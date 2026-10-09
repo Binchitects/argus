@@ -485,6 +485,10 @@ namespace Llm.Core.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<string>("Origin")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.Property<double?>("Seconds")
                         .HasColumnType("double precision");
 

@@ -68,7 +68,7 @@ public static class ChatForks
             var copy = new ChatAttachment
             {
                 UserId = owner, FileName = a.FileName, ContentType = a.ContentType, Size = a.Size, Text = a.Text, Truncated = a.Truncated, Kind = a.Kind,
-                Data = a.Data, Sound = a.Sound, Seconds = a.Seconds,
+                Data = a.Data, Sound = a.Sound, Seconds = a.Seconds, Origin = a.Origin,
             };
             db.ChatAttachments.Add(copy);
             map[a.Id] = copy.Id;

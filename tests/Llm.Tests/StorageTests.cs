@@ -805,21 +805,26 @@ public sealed class StorageTests(AppFixture app)
     {
         var options = new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(app.ConnectionStringFor("up_" + Guid.NewGuid().ToString("N")[..8])).Options;
         var person = new Llm.Core.Identity.AppUser { Id = Guid.NewGuid(), UserName = "kept", NormalizedUserName = "KEPT", Email = "kept@example.test", NormalizedEmail = "KEPT@EXAMPLE.TEST" };
-        var file = new ChatAttachment { UserId = person.Id, FileName = "kept.txt", ContentType = "text/plain", Size = 4, Text = "kept" };
+        var fileId = Guid.NewGuid();
         await using (var db = new AppDbContext(options))
         {
-            // v5.2.0's last migration.
+            // v5.2.0's last migration, and a file as v5.2.0 keeps one (its columns then).
             await Microsoft.EntityFrameworkCore.Infrastructure.AccessorExtensions.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>(db)
                 .MigrateAsync("20261005151513_ToolCertificates");
             db.Users.Add(person);
-            db.ChatAttachments.Add(file);
             await db.SaveChangesAsync();
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO chat_attachments ("Id", "UserId", "FileName", "ContentType", "Size", "Text", "Truncated", "Kind", "CreatedAt")
+                VALUES ({fileId}, {person.Id}, 'kept.txt', 'text/plain', 4, 'kept', false, 'text', now())
+                """);
         }
         await using (var db = new AppDbContext(options))
         {
             await db.Database.MigrateAsync();
             Assert.Empty(await db.Database.GetPendingMigrationsAsync());
-            Assert.Equal("kept", (await db.ChatAttachments.SingleAsync(a => a.Id == file.Id)).Text);
+            // Kept, with no tool named as its maker: its messages say where it came from, as before.
+            var kept = await db.ChatAttachments.SingleAsync(a => a.Id == fileId);
+            Assert.Equal(("kept", null), (kept.Text, kept.Origin));
             Assert.Empty(await db.StorageSamples.ToListAsync());
             db.StorageQuotas.Add(new StorageQuota { UserId = person.Id, Megabytes = 10 });
             await db.SaveChangesAsync();

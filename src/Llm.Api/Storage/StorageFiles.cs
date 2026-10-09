@@ -43,9 +43,10 @@ public sealed class StorageFiles(AppDbContext db)
         """;
 
     /// <summary>
-    /// Every file with where it came from and whether a chat has it. Messages (and those waiting their turn) name
-    /// their files in a JSON list; the first message naming a file (a chat not deleted first) says where it came
-    /// from: a tool's (by which tool) or the person's.
+    /// Every file with where it came from and whether a chat has it. A file a tool made says which itself (one made
+    /// over Arena MCP is in no message). Messages (and those waiting their turn) name their files in a JSON list; for
+    /// files from before v5.3, the first message naming one (a chat not deleted first) says where it came from: a
+    /// tool's (by which tool) or the person's.
     /// </summary>
     private const string Files = $$"""
         WITH refs AS (
@@ -71,7 +72,8 @@ public sealed class StorageFiles(AppDbContext db)
                      WHEN EXISTS (SELECT 1 FROM project_files pf WHERE pf."AttachmentId" = a."Id") THEN 'assistant'
                      WHEN f.id IS NOT NULL THEN 'deleted'
                      ELSE 'none' END AS state,
-                CASE WHEN f.role IS DISTINCT FROM 'tool' THEN 'upload'
+                CASE WHEN a."Origin" IS NOT NULL THEN a."Origin"
+                     WHEN f.role IS DISTINCT FROM 'tool' THEN 'upload'
                      WHEN f.tool = 'generate_image' THEN 'picture'
                      WHEN f.tool = 'generate_video' THEN 'video'
                      WHEN f.tool = 'speak' THEN 'speech'

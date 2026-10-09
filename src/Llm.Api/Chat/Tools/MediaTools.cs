@@ -113,7 +113,7 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
             var file = new ChatAttachment
             {
                 UserId = context.User.Id, FileName = Path.ChangeExtension(ImageTool.FileName(prompt), type == "video/webm" ? ".webm" : ".avi"),
-                ContentType = type, Size = video.Length, Kind = "video", Data = video, Text = "", Seconds = seconds,
+                ContentType = type, Size = video.Length, Kind = "video", Data = video, Text = "", Seconds = seconds, Origin = "video",
             };
             db.ChatAttachments.Add(file);
             await db.SaveChangesAsync(token);
@@ -216,7 +216,7 @@ public sealed class SpeechTool(ChatModels models, GatewayChat gateway, AppDbCont
             var file = new ChatAttachment
             {
                 UserId = context.User.Id, FileName = Path.ChangeExtension(ImageTool.FileName(name), ".mp3"), ContentType = "audio/mpeg",
-                Size = mp3.Length, Kind = "audio", Data = mp3, Text = text,
+                Size = mp3.Length, Kind = "audio", Data = mp3, Text = text, Origin = "speech",
             };
             db.ChatAttachments.Add(file);
             await db.SaveChangesAsync(token);

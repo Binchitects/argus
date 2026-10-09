@@ -554,7 +554,7 @@ public sealed partial class ChatService(
         var atLineEnd = cut >= budget / 2;
         cut = atLineEnd ? cut : budget;
         var name = $"{tool}-result-{Guid.CreateVersion7().ToString("N")[^6..]}.txt";
-        var file = new ChatAttachment { UserId = userId, FileName = name, ContentType = "text/plain", Size = Encoding.UTF8.GetByteCount(text), Kind = "text", Text = text };
+        var file = new ChatAttachment { UserId = userId, FileName = name, ContentType = "text/plain", Size = Encoding.UTF8.GetByteCount(text), Kind = "text", Text = text, Origin = "tool" };
         // The first line not read whole.
         var lines = text.AsSpan(0, cut).Count('\n') + (atLineEnd ? 2 : 1);
         var said = canRead

@@ -5,7 +5,10 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Llm.Api.Chat;
 using Llm.Api.Gateway;
+using Llm.Core.Data;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
 
@@ -399,6 +402,20 @@ public sealed class ArenaMcpTests(AppFixture app)
         Assert.Equal(FakeModel.Png, await opened.Content.ReadAsByteArrayAsync());
         var (_, _, _, otherKey) = await PersonAsync(f);
         Assert.Equal(-32002, (await RpcAsync(Agent(f, otherKey), "resources/read", new { uri = link })).Answer.GetProperty("error").GetProperty("code").GetInt32());
+
+        // Admin → Storage knows it for a picture the tool made, though no chat message names it; the clean-up of old ones finds it.
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var id = Guid.Parse(new Uri(link).Segments[^2].TrimEnd('/'));
+        var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/storage/files?origin=picture"))).GetProperty("rows").EnumerateArray()
+            .Single(r => r.GetProperty("id").GetGuid() == id);
+        Assert.Equal(("picture", "none"), (row.GetProperty("origin").GetString(), row.GetProperty("state").GetString()));
+        await using (var scope = f.Services.CreateAsyncScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<AppDbContext>().ChatAttachments.Where(a => a.Id == id)
+                .ExecuteUpdateAsync(x => x.SetProperty(a => a.CreatedAt, DateTimeOffset.UtcNow.AddDays(-100)));
+        }
+        Assert.Contains((await admin.JsonAsync(await admin.GetAsync("/api/admin/storage/cleanups/old-media?days=90"))).GetProperty("items").EnumerateArray(),
+            i => i.GetProperty("id").GetString() == id.ToString());
 
         // A client of 2025-03-26 knows no links: the address is in the text.
         var parts = (await RpcAsync(Agent(f, key, "2025-03-26"), "tools/call", new { name = "generate_image", arguments = new { prompt = "A fox" } })).Answer

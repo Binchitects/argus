@@ -307,7 +307,7 @@ public sealed partial class ImageTool(ChatModels models, GatewayChat gateway, Ap
                 }
                 var file = new ChatAttachment
                 {
-                    UserId = context.User.Id, FileName = FileName(prompt), ContentType = "image/png", Size = png.Length, Kind = "image", Data = png, Text = "",
+                    UserId = context.User.Id, FileName = FileName(prompt), ContentType = "image/png", Size = png.Length, Kind = "image", Data = png, Text = "", Origin = "picture",
                 };
                 db.ChatAttachments.Add(file);
                 await db.SaveChangesAsync(token);
