@@ -10,9 +10,9 @@ public sealed class ServerTests : IDisposable
     private readonly FakeMcp _mcp = new();
     private readonly StringWriter _output = new();
 
-    private async Task<Runtime> StartAsync(Harness h, Options? o = null)
+    private async Task<Runtime> StartAsync(Harness h, Options? o = null, Func<string, string?>? variables = null)
     {
-        var env = new CliEnv { In = new StringReader(""), Out = _output, Err = _output, Env = _ => null, Cwd = h.Work, Paths = h.Paths };
+        var env = new CliEnv { In = new StringReader(""), Out = _output, Err = _output, Env = variables ?? (_ => null), Cwd = h.Work, Paths = h.Paths };
         return await Runtime.StartAsync(o ?? new Options(), env, new Ui(env.In, _output, _output, false, false), CancellationToken.None);
     }
 
@@ -216,6 +216,96 @@ public sealed class ServerTests : IDisposable
         var e = await Assert.ThrowsAsync<McpException>(() => McpClient.ConnectAsync("argus", new HttpMcpTransport(http, refusing.BaseUrl + "/mcp", new Dictionary<string, string>()), CancellationToken.None));
         Assert.Equal($"{refusing.BaseUrl}/mcp refused the credentials (401): Cannot verify your GitLab access right now.", e.Message);
         Assert.False(e.Lost);
+    }
+
+    [Fact]
+    public async Task A_failure_of_any_kind_is_said_and_tried_again_and_the_first_try_always_ends()
+    {
+        // What HttpClient throws for a scheme it does not speak (or Uri for a port out of range): neither an MCP nor a network error.
+        var tries = 0;
+        await using var link = new ServerLink("mine", "Mine", "ftp://files.example/mcp", _ =>
+        {
+            Interlocked.Increment(ref tries);
+            throw new NotSupportedException("The 'ftp' scheme is not supported.");
+        });
+        link.Start();
+        await link.FirstTry.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(LinkState.Failed, link.State);
+        Assert.Equal("ftp://files.example/mcp: The 'ftp' scheme is not supported.", link.Error);
+        Assert.NotNull(link.NextTry);
+        Assert.StartsWith("Mine: not connected, tried again at ", link.Describe());
+
+        // Still trying, not stuck: a retry tries at once.
+        link.Retry();
+        await Until(() => Volatile.Read(ref tries) >= 2, "tried again", seconds: 5);
+    }
+
+    [Fact]
+    public async Task A_fault_in_what_hears_of_a_change_is_a_failure_like_any_not_the_end_of_the_link()
+    {
+        using var http = new HttpClient();
+        await using var link = new ServerLink(Runtime.ArenaName, "Arena", _mcp.Url,
+            ct => McpClient.ConnectAsync(Runtime.ArenaName, new HttpMcpTransport(http, _mcp.Url, new Dictionary<string, string> { ["Authorization"] = "Bearer " + FakeGateway.Key }), ct));
+        var heard = 0;
+        link.Changed = (_, client, _) =>
+        {
+            if (Interlocked.Increment(ref heard) == 1)
+            {
+                throw new InvalidCastException("a fault in the handler");
+            }
+        };
+        link.Start();
+        await link.FirstTry.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(LinkState.Failed, link.State);
+        Assert.Contains("a fault in the handler", link.Error);
+        Assert.Null(link.Client);
+
+        link.Retry();
+        await Until(() => link.State == LinkState.Connected, "connected on retry");
+        Assert.Equal(3, link.Client!.Tools.Count);
+    }
+
+    [Fact]
+    public async Task A_command_waits_for_Arenas_first_answer_no_longer_than_its_handshake()
+    {
+        var shell = LocalTools.All().Single(t => t.Name == "run_shell");
+        var ui = new Ui(new StringReader(""), _output, _output, false, false);
+        Assert.Equal(McpClient.Handshake, new Permissions(ui, Mode.Yolo).GuardWait);
+        // A first try that never ends (as a link whose loop had died did): the command runs after the wait all the same.
+        var permissions = new Permissions(ui, Mode.Yolo) { GuardReady = new TaskCompletionSource().Task, GuardWait = TimeSpan.FromMilliseconds(300) };
+        var clock = Stopwatch.StartNew();
+        Assert.Null(await permissions.CheckAsync(shell, new JsonObject { ["command"] = "ls" }, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.InRange(clock.Elapsed, TimeSpan.FromMilliseconds(250), TimeSpan.FromSeconds(4));
+
+        // Stopped meanwhile (Ctrl+C): stopped, not waited out.
+        permissions.GuardWait = TimeSpan.FromMinutes(1);
+        using var stop = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => permissions.CheckAsync(shell, new JsonObject { ["command"] = "ls" }, stop.Token).WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Theory]
+    [InlineData("mcpUrl", "https://arena.corp:99999/mcp", "ARENA_MCP_URL")]
+    [InlineData("mcpUrl", "https://arena corp/mcp", "ARENA_MCP_URL")]
+    [InlineData("argusUrl", "ftp://argus.corp/mcp", "ARENA_ARGUS_URL")]
+    public async Task An_address_that_is_not_one_stops_the_session_as_it_starts_with_where_to_fix_it(string key, string address, string variable)
+    {
+        using var h = new Harness(_gateway, _mcp, c => c[key] = address);
+        var e = await Assert.ThrowsAsync<Runtime.StartException>(() => StartAsync(h));
+        Assert.Equal($"{address} is not an http or https address: fix \"{key}\" in {h.Paths.ConfigFile} (or {variable}).", e.Message);
+
+        // From the environment too.
+        using var fine = new Harness(_gateway, _mcp);
+        e = await Assert.ThrowsAsync<Runtime.StartException>(() => StartAsync(fine, variables: name => name == variable ? address : null));
+        Assert.StartsWith($"{address} is not an http or https address", e.Message);
+    }
+
+    [Fact]
+    public async Task An_mcp_server_of_ones_own_at_an_address_that_is_not_one_is_skipped_and_said()
+    {
+        using var h = new Harness(_gateway, _mcp, c => c["mcpServers"] = new JsonObject { ["files"] = new JsonObject { ["url"] = "ftp://files.example/mcp" } });
+        await using var rt = await StartAsync(h);
+        Assert.Equal([Runtime.ArenaName], rt.Links.Select(l => l.Name));
+        Assert.Contains("MCP server files: ftp://files.example/mcp is not an http or https address: skipped.", _output.ToString());
     }
 
     /// <summary>Argus refusing as it does when it cannot say what the person may read.</summary>

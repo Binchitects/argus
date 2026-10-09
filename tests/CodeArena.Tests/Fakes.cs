@@ -119,6 +119,8 @@ public sealed class FakeGateway : FakeServer
     public string[] Models { get; set; } = ["model-a", "model-b"];
     public int Context { get; set; } = 32768;
     public Func<JsonObject, Reply> Answer { get; set; } = _ => Reply.Say("Hello from the model.");
+    /// <summary>An HTTP status a chat request is answered with instead of an answer (a backend restarting: 500); 0 answers it.</summary>
+    public Func<JsonObject, int> Failure { get; set; } = _ => 0;
     /// <summary>Holds each answer until the request is cancelled (to test Ctrl+C).</summary>
     public bool Hang { get; set; }
     public TaskCompletionSource FirstRequest { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -172,6 +174,11 @@ public sealed class FakeGateway : FakeServer
             _requests.Add(request);
         }
         FirstRequest.TrySetResult();
+        if (Failure(request) is > 0 and var status)
+        {
+            await WriteJson(ctx, new JsonObject { ["error"] = new JsonObject { ["message"] = "The model's backend is restarting." } }, status);
+            return;
+        }
         if (Hang)
         {
             ctx.Response.ContentType = "text/event-stream";

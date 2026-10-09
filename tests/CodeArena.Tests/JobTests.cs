@@ -311,6 +311,131 @@ public sealed class JobTests : IDisposable
         Assert.Equal(HttpStatusCode.NotFound, (await web.PostAsync("/api/jobs/stop", new JsonObject { ["id"] = 9 })).StatusCode);
     }
 
+    [Fact]
+    public async Task A_turn_that_fails_still_waits_for_its_commands_and_the_next_turn_tells_the_model_how_they_ended()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        using var h = new Harness(_gateway, _mcp, c => c["mode"] = "yolo");
+        // The model starts the build and carries on; then the model's backend restarts and the gateway answers 500.
+        _gateway.Answer = _ => Reply.Call(("run_shell", """{"command":"sleep 1.5; echo built ok","no_time_limit":true}"""));
+        _gateway.Failure = req => FakeGateway.HasToolResults(req) ? 500 : 0;
+        var output = new StringWriter();
+        var env = new CliEnv { In = new StringReader(""), Out = TextWriter.Synchronized(output), Err = TextWriter.Synchronized(output), Env = _ => null, Cwd = h.Work, Paths = h.Paths };
+        var ui = new Ui(env.In, env.Out, env.Err, false, false);
+        await using var rt = await Runtime.StartAsync(new Options(), env, ui, CancellationToken.None);
+
+        var clock = Stopwatch.StartNew();
+        var failed = await Assert.ThrowsAsync<GatewayException>(() => rt.Agent.RunAsync("build it", new Spend(), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.Contains("restarting", failed.Message);
+        // The error came out when the build had ended, on its own: the failed request did not stop it.
+        var job = Assert.Single(rt.Jobs.All);
+        Assert.False(job.Running);
+        Assert.Null(job.StoppedBy);
+        Assert.Equal(0, job.ExitCode);
+        Assert.True(clock.Elapsed > TimeSpan.FromSeconds(1.2), $"the turn ended after {clock.Elapsed}");
+        var said = output.ToString();
+        Assert.Contains("The model cannot carry on: ", said);
+        Assert.Contains("The commands still running are watched until they end (Ctrl+C or Stop ends them)", said);
+        Assert.Contains("│1 built ok", said);
+        Assert.Contains("job 1 ended: exit code 0", said);
+
+        // The next turn tells the model how it ended, first thing.
+        _gateway.Failure = _ => 0;
+        _gateway.Answer = req => Reply.Say(FakeGateway.Last(req).Contains("job 1 has ended", StringComparison.Ordinal) ? "told" : "not told");
+        Assert.Equal("told", await rt.Agent.RunAsync("go on", new Spend(), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Jobs_stop_in_the_terminal_stops_the_one_named()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        using var h = new Harness(_gateway, _mcp);
+        var output = new StringWriter();
+        var env = new CliEnv { In = new StringReader("/jobs stop\n/jobs stop 9\n/jobs stop 1\n/jobs stop 1\n/jobs\n/exit\n"), Out = TextWriter.Synchronized(output), Err = TextWriter.Synchronized(output), Env = _ => null, Cwd = h.Work, Paths = h.Paths };
+        var ui = new Ui(env.In, env.Out, env.Err, false, true);
+        await using var rt = await Runtime.StartAsync(new Options(), env, ui, CancellationToken.None);
+        var job = rt.Jobs.Start("serve", Sh("echo up; sleep 300"));
+
+        Assert.Equal(0, await new Repl(rt).RunAsync(null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(20)));
+        Assert.False(job.Running);
+        var said = output.ToString();
+        Assert.Contains("Which job? /jobs stop N (/jobs lists them).", said);
+        Assert.Contains("There is no job 9: /jobs lists them.", said);
+        Assert.Matches(@"job 1 ended: stopped \(by the person, with /jobs stop\) after \d+s", said);
+        Assert.Matches(@"job 1 has ended: stopped \(by the person, with /jobs stop\) after \d+s\.", said);
+        Assert.Matches(@"job 1  serve  stopped \(by the person, with /jobs stop\)", said);
+    }
+
+    [Fact]
+    public async Task In_the_IDE_a_turn_that_fails_keeps_watching_its_commands_with_their_Stop()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        using var h = new Harness(_gateway, _mcp, c => c["mode"] = "yolo");
+        await using var web = await WebRun.StartAsync(h);
+        _gateway.Answer = _ => Reply.Call(("run_shell", """{"command":"echo first line; sleep 300","no_time_limit":true}"""));
+        _gateway.Failure = req => FakeGateway.HasToolResults(req) ? 500 : 0;
+        using var stream = await web.SendAsync("run the slow tests");
+        await stream.UntilAsync("job");
+        var notice = await stream.UntilAsync("notice");
+        Assert.StartsWith("The model cannot carry on: ", notice["text"]!.GetValue<string>());
+
+        // The turn is not over: the command runs, watched, and the page has its Stop.
+        var state = await web.GetJsonAsync("/api/state");
+        Assert.True(state["busy"]!.GetValue<bool>());
+        Assert.True(state["jobs"]![0]!["running"]!.GetValue<bool>());
+        Assert.Equal(HttpStatusCode.NoContent, (await web.PostAsync("/api/jobs/stop", new JsonObject { ["id"] = 1 })).StatusCode);
+        var end = await stream.UntilAsync("job_end");
+        Assert.StartsWith("stopped (by the person, in the IDE) after", end["status"]!.GetValue<string>());
+        // Then the error, and the turn's end.
+        var rest = await stream.RestAsync();
+        Assert.Contains("restarting", rest.Single(e => e["type"]!.GetValue<string>() == "error")["message"]!.GetValue<string>());
+        Assert.Equal("done", rest[^1]["type"]!.GetValue<string>());
+        Assert.False((await web.GetJsonAsync("/api/state"))["busy"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task The_IDE_streams_a_commands_output_however_much_it_writes_and_a_page_that_comes_back_gets_its_end()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        using var h = new Harness(_gateway, _mcp, c => c["mode"] = "yolo");
+        await using var web = await WebRun.StartAsync(h);
+        // 400 KB over a few seconds (past the 256 KB the page once stopped at), a last line, then it runs on.
+        const string command = "i=0; while [ $i -lt 40 ]; do head -c 10000 /dev/zero | tr '\\0' x; echo; i=$((i+1)); sleep 0.05; done; echo the last line; sleep 300";
+        _gateway.Answer = req => FakeGateway.HasToolResults(req)
+            ? Reply.Say("Watching the build.")
+            : Reply.Call(("run_shell", new JsonObject { ["command"] = command, ["no_time_limit"] = true }.ToJsonString()));
+        using var stream = await web.SendAsync("build");
+        var streamed = new StringBuilder();
+        while (!streamed.ToString().Contains("the last line\n", StringComparison.Ordinal))
+        {
+            streamed.Append((await stream.UntilAsync("job_output").WaitAsync(TimeSpan.FromSeconds(30)))["text"]!.GetValue<string>());
+        }
+        Assert.Equal(400_000, streamed.ToString().Count(ch => ch == 'x'));
+
+        // A page that comes back mid-turn (reloaded, another tab) is sent the end of it, not all of it.
+        using var again = await web.StreamAsync(HttpMethod.Get, "/api/turn", null);
+        var replayed = (await again.UntilAsync("job_output"))["text"]!.GetValue<string>();
+        Assert.StartsWith("… (the start is not shown here: the agent reads the output with command_output)\n", replayed);
+        Assert.EndsWith("the last line\n", replayed);
+        Assert.InRange(replayed.Length, 64 * 1024, 64 * 1024 + 100);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await web.PostAsync("/api/jobs/stop", new JsonObject { ["id"] = 1 })).StatusCode);
+        await stream.UntilAsync("job_end");
+        await stream.RestAsync();
+    }
+
     public void Dispose()
     {
         _gateway.Dispose();
