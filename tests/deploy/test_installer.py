@@ -619,13 +619,43 @@ class InstallerTests(unittest.TestCase):
         app = next(c for c in self.containers() if c["service"] == "app")
         self.assertEqual(app["image_id"], old_app)
         self.assertTrue(any("find /target -mindepth 1 -delete" in " ".join(c) for c in self.r.calls()))
-        self.assertTrue(list((self.dir / ".arena-install" / "rollback" / "5.2.0" / "after-failed-upgrade").glob("20*")))
+        self.assertTrue(list((self.dir / ".arena-install" / "rollback" / "5.2.0" / "data-before-rollback").glob("20*")))
         self.assertFalse((self.dir / ".arena-install" / "upgrade").exists())
         # The images it loaded are known, so remove takes them too.
         self.assertIn("arena-app:9.9.9\t", (self.dir / ".arena-install" / "IMAGES").read_text())
         r = self.r.run("remove", "--dir", str(self.dir), "--yes")
         self.assertEqual(r.returncode, 0, self.output(r))
         self.assertNotIn("arena-app:9.9.9", self.r.store()["images"])
+
+    def test_Rollback_goes_back_to_the_release_and_data_before_the_upgrade(self):
+        deploy = self.old_install()
+        old_app = next(c for c in self.containers() if c["service"] == "app")["image_id"]
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        snap = self.dir / ".arena-install" / "rollback" / "5.2.0"
+        # Without a backup of the data as it is now, nothing is rolled back.
+        (snap / "data-before-rollback").write_text("in the way\n")
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--rollback", "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 1, self.output(r))
+        self.assertIn("nothing was rolled back", self.output(r))
+        self.assertEqual((deploy / "docker-compose.yml").read_text(), COMPOSE_NEW)
+        (snap / "data-before-rollback").unlink()
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--rollback", "--dry-run")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("would  stop it, put back 5.2.0's files and images", r.stdout)
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--rollback", "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("Rolled back: 5.2.0 runs", r.stdout)
+        self.assertEqual((deploy / "docker-compose.yml").read_text(), COMPOSE_OLD)
+        self.assertEqual((deploy / ".env").read_text(), OLD_ENV)
+        self.assertFalse((self.dir / "VERSION").exists())
+        self.assertEqual(next(c for c in self.containers() if c["service"] == "app")["image_id"], old_app)
+        self.assertEqual(len(list((snap / "data-before-rollback").glob("20*"))), 1)
+        self.assertIn("version=5.2.0\n", (self.dir / ".arena-install" / "state").read_text())
+        # Once is all: there is nothing more to roll back to.
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--rollback", "--yes")
+        self.assertEqual(r.returncode, 3, self.output(r))
+        self.assertIn("no upgrade of this installer to roll back here", r.stderr)
 
     def test_An_upgrade_cut_off_half_way_carries_on(self):
         self.old_install(version_file=True)

@@ -1084,7 +1084,8 @@ snapshot_deploy() {
   ok "a copy of $DEPLOY for a rollback ($(human "$(stat -c %s "$SNAP/deploy.tar")"))"
 }
 # Back to FROM: its files, its images, and (once the new version had started) the data
-# of the backup taken before the upgrade, after keeping what the failed version left.
+# of the backup taken before the upgrade, after keeping the data as it is (unless KEPT).
+KEPT=0
 rollback() {   # rollback STARTED -> 0 when FROM runs again
   local started=$1 ref id tag f rc=0
   step "rolling back to $FROM"
@@ -1101,8 +1102,11 @@ rollback() {   # rollback STARTED -> 0 when FROM runs again
   ok "the old images tagged back"
   if [[ $started -eq 1 ]]; then
     if [[ -n "$BACKUP" && -d "$BACKUP" ]]; then
-      say "  keeping what the failed version left, then restoring the backup from before it"
-      backup_sh --out "$SNAP/after-failed-upgrade" >/dev/null 2>&1 && ok "what it left: $SNAP/after-failed-upgrade" || note "could not keep what it left"
+      if [[ $KEPT -eq 0 ]]; then
+        say "  keeping the data as it is now, then restoring the backup from before the upgrade"
+        backup_sh --out "$SNAP/data-before-rollback" >/dev/null 2>&1 && ok "the data as it was: $SNAP/data-before-rollback" \
+          || note "could not keep the data as it was (the failed release's)"
+      fi
       backup_sh --restore --from "$BACKUP" --yes || { bad "restoring $BACKUP failed"; return 1; }
       ok "the data from $BACKUP"
     else
@@ -1284,10 +1288,14 @@ cmd_rollback() {
   lock; start_log
   # The one installed now: the rollback puts the older one back.
   BACKUP_SCRIPT="$SNAP/backup.sh"; cp "$DEPLOY/scripts/backup.sh" "$BACKUP_SCRIPT" || die "cannot copy backup.sh"
+  # What was written since the upgrade, kept before anything stops: no backup, no rollback.
+  step "a backup of the data as it is now, kept (the rollback replaces the data)"
+  backup_sh --out "$SNAP/data-before-rollback" || die "that backup failed: nothing was rolled back"
+  KEPT=1
   if rollback 1; then
     state_set version "$FROM" previous "" status installed
     rm -f "$STATE/deploy.sha256" "$STATE/MANIFEST"
-    say "Rolled back: $FROM runs, with the data of $BACKUP."
+    say "Rolled back: $FROM runs, with the data of $BACKUP. The data as it was before: $SNAP/data-before-rollback"
     return 0
   fi
   die "the rollback failed: see above" 5
