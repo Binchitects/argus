@@ -516,9 +516,10 @@ load_images() {   # load_images fresh|upgrade|repair
   done < <(bundle_release)
   ok "$n loaded, $skipped there already; the release's own tagged for $PROJECT ($(bundle_release | cut -f1 | paste -sd' ' -))"
 }
-record_images() {   # what load_images found and loaded, as the state's image list
+record_images() {   # what load_images found and loaded, added to the state's image list (the new row wins)
   [[ -s "$STATE/IMAGES.new" ]] || return 0
-  (umask 077; awk -F'\t' '!seen[$1]++' "$STATE/IMAGES.new" > "$STATE/IMAGES") && rm -f "$STATE/IMAGES.new"
+  (umask 077; { cat "$STATE/IMAGES.new"; cat "$STATE/IMAGES" 2>/dev/null || true; } | awk -F'\t' '!seen[$1]++' > "$STATE/IMAGES.merged") \
+    && mv -f "$STATE/IMAGES.merged" "$STATE/IMAGES" && rm -f "$STATE/IMAGES.new"
 }
 
 # Every image compose would run is here (it pulls and builds nothing).
@@ -1244,6 +1245,8 @@ cmd_upgrade() {
   if [[ -n "$failed" ]]; then
     say ""
     say "The upgrade to $BVERSION failed (above). Rolling back to $FROM."
+    # The images it loaded stay on the host (an upgrade again finds them): remove knows them.
+    record_images
     if rollback "$started"; then
       rm -f "$marker"; state_set status installed target ""
       [[ -n "$(state_get version)" ]] || state_set version "$FROM" engine "$ENGINE" project "$PROJECT"

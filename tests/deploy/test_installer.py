@@ -616,6 +616,11 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue(any("find /target -mindepth 1 -delete" in " ".join(c) for c in self.r.calls()))
         self.assertTrue(list((self.dir / ".arena-install" / "rollback" / "5.2.0" / "after-failed-upgrade").glob("20*")))
         self.assertFalse((self.dir / ".arena-install" / "upgrade").exists())
+        # The images it loaded are known, so remove takes them too.
+        self.assertIn("arena-app:9.9.9\t", (self.dir / ".arena-install" / "IMAGES").read_text())
+        r = self.r.run("remove", "--dir", str(self.dir), "--yes")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertNotIn("arena-app:9.9.9", self.r.store()["images"])
 
     def test_An_upgrade_cut_off_half_way_carries_on(self):
         self.old_install(version_file=True)
