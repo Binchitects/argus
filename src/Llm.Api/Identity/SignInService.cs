@@ -202,6 +202,36 @@ public sealed partial class SignInService(
     }
 
     /// <summary>
+    /// Why the admin's try of a directory person's sign-in may not go ahead, or null. A try is a guess at
+    /// their password like any sign-in, so the same brakes hold it: the throttle on this name from this
+    /// address, and the lock on their account here.
+    /// </summary>
+    public async Task<string?> TryRefusalAsync(string login)
+    {
+        login = LdapDirectory.SignInName(login);
+        if (throttle.IsBanned(Ip, login))
+        {
+            return $"too many wrong passwords for \"{login}\" (or for many names) from this address: sign-ins and tries of it from here are refused for a while (how long: Settings → Sign-in and sessions)";
+        }
+        var user = await users.FindByNameAsync(login.ToLowerInvariant()) ?? await users.FindByEmailAsync(login);
+        return user is { Source: UserSource.Ldap } && await users.IsLockedOutAsync(user)
+            ? $"their account here ({user.UserName}) is locked for a while after wrong passwords, and a try waits as signing in does"
+            : null;
+    }
+
+    /// <summary>A password the directory refused in the admin's try: counted as a sign-in's would be, against this address and their account here.</summary>
+    public async Task TryRefusedAsync(string login)
+    {
+        login = LdapDirectory.SignInName(login);
+        throttle.Failure(Ip, login);
+        var user = await users.FindByNameAsync(login.ToLowerInvariant()) ?? await users.FindByEmailAsync(login);
+        if (user is { Source: UserSource.Ldap })
+        {
+            await CountFailureAsync(user);
+        }
+    }
+
+    /// <summary>
     /// What signing in would do here for a person the directory let in, changing nothing (the
     /// admin's try): why the app would still refuse them, or how they come in.
     /// </summary>

@@ -80,10 +80,20 @@ public sealed partial class LdapSync(IServiceScopeFactory scopes, IOptionsMonito
         var people = sp.GetRequiredService<PeopleService>();
 
         var directoryPeople = await users.Users.Where(u => u.Source == UserSource.Ldap && u.LdapDn != null).ToListAsync(ct);
-        var disabled = 0;
+        var found = new List<(AppUser User, LdapPerson? Person)>(directoryPeople.Count);
         foreach (var user in directoryPeople)
         {
-            var person = await ldap.FindByDnAsync(user.LdapDn!, ct);
+            found.Add((user, await ldap.FindByDnAsync(user.LdapDn!, ct)));
+        }
+        // Someone to disable for not being in the required group, and nobody in it at all: a typo in its
+        // name reads just the same. Unless the group is found, nobody is changed and the check says why.
+        if (found.Any(f => f.Person is { } p && !ldap.IsAllowed(p) && !f.User.IsDisabled) && !found.Any(f => f.Person is { } p && ldap.IsAllowed(p)))
+        {
+            await ldap.CheckRequiredGroupAsync(ct);
+        }
+        var disabled = 0;
+        foreach (var (user, person) in found)
+        {
             if (person is not null && ldap.IsAllowed(person))
             {
                 await signIn.SyncFromDirectoryAsync(person);

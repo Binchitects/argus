@@ -43,10 +43,13 @@ public static class LdapCheck
     /// <summary>StartTLS, as the root entry lists it among its extensions (RFC 4511).</summary>
     private const string StartTlsExtension = "1.3.6.1.4.1.1466.20037";
 
-    /// <summary>Connects and signs in with these settings, then looks for people and the groups named.</summary>
-    public static async Task<LdapCheckResult> TestAsync(LdapOptions o, PasswordFrom password, IReadOnlyList<string>? notes = null, CancellationToken ct = default)
+    /// <summary>
+    /// Connects and signs in with these settings, then looks for people and the groups named. Withheld says
+    /// why the saved password is not used (with <see cref="PasswordFrom.SavedWithheld"/>).
+    /// </summary>
+    public static async Task<LdapCheckResult> TestAsync(LdapOptions o, PasswordFrom password, IReadOnlyList<string>? notes = null, string? withheld = null, CancellationToken ct = default)
     {
-        var run = new Run(o, password, notes);
+        var run = new Run(o, password, notes, withheld);
         using var conn = await run.OpenAsync(ct);
         if (conn is null)
         {
@@ -69,36 +72,37 @@ public static class LdapCheck
     /// <summary>
     /// A person's sign-in, made as the app makes it (the same search, the same bind as them, the same
     /// groups), with the settings given: who they would be here, or exactly why not. Nothing is kept.
+    /// Refused is whether the directory checked their password and said no: a wrong guess, to count.
     /// </summary>
-    public static async Task<(LdapCheckResult Result, LdapPerson? Person)> TryAsync(LdapOptions o, PasswordFrom password, string login, string personPassword, IReadOnlyList<string>? notes = null, CancellationToken ct = default)
+    public static async Task<(LdapCheckResult Result, LdapPerson? Person, bool Refused)> TryAsync(LdapOptions o, PasswordFrom password, string login, string personPassword, IReadOnlyList<string>? notes = null, string? withheld = null, CancellationToken ct = default)
     {
-        var run = new Run(o, password, notes);
+        var run = new Run(o, password, notes, withheld);
         if (string.IsNullOrWhiteSpace(login))
         {
-            return (run.Failed("Type the person's username (or email) to try."), null);
+            return (run.Failed("Type the person's username (or email) to try."), null, false);
         }
         if (string.IsNullOrEmpty(personPassword))
         {
-            return (run.Failed("Type their password: an empty one is never tried, as many servers take it for an anonymous sign-in and say yes."), null);
+            return (run.Failed("Type their password: an empty one is never tried, as many servers take it for an anonymous sign-in and say yes."), null, false);
         }
         using var conn = await run.OpenAsync(ct);
         if (conn is null)
         {
-            return (run.Result(), null);
+            return (run.Result(), null, false);
         }
         try
         {
             var person = await run.PersonAsync(conn, login, personPassword, ct);
-            return (run.Result(), person);
+            return (run.Result(), person, run.PasswordRefused);
         }
         catch (Exception ex) when (LdapErrors.IsDirectoryFailure(ex))
         {
-            return (run.Failed("The connection failed: " + LdapErrors.Describe(o, ex, null)), null);
+            return (run.Failed("The connection failed: " + LdapErrors.Describe(o, ex, null)), null, run.PasswordRefused);
         }
     }
 
     /// <summary>One check under way: its settings, what the server says of itself, and the steps so far.</summary>
-    private sealed class Run(LdapOptions o, PasswordFrom from, IReadOnlyList<string>? notes)
+    private sealed class Run(LdapOptions o, PasswordFrom from, IReadOnlyList<string>? notes, string? withheld)
     {
         private readonly List<LdapStep> _steps = [.. (notes ?? []).Select(n => new LdapStep(Warn, n))];
         private readonly List<string> _contexts = [];
@@ -106,6 +110,12 @@ public static class LdapCheck
 
         /// <summary>Whether the server says it offers StartTLS; null when its root entry could not be read.</summary>
         private bool? _offersStartTls;
+
+        /// <summary>Whether the root entry says it is OpenLDAP, which sends memberOf only when asked for it.</summary>
+        private bool _openLdap;
+
+        /// <summary>The directory checked the person's password, and refused it.</summary>
+        public bool PasswordRefused { get; private set; }
 
         private bool Anonymous => string.IsNullOrWhiteSpace(o.BindDn);
         private string Who => Anonymous ? "an anonymous connection" : "the service account";
@@ -149,7 +159,7 @@ public static class LdapCheck
                 Failed(from switch
                 {
                     PasswordFrom.SavedUnreadable => "The saved service account password no longer reads: APP_KEY changed since it was saved. Type it again in \"Service account password\".",
-                    PasswordFrom.SavedWithheld => "Type the service account's password: the saved one is sent only to the saved server, as the saved service account, and the form changes the server or the account.",
+                    PasswordFrom.SavedWithheld => $"Type the service account's password: the saved one is sent only to the saved server, as the saved service account, over a connection at least as safe as the saved one, and the form {withheld ?? "changes the server or the account"}.",
                     _ => "The service account has no password: none is typed above and none is saved. Type it in \"Service account password\". (Without one, the server would take it for an anonymous connection.)",
                 });
                 return null;
@@ -240,22 +250,12 @@ public static class LdapCheck
                 var root = await conn.ReadAsync("", ["namingContexts", "defaultNamingContext", "supportedCapabilities", "supportedExtension", "vendorName", "objectClass"], ct);
                 var attrs = root.GetAttributeSet();
                 var activeDirectory = attrs.TryGetValue("supportedCapabilities", out var caps) && caps.StringValueArray.Contains(ActiveDirectoryCapability);
-                var openLdap = attrs.TryGetValue("objectClass", out var classes) && classes.StringValueArray.Contains("OpenLDAProotDSE", StringComparer.OrdinalIgnoreCase);
+                var openLdap = _openLdap = attrs.TryGetValue("objectClass", out var classes) && classes.StringValueArray.Contains("OpenLDAProotDSE", StringComparer.OrdinalIgnoreCase);
                 if (attrs.TryGetValue("supportedExtension", out var extensions))
                 {
                     _offersStartTls = extensions.StringValueArray.Contains(StartTlsExtension);
                 }
-                if (attrs.TryGetValue("defaultNamingContext", out var main) && main.StringValue is { Length: > 0 } d)
-                {
-                    _contexts.Add(d);
-                }
-                if (attrs.TryGetValue("namingContexts", out var all))
-                {
-                    _contexts.AddRange(all.StringValueArray.Where(c => c.Length > 0 && !_contexts.Contains(c, StringComparer.OrdinalIgnoreCase)
-                        // Active Directory's own partitions are not where people are.
-                        && !c.StartsWith("CN=Configuration,", StringComparison.OrdinalIgnoreCase) && !c.StartsWith("CN=Schema,", StringComparison.OrdinalIgnoreCase)
-                        && !c.StartsWith("DC=ForestDnsZones,", StringComparison.OrdinalIgnoreCase) && !c.StartsWith("DC=DomainDnsZones,", StringComparison.OrdinalIgnoreCase)));
-                }
+                _contexts.AddRange(LdapDirectory.Contexts(attrs));
                 var vendor = attrs.TryGetValue("vendorName", out var v) ? v.StringValue : null;
                 var kind = activeDirectory ? "Active Directory" : openLdap ? "OpenLDAP" : vendor ?? "an LDAP directory";
                 Add(Ok, _contexts.Count > 0 ? $"It is {kind}, holding {Holds}." : $"It is {kind}.");
@@ -509,7 +509,7 @@ public static class LdapCheck
             LdapEntry? found;
             try
             {
-                found = await FindGroupAsync(conn, group, ct);
+                found = await LdapDirectory.FindGroupAsync(o, conn, group, _contexts, GroupAttributes, ct);
             }
             catch (LdapException ex) when (!LdapErrors.IsConnectionFailure(ex))
             {
@@ -518,8 +518,7 @@ public static class LdapCheck
             }
             if (found is null)
             {
-                var where = !string.IsNullOrWhiteSpace(o.GroupBaseDn) ? $"below \"{o.GroupBaseDn.Trim()}\"" : _contexts.Count > 0 ? $"in {Holds}" : $"below \"{o.UserBaseDn.Trim()}\"";
-                Add(required ? Fail : Warn, $"{label}: no group \"{group}\" found {where}, as {Who} sees it: {nobody}. Check the name (a group's name or its full DN).");
+                Add(required ? Fail : Warn, $"{label}: no group \"{group}\" found {LdapDirectory.GroupPlaces(o, _contexts)}, as {Who} sees it: {nobody}. Check the name (a group's name or its full DN).");
                 return;
             }
             Add(Ok, $"{label}: found {found.Dn}.");
@@ -527,40 +526,11 @@ public static class LdapCheck
             {
                 Add(required ? Fail : Warn, $"{label}: its members do not show it in their memberOf (this server's memberOf overlay is off, or covers another kind of group), so {nobody}. Set \"Where groups are\" (like {Parent(found.Dn)}) and groups are searched there.");
             }
-        }
-
-        /// <summary>The group: by its DN, or by its name (cn) where groups are, else in the server's naming contexts.</summary>
-        private async Task<LdapEntry?> FindGroupAsync(LdapConnection conn, string group, CancellationToken ct)
-        {
-            if (group.Contains('=', StringComparison.Ordinal))
+            else if (!string.IsNullOrWhiteSpace(o.GroupBaseDn) && _openLdap && !IsUnder(found.Dn, o.GroupBaseDn.Trim()))
             {
-                try
-                {
-                    return await conn.ReadAsync(group, GroupAttributes, ct);
-                }
-                catch (LdapException ex) when (ex.ResultCode is LdapException.NoSuchObject or LdapException.InvalidDnSyntax)
-                {
-                    return null;
-                }
+                // Named by its DN, elsewhere: with "Where groups are" set, OpenLDAP's people have only the groups there.
+                Add(required ? Fail : Warn, $"{label}: {found.Dn} is not below \"{o.GroupBaseDn.Trim()}\" (where groups are), and on OpenLDAP only the groups there count, so {nobody}. Name a group below it, or empty \"Where groups are\" if its members show it in their memberOf.");
             }
-            var filter = $"(&(|(objectClass=groupOfNames)(objectClass=groupOfUniqueNames)(objectClass=group)(objectClass=posixGroup))(cn={LdapDirectory.EscapeFilter(group)}))";
-            IEnumerable<string> places = !string.IsNullOrWhiteSpace(o.GroupBaseDn) ? [o.GroupBaseDn.Trim()] : _contexts.Count > 0 ? _contexts : [o.UserBaseDn.Trim()];
-            foreach (var place in places)
-            {
-                try
-                {
-                    var hits = await LdapDirectory.SearchAsync(conn, place, LdapConnection.ScopeSub, filter, GroupAttributes, ct, most: 10);
-                    if (hits.Count > 0)
-                    {
-                        return hits[0];
-                    }
-                }
-                catch (LdapException ex) when (ex.ResultCode == LdapException.NoSuchObject)
-                {
-                    // Not visible from there: the next place.
-                }
-            }
-            return null;
         }
 
         /// <summary>Whether a member of the group has it in memberOf (asked for by name), as the app reads groups without "Where groups are".</summary>
@@ -639,6 +609,7 @@ public static class LdapCheck
             }
             if (signIn.Person is not { } person)
             {
+                PasswordRefused = true;
                 Failed($"Their password was not accepted: {signIn.Refusal}.");
                 return null;
             }

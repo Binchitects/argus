@@ -38,6 +38,12 @@ public interface ILdapDirectory
     /// <summary>Re-reads a person for the sync; null when the entry no longer exists.</summary>
     Task<LdapPerson?> FindByDnAsync(string dn, CancellationToken ct = default);
 
+    /// <summary>
+    /// Finds the required group in the directory. Throws <see cref="LdapUnavailableException"/> when it is not
+    /// there (a typo in its name, most likely): nobody may be disabled for not being in a group that does not exist.
+    /// </summary>
+    Task CheckRequiredGroupAsync(CancellationToken ct = default);
+
     bool IsAdmin(LdapPerson person);
     bool IsAllowed(LdapPerson person);
 }
@@ -90,6 +96,118 @@ public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapD
             }
             return matches.Count == 1 ? await ToPersonAsync(o, conn, matches[0], ct) : null;
         }, ct);
+    }
+
+    public Task CheckRequiredGroupAsync(CancellationToken ct = default)
+    {
+        var o = _o;
+        if (string.IsNullOrWhiteSpace(o.RequiredGroup))
+        {
+            return Task.CompletedTask;
+        }
+        return WithServiceAsync(o, async conn =>
+        {
+            var contexts = string.IsNullOrWhiteSpace(o.GroupBaseDn) ? await ContextsAsync(conn, ct) : [];
+            return await FindGroupAsync(o, conn, o.RequiredGroup, contexts, ["1.1"], ct) is not null
+                ? true
+                : throw new LdapUnavailableException($"The directory at {o.Url} cannot be used: {RequiredGroupMissing(o, contexts)}.");
+        }, ct);
+    }
+
+    /// <summary>Why nobody is disabled for the required group: it is not in the directory.</summary>
+    internal static string RequiredGroupMissing(LdapOptions o, IReadOnlyList<string> contexts) =>
+        $"no required group \"{o.RequiredGroup?.Trim()}\" is found {GroupPlaces(o, contexts)}, so nobody is disabled for not being in it: fix \"Required group\" in the Settings page";
+
+    /// <summary>Where a group named by its name is looked for, in words.</summary>
+    internal static string GroupPlaces(LdapOptions o, IReadOnlyList<string> contexts) =>
+        !string.IsNullOrWhiteSpace(o.GroupBaseDn) ? $"below \"{o.GroupBaseDn.Trim()}\""
+        : contexts.Count > 0 ? "in " + string.Join(" and ", contexts.Select(c => $"\"{c}\""))
+        : $"below \"{o.UserBaseDn.Trim()}\"";
+
+    /// <summary>What an entry is when it is a group: OpenLDAP's kinds, Active Directory's, and posix groups.</summary>
+    private const string GroupClasses = "(|(objectClass=groupOfNames)(objectClass=groupOfUniqueNames)(objectClass=group)(objectClass=posixGroup))";
+
+    /// <summary>
+    /// A group as a setting names it: by its DN, or by its name below "Where groups are", else in the
+    /// server's naming contexts (else below where people are). Only a group that signing in would match
+    /// counts, a name saved by v5.2.0 included ("Sales\" for CN=Sales\, EMEA). Null when there is none.
+    /// </summary>
+    internal static async Task<LdapEntry?> FindGroupAsync(LdapOptions o, LdapConnection conn, string group, IReadOnlyList<string> contexts, string[] attributes, CancellationToken ct)
+    {
+        group = group.Trim();
+        if (group.Contains('=', StringComparison.Ordinal))
+        {
+            try
+            {
+                return await conn.ReadAsync(group, attributes, ct);
+            }
+            catch (LdapException ex) when (ex.ResultCode is LdapException.NoSuchObject or LdapException.InvalidDnSyntax)
+            {
+                return null;
+            }
+        }
+        var filter = $"(&{GroupClasses}{NameFilter(group)})";
+        IEnumerable<string> places = !string.IsNullOrWhiteSpace(o.GroupBaseDn) ? [o.GroupBaseDn.Trim()] : contexts.Count > 0 ? contexts : [o.UserBaseDn.Trim()];
+        foreach (var place in places)
+        {
+            try
+            {
+                var hits = await SearchAsync(conn, place, LdapConnection.ScopeSub, filter, attributes, ct, most: 100);
+                if (hits.FirstOrDefault(g => IsNamed(g.Dn, group)) is { } hit)
+                {
+                    return hit;
+                }
+            }
+            catch (LdapException ex) when (ex.ResultCode == LdapException.NoSuchObject)
+            {
+                // Not visible from there: the next place.
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The search for a group by its name: its cn as written and with its escapes read; for a name v5.2.0
+    /// cut at an escaped comma ("Sales\"), the cns that begin with it and that comma.
+    /// </summary>
+    private static string NameFilter(string group)
+    {
+        if ((group.Length - group.TrimEnd('\\').Length) % 2 == 1)
+        {
+            return $"(cn={EscapeFilter(Unescape(group[..^1]) + ",")}*)";
+        }
+        var read = Unescape(group);
+        return read == group ? $"(cn={EscapeFilter(group)})" : $"(|(cn={EscapeFilter(group)})(cn={EscapeFilter(read)}))";
+    }
+
+    /// <summary>The server's naming contexts, from its root entry: where its entries are. Empty when it shows none.</summary>
+    private static async Task<List<string>> ContextsAsync(LdapConnection conn, CancellationToken ct)
+    {
+        try
+        {
+            return Contexts((await conn.ReadAsync("", ["namingContexts", "defaultNamingContext"], ct)).GetAttributeSet());
+        }
+        catch (LdapException ex) when (!LdapErrors.IsConnectionFailure(ex))
+        {
+            return [];
+        }
+    }
+
+    /// <summary>The naming contexts a root entry lists, its default first, without Active Directory's own partitions (no people or groups there).</summary>
+    internal static List<string> Contexts(LdapAttributeSet root)
+    {
+        var contexts = new List<string>();
+        if (root.TryGetValue("defaultNamingContext", out var main) && main.StringValue is { Length: > 0 } d)
+        {
+            contexts.Add(d);
+        }
+        if (root.TryGetValue("namingContexts", out var all))
+        {
+            contexts.AddRange(all.StringValueArray.Where(c => c.Length > 0 && !contexts.Contains(c, StringComparer.OrdinalIgnoreCase)
+                && !c.StartsWith("CN=Configuration,", StringComparison.OrdinalIgnoreCase) && !c.StartsWith("CN=Schema,", StringComparison.OrdinalIgnoreCase)
+                && !c.StartsWith("DC=ForestDnsZones,", StringComparison.OrdinalIgnoreCase) && !c.StartsWith("DC=DomainDnsZones,", StringComparison.OrdinalIgnoreCase)));
+        }
+        return contexts;
     }
 
     public bool IsAdmin(LdapPerson person) => IsAdmin(_o, person);
