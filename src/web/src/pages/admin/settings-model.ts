@@ -97,3 +97,27 @@ export function bytesHint(v: string): string | null {
   if (!Number.isFinite(n) || n <= 0) return null
   return n >= 1048576 ? `${Number((n / 1048576).toFixed(1))} MB` : `${Number((n / 1024).toFixed(1))} KB`
 }
+
+/** A value as the page shows it, in its unit ("15 minutes", "on", "20 MB"); null when there is none. */
+export function shownValue(s: SettingView, v: string | null): string | null {
+  if (v === null || v === '') return null
+  switch (s.type) {
+    case 'boolean':
+      return v === 'true' ? 'on' : 'off'
+    case 'duration':
+      return `${durationInUnit(v, s.unit) || v} ${s.unit ?? 'minutes'}`
+    case 'wholenumber':
+    case 'number':
+      return s.unit === 'bytes' ? (bytesHint(v) ?? v) : s.unit ? `${v} ${s.unit}` : v
+    case 'choices':
+      return v.split(',').join(', ')
+    default:
+      return v
+  }
+}
+
+/** The limits shown beside a number or a duration's box ("5–1440"); a text's length is checked as it is saved. */
+export function limits(s: SettingView): string | null {
+  if (s.min === null || s.max === null || s.unit === 'bytes') return null
+  return s.type === 'wholenumber' || s.type === 'number' || s.type === 'duration' ? `${s.min}–${s.max}` : null
+}

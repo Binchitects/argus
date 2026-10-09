@@ -40,6 +40,7 @@ import {
   type SessionSummary,
 } from './api'
 import { CodeAnswer } from './answer'
+import { PartHelp } from './help'
 import { changesQuery, savePreferences } from './ide-api'
 
 // The agent's chat, in the IDE's side panel: the folder's sessions (the side
@@ -74,6 +75,7 @@ export function Sessions({ state, onNavigate }: { state: CodeState; onNavigate?:
             {state.project}
           </span>
         </div>
+        <PartHelp part="sessions" className="ml-auto" />
       </div>
       <div className="grid gap-2 p-3">
         <Button onClick={() => void open(newSession)} className="justify-start" disabled={state.busy}>
@@ -354,6 +356,7 @@ export function Thread({
         {model?.thinking && <ThinkingPicker config={config} value={state.thinking} onChange={(level) => void settings({ thinking: level })} />}
         <span className="ml-auto" />
         {state.mode === 'yolo' && <span className="hidden text-xs text-destructive-ink @md:inline">Yolo: nothing asks</span>}
+        <PartHelp part="chat" className="size-8 rounded-md [&_svg]:size-4" />
         <Tooltip content="This folder's sessions">
           <Button variant="ghost" size="icon-sm" onClick={onOpenList} aria-label="Sessions">
             <History />

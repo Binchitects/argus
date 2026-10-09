@@ -1,5 +1,6 @@
 # Context of the images built from the repository root: the API
-# (src/Llm.Api/Dockerfile) and Argus (src/Argus/Dockerfile). They build from
+# (src/Llm.Api/Dockerfile), Argus (src/Argus/Dockerfile) and the web
+# (src/web/Dockerfile, which builds docs/ into its manual). They build from
 # source; nothing prebuilt, secret or large crosses into the context.
 .git
 .github
@@ -7,9 +8,9 @@
 .remember
 .config
 
-# Not needed by either image. deploy/ holds .env, backups and the models.
+# Not needed by any image. deploy/ holds .env, backups and the models.
 deploy/
-docs/
+docs/measurements/
 evals/
 clients/
 tools/*

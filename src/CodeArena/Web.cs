@@ -399,6 +399,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["version"] = Cli.Version,
             ["license"] = Cli.License,
             ["source"] = Cli.Source,
+            // The help's "Read more": the manual of the Arena signed in to.
+            ["manual"] = _rt.Config.ManualUrl,
             ["folder"] = _rt.Workspace.Root,
             ["project"] = Path.GetFileName(root) is { Length: > 0 } project ? project : root,
             ["branch"] = git is null ? null : SystemPrompt.GitBranch(git),

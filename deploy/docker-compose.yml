@@ -57,7 +57,7 @@ services:
 
   web:
     <<: *service
-    build: ../src/web
+    build: { context: .., dockerfile: src/web/Dockerfile }
     container_name: web
     read_only: true
     tmpfs: [/tmp]

@@ -41,6 +41,7 @@ export const routes: RouteObject[] = [
           { path: 'usage', ...lazy(() => import('@/pages/usage').then((m) => ({ Component: m.UsagePage }))) },
           { path: 'leaderboard', ...lazy(() => import('@/pages/leaderboard').then((m) => ({ Component: m.LeaderboardPage }))) },
           { path: 'setup', ...lazy(() => import('@/pages/setup').then((m) => ({ Component: m.ConnectPage }))) },
+          { path: 'help/*', ...lazy(() => import('@/pages/help').then((m) => ({ Component: m.ManualPage }))) },
           {
             path: 'admin',
             element: <RequireAdmin />,

@@ -157,8 +157,14 @@ The page is laid out as VS Code is, in Argus Arena's design system:
 
 - **activity bar** (the left edge): Explorer, Search, Agent changes (with a
   count of the files) and Chat switch the side bar; the one shown hides it.
-  At its foot: the terminal panel, the theme (light, dark or the system's)
-  and About.
+  At its foot: the terminal panel, the theme (light, dark or the system's),
+  Help and About.
+- **help**: Help in the activity bar opens the IDE's help over the page:
+  what each part does, the common tasks step by step and the keys, with a
+  link to this page of the manual in the Arena signed in to
+  (`https://DOMAIN/help/code-arena`). The **?** in a panel's header
+  (Explorer, Search, Agent changes, Sessions, the terminal, the chat) opens it
+  at that panel. Esc closes it.
 - **Explorer**: the project's files, with New file, New folder, Refresh and
   Collapse at its top. Click opens; a right-click menu has new file, new
   folder, Copy path, Rename (F2) and Delete (Del, asks first); the arrow
@@ -302,7 +308,7 @@ status (403 `outside` for a path outside the folder).
 
 | call | what it does |
 |---|---|
-| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), the folder, project, branch, model, mode, session, busy |
+| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy |
 | `GET /api/files?path=DIR` | a folder's entries, folders first: `{path, entries: [{name, path, kind, size, link}]}` |
 | `GET /api/files/all` | every file, for quick open: `{files, truncated}` (50,000 at most) |
 | `GET /api/file?path=FILE` | `{path, size, version, text}`; `text` is null with `binary` or `tooLarge` (over 5 MB) |

@@ -1,5 +1,29 @@
 # Documentation
 
+The pages people and admins need are also in the app, as its **manual**
+(`https://DOMAIN/help`, **Manual** at the foot of the sidebar and in the
+account menu): built into the web when it is built, with contents, search
+across every page, anchors, and links between pages that stay in the app. The
+**?** at the top of every page opens that page's help: what the page is for,
+what each part does, and the common tasks step by step
+(`src/web/src/help/topics.ts`). On a wide screen it sits beside the page and
+stays open while you work; on a smaller one it opens over the page. Argus's
+own app has a lighter version: **Help** in its sidebar (and on its sign-in
+page), beside the page on a wide screen and over it on a smaller one, and
+`/help`. Code Arena's IDE has **Help** in its activity bar and a **?** on each
+panel, with links into the manual's Code Arena page.
+
+The manual lists an admin's pages for admins only, but that only tidies it: it
+is not access control. Every page of the manual, admins' too, is in the web's
+files, which anyone who can reach the web can fetch without signing in (as the
+pages are on GitHub). Keep nothing confidential in `docs/`: no internal host
+names, passwords or private procedures.
+
+A new page here, in any folder, is placed on purpose: in the manual
+(`src/web/src/help/manual.ts`), or among the pages it leaves out (the
+developers', and Argus run alone); a test fails until it is. Only
+`measurements/` is left out whole: it holds results, not pages.
+
 ## Running the platform
 
 | page | what it covers |

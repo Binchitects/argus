@@ -15,6 +15,7 @@ const paths: Record<string, string> = {
   send: "M4 12 20 4l-6 16-3-7z",
   tool: "M14 6a4 4 0 0 0 5 5l-9 9-3-3 9-9a4 4 0 0 0-2-2z",
   logo: "M12 5a7 7 0 1 0 0 14 7 7 0 0 0 0-14zm0 4.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z",
+  help: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zm-2.5-11.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6m0 3h.01",
 };
 
 export default function Icon({ name, size = 16 }: { name: keyof typeof paths | string; size?: number }) {

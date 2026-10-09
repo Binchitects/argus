@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { durationFromUnit, durationInUnit, initialValue, timeSpanSeconds, toTimeSpan, type SettingView } from './settings-model'
+import { durationFromUnit, durationInUnit, initialValue, limits, shownValue, timeSpanSeconds, toTimeSpan, type SettingView } from './settings-model'
 
 describe('settings model', () => {
   it('reads and writes .NET durations', () => {
@@ -20,5 +20,21 @@ describe('settings model', () => {
     const base = { type: 'text', scope: 'live', value: 'medium', unit: null } as SettingView
     expect(initialValue(base)).toBe('medium')
     expect(initialValue({ ...base, type: 'secret', value: null })).toBe('')
+  })
+  it('shows a value in its unit, and the limits of a number or a duration', () => {
+    const base = { type: 'wholenumber', scope: 'live', unit: null, min: 1, max: 32 } as SettingView
+    expect(shownValue(base, '8')).toBe('8')
+    expect(shownValue({ ...base, unit: 'characters' }, '6000')).toBe('6000 characters')
+    expect(shownValue({ ...base, unit: 'bytes' }, '20971520')).toBe('20 MB')
+    expect(shownValue({ ...base, type: 'duration', unit: 'minutes' }, '01:00:00')).toBe('60 minutes')
+    expect(shownValue({ ...base, type: 'boolean' }, 'false')).toBe('off')
+    expect(shownValue({ ...base, type: 'choices' }, 'a,b')).toBe('a, b')
+    expect(shownValue(base, '')).toBeNull()
+    expect(shownValue(base, null)).toBeNull()
+    expect(limits(base)).toBe('1–32')
+    expect(limits({ ...base, type: 'duration', min: 5, max: 1440 })).toBe('5–1440')
+    // A text's length is checked as it is saved; bytes show as megabytes beside the box.
+    expect(limits({ ...base, type: 'text', min: null, max: 60 })).toBeNull()
+    expect(limits({ ...base, unit: 'bytes' })).toBeNull()
   })
 })

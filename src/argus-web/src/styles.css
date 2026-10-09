@@ -255,3 +255,45 @@ pre.log { max-height: 280px; background: #111418; color: #d6dae0; font-size: 12p
   .conversations { display: none; }
   .page { padding: 20px 16px; }
 }
+
+/* ---- help ---------------------------------------------------------------------- */
+/* Wide enough (Help.tsx, besideQuery): a column of its own, so nothing of the page is under it. */
+.help-panel {
+  overflow: auto;
+  padding: 20px;
+  color: var(--fg);
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+}
+.help-panel:focus { outline: none; }
+@media (min-width: 1280px) {
+  .shell.help-open { grid-template-columns: 232px minmax(0, 1fr) 360px; }
+}
+/* Until there is room to spare, the chat's list gives some of its width to the conversation. */
+@media (min-width: 1280px) and (max-width: 1439px) {
+  .shell.help-open .chat { grid-template-columns: 200px minmax(0, 1fr); }
+}
+/* Narrower: a dialog over the page, at its right edge, with the page dimmed and waiting behind it. */
+.help-panel.help-over {
+  position: fixed;
+  inset: 0 0 0 auto;
+  width: min(380px, 100vw);
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--line);
+  box-shadow: -8px 0 24px rgba(16, 24, 40, 0.12);
+}
+.help-panel.help-over::backdrop { background: rgba(16, 24, 40, 0.4); }
+.help-over-body { min-height: 100%; padding: 20px; }
+.help-panel h2 { font-size: 16px; }
+.help-inline { margin-top: 4px; }
+.help-inline summary { cursor: pointer; font-size: 13px; color: var(--dim); }
+.help-panel h3, .help-page h3, .help-inline h3 { font-size: 13.5px; margin: 16px 0 4px; }
+.help-panel ol, .help-page ol, .help-inline ol { margin: 0; padding-left: 20px; }
+.help-parts { display: grid; gap: 10px; margin: 12px 0 0; }
+.help-parts dt { font-weight: 600; }
+.help-parts dd { margin: 0; }

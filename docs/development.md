@@ -97,6 +97,7 @@ and `/mcp` to a backend on `:7700`:
 
 ```bash
 cd src/argus-web && npm ci && npm run dev      # http://localhost:5173
+cd src/argus-web && npm test && npm run build  # every route has its help (src/help.ts); typecheck and build
 ```
 
 ## Browser tests
@@ -153,12 +154,13 @@ python3 scripts/audit-dashboards.py 6h  # every dashboard panel's queries
 
 ## Images
 
-Both .NET images build from the repository root:
+All three images build from the repository root (the web reads `docs/` for
+its manual):
 
 ```bash
 docker build -f src/Llm.Api/Dockerfile -t llmservice-app .
 docker build -f src/Argus/Dockerfile --target server -t argus .
-docker build -t llmservice-web src/web
+docker build -f src/web/Dockerfile -t llmservice-web .
 ```
 
 The Argus image runs its xUnit suite during the build and fails with it; the

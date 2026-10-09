@@ -1,11 +1,16 @@
 # The web: the React build, served as static files by nginx.
 # Traefik sends /api, /connect and /.well-known to the app, and everything else here.
+#
+# Built from the repository root, for the manual (Help) builds docs/ into the page:
+#   docker build -f src/web/Dockerfile -t llm-web .
 
 FROM node:22-alpine AS build
 WORKDIR /web
-COPY package.json package-lock.json ./
+COPY src/web/package.json src/web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
-COPY . .
+COPY src/web/ ./
+# The manual's pages: vite.config.ts reads ../../docs, which from /web is /docs.
+COPY docs/ /docs/
 # NO_MINIFY=1 builds a readable bundle for chasing production-only bugs.
 ARG NO_MINIFY=
 RUN NO_MINIFY=$NO_MINIFY npm run build
@@ -14,7 +19,7 @@ RUN NO_MINIFY=$NO_MINIFY npm run build
 FROM alpine:3
 RUN apk add --no-cache nginx \
  && rm -rf /etc/nginx/http.d /var/www
-COPY nginx.conf /etc/nginx/nginx.conf
+COPY src/web/nginx.conf /etc/nginx/nginx.conf
 COPY --from=build /web/dist /srv/web
 ARG APP_VERSION=0.0.0
 LABEL org.opencontainers.image.title="llm-web" org.opencontainers.image.version="$APP_VERSION"

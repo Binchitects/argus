@@ -6,6 +6,7 @@ import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useEditor } from './editor-state'
 import { FileIcon } from './file-icon'
+import { PartHelp } from './help'
 import { changesQuery, nameOf, parentOf } from './ide-api'
 
 const action =
@@ -31,6 +32,7 @@ export function ChangesPanel() {
             </button>
           </Tooltip>
         )}
+        <PartHelp part="changes" />
       </div>
       <div className="min-h-0 flex-1 overflow-auto pb-4 text-[0.8125rem]">
         {changes.isPending && Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="mx-3 my-1.5 h-4" />)}

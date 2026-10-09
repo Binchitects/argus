@@ -65,6 +65,8 @@ public sealed partial class WebTests : IDisposable
         Assert.Equal(Cli.Version, state["version"]!.GetValue<string>());
         Assert.Equal("AGPL-3.0-only", state["license"]!.GetValue<string>());
         Assert.Equal("https://github.com/Binchitects/argus", state["source"]!.GetValue<string>());
+        // The help's link to the manual: the Arena's own, at the address signed in to.
+        Assert.Equal(_mcp.BaseUrl + "/help/code-arena", state["manual"]!.GetValue<string>());
         // The key works as a bearer token too (scripts, these tests); another key does not.
         Assert.Equal(HttpStatusCode.OK, (await web.Http.GetAsync("/api/state")).StatusCode);
         using var wrong = WebRun.Client(web.Port, token: new string('y', 43));

@@ -293,4 +293,58 @@ test.describe.serial("Argus", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await page.screenshot({ path: join(shots(), "10-overview-dark.png"), fullPage: true });
   });
+
+  test("help: each page has its own, it follows from page to page, and /help has them all", async ({ page }) => {
+    await page.goto("/login");
+    await page.getByText("Help with signing in").click();
+    await expect(page.getByTestId("login-help")).toContainText("Ask an admin to reset your password");
+    await signIn(page, ADMIN.username, ADMIN.password);
+    const button = page.getByRole("button", { name: "Help", exact: true });
+    await button.click();
+    const panel = page.getByTestId("help-panel");
+    await expect(panel.getByRole("heading", { name: "Help: Chat" })).toBeVisible();
+    await expect(panel).toBeFocused();
+    // Beside the page, not over it: an Esc in the page is the page's.
+    const column = await page.getByRole("main").boundingBox();
+    const beside = await panel.boundingBox();
+    expect(column!.x + column!.width).toBeLessThanOrEqual(beside!.x + 1);
+    await page.getByRole("textbox").first().focus();
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeVisible();
+    const pages = ["Settings & keys", "Overview", "People", "Indexing", "Explore", "Knowledge packs"];
+    for (const name of pages) {
+      await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name }).click();
+      await expect(panel.getByRole("heading", { name: `Help: ${name}` })).toBeVisible();
+    }
+    await panel.getByRole("link", { name: "Every page's help" }).click();
+    await expect(page.getByRole("heading", { name: "Help", exact: true, level: 1 })).toBeVisible();
+    await expect(page.getByRole("main").getByRole("heading", { name: "Knowledge packs", level: 2 })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeHidden();
+    await expect(button).toBeFocused();
+
+    // Narrower, it opens over the page as a dialog, the page waiting behind it: Esc, or a click beside it, closes it.
+    await page.setViewportSize({ width: 1000, height: 800 });
+    await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Settings & keys" }).click();
+    await button.click();
+    const over = page.getByRole("dialog", { name: "Help: Settings & keys" });
+    await expect(over).toBeVisible();
+    await expect(over).toBeFocused();
+    const main = await page.locator("main").boundingBox();
+    expect(Math.round(main!.x + main!.width)).toBe(1000);
+    const field = page.locator('input[aria-label="New password"]');
+    await field.focus();
+    await expect(over).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(over).toBeHidden();
+    await expect(button).toBeFocused();
+    await button.click();
+    await expect(over).toBeVisible();
+    const box = await field.boundingBox();
+    expect(box!.x + 5).toBeLessThan((await over.boundingBox())!.x);
+    await page.mouse.click(box!.x + 5, box!.y + box!.height / 2);
+    await expect(over).toBeHidden();
+    await expect(field).not.toBeFocused();
+    await expect(button).toBeFocused();
+  });
 });
