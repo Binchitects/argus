@@ -59,7 +59,8 @@ Other clients (streamable HTTP):
   parts. Cancelling the call stops it; the chat keeps what was done. It takes
   minutes: give the client a long tool timeout. While **Web** asks before each
   call, it is not served (nobody is in its chat to allow the web's calls), and
-  the notes for the agent say so; the person starts it in the chat instead.
+  the notes for the agent say so, as does **Connect your tools** (it is not
+  listed among the tools served); the person starts it in the chat instead.
 - **Not served**: the chat's own tools. Reading files (a chat's files),
   questions to the person (`ask_user`) and sub-agents (`delegate`) have no chat
   here.
@@ -138,6 +139,7 @@ Argus); an admin's MCP server proxied with its progress; a call cancelled; a
 picture inline and as a link that `resources/read` reads and the person opens.
 `tests/Llm.Tests/DeepResearchTests.cs` runs `deep_research` for an agent: a
 chat of the person's own does it, its steps come as progress and the report as
-the result; not served, saying why, while the web asks first; gone when the
-person may not use it.
+the result; not served, saying why (in the agent's notes and on Connect your
+tools), while the web asks first, when an unknown function name is still "no
+tool named"; gone when the person may not use it.
 `src/web/src/pages/setup.test.tsx` checks the setups on Connect your tools.

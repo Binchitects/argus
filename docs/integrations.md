@@ -34,7 +34,10 @@ trigger word or slash command) is answered like this:
    theirs would use), of those they may use, in turn with everyone else's
    answers, against their credit; the safeguards check the question as in the
    chat. **What the bots are told** (an instruction for every bot chat) asks
-   for short answers in plain Markdown.
+   for short answers in plain Markdown. Nobody in the thread can press
+   **Allow**, so the model is not offered **Deep research** while it asks
+   first (Admin → Tools); with asking turned off it may start one, and the
+   thread gets the report.
 4. **Back in the thread**: the answer, cut to what a post holds (Slack 4,000
    characters, Mattermost 16,000, Teams 12,000) with a link to the whole of it
    in the chat. Slack's Markdown is converted (bold, links, headings).
@@ -174,10 +177,12 @@ it for a whole company, are in [its README](../clients/browser-extension/README.
   signature (a wrong secret, a stale timestamp), a mention answered in its
   thread as the person matched by email, a reply carrying the chat on, a
   stranger refused politely and audited, channels not on the list declined,
-  direct messages answered; Mattermost's tokens, a reply answered in its
-  thread's first post, a slash command; Teams' token checks (another bot's
-  audience, another key, another issuer, another service address, a key not
-  endorsed for the channel) and the reply; email in with a fake SMTP server.
+  direct messages answered; a Slack answer not offered deep research while it
+  asks first, and offered once it does not; Mattermost's tokens, a reply
+  answered in its thread's first post, a slash command; Teams' token checks
+  (another bot's audience, another key, another issuer, another service
+  address, a key not endorsed for the channel) and the reply; email in with a
+  fake SMTP server.
 - Web Push: the encryption against RFC 8291's own test vector; a subscription,
   a notification pushed and decrypted as the browser does, its VAPID signature
   checked; a device the push service forgot removed.

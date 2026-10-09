@@ -83,8 +83,11 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     groups; on for everyone until an admin changes it). The button is there
     only for those who may use it; a message asking for it from anyone else is
     refused, and one queued before an admin took it away is answered plainly,
-    saying so. The button is greyed out, and says why, when it cannot go with
-    the next message: the chat's model calls no tools, or **Compare** is on.
+    saying so. When an admin takes it away from someone who had it, the button
+    goes and a note says why, once: at once while the chat is open, or the
+    next time they open it on that browser. The button is greyed out, and says
+    why (its tooltip, or a tap on a phone), when it cannot go with the next
+    message: the chat's model calls no tools, or **Compare** is on.
   - **Started by the model.** Deep research is also one of the chat's tools
     (**Tools**). While it is on in a chat (it is in new chats unless an admin
     changes that), the model may start one itself (`deep_research`) when a
@@ -93,7 +96,12 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     deep research from there, as with the button: the web and sub-agents join
     it, its steps are said in the call's result, and the line under the answer
     shows the step. It counts in the deep research a day. Sub-agents never
-    start one, and an answer that is deep research already is not offered it.
+    start one, and an answer that is deep research already is not offered it,
+    nor are **Compare**'s two answers (deep research is one model's report).
+    While it asks first, it is not offered where nobody can press **Allow**: a
+    [scheduled task](#scheduled-tasks)'s run and a chat bot's thread
+    ([integrations.md](integrations.md#chat-bots)). With asking turned off,
+    they may start one too.
   - **For your agent.** [Arena MCP](mcp.md) serves `deep_research` to your
     own agent: it runs in a new chat of yours ("Deep research: …"), and the
     agent gets the report.
@@ -685,9 +693,12 @@ you: a morning digest, a weekly report on a repository with Argus.
   minutes by default).
 - **Each run** asks the question with the task's model and tools (or the ones
   a new chat would use), as any answer: in turn with everyone else's, against
-  your credit. It is a new chat, titled with the task and the time, or with
-  **One chat for every run**, the same chat carried on, so each run reads the
-  ones before ("what changed since yesterday").
+  your credit. Nobody is in the run's chat to press **Allow**, so the model is
+  not offered **Deep research** while it asks first (Admin → Tools); to have
+  a task research, an admin turns that off, or you ask in the chat with the
+  **Deep research** button. It is a new chat, titled with the task and the
+  time, or with **One chat for every run**, the same chat carried on, so each
+  run reads the ones before ("what changed since yesterday").
 - **Delivered** under the bell in the header (a toast too, when the page is
   open), and if asked by email (to your account's address; an admin sets the
   mail server under **Settings → Email**) and to a channel: a Slack, Teams,
@@ -1021,7 +1032,8 @@ use and edit one); a new chat takes `assistantId`.
 | No **Decide (Laya)** in the Tools menu | the laya module is off (the default), or still fetching or loading its checkpoints | `COMPOSE_PROFILES=laya` in `.env`, then `docker compose up -d laya`; Admin → Models shows the downloads |
 | No **Web** in the Tools menu | it is off (the default), or no site is allowed | Admin → Tools → Web on, and Settings → Python and web → Sites the chat may open |
 | No **Deep research** in the message box | an admin has not given deep research to you | Admin → Tools → Deep research: who may use it |
-| **Deep research** is greyed out | the chat's model calls no tools, or **Compare** is on (its tooltip says which) | choose a model that calls tools, or turn Compare off |
+| **Deep research** is greyed out | the chat's model calls no tools, or **Compare** is on (its tooltip, or a tap, says which) | choose a model that calls tools, or turn Compare off |
+| A scheduled task or a bot never starts deep research | it asks first, and nobody is there to allow it | Admin → Tools → Deep research → **Ask before each run** off, or use the button in the chat |
 | "… is not one of the sites the chat may open" | the page's site is not allowed | allow it in Settings → Python and web, or `*` for any public site |
 
 ## How it is tested
@@ -1070,9 +1082,14 @@ use and edit one); a new chat takes `assistantId`.
   one answered plainly once it is taken away; the model starting one when
   allowed (the web and sub-agents join, its parts run, it is not offered
   again nor to the parts), declined, not asking first, and past the day's
-  limit; and Arena MCP running one in a chat of the person's own, its steps
-  as progress and its report as the result, not served (and saying why)
-  while the web asks first.
+  limit; not offered to a scheduled task's run (nor a Slack bot's answer,
+  in `ChatBotTests`) while it asks first, and offered once it does not; never
+  offered to Compare's two answers; and Arena MCP running one in a chat of
+  the person's own, its steps as progress and its report as the result, not
+  served (and saying why, on Connect your tools too) while the web asks first,
+  an unknown function name then still "no tool named". The web's tests:
+  the switch only for those given it, a note when it is taken away (at once,
+  or on the next visit), and the reason on a tap when it is greyed out.
   Also memory: "remember I deploy with Podman" in the next chat's system
   prompt (after the fixed notes) and gone once deleted; an offer kept only
   when accepted (in the person's words), taken back, declined, and nobody
