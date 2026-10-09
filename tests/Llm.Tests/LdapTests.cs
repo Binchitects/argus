@@ -670,12 +670,27 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
         Assert.Contains("the password is wrong. The DN is right (an entry has it)", wrong, StringComparison.Ordinal);
         var misspelt = await Fails(Form(null, ("BindDn", @"cn=Svc Raeder\2C LDAP,ou=Service Accounts,dc=example,dc=test")));
         Assert.Contains("no entry has this DN. The part of it that exists is \"ou=Service Accounts,dc=example,dc=test\"", misspelt, StringComparison.Ordinal);
-        Assert.DoesNotContain("password", misspelt, StringComparison.Ordinal);
+        Assert.DoesNotContain("the password is wrong", misspelt, StringComparison.Ordinal);
+        // The server's own administrator (rootdn) has no entry: the one case where the DN is right all the same.
+        Assert.Contains("Only the server's own administrator (its root DN, OpenLDAP's rootdn or olcRootDN) signs in with no entry", misspelt, StringComparison.Ordinal);
         // Where an anonymous look sees nothing (here, the rest of the domain), the test says it cannot tell.
         var hidden = await Fails(Form(null, ("BindDn", @"cn=Svc Reader\2C LDAP,ou=Service Acounts,dc=example,dc=test")));
         Assert.Contains("the DN or the password is wrong. The server says the same for both", hidden, StringComparison.Ordinal);
         Assert.Contains("cannot tell which", hidden, StringComparison.Ordinal);
-        Assert.Contains("this server holds \"dc=example,dc=test\"", await Fails(Form(null, ("BindDn", "cn=reader,dc=example,dc=com"))), StringComparison.Ordinal);
+        var otherDomain = await Fails(Form(null, ("BindDn", "cn=reader,dc=example,dc=com")));
+        Assert.Contains("no entry here has this DN, as this server holds \"dc=example,dc=test\"", otherDomain, StringComparison.Ordinal);
+        Assert.Contains("Only the server's own administrator (its root DN, like cn=Directory Manager", otherDomain, StringComparison.Ordinal);
+        // A server's own administrator lives outside what it holds, with no entry: a wrong password is said to be one.
+        // Before, "no such entry can be here" sent the admin looking for a DN problem that was not there.
+        foreach (var (dn, what) in new[] { ("cn=admin,cn=config", "an administrator of the server's own settings (cn=config)"), ("cn=Directory Manager", "the administrator of 389 Directory Server and FreeIPA") })
+        {
+            var administrator = await Fails(Form(null, ("BindDn", dn), ("BindPassword", "not-the-config-password")));
+            Assert.StartsWith($"The server refused the service account {dn} with the password typed above: the password is wrong", administrator, StringComparison.Ordinal);
+            Assert.Contains($"{dn} is {what}", administrator, StringComparison.Ordinal);
+            Assert.DoesNotContain("no entry here has this DN", administrator, StringComparison.Ordinal);
+            Assert.DoesNotContain("can be here", administrator, StringComparison.Ordinal);
+        }
+        Assert.Contains("LDAP_CONFIG_PASSWORD, not LDAP_ADMIN_PASSWORD", await Fails(Form(null, ("BindDn", "cn=admin,cn=config"), ("BindPassword", "wrong"))), StringComparison.Ordinal);
         Assert.Contains("works only with Active Directory", await Fails(Form(null, ("BindDn", "reader@example.test"))), StringComparison.Ordinal);
         Assert.Contains("works only with Active Directory", await Fails(Form(null, ("BindDn", "EXAMPLE\\reader"))), StringComparison.Ordinal);
         Assert.Contains("is not a valid DN", await Fails(Form(null, ("BindDn", "cn=Svc Reader, LDAP,ou=Service Accounts,dc=example,dc=test"))), StringComparison.Ordinal);
@@ -1002,6 +1017,69 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
     }
 
     [Fact]
+    public async Task A_required_group_that_signing_in_sees_nobody_in_changes_nobody()
+    {
+        // The group is there, but signing in finds none of its members in it: before, the guard took it as
+        // there and the check disabled every directory person. (a) "Where groups are" emptied on this image,
+        // whose memberOf overlay keeps groupOfUniqueNames only, with a groupOfNames as the required group;
+        // (b) a required group named by its DN outside "Where groups are", on OpenLDAP.
+        await ldap.ModifyAsync("""
+            dn: ou=other,dc=example,dc=test
+            changetype: add
+            objectClass: organizationalUnit
+            ou: other
+
+            dn: cn=llm-outside,ou=other,dc=example,dc=test
+            changetype: add
+            objectClass: groupOfUniqueNames
+            cn: llm-outside
+            uniqueMember: uid=bob,ou=people,dc=example,dc=test
+
+            """);
+        try
+        {
+            var gateway = new FakeGateway();
+            await using var f = app.Create(app.ConnectionStringFor("ldapunseen_" + Guid.NewGuid().ToString("N")[..8]), gateway,
+                new Dictionary<string, string?>(Settings(ldap.Url)) { ["Auth:DataKey"] = "ldap-settings-data-key" });
+            var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+            var bob = await new TestBrowser(f).SignedInAsync("bob", "bob-directory-pw");
+            async Task NobodyChangedAsync(string why)
+            {
+                var sync = await admin.PostAsync("/api/admin/ldap/sync");
+                await StatusAssert.Is(HttpStatusCode.ServiceUnavailable, sync);
+                Assert.Contains(why, (await admin.JsonAsync(sync)).GetProperty("error").GetString(), StringComparison.Ordinal);
+                await Task.Delay(TimeSpan.FromSeconds(3)); // the background check, woken by saving, did the same
+                var people = await admin.JsonAsync(await admin.GetAsync("/api/admin/people"));
+                Assert.False(people.GetProperty("people").EnumerateArray().Single(p => p.GetProperty("userName").GetString() == "bob").GetProperty("disabled").GetBoolean());
+                await StatusAssert.Is(HttpStatusCode.OK, await bob.GetAsync("/api/auth/me"));
+                Assert.All(gateway.KeysOf("bob@example.test"), k => Assert.False(k.Blocked));
+            }
+
+            await SaveAsync(admin, new() { ["Ldap:GroupBaseDn"] = "" });
+            await NobodyChangedAsync("the required group cn=llm-users,ou=groups,dc=example,dc=test is there, but its members do not show it in their memberOf");
+
+            await SaveAsync(admin, new() { ["Ldap:GroupBaseDn"] = "ou=groups," + LdapServer.Base, ["Ldap:RequiredGroup"] = "cn=llm-outside,ou=other," + LdapServer.Base });
+            await NobodyChangedAsync("the required group cn=llm-outside,ou=other,dc=example,dc=test is not below \"ou=groups,dc=example,dc=test\" (where groups are)");
+
+            // Set right again: the check runs, and bob, in the group, stays.
+            await SaveAsync(admin, new() { ["Ldap:RequiredGroup"] = "llm-users" });
+            await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync("/api/admin/ldap/sync"));
+            await StatusAssert.Is(HttpStatusCode.OK, await bob.GetAsync("/api/auth/me"));
+        }
+        finally
+        {
+            await ldap.ModifyAsync("""
+                dn: cn=llm-outside,ou=other,dc=example,dc=test
+                changetype: delete
+
+                dn: ou=other,dc=example,dc=test
+                changetype: delete
+
+                """);
+        }
+    }
+
+    [Fact]
     public async Task A_posixGroup_as_the_required_group_fails_the_test_and_changes_nobody()
     {
         // Its members are uids (memberUid), which signing in never reads. Before, the test said "found" and
@@ -1235,6 +1313,71 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
         var locked = (await Try(null, "bob-directory-pw")).Result;
         Assert.StartsWith("Not tried: their account here (bob) is locked", locked.GetProperty("message").GetString(), StringComparison.Ordinal);
         Assert.False((await new TestBrowser(f).LoginAsync("bob", "bob-directory-pw")).IsSuccessStatusCode);
+    }
+
+    [Fact]
+    public async Task A_test_of_another_account_is_held_by_the_same_brakes_as_signing_in()
+    {
+        // The test says whether a typed password is right for the DN typed: with someone's DN as the service
+        // account, a guess at their password. Before, nothing held it (only the try was).
+        var (f, _) = Fresh(more: Settings(ldap.Url));
+        await using var _f = f;
+        await new TestBrowser(f).SignedInAsync("bob", "bob-directory-pw");
+        const string Bob = "uid=bob,ou=people,dc=example,dc=test";
+        async Task<(TestBrowser Admin, JsonElement Result)> Test(TestBrowser? admin, string password, string dn = Bob)
+        {
+            admin ??= await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+            return (admin, await TestAsync(admin, Form(null, ("BindDn", dn), ("BindPassword", password))));
+        }
+
+        var (first, firstResult) = await Test(null, "guess-0");
+        Assert.Contains("refused the service account uid=bob", Says(firstResult), StringComparison.Ordinal);
+        for (var i = 1; i < 5; i++)
+        {
+            Assert.False((await Test(first, $"guess-{i}")).Result.GetProperty("ok").GetBoolean());
+        }
+        // Held, however the DN is written, and the try that would sign in as it too.
+        foreach (var dn in new[] { Bob, "UID=bob, ou=people, dc=example, dc=test" })
+        {
+            var held = (await Test(first, "bob-directory-pw", dn)).Result;
+            Assert.False(held.GetProperty("ok").GetBoolean());
+            Assert.StartsWith($"Not tested: too many wrong passwords for \"{dn}\"", held.GetProperty("message").GetString(), StringComparison.Ordinal);
+        }
+        var tried = await first.JsonAsync(await first.PostAsync("/api/admin/config/ldap-try",
+            new { settings = Form(null, ("BindDn", Bob), ("BindPassword", "bob-directory-pw")), login = "alice", password = "alice-directory-pw" }));
+        Assert.StartsWith($"Not tried: too many wrong passwords for \"{Bob}\"", tried.GetProperty("message").GetString(), StringComparison.Ordinal);
+        // From another address it goes ahead (one office's typos hold nobody else), and the right password says so.
+        var (_, right) = await Test(null, "bob-directory-pw");
+        Assert.Contains("Signed in as uid=bob,ou=people,dc=example,dc=test with the password typed above", Says(right), StringComparison.Ordinal);
+
+        // Wrong ones from several addresses lock bob's account here, for tests and sign-ins alike.
+        for (var round = 0; round < 2; round++)
+        {
+            var (admin, _) = await Test(null, "guess-a");
+            for (var i = 1; i < 5; i++)
+            {
+                await Test(admin, $"guess-{round}-{i}");
+            }
+        }
+        var locked = (await Test(null, "bob-directory-pw")).Result;
+        Assert.StartsWith("Not tested: their account here (bob) is locked", locked.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.False((await new TestBrowser(f).LoginAsync("bob", "bob-directory-pw")).IsSuccessStatusCode);
+
+        // The saved service account's own password, typed again (it changed in the directory, say): never held.
+        var (owner, _) = await Test(null, "not-the-password", LdapServer.ServiceDn);
+        for (var i = 0; i < 6; i++)
+        {
+            Assert.Contains("the password is wrong", Says((await Test(owner, $"not-it-{i}", LdapServer.ServiceDn)).Result), StringComparison.Ordinal);
+        }
+        Assert.True((await Test(owner, LdapServer.ServicePassword, LdapServer.ServiceDn)).Result.GetProperty("ok").GetBoolean());
+
+        // And the test is rate limited as signing in is.
+        var endpoints = f.Services.GetRequiredService<Microsoft.AspNetCore.Routing.EndpointDataSource>().Endpoints.OfType<Microsoft.AspNetCore.Routing.RouteEndpoint>();
+        foreach (var path in new[] { "/api/admin/config/ldap-test", "/api/admin/config/ldap-try" })
+        {
+            var endpoint = endpoints.Single(e => "/" + e.RoutePattern.RawText?.TrimStart('/') == path);
+            Assert.Equal("sign-in", endpoint.Metadata.GetMetadata<Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute>()?.PolicyName);
+        }
     }
 
     [Fact]

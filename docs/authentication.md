@@ -172,6 +172,22 @@ says which change kept it back. The password is tried and saved exactly as typed
 one that starts or ends with a space (often a copy and paste) is pointed out.
 Each test is in the audit log (`settings.ldap_test`) with the server it went to.
 
+OpenLDAP refuses a DN with no entry just as it refuses a wrong password, so the
+test looks the DN up without signing in: an entry found means the password is
+wrong; none, with the part of the DN that exists, means a typo in it. A server's
+own administrator has no entry and often lies outside what the server holds:
+`cn=Directory Manager` on 389 Directory Server and FreeIPA, `cn=admin,cn=config`
+on OpenLDAP (on the osixia/openldap image its password is `LDAP_CONFIG_PASSWORD`,
+not `LDAP_ADMIN_PASSWORD`, and it may read only the server's settings, not
+people). For those the test says the password is wrong; for any other DN with no
+entry it adds that only such an administrator (OpenLDAP's `rootdn`) signs in
+without one. A password typed for another service account than the saved one (or
+for any, before one is saved) tells whether it is right, as a sign-in does, so
+the same brakes hold the test: a refused one counts against that DN from your
+address and against the account here of the person whose DN it is, and the test
+is refused while either is held. Typing the saved account's own password again
+(after it changed in the directory, say) is never held.
+
 Active Directory refuses a sign-in with one code for many reasons; the test and
 the audit log say which: `52e` the name or password is wrong, `525` no such
 account, `530` not at this time, `531` not from this computer, `532` the
@@ -190,7 +206,8 @@ and the try is in the audit log (`settings.ldap_try`) with the server and its
 outcome. A try is a guess at a password like any sign-in, so the same brakes
 hold it: a wrong password counts as a wrong sign-in does, against that name from
 your address and against their account here, and a try is refused while either
-is held (**Settings → Sign-in and sessions** says for how long).
+is held (**Settings → Sign-in and sessions** says for how long). A service
+account's password typed for the try is held as for the test.
 
 People sign in with their directory name (`uid` or `sAMAccountName`), their email
 or `userPrincipalName`, or `DOMAIN\name` (the domain is left out). The app
@@ -232,9 +249,13 @@ be used (not reached, its certificate refused, the service account refused,
 **Where groups are** not there), nobody is changed and the check says why; the
 app keeps running. Only a person's own entry gone counts as leaving. The same
 goes for the required group: when nobody at all is in it, it must be found (a
-group of a kind signing in reads, not a `posixGroup` or an OU) before anyone is
-disabled for not being in it, so a typo in its name changes nobody and the check
-says to fix **Required group**.
+group of a kind signing in reads, not a `posixGroup` or an OU), and one of its
+members must be in it as signing in reads people, before anyone is disabled for
+not being in it. So a typo in its name changes nobody, and nor does a group that
+signing in cannot see anyone in: a `groupOfNames` with **Where groups are** empty
+on a server whose memberOf overlay keeps only `groupOfUniqueNames` (the
+osixia/openldap image), or a group named by its DN outside **Where groups are**
+on OpenLDAP. The check says what to fix.
 
 A directory that is busy or unavailable when it checks someone's password
 (rather than refusing it) is the directory's state, not a wrong password: they
@@ -473,7 +494,8 @@ set by hand is changed by hand.
 | Guessing one account | 5 failures for one name from one address in 10 minutes ban that pair for 12 hours; colleagues behind the same NAT are unaffected |
 | Password spraying | 50 failures from one address in 10 minutes ban the address for 1 hour |
 | Guessing from many addresses | 10 failures on an account lock it for 15 minutes, counted atomically so parallel guesses cannot slip past |
-| Floods | 120 sign-in requests per minute per address |
+| Floods | 120 sign-in requests per minute per address, the directory's test and try included |
+| Guessing through the directory's checks | a password typed in **Test the settings** for another service account, or in **Try a person's sign-in**, counts as a sign-in does |
 | Sessions | 1 hour idle, 12 hours absolute (no action extends that), 30 days with "keep me signed in"; re-checked against the account every minute |
 | Cross-site requests | every state change needs an `X-Requested-With` header, which another site cannot send; the SAML Reply URL, which the provider's page posts to, is guarded by the signature and the request this browser made |
 | Answers | a wrong password and an unknown name get the same answer |

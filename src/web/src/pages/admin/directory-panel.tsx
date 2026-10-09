@@ -130,7 +130,8 @@ export function DirectoryChecks({ draft }: { draft: Record<string, string> }) {
           <PlugZap /> Test the settings
         </Button>
         <span className="text-sm text-muted-foreground">
-          Tries the values above, saved or not: the server, its certificate, the service account, where people are and the groups. A blank password field uses the saved password, but only with the saved server and service account, over a connection as safe as the saved one.
+          Tries the values above, saved or not: the server, its certificate, the service account, where people are and the groups. A blank password field uses the saved password, but only with the saved server and service account, over a connection as safe as the saved one. A wrong
+          password typed for another service account than the saved one counts as a wrong sign-in does.
         </span>
       </div>
       {test.data && <CheckResult result={test.data} />}

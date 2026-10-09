@@ -409,7 +409,7 @@ export const topics = {
     admin: true,
     parts: [
       { name: 'Local accounts', text: 'Always on. Admins add people under People. **Sessions and limits** opens their settings.' },
-      { name: 'Company directory (LDAP)', text: 'When set up: the server, the admin and required groups, and how often people are checked. **Check the directory now** disables people who left the directory or the required group; if the directory cannot be used, or the required group is not found, it changes nobody and says why.' },
+      { name: 'Company directory (LDAP)', text: 'When set up: the server, the admin and required groups, and how often people are checked. **Check the directory now** disables people who left the directory or the required group; if the directory cannot be used, or the required group is not found or nobody can be found in it, it changes nobody and says why.' },
       { name: 'Company sign-in', text: 'OIDC or SAML at your identity provider: its admin and required groups, and whether SCIM is on. **Configure** opens its settings.' },
     ],
     tasks: [
