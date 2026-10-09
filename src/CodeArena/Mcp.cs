@@ -12,6 +12,8 @@ internal class McpException(string message, int? code = null) : Exception(messag
     public int? Code { get; } = code;
     /// <summary>The server could not be reached, or went away mid-answer (not an answer of its own): worth connecting again.</summary>
     public bool Lost { get; init; }
+    /// <summary>The name in its address does not resolve.</summary>
+    public bool NoSuchHost { get; init; }
 }
 
 /// <summary>There is no MCP endpoint at the address (404, 405, or a web page answered).</summary>
@@ -281,7 +283,7 @@ internal sealed class HttpMcpTransport(HttpClient http, string url, IReadOnlyDic
         }
         catch (HttpRequestException e)
         {
-            throw new McpException(Net.Explain(e, url)) { Lost = true };
+            throw new McpException(Net.Explain(e, url)) { Lost = true, NoSuchHost = Net.NoSuchHost(e) };
         }
     }
 

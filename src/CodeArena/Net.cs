@@ -93,6 +93,19 @@ internal static class Net
     }
 
     /// <summary>What went wrong reaching an address, in words a person can act on.</summary>
+    /// <summary>The name in the address does not resolve (as opposed to a server that is down or refuses).</summary>
+    public static bool NoSuchHost(Exception e)
+    {
+        for (var inner = e; inner is not null; inner = inner.InnerException)
+        {
+            if (inner is SocketException { SocketErrorCode: SocketError.HostNotFound or SocketError.NoData })
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static string Explain(Exception e, string url)
     {
         for (var inner = e; inner is not null; inner = inner.InnerException)

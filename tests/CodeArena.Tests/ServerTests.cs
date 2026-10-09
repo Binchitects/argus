@@ -178,6 +178,26 @@ public sealed class ServerTests : IDisposable
     }
 
     [Fact]
+    public async Task An_Arena_without_Argus_beside_it_is_said_once_quietly_not_as_a_failure()
+    {
+        // argus.DOMAIN does not resolve (.invalid never does): this Arena has no Argus.
+        using var h = new Harness(_gateway, _mcp, c =>
+        {
+            c["url"] = "http://arena.invalid";
+            c["mcpUrl"] = _mcp.Url;
+        });
+        await using var rt = await StartAsync(h);
+        var argus = rt.Links.Single(l => l.Name == Runtime.ArgusName);
+        Assert.Equal("http://argus.arena.invalid/mcp", argus.Url);
+        await argus.FirstTry.WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Equal(LinkState.Unavailable, argus.State);
+        Assert.Equal("Argus: not available here", argus.Describe());
+        Assert.Contains("Argus's tools are not available here: http://argus.arena.invalid/mcp does not resolve: this Arena has no Argus at argus.DOMAIN", _output.ToString());
+        Assert.DoesNotContain("Argus's tools did not connect", _output.ToString());
+        Assert.True(rt.ArenaConnected);
+    }
+
+    [Fact]
     public void Argus_is_found_beside_the_Arena_unless_the_Arena_has_no_name_for_it()
     {
         Assert.Equal("https://argus.arena.example.com/mcp", Config.DeriveArgus("https://arena.example.com"));

@@ -476,8 +476,9 @@ often after that, up to every 5 minutes; a call that finds it gone (the
 connection dropped, or its proxy's 502, 503 or 504) has it connect again at
 once. `/mcp` (or **MCP servers** in the IDE's status bar) shows each one,
 connected or not and why; `/mcp retry` (**Try again**) tries now. When the
-Arena has no MCP endpoint at all, the session says so once and carries on with
-the local tools. `"arenaTools": false` and `"argusTools": false` in
+Arena has no MCP endpoint at all, or no Argus beside it (`argus.DOMAIN` does
+not resolve, or has no MCP endpoint), the session says so once, quietly, and
+carries on. `"arenaTools": false` and `"argusTools": false` in
 `config.json` turn them off. `code-arena login` tries both and says what it
 found.
 

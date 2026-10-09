@@ -245,7 +245,18 @@ internal sealed partial class Runtime : IAsyncDisposable
         }
         if (Config.ArgusTools && Config.ArgusMcpUrl is { } argusUrl)
         {
-            Link(new ServerLink(ArgusName, "Argus", argusUrl, ct => McpClient.ConnectAsync(ArgusName, new HttpMcpTransport(Http, argusUrl, auth), ct)));
+            Link(new ServerLink(ArgusName, "Argus", argusUrl, async ct =>
+            {
+                try
+                {
+                    return await McpClient.ConnectAsync(ArgusName, new HttpMcpTransport(Http, argusUrl, auth), ct);
+                }
+                catch (McpException e) when (e.NoSuchHost && Config.ArgusUrl is not { Length: > 0 })
+                {
+                    // Found by its name beside the Arena's (argus.DOMAIN): an Arena without Argus has no such name. Not an error.
+                    throw new McpUnavailableException($"{argusUrl} does not resolve: this Arena has no Argus at argus.DOMAIN (\"argusUrl\" in config.json gives its address).");
+                }
+            }));
         }
         foreach (var server in Config.McpServers.Where(s => !s.Disabled))
         {
@@ -366,7 +377,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             Notice(false, link.Name switch
             {
                 ArenaName => $"Arena's tools are not available here (no MCP endpoint at {link.Url}): carrying on with the local tools.",
-                ArgusName => $"Argus's tools are not available here (no MCP endpoint at {link.Url}).",
+                ArgusName => $"Argus's tools are not available here: {link.Error}",
                 _ => $"MCP server {link.Name} has no MCP endpoint at {link.Url}.",
             });
             return;
