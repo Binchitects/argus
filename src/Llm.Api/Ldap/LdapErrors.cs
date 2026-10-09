@@ -52,6 +52,20 @@ public static partial class LdapErrors
     public static bool IsDirectoryFailure(Exception ex) =>
         ex is LdapException or AuthenticationException or IOException or SocketException or TimeoutException;
 
+    /// <summary>
+    /// Whether the directory refused a person's own sign-in because of them: a wrong password (with Active
+    /// Directory's reasons), or an account it will not let in. Anything else (busy, unavailable, out of time,
+    /// an encrypted connection wanted) is the directory's state, and never counts as a wrong guess.
+    /// </summary>
+    public static bool IsPersonRefusal(LdapException ex) =>
+        ex.ResultCode is LdapException.InvalidCredentials or LdapException.InappropriateAuthentication or LdapException.UnwillingToPerform
+            or LdapException.ConstraintViolation; // 389 Directory Server's "exceed password retry limit"
+
+    /// <summary>Why a person's password could not be checked at all, to follow "the directory": its answer, in words.</summary>
+    public static string PersonNotChecked(string dn, LdapException ex) => ex.ResultCode is LdapException.ConfidentialityRequired or LdapException.StrongAuthRequired
+        ? $"wants an encrypted connection before a password is sent ({Answer(ex)}): use ldaps:// or turn on \"Use StartTLS\""
+        : $"answered {Answer(ex)} when asked to check the password of {dn}";
+
     /// <summary>Why a person's own sign-in was refused, for the audit log and the admin's try.</summary>
     public static string PersonRefused(LdapException ex) => ex.ResultCode == LdapException.InvalidCredentials
         ? AdReason(ex) ?? "the password is wrong"

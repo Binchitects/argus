@@ -19,7 +19,11 @@ public sealed record LdapPerson(string Dn, string UserName, string? Email, strin
 /// </summary>
 /// <param name="Filter">The search that looked for them.</param>
 /// <param name="Found">The entries the search found (their DNs).</param>
-public sealed record LdapSignIn(LdapPerson? Person, string Refusal, string Filter, IReadOnlyList<string> Found);
+/// <param name="Failure">
+/// Why their password could not be checked at all (the directory busy or unavailable when asked): then
+/// nothing is known of it, and nothing may count against them.
+/// </param>
+public sealed record LdapSignIn(LdapPerson? Person, string Refusal, string Filter, IReadOnlyList<string> Found, string? Failure = null);
 
 public interface ILdapDirectory
 {
@@ -43,8 +47,12 @@ public sealed class LdapUnavailableException(string message, Exception? inner = 
 
 public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapDirectory
 {
-    /// <summary>A person's attributes, and memberOf by name: OpenLDAP's memberOf overlay sends it only when asked.</summary>
-    internal static readonly string[] PersonAttributes = ["*", "memberOf"];
+    /// <summary>
+    /// A person's attributes. With "Where groups are" empty, memberOf too, by name: OpenLDAP's memberOf
+    /// overlay sends it only when asked. With it set, as v5.2.0 read them: then only the groups there
+    /// count on OpenLDAP, never one of the same name elsewhere (Active Directory sends memberOf anyway).
+    /// </summary>
+    internal static string[] PersonAttributes(LdapOptions o) => string.IsNullOrWhiteSpace(o.GroupBaseDn) ? ["*", "memberOf"] : ["*"];
 
     // Read on every use: a change saved in the Settings page applies at once.
     private LdapOptions _o => options.CurrentValue;
@@ -60,7 +68,9 @@ public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapD
         {
             return new(null, "no name or no password", "", []);
         }
-        return await WithServiceAsync(o, conn => SignInWithAsync(o, conn, login, password, ct), ct);
+        var signIn = await WithServiceAsync(o, conn => SignInWithAsync(o, conn, login, password, ct), ct);
+        // Busy or unavailable is the directory's state, not a wrong password: "cannot be reached", and nobody counted.
+        return signIn.Failure is { } failure ? throw new LdapUnavailableException($"The directory at {o.Url} cannot be used: it {failure}.") : signIn;
     }
 
     public Task<LdapPerson?> FindByDnAsync(string dn, CancellationToken ct = default)
@@ -71,7 +81,7 @@ public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapD
             List<LdapEntry> matches;
             try
             {
-                matches = await SearchAsync(conn, dn, LdapConnection.ScopeBase, "(objectClass=*)", PersonAttributes, ct);
+                matches = await SearchAsync(conn, dn, LdapConnection.ScopeBase, "(objectClass=*)", PersonAttributes(o), ct);
             }
             catch (LdapException ex) when (ex.ResultCode == LdapException.NoSuchObject)
             {
@@ -138,7 +148,7 @@ public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapD
         {
             return new(null, "no name or no password", filter, []);
         }
-        var matches = await SearchAsync(service, o.UserBaseDn, LdapConnection.ScopeSub, filter, PersonAttributes, ct);
+        var matches = await SearchAsync(service, o.UserBaseDn, LdapConnection.ScopeSub, filter, PersonAttributes(o), ct);
         var found = matches.Select(m => m.Dn).ToList();
         if (matches.Count != 1)
         {
@@ -152,9 +162,13 @@ public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapD
             {
                 await user.BindAsync(entry.Dn, password, ct);
             }
-            catch (LdapException ex) when (!LdapErrors.IsConnectionFailure(ex))
+            catch (LdapException ex) when (LdapErrors.IsPersonRefusal(ex))
             {
                 return new(null, LdapErrors.PersonRefused(ex), filter, found);
+            }
+            catch (LdapException ex) when (!LdapErrors.IsConnectionFailure(ex))
+            {
+                return new(null, "", filter, found, LdapErrors.PersonNotChecked(entry.Dn, ex));
             }
         }
         return new(await ToPersonAsync(o, service, entry, ct), "", filter, found);

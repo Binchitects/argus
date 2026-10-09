@@ -632,6 +632,11 @@ public static class LdapCheck
                 return null;
             }
             Add(Ok, $"Found {signIn.Found[0]}.");
+            if (signIn.Failure is { } failure)
+            {
+                Failed($"Their password could not be checked: the directory {failure}. Signing in would answer \"the directory cannot be reached\" for now, and count nothing against them.");
+                return null;
+            }
             if (signIn.Person is not { } person)
             {
                 Failed($"Their password was not accepted: {signIn.Refusal}.");
@@ -643,7 +648,7 @@ public static class LdapCheck
             Add(groups.Count == 0 && (!string.IsNullOrWhiteSpace(o.AdminGroup) || !string.IsNullOrWhiteSpace(o.RequiredGroup)) ? Warn : Ok,
                 groups.Count > 0 ? $"Their groups: {string.Join(", ", groups)}."
                 : string.IsNullOrWhiteSpace(o.GroupBaseDn) ? "No groups found for them: with \"Where groups are\" empty, only their memberOf counts."
-                : $"No groups found for them, in their memberOf or below \"{o.GroupBaseDn.Trim()}\".");
+                : $"No groups found for them below \"{o.GroupBaseDn.Trim()}\".");
             // In the order signing in checks them.
             if (!LdapDirectory.IsAllowed(o, person))
             {
