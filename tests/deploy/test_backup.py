@@ -70,6 +70,21 @@ class PruneTests(unittest.TestCase):
         self.assertIn("--install-timer", r.stderr)
         self.assertEqual(self.s.calls(), [])
 
+    @unittest.skipIf(os.geteuid() == 0, "root may write anywhere")
+    def test_An_empty_backups_folder_Docker_made_root_s_is_taken_back_through_Docker(self):
+        # Docker made it for the app's mount before the first backup: nothing to do by hand. (The fake docker
+        # changes nothing, so the folder stays root's here and the backup then names the fix.)
+        empty = next((d for d in ("/mnt", "/srv", "/media") if os.path.isdir(d) and os.stat(d).st_uid == 0
+                      and not os.access(d, os.W_OK) and not os.listdir(d)), None)
+        if empty is None:
+            self.skipTest("no empty folder of root's here")
+        self.s.write(".env", f"BACKUP_DIR={empty}\n")
+        r = self.s.run("backup.sh")
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(self.s.calls(), [["docker", "run", "--rm", "--network", "none", "-v", f"{empty}:/d", "python:3.13-slim",
+                                           "chown", f"{os.getuid()}:{os.getgid()}", "/d"]])
+        self.assertIn("sudo chown", r.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

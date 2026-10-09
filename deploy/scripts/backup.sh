@@ -98,12 +98,17 @@ verify_dir() {   # verify_dir <backup dir>
 
 latest_backup() { ls -1d "$BACKUP_DIR"/20[0-9][0-9]-*_* 2>/dev/null | sort | tail -n1; }
 
-# A folder the backups go to: made private when it is ours. One Docker made (the app
-# mounts BACKUP_DIR, and Docker makes a missing folder root's) is used if we may write
-# in it, and named otherwise: --install-timer gives it to the user the timer runs as.
+# A folder the backups go to: made private when it is ours. The app mounts BACKUP_DIR,
+# and Docker makes a missing folder it mounts root's: an empty one we may not write in
+# is taken back through Docker (as the backup's own containers run), with no step by
+# hand. One with something in it is used if we may write in it, and named otherwise.
 own_dir() {   # own_dir <dir>
   local dir=$1
   mkdir -p "$dir" || die "cannot create $dir"
+  if [[ ! -O "$dir" && ! -w "$dir" && -r "$dir" && -z "$(ls -A "$dir")" ]] && command -v docker >/dev/null; then
+    docker run --rm --network none -v "$dir:/d" "$HELPER" chown "$(id -u):$(id -g)" /d >/dev/null \
+      && [[ -O "$dir" ]] && say "  $dir was root's (Docker made it for the app's mount): now $(id -un)'s"
+  fi
   if [[ -O "$dir" ]]; then
     chmod 700 "$dir" || die "cannot make $dir private"
   elif [[ ! -w "$dir" ]]; then

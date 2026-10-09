@@ -431,12 +431,14 @@ as another user (the folder is `0700`), or list the app's volumes without
 then says the backups are not seen. Backups taken by a user the app is not, it
 cannot read, and says so.
 
-Docker makes a folder it mounts root's when the folder is not there yet: start
-the stack before the first backup with `BACKUP_DIR` set to a new folder, and
-`scripts/backup.sh` (run as you) could not write in it. It says so and how to
-fix it; `sudo scripts/backup.sh --install-timer` makes the folder (or takes it
-back from root) for the user the timer runs as. The default `./backups` is in
-the repository, so it is always yours.
+Docker makes a folder it mounts root's when the folder is not there yet, as
+when the stack starts (an upgrade, say) before the first backup into a new
+`BACKUP_DIR`. `scripts/backup.sh`, run as you, takes such a folder back while
+it is empty, through Docker as its other containers run; a folder of root's
+with something in it, it names with the fix. `sudo scripts/backup.sh
+--install-timer` makes the folder (or takes it back from root) for the user the
+timer runs as. The default `./backups` is in the repository, so it is always
+yours.
 
 To put a backup back, stop the stack and restore it: the volumes and the
 database, and with `--with-config` also `.env` and the files under `config/`.
