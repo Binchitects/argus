@@ -15,6 +15,9 @@ namespace Llm.Api.Ldap;
 /// </summary>
 public sealed partial class LdapSync(IServiceScopeFactory scopes, IOptionsMonitor<LdapOptions> options, Replicas replicas, ILogger<LdapSync> logger) : BackgroundService
 {
+    /// <summary>One check at a time: "Check the directory now" right after a save meets the one the save woke.</summary>
+    private readonly SemaphoreSlim _one = new(1, 1);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // The settings can change at any time (the Settings page): they are read
@@ -71,6 +74,19 @@ public sealed partial class LdapSync(IServiceScopeFactory scopes, IOptionsMonito
     }
 
     public async Task<(int Checked, int Disabled)> RunOnceAsync(CancellationToken ct = default)
+    {
+        await _one.WaitAsync(ct);
+        try
+        {
+            return await CheckEveryoneAsync(ct);
+        }
+        finally
+        {
+            _one.Release();
+        }
+    }
+
+    private async Task<(int Checked, int Disabled)> CheckEveryoneAsync(CancellationToken ct)
     {
         await using var scope = scopes.CreateAsyncScope();
         var sp = scope.ServiceProvider;
