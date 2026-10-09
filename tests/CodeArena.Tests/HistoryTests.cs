@@ -343,6 +343,9 @@ public sealed class HistoryTests : IDisposable
         Assert.Equal("ne two ", editor.Read("› ", "… "));
         keys.Type("😀x").Left().Left().Backspace().Ctrl('u').Type("ok").Enter();
         Assert.Equal("ok😀x", editor.Read("› ", "… "));
+        // Half of a pair, then the input ends: drawn as it is, and it is the end.
+        keys.Type("a\ud83d");
+        Assert.Null(editor.Read("› ", "… "));
     }
 
     [Fact]

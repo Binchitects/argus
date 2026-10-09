@@ -424,7 +424,9 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
             var line = lines[i];
             for (var j = 0; j < line.Length;)
             {
+                // Half a pair alone is one replacement character.
                 Rune.DecodeFromUtf16(line.AsSpan(j), out var rune, out var n);
+                n = Math.Max(1, n);
                 var cells = rune.Value == '\t' ? Tab.Length : Cells(rune);
                 if (col + cells > width)
                 {
