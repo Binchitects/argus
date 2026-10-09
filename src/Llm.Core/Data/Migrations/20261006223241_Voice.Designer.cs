@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Llm.Core.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Llm.Core.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261006223241_Voice")]
+    partial class Voice
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -517,9 +520,6 @@ namespace Llm.Core.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<Guid?>("AnswerId")
-                        .HasColumnType("uuid");
-
                     b.Property<int?>("AnswerMs")
                         .HasColumnType("integer");
 
@@ -541,9 +541,6 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<Guid>("ConversationId")
                         .HasColumnType("uuid");
-
-                    b.Property<decimal?>("Cost")
-                        .HasColumnType("numeric");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -605,8 +602,6 @@ namespace Llm.Core.Data.Migrations
                         .HasColumnType("text");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("AnswerId");
 
                     b.HasIndex("CreatedAt");
 
@@ -1852,9 +1847,6 @@ namespace Llm.Core.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
-                    b.Property<decimal?>("CachedInputPerMtok")
-                        .HasColumnType("numeric");
-
                     b.Property<int>("Context")
                         .HasColumnType("integer");
 
@@ -2785,8 +2777,6 @@ namespace Llm.Core.Data.Migrations
 
                             b1.Property<int>("__synthesizedOrdinal")
                                 .ValueGeneratedOnAdd();
-
-                            b1.Property<decimal?>("CachedInputPerMtok");
 
                             b1.Property<int?>("Context");
 

@@ -391,7 +391,7 @@ public static class AnswerCacheEndpoints
     private const int MostCachedAnswer = 4 * 1024 * 1024;
 
     /// <summary>Not passed on: they belong to one connection, or to the app's own site.</summary>
-    private static readonly HashSet<string> Dropped = new(StringComparer.OrdinalIgnoreCase)
+    internal static readonly HashSet<string> Dropped = new(StringComparer.OrdinalIgnoreCase)
     {
         "Host", "Connection", "Keep-Alive", "Transfer-Encoding", "TE", "Trailer", "Upgrade", "Proxy-Connection", "Proxy-Authorization",
         "Accept-Encoding", "Content-Length", "Content-Type", "Cookie", "X-Forwarded-For", "X-Forwarded-Proto", "X-Forwarded-Host", "X-Original-For", "X-Original-Proto", "X-Original-Host",

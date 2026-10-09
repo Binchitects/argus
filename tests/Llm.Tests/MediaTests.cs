@@ -32,11 +32,13 @@ public sealed class MediaTests(AppFixture app)
     }
 
     [Fact]
-    public void An_answer_is_read_without_its_code_or_marks_and_Persian_in_a_Persian_voice()
+    public void An_answer_is_read_without_its_code_or_marks_and_Persian_as_Persian()
     {
         Assert.Equal("Hello there. See the docs.", Voices.Plain("**Hello** there.\n```python\nprint(1)\n```\nSee [the docs](https://example.com/docs)."));
-        Assert.Equal((Llm.Api.Models.MediaModels.TextToSpeech, "af_heart"), Voices.For("Hello"));
-        Assert.Equal((Llm.Api.Models.MediaModels.TextToSpeechPersian, "amir"), Voices.For("سلام، حال شما چطور است؟"));
+        Assert.Equal("en", Voices.LanguageOf("Hello, how are you?"));
+        // One word does not say: the reader goes by what came before it, or the person's language.
+        Assert.Null(Voices.LanguageOf("Hello"));
+        Assert.Equal("fa", Voices.LanguageOf("سلام، حال شما چطور است؟"));
     }
 
     /// <summary>
@@ -168,12 +170,14 @@ public sealed class MediaTests(AppFixture app)
         var heard = LastUserParts(await AskAsync(b, "Omni", id));
         Assert.Contains(heard, p => p!["type"]!.GetValue<string>() == "input_audio" && p["input_audio"]!["format"]!.GetValue<string>() == "mp3");
 
-        // One that does not gets what was said, written down once.
+        // One that does not gets what was said, written down once: their own voice message in the language they speak.
+        await StatusAssert.Is(HttpStatusCode.OK, await b.Http.PatchAsJsonAsync(new Uri("/api/account/voice", UriKind.Relative), new { language = "fa" }));
         var before = app.Model.Transcriptions.Count;
         var request = await AskAsync(b, "Qwen3.8-Flash-Next", id);
         var text = request["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.ToJsonString();
         Assert.Contains("What is the capital of France?", text, StringComparison.Ordinal);
         Assert.DoesNotContain("input_audio", text, StringComparison.Ordinal);
+        Assert.Contains("name=language\r\n\r\nfa", app.Model.Transcriptions.Last(), StringComparison.Ordinal);
         await AskAsync(b, "Qwen3.8-Flash-Next", id);
         Assert.Equal(before + 1, app.Model.Transcriptions.Count);
     }

@@ -7,17 +7,22 @@ export const voicePrefix = 'Voice message'
 
 let playing: { audio: HTMLAudioElement; stop: () => void } | null = null
 
-/** Reads a text aloud through the gateway's text to speech. One at a time: a new one stops the last. */
-export async function speak(text: string, onEnd?: () => void): Promise<() => void> {
+/** Reads a text aloud through the gateway's text to speech, in the person's voice for its language. One at a time: a new one stops the last. */
+export function speak(text: string, onEnd?: () => void): Promise<() => void> {
+  return play('/api/chat/speech', { text }, onEnd)
+}
+
+/** Plays what the app's text to speech makes of a request (a text read aloud, a voice tried). One at a time: a new one stops the last. */
+export async function play(path: string, body: unknown, onEnd?: () => void): Promise<() => void> {
   playing?.stop()
-  const res = await fetch('/api/chat/speech', {
+  const res = await fetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) {
-    const body = await res.json().catch(() => null)
-    throw new Error(body?.error ?? `Read aloud failed (HTTP ${res.status}).`)
+    const problem = await res.json().catch(() => null)
+    throw new Error(problem?.error ?? `Read aloud failed (HTTP ${res.status}).`)
   }
   const url = URL.createObjectURL(await res.blob())
   const audio = new Audio(url)

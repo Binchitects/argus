@@ -199,6 +199,7 @@ public static class IdentityWiring
         });
 
         services.AddAnswerCache(config);
+        Chat.VoiceEndpoints.AddVoices(services, config);
 
         services.Configure<ThrottleOptions>(config.GetSection("Throttle"));
         services.Configure<Settings.BrandingOptions>(config.GetSection("Branding"));
@@ -472,6 +473,7 @@ public static class IdentityWiring
         Models.RemoteServerEndpoints.MapRemoteServers(app);
         app.MapGovernance();
         AnswerCacheEndpoints.MapAnswerCache(app);
+        Chat.VoiceEndpoints.MapVoices(app);
         Bots.BotEndpoints.MapBots(app);
         Notifications.PushEndpoints.MapPush(app);
         Downloads.DownloadEndpoints.MapDownloads(app);

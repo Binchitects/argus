@@ -52,6 +52,8 @@ public sealed class AppUser : IdentityUser<Guid>
     public string? LegalHoldReason { get; set; }
     /// <summary>Their API key's repeated requests are answered from the answer cache (when an admin lets people choose).</summary>
     public bool CacheApiAnswers { get; set; }
+    /// <summary>Their speech choices (Your account → Voice) as JSON: the language they speak, a voice per language, the speed, reading aloud. Null: the company's.</summary>
+    public string? Voice { get; set; }
 }
 
 public sealed class AppRole : IdentityRole<Guid>

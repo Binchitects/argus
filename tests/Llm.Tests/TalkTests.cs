@@ -105,7 +105,7 @@ public sealed class TalkTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.OK, persian);
         var asked = app.Model.SpeechRequests.Last(r => r["user"]?.GetValue<string>() == email);
         Assert.Equal(Llm.Api.Models.MediaModels.TextToSpeechPersian, asked["model"]!.GetValue<string>());
-        Assert.Equal("amir", asked["voice"]!.GetValue<string>());
+        Assert.Equal("gyro", asked["voice"]!.GetValue<string>());
     }
 
     private static string LastUser(JsonObject request)

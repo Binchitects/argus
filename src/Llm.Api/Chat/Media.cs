@@ -14,9 +14,12 @@ public sealed class MediaException(string message) : Exception(message);
 /// an MP3 (mono, 16 kHz), a video as up to eight frames and its sound track. A model that hears gets
 /// the sound itself; one that does not gets a transcript (speech to text at the gateway), made once.
 /// </summary>
-public sealed partial class Media(SandboxClient sandbox, AppDbContext db, GatewayChat gateway, ChatModels models)
+public sealed partial class Media(SandboxClient sandbox, AppDbContext db, GatewayChat gateway, ChatModels models, VoiceCatalog voices)
 {
     public const int MaxFrames = 8;
+
+    /// <summary>How the page names a recording from its microphone (sound.ts): the person's own speech.</summary>
+    public const string VoiceMessage = "Voice message";
 
     private const string Script = """
         import json, os, subprocess
@@ -140,7 +143,10 @@ public sealed partial class Media(SandboxClient sandbox, AppDbContext db, Gatewa
         a.Seconds = seconds;
     }
 
-    /// <summary>What was said in it (empty for silence or no sound), made once at the gateway's speech to text and kept.</summary>
+    /// <summary>
+    /// What was said in it (empty for silence or no sound), made once at the gateway's speech to text and kept. A voice
+    /// message is heard in the language its person speaks, when they chose one; any other sound in the language Whisper hears.
+    /// </summary>
     public async Task<string> TranscriptAsync(ChatAttachment a, string email, CancellationToken ct)
     {
         if (a.Text.Length > 0)
@@ -154,7 +160,8 @@ public sealed partial class Media(SandboxClient sandbox, AppDbContext db, Gatewa
         }
         var model = await models.OfModeAsync("audio_transcription", Models.MediaModels.SpeechToText, ct)
             ?? throw new MediaException("The gateway has no speech to text model (the audio module).");
-        var text = (await gateway.TranscribeAsync(model.Name, sound, "sound.mp3", email, ct)).Trim();
+        var person = a.FileName.StartsWith(VoiceMessage, StringComparison.Ordinal) ? await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == a.UserId, ct) : null;
+        var text = (await gateway.TranscribeAsync(model.Name, sound, "sound.mp3", email, ct, language: person is null ? null : await voices.LanguageOfAsync(person, ct))).Trim();
         await db.ChatAttachments.Where(x => x.Id == a.Id).ExecuteUpdateAsync(x => x.SetProperty(y => y.Text, text.Length == 0 ? " " : text), ct);
         a.Text = text.Length == 0 ? " " : text;
         return text;

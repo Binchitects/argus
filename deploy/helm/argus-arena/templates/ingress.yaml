@@ -39,6 +39,10 @@ spec:
     - host: {{ printf "gateway.%s" .Values.domain | quote }}
       http:
         paths:
+          {{- /* Speech with keys goes by the app: the key's person's voice, and the language they speak. Every method: the app passes the rest (a browser's preflight) on to LiteLLM. An Ingress has no failover: while no app pod is ready, these fail (Traefik in compose falls back to LiteLLM). */}}
+          {{- range list "/v1/audio/speech" "/audio/speech" "/v1/audio/transcriptions" "/audio/transcriptions" }}
+          - { path: {{ . }}, pathType: Exact, backend: { service: { name: app, port: { number: 8080 } } } }
+          {{- end }}
           - { path: /, pathType: Prefix, backend: { service: { name: litellm, port: { number: 4000 } } } }
     {{- if .Values.argus.enabled }}
     - host: {{ printf "argus.%s" .Values.domain | quote }}

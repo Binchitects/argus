@@ -22,8 +22,8 @@ public static class Talk
     /// <summary>The largest recording taken: minutes of speech (the browser's Opus is about 4 KB a second).</summary>
     public const int MaxBytes = 10 * 1024 * 1024;
 
-    /// <summary>What was said in a recording from the browser, written down by the gateway's speech to text in the person's name.</summary>
-    public static async Task<IResult> TranscribeAsync(HttpRequest request, ClaimsPrincipal p, UserManager<AppUser> users, GatewayChat gateway, ChatModels models)
+    /// <summary>What was said in a recording from the browser, written down by the gateway's speech to text in the person's name, in the language they speak when they chose one.</summary>
+    public static async Task<IResult> TranscribeAsync(HttpRequest request, ClaimsPrincipal p, UserManager<AppUser> users, GatewayChat gateway, ChatModels models, VoiceCatalog voices)
     {
         var ct = request.HttpContext.RequestAborted;
         var me = (await users.GetUserAsync(p))!;
@@ -55,7 +55,7 @@ public static class Talk
         var sound = type == "video/webm" ? "audio/webm" : type;
         try
         {
-            var text = await gateway.TranscribeAsync(model.Name, ms.ToArray(), "speech" + Extension(sound), me.Email!, ct, sound);
+            var text = await gateway.TranscribeAsync(model.Name, ms.ToArray(), "speech" + Extension(sound), me.Email!, ct, sound, await voices.LanguageOfAsync(me, ct));
             return Results.Ok(new { text = text.Trim() });
         }
         catch (ChatGatewayException ex)

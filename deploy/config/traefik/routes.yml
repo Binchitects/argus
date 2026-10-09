@@ -28,6 +28,15 @@ http:
       service: completions
       middlewares: [secure]
       tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}
+    # Speech with keys goes by the app, which reads a text that names no voice in the
+    # key's person's voice, and writes down speech that names no language in the
+    # language they speak (Your account → Voice); straight to LiteLLM when the app is down.
+    # POST only: a browser's preflight (OPTIONS) goes to LiteLLM, which answers it.
+    gateway-speech:
+      rule: Host(`gateway.{{ $domain }}`) && Method(`POST`) && (Path(`/v1/audio/speech`) || Path(`/audio/speech`) || Path(`/v1/audio/transcriptions`) || Path(`/audio/transcriptions`))
+      service: speech
+      middlewares: [secure]
+      tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}
     # Argus's MCP, for coding agents with their own key.
     argus:
       rule: Host(`argus.{{ $domain }}`)
@@ -61,6 +70,12 @@ http:
       loadBalancer:
         servers: [{ url: "http://app:8080" }]
         healthCheck: { path: /v1/answer-cache, interval: 10s, timeout: 3s }
+    speech:
+      failover: { service: app-speech, fallback: litellm }
+    app-speech:
+      loadBalancer:
+        servers: [{ url: "http://app:8080" }]
+        healthCheck: { path: /healthz, interval: 10s, timeout: 3s }
 
   middlewares:
     secure:

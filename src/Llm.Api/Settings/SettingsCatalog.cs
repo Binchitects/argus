@@ -13,6 +13,7 @@ public static class SettingsCatalog
     private const string Chat = "Chat";
     private const string Model = "Model";
     private const string PricesGroup = "Prices";
+    private const string Speech = "Speech";
     private const string Argus = "Argus (GitLab)";
     private const string Tools = "Python and web";
     private const string PluginsGroup = "Plugins";
@@ -197,6 +198,16 @@ public static class SettingsCatalog
 
         new("Chat:RequestTimeout", Chat, "Longest single answer", "An answer still running after this long is stopped.", SettingType.Duration, SettingScope.AppRestart)
             { Default = "00:15:00", Unit = "minutes", Min = 1, Max = 240, Optional = false },
+
+        // ---------------------------------------------------------------- speech, live: everyone's until they choose their own (Your account → Voice) --
+        new("Speech:Language", Speech, "Language people speak", "For speech to text (Talk, voice messages, and API keys' speech to text that names no language): auto lets Whisper hear which; a language speech to text knows (en, fa, de) writes everything down in it, which suits short or accented speech.", SettingType.Text, SettingScope.Live)
+            { Default = "auto", Optional = false, Max = 4, Pattern = "auto|" + string.Join('|', Llm.Api.Chat.VoiceCatalog.WhisperLanguages), PatternHelp = "auto, or the code of a language Whisper knows, such as en, fa or de" },
+        new("Speech:Voices", Speech, "Voice for each language", "The voice that reads each language aloud (read aloud, Talk, the Speech tool, and API keys' speech that names no voice): a text is read in the voice of its language. Choose each from the voices the speech models offer, and Try it; a language left to the first offered gets the first voice offered for it. A voice here that is not offered is said below.", SettingType.Text, SettingScope.Live)
+            { Default = "en:kokoro/af_heart,fa:piper-fa/gyro", Optional = false, Max = 1000, Pattern = @"[a-z]{2,3}:[^,:/\s]+/[^,:/\s]+(\s*,\s*[a-z]{2,3}:[^,:/\s]+/[^,:/\s]+)*", PatternHelp = "language:model/voice pairs, e.g. en:kokoro/af_heart,fa:piper-fa/gyro" },
+        new("Speech:Speed", Speech, "Reading speed", "1 is the voice's own pace; 0.5 is half as fast, 2 twice as fast.", SettingType.Number, SettingScope.Live)
+            { Default = "1", Min = 0.5m, Max = 2, Optional = false },
+        new("Speech:ReadAloud", Speech, "Read answers aloud in Talk", "In Talk, and for a voice message, the answer is read aloud as it is written. Off: it is only shown.", SettingType.Boolean, SettingScope.Live)
+            { Default = "true", Optional = false },
 
         // ---------------------------------------------------------------- safeguards, live --
         new("Safeguards:Enabled", Safeguards, "Safeguards on", "Everything below. Off: no limits, no checks (the gateway's credit still applies).", SettingType.Boolean, SettingScope.Live)
