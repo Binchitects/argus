@@ -1265,7 +1265,7 @@ cmd_upgrade() {
   rm -f "$marker"
   say ""
   say "Upgraded from $FROM to $BVERSION. The backup from before it: $BACKUP"
-  say "  .env: $(grep -c . "$SNAP/env-added" 2>/dev/null || echo 0) key(s) added$([[ -s "$SNAP/env-added" ]] && echo " ($(tr '\n' ' ' < "$SNAP/env-added"))")"
+  say "  .env: $(cat "$SNAP/env-added" 2>/dev/null | grep -c .) key(s) added$([[ -s "$SNAP/env-added" ]] && echo " ($(tr '\n' ' ' < "$SNAP/env-added" | sed 's/ $//'))")"
   say "  $FROM's images stay for a rollback (upgrade --rollback): $(wc -l < "$SNAP/IMAGES") tags $PROJECT-rollback:$FROM-...;"
   say "  to free their space: $ENGINE image rm \$(cut -f3 $SNAP/IMAGES)"
   print_access
