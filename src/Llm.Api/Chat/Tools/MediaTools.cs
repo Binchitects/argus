@@ -173,7 +173,7 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
 }
 
 /// <summary>A text read aloud into a sound file, by the gateway's text to speech.</summary>
-public sealed class SpeechTool(ChatModels models, GatewayChat gateway, AppDbContext db, Gateway.PriceBook prices) : IChatTool
+public sealed class SpeechTool(ChatModels models, GatewayChat gateway, AppDbContext db, Gateway.PriceBook prices, Storage.StorageQuotas quotas) : IChatTool
 {
     public string Id => "speech";
     public string Title => "Speech";
@@ -197,6 +197,10 @@ public sealed class SpeechTool(ChatModels models, GatewayChat gateway, AppDbCont
             if (text.Length == 0)
             {
                 return new ToolResult("Give the words to say in 'text'.", IsError: true);
+            }
+            if (await quotas.ToolRefusalAsync(context.User.Id, "sound file", token) is { } full)
+            {
+                return new ToolResult(full, IsError: true);
             }
             var (model, voice) = Voices.For(text);
             byte[] mp3;

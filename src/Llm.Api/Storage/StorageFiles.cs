@@ -43,9 +43,9 @@ public sealed class StorageFiles(AppDbContext db)
         """;
 
     /// <summary>
-    /// Every file with where it came from and whether a chat has it. Messages name their files in a JSON list;
-    /// the first message naming a file (a chat not deleted first) says where it came from: a tool's (by which
-    /// tool) or the person's.
+    /// Every file with where it came from and whether a chat has it. Messages (and those waiting their turn) name
+    /// their files in a JSON list; the first message naming a file (a chat not deleted first) says where it came
+    /// from: a tool's (by which tool) or the person's.
     /// </summary>
     private const string Files = $$"""
         WITH refs AS (
@@ -54,6 +54,13 @@ public sealed class StorageFiles(AppDbContext db)
             JOIN conversations c ON c."Id" = m."ConversationId"
             CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(m."AttachmentsJson"::jsonb) = 'array' THEN m."AttachmentsJson"::jsonb ELSE '[]'::jsonb END) AS r(id)
             WHERE m."AttachmentsJson" IS NOT NULL
+            UNION ALL
+            -- A message waiting its turn (sent while the chat answered): its files are the person's, in that chat.
+            SELECT r.id, 'user', NULL, q."ConversationId", q."CreatedAt", c."DeletedAt" IS NOT NULL
+            FROM queued_messages q
+            JOIN conversations c ON c."Id" = q."ConversationId"
+            CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(q."AttachmentsJson"::jsonb) = 'array' THEN q."AttachmentsJson"::jsonb ELSE '[]'::jsonb END) AS r(id)
+            WHERE q."AttachmentsJson" IS NOT NULL
         ),
         firsts AS (SELECT DISTINCT ON (id) id, role, tool, chat FROM refs ORDER BY id, hidden, at),
         lives AS (SELECT DISTINCT id FROM refs WHERE NOT hidden),

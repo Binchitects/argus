@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Llm.Api.Gateway;
 using Llm.Api.Storage;
 using Llm.Core.Chat;
 using Llm.Core.Data;
@@ -32,7 +33,7 @@ public sealed class StorageTests(AppFixture app)
     }
 
     /// <summary>An app on its own database, with a clock to move and folders of its own (none made yet).</summary>
-    private Setup NewApp(Dictionary<string, string?>? settings = null)
+    private Setup NewApp(Dictionary<string, string?>? settings = null, FakeGateway? gateway = null)
     {
         var root = Directory.CreateTempSubdirectory("storage-").FullName;
         var all = new Dictionary<string, string?>
@@ -47,7 +48,7 @@ public sealed class StorageTests(AppFixture app)
             all[k] = v;
         }
         var clock = new MovableClock(DateTimeOffset.UtcNow);
-        var f = app.Create(app.ConnectionStringFor("st_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), all, s => s.AddSingleton<TimeProvider>(clock));
+        var f = app.Create(app.ConnectionStringFor("st_" + Guid.NewGuid().ToString("N")[..8]), gateway ?? new FakeGateway(), all, s => s.AddSingleton<TimeProvider>(clock));
         return new Setup(f, clock, root);
     }
 
@@ -489,6 +490,53 @@ public sealed class StorageTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.RequestEntityTooLarge, await UploadAsync(ann, "three.png", Png(1000), "image/png"));
         Assert.Equal(new[] { "no limit", "5 MB", "the company's room again" },
             (await AuditAsync(admin, "storage.quota")).Where(e => e.GetProperty("target").GetString() == annName).Select(e => e.GetProperty("detail").GetString()).Reverse());
+    }
+
+    [Fact]
+    public async Task With_the_room_full_the_picture_tool_makes_nothing_and_says_why()
+    {
+        var gateway = new FakeGateway();
+        gateway.Models.Add(new GatewayModel("FLUX.2-klein-4B", null, null, false, false, false, null, null, null, Mode: "image_generation"));
+        await using var s = NewApp(new() { ["Storage:PersonMegabytes"] = "1" }, gateway);
+        var f = s.App;
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (ann, _, _) = await PersonAsync(f, admin);
+        await StatusAssert.Is(HttpStatusCode.OK, await UploadAsync(ann, "full.png", Png(1024 * 1024), "image/png"));
+
+        var chat = (await ann.JsonAsync(await ann.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+        var before = app.Model.ImageRequests.Count;
+        var res = await ann.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = """Draw: [call generate_image {"prompt":"A red fox in the snow"}]""" });
+        Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
+        var result = (await res.Content.ReadAsStringAsync()).Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => JsonDocument.Parse(l[6..]).RootElement)
+            .Single(e => e.GetProperty("type").GetString() == "tool_result");
+        Assert.StartsWith("No picture was made: the person's files are full.", result.GetProperty("text").GetString(), StringComparison.Ordinal);
+        // Nothing was asked of the image model, and nothing was kept.
+        Assert.Equal(before, app.Model.ImageRequests.Count);
+        Assert.Equal(1, (await FilesAsync(admin)).GetProperty("total").GetProperty("count").GetInt64());
+    }
+
+    [Fact]
+    public async Task A_file_on_a_message_waiting_its_turn_is_in_its_chat_and_no_clean_up_takes_it()
+    {
+        await using var s = NewApp();
+        var f = s.App;
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (ann, _, _) = await PersonAsync(f, admin);
+        var chat = await ChatAsync(ann, "First question");
+        var waiting = await UploadTextAsync(ann, "next.txt", "for the next question");
+        await using (var scope = f.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.QueuedMessages.Add(new QueuedMessage { ConversationId = chat, Content = "And this", AttachmentsJson = JsonSerializer.Serialize(new[] { waiting }) });
+            await db.SaveChangesAsync();
+        }
+        await OlderAsync(f, TimeSpan.FromDays(30));
+
+        var row = Rows(await FilesAsync(admin)).Single(r => r.GetProperty("id").GetGuid() == waiting);
+        Assert.Equal(("upload", "chat", chat), (row.GetProperty("origin").GetString(), row.GetProperty("state").GetString(), row.GetProperty("chatId").GetGuid()));
+        var plan = await admin.JsonAsync(await admin.GetAsync("/api/admin/storage/cleanups/unused-files?days=7"));
+        Assert.Equal(0, plan.GetProperty("count").GetInt64());
     }
 
     private static string Vector(params (string Device, string Mount, double Value)[] series) => new JsonObject
