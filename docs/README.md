@@ -4,7 +4,7 @@
 
 | page | what it covers |
 |---|---|
-| [deployment.md](deployment.md) | deploying: the samples and secrets, addresses, connecting tools, a host with no network, switching the model, the traps |
+| [deployment.md](deployment.md) | deploying: the samples and secrets, addresses, connecting tools, a host with no network (the offline installer: install, upgrade from 5.2.0, repair, remove), switching the model, the traps |
 | [configuration.md](configuration.md) | every `.env` variable and every file under `deploy/config/` |
 | [architecture.md](architecture.md) | every service, how a request flows through them, where state lives, and what each failure looks like |
 | [authentication.md](authentication.md) | who signs in where, and how identity reaches each service |
@@ -38,7 +38,7 @@
 
 | page | what it covers |
 |---|---|
-| [development.md](development.md) | the repository's layout, building and testing each part, conventions |
+| [development.md](development.md) | the repository's layout, building and testing each part, making a release, conventions |
 | [testing.md](testing.md) | what each test layer proves, what a green run skips, and the tests still missing |
 | [plan.md](plan.md) | the plan: its phases, what each delivered, and what is next |
 

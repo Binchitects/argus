@@ -165,6 +165,38 @@ The Argus image runs its xUnit suite during the build and fails with it; the
 runtime image carries the receipt at `/usr/share/argus/build-verified`.
 `docker compose build` in `deploy/` builds everything the platform runs.
 
+## Releasing
+
+A release is a tag, `vX.Y.Z`, on a commit of `main` whose suites all pass.
+
+1. `VERSION` says the release, and `CHANGELOG.md` has its notes: what changed
+   for people, what an upgrade does, and anything an admin must do.
+2. Every suite passes: the .NET tests, both web apps (`tsc`, `oxlint`,
+   `vitest`), the deployment tooling (`python3 -m unittest discover -s
+   tests/deploy`), and the outside-in suites against the stack running this
+   commit ([testing.md](testing.md)).
+3. An upgrade from the oldest release the bundle takes (5.2.0) keeps every
+   person, chat and setting: `scripts/upgrade-test.py --from v5.2.0
+   --stop-live`. Each migration applies on that release's schema.
+4. The images: `docker compose build` and `docker compose --profile laya build
+   laya` in `deploy/`.
+5. Code Arena's packages: `tools/publish-code-arena.sh --offline`, then
+   `tools/package-code-arena.sh` (into `dist/`).
+6. The offline installer: `deploy/scripts/make-installer.sh` (with `--models`
+   and `--packs` for a bundle that carries them) writes
+   `dist/argus-arena-VERSION-offline.run` and its `.sha256`. Check it:
+   `sh dist/argus-arena-VERSION-offline.run verify`, and
+   `sh dist/argus-arena-VERSION-offline.run upgrade --dir DIR --dry-run` against
+   an installation of the oldest release it upgrades.
+7. Tag the commit and push the tag (`release.yml` publishes the Argus image),
+   and attach the `.run`, its `.sha256` and Code Arena's packages to the
+   release.
+
+When a release can no longer upgrade from 5.2.0 (a migration or a file that
+needs a release in between), raise `UPGRADES_FROM` in
+`deploy/scripts/make-installer.sh`: the installer then refuses anything older
+and says which release to upgrade to first.
+
 ## CI
 
 `.github/workflows/ci.yml` runs on every push: the API, Argus and Code Arena tests (and Code Arena's Linux package), both web
