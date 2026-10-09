@@ -11,6 +11,10 @@
 #   ./scripts/backup.sh --restore --from DIR --with-config   also .env, overrides and config files
 #   ./scripts/backup.sh --restore --from DIR --yes           without asking (restore-test.sh, rollback-test.sh)
 #
+#   --podman        Podman's containers and volumes (podman compose) in place of Docker's
+#   --deploy DIR    the deploy folder to back up or restore (default: the one this script is in;
+#                   installer.sh runs a newer release's copy against the installed folder)
+#
 # Settings, all in .env:
 #   BACKUP_DIR            where backups go                        default ./backups
 #                         (absolute, or relative to deploy/; the app mounts it read only)
@@ -36,23 +40,39 @@
 # A copy is a backup like any other: --verify DIR and --restore --from DIR take it.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+ENGINE=docker
+# Read before anything else: they say which folder and which engine the rest is about.
+ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --podman) ENGINE=podman; shift ;;
+    --deploy) [[ $# -gt 1 && -d "$2" ]] || { printf 'backup: ERROR: --deploy needs a folder\n' >&2; exit 1; }; ROOT="$(cd "$2" && pwd)"; shift 2 ;;
+    *) ARGS+=("$1"); shift ;;
+  esac
+done
+set -- ${ARGS[@]+"${ARGS[@]}"}
+cd "$ROOT" || exit 1
 umask 077
+# Podman runs compose through its own command; its banner is noise in a backup log.
+export PODMAN_COMPOSE_WARNING_LOGS=false
 
 env_get() { grep -E "^$1=" .env 2>/dev/null | tail -n1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//'; }
 say() { printf '%s\n' "$*"; }
 die() { printf 'backup: ERROR: %s\n' "$*" >&2; exit 1; }
 CFG=./config
 
-PROJECT="${COMPOSE_PROJECT_NAME:-arena}"
+# The project compose runs: from the environment, else .env (installer.sh writes one other than arena there).
+PROJECT="${COMPOSE_PROJECT_NAME:-$(env_get COMPOSE_PROJECT_NAME)}"; PROJECT="${PROJECT:-arena}"
 BACKUP_DIR="$(env_get BACKUP_DIR)"; BACKUP_DIR="${BACKUP_DIR:-./backups}"
 KEEP="$(env_get BACKUP_KEEP)"; KEEP="${KEEP:-14}"
 INCLUDE_LOGS="$(env_get BACKUP_INCLUDE_LOGS)"; INCLUDE_LOGS="${INCLUDE_LOGS:-1}"
 BACKUP_TIME="$(env_get BACKUP_TIME)"; BACKUP_TIME="${BACKUP_TIME:-03:30}"
 PG_USER=arena
 # The image cpu-temp-exporter already runs: on an air-gapped host a backup must
-# not need an image that was never pulled (or was pruned as unused).
+# not need an image that was never pulled (or was pruned as unused). It is never pulled.
 HELPER=python:3.13-slim
+HELPER_MISSING="the helper image $HELPER is not on this host, and nothing is pulled: load it from the offline bundle (or $ENGINE pull $HELPER where there is a network)"
 case "$BACKUP_DIR" in /*) ;; *) BACKUP_DIR="$ROOT/${BACKUP_DIR#./}" ;; esac
 COPY_DIR="$(env_get BACKUP_COPY_DIR)"
 case "$COPY_DIR" in ""|/*) ;; *) COPY_DIR="$ROOT/${COPY_DIR#./}" ;; esac
@@ -75,12 +95,12 @@ while [[ $# -gt 0 ]]; do
     --include-model-cache) SKIP_VOLUMES="${SKIP_VOLUMES/ audio / }"; shift ;;
     --prune) ACTION=prune; shift ;;
     --keep) [[ $# -ge 2 ]] || die "--keep takes a number"; KEEP="$2"; shift 2 ;;
-    -h|--help) sed -n '2,36p' "$0" | grep '^#'; exit 0 ;;
+    -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1 { print }' "$SELF"; exit 0 ;;
     *) die "unknown option: $1 (see --help)" ;;
   esac
 done
 
-compose_volumes() { docker compose config --volumes 2>/dev/null; }
+compose_volumes() { "$ENGINE" compose config --volumes 2>/dev/null; }
 
 verify_dir() {   # verify_dir <backup dir>
   local dir=$1
@@ -178,19 +198,25 @@ if [[ $ACTION == timer ]]; then
       fi
     done
   fi
+  # Docker's daemon is a system service; rootless Podman's socket is the user's own.
+  if [[ $ENGINE == podman ]]; then
+    NEEDS="Environment=XDG_RUNTIME_DIR=/run/user/$(id -u "$RUN_USER")"
+  else
+    NEEDS=$'Requires=docker.service\nAfter=docker.service'
+  fi
   case "$BACKUP_TIME" in *:*:*|*-*|*" "*) CAL="$BACKUP_TIME" ;; *) CAL="*-*-* ${BACKUP_TIME}:00" ;; esac
   cat > /etc/systemd/system/${PROJECT}-backup.service <<EOF
 [Unit]
 Description=${PROJECT}: complete backup of the LLM stack into ${BACKUP_DIR}
-Requires=docker.service
-After=docker.service
+$([[ $ENGINE == docker ]] && echo "$NEEDS")
 RequiresMountsFor=${BACKUP_DIR} ${COPY_DIR}
 
 [Service]
 Type=oneshot
 User=${RUN_USER}
 WorkingDirectory=${ROOT}
-ExecStart=${ROOT}/scripts/backup.sh
+$([[ $ENGINE == podman ]] && echo "$NEEDS")
+ExecStart=${ROOT}/scripts/backup.sh$([[ $ENGINE == podman ]] && echo " --podman")
 Nice=10
 IOSchedulingClass=idle
 EOF
@@ -219,8 +245,9 @@ if [[ $ACTION == restore ]]; then
   [[ -n "$FROM" && -d "$FROM" ]] || die "pass --from <backup directory>"
   FROM="$(cd "$FROM" && pwd)"
   verify_dir "$FROM" || die "the backup does not verify; not restoring from it"
-  if docker compose ps -q 2>/dev/null | grep -q .; then
-    die "the stack is running. Stop it first: docker compose down   (volumes are kept)"
+  "$ENGINE" image inspect "$HELPER" >/dev/null 2>&1 || die "$HELPER_MISSING"
+  if "$ENGINE" compose ps -q 2>/dev/null | grep -q .; then
+    die "the stack is running. Stop it first: $ENGINE compose down   (volumes are kept)"
   fi
   say "Restoring from $FROM. This OVERWRITES the current volumes${WITH_CONFIG:+ and config}."
   if [[ $YES -eq 0 ]]; then
@@ -241,33 +268,33 @@ if [[ $ACTION == restore ]]; then
   fi
 
   say "==> volumes (created exactly as compose defines them, then filled)"
-  docker compose up --no-start >/dev/null 2>&1 || die "docker compose up --no-start failed"
+  "$ENGINE" compose up --no-start --no-build --pull never >/dev/null 2>&1 || die "$ENGINE compose up --no-start failed"
   for a in "$FROM"/volumes/*.tar.gz; do
     [[ -f "$a" ]] || continue
     vol="$(basename "$a" .tar.gz)"
-    docker run --rm --network none -v "${PROJECT}_${vol}:/target" -v "$FROM/volumes:/backup:ro" "$HELPER" \
+    "$ENGINE" run --rm --pull never --network none -v "${PROJECT}_${vol}:/target" -v "$FROM/volumes:/backup:ro" "$HELPER" \
       sh -c "find /target -mindepth 1 -delete && tar -xzpf /backup/${vol}.tar.gz --numeric-owner -C /target" \
       && say "  restored  $vol" || die "restoring $vol failed"
   done
 
   if [[ -f "$FROM/postgres.sql.gz" ]]; then
     say "==> gateway database"
-    docker run --rm --network none -v "${PROJECT}_postgres:/target" "$HELPER" sh -c "find /target -mindepth 1 -delete"
-    docker compose up -d postgres >/dev/null 2>&1 || die "postgres did not start"
+    "$ENGINE" run --rm --pull never --network none -v "${PROJECT}_postgres:/target" "$HELPER" sh -c "find /target -mindepth 1 -delete"
+    "$ENGINE" compose up -d --no-build --pull never postgres >/dev/null 2>&1 || die "postgres did not start"
     # Through compose: the project's own postgres, whatever the project is called.
-    for _ in $(seq 1 60); do docker compose exec -T postgres pg_isready -U "$PG_USER" -d litellm >/dev/null 2>&1 && break; sleep 2; done
+    for _ in $(seq 1 60); do "$ENGINE" compose exec -T postgres pg_isready -U "$PG_USER" -d litellm >/dev/null 2>&1 && break; sleep 2; done
     sleep 3
-    zcat "$FROM/postgres.sql.gz" | docker compose exec -T postgres psql -q -U "$PG_USER" -d postgres >/dev/null 2>"$FROM/.restore-psql.log" \
+    zcat "$FROM/postgres.sql.gz" | "$ENGINE" compose exec -T postgres psql -q -U "$PG_USER" -d postgres >/dev/null 2>"$FROM/.restore-psql.log" \
       || say "  psql reported errors; see $FROM/.restore-psql.log"
-    docker compose stop postgres >/dev/null 2>&1
+    "$ENGINE" compose stop postgres >/dev/null 2>&1
     say "  restored  postgres (people, keys, budgets, spend)"
   fi
-  say ""; say "Done. Start the stack: docker compose up -d"
+  say ""; say "Done. Start the stack: $ENGINE compose up -d"
   exit 0
 fi
 
 # ========================================================================== backup
-command -v docker >/dev/null || die "docker not found"
+command -v "$ENGINE" >/dev/null || die "$ENGINE not found"
 [[ -f .env ]] || die "no .env in $ROOT"
 check_keep
 own_dir "$BACKUP_DIR"
@@ -284,6 +311,8 @@ exec > >(tee -a "$LOG") 2>&1
 FAILED=0
 fail() { say "  FAILED: $*"; FAILED=$((FAILED+1)); }
 UIDGID="$(id -u):$(id -g)"
+# Rootless Podman: the container's root is this user here (its uid 1000 is another host uid).
+[[ $ENGINE == podman ]] && UIDGID="0:0"
 
 say "backup $STAMP -> $OUT"
 
@@ -304,8 +333,8 @@ say "  $(find "$OUT/config" -type f | wc -l) files (.env, $(ls "$OUT/config/comp
 
 # ---- 2. gateway database -------------------------------------------------------
 say "==> postgres"
-if docker exec postgres pg_isready -U "$PG_USER" -d litellm >/dev/null 2>&1; then
-  if docker exec postgres pg_dumpall -U "$PG_USER" --clean --if-exists | gzip -6 > "$OUT/postgres.sql.gz" \
+if "$ENGINE" exec postgres pg_isready -U "$PG_USER" -d litellm >/dev/null 2>&1; then
+  if "$ENGINE" exec postgres pg_dumpall -U "$PG_USER" --clean --if-exists | gzip -6 > "$OUT/postgres.sql.gz" \
      && zcat "$OUT/postgres.sql.gz" | tail -n 5 | grep -q "PostgreSQL database cluster dump complete"; then
     say "  postgres.sql.gz $(du -h "$OUT/postgres.sql.gz" | cut -f1) (pg_dumpall)"
   else
@@ -353,11 +382,14 @@ with tarfile.open(out, "w:gz", compresslevel=6) as tar:
                 tar.add(path, arcname=arc, recursive=False)
 print(n_sql)
 '
+HAVE_HELPER=1
+"$ENGINE" image inspect "$HELPER" >/dev/null 2>&1 || { HAVE_HELPER=0; fail "$HELPER_MISSING"; }
 for vol in $(compose_volumes); do
+  [[ $HAVE_HELPER -eq 1 ]] || break
   case "$SKIP_VOLUMES" in *" $vol "*) continue ;; esac
   if [[ "$INCLUDE_LOGS" != 1 ]]; then case "$LOG_VOLUMES" in *" $vol "*) continue ;; esac; fi
-  docker volume inspect "${PROJECT}_${vol}" >/dev/null 2>&1 || continue
-  n_sql=$(docker run --rm --network none -v "${PROJECT}_${vol}:/src" -v "$OUT/volumes:/out" "$HELPER" \
+  "$ENGINE" volume inspect "${PROJECT}_${vol}" >/dev/null 2>&1 || continue
+  n_sql=$("$ENGINE" run --rm --pull never --network none -v "${PROJECT}_${vol}:/src" -v "$OUT/volumes:/out" "$HELPER" \
           sh -c "python -c '$SNAPSHOT_PY' /out/${vol}.tar.gz && chown ${UIDGID} /out/${vol}.tar.gz && chmod 600 /out/${vol}.tar.gz" 2>>"$LOG")
   if [[ $? -eq 0 && -s "$OUT/volumes/${vol}.tar.gz" ]]; then
     printf '  %-22s %7s%s\n' "$vol" "$(du -h "$OUT/volumes/${vol}.tar.gz" | cut -f1)" "$([[ "${n_sql:-0}" -gt 0 ]] && echo "  (${n_sql} SQLite database(s) via online backup)")"
@@ -373,9 +405,10 @@ done
   echo "host: $(hostname)"
   echo "project: $PROJECT   domain: $(env_get DOMAIN)"
   echo "commit: $(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null)"
-  echo "services running: $(docker compose ps --services 2>/dev/null | tr '\n' ' ')"
+  echo "services running: $("$ENGINE" compose ps --services 2>/dev/null | tr '\n' ' ')"
   echo "include logs: $INCLUDE_LOGS"
-  echo "restore: $ROOT/scripts/backup.sh --restore --from $OUT [--with-config]"
+  echo "engine: $ENGINE"
+  echo "restore: $ROOT/scripts/backup.sh$([[ $ENGINE == podman ]] && echo " --podman") --restore --from $OUT [--with-config]"
 } > "$OUT/MANIFEST"
 (cd "$OUT" && find . -type f ! -name SHA256SUMS ! -name backup.log ! -name RESULT ! -name .restore-psql.log -printf '%P\n' | sort | xargs -d '\n' sha256sum > SHA256SUMS)
 if verify_dir "$OUT"; then say "==> verified: $(wc -l < "$OUT/SHA256SUMS") files match their checksums"; else fail "verification"; fi

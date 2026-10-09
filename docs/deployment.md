@@ -182,7 +182,8 @@ then links to `https://DOMAIN:8443`). GPUs come through CDI: `sudo nvidia-ctk
 cdi generate --output=/etc/cdi/nvidia.yaml` once. The override runs the app as
 the container's root, which under rootless Podman is you, so `MODELS_DIR` stays
 yours; it gives Promtail Podman's socket, and leaves the power caps out (they
-need the host's root).
+need the host's root). The offline installer takes `--podman`
+([below](#the-offline-installer)), with `podman.yml` on top for you.
 
 ## External Postgres
 
@@ -491,7 +492,9 @@ before the upgrade:
    and its images built, `scripts/backup.sh --restore --from <the backup from
    step 1>`, then `docker compose up -d`.
 
-What was written after the upgrade is lost: the backup is from before it.
+What was written after the upgrade is lost: the backup is from before it. The
+offline installer's upgrade takes the backup and rolls back by itself
+([Upgrade from 5.2.0](#upgrade-from-520)).
 
 `scripts/rollback-test.sh FROM_TAG TO_TAG` (for example `v4.1.0 v4.0.0`) proves
 it in a throwaway project, as `restore-test.sh` does, on port 18444:
@@ -509,8 +512,234 @@ The project, its volumes and the images it built are removed at the end.
 
 ## Offline install
 
-`scripts/airgap.sh` carries the whole stack to a host with no network, in one
-file. On a host where the stack runs:
+Two ways to a host with no network:
+
+- **The offline installer**: one file per release that installs, upgrades from
+  5.2.0, repairs and removes the stack ([below](#the-offline-installer)).
+- **`scripts/airgap.sh`**: a running stack's images, files and models in one
+  tar, loaded by hand on the other host
+  ([below](#carrying-a-running-stack-airgapsh)).
+
+Neither pulls or builds anything there.
+
+### The offline installer
+
+`argus-arena-VERSION-offline.run` is a shell script with the release after it:
+every image (gzipped), `deploy/` without secrets, the docs, the licences, Code
+Arena's packages, the embedding model, and when asked the other models and the
+knowledge packs. The host needs bash, tar, gzip and sha256sum, and Docker or
+rootless Podman with Docker's compose plugin; nothing is ever pulled, the helper
+containers included. Without curl, the installer asks the app and Argus their
+version from a helper container on the stack's network instead of through
+Traefik.
+
+#### Making it
+
+On the release's host, with its images built (`docker compose build`, and
+`docker compose --profile laya build laya` in `deploy/`):
+
+```bash
+deploy/scripts/make-installer.sh                    # dist/argus-arena-VERSION-offline.run and .sha256
+deploy/scripts/make-installer.sh --models --packs   # with the models and the knowledge packs
+deploy/scripts/make-installer.sh --dry-run          # what it would hold
+```
+
+| option | what |
+|---|---|
+| `--models`, `--models-dir DIR` | the models too, as `airgap.sh --models`; without it they are listed, and only the embedding model goes in |
+| `--packs` | the knowledge packs in `packs/` |
+| `--code-arena DIR` | Code Arena's packages (default `dist/`, which `tools/package-code-arena.sh` fills) |
+| `--leave-out A,B` | services whose images stay out: a smaller file for hosts without them (`llamacpp,embed,imagegen,videogen,gpu-exporter` for hosts with no GPU) |
+| `--podman`, `--project NAME` | the images in Podman's store; the compose project they were built under (default `arena`) |
+| `--version V`, `--out DIR` | the release (default `VERSION`); where the file goes (default `dist/`) |
+
+The release's own images go in as `arena-SERVICE:VERSION`, the others as the
+compose file names them. `MANIFEST` says the version, the commit and the oldest
+release it upgrades (5.2.0). `SHA256SUMS` holds a checksum for every file, and
+`known/` the checksums of each earlier release's `deploy/` files, so that an
+upgrade tells a file the host changed from one it was shipped with. They come
+from the releases' git tags: without 5.2.0's (a shallow clone), no file is made
+(`git fetch --tags` first). The speech server's models come from the
+`arena_audio` volume, as with `airgap.sh`. The embedding model
+(`embed/nomic-embed-text-v1.5.f16.gguf`, which the embedding server waits for)
+goes in from `MODELS_DIR` even without `--models`; when it is not there, the
+bundle maker says so loudly.
+
+#### Install
+
+Copy the `.run` and its `.sha256` to the host, then:
+
+```bash
+sha256sum -c argus-arena-5.3.0-offline.run.sha256
+sudo sh argus-arena-5.3.0-offline.run install --dir /srv/arena
+```
+
+It checks the bundle and the host first: 4 CPU cores and 16 GB of memory,
+disk for the images and the files, Docker or Podman and compose, an NVIDIA GPU
+the engine can hand to containers (or `--cpu-only`), and the two ports free.
+`scripts/install-requirements.sh` installs what is missing, but it needs the
+network. Then it asks the domain, the admin's e-mail, where models live, the
+first model, the ports and the GitLab Argus indexes; loads the images; writes
+`/srv/arena/deploy` and its `.env`, with every secret generated; starts the
+stack, waits until each service is healthy, checks the version the app and
+Argus report, and prints the address. The admin's first password is shown once,
+on the terminal and never in the log: it is `ADMIN_PASSWORD` in `.env` (0600).
+
+- Unattended, every answer is an option: `--yes --domain llm.example.com
+  --admin-email a@example.com --gitlab-url URL --gitlab-token-file FILE`
+  (`--models-dir`, `--model`, `--http-port`, `--https-port`, `--acme-email`).
+  The token is read from the file, never from the command line.
+- Without a GitLab, Argus is left out until `GITLAB_URL` and `GITLAB_TOKEN` are
+  in `.env` (and its line is out of `docker-compose.override.yml`).
+- `--cpu-only` leaves out the GPU's services, `--leave-out A,B` others. They go
+  in `docker-compose.override.yml`, which is yours from then on: upgrades and
+  repairs keep it. It also keeps the speech server from looking for models
+  online (`HF_HUB_OFFLINE=1`).
+- `MODEL` is a `.gguf` file in `MODELS_DIR` (the bundle's with `--models`): a
+  Hugging Face name (`repo:quant`) needs the network and is refused.
+- `--make-cert` makes a certificate (`scripts/make-cert.sh`); `--hosts` adds the
+  names to `/etc/hosts` (`scripts/setup-hosts.sh`, as root).
+- The folder defaults to `/srv/arena` as root, else `~/arena`. Beside
+  `deploy/` the installer writes the docs, the licences, `VERSION` and Code
+  Arena's packages, but never over a file or folder it did not write there (a
+  git checkout keeps its own).
+- Rootless Podman makes some new volumes root's (Alertmanager's then cannot
+  write): once the stack runs, install and upgrade give each volume to its
+  service's user and start that service again.
+- A bundle without the embedding model: the embedding server waits for its file
+  (on Docker its image's health check fails meanwhile). The installer counts it
+  as waiting for models, not as a failure: it ends with "healthy, waiting for
+  models", names the file and where it goes, and the server starts by itself
+  once it is there. An upgrade does the same.
+
+#### Upgrade from 5.2.0
+
+```bash
+sh argus-arena-5.3.0-offline.run upgrade --dir /srv/arena --dry-run   # the plan: each file, each new .env key
+sh argus-arena-5.3.0-offline.run upgrade --dir /srv/arena
+```
+
+It upgrades an installation of 5.2.0 or newer, whether this installer made it
+or not: a checkout's `deploy/`, or one `airgap.sh` loaded (`--dir` is the folder
+that holds `deploy/`, or `deploy/` itself). The version comes from the
+installer's record, else `VERSION` beside `deploy/`, else the running app's
+`/api/info`. An older version, or one it cannot tell, is refused with why.
+
+1. **A rollback point.** The images the stack runs are tagged
+   `arena-rollback:5.2.0-...` and `deploy/` is copied.
+2. **The new images load** while the old release still serves: the longest
+   step, and it changes nothing the old release runs on.
+3. **A backup** with `scripts/backup.sh`: the database, the volumes, `.env` and
+   the config. Every service but postgres stops first, so the backup is the
+   data the new release starts from; people cannot use the stack from here
+   until the new release runs. Nothing goes on unless the backup verifies.
+4. **The new files.** `.env`, `docker-compose.override.yml`, the certificates,
+   the backups and the models are never touched. Each shipped file is compared
+   three ways: as the old release shipped it, as the new one does, and as it is
+   on the host. A file the host changed (an Alertmanager receiver, the budgets
+   in `config/litellm.yaml`) stays as the host has it when the release ships it
+   unchanged. When the release changed it too, the host's still stays in
+   effect, and the release's is written beside it as `FILE.new-VERSION`; the
+   summary at the end lists each one under TO MERGE. Only the compose files
+   (`docker-compose.yml`, `podman.yml`, `scale.yml`) and the installer are the
+   release's whatever the host did: the host's copy is kept beside as
+   `FILE.before-VERSION`, listed under TO APPLY AGAIN (a host's change to a
+   compose file belongs in `docker-compose.override.yml`). A file the release
+   dropped is removed only when it is the old release's own, unchanged; every
+   change is listed. `.env` gets each new key with its default (a new secret is
+   generated), listed; nothing is removed, and the keys the release no longer
+   reads are named.
+5. **The new release starts.** The app and Argus migrate their data as they
+   start. Every service must be up and healthy (one that was down before the
+   upgrade is named and not waited for, and the embedding server without its
+   model is waiting for models), and the app, Argus and every container must
+   run the new release.
+6. **On a failure it rolls back by itself**: the old images, the files the
+   upgrade changed, and, once the new release had started, the data from the
+   backup. The data as it is, with the files and `.env` that open it, goes into
+   a backup of its own first; if that backup fails (a full disk), nothing is put
+   back or restored over the data and it stops with exit 5 and the steps to
+   take. It says what failed and exits 4 when the old release runs again.
+
+An upgrade cut off half way (a crash, a power cut) carries on where it was when
+it is run again, and a rollback cut off half way is finished, never taken for
+the upgrade. `upgrade --rollback` goes back to the release before the last
+upgrade later on: what was written since is lost (a backup of it is kept). It
+puts back only what the upgrade changed: the old release's copy of each file
+it replaced or removed, what it added taken out, and `.env` without the keys it
+added. What was changed here since the upgrade is asked about first, while the
+stack still runs (`--yes` takes the defaults): a file the upgrade had changed
+goes back to the old release's, one it had left as it was stays as it is now;
+in `.env` a key changed since stays, but for `DB_PASSWORD`, `APP_KEY` and
+`GATEWAY_KEY`, which the restored data opens with, and which go back. The
+certificates and the override stay as they are. The `.env` there was, and each
+file changed since the upgrade that is replaced or taken out, are kept in
+`.arena-install/rollback/VERSION/files-before-rollback/`; `--dry-run` lists all
+of it. The old release's images stay for that until you remove them; the
+upgrade prints the command.
+
+#### Repair, status, verify
+
+`repair` checks the installation against the bundle and puts right what it
+finds, each finding named with what was done: a missing file restored, a
+changed one put back after asking (the changed copy kept beside it; never
+`.env` or an override, nor a file the install or upgrade kept as you changed
+it), a missing image loaded, a volume owned by the wrong
+user given back to its service's (rootless Podman leaves Alertmanager's to
+root), a stopped or unhealthy container recreated, and each service that
+reads a file it put back started again on it. Then it waits for health and
+checks the versions. Without the bundle, the installation's own copy
+(`/srv/arena/deploy/scripts/installer.sh repair`) checks, and recreates
+containers. An embedding server waiting for its model is named, not recreated.
+
+`status` says what runs: the version each service reports, its health, the
+disk, the GPU and the last backup. `verify` checks the `.run` against its
+`.sha256`, the bundle against its `SHA256SUMS`, and the installed files against
+what was written (or kept as you changed them).
+
+#### Remove
+
+`remove` stops and removes the stack's containers, its network and its images;
+an image that was on the host before the install, or that another project's
+container uses, stays. The volumes, `.env`, the backups and the models stay
+too: `install` brings the stack back on the same data. So does
+`python:3.13-slim`, which `scripts/backup.sh` reads the volumes with.
+
+`remove --purge` also deletes the data: the volumes, `deploy/` with `.env` and
+the certificates, what the installer wrote beside it (the docs, the licences,
+`VERSION`, Code Arena's packages), the backups, and the models when they are
+inside the folder. The knowledge packs in `packs/` stay.
+It asks for the word PURGE (unattended: `--confirm PURGE`) and offers a last
+backup first (`--final-backup DIR`, outside the folder), taken with the
+bundle's `scripts/backup.sh` (5.2.0's backs up only with Docker). A project
+started from another folder is refused, and nothing outside the project is
+touched.
+
+#### Every command
+
+`--dry-run` prints the plan and changes nothing. `--yes` takes the defaults
+without asking; with no terminal and no `--yes`, a question is refused rather
+than guessed. `--docker` or `--podman` picks the engine (default: the one the
+installation runs on); `--project` the compose project (default:
+`COMPOSE_PROJECT_NAME` in `.env`, else `arena`). Each run logs to
+`DIR/.arena-install/logs/` (`--log FILE` elsewhere), and secrets never reach a
+log. Each command can run twice: the second finds nothing left to do. On
+Podman ([above](#podman)) the ports default to 8080 and 8443.
+
+| exit code | means |
+|---|---|
+| 0 | done, or nothing to do |
+| 1 | failed: the log says what |
+| 2 | a wrong command or option |
+| 3 | refused: a requirement not met, a version it does not upgrade from, no confirmation |
+| 4 | the upgrade failed and was rolled back: the release before it runs again |
+| 5 | the upgrade failed and so did the rollback: once the cause is put right, `upgrade` again finishes the rollback; the steps by hand are printed |
+| 6 | checksums do not match: the bundle or the installed files are damaged |
+
+### Carrying a running stack (airgap.sh)
+
+`scripts/airgap.sh` carries a running stack, as it is, to a host with no network, in
+one file. On a host where the stack runs:
 
 ```bash
 scripts/airgap.sh pack --models /media/usb/arena.tar
@@ -564,6 +793,8 @@ server from looking. Then `docker compose up -d --pull never`.
 | `scripts/restore-test.sh [--from DIR]` | a backup restores: in a throwaway project beside the live one, its people, chats, settings and spend are there |
 | `scripts/rollback-test.sh FROM_TAG TO_TAG` | a release rolls back by restoring the backup taken before the upgrade, in a throwaway project |
 | `scripts/airgap.sh pack --dry-run X.tar` | what an offline bundle would hold, and that every image is on this host |
+| `scripts/make-installer.sh --dry-run` | what the release's offline installer would hold, and that its images are built |
+| `sh argus-arena-VERSION-offline.run upgrade --dir DIR --dry-run` | what an upgrade would change on that host: the files, the `.env` keys, the images |
 | `scripts/clients-check.py` | the API (OpenAI and Anthropic, streaming, tools), Argus over MCP, Qwen Code and DeepSeek Harness |
 | `scripts/scale-test.py` | many people at once: the chat's queue, every key, a burst of sandbox jobs |
 | `scripts/sandbox-check.py` | the Python sandbox's limits and escapes |

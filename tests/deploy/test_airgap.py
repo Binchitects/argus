@@ -64,7 +64,7 @@ class AirgapTests(unittest.TestCase):
         engine = s.dir / "engine"
         s.write("models.ini", INI, base=engine)
         s.write("keep", "Big\n", base=engine)
-        s.env = {"FAKE_IMAGES": IMAGES, "FAKE_ENGINE": str(engine), "FAKE_VOLUMES": "arena_audio"}
+        s.env = {"FAKE_IMAGES": IMAGES, "FAKE_ENGINE": str(engine), "FAKE_VOLUMES": "arena_audio\narena_engine"}
         self.out = s.dir / "out" / "arena-airgap.tar"
         self.out.parent.mkdir()
 
@@ -149,7 +149,7 @@ class AirgapTests(unittest.TestCase):
     def test_The_speech_models_come_from_the_audio_volume(self):
         self.pack()
         self.assertIn("arena-airgap/audio/audio.tar.gz", self.members())
-        self.assertTrue(self.s.called("run", "--rm", "--network", "none", "-v", "arena_audio:/src:ro"))
+        self.assertTrue(self.s.called("run", "--rm", "--pull", "never", "--network", "none", "-v", "arena_audio:/src:ro"))
 
     def test_Packing_never_pulls_and_stops_on_an_image_that_is_not_here(self):
         self.s.env["FAKE_MISSING"] = "ghcr.io/berriai/litellm:main-stable"
@@ -184,7 +184,7 @@ class AirgapTests(unittest.TestCase):
     def test_Podman_packs_from_its_own_store_with_its_compose_files(self):
         self.pack("--podman")
         self.assertTrue(self.s.called("podman", "compose", "-f", "docker-compose.yml", "-f", "podman.yml"))
-        self.assertTrue(self.s.called("podman", "save", "-o"))
+        self.assertTrue(self.s.called("podman", "save", "-q", "-o"))
         self.assertFalse(any(c[0] == "docker" for c in self.s.calls()))
         self.assertIn("engine: podman\n", self.read("MANIFEST"))
 

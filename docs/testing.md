@@ -13,7 +13,7 @@ What runs today, what it leaves out, and the tests that would close the gap.
 | **Deployment** | `scripts/upgrade-test.py --zero --stop-live` (and `--from TAG`) | this checkout from zero on fresh volumes: it comes up, provisions its first model, signs in, answers with a file; an upgrade keeps people, groups, chats and files, and survives `up` and `down`/`up` | a GPU host |
 | **Code Arena** | `./tools/dn test tests/CodeArena.Tests`, `npx vitest run src/code-arena` in `src/web`, and CI | the agent against a fake gateway and MCP server (tools, modes, approvals, sessions, compaction); the prompt's line editor on a fake terminal (↑'s history per folder, the draft kept, editing keys, several lines, a paste taller than the screen drawn once, Ctrl+Z stopping it with the keys signals again and the prompt drawn as it was after); the IDE's server: files inside the folder only (absolute paths, `..` and links that lead out refused), search, the agent's changes accepted or reverted, this run's key and the Host and Origin checks on every call and on the terminal's WebSocket; terminals on a real pseudo-terminal with `/bin/sh` (echo, `stty size` after a resize, the exit code, close, a session and controlling terminal, no signal ignored or blocked, no API key), and the macOS helper's path run on Linux; the page (Explorer, tabs, saving, the diff view, search, the terminal panel, with Monaco, xterm.js and the socket faked); CI builds the Linux package with its page and starts it | Linux or macOS |
 | **arena CLI** | `python3 -m unittest discover clients/arena`, and CI | `arena ask`, `review` and `explain-failure` against a fake gateway and GitLab on a local socket: streaming, the model chosen, diffs and logs cut to the budget, the note posted, a private CA, every exit code; the GitLab CI template's jobs run by `sh` (with PyYAML) | nothing running |
-| **Recovery and offline, the scripts** | `python3 -m unittest discover -s tests/deploy`; also CI | `airgap.sh`: every image once, `deploy/` without `.env`, backups, keys or models, the registered models listed or copied, checksums written and checked, a damaged bundle or an unlisted file loads nothing, Podman; `restore-test.sh` and `rollback-test.sh`: their plans, and the guards (never the live project, its volumes or its ports); `recovery-check.py`: a dump's people, chats and settings, and the API checks against a fake app; the Laya server (`services/laya/server.py`): what a request may hold, which checkpoint reads it, its HTTP, with the model stubbed | nothing running (fake `docker` and `podman` on PATH) |
+| **Recovery and offline, the scripts** | `python3 -m unittest discover -s tests/deploy`; also CI | `airgap.sh`: every image once, `deploy/` without `.env`, backups, keys or models, the registered models listed or copied, checksums written and checked, a damaged bundle or an unlisted file loads nothing, Podman; the offline installer (`make-installer.sh`, `installer.sh`): the bundle's layout and checksums, a damaged bundle or `.run` refused, arguments, dry runs that change nothing, the version gate, install, an upgrade from a 5.2.0 installation (backup, files, `.env` merged), a failed upgrade rolled back, an interrupted one carried on, repair, remove with and without `--purge`, status, on Docker and Podman; `restore-test.sh` and `rollback-test.sh`: their plans, and the guards (never the live project, its volumes or its ports); `recovery-check.py`: a dump's people, chats and settings, and the API checks against a fake app; the Laya server (`services/laya/server.py`): what a request may hold, which checkpoint reads it, its HTTP, with the model stubbed | nothing running (fake `docker` and `podman` on PATH) |
 | **Restore and rollback** | `scripts/restore-test.sh [--from DIR]`, `scripts/rollback-test.sh FROM_TAG TO_TAG` | a backup restores into a throwaway project beside the live one, with its people, chats, settings and spend; a release rolls back by restoring the backup taken before the upgrade | a host with the stack's images |
 | **Clients** | `scripts/clients-check.py` | the API as developers use it: OpenAI and Anthropic protocols, streaming, tool calls, spend per key, Argus over MCP, Qwen Code and DeepSeek Harness through the API and MCP | a running stack |
 | **Scale** | `scripts/scale-test.py` | many people at once: the chat's queue (and no answer carrying another's secret), every key at once, a burst of sandbox jobs | a running stack |
@@ -28,12 +28,31 @@ the stack with `podman.yml` (and with `podman compose` when the runner has it),
 and parses every script, the services' (the picture and video servers', the
 engine's) with `/bin/sh` too, the shell they run under.
 
+**The offline installer** was proved by hand in rootless Podman beside the live
+Docker stack, which it never touched (2026-10-09, Podman 5.7): a 5.2.0
+installation made the 5.2.0 way (5.2.0's `airgap.sh` bundle of the 5.2.0 images,
+then `podman compose up`) with a person, a group, a chat and a setting put in
+through the API; bundles made by `make-installer.sh` of a "5.3.0-test" (this
+branch's app, Argus and web built over 5.2.0's images) and of a release whose
+app cannot start; then `upgrade` (the backup, the files, the images, every
+service's version, the data kept), `upgrade --rollback` (what went in after
+the upgrade gone, what was there before kept), the upgrade again, a failed
+upgrade rolled back by itself with its data, `repair` after a deleted and a
+changed file, a stopped container, a removed container and image and a volume
+given to root, `remove`, `install` over the kept data, `remove --purge` with a
+last backup, and a fresh unattended `install` and `--purge` again. Left out:
+the GPU's services (the live stack holds the GPU), the speech and embedding
+servers, and Laya. Not proved there: a second host with no network at all,
+Docker as the engine (the fakes only), a GPU through CDI, and models in the
+bundle.
+
 ## 2. What is not tested
 
 | gap | what it would catch |
 |---|---|
 | `restore-test.sh` and `rollback-test.sh` run in CI (they need the stack's images) | a backup that cannot be restored, a release that cannot be rolled back |
-| An offline bundle loaded on a second host with no network, then `up` | a first start that needs the internet |
+| An offline bundle loaded on a second host with no network, then `up` (the installer's run in Podman pulled nothing, but its host had a network) | a first start that needs the internet |
+| The offline installer with Docker as the engine, and with models and a GPU (proved in Podman without them) | an engine or GPU difference past what the fakes model |
 | The stack running under Podman in CI (needs a GPU runner; CI only renders `podman.yml`) | a Podman regression past the compose files |
 | Video generation in CI (minutes on a GPU) | a change in stable-diffusion.cpp's job API |
 | Code Arena's terminals on a Mac and on Windows (the tests run on Linux, the macOS helper's path included; ConPTY is only built) | a pseudo-terminal that does not start, or loses its size or Ctrl+C, on those systems |
