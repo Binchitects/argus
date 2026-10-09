@@ -137,7 +137,7 @@ public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapD
     /// and Active Directory's group. Not a posixGroup alone: its members (memberUid) are plain uids, which neither
     /// memberOf nor the group search sees, so nobody would ever be found in it.
     /// </summary>
-    internal static readonly string[] GroupClasses = ["groupOfNames", "groupOfUniqueNames", "group"];
+    private static readonly string[] GroupClasses = ["groupOfNames", "groupOfUniqueNames", "group"];
 
     private static readonly string GroupClassFilter = "(|" + string.Concat(GroupClasses.Select(c => $"(objectClass={c})")) + ")";
 
@@ -262,8 +262,13 @@ public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapD
             || (group.Contains('=', StringComparison.Ordinal) && SameDn(dn, group));
     }
 
-    /// <summary>Whether two DNs name the same entry, however each is written; false when either is not a DN.</summary>
-    public static bool SameDn(string a, string b) => Rdns(a) is { } x && Rdns(b) is { } y && x.SequenceEqual(y, StringComparer.Ordinal);
+    /// <summary>
+    /// Whether two DNs name the same entry, however each is written; false when either is not a DN. Their first
+    /// parts are compared first: most DNs differ there, and the groups page compares many.
+    /// </summary>
+    public static bool SameDn(string a, string b) =>
+        NormalRdn(FirstPart(a.Trim())) is { } first && first == NormalRdn(FirstPart(b.Trim()))
+        && Rdns(a) is { } x && Rdns(b) is { } y && x.SequenceEqual(y, StringComparer.Ordinal);
 
     /// <summary>Whether a DN is the other or below it, however each is written.</summary>
     public static bool IsUnder(string dn, string above) =>
@@ -284,27 +289,41 @@ public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapD
         var rdns = new List<string>();
         foreach (var rdn in SplitUnescaped(dn, ",;"))
         {
-            var values = new List<string>();
-            foreach (var pair in SplitUnescaped(rdn, "+"))
+            if (NormalRdn(rdn) is not { } normal)
             {
-                var eq = pair.IndexOf('=', StringComparison.Ordinal);
-                var type = eq > 0 ? pair[..eq].Trim() : "";
-                if (type.Length == 0)
-                {
-                    return null;
-                }
-                var value = Unescape(TrimValue(pair[(eq + 1)..])).ToLowerInvariant();
-                var sb = new StringBuilder(type.ToLowerInvariant()).Append('=');
-                foreach (var c in value)
-                {
-                    sb.Append(c is '\\' or ',' or '+' or '=' or ';' or '"' or '<' or '>' ? "\\" + c : c.ToString());
-                }
-                values.Add(sb.ToString());
+                return null;
             }
-            values.Sort(StringComparer.Ordinal);
-            rdns.Add(string.Join('+', values));
+            rdns.Add(normal);
         }
         return rdns;
+    }
+
+    /// <summary>One part of a DN in the form <see cref="Rdns"/> gives it; null when it is not attribute=value.</summary>
+    private static string? NormalRdn(string rdn)
+    {
+        var values = new List<string>(1);
+        foreach (var pair in SplitUnescaped(rdn, "+"))
+        {
+            var eq = pair.IndexOf('=', StringComparison.Ordinal);
+            var type = eq > 0 ? pair[..eq].Trim() : "";
+            if (type.Length == 0)
+            {
+                return null;
+            }
+            var value = Unescape(TrimValue(pair[(eq + 1)..])).ToLowerInvariant();
+            var sb = new StringBuilder(type.ToLowerInvariant()).Append('=');
+            foreach (var c in value)
+            {
+                if (c is '\\' or ',' or '+' or '=' or ';' or '"' or '<' or '>')
+                {
+                    sb.Append('\\');
+                }
+                sb.Append(c);
+            }
+            values.Add(sb.ToString());
+        }
+        values.Sort(StringComparer.Ordinal);
+        return string.Join('+', values);
     }
 
     /// <summary>The parts of a DN between the separators given that are not escaped.</summary>
