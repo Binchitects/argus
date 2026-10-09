@@ -45,6 +45,36 @@ describe('admin tools', () => {
     expect(card.querySelector('svg.lucide-scale')).not.toBeNull()
   })
 
+  it('Deep research is a row like the others, its switches saying what they mean for it', async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/tools': () => ({
+        json: [tool('calculator', 'Calculator'), tool('research', 'Deep research', { icon: 'telescope', setting: { enabled: true, audience: 'Everyone', onByDefault: true, askFirst: true, groups: [] } })],
+      }),
+      'PUT /api/admin/tools/research': () => ({ status: 204 }),
+      'GET /api/admin/groups': () => ({ json: [{ id: 'g1', name: 'Analysts', description: null, directory: null, members: 3, createdAt: '' }] }),
+    })
+    renderApp('/admin/tools')
+    const card = (await screen.findByRole('heading', { name: /Deep research/ })).closest('section')!
+    expect(card.querySelector('svg.lucide-telescope')).not.toBeNull()
+    expect(within(card).getByRole('switch', { name: /Ask before each run/ })).toBeChecked()
+    expect(within(card).getByText(/Pressing Deep research is the person asking/)).toBeInTheDocument()
+    expect(within(card).getByRole('switch', { name: /The model may start it in new chats/ })).toBeChecked()
+    // The others keep theirs.
+    const calculator = screen.getByRole('heading', { name: /Calculator/ }).closest('section')!
+    expect(within(calculator).getByRole('switch', { name: /Ask before each call/ })).toBeInTheDocument()
+
+    // Given to one group; the model's runs no longer ask first; then off for everyone.
+    await userEvent.click(within(card).getByRole('combobox', { name: 'Who may use it' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Chosen groups' }))
+    await userEvent.click(within(card).getByRole('button', { name: 'Choose groups' }))
+    await userEvent.click(await screen.findByRole('checkbox', { name: /Analysts/ }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT').at(-1)?.body).toMatchObject({ audience: 'Groups', groups: ['g1'] }))
+    await userEvent.click(within(card).getByRole('switch', { name: /Ask before each run/ }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT').at(-1)?.body).toMatchObject({ askFirst: false }))
+    await userEvent.click(within(card).getByRole('switch', { name: 'Deep research on' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT').at(-1)?.body).toMatchObject({ enabled: false }))
+  })
+
   it('an MCP server is tested, then added', async () => {
     const calls = fakeApi(admin, {
       'GET /api/admin/tools': () => ({ json: [] }),

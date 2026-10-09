@@ -12,6 +12,12 @@ public sealed record ToolContext(AppUser User, string Email, Conversation Conver
 {
     /// <summary>Runs parts of a task by sub-agents with the answer's model and tools (the Sub-agents tool).</summary>
     public Func<IReadOnlyList<AgentTask>, CancellationToken, Task<ToolResult>>? Agents { get; init; }
+
+    /// <summary>Runs deep research on a question and returns its report (the Deep research tool, at Arena MCP; in a chat the answer itself becomes the research).</summary>
+    public Func<string, CancellationToken, Task<ToolResult>>? Research { get; init; }
+
+    /// <summary>Why deep research cannot run here; the tool is then not offered, and this says why.</summary>
+    public string? NoResearch { get; init; }
 }
 
 /// <summary>

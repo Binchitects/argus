@@ -7,12 +7,18 @@ export function partsDone(done: number, total: number): string {
   return `${done} of ${total} part${total === 1 ? '' : 's'} done`
 }
 
+/** The function the model calls to start deep research itself (the Deep research tool). */
+export const startsResearch = 'deep_research'
+
 /**
  * Which step deep research is on, in words, from what the answer has done so far: planning
  * (nothing called yet), researching its parts (sub-agents at work), filling gaps (sub-agents
- * or a tool called after them), writing the report.
+ * or a tool called after them), writing the report. Started by the model, the research is
+ * what came after its call.
  */
-export function researchStep(answer: Message[], agents: Record<string, AgentWork[]> | undefined): string {
+export function researchStep(whole: Message[], agents: Record<string, AgentWork[]> | undefined): string {
+  const started = whole.findLastIndex((m) => m.role === 'assistant' && !!m.toolCalls?.some((c) => c.function.name === startsResearch))
+  const answer = whole.slice(started + 1)
   const calls = answer.flatMap((m) => (m.role === 'assistant' ? (m.toolCalls ?? []) : []))
   const answered = new Set(answer.filter((m) => m.role === 'tool').map((m) => m.toolCallId))
   const pending = calls.find((c) => !answered.has(c.id))

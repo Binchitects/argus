@@ -282,6 +282,7 @@ public static class IdentityWiring
         services.AddSingleton<Chat.Tools.TimeTool>();
         services.AddSingleton<Chat.Tools.AskTool>();
         services.AddSingleton<Chat.Tools.AgentsTool>();
+        services.AddSingleton<Chat.Tools.ResearchTool>();
         services.AddScoped<Chat.Tools.FilesTool>();
         services.AddScoped<Chat.Canvases>();
         services.AddScoped<Chat.Tools.CanvasTool>();

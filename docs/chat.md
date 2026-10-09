@@ -78,6 +78,25 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   call waiting for your **Allow**. While it works, a line under the answer
   says which step it is on: planning the research, researching 4 parts (2 of
   4 parts done), filling gaps (1 of 2 parts done), writing the report.
+  - **Who has it.** Deep research is a tool admins give to people like any
+    other (Admin → Tools → **Deep research**: everyone, admins or chosen
+    groups; on for everyone until an admin changes it). The button is there
+    only for those who may use it; a message asking for it from anyone else is
+    refused, and one queued before an admin took it away is answered plainly,
+    saying so. The button is greyed out, and says why, when it cannot go with
+    the next message: the chat's model calls no tools, or **Compare** is on.
+  - **Started by the model.** Deep research is also one of the chat's tools
+    (**Tools**). While it is on in a chat (it is in new chats unless an admin
+    changes that), the model may start one itself (`deep_research`) when a
+    question wants a thorough, sourced report. The call asks you first
+    (**Allow**), unless an admin turned that off. Allowed, the answer becomes
+    deep research from there, as with the button: the web and sub-agents join
+    it, its steps are said in the call's result, and the line under the answer
+    shows the step. It counts in the deep research a day. Sub-agents never
+    start one, and an answer that is deep research already is not offered it.
+  - **For your agent.** [Arena MCP](mcp.md) serves `deep_research` to your
+    own agent: it runs in a new chat of yours ("Deep research: …"), and the
+    agent gets the report.
 - **Answer trace** (admins). The timer under an answer opens where its time
   went: the wait in line, getting ready (the chat's tools started, the chat
   read), each round of the model (tokens in, the share from the cache, tokens
@@ -202,6 +221,9 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     passages about that, each with where it starts, instead of its first
     part. A page read lately comes from a cache for a day: reading on, or the
     same page in another answer, does not download it again.
+  - **Deep research**: the model starts deep research itself when a question
+    wants a thorough, sourced report, asking you first (see **Deep research**
+    above).
   - **Questions for you**: when a request leaves a choice open, the model asks
     instead of guessing, as Claude does: one to four questions, each with a
     few choices (pick one, or several where it says so), and a box to write
@@ -998,6 +1020,8 @@ use and edit one); a new chat takes `assistantId`.
 | No **Python** in the Tools menu | the sandbox is not running | `docker compose ps sandbox`; `scripts/sandbox-check.py` says whether it is sound |
 | No **Decide (Laya)** in the Tools menu | the laya module is off (the default), or still fetching or loading its checkpoints | `COMPOSE_PROFILES=laya` in `.env`, then `docker compose up -d laya`; Admin → Models shows the downloads |
 | No **Web** in the Tools menu | it is off (the default), or no site is allowed | Admin → Tools → Web on, and Settings → Python and web → Sites the chat may open |
+| No **Deep research** in the message box | an admin has not given deep research to you | Admin → Tools → Deep research: who may use it |
+| **Deep research** is greyed out | the chat's model calls no tools, or **Compare** is on (its tooltip says which) | choose a model that calls tools, or turn Compare off |
 | "… is not one of the sites the chat may open" | the page's site is not allowed | allow it in Settings → Python and web, or `*` for any public site |
 
 ## How it is tested
@@ -1040,6 +1064,15 @@ use and edit one); a new chat takes `assistantId`.
   incident in the chat and a Persian complaint over Arena MCP, and Code
   Arena's look at 95 labelled commands and at long ones (a push after
   Persian, a script or base64); without it they are skipped.
+  Also deep research as a tool (`DeepResearchTests`): on for everyone, asking
+  first, with no setting saved (as on an upgrade); off, for admins and for a
+  group, with a message or a queued one refused for whoever may not; a queued
+  one answered plainly once it is taken away; the model starting one when
+  allowed (the web and sub-agents join, its parts run, it is not offered
+  again nor to the parts), declined, not asking first, and past the day's
+  limit; and Arena MCP running one in a chat of the person's own, its steps
+  as progress and its report as the result, not served (and saying why)
+  while the web asks first.
   Also memory: "remember I deploy with Podman" in the next chat's system
   prompt (after the fixed notes) and gone once deleted; an offer kept only
   when accepted (in the person's words), taken back, declined, and nobody

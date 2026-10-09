@@ -40,6 +40,15 @@ public sealed class OnDemandTools
     /// <summary>Whether the tools go on demand at all (their definitions are past the budget).</summary>
     public bool Active { get; }
 
+    /// <summary>A function made ready during the answer (deep research started by the model brings the web and sub-agents): listed, not yet loaded.</summary>
+    public void Add(IChatTool tool, JsonObject definition)
+    {
+        if (definition["function"]?["name"]?.GetValue<string>() is { } name && _all.All(f => f.Name != name))
+        {
+            _all.Add((tool, definition, name));
+        }
+    }
+
     /// <summary>The functions loaded, by name, in their usual order.</summary>
     public List<string> Loaded => [.. _all.Where(f => _loaded.Contains(f.Name)).Select(f => f.Name)];
 

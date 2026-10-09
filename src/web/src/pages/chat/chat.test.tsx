@@ -35,6 +35,9 @@ const config: ChatConfig = {
   imageTypes: ['image/png'],
 }
 
+/** Deep research, for those an admin gave it to (Admin → Tools). */
+const researchTool = { id: 'research', title: 'Deep research', description: 'A plan, sub-agents that search the web, and a report.', icon: 'telescope', onByDefault: true, askFirst: true }
+
 const conversation = (over: Partial<Conversation> = {}): Conversation => ({
   id: 'c1', title: 'New chat', thinking: null, tools: ['argus', 'calculator'], useArgus: true, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
   currentLeafId: null, archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '', messages: [], ...over,
@@ -795,8 +798,36 @@ describe('chat', () => {
     await waitFor(() => expect(screen.queryByRole('list', { name: 'Queued messages' })).not.toBeInTheDocument())
   })
 
+  it('the deep research switch is there only for people an admin gave deep research to', async () => {
+    backend({})
+    renderApp('/chat')
+    expect(await screen.findByRole('button', { name: /^Tools/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Deep research' })).not.toBeInTheDocument()
+    cleanup()
+    backend({ config: { tools: [...config.tools, researchTool] } })
+    renderApp('/chat')
+    const toggle = await screen.findByRole('button', { name: 'Deep research' })
+    expect(toggle).not.toHaveAttribute('aria-disabled')
+    // It is one of the chat's tools too: on, the model may start one itself.
+    await userEvent.click(screen.getByRole('button', { name: /^Tools/ }))
+    expect(await screen.findByRole('switch', { name: /Deep research/ })).toBeInTheDocument()
+  })
+
+  it('the deep research switch says why it cannot go with the next message', async () => {
+    const calls = backend({ events: answer, saved: answered, config: { tools: [...config.tools, researchTool], models: [{ ...config.models[0]!, tools: false }, config.models[1]!] } })
+    renderApp('/chat')
+    const toggle = await screen.findByRole('button', { name: 'Deep research' })
+    expect(toggle).toHaveAttribute('aria-disabled', 'true')
+    expect(toggle).toHaveAccessibleDescription(/Main-Model cannot call tools, which deep research needs/)
+    await userEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    await ask('Compare the codecs')
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/chat/conversations/c1/messages')?.body).toMatchObject({ content: 'Compare the codecs' }))
+    expect(calls.find((c) => c.path === '/api/chat/conversations/c1/messages')?.body).not.toHaveProperty('research')
+  })
+
   it('deep research goes with the message written with it on, then turns off', async () => {
-    const calls = backend({ events: answer, saved: answered })
+    const calls = backend({ events: answer, saved: answered, config: { tools: [...config.tools, researchTool] } })
     renderApp('/chat')
     const toggle = await screen.findByRole('button', { name: 'Deep research' })
     await userEvent.click(toggle)
@@ -821,6 +852,7 @@ describe('chat', () => {
         { type: 'agent', id: 'd1', index: 0, event: 'done', ms: 1000 },
       ],
       hang: true,
+      config: { tools: [...config.tools, researchTool] },
     })
     renderApp('/chat')
     await userEvent.click(await screen.findByRole('button', { name: 'Deep research' }))

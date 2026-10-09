@@ -67,6 +67,7 @@ public static class McpEndpoints
         services.AddMemoryCache();
         services.AddScoped<McpPeople>();
         services.AddScoped<McpTools>();
+        services.AddScoped<McpResearch>();
         services.AddScoped<McpPrompts>();
         services.AddSingleton<McpCalls>();
     }

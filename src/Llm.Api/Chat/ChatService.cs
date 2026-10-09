@@ -151,58 +151,73 @@ public sealed partial class ChatService(
         // when there is one that calls tools (else the answer's model and thinking).
         var (agentModel, agentThinking) = helper is { Tools: true } ? (helper.Name, SmallModel.NoThinking(helper)) : (modelName, model?.Thinking == false ? null : thinking);
         var kit = new AgentKit(agentModel, agentThinking, email, runs, tools, instructions, progress, emit, user, conversation);
+
+        // A tool made ready for this answer: its functions offered and its notes kept. One whose server cannot be reached says so.
+        async Task StartToolAsync(ToolChoice choice)
+        {
+            IToolRun run;
+            try
+            {
+                run = await choice.Tool.StartAsync(new ToolContext(user, email, conversation, progress) { Agents = (parts, token) => AgentsAsync(parts, kit, token) }, ct);
+            }
+            catch (McpException ex)
+            {
+                await emit(new
+                {
+                    type = "notice", kind = choice.Tool.Id == "argus" ? "argus_unavailable" : "tool_unavailable",
+                    text = $"{choice.Tool.Title} is not available for this answer: {ex.Message}",
+                });
+                return;
+            }
+            foreach (var f in run.Functions.OfType<JsonObject>())
+            {
+                if (f["function"]?["name"]?.GetValue<string>() is { } fname && runs.TryAdd(fname, (choice, run)))
+                {
+                    tools.Add(f.DeepClone());
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(run.Instructions))
+            {
+                instructions.Add((choice.Tool.Id, run.Instructions.Trim()));
+            }
+        }
+
+        // Deep research: asked for with the composer's switch, or (below) started by the model with the Deep research tool.
+        var research = overrides.Research;
+        IReadOnlyList<ToolChoice> allowed = model?.Tools != false || research ? await registry.ForAsync(await access.MembershipAsync(user, ct), ct) : [];
+        if (research && allowed.All(t => t.Tool.Id != ResearchTool.ToolId))
+        {
+            // Asked for before an admin took deep research away from this person (a message queued then): a plain answer.
+            research = false;
+            await emit(new { type = "notice", kind = "research_off", text = "Deep research is not available to you any more (an admin decides who may use it): this is a plain answer." });
+        }
         if (model?.Tools != false)
         {
-            var allowed = await registry.ForAsync(await access.MembershipAsync(user, ct), ct);
-            var chosen = ToolRegistry.Chosen(conversation.Tools, allowed).ToList();
-            if (overrides.Research)
+            // The model starts no deep research while this answer is one, nor while Auto's small model answers.
+            var chosen = ToolRegistry.Chosen(conversation.Tools, allowed).Where(t => t.Tool.Id != ResearchTool.ToolId || !(research || route is { Small: true })).ToList();
+            if (research)
             {
                 // Deep research needs the web and sub-agents, for this answer, when the person may use them.
                 chosen.AddRange(allowed.Where(t => t.Tool.Id is "web" or "agents" && chosen.All(c => c.Tool.Id != t.Tool.Id)));
                 if (chosen.All(c => c.Tool.Id != "web"))
                 {
-                    await emit(new { type = "notice", kind = "research_no_web", text = "Deep research works best with the web tool, which is not available to you: this answer uses what is." });
+                    await emit(NoWebForResearch);
                 }
             }
             foreach (var choice in chosen)
             {
-                IToolRun run;
-                try
-                {
-                    run = await choice.Tool.StartAsync(new ToolContext(user, email, conversation, progress) { Agents = (parts, token) => AgentsAsync(parts, kit, token) }, ct);
-                }
-                catch (McpException ex)
-                {
-                    await emit(new
-                    {
-                        type = "notice", kind = choice.Tool.Id == "argus" ? "argus_unavailable" : "tool_unavailable",
-                        text = $"{choice.Tool.Title} is not available for this answer: {ex.Message}",
-                    });
-                    continue;
-                }
-                foreach (var f in run.Functions.OfType<JsonObject>())
-                {
-                    if (f["function"]?["name"]?.GetValue<string>() is { } fname && runs.TryAdd(fname, (choice, run)))
-                    {
-                        tools.Add(f.DeepClone());
-                    }
-                }
-                if (!string.IsNullOrWhiteSpace(run.Instructions))
-                {
-                    instructions.Add((choice.Tool.Id, run.Instructions.Trim()));
-                }
+                await StartToolAsync(choice);
             }
         }
 
         // Deep research with sub-agents: the parts research and the web is theirs, and the answer delegates at most
         // twice, then writes. Not when the web asks before each call: a part has nobody there to allow it, so the
         // answer reads the web itself, as the person allows.
-        var researchByAgents = overrides.Research && runs.ContainsKey(AgentsTool.Function)
-            && runs.All(kv => kv.Value.Choice.Tool.Id != "web" || ForAgents(kv.Key, kv.Value));
+        var researchByAgents = research && ByAgents(runs);
         // The answer's notes: in deep research its steps, and not the web's while its functions are the parts'.
         // Sub-agents get the tools' own notes (kit.Instructions), the web's among them.
-        var answerNotes = instructions;
-        if (overrides.Research)
+        List<(string Tool, string Text)> answerNotes = [.. instructions];
+        if (research)
         {
             answerNotes = [.. instructions.Where(i => !(researchByAgents && i.Tool == "web")), ("research", ResearchNote(researchByAgents))];
             // The page says which step deep research is on.
@@ -210,7 +225,7 @@ public sealed partial class ChatService(
         }
         // Past the budget, the tools go on demand: those the chat loaded whole, a line for each other.
         var demand = new OnDemandTools(tools, runs, answerNotes, conversation.LoadedTools, chat.CurrentValue.ToolTextChars);
-        if (overrides.Research && demand.Load(["web", "agents"]).Added.Count > 0)
+        if (research && demand.Load(["web", "agents"]).Added.Count > 0)
         {
             conversation.LoadedTools = demand.Loaded;
         }
@@ -219,7 +234,7 @@ public sealed partial class ChatService(
             AnswerLengths.Note(user.AnswerLength), await memories.NoteAsync(user, ct), emit, ct);
         // Said on the person's turn (models follow it more closely there), at the prompt's end (the
         // cache keeps the rest); the question kept stays as written.
-        if (overrides.Research)
+        if (research)
         {
             ToQuestion(messages, researchByAgents
                 ? "\n\n(Deep research: plan the research questions, call delegate once with one part per question, " +
@@ -242,6 +257,43 @@ public sealed partial class ChatService(
         // Each round's cost at the model's prices now (the gateway was given the same); every round and tool call names the answer.
         var price = await prices.ForAsync(modelName, ct);
         Guid? answerId = null;
+
+        // The model started deep research (the Deep research tool, allowed): from its next round this answer is one, as if asked
+        // with the composer's switch. The web and sub-agents join it when the person may use them; its steps are the call's
+        // result, at the prompt's end (the cache keeps the rest), not in the system prompt.
+        async Task<ToolResult> ResearchNowAsync(string topic)
+        {
+            if (await safeguards.TakeResearchAsync(user.Id, ct) is { } refused)
+            {
+                return new ToolResult(refused, IsError: true);
+            }
+            var (functionsBefore, notesBefore) = (tools.Count, instructions.Count);
+            foreach (var choice in allowed.Where(t => t.Tool.Id is "web" or "agents" && runs.Values.All(r => r.Choice.Tool.Id != t.Tool.Id)))
+            {
+                await StartToolAsync(choice);
+            }
+            foreach (var f in tools.Skip(functionsBefore).OfType<JsonObject>())
+            {
+                demand.Add(runs[f["function"]!["name"]!.GetValue<string>()].Choice.Tool, f);
+            }
+            if (runs.Values.All(r => r.Choice.Tool.Id != "web"))
+            {
+                await emit(NoWebForResearch);
+            }
+            research = true;
+            researchByAgents = ByAgents(runs);
+            answerNotes.AddRange(instructions.Skip(notesBefore));
+            if (researchByAgents)
+            {
+                answerNotes.RemoveAll(i => i.Tool == "web");
+            }
+            demand.Load(["web", "agents"]);
+            await emit(new { type = "research" });
+            return new ToolResult($"Deep research is on for this answer, on: {topic}\n\n{ResearchNote(researchByAgents)}")
+            {
+                Details = new JsonObject { ["research"] = topic },
+            };
+        }
 
         for (var round = 0; ; round++)
         {
@@ -287,7 +339,7 @@ public sealed partial class ChatService(
             if (tools.Count > 0 && chat.CurrentValue.MaxToolRounds > 0)
             {
                 Tools(request, researchByAgents ? WithoutWeb(demand.Request(), runs) : demand.Request(),
-                    last: round >= (overrides.Research ? Math.Max(ResearchRounds, chat.CurrentValue.MaxToolRounds) : chat.CurrentValue.MaxToolRounds)
+                    last: round >= (research ? Math.Max(ResearchRounds, chat.CurrentValue.MaxToolRounds) : chat.CurrentValue.MaxToolRounds)
                         || (researchByAgents && delegations >= ResearchDelegations));
             }
 
@@ -450,10 +502,20 @@ public sealed partial class ChatService(
                         // Named from memory or from the list: the parts read the web in deep research.
                         outcome = new ToolResult("In deep research the parts read the web: call delegate with what is missing, or write the report.", IsError: true);
                     }
+                    else if (target.Choice.Tool.Id == ResearchTool.ToolId && (research || ResearchTool.Question(args) is null))
+                    {
+                        // Nothing to ask the person about: this answer researches already, or the call says not what.
+                        outcome = research ? new ToolResult("This answer is deep research already: go on with its steps.") : ResearchTool.NoQuestion;
+                    }
                     else if ((target.Choice.Setting.AskFirst || target.Run.AsksFirst(name)) && !await AskAsync(conversation, id, name, rawArgs, target.Choice.Tool, emit, ct))
                     {
                         declined = true;
                         outcome = new ToolResult($"The person did not allow {target.Choice.Tool.Title} to run this call. Do not try it again unless they ask.", IsError: true);
+                    }
+                    else if (target.Choice.Tool.Id == ResearchTool.ToolId)
+                    {
+                        took.Restart();
+                        outcome = await ResearchNowAsync(ResearchTool.Question(args)!);
                     }
                     else
                     {
@@ -714,12 +776,22 @@ public sealed partial class ChatService(
     private static string Cut(string text, int max) => text.Length <= max ? text : text[..max] + "\n[cut to fit]";
 
     /// <summary>
-    /// Whether sub-agents get a function: not delegating again, questions for the person or memory,
-    /// nor a tool that asks before each call (nobody is there to allow it).
+    /// Whether sub-agents get a function: not delegating again, deep research, questions for the person
+    /// or memory, nor a tool that asks before each call (nobody is there to allow it).
     /// </summary>
     private static bool ForAgents(string function, (ToolChoice Choice, IToolRun Run) tool) =>
-        function is not AgentsTool.Function and not AskTool.Function and not MemoryTool.Function
+        function is not AgentsTool.Function and not ResearchTool.Function and not AskTool.Function and not MemoryTool.Function
         && !tool.Choice.Setting.AskFirst && !tool.Run.AsksFirst(function);
+
+    /// <summary>Whether deep research goes by sub-agents with these functions: they can delegate, and the web (if any) does not ask before each call.</summary>
+    private static bool ByAgents(Dictionary<string, (ToolChoice Choice, IToolRun Run)> runs) =>
+        runs.ContainsKey(AgentsTool.Function) && runs.All(kv => kv.Value.Choice.Tool.Id != "web" || ForAgents(kv.Key, kv.Value));
+
+    /// <summary>Said when deep research has no web to read.</summary>
+    private static readonly object NoWebForResearch = new
+    {
+        type = "notice", kind = "research_no_web", text = "Deep research works best with the web tool, which is not available to you: this answer uses what is.",
+    };
 
     /// <summary>
     /// Sub-agents: each part of a task is asked of the answer's model on its own (a clean

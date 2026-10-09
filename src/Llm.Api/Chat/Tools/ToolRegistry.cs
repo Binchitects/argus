@@ -135,7 +135,8 @@ public sealed record ToolChoice(IChatTool Tool, ToolSetting Setting, string? Una
 /// </summary>
 public sealed class ToolRegistry(
     AppDbContext db, ArgusTool argus, ImageTool image, VideoTool video, SpeechTool speech, CalculatorTool calculator, TimeTool time, FilesTool files, CanvasTool canvas, PythonTool python, WebTool web, AskTool ask, AgentsTool agents, MemoryTool memory,
-    IHttpClientFactory http, IOptions<AuthOptions> auth, IOptionsMonitor<ChatOptions> chat, Plugins.PersonCredentials people, Knowledge.KnowledgeTool knowledge, LayaTool laya)
+    IHttpClientFactory http, IOptions<AuthOptions> auth, IOptionsMonitor<ChatOptions> chat, Plugins.PersonCredentials people, Knowledge.KnowledgeTool knowledge, LayaTool laya,
+    ResearchTool research)
 {
     public const string McpClient = "mcp";
 
@@ -143,7 +144,7 @@ public sealed class ToolRegistry(
     {
         var settings = await db.ToolSettings.AsNoTracking().ToDictionaryAsync(s => s.ToolId, ct);
         var servers = await db.McpServers.AsNoTracking().OrderBy(s => s.Name).ToListAsync(ct);
-        IEnumerable<IChatTool> tools = [argus, knowledge, python, web, image, video, speech, calculator, time, files, canvas, ask, agents, memory, laya, .. servers.Select(Server)];
+        IEnumerable<IChatTool> tools = [argus, knowledge, python, web, research, image, video, speech, calculator, time, files, canvas, ask, agents, memory, laya, .. servers.Select(Server)];
         var all = new List<ToolChoice>();
         foreach (var tool in tools)
         {
@@ -163,6 +164,9 @@ public sealed class ToolRegistry(
     /// <summary>The tools this person may use now: on, allowed to them, and available.</summary>
     public async Task<IReadOnlyList<ToolChoice>> ForAsync(Membership member, CancellationToken ct = default) =>
         [.. (await AllAsync(ct)).Where(t => t.Setting.Enabled && t.Unavailable is null && member.May(t.Setting.Audience, t.Setting.Groups))];
+
+    /// <summary>Whether this person may use the tool now: on, allowed to them, and available.</summary>
+    public async Task<bool> MayUseAsync(Membership member, string toolId, CancellationToken ct = default) => (await ForAsync(member, ct)).Any(t => t.Tool.Id == toolId);
 
     /// <summary>What a chat uses: its own choice, or the tools on in new chats; either way only what the person may use.</summary>
     public static IReadOnlyList<ToolChoice> Chosen(IReadOnlyList<string>? chat, IReadOnlyList<ToolChoice> allowed) =>

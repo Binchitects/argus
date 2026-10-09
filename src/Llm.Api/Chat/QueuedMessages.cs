@@ -152,7 +152,8 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
     /// whether it is answering: one that ended meanwhile takes the message at once.
     /// </summary>
     private static async Task<IResult> AddAsync(Guid id, QueueRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db,
-        Safeguards.Safeguards safeguards, ModelPolicy policy, ChatModels models, QueuedMessages queue, AnswerJobs jobs, CancellationToken ct)
+        Safeguards.Safeguards safeguards, ModelPolicy policy, ChatModels models, QueuedMessages queue, AnswerJobs jobs, Tools.ToolRegistry registry, Access.AccessService access,
+        CancellationToken ct)
     {
         var (me, c) = await OwnedAsync(id, p, users, db, ct);
         if (c is null)
@@ -172,6 +173,10 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
         if (await db.QueuedMessages.CountAsync(q => q.ConversationId == id, ct) >= Max)
         {
             return AuthEndpoints.Problem(409, "queue_full", $"{Max} messages wait in this chat already: send one now, or cancel one.");
+        }
+        if (body.Research && !await registry.MayUseAsync(await access.MembershipAsync(me, ct), Tools.ResearchTool.ToolId, ct))
+        {
+            return AuthEndpoints.Problem(403, "research", Tools.ResearchTool.NotYours);
         }
         var model = c.Model ?? (await policy.ForAsync(me, await models.ListAsync(ct), ct)).Default?.Name;
         var verdict = await safeguards.CheckMessageAsync(me, text, attachments.Length, body.Research, model, ct);

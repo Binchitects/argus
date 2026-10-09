@@ -253,6 +253,18 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
 
     public Task MarkResearchAsync(Guid userId, CancellationToken ct) => MarkAsync(userId, "research", ct);
 
+    /// <summary>Whether the person may have one more deep research today, when the model starts one (and it is counted when they may).</summary>
+    public async Task<string?> TakeResearchAsync(Guid userId, CancellationToken ct)
+    {
+        var o = O;
+        if (o.Enabled && o.ResearchPerDay > 0 && await CountAsync(userId, "research", TimeSpan.FromDays(1), ct) >= o.ResearchPerDay)
+        {
+            return $"The person has had {o.ResearchPerDay} deep research answers today, the most a day here: answer with what you can without it, and say so.";
+        }
+        await MarkAsync(userId, "research", ct);
+        return null;
+    }
+
     private async Task MarkAsync(Guid userId, string kind, CancellationToken ct)
     {
         db.SafeguardMarks.Add(new SafeguardMark { UserId = userId, Kind = kind, At = clock.GetUtcNow() });

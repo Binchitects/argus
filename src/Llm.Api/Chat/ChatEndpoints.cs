@@ -458,7 +458,7 @@ public static partial class ChatEndpoints
     }
 
     private static async Task SendAsync(Guid id, NewMessage body, HttpContext http, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs,
-        Safeguards.Safeguards safeguards, ModelPolicy policy, ChatModels models, SmallModel small)
+        Safeguards.Safeguards safeguards, ModelPolicy policy, ChatModels models, SmallModel small, ToolRegistry registry, AccessService access)
     {
         var me = await Me(http.User, users);
         if (await Owned(db, id, me) is not { } c)
@@ -484,6 +484,12 @@ public static partial class ChatEndpoints
         if (parent is { } p && !await db.ChatMessages.AnyAsync(m => m.ConversationId == c.Id && m.Id == p))
         {
             await Problem(http, 400, "parent", "That message is not in this chat.");
+            return;
+        }
+        // Deep research is a tool admins give to people (Admin → Tools).
+        if (body.Research && !await registry.MayUseAsync(await access.MembershipAsync(me, http.RequestAborted), ResearchTool.ToolId, http.RequestAborted))
+        {
+            await Problem(http, 403, "research", ResearchTool.NotYours);
             return;
         }
         // Safeguards first: limits, blocked words, and (when on) the model's check: the small model's when there is one.
