@@ -239,12 +239,15 @@ export interface FileQuery {
 
 export const noFilter: FileQuery = { q: '', person: ANY, kind: ANY, origin: ANY, state: ANY, min: ANY, days: ANY, sort: 'size' }
 
-/** "?q=…&origin=picture…": the chosen filters only; an age becomes the time before which files were made. */
+/**
+ * "?q=…&origin=picture…": the chosen filters only; an age becomes the time before which files were made, to the
+ * minute. The page's query key, so the same through a minute: to the millisecond, each render would ask again.
+ */
 export function fileSearch(f: FileQuery, now = Date.now()): string {
   const q = new URLSearchParams()
   if (f.q.trim()) q.set('q', f.q.trim())
   for (const key of ['person', 'kind', 'origin', 'state', 'min'] as const) if (f[key] !== ANY) q.set(key, f[key])
-  if (f.days !== ANY) q.set('before', new Date(now - Number(f.days) * 86_400_000).toISOString())
+  if (f.days !== ANY) q.set('before', new Date(Math.floor(now / 60_000) * 60_000 - Number(f.days) * 86_400_000).toISOString())
   if (f.sort !== 'size') q.set('sort', f.sort)
   const s = q.toString()
   return s ? `?${s}` : ''

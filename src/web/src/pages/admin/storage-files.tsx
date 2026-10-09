@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { ago, when } from '@/lib/format'
+import { useDebounced } from '@/lib/use-debounced'
 import { ANY, fileSearch, kinds, noFilter, origins, plural, size, states, type Amount, type FileList, type FileQuery, type FileRow, type PersonFiles } from './storage-api'
 
 const larger = [
@@ -136,7 +137,9 @@ export function StorageFiles() {
     queryKey: ['admin', 'storage', 'people'],
     queryFn: ({ signal }) => api<{ people: PersonFiles[] }>('/api/admin/storage/people', { signal }),
   })
-  const search = fileSearch(f)
+  // The search box asks the server once typing pauses, not at each key: each ask reads every chat's files.
+  const q = useDebounced(f.q, 300)
+  const search = fileSearch({ ...f, q })
   const list = useQuery({
     queryKey: ['admin', 'storage', 'files', search],
     queryFn: ({ signal }) => api<FileList>(`/api/admin/storage/files${search}`, { signal }),
@@ -167,32 +170,38 @@ export function StorageFiles() {
           </Button>
         )}
       </div>
-      {list.error && <QueryError error={list.error} retry={() => list.refetch()} />}
-      {d && (
-        <p className="text-sm text-muted-foreground">
-          {plural(d.total.count, 'file')} match, taking <span className="font-medium text-foreground">{size(d.total.bytes)}</span>.
-          {d.capped && ` The table holds the first ${d.rows.length.toLocaleString('en-US')} in this order; narrow the filters to see the rest.`}
-        </p>
+      {/* A list that failed is its error alone: not the rows of other filters, nor "No files here". */}
+      {list.error ? (
+        <QueryError error={list.error} retry={() => list.refetch()} />
+      ) : (
+        <>
+          {d && (
+            <p className="text-sm text-muted-foreground">
+              {plural(d.total.count, 'file')} match, taking <span className="font-medium text-foreground">{size(d.total.bytes)}</span>.
+              {d.capped && ` The table holds the first ${d.rows.length.toLocaleString('en-US')} in this order; narrow the filters to see the rest.`}
+            </p>
+          )}
+          <DataTable
+            columns={columns}
+            data={d?.rows}
+            loading={list.isPending}
+            noun="files"
+            getRowId={(r) => r.id}
+            searchPlaceholder="Search these files"
+            initialSorting={[]}
+            empty={
+              <EmptyState icon={FileStack} title="No files here" className="py-8">
+                Uploads and what the tools make appear here. Try fewer filters.
+              </EmptyState>
+            }
+            bulk={(selected, table) => (
+              <Button size="sm" variant="destructive" loading={remove.pending} onClick={() => void remove.run(selected, () => table.resetRowSelection())}>
+                <Trash2 /> Delete {plural(selected.length, 'file')}
+              </Button>
+            )}
+          />
+        </>
       )}
-      <DataTable
-        columns={columns}
-        data={d?.rows}
-        loading={list.isPending}
-        noun="files"
-        getRowId={(r) => r.id}
-        searchPlaceholder="Search these files"
-        initialSorting={[]}
-        empty={
-          <EmptyState icon={FileStack} title="No files here" className="py-8">
-            Uploads and what the tools make appear here. Try fewer filters.
-          </EmptyState>
-        }
-        bulk={(selected, table) => (
-          <Button size="sm" variant="destructive" loading={remove.pending} onClick={() => void remove.run(selected, () => table.resetRowSelection())}>
-            <Trash2 /> Delete {plural(selected.length, 'file')}
-          </Button>
-        )}
-      />
     </div>
   )
 }

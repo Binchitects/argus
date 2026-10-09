@@ -156,6 +156,32 @@ describe('Admin → Storage', () => {
     await waitFor(() => expect(last()).toBe('/api/admin/storage/files'))
   })
 
+  it('the search asks the server once typing pauses, and an age asks once, not at each render', async () => {
+    const calls = fakeApi(admin, routes)
+    renderApp('/admin/storage?tab=files')
+    expect(await screen.findByText('report.pdf')).toBeInTheDocument()
+    const asked = () => calls.filter((c) => c.path.startsWith('/api/admin/storage/files'))
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Find files by name, person or chat' }), 'quarterly')
+    await waitFor(() => expect(asked().at(-1)!.path).toContain('q=quarterly'))
+    expect(asked().filter((c) => c.path.includes('q='))).toHaveLength(1)
+
+    await userEvent.click(screen.getByRole('combobox', { name: 'Age' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Older than 30 days' }))
+    await waitFor(() => expect(asked().at(-1)!.path).toContain('before='))
+    const n = asked().length
+    await new Promise((r) => setTimeout(r, 400))
+    // Once more at most, should the minute turn meanwhile.
+    expect(asked().length).toBeLessThanOrEqual(n + 1)
+  })
+
+  it('a list that fails shows its error alone, not "No files here"', async () => {
+    fakeApi(admin, { ...routes, 'GET /api/admin/storage/files': () => ({ status: 503, json: { status: 'timeout', error: 'The list took too long.' } }) })
+    renderApp('/admin/storage?tab=files')
+    expect(await screen.findByText('The list took too long.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+    expect(screen.queryByText('No files here')).not.toBeInTheDocument()
+  })
+
   it('deleting files asks first, says what a hold keeps, and cancelling sends nothing', async () => {
     const calls = fakeApi(admin, {
       ...routes,
@@ -338,6 +364,8 @@ describe('storage helpers', () => {
     expect(fileSearch(noFilter)).toBe('')
     const now = Date.parse('2026-10-09T00:00:00Z')
     expect(fileSearch({ ...noFilter, q: ' cat ', origin: 'video', days: '30', sort: 'old' }, now)).toBe('?q=cat&origin=video&before=2026-09-09T00%3A00%3A00.000Z&sort=old')
+    // To the minute: the page asks again when the minute changes, not at each render.
+    expect(fileSearch({ ...noFilter, days: '7' }, now + 59_999)).toBe(fileSearch({ ...noFilter, days: '7' }, now))
   })
 
   it('rooms and growth read as the page says them', () => {
