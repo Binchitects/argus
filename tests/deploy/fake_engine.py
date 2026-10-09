@@ -13,6 +13,8 @@ make with small fake files, so they run with no container engine at all.
     FAKE_CONFIG       what `compose config` prints (the normalised compose file)
     FAKE_PROFILES     what `compose config --profiles` prints
 
+(With FAKE_STATE, compose config reads the compose files themselves, below.)
+
 With FAKE_STATE (a JSON file) docker (or FAKE_STATE_ENGINE) keeps a store, for installer.sh: images by
 reference (load, tag, rm, inspect), volumes, and the containers `compose up`
 makes, one per service of FAKE_SERVICES. Compose's images are read from the
@@ -222,8 +224,12 @@ def stateful(args: list[str]) -> int | None:
     return None
 
 
-def compose_model(args: list[str], project: str) -> dict[str, dict]:
-    """service -> {image, build, off} from the compose files compose would read."""
+def profiles_of(text: str) -> list[str]:
+    return [x.strip() for x in text.split("profiles:", 1)[1].split("[", 1)[1].split("]", 1)[0].split(",") if x.strip()]
+
+
+def compose_model(args: list[str], project: str, everything: bool = False) -> dict[str, dict]:
+    """service -> {image, build, profiles} of the active services in the compose files compose would read."""
     files = [args[i + 1] for i, a in enumerate(args) if a == "-f"]
     if not files and os.environ.get("COMPOSE_FILE"):
         files = os.environ["COMPOSE_FILE"].split(":")
@@ -246,21 +252,24 @@ def compose_model(args: list[str], project: str) -> dict[str, dict]:
                 continue
             if line.startswith("  ") and not line.startswith("   "):
                 svc = line.strip().split(":", 1)[0]
-                entry = model.setdefault(svc, {"image": None, "build": False, "off": False})
+                entry = model.setdefault(svc, {"image": None, "build": False, "profiles": []})
                 rest = line.split(":", 1)[1]
                 if "image:" in rest:
                     entry["image"] = rest.split("image:", 1)[1].split("}")[0].strip().strip('"')
-                if "profiles: [off]" in rest:
-                    entry["off"] = True
+                if "profiles:" in rest:
+                    entry["profiles"] = profiles_of(rest)
             elif svc and line.startswith("    ") and not line.startswith("     "):
                 key, _, value = line.strip().partition(":")
                 if key == "image":
                     model[svc]["image"] = value.strip().strip('"')
                 elif key == "build":
                     model[svc]["build"] = True
-                elif key == "profiles" and "off" in value:
-                    model[svc]["off"] = True
-    return {k: v for k, v in model.items() if not v["off"]}
+                elif key == "profiles":
+                    model[svc]["profiles"] = profiles_of(line)
+    if everything:
+        return model
+    on = set(x for x in os.environ.get("COMPOSE_PROFILES", "").split(",") if x)
+    return {k: v for k, v in model.items() if not v["profiles"] or (set(v["profiles"]) & on and "off" not in v["profiles"])}
 
 
 def service_image(model: dict[str, dict], svc: str, project: str) -> str:
@@ -282,9 +291,16 @@ def compose(st: Store, args: list[str], project: str) -> int:
         elif "--volumes" in args:
             print("\n".join(lines("FAKE_COMPOSE_VOLUMES")))
         elif "--profiles" in args:
-            print("\n".join(lines("FAKE_PROFILES")))
+            print("\n".join(sorted({p for v in compose_model(args, project, True).values() for p in v["profiles"]})))
         else:
-            print(os.environ.get("FAKE_CONFIG", ""))
+            # As compose prints it: each active service, what it builds or runs.
+            print("services:")
+            for name in sorted(model):
+                print(f"  {name}:")
+                if model[name]["build"]:
+                    print("    build:\n      context: .")
+                if model[name]["image"]:
+                    print(f"    image: {model[name]['image']}")
         return 0
     if "version" in args:
         print("Docker Compose version v9")

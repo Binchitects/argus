@@ -24,6 +24,8 @@ IMAGES_NEW = "\n".join(THIRD_PARTY + ["arena-web:9.9.9", "arena-app:9.9.9", "are
 # 5.2.0's compose file: one more key it needs, a file this release drops, one this release changes.
 # A GPU service (llamacpp), which this host leaves out (FAKE_SERVICES has it not).
 COMPOSE = COMPOSE.replace("volumes:\n", "  llamacpp:\n    image: ghcr.io/ggml-org/llama.cpp:server-cuda\nvolumes:\n", 1)
+# And one the release builds that runs only when asked for (laya).
+COMPOSE = COMPOSE.replace("volumes:\n", "  laya:\n    build: ./services/laya\n    profiles: [laya]\nvolumes:\n", 1)
 COMPOSE_OLD = COMPOSE.replace("name: arena\n", "name: arena\n# 5.2.0\n")
 COMPOSE_NEW = COMPOSE.replace("    container_name: app\n", "    container_name: app\n    environment: { NEW_KEY: \"${NEW_KEY:?set NEW_KEY}\", APP_KEY: \"${APP_KEY:?}\" }\n")
 ENV_EXAMPLE_OLD = "DOMAIN=llm.localhost\nADMIN_EMAIL=admin@example.com\nMODELS_DIR=./models\nMODEL=org/repo:Q4\nADMIN_PASSWORD=\nAPP_KEY=\nDB_PASSWORD=\nGATEWAY_KEY=\nENGINE_KEY=\nARGUS_KEY=\n"
@@ -74,9 +76,9 @@ class Release:
         git(self.repo, "commit", "-q", "-m", "9.9.9")
         self.state = s.dir / "engine.json"
         # The third-party images, and the release's own as compose built them (latest).
-        refs = THIRD_PARTY + ["arena-app:latest", "arena-web:latest", "arena-argus:latest"]
+        refs = THIRD_PARTY + ["arena-app:latest", "arena-web:latest", "arena-argus:latest", "arena-laya:latest"]
         self.state.write_text(json.dumps({"images": {r: f"{i:064x}" for i, r in enumerate(refs, start=1)}}))
-        s.env = {"FAKE_STATE": str(self.state), "FAKE_SERVICES": SERVICES, "FAKE_CONFIG": COMPOSE_NEW,
+        s.env = {"FAKE_STATE": str(self.state), "FAKE_SERVICES": SERVICES,
                  "FAKE_COMPOSE_VOLUMES": "postgres\nengine\nargus\n"}
         self.dist = self.repo / "dist"
         self.made = s.run("make-installer.sh", *make_args)
@@ -156,9 +158,9 @@ class BundleTests(unittest.TestCase):
         self.assertRegex(manifest, r"commit: [0-9a-f]{7}")
         self.assertEqual((b / "installer.sh").read_text(), (self.r.s.deploy / "scripts" / "installer.sh").read_text())
         release = dict(line.split("\t") for line in (b / "images" / "RELEASE").read_text().splitlines())
-        self.assertEqual(release, {"web": "arena-web:9.9.9", "app": "arena-app:9.9.9", "argus": "arena-argus:9.9.9"})
+        self.assertEqual(release, {"web": "arena-web:9.9.9", "app": "arena-app:9.9.9", "argus": "arena-argus:9.9.9", "laya": "arena-laya:9.9.9"})
         rows = [line.split("\t") for line in (b / "images" / "IMAGES").read_text().splitlines()]
-        self.assertEqual(sorted(r[0] for r in rows), sorted(IMAGES_NEW.split()))
+        self.assertEqual(sorted(r[0] for r in rows), sorted(IMAGES_NEW.split() + ["arena-laya:9.9.9"]))
         for ref, file, _, size, raw in rows:
             self.assertTrue(file.endswith(".tar.gz"), file)
             self.assertEqual((b / "images" / file).read_bytes()[:2], b"\x1f\x8b")
@@ -213,7 +215,7 @@ class MakeInstallerArgumentTests(unittest.TestCase):
         self.s.env["FAKE_STATE"] = str(state)
         r = self.s.run("make-installer.sh")
         self.assertEqual(r.returncode, 1)
-        self.assertIn("arena-web is not on this host: build it first", r.stderr)
+        self.assertRegex(r.stderr, r"arena-(app|web) is not on this host: build it first")
         self.assertFalse((self.s.repo / "dist").exists() and any((self.s.repo / "dist").glob("*.run")))
 
     def test_A_dry_run_writes_and_saves_nothing(self):
@@ -321,7 +323,7 @@ class InstallerTests(unittest.TestCase):
         out = r.stdout
         self.assertIn("dry run: nothing is done", out)
         self.assertIn("the small ones: the rest is checked when it is unpacked", out)
-        self.assertIn("would  load 8 images", out)
+        self.assertIn("would  load 9 images", out)
         self.assertIn("would  write docker-compose.override.yml: llamacpp argus left out; the speech server offline", out)
         self.assertIn("no GitLab given (--gitlab-url, --gitlab-token-file): Argus is left out", out)
         self.assertFalse(self.dir.exists())

@@ -113,16 +113,17 @@ trap cleanup EXIT
 # Compose, for the release as it ships: docker-compose.yml alone, every profile but off, and
 # placeholder secrets (an image never depends on them).
 printf '%s=placeholder\n' APP_KEY DB_PASSWORD GATEWAY_KEY ENGINE_KEY ARGUS_KEY > "$WORK/placeholder.env"
-rc() { (cd "$ROOT" && env -u COMPOSE_FILE -u COMPOSE_PROFILES COMPOSE_PROJECT_NAME="$PROJECT" "$ENGINE" compose --env-file "$WORK/placeholder.env" -f docker-compose.yml "$@"); }
+PROFILES=""
+rc() { (cd "$ROOT" && env -u COMPOSE_FILE COMPOSE_PROFILES="$PROFILES" COMPOSE_PROJECT_NAME="$PROJECT" "$ENGINE" compose --env-file "$WORK/placeholder.env" -f docker-compose.yml "$@"); }
 PROFILES="$(rc config --profiles 2>/dev/null | grep -vx off | paste -sd, -)"
 # The services compose builds: the release's own images.
-mapfile -t BUILT < <(COMPOSE_PROFILES="$PROFILES" rc config 2>/dev/null | awk '
+mapfile -t BUILT < <(rc config 2>/dev/null | awk '
   /^services:/ { s = 1; next }
   s && /^[^ ]/ { s = 0 }
   s && /^  [a-z0-9_-]+:[[:space:]]*$/ { svc = $1; sub(/:$/, "", svc) }
   s && /^    build:/ { print svc }')
 [[ ${#BUILT[@]} -gt 0 ]] || die "compose names no service it builds (is docker-compose.yml in $ROOT?)"
-ALL=" $(COMPOSE_PROFILES="$PROFILES" rc config --services 2>/dev/null | tr '\n' ' ') "
+ALL=" $(rc config --services 2>/dev/null | tr '\n' ' ') "
 for s in ${LEAVE//,/ }; do [[ "$ALL" == *" $s "* ]] || usage_error "--leave-out $s: no such service"; done
 left() { [[ ",$LEAVE," == *",$1,"* ]]; }
 
