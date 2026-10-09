@@ -599,21 +599,22 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
         !onEngine.Contains(model) || engine.Now is not { Error: null, At: not null } || engine.StatusOf(model) == "loaded";
 
     /// <summary>
-    /// An engine model that is not loaded but loads when asked for: the engine has a place besides the
-    /// models that never make room, those kept loaded and those loaded that new chats or small steps use
-    /// (EngineState.Held; an idle one that may makes room: EngineRoute). One that failed to load does too
-    /// once its wait is over (EngineState.MayAsk).
+    /// An engine model that is not loaded but loads when asked for: one of those that never make room (those kept
+    /// loaded, the one new chats use, the one for small steps: EngineState.Held), which has its place, or another
+    /// while the engine has a place besides theirs (an idle one that may makes room: EngineRoute). One that failed
+    /// to load does too once its wait is over (EngineState.MayAsk).
     /// </summary>
     public bool OnRequest(string model, IReadOnlySet<string> onEngine) =>
         onEngine.Contains(model) && !Loaded(model, onEngine) && (engine.StatusOf(model) is "unloaded" or "loading" || engine.MayAsk(model))
-        && PlaceLeft;
+        && (engine.Held.Contains(model) || PlaceLeft);
 
     /// <summary>
-    /// Whether the engine has a place for a model not loaded: the places that never free (the models kept loaded,
-    /// and the loaded ones that never make room) are fewer than it holds at once.
+    /// Whether the engine has a place for any other model: the places of those that never make room (the models kept
+    /// loaded, the one new chats use, the one for small steps), loaded or kept for them until they load again, are fewer
+    /// than it holds at once. One an admin unloaded gives its place up until it loads again.
     /// </summary>
     public bool PlaceLeft =>
-        catalog.Kept().Concat(engine.Held.Where(h => engine.StatusOf(h) is "loaded" or "loading")).Distinct(StringComparer.Ordinal).Count() < options.Value.ModelsMax;
+        catalog.Kept().Concat(engine.Held.Where(h => !engine.WasDropped(h))).Distinct(StringComparer.Ordinal).Count() < options.Value.ModelsMax;
 
     /// <summary>Whether a model can answer: loaded, or loaded on request.</summary>
     public bool Ready(string model, IReadOnlySet<string> onEngine) => Loaded(model, onEngine) || OnRequest(model, onEngine);
@@ -667,8 +668,8 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
                 ? $"{model} is loading. Try again in a minute, or choose another model."
                 : engine.StatusOf(model) == "failed"
                     ? $"{model} could not be loaded just now. Choose another model, or try again in a few minutes; an admin can see why under Admin → Models."
-                    : $"{model} is not loaded right now, and the engine has no place for it: each model it holds at once is kept loaded, or used by everyone "
-                      + "(the model new chats use, the one for small steps). Choose another model, or ask an admin to raise Models loaded at once.";
+                    : $"{model} is not loaded right now, and the engine has no place for it: each place is taken by, or kept for, a model kept loaded or used "
+                      + "by everyone (the model new chats use, the one for small steps). Choose another model, or ask an admin to raise Models loaded at once.";
         }
         // One credit over the chat and API keys, and the groups' credit.
         return await credit.RefusalAsync(user, ct);

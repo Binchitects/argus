@@ -207,8 +207,8 @@ public sealed partial class EngineRoute(SlotTable slots, EngineState engine, Eng
             if (room == Room.None)
             {
                 LogFull(logger, model);
-                throw new ChatGatewayException($"{model} cannot be loaded now: the engine holds all the models it may, and each is kept loaded or used by everyone "
-                    + "(the model new chats use, the one for small steps). Choose a model that is loaded, or ask an admin to raise Models loaded at once.", 503) { NotLoaded = true };
+                throw new ChatGatewayException($"{model} cannot be loaded now: each place in the engine is taken by, or kept for, a model kept loaded or used by "
+                    + "everyone (the model new chats use, the one for small steps). Choose a model that is loaded, or ask an admin to raise Models loaded at once.", 503) { NotLoaded = true };
             }
             if (clock.GetUtcNow() >= until)
             {
@@ -255,7 +255,10 @@ public sealed partial class EngineRoute(SlotTable slots, EngineState engine, Eng
             _coming.TryRemove(new KeyValuePair<string, DateTimeOffset>(name, at));
         }
         var coming = _coming.Keys.Count(k => k != model);
-        if (models.Count(m => m.Status is "loaded" or "loading") + coming < options.Value.ModelsMax)
+        // The places of the models that never make room and are not loaded now are kept for them (each loads again: the
+        // watcher's, or the next small step's), unless an admin unloaded it.
+        var reserved = engine.Held.Count(h => h != model && !Up(h) && !_coming.ContainsKey(h) && !engine.WasDropped(h) && models.Any(m => m.Name == h));
+        if (models.Count(m => m.Status is "loaded" or "loading") + coming + reserved < options.Value.ModelsMax)
         {
             _coming[model] = now;
             return Room.Free;
@@ -263,7 +266,7 @@ public sealed partial class EngineRoute(SlotTable slots, EngineState engine, Eng
         var others = models.Where(m => m.Status is "loaded" or "loading" && m.Name != model).ToList();
         if (coming == 0 && others.All(m => engine.Held.Contains(m.Name)))
         {
-            // Each one there never makes room: waiting would not help.
+            // Each one there never makes room, and the other places are kept for those that do not either: waiting would not help.
             return Room.None;
         }
         var loaded = others.Where(m => m.Status == "loaded").Select(m => m.Name).ToList();

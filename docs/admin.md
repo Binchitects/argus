@@ -65,10 +65,13 @@ would be with them.
   loads again quickest). Three never make room, so the models everyone relies
   on stay: one kept loaded, the one new chats use (Settings, or the working
   hours', else the first kept; with none of them, the one new chats have been
-  getting), and the model for small steps. When none that may is idle, the
-  request (an answer, a title, the safeguards' check) waits up to a minute for
-  one, then says the engine is full; when every loaded model is one of the
-  three, it says so at once, and the chat's menu does not offer the others.
+  getting), and the model for small steps. While one of them is not loaded,
+  its place is kept for it (it loads again soon: the app loads the first two,
+  the next small step the third), unless an admin unloaded it. When none that
+  may make room is idle, the request (an answer, a title, the safeguards'
+  check) waits up to a minute for one, then says the engine is full; when each
+  place is taken by, or kept for, one of the three, it says so at once, and
+  the chat's menu does not offer the others.
   The app never leaves the choice to the engine, which would unload the model
   used least recently, whichever it is. An API key's request (a coding agent,
   an IDE) gets room the same way: the gateway asks the app before sending it
@@ -77,11 +80,11 @@ would be with them.
   engine loads it, so two requests at once for two models take two places.
   Should the engine still unload a model by its own choice (an admin's
   **Load** at the limit, or a request let through while the app is down,
-  with the guardrail's `fail_open`), a kept one
-  comes back, and so does the one new chats use, once a model that may make
-  room has been idle for a minute (so an agent pausing between its requests
-  is not pushed out for it). After an admin's **Unload**, it stays unloaded.
-  In the chat such a model reads **Loads when asked**.
+  with the guardrail's `fail_open`), a kept one comes back, and so does the
+  one new chats use, once a model that may make room has been idle for a
+  minute (so an agent pausing between its requests is not pushed out for
+  it). After an admin's **Unload**, it stays unloaded. In the chat such a
+  model reads **Loads when asked**.
   When every place is kept, no other model loads on request, and the chat says
   so. A change of the kept list that flips this restarts llama-server (the kept
   models load again, one after another).

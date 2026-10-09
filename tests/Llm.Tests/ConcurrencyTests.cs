@@ -1075,13 +1075,46 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         await EventuallyAsync(() => state.Spare.Count == 0, "the watcher holds tiny-b");
         verdict = await GuardAsync(f, "tiny-a").WaitAsync(TimeSpan.FromSeconds(20));
         Assert.Equal("BLOCKED", verdict.GetProperty("action").GetString());
-        Assert.StartsWith("tiny-a cannot be loaded now: the engine holds all the models it may, and each is kept loaded or used by everyone",
+        Assert.StartsWith("tiny-a cannot be loaded now: each place in the engine is taken by, or kept for, a model kept loaded or used by everyone",
             verdict.GetProperty("blocked_reason").GetString(), StringComparison.Ordinal);
         Assert.Single(app.Engine.Calls, c => c.Path == "/models/unload");
         Assert.Equal("loaded", app.Engine.StatusOf(Big));
         // A model that is loaded, or not the engine's, goes as it is.
         Assert.Equal("NONE", (await GuardAsync(f, Big)).GetProperty("action").GetString());
         Assert.Equal("NONE", (await GuardAsync(f, "gpt-elsewhere")).GetProperty("action").GetString());
+    }
+
+    [Fact]
+    public async Task The_place_of_the_model_for_small_steps_is_kept_for_it_while_it_is_not_loaded()
+    {
+        // The model for small steps is set, not kept loaded, and not loaded yet: the big one and it fill the engine.
+        await using var f = NewApp(new Dictionary<string, string?> { ["Chat:SmallModel"] = "tiny-small" }, parallel: 1, others: [("tiny-small", 1), ("tiny-b", 1)]);
+        var state = f.Services.GetRequiredService<EngineState>();
+        f.Services.GetRequiredService<EngineWatcher>().Wake();
+        await EventuallyAsync(() => state.Held.SequenceEqual([Big, "tiny-small"]), "the watcher holds the big model and the one for small steps");
+        Assert.Equal("unloaded", app.Engine.StatusOf("tiny-small"));
+        var b = await PersonAsync(f);
+
+        // tiny-b is not offered: loaded on request, it would be unloaded for the next title, and its chat then refused.
+        var config = await b.JsonAsync(await b.GetAsync("/api/chat/config"));
+        bool OnRequest(string name) => config.GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == name).GetProperty("onRequest").GetBoolean();
+        Assert.False(OnRequest("tiny-b"));
+        Assert.True(OnRequest("tiny-small"));
+        int Sent() => app.Model.Requests.Count(r => r.Body["model"]?.GetValue<string>() == "tiny-b");
+        var sent = Sent();
+        var answer = await AskAsync(b, await ChatAsync(b, "tiny-b"), "hello");
+        Assert.Contains(answer, e => e.GetProperty("type").GetString() == "error"
+            && e.GetProperty("message").GetString()!.StartsWith("tiny-b is not loaded right now, and the engine has no place for it", StringComparison.Ordinal));
+        // Nor does an API key's request take the place: refused at once, with the reason.
+        var verdict = await GuardAsync(f, "tiny-b");
+        Assert.Equal("BLOCKED", verdict.GetProperty("action").GetString());
+        Assert.StartsWith("tiny-b cannot be loaded now: each place in the engine is taken by, or kept for", verdict.GetProperty("blocked_reason").GetString(), StringComparison.Ordinal);
+        Assert.Equal(0, app.Engine.LoadsOf("tiny-b"));
+        Assert.Equal(sent, Sent());
+
+        // The model for small steps has its place: a chat on it is answered.
+        Assert.Contains(await AskAsync(b, await ChatAsync(b, "tiny-small"), "hello"), e => e.GetProperty("type").GetString() == "done");
+        Assert.Equal("NONE", (await GuardAsync(f, "tiny-small")).GetProperty("action").GetString());
     }
 
     [Fact]
