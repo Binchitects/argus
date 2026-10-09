@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
 namespace CodeArena;
 
@@ -41,7 +42,7 @@ internal sealed class GatewayException(string message, int? status = null) : Exc
 }
 
 /// <summary>The gateway's OpenAI-compatible API, with the person's key.</summary>
-internal sealed class GatewayClient(HttpClient http, string baseUrl, string key)
+internal sealed partial class GatewayClient(HttpClient http, string baseUrl, string key)
 {
     public string BaseUrl { get; } = baseUrl.TrimEnd('/');
 
@@ -340,7 +341,16 @@ internal sealed class GatewayClient(HttpClient http, string baseUrl, string key)
                 new GatewayException($"The gateway refused your API key ({(int)status}). Make a new one under Your account → API key, then run code-arena login.", (int)status),
             HttpStatusCode.NotFound when detail.Length == 0 || detail.StartsWith('<') =>
                 new GatewayException($"{BaseUrl} has no OpenAI API (404). Is this the gateway's address (https://gateway.DOMAIN)?", 404),
+            HttpStatusCode.TooManyRequests when RateLimit().Match(detail) is { Success: true } m && m.Groups[1].Value is "requests" or "tokens" =>
+                new GatewayException($"Your API key reached its limit of {m.Groups[2].Value} {m.Groups[1].Value} a minute. Try again in a minute; " +
+                    "Your account → API key shows your limits and what you used.", 429),
+            HttpStatusCode.TooManyRequests when RateLimit().Match(detail) is { Success: true } m && m.Groups[1].Value == "max_parallel_requests" =>
+                new GatewayException($"Your API key reached its limit of {m.Groups[2].Value} requests at once. Wait for one to finish, then try again.", 429),
             _ => new GatewayException($"The gateway answered {(int)status}: {detail}", (int)status),
         };
     }
+
+    /// <summary>The gateway's (LiteLLM's) refusal for a key's rate limit: "Limit type: requests. Current limit: 60, …".</summary>
+    [GeneratedRegex(@"Limit type: (\w+)\. Current limit: (\d+)")]
+    private static partial Regex RateLimit();
 }
