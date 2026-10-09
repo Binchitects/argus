@@ -377,10 +377,11 @@ idle in `free` while it is full of the model's file (buff/cache). Measured
 here: Qwen3.8-Flash-Next at IQ4_XS is 94 GB, against 61 GB of RAM and 21 GB
 of GPU memory in use; its prompts read at 96 tokens a second for a short one
 and 290 for a long one, and a first round after an idle spell took 13.7 s for
-832 tokens. The same model at IQ3_XXS is 64 GB and fits. Two things help:
+832 tokens. Two things help:
 
 - A quantization that fits the GPU and RAM together, with room left for the
-  other services: the model form and Admin → Models say when one does not.
+  other services: the model form and Admin → Models say when one does not
+  (about 70 GB for this model at IQ3_XXS, still close to this host's 82 GB).
 - `ENGINE_RAM_PROTECT` in `.env` ([configuration.md](configuration.md#env)):
   RAM the host keeps for the engine under memory pressure (cgroup
   `memory.low`), so its pages stay in RAM instead of other files' taking
