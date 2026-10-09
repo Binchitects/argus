@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, LogOut, UserCheck, UserPlus, UserX, Wallet } from 'lucide-react'
+import { Building2, Download, LogOut, UserCheck, UserPlus, UserX, Wallet } from 'lucide-react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useNavigate } from 'react-router'
@@ -23,8 +23,9 @@ import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { ago } from '@/lib/format'
+import { DirectoryMoveDialog } from './directory-move'
 import { CreditMeter, PersonBadges } from './person-badges'
-import { parseCredit, peopleQuery, type Created, type Person } from './people-api'
+import { parseCredit, peopleQuery, signInQuery, type Created, type Person } from './people-api'
 
 const columns: ColumnDef<Person>[] = [
   selectColumn<Person>(),
@@ -72,7 +73,7 @@ const columns: ColumnDef<Person>[] = [
   },
 ]
 
-type Filter = 'all' | 'admins' | 'disabled' | 'over'
+type Filter = 'all' | 'admins' | 'disabled' | 'over' | 'local'
 
 export function PeoplePage() {
   const navigate = useNavigate()
@@ -80,10 +81,20 @@ export function PeoplePage() {
   const [filter, setFilter] = useState<Filter>('all')
   const [adding, setAdding] = useState(false)
   const [creditFor, setCreditFor] = useState<Person[] | null>(null)
+  const [moving, setMoving] = useState<Person[] | null>(null)
+  const directory = useQuery(signInQuery).data?.ldap === true
   const bulk = useBulk()
   const all = people.data?.people ?? []
   const shown = all.filter((p) =>
-    filter === 'admins' ? p.isAdmin : filter === 'disabled' ? p.disabled : filter === 'over' ? p.budget !== null && (p.spend ?? 0) >= p.budget : true,
+    filter === 'admins'
+      ? p.isAdmin
+      : filter === 'disabled'
+        ? p.disabled
+        : filter === 'over'
+          ? p.budget !== null && (p.spend ?? 0) >= p.budget
+          : filter === 'local'
+            ? p.source === 'local'
+            : true,
   )
   return (
     <>
@@ -129,6 +140,7 @@ export function PeoplePage() {
                 { value: 'admins', label: 'Admins' },
                 { value: 'disabled', label: 'Disabled' },
                 { value: 'over', label: 'Over credit' },
+                ...(directory ? [{ value: 'local' as const, label: 'Local accounts' }] : []),
               ]}
             />
           }
@@ -146,12 +158,18 @@ export function PeoplePage() {
               <Button size="sm" variant="outline" loading={bulk.isPending} onClick={() => bulk.run('sign-out', selected, () => table.resetRowSelection())}>
                 <LogOut /> Sign out everywhere
               </Button>
+              {directory && (
+                <Button size="sm" variant="outline" onClick={() => setMoving(selected)}>
+                  <Building2 /> Move to the directory
+                </Button>
+              )}
             </>
           )}
         />
       )}
       <AddPersonDialog open={adding} onOpenChange={setAdding} />
       <CreditDialog people={creditFor} onClose={() => setCreditFor(null)} />
+      <DirectoryMoveDialog people={moving} onClose={() => setMoving(null)} />
     </>
   )
 }

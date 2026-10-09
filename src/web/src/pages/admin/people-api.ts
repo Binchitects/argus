@@ -45,6 +45,12 @@ export const peopleQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => api<{ warning: string | null; people: Person[] }>('/api/admin/people', { signal }),
 }
 
+/** Whether the company directory is on: what moving local accounts to it needs. */
+export const signInQuery = {
+  queryKey: ['admin', 'sign-in'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ ldap: boolean }>('/api/admin/sign-in', { signal }),
+}
+
 export const personQuery = (id: string) => ({
   queryKey: ['admin', 'person', id] as const,
   queryFn: ({ signal }: { signal: AbortSignal }) => api<PersonDetail>(`/api/admin/people/${id}`, { signal }),

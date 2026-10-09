@@ -223,6 +223,7 @@ public static class IdentityWiring
         services.AddScoped<PeopleService>();
         services.AddScoped<Access.AccessService>();
         services.AddScoped<SignInService>();
+        services.AddScoped<DirectoryMoves>();
         services.AddScoped<PersonClaims>();
         services.AddScoped<IdentityBootstrap>();
         services.AddScoped<OidcClients>();

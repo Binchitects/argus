@@ -274,6 +274,25 @@ Give a company CA in **Directory's CA** instead.
 Local accounts keep working next to the directory: keep at least one local admin
 as a way in if the directory is down.
 
+### Moving local accounts to the directory
+
+People who had local accounts before the directory was set up move to directory
+sign-in from **Admin → People**: select them (**Local accounts** shows only
+those), then **Move to the directory**. The app finds each in the directory by
+their email, then by their username, and shows what moving does before it does
+it: the entry they will sign in as, and the username, name or admin role the
+directory gives them. Only the password check moves. Their account stays, so
+their chats, files, groups, API keys, spend and email stay too, and so do their
+sessions and two-step sign-in; their password here stops working.
+
+A person stays local, with the reason shown, when the directory has no entry
+with their email (an entry with their username but another email is refused,
+since their keys and spend are under the email they have here: make the two the
+same first), when several entries have their email, when they are outside the
+sign-in group, when another account here already has that entry or username, or
+when they are the last local admin. An admin never moves their own account:
+another admin does. Each move is in the audit log as `person.to_directory`.
+
 ---
 
 ## Company sign-in (OIDC)

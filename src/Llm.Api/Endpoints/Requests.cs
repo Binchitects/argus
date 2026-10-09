@@ -9,3 +9,6 @@ public sealed record UpdatePersonRequest(bool? Admin = null, bool? Disabled = nu
 public sealed record BudgetRequest(decimal? Budget);
 /// <summary>A person's own rate limits for their API keys, a minute: null takes their groups' or the company's, 0 is no limit.</summary>
 public sealed record LimitsRequest(int? RequestsPerMinute = null, int? TokensPerMinute = null);
+
+/// <summary>The people to move to directory sign-in.</summary>
+public sealed record MoveRequest(List<Guid>? Ids);

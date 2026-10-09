@@ -46,6 +46,37 @@ describe('people', () => {
     expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ disabled: true })
   })
 
+  it('local accounts move to directory sign-in after a look at what changes for each', async () => {
+    const plan = (id: string, over: object) => ({ id, userName: 'grace', email: 'grace@example.test', displayName: 'Grace Hopper', admin: false, dn: null, newUserName: null, newDisplayName: null, newAdmin: null, refusal: null, ...over })
+    const calls = fakeApi(admin, {
+      'GET /api/admin/people': () => ({ json: { warning: null, people } }),
+      'GET /api/admin/sign-in': () => ({ json: { ldap: true, ldapUrl: 'ldaps://dir', adminGroup: null, requiredGroup: null, syncMinutes: 15 } }),
+      'POST /api/admin/ldap/moves/plan': () => ({
+        json: {
+          people: [
+            plan('p1', { dn: 'uid=grace,ou=people,dc=example,dc=test', newDisplayName: 'Grace B. Hopper' }),
+            plan('p2', { userName: 'alan', displayName: 'Alan Turing', email: 'alan@example.test', refusal: 'not in the directory, by email or by username' }),
+          ],
+        },
+      }),
+      'POST /api/admin/ldap/moves': () => ({ json: { moved: [plan('p1', {})], refused: [] } }),
+    })
+    renderApp('/admin/people')
+    await screen.findByText('Grace Hopper')
+    await userEvent.click(await screen.findByRole('radio', { name: 'Local accounts' }))
+    const rows = screen.getAllByRole('checkbox', { name: 'Select row' })
+    await userEvent.click(rows[1]!)
+    await userEvent.click(rows[2]!)
+    await userEvent.click(within(screen.getByRole('region', { name: 'Bulk actions' })).getByRole('button', { name: 'Move to the directory' }))
+    const dialog = await screen.findByRole('dialog')
+    const list = await within(dialog).findByRole('list', { name: 'People to move' })
+    expect(within(list).getByText(/As uid=grace,ou=people,dc=example,dc=test; name becomes Grace B. Hopper/)).toBeInTheDocument()
+    expect(within(list).getByText('Why not: not in the directory, by email or by username.')).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Move 1 person' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/admin/ldap/moves')?.body).toEqual({ ids: ['p1'] }))
+    expect(calls.find((c) => c.path === '/api/admin/ldap/moves/plan')?.body).toEqual({ ids: expect.arrayContaining(['p1', 'p2']) })
+  })
+
   it('adding a person shows their password once', async () => {
     const calls = fakeApi(admin, {
       'GET /api/admin/people': () => ({ json: { warning: null, people } }),

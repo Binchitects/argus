@@ -461,6 +461,67 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
     }
 
     [Fact]
+    public async Task A_local_account_moves_to_directory_sign_in_and_keeps_its_id_email_key_and_session()
+    {
+        var admin = await (await Browser()).SignedInAsync("admin", AppFixture.AdminPassword);
+        await ldap.ModifyAsync("""
+            dn: uid=hank,ou=people,dc=example,dc=test
+            changetype: add
+            objectClass: inetOrgPerson
+            uid: hank
+            cn: Hank Directory
+            sn: Directory
+            mail: hank@example.test
+            userPassword: hank-directory-pw
+
+            dn: cn=llm-users,ou=groups,dc=example,dc=test
+            changetype: modify
+            add: member
+            member: uid=hank,ou=people,dc=example,dc=test
+
+            """);
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = "hank", email = "Hank@example.test" }));
+        var id = made.GetProperty("id").GetGuid();
+        var hank = await (await Browser()).SignedInAsync("hank", made.GetProperty("password").GetString()!);
+        var key = Assert.Single(ldap.Gateway.KeysOf("hank@example.test")).Token;
+        var people = await admin.JsonAsync(await admin.GetAsync("/api/admin/people"));
+        Guid IdOf(string name) => people.GetProperty("people").EnumerateArray().Single(p => p.GetProperty("userName").GetString() == name).GetProperty("id").GetGuid();
+        var erin = IdOf("erin");
+        var me = IdOf("admin");
+
+        // First what it would do: hank moves; erin's directory entry has another email; nobody moves their own account.
+        var plan = await admin.JsonAsync(await admin.PostAsync("/api/admin/ldap/moves/plan", new { ids = new[] { id, erin, me } }));
+        var rows = plan.GetProperty("people").EnumerateArray().ToDictionary(p => p.GetProperty("userName").GetString()!);
+        Assert.Equal(JsonValueKind.Null, rows["hank"].GetProperty("refusal").ValueKind);
+        Assert.Equal("uid=hank,ou=people,dc=example,dc=test", rows["hank"].GetProperty("dn").GetString());
+        Assert.Equal("Hank Directory", rows["hank"].GetProperty("newDisplayName").GetString());
+        Assert.Contains("has the email erin-directory@example.test, not erin-local@example.test", rows["erin"].GetProperty("refusal").GetString(), StringComparison.Ordinal);
+        Assert.Contains("your own account", rows["admin"].GetProperty("refusal").GetString(), StringComparison.Ordinal);
+
+        var done = await admin.JsonAsync(await admin.PostAsync("/api/admin/ldap/moves", new { ids = new[] { id, erin } }));
+        Assert.Equal("hank", Assert.Single(done.GetProperty("moved").EnumerateArray()).GetProperty("userName").GetString());
+        Assert.Equal("erin", Assert.Single(done.GetProperty("refused").EnumerateArray()).GetProperty("userName").GetString());
+
+        // Only the password check moved: the same account, email and key; the session goes on; the local password is gone.
+        var still = await hank.JsonAsync(await hank.GetAsync("/api/auth/me"));
+        Assert.Equal(id, still.GetProperty("id").GetGuid());
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await (await Browser()).LoginAsync("hank", made.GetProperty("password").GetString()!));
+        var again = await (await Browser()).SignedInAsync("hank", "hank-directory-pw");
+        var now = await again.JsonAsync(await again.GetAsync("/api/auth/me"));
+        Assert.Equal(id, now.GetProperty("id").GetGuid());
+        Assert.Equal("ldap", now.GetProperty("source").GetString());
+        Assert.Equal("hank@example.test", now.GetProperty("email").GetString());
+        Assert.Equal("Hank Directory", now.GetProperty("displayName").GetString());
+        Assert.Equal(key, Assert.Single(ldap.Gateway.KeysOf("hank@example.test")).Token);
+        var audit = await admin.JsonAsync(await admin.GetAsync("/api/admin/audit?take=50"));
+        Assert.Contains(audit.EnumerateArray(), e => e.GetProperty("action").GetString() == "person.to_directory" && e.GetProperty("target").GetString() == "hank");
+
+        // Moved once: a second move says so.
+        var twice = await admin.JsonAsync(await admin.PostAsync("/api/admin/ldap/moves/plan", new { ids = new[] { id } }));
+        Assert.Contains("already signs in with the directory", twice.GetProperty("people")[0].GetProperty("refusal").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Joining_the_admin_group_in_the_directory_makes_someone_an_admin()
     {
         await ldap.ModifyAsync("""

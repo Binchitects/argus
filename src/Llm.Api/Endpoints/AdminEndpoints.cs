@@ -57,6 +57,15 @@ public static class AdminEndpoints
                 syncMinutes = ldap.SyncInterval.TotalMinutes,
             });
         });
+        // Local accounts to directory sign-in: what it would do for the chosen people, then doing it.
+        admin.MapPost("/ldap/moves/plan", (MoveRequest body, ClaimsPrincipal p, IOptionsMonitor<LdapOptions> ldap, UserManager<AppUser> users, DirectoryMoves moves, CancellationToken ct) =>
+            Moving(ldap, async () => Results.Ok(new { people = await moves.PlanAsync(body.Ids ?? [], (await users.GetUserAsync(p))!, ct) })));
+        admin.MapPost("/ldap/moves", (MoveRequest body, ClaimsPrincipal p, IOptionsMonitor<LdapOptions> ldap, UserManager<AppUser> users, DirectoryMoves moves, CancellationToken ct) =>
+            Moving(ldap, async () =>
+            {
+                var (moved, refused) = await moves.MoveAsync(body.Ids ?? [], (await users.GetUserAsync(p))!, ct);
+                return Results.Ok(new { moved, refused });
+            }));
         admin.MapPost("/ldap/sync", async (IOptionsMonitor<LdapOptions> ldap, LdapSync sync, Audit audit) =>
         {
             if (!ldap.CurrentValue.Enabled)
@@ -74,6 +83,22 @@ public static class AdminEndpoints
                 return AuthEndpoints.Problem(503, "unavailable", ex.Message);
             }
         });
+    }
+
+    private static async Task<IResult> Moving(IOptionsMonitor<LdapOptions> ldap, Func<Task<IResult>> work)
+    {
+        if (!ldap.CurrentValue.Enabled)
+        {
+            return AuthEndpoints.Problem(400, "off", "LDAP is not configured.");
+        }
+        try
+        {
+            return await work();
+        }
+        catch (LdapUnavailableException ex)
+        {
+            return AuthEndpoints.Problem(503, "unavailable", ex.Message);
+        }
     }
 
     private static async Task<IResult> ListAsync(AppDbContext db, UserManager<AppUser> users, Ledger ledger)

@@ -39,6 +39,12 @@ public interface ILdapDirectory
     Task<LdapPerson?> FindByDnAsync(string dn, CancellationToken ct = default);
 
     /// <summary>
+    /// The entries signing in would find for each name (none, one, or the first two of several), checking no
+    /// password: to match people here to the directory. Throws <see cref="LdapUnavailableException"/> as signing in does.
+    /// </summary>
+    Task<IReadOnlyList<IReadOnlyList<LdapPerson>>> FindAsync(IReadOnlyList<string> names, CancellationToken ct = default);
+
+    /// <summary>
     /// Finds the required group in the directory, and one of its members in it as signing in reads people. Throws
     /// <see cref="LdapUnavailableException"/> when it is not there (a typo in its name, most likely), or signing in
     /// finds none of its members in it (memberOf without it, say): nobody may be disabled for not being in a group
@@ -97,6 +103,29 @@ public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapD
                 return null;
             }
             return matches.Count == 1 ? await ToPersonAsync(o, conn, matches[0], ct) : null;
+        }, ct);
+    }
+
+    public Task<IReadOnlyList<IReadOnlyList<LdapPerson>>> FindAsync(IReadOnlyList<string> names, CancellationToken ct = default)
+    {
+        var o = _o;
+        return WithServiceAsync<IReadOnlyList<IReadOnlyList<LdapPerson>>>(o, async conn =>
+        {
+            var found = new List<IReadOnlyList<LdapPerson>>(names.Count);
+            foreach (var login in names)
+            {
+                var name = SignInName(login);
+                var people = new List<LdapPerson>();
+                if (name.Length > 0)
+                {
+                    foreach (var entry in (await SearchAsync(conn, o.UserBaseDn, LdapConnection.ScopeSub, UserFilterFor(o, name), PersonAttributes(o), ct)).Take(2))
+                    {
+                        people.Add(await ToPersonAsync(o, conn, entry, ct));
+                    }
+                }
+                found.Add(people);
+            }
+            return found;
         }, ct);
     }
 

@@ -307,13 +307,14 @@ export const topics = {
     about: 'Everyone who can sign in: their role, credit and sign-in security.',
     admin: true,
     parts: [
-      { name: 'The table', text: 'Each person with their spend and credit and last sign-in. **Show** filters to admins, the disabled or those over credit. A row opens the person.' },
-      { name: 'Bulk actions', text: 'Tick people, then **Set credit**, **Disable**, **Enable** or **Sign out everywhere**.' },
+      { name: 'The table', text: 'Each person with their spend and credit and last sign-in. **Show** filters to admins, the disabled, those over credit, or (with the company directory on) local accounts. A row opens the person.' },
+      { name: 'Bulk actions', text: 'Tick people, then **Set credit**, **Disable**, **Enable**, **Sign out everywhere** or, with the company directory on, **Move to the directory**.' },
       { name: 'Add person', text: 'A local account with a password and an API key, shown once. People from the company directory or company sign-in appear by themselves at their first sign-in.' },
       { name: 'Export CSV', text: 'Everyone, with spend and credit left.' },
     ],
     tasks: [
       { title: 'Add a person', steps: ['Press **Add person**.', 'Use their GitLab username, so Argus knows what they may read; add their email and name.', 'Press **Add person**, and give them the password and API key now: they are shown only once.'] },
+      { title: 'Move local accounts to the directory', steps: ['Press **Show → Local accounts** and tick the people.', 'Press **Move to the directory**: each shows the directory entry they will sign in as and what changes, or why they stay.', 'Press **Move**: they sign in with their directory password from now on, and keep their chats, keys, spend and email.'] },
       { title: 'Raise someone\'s credit', steps: ['Tick them in the table.', 'Press **Set credit** and type the new amount (empty: no limit).', 'API keys get it at once, the chat within about a minute.'] },
     ],
     manual: { doc: 'authentication', section: 'managing-people' },
