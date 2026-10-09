@@ -13,6 +13,7 @@
 #
 # Settings, all in .env:
 #   BACKUP_DIR            where backups go                        default ./backups
+#                         (absolute, or relative to deploy/; the app mounts it read only)
 #   BACKUP_COPY_DIR       a second copy of each good backup, verified, on ANOTHER disk:
 #                         then one failed disk cannot take the data and every backup   default none
 #   BACKUP_KEEP           how many backups to keep                default 14
@@ -73,7 +74,7 @@ while [[ $# -gt 0 ]]; do
     --include-model-cache) SKIP_VOLUMES="${SKIP_VOLUMES/ audio / }"; shift ;;
     --prune) ACTION=prune; shift ;;
     --keep) [[ $# -ge 2 ]] || die "--keep takes a number"; KEEP="$2"; shift 2 ;;
-    -h|--help) sed -n '2,34p' "$0" | grep '^#'; exit 0 ;;
+    -h|--help) sed -n '2,35p' "$0" | grep '^#'; exit 0 ;;
     *) die "unknown option: $1 (see --help)" ;;
   esac
 done

@@ -1,14 +1,19 @@
 """
 deploy/scripts/backup.sh: removing old backups on request (--prune, what Admin ->
 Storage previews, since the app sees the backups read only), and a backups folder
-Docker made root's, with fake docker on PATH (nothing runs).
+Docker made root's, with fake docker on PATH (nothing runs). And the app's mount of
+the folder: the host's `docker compose config`, when it has one, which only reads.
 """
 from __future__ import annotations
 
+import json
 import os
+import re
+import shutil
+import subprocess
 import unittest
 
-from support import Sandbox
+from support import REPO, Sandbox
 
 
 class PruneTests(unittest.TestCase):
@@ -84,6 +89,57 @@ class PruneTests(unittest.TestCase):
         self.assertEqual(self.s.calls(), [["docker", "run", "--rm", "--network", "none", "-v", f"{empty}:/d", "python:3.13-slim",
                                            "chown", f"{os.getuid()}:{os.getgid()}", "/d"]])
         self.assertIn("sudo chown", r.stderr)
+
+
+def real_compose() -> str | None:
+    """The host's docker, when it has Compose: `docker compose config` only reads files."""
+    docker = shutil.which("docker")
+    if docker is None:
+        return None
+    try:
+        ok = subprocess.run([docker, "compose", "version"], capture_output=True, timeout=30).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return docker if ok else None
+
+
+class ComposeMountTests(unittest.TestCase):
+    """The app mounts BACKUP_DIR (Admin -> Storage): every value backup.sh takes is the same folder there."""
+
+    def setUp(self):
+        self.s = Sandbox()
+        self.compose = (REPO / "deploy" / "docker-compose.yml").read_text()
+
+    def tearDown(self):
+        self.s.cleanup()
+
+    def test_The_mount_is_written_out_as_a_bind(self):
+        # In the short form Compose takes a value with no ./ or / in front (BACKUP_DIR=backups) for a named
+        # volume the file does not declare, and refuses to start the stack.
+        short = re.search(r"\$\{BACKUP_DIR[^}]*\}:/backups.*", self.compose)
+        self.assertIsNone(short, short and short.group(0))
+        self.assertIsNotNone(re.search(r"- type: bind\n\s+source: \$\{BACKUP_DIR:-\./backups\}\n\s+target: /backups\n\s+read_only: true\n", self.compose))
+
+    def test_Compose_mounts_the_folder_backup_sh_writes_for_each_form_of_BACKUP_DIR(self):
+        docker = real_compose()
+        if docker is None:
+            self.skipTest("no docker compose here")
+        self.s.write("docker-compose.yml", self.compose)
+        keys = "".join(f"{k}=x\n" for k in ("APP_KEY", "ARGUS_KEY", "DB_PASSWORD", "ENGINE_KEY", "GATEWAY_KEY"))
+        elsewhere = self.s.dir / "elsewhere"
+        for value in ("", "backups", "./backups", "arena-backups", "../kept", str(elsewhere)):
+            with self.subTest(BACKUP_DIR=value):
+                self.s.write(".env", keys + f"BACKUP_DIR={value}\n")
+                env = {k: v for k, v in os.environ.items() if not k.startswith(("COMPOSE_", "BACKUP_", "DOCKER_HOST"))}
+                r = subprocess.run([docker, "compose", "-f", str(self.s.deploy / "docker-compose.yml"), "config", "--format", "json"],
+                                   cwd=self.s.deploy, env=env, capture_output=True, text=True, timeout=60)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                mount = next(v for v in json.loads(r.stdout)["services"]["app"]["volumes"] if v["target"] == "/backups")
+                self.assertEqual((mount["type"], mount.get("read_only")), ("bind", True))
+                listed = self.s.run("backup.sh", "--list")
+                self.assertEqual(listed.returncode, 0, listed.stderr)
+                where = re.search(r"^Backups in (.+) \(keeping", listed.stdout, re.M).group(1)
+                self.assertEqual(os.path.normpath(mount["source"]), os.path.normpath(where))
 
 
 if __name__ == "__main__":
