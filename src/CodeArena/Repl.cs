@@ -229,6 +229,15 @@ internal sealed class Repl(Runtime rt)
     /// </summary>
     private async Task ListenAsync(Task wait)
     {
+        if (_editor is not null)
+        {
+            // The prompt's line editor reads the terminal key by key: a line read in the background meanwhile would
+            // take the keys meant for the prompt once the wait ends. Here the wait is only watched: Ctrl+C stops the
+            // turn and its commands, and what to say next is typed once it ends.
+            Ui.Info("Waiting for the commands with no time limit: Ctrl+C stops them and the turn.");
+            await wait;
+            return;
+        }
         var lines = new StringBuilder();
         while (!wait.IsCompleted)
         {

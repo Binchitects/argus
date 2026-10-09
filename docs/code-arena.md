@@ -157,7 +157,7 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/context` | how full the model's window is |
 | `/cost` | tokens spent, and how full the model's window is |
 | `/mcp [retry [name]]` | Arena's, Argus's and your MCP servers: connected or not and why; `retry` tries those not connected now |
-| `/jobs [stop N]` | the commands run with no time limit, running or ended; `stop N` stops job N (typed while the turn waits for them) |
+| `/jobs [stop N]` | the commands run with no time limit, running or ended; `stop N` stops job N |
 | `/clear` | a new session (the last stays saved) |
 | `/resume [id]` | switch to a saved session |
 | `/exit` | leave (also Ctrl+D) |
@@ -531,10 +531,13 @@ keeps watching it until it ends, and the model is told how it ended with the
 person's next message.
 
 Only the person stops one: **Ctrl+C** in the terminal stops the turn and the
-commands it started; while the turn waits for them, the terminal still reads
-what the person types: `/jobs` lists them and `/jobs stop N` stops one (the
-model is told how it ended and the turn goes on), and anything else is taken
-as the next message when the turn ends (not if they stop it). **Stop** in the
+commands it started. While the turn waits for them, Ctrl+C stops the turn
+and them. Where the terminal reads plain lines (a pipe, `TERM=dumb`), it still
+reads what the person types meanwhile: `/jobs` lists them and `/jobs stop N`
+stops one (the model is told how it ended and the turn goes on), and anything
+else is taken as the next message when the turn ends (not if they stop it).
+At an interactive prompt, whose line editor reads the keys itself, what to say
+next is typed once the turn ends, and `/jobs` then lists the commands. **Stop** in the
 IDE stops the turn or one command (a command running that no turn on the page shows, after
 a reload, is listed from the session's state with its **Stop**), and the
 model's `stop_command` asks the person first in every mode, every time: it
