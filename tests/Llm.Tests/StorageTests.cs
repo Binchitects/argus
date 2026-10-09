@@ -572,6 +572,16 @@ public sealed class StorageTests(AppFixture app)
         },
     }.ToJsonString();
 
+    /// <summary>Alertmanager as it holds what the app gives it: each alert by its labels as last posted, while its end is ahead.</summary>
+    private void AlertmanagerHolds(MovableClock clock) => app.Observe.Answers["/api/v2/alerts"] = _ => new JsonArray([.. app.Observe.To("/api/v2/alerts")
+        .Where(r => r.Method == "POST").SelectMany(r => JsonNode.Parse(r.Body!)!.AsArray()).GroupBy(a => a!["labels"]!.ToJsonString()).Select(g => g.Last()!)
+        .Where(a => DateTimeOffset.Parse(a["endsAt"]!.GetValue<string>(), System.Globalization.CultureInfo.InvariantCulture) > clock.Now)
+        .Select(a => (JsonNode)new JsonObject
+        {
+            ["labels"] = a["labels"]!.DeepClone(), ["annotations"] = a["annotations"]?.DeepClone() ?? new JsonObject(), ["startsAt"] = a["startsAt"]!.DeepClone(),
+            ["status"] = new JsonObject { ["state"] = "active", ["silencedBy"] = new JsonArray(), ["inhibitedBy"] = new JsonArray() },
+        })]).ToJsonString();
+
     [Fact]
     public async Task A_disk_past_the_share_is_an_alert_given_to_Alertmanager_ended_when_below_and_told_directly_without_it()
     {
@@ -587,6 +597,7 @@ public sealed class StorageTests(AppFixture app)
                 : Vector();
             var watch = f.Services.GetRequiredService<StorageWatch>();
             List<JsonNode> Posted() => [.. app.Observe.To("/api/v2/alerts").Where(r => r.Method == "POST").Select(r => JsonNode.Parse(r.Body!)!)];
+            AlertmanagerHolds(s.Clock);
 
             await watch.CheckAsync(CancellationToken.None);
             var alert = Assert.Single(Posted())!.AsArray().Single()!;
@@ -626,6 +637,89 @@ public sealed class StorageTests(AppFixture app)
             var bell = (await admin.JsonAsync(await admin.GetAsync("/api/notifications"))).GetProperty("items").EnumerateArray()
                 .Where(n => n.GetProperty("title").GetString() == "Warning: Disk /data is 95% full").ToList();
             Assert.Equal("/admin/storage", Assert.Single(bell).GetProperty("link").GetString());
+        }
+        finally
+        {
+            app.Observe.Reset();
+        }
+    }
+
+    [Fact]
+    public async Task While_Prometheus_is_away_a_host_disk_past_the_share_keeps_its_one_alert_and_its_folders_raise_none()
+    {
+        app.Observe.Reset();
+        try
+        {
+            // A share every disk is past; the model library's folder is on the host's /data, as node-exporter reports it.
+            await using var s = NewApp(new() { ["Storage:AlertPercent"] = "0" });
+            Directory.CreateDirectory(s.Library);
+            var (size, free) = StorageDisks.Space(s.Library)!.Value;
+            app.Observe.Answers["/api/v1/query"] = args => args["query"]!.StartsWith("node_filesystem_size_bytes", StringComparison.Ordinal) ? Vector(("/dev/sdb1", "/data", size))
+                : args["query"]!.StartsWith("node_filesystem_avail_bytes", StringComparison.Ordinal) ? Vector(("/dev/sdb1", "/data", free))
+                : Vector();
+            var watch = s.App.Services.GetRequiredService<StorageWatch>();
+            List<JsonArray> Posted() => [.. app.Observe.To("/api/v2/alerts").Where(r => r.Method == "POST").Select(r => JsonNode.Parse(r.Body!)!.AsArray())];
+            DateTimeOffset Ends(JsonNode alert) => DateTimeOffset.Parse(alert["endsAt"]!.GetValue<string>(), System.Globalization.CultureInfo.InvariantCulture);
+
+            await watch.CheckAsync(CancellationToken.None);
+            var raised = Assert.Single(Assert.Single(Posted()))!;
+            Assert.Equal(("/dev/sdb1", "/data"), (raised["labels"]!["device"]!.GetValue<string>(), raised["labels"]!["mountpoint"]!.GetValue<string>()));
+            var starts = raised["startsAt"]!.GetValue<string>();
+
+            // Prometheus away: the host's disk is as full as anyone knows. Its alert stays up, words and all, and the library's
+            // folder, seen by the app alone now, raises none of its own (the admins would be told twice).
+            app.Observe.Down["/api/v1/query"] = true;
+            s.Clock.Now += TimeSpan.FromMinutes(5);
+            await watch.CheckAsync(CancellationToken.None);
+            var kept = Assert.Single(Posted()[^1])!;
+            Assert.Equal(("/data", starts), (kept["labels"]!["mountpoint"]!.GetValue<string>(), kept["startsAt"]!.GetValue<string>()));
+            Assert.True(Ends(kept) > s.Clock.Now);
+            Assert.StartsWith("Disk /data is", kept["annotations"]!["summary"]!.GetValue<string>(), StringComparison.Ordinal);
+
+            // Back: the same alert, since the same time.
+            app.Observe.Down.TryRemove("/api/v1/query", out _);
+            s.Clock.Now += TimeSpan.FromMinutes(5);
+            await watch.CheckAsync(CancellationToken.None);
+            var back = Assert.Single(Posted()[^1])!;
+            Assert.Equal(("/data", starts), (back["labels"]!["mountpoint"]!.GetValue<string>(), back["startsAt"]!.GetValue<string>()));
+            Assert.True(Ends(back) > s.Clock.Now);
+        }
+        finally
+        {
+            app.Observe.Reset();
+        }
+    }
+
+    [Fact]
+    public async Task Every_replica_shows_the_app_rule_as_Alertmanager_holds_it_and_without_Alertmanager_the_disks_now()
+    {
+        app.Observe.Reset();
+        try
+        {
+            // A replica that does not lead has never looked at the disks itself.
+            await using var s = NewApp(new() { ["Storage:AlertPercent"] = "0" });
+            var admin = await new TestBrowser(s.App).SignedInAsync("admin", AppFixture.AdminPassword);
+            app.Observe.Answers["/api/v2/alerts"] = _ => """
+                [{"labels":{"alertname":"DiskAboveThreshold","severity":"warning","component":"storage","source":"app","device":"/dev/sdb1","mountpoint":"/data"},
+                  "annotations":{"summary":"Disk /data is 91% full"},"startsAt":"2026-09-20T10:00:00Z","status":{"state":"active","silencedBy":[],"inhibitedBy":[]}},
+                 {"labels":{"alertname":"DiskAboveThreshold","severity":"warning","source":"app","device":"/dev/sdc1","mountpoint":"/srv"},
+                  "annotations":{"summary":"Disk /srv is 85% full"},"startsAt":"2026-09-21T10:00:00Z","status":{"state":"suppressed","silencedBy":["s1"],"inhibitedBy":[]}},
+                 {"labels":{"alertname":"TargetDown","severity":"critical","job":"loki"},"startsAt":"2026-09-20T11:05:00Z","status":{"state":"active","silencedBy":[],"inhibitedBy":[]}}]
+                """;
+            async Task<JsonElement> RuleAsync() => (await admin.JsonAsync(await admin.GetAsync("/api/admin/alerts"))).GetProperty("rules").EnumerateArray()
+                .Single(r => r.GetProperty("name").GetString() == StorageWatch.AlertName);
+            var rule = await RuleAsync();
+            Assert.Equal(("firing", 2), (rule.GetProperty("state").GetString(), rule.GetProperty("active").GetInt32()));
+            Assert.Equal(DateTimeOffset.Parse("2026-09-20T10:00:00Z", System.Globalization.CultureInfo.InvariantCulture), rule.GetProperty("activeAt").GetDateTimeOffset());
+
+            app.Observe.Answers["/api/v2/alerts"] = _ => "[]";
+            Assert.Equal("inactive", (await RuleAsync()).GetProperty("state").GetString());
+
+            // Alertmanager away: the disks against the share now (a folder of the app's, past a share of 0).
+            app.Observe.Down["/api/v2/alerts"] = true;
+            Directory.CreateDirectory(s.Library);
+            rule = await RuleAsync();
+            Assert.Equal(("firing", 1, JsonValueKind.Null), (rule.GetProperty("state").GetString(), rule.GetProperty("active").GetInt32(), rule.GetProperty("activeAt").ValueKind));
         }
         finally
         {

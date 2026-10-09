@@ -68,7 +68,7 @@ public static partial class AlertEndpoints
     }
 
     /// <summary>Each source answers on its own: Alertmanager down still shows the rules, and the other way round.</summary>
-    private static async Task<IResult> NowAsync(AlertmanagerClient alertmanager, PromDatasource prom, Storage.StorageWatch storage,
+    private static async Task<IResult> NowAsync(AlertmanagerClient alertmanager, PromDatasource prom, Storage.StorageDisks disks,
         Microsoft.Extensions.Options.IOptionsMonitor<Storage.StorageOptions> storageOptions, CancellationToken ct)
     {
         var firing = Try(() => alertmanager.AlertsAsync(ct), "Alertmanager");
@@ -78,11 +78,17 @@ public static partial class AlertEndpoints
         // The app's own rule beside Prometheus's: a disk past the share Settings → Storage sets.
         if (list is not null)
         {
-            var above = storage.Above;
-            list = [.. list, new AlertRule("The app's own", Storage.StorageWatch.AlertName, "warning", above.Count > 0 ? "firing" : "inactive", "ok", null,
-                $"A disk's used share ≥ {storageOptions.CurrentValue.AlertPercent}%, checked by the app every 5 minutes (Settings → Storage)", 0,
+            var share = storageOptions.CurrentValue.AlertPercent;
+            // As Alertmanager holds its alerts, the same on every replica (only the leading one raises them); without
+            // Alertmanager, the disks as they are now.
+            var raised = active?.Where(a => a.Name == Storage.StorageWatch.AlertName && a.Labels.GetValueOrDefault("source") == "app").ToList();
+            var (count, since) = raised is not null
+                ? (raised.Count, raised.Select(a => (DateTimeOffset?)a.StartsAt).Min())
+                : ((await disks.ListAsync(ct)).Disks.Count(d => d.Percent >= share), null);
+            list = [.. list, new AlertRule("The app's own", Storage.StorageWatch.AlertName, "warning", count > 0 ? "firing" : "inactive", "ok", null,
+                $"A disk's used share ≥ {share}%, checked by the app every 5 minutes (Settings → Storage)", 0,
                 "A disk is fuller than Settings → Storage allows", "Raised by the app itself and given to Alertmanager; Admin → Storage shows what takes the room.",
-                above.Count, above.Count > 0 ? above.Values.Min() : null)];
+                count, since)];
         }
         return Results.Ok(new { firing = active, rules = list, errors = new { alertmanager = alertmanagerError, prometheus = prometheusError } });
     }

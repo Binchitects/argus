@@ -304,7 +304,10 @@ disk past it is an alert like the stack's own (`DiskAboveThreshold`, from the
 app): given to Alertmanager, so it fires on the Alerts page (its rule is under
 **The app's own**; the history there is Prometheus's, so it is not in it) and
 reaches the bell, email and the alerts webhook once, and it ends when the disk
-is below again.
+is below again. The rule's state is what Alertmanager holds, so every replica
+shows the same. While Prometheus does not answer, a host's disk past the share
+keeps its alert as it was, and the folders the app mounts on it raise none of
+their own.
 With Alertmanager away, the admins are told directly, once each time a disk
 passes the share. The Overview shows the fullest disk and warns about any past
 the share. Prometheus's own rules still warn at 85% and 95%.

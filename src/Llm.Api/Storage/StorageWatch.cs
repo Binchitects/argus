@@ -16,8 +16,8 @@ namespace Llm.Api.Storage;
 /// A disk fuller than Settings → Storage allows is an alert like the stack's own: given to Alertmanager (so it
 /// fires on the Alerts page, reaches the bell, email and the alerts webhook once, and Alertmanager's own
 /// receivers), resent while it lasts and ended when the disk is below again. With Alertmanager away, the admins
-/// are told directly, once each time the disk passes the share. The measures are one row a day for each thing:
-/// the storage page's trends.
+/// are told directly, once each time the disk passes the share. While Prometheus does not say what the host's disks
+/// are, their alerts stay up as they were. The measures are one row a day for each thing: the storage page's trends.
 /// </summary>
 /// <remarks>Notifications:Watch=false turns the looking off (tests, which call the checks themselves).</remarks>
 public sealed partial class StorageWatch(IServiceScopeFactory scopes, IConfiguration config, TimeProvider clock, Replicas replicas,
@@ -33,11 +33,14 @@ public sealed partial class StorageWatch(IServiceScopeFactory scopes, IConfigura
     /// <summary>What Argus keeps besides its packs: its index, mirrors, trees and the rest.</summary>
     private static readonly string[] ArgusParts = ["index_bytes", "mirrors_bytes", "trees_bytes", "other_bytes"];
 
-    /// <summary>Each disk past the share now: since when, and the labels its alert has.</summary>
-    private readonly ConcurrentDictionary<string, (DateTimeOffset Since, Dictionary<string, string> Labels)> _above = new(StringComparer.Ordinal);
+    /// <summary>A disk past the share: since when, its alert's labels and words, and whether it is the host's.</summary>
+    private sealed record Raised(DateTimeOffset Since, Dictionary<string, string> Labels, string Summary, string Description, bool Host);
 
-    /// <summary>The disks past the share at the last look, with since when.</summary>
-    public IReadOnlyDictionary<string, DateTimeOffset> Above => _above.ToDictionary(a => a.Key, a => a.Value.Since, StringComparer.Ordinal);
+    /// <summary>Each disk past the share now.</summary>
+    private readonly ConcurrentDictionary<string, Raised> _above = new(StringComparer.Ordinal);
+
+    /// <summary>The folders the app sees on no disk of the host's, the last time Prometheus said what they are; null until it has.</summary>
+    private HashSet<string>? _appOnly;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -76,7 +79,17 @@ public sealed partial class StorageWatch(IServiceScopeFactory scopes, IConfigura
         try
         {
             await using var scope = scopes.CreateAsyncScope();
-            var (disks, _) = await scope.ServiceProvider.GetRequiredService<StorageDisks>().ListAsync(ct);
+            var (all, problem) = await scope.ServiceProvider.GetRequiredService<StorageDisks>().ListAsync(ct);
+            // Without the host's disks (Prometheus away, or node-exporter), each folder the app mounts is a disk of its
+            // own. Those that were on a host's disk while Prometheus answered are left out, and that disk's alert stays
+            // up: it is as full as anyone knows. Ending it would tell the admins twice, for the folder now and for the
+            // disk again when Prometheus is back.
+            var hostKnown = problem is null;
+            if (hostKnown)
+            {
+                _appOnly = [.. all.Where(d => d.Source == "app").Select(d => d.Id)];
+            }
+            var disks = hostKnown || _appOnly is not { } appOnly ? all : [.. all.Where(d => appOnly.Contains(d.Id))];
             var threshold = options.CurrentValue.AlertPercent;
             var now = clock.GetUtcNow();
             var alerts = new JsonArray();
@@ -88,20 +101,25 @@ public sealed partial class StorageWatch(IServiceScopeFactory scopes, IConfigura
                     ["alertname"] = AlertName, ["severity"] = "warning", ["component"] = "storage", ["source"] = "app",
                     ["device"] = d.Device ?? d.Id, ["mountpoint"] = d.Name,
                 };
-                var known = _above.TryGetValue(d.Id, out var was);
-                var since = known ? was.Since : now;
-                _above[d.Id] = (since, labels);
-                if (!known)
+                var was = _above.GetValueOrDefault(d.Id);
+                var since = was?.Since ?? now;
+                _above[d.Id] = new Raised(since, labels, Summary(d), Description(d, threshold), d.Source == "host");
+                if (was is null)
                 {
                     news.Add((d, since));
                 }
                 alerts.Add(Alert(labels, Summary(d), Description(d, threshold), since, now + CheckEvery * 3));
             }
-            // Below the share again (or the share was raised): their alerts end.
-            foreach (var id in _above.Keys.Where(id => !disks.Any(d => d.Id == id && d.Percent >= threshold)).ToList())
+            foreach (var (id, raised) in _above.Where(a => !disks.Any(d => d.Id == a.Key && d.Percent >= threshold)).ToList())
             {
-                if (_above.TryRemove(id, out var gone))
+                if (raised.Host && !hostKnown)
                 {
+                    // The host's disk, not seen now: kept up as it was.
+                    alerts.Add(Alert(raised.Labels, raised.Summary, raised.Description, raised.Since, now + CheckEvery * 3));
+                }
+                else if (_above.TryRemove(id, out var gone))
+                {
+                    // Below the share again (or the share was raised): its alert ends.
                     alerts.Add(Alert(gone.Labels, null, null, gone.Since, now));
                 }
             }
