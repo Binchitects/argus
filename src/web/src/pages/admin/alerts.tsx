@@ -35,12 +35,15 @@ interface Rule {
   state: 'inactive' | 'pending' | 'firing'
   health: string
   lastError: string | null
-  query: string
+  /** Prometheus's PromQL; null for a rule the app checks itself. */
+  query: string | null
   for: number
   summary: string | null
   description: string | null
   active: number
   activeAt: string | null
+  /** What a rule the app checks itself checks, in words. */
+  checks?: string | null
 }
 
 interface Episode {
@@ -275,7 +278,7 @@ const ruleStates: Record<Rule['state'], { label: string; icon: typeof CheckCircl
   firing: { label: 'Firing', icon: XCircle, variant: 'destructive' },
 }
 
-/** The rules by group, as their files list them; a rule opens to its description and query. */
+/** The rules by group, as their files list them; a rule opens to its description and query (in words for the app's own). */
 function Rules({ rules }: { rules: Rule[] }) {
   const [show, setShow] = useState<'all' | 'active'>('all')
   const shown = show === 'all' ? rules : rules.filter((r) => r.state !== 'inactive' || r.health !== 'ok')
@@ -330,7 +333,8 @@ function RuleRow({ rule: r }: { rule: Rule }) {
         {r.description && <Field label="Why">{r.description}</Field>}
         {r.activeAt && <Field label="Condition met">{`${ago(r.activeAt)} (${when(r.activeAt)})${r.active > 1 ? `, ${r.active} series` : ''}`}</Field>}
         {r.lastError && <Field label="Error">{r.lastError}</Field>}
-        <CodeBlock code={r.query} label="PromQL" />
+        {r.checks && <Field label="Checks">{r.checks}</Field>}
+        {r.query && <CodeBlock code={r.query} label="PromQL" />}
       </div>
     </details>
   )

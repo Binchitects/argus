@@ -9,9 +9,11 @@ namespace Llm.Api.Dashboards;
 public sealed record ActiveAlert(string Name, string? Severity, string State, DateTimeOffset StartsAt, string? Summary, string? Description,
     IReadOnlyDictionary<string, string> Labels, IReadOnlyList<string> SilencedBy, IReadOnlyList<string> InhibitedBy);
 
-/// <summary>A Prometheus alerting rule: what it checks, for how long, and how it stands now.</summary>
-public sealed record AlertRule(string Group, string Name, string? Severity, string State, string Health, string? LastError, string Query, double For,
-    string? Summary, string? Description, int Active, DateTimeOffset? ActiveAt);
+/// <summary>An alerting rule, Prometheus's or the app's own: what it checks, for how long, and how it stands now.</summary>
+/// <param name="Query">The PromQL Prometheus evaluates; null for a rule the app checks itself.</param>
+/// <param name="Checks">What a rule the app checks itself checks, in words; null for Prometheus's.</param>
+public sealed record AlertRule(string Group, string Name, string? Severity, string State, string Health, string? LastError, string? Query, double For,
+    string? Summary, string? Description, int Active, DateTimeOffset? ActiveAt, string? Checks = null);
 
 /// <summary>One time an alert fired: from when to when (no end while it still fires).</summary>
 public sealed record AlertEpisode(string Name, string? Severity, IReadOnlyDictionary<string, string> Labels, DateTimeOffset Start, DateTimeOffset? End, string? Summary);
@@ -85,10 +87,9 @@ public static partial class AlertEndpoints
             var (count, since) = raised is not null
                 ? (raised.Count, raised.Select(a => (DateTimeOffset?)a.StartsAt).Min())
                 : ((await disks.ListAsync(ct)).Disks.Count(d => d.Percent >= share), null);
-            list = [.. list, new AlertRule("The app's own", Storage.StorageWatch.AlertName, "warning", count > 0 ? "firing" : "inactive", "ok", null,
-                $"A disk's used share ≥ {share}%, checked by the app every 5 minutes (Settings → Storage)", 0,
+            list = [.. list, new AlertRule("The app's own", Storage.StorageWatch.AlertName, "warning", count > 0 ? "firing" : "inactive", "ok", null, null, 0,
                 "A disk is fuller than Settings → Storage allows", "Raised by the app itself and given to Alertmanager; Admin → Storage shows what takes the room.",
-                count, since)];
+                count, since, $"A disk's used share ≥ {share}%, by the app every 5 minutes (Settings → Storage)")];
         }
         return Results.Ok(new { firing = active, rules = list, errors = new { alertmanager = alertmanagerError, prometheus = prometheusError } });
     }
