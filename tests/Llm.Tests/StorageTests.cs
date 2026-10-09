@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Llm.Api.Gateway;
+using Llm.Api.Notifications;
 using Llm.Api.Storage;
 using Llm.Core.Chat;
 using Llm.Core.Data;
@@ -620,13 +621,18 @@ public sealed class StorageTests(AppFixture app)
         },
     }.ToJsonString();
 
-    /// <summary>Alertmanager as it holds what the app gives it: each alert by its labels as last posted, while its end is ahead.</summary>
+    /// <summary>
+    /// Alertmanager as it holds what the app gives it: each alert by its labels as last posted, while its end is ahead,
+    /// with its start to the millisecond (as Alertmanager's API writes times).
+    /// </summary>
     private void AlertmanagerHolds(MovableClock clock) => app.Observe.Answers["/api/v2/alerts"] = _ => new JsonArray([.. app.Observe.To("/api/v2/alerts")
         .Where(r => r.Method == "POST").SelectMany(r => JsonNode.Parse(r.Body!)!.AsArray()).GroupBy(a => a!["labels"]!.ToJsonString()).Select(g => g.Last()!)
         .Where(a => DateTimeOffset.Parse(a["endsAt"]!.GetValue<string>(), System.Globalization.CultureInfo.InvariantCulture) > clock.Now)
         .Select(a => (JsonNode)new JsonObject
         {
-            ["labels"] = a["labels"]!.DeepClone(), ["annotations"] = a["annotations"]?.DeepClone() ?? new JsonObject(), ["startsAt"] = a["startsAt"]!.DeepClone(),
+            ["labels"] = a["labels"]!.DeepClone(), ["annotations"] = a["annotations"]?.DeepClone() ?? new JsonObject(),
+            ["startsAt"] = DateTimeOffset.Parse(a["startsAt"]!.GetValue<string>(), System.Globalization.CultureInfo.InvariantCulture).UtcDateTime
+                .ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", System.Globalization.CultureInfo.InvariantCulture),
             ["status"] = new JsonObject { ["state"] = "active", ["silencedBy"] = new JsonArray(), ["inhibitedBy"] = new JsonArray() },
         })]).ToJsonString();
 
@@ -680,11 +686,19 @@ public sealed class StorageTests(AppFixture app)
             // Alertmanager away: the admins are told directly, once each time it passes the share.
             app.Observe.Down["/api/v2/alerts"] = true;
             free = 50;
+            s.Clock.Now += TimeSpan.FromTicks(1234);
             await watch.CheckAsync(CancellationToken.None);
             await watch.CheckAsync(CancellationToken.None);
-            var bell = (await admin.JsonAsync(await admin.GetAsync("/api/notifications"))).GetProperty("items").EnumerateArray()
-                .Where(n => n.GetProperty("title").GetString() == "Warning: Disk /data is 95% full").ToList();
-            Assert.Equal("/admin/storage", Assert.Single(bell).GetProperty("link").GetString());
+            async Task<List<JsonElement>> BellAsync() => [.. (await admin.JsonAsync(await admin.GetAsync("/api/notifications"))).GetProperty("items").EnumerateArray()
+                .Where(n => n.GetProperty("title").GetString() == "Warning: Disk /data is 95% full")];
+            Assert.Equal("/admin/storage", Assert.Single(await BellAsync()).GetProperty("link").GetString());
+
+            // Alertmanager back: it takes the same alert, and the news of it is the news they had.
+            app.Observe.Down.TryRemove("/api/v2/alerts", out _);
+            s.Clock.Now += TimeSpan.FromMinutes(5);
+            await watch.CheckAsync(CancellationToken.None);
+            await f.Services.GetRequiredService<NewsWatch>().CheckAlertsAsync(CancellationToken.None);
+            Assert.Equal("/admin/storage", Assert.Single(await BellAsync()).GetProperty("link").GetString());
         }
         finally
         {

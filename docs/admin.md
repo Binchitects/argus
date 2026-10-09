@@ -309,7 +309,7 @@ shows the same. While Prometheus does not answer, a host's disk past the share
 keeps its alert as it was, and the folders the app mounts on it raise none of
 their own.
 With Alertmanager away, the admins are told directly, once each time a disk
-passes the share. The Overview shows the fullest disk and warns about any past
+passes the share, and not again for it when Alertmanager is back. The Overview shows the fullest disk and warns about any past
 the share. Prometheus's own rules still warn at 85% and 95%.
 
 **Files.** The chat's files and what the tools made: whose, which chat, from

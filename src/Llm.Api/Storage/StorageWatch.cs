@@ -16,8 +16,9 @@ namespace Llm.Api.Storage;
 /// A disk fuller than Settings → Storage allows is an alert like the stack's own: given to Alertmanager (so it
 /// fires on the Alerts page, reaches the bell, email and the alerts webhook once, and Alertmanager's own
 /// receivers), resent while it lasts and ended when the disk is below again. With Alertmanager away, the admins
-/// are told directly, once each time the disk passes the share. While Prometheus does not say what the host's disks
-/// are, their alerts stay up as they were. The measures are one row a day for each thing: the storage page's trends.
+/// are told directly, once each time the disk passes the share (and not again when Alertmanager is back). While
+/// Prometheus does not say what the host's disks are, their alerts stay up as they were. The measures are one row a
+/// day for each thing: the storage page's trends.
 /// </summary>
 /// <remarks>Notifications:Watch=false turns the looking off (tests, which call the checks themselves).</remarks>
 public sealed partial class StorageWatch(IServiceScopeFactory scopes, IConfiguration config, TimeProvider clock, Replicas replicas,
@@ -93,7 +94,7 @@ public sealed partial class StorageWatch(IServiceScopeFactory scopes, IConfigura
             var threshold = options.CurrentValue.AlertPercent;
             var now = clock.GetUtcNow();
             var alerts = new JsonArray();
-            var news = new List<(Disk Disk, DateTimeOffset Since)>();
+            var news = new List<(Disk Disk, Dictionary<string, string> Labels, DateTimeOffset Since)>();
             foreach (var d in disks.Where(d => d.Percent >= threshold))
             {
                 var labels = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -102,11 +103,11 @@ public sealed partial class StorageWatch(IServiceScopeFactory scopes, IConfigura
                     ["device"] = d.Device ?? d.Id, ["mountpoint"] = d.Name,
                 };
                 var was = _above.GetValueOrDefault(d.Id);
-                var since = was?.Since ?? now;
+                var since = was?.Since ?? ToTheMillisecond(now);
                 _above[d.Id] = new Raised(since, labels, Summary(d), Description(d, threshold), d.Source == "host");
                 if (was is null)
                 {
-                    news.Add((d, since));
+                    news.Add((d, labels, since));
                 }
                 alerts.Add(Alert(labels, Summary(d), Description(d, threshold), since, now + CheckEvery * 3));
             }
@@ -133,13 +134,14 @@ public sealed partial class StorageWatch(IServiceScopeFactory scopes, IConfigura
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or DatasourceException && !ct.IsCancellationRequested)
             {
-                // Alertmanager is away: the admins are told here, once each time a disk passes the share.
+                // Alertmanager is away: the admins are told here, once each time a disk passes the share. The news has the
+                // key Alertmanager's would have, so when it is back and takes the alert, they are not told again.
                 LogNoAlertmanager(logger, ex.Message);
                 var delivery = scope.ServiceProvider.GetRequiredService<NewsDelivery>();
-                foreach (var (d, since) in news)
+                foreach (var (d, labels, since) in news)
                 {
                     await delivery.ToAdminsAsync(new News("alert", "Warning: " + Summary(d), Description(d, threshold), "/admin/storage",
-                        $"storage:{d.Id}:{threshold}:{since.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)}"), ct);
+                        NewsWatch.AlertKey(AlertName, labels, since)), ct);
                 }
             }
         }
@@ -149,6 +151,9 @@ public sealed partial class StorageWatch(IServiceScopeFactory scopes, IConfigura
             LogSkipped(logger, "the disks", ex.Message);
         }
     }
+
+    /// <summary>A start as Alertmanager gives it back, to the millisecond: the news told without it then has the key it would have.</summary>
+    private static DateTimeOffset ToTheMillisecond(DateTimeOffset t) => DateTimeOffset.FromUnixTimeMilliseconds(t.ToUnixTimeMilliseconds());
 
     private static string Summary(Disk d) => $"Disk {d.Name} is {d.Percent.ToString("0", CultureInfo.InvariantCulture)}% full";
 
