@@ -247,7 +247,7 @@ public sealed class RateLimits(AppDbContext db, AccessService access, ILiteLlm g
         {
             return (slot, null);
         }
-        return (null, $"Your API key reached its limit of {most.ToString(CultureInfo.InvariantCulture)} requests a minute; pictures, speech and video made " +
+        return (null, $"Your API key reached its limit of {(most == 1 ? "1 request" : $"{most.ToString(CultureInfo.InvariantCulture)} requests")} a minute; pictures, speech and video made " +
             "through Arena MCP count too. Try again in a minute. Your account → API key shows your limits and what you used.");
     }
 

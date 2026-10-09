@@ -402,7 +402,10 @@ public sealed class RateLimitTests(AppFixture app)
         try
         {
             await LogAsync(run + "1", gateway.KeysOf(q.Email).Single().Token, q.Email, DateTimeOffset.UtcNow.AddSeconds(-5), total: 10);
-            Assert.True((await McpCallAsync(f, q.Key, "generate_image", picture)).IsError);
+            var (one, refused) = await McpCallAsync(f, q.Key, "generate_image", picture);
+            Assert.True(refused);
+            // One request, not "1 requests".
+            Assert.StartsWith("Your API key reached its limit of 1 request a minute;", one, StringComparison.Ordinal);
         }
         finally
         {

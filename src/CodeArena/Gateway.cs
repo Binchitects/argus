@@ -346,18 +346,21 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
             HttpStatusCode.NotFound when detail.Length == 0 || detail.StartsWith('<') =>
                 new GatewayException($"{BaseUrl} has no OpenAI API (404). Is this the gateway's address (https://gateway.DOMAIN)?", 404),
             HttpStatusCode.TooManyRequests when RateLimit().Match(detail) is { Success: true } m && m.Groups[1].Value == "requests" =>
-                new GatewayException($"Your API key reached its limit of {m.Groups[2].Value} requests a minute. Try again in a minute; " +
+                new GatewayException($"Your API key reached its limit of {Count(m.Groups[2].Value, "request")} a minute. Try again in a minute; " +
                     "Your account → API key shows your limits and what you used.", 429, perMinute: true),
             // The gateway counts a request's prompt and answer before it runs: one bigger than the limit is refused every minute.
             HttpStatusCode.TooManyRequests when RateLimit().Match(detail) is { Success: true } m && m.Groups[1].Value == "tokens" =>
-                new GatewayException($"Your API key reached its limit of {m.Groups[2].Value} tokens a minute. Try again in a minute; " +
+                new GatewayException($"Your API key reached its limit of {Count(m.Groups[2].Value, "token")} a minute. Try again in a minute; " +
                     "a request bigger than the limit (its prompt and the answer it asks for) is refused every time, so if this one is, " +
                     "make it smaller (/compact) or ask an admin to raise the limit. Your account → API key shows your limits and what you used.", 429, perMinute: true),
             HttpStatusCode.TooManyRequests when RateLimit().Match(detail) is { Success: true } m && m.Groups[1].Value == "max_parallel_requests" =>
-                new GatewayException($"Your API key reached its limit of {m.Groups[2].Value} requests at once. Wait for one to finish, then try again.", 429),
+                new GatewayException($"Your API key reached its limit of {Count(m.Groups[2].Value, "request")} at once. Wait for one to finish, then try again.", 429),
             _ => new GatewayException($"The gateway answered {(int)status}: {detail}", (int)status),
         };
     }
+
+    /// <summary>A limit with its word: "1 request", "60 requests".</summary>
+    private static string Count(string limit, string one) => limit == "1" ? $"1 {one}" : $"{limit} {one}s";
 
     /// <summary>The gateway's (LiteLLM's) refusal for a key's rate limit: "Limit type: requests. Current limit: 60, …".</summary>
     [GeneratedRegex(@"Limit type: (\w+)\. Current limit: (\d+)")]

@@ -45,6 +45,16 @@ public sealed class GatewayRateLimitTests
     }
 
     [Theory]
+    [InlineData("requests", "Your API key reached its limit of 1 request a minute.")]
+    [InlineData("tokens", "Your API key reached its limit of 1 token a minute.")]
+    [InlineData("max_parallel_requests", "Your API key reached its limit of 1 request at once.")]
+    public async Task A_limit_of_one_says_request_or_token_not_requests(string type, string start)
+    {
+        var e = await RefusedAsync(HttpStatusCode.TooManyRequests, Over(type, 1));
+        Assert.StartsWith(start, e.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("requests")]
     [InlineData("tokens")]
     public async Task A_key_past_its_limit_a_minute_is_not_asked_again_within_seconds(string limit)
