@@ -97,7 +97,9 @@ setting ([admin.md](admin.md#credit-for-groups)).
 
 **Settings → API keys → Requests a minute, per key** and **Tokens a minute,
 per key** are the company's rate limits for API keys at the gateway: 0 (the
-default, and what an upgrade from v5.2.0 keeps) is no limit. A request past
+default, and what an upgrade from v5.2.0 keeps) is no limit; a limit already
+put on a key in the gateway's own pages is kept as its person's own
+([admin.md](admin.md#rate-limits-for-api-keys)). A request past
 one is refused with HTTP 429 and `Retry-After`. A group's own (above) replaces
 them for its members, and a person's own (Admin → People) replaces both. A
 change reaches every key within seconds. The chat is never limited by them.

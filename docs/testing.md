@@ -78,7 +78,9 @@ request a minute is refused past it with HTTP 429, `Retry-After` and
 and the chat answers meanwhile (checks named `rate`). `RateLimitTests` covers
 the rest without a stack: the company's, a group's and a person's own, the
 key sync (two replicas, a change made while it runs), new keys a few an hour,
-Arena MCP's pictures counted, and refusals counted apart from requests.
+Arena MCP's pictures counted (a slow one in the minute it started only),
+refusals counted apart from requests, and an upgrade from v5.2.0 that keeps a
+limit a key already carried as its person's own.
 Missing: behaviour when the engine is down (retry, then a clear error).
 
 ### S5 — Argus *(strong unit, weak integration)*

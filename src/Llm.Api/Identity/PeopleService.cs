@@ -197,9 +197,11 @@ public sealed partial class PeopleService(
     public async Task<Secrets> RotateKeyAsync(AppUser user)
     {
         var old = await gateway.KeysAsync(user.Email!);
+        // Before the old keys go: a limit they carried from before the upgrade to rate limits is kept.
+        var rate = await rateLimits.ForNewKeyAsync(user, old);
         await gateway.DeleteKeysAsync(old.Select(k => k.Token));
         await gateway.EnsureUserAsync(user.Email!);
-        var key = await gateway.GenerateKeyAsync(user.Email!, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel, (await rateLimits.ForAsync(user)).Key);
+        var key = await gateway.GenerateKeyAsync(user.Email!, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel, rate);
         await audit.WriteAsync("person.rotate_key", user.UserName, detail: $"revoked {old.Count}");
         return new Secrets(null, key);
     }

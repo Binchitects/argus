@@ -21,6 +21,8 @@ public sealed class FakeGateway : ILiteLlm
         public string? TeamId { get; set; }
         /// <summary>Its requests and tokens a minute.</summary>
         public KeyRate Rate { get; set; } = KeyRate.None;
+        /// <summary>When it was made: a test sets an earlier time for a key made before an upgrade.</summary>
+        public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
     }
 
     /// <summary>Every rate the app set on a key, in order (the key's hashed token and the rate), so tests see what changed.</summary>
@@ -120,7 +122,7 @@ public sealed class FakeGateway : ILiteLlm
         {
             await before(email);
         }
-        return [.. KeysOf(email).Select(k => new GatewayKey(k.Token, k.Alias, "sk-...", 0, k.Blocked, DateTimeOffset.UtcNow, k.Models, k.MaxParallel, k.TeamId, k.Rate))];
+        return [.. KeysOf(email).Select(k => new GatewayKey(k.Token, k.Alias, "sk-...", 0, k.Blocked, k.CreatedAt, k.Models, k.MaxParallel, k.TeamId, k.Rate))];
     }
 
     /// <summary>The keys looked up by the key itself (each one asked about), so tests can see what was cached.</summary>

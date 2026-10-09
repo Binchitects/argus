@@ -673,29 +673,38 @@ public sealed class RateLimitTests(AppFixture app)
         }
     }
 
+    /// <summary>A database as v5.2.0 left it (the migrations before rate limits), with these rows put in: the app has not started on it yet.</summary>
+    private static async Task<AppDbContext> V520Async(string cs, string rows)
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>();
+        options.UseNpgsql(cs);
+        options.UseOpenIddict<Guid>();
+        var db = new AppDbContext(options.Options);
+        var all = db.Database.GetMigrations().ToList();
+        await db.GetService<IMigrator>().MigrateAsync(all[all.FindIndex(m => m.EndsWith("_RateLimits", StringComparison.Ordinal)) - 1]);
+        await using var conn = new NpgsqlConnection(cs);
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand(rows, conn);
+        await cmd.ExecuteNonQueryAsync();
+        return db;
+    }
+
+    /// <summary>A person as v5.2.0 kept them.</summary>
+    private static string OldPerson(int n, string name) => $"""
+        INSERT INTO "AspNetUsers" ("Id","UserName","NormalizedUserName","Email","NormalizedEmail","EmailConfirmed","PhoneNumberConfirmed","TwoFactorEnabled","LockoutEnabled","AccessFailedCount","DisplayName","Source","IsDisabled","CreatedAt","CacheApiAnswers","MemoryOff")
+          VALUES ('00000000-0000-0000-0000-0000000000{n:x2}','{name}','{name.ToUpperInvariant()}','{name}@example.test','{name.ToUpperInvariant()}@EXAMPLE.TEST',true,false,false,true,0,'{name}',0,false,now(),false,false);
+        """;
+
     [Fact]
     public async Task A_v5_2_0_database_keeps_its_people_and_groups_with_no_limits()
     {
         var cs = app.ConnectionStringFor("ratesup_" + Guid.NewGuid().ToString("N")[..8]);
-        var options = new DbContextOptionsBuilder<AppDbContext>();
-        options.UseNpgsql(cs);
-        options.UseOpenIddict<Guid>();
-        await using var db = new AppDbContext(options.Options);
-        var migrator = db.GetService<IMigrator>();
-        var all = db.Database.GetMigrations().ToList();
-        await migrator.MigrateAsync(all[all.FindIndex(m => m.EndsWith("_RateLimits", StringComparison.Ordinal)) - 1]);
-        await using (var conn = new NpgsqlConnection(cs))
-        {
-            await conn.OpenAsync();
-            await using var cmd = new NpgsqlCommand("""
-                INSERT INTO "AspNetUsers" ("Id","UserName","NormalizedUserName","Email","NormalizedEmail","EmailConfirmed","PhoneNumberConfirmed","TwoFactorEnabled","LockoutEnabled","AccessFailedCount","DisplayName","Source","IsDisabled","CreatedAt","CacheApiAnswers","MemoryOff")
-                  VALUES ('00000000-0000-0000-0000-0000000000b1','old','OLD','old@example.test','OLD@EXAMPLE.TEST',true,false,false,true,0,'Old',0,false,now(),false,false);
-                INSERT INTO groups ("Id","Name","Scim","Priority","CreatedAt","CreditPerMember","Credit")
-                  VALUES ('00000000-0000-0000-0000-0000000000b2','Old group',false,0,now(),false,5);
-                """, conn);
-            await cmd.ExecuteNonQueryAsync();
-        }
-        await migrator.MigrateAsync();
+        await using var db = await V520Async(cs, OldPerson(0xb1, "old") + """
+            INSERT INTO groups ("Id","Name","Scim","Priority","CreatedAt","CreditPerMember","Credit")
+              VALUES ('00000000-0000-0000-0000-0000000000b2','Old group',false,0,now(),false,5);
+            """);
+        var upgraded = DateTimeOffset.UtcNow;
+        await db.GetService<IMigrator>().MigrateAsync();
 
         var user = await db.Users.AsNoTracking().SingleAsync(u => u.UserName == "old");
         var group = await db.Groups.AsNoTracking().SingleAsync(g => g.Name == "Old group");
@@ -704,5 +713,72 @@ public sealed class RateLimitTests(AppFixture app)
         // Nothing set anywhere, and the company's default is none: no limit.
         Assert.Equal(new RateLimit(null, "none"), RateLimits.Resolve(user.RequestsPerMinute, [(group.Name, group.RequestsPerMinute)], new RateLimitOptions().RequestsPerMinute));
         Assert.Equal(new RateLimit(null, "none"), RateLimits.Resolve(user.TokensPerMinute, [(group.Name, group.TokensPerMinute)], new RateLimitOptions().TokensPerMinute));
+        // The upgrade says when it ran, so the first key check keeps the limits keys made before it carry.
+        var keep = await db.Settings.AsNoTracking().SingleAsync(x => x.Key == RateLimits.KeepRow);
+        Assert.InRange(keep.UpdatedAt, upgraded.AddMinutes(-1), DateTimeOffset.UtcNow.AddMinutes(1));
+    }
+
+    [Fact]
+    public async Task An_upgrade_keeps_a_limit_a_key_carried_from_the_gateways_own_pages_as_its_persons_own()
+    {
+        var cs = app.ConnectionStringFor("ratesup_" + Guid.NewGuid().ToString("N")[..8]);
+        await (await V520Async(cs, OldPerson(0xc1, "held") + OldPerson(0xc2, "two") + OldPerson(0xc3, "free") + OldPerson(0xc4, "renewed"))).DisposeAsync();
+        var gateway = new FakeGateway();
+        FakeGateway.Key Made(string name, KeyRate rate)
+        {
+            // Made on v5.2.0, a month before the upgrade.
+            var key = new FakeGateway.Key
+            {
+                Secret = "sk-" + Guid.NewGuid().ToString("N"), Token = Guid.NewGuid().ToString("N"), Email = $"{name}@example.test", Alias = "app-" + name, Rate = rate,
+                CreatedAt = DateTimeOffset.UtcNow.AddDays(-30),
+            };
+            gateway.Keys[key.Token] = key;
+            return key;
+        }
+        // On v5.2.0 an admin held back a runaway script in LiteLLM's own pages: 10 requests a minute on its owner's key.
+        var held = Made("held", new KeyRate(10, null));
+        // Two keys, limited each its own way: the strictest of each kind is kept.
+        FakeGateway.Key[] two = [Made("two", new KeyRate(null, 5000)), Made("two", new KeyRate(20, 9000))];
+        var free = Made("free", KeyRate.None);
+        var renewed = Made("renewed", new KeyRate(7, null));
+
+        // The upgrade: the app starts on the database and migrates it (no admin is made: it has people).
+        await using var f = app.Create(cs, gateway);
+        _ = f.Server;
+        await using var scope = f.Services.CreateAsyncScope();
+        var services = scope.ServiceProvider;
+        var db = services.GetRequiredService<AppDbContext>();
+        var people = services.GetRequiredService<Llm.Api.Identity.PeopleService>();
+        // A new key made before the first key check gets the limit the old one carried, not none.
+        await people.RotateKeyAsync((await people.FindAsync(Guid.Parse("00000000-0000-0000-0000-0000000000c4")))!);
+        Assert.Equal(new KeyRate(7, null), gateway.KeysOf("renewed@example.test").Single().Rate);
+
+        // The first key check after the upgrade (the replica that leads runs it soon after it starts).
+        var rates = services.GetRequiredService<RateLimits>();
+        await rates.SyncAsync();
+        // Nothing lifted: the held key never carried less.
+        Assert.Equal(new KeyRate(10, null), held.Rate);
+        Assert.DoesNotContain(gateway.RateChanges, c => c.Token == held.Token);
+        Assert.All(two, k => Assert.Equal(new KeyRate(20, 5000), k.Rate));
+        Assert.Equal(KeyRate.None, free.Rate);
+        // The limits are their own now (the admin's page shows them and can change them), and each was audited.
+        var mine = await rates.ForAsync(await db.Users.AsNoTracking().SingleAsync(u => u.UserName == "held"));
+        Assert.Equal((new RateLimit(10, "person"), new RateLimit(null, "none")), (mine.RequestsPerMinute, mine.TokensPerMinute));
+        var audit = await db.AuditEvents.AsNoTracking().Where(e => e.Action == "person.set_limits").ToDictionaryAsync(e => e.Target!, e => e.Detail);
+        Assert.Equal(new Dictionary<string, string?>
+        {
+            ["held"] = "kept from their API key, set at the gateway before the upgrade: requests a minute 10",
+            ["two"] = "kept from their API key, set at the gateway before the upgrade: requests a minute 20; tokens a minute 5,000",
+            ["renewed"] = "kept from their API key, set at the gateway before the upgrade: requests a minute 7",
+        }, audit);
+        Assert.False(await db.Settings.AnyAsync(x => x.Key == RateLimits.KeepRow));
+        var unlimited = await db.Users.AsNoTracking().SingleAsync(u => u.UserName == "free");
+        Assert.Equal(((int?)null, (int?)null), (unlimited.RequestsPerMinute, unlimited.TokensPerMinute));
+
+        // Once done, a key carries the app's limits: one set in the gateway's own pages now is replaced, not kept.
+        free.Rate = new KeyRate(3, null);
+        await rates.SyncAsync();
+        Assert.Equal(KeyRate.None, free.Rate);
+        Assert.Null(await db.Users.Where(u => u.UserName == "free").Select(u => u.RequestsPerMinute).SingleAsync());
     }
 }

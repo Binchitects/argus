@@ -341,7 +341,15 @@ from the company's limit. A person in several groups gets the most generous:
 a group that needs more is not held back by a broader one with less, and a
 person's own holds back anyone who needs it. (Credit and safeguards are the
 other way: the strictest group applies.) Out of the box nothing is set, so
-nothing is limited; an upgrade from v5.2.0 sets nothing either.
+nothing is limited, and an upgrade from v5.2.0 sets nothing either, with one
+exception: a limit an admin already put on a key in the gateway's own pages
+(LiteLLM's `/ui`, the only way to limit a key before) is kept. The first key
+check after the upgrade makes it its person's own, the strictest of their
+keys' for each of the two, where it is stricter than what they would get and
+they have none of their own; it is audited (`person.set_limits`, "kept from
+their API key") and logged, and shows on their page, where you can change it.
+A **New key** made before that check keeps it too. From then on the app's
+limits are the keys'.
 
 Each of a person's keys carries the limits: the app gives each person one key,
 and **New key** makes the next with the same limits, so they are the person's.
@@ -373,7 +381,8 @@ them.
   members and the company's within seconds (the same check that keeps each
   key's models in step, on the replica that leads), and every ten minutes
   (directory groups change on their own). A limit set in the gateway's own
-  pages is replaced by the app's.
+  pages is replaced by the app's (one set there before the upgrade is kept, as
+  above).
 - **The chat is not limited by these.** Its requests go with the chat's own
   key, which carries none: the chat has its fair line (Settings → Chat).
   Answers from the [answer cache](#the-answer-cache-for-api-keys) do not count
