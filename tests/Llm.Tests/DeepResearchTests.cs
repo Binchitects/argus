@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Llm.Api.Chat;
 using Llm.Api.Chat.Tools;
+using Llm.Api.Gateway;
 using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace Llm.Tests;
@@ -236,6 +237,60 @@ public sealed class DeepResearchTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Scheduled_tasks_are_not_offered_deep_research_while_it_asks_first_nor_Compare_at_all()
+    {
+        var gateway = new FakeGateway();
+        gateway.Models.Add(new GatewayModel("Other-Model", 32768, 4096, Vision: false, Tools: true, Thinking: true, null, null, null));
+        await using var f = app.Create(app.ConnectionStringFor("research_" + Guid.NewGuid().ToString("N")[..8]), gateway);
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (b, _, _, _) = await PersonAsync(f);
+        var marker = "unwatched-" + Guid.NewGuid().ToString("N")[..8];
+
+        // In the person's own chat the model is offered it (on in new chats).
+        await EventsAsync(await b.PostAsync($"/api/chat/conversations/{await NewChatAsync(b)}/messages", new { content = $"{marker}-web" }));
+        Assert.Contains(ResearchTool.Function, Functions(Assert.Single(AnswerRequests($"{marker}-web"))));
+
+        // A scheduled task's answer has nobody to press Allow: not offered while it asks first, and the run ends without waiting.
+        var made = await b.PostAsync("/api/tasks", new { name = "Weekly research", prompt = $"{marker}-task", cron = "0 9 * * 1", timeZone = "Europe/Berlin" });
+        await StatusAssert.Is(HttpStatusCode.Created, made);
+        var task = (await b.JsonAsync(made)).GetProperty("id").GetGuid();
+        async Task<JsonObject> RunTaskAsync(int count)
+        {
+            await StatusAssert.Is(HttpStatusCode.Accepted, await b.PostAsync($"/api/tasks/{task}/run"));
+            for (var i = 0; ; i++)
+            {
+                var runs = (await b.JsonAsync(await b.GetAsync($"/api/tasks/{task}/runs"))).EnumerateArray().ToList();
+                if (runs.Count(r => r.GetProperty("status").GetString() != "running") >= count)
+                {
+                    Assert.Equal("done", runs[0].GetProperty("status").GetString());
+                    return AnswerRequests($"{marker}-task").Last();
+                }
+                Assert.True(i < 200, "the task's run never ended");
+                await Task.Delay(100);
+            }
+        }
+        var asked = Functions(await RunTaskAsync(1));
+        Assert.NotEmpty(asked);
+        Assert.DoesNotContain(ResearchTool.Function, asked);
+
+        // Compare: neither model is offered it (deep research is one model's report).
+        var compared = await b.PostAsync($"/api/chat/conversations/{await NewChatAsync(b)}/compare", new { content = $"{marker}-compare" });
+        await StatusAssert.Is(HttpStatusCode.OK, compared);
+        await compared.Content.ReadAsStringAsync();
+        var both = AnswerRequests($"{marker}-compare");
+        Assert.Equal(2, both.Select(r => r["model"]!.GetValue<string>()).Distinct().Count());
+        Assert.All(both, r => Assert.DoesNotContain(ResearchTool.Function, Functions(r)));
+
+        // Not asking first (an admin's choice): a task may start one, as the person could. Compare still not.
+        await StatusAssert.Is(HttpStatusCode.NoContent, await SetResearchAsync(admin, askFirst: false));
+        Assert.Contains(ResearchTool.Function, Functions(await RunTaskAsync(2)));
+        var again = await b.PostAsync($"/api/chat/conversations/{await NewChatAsync(b)}/compare", new { content = $"{marker}-again" });
+        await again.Content.ReadAsStringAsync();
+        Assert.Equal(2, AnswerRequests($"{marker}-again").Count);
+        Assert.All(AnswerRequests($"{marker}-again"), r => Assert.DoesNotContain(ResearchTool.Function, Functions(r)));
+    }
+
+    [Fact]
     public async Task Arena_MCP_runs_deep_research_in_a_chat_of_the_persons_own_and_says_why_when_it_cannot()
     {
         await using var f = NewApp(new() { ["Auth:DataKey"] = "a-data-key-for-research-tests", ["Web:AllowedSites"] = "docs.example.test" });
@@ -262,7 +317,11 @@ public sealed class DeepResearchTests(AppFixture app)
         async Task<JsonElement?> ListedAsync() => (await RpcAsync("tools/list", new { })).Answer.GetProperty("result").GetProperty("tools").EnumerateArray()
             .Cast<JsonElement?>().FirstOrDefault(t => t!.Value.GetProperty("name").GetString() == ResearchTool.Function);
 
-        // Served, asking first (the client asks the person, as the chat would).
+        async Task<JsonElement> InfoAsync() => await b.JsonAsync(await b.GetAsync("/api/account/mcp"));
+
+        // Served, asking first (the client asks the person, as the chat would), and Connect your tools says so.
+        Assert.Contains((await InfoAsync()).GetProperty("tools").EnumerateArray(), t => t.GetProperty("id").GetString() == "research" && t.GetProperty("askFirst").GetBoolean());
+        Assert.Empty((await InfoAsync()).GetProperty("notServed").EnumerateArray());
         var listed = await ListedAsync();
         Assert.NotNull(listed);
         Assert.True(listed.Value.GetProperty("annotations").GetProperty("destructiveHint").GetBoolean());
@@ -300,6 +359,17 @@ public sealed class DeepResearchTests(AppFixture app)
         var why = (await RpcAsync("tools/call", new { name = ResearchTool.Function, arguments = new { question = "Codecs" } })).Answer.GetProperty("result");
         Assert.True(why.GetProperty("isError").GetBoolean());
         Assert.Contains("start deep research in the chat instead", why.GetProperty("content")[0].GetProperty("text").GetString(), StringComparison.Ordinal);
+        // Connect your tools does not list it as served, and says why.
+        var info = await InfoAsync();
+        Assert.DoesNotContain(info.GetProperty("tools").EnumerateArray(), t => t.GetProperty("id").GetString() == "research");
+        Assert.Contains(info.GetProperty("tools").EnumerateArray(), t => t.GetProperty("id").GetString() == "web");
+        var notServed = Assert.Single(info.GetProperty("notServed").EnumerateArray());
+        Assert.Equal("Deep research", notServed.GetProperty("title").GetString());
+        Assert.Contains("start deep research in the chat instead", notServed.GetProperty("why").GetString(), StringComparison.Ordinal);
+        // A name no tool has is still that, not deep research's refusal.
+        var unknown = (await RpcAsync("tools/call", new { name = "fnd_symbol", arguments = new { name = "Parser" } })).Answer;
+        Assert.Equal(-32602, unknown.GetProperty("error").GetProperty("code").GetInt32());
+        Assert.Contains("fnd_symbol", unknown.GetProperty("error").GetProperty("message").GetString(), StringComparison.Ordinal);
 
         // Taken away from the person: not there at all.
         await StatusAssert.Is(HttpStatusCode.NoContent, await SetResearchAsync(admin, audience: "Admins"));

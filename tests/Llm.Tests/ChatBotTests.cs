@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -117,6 +118,34 @@ public sealed class ChatBotTests(AppFixture app) : IDisposable
         Assert.Equal(1, slack.GetProperty("threads").GetInt32());
         Assert.False(platforms.Single(p => p.GetProperty("name").GetString() == "email").GetProperty("ready").GetBoolean());
         await StatusAssert.Is(HttpStatusCode.Forbidden, await b.GetAsync("/api/admin/bots"));
+    }
+
+    [Fact]
+    public async Task A_bot_answer_is_not_offered_deep_research_while_it_asks_first()
+    {
+        await using var f = NewApp();
+        var (_, email) = await PersonAsync(f);
+        _platforms.SlackEmails["U3"] = email;
+        var marker = "bot-" + Guid.NewGuid().ToString("N")[..8];
+        async Task<List<string>> AskAsync(string ts)
+        {
+            await StatusAssert.Is(HttpStatusCode.OK, await SlackAsync(f, Mention("U3", $"<@UBOT> {marker}-{ts} What changed in vector databases?", ts: ts)));
+            // Answered in its thread at once: nothing waited for an Allow nobody in the thread can press.
+            await _platforms.WaitAsync("slack.com", "/api/chat.postMessage", p => p.Body.Contains($"\"{ts}\"", StringComparison.Ordinal));
+            var request = app.Model.Requests.Select(r => r.Body).Last(r => r["tools"] is not null && r["messages"]!.ToJsonString().Contains($"{marker}-{ts}", StringComparison.Ordinal));
+            return [.. request["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>())];
+        }
+
+        // As installed, deep research asks first: the bot's answer has the person's other tools, not it.
+        var asked = await AskAsync("4.1");
+        Assert.NotEmpty(asked);
+        Assert.DoesNotContain("deep_research", asked);
+
+        // An admin lets the model start one without asking: then it is offered, as in the person's chat.
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/tools/research", UriKind.Relative),
+            new { enabled = true, audience = "Everyone", groups = Array.Empty<Guid>(), onByDefault = true, askFirst = false }));
+        Assert.Contains("deep_research", await AskAsync("4.2"));
     }
 
     [Fact]
