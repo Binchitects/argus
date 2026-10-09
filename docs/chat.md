@@ -580,7 +580,9 @@ company's** puts them all back.
 - **A text is read in the voice of its language**: Persian text in your Persian
   voice when English is the one you speak. The language is told by the
   text's script (Persian, Hindi, Japanese, Chinese) and, in the Latin script,
-  by its small words (English, Spanish, French, Italian, Portuguese). A Latin
+  by its small words (English, Spanish, French, Italian, Portuguese). A small
+  word English writes too ("as", "do", "per") counts for another language only
+  beside one of its own, so "As far as I know." is not Portuguese. A Latin
   text whose words do not tell (a short sentence, a name) takes the language
   of what came before it in Talk, else the language you speak when it is one
   of these, else English. A language with no voice is read in the voice of the

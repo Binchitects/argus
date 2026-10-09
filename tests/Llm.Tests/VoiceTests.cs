@@ -647,6 +647,17 @@ public sealed class VoiceTests(AppFixture app)
     [InlineData("¡Hola!", null)]
     [InlineData("Vado in Italia.", null)]
     [InlineData("", null)]
+    // Small words English writes too ("as", "do", "per", "OS") are not another language's alone...
+    [InlineData("As far as I know.", null)]
+    [InlineData("Do as I say.", null)]
+    [InlineData("As soon as possible.", null)]
+    [InlineData("As well as Rome.", null)]
+    [InlineData("Which OS, Linux or DOS?", null)]
+    [InlineData("The fee is five euros per day, non refundable.", "en")]
+    [InlineData("Flights from Los Angeles to Las Vegas are cheap.", "en")]
+    // ...but count beside the language's own.
+    [InlineData("As casas do Rio são bonitas.", "pt")]
+    [InlineData("Los niños y las niñas.", "es")]
     public void A_texts_language_is_told_by_its_script_and_its_small_words(string text, string? language) =>
         Assert.Equal(language, Voices.LanguageOf(text));
 
@@ -660,7 +671,7 @@ public sealed class VoiceTests(AppFixture app)
     private static OfferedVoice Voice(string id, string language, string? accent = null) => OfferedVoice.Assumed(id, language)! with { Accent = accent ?? language };
 
     private static readonly SpeechOffer Offer = new(
-        [Voice("kokoro/af_heart", "en", "en-us"), Voice("kokoro/am_adam", "en", "en-us"), Voice("kokoro/ef_dora", "es"), Voice("piper-fa/gyro", "fa")],
+        [Voice("kokoro/af_heart", "en", "en-us"), Voice("kokoro/am_adam", "en", "en-us"), Voice("kokoro/ef_dora", "es"), Voice("kokoro/pf_dora", "pt", "pt-br"), Voice("piper-fa/gyro", "fa")],
         VoiceCatalog.WhisperLanguages, new HashSet<string> { "kokoro", "piper-fa" }, Hears: true, Known: true);
 
     [Fact]
@@ -697,6 +708,11 @@ public sealed class VoiceTests(AppFixture app)
         Assert.Equal("kokoro/af_heart", spanish.For("Sure.", context: "The capital of France is Paris, and it is on the Seine.")!.Id);
         Assert.Equal("kokoro/am_adam", english.For("Claro que sí.")!.Id);
         Assert.Equal("kokoro/ef_dora", english.For("Claro que sí.", context: "¿Dónde está la estación de tren? Está muy cerca.")!.Id);
+        // A short English sentence of words Portuguese writes too ("as", "do") stays in their English voice, after
+        // English or alone; Portuguese is still read in the Portuguese voice.
+        Assert.Equal("kokoro/am_adam", english.For("As far as I know.", context: "Rome was founded in 753 BC, and it is the capital of Italy.")!.Id);
+        Assert.Equal("kokoro/am_adam", english.For("Do as I say.")!.Id);
+        Assert.Equal("kokoro/pf_dora", english.For("Você não sabe onde fica a estação?")!.Id);
         // Not Persian's voice for a Latin sentence: it speaks no Latin script.
         Assert.Equal("kokoro/af_heart", persian.For("OK.", context: "پاریس پایتخت فرانسه است.")!.Id);
         Assert.Equal("kokoro/af_heart", persian.For("OK.")!.Id);

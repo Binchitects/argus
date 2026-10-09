@@ -24,6 +24,16 @@ public static partial class Voices
     ];
 
     /// <summary>
+    /// Their small words that English writes too ("As far as I know", "per day", "Los Angeles", "x and y"): they count
+    /// for a language only beside a word or an accent of it that English does not have.
+    /// </summary>
+    private static readonly HashSet<string> EnglishToo =
+    [
+        "as", "do", "da", "dos", "em", "os", "um", "com", "para", "per", "non", "ma", "ho", "lo", "si", "ci", "di", "uno",
+        "pour", "des", "et", "pas", "au", "los", "las", "del", "con", "se", "y", "yo",
+    ];
+
+    /// <summary>
     /// The language a text is written in, as far as reading it aloud needs: by its script (Persian for the Arabic
     /// script, Hindi, Japanese, Chinese), and for the Latin script by its small words. Only <paramref name="among"/>
     /// (the languages there are voices for) are told apart; null: all of these. Null when a Latin text's words do not
@@ -69,13 +79,20 @@ public static partial class Voices
     {
         var words = LatinWord().Matches(text.ToLowerInvariant()).Select(m => m.Value).ToList();
         var scores = Latin.Where(l => l.Language == "en" || among is null || among.Contains(l.Language))
-            .Select(l => (l.Language, Score: words.Count(l.Words.Contains) + text.Count(c => l.Marks.Contains(char.ToLowerInvariant(c)))))
+            .Select(l => (l.Language, Score: Score(l.Words, l.Marks, words, text)))
             .ToList();
         var english = scores[0].Score;
         var best = scores.Skip(1).OrderByDescending(s => s.Score).FirstOrDefault();
         return best.Language is { } other && best.Score >= 2 && best.Score > 2 * english ? other
             : english >= 2 && english > 2 * best.Score ? "en"
             : null;
+    }
+
+    /// <summary>A language's small words and accents in a text; its words English writes too only beside one of its own.</summary>
+    private static int Score(HashSet<string> small, string marks, List<string> words, string text)
+    {
+        var own = words.Count(w => small.Contains(w) && !EnglishToo.Contains(w)) + text.Count(c => marks.Contains(char.ToLowerInvariant(c)));
+        return own == 0 ? 0 : own + words.Count(w => small.Contains(w) && EnglishToo.Contains(w));
     }
 
     [GeneratedRegex(@"[\p{L}']+")]
