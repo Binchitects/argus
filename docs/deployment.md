@@ -556,7 +556,10 @@ on the terminal and never in the log: it is `ADMIN_PASSWORD` in `.env` (0600).
   Hugging Face name (`repo:quant`) needs the network and is refused.
 - `--make-cert` makes a certificate (`scripts/make-cert.sh`); `--hosts` adds the
   names to `/etc/hosts` (`scripts/setup-hosts.sh`, as root).
-- The folder defaults to `/srv/arena` as root, else `~/arena`.
+- The folder defaults to `/srv/arena` as root, else `~/arena`. Beside
+  `deploy/` the installer writes the docs, the licences, `VERSION` and Code
+  Arena's packages, but never over a file or folder it did not write there (a
+  git checkout keeps its own).
 - Rootless Podman makes some new volumes root's (Alertmanager's then cannot
   write): once the stack runs, install and upgrade give each volume to its
   service's user and start that service again.
@@ -624,7 +627,9 @@ container uses, stays. The volumes, `.env`, the backups and the models stay
 too: `install` brings the stack back on the same data.
 
 `remove --purge` also deletes the data: the volumes, `deploy/` with `.env` and
-the certificates, the backups, and the models when they are inside the folder.
+the certificates, what the installer wrote beside it (the docs, the licences,
+`VERSION`, Code Arena's packages), the backups, and the models when they are
+inside the folder. The knowledge packs in `packs/` stay.
 It asks for the word PURGE (unattended: `--confirm PURGE`) and offers a last
 backup first (`--final-backup DIR`, outside the folder). A project started from
 another folder is refused, and nothing outside the project is touched.

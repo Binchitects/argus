@@ -696,6 +696,44 @@ class InstallerTests(unittest.TestCase):
         left = [ref for ref in self.r.store()["images"] if "arena-" in ref]
         self.assertEqual(left, [], r.stdout)
 
+    def test_Beside_deploy_nothing_of_someone_elses_is_replaced(self):
+        """deploy/ in a folder that holds other things (here, someone's own docs/)."""
+        self.old_install(version_file=True)
+        (self.dir / "docs").mkdir()
+        (self.dir / "docs" / "mine.md").write_text("my notes\n")
+        (self.dir / "LICENSE.md").write_text("my licence\n")
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("kept docs LICENSE.md in", r.stdout)
+        self.assertEqual([p.name for p in (self.dir / "docs").iterdir()], ["mine.md"])
+        self.assertEqual((self.dir / "LICENSE.md").read_text(), "my licence\n")
+        # What it could write, it did: VERSION (it held a version), the other licence, Code Arena's packages.
+        self.assertEqual((self.dir / "VERSION").read_text().strip(), "9.9.9")
+        self.assertTrue((self.dir / "LICENSING.md").is_file())
+        self.assertTrue((self.dir / "code-arena").is_dir())
+        # Purge takes deploy/ and what it wrote beside it, and nothing else.
+        (self.dir / "packs" / "mine.arguspack").write_text("a pack\n")
+        r = self.r.run("remove", "--dir", str(self.dir), "--yes", "--purge", "--confirm", "PURGE")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertFalse((self.dir / "deploy").exists())
+        for gone in ("VERSION", "LICENSING.md", "code-arena"):
+            self.assertFalse((self.dir / gone).exists(), gone)
+        self.assertEqual((self.dir / "docs" / "mine.md").read_text(), "my notes\n")
+        self.assertEqual((self.dir / "LICENSE.md").read_text(), "my licence\n")
+        self.assertTrue((self.dir / "packs" / "mine.arguspack").is_file())
+
+    def test_A_git_checkout_keeps_its_own_docs_and_VERSION(self):
+        self.old_install(version_file=True)
+        (self.dir / ".git").mkdir()
+        (self.dir / "docs").mkdir()
+        (self.dir / "docs" / "deployment.md").write_text("the checkout's\n")
+        r = self.r.run("upgrade", "--dir", str(self.dir / "deploy"), "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("is a git checkout: its docs, licences, packs and VERSION are its own", r.stdout)
+        self.assertEqual((self.dir / "docs" / "deployment.md").read_text(), "the checkout's\n")
+        self.assertEqual((self.dir / "VERSION").read_text(), "5.2.0\n")
+        self.assertIn("installed: 9.9.9 (this installer's record)", self.r.run("status", "--dir", str(self.dir)).stdout)
+
     def test_Upgrade_refuses_a_bundle_without_an_image_the_host_runs(self):
         self.old_install(version_file=True)
         copy = self.damaged_copy()

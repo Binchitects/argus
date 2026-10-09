@@ -625,27 +625,42 @@ record_deploy() {   # what this installer wrote, to tell later what was changed
   (umask 077; bundle_deploy_sums | awk -F'\t' '{ print $2 "  " $1 }' > "$STATE/deploy.sha256")
 }
 
-# Beside deploy/: the docs, the licences, Code Arena's packages, the knowledge packs, VERSION.
+# Beside deploy/: the docs, the licences, Code Arena's packages, the knowledge packs, VERSION. Only
+# where nothing of someone else's is: a path there already is replaced only when this installer
+# wrote it ($STATE/extras lists them), and a git checkout keeps its own. packs/ is made when
+# missing (compose mounts it); a pack is added to it, never taken out.
+EXTRAS="docs code-arena packs LICENSE.md LICENSING.md VERSION"
+extra_ours() { [[ ! -e "$1" ]] || grep -qxF "$1" "$STATE/extras" 2>/dev/null; }
+replaceable() {   # replaceable NAME: this installer may write DIR/NAME
+  extra_ours "$DIR/$1" && return 0
+  # VERSION holding a version is the record of what runs here: it is brought up to date.
+  [[ $1 == VERSION && -f "$DIR/VERSION" ]] && valid_version "$(tr -d '[:space:]' < "$DIR/VERSION")"
+}
+extras_written() { awk -v d="$DIR/" 'index($0, d) == 1 && substr($0, length(d) + 1) !~ /\//' "$STATE/extras" 2>/dev/null; }
 write_extras() {   # write_extras plan|do
-  local f
-  if [[ $1 == plan ]]; then
-    would "write docs/, LICENSE.md, LICENSING.md and VERSION ($BVERSION) in $DIR"
-    [[ -d "$BUNDLE/code-arena" ]] && would "put Code Arena's packages in $DIR/code-arena (the earlier ones replaced)"
-    [[ -n "$(ls -A "$BUNDLE/packs" 2>/dev/null)" ]] && would "add the bundle's knowledge packs to $DIR/packs (others there kept)"
+  local f p kept=() wrote=()
+  [[ $1 == do ]] && { mkdir -p "$DIR/packs" || die "cannot write $DIR"; }
+  if [[ -e "$DIR/.git" ]]; then
+    note "$DIR is a git checkout: its docs, licences, packs and VERSION are its own, left as they are"
     return 0
   fi
-  mkdir -p "$DIR/packs" || die "cannot write $DIR"
-  rm -rf "$DIR/docs.installer-new" && cp -a "$BUNDLE/docs" "$DIR/docs.installer-new" 2>/dev/null \
-    && rm -rf "$DIR/docs" && mv "$DIR/docs.installer-new" "$DIR/docs"
-  for f in LICENSE.md LICENSING.md VERSION; do [[ -f "$BUNDLE/$f" ]] && cp -p "$BUNDLE/$f" "$DIR/$f"; done
-  if [[ -d "$BUNDLE/code-arena" ]]; then
-    rm -rf "$DIR/code-arena" && mkdir -p "$DIR/code-arena" && cp -p "$BUNDLE/code-arena/." "$DIR/code-arena/" 2>/dev/null \
-      || cp -a "$BUNDLE/code-arena/." "$DIR/code-arena/"
+  for f in $EXTRAS; do
+    [[ -e "$BUNDLE/$f" ]] || continue
+    if [[ $f != packs ]] && ! replaceable "$f"; then kept+=("$f"); continue; fi
+    wrote+=("$f")
+    [[ $1 == plan ]] && continue
+    case "$f" in
+      packs) for p in "$BUNDLE"/packs/*; do [[ -f "$p" ]] || continue; ln -f "$p" "$DIR/packs/" 2>/dev/null || cp -p "$p" "$DIR/packs/" || break; done ;;
+      docs|code-arena) rm -rf "$DIR/$f.installer-new" && cp -a "$BUNDLE/$f" "$DIR/$f.installer-new" && rm -rf "$DIR/$f" && mv "$DIR/$f.installer-new" "$DIR/$f" ;;
+      *) cp -p "$BUNDLE/$f" "$DIR/$f" ;;
+    esac || die "writing $DIR/$f failed (disk full?)"
+    [[ $f == packs ]] || grep -qxF "$DIR/$f" "$STATE/extras" 2>/dev/null || (umask 077; echo "$DIR/$f" >> "$STATE/extras")
+  done
+  if [[ ${#wrote[@]} -gt 0 ]]; then
+    if [[ $1 == plan ]]; then would "write ${wrote[*]} ($BVERSION) in $DIR"; else ok "${wrote[*]} ($BVERSION) in $DIR"; fi
   fi
-  if [[ -d "$BUNDLE/packs" ]]; then
-    for f in "$BUNDLE"/packs/*; do [[ -f "$f" ]] && { ln -f "$f" "$DIR/packs/" 2>/dev/null || cp -p "$f" "$DIR/packs/"; }; done
-  fi
-  ok "docs/, the licences, VERSION$([[ -d "$BUNDLE/code-arena" ]] && echo ", code-arena/")$([[ -n "$(ls -A "$BUNDLE/packs" 2>/dev/null)" ]] && echo ", packs/") in $DIR"
+  [[ ${#kept[@]} -gt 0 ]] && note "kept ${kept[*]} in $DIR: not this installer's (the release's are in the bundle)"
+  return 0
 }
 
 # ============================================================================ .env
@@ -1490,7 +1505,7 @@ cmd_remove() {
   if [[ $PURGE -eq 1 ]]; then
     say "  PURGE, which cannot be undone:"
     say "    volumes: $(tr '\n' ' ' <<<"$vols")"
-    if [[ $own -eq 1 ]]; then say "    $DEPLOY with .env and the certificates; $DIR's docs, packs, code-arena; the backups in $BACKUP_DIR"
+    if [[ $own -eq 1 ]]; then say "    $DEPLOY with .env and the certificates; beside it what this installer wrote ($(extras_written | sed 's|.*/||' | tr '\n' ' ' | sed 's/ $//')); the backups in $BACKUP_DIR (the packs in $DIR/packs are kept)"
     else say "    $DEPLOY/.env and the certificates (the rest of $DEPLOY was not made by this installer: kept); the backups in $BACKUP_DIR"; fi
     if [[ "$MODELS_DIR" == "$DIR"/* ]]; then say "    the models in $MODELS_DIR"; else say "    (the models in $MODELS_DIR are outside $DIR: kept)"; fi
   else
@@ -1553,7 +1568,9 @@ cmd_remove() {
     fi
     if [[ "$MODELS_DIR" == "$DIR"/* && -d "$MODELS_DIR" ]]; then rm -rf "$MODELS_DIR" && did "the models in $MODELS_DIR"; fi
     if [[ $own -eq 1 ]]; then
-      rm -rf "$DEPLOY" "$DIR/docs" "$DIR/packs" "$DIR/code-arena" "$DIR/LICENSE.md" "$DIR/LICENSING.md" "$DIR/VERSION" && did "$DEPLOY (.env, certificates), docs, packs, code-arena"
+      # deploy/, and beside it only what this installer wrote there (the packs are the admin's).
+      local extras=(); mapfile -t extras < <(extras_written)
+      rm -rf "$DEPLOY" ${extras[@]+"${extras[@]}"} && did "$DEPLOY (.env, certificates)${extras[*]:+, $(for f in "${extras[@]}"; do printf '%s ' "${f##*/}"; done | sed 's/ $//')}"
     else
       # Not a folder this installer made (a checkout, or one airgap.sh loaded): its files stay.
       rm -f "$DEPLOY/.env" "$DEPLOY/config/traefik/certificate.yml"
