@@ -1107,6 +1107,29 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
     }
 
     [Fact]
+    public async Task An_API_keys_request_for_a_model_that_failed_to_load_waits_for_its_next_try_as_the_chats_do()
+    {
+        var clock = new MovableClock(DateTimeOffset.UtcNow);
+        await using var f = NewApp(parallel: 1, clock: clock, others: [("tiny-a", 1)]);
+        var state = f.Services.GetRequiredService<EngineState>();
+        app.Engine.Broken.Add("tiny-a");
+        await f.Services.GetRequiredService<EngineClient>().LoadAsync("tiny-a");
+        f.Services.GetRequiredService<EngineWatcher>().Wake();
+        await EventuallyAsync(() => state.StatusOf("tiny-a") == "failed", "the watcher sees it failed");
+
+        // Within its wait: refused with the reason, and the engine is not asked to load it again (nor any model to make room).
+        var verdict = await GuardAsync(f, "tiny-a");
+        Assert.Equal("BLOCKED", verdict.GetProperty("action").GetString());
+        Assert.StartsWith("tiny-a could not be loaded just now", verdict.GetProperty("blocked_reason").GetString(), StringComparison.Ordinal);
+
+        // Its wait over: the request goes (the engine loads it for it), a try after which the next wait is longer.
+        clock.Now += EngineState.Wait(1) + TimeSpan.FromSeconds(1);
+        Assert.Equal("NONE", (await GuardAsync(f, "tiny-a")).GetProperty("action").GetString());
+        Assert.Equal(clock.Now + EngineState.Wait(2), state.NextTry("tiny-a"));
+        Assert.DoesNotContain(app.Engine.Calls, c => c.Path == "/models/unload");
+    }
+
+    [Fact]
     public async Task The_place_of_the_model_for_small_steps_is_kept_for_it_while_it_is_not_loaded()
     {
         // The model for small steps is set, not kept loaded, and not loaded yet: the big one and it fill the engine.

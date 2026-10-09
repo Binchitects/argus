@@ -119,10 +119,11 @@ would be with them.
   moment it started for its own questions; it answered them, and was killed
   and marked failed. The app tries a model that failed again after a minute,
   then after 2, 4, 8, 16 and at most 30 minutes, once each time: a kept one
-  is loaded again by the app, any other by the next question asked of it (the
-  questions of the next half minute go too, while it loads, unless it is seen
-  failing again). Meanwhile the chat says it could not be loaded just now, and
-  its card says from when it is tried again; **Load** tries at once (should it
+  is loaded again by the app, any other by the next question asked of it, in
+  the chat or with an API key (the questions of the next half minute go too,
+  while it loads, unless it is seen failing again). Meanwhile the chat, and an
+  API key's request, say it could not be loaded just now, and its card says
+  from when it is tried again; **Load** tries at once (should it
   fail, the next wait is the longer one). A model that loads is known to be
   fine again.
 - **The model for small steps** (Settings → Model → **Model for sub-agents
