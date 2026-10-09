@@ -243,6 +243,8 @@ exec > >(tee -a "$LOG") 2>&1
 START=$(date +%s); FAILED=0
 fail() { say "  FAILED: $*"; FAILED=$((FAILED+1)); }
 UIDGID="$(id -u):$(id -g)"
+# Rootless Podman: the container's root is this user here (its uid 1000 is another host uid).
+[[ $ENGINE == podman ]] && UIDGID="0:0"
 
 say "backup $STAMP -> $OUT"
 

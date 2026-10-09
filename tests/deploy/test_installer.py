@@ -589,6 +589,24 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("carrying on the upgrade from 5.2.0 that was interrupted", r.stdout)
         self.assertEqual(len(list((self.dir / "deploy" / "backups").glob("20*"))), 1, "a second backup was taken")
 
+    def test_On_rootless_Podman_the_backup_is_yours_and_Docker_only_looked_at(self):
+        podman = {"FAKE_STATE_ENGINE": "podman", "FAKE_VOLUMES": "arena_engine\narena_argus"}
+        deploy = self.old_install(version_file=True, running=False)
+        subprocess.run(["podman", "compose", "-f", "docker-compose.yml", "-f", "podman.yml", "up", "-d"], cwd=deploy,
+                       env=self.r.env(podman), check=True)
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s", extra=podman)
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("(podman, project arena)", r.stdout)
+        # The container's root is this user under rootless Podman: its uid 1000 is another host uid,
+        # whose files this user could not read back to check the backup.
+        snapshots = [" ".join(c) for c in self.r.calls() if c[:2] == ["podman", "run"] and "python -c" in " ".join(c)]
+        self.assertTrue(snapshots)
+        for call in snapshots:
+            self.assertIn("chown 0:0 /out/", call)
+        # Docker is only asked whether it runs the project (it does not: the engine is Podman).
+        self.assertFalse([c for c in self.r.calls() if c[0] == "docker" and c[1] not in ("info", "ps")])
+        self.assertIn("Upgraded from 5.2.0 to 9.9.9", r.stdout)
+
     def test_Upgrade_refuses_a_bundle_without_an_image_the_host_runs(self):
         self.old_install(version_file=True)
         copy = self.damaged_copy()
