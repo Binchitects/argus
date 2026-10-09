@@ -287,6 +287,7 @@ public sealed partial class SettingsTests(AppFixture app)
             ["Chat:ThinkingPresets"] = chat.ThinkingPresets,
             ["Chat:DefaultThinking"] = chat.DefaultThinking,
             ["Engine:ModelsMax"] = new Llm.Api.Models.EngineOptions().ModelsMax.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Mcp:ListWaitSeconds"] = new Llm.Api.ArenaMcp.McpOptions().ListWaitSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
         var prices = new Llm.Api.Gateway.PriceOptions();
         foreach (var (key, price) in new Dictionary<string, decimal>

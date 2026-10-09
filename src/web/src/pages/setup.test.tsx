@@ -151,7 +151,7 @@ describe('connect your tools', () => {
     expect(within(steps).getByText(/^cd your-project\s+code-arena chat$/)).toBeInTheDocument()
     expect(steps).not.toHaveTextContent('code-arena web')
     // Argus comes through Arena's own tools: no GitLab token to add.
-    expect(within(steps).getByText(/reaches Argus through Arena's own tools/)).toBeInTheDocument()
+    expect(within(steps).getByText(/Code Arena connects to Argus by itself, beside Arena's own tools/)).toBeInTheDocument()
   })
 
   it('says how to add Code Arena when this Arena has no builds of it', async () => {

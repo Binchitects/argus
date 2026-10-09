@@ -65,7 +65,10 @@ Their email (or linked GitLab username) is matched to a GitLab account with the
 read-only service token, and their repositories are those whose member lists
 include them at Reporter or above. Refusals say which repository holds a match
 and who can grant access. The same resolution applies to chat tool calls, to
-`ak_` keys on `/mcp`, and — through GitLab itself — to GitLab tokens.
+`ak_` keys on `/mcp`, and — through GitLab itself — to GitLab tokens. It is
+made apart from the request that brings the person (connecting never waits for
+it): started as they connect, waited for by the first tool that reads code,
+the member lists fetched eight at a time and kept ten minutes.
 
 ## A chat turn
 
