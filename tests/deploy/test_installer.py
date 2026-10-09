@@ -680,6 +680,9 @@ class InstallerTests(unittest.TestCase):
         (deploy / "certs" / "tls.key").write_text("NEW KEY\n")
         (deploy / "certs" / "tls.crt").write_text("NEW CERTIFICATE\n")
         (deploy / "docker-compose.override.yml").write_text("services: {}\n# changed after the upgrade\n")
+        # And two of 9.9.9's files changed since: one 5.2.0 had too, one it did not.
+        (deploy / "config" / "edited.yml").write_text("shipped: 2\nlater: yes\n")
+        (deploy / "config" / "added.yml").write_text("new: 1\nlater: yes\n")
         r = self.r.run("upgrade", "--dir", str(self.dir), "--rollback", "--yes", "--timeout", "5s")
         self.assertEqual(r.returncode, 0, self.output(r))
         self.assertIn("Rolled back: 5.2.0 runs", r.stdout)
@@ -696,6 +699,12 @@ class InstallerTests(unittest.TestCase):
             self.assertIn(f, back)
         self.assertFalse([f for f in back if f.startswith("certs/") or "override" in f])
         self.assertIn("took out config/added.yml (the upgrade added it)", r.stdout)
+        # What was changed since the upgrade is kept before it is replaced or taken out.
+        kept = snap / "files-before-rollback" / "config"
+        self.assertEqual((kept / "edited.yml").read_text(), "shipped: 2\nlater: yes\n")
+        self.assertEqual((kept / "added.yml").read_text(), "new: 1\nlater: yes\n")
+        self.assertFalse((kept / "litellm.yaml").exists())
+        self.assertIn("changed here since the upgrade, kept in", r.stdout)
         self.assertFalse((self.dir / "VERSION").exists())
         self.assertEqual(next(c for c in self.containers() if c["service"] == "app")["image_id"], old_app)
         self.assertEqual(len(list((snap / "data-before-rollback").glob("20*"))), 1)
@@ -1016,6 +1025,21 @@ class InstallerTests(unittest.TestCase):
         self.assertNotIn("postgres", calls[stop])
         self.assertIn("app", calls[stop])
         self.assertIn("stopped for the backup: every service but postgres", r.stdout)
+
+    def test_A_backup_that_fails_leaves_5_2_0_running_on_its_data(self):
+        deploy = self.old_install(version_file=True)
+        old_app = next(c for c in self.containers() if c["service"] == "app")["image_id"]
+        (deploy / "backups").write_text("not a folder\n")
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 4, self.output(r))
+        self.assertIn("the backup failed", r.stdout)
+        self.assertIn("Rolled back: 5.2.0 runs again; its data was not touched (the new release never started)", r.stdout)
+        # Never taken down: the services stopped for the backup start again, on 5.2.0's images.
+        self.assertFalse([c for c in self.r.calls() if c[1:3] == ["compose", "down"]])
+        self.assertEqual({c["state"] for c in self.containers()}, {"running"})
+        self.assertEqual(next(c for c in self.containers() if c["service"] == "app")["image_id"], old_app)
+        self.assertEqual((deploy / "docker-compose.yml").read_text(), COMPOSE_OLD)
+        self.assertFalse((self.dir / ".arena-install" / "upgrade").exists())
 
     def test_A_rollback_that_cannot_keep_the_data_restores_nothing_and_is_finished_when_run_again(self):
         deploy = self.old_install(version_file=True)

@@ -1248,16 +1248,36 @@ stop_writers() {
 
 # FROM's files from the copy taken before the upgrade: each file it shipped, and .env, as they were
 # then (the data goes back to then too, and .env's secrets open it); what the upgrade added taken
-# out. The certificates, the override and the host's other files stay as they are now; the .env
-# there was is kept in SNAP/files-before-rollback. Each file put back is named.
+# out. The certificates, the override and the host's other files stay as they are now. The .env
+# there was, and each file changed here since the new release wrote it, are kept in
+# SNAP/files-before-rollback before they are replaced or taken out. Each file put back is named.
 same() { [[ -f "$1" && -f "$2" && "$(sha_of "$1")" == "$(sha_of "$2")" ]]; }
+declare -A RB_SHIPPED=()
+RB_KEPT=()
+keep_later_change() {   # keep_later_change FILE: kept in SNAP/files-before-rollback when changed here
+  local f=$1 sum
+  [[ $f == .env || $f == *.before-* ]] && return 0
+  sum="$(sha_of "$DEPLOY/$f")"
+  [[ -n "$sum" && "$sum" != "${RB_SHIPPED[$f]:-}" ]] || return 0
+  (umask 077; mkdir -p "$SNAP/files-before-rollback/$(dirname "$f")" && cp -p "$DEPLOY/$f" "$SNAP/files-before-rollback/$f") \
+    || { bad "keeping $f as it is failed"; return 1; }
+  RB_KEPT+=("$f")
+}
 restore_files() {
-  local old="$SNAP/old-deploy" keep="$SNAP/files-before-rollback" f
+  local old="$SNAP/old-deploy" keep="$SNAP/files-before-rollback" f sum
   local -a back=()
+  RB_SHIPPED=() RB_KEPT=()
+  # What the new release shipped: its record after upgrade --rollback, else its bundle's.
+  if [[ "$(marker_get manual)" == 1 && -f "$STATE/deploy.sha256" ]]; then
+    while IFS=$'\t' read -r f sum; do [[ -n "$f" ]] && RB_SHIPPED["$f"]=$sum; done < <(sed -E 's/^([0-9a-f]{64}) [ *](.*)$/\2\t\1/' "$STATE/deploy.sha256")
+  elif [[ -n "$BUNDLE" ]]; then
+    while IFS=$'\t' read -r f sum; do [[ -n "$f" ]] && RB_SHIPPED["$f"]=$sum; done < <(bundle_deploy_sums)
+  fi
   rm -rf "$old" && mkdir -p "$old" && tar -xpf "$SNAP/deploy.tar" -C "$old" || { bad "unpacking $SNAP/deploy.tar failed (disk full?)"; return 1; }
   if [[ -f "$SNAP/added" ]]; then
     while IFS= read -r f; do
       [[ -n "$f" && -e "$DEPLOY/$f" && ! -e "$old/$f" ]] || continue
+      keep_later_change "$f" || return 1
       rm -f "$DEPLOY/$f" && did "took out $f (the upgrade added it)"
     done < "$SNAP/added"
   fi
@@ -1266,6 +1286,8 @@ restore_files() {
     same "$old/$f" "$DEPLOY/$f" && continue
     if [[ $f == .env && -f "$DEPLOY/.env" ]]; then
       (umask 077; mkdir -p "$keep" && cp -p "$DEPLOY/.env" "$keep/.env") || { bad "keeping the .env there is failed"; return 1; }
+    elif [[ -f "$DEPLOY/$f" ]]; then
+      keep_later_change "$f" || return 1
     fi
     { mkdir -p "$DEPLOY/$(dirname "$f")" && cp -p "$old/$f" "$DEPLOY/$f.installer-new" && mv -f "$DEPLOY/$f.installer-new" "$DEPLOY/$f"; } \
       || { bad "putting back $f failed"; return 1; }
@@ -1274,6 +1296,7 @@ restore_files() {
   if [[ -f "$SNAP/VERSION" ]]; then cp -p "$SNAP/VERSION" "$DIR/VERSION"; else rm -f "$DIR/VERSION"; fi
   if [[ ${#back[@]} -gt 0 ]]; then did "put back as $FROM had them: ${back[*]}"; else ok "every file of $FROM is as it was"; fi
   [[ " ${back[*]} " == *" .env "* ]] && note ".env as $FROM had it, as the data will be; the one there was is kept as $keep/.env"
+  [[ ${#RB_KEPT[@]} -gt 0 ]] && note "changed here since the upgrade, kept in $keep: ${RB_KEPT[*]}"
   # The override as it is now, unless FROM's compose file cannot read it: then FROM's, and it is said.
   if [[ -f "$DEPLOY/docker-compose.override.yml" ]] && ! same "$old/docker-compose.override.yml" "$DEPLOY/docker-compose.override.yml" \
      && ! dc config -q >/dev/null 2>&1; then
@@ -1294,7 +1317,8 @@ rollback() {   # rollback STARTED -> 0 when FROM runs again
   local started=$1 ref id tag rc=0 out
   step "rolling back to $FROM"
   marker_set rolling-back 1 started "$started"
-  dc_down --remove-orphans
+  # Once the new release had started, it goes; before that, FROM still runs on what it had.
+  [[ $started -eq 1 ]] && dc_down --remove-orphans
   restore_files || return 1
   while IFS=$'\t' read -r ref id tag; do
     [[ -n "$ref" ]] || continue

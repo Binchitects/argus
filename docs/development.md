@@ -184,7 +184,9 @@ A release is a tag, `vX.Y.Z`, on a commit of `main` whose suites all pass.
    `tools/package-code-arena.sh` (into `dist/`).
 6. The offline installer: `deploy/scripts/make-installer.sh` (with `--models`
    and `--packs` for a bundle that carries them) writes
-   `dist/argus-arena-VERSION-offline.run` and its `.sha256`. Check it:
+   `dist/argus-arena-VERSION-offline.run` and its `.sha256`. It needs the tags
+   of the releases since 5.2.0 (`git fetch --tags`) and the embedding model in
+   `MODELS_DIR` (it says so when either is missing). Check it:
    `sh dist/argus-arena-VERSION-offline.run verify`, and
    `sh dist/argus-arena-VERSION-offline.run upgrade --dir DIR --dry-run` against
    an installation of the oldest release it upgrades.
