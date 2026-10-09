@@ -59,10 +59,6 @@ limits_config:
   per_stream_rate_limit_burst: 64MB
   volume_enabled: true
   allow_structured_metadata: true
-  # How long logs are kept: the compactor (retention_enabled, below) deletes
-  # older ones. Without it they were kept forever: table_manager's period does
-  # not apply to the tsdb store. Admin -> Storage shows the period in force.
-  retention_period: 336h
 
 compactor:
   working_directory: /loki/compactor

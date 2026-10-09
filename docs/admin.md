@@ -277,7 +277,7 @@ it is full. Then what takes room:
 | Argus: its index, GitLab mirrors, checked-out trees and installed packs, and its disk | Argus measures its own data folder (`GET /admin/storage`), at most every ten minutes |
 | Backups (`BACKUP_DIR`, mounted in the app at `/backups`, read only): each backup, how it ended, and which is the latest | the folder |
 | Metrics: what Prometheus keeps and for how long (30 days or 20 GB) | Prometheus's own metrics and flags |
-| Logs: how long Loki keeps them (14 days), and what each container wrote over the last week | Loki's configuration and its volume API |
+| Logs: how long Loki keeps them (as shipped, forever), and what each container wrote over the last week | Loki's configuration and its volume API |
 
 Every six hours the app writes down what each thing takes (one row a day for
 each, kept 400 days): the 30-day growth beside each. **How long things stay**
@@ -288,6 +288,15 @@ images and build cache, the containers' own logs (at most 5 files of 20 MB each)
 and the volumes it does not mount are not measured as folders;
 `docker system df -v` on the host lists them. Folders are measured at most
 every two minutes; **Measure again** asks now.
+
+**Keeping logs for less time.** As shipped, Loki keeps logs forever: its
+compactor deletes only logs older than `limits_config.retention_period`, which
+is not set. To keep 14 days, say, add `retention_period: 336h` under
+`limits_config:` in `deploy/config/loki.yml` (with Helm, the chart's
+`files/loki.yml`) and recreate Loki (`docker compose up -d --force-recreate
+loki`, or `helm upgrade`). Within a few hours its compactor deletes every log
+older than that, for good, and keeps doing so. The page shows the period in
+force.
 
 **A disk past the share.** Every five minutes the app compares each disk with
 **Settings → Storage → Warn when a disk is fuller than** (80% by default). A
