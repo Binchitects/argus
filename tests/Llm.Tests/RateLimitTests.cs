@@ -90,7 +90,7 @@ public sealed class RateLimitTests(AppFixture app)
         var p = await PersonAsync(admin);
         Assert.Equal(KeyRate.None, RateOf(app.Gateway, p.Email));
         var me = await new TestBrowser(app.Factory).SignedInAsync(p.Name, p.Password);
-        var limits = (await me.JsonAsync(await me.GetAsync("/api/account/keys"))).GetProperty("limits");
+        var limits = await me.JsonAsync(await me.GetAsync("/api/account/keys/limits"));
         foreach (var name in new[] { "requestsPerMinute", "tokensPerMinute" })
         {
             Assert.Equal(JsonValueKind.Null, limits.GetProperty(name).GetProperty("value").ValueKind);
@@ -98,6 +98,8 @@ public sealed class RateLimitTests(AppFixture app)
         }
         // Requests at once, per key, as before.
         Assert.Equal(2, limits.GetProperty("atOnce").GetInt32());
+        // The keys' list (the home page's credit card reads it too) does not read the gateway's request log.
+        Assert.False((await me.JsonAsync(await me.GetAsync("/api/account/keys"))).TryGetProperty("limits", out _));
     }
 
     [Fact]
@@ -196,7 +198,7 @@ public sealed class RateLimitTests(AppFixture app)
         foreach (var f in new[] { follower, other })
         {
             var me = await new TestBrowser(f).SignedInAsync(p.Name, p.Password);
-            var limit = (await me.JsonAsync(await me.GetAsync("/api/account/keys"))).GetProperty("limits").GetProperty("requestsPerMinute");
+            var limit = (await me.JsonAsync(await me.GetAsync("/api/account/keys/limits"))).GetProperty("requestsPerMinute");
             Assert.Equal((50, "group"), (limit.GetProperty("value").GetInt32(), limit.GetProperty("from").GetString()));
         }
     }
@@ -392,7 +394,7 @@ public sealed class RateLimitTests(AppFixture app)
             await LogAsync(run + "9", app.Gateway.KeysOf(other.Email).Single().Token, other.Email, now.AddSeconds(-10), error: Over("x", "requests"));
 
             var me = await new TestBrowser(app.Factory).SignedInAsync(p.Name, p.Password);
-            var limits = (await me.JsonAsync(await me.GetAsync("/api/account/keys"))).GetProperty("limits");
+            var limits = await me.JsonAsync(await me.GetAsync("/api/account/keys/limits"));
             Assert.Equal((60, "person"), (limits.GetProperty("requestsPerMinute").GetProperty("value").GetInt32(), limits.GetProperty("requestsPerMinute").GetProperty("from").GetString()));
             // Two requests in the last minute; their tokens less the prompt read from the cache.
             Assert.Equal((2, 500), (limits.GetProperty("used").GetProperty("requests").GetInt64(), limits.GetProperty("used").GetProperty("tokens").GetInt64()));

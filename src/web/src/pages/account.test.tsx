@@ -38,21 +38,19 @@ describe('account', () => {
   it('the API key shows its rate limits, what was used in the last minute and what was refused', async () => {
     fakeApi(member, {
       'GET /api/account/keys': () => ({
+        json: { keys: [{ alias: 'mo', preview: 'sk-...abcd', spend: 1, blocked: false, createdAt: '2026-09-01T10:00:00Z' }], spend: 1, budget: 10 },
+      }),
+      'GET /api/account/keys/limits': () => ({
         json: {
-          keys: [{ alias: 'mo', preview: 'sk-...abcd', spend: 1, blocked: false, createdAt: '2026-09-01T10:00:00Z' }],
-          spend: 1,
-          budget: 10,
-          limits: {
-            requestsPerMinute: { value: 60, from: 'company', group: null },
-            tokensPerMinute: { value: 100000, from: 'group', group: 'Developers' },
-            own: { requestsPerMinute: null, tokensPerMinute: null },
-            atOnce: 2,
-            used: { requests: 12, tokens: 3400 },
-            refused: [
-              { limit: 'tokens', count: 2, last: new Date(Date.now() - 5 * 60_000).toISOString() },
-              { limit: 'at once', count: 1, last: new Date(Date.now() - 60 * 60_000).toISOString() },
-            ],
-          },
+          requestsPerMinute: { value: 60, from: 'company', group: null },
+          tokensPerMinute: { value: 100000, from: 'group', group: 'Developers' },
+          own: { requestsPerMinute: null, tokensPerMinute: null },
+          atOnce: 2,
+          used: { requests: 12, tokens: 3400 },
+          refused: [
+            { limit: 'tokens', count: 2, last: new Date(Date.now() - 5 * 60_000).toISOString() },
+            { limit: 'at once', count: 1, last: new Date(Date.now() - 60 * 60_000).toISOString() },
+          ],
         },
       }),
     })
@@ -66,21 +64,25 @@ describe('account', () => {
     expect(within(limits).getByText(/HTTP 429 and Retry-After/)).toBeInTheDocument()
   })
 
+  it('the home page shows the credit without asking for the key’s rate limits', async () => {
+    const calls = fakeApi(member)
+    renderApp('/')
+    expect(await screen.findByText('Your credit')).toBeInTheDocument()
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/account/keys')).toBe(true))
+    expect(calls.some((c) => c.path === '/api/account/keys/limits')).toBe(false)
+  })
+
   it('a key with no limits says so, and nothing was refused', async () => {
     fakeApi(member, {
-      'GET /api/account/keys': () => ({
+      'GET /api/account/keys': () => ({ json: { keys: [{ alias: 'mo', preview: 'sk-...abcd', spend: 1, blocked: false, createdAt: null }], spend: 1, budget: null } }),
+      'GET /api/account/keys/limits': () => ({
         json: {
-          keys: [{ alias: 'mo', preview: 'sk-...abcd', spend: 1, blocked: false, createdAt: null }],
-          spend: 1,
-          budget: null,
-          limits: {
-            requestsPerMinute: { value: null, from: 'none', group: null },
-            tokensPerMinute: { value: null, from: 'none', group: null },
-            own: { requestsPerMinute: null, tokensPerMinute: null },
-            atOnce: null,
-            used: null,
-            refused: null,
-          },
+          requestsPerMinute: { value: null, from: 'none', group: null },
+          tokensPerMinute: { value: null, from: 'none', group: null },
+          own: { requestsPerMinute: null, tokensPerMinute: null },
+          atOnce: null,
+          used: null,
+          refused: null,
         },
       }),
     })

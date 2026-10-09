@@ -40,6 +40,7 @@ public static class AccountEndpoints
             return Results.Ok(new { answerLength = user.AnswerLength ?? Chat.AnswerLengths.Normal });
         });
         me.MapGet("/keys", KeysAsync);
+        me.MapGet("/keys/limits", LimitsAsync);
         me.MapPost("/keys/rotate", async (ClaimsPrincipal p, UserManager<AppUser> users, PeopleService people) =>
             Results.Ok(await people.RotateKeyAsync((await users.GetUserAsync(p))!)));
     }
@@ -127,8 +128,8 @@ public static class AccountEndpoints
         return Results.NoContent();
     }
 
-    /// <summary>The person's keys, their spend and credit, and their keys' rate limits with what the keys used in the last minute.</summary>
-    private static async Task<IResult> KeysAsync(ClaimsPrincipal p, UserManager<AppUser> users, ILiteLlm gateway, Ledger ledger, RateLimits rateLimits, Models.KeyAccess keyAccess)
+    /// <summary>The person's keys, their spend and credit (the home page shows these too).</summary>
+    private static async Task<IResult> KeysAsync(ClaimsPrincipal p, UserManager<AppUser> users, ILiteLlm gateway, Ledger ledger)
     {
         var user = (await users.GetUserAsync(p))!;
         var keys = await gateway.KeysAsync(user.Email!);
@@ -139,8 +140,18 @@ public static class AccountEndpoints
             keys = keys.Select(k => new { alias = k.Alias, preview = k.Preview, spend = k.Spend, blocked = k.Blocked, createdAt = k.CreatedAt }),
             spend = standing?.Spend ?? 0,
             budget = standing?.Budget,
-            limits = await rateLimits.ViewAsync(user, keys, keyAccess.MaxParallel),
         });
+    }
+
+    /// <summary>
+    /// The person's keys' rate limits, with what the keys used in the last minute and what was
+    /// refused in the last day: only the key's card asks, as it reads the gateway's request log.
+    /// </summary>
+    private static async Task<IResult> LimitsAsync(ClaimsPrincipal p, UserManager<AppUser> users, ILiteLlm gateway, RateLimits rateLimits, Models.KeyAccess keyAccess,
+        CancellationToken ct)
+    {
+        var user = (await users.GetUserAsync(p))!;
+        return Results.Ok(await rateLimits.ViewAsync(user, await gateway.KeysAsync(user.Email!, ct), keyAccess.MaxParallel, ct));
     }
 
     private static string Group(string key)

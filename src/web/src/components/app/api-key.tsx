@@ -19,8 +19,6 @@ interface Keys {
   keys: { alias: string; preview: string | null; spend: number; blocked: boolean; createdAt: string | null }[]
   spend: number
   budget: number | null
-  /** The keys' rate limits, with what they used in the last minute. */
-  limits?: KeyLimits
 }
 
 /** The answer cache for the key: off, each person's choice (opt-in), or every key (all); and how long answers are kept. */
@@ -69,6 +67,8 @@ export function ApiKey({ onNewKey }: { onNewKey?: (key: string) => void } = {}) 
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const keys = useQuery({ queryKey: ['account', 'keys'], queryFn: () => api<Keys>('/api/account/keys') })
+  // Its own request: it reads the gateway's request log, which the home page's credit card does not need.
+  const limits = useQuery({ queryKey: ['account', 'keys', 'limits'], queryFn: () => api<KeyLimits>('/api/account/keys/limits') })
   const rotate = useMutation({
     mutationFn: () => api<{ apiKey: string }>('/api/account/keys/rotate', { body: {} }),
     onSuccess: (made) => {
@@ -130,12 +130,12 @@ export function ApiKey({ onNewKey }: { onNewKey?: (key: string) => void } = {}) 
             ))}
           </ul>
         )}
-        {d?.limits && d.keys.length > 0 && (
+        {limits.data && d && d.keys.length > 0 && (
           <section aria-labelledby="key-limits" className="grid gap-2 border-t pt-4">
             <h3 id="key-limits" className="text-sm font-medium">
               Rate limits
             </h3>
-            <LimitRows limits={d.limits} you />
+            <LimitRows limits={limits.data} you />
             <p className="text-xs text-muted-foreground">
               For each key, counted by the gateway; used is the last minute. Past a limit a request is refused with HTTP 429 and Retry-After: wait that long and send it again. The chat is not limited by these.
             </p>
