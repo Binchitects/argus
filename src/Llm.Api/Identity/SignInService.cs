@@ -202,33 +202,53 @@ public sealed partial class SignInService(
     }
 
     /// <summary>
-    /// Why the admin's try of a directory person's sign-in may not go ahead, or null. A try is a guess at
-    /// their password like any sign-in, so the same brakes hold it: the throttle on this name from this
+    /// Why the admin's check of a typed password may not go ahead, or null: a try of a person's sign-in (their
+    /// username), or a test of a service account other than the saved one (its DN, or user@domain). Either is a
+    /// guess at a password like any sign-in, so the same brakes hold it: the throttle on that name from this
     /// address, and the lock on their account here.
     /// </summary>
     public async Task<string?> TryRefusalAsync(string login)
     {
-        login = LdapDirectory.SignInName(login);
-        if (throttle.IsBanned(Ip, login))
+        var (key, shown, user) = await GuessedAsync(login);
+        if (throttle.IsBanned(Ip, key))
         {
-            return $"too many wrong passwords for \"{login}\" (or for many names) from this address: sign-ins and tries of it from here are refused for a while (how long: Settings → Sign-in and sessions)";
+            return $"too many wrong passwords for \"{shown}\" (or for many names) from this address: sign-ins, tries and tests of it from here are refused for a while (how long: Settings → Sign-in and sessions)";
         }
-        var user = await users.FindByNameAsync(login.ToLowerInvariant()) ?? await users.FindByEmailAsync(login);
-        return user is { Source: UserSource.Ldap } && await users.IsLockedOutAsync(user)
-            ? $"their account here ({user.UserName}) is locked for a while after wrong passwords, and a try waits as signing in does"
+        return user is not null && await users.IsLockedOutAsync(user)
+            ? $"their account here ({user.UserName}) is locked for a while after wrong passwords, and a check waits as signing in does"
             : null;
     }
 
-    /// <summary>A password the directory refused in the admin's try: counted as a sign-in's would be, against this address and their account here.</summary>
+    /// <summary>A password the directory refused in the admin's try or test: counted as a sign-in's would be, against this address and their account here.</summary>
     public async Task TryRefusedAsync(string login)
     {
-        login = LdapDirectory.SignInName(login);
-        throttle.Failure(Ip, login);
-        var user = await users.FindByNameAsync(login.ToLowerInvariant()) ?? await users.FindByEmailAsync(login);
-        if (user is { Source: UserSource.Ldap })
+        var (key, _, user) = await GuessedAsync(login);
+        throttle.Failure(Ip, key);
+        if (user is not null)
         {
             await CountFailureAsync(user);
         }
+    }
+
+    /// <summary>
+    /// Whose password a check guesses: the name the throttle holds (a username as signing in reads it; a DN in
+    /// one form, however it is written), that name as shown, and their directory account here, if any.
+    /// </summary>
+    private async Task<(string Key, string Shown, AppUser? User)> GuessedAsync(string login)
+    {
+        if (LdapDirectory.Rdns(login) is { } rdns)
+        {
+            // A DN: the person whose entry it is, if they have signed in here (by their name first, then by the DN as written).
+            var dn = login.Trim();
+            var named = await users.FindByNameAsync(LdapDirectory.CommonName(dn).ToLowerInvariant());
+            var exactly = dn.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal);
+            var user = named is { Source: UserSource.Ldap, LdapDn: { } stored } && LdapDirectory.SameDn(stored, dn) ? named
+                : await users.Users.FirstOrDefaultAsync(u => u.Source == UserSource.Ldap && u.LdapDn != null && EF.Functions.ILike(u.LdapDn, exactly));
+            return (string.Join(',', rdns), dn, user);
+        }
+        var name = LdapDirectory.SignInName(login);
+        var found = await users.FindByNameAsync(name.ToLowerInvariant()) ?? await users.FindByEmailAsync(name);
+        return (name, name, found is { Source: UserSource.Ldap } ? found : null);
     }
 
     /// <summary>

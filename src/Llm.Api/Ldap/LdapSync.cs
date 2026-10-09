@@ -102,7 +102,8 @@ public sealed partial class LdapSync(IServiceScopeFactory scopes, IOptionsMonito
             found.Add((user, await ldap.FindByDnAsync(user.LdapDn!, ct)));
         }
         // Someone to disable for not being in the required group, and nobody in it at all: a typo in its
-        // name reads just the same. Unless the group is found, nobody is changed and the check says why.
+        // name reads just the same, as does a group whose members signing in cannot see in it (memberOf
+        // without it). Unless the group is found with a member in it, nobody is changed and the check says why.
         if (found.Any(f => f.Person is { } p && !ldap.IsAllowed(p) && !f.User.IsDisabled) && !found.Any(f => f.Person is { } p && ldap.IsAllowed(p)))
         {
             await ldap.CheckRequiredGroupAsync(ct);

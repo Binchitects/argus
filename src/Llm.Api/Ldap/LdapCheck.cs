@@ -34,7 +34,7 @@ public static class LdapCheck
     private const string Warn = "warn";
     private const string Fail = "fail";
 
-    private static readonly string[] MemberAttributes = ["member", "uniqueMember"];
+    private static readonly string[] MemberAttributes = LdapDirectory.MemberAttributes;
     private static readonly string[] GroupAttributes = ["cn", "objectClass", "memberUid", .. MemberAttributes];
 
     /// <summary>Active Directory says so in its root entry (LDAP_CAP_ACTIVE_DIRECTORY_OID).</summary>
@@ -45,15 +45,16 @@ public static class LdapCheck
 
     /// <summary>
     /// Connects and signs in with these settings, then looks for people and the groups named. Withheld says
-    /// why the saved password is not used (with <see cref="PasswordFrom.SavedWithheld"/>).
+    /// why the saved password is not used (with <see cref="PasswordFrom.SavedWithheld"/>). Refused is whether
+    /// the directory checked the service account's password and said no: a wrong guess, when it was typed.
     /// </summary>
-    public static async Task<LdapCheckResult> TestAsync(LdapOptions o, PasswordFrom password, IReadOnlyList<string>? notes = null, string? withheld = null, CancellationToken ct = default)
+    public static async Task<(LdapCheckResult Result, bool Refused)> TestAsync(LdapOptions o, PasswordFrom password, IReadOnlyList<string>? notes = null, string? withheld = null, CancellationToken ct = default)
     {
         var run = new Run(o, password, notes, withheld);
         using var conn = await run.OpenAsync(ct);
         if (conn is null)
         {
-            return run.Result();
+            return (run.Result(), run.ServiceRefused);
         }
         try
         {
@@ -66,38 +67,39 @@ public static class LdapCheck
         {
             run.Failed("The connection failed: " + LdapErrors.Describe(o, ex, null));
         }
-        return run.Result();
+        return (run.Result(), false);
     }
 
     /// <summary>
     /// A person's sign-in, made as the app makes it (the same search, the same bind as them, the same
     /// groups), with the settings given: who they would be here, or exactly why not. Nothing is kept.
-    /// Refused is whether the directory checked their password and said no: a wrong guess, to count.
+    /// Refused is whether the directory checked their password and said no: a wrong guess, to count. ServiceRefused
+    /// is the same for the service account's password, as for <see cref="TestAsync"/>.
     /// </summary>
-    public static async Task<(LdapCheckResult Result, LdapPerson? Person, bool Refused)> TryAsync(LdapOptions o, PasswordFrom password, string login, string personPassword, IReadOnlyList<string>? notes = null, string? withheld = null, CancellationToken ct = default)
+    public static async Task<(LdapCheckResult Result, LdapPerson? Person, bool Refused, bool ServiceRefused)> TryAsync(LdapOptions o, PasswordFrom password, string login, string personPassword, IReadOnlyList<string>? notes = null, string? withheld = null, CancellationToken ct = default)
     {
         var run = new Run(o, password, notes, withheld);
         if (string.IsNullOrWhiteSpace(login))
         {
-            return (run.Failed("Type the person's username (or email) to try."), null, false);
+            return (run.Failed("Type the person's username (or email) to try."), null, false, false);
         }
         if (string.IsNullOrEmpty(personPassword))
         {
-            return (run.Failed("Type their password: an empty one is never tried, as many servers take it for an anonymous sign-in and say yes."), null, false);
+            return (run.Failed("Type their password: an empty one is never tried, as many servers take it for an anonymous sign-in and say yes."), null, false, false);
         }
         using var conn = await run.OpenAsync(ct);
         if (conn is null)
         {
-            return (run.Result(), null, false);
+            return (run.Result(), null, false, run.ServiceRefused);
         }
         try
         {
             var person = await run.PersonAsync(conn, login, personPassword, ct);
-            return (run.Result(), person, run.PasswordRefused);
+            return (run.Result(), person, run.PasswordRefused, false);
         }
         catch (Exception ex) when (LdapErrors.IsDirectoryFailure(ex))
         {
-            return (run.Failed("The connection failed: " + LdapErrors.Describe(o, ex, null)), null, run.PasswordRefused);
+            return (run.Failed("The connection failed: " + LdapErrors.Describe(o, ex, null)), null, run.PasswordRefused, false);
         }
     }
 
@@ -114,8 +116,14 @@ public static class LdapCheck
         /// <summary>Whether the root entry says it is OpenLDAP, which sends memberOf only when asked for it.</summary>
         private bool _openLdap;
 
+        /// <summary>Where the server keeps its own settings (OpenLDAP's cn=config), as its root entry says; null when it does not.</summary>
+        private string? _configContext;
+
         /// <summary>The directory checked the person's password, and refused it.</summary>
         public bool PasswordRefused { get; private set; }
+
+        /// <summary>The directory checked the service account's password, and refused it (or will not let that account in).</summary>
+        public bool ServiceRefused { get; private set; }
 
         private bool Anonymous => string.IsNullOrWhiteSpace(o.BindDn);
         private string Who => Anonymous ? "an anonymous connection" : "the service account";
@@ -247,8 +255,9 @@ public static class LdapCheck
         {
             try
             {
-                var root = await conn.ReadAsync("", ["namingContexts", "defaultNamingContext", "supportedCapabilities", "supportedExtension", "vendorName", "objectClass"], ct);
+                var root = await conn.ReadAsync("", ["namingContexts", "defaultNamingContext", "configContext", "supportedCapabilities", "supportedExtension", "vendorName", "objectClass"], ct);
                 var attrs = root.GetAttributeSet();
+                _configContext = attrs.TryGetValue("configContext", out var config) && config.StringValue is { Length: > 0 } c ? c : null;
                 var activeDirectory = attrs.TryGetValue("supportedCapabilities", out var caps) && caps.StringValueArray.Contains(ActiveDirectoryCapability);
                 var openLdap = _openLdap = attrs.TryGetValue("objectClass", out var classes) && classes.StringValueArray.Contains("OpenLDAProotDSE", StringComparer.OrdinalIgnoreCase);
                 if (attrs.TryGetValue("supportedExtension", out var extensions))
@@ -268,8 +277,23 @@ public static class LdapCheck
 
         private string Holds => string.Join(" and ", _contexts.Select(c => $"\"{c}\""));
 
-        /// <summary>Whether a DN cannot be on this server: it is not below anything the server holds.</summary>
+        /// <summary>Whether no entry of this server can have a DN: it is not below anything the server holds.</summary>
         private bool Outside(string dn) => _contexts.Count > 0 && LdapDirectory.Rdns(dn) is not null && !_contexts.Any(c => LdapDirectory.IsUnder(dn, c));
+
+        /// <summary>
+        /// What a DN is when it names a server's own administrator, which has no entry and lies outside what the server
+        /// holds: 389 Directory Server's and FreeIPA's cn=Directory Manager, or one in OpenLDAP's own settings, such
+        /// as cn=admin,cn=config (Config). Null for any other DN.
+        /// </summary>
+        private (string What, bool Config)? Administrator(string dn)
+        {
+            if (LdapDirectory.SameDn(dn, "cn=Directory Manager"))
+            {
+                return ("the administrator of 389 Directory Server and FreeIPA (their root DN)", false);
+            }
+            var config = _configContext ?? "cn=config";
+            return LdapDirectory.IsUnder(dn, config) ? ($"an administrator of the server's own settings ({config}), as OpenLDAP has", true) : null;
+        }
 
         /// <summary>Signs in as the service account, or anonymously; false (with the failed step) when the server says no.</summary>
         private async Task<bool> BindAsync(LdapConnection conn, CancellationToken ct)
@@ -280,6 +304,7 @@ public static class LdapCheck
             }
             catch (LdapException ex) when (!LdapErrors.IsConnectionFailure(ex))
             {
+                ServiceRefused = !Anonymous && LdapErrors.IsPersonRefusal(ex);
                 Failed(Anonymous ? AnonymousRefused(ex) : await ServiceRefusedAsync(ex, ct));
                 return false;
             }
@@ -314,20 +339,28 @@ public static class LdapCheck
                             : $"Active Directory refused the service account {dn}: {why}. The name and the password are right; fix the account in Active Directory (a service account's password is best set never to expire), then test again.";
                     }
                     var said = LdapErrors.ServerMessage(ex) is { } m ? $" It said: {m}." : "";
+                    // OpenLDAP answers a DN with no entry as it answers a wrong password: an anonymous look tells them apart where it may.
+                    // The server's own administrator has no entry, often not even below what it holds: nothing to look at, so never "no such DN".
+                    var look = LooksLikeDn(dn) ? await LookAsync(dn, ct) : null;
+                    if (look is (true, _))
+                    {
+                        return $"The server refused the service account {dn} with {Password}: the password is wrong. The DN is right (an entry has it), unless that entry has no password of its own (no userPassword) or a password policy has locked it.{said}";
+                    }
+                    string Root(string like) => $" Only the server's own administrator (its root DN, {like}) signs in with no entry: if {dn} is that, the DN is right and {Password} is wrong.";
+                    if (Administrator(dn) is { } admin)
+                    {
+                        var hint = admin.Config
+                            ? $" On the osixia/openldap image its password is LDAP_CONFIG_PASSWORD, not LDAP_ADMIN_PASSWORD. Even signed in, it may read only the settings, not people: a service account is usually an entry {(_contexts.Count > 0 ? $"below {Holds}" : "where people are")}."
+                            : "";
+                        return $"The server refused the service account {dn} with {Password}: the password is wrong (unless this server has no such account). {dn} is {admin.What}, which has no entry to look at, so the server answers a wrong password and a missing account alike.{hint}{said}";
+                    }
                     if (Outside(dn))
                     {
-                        return $"The server refused the service account {dn}: no such entry can be here, as this server holds {Holds} and {dn} is not below it.{said}";
+                        return $"The server refused the service account {dn}: no entry here has this DN, as this server holds {Holds} and {dn} is not below it. Check the DN.{Root("like cn=Directory Manager on 389 Directory Server and FreeIPA")}{said}";
                     }
-                    if (LooksLikeDn(dn))
+                    if (look is (false, var matched))
                     {
-                        // OpenLDAP answers a DN with no entry as it answers a wrong password: an anonymous look tells them apart where it may.
-                        switch (await LookAsync(dn, ct))
-                        {
-                            case (true, _):
-                                return $"The server refused the service account {dn} with {Password}: the password is wrong. The DN is right (an entry has it), unless that entry has no password of its own (no userPassword) or a password policy has locked it.{said}";
-                            case (false, var matched):
-                                return $"The server refused the service account {dn}: no entry has this DN. The part of it that exists is \"{matched}\": check the rest letter by letter.{said}";
-                        }
+                        return $"The server refused the service account {dn}: no entry has this DN. The part of it that exists is \"{matched}\": check the rest letter by letter.{Root("OpenLDAP's rootdn or olcRootDN")}{said}";
                     }
                     return $"The server refused the service account {dn} with {Password}: the DN or the password is wrong. The server says the same for both, and does not let an anonymous look see whether the DN exists, so this test cannot tell which. Check the DN letter by letter (a typo in it reads the same as a wrong password), then the password.{said}";
                 case LdapException.InvalidDnSyntax:
@@ -542,7 +575,7 @@ public static class LdapCheck
             }
             if (string.IsNullOrWhiteSpace(o.GroupBaseDn) && !await MemberOfWorksAsync(conn, found, ct))
             {
-                Add(required ? Fail : Warn, $"{label}: its members do not show it in their memberOf (this server's memberOf overlay is off, or covers another kind of group), so {nobody}. Set \"Where groups are\" (like {Parent(found.Dn)}) and groups are searched there.");
+                Add(required ? Fail : Warn, $"{label}: its members do not show it in their memberOf (this server's memberOf overlay is off, or covers another kind of group), so {nobody}. Set \"Where groups are\" (like {LdapDirectory.Parent(found.Dn)}) and groups are searched there.");
             }
             else if (!string.IsNullOrWhiteSpace(o.GroupBaseDn) && _openLdap && !LdapDirectory.IsUnder(found.Dn, o.GroupBaseDn.Trim()))
             {
@@ -736,10 +769,4 @@ public static class LdapCheck
     }
 
     private static bool LooksLikeDn(string value) => value.Contains('=', StringComparison.Ordinal);
-
-    private static string Parent(string dn)
-    {
-        var comma = dn.IndexOf(',', StringComparison.Ordinal);
-        return comma >= 0 ? dn[(comma + 1)..] : dn;
-    }
 }

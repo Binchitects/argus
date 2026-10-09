@@ -39,8 +39,10 @@ public interface ILdapDirectory
     Task<LdapPerson?> FindByDnAsync(string dn, CancellationToken ct = default);
 
     /// <summary>
-    /// Finds the required group in the directory. Throws <see cref="LdapUnavailableException"/> when it is not
-    /// there (a typo in its name, most likely): nobody may be disabled for not being in a group that does not exist.
+    /// Finds the required group in the directory, and one of its members in it as signing in reads people. Throws
+    /// <see cref="LdapUnavailableException"/> when it is not there (a typo in its name, most likely), or signing in
+    /// finds none of its members in it (memberOf without it, say): nobody may be disabled for not being in a group
+    /// that nobody can be found in.
     /// </summary>
     Task CheckRequiredGroupAsync(CancellationToken ct = default);
 
@@ -108,10 +110,66 @@ public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapD
         return WithServiceAsync(o, async conn =>
         {
             var contexts = string.IsNullOrWhiteSpace(o.GroupBaseDn) ? await ContextsAsync(conn, ct) : [];
-            return await FindGroupAsync(o, conn, o.RequiredGroup, contexts, ["1.1"], ct) is not null
-                ? true
-                : throw new LdapUnavailableException($"The directory at {o.Url} cannot be used: {RequiredGroupMissing(o, contexts)}.");
+            var group = await FindGroupAsync(o, conn, o.RequiredGroup, contexts, MemberAttributes, ct)
+                ?? throw new LdapUnavailableException($"The directory at {o.Url} cannot be used: {RequiredGroupMissing(o, contexts)}.");
+            return await UnseenAsync(o, conn, group, ct) is { } unseen
+                ? throw new LdapUnavailableException($"The directory at {o.Url} cannot be used: {unseen}.")
+                : true;
         }, ct);
+    }
+
+    /// <summary>The attributes that list a group's members, as signing in reads groups.</summary>
+    internal static readonly string[] MemberAttributes = ["member", "uniqueMember"];
+
+    /// <summary>
+    /// Why signing in finds nobody in the required group, which is there: its members, read as signing in reads a
+    /// person, are not in it (memberOf without it, or the group outside "Where groups are"). Null when one of them
+    /// is, or when none can be read to tell. A few members are enough: signing in reads every person alike.
+    /// </summary>
+    private static async Task<string?> UnseenAsync(LdapOptions o, LdapConnection conn, LdapEntry group, CancellationToken ct)
+    {
+        var attrs = group.GetAttributeSet();
+        var members = MemberAttributes.SelectMany(a => attrs.TryGetValue(a, out var m) ? m.StringValueArray : []).Where(m => m.Length > 0).Take(5).ToList();
+        var read = false;
+        foreach (var member in members)
+        {
+            List<LdapEntry> entries;
+            try
+            {
+                entries = await SearchAsync(conn, member, LdapConnection.ScopeBase, "(objectClass=*)", PersonAttributes(o), ct);
+            }
+            catch (LdapException ex) when (!LdapErrors.IsConnectionFailure(ex))
+            {
+                continue; // gone, or hidden from the service account: another one tells
+            }
+            if (entries.Count != 1)
+            {
+                continue;
+            }
+            read = true;
+            if (IsAllowed(o, await ToPersonAsync(o, conn, entries[0], ct)))
+            {
+                return null;
+            }
+        }
+        if (!read)
+        {
+            return null;
+        }
+        var nobody = "so signing in finds nobody in it, and nobody is disabled for not being in it";
+        var test = "in the Settings page, where \"Test the settings\" says why";
+        return string.IsNullOrWhiteSpace(o.GroupBaseDn)
+            ? $"the required group {group.Dn} is there, but its members do not show it in their memberOf (this server's memberOf overlay is off, or covers another kind of group), {nobody}: set \"Where groups are\" (like {Parent(group.Dn)}) {test}"
+            : !IsUnder(group.Dn, o.GroupBaseDn.Trim())
+                ? $"the required group {group.Dn} is not below \"{o.GroupBaseDn.Trim()}\" (where groups are), where signing in looks for people's groups, {nobody}: name a group below it, or empty \"Where groups are\" if its members show it in their memberOf, {test}"
+                : $"the required group {group.Dn} is there, but signing in does not find its members in it (the group search below \"{o.GroupBaseDn.Trim()}\" does not match them), {nobody}: check the group and its members {test}";
+    }
+
+    /// <summary>The DN above this one: where an entry is.</summary>
+    internal static string Parent(string dn)
+    {
+        var first = FirstPart(dn);
+        return first.Length < dn.Length ? dn[(first.Length + 1)..] : dn;
     }
 
     /// <summary>Why nobody is disabled for the required group: no group signing in reads goes by it.</summary>

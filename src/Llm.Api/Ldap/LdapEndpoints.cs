@@ -15,38 +15,68 @@ public static class LdapEndpoints
     public static void MapDirectoryChecks(this RouteGroupBuilder g)
     {
         // Audited with the server it went to: the saved password goes only to the saved server and account, as safely as saved.
-        g.MapPost("/ldap-test", async (Dictionary<string, string?> form, IOptionsMonitor<LdapOptions> current, AppDbContext db, Audit audit, CancellationToken ct) =>
+        // A password typed for another service account than the saved one is a guess at it, as a sign-in is (the answer says
+        // whether it is right): held by the same throttle and lockout as signing in.
+        g.MapPost("/ldap-test", async (Dictionary<string, string?> form, IOptionsMonitor<LdapOptions> current, AppDbContext db, SignInService signIn, Audit audit, CancellationToken ct) =>
         {
-            var (o, from, withheld, problem, notes) = await FromFormAsync(form, current.CurrentValue, db, ct);
-            var result = problem ?? await LdapCheck.TestAsync(o, from, notes, withheld, ct);
+            var saved = current.CurrentValue;
+            var (o, from, withheld, problem, notes) = await FromFormAsync(form, saved, db, ct);
+            var guessed = Guessed(o, from, saved);
+            LdapCheckResult result;
+            if (problem is not null)
+            {
+                result = problem;
+            }
+            else if (guessed is not null && await signIn.TryRefusalAsync(guessed) is { } held)
+            {
+                result = Held("Not tested", held);
+            }
+            else
+            {
+                (result, var refused) = await LdapCheck.TestAsync(o, from, notes, withheld, ct);
+                if (refused && guessed is not null)
+                {
+                    await signIn.TryRefusedAsync(guessed);
+                }
+            }
             await audit.WriteAsync("settings.ldap_test", Clip(o.Url), success: result.Ok, detail: result.Message);
             return Results.Ok(result);
-        });
+        }).RequireRateLimiting("sign-in");
 
         // Checked as a sign-in is (the same search, bind and groups, and this app's own rules),
         // with the form's settings. The password is never stored or logged; the try itself is audited.
-        // A try is a guess at a password too: held by the same throttle and lockout as signing in.
+        // A try is a guess at a password too (the person's, and a service account's typed as for the test):
+        // held by the same throttle and lockout as signing in.
         g.MapPost("/ldap-try", async (LdapTry body, IOptionsMonitor<LdapOptions> current, AppDbContext db, SignInService signIn, Audit audit, CancellationToken ct) =>
         {
-            var (o, from, withheld, problem, notes) = await FromFormAsync(body.Settings ?? [], current.CurrentValue, db, ct);
+            var saved = current.CurrentValue;
+            var (o, from, withheld, problem, notes) = await FromFormAsync(body.Settings ?? [], saved, db, ct);
             if (problem is not null)
             {
                 return Results.Ok(problem);
             }
             var login = body.Login?.Trim() ?? "";
+            var guessed = Guessed(o, from, saved);
             LdapCheckResult result;
             if (login.Length > 0 && await signIn.TryRefusalAsync(login) is { } held)
             {
-                var text = $"Not tried: {held}.";
-                result = new(false, text, [new LdapStep("fail", text)]);
+                result = Held("Not tried", held);
+            }
+            else if (login.Length > 0 && guessed is not null && await signIn.TryRefusalAsync(guessed) is { } service)
+            {
+                result = Held("Not tried", service);
             }
             else
             {
-                var (tried, person, refused) = await LdapCheck.TryAsync(o, from, login, body.Password ?? "", notes, withheld, ct);
+                var (tried, person, refused, serviceRefused) = await LdapCheck.TryAsync(o, from, login, body.Password ?? "", notes, withheld, ct);
                 result = tried;
                 if (refused)
                 {
                     await signIn.TryRefusedAsync(login);
+                }
+                if (serviceRefused && guessed is not null)
+                {
+                    await signIn.TryRefusedAsync(guessed);
                 }
                 if (person is not null)
                 {
@@ -65,6 +95,24 @@ public static class LdapEndpoints
     /// <summary>An audit entry's target, at most its column's 256 characters.</summary>
     private static string? Clip(string? value) => value is { Length: > 256 } ? value[..256] : value;
 
+    /// <summary>A check not made, as the brakes on password guessing hold it.</summary>
+    private static LdapCheckResult Held(string what, string why)
+    {
+        var text = $"{what}: {why}.";
+        return new(false, text, [new LdapStep("fail", text)]);
+    }
+
+    /// <summary>
+    /// The service account whose password a check guesses, or null: one with a password typed for it, other than
+    /// the saved one (or any, when none is saved). Re-typing the saved account's own password is not held.
+    /// </summary>
+    private static string? Guessed(LdapOptions form, PasswordFrom from, LdapOptions saved) =>
+        from == PasswordFrom.Typed && form.BindDn?.Trim() is { Length: > 0 } account && !SameAccount(account, saved.BindDn) ? account : null;
+
+    /// <summary>Whether two service accounts are one: the same text, in any case, or the same DN however it is written.</summary>
+    private static bool SameAccount(string? a, string? b) =>
+        string.Equals(a?.Trim() ?? "", b?.Trim() ?? "", StringComparison.OrdinalIgnoreCase) || (a is not null && b is not null && LdapDirectory.SameDn(a, b));
+
     /// <summary>
     /// What in the form keeps the saved password from going there, or null when nothing does. It goes only
     /// to the saved server (its host and port), as the saved service account, over a connection at least as
@@ -81,7 +129,7 @@ public static class LdapEndpoints
         {
             changes.Add("names another server");
         }
-        if (!string.Equals(form.BindDn?.Trim() ?? "", saved.BindDn?.Trim() ?? "", StringComparison.OrdinalIgnoreCase))
+        if (!SameAccount(form.BindDn, saved.BindDn))
         {
             changes.Add("names another service account");
         }
