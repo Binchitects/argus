@@ -75,7 +75,7 @@ until it is offered again.
 
 | Setting | What it holds |
 |---|---|
-| **Language people speak** | `auto` (Whisper hears which) or a language's code (`en`, `fa`, `de`): Talk, voice messages and API keys' speech to text are written down in it |
+| **Language people speak** | `auto` (Whisper hears which) or the code of a language Whisper knows (`en`, `fa`, `de`; not `per` or `eng`): Talk, voice messages and API keys' speech to text are written down in it. A code the speech to text model here does not list is said under the setting, and everyone is heard as with `auto` meanwhile |
 | **Voice for each language** | `language:model/voice` pairs, comma-separated: `en:kokoro/af_heart,fa:piper-fa/gyro` (the default). A text is read in the voice of its language; a language not named here gets the first voice offered for it. Your account → Voice lists every voice the speech models offer, with its id under each language (`kokoro/am_adam`, `kokoro/pf_dora`). A voice here that is not offered (mistyped, its model turned off) is said under the setting, with the voice that reads instead and the ones offered |
 | **Reading speed** | 0.5 to 2; 1 is the voice's own pace |
 | **Read answers aloud in Talk** | on or off, for Talk and the answer to a voice message |
@@ -83,10 +83,14 @@ until it is offered again.
 They apply to read aloud, Talk, the Speech tool, and API keys' speech at
 `gateway.DOMAIN`: `/v1/audio/speech` that names no voice and
 `/v1/audio/transcriptions` that names no language. Traefik sends those
-requests by the app, which fills in the key's person's voice or language and
-passes them on to LiteLLM with the same key (straight to LiteLLM while the app
-is down). An installation upgraded from v5.2.0 starts with these defaults for
-everyone: the voices it used before.
+requests (POST) by the app, which fills in the key's person's voice or
+language and passes them on to LiteLLM with the same key (straight to LiteLLM
+while the app is down). The app reads nothing of a request before its key
+says whose it is, and holds no sound: the person's language goes first in the
+form and the sound streams on behind it (a language the request names comes
+later, and LiteLLM keeps it). A browser's preflight goes to LiteLLM, which
+answers it. An installation upgraded from v5.2.0 starts with these defaults
+for everyone: the voices it used before.
 
 ## What cannot be changed here, and why
 

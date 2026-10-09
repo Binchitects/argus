@@ -107,7 +107,15 @@ public sealed record OfferedVoice(string Id, string Model, string Name, string L
 /// and the languages speech to text knows. Known: the speech server said so; else no voice is listed, and the ones the
 /// person and the company chose are believed.
 /// </summary>
-public sealed record SpeechOffer(IReadOnlyList<OfferedVoice> Voices, IReadOnlyList<string> Languages, IReadOnlySet<string> Models, bool Hears, bool Known);
+public sealed record SpeechOffer(IReadOnlyList<OfferedVoice> Voices, IReadOnlyList<string> Languages, IReadOnlySet<string> Models, bool Hears, bool Known)
+{
+    /// <summary>
+    /// A voice of a model the gateway serves whose voices the speech server did not list (it cannot be asked, or the
+    /// model is still downloading): believed as chosen, as before the app asked.
+    /// </summary>
+    public bool Believes(string id) =>
+        SpeechOptions.IsVoice(id) && id[..id.IndexOf('/', StringComparison.Ordinal)] is var model && Models.Contains(model) && !Voices.Any(v => v.Model == model);
+}
 
 /// <summary>How one person hears and is read to: their choices over the company's, within what the speech models offer.</summary>
 public sealed class PersonalSpeech(VoiceChoices mine, SpeechOptions company, SpeechOffer offer)
@@ -117,25 +125,29 @@ public sealed class PersonalSpeech(VoiceChoices mine, SpeechOptions company, Spe
     public SpeechOffer Offer => offer;
 
     /// <summary>The language for speech to text; null lets Whisper hear which.</summary>
-    public string? Language => Spoken(mine, company);
+    public string? Language => Spoken(mine, company, offer.Languages);
 
     public double Speed => Math.Clamp(mine.Speed ?? company.Speed, VoiceCatalog.Slowest, VoiceCatalog.Fastest);
 
     public bool ReadAloud => mine.ReadAloud ?? company.ReadAloud;
 
     /// <summary>
-    /// The voices that may read: those offered. While the speech server cannot be asked, the ones the person and the
-    /// company chose instead, of a model the gateway serves, each reading the language it was chosen for.
+    /// The voices that may read: those offered. For a model at the gateway whose voices the speech server did not list
+    /// (it cannot be asked, or the model is still downloading), the ones the person and the company chose instead, each
+    /// reading the language it was chosen for.
     /// </summary>
-    public IReadOnlyList<OfferedVoice> Usable { get; } = offer.Known ? offer.Voices :
-        [.. (mine.Voices ?? []).Concat(company.VoiceMap())
+    public IReadOnlyList<OfferedVoice> Usable { get; } =
+        [.. offer.Voices, .. (mine.Voices ?? []).Concat(company.VoiceMap())
+            .Where(c => offer.Believes(c.Value))
             .Select(c => OfferedVoice.Assumed(c.Value, c.Key)).OfType<OfferedVoice>()
-            .Where(v => offer.Models.Contains(v.Model))
             .DistinctBy(v => (v.Id, v.Language))];
 
-    /// <summary>The language a person speaks: theirs, else the company's; null for auto (or a code that is not one).</summary>
-    public static string? Spoken(VoiceChoices mine, SpeechOptions company) =>
-        (mine.Language ?? company.Language) is var l && l != SpeechOptions.Auto && SpeechOptions.IsLanguage(l) ? l : null;
+    /// <summary>
+    /// The language a person speaks: theirs, else the company's; null for auto, or a code speech to text does not know
+    /// (<paramref name="known"/>), which Whisper would refuse.
+    /// </summary>
+    public static string? Spoken(VoiceChoices mine, SpeechOptions company, IReadOnlyCollection<string> known) =>
+        (mine.Language ?? company.Language) is var l && l != SpeechOptions.Auto && known.Contains(l) ? l : null;
 
     /// <summary>The voice for a language, of <paramref name="model"/> only when given: theirs, else the company's, else the first offered for it.</summary>
     public OfferedVoice? VoiceFor(string language, string? model = null) => Pick(language, model, mine.Voices?.GetValueOrDefault(language));
@@ -172,8 +184,9 @@ public sealed class PersonalSpeech(VoiceChoices mine, SpeechOptions company, Spe
 /// <summary>
 /// The voices and languages the speech models offer, asked of the speech server: its models' list gives each text to
 /// speech model's voices, with their language (and, for Kokoro, a woman's or a man's), and the languages its speech to
-/// text knows. Asked again every ten minutes; while it cannot be asked (the audio module left out, the server down), the
-/// last answer stays, or the voices chosen are believed.
+/// text knows. Asked again every ten minutes, or every minute while a model of its that the gateway serves is not listed
+/// (the server lists only the models it has downloaded); while it cannot be asked (the audio module left out, the server
+/// down), the last answer stays, or the voices chosen are believed.
 /// </summary>
 public sealed partial class VoiceCatalog(IHttpClientFactory http, Operations.Modules modules, ChatModels models, IOptionsMonitor<SpeechOptions> options,
     TimeProvider clock, ILogger<VoiceCatalog> logger) : Settings.ISettingWarning, IDisposable
@@ -201,16 +214,23 @@ public sealed partial class VoiceCatalog(IHttpClientFactory http, Operations.Mod
     /// <summary>The server's last answer (kept while it cannot be asked), when it was last asked, and whether it answered then.</summary>
     private sealed record Asked(Heard? Heard, DateTimeOffset At, bool Answered)
     {
-        public bool Fresh(DateTimeOffset now) => now - At < (Answered ? VoiceCatalog.Fresh : Retry);
+        /// <summary>
+        /// Not asked again yet: for ten minutes after an answer that lists every one of the server's text to speech
+        /// models the gateway serves (<paramref name="speaking"/>), else for a minute.
+        /// </summary>
+        public bool Fresh(DateTimeOffset now, IReadOnlySet<string> speaking) =>
+            now - At < (Answered && Heard is { } h && speaking.All(m => !Ours(m) || h.Voices.Any(v => v.Model == m)) ? VoiceCatalog.Fresh : Retry);
+
+        private static bool Ours(string model) => MediaModels.Speech.Any(s => s.Name == model && s.Mode == "audio_speech");
     }
 
     /// <summary>What the speech models at the gateway offer now.</summary>
     public async Task<SpeechOffer> OfferAsync(CancellationToken ct = default)
     {
-        var heard = await HeardAsync(ct);
         var all = await models.AllAsync(ct);
         var speaking = all.Where(m => m.Mode == "audio_speech").Select(m => m.Name).ToHashSet(StringComparer.Ordinal);
         var hears = all.Any(m => m.Mode == "audio_transcription");
+        var heard = await HeardAsync(speaking, ct);
         return heard is null
             ? new SpeechOffer([], WhisperLanguages, speaking, hears, Known: false)
             : new SpeechOffer([.. heard.Voices.Where(v => speaking.Contains(v.Model))], heard.Languages, speaking, hears, Known: true);
@@ -220,14 +240,16 @@ public sealed partial class VoiceCatalog(IHttpClientFactory http, Operations.Mod
     public async Task<PersonalSpeech> ForAsync(AppUser person, CancellationToken ct = default) =>
         new(VoiceChoices.Of(person.Voice), options.CurrentValue, await OfferAsync(ct));
 
-    /// <summary>The language a person speaks, for speech to text (the speech server is not asked); null: Whisper hears which.</summary>
-    public string? LanguageOf(AppUser person) => PersonalSpeech.Spoken(VoiceChoices.Of(person.Voice), options.CurrentValue);
+    /// <summary>The language a person speaks, for speech to text; null: Whisper hears which.</summary>
+    public async Task<string?> LanguageOfAsync(AppUser person, CancellationToken ct = default) =>
+        PersonalSpeech.Spoken(VoiceChoices.Of(person.Voice), options.CurrentValue, (await OfferAsync(ct)).Languages);
 
     string Settings.ISettingWarning.Key => "Speech:Voices";
 
     /// <summary>
     /// The company's voices the speech models do not offer (a name mistyped, a model turned off), each with the voice its
-    /// language gets instead and the ones offered for it. Null when all are offered, or the speech server cannot be asked.
+    /// language gets instead and the ones offered for it. Null when all are offered, or the speech server cannot be asked
+    /// (or has not listed a voice's model yet).
     /// </summary>
     public async Task<string?> WarningAsync(CancellationToken ct = default)
     {
@@ -236,16 +258,16 @@ public sealed partial class VoiceCatalog(IHttpClientFactory http, Operations.Mod
         {
             return null;
         }
-        var wrong = options.CurrentValue.VoiceMap().Where(p => !offer.Voices.Any(v => v.Id == p.Value && v.Language == p.Key)).Select(p =>
+        var wrong = options.CurrentValue.VoiceMap().Where(p => !offer.Voices.Any(v => v.Id == p.Value && v.Language == p.Key) && !offer.Believes(p.Value)).Select(p =>
             offer.Voices.Where(v => v.Language == p.Key).Select(v => v.Id).ToList() is { Count: > 0 } ids
                 ? $"{p.Key}:{p.Value} is not a voice offered for {p.Key}, so {ids[0]} reads it. Offered: {string.Join(", ", ids)}."
                 : $"{p.Key}:{p.Value} is not offered, and no voice reads {p.Key} here.").ToList();
         return wrong.Count > 0 ? string.Join(" ", wrong) : null;
     }
 
-    private async Task<Heard?> HeardAsync(CancellationToken ct)
+    private async Task<Heard?> HeardAsync(IReadOnlySet<string> speaking, CancellationToken ct)
     {
-        if (_asked is var known && known.Fresh(clock.GetUtcNow()))
+        if (_asked is var known && known.Fresh(clock.GetUtcNow(), speaking))
         {
             return known.Heard;
         }
@@ -253,7 +275,7 @@ public sealed partial class VoiceCatalog(IHttpClientFactory http, Operations.Mod
         try
         {
             var now = clock.GetUtcNow();
-            if (_asked.Fresh(now))
+            if (_asked.Fresh(now, speaking))
             {
                 return _asked.Heard;
             }
@@ -322,4 +344,24 @@ public sealed partial class VoiceCatalog(IHttpClientFactory http, Operations.Mod
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Voices: the speech server could not be asked: {Error}")]
     private static partial void LogUnheard(ILogger logger, string error);
+}
+
+/// <summary>
+/// The company's language (Settings → Speech) when speech to text does not know it: everyone who leaves it to the company
+/// is then heard as with auto, and the Settings page says so under it.
+/// </summary>
+public sealed class SpeechLanguageWarning(VoiceCatalog voices, IOptionsMonitor<SpeechOptions> options) : Settings.ISettingWarning
+{
+    /// <summary>The setting it is said under.</summary>
+    public string Key => "Speech:Language";
+
+    /// <summary>What the Settings page says under the company's language; null when speech to text knows it, or it is auto.</summary>
+    public async Task<string?> WarningAsync(CancellationToken ct = default)
+    {
+        var company = options.CurrentValue;
+        var known = (await voices.OfferAsync(ct)).Languages;
+        return company.Language != SpeechOptions.Auto && PersonalSpeech.Spoken(new VoiceChoices(), company, known) is null
+            ? $"Speech to text does not know \"{company.Language}\" here, so Whisper hears which language is spoken, as with auto. Codes it knows: {string.Join(", ", known)}."
+            : null;
+    }
 }

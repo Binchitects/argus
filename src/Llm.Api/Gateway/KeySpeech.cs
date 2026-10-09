@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -5,7 +6,6 @@ using Llm.Api.Chat;
 using Llm.Core.Data;
 using Llm.Core.Identity;
 using Microsoft.AspNetCore.Http.Features;
-using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
 
@@ -16,8 +16,8 @@ namespace Llm.Api.Gateway;
 /// here while the app is up, and straight to LiteLLM otherwise. Text to speech that names no voice is read in the key's
 /// person's voice for its text's language (Your account → Voice), at their speed when it names none; one that names no
 /// model either gets that voice's model. Speech to text that names no language is written down in the language the
-/// person speaks, when they chose one. Everything goes on to LiteLLM with the caller's own key, which the gateway
-/// checks, and streams back.
+/// person speaks, when they chose one. Nothing is read before the key says whose request it is, and sound is never held:
+/// everything goes on to LiteLLM with the caller's own key, which the gateway checks, and streams back.
 /// </summary>
 public static class KeySpeech
 {
@@ -29,9 +29,6 @@ public static class KeySpeech
     /// <summary>Text to speech requests larger than this go on as they came.</summary>
     private const int MostRead = 1024 * 1024;
 
-    /// <summary>Speech to text requests larger than this go on as they came (OpenAI's own limit is 25 MB).</summary>
-    private const int MostHeard = 32 * 1024 * 1024;
-
     public static async Task ProxyAsync(HttpContext http, ILiteLlm gateway, AppDbContext db, VoiceCatalog voices, IHttpClientFactory factory)
     {
         var ct = http.RequestAborted;
@@ -41,30 +38,43 @@ public static class KeySpeech
             // The gateway decides, as when it is reached directly.
             limit.MaxRequestBodySize = null;
         }
-        var hearing = request.Path.Value?.EndsWith("/transcriptions", StringComparison.Ordinal) == true;
-        byte[]? body = null;
-        if (request.ContentLength is { } length && length > 0 && length <= (hearing ? MostHeard : MostRead))
+        HttpContent? content = null;
+        long? length = request.ContentLength;
+        // Only a person's request is changed: who it is comes first, from the key alone, and anyone else's goes on as it came.
+        if (HttpMethods.IsPost(request.Method) && await PersonAsync(request.Headers.Authorization.ToString(), gateway, db, ct) is { } person)
         {
-            body = new byte[length];
-            var read = 0;
-            int n;
-            while (read < body.Length && (n = await request.Body.ReadAsync(body.AsMemory(read), ct)) > 0)
+            if (request.Path.Value?.EndsWith("/transcriptions", StringComparison.Ordinal) == true)
             {
-                read += n;
+                if (await WithLanguageAsync(request.Body, request.ContentType, await voices.LanguageOfAsync(person, ct), ct) is (var form, var added))
+                {
+                    content = form;
+                    length += added;
+                }
             }
-            if (read < body.Length)
+            else if (request.ContentLength is > 0 and <= MostRead)
             {
-                http.Response.StatusCode = StatusCodes.Status400BadRequest;
-                return;
+                var body = new byte[request.ContentLength.Value];
+                var read = 0;
+                int n;
+                while (read < body.Length && (n = await request.Body.ReadAsync(body.AsMemory(read), ct)) > 0)
+                {
+                    read += n;
+                }
+                if (read < body.Length)
+                {
+                    http.Response.StatusCode = StatusCodes.Status400BadRequest;
+                    return;
+                }
+                body = await WithVoiceAsync(body, person, voices, ct) ?? body;
+                content = new ByteArrayContent(body);
+                length = body.Length;
             }
-            var key = request.Headers.Authorization.ToString();
-            body = (hearing ? await WithLanguageAsync(body, request.ContentType, key, gateway, db, voices, ct) : await WithVoiceAsync(body, key, gateway, db, voices, ct)) ?? body;
         }
+        // A request with no body (a browser's preflight) goes on with none.
+        var hasBody = http.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody ?? (request.ContentLength > 0 || request.Headers.ContainsKey(HeaderNames.TransferEncoding));
+        content ??= hasBody ? new StreamContent(request.Body) : null;
 
-        using var forward = new HttpRequestMessage(HttpMethod.Post, new Uri(request.Path + request.QueryString, UriKind.Relative))
-        {
-            Content = body is not null ? new ByteArrayContent(body) : new StreamContent(request.Body),
-        };
+        using var forward = new HttpRequestMessage(new HttpMethod(request.Method), new Uri(request.Path + request.QueryString, UriKind.Relative)) { Content = content };
         foreach (var (name, values) in request.Headers)
         {
             if (!AnswerCacheEndpoints.Dropped.Contains(name))
@@ -72,11 +82,14 @@ public static class KeySpeech
                 forward.Headers.TryAddWithoutValidation(name, (IEnumerable<string?>)values);
             }
         }
-        if (request.ContentType is { } type)
+        if (content is not null)
         {
-            forward.Content.Headers.TryAddWithoutValidation("Content-Type", type);
+            if (request.ContentType is { } type)
+            {
+                content.Headers.TryAddWithoutValidation("Content-Type", type);
+            }
+            content.Headers.ContentLength = length;
         }
-        forward.Content.Headers.ContentLength = body?.Length ?? request.ContentLength;
         forward.Headers.TryAddWithoutValidation("X-Forwarded-For", http.Connection.RemoteIpAddress?.ToString());
         forward.Headers.TryAddWithoutValidation("X-Forwarded-Proto", request.Scheme);
         forward.Headers.TryAddWithoutValidation("X-Forwarded-Host", request.Host.Value);
@@ -115,8 +128,8 @@ public static class KeySpeech
         }
     }
 
-    /// <summary>The request with the person's voice (and speed, and model) filled in; null: as it came (a voice named, no person to the key, nothing to read).</summary>
-    public static async Task<byte[]?> WithVoiceAsync(byte[] body, string authorization, ILiteLlm gateway, AppDbContext db, VoiceCatalog voices, CancellationToken ct)
+    /// <summary>The request with the person's voice (and speed, and model) filled in; null: as it came (a voice named, nothing to read).</summary>
+    public static async Task<byte[]?> WithVoiceAsync(byte[] body, AppUser person, VoiceCatalog voices, CancellationToken ct)
     {
         JsonObject? json;
         try
@@ -128,8 +141,7 @@ public static class KeySpeech
             // Not JSON: the gateway says what is wrong with it.
             return null;
         }
-        if (json is null || Str(json, "voice") is { Length: > 0 } || Str(json, "input") is not { Length: > 0 } text
-            || await PersonAsync(authorization, gateway, db, ct) is not { } person)
+        if (json is null || Str(json, "voice") is { Length: > 0 } || Str(json, "input") is not { Length: > 0 } text)
         {
             return null;
         }
@@ -149,41 +161,32 @@ public static class KeySpeech
     }
 
     /// <summary>
-    /// The form with the language the person speaks added, before its closing line; null: as it came (a language named,
-    /// the person lets Whisper hear which, no person to the key, not a form).
+    /// The form with a part for the language the person speaks put first, and the rest streamed on as it comes: a
+    /// language the request names comes after it, and the gateway keeps a field's last value. Also how many bytes it
+    /// adds. Null: as it came, with nothing read (no language chosen, not a form).
     /// </summary>
-    public static async Task<byte[]?> WithLanguageAsync(byte[] body, string? contentType, string authorization, ILiteLlm gateway, AppDbContext db, VoiceCatalog voices,
-        CancellationToken ct)
+    public static async Task<(HttpContent Form, int Added)?> WithLanguageAsync(Stream body, string? contentType, string? language, CancellationToken ct)
     {
-        if (!MediaTypeHeaderValue.TryParse(contentType, out var type) || !type.MediaType.Equals("multipart/form-data", StringComparison.OrdinalIgnoreCase)
+        if (language is null || !MediaTypeHeaderValue.TryParse(contentType, out var type) || !type.MediaType.Equals("multipart/form-data", StringComparison.OrdinalIgnoreCase)
             || HeaderUtilities.RemoveQuotes(type.Boundary).Value is not { Length: > 0 } boundary)
         {
             return null;
         }
-        try
+        // The form's first boundary, with or without a line break before it; a form that starts with anything else goes as it came.
+        var delimiter = Encoding.ASCII.GetBytes("--" + boundary);
+        var broken = Encoding.ASCII.GetBytes("\r\n--" + boundary);
+        var first = new byte[broken.Length];
+        var read = 0;
+        int n;
+        while (read < first.Length && (n = await body.ReadAsync(first.AsMemory(read), ct)) > 0)
         {
-            var reader = new MultipartReader(boundary, new MemoryStream(body, writable: false));
-            while (await reader.ReadNextSectionAsync(ct) is { } section)
-            {
-                if (ContentDispositionHeaderValue.TryParse(section.ContentDisposition, out var part) && HeaderUtilities.RemoveQuotes(part.Name).Equals("language", StringComparison.Ordinal))
-                {
-                    return null;
-                }
-            }
+            read += n;
         }
-        catch (Exception ex) when (ex is IOException or InvalidDataException)
-        {
-            // Not a whole form: the gateway says what is wrong with it.
-            return null;
-        }
-        var end = Encoding.ASCII.GetBytes($"\r\n--{boundary}--");
-        var at = body.AsSpan().LastIndexOf(end);
-        if (at < 0 || await PersonAsync(authorization, gateway, db, ct) is not { } person || voices.LanguageOf(person) is not { } language)
-        {
-            return null;
-        }
-        var field = Encoding.ASCII.GetBytes($"\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n{language}");
-        return [.. body.AsSpan(0, at), .. field, .. body.AsSpan(at)];
+        var start = first[..read];
+        // The part ends with the line break before the form's first boundary, which it may bring itself.
+        var close = start.AsSpan().StartsWith(delimiter) ? "\r\n" : start.AsSpan().StartsWith(broken) ? "" : null;
+        byte[] part = close is null ? [] : Encoding.ASCII.GetBytes($"--{boundary}\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n{language}{close}");
+        return (new Spliced([.. part, .. start], body), part.Length);
     }
 
     /// <summary>The person a key belongs to: null for no key, a key the gateway does not know or blocked, or one of nobody here.</summary>
@@ -212,4 +215,22 @@ public static class KeySpeech
     }
 
     private static string? Str(JsonObject o, string name) => o[name] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+
+    /// <summary>Bytes the app put first, then the rest of the caller's body as it comes.</summary>
+    private sealed class Spliced(byte[] head, Stream rest) : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => SerializeToStreamAsync(stream, context, CancellationToken.None);
+
+        protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken ct)
+        {
+            await stream.WriteAsync(head, ct);
+            await rest.CopyToAsync(stream, ct);
+        }
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
+    }
 }

@@ -161,7 +161,7 @@ public sealed partial class Media(SandboxClient sandbox, AppDbContext db, Gatewa
         var model = await models.OfModeAsync("audio_transcription", Models.MediaModels.SpeechToText, ct)
             ?? throw new MediaException("The gateway has no speech to text model (the audio module).");
         var person = a.FileName.StartsWith(VoiceMessage, StringComparison.Ordinal) ? await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == a.UserId, ct) : null;
-        var text = (await gateway.TranscribeAsync(model.Name, sound, "sound.mp3", email, ct, language: person is null ? null : voices.LanguageOf(person))).Trim();
+        var text = (await gateway.TranscribeAsync(model.Name, sound, "sound.mp3", email, ct, language: person is null ? null : await voices.LanguageOfAsync(person, ct))).Trim();
         await db.ChatAttachments.Where(x => x.Id == a.Id).ExecuteUpdateAsync(x => x.SetProperty(y => y.Text, text.Length == 0 ? " " : text), ct);
         a.Text = text.Length == 0 ? " " : text;
         return text;

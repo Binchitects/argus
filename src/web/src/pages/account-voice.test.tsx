@@ -153,7 +153,11 @@ describe('your voice', () => {
     renderApp('/account')
     const english = await screen.findByRole('combobox', { name: 'Voice for English' })
     expect(english).toHaveTextContent('kokoro/af_bella (not offered now)')
-    expect(screen.getByText('kokoro/af_bella is not offered now: kokoro/af_heart reads English')).toBeInTheDocument()
+    // Said in full across the row, wrapped, and not cut short on a phone (the select's own value is).
+    const said = screen.getByText('kokoro/af_bella is not offered now: kokoro/af_heart reads English')
+    expect(said).toHaveClass('col-span-full', 'break-words')
+    expect(said).not.toHaveClass('truncate')
+    expect(said).not.toHaveAttribute('title')
     // A language no voice reads now still has its row, to put it back.
     expect(screen.getByRole('combobox', { name: 'Voice for Portuguese' })).toBeInTheDocument()
     expect(screen.getByText('kokoro/pf_dora is not offered now: no voice reads Portuguese')).toBeInTheDocument()

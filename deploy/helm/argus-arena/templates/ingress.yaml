@@ -39,7 +39,7 @@ spec:
     - host: {{ printf "gateway.%s" .Values.domain | quote }}
       http:
         paths:
-          {{- /* Speech with keys goes by the app: the key's person's voice, and the language they speak. */}}
+          {{- /* Speech with keys goes by the app: the key's person's voice, and the language they speak. Every method: the app passes the rest (a browser's preflight) on to LiteLLM. */}}
           {{- range list "/v1/audio/speech" "/audio/speech" "/v1/audio/transcriptions" "/audio/transcriptions" }}
           - { path: {{ . }}, pathType: Exact, backend: { service: { name: app, port: { number: 8080 } } } }
           {{- end }}

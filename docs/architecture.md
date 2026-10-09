@@ -95,7 +95,8 @@ rest go on to LiteLLM with the same key ([admin.md](admin.md#the-answer-cache-fo
 Speech (`/v1/audio/speech` and `/v1/audio/transcriptions`) also goes by the
 app: text to speech that names no voice gets the key's person's voice, and
 speech to text that names no language gets the language they speak
-([chat.md](chat.md#your-voice)); both go on to LiteLLM with the same key.
+([chat.md](chat.md#your-voice)); both go on to LiteLLM with the same key, the
+sound streamed through and nothing read before the key says whose it is.
 
 **Argus.** A developer's agent → `argus.DOMAIN/mcp` with the person's API key,
 which Argus checks with the app (`app:8080/api/authz/key`); the chat →

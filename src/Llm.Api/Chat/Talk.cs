@@ -55,7 +55,7 @@ public static class Talk
         var sound = type == "video/webm" ? "audio/webm" : type;
         try
         {
-            var text = await gateway.TranscribeAsync(model.Name, ms.ToArray(), "speech" + Extension(sound), me.Email!, ct, sound, voices.LanguageOf(me));
+            var text = await gateway.TranscribeAsync(model.Name, ms.ToArray(), "speech" + Extension(sound), me.Email!, ct, sound, await voices.LanguageOfAsync(me, ct));
             return Results.Ok(new { text = text.Trim() });
         }
         catch (ChatGatewayException ex)

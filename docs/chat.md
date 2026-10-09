@@ -593,7 +593,10 @@ company's** puts them all back.
   voice, and its `/v1/audio/transcriptions` when the request names no
   language.
 - While the speech server cannot be asked, only the voices already chosen (by
-  you or the company) are listed, and they are used as chosen.
+  you or the company) are listed, and they are used as chosen. So too for a
+  model it has not listed yet (it lists only the models it has downloaded):
+  its voices chosen are used, and the server is asked again each minute until
+  it lists them.
 
 ## Memory
 
@@ -1054,9 +1057,13 @@ use and edit one); a new chat takes `assistantId`.
   does not name, changes made at once all kept, a voice no longer offered not
   stopping other changes, new choices refused that the speech models do not
   offer, an API key's speech that names no voice read in its person's voice and
-  its speech to text that names no language written down in theirs, the voices
-  chosen believed while the speech server is down, and a person from v5.2.0
-  upgraded with nothing lost.
+  its speech to text that names no language written down in theirs (the sound
+  passed on before it has all come, and nothing held before the key says whose
+  it is; a browser's preflight passed on as it came), the company's language
+  refused when Whisper does not know it and heard as auto when the speech
+  server does not list it, the voices chosen believed while the speech server
+  is down or has not listed their model yet (asked again within a minute), and
+  a person from v5.2.0 upgraded with nothing lost.
   Also branches (edits, answering again, switching, parents from another chat
   refused), archiving (and coming back when written in), forks (up to the
   chosen answer, with settings and files; never inside a tool round; the owner

@@ -30,8 +30,11 @@ public sealed class VoiceTests(AppFixture app)
         public ValueTask DisposeAsync() => App.DisposeAsync();
     }
 
-    /// <summary>An app with the speech models at the gateway and a speech server to ask (or none: the audio module left out).</summary>
-    private Setup NewApp(bool audio = true, bool down = false)
+    /// <summary>
+    /// An app with the speech models at the gateway and a speech server to ask (or none: the audio module left out); API
+    /// keys' speech goes on to <paramref name="keySpeech"/> (else the fake gateway), and time is <paramref name="clock"/>'s.
+    /// </summary>
+    private Setup NewApp(bool audio = true, bool down = false, HttpMessageHandler? keySpeech = null, TimeProvider? clock = null)
     {
         var gateway = new FakeGateway();
         gateway.Models.Add(new GatewayModel(MediaModels.SpeechToText, null, null, false, false, false, null, null, null, Mode: "audio_transcription"));
@@ -44,7 +47,11 @@ public sealed class VoiceTests(AppFixture app)
                 s.AddHttpClient(VoiceCatalog.Client).ConfigurePrimaryHttpMessageHandler(() => fake);
                 s.AddHttpClient(MediaControl.Client).ConfigurePrimaryHttpMessageHandler(() => fake);
                 s.AddHttpClient(Provisioning.Client).ConfigurePrimaryHttpMessageHandler(() => fake);
-                s.AddHttpClient(KeySpeech.Client).ConfigurePrimaryHttpMessageHandler(() => app.Model);
+                s.AddHttpClient(KeySpeech.Client).ConfigurePrimaryHttpMessageHandler(() => keySpeech ?? app.Model);
+                if (clock is not null)
+                {
+                    s.AddSingleton(clock);
+                }
             });
         return new Setup(f, fake);
     }
@@ -339,10 +346,11 @@ public sealed class VoiceTests(AppFixture app)
         Assert.Equal([MediaModels.SpeechToText], form["model"]);
         Assert.Equal("RIFF0000WAVEfmt ", form["file"].Single());
 
-        // A language named is kept, without the path's /v1 too.
+        // Their language goes first, so a language the request names comes after it, and the gateway keeps a field's
+        // last value (LiteLLM reads the form so): the one named. Without the path's /v1 too.
         var named = "n" + Guid.NewGuid().ToString("N")[..10];
         await StatusAssert.Is(HttpStatusCode.OK, await KeyHearAsync(s.App, key, named, "en", "/audio/transcriptions"));
-        Assert.Equal(["en"], (await HeardFormAsync(named))["language"]);
+        Assert.Equal(["fa", "en"], (await HeardFormAsync(named))["language"]);
 
         // Detect it (theirs or the company's): Whisper hears which.
         await StatusAssert.Is(HttpStatusCode.OK, await ChooseAsync(b, new { language = "auto" }));
@@ -400,10 +408,40 @@ public sealed class VoiceTests(AppFixture app)
             "de:kokoro/df_anna is not offered, and no voice reads de here.", await SettingWarningAsync(admin));
     }
 
-    /// <summary>What the Settings page says under Speech:Voices, if anything.</summary>
-    private static async Task<string?> SettingWarningAsync(TestBrowser admin) =>
+    /// <summary>What the Settings page says under a setting (Speech:Voices), if anything.</summary>
+    private static async Task<string?> SettingWarningAsync(TestBrowser admin, string key = "Speech:Voices") =>
         (await admin.JsonAsync(await admin.GetAsync("/api/admin/config"))).GetProperty("groups").EnumerateArray().SelectMany(g => g.GetProperty("settings").EnumerateArray())
-            .Single(x => x.GetProperty("key").GetString() == "Speech:Voices").GetProperty("warning").GetString();
+            .Single(x => x.GetProperty("key").GetString() == key).GetProperty("warning").GetString();
+
+    private static Task<HttpResponseMessage> SetAsync(TestBrowser admin, string key, string value) =>
+        admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative), new { changes = new[] { new { key, value } } });
+
+    [Fact]
+    public async Task The_companys_language_is_one_speech_to_text_knows_and_one_it_does_not_list_is_heard_as_auto_and_said()
+    {
+        await using var s = NewApp();
+        var (b, _, email) = await PersonAsync(s.App);
+        var admin = await new TestBrowser(s.App).SignedInAsync("admin", AppFixture.AdminPassword);
+        // Not a code Whisper knows (Persian is fa, English en): refused.
+        foreach (var wrong in new[] { "per", "pe", "eng", "xx" })
+        {
+            await StatusAssert.Is(HttpStatusCode.BadRequest, await SetAsync(admin, "Speech:Language", wrong));
+        }
+        Assert.Null(await SettingWarningAsync(admin, "Speech:Language"));
+        await StatusAssert.Is(HttpStatusCode.OK, await SetAsync(admin, "Speech:Language", "fa"));
+        Assert.Null(await SettingWarningAsync(admin, "Speech:Language"));
+        await TranscribeAsync(b);
+        Assert.Contains("name=language\r\n\r\nfa", Heard(email), StringComparison.Ordinal);
+
+        // One Whisper knows that this speech server's model does not list: said under the setting, and everyone who leaves
+        // it to the company is heard as with auto rather than refused.
+        await StatusAssert.Is(HttpStatusCode.OK, await SetAsync(admin, "Speech:Language", "it"));
+        Assert.Equal("Speech to text does not know \"it\" here, so Whisper hears which language is spoken, as with auto. Codes it knows: en, fa, de, fr, es, ja.",
+            await SettingWarningAsync(admin, "Speech:Language"));
+        await TranscribeAsync(b);
+        Assert.DoesNotContain("name=language", Heard(email), StringComparison.Ordinal);
+        Assert.Equal("auto", (await b.JsonAsync(await b.GetAsync("/api/account/voice"))).GetProperty("company").GetProperty("language").GetString());
+    }
 
     [Fact]
     public async Task While_the_speech_server_cannot_be_asked_the_voices_chosen_are_believed()
@@ -419,6 +457,177 @@ public sealed class VoiceTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.BadRequest, await ChooseAsync(b, new { voices = new Dictionary<string, string> { ["en"] = "elsewhere/voice" } }));
         await b.PostAsync("/api/chat/speech", new { text = "Hello there." });
         Assert.Equal("am_adam", Spoken(email)["voice"]!.GetValue<string>());
+    }
+
+    /// <summary>
+    /// The gateway as the app reaches it for API keys' speech: it says when a request has come (before reading its body),
+    /// then reads it all; LiteLLM's CORS answers a browser's preflight.
+    /// </summary>
+    private sealed class HeldGateway : HttpMessageHandler
+    {
+        private TaskCompletionSource<HttpRequestMessage> _arrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private TaskCompletionSource<byte[]> _received = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<HttpRequestMessage> Arrived => _arrived.Task;
+        public Task<byte[]> Received => _received.Task;
+
+        /// <summary>Ready for the next request.</summary>
+        public void Next()
+        {
+            _arrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            _received = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            _arrived.TrySetResult(request);
+            _received.TrySetResult(request.Content is null ? [] : await request.Content.ReadAsByteArrayAsync(cancellationToken));
+            var res = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"text":"Heard."}""", Encoding.UTF8, "application/json") };
+            if (request.Method == HttpMethod.Options)
+            {
+                res.Content = new StringContent("OK");
+                res.Headers.TryAddWithoutValidation("Access-Control-Allow-Origin", "*");
+                res.Headers.TryAddWithoutValidation("Access-Control-Allow-Methods", "DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT");
+            }
+            return res;
+        }
+    }
+
+    /// <summary>A body whose first bytes are sent at once and the rest only once let go; its length is said up front.</summary>
+    private sealed class Trickle(byte[] body, int first, Task go) : HttpContent
+    {
+        protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+        {
+            await stream.WriteAsync(body.AsMemory(0, first));
+            await stream.FlushAsync();
+            await go;
+            await stream.WriteAsync(body.AsMemory(first));
+        }
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = body.Length;
+            return true;
+        }
+    }
+
+    [Fact]
+    public async Task An_API_keys_speech_goes_on_before_its_body_has_come_and_nothing_is_held_before_the_key_says_whose_it_is()
+    {
+        var held = new HeldGateway();
+        await using var s = NewApp(keySpeech: held);
+        var (b, key, _) = await PersonAsync(s.App);
+        // No redirects followed: the test client would hold the whole body to send it again.
+        var client = s.App.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://gateway.{AppFixture.Domain}"), HandleCookies = false, AllowAutoRedirect = false });
+
+        // Sends a body of which only the first 200 bytes come before the gateway has the request; then the rest.
+        async Task<(HttpRequestMessage Arrived, byte[] Received)> SendAsync(string path, string? bearer, byte[] body, string type)
+        {
+            held.Next();
+            var go = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(path, UriKind.Relative)) { Content = new Trickle(body, 200, go.Task) };
+            req.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(type);
+            if (bearer is not null)
+            {
+                req.Headers.Authorization = new("Bearer", bearer);
+            }
+            var sending = client.SendAsync(req);
+            HttpRequestMessage arrived;
+            try
+            {
+                // The app held none of it: the gateway has the request while most of its body has still to come.
+                arrived = await held.Arrived.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            finally
+            {
+                go.TrySetResult();
+            }
+            await StatusAssert.Is(HttpStatusCode.OK, await sending);
+            return (arrived, await held.Received.WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+
+        using var form = new MultipartFormDataContent("form-" + Guid.NewGuid().ToString("N"));
+        form.Add(new StringContent(MediaModels.SpeechToText), "model");
+        form.Add(new ByteArrayContent(new byte[64 * 1024]), "file", "meeting.wav");
+        var sound = await form.ReadAsByteArrayAsync();
+        var formType = form.Headers.ContentType!.ToString();
+
+        // No key: as it came, whatever length it says it has.
+        var (anyone, heard) = await SendAsync("/v1/audio/transcriptions", null, sound, formType);
+        Assert.Equal(sound, heard);
+        Assert.Equal(sound.Length, anyone.Content!.Headers.ContentLength);
+        var json = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { model = "kokoro", input = new string('a', 4000) }));
+        var (reader, read) = await SendAsync("/v1/audio/speech", null, json, "application/json");
+        Assert.Equal(json, read);
+        Assert.Equal(json.Length, reader.Content!.Headers.ContentLength);
+
+        // A person who lets Whisper hear their language (as everyone does by default): as it came too.
+        var (detect, detected) = await SendAsync("/v1/audio/transcriptions", key, sound, formType);
+        Assert.Equal(sound, detected);
+        Assert.Equal(sound.Length, detect.Content!.Headers.ContentLength);
+
+        // One who speaks Persian: their language put first, and the sound streamed on after it.
+        await StatusAssert.Is(HttpStatusCode.OK, await ChooseAsync(b, new { language = "fa" }));
+        var (persian, sent) = await SendAsync("/audio/transcriptions", key, sound, formType);
+        var boundary = form.Headers.ContentType!.Parameters.Single(p => p.Name == "boundary").Value!.Trim('"');
+        Assert.Equal([.. Encoding.ASCII.GetBytes($"--{boundary}\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\nfa\r\n"), .. sound], sent);
+        Assert.Equal(sent.Length, persian.Content!.Headers.ContentLength);
+    }
+
+    [Fact]
+    public async Task A_browsers_preflight_for_an_API_keys_speech_is_passed_on_as_it_came()
+    {
+        var held = new HeldGateway();
+        await using var s = NewApp(keySpeech: held);
+        var client = s.App.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://gateway.{AppFixture.Domain}"), HandleCookies = false, AllowAutoRedirect = false });
+        foreach (var path in KeySpeech.Paths)
+        {
+            held.Next();
+            using var req = new HttpRequestMessage(HttpMethod.Options, new Uri(path, UriKind.Relative));
+            req.Headers.Add("Origin", "https://tools.example.test");
+            req.Headers.Add("Access-Control-Request-Method", "POST");
+            req.Headers.Add("Access-Control-Request-Headers", "authorization, content-type");
+            var res = await client.SendAsync(req);
+            await StatusAssert.Is(HttpStatusCode.OK, res);
+            Assert.Equal("*", res.Headers.GetValues("Access-Control-Allow-Origin").Single());
+            var arrived = await held.Arrived.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal((HttpMethod.Options, path), (arrived.Method, arrived.RequestUri!.AbsolutePath));
+            Assert.Null(arrived.Content);
+            Assert.Equal("POST", arrived.Headers.GetValues("Access-Control-Request-Method").Single());
+        }
+    }
+
+    [Fact]
+    public async Task A_model_the_speech_server_has_not_listed_yet_reads_in_the_voices_chosen_and_the_server_is_asked_again_within_a_minute()
+    {
+        var clock = new MovableClock(DateTimeOffset.UtcNow);
+        await using var s = NewApp(clock: clock);
+        // Persian's model is still downloading: the speech server lists Kokoro's voices alone.
+        s.Audio.Downloading["speaches-ai/piper-fa_IR-gyro-medium"] = true;
+        var (b, _, email) = await PersonAsync(s.App);
+        var admin = await new TestBrowser(s.App).SignedInAsync("admin", AppFixture.AdminPassword);
+        var mine = await b.JsonAsync(await b.GetAsync("/api/account/voice"));
+        Assert.True(mine.GetProperty("known").GetBoolean());
+        // The company's Persian voice is believed, as before the app asked, and not said to be wrong.
+        Assert.Contains("piper-fa/gyro", mine.GetProperty("voices").EnumerateArray().Select(v => v.GetProperty("id").GetString()));
+        await b.PostAsync("/api/chat/speech", new { text = "صبح بخیر" });
+        Assert.Equal(("piper-fa", "gyro"), (Spoken(email)["model"]!.GetValue<string>(), Spoken(email)["voice"]!.GetValue<string>()));
+        Assert.Null(await SettingWarningAsync(admin));
+        int Asked() => s.Audio.Asked.Count(a => a.Contains("task=text-to-speech", StringComparison.Ordinal));
+        var asked = Asked();
+
+        // Downloaded: asked again a minute on, not ten.
+        s.Audio.Downloading.Clear();
+        clock.Now += TimeSpan.FromSeconds(30);
+        await b.GetAsync("/api/account/voice");
+        Assert.Equal(asked, Asked());
+        clock.Now += TimeSpan.FromSeconds(40);
+        await b.GetAsync("/api/account/voice");
+        Assert.Equal(asked + 1, Asked());
+        // Every model listed now: remembered for ten minutes.
+        clock.Now += TimeSpan.FromMinutes(5);
+        await b.GetAsync("/api/account/voice");
+        Assert.Equal(asked + 1, Asked());
     }
 
     [Theory]
@@ -467,6 +676,9 @@ public sealed class VoiceTests(AppFixture app)
         var persian = new PersonalSpeech(new VoiceChoices { Language = "fa" }, new SpeechOptions(), Offer);
         Assert.Equal("piper-fa/gyro", persian.For("こんにちは")!.Id);
         Assert.Equal("fa", persian.Language);
+        // A language speech to text does not know (Whisper would refuse it) is heard as with auto, the company's too.
+        Assert.Null(new PersonalSpeech(new VoiceChoices(), new SpeechOptions { Language = "per" }, Offer).Language);
+        Assert.Null(new PersonalSpeech(new VoiceChoices { Language = "it" }, new SpeechOptions(), Offer with { Languages = ["en", "fa"] }).Language);
         // A model named: its voices only.
         Assert.Equal("kokoro/am_adam", english.For("صبح بخیر", "kokoro")!.Id);
         Assert.Null(english.For("Hello", "whisper"));
@@ -551,6 +763,8 @@ public sealed class VoiceTests(AppFixture app)
         Assert.Contains("Path(`/v1/audio/speech`) || Path(`/audio/speech`)", routes, StringComparison.Ordinal);
         Assert.Contains("failover: { service: app-speech, fallback: litellm }", routes, StringComparison.Ordinal);
         Assert.Contains("Path(`/v1/audio/transcriptions`) || Path(`/audio/transcriptions`)", routes, StringComparison.Ordinal);
+        // POST only: a browser's preflight goes straight to LiteLLM, which answers it.
+        Assert.Contains("Host(`gateway.{{ $domain }}`) && Method(`POST`) && (Path(`/v1/audio/speech`)", routes, StringComparison.Ordinal);
         var ingress = File.ReadAllText(Path.Combine(deploy, "helm", "argus-arena", "templates", "ingress.yaml"));
         Assert.Contains("\"/v1/audio/speech\" \"/audio/speech\" \"/v1/audio/transcriptions\" \"/audio/transcriptions\"", ingress, StringComparison.Ordinal);
         Assert.Equal(["/v1/audio/speech", "/audio/speech", "/v1/audio/transcriptions", "/audio/transcriptions"], KeySpeech.Paths);

@@ -16,6 +16,9 @@ public sealed class FakeAudio : HttpMessageHandler
     public ConcurrentQueue<string> Asked { get; } = new();
     public bool Down { get; set; }
 
+    /// <summary>Models it does not list yet, by id: speaches lists only the models it has downloaded.</summary>
+    public ConcurrentDictionary<string, bool> Downloading { get; } = new();
+
     private static JsonObject Voice(string name, string language, string? gender = null)
     {
         var v = new JsonObject { ["name"] = name, ["language"] = language, ["id"] = name };
@@ -73,6 +76,10 @@ public sealed class FakeAudio : HttpMessageHandler
             var list = uri.Query.Contains("task=automatic-speech-recognition", StringComparison.Ordinal) ? Hearing()
                 : uri.Query.Contains("task=text-to-speech", StringComparison.Ordinal) ? Speaking()
                 : new JsonObject { ["data"] = new JsonArray([.. Speaking()["data"]!.AsArray().Select(m => m!.DeepClone()), .. Hearing()["data"]!.AsArray().Select(m => m!.DeepClone())]) };
+            foreach (var model in list["data"]!.AsArray().Where(m => Downloading.ContainsKey(m!["id"]!.GetValue<string>())).ToList())
+            {
+                list["data"]!.AsArray().Remove(model);
+            }
             return Task.FromResult(Json(list));
         }
         if (request.Method == HttpMethod.Get && uri.AbsolutePath == "/api/ps")

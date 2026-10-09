@@ -153,9 +153,16 @@ function Voices({ settings: v, disabled, onChange }: { settings: VoiceSettings; 
               </SelectContent>
             </Select>
             {reads ? <TryIt voice={reads.id} language={language} label={label} speed={speedOf(v)} /> : <span />}
-            <span className="col-start-2 truncate font-mono text-xs text-muted-foreground" title="The voice's id, as Settings → Speech names it">
-              {gone ? `${chosen} is not offered now: ${reads ? `${reads.id} reads ${label}` : `no voice reads ${label}`}` : (reads?.id ?? 'No voice reads it here')}
-            </span>
+            {gone ? (
+              // The whole row's width, wrapped: on a phone it is the only place that says what happened.
+              <span className="col-span-full text-xs break-words text-muted-foreground sm:col-span-2 sm:col-start-2">
+                {`${chosen} is not offered now: ${reads ? `${reads.id} reads ${label}` : `no voice reads ${label}`}`}
+              </span>
+            ) : (
+              <span className="col-start-2 truncate font-mono text-xs text-muted-foreground" title="The voice's id, as Settings → Speech names it">
+                {reads?.id ?? 'No voice reads it here'}
+              </span>
+            )}
           </div>
         )
       })}

@@ -41,6 +41,7 @@ public static class VoiceEndpoints
         services.Configure<SpeechOptions>(config.GetSection("Speech"));
         services.AddSingleton<VoiceCatalog>();
         services.AddSingleton<Settings.ISettingWarning>(sp => sp.GetRequiredService<VoiceCatalog>());
+        services.AddSingleton<Settings.ISettingWarning, SpeechLanguageWarning>();
         services.AddHttpClient(VoiceCatalog.Client, c => c.Timeout = TimeSpan.FromSeconds(5));
         services.AddHttpClient(KeySpeech.Client, (sp, c) =>
         {
@@ -57,10 +58,11 @@ public static class VoiceEndpoints
         me.MapGet("", MineAsync);
         me.MapPatch("", ChooseAsync);
         me.MapPost("/try", TryAsync);
-        // API keys' speech at gateway.DOMAIN, sent here by Traefik while the app is up.
+        // API keys' speech at gateway.DOMAIN, sent here while the app is up: every method, as the gateway answers them all
+        // (a browser's preflight gets its CORS headers).
         foreach (var path in KeySpeech.Paths)
         {
-            app.MapPost(path, KeySpeech.ProxyAsync).AllowAnonymous().DisableAntiforgery();
+            app.Map(path, KeySpeech.ProxyAsync).AllowAnonymous().DisableAntiforgery();
         }
     }
 
@@ -78,7 +80,7 @@ public static class VoiceEndpoints
             chosen = new { language = s.Mine.Language, voices = s.Mine.Voices ?? [], speed = s.Mine.Speed, readAloud = s.Mine.ReadAloud },
             company = new
             {
-                language = PersonalSpeech.Spoken(new VoiceChoices(), s.Company) ?? SpeechOptions.Auto,
+                language = PersonalSpeech.Spoken(new VoiceChoices(), s.Company, s.Offer.Languages) ?? SpeechOptions.Auto,
                 voices = languages.Select(l => (l, v: s.CompanyVoiceFor(l))).Where(x => x.v is not null).ToDictionary(x => x.l, x => x.v!.Id),
                 speed = Math.Clamp(s.Company.Speed, VoiceCatalog.Slowest, VoiceCatalog.Fastest),
                 readAloud = s.Company.ReadAloud,
@@ -137,10 +139,10 @@ public static class VoiceEndpoints
         }
         foreach (var (lang, id) in voiceChanges ?? [])
         {
-            // Offered for that language; while the speech server cannot be asked, any voice of a text to speech model at the gateway.
-            var fits = id is null || had.Voices?.GetValueOrDefault(lang) == id || (offer.Known
-                ? offer.Voices.Any(v => v.Id == id && v.Language == lang)
-                : SpeechOptions.IsLanguage(lang) && OfferedVoice.Assumed(id, lang) is { } assumed && offer.Models.Contains(assumed.Model));
+            // Offered for that language; for a text to speech model at the gateway whose voices the speech server did not list
+            // (it cannot be asked, the model is still downloading), any voice of it.
+            var fits = id is null || had.Voices?.GetValueOrDefault(lang) == id || offer.Voices.Any(v => v.Id == id && v.Language == lang)
+                || (SpeechOptions.IsLanguage(lang) && offer.Believes(id));
             if (!fits)
             {
                 return AuthEndpoints.Problem(400, "voice", $"\"{id}\" is not a voice for {lang} here.");
