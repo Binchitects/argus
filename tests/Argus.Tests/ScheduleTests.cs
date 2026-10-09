@@ -69,6 +69,7 @@ public class ScheduleTests
         Choices.Record(ix.Conn, [P(1, "g/hourly"), P(2, "g/nightly"), P(3, "g/pass"), P(4, "g/off"), P(5, "g/left-out"), P(6, "g/default")], t0);
         var hourly = ix.Repo(1, "g/hourly");
         Writes.RecordRunState(ix.Conn, hourly, false, false, t0 - 3600);
+        Writes.RecordRunState(ix.Conn, ix.Repo(2, "g/nightly"), false, false, t0 - 3600);
         Assert.True(Choices.SetSchedule(ix.Conn, 1, "hours:6", t0));
         Assert.True(Choices.SetSchedule(ix.Conn, 2, "daily:02:00", t0));
         Assert.True(Choices.SetSchedule(ix.Conn, 4, "off", t0));
@@ -101,6 +102,46 @@ public class ScheduleTests
         // Off, or left out of the index: never by schedule.
         Assert.DoesNotContain("g/off", Choices.Due(ix.Conn, t0 + 30 * 86400).Select(c => c.Path));
         Assert.DoesNotContain("g/left-out", Choices.Due(ix.Conn, t0 + 30 * 86400).Select(c => c.Path));
+    }
+
+    [Fact]
+    public void A_repository_never_indexed_runs_at_once_whatever_its_schedule_and_one_gitlab_no_longer_lists_never_does()
+    {
+        using var ix = new TestIndex();
+        var tuesday = At("2026-10-06T10:00:00Z");
+        Choices.Record(ix.Conn, [P(1, "g/old")], tuesday - 86400);
+        Writes.RecordRunState(ix.Conn, ix.Repo(1, "g/old"), false, false, tuesday - 3600);
+        // The schedule for all set on a Tuesday: Mondays at 02:00 (UTC).
+        Choices.SetDefaultSchedule(ix.Conn, RepoSchedule.Parse("weekly:1:02:00"), tuesday);
+        var (zone, _) = RepoSchedule.Zone("UTC");
+
+        // A repository made in GitLab afterwards is not left out of answers until Monday: it runs at once.
+        Choices.Record(ix.Conn, [P(1, "g/old"), P(2, "g/new")], tuesday + 600);
+        Assert.Equal(["g/new"], Choices.Due(ix.Conn, tuesday + 630).Select(c => c.Path));
+        Assert.Equal(tuesday + 630, Choices.NextRun(Choices.Find(ix.Conn, 2)!, RepoSchedule.Parse("weekly:1:02:00"), zone, null, tuesday + 630)!.Value.ToUnixTimeSeconds());
+        // Once its schedule started it, it waits for Monday like the rest, even when that run indexed nothing.
+        Choices.MarkScheduled(ix.Conn, [2], tuesday + 630);
+        Assert.Empty(Choices.Due(ix.Conn, tuesday + 3 * 86400));
+        var monday = At("2026-10-12T02:00:00Z");
+        Assert.Equal(["g/new", "g/old"], Choices.Due(ix.Conn, monday).Select(c => c.Path).Order());
+
+        // A schedule of its own, set before it was ever checked: at once too.
+        Choices.Record(ix.Conn, [P(1, "g/old"), P(2, "g/new"), P(3, "g/daily")], tuesday + 700);
+        Assert.True(Choices.SetSchedule(ix.Conn, 3, "daily:02:00", tuesday + 710));
+        Assert.Contains("g/daily", Choices.Due(ix.Conn, tuesday + 720).Select(c => c.Path));
+
+        // Left out, then chosen again (its index went with it): at once, not next Monday.
+        Choices.MarkScheduled(ix.Conn, [1, 2, 3], monday);
+        Choices.Set(ix.Conn, 2, false, null, monday + 60);
+        Choices.Set(ix.Conn, 2, true, null, monday + 120);
+        Assert.Equal(["g/new"], Choices.Due(ix.Conn, monday + 180).Select(c => c.Path));
+
+        // GitLab no longer lists it (a token that cannot see it, a project deleted): its schedule never runs it,
+        // as Update cannot; nor one set aside under an id no project has.
+        Choices.Record(ix.Conn, [P(1, "g/old"), P(3, "g/daily")], monday + 240);
+        Assert.False(Choices.Listed(Choices.Find(ix.Conn, 2)!, Choices.ListedAt(ix.Conn)));
+        Assert.DoesNotContain("g/new", Choices.Due(ix.Conn, monday + 30 * 86400).Select(c => c.Path));
+        Assert.False(Choices.Listed(Choices.Find(ix.Conn, 1)! with { GitlabId = -1 }, null));
     }
 
     [Fact]

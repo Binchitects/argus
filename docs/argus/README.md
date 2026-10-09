@@ -508,7 +508,9 @@ API (`/admin/repos`).
   **Add branches…** or **Remove…**. Each asks first, then lists what came of
   each repository in a sentence ("Updating now.", "Not indexed: choose it for
   the index first."). Remove takes the index away and leaves the repository
-  out; one GitLab no longer lists is forgotten altogether.
+  out; one GitLab no longer lists is forgotten altogether. **Leave them out**
+  and **Remove…** answer at once: the indexes go in the background, one
+  repository at a time, and only once the run going ends when one is.
 - **Indexed** on or off per repository. Off takes it out of the index at once,
   its files, symbols and text search with it (after the run going, if one is).
   **New repositories** says whether one GitLab lists for the first time is
@@ -534,7 +536,7 @@ has them too. Its admin API, for scripts (the admin token, or an admin's session
 | `PATCH /admin/repos/{id}` | `included`, `branches`, `schedule` (`""` follows the schedule for all) |
 | `POST /admin/repos/batch` | `{"ids": [...], "action": "include" \| "exclude" \| "reindex" \| "schedule" \| "add_branches" \| "remove", "schedule": ..., "branches": [...]}`; answers each repository's outcome |
 | `PUT /admin/repos/settings` | `new_repos` (`include` or `exclude`), `schedule` (the schedule for all), `schedule_tz` (an IANA zone) |
-| `GET /admin/repos/{id}/log?runs=5` | its log, oldest line first, and where the run going is with it |
+| `GET /admin/repos/{id}/log?runs=5` | its last runs and as many of the changes admins made, oldest line first, and where the run going is with it |
 
 A schedule is written `pass`, `off`, `hours:6`, `daily:02:30` or `weekly:1:02:30`
 (the day from 1 for Monday to 7 for Sunday).
@@ -562,8 +564,10 @@ Until v5.2.0 the id alone was the identity, so bringing Argus up again with
 another token on a GitLab set up anew made a second copy of every repository:
 the old one was never listed again, never updated, stale for good (its alert
 never cleared), and kept its whole index. Upgrading merges those copies once
-(migration 017): per path, the copy GitLab listed last is the repository; the
-admin's latest choice among the copies (in or out, branches) is its choice; per
+(migration 017): per path, the copy GitLab listed last is the repository; it
+is in the index when any copy was (a copy turned off only to hide the
+duplicate, or a new one the **New repositories** policy left out, never takes
+the other copy's index away), with the branches of every copy that was in; per
 branch the newest good index stays (indexed at a commit, most recently) and the
 other copies go with their files, symbols, vectors and text search; permissions
 cached per token are read again.
@@ -583,9 +587,13 @@ on one of its own (**Schedule…**, for one or many):
 
 Argus's own scheduler, in the process that serves, looks every 30 seconds and
 starts the repositories that are due, together as one run; a scheduled pass
-leaves a repository on its own schedule (or off) to it. A time that went by
-while Argus was down runs once when it is back, not once per time missed. The
-list shows each one's schedule, when it next runs and when it last ran.
+(and each pass of `argus index --interval`) leaves a repository on its own
+schedule (or off) to it. A repository not indexed yet (new in GitLab, or chosen
+again after it was left out) runs at once, whatever its schedule, and its
+schedule counts from then; one GitLab no longer lists is not run by its
+schedule, as it cannot be fetched. A time that went by while Argus was down
+runs once when it is back, not once per time missed. The list shows each one's
+schedule, when it next runs and when it last ran.
 Staleness, and the `ArgusIndexStale` alert, allow for the schedule: a
 repository updated daily is not stale an hour after its run, and one that is
 off is never stale by age. `ARGUS_INDEX_SCHEDULER=off` stops the scheduler (an
@@ -605,11 +613,14 @@ with why. **Index now** keeps the run as a whole: a percentage over the
 repositories and the run log. The index process reports this as `@progress`
 lines on stdout, which the server keeps out of the run log.
 
-Each repository keeps a log of its last 20 runs (**Log**, `GET
-/admin/repos/{id}/log`): one sentence a line, with its time, saying who started
-the run, how long the fetch took, what each branch read ("main: at 1a2b3c4d
-("Fix the decoder"), 14 files changed since 9f8e7d6c: 12 indexed, 2 skipped …
-(8.1 s)"), what it embedded, how it ended, and what admins changed. Warnings
+Each repository keeps a log (**Log**, `GET /admin/repos/{id}/log`) of its last
+20 runs that did something (read files, failed or warned), the latest run that
+found nothing new (so a day of passes with nothing new never pushes a morning's
+failure out), and, apart, the last 20 changes admins made. One sentence a line,
+with its time, saying who started the run, how long the fetch took, what each
+branch read ("main: at 1a2b3c4d ("Fix the decoder"), 14 files changed since
+9f8e7d6c: 12 indexed, 2 skipped … (8.1 s)"), what it embedded, how it ended,
+and what admins changed. Warnings
 and errors say what to do: a file that could not be read is tried again up to
 three times, a repository that ran out of time goes on where it stopped next
 time (or raise `index.repo_time_budget_seconds`), a fetch GitLab refused means

@@ -61,9 +61,15 @@ public static class Choices
     {
         using var tx = conn.BeginTransaction();
         SetMeta(conn, DefaultScheduleKey, schedule.ToString());
-        Sql.Exec(conn, "UPDATE repo_choices SET scheduled_at = ? WHERE schedule = ''", schedule.Kind == ScheduleKind.Hours ? null : now);
+        Sql.Exec(conn, $"UPDATE repo_choices SET scheduled_at = {CountsFrom} WHERE schedule = ''", schedule.Kind == ScheduleKind.Hours ? null : now);
         tx.Commit();
     }
+
+    /// <summary>
+    /// When a schedule set now counts from (the parameter, or null for every N hours): a time of
+    /// day from now, but nothing for a repository never checked, so it runs at once (<see cref="NextRun"/>).
+    /// </summary>
+    const string CountsFrom = "CASE WHEN EXISTS (SELECT 1 FROM repos r WHERE r.gitlab_id = repo_choices.gitlab_id AND r.last_run_at IS NOT NULL) THEN ? END";
 
     /// <summary>The IANA zone daily and weekly schedules are in ("UTC" until set).</summary>
     public static string ScheduleZone(SqliteConnection conn) => Meta(conn, ScheduleZoneKey) is { Length: > 0 } z ? z : "UTC";
@@ -196,23 +202,27 @@ public static class Choices
     public static IReadOnlyList<string> Split(string branches) =>
         [.. branches.Split(['\n', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.Ordinal)];
 
-    /// <summary>An admin's choice for one repository; null leaves that part as it was. False when there is no such repository.</summary>
+    /// <summary>
+    /// An admin's choice for one repository; null leaves that part as it was. One chosen again for the
+    /// index has its schedule count from its last check (at once, when it has none). False when there is no such repository.
+    /// </summary>
     public static bool Set(SqliteConnection conn, long gitlabId, bool? included, IReadOnlyList<string>? branches, long now)
     {
         if (Find(conn, gitlabId) is not { } current) return false;
-        Sql.Exec(conn, "UPDATE repo_choices SET included = ?, branches = ?, changed_at = ? WHERE gitlab_id = ?",
-            (included ?? current.Included) ? 1L : 0L, string.Join('\n', branches ?? current.Branches), now, gitlabId);
+        var chosenAgain = included == true && !current.Included;
+        Sql.Exec(conn, "UPDATE repo_choices SET included = ?, branches = ?, changed_at = ?, scheduled_at = ? WHERE gitlab_id = ?",
+            (included ?? current.Included) ? 1L : 0L, string.Join('\n', branches ?? current.Branches), now, chosenAgain ? null : current.ScheduledAt, gitlabId);
         return true;
     }
 
     /// <summary>
     /// A repository's own schedule ("" follows the default). A time of day counts from now; every N
-    /// hours counts from its last check (at once, when it was never checked). False when there is no such repository.
+    /// hours counts from its last check. Either runs it at once when it was never checked. False when there is no such repository.
     /// </summary>
     public static bool SetSchedule(SqliteConnection conn, long gitlabId, string schedule, long now)
     {
         var effective = schedule.Length > 0 ? RepoSchedule.Parse(schedule) : DefaultSchedule(conn);
-        return Sql.Exec(conn, "UPDATE repo_choices SET schedule = ?, scheduled_at = ?, changed_at = ? WHERE gitlab_id = ?",
+        return Sql.Exec(conn, $"UPDATE repo_choices SET schedule = ?, scheduled_at = {CountsFrom}, changed_at = ? WHERE gitlab_id = ?",
             schedule, effective.Kind == ScheduleKind.Hours ? null : now, now, gitlabId) > 0;
     }
 
@@ -227,6 +237,30 @@ public static class Choices
     /// <summary>Takes a repository out of the index (its files and symbols with it). How many index rows went.</summary>
     public static int Drop(SqliteConnection conn, long gitlabId) =>
         Writes.DeleteRepos(conn, [.. Sql.Query(conn, "SELECT id FROM repos WHERE gitlab_id = ?", gitlabId).Select(r => r.Long("id"))]);
+
+    /// <summary>
+    /// <see cref="Drop"/> a few hundred files at a time, each step its own transaction: a large
+    /// repository never holds the write lock for long, so an admin's change made meanwhile waits a
+    /// moment, not past the busy timeout. How many index rows went.
+    /// </summary>
+    public static int DropInSteps(SqliteConnection conn, long gitlabId, int filesPerStep = 500)
+    {
+        List<long> rows = [.. Sql.Query(conn, "SELECT id FROM repos WHERE gitlab_id = ?", gitlabId).Select(r => r.Long("id"))];
+        foreach (var row in rows)
+        {
+            while (Sql.Query(conn, "SELECT id FROM files WHERE repo_id = ? LIMIT ?", row, (long)filesPerStep).Select(r => r.Long("id")).ToList() is { Count: > 0 } files)
+            {
+                var marks = Sql.Marks(files.Count);
+                var ids = files.Cast<object?>().ToArray();
+                using var tx = conn.BeginTransaction();
+                // The text search first (it keeps its own copy of the text); symbols, includes and vectors follow the files.
+                Sql.ExecList(conn, $"INSERT INTO files_fts(files_fts, rowid, path, content) SELECT 'delete', id, path, content FROM files WHERE id IN ({marks})", ids);
+                Sql.ExecList(conn, $"DELETE FROM files WHERE id IN ({marks})", ids);
+                tx.Commit();
+            }
+        }
+        return Writes.DeleteRepos(conn, rows);
+    }
 
     /// <summary>A repository GitLab no longer lists, forgotten: its row, its index and its log. How many index rows went.</summary>
     public static int Forget(SqliteConnection conn, long gitlabId)
@@ -244,38 +278,41 @@ public static class Choices
 
     /// <summary>
     /// When a repository's schedule next starts a run of it; null when Argus's scheduler does not run it.
-    /// Every N hours: N hours after its last check or the schedule's last start, whichever is later
-    /// (now, when neither ever happened). A time of day: the first one after the schedule's last start
-    /// (or its last check, before the schedule ever ran it; or now).
+    /// Never checked, and never started by its schedule since it was chosen: now, whatever the schedule,
+    /// so a new repository is not left out of answers until a time of day or a weekday comes round.
+    /// Every N hours: N hours after its last check or the schedule's last start, whichever is later.
+    /// A time of day: the first one after the schedule's last start (or its last check, before the
+    /// schedule ever ran it).
     /// </summary>
     public static DateTimeOffset? NextRun(RepoChoice choice, RepoSchedule schedule, TimeZoneInfo zone, long? lastCheck, long now)
     {
         if (!choice.Included || !schedule.Timed) return null;
         DateTimeOffset At(long seconds) => DateTimeOffset.FromUnixTimeSeconds(seconds);
+        if ((choice.ScheduledAt ?? lastCheck) is not { } from) return At(now);
         if (schedule.Kind == ScheduleKind.Hours)
-            return Math.Max(lastCheck ?? long.MinValue, choice.ScheduledAt ?? long.MinValue) is var from && from == long.MinValue
-                ? At(now)
-                : At(from) + TimeSpan.FromHours(schedule.Hours);
-        return schedule.Next(At(choice.ScheduledAt ?? lastCheck ?? now), null, zone);
+            return At(Math.Max(from, lastCheck ?? from)) + TimeSpan.FromHours(schedule.Hours);
+        return schedule.Next(At(from), null, zone);
     }
 
-    /// <summary>The indexed repositories whose own schedule (or the default) is due by <paramref name="now"/>.</summary>
+    /// <summary>
+    /// Whether GitLab listed it the last time it was asked. One it no longer lists (a token that cannot
+    /// see it, a project deleted, a row set aside under an id no project has) cannot be fetched.
+    /// </summary>
+    public static bool Listed(RepoChoice choice, long? listedAt) =>
+        choice.GitlabId > 0 && (listedAt is null || choice.SeenAt is null || choice.SeenAt >= listedAt);
+
+    /// <summary>The indexed repositories GitLab lists whose own schedule (or the default) is due by <paramref name="now"/>.</summary>
     public static List<RepoChoice> Due(SqliteConnection conn, long now)
     {
         var fallback = DefaultSchedule(conn);
         var (zone, _) = RepoSchedule.Zone(ScheduleZone(conn));
         var checks = LastChecks(conn);
+        var listedAt = ListedAt(conn);
         var due = new List<RepoChoice>();
         foreach (var c in List(conn))
         {
             var schedule = Effective(c, fallback);
-            if (!c.Included || !schedule.Timed) continue;
-            // A time of day with nothing to count from yet (never checked, never run by a schedule): from now.
-            if (c.ScheduledAt is null && !checks.ContainsKey(c.GitlabId) && schedule.Kind != ScheduleKind.Hours)
-            {
-                MarkScheduled(conn, [c.GitlabId], now);
-                continue;
-            }
+            if (!c.Included || !schedule.Timed || !Listed(c, listedAt)) continue;
             if (NextRun(c, schedule, zone, checks.TryGetValue(c.GitlabId, out var at) ? at : null, now) is { } next && next.ToUnixTimeSeconds() <= now)
                 due.Add(c);
         }

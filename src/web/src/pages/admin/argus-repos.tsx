@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CalendarClock, CircleCheck, CircleX, Eraser, GitBranch, Loader2, MoreHorizontal, RefreshCw, RotateCw, ScrollText, Trash2 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -124,15 +124,24 @@ const noun = (n: number) => (n === 1 ? '1 repository' : `${n.toLocaleString()} r
  * Admin → Indexing → Repositories: what GitLab lists, found by name, path or group and narrowed
  * by state, group, language and whether it is indexed; each one's state live while it is
  * indexed, its schedule, branches and log; and changes to many at once, with an outcome for each.
+ *
+ * `running` is the index run as the page's status sees it: a run started anywhere (Index now,
+ * the schedule, a push, a repository's own schedule) is followed from the moment the page sees it.
  */
-export function RepositoriesCard({ gitlabUrl }: { gitlabUrl: string | null }) {
+export function RepositoriesCard({ gitlabUrl, running = false }: { gitlabUrl: string | null; running?: boolean }) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const repos = useQuery({
     queryKey: ['admin', 'argus', 'repos'],
     queryFn: ({ signal }) => api<ReposView>('/api/admin/argus/repos', { signal }),
-    refetchInterval: (q) => (q.state.data?.running || q.state.data?.pending.length ? 3000 : 60_000),
+    refetchInterval: (q) => (running || q.state.data?.running || q.state.data?.pending.length ? 3000 : 60_000),
   })
+  // A run just started: every repository it takes shows queued, and then where it is, at once.
+  const wasRunning = useRef(running)
+  useEffect(() => {
+    if (running && !wasRunning.current) void queryClient.invalidateQueries({ queryKey: ['admin', 'argus', 'repos'] })
+    wasRunning.current = running
+  }, [running, queryClient])
   // When the app's scheduled pass comes next (in this platform the app starts the passes).
   const pass = useQuery({ queryKey: ['admin', 'argus', 'schedule'], queryFn: ({ signal }) => api<{ nextRuns: string[] }>('/api/admin/argus/schedule', { signal }) })
   const [branchesOf, setBranchesOf] = useState<RepoRow | null>(null)

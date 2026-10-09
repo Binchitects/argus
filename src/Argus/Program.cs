@@ -29,7 +29,7 @@ public static class Program
             .Flag("--scheduled", "A scheduled pass: only the repositories that go with the passes (not those on a schedule of their own, or off).")
             .Many("--trigger", "Who asked, for each repository's log: manual, schedule, repo-schedule, webhook. Once for all, or once per --repo, in order.")
             .Flag("--allow-partial-enumeration", "Index even when the service token cannot see every repository.")
-            .Opt("--interval", "Keep running, starting a new pass every SECONDS.", metavar: "SECONDS")
+            .Opt("--interval", "Keep running: a scheduled pass every SECONDS (a repository on a schedule of its own, or off, is left to it).", metavar: "SECONDS")
             .Many("--branch", "Index this branch in every repo, in addition to each default branch. Repeatable, and a glob.", metavar: "GLOB")
             .Flag("--reset-retries", "Clear retry counters before indexing (manual recovery only; do not use on a schedule)"),
         "backup" => new ArgSpec($"{Prog} backup").Opt("--config", required: true).Opt("--out", "Directory to write the snapshot into", required: true),

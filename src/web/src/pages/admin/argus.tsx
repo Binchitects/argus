@@ -78,6 +78,7 @@ export function IndexingPage() {
     onSuccess: () => {
       toast.success('Indexing started')
       void queryClient.invalidateQueries({ queryKey: ['admin', 'argus', 'status'] })
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'argus', 'repos'] })
     },
   })
   if (st.isPending) return <PageSkeleton />
@@ -161,7 +162,7 @@ export function IndexingPage() {
         </Card>
         <ScheduleCard />
         <WebhookCard />
-        <RepositoriesCard gitlabUrl={gitlabUrl} />
+        <RepositoriesCard gitlabUrl={gitlabUrl} running={running} />
       </div>
     </>
   )

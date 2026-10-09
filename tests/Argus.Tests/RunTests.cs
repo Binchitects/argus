@@ -201,6 +201,49 @@ public class RunTests
         Assert.Equal("1,200 branches", RepoLog.Count(1200, "branch", "branches"));
     }
 
+    [Fact]
+    public void A_failure_in_the_morning_is_still_in_the_log_after_a_day_of_runs_that_found_nothing_new()
+    {
+        using var ix = new TestIndex();
+        double t = 1000;
+        // As Commands.Index writes a run: its lines, and whether it found nothing new.
+        void Run(long run, bool nothingNew, params string[] lines)
+        {
+            var log = new RepoLog(ix.Conn, 7, run, () => t++);
+            foreach (var line in lines)
+            {
+                if (line.StartsWith("!", StringComparison.Ordinal)) log.Fail(line[1..]);
+                else log.Say(line);
+            }
+            if (nothingNew) log.Quiet();
+            RepoLog.Trim(ix.Conn, 7);
+        }
+        // 09:00: a push, and its symbols could not be read.
+        Run(1, false, "Run started by a push or merge in GitLab.", "!main: its symbols could not be read: ctags failed.");
+        RepoLog.Note(ix.Conn, 7, "An admin set its schedule: every 6 hours.");
+        // 09:15: read again, and fixed.
+        Run(2, false, "Run started with the scheduled pass.", "main: at 1a2b3c4d, 14 files changed since 9f8e7d6c: 14 indexed (2.0 s).");
+        // Then passes every 15 minutes for the rest of the day, with nothing new.
+        for (long run = 3; run < 3 + 4 * 24; run++) Run(run, true, "Run started with the scheduled pass.", "main: up to date at 1a2b3c4d; nothing new to read.");
+
+        var lines = RepoLog.Read(ix.Conn, 7, 5);
+        // The failure and the run that fixed it stay; of the runs that found nothing new, the latest; and the admin's change.
+        Assert.Equal([1L, 2L, 3 + 4 * 24 - 1], lines.Where(l => l.Text.StartsWith("Run started", StringComparison.Ordinal)).Select(l => l.Run));
+        Assert.Contains(lines, l => l is { Level: RepoLog.Error, Text: "main: its symbols could not be read: ctags failed." });
+        Assert.Contains(lines, l => l.Text == "An admin set its schedule: every 6 hours.");
+        Assert.Equal(3 * 2 + 1, Convert.ToInt64(Sql.Scalar(ix.Conn, "SELECT COUNT(*) FROM index_log WHERE gitlab_id = 7")));
+
+        // Admins' changes are kept apart: many of them push no run out, and only their last ones are kept.
+        for (int i = 0; i < RepoLog.KeepNotes + 5; i++) RepoLog.Note(ix.Conn, 7, $"An admin added branches to index: b{i}.");
+        RepoLog.Trim(ix.Conn, 7);
+        var all = RepoLog.Read(ix.Conn, 7, RepoLog.KeepRuns);
+        Assert.Equal(3, all.Count(l => l.Text.StartsWith("Run started", StringComparison.Ordinal)));
+        Assert.Equal(RepoLog.KeepNotes, all.Count(l => l.Text.StartsWith("An admin", StringComparison.Ordinal)));
+        Assert.Equal($"An admin added branches to index: b{RepoLog.KeepNotes + 4}.", all[^1].Text);
+        // Asked for its last 2: two runs (two lines each) and two changes.
+        Assert.Equal(6, RepoLog.Read(ix.Conn, 7, 2).Count);
+    }
+
     static void Git(string cwd, params string[] args)
     {
         var psi = new ProcessStartInfo("git") { WorkingDirectory = cwd, RedirectStandardError = true, RedirectStandardOutput = true };
@@ -300,6 +343,16 @@ public class RunTests
             steps.Clear();
             Assert.Equal(0, Cli.Commands.Index(Cfg("token-b"), null, allowPartial: true, scheduled: true, triggers: ["schedule"]));
             Assert.Equal(["root/etl-decoder"], steps.First(s => s["stage"]!.ToString() == "pass")["names"]!.AsArray().Select(n => n!.GetValue<string>()));
+            // So does `argus index --interval`: its passes are scheduled passes.
+            steps.Clear();
+            Assert.Equal(0, Cli.Commands.IndexRepeatedly(Cfg("token-b"), null, false, true, interval: 1, maxPasses: 1));
+            Assert.Equal(["root/etl-decoder"], steps.First(s => s["stage"]!.ToString() == "pass")["names"]!.AsArray().Select(n => n!.GetValue<string>()));
+            using (var conn = Db.Open(Path.Combine(data, "index.db")))
+            {
+                Assert.Equal(2, RepoLog.Read(conn, 11).Count(l => l.Text.StartsWith("Run started", StringComparison.Ordinal)));
+                // Runs that found nothing new: the latest one is kept.
+                Assert.Single(RepoLog.Read(conn, 12), l => l.Text == "Run started with the scheduled pass.");
+            }
         }
         finally
         {

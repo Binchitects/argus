@@ -285,7 +285,7 @@ public static class Commands
         var excluded = projects.Where(p => !(choices.TryGetValue(p.GitlabId, out var c) ? c.Included : Choices.NewReposIncluded(conn))).ToList();
         foreach (var p in excluded)
         {
-            if (Choices.Drop(conn, p.GitlabId) > 0) Out.WriteLine($"{p.PathWithNamespace}: not chosen for the index -- removed from it");
+            if (Choices.DropInSteps(conn, p.GitlabId) > 0) Out.WriteLine($"{p.PathWithNamespace}: not chosen for the index -- removed from it");
         }
         projects = projects.Except(excluded).ToList();
         if (only is not null)
@@ -386,6 +386,7 @@ public static class Commands
                 AuditLog.IndexRepo(project.PathWithNamespace, project.DefaultBranch, "no_branches");
                 Progress.BranchDone(project.PathWithNamespace, project.DefaultBranch, "empty");
                 log.Say("It has no branches yet (an empty repository): nothing to index.");
+                log.Quiet();
                 Progress.RepoDone(path, "ok", "Empty: nothing to index.");
                 RepoLog.Trim(conn, project.GitlabId);
                 empty++;
@@ -401,8 +402,9 @@ public static class Commands
                 if (outcome == "failed") failed++;
                 else if (outcome == "up_to_date") upToDate++;
             }
-            PruneMissingBranches(conn, project, branches, log);
-            embedded += EmbedRepo(conn, project, log, ref budget, ref embedProblem);
+            var pruned = PruneMissingBranches(conn, project, branches, log);
+            var embeddedHere = EmbedRepo(conn, project, log, ref budget, ref embedProblem);
+            embedded += embeddedHere;
 
             var updated = outcomes.Count(o => o is "ok" or "timed_out" or "symbols_failed");
             var summary = outcomes.All(o => o == "up_to_date")
@@ -415,6 +417,8 @@ public static class Commands
             var sentence = $"Done in {RepoLog.Took(NowF() - repoStarted)}: {summary}" +
                            (repoOutcome == "failed" ? "; see the errors above." : repoOutcome == "warning" ? "; see the warnings above." : ".");
             log.Write(repoOutcome switch { "failed" => RepoLog.Error, "warning" => RepoLog.Warning, _ => RepoLog.Info }, sentence);
+            // A run that found nothing new: only the latest such run is kept, so real changes and failures stay in the log.
+            if (repoOutcome == "up_to_date" && pruned == 0 && embeddedHere == 0) log.Quiet();
             Progress.RepoDone(path, repoOutcome, sentence);
             RepoLog.Trim(conn, project.GitlabId);
         }
@@ -454,13 +458,17 @@ public static class Commands
         _ => exc.GetType().Name,
     };
 
+    /// <summary>
+    /// A scheduled pass every <paramref name="interval"/> seconds, as ARGUS_INDEX_INTERVAL runs them: a
+    /// repository with a schedule of its own, or off, is left to it (Argus's scheduler, in the process that serves).
+    /// </summary>
     public static int IndexRepeatedly(ArgusConfig cfg, IReadOnlyList<string>? only, bool resetRetries, bool allowPartial, int interval, int? maxPasses = null)
     {
         int last = 0, passes = 0;
         while (maxPasses is null || passes < maxPasses)
         {
             var sw = Stopwatch.StartNew();
-            try { last = Index(cfg, only, resetRetries, allowPartial, triggers: ["schedule"]); }
+            try { last = Index(cfg, only, resetRetries, allowPartial, scheduled: true, triggers: ["schedule"]); }
             catch (Exception exc) when (exc is GitLabError or GitError or IOException)
             {
                 Err.WriteLine($"indexing pass failed: {exc.Message}");
@@ -474,6 +482,7 @@ public static class Commands
         }
         return last;
     }
+
     static int EmbedPerPass() =>
         int.TryParse(Environment.GetEnvironmentVariable("ARGUS_EMBED_PER_PASS"), out var v) ? v : DefaultEmbedPerPass;
 
@@ -747,7 +756,10 @@ public static class Commands
         var scheme = tls ? "https" : "http";
         app.Urls.Add($"{scheme}://{address}:{port}");
         // The repositories' own schedules (every N hours, daily, weekly) run in the process that serves.
-        if (Jobs.SchedulerEnabled()) app.Services.GetRequiredService<Jobs>().StartRepoScheduler();
+        var jobs = app.Services.GetRequiredService<Jobs>();
+        if (Jobs.SchedulerEnabled()) jobs.StartRepoScheduler();
+        // The index of a repository left out before a restart, not yet removed.
+        jobs.RemoveLeftOut();
         Out.WriteLine($"argus serving the app on {scheme}://{address}:{port}/ and MCP on {scheme}://{address}:{port}/mcp");
         Out.Flush();
         app.Run();

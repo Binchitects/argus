@@ -18,6 +18,33 @@ public class StoreTests
     }
 
     [Fact]
+    public void A_repository_left_out_is_removed_a_few_files_at_a_time_with_everything_that_hangs_on_them()
+    {
+        using var ix = new TestIndex();
+        long Count(string sql, params object?[] args) => Convert.ToInt64(Sql.Scalar(ix.Conn, sql, args));
+        var main = ix.Repo(1, "g/big");
+        var dev = ix.Repo(1, "g/big", branch: "develop");
+        foreach (var row in new[] { main, dev })
+            for (int i = 0; i < 7; i++)
+                ix.Symbol(row, ix.File(row, $"src/f{i}.c", $"int BigThing{i}(void);\n"), $"BigThing{i}");
+        var other = ix.Repo(2, "g/other");
+        ix.Symbol(other, ix.File(other, "o.c", "int OtherThing(void);\n"), "OtherThing");
+        Writes.RecordError(ix.Conn, main, "src/f0.c", "read", "a test error", 1);
+
+        Assert.Equal(2, Choices.DropInSteps(ix.Conn, 1, filesPerStep: 3));
+        Assert.Equal(0L, Count("SELECT COUNT(*) FROM repos WHERE gitlab_id = 1"));
+        Assert.Equal(0L, Count("SELECT COUNT(*) FROM files WHERE repo_id IN (?, ?)", main, dev));
+        Assert.Equal(0L, Count("SELECT COUNT(*) FROM symbols WHERE repo_id IN (?, ?)", main, dev));
+        Assert.Equal(0L, Count("SELECT COUNT(*) FROM index_errors WHERE repo_id = ?", main));
+        Assert.Equal(0L, Count("SELECT COUNT(*) FROM files_fts WHERE files_fts MATCH 'BigThing3'"));
+        Sql.Exec(ix.Conn, "INSERT INTO files_fts(files_fts) VALUES ('integrity-check')");
+        // Another repository is untouched.
+        Assert.Equal(1L, Count("SELECT COUNT(*) FROM files_fts WHERE files_fts MATCH 'OtherThing'"));
+        Assert.Single(Queries.FindSymbol([other], ix.Conn, "OtherThing"));
+        Assert.Equal(0, Choices.DropInSteps(ix.Conn, 1));
+    }
+
+    [Fact]
     public void Upserting_a_file_keeps_the_fts_index_in_step()
     {
         using var ix = new TestIndex();

@@ -107,7 +107,7 @@ public static partial class ArgusServer
                 ["default_branch"] = c.DefaultBranch, ["included"] = c.Included,
                 ["branches"] = new JsonArray([.. c.Branches.Select(b => (JsonNode)b)]), ["seen_at"] = c.SeenAt, ["changed_at"] = c.ChangedAt,
                 // GitLab did not list it the last time it was asked (a token that cannot see it, a repository moved away or deleted).
-                ["listed"] = listedAt is null || c.SeenAt is null || c.SeenAt >= listedAt,
+                ["listed"] = Choices.Listed(c, listedAt),
                 ["languages"] = new JsonArray([.. langs.Take(4).Select(l => (JsonNode)new JsonObject
                 {
                     ["lang"] = l.Str("lang"), ["name"] = LanguageNames.GetValueOrDefault(l.Str("lang"), l.Str("lang")), ["files"] = l.Long("n"),
@@ -151,18 +151,30 @@ public static partial class ArgusServer
         return true;
     }
 
-    /// <summary>One repository in or out of the index: out leaves the index now, unless a run is writing (then at the next one). The index rows removed.</summary>
+    /// <summary>One repository in or out of the index: out leaves the index now, unless a run is writing (then when it ends). The index rows removed.</summary>
     static (int Removed, bool Deferred) Include(SqliteConnection conn, Jobs jobs, RepoChoice choice, bool included, long now)
     {
         Choices.Set(conn, choice.GitlabId, included, null, now);
         if (included == choice.Included) return (0, false);
         RepoLog.Note(conn, choice.GitlabId, included ? "An admin chose it for the index: the next run indexes it." : "An admin left it out of the index.");
         if (included) return (0, false);
-        if (jobs.IndexJobSnapshot()["state"]?.ToString() == "running") return (0, true);
+        if (jobs.IndexJobSnapshot()["state"]?.ToString() == "running")
+        {
+            jobs.RemoveLeftOut();
+            return (0, true);
+        }
         var removed = Choices.Drop(conn, choice.GitlabId);
         if (removed > 0) RepoLog.Note(conn, choice.GitlabId, "Its files and symbols were removed from the index.");
         return (removed, false);
     }
+
+    /// <summary>How many branches of a repository are indexed.</summary>
+    static long IndexedBranches(SqliteConnection conn, long gitlabId) =>
+        Convert.ToInt64(Sql.Scalar(conn, "SELECT COUNT(*) FROM repos WHERE gitlab_id = ?", gitlabId));
+
+    /// <summary>What becomes of the index of a repository left out by a batch: removed in the background, or when the run going ends.</summary>
+    static string IndexGoes(long branches, bool running) =>
+        branches == 0 ? "" : running ? " Its index goes when the run going now ends." : $" Its index ({RepoLog.Count(branches, "branch", "branches")}) is being removed.";
 
     static void MapRepoAdmin(WebApplication app, ArgusConfig cfg, Jobs jobs)
     {
@@ -364,6 +376,11 @@ public static partial class ArgusServer
             using var conn = Db.Open(cfg.Index.DbPath);
             var listedAt = Choices.ListedAt(conn);
             var toRun = new List<RepoChoice>();
+            // Indexes of repositories left out or removed go in the background (Jobs.RemoveLeftOut), so a
+            // batch of hundreds answers at once; the choices themselves are one transaction.
+            var removing = false;
+            var forget = new List<long>();
+            using var tx = conn.BeginTransaction();
             foreach (var id in ids)
             {
                 if (Choices.Find(conn, id) is not { } c)
@@ -378,12 +395,23 @@ public static partial class ArgusServer
                         Result(id, c.Path, true, c.Included ? "Already indexed." : "Chosen: the next run indexes it, or Update now.");
                         break;
                     case "exclude":
-                        var (removed, deferred) = Include(conn, jobs, c, false, now);
-                        Result(id, c.Path, true, !c.Included ? "Already left out." : deferred ? "Left out: its index goes when the run going now ends." : $"Left out: {RepoLog.Count(removed, "branch", "branches")} removed from the index.");
+                        if (!c.Included)
+                        {
+                            // Its index not removed yet (left out while a run went, before a restart): it goes now.
+                            var left = IndexedBranches(conn, id);
+                            removing |= left > 0;
+                            Result(id, c.Path, true, "Already left out." + IndexGoes(left, running));
+                            break;
+                        }
+                        Choices.Set(conn, id, false, null, now);
+                        RepoLog.Note(conn, id, "An admin left it out of the index.");
+                        var branches = IndexedBranches(conn, id);
+                        removing |= branches > 0;
+                        Result(id, c.Path, true, "Left out." + IndexGoes(branches, running));
                         break;
                     case "reindex":
                         if (!c.Included) Result(id, c.Path, false, "Not indexed: choose it for the index first.");
-                        else if (listedAt is not null && c.SeenAt < listedAt) Result(id, c.Path, false, "GitLab no longer lists it, so it cannot be fetched.");
+                        else if (!Choices.Listed(c, listedAt)) Result(id, c.Path, false, "GitLab no longer lists it, so it cannot be fetched.");
                         else toRun.Add(c);
                         break;
                     case "schedule":
@@ -400,23 +428,31 @@ public static partial class ArgusServer
                         Result(id, c.Path, true, added.Count > 0 ? $"Also indexes {string.Join(", ", added)} from the next run." : "Had them already.");
                         break;
                     case "remove":
-                        if (running) { Result(id, c.Path, false, "A run is going: remove it when the run ends."); break; }
-                        var listed = listedAt is null || c.SeenAt is null || c.SeenAt >= listedAt;
-                        if (listed)
+                        var indexed = IndexedBranches(conn, id);
+                        if (Choices.Listed(c, listedAt))
                         {
                             Choices.Set(conn, id, false, null, now);
-                            var rows = Choices.Drop(conn, id);
-                            RepoLog.Note(conn, id, "An admin removed its index and left it out: its files and symbols are gone.");
-                            Result(id, c.Path, true, $"Removed from the index ({RepoLog.Count(rows, "branch", "branches")}) and left out.");
+                            RepoLog.Note(conn, id, "An admin removed its index and left it out.");
+                            removing |= indexed > 0;
+                            Result(id, c.Path, true, "Left out." + (indexed == 0 ? " It had no index." : IndexGoes(indexed, running)));
+                        }
+                        else if (indexed == 0)
+                        {
+                            Choices.Forget(conn, id);
+                            Result(id, c.Path, true, "Forgotten: GitLab no longer lists it.");
                         }
                         else
                         {
-                            var rows = Choices.Forget(conn, id);
-                            Result(id, c.Path, true, $"Forgotten: GitLab no longer lists it ({RepoLog.Count(rows, "branch", "branches")} removed from the index).");
+                            // Left out now; its row and log go with its index.
+                            Choices.Set(conn, id, false, null, now);
+                            forget.Add(id);
+                            Result(id, c.Path, true, "Forgotten: GitLab no longer lists it." + IndexGoes(indexed, running));
                         }
                         break;
                 }
             }
+            tx.Commit();
+            if (removing || forget.Count > 0) jobs.RemoveLeftOut(forget);
             if (toRun.Count > 0)
             {
                 var outcome = jobs.EnqueueRepos([.. toRun.Select(c => c.Path)], "manual");

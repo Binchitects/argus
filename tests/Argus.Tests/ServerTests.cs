@@ -352,7 +352,8 @@ public sealed class ServerTests : IDisposable
         outcome = Results((await AdminSend(HttpMethod.Post, "/admin/repos/batch", new { action = "add_branches", ids = new long[] { 11 }, branches = new[] { "release/*", "" } })).Body);
         Assert.Equal((true, "Also indexes release/* from the next run."), outcome[11]);
         outcome = Results((await AdminSend(HttpMethod.Post, "/admin/repos/batch", new { action = "remove", ids = new long[] { 12 } })).Body);
-        Assert.True(outcome[12].Ok);
+        Assert.Equal((true, "Left out. Its index (1 branch) is being removed."), outcome[12]);
+        Assert.True(SpinWait.SpinUntil(() => Convert.ToInt64(Sql.Scalar(_ix.Conn, "SELECT COUNT(*) FROM repos WHERE gitlab_id = 12")) == 0, TimeSpan.FromSeconds(10)));
         list = (await AdminGet("/admin/repos")).Body;
         Assert.Equal(["release/*"], Repo(list, 11)["branches"]!.AsArray().Select(b => b!.GetValue<string>()));
         Assert.False(Repo(list, 12)["included"]!.GetValue<bool>());
@@ -373,6 +374,54 @@ public sealed class ServerTests : IDisposable
         Assert.Contains("An admin set its schedule: every day at 02:30.", lines);
         Assert.Contains("An admin added branches to index: release/*.", lines);
         Assert.Equal(HttpStatusCode.NotFound, (await AdminGet("/admin/repos/999/log")).Status);
+    }
+
+    [Fact]
+    public async Task Leaving_many_out_answers_at_once_and_their_index_goes_in_the_background_once_the_run_going_ends()
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        Project P(long id, string path) => new(id, path, "main", $"http://x/{path}.git");
+        var gone = _ix.Repo(14, "grp/gone");
+        _ix.File(gone, "g.c", "int GoneForGood;\n");
+        Choices.Record(_ix.Conn, [P(11, "grp/alpha"), P(12, "grp/hidden"), P(14, "grp/gone")], now);
+        // GitLab no longer lists grp/gone.
+        Choices.Record(_ix.Conn, [P(11, "grp/alpha"), P(12, "grp/hidden")], now + 10);
+        long Rows(long id) => Convert.ToInt64(Sql.Scalar(_ix.Conn, "SELECT COUNT(*) FROM repos WHERE gitlab_id = ?", id));
+        var jobs = _app.Services.GetRequiredService<Jobs>();
+        using var release = new ManualResetEventSlim();
+        jobs.Runner = (_, _) =>
+        {
+            release.Wait(TimeSpan.FromSeconds(20));
+            return 0;
+        };
+        Assert.Equal("started", jobs.EnqueueRepos(["grp/alpha"], "manual")["grp/alpha"]);
+
+        // While a run writes: the choices are made, and each says when its index goes.
+        var outcome = Results((await AdminSend(HttpMethod.Post, "/admin/repos/batch", new { action = "exclude", ids = new long[] { 11, 12 } })).Body);
+        Assert.Equal((true, "Left out. Its index goes when the run going now ends."), outcome[11]);
+        outcome = Results((await AdminSend(HttpMethod.Post, "/admin/repos/batch", new { action = "remove", ids = new long[] { 14 } })).Body);
+        Assert.Equal((true, "Forgotten: GitLab no longer lists it. Its index goes when the run going now ends."), outcome[14]);
+        var list = (await AdminGet("/admin/repos")).Body;
+        Assert.False(Repo(list, 11)["included"]!.GetValue<bool>());
+        // Nothing is removed under the run.
+        Assert.Equal(0, jobs.RemoveLeftOutNow());
+        Assert.Equal(1L, Rows(11));
+        Assert.Equal(1L, Rows(14));
+
+        release.Set();
+        Assert.True(SpinWait.SpinUntil(() => Rows(11) + Rows(12) + Rows(14) == 0, TimeSpan.FromSeconds(10)));
+        Assert.True(SpinWait.SpinUntil(() => Choices.Find(_ix.Conn, 14) is null, TimeSpan.FromSeconds(10)));
+        Assert.Empty(Queries.FindSymbol([_repo], _ix.Conn, "DecodeFrame"));
+        var log = (await AdminGet("/admin/repos/12/log")).Body["lines"]!.AsArray().Select(l => l!["text"]!.GetValue<string>()).ToList();
+        Assert.Equal(["An admin left it out of the index.", "Its files and symbols were removed from the index."], log);
+
+        // With no run going, a batch answers before the index goes, and it goes at once.
+        Choices.Set(_ix.Conn, 11, true, null, now);
+        var again = _ix.Repo(11, "grp/alpha");
+        _ix.File(again, "a.c", "int Again;\n");
+        outcome = Results((await AdminSend(HttpMethod.Post, "/admin/repos/batch", new { action = "exclude", ids = new long[] { 11 } })).Body);
+        Assert.Equal((true, "Left out. Its index (1 branch) is being removed."), outcome[11]);
+        Assert.True(SpinWait.SpinUntil(() => Rows(11) == 0, TimeSpan.FromSeconds(10)));
     }
 
     [Fact]

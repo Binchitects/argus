@@ -241,6 +241,61 @@ public class RepoIdentityTests
     }
 
     [Fact]
+    public void Upgrading_keeps_a_repository_in_the_index_when_any_copy_of_it_was_in()
+    {
+        using var dir = new TempDir();
+        var db = Path.Combine(dir.Path, "index.db");
+        long ealNew, etlOld;
+        using (var conn = Db.Connect(db))
+        {
+            Db.Migrate(conn, upTo: 16);
+            Sql.Exec(conn, "INSERT INTO argus_meta (key, value) VALUES ('index.new_repos', 'exclude')");
+            // Cleaned up by hand on v5.2.0: the stale old copy turned off; the new copy holds the index.
+            V520Choice(conn, 1, "root/eal-core", 1000, included: false, branches: "v2", changedAt: 3000);
+            V520Choice(conn, 11, "root/eal-core", 2000, branches: "release/*");
+            ealNew = V520Row(conn, 11, "root/eal-core", "main", "def111", 2000, 2000, null, "NewEal");
+            // "New repositories: leave them out": the old copy (in since migration 016) holds the index, the policy left the new one out.
+            V520Choice(conn, 2, "root/etl-decoder", 1000, branches: "develop");
+            etlOld = V520Row(conn, 2, "root/etl-decoder", "main", "abc111", 1000, 1000, null, "OldEtl");
+            V520Choice(conn, 12, "root/etl-decoder", 2000, included: false);
+            // Both copies in, each with branches of its own: every one stays, the kept copy's first.
+            V520Choice(conn, 3, "root/driver-shim", 1000, branches: "v2\nrelease/*", changedAt: 1100);
+            V520Choice(conn, 13, "root/driver-shim", 2000, branches: "release/*, hotfix\r\n");
+            // Both copies out: so is the repository.
+            V520Choice(conn, 4, "root/retired", 1000, included: false, branches: "a", changedAt: 1500);
+            V520Choice(conn, 14, "root/retired", 2000, included: false, branches: "b", changedAt: 2500);
+        }
+        using (var conn = Db.Open(db))
+        {
+            var eal = Choices.Find(conn, 11)!;
+            Assert.True(eal.Included);
+            // The branches of the copy turned off are not taken up.
+            Assert.Equal(["release/*"], eal.Branches);
+            Assert.Equal(3000L, eal.ChangedAt);
+            Assert.Equal("def111", Sql.One(conn, "SELECT last_indexed_sha FROM repos WHERE id = ?", ealNew)!.Str("last_indexed_sha"));
+
+            var etl = Choices.Find(conn, 12)!;
+            Assert.True(etl.Included);
+            Assert.Equal(["develop"], etl.Branches);
+            Assert.Null(etl.ChangedAt);
+            Assert.Equal(12L, Count(conn, "SELECT gitlab_id FROM repos WHERE id = ?", etlOld));
+
+            Assert.Equal(["release/*", "hotfix", "v2"], Choices.Find(conn, 13)!.Branches);
+            var retired = Choices.Find(conn, 14)!;
+            Assert.False(retired.Included);
+            Assert.Equal(["b", "a"], retired.Branches);
+            Assert.Equal(2500L, retired.ChangedAt);
+            Assert.Equal(4, Choices.List(conn).Count);
+
+            // What the next pass sees: both indexed repositories are chosen, so it keeps their index.
+            Assert.True(Choices.Included(conn, 11));
+            Assert.True(Choices.Included(conn, 12));
+            Assert.Equal(1, Matches(conn, "NewEal"));
+            Assert.Equal(1, Matches(conn, "OldEtl"));
+        }
+    }
+
+    [Fact]
     public void An_index_without_copies_upgrades_untouched()
     {
         using var dir = new TempDir();

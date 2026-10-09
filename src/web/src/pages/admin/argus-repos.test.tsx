@@ -107,6 +107,53 @@ describe('admin indexing: repositories', () => {
     expect(await within(c).findByText('Embedding for meaning search: 64 of 200', {}, { timeout: 5000 })).toBeInTheDocument()
   })
 
+  it('follows a run from the moment the page sees it, wherever it was started', async () => {
+    let running = false
+    const status = () => ({
+      json: {
+        job: { state: running ? 'running' : 'idle', branches: [], started: running ? now : null, finished: null, returncode: null, tail: [], trigger: running ? 'manual' : null },
+        index: { repos: 1, stale: 0, errored: 0, files: 10, symbols: 100 }, interval: 0, webhook: false, pending: [],
+      },
+    })
+    const rows = () => (running ? [repo(1, 'team-a/eal-core', { state: 'queued', progress: { state: 'queued' } })] : [repo(1, 'team-a/eal-core')])
+    fakeApi(admin, routes({
+      'GET /api/admin/argus/status': status,
+      'GET /api/admin/argus/repos': () => view(rows(), { running }),
+      'POST /api/admin/argus/index': () => {
+        running = true
+        return { json: { status: 'started' } }
+      },
+    }))
+    renderApp('/admin/indexing')
+    const c = await card()
+    await within(c).findByText('eal-core')
+    expect(within(rowOf(c, 'team-a/eal-core')).getByText('Indexed')).toBeInTheDocument()
+    // Index now: the repositories show the run at once, not at their next minute's look.
+    await userEvent.click(screen.getByRole('button', { name: 'Index now' }))
+    await waitFor(() => expect(within(rowOf(c, 'team-a/eal-core')).getByText('Queued')).toBeInTheDocument(), { timeout: 2000 })
+  })
+
+  it('looks every few seconds while the page says a run goes, though its own last look did not see it', async () => {
+    let seen = 0
+    const running = {
+      json: {
+        job: { state: 'running', branches: [], started: now, finished: null, returncode: null, tail: [], trigger: 'schedule', progress: null },
+        index: { repos: 1, stale: 0, errored: 0, files: 10, symbols: 100 }, interval: 0, webhook: false, pending: [],
+      },
+    }
+    fakeApi(admin, routes({
+      'GET /api/admin/argus/status': () => running,
+      // Its first look came just before the scheduled pass took it.
+      'GET /api/admin/argus/repos': () =>
+        seen++ === 0
+          ? view([repo(1, 'team-a/eal-core')])
+          : view([repo(1, 'team-a/eal-core', { state: 'indexing', progress: { state: 'files', branch: 'main', done: 3, total: 12, started: now } })], { running: true }),
+    }))
+    renderApp('/admin/indexing')
+    const c = await card()
+    expect(await within(c).findByText('Reading files on main: 3 of 12', {}, { timeout: 5000 })).toBeInTheDocument()
+  })
+
   it('changes many at once after asking, then says what came of each', async () => {
     const calls = fakeApi(admin, routes({
       'POST /api/admin/argus/repos/batch': (body) => {

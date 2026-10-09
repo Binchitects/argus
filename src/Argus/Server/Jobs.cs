@@ -12,7 +12,8 @@ namespace Argus.Server;
 /// Background work the server runs on the operator's behalf: one index run at
 /// a time as a child `argus index` process, repositories queued behind it (pushes,
 /// an admin's Update, their schedules) and run together when it ends, the pass
-/// timer, the repositories' own schedules, and pack install/update/remove.
+/// timer, the repositories' own schedules, removing the index of repositories
+/// left out, and pack install/update/remove.
 /// </summary>
 public sealed class Jobs(ArgusConfig cfg)
 {
@@ -310,6 +311,9 @@ public sealed class Jobs(ArgusConfig cfg)
         IReadOnlyDictionary<string, string>? triggers)
     {
         var argv = IndexCommand(branches, allowPartial, only, scheduled, trigger, triggers);
+        // An index being removed finishes first: the run never waits on its write lock. (The run is
+        // marked as going, so no other removal starts.)
+        lock (_dropping) { }
         int rc;
         try
         {
@@ -354,6 +358,8 @@ public sealed class Jobs(ArgusConfig cfg)
                         s["message"] ??= rc == 0 ? "The run ended before it." : $"The run stopped before it (exit {rc}): the run log says why.";
                     }
         }
+        // What was left out while it ran leaves the index now.
+        RemoveLeftOut();
         DrainPending();
     }
 
@@ -424,6 +430,86 @@ public sealed class Jobs(ArgusConfig cfg)
         AuditLog.IndexWebhook(distinct.Count == 1 ? distinct[0] : $"{distinct.Count} repositories", started: true);
         new Thread(() => RunIndex([], false, distinct, false, trigger, null)) { IsBackground = true, Name = "argus-index" }.Start();
         return outcome;
+    }
+
+    // --- removals -------------------------------------------------------------------------
+
+    /// <summary>Held while one repository's index is removed: a run starts only once it is gone.</summary>
+    readonly Lock _dropping = new();
+    readonly Lock _removalLock = new();
+    /// <summary>Repositories GitLab no longer lists that an admin removed: forgotten once their index is gone.</summary>
+    readonly HashSet<long> _forget = [];
+    readonly AutoResetEvent _removalsWanted = new(false);
+    bool _removerStarted;
+
+    /// <summary>
+    /// Removes the index of every repository left out of it, in the background: one repository at a
+    /// time, never while a run writes (then when it ends). A batch of hundreds answers at once rather
+    /// than waiting for every file, symbol and vector to go. <paramref name="forget"/>: repositories
+    /// GitLab no longer lists, whose row and log go too once their index is gone.
+    /// </summary>
+    public void RemoveLeftOut(IEnumerable<long>? forget = null)
+    {
+        lock (_removalLock)
+        {
+            foreach (var id in forget ?? []) _forget.Add(id);
+            if (!_removerStarted)
+            {
+                _removerStarted = true;
+                new Thread(() =>
+                {
+                    while (true)
+                    {
+                        _removalsWanted.WaitOne();
+                        try { RemoveLeftOutNow(); }
+                        catch (Exception exc) { Console.Error.WriteLine($"the index of repositories left out could not be removed: {exc.GetType().Name}: {exc.Message}"); }
+                    }
+                }) { IsBackground = true, Name = "argus-removals" }.Start();
+            }
+        }
+        _removalsWanted.Set();
+    }
+
+    /// <summary>
+    /// The removals themselves: each repository left out that still has an index, until none is left
+    /// or a run starts (its end calls again); then the ones to forget. How many repositories' indexes went.
+    /// </summary>
+    public int RemoveLeftOutNow()
+    {
+        var removed = 0;
+        // No index yet: nothing to remove (and none is made here).
+        if (!File.Exists(cfg.Index.DbPath)) return removed;
+        using var conn = Db.Open(cfg.Index.DbPath);
+        bool Busy() { lock (_indexLock) return Running; }
+        while (true)
+        {
+            lock (_dropping)
+            {
+                if (Busy()) return removed;
+                if (Sql.Scalar(conn, "SELECT r.gitlab_id FROM repos r JOIN repo_choices c ON c.gitlab_id = r.gitlab_id WHERE c.included = 0 LIMIT 1") is not long id)
+                    break;
+                bool forgotten;
+                lock (_removalLock) forgotten = _forget.Contains(id);
+                Choices.DropInSteps(conn, id);
+                if (!forgotten) RepoLog.Note(conn, id, "Its files and symbols were removed from the index.");
+                removed++;
+            }
+        }
+        lock (_dropping)
+        {
+            if (Busy()) return removed;
+            List<long> forget;
+            lock (_removalLock)
+            {
+                forget = [.. _forget];
+                _forget.Clear();
+            }
+            var listedAt = Choices.ListedAt(conn);
+            // Unless an admin chose it again, or GitLab lists it again, meanwhile.
+            foreach (var id in forget)
+                if (Choices.Find(conn, id) is { Included: false } c && !Choices.Listed(c, listedAt)) Choices.Forget(conn, id);
+        }
+        return removed;
     }
 
     // --- packs ----------------------------------------------------------------------------

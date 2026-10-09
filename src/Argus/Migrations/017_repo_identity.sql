@@ -17,8 +17,13 @@
 --
 --   * per path (GitLab compares paths without case), the copy GitLab listed
 --     last is the repository;
---   * the admin's latest choice among the copies (in or out, branches) is its
---     choice;
+--   * it is in the index when any copy is: a copy turned off to hide the
+--     duplicate, or a new copy the "leave new repositories out" policy left
+--     out, never takes the index of the other copy away (the next run would
+--     drop what is merged into a repository left out);
+--   * its branches are those of every copy that is in (of every copy, when
+--     none is), the kept copy's first: a branch indexed under either copy
+--     stays indexed;
 --   * per branch, the newest good index stays: indexed at a commit, most
 --     recently; the other copies go, with their files, symbols, vectors and
 --     text search;
@@ -52,22 +57,33 @@ DELETE FROM merge_choice WHERE copies < 2;
 
 CREATE TEMP TABLE merge_keep AS SELECT k, gitlab_id AS keep_id FROM merge_choice WHERE rank = 1;
 
--- The admin's latest choice among the copies, when one was ever made.
+-- In when any copy is in; the admin's latest change to any copy, when one was ever made.
 CREATE TEMP TABLE merge_pick AS
-  SELECT k, from_id FROM (
-    SELECT m.k, c.gitlab_id AS from_id, ROW_NUMBER() OVER (PARTITION BY m.k ORDER BY c.changed_at DESC, m.rank) AS n
-      FROM merge_choice m JOIN repo_choices c ON c.gitlab_id = m.gitlab_id
-     WHERE c.changed_at IS NOT NULL)
-   WHERE n = 1;
+  SELECT m.k, MAX(c.included) AS included, MAX(c.changed_at) AS changed_at
+    FROM merge_choice m JOIN repo_choices c ON c.gitlab_id = m.gitlab_id
+   GROUP BY m.k;
+
+-- The branches of the copies that are in (of every copy, when none is), one a row: names
+-- or globs, one a line (a comma separates them too), the kept copy's first, each once.
+CREATE TEMP TABLE merge_branch AS
+  WITH RECURSIVE part(k, rank, n, item, rest) AS (
+    SELECT m.k, m.rank, 0, NULL, replace(replace(c.branches, char(13), ''), ',', char(10)) || char(10)
+      FROM merge_choice m
+      JOIN repo_choices c ON c.gitlab_id = m.gitlab_id
+      JOIN merge_pick p ON p.k = m.k
+     WHERE c.included = p.included
+    UNION ALL
+    SELECT k, rank, n + 1, trim(substr(rest, 1, instr(rest, char(10)) - 1), ' ' || char(9)), substr(rest, instr(rest, char(10)) + 1)
+      FROM part
+     WHERE rest <> '')
+  SELECT k, item, MIN(rank * 100000 + n) AS ord FROM part WHERE item <> '' GROUP BY k, item;
 
 UPDATE repo_choices
-   SET included   = (SELECT c.included FROM merge_keep k JOIN merge_pick p ON p.k = k.k JOIN repo_choices c ON c.gitlab_id = p.from_id
-                      WHERE k.keep_id = repo_choices.gitlab_id),
-       branches   = (SELECT c.branches FROM merge_keep k JOIN merge_pick p ON p.k = k.k JOIN repo_choices c ON c.gitlab_id = p.from_id
-                      WHERE k.keep_id = repo_choices.gitlab_id),
-       changed_at = (SELECT c.changed_at FROM merge_keep k JOIN merge_pick p ON p.k = k.k JOIN repo_choices c ON c.gitlab_id = p.from_id
-                      WHERE k.keep_id = repo_choices.gitlab_id)
- WHERE gitlab_id IN (SELECT k.keep_id FROM merge_keep k JOIN merge_pick p ON p.k = k.k);
+   SET included   = (SELECT p.included FROM merge_keep k JOIN merge_pick p ON p.k = k.k WHERE k.keep_id = repo_choices.gitlab_id),
+       changed_at = (SELECT p.changed_at FROM merge_keep k JOIN merge_pick p ON p.k = k.k WHERE k.keep_id = repo_choices.gitlab_id),
+       branches   = COALESCE((SELECT group_concat(b.item, char(10) ORDER BY b.ord) FROM merge_keep k JOIN merge_branch b ON b.k = k.k
+                               WHERE k.keep_id = repo_choices.gitlab_id), '')
+ WHERE gitlab_id IN (SELECT keep_id FROM merge_keep);
 
 -- Per branch, the newest good index of all the copies.
 CREATE TEMP TABLE merge_rows AS
@@ -101,6 +117,7 @@ DELETE FROM argus_meta
 DELETE FROM acl_cache;
 
 DROP TABLE merge_rows;
+DROP TABLE merge_branch;
 DROP TABLE merge_pick;
 DROP TABLE merge_keep;
 DROP TABLE merge_choice;
