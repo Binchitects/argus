@@ -106,7 +106,7 @@ public static class LdapEndpoints
     /// <summary>
     /// The settings a check uses: each one of the form, made exactly as saving would make it (the same
     /// checks, the same trimming), else the saved one. A blank password field means the saved password,
-    /// with the saved server and service account over a connection as safe as the saved one only.
+    /// only with the saved server and service account, over a connection as safe as the saved one.
     /// </summary>
     private static async Task<(LdapOptions Options, PasswordFrom From, string? Withheld, LdapCheckResult? Problem, List<string> Notes)> FromFormAsync(
         Dictionary<string, string?> form, LdapOptions saved, AppDbContext db, CancellationToken ct)

@@ -161,9 +161,12 @@ only DNs, Active Directory's own reasons below), where people are (empty, not a
 DN, or missing, with the part that exists), the user filter, and the groups (not
 found, or not in their members' `memberOf`). It says which password it used: the
 one typed in the field, or the saved one when the field is blank. The saved one
-is used only with the saved server (its host and port) and service account: with
-another one in the form, type the password, so a saved password never goes to a
-server it was not saved for. The password is tried and saved exactly as typed;
+is used only with the saved server (its host and port) and service account, over
+a connection at least as safe as the saved one: with another server or account
+in the form, or with **Use StartTLS** turned off, **Accept any certificate**
+turned on or another CA in **Directory's CA**, type the password, so a saved
+password never goes to a server it was not saved for, nor in the clear. The test
+says which change kept it back. The password is tried and saved exactly as typed;
 one that starts or ends with a space (often a copy and paste) is pointed out.
 Each test is in the audit log (`settings.ldap_test`) with the server it went to.
 
@@ -182,18 +185,24 @@ account of that name is never taken over). It shows who they would be here
 (username, email, name, groups, admin or not), or exactly why they could not
 sign in. Nothing is saved or changed; the password is never stored or logged,
 and the try is in the audit log (`settings.ldap_try`) with the server and its
-outcome.
+outcome. A try is a guess at a password like any sign-in, so the same brakes
+hold it: a wrong password counts as a wrong sign-in does, against that name from
+your address and against their account here, and a try is refused while either
+is held (**Settings → Sign-in and sessions** says for how long).
 
 People sign in with their directory name (`uid` or `sAMAccountName`), their email
 or `userPrincipalName`, or `DOMAIN\name` (the domain is left out). The app
 searches for them with the service account, then checks the password by binding
 as them. On the first sign-in it creates them, gives them an API key, and sets
 their role from the admin group. The directory stays in charge of their name,
-email, role and password; the app does not let those be changed here. Groups come
-from each person's `memberOf` (asked for by name, as OpenLDAP's overlay sends it
-only then) and, with **Where groups are** set, from the groups there that name
-them as a `member` or `uniqueMember`. Direct members only: a group inside a group
-does not count. A group goes by its full DN or its common name, a comma in it
+email, role and password; the app does not let those be changed here. With
+**Where groups are** empty, groups come from each person's `memberOf`, asked for
+by name (OpenLDAP's overlay sends it only then). With it set, they come from the
+groups there that name them as a `member` or `uniqueMember`, and from `memberOf`
+only where the server sends it unasked (Active Directory does, OpenLDAP does not),
+as in v5.2.0: on OpenLDAP a group of the same name elsewhere, such as another
+app's `admins`, never makes anyone an admin here. Direct members only: a group
+inside a group does not count. A group goes by its full DN or its common name, a comma in it
 included (`CN=Sales\, EMEA,...` is `Sales, EMEA`); a group, admin group or
 required group saved in v5.2.0 as `Sales\` (its name cut at the comma) keeps
 matching.
@@ -204,7 +213,14 @@ API keys blocked. They are enabled again if they come back. **Admin → Sign-in 
 Check the directory now** runs the same check at once. When the directory cannot
 be used (not reached, its certificate refused, the service account refused,
 **Where groups are** not there), nobody is changed and the check says why; the
-app keeps running. Only a person's own entry gone counts as leaving.
+app keeps running. Only a person's own entry gone counts as leaving. The same
+goes for the required group: when nobody at all is in it, it must be found before
+anyone is disabled for not being in it, so a typo in its name changes nobody and
+the check says to fix **Required group**.
+
+A directory that is busy or unavailable when it checks someone's password
+(rather than refusing it) is the directory's state, not a wrong password: they
+are told it cannot be reached, and nothing counts against them.
 
 Safeguards: an empty password is refused before the directory sees it (many
 servers treat it as an anonymous bind and say yes); the service account is never
@@ -533,8 +549,9 @@ here has, or a local admin's email (local admins are never taken over).
 
 **Directory sign-ins answer "cannot be reached".** The app could not use the
 directory: a wrong **Directory server**, a firewall, a certificate the app does
-not trust (for `ldaps://` or StartTLS; give its CA in **Directory's CA**), or the
-service account refused. **Test the settings** says which, and the app's log has
+not trust (for `ldaps://` or StartTLS; give its CA in **Directory's CA**), the
+service account refused, **Where groups are** not there, or the directory busy
+when it checked the password. **Test the settings** says which, and the app's log has
 the same sentence. Local accounts still work.
 
 **The test says the server refused the service account.** The step says why.
