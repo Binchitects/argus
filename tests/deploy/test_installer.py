@@ -387,7 +387,7 @@ class InstallerTests(unittest.TestCase):
         out = r.stdout
         self.assertIn("from 5.2.0 (" + str(self.dir / "VERSION") + ") to 9.9.9", out)
         self.assertIn("would  update docker-compose.yml", out)
-        self.assertIn("would  update config/edited.yml, which was changed here and in 9.9.9: that copy kept as config/edited.yml.before-9.9.9", out)
+        self.assertIn("would  keep config/edited.yml as it was changed here, and write 9.9.9's beside it as config/edited.yml.new-9.9.9 (it changes it too), to merge", out)
         self.assertIn("note   kept config/litellm.yaml as it was changed here: 9.9.9 ships it as it was", out)
         self.assertNotIn("update config/litellm.yaml", out)
         self.assertIn("would  add config/added.yml", out)
@@ -571,6 +571,9 @@ class InstallerTests(unittest.TestCase):
 
     def test_Upgrade_from_5_2_0_backs_up_updates_merges_and_runs_the_new_release(self):
         deploy = self.old_install()
+        # The compose file changed here too (its changes belong in the override).
+        with open(deploy / "docker-compose.yml", "a") as f:
+            f.write("# mine\n")
         old_app = next(c for c in self.containers() if c["service"] == "app")["image_id"]
         r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s")
         self.assertEqual(r.returncode, 0, self.output(r))
@@ -581,15 +584,25 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual((backups[0] / "RESULT").read_text().strip(), "ok")
         self.assertEqual((backups[0] / "config" / ".env").read_text(), OLD_ENV)
         self.assertIn("backup: " + str(backups[0]), out)
-        # Files: the shipped ones updated, a changed one kept beside, a dropped one removed, the host's own kept.
+        # Files, three ways (5.2.0's, 9.9.9's, the host's): the shipped ones updated, a dropped one
+        # removed, the host's own kept. Changed here and in the release: the host's stays in effect,
+        # the release's beside it, to merge.
+        self.assertEqual((deploy / "config" / "edited.yml").read_text(), "shipped: 1\nmine: yes\n")
+        self.assertEqual((deploy / "config" / "edited.yml.new-9.9.9").read_text(), "shipped: 2\n")
+        self.assertFalse((deploy / "config" / "edited.yml.before-9.9.9").exists())
+        # But the compose file is the release's: the host's copy beside it, to apply again in the override.
         self.assertEqual((deploy / "docker-compose.yml").read_text(), COMPOSE_NEW)
-        self.assertEqual((deploy / "config" / "edited.yml").read_text(), "shipped: 2\n")
-        self.assertEqual((deploy / "config" / "edited.yml.before-9.9.9").read_text(), "shipped: 1\nmine: yes\n")
-        # Changed here and not by the release: the host's stays in effect, and both are named at the end.
+        self.assertEqual((deploy / "docker-compose.yml.before-9.9.9").read_text(), COMPOSE_OLD + "# mine\n")
+        # Changed here and not by the release: the host's stays in effect, and each is named at the end.
         self.assertEqual((deploy / "config" / "litellm.yaml").read_text(), "model_list: []\nbudget: mine\n")
         self.assertFalse((deploy / "config" / "litellm.yaml.before-9.9.9").exists())
-        self.assertIn("changes of yours to apply again (9.9.9 changed these files too; yours are beside them as FILE.before-9.9.9): config/edited.yml\n", out)
+        self.assertFalse((deploy / "config" / "litellm.yaml.new-9.9.9").exists())
+        self.assertIn("  TO MERGE: yours stay in effect, and 9.9.9 changed these files too; its copies are beside them:\n"
+                      "    config/edited.yml  <-  config/edited.yml.new-9.9.9\n", out)
+        self.assertIn("    docker-compose.yml  ->  docker-compose.yml.before-9.9.9\n", out)
         self.assertIn("kept as you changed them (9.9.9 ships them as they were): config/litellm.yaml\n", out)
+        # The embedding model is not here: healthy, waiting for models.
+        self.assertIn("Upgraded from 5.2.0 to 9.9.9: healthy, waiting for models (embed; below)", out)
         self.assertFalse((deploy / "config" / "dropped.yml").exists())
         self.assertEqual((deploy / "config" / "mine.yml").read_text(), "my own\n")
         self.assertEqual((deploy / "certs" / "tls.key").read_text(), "KEY\n")
@@ -615,6 +628,22 @@ class InstallerTests(unittest.TestCase):
         r = self.r.run("upgrade", "--dir", str(self.dir), "--yes")
         self.assertEqual(r.returncode, 0, self.output(r))
         self.assertIn("nothing to upgrade", r.stdout)
+        # What the upgrade kept as the admin's is not damage: repair and verify leave it.
+        r = self.r.run("repair", "--dir", str(self.dir), "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("kept as you changed them (the install or upgrade left them so): config/edited.yml config/litellm.yaml", r.stdout)
+        self.assertEqual((deploy / "config" / "litellm.yaml").read_text(), "model_list: []\nbudget: mine\n")
+        self.assertEqual((deploy / "config" / "edited.yml").read_text(), "shipped: 1\nmine: yes\n")
+        self.assertFalse(list((deploy / "config").glob("*.changed-*")))
+        r = subprocess.run(["bash", str(deploy / "scripts" / "installer.sh"), "verify", "--dir", str(self.dir)], env=self.r.env(),
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, self.output(r))
+        # Changed again since: that is a finding.
+        (deploy / "config" / "litellm.yaml").write_text("budget: changed again\n")
+        r = subprocess.run(["bash", str(deploy / "scripts" / "installer.sh"), "verify", "--dir", str(self.dir)], env=self.r.env(),
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 6, self.output(r))
+        self.assertIn("config/litellm.yaml", r.stdout)
 
     def test_An_app_that_answers_a_few_seconds_late_is_waited_for(self):
         """Traefik reaches a recreated container a little after compose calls it healthy."""
@@ -643,7 +672,8 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual((deploy / ".env").read_text(), OLD_ENV)
         self.assertEqual((deploy / "config" / "dropped.yml").read_text(), "old: 1\n")
         self.assertFalse((deploy / "config" / "added.yml").exists())
-        self.assertFalse((deploy / "config" / "edited.yml.before-9.9.9").exists())
+        self.assertEqual((deploy / "config" / "edited.yml").read_text(), "shipped: 1\nmine: yes\n")
+        self.assertFalse((deploy / "config" / "edited.yml.new-9.9.9").exists())
         # 5.2.0 had no VERSION beside deploy/; the upgrade's is gone again.
         self.assertFalse((self.dir / "VERSION").exists())
         # The old images, and the data of the backup (restored by backup.sh, after keeping what the failed one left).
@@ -673,36 +703,45 @@ class InstallerTests(unittest.TestCase):
         (snap / "data-before-rollback").unlink()
         r = self.r.run("upgrade", "--dir", str(self.dir), "--rollback", "--dry-run")
         self.assertEqual(r.returncode, 0, self.output(r))
-        self.assertIn("would  stop it but postgres, back up the data as it is, put back 5.2.0's files and images", r.stdout)
-        self.assertIn("the certificates, the override and your other files stay as they are", r.stdout)
+        out = r.stdout
+        self.assertIn("would  stop it but postgres, back up the data as it is, put back 5.2.0's images", out)
+        self.assertIn("would  take out what the upgrade added: config/added.yml config/edited.yml.new-9.9.9", out)
+        self.assertIn("would  put back as 5.2.0 had them: config/dropped.yml docker-compose.yml .env.example", out)
+        self.assertIn("would  put back .env as 5.2.0 had it (it is as the upgrade left it: only the keys it added go)", out)
+        self.assertIn("the certificates, the override and your other files stay as they are", out)
+        self.assertFalse((snap / "old-deploy").exists())
         # A week on: a new certificate and key, and the override changed.
         upgraded_env = (deploy / ".env").read_text()
         (deploy / "certs" / "tls.key").write_text("NEW KEY\n")
         (deploy / "certs" / "tls.crt").write_text("NEW CERTIFICATE\n")
         (deploy / "docker-compose.override.yml").write_text("services: {}\n# changed after the upgrade\n")
-        # And two of 9.9.9's files changed since: one 5.2.0 had too, one it did not.
-        (deploy / "config" / "edited.yml").write_text("shipped: 2\nlater: yes\n")
+        # And two files changed since: one the upgrade left as the host had it, one it added.
+        (deploy / "config" / "edited.yml").write_text("shipped: 1\nmine: yes\nlater: yes\n")
         (deploy / "config" / "added.yml").write_text("new: 1\nlater: yes\n")
         r = self.r.run("upgrade", "--dir", str(self.dir), "--rollback", "--yes", "--timeout", "5s")
         self.assertEqual(r.returncode, 0, self.output(r))
         self.assertIn("Rolled back: 5.2.0 runs", r.stdout)
         self.assertEqual((deploy / "docker-compose.yml").read_text(), COMPOSE_OLD)
+        # .env was as the upgrade left it: 5.2.0's again, the one there was kept.
         self.assertEqual((deploy / ".env").read_text(), OLD_ENV)
-        # The certificates and the override as they are now; the .env there was, kept.
+        self.assertEqual((snap / "files-before-rollback" / ".env").read_text(), upgraded_env)
+        self.assertEqual(oct((snap / "files-before-rollback" / ".env").stat().st_mode & 0o777), "0o600")
+        # The certificates and the override as they are now.
         self.assertEqual((deploy / "certs" / "tls.key").read_text(), "NEW KEY\n")
         self.assertEqual((deploy / "certs" / "tls.crt").read_text(), "NEW CERTIFICATE\n")
         self.assertEqual((deploy / "docker-compose.override.yml").read_text(), "services: {}\n# changed after the upgrade\n")
-        self.assertEqual((snap / "files-before-rollback" / ".env").read_text(), upgraded_env)
-        self.assertEqual(oct((snap / "files-before-rollback" / ".env").stat().st_mode & 0o777), "0o600")
         back = next(line for line in r.stdout.splitlines() if "put back as 5.2.0 had them:" in line).split(": ", 1)[1].split()
-        for f in (".env", "docker-compose.yml", "config/dropped.yml"):
-            self.assertIn(f, back)
-        self.assertFalse([f for f in back if f.startswith("certs/") or "override" in f])
+        self.assertEqual(sorted(back), sorted(["docker-compose.yml", "config/dropped.yml", ".env.example"]))
         self.assertIn("took out config/added.yml (the upgrade added it)", r.stdout)
-        # What was changed since the upgrade is kept before it is replaced or taken out.
+        self.assertIn("took out config/edited.yml.new-9.9.9 (the upgrade added it)", r.stdout)
+        # Asked about, and unattended the defaults: the file the upgrade had left as it was stays as it
+        # is now; the one it added goes, kept first.
+        self.assertIn("changed here since the upgrade, which had left them as they were: config/edited.yml", r.stdout)
+        self.assertIn("left as they are now: config/edited.yml", r.stdout)
+        self.assertEqual((deploy / "config" / "edited.yml").read_text(), "shipped: 1\nmine: yes\nlater: yes\n")
         kept = snap / "files-before-rollback" / "config"
-        self.assertEqual((kept / "edited.yml").read_text(), "shipped: 2\nlater: yes\n")
         self.assertEqual((kept / "added.yml").read_text(), "new: 1\nlater: yes\n")
+        self.assertFalse((kept / "edited.yml").exists())
         self.assertFalse((kept / "litellm.yaml").exists())
         self.assertIn("changed here since the upgrade, kept in", r.stdout)
         self.assertFalse((self.dir / "VERSION").exists())
@@ -713,6 +752,47 @@ class InstallerTests(unittest.TestCase):
         r = self.r.run("upgrade", "--dir", str(self.dir), "--rollback", "--yes")
         self.assertEqual(r.returncode, 3, self.output(r))
         self.assertIn("no upgrade of this installer to roll back here", r.stderr)
+
+    def test_A_rollback_puts_back_only_what_the_upgrade_changed_and_asks_about_the_rest(self):
+        deploy = self.old_install(version_file=True)
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        snap = self.dir / ".arena-install" / "rollback" / "5.2.0"
+        # Since the upgrade: a setting changed and one added, the database password changed, a key
+        # the upgrade added changed, and a file it wrote changed.
+        env = (deploy / ".env").read_text()
+        self.assertIn("DOMAIN=old.example\n", env)
+        env = env.replace("DOMAIN=old.example\n", "DOMAIN=new.example\n").replace("DB_PASSWORD=old-db\n", "DB_PASSWORD=rotated-db\n")
+        env = env.replace("NEW_SETTING=on\n", "export NEW_SETTING = off\n") + "MY_SETTING=1\n"
+        (deploy / ".env").write_text(env)
+        (deploy / ".env.example").write_text(ENV_EXAMPLE_NEW + "# mine\n")
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--rollback", "--dry-run")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        out = r.stdout
+        self.assertIn("the upgrade changed these, and they were changed here since: .env.example", out)
+        self.assertIn("would  take out of .env the keys the upgrade added: NEW_KEY NEW_SETTING", out)
+        self.assertIn(".env: changed since the upgrade, and the data goes back to a backup taken with 5.2.0's: DB_PASSWORD", out)
+        self.assertIn("would  put back 5.2.0's values in .env: DB_PASSWORD", out)
+        self.assertIn(".env: left as they are now: DOMAIN MY_SETTING", out)
+        self.assertEqual((deploy / ".env").read_text(), env)
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--rollback", "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        values = dict(line.split("=", 1) for line in (deploy / ".env").read_text().splitlines() if "=" in line and not line.startswith("#"))
+        # What the upgrade changed goes back; what was changed since stays, but for what the data needs.
+        self.assertEqual(values["DOMAIN"], "new.example")
+        self.assertEqual(values["MY_SETTING"], "1")
+        self.assertEqual(values["DB_PASSWORD"], "old-db")
+        self.assertEqual(values["OLD_THING"], "1")
+        self.assertNotIn("NEW_KEY", values)
+        self.assertFalse([k for k in values if "NEW_SETTING" in k])
+        self.assertEqual(oct((deploy / ".env").stat().st_mode & 0o777), "0o600")
+        self.assertEqual((snap / "files-before-rollback" / ".env").read_text(), env)
+        self.assertEqual((deploy / ".env.example").read_text(), ENV_EXAMPLE_OLD)
+        self.assertEqual((snap / "files-before-rollback" / ".env.example").read_text(), ENV_EXAMPLE_NEW + "# mine\n")
+        self.assertIn(".env: 5.2.0's values put back: DB_PASSWORD", r.stdout)
+        # Names only: no value of .env is printed or logged.
+        for secret in ("rotated-db", "old-db", "old-app-key"):
+            self.assertNotIn(secret, self.output(r) + self.logs())
 
     def test_An_upgrade_cut_off_half_way_carries_on(self):
         self.old_install(version_file=True)
@@ -944,8 +1024,10 @@ class InstallerTests(unittest.TestCase):
         r = self.install()
         out = r.stdout
         self.assertIn(f"the embedding server waits for {EMBED} in {self.dir}/deploy/models, which the bundle does not carry", out)
-        self.assertIn(f"waiting for its model, {EMBED} in {self.dir}/deploy/models, and not waited for: embed: running (unhealthy)", out)
+        self.assertIn(f"ok     healthy, waiting for models: {len(SERVICES.split()) - 1} of {len(SERVICES.split())} services up, and embed running, waiting for its model", out)
+        self.assertIn(f"waiting for models: embed needs {EMBED} in {self.dir}/deploy/models, which nothing here can fetch: copy the file there and it starts by itself", out)
         self.assertIn("Argus Arena 9.9.9 runs:", out)
+        self.assertIn("Installed: healthy, waiting for models (embed; above).", out)
         self.assertIn(f"the embedding server waits for its model: bring {EMBED} into", out)
         # status names it and is not failed by it; repair does not recreate it (nothing would change).
         r = self.r.run("status", "--dir", str(self.dir))
@@ -1025,6 +1107,7 @@ class InstallerTests(unittest.TestCase):
         self.assertNotIn("postgres", calls[stop])
         self.assertIn("app", calls[stop])
         self.assertIn("stopped for the backup: every service but postgres", r.stdout)
+        self.assertIn("a rollback (by itself on a failure, or upgrade --rollback later) puts back 5.2.0's images, the files this upgrade changes and the data of this backup", r.stdout)
 
     def test_A_backup_that_fails_leaves_5_2_0_running_on_its_data(self):
         deploy = self.old_install(version_file=True)
@@ -1050,8 +1133,10 @@ class InstallerTests(unittest.TestCase):
         (snap / "data-before-rollback").write_text("in the way\n")
         r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "3s", extra={"FAKE_UNHEALTHY": "arena-app:9.9.9"})
         self.assertEqual(r.returncode, 5, self.output(r))
-        self.assertIn("nothing is restored over the data, which would be lost", r.stdout)
+        self.assertIn("nothing is put back or restored over the data, which would be lost", r.stdout)
         self.assertFalse([c for c in self.r.calls() if "find /target -mindepth 1 -delete" in " ".join(c)])
+        # Not a file put back either: the new release's files, with the data they open, as they were.
+        self.assertEqual((deploy / "docker-compose.yml").read_text(), COMPOSE_NEW)
         # The steps by hand: the rollback's own backup.sh, which takes --deploy (5.2.0's put back does not).
         self.assertTrue((snap / "backup.sh").is_file())
         self.assertIn(f"bash {snap}/backup.sh --deploy {deploy} --restore --from {deploy}/backups/", r.stdout)
@@ -1086,6 +1171,8 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(r.returncode, 5, self.output(r))
         self.assertIn("podman compose -p arena -f docker-compose.yml -f podman.yml down", r.stdout)
         self.assertIn(f"COMPOSE_PROJECT_NAME=arena COMPOSE_FILE=docker-compose.yml:podman.yml bash {snap}/backup.sh --deploy {deploy} --podman --restore", r.stdout)
+        # 5.2.0's files and .env by hand, never over the certificates and the override.
+        self.assertIn(f"tar -xpf {snap}/deploy.tar -C {deploy} --exclude=./certs --exclude=./docker-compose.override.yml", r.stdout)
 
     # ------------------------------------------------ remove and the helper
 

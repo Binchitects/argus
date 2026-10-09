@@ -10,15 +10,19 @@
 #
 # Commands:
 #   install   a new installation: checks the host, loads the images, writes DIR/deploy, makes
-#             .env (secrets generated), starts the stack and waits until it is healthy
-#   upgrade   an installation of 5.2.0 or newer: the new images loaded while it runs, then a
+#             .env (secrets generated), starts the stack and waits until it is healthy (a
+#             service waiting for a model file is named, with what to do: healthy, waiting for
+#             models)
+#   upgrade  an installation of 5.2.0 or newer: the new images loaded while it runs, then a
 #             backup with the stack stopped (but its database), then the new files (.env,
-#             overrides, certificates, backups and files changed here that the release did not
-#             change kept; new .env keys added and listed), started and checked. On a failure it
-#             rolls back by itself: the files, the images and the data from the backup (the data
-#             as it is kept in a backup first). --rollback goes back to before the last upgrade
-#             (the certificates, the override and the other files of the host stay as they are).
-#             A rollback cut off half way is finished when upgrade runs again.
+#             overrides, certificates and backups kept; a file changed here stays in effect, and
+#             when the release changed it too its copy is written beside it as FILE.new-VERSION
+#             to merge; new .env keys added and listed), started and checked. On a failure it
+#             rolls back by itself: the files it changed, the images and the data from the backup
+#             (the data as it is kept in a backup first). --rollback goes back to before the last
+#             upgrade the same way, asking about what was changed since (the certificates and the
+#             override stay as they are). A rollback cut off half way is finished when upgrade runs
+#             again. Services waiting for a model file (the embedding server) do not fail it.
 #   repair    checks the installation against the bundle and puts right what is wrong:
 #             missing or changed files, missing images, volumes' owners, stopped or unhealthy
 #             containers; each finding is reported with what was done
@@ -598,7 +602,7 @@ images_present() {
 is_user_path() {
   case "$1" in
     .env.example|certs/README.md|models/.gitkeep) return 1 ;;
-    .env|.env.*|docker-compose.override.yml|certs/*|config/traefik/certificate.yml|backups/*|models/*|*.before-*|.airgap-*|*/__pycache__/*|__pycache__/*) return 0 ;;
+    .env|.env.*|docker-compose.override.yml|certs/*|config/traefik/certificate.yml|backups/*|models/*|*.before-*|*.new-*|*.changed-*|.airgap-*|*/__pycache__/*|__pycache__/*) return 0 ;;
   esac
   local rel
   for rel in "${MODELS_DIR#"$DEPLOY"/}" "${BACKUP_DIR#"$DEPLOY"/}"; do
@@ -618,19 +622,24 @@ old_deploy_sums() {   # old_deploy_sums VERSION
 installed_files() {   # the files in DEPLOY that are not the host's own
   (cd "$DEPLOY" 2>/dev/null && find . -type f -printf '%P\n' | sort) | while IFS= read -r f; do is_user_path "$f" || printf '%s\n' "$f"; done
 }
-# Brings DEPLOY to the bundle's files. The host's own (.env, overrides, certificates, backups,
-# models) are never touched. A file changed here stays as it is when the release ships it as it
-# was (an Alertmanager receiver, a budget: the admin's), and is replaced only when the release
-# changed it too (or what was shipped is not known): then the host's copy is kept beside it as
-# FILE.before-VERSION and it is named at the end, to apply again. A file the new release dropped
-# is removed only when it is the old release's own, unchanged; every other file stays. Each is
-# listed. plan: only says so. The same for an install over a removed installation's deploy/.
-# Writes $SYNC_ADDED: one line per file it added (to undo a failed upgrade).
-SYNC_ADDED="" SYNC_REAPPLY=() SYNC_KEPT=()
-sync_deploy() {   # sync_deploy install|upgrade|repair OLD_VERSION plan|do
-  local mode=$1 oldv=$2 act=$3 f sum cur old n_add=0 n_upd=0 n_mine=0 n_yours=0 n_rm=0 n_keep=0
+# The release's compose files and this installer say what runs and how: a host's change to one of
+# them belongs in docker-compose.override.yml (always kept), so the release's copy is the one used.
+release_owned() { case "$1" in docker-compose.yml|podman.yml|scale.yml|scripts/installer.sh) return 0 ;; esac; return 1; }
+# Brings DEPLOY to the bundle's files, three ways: as shipped before, as shipped now, as it is
+# here. The host's own (.env, overrides, certificates, backups, models) are never touched. A file
+# changed here stays as it is when the release ships it as it was (an Alertmanager receiver, a
+# budget: the admin's). Changed here and in the release too, the host's still stays in effect and
+# the release's is written beside it as FILE.new-VERSION, to merge by hand; only the release's
+# compose files and this installer (release_owned), or a file whose shipped copy is not known, are
+# replaced, the host's copy kept beside as FILE.before-VERSION. A file the new release dropped is
+# removed only when it is the old release's own, unchanged; every other file stays. Each is listed,
+# and named again at the end. plan: only says so. The same for an install over a removed
+# installation's deploy/. Writes $SYNC_ADDED: one line per file it added (to undo a failed upgrade).
+SYNC_ADDED="" SYNC_REAPPLY=() SYNC_KEPT=() SYNC_BESIDE=()
+sync_deploy() {   # sync_deploy install|upgrade OLD_VERSION plan|do
+  local mode=$1 oldv=$2 act=$3 f sum cur old n_add=0 n_upd=0 n_mine=0 n_yours=0 n_both=0 n_rm=0 n_keep=0
   local -A OLD=() NEW=()
-  SYNC_REAPPLY=() SYNC_KEPT=()
+  SYNC_REAPPLY=() SYNC_KEPT=() SYNC_BESIDE=()
   while IFS=$'\t' read -r f sum; do [[ -n "$f" ]] && NEW["$f"]=$sum; done < <(bundle_deploy_sums)
   while IFS=$'\t' read -r f sum; do [[ -n "$f" ]] && OLD["$f"]=$sum; done < <(old_deploy_sums "$oldv")
   [[ $act == do ]] && mkdir -p "$DEPLOY"
@@ -654,8 +663,20 @@ sync_deploy() {   # sync_deploy install|upgrade|repair OLD_VERSION plan|do
       n_yours=$((n_yours + 1)); SYNC_KEPT+=("$f")
       note "kept $f as it was changed here: $BVERSION ships it as it was"
       continue
+    elif [[ -n "$old" ]] && ! release_owned "$f"; then
+      # Changed here and in the release: the host's stays in effect, the release's beside it.
+      n_both=$((n_both + 1)); SYNC_BESIDE+=("$f")
+      if [[ $act == do ]]; then
+        cp -p "$BUNDLE/deploy/$f" "$DEPLOY/$f.new-$BVERSION" || die "writing $DEPLOY/$f.new-$BVERSION failed"
+        [[ -n "$SYNC_ADDED" ]] && echo "$f.new-$BVERSION" >> "$SYNC_ADDED"
+        note "kept $f as it was changed here; $BVERSION changes it too: its copy is beside it as $f.new-$BVERSION, to merge"
+      else
+        would "keep $f as it was changed here, and write $BVERSION's beside it as $f.new-$BVERSION (it changes it too), to merge"
+      fi
+      continue
     else
-      # Changed here and in the release: the release's, the host's copy beside it.
+      # The release's compose files and this installer changed here (or what was shipped is not
+      # known): the release's, the host's copy beside it.
       n_mine=$((n_mine + 1)); SYNC_REAPPLY+=("$f")
       if [[ $act == do ]]; then
         cp -p "$DEPLOY/$f" "$DEPLOY/$f.before-$BVERSION" || die "keeping $f failed"
@@ -680,20 +701,38 @@ sync_deploy() {   # sync_deploy install|upgrade|repair OLD_VERSION plan|do
       fi
     done < <(installed_files)
   fi
-  SYNC_SUMMARY="$n_add added, $n_upd updated, $n_yours kept as changed here, $n_mine replaced with your copy kept beside, $n_rm removed, $n_keep kept"
-  SYNC_CHANGES=$((n_add + n_upd + n_mine + n_rm))
+  SYNC_SUMMARY="$n_add added, $n_upd updated, $n_yours kept as changed here, $n_both kept as changed here with $BVERSION's beside, $n_mine replaced with your copy kept beside, $n_rm removed, $n_keep kept"
+  SYNC_CHANGES=$((n_add + n_upd + n_both + n_mine + n_rm))
 }
 SYNC_SUMMARY="" SYNC_CHANGES=0
-# What a person must look at once the release's files are in: named again at the end.
-say_file_changes() {   # say_file_changes "REPLACED FILES" "KEPT FILES"
-  local replaced kept
-  replaced="$(xargs <<<"$1")" kept="$(xargs <<<"$2")"
-  [[ -n "$replaced" ]] && say "  changes of yours to apply again ($BVERSION changed these files too; yours are beside them as FILE.before-$BVERSION): $replaced"
-  [[ -n "$kept" ]] && say "  kept as you changed them ($BVERSION ships them as they were): $kept"
+# What a person must look at once the release's files are in: named again at the end, one a line.
+say_file_changes() {   # say_file_changes "REPLACED FILES" "KEPT, RELEASE'S BESIDE" "KEPT FILES"
+  local f
+  if [[ -n "${2// /}" ]]; then
+    say "  TO MERGE: yours stay in effect, and $BVERSION changed these files too; its copies are beside them:"
+    for f in $2; do say "    $f  <-  $f.new-$BVERSION"; done
+  fi
+  if [[ -n "${1// /}" ]]; then
+    say "  TO APPLY AGAIN (in docker-compose.override.yml for a compose file): $BVERSION's are in effect; yours are beside them:"
+    for f in $1; do say "    $f  ->  $f.before-$BVERSION"; done
+  fi
+  [[ -n "${3// /}" ]] && say "  kept as you changed them ($BVERSION ships them as they were): $(xargs <<<"$3")"
   return 0
 }
 record_deploy() {   # what this installer wrote, to tell later what was changed
   (umask 077; bundle_deploy_sums | awk -F'\t' '{ print $2 "  " $1 }' > "$STATE/deploy.sha256")
+}
+# The shipped files an install or upgrade left as the host had changed them, as they are now:
+# repair and verify do not take them for damage.
+record_kept() {   # record_kept FILE...
+  local f
+  (umask 077; for f in "$@"; do [[ -f "$DEPLOY/$f" ]] && printf '%s\t%s\n' "$f" "$(sha_of "$DEPLOY/$f")"; done > "$STATE/kept")
+}
+kept_sum() { awk -F'\t' -v f="$1" '$1 == f { print $2 }' "$STATE/kept" 2>/dev/null | tail -n1; }
+# What verify expects in DEPLOY: as written, or as kept.
+expected_sums() {
+  { cat "$STATE/kept" 2>/dev/null; echo "--"; cat "$STATE/deploy.sha256"; } \
+    | awk -F'\t' '$0 == "--" { s = 1; next } !s { k[$1] = $2; next } { f = substr($0, 67); print ((f in k) ? k[f] : substr($0, 1, 64)) "  " f }'
 }
 
 # Beside deploy/: the docs, the licences, Code Arena's packages, the knowledge packs, VERSION. Only
@@ -929,8 +968,11 @@ start_stack() {
   ok "started"
 }
 # Every service compose runs: up, and healthy where it has a health check. Those in EXCUSED
-# (not up before an upgrade either) are named, and do not hold it up.
-EXCUSED=""
+# (not up before an upgrade either) are named, and do not hold it up. A service that waits for a
+# model file MODELS_DIR does not have (model_waits) is up once it runs, whatever its health check
+# says (Docker's llama.cpp image fails it until the file is there; Podman's has none): it is named
+# as waiting for models, with what to do, in MODEL_WAITING.
+EXCUSED="" MODEL_WAITING=""
 # The services not up now, while the stack runs: an upgrade does not answer for them.
 not_up_now() {
   local svc st health
@@ -961,14 +1003,19 @@ wait_healthy() {
     local excused=() for_model=()
     for svc in $services; do
       m=$((m + 1))
-      if [[ "${STATEOF[$svc]:-}" == ok ]]; then n=$((n + 1))
-      elif [[ "$models" == *" $svc "* && "${STATEOF[$svc]:-}" == running* ]]; then for_model+=("$svc: ${STATEOF[$svc]}")
+      if [[ "$models" == *" $svc "* && ( "${STATEOF[$svc]:-}" == ok || "${STATEOF[$svc]:-}" == running* ) ]]; then for_model+=("$svc")
+      elif [[ "${STATEOF[$svc]:-}" == ok ]]; then n=$((n + 1))
       elif [[ " $EXCUSED " == *" $svc "* ]]; then excused+=("$svc: ${STATEOF[$svc]:-no container}")
       else waiting+=("$svc: ${STATEOF[$svc]:-no container}"); fi
     done
     if [[ ${#waiting[@]} -eq 0 ]]; then
-      ok "$n of $m services up"
-      [[ ${#for_model[@]} -gt 0 ]] && note "waiting for its model, $EMBED_FILE in $MODELS_DIR, and not waited for: ${for_model[*]} (it starts by itself once the file is there)"
+      MODEL_WAITING="${for_model[*]}"
+      if [[ -n "$MODEL_WAITING" ]]; then
+        ok "healthy, waiting for models: $n of $m services up, and $MODEL_WAITING running, waiting for its model"
+        note "waiting for models: $MODEL_WAITING needs $EMBED_FILE in $MODELS_DIR, which nothing here can fetch: copy the file there and it starts by itself (no restart)"
+      else
+        ok "$n of $m services up"
+      fi
       [[ ${#excused[@]} -gt 0 ]] && note "not up, as before the upgrade: ${excused[*]} (status, repair)"
       return 0
     fi
@@ -1204,11 +1251,12 @@ cmd_install() {
   wait_healthy || die "the stack is not healthy; repair (or install again) after the cause is fixed"
   check_versions "$BVERSION" || die "the stack does not run $BVERSION as it should; see above"
   record_state
+  record_kept ${SYNC_KEPT[@]+"${SYNC_KEPT[@]}"} ${SYNC_BESIDE[@]+"${SYNC_BESIDE[@]}"}
   state_set target ""
   print_access
-  say_file_changes "${SYNC_REAPPLY[*]}" "${SYNC_KEPT[*]}"
+  say_file_changes "${SYNC_REAPPLY[*]}" "${SYNC_BESIDE[*]}" "${SYNC_KEPT[*]}"
   show_password_once
-  say "Installed. Status: $DEPLOY/scripts/installer.sh status --dir $DIR"
+  say "Installed$([[ -n "$MODEL_WAITING" ]] && echo ": healthy, waiting for models ($MODEL_WAITING; above)"). Status: $DEPLOY/scripts/installer.sh status --dir $DIR"
 }
 
 # ======================================================================= upgrade
@@ -1246,66 +1294,185 @@ stop_writers() {
   else note "stopping the services for the backup failed: it is taken as they run"; fi
 }
 
-# FROM's files from the copy taken before the upgrade: each file it shipped, and .env, as they were
-# then (the data goes back to then too, and .env's secrets open it); what the upgrade added taken
-# out. The certificates, the override and the host's other files stay as they are now. The .env
-# there was, and each file changed here since the new release wrote it, are kept in
-# SNAP/files-before-rollback before they are replaced or taken out. Each file put back is named.
+# A rollback puts back only what the upgrade changed, from the copy taken before it: FROM's copy of
+# each file the upgrade replaced or removed and that is as the upgrade left it, .env without the
+# keys it added; what it added is taken out. What was changed here since the upgrade is asked about
+# first (unattended: the defaults), and kept in SNAP/files-before-rollback before it is replaced or
+# taken out. The certificates, the override and the host's other files stay as they are now.
 same() { [[ -f "$1" && -f "$2" && "$(sha_of "$1")" == "$(sha_of "$2")" ]]; }
 declare -A RB_SHIPPED=()
-RB_KEPT=()
+RB_KEPT=() RB_BACK=() RB_OUT=() RB_STAY=() RB_ENV="" RB_ENV_DEL=() RB_ENV_PUT=() RB_ENV_STAY=() RB_PLANNED=0 RB_OLD=""
+# The secrets the data opens with: the data goes back to the backup, which was taken with FROM's.
+DATA_KEYS="DB_PASSWORD APP_KEY GATEWAY_KEY"
+choose() {   # choose QUESTION y|n: yes or no; unattended (--yes) and in a dry run, the default
+  local answer="" d=$2
+  if [[ $YES -eq 1 || $DRY -eq 1 ]]; then [[ $d == y ]]; return; fi
+  [[ $TTY -eq 1 ]] || refuse "no terminal to ask \"$1\": pass --yes for an unattended run"
+  printf '%s [%s]: ' "$1" "$([[ $d == y ]] && echo Y/n || echo y/N)" >&2
+  read -r answer <&7 || true
+  if [[ -z "$answer" ]]; then [[ $d == y ]]; return; fi
+  [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]
+}
+# .env's lines as compose reads them ("export KEY=", spaces around =); the values never printed.
+env_line() {   # env_line FILE KEY: the line that sets KEY (the last), as it is written
+  K="$2" awk '{ l = $0; sub(/^[ \t]*(export[ \t]+)?/, "", l) }
+    index(l, ENVIRON["K"]) == 1 && substr(l, length(ENVIRON["K"]) + 1) ~ /^[ \t]*=/ { last = $0 }
+    END { if (last != "") print last }' "$1" 2>/dev/null
+}
+env_edit() {   # env_edit FILE KEY [LINE]: LINE in place of KEY's lines, or KEY taken out
+  local file=$1 tmp="$1.installer-new"
+  (umask 077; K="$2" L="${3-}" SET="${3+1}" awk '{ l = $0; sub(/^[ \t]*(export[ \t]+)?/, "", l) }
+    index(l, ENVIRON["K"]) == 1 && substr(l, length(ENVIRON["K"]) + 1) ~ /^[ \t]*=/ {
+      if (ENVIRON["SET"] == 1 && !done) { print ENVIRON["L"]; done = 1 }
+      next
+    }
+    { print }
+    END { if (ENVIRON["SET"] == 1 && !done) print ENVIRON["L"] }' "$file" > "$tmp") || return 1
+  chmod --reference="$file" "$tmp" 2>/dev/null; chown --reference="$file" "$tmp" 2>/dev/null
+  mv -f "$tmp" "$file"
+}
 keep_later_change() {   # keep_later_change FILE: kept in SNAP/files-before-rollback when changed here
   local f=$1 sum
-  [[ $f == .env || $f == *.before-* ]] && return 0
+  [[ $f == .env || $f == *.before-* || $f == *.new-* ]] && return 0
   sum="$(sha_of "$DEPLOY/$f")"
   [[ -n "$sum" && "$sum" != "${RB_SHIPPED[$f]:-}" ]] || return 0
   (umask 077; mkdir -p "$SNAP/files-before-rollback/$(dirname "$f")" && cp -p "$DEPLOY/$f" "$SNAP/files-before-rollback/$f") \
     || { bad "keeping $f as it is failed"; return 1; }
   RB_KEPT+=("$f")
 }
-restore_files() {
-  local old="$SNAP/old-deploy" keep="$SNAP/files-before-rollback" f sum
-  local -a back=()
-  RB_SHIPPED=() RB_KEPT=()
+# What the rollback does with each file and .env key, the questions asked: before anything stops.
+plan_restore() {
+  local old="${RB_OLD:-$SNAP/old-deploy}" f sum cur key
+  local -a ask_back=() ask_out=() ask_keep=() changed=() data=() other=()
+  local -A left=() added=()
+  RB_SHIPPED=() RB_BACK=() RB_OUT=() RB_STAY=() RB_ENV="" RB_ENV_DEL=() RB_ENV_PUT=() RB_ENV_STAY=()
   # What the new release shipped: its record after upgrade --rollback, else its bundle's.
-  if [[ "$(marker_get manual)" == 1 && -f "$STATE/deploy.sha256" ]]; then
+  if [[ "$(marker_get manual)" == 1 || $ROLLBACK -eq 1 ]] && [[ -f "$STATE/deploy.sha256" ]]; then
     while IFS=$'\t' read -r f sum; do [[ -n "$f" ]] && RB_SHIPPED["$f"]=$sum; done < <(sed -E 's/^([0-9a-f]{64}) [ *](.*)$/\2\t\1/' "$STATE/deploy.sha256")
   elif [[ -n "$BUNDLE" ]]; then
     while IFS=$'\t' read -r f sum; do [[ -n "$f" ]] && RB_SHIPPED["$f"]=$sum; done < <(bundle_deploy_sums)
   fi
-  rm -rf "$old" && mkdir -p "$old" && tar -xpf "$SNAP/deploy.tar" -C "$old" || { bad "unpacking $SNAP/deploy.tar failed (disk full?)"; return 1; }
-  if [[ -f "$SNAP/added" ]]; then
-    while IFS= read -r f; do
-      [[ -n "$f" && -e "$DEPLOY/$f" && ! -e "$old/$f" ]] || continue
-      keep_later_change "$f" || return 1
-      rm -f "$DEPLOY/$f" && did "took out $f (the upgrade added it)"
-    done < "$SNAP/added"
-  fi
+  # The files the upgrade left as the host had changed them.
+  while IFS= read -r f; do [[ -n "$f" ]] && left["$f"]=1; done < <(cat "$SNAP/kept" "$SNAP/beside" 2>/dev/null)
+  rm -rf "${old:?}" && mkdir -p "$old" && tar -xpf "$SNAP/deploy.tar" -C "$old" || { bad "unpacking $SNAP/deploy.tar failed (disk full?)"; return 1; }
+  # What the upgrade added: taken out; asked first when it was changed since.
   while IFS= read -r f; do
-    [[ $f == .env ]] || ! is_user_path "$f" || continue
+    [[ -n "$f" && -e "$DEPLOY/$f" && ! -e "$old/$f" ]] || continue
+    if [[ $f == *.before-* || $f == *.new-* || "$(sha_of "$DEPLOY/$f")" == "${RB_SHIPPED[$f]:-}" ]]; then RB_OUT+=("$f"); else ask_out+=("$f"); fi
+  done < <(sort -u "$SNAP/added" 2>/dev/null)
+  # FROM's files: back where the upgrade changed them; asked first where they were changed since.
+  while IFS= read -r f; do
+    is_user_path "$f" && continue
     same "$old/$f" "$DEPLOY/$f" && continue
-    if [[ $f == .env && -f "$DEPLOY/.env" ]]; then
-      (umask 077; mkdir -p "$keep" && cp -p "$DEPLOY/.env" "$keep/.env") || { bad "keeping the .env there is failed"; return 1; }
-    elif [[ -f "$DEPLOY/$f" ]]; then
-      keep_later_change "$f" || return 1
+    if [[ ! -e "$DEPLOY/$f" ]]; then RB_BACK+=("$f"); continue; fi
+    cur="$(sha_of "$DEPLOY/$f")"
+    if [[ -n "${RB_SHIPPED[$f]:-}" && -z "${left[$f]:-}" ]]; then
+      if [[ "$cur" == "${RB_SHIPPED[$f]}" ]]; then RB_BACK+=("$f"); else ask_back+=("$f"); fi
+    else
+      ask_keep+=("$f")
     fi
+  done < <(cd "$old" && find . -type f -printf '%P\n' | sort)
+  if [[ ${#ask_back[@]} -gt 0 ]]; then
+    note "the upgrade changed these, and they were changed here since: ${ask_back[*]}"
+    if choose "Put back $FROM's copies of them (yours are kept in $SNAP/files-before-rollback)?" y; then RB_BACK+=("${ask_back[@]}"); else RB_STAY+=("${ask_back[@]}"); fi
+  fi
+  if [[ ${#ask_out[@]} -gt 0 ]]; then
+    note "the upgrade added these, and they were changed here since: ${ask_out[*]}"
+    if choose "Take them out, as $FROM has none (yours are kept in $SNAP/files-before-rollback)?" y; then RB_OUT+=("${ask_out[@]}"); else RB_STAY+=("${ask_out[@]}"); fi
+  fi
+  if [[ ${#ask_keep[@]} -gt 0 ]]; then
+    note "changed here since the upgrade, which had left them as they were: ${ask_keep[*]}"
+    if choose "Put back $FROM's copies of these too (yours are kept in $SNAP/files-before-rollback)?" n; then RB_BACK+=("${ask_keep[@]}"); else RB_STAY+=("${ask_keep[@]}"); fi
+  fi
+  # .env: as FROM had it when it is as the upgrade left it; else only the keys the upgrade added
+  # go, and the keys changed since are asked about.
+  if [[ ! -f "$old/.env" ]] || same "$old/.env" "$DEPLOY/.env"; then RB_ENV=""
+  elif [[ ! -f "$DEPLOY/.env" || ( -f "$SNAP/env-sha" && "$(sha_of "$DEPLOY/.env")" == "$(cat "$SNAP/env-sha")" ) ]]; then RB_ENV=whole
+  else
+    RB_ENV=keys
+    while IFS= read -r key; do [[ -n "$key" ]] && added["$key"]=1; done < <(cat "$SNAP/env-added" 2>/dev/null)
+    while IFS= read -r key; do
+      [[ -n "$key" ]] || continue
+      if [[ -n "${added[$key]:-}" ]]; then
+        [[ -n "$(env_line "$DEPLOY/.env" "$key")" ]] && RB_ENV_DEL+=("$key")
+        continue
+      fi
+      [[ -n "$(env_line "$old/.env" "$key")" && -n "$(env_line "$DEPLOY/.env" "$key")" \
+         && "$(env_get "$key" "$old/.env")" == "$(env_get "$key" "$DEPLOY/.env")" ]] && continue
+      changed+=("$key")
+    done < <({ env_keys "$old/.env"; env_keys "$DEPLOY/.env"; } | sort -u)
+    for key in ${changed[@]+"${changed[@]}"}; do if [[ " $DATA_KEYS " == *" $key "* ]]; then data+=("$key"); else other+=("$key"); fi; done
+    if [[ ${#data[@]} -gt 0 ]]; then
+      note ".env: changed since the upgrade, and the data goes back to a backup taken with $FROM's: ${data[*]}"
+      if choose "Put back $FROM's ${data[*]} in .env, as the restored data needs?" y; then RB_ENV_PUT+=("${data[@]}"); else RB_ENV_STAY+=("${data[@]}"); fi
+    fi
+    if [[ ${#other[@]} -gt 0 ]]; then
+      note ".env: changed here since the upgrade: ${other[*]}"
+      if choose "Put back $FROM's values of them too?" n; then RB_ENV_PUT+=("${other[@]}"); else RB_ENV_STAY+=("${other[@]}"); fi
+    fi
+  fi
+  RB_PLANNED=1
+  return 0
+}
+say_restore_plan() {   # what plan_restore decided, as a dry run says it
+  [[ ${#RB_OUT[@]} -gt 0 ]] && would "take out what the upgrade added: ${RB_OUT[*]}"
+  [[ ${#RB_BACK[@]} -gt 0 ]] && would "put back as $FROM had them: ${RB_BACK[*]}"
+  [[ ${#RB_STAY[@]} -gt 0 ]] && note "left as they are now (asked first; unattended, so): ${RB_STAY[*]}"
+  case "$RB_ENV" in
+    whole) would "put back .env as $FROM had it (it is as the upgrade left it: only the keys it added go)" ;;
+    keys) [[ ${#RB_ENV_DEL[@]} -gt 0 ]] && would "take out of .env the keys the upgrade added: ${RB_ENV_DEL[*]}"
+          [[ ${#RB_ENV_PUT[@]} -gt 0 ]] && would "put back $FROM's values in .env: ${RB_ENV_PUT[*]}"
+          [[ ${#RB_ENV_STAY[@]} -gt 0 ]] && note ".env: left as they are now: ${RB_ENV_STAY[*]}" ;;
+  esac
+  return 0
+}
+restore_files() {
+  local old="$SNAP/old-deploy" keep="$SNAP/files-before-rollback" f key
+  local -a back=()
+  RB_KEPT=()
+  [[ $RB_PLANNED -eq 1 && -d "$old" ]] || plan_restore || return 1
+  for f in ${RB_OUT[@]+"${RB_OUT[@]}"}; do
+    [[ -e "$DEPLOY/$f" ]] || continue
+    keep_later_change "$f" || return 1
+    rm -f "${DEPLOY:?}/${f:?}" && did "took out $f (the upgrade added it)"
+  done
+  for f in ${RB_BACK[@]+"${RB_BACK[@]}"}; do
+    if [[ -f "$DEPLOY/$f" ]]; then keep_later_change "$f" || return 1; fi
     { mkdir -p "$DEPLOY/$(dirname "$f")" && cp -p "$old/$f" "$DEPLOY/$f.installer-new" && mv -f "$DEPLOY/$f.installer-new" "$DEPLOY/$f"; } \
       || { bad "putting back $f failed"; return 1; }
     back+=("$f")
-  done < <(cd "$old" && find . -type f -printf '%P\n' | sort)
-  if [[ -f "$SNAP/VERSION" ]]; then cp -p "$SNAP/VERSION" "$DIR/VERSION"; else rm -f "$DIR/VERSION"; fi
-  if [[ ${#back[@]} -gt 0 ]]; then did "put back as $FROM had them: ${back[*]}"; else ok "every file of $FROM is as it was"; fi
-  [[ " ${back[*]} " == *" .env "* ]] && note ".env as $FROM had it, as the data will be; the one there was is kept as $keep/.env"
+  done
+  if [[ -n "$RB_ENV" && -f "$DEPLOY/.env" ]]; then
+    (umask 077; mkdir -p "$keep" && cp -p "$DEPLOY/.env" "$keep/.env") || { bad "keeping the .env there is failed"; return 1; }
+  fi
+  case "$RB_ENV" in
+    whole)
+      { cp -p "$old/.env" "$DEPLOY/.env.installer-new" && mv -f "$DEPLOY/.env.installer-new" "$DEPLOY/.env"; } || { bad "putting back .env failed"; return 1; }
+      did ".env as $FROM had it (it was as the upgrade left it: the keys it added are gone)" ;;
+    keys)
+      for key in ${RB_ENV_DEL[@]+"${RB_ENV_DEL[@]}"}; do env_edit "$DEPLOY/.env" "$key" || { bad "editing .env failed"; return 1; }; done
+      for key in ${RB_ENV_PUT[@]+"${RB_ENV_PUT[@]}"}; do
+        if [[ -n "$(env_line "$old/.env" "$key")" ]]; then env_edit "$DEPLOY/.env" "$key" "$(env_line "$old/.env" "$key")"
+        else env_edit "$DEPLOY/.env" "$key"; fi || { bad "editing .env failed"; return 1; }
+      done
+      [[ ${#RB_ENV_DEL[@]} -gt 0 ]] && did ".env: took out the keys the upgrade added: ${RB_ENV_DEL[*]}"
+      [[ ${#RB_ENV_PUT[@]} -gt 0 ]] && did ".env: $FROM's values put back: ${RB_ENV_PUT[*]}"
+      [[ ${#RB_ENV_STAY[@]} -gt 0 ]] && note ".env: left as they are now: ${RB_ENV_STAY[*]}" ;;
+  esac
+  [[ -n "$RB_ENV" ]] && note "the .env there was is kept as $keep/.env"
+  if [[ -f "$SNAP/VERSION" ]]; then cp -p "$SNAP/VERSION" "$DIR/VERSION"; else rm -f "${DIR:?}/VERSION"; fi
+  if [[ ${#back[@]} -gt 0 ]]; then did "put back as $FROM had them: ${back[*]}"; else ok "every file of $FROM the upgrade changed is as it was"; fi
+  [[ ${#RB_STAY[@]} -gt 0 ]] && note "left as they are now: ${RB_STAY[*]}"
   [[ ${#RB_KEPT[@]} -gt 0 ]] && note "changed here since the upgrade, kept in $keep: ${RB_KEPT[*]}"
   # The override as it is now, unless FROM's compose file cannot read it: then FROM's, and it is said.
   if [[ -f "$DEPLOY/docker-compose.override.yml" ]] && ! same "$old/docker-compose.override.yml" "$DEPLOY/docker-compose.override.yml" \
      && ! dc config -q >/dev/null 2>&1; then
     (umask 077; mkdir -p "$keep") && cp -p "$DEPLOY/docker-compose.override.yml" "$keep/"
     if [[ -f "$old/docker-compose.override.yml" ]]; then cp -p "$old/docker-compose.override.yml" "$DEPLOY/docker-compose.override.yml"
-    else rm -f "$DEPLOY/docker-compose.override.yml"; fi
+    else rm -f "${DEPLOY:?}/docker-compose.override.yml"; fi
     note "$FROM's compose file cannot read the docker-compose.override.yml there was: $FROM's is back, yours is kept as $keep/docker-compose.override.yml"
   fi
-  rm -rf "$old"
+  rm -rf "${old:?}"; RB_PLANNED=0
   return 0
 }
 
@@ -1317,15 +1484,10 @@ rollback() {   # rollback STARTED -> 0 when FROM runs again
   local started=$1 ref id tag rc=0 out
   step "rolling back to $FROM"
   marker_set rolling-back 1 started "$started"
-  # Once the new release had started, it goes; before that, FROM still runs on what it had.
-  [[ $started -eq 1 ]] && dc_down --remove-orphans
-  restore_files || return 1
-  while IFS=$'\t' read -r ref id tag; do
-    [[ -n "$ref" ]] || continue
-    E tag "$tag" "$ref" >/dev/null 2>&1 || { bad "the old image of $ref ($tag) is gone"; rc=1; }
-  done < "$SNAP/IMAGES"
-  ok "$FROM's images tagged back"
+  # Once the new release had started, it goes, and the data it has is backed up with the files
+  # and .env that open it, before anything is put back; before that, FROM still runs on what it had.
   if [[ $started -eq 1 ]]; then
+    dc_down --remove-orphans
     [[ -n "$BACKUP" && -d "$BACKUP" ]] || { bad "no backup to restore (${BACKUP:-none})"; return 1; }
     if [[ "$(marker_get kept)" != 1 ]]; then
       say "  a backup of the data as it is now, before the restore replaces it"
@@ -1335,10 +1497,18 @@ rollback() {   # rollback STARTED -> 0 when FROM runs again
         ok "the data as it was: $SNAP/data-before-rollback"
       else
         tail -n 5 "$out" | sed 's/^/    /'
-        bad "that backup failed (disk full?): nothing is restored over the data, which would be lost"
+        bad "that backup failed (disk full?): nothing is put back or restored over the data, which would be lost"
         return 1
       fi
     fi
+  fi
+  restore_files || return 1
+  while IFS=$'\t' read -r ref id tag; do
+    [[ -n "$ref" ]] || continue
+    E tag "$tag" "$ref" >/dev/null 2>&1 || { bad "the old image of $ref ($tag) is gone"; rc=1; }
+  done < "$SNAP/IMAGES"
+  ok "$FROM's images tagged back"
+  if [[ $started -eq 1 ]]; then
     backup_sh --restore --from "$BACKUP" --yes || { bad "restoring $BACKUP failed"; return 1; }
     ok "the data from $BACKUP"
   fi
@@ -1357,7 +1527,9 @@ by_hand() {
   say "The rollback failed too (above). Once its cause is put right, run the same upgrade again: it finishes"
   say "the rollback. Or by hand, in $DEPLOY:"
   say "  $(dc_hint) down"
-  say "  tar -xpf $SNAP/deploy.tar -C $DEPLOY      ($FROM's files; the certificates and override as they were then too)"
+  say "  cp -p $DEPLOY/.env $SNAP/env-before-by-hand      (the .env there is, kept)"
+  say "  tar -xpf $SNAP/deploy.tar -C $DEPLOY --exclude=./certs --exclude=./docker-compose.override.yml"
+  say "      ($FROM's files and .env, as the data will be; the certificates and the override stay as they are)"
   say "  the old images: each line of $SNAP/IMAGES is REFERENCE ID TAG: $ENGINE tag TAG REFERENCE"
   if [[ $started -eq 1 ]]; then
     say "  $(env_hint) bash $SNAP/backup.sh --deploy $DEPLOY$eng --out $SNAP/data-before-rollback   (the data as it is, kept)"
@@ -1496,7 +1668,7 @@ cmd_upgrade() {
     else ok "$(human $(( ${free:-0} * 1024 ))) free in $BACKUP_DIR, for volumes of $(human $((need * 1024)))"; fi
     step "a rollback point"
     mkdir -p "$SNAP" && chmod 700 "$STATE/rollback" "$SNAP" || die "cannot write $SNAP"
-    rm -f "$SNAP/added" "$SNAP/env-added" "$SNAP/reapply" "$SNAP/kept" "$SNAP/info"
+    rm -f "$SNAP/added" "$SNAP/env-added" "$SNAP/env-sha" "$SNAP/reapply" "$SNAP/kept" "$SNAP/beside" "$SNAP/info"
     (umask 077; cp -p "$BUNDLE/deploy/scripts/backup.sh" "$BACKUP_SCRIPT") || die "cannot write $BACKUP_SCRIPT"
     keep_old_images
     snapshot_deploy
@@ -1520,16 +1692,20 @@ cmd_upgrade() {
       marker_set backup "$BACKUP"
       printf 'from=%s\nto=%s\nbackup=%s\nwhen=%s\n' "$FROM" "$BVERSION" "$BACKUP" "$(date '+%Y-%m-%d %H:%M:%S')" > "$SNAP/info"
       ok "backup: $BACKUP"
+      note "a rollback (by itself on a failure, or upgrade --rollback later) puts back $FROM's images, the files this upgrade changes and the data of this backup; what is written after it is kept in a backup of its own first"
     fi
     step "deploy/ ($FROM -> $BVERSION; .env, overrides, certificates, backups and models kept)"
     SYNC_ADDED="$SNAP/added"; touch "$SYNC_ADDED"
     sync_deploy upgrade "$FROM" do
     printf '%s\n' ${SYNC_REAPPLY[@]+"${SYNC_REAPPLY[@]}"} > "$SNAP/reapply"
     printf '%s\n' ${SYNC_KEPT[@]+"${SYNC_KEPT[@]}"} > "$SNAP/kept"
+    printf '%s\n' ${SYNC_BESIDE[@]+"${SYNC_BESIDE[@]}"} > "$SNAP/beside"
     ok "$SYNC_SUMMARY"
     step ".env"
     ENV_ADDED_FILE="$SNAP/env-added"; : > "$ENV_ADDED_FILE"
     merge_env do
+    # .env as the upgrade left it (its checksum only): a rollback tells a later change from it.
+    (umask 077; sha_of "$DEPLOY/.env" > "$SNAP/env-sha")
     write_extras do
     step "models"
     place_models do
@@ -1553,12 +1729,16 @@ cmd_upgrade() {
     run_rollback "$started"
   fi
   record_state
+  # shellcheck disable=SC2046
+  record_kept $(cat "$SNAP/kept" "$SNAP/beside" 2>/dev/null)
   state_set target "" previous "$FROM"
   rm -f "$MARKER"
+  read_settings
+  MODEL_WAITING="$(model_waits | xargs)"
   say ""
-  say "Upgraded from $FROM to $BVERSION. The backup from before it: $BACKUP"
+  say "Upgraded from $FROM to $BVERSION$([[ -n "$MODEL_WAITING" ]] && echo ": healthy, waiting for models ($MODEL_WAITING; below)"). The backup from before it: $BACKUP"
   say "  .env: $(cat "$SNAP/env-added" 2>/dev/null | grep -c .) key(s) added$([[ -s "$SNAP/env-added" ]] && echo " ($(tr '\n' ' ' < "$SNAP/env-added" | sed 's/ $//'))")"
-  say_file_changes "$(tr '\n' ' ' < "$SNAP/reapply" 2>/dev/null)" "$(tr '\n' ' ' < "$SNAP/kept" 2>/dev/null)"
+  say_file_changes "$(tr '\n' ' ' < "$SNAP/reapply" 2>/dev/null)" "$(tr '\n' ' ' < "$SNAP/beside" 2>/dev/null)" "$(tr '\n' ' ' < "$SNAP/kept" 2>/dev/null)"
   say "  $FROM's images stay for a rollback (upgrade --rollback): $(wc -l < "$SNAP/IMAGES") tags $PROJECT-rollback:$FROM-...;"
   say "  to free their space: $ENGINE image rm \$(cut -f3 $SNAP/IMAGES)"
   print_access
@@ -1573,10 +1753,22 @@ cmd_rollback() {
   FROM="$prev"; SNAP="$STATE/rollback/$prev"; BACKUP="$(sed -n 's/^backup=//p' "$SNAP/info")"
   [[ -d "$BACKUP" ]] || refuse "the backup from before the upgrade, $BACKUP, is gone"
   say "Roll back $DIR from $cur to $FROM: the data goes back to $BACKUP ($(sed -n 's/^when=//p' "$SNAP/info")); what was written since is lost (a backup of it is kept)"
-  say "  $FROM's files and .env come back; the certificates, the override and your other files stay as they are"
-  [[ $DRY -eq 1 ]] && { would "stop it but postgres, back up the data as it is, put back $FROM's files and images, restore $BACKUP, start $FROM"; return 0; }
+  say "  what the upgrade changed goes back to $FROM's; what was changed here since is asked about; the certificates, the override and your other files stay as they are"
+  if [[ $DRY -eq 1 ]]; then
+    RB_OLD="$(mktemp -d)" || die "cannot make a folder in ${TMPDIR:-/tmp}"
+    TMPFILES+=("$RB_OLD")
+    step "the plan"
+    would "stop it but postgres, back up the data as it is, put back $FROM's images"
+    plan_restore && say_restore_plan
+    would "restore $BACKUP, start $FROM"
+    return 0
+  fi
   confirm "Roll back to $FROM?" || refuse "not confirmed"
   lock; start_log
+  # The questions first, while it still runs.
+  step "what goes back"
+  plan_restore || die "nothing was rolled back"
+  ok "$((${#RB_BACK[@]} + ${#RB_OUT[@]})) file(s) to put back or take out$([[ -n "$RB_ENV" ]] && echo ", and .env"); ${#RB_STAY[@]} left as they are"
   # The one installed now: the rollback puts the older one back.
   BACKUP_SCRIPT="$SNAP/backup.sh"; cp "$DEPLOY/scripts/backup.sh" "$BACKUP_SCRIPT" || die "cannot copy backup.sh"
   # What was written since the upgrade, kept before anything is replaced: no backup, no rollback.
@@ -1584,6 +1776,7 @@ cmd_rollback() {
   EXCUSED="$(not_up_now)"
   stop_writers
   if ! backup_sh --out "$SNAP/data-before-rollback"; then
+    rm -rf "${SNAP:?}/old-deploy"
     start_stack >/dev/null 2>&1
     die "that backup failed: nothing was rolled back (the stack is started again)"
   fi
@@ -1626,11 +1819,18 @@ cmd_repair() {
 
   step "deploy/ files"
   if [[ -n "$BUNDLE" ]]; then
-    local -a missing=() changed=()
+    local -a missing=() changed=() yours=()
     while IFS=$'\t' read -r f sum; do
       is_user_path "$f" && continue
-      if [[ ! -f "$DEPLOY/$f" ]]; then missing+=("$f"); elif [[ "$(sha_of "$DEPLOY/$f")" != "$sum" ]]; then changed+=("$f"); fi
+      if [[ ! -f "$DEPLOY/$f" ]]; then missing+=("$f")
+      else
+        cur="$(sha_of "$DEPLOY/$f")"
+        [[ "$cur" == "$sum" ]] && continue
+        # Left as the host changed it by the install or upgrade: the admin's, not damage.
+        if [[ "$cur" == "$(kept_sum "$f")" ]]; then yours+=("$f"); else changed+=("$f"); fi
+      fi
     done < <(bundle_deploy_sums)
+    [[ ${#yours[@]} -gt 0 ]] && ok "kept as you changed them (the install or upgrade left them so): ${yours[*]}"
     for f in ${missing[@]+"${missing[@]}"}; do
       problems=$((problems + 1))
       restored+=("$f")
@@ -1653,7 +1853,7 @@ cmd_repair() {
     fi
     [[ ${#missing[@]} -eq 0 && ${#changed[@]} -eq 0 ]] && ok "every file of $BVERSION is there, as it was shipped"
   elif [[ -f "$STATE/deploy.sha256" ]]; then
-    if (cd "$DEPLOY" && sha256sum -c --quiet "$STATE/deploy.sha256" 2>&1 | sed 's/^/  FAIL   /'; exit "${PIPESTATUS[0]}"); then ok "every file installed is as it was written"; else problems=$((problems + 1)); fi
+    if (cd "$DEPLOY" && expected_sums | sha256sum -c --quiet - 2>&1 | sed 's/^/  FAIL   /'; exit "${PIPESTATUS[1]}"); then ok "every file installed is as it was written (or kept as you changed it)"; else problems=$((problems + 1)); fi
   fi
   [[ -f "$DEPLOY/.env" ]] || { bad ".env is missing: its secrets open the data; restore it (scripts/backup.sh --restore --with-config, or by hand)"; problems=$((problems + 1)); }
   local -A have=()
@@ -1951,7 +2151,7 @@ cmd_verify() {
   fi
   if [[ -f "$STATE/deploy.sha256" && -d "$DEPLOY" ]]; then
     step "the files installed in $DEPLOY"
-    if (cd "$DEPLOY" && sha256sum -c --quiet "$STATE/deploy.sha256" 2>&1 | sed 's/^/  FAIL   /'; exit "${PIPESTATUS[0]}"); then ok "every file is as it was installed ($(wc -l < "$STATE/deploy.sha256"))"
+    if (cd "$DEPLOY" && expected_sums | sha256sum -c --quiet - 2>&1 | sed 's/^/  FAIL   /'; exit "${PIPESTATUS[1]}"); then ok "every file is as it was installed, or kept as you changed it ($(wc -l < "$STATE/deploy.sha256"))"
     else failed=1; note "repair (from the bundle) puts them back"; fi
   elif [[ -z "$BUNDLE" ]]; then
     die "nothing to verify: no bundle, and no installation of this installer in $DIR"

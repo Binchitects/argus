@@ -572,9 +572,10 @@ on the terminal and never in the log: it is `ADMIN_PASSWORD` in `.env` (0600).
   write): once the stack runs, install and upgrade give each volume to its
   service's user and start that service again.
 - A bundle without the embedding model: the embedding server waits for its file
-  (on Docker its image's health check fails meanwhile). The installer names it,
-  does not wait for it, and says where the file goes; the server starts by
-  itself once it is there.
+  (on Docker its image's health check fails meanwhile). The installer counts it
+  as waiting for models, not as a failure: it ends with "healthy, waiting for
+  models", names the file and where it goes, and the server starts by itself
+  once it is there. An upgrade does the same.
 
 #### Upgrade from 5.2.0
 
@@ -598,42 +599,57 @@ installer's record, else `VERSION` beside `deploy/`, else the running app's
    data the new release starts from; people cannot use the stack from here
    until the new release runs. Nothing goes on unless the backup verifies.
 4. **The new files.** `.env`, `docker-compose.override.yml`, the certificates,
-   the backups and the models are never touched. A shipped file the host
-   changed (an Alertmanager receiver, the budgets in `config/litellm.yaml`)
-   stays as the host has it when the release ships it unchanged. When the
-   release changed it too, the release's goes in, the host's copy is kept
-   beside it as `FILE.before-VERSION`, and the summary at the end lists it as a
-   change to apply again. A file the release dropped is removed only when it is
-   the old release's own, unchanged; every change is listed. `.env` gets each
-   new key with its default (a new secret is generated), listed; nothing is
-   removed, and the keys the release no longer reads are named.
+   the backups and the models are never touched. Each shipped file is compared
+   three ways: as the old release shipped it, as the new one does, and as it is
+   on the host. A file the host changed (an Alertmanager receiver, the budgets
+   in `config/litellm.yaml`) stays as the host has it when the release ships it
+   unchanged. When the release changed it too, the host's still stays in
+   effect, and the release's is written beside it as `FILE.new-VERSION`; the
+   summary at the end lists each one under TO MERGE. Only the compose files
+   (`docker-compose.yml`, `podman.yml`, `scale.yml`) and the installer are the
+   release's whatever the host did: the host's copy is kept beside as
+   `FILE.before-VERSION`, listed under TO APPLY AGAIN (a host's change to a
+   compose file belongs in `docker-compose.override.yml`). A file the release
+   dropped is removed only when it is the old release's own, unchanged; every
+   change is listed. `.env` gets each new key with its default (a new secret is
+   generated), listed; nothing is removed, and the keys the release no longer
+   reads are named.
 5. **The new release starts.** The app and Argus migrate their data as they
    start. Every service must be up and healthy (one that was down before the
-   upgrade is named and not waited for), and the app, Argus and every
-   container must run the new release.
-6. **On a failure it rolls back by itself**: the old files and images, and,
-   once the new release had started, the data from the backup. The data as it
-   is goes into a backup of its own first; if that backup fails (a full disk),
-   nothing is restored over the data and it stops with exit 5 and the steps to
+   upgrade is named and not waited for, and the embedding server without its
+   model is waiting for models), and the app, Argus and every container must
+   run the new release.
+6. **On a failure it rolls back by itself**: the old images, the files the
+   upgrade changed, and, once the new release had started, the data from the
+   backup. The data as it is, with the files and `.env` that open it, goes into
+   a backup of its own first; if that backup fails (a full disk), nothing is put
+   back or restored over the data and it stops with exit 5 and the steps to
    take. It says what failed and exits 4 when the old release runs again.
 
 An upgrade cut off half way (a crash, a power cut) carries on where it was when
 it is run again, and a rollback cut off half way is finished, never taken for
 the upgrade. `upgrade --rollback` goes back to the release before the last
 upgrade later on: what was written since is lost (a backup of it is kept). It
-puts back the old release's files and `.env` (the data goes back to then, and
-`.env`'s secrets open it); the certificates, the override and your other files
-stay as they are. The `.env` there was, and each shipped file changed since the
-upgrade, are kept in `.arena-install/rollback/VERSION/files-before-rollback/`.
-The old release's images stay for that until you remove them; the upgrade
-prints the command.
+puts back only what the upgrade changed: the old release's copy of each file
+it replaced or removed, what it added taken out, and `.env` without the keys it
+added. What was changed here since the upgrade is asked about first, while the
+stack still runs (`--yes` takes the defaults): a file the upgrade had changed
+goes back to the old release's, one it had left as it was stays as it is now;
+in `.env` a key changed since stays, but for `DB_PASSWORD`, `APP_KEY` and
+`GATEWAY_KEY`, which the restored data opens with, and which go back. The
+certificates and the override stay as they are. The `.env` there was, and each
+file changed since the upgrade that is replaced or taken out, are kept in
+`.arena-install/rollback/VERSION/files-before-rollback/`; `--dry-run` lists all
+of it. The old release's images stay for that until you remove them; the
+upgrade prints the command.
 
 #### Repair, status, verify
 
 `repair` checks the installation against the bundle and puts right what it
 finds, each finding named with what was done: a missing file restored, a
 changed one put back after asking (the changed copy kept beside it; never
-`.env` or an override), a missing image loaded, a volume owned by the wrong
+`.env` or an override, nor a file the install or upgrade kept as you changed
+it), a missing image loaded, a volume owned by the wrong
 user given back to its service's (rootless Podman leaves Alertmanager's to
 root), a stopped or unhealthy container recreated, and each service that
 reads a file it put back started again on it. Then it waits for health and
@@ -644,7 +660,7 @@ containers. An embedding server waiting for its model is named, not recreated.
 `status` says what runs: the version each service reports, its health, the
 disk, the GPU and the last backup. `verify` checks the `.run` against its
 `.sha256`, the bundle against its `SHA256SUMS`, and the installed files against
-what was written.
+what was written (or kept as you changed them).
 
 #### Remove
 
