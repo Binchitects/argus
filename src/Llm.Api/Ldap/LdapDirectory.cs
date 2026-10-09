@@ -114,12 +114,12 @@ public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapD
         }, ct);
     }
 
-    /// <summary>Why nobody is disabled for the required group: it is not in the directory.</summary>
+    /// <summary>Why nobody is disabled for the required group: no group signing in reads goes by it.</summary>
     internal static string RequiredGroupMissing(LdapOptions o, IReadOnlyList<string> contexts)
     {
         var group = o.RequiredGroup?.Trim() ?? "";
-        var where = group.Contains('=', StringComparison.Ordinal) ? "(no entry has that DN, or the service account cannot see it)" : GroupPlaces(o, contexts);
-        return $"no required group \"{group}\" is found {where}, so nobody is disabled for not being in it: fix \"Required group\" in the Settings page";
+        var where = group.Contains('=', StringComparison.Ordinal) ? "(no group has that DN, or the service account cannot see it)" : GroupPlaces(o, contexts);
+        return $"no required group \"{group}\" is found {where}, so nobody is disabled for not being in it: fix \"Required group\" in the Settings page, where \"Test the settings\" says why";
     }
 
     /// <summary>Where a group named by its name is looked for, in words.</summary>
@@ -128,46 +128,72 @@ public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapD
         : contexts.Count > 0 ? "in " + string.Join(" and ", contexts.Select(c => $"\"{c}\""))
         : $"below \"{o.UserBaseDn.Trim()}\"";
 
-    /// <summary>What an entry is when it is a group: OpenLDAP's kinds, Active Directory's, and posix groups.</summary>
-    private const string GroupClasses = "(|(objectClass=groupOfNames)(objectClass=groupOfUniqueNames)(objectClass=group)(objectClass=posixGroup))";
+    /// <summary>Where a group named by its name is looked for: below "Where groups are", else in the server's naming contexts, else below where people are.</summary>
+    internal static IReadOnlyList<string> Places(LdapOptions o, IReadOnlyList<string> contexts) =>
+        !string.IsNullOrWhiteSpace(o.GroupBaseDn) ? [o.GroupBaseDn.Trim()] : contexts.Count > 0 ? contexts : [o.UserBaseDn.Trim()];
+
+    /// <summary>
+    /// The kinds of group signing in reads: OpenLDAP's groupOfNames and groupOfUniqueNames (member, uniqueMember)
+    /// and Active Directory's group. Not a posixGroup alone: its members (memberUid) are plain uids, which neither
+    /// memberOf nor the group search sees, so nobody would ever be found in it.
+    /// </summary>
+    internal static readonly string[] GroupClasses = ["groupOfNames", "groupOfUniqueNames", "group"];
+
+    private static readonly string GroupClassFilter = "(|" + string.Concat(GroupClasses.Select(c => $"(objectClass={c})")) + ")";
+
+    /// <summary>Whether an entry, read with its objectClass, is a group signing in reads.</summary>
+    internal static bool IsGroup(LdapEntry entry) =>
+        entry.GetAttributeSet().TryGetValue("objectClass", out var classes) && classes.StringValueArray.Any(c => GroupClasses.Contains(c, StringComparer.OrdinalIgnoreCase));
 
     /// <summary>
     /// A group as a setting names it: by its DN, or by its name below "Where groups are", else in the
     /// server's naming contexts (else below where people are). Only a group that signing in would match
     /// counts, a name saved by v5.2.0 included ("Sales\" for CN=Sales\, EMEA). Null when there is none.
     /// </summary>
-    internal static async Task<LdapEntry?> FindGroupAsync(LdapOptions o, LdapConnection conn, string group, IReadOnlyList<string> contexts, string[] attributes, CancellationToken ct)
+    internal static async Task<LdapEntry?> FindGroupAsync(LdapOptions o, LdapConnection conn, string group, IReadOnlyList<string> contexts, string[] attributes, CancellationToken ct) =>
+        (await NamedAsync(conn, group, Places(o, contexts), attributes, anyKind: false, ct, firstOnly: true)).FirstOrDefault();
+
+    /// <summary>
+    /// The entries a group setting names: the entry with its DN, or those its name goes by (as signing in reads
+    /// names) in these places, up to 100 in each. Only groups signing in reads, unless <paramref name="anyKind"/>:
+    /// then whatever has the name, to say what it is. Each is read with its objectClass.
+    /// </summary>
+    internal static async Task<List<LdapEntry>> NamedAsync(LdapConnection conn, string group, IEnumerable<string> places, string[] attributes, bool anyKind, CancellationToken ct, bool firstOnly = false)
     {
         group = group.Trim();
+        attributes = [.. attributes.Where(a => a != "1.1").Append("objectClass").Distinct(StringComparer.OrdinalIgnoreCase)];
         if (group.Contains('=', StringComparison.Ordinal))
         {
             try
             {
-                return await conn.ReadAsync(group, attributes, ct);
+                // Only what signing in would match: the DN as it compares there, and a group of a kind it reads.
+                var entry = await conn.ReadAsync(group, attributes, ct);
+                return entry is not null && IsNamed(entry.Dn, group) && (anyKind || IsGroup(entry)) ? [entry] : [];
             }
             catch (LdapException ex) when (ex.ResultCode is LdapException.NoSuchObject or LdapException.InvalidDnSyntax)
             {
-                return null;
+                return [];
             }
         }
-        var filter = $"(&{GroupClasses}{NameFilter(group)})";
-        IEnumerable<string> places = !string.IsNullOrWhiteSpace(o.GroupBaseDn) ? [o.GroupBaseDn.Trim()] : contexts.Count > 0 ? contexts : [o.UserBaseDn.Trim()];
+        var filter = anyKind ? NameFilter(group) : $"(&{GroupClassFilter}{NameFilter(group)})";
+        var found = new List<LdapEntry>();
         foreach (var place in places)
         {
             try
             {
                 var hits = await SearchAsync(conn, place, LdapConnection.ScopeSub, filter, attributes, ct, most: 100);
-                if (hits.FirstOrDefault(g => IsNamed(g.Dn, group)) is { } hit)
-                {
-                    return hit;
-                }
+                found.AddRange(hits.Where(g => IsNamed(g.Dn, group) && !found.Any(f => SameDn(f.Dn, g.Dn))));
             }
             catch (LdapException ex) when (ex.ResultCode == LdapException.NoSuchObject)
             {
                 // Not visible from there: the next place.
             }
+            if (firstOnly && found.Count > 0)
+            {
+                break;
+            }
         }
-        return null;
+        return found;
     }
 
     /// <summary>
@@ -225,11 +251,93 @@ public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapD
     private static bool InGroup(LdapPerson person, string? group) =>
         !string.IsNullOrWhiteSpace(group) && person.Groups.Any(g => IsNamed(g, group));
 
-    /// <summary>Whether a directory group (its DN) goes by this name: its full DN, or its common name, in any case.</summary>
+    /// <summary>
+    /// Whether a directory group (its DN) goes by this name: its full DN, or its common name, in any case. A DN
+    /// matches however it is written: spaces around its commas and equals signs, \, or \2C for a comma.
+    /// </summary>
     public static bool IsNamed(string dn, string group)
     {
         group = group.Trim();
-        return Names(dn).Any(n => string.Equals(n, group, StringComparison.OrdinalIgnoreCase));
+        return Names(dn).Any(n => string.Equals(n, group, StringComparison.OrdinalIgnoreCase))
+            || (group.Contains('=', StringComparison.Ordinal) && SameDn(dn, group));
+    }
+
+    /// <summary>Whether two DNs name the same entry, however each is written; false when either is not a DN.</summary>
+    public static bool SameDn(string a, string b) => Rdns(a) is { } x && Rdns(b) is { } y && x.SequenceEqual(y, StringComparer.Ordinal);
+
+    /// <summary>Whether a DN is the other or below it, however each is written.</summary>
+    public static bool IsUnder(string dn, string above) =>
+        Rdns(dn) is { } d && Rdns(above) is { } a && d.Count >= a.Count && d.Skip(d.Count - a.Count).SequenceEqual(a, StringComparer.Ordinal);
+
+    /// <summary>
+    /// A DN's parts (its RDNs), each in one form to compare: the attribute and the value in lower case, the
+    /// value's escapes read and the spaces around it left out, written again with its special characters
+    /// escaped (a multi-valued RDN's values in order). Null when it is not a DN.
+    /// </summary>
+    internal static List<string>? Rdns(string dn)
+    {
+        dn = dn.Trim();
+        if (dn.Length == 0)
+        {
+            return null;
+        }
+        var rdns = new List<string>();
+        foreach (var rdn in SplitUnescaped(dn, ",;"))
+        {
+            var values = new List<string>();
+            foreach (var pair in SplitUnescaped(rdn, "+"))
+            {
+                var eq = pair.IndexOf('=', StringComparison.Ordinal);
+                var type = eq > 0 ? pair[..eq].Trim() : "";
+                if (type.Length == 0)
+                {
+                    return null;
+                }
+                var value = Unescape(TrimValue(pair[(eq + 1)..])).ToLowerInvariant();
+                var sb = new StringBuilder(type.ToLowerInvariant()).Append('=');
+                foreach (var c in value)
+                {
+                    sb.Append(c is '\\' or ',' or '+' or '=' or ';' or '"' or '<' or '>' ? "\\" + c : c.ToString());
+                }
+                values.Add(sb.ToString());
+            }
+            values.Sort(StringComparer.Ordinal);
+            rdns.Add(string.Join('+', values));
+        }
+        return rdns;
+    }
+
+    /// <summary>The parts of a DN between the separators given that are not escaped.</summary>
+    private static List<string> SplitUnescaped(string value, string separators)
+    {
+        var parts = new List<string>();
+        var start = 0;
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (value[i] == '\\')
+            {
+                i++;
+            }
+            else if (separators.Contains(value[i], StringComparison.Ordinal))
+            {
+                parts.Add(value[start..i]);
+                start = i + 1;
+            }
+        }
+        parts.Add(value[start..]);
+        return parts;
+    }
+
+    /// <summary>A DN value without the spaces around it, keeping an escaped one at its end (\ ).</summary>
+    private static string TrimValue(string value)
+    {
+        value = value.TrimStart(' ');
+        var end = value.Length;
+        while (end > 0 && value[end - 1] == ' ' && (end - 1 - value[..(end - 1)].TrimEnd('\\').Length) % 2 == 0)
+        {
+            end--;
+        }
+        return value[..end];
     }
 
     /// <summary>

@@ -35,7 +35,7 @@ public static class LdapCheck
     private const string Fail = "fail";
 
     private static readonly string[] MemberAttributes = ["member", "uniqueMember"];
-    private static readonly string[] GroupAttributes = ["cn", .. MemberAttributes];
+    private static readonly string[] GroupAttributes = ["cn", "objectClass", "memberUid", .. MemberAttributes];
 
     /// <summary>Active Directory says so in its root entry (LDAP_CAP_ACTIVE_DIRECTORY_OID).</summary>
     private const string ActiveDirectoryCapability = "1.2.840.113556.1.4.800";
@@ -268,6 +268,9 @@ public static class LdapCheck
 
         private string Holds => string.Join(" and ", _contexts.Select(c => $"\"{c}\""));
 
+        /// <summary>Whether a DN cannot be on this server: it is not below anything the server holds.</summary>
+        private bool Outside(string dn) => _contexts.Count > 0 && LdapDirectory.Rdns(dn) is not null && !_contexts.Any(c => LdapDirectory.IsUnder(dn, c));
+
         /// <summary>Signs in as the service account, or anonymously; false (with the failed step) when the server says no.</summary>
         private async Task<bool> BindAsync(LdapConnection conn, CancellationToken ct)
         {
@@ -311,7 +314,7 @@ public static class LdapCheck
                             : $"Active Directory refused the service account {dn}: {why}. The name and the password are right; fix the account in Active Directory (a service account's password is best set never to expire), then test again.";
                     }
                     var said = LdapErrors.ServerMessage(ex) is { } m ? $" It said: {m}." : "";
-                    if (LooksLikeDn(dn) && _contexts.Count > 0 && !_contexts.Any(c => IsUnder(dn, c)))
+                    if (Outside(dn))
                     {
                         return $"The server refused the service account {dn}: no such entry can be here, as this server holds {Holds} and {dn} is not below it.{said}";
                     }
@@ -482,7 +485,7 @@ public static class LdapCheck
         private void NotThere(string what, string dn, string? matched)
         {
             var part = matched is { Length: > 0 } ? $" The part of it that exists is \"{matched}\"." : "";
-            var holds = _contexts.Count > 0 && LooksLikeDn(dn) && !_contexts.Any(c => IsUnder(dn, c)) ? $" This server holds {Holds}." : "";
+            var holds = Outside(dn) ? $" This server holds {Holds}." : "";
             Failed($"\"{dn}\" ({what}) does not exist on this server, or {Who} cannot see it.{part}{holds}");
         }
 
@@ -507,29 +510,103 @@ public static class LdapCheck
             group = group.Trim();
             var nobody = required ? "nobody from the directory can sign in" : "nobody from the directory will be an admin here";
             LdapEntry? found;
+            (string What, string Fix)? unread;
+            List<LdapEntry> same = [];
             try
             {
                 found = await LdapDirectory.FindGroupAsync(o, conn, group, _contexts, GroupAttributes, ct);
+                unread = await UnreadAsync(conn, group, found, ct);
+                if (unread is null && !LooksLikeDn(group))
+                {
+                    same = await LdapDirectory.NamedAsync(conn, group, Counted, ["1.1"], anyKind: false, ct);
+                }
             }
             catch (LdapException ex) when (!LdapErrors.IsConnectionFailure(ex))
             {
                 Add(Warn, $"{label}: looking for \"{group}\" failed ({LdapErrors.Answer(ex)}).");
                 return;
             }
-            if (found is null)
+            if (found is null || unread is { })
             {
-                Add(required ? Fail : Warn, $"{label}: no group \"{group}\" found {LdapDirectory.GroupPlaces(o, _contexts)}, as {Who} sees it: {nobody}. Check the name (a group's name or its full DN).");
+                Add(required ? Fail : Warn, $"{label}: {unread?.What}, so {nobody}. {unread?.Fix}");
                 return;
             }
             Add(Ok, $"{label}: found {found.Dn}.");
+            if (same.Count > 1)
+            {
+                // By its name, every group of that name counts: another app's "admins" would make its members admins here.
+                var shown = string.Join("; ", same.Take(5).Select(g => g.Dn)) + (same.Count > 5 ? "; ..." : "");
+                var each = required ? "the members of each may sign in" : "the members of each are admins here";
+                var narrower = _openLdap && string.IsNullOrWhiteSpace(o.GroupBaseDn) ? ", or set \"Where groups are\" to a place that holds only it" : "";
+                Add(required ? Warn : Fail, $"{label}: {same.Count} groups go by \"{group}\" ({shown}), and every one counts: {each}. Name the one meant by its full DN{narrower}.");
+            }
             if (string.IsNullOrWhiteSpace(o.GroupBaseDn) && !await MemberOfWorksAsync(conn, found, ct))
             {
                 Add(required ? Fail : Warn, $"{label}: its members do not show it in their memberOf (this server's memberOf overlay is off, or covers another kind of group), so {nobody}. Set \"Where groups are\" (like {Parent(found.Dn)}) and groups are searched there.");
             }
-            else if (!string.IsNullOrWhiteSpace(o.GroupBaseDn) && _openLdap && !IsUnder(found.Dn, o.GroupBaseDn.Trim()))
+            else if (!string.IsNullOrWhiteSpace(o.GroupBaseDn) && _openLdap && !LdapDirectory.IsUnder(found.Dn, o.GroupBaseDn.Trim()))
             {
                 // Named by its DN, elsewhere: with "Where groups are" set, OpenLDAP's people have only the groups there.
                 Add(required ? Fail : Warn, $"{label}: {found.Dn} is not below \"{o.GroupBaseDn.Trim()}\" (where groups are), and on OpenLDAP only the groups there count, so {nobody}. Name a group below it, or empty \"Where groups are\" if its members show it in their memberOf.");
+            }
+        }
+
+        /// <summary>
+        /// Where a group's name counts when signing in: below "Where groups are" on OpenLDAP (which sends memberOf
+        /// only when asked, and it is not asked then); else anywhere, as memberOf names groups all over the directory.
+        /// </summary>
+        private IReadOnlyList<string> Counted =>
+            !string.IsNullOrWhiteSpace(o.GroupBaseDn) && (_openLdap || _contexts.Count == 0) ? [o.GroupBaseDn.Trim()]
+            : _contexts.Count > 0 ? _contexts : [o.UserBaseDn.Trim()];
+
+        /// <summary>
+        /// Why a group setting can match nobody, when it names no group signing in reads (<paramref name="found"/> is
+        /// what <see cref="LdapDirectory.FindGroupAsync"/> found): what it names instead, and what to do. Null when it names one.
+        /// </summary>
+        private async Task<(string What, string Fix)?> UnreadAsync(LdapConnection conn, string group, LdapEntry? found, CancellationToken ct)
+        {
+            if (found is not null)
+            {
+                return Posix(found) ? PosixGroup(found.Dn) : null;
+            }
+            var named = await LdapDirectory.NamedAsync(conn, group, LdapDirectory.Places(o, _contexts), GroupAttributes, anyKind: true, ct);
+            if (named.FirstOrDefault(Posix) is { } posix)
+            {
+                return PosixGroup(posix.Dn);
+            }
+            if (named.FirstOrDefault() is { } other)
+            {
+                var classes = other.GetAttributeSet().TryGetValue("objectClass", out var c) ? string.Join(", ", c.StringValueArray.Where(x => !x.Equals("top", StringComparison.OrdinalIgnoreCase))) : "unknown";
+                return ($"\"{group}\" names {other.Dn}, which is not a group (its objectClass: {classes})",
+                    "Name a group: a groupOfNames, a groupOfUniqueNames or an Active Directory group, by its name or its full DN.");
+            }
+            return (LooksLikeDn(group) ? $"no group has the DN \"{group}\", as {Who} sees it" : $"no group \"{group}\" found {LdapDirectory.GroupPlaces(o, _contexts)}, as {Who} sees it",
+                "Check the name (a group's name or its full DN).");
+        }
+
+        /// <summary>A group whose members are listed by uid only (memberUid), as a posixGroup's are: nobody is ever found in it here.</summary>
+        private static bool Posix(LdapEntry entry)
+        {
+            var attrs = entry.GetAttributeSet();
+            return !MemberAttributes.Any(attrs.ContainsKey)
+                && (attrs.ContainsKey("memberUid") || (attrs.TryGetValue("objectClass", out var c) && c.StringValueArray.Contains("posixGroup", StringComparer.OrdinalIgnoreCase)));
+        }
+
+        private static (string What, string Fix) PosixGroup(string dn) =>
+            ($"{dn} is a posixGroup, whose members (memberUid) are not read here",
+                "Signing in reads groupOfNames and groupOfUniqueNames groups (member, uniqueMember) and Active Directory's groups: name one of those. With the rfc2307bis schema, a posixGroup can be a groupOfNames too, its members listed in member.");
+
+        /// <summary>For a try: why nobody can be in a group setting; null when it names a group signing in reads, or cannot be looked up.</summary>
+        private async Task<(string What, string Fix)?> UnreadNoteAsync(LdapConnection conn, string group, CancellationToken ct)
+        {
+            group = group.Trim();
+            try
+            {
+                return await UnreadAsync(conn, group, await LdapDirectory.FindGroupAsync(o, conn, group, _contexts, GroupAttributes, ct), ct);
+            }
+            catch (LdapException ex) when (!LdapErrors.IsConnectionFailure(ex))
+            {
+                return null;
             }
         }
 
@@ -545,7 +622,7 @@ public static class LdapCheck
             try
             {
                 var entry = await conn.ReadAsync(member, ["memberOf"], ct);
-                return entry.GetAttributeSet().TryGetValue("memberOf", out var of) && of.StringValueArray.Any(g => SameDn(g, group.Dn));
+                return entry.GetAttributeSet().TryGetValue("memberOf", out var of) && of.StringValueArray.Any(g => LdapDirectory.SameDn(g, group.Dn));
             }
             catch (LdapException)
             {
@@ -623,7 +700,9 @@ public static class LdapCheck
             // In the order signing in checks them.
             if (!LdapDirectory.IsAllowed(o, person))
             {
-                Failed($"They are not in the required group \"{o.RequiredGroup!.Trim()}\", so they may not sign in.");
+                // Said with why nobody can be, when the setting names no group signing in reads (a posixGroup, say).
+                var why = await UnreadNoteAsync(conn, o.RequiredGroup!, ct) is { } u ? $", and nobody can be: {u.What}. {u.Fix}" : ".";
+                Failed($"They are not in the required group \"{o.RequiredGroup!.Trim()}\", so they may not sign in{why}");
                 return null;
             }
             if (person.Email is null)
@@ -632,6 +711,10 @@ public static class LdapCheck
                 return null;
             }
             Add(Ok, LdapDirectory.IsAdmin(o, person) ? $"An admin here: they are in \"{o.AdminGroup!.Trim()}\"." : "A member here, not an admin.");
+            if (!LdapDirectory.IsAdmin(o, person) && !string.IsNullOrWhiteSpace(o.AdminGroup) && await UnreadNoteAsync(conn, o.AdminGroup, ct) is { } admins)
+            {
+                Add(Warn, $"Nobody can be an admin through \"Admin group\": {admins.What}. {admins.Fix}");
+            }
             _summary = $"{person.UserName} can sign in{(LdapDirectory.IsAdmin(o, person) ? ", as an admin" : "")}.";
             return person;
         }
@@ -653,19 +736,6 @@ public static class LdapCheck
     }
 
     private static bool LooksLikeDn(string value) => value.Contains('=', StringComparison.Ordinal);
-
-    /// <summary>A DN with spaces around its commas and equals signs left out, in lower case: enough to compare the settings' DNs.</summary>
-    private static string Plain(string dn) =>
-        string.Join(',', dn.Split(',').Select(p => string.Join('=', p.Split('=').Select(x => x.Trim())))).ToLowerInvariant();
-
-    private static bool SameDn(string a, string b) => Plain(a) == Plain(b);
-
-    /// <summary>Whether the DN is the context or below it.</summary>
-    private static bool IsUnder(string dn, string context)
-    {
-        var (d, c) = (Plain(dn), Plain(context));
-        return d == c || d.EndsWith("," + c, StringComparison.Ordinal);
-    }
 
     private static string Parent(string dn)
     {
