@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { when } from '@/lib/format'
+import { useDebounced } from '@/lib/use-debounced'
 import { cleanupKinds, plural, size, type CleanupDone, type CleanupPlan, type CleanupType, type StorageReport } from './storage-api'
 
 /** Every clean-up, each shown before it runs. */
@@ -36,11 +37,14 @@ function CleanupCard({ k, start }: { k: CleanupType; start: number | undefined }
   const [running, setRunning] = useState(false)
   const number = value ?? (start !== undefined ? String(start) : '')
   const valid = !k.param || (/^\d+$/.test(number) && Number(number) >= 1)
-  const query = k.param && number ? `?${k.param}=${Number(number)}` : ''
+  // Each plan walks every file (or backup): it follows the number once typing pauses, and runs with the number it shows.
+  const planned = useDebounced(number, 300)
+  const settled = planned === number
+  const query = k.param && planned ? `?${k.param}=${Number(planned)}` : ''
   const plan = useQuery({
     queryKey: ['admin', 'storage', 'cleanup', k.kind, query],
     queryFn: ({ signal }) => api<CleanupPlan>(`/api/admin/storage/cleanups/${k.kind}${query}`, { signal }),
-    enabled: asked && valid,
+    enabled: asked && valid && settled,
   })
   const p = plan.data
   const models = k.kind === 'unused-models'
@@ -64,7 +68,7 @@ function CleanupCard({ k, start }: { k: CleanupType; start: number | undefined }
     setRunning(true)
     try {
       const done = await api<CleanupDone>(`/api/admin/storage/cleanups/${k.kind}`, {
-        body: { ...(k.param ? { [k.param]: Number(number) } : {}), ...(models ? { only: [...chosen] } : {}) },
+        body: { ...(k.param ? { [k.param]: Number(planned) } : {}), ...(models ? { only: [...chosen] } : {}) },
       })
       if (done.failed.length) toast.error(`${plural(done.count, ...k.noun)} removed; ${done.failed.length} could not be`, { description: done.failed.slice(0, 3).join(' ') })
       else toast.success(`${plural(done.count, ...k.noun)} removed, ${size(done.bytes)} freed`)
@@ -98,11 +102,11 @@ function CleanupCard({ k, start }: { k: CleanupType; start: number | undefined }
               />
             </Label>
           )}
-          <Button variant="outline" size="sm" className="h-9" disabled={!valid} loading={plan.isFetching} onClick={() => (asked ? void plan.refetch() : setAsked(true))}>
+          <Button variant="outline" size="sm" className="h-9" disabled={!valid} loading={plan.isFetching} onClick={() => (!asked ? setAsked(true) : settled ? void plan.refetch() : undefined)}>
             <Eye /> {asked ? 'Look again' : 'Preview'}
           </Button>
           {p && !p.problem && !p.command && (
-            <Button variant="destructive" size="sm" className="h-9" disabled={count === 0 || plan.isFetching} loading={running} onClick={() => void run()}>
+            <Button variant="destructive" size="sm" className="h-9" disabled={count === 0 || plan.isFetching || !settled} loading={running} onClick={() => void run()}>
               <Trash2 /> Clean up
             </Button>
           )}

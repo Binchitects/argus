@@ -232,6 +232,11 @@ describe('Admin → Storage', () => {
     await userEvent.type(days, '30')
     await waitFor(() => expect(calls.some((c) => c.path === '/api/admin/storage/cleanups/unused-files?days=30')).toBe(true))
     expect(await within(card).findByText('2.0 MiB', { selector: 'span.font-medium' })).toBeInTheDocument()
+    // Asked once typing paused: not for 3 days on the way to 30.
+    expect(calls.filter((c) => c.path.startsWith('/api/admin/storage/cleanups/')).map((c) => c.path)).toEqual([
+      '/api/admin/storage/cleanups/unused-files?days=7',
+      '/api/admin/storage/cleanups/unused-files?days=30',
+    ])
 
     await userEvent.click(within(card).getByRole('button', { name: 'Clean up' }))
     const ask = await screen.findByRole('alertdialog', { name: /Files in no chat: remove 1 file/ })
