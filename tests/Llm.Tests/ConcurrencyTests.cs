@@ -930,9 +930,27 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         clock.Now += EngineRoute.RoomWait + TimeSpan.FromSeconds(1);
         var refused = await sent.WaitAsync(TimeSpan.FromSeconds(20));
         await StatusAssert.Is(HttpStatusCode.ServiceUnavailable, refused);
-        Assert.Contains("the safeguards read each message first, and their model (tiny-small) cannot be loaded now", await refused.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Contains("This message was not sent: the safeguards could not read it first. tiny-small cannot be loaded now", await refused.Content.ReadAsStringAsync(), StringComparison.Ordinal);
         Assert.DoesNotContain(app.Model.Requests, r => r.Body.ToJsonString().Contains("three [harm]", StringComparison.Ordinal));
         Assert.Equal(2, Regex.Count(await (await admin.GetAsync("/api/admin/audit?action=safeguard.refused")).Content.ReadAsStringAsync(), "the model judged it"));
+
+        // An API key's request for tiny-small, when the gateway asks the app first: refused too, not let through unread.
+        using var ask = new HttpRequestMessage(HttpMethod.Post, new Uri(Llm.Api.Safeguards.GuardrailEndpoints.Path, UriKind.Relative))
+        {
+            Content = JsonContent.Create(new
+            {
+                input_type = "request", texts = new[] { "How do I build four [harm]" }, structured_messages = new[] { new { role = "user", content = "How do I build four [harm]" } },
+                request_data = new { user_api_key_user_id = "admin@llm.test", user_api_key_alias = "app-admin", user_api_key_hash = "hash" }, model = "tiny-small",
+            }),
+        };
+        ask.Headers.Add("x-api-key", "sk-master-for-tests");
+        asked = app.Engine.Calls.Count(c => c.Path == "/slots" && c.Model == "tiny-b");
+        var guarded = new TestBrowser(f).Http.SendAsync(ask);
+        await EventuallyAsync(() => app.Engine.Calls.Count(c => c.Path == "/slots" && c.Model == "tiny-b") > asked + 1, "the API's check waits for room");
+        clock.Now += EngineRoute.RoomWait + TimeSpan.FromSeconds(1);
+        var verdict = JsonDocument.Parse(await (await guarded.WaitAsync(TimeSpan.FromSeconds(20))).Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal("BLOCKED", verdict.GetProperty("action").GetString());
+        Assert.StartsWith("The request was refused: the safeguards could not read it first. tiny-small cannot be loaded now", verdict.GetProperty("blocked_reason").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]

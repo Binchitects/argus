@@ -149,8 +149,7 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
             catch (ChatGatewayException ex) when (ex.NotLoaded)
             {
                 // Not let through unread. Not a strike either: nothing is wrong with the message.
-                return new(false, $"This message was not sent: the safeguards read each message first, and their model ({model}) cannot be loaded now. "
-                    + "Try again in a few minutes.", "check", 503);
+                return new(false, $"This message was not sent: the safeguards could not read it first. {ex.Message}", "check", 503);
             }
             if (category is not null)
             {
@@ -243,8 +242,7 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
                 }
                 catch (ChatGatewayException ex) when (ex.NotLoaded)
                 {
-                    return new ApiVerdict("BLOCKED", $"The request was refused: the safeguards read each request first, and their model ({model}) cannot be loaded now. "
-                        + "Try again in a few minutes.");
+                    return new ApiVerdict("BLOCKED", $"The request was refused: the safeguards could not read it first. {ex.Message}");
                 }
                 if (category is not null)
                 {
