@@ -32,7 +32,8 @@
 #   --yes                no questions, the defaults: for unattended runs
 #   --dry-run            the plan; nothing is written, loaded, started or removed
 #   --log FILE           the log (default DIR/.arena-install/logs/COMMAND-TIME.log)
-#   --timeout MIN        how long to wait for the stack to be healthy (default 15)
+#   --timeout MIN        how long to wait for the stack to be healthy, in minutes (default 15;
+#                        30s: seconds)
 # install:
 #   --domain NAME  --admin-email ADDRESS  --models-dir DIR  --model FILE  --acme-email ADDRESS
 #   --http-port N  --https-port N   (default 80 and 443; Podman 8080 and 8443)
@@ -119,9 +120,9 @@ vercmp() {
 # Questions come from the terminal; with --yes the default is taken. No terminal and no --yes: refused.
 TTY=0
 if ( : </dev/tty ) 2>/dev/null; then exec 7</dev/tty && TTY=1; fi
-ask() {   # ask QUESTION DEFAULT -> the answer
+ask() {   # ask QUESTION DEFAULT -> the answer (a dry run takes the default)
   local answer=""
-  if [[ $YES -eq 1 ]]; then printf '%s' "$2"; return; fi
+  if [[ $YES -eq 1 || $DRY -eq 1 ]]; then printf '%s' "$2"; return; fi
   [[ $TTY -eq 1 ]] || refuse "no terminal to ask \"$1\": answer with options and --yes"
   printf '%s [%s]: ' "$1" "$2" >&2
   read -r answer <&7 || true
@@ -161,7 +162,7 @@ while [[ $# -gt 0 ]]; do
     --yes|-y) YES=1 ;;
     --dry-run) DRY=1 ;;
     --log) value "$1" $#; LOG_ARG="$2"; shift ;;
-    --timeout) value "$1" $#; TIMEOUT="$2"; shift; [[ "$TIMEOUT" =~ ^[0-9]+$ && $TIMEOUT -gt 0 ]] || usage_error "--timeout is minutes, a whole number" ;;
+    --timeout) value "$1" $#; TIMEOUT="$2"; shift; [[ "$TIMEOUT" =~ ^[1-9][0-9]*s?$ ]] || usage_error "--timeout is minutes (15), or seconds (90s)" ;;
     --domain) only "$1" install; value "$1" $#; DOMAIN_ARG="$2"; shift ;;
     --admin-email) only "$1" install; value "$1" $#; EMAIL_ARG="$2"; shift ;;
     --models-dir) only "$1" install; value "$1" $#; MODELS_ARG="$2"; shift ;;
@@ -349,7 +350,7 @@ argus_version() {
 installed_version() {
   local v
   v="$(state_get version)"; [[ -n "$v" ]] && { printf '%s' "$v"; return; }
-  v="$(tr -d '[:space:]' < "$DIR/VERSION" 2>/dev/null)"; valid_version "$v" && [[ -f "$DIR/VERSION" ]] && { printf '%s' "$v"; return; }
+  [[ -f "$DIR/VERSION" ]] && { tr -d '[:space:]' < "$DIR/VERSION"; return; }
   read_settings
   app_version
 }
@@ -487,7 +488,7 @@ load_images() {   # load_images fresh|upgrade|repair
     fi
     printf '%s\t%s\t0\n' "$(compose_image "$svc")" "$id" >> "$tmp"
   done < <(bundle_release)
-  ok "$n loaded, $skipped there already; the release's own tagged for $PROJECT ($(bundle_release | cut -f1 | tr '\n' ' '))"
+  ok "$n loaded, $skipped there already; the release's own tagged for $PROJECT ($(bundle_release | cut -f1 | paste -sd' ' -))"
 }
 record_images() {   # what load_images found and loaded, as the state's image list
   [[ -s "$STATE/IMAGES.new" ]] || return 0
@@ -670,7 +671,8 @@ make_env() {
   local env="$DEPLOY/.env" tmp key line val model example="$DEPLOY/.env.example"
   local -A V=()
   V[DOMAIN]="$NEW_DOMAIN"; V[ADMIN_EMAIL]="$NEW_EMAIL"; V[MODELS_DIR]="$NEW_MODELS_DIR"; V[MODEL]="$NEW_MODEL"
-  for key in DB_PASSWORD APP_KEY ENGINE_KEY ARGUS_KEY; do V[$key]="$(gen_secret)"; done
+  # Every key compose cannot start without gets a secret of its own (the gateway's starts with sk-).
+  for key in DB_PASSWORD APP_KEY ENGINE_KEY ARGUS_KEY $(required_keys "$DEPLOY"); do [[ -n "${V[$key]:-}" ]] || V[$key]="$(gen_secret)"; done
   V[GATEWAY_KEY]="sk-$(gen_secret)"
   ADMIN_PASSWORD_NEW="$(gen_secret | cut -c1-24)"; V[ADMIN_PASSWORD]="$ADMIN_PASSWORD_NEW"
   tmp="$env.installer-new"
@@ -690,10 +692,10 @@ make_env() {
     [[ "$NEW_HTTP" != 80 ]] && echo "HTTP_PORT=$NEW_HTTP"
     [[ "$NEW_HTTPS" != 443 ]] && echo "HTTPS_PORT=$NEW_HTTPS"
     [[ -n "$ACME_ARG" ]] && echo "ACME_EMAIL=$ACME_ARG"
-    [[ "$PROJECT" != arena ]] && echo "COMPOSE_PROJECT_NAME=$PROJECT"
+    if [[ "$PROJECT" != arena ]]; then echo "COMPOSE_PROJECT_NAME=$PROJECT"; fi
   ) > "$tmp" || die "cannot write $tmp"
   mv -f "$tmp" "$env" && chmod 600 "$env" || die "writing $env failed"
-  did ".env written (0600): DOMAIN=$NEW_DOMAIN, MODELS_DIR=$NEW_MODELS_DIR, MODEL=${NEW_MODEL:-none yet}; six secrets generated, none printed"
+  did ".env written (0600): DOMAIN=$NEW_DOMAIN, MODELS_DIR=$NEW_MODELS_DIR, MODEL=${NEW_MODEL:-none yet}; the secrets generated, none printed"
 }
 
 # docker-compose.override.yml for this host, when it has none: what it leaves out, and the
@@ -714,8 +716,10 @@ write_override() {   # write_override plan|do SERVICES...
     echo "# Written by installer.sh ($BVERSION) for this host. Yours to change: upgrades and repairs keep it."
     echo "services:"
     for svc in "$@"; do echo "  $svc: { profiles: [off] }"; done
-    [[ $audio_on -eq 1 ]] && echo "  # No network here: the speech server uses the models it has and never looks for others."
-    [[ $audio_on -eq 1 ]] && echo "  audio: { environment: { HF_HUB_OFFLINE: \"1\" } }"
+    if [[ $audio_on -eq 1 ]]; then
+      echo "  # No network here: the speech server uses the models it has and never looks for others."
+      echo "  audio: { environment: { HF_HUB_OFFLINE: \"1\" } }"
+    fi
   } > "$f" || die "cannot write $f"
   did "docker-compose.override.yml: ${*:+$* left out; }the speech server offline"
 }
@@ -772,9 +776,11 @@ start_stack() {
 }
 # Every service compose runs: up, and healthy where it has a health check.
 wait_healthy() {
-  local deadline=$(( $(date +%s) + TIMEOUT * 60 )) last=0 services svc row waiting n m
+  local secs=$(( ${TIMEOUT%s} * 60 )) last=0 services svc waiting n m deadline
+  [[ $TIMEOUT == *s ]] && secs=${TIMEOUT%s}
+  deadline=$(( $(date +%s) + secs ))
   services="$(dc config --services 2>/dev/null | sort -u)"
-  step "waiting for every service to be up and healthy (up to $TIMEOUT minutes)"
+  step "waiting for every service to be up and healthy (up to $(( secs / 60 )) min $(( secs % 60 )) s)"
   while :; do
     local -A STATEOF=()
     while IFS='|' read -r svc _ st health _ _; do
@@ -789,12 +795,12 @@ wait_healthy() {
     done
     if [[ ${#waiting[@]} -eq 0 ]]; then ok "all $m services up"; return 0; fi
     if [[ $(date +%s) -ge $deadline ]]; then
-      bad "after $TIMEOUT minutes, $n of $m services are up; not: ${waiting[*]}"
+      bad "after $(( secs / 60 )) min $(( secs % 60 )) s, $n of $m services are up; not: ${waiting[*]}"
       say "    their logs: $ENGINE logs --tail 50 CONTAINER (the names: $ENGINE ps -a)"
       return 1
     fi
     if [[ $(( $(date +%s) - last )) -ge 30 ]]; then say "  $n of $m up; waiting for: ${waiting[*]}"; last=$(date +%s); fi
-    sleep 5
+    sleep $(( secs < 30 ? 1 : 5 ))
   done
 }
 # The version each service runs: the app and Argus say theirs; every container runs the image
@@ -900,9 +906,12 @@ cmd_install() {
   fi
 
   local podman=0; [[ $ENGINE == podman ]] && podman=1
+  # Only services the release has (a GPU service a release lacks needs no leaving out).
   local known; known=" $(sed -n '/^services:/,/^[^ ]/s/^  \([a-z0-9-]*\):.*/\1/p' "$BUNDLE/deploy/docker-compose.yml" | tr '\n' ' ') "
-  for svc in ${leave[@]+"${leave[@]}"}; do [[ "$known" == *" $svc "* ]] || usage_error "--leave-out $svc: no such service (they are:$known)"; done
+  for svc in ${LEAVE_ARG//,/ }; do [[ "$known" == *" $svc "* ]] || usage_error "--leave-out $svc: no such service (they are:${known% })"; done
+  mapfile -t leave < <(for svc in ${leave[@]+"${leave[@]}"}; do [[ "$known" == *" $svc "* ]] && echo "$svc"; done)
 
+  [[ $YES -eq 1 || $DRY -eq 1 || $TTY -eq 1 ]] || refuse "no terminal to ask the domain, ports and models: give them as options, with --yes"
   if [[ $again -eq 1 && -f "$DEPLOY/.env" ]]; then
     read_settings
     NEW_DOMAIN="$DOMAIN" NEW_HTTP="$HTTP_PORT" NEW_HTTPS="$HTTPS_PORT" NEW_MODELS_DIR="$(env_get MODELS_DIR)" NEW_MODEL="$(env_get MODEL)" NEW_EMAIL="$(env_get ADMIN_EMAIL)"
@@ -931,7 +940,7 @@ cmd_install() {
     would "load $(bundle_images | wc -l) images into $ENGINE (those there already kept) and tag the release's own for $PROJECT"
     would "write $(bundle_deploy_sums | wc -l) files into $DEPLOY"
     write_extras plan
-    [[ -f "$DEPLOY/.env" ]] && would "keep the .env there, adding what it lacks" || would "write $DEPLOY/.env: these answers, six secrets generated (none printed; the admin's first password shown once, on the terminal)"
+    [[ -f "$DEPLOY/.env" ]] && would "keep the .env there, adding what it lacks" || would "write $DEPLOY/.env: these answers, the secrets generated (none printed; the admin's first password shown once, on the terminal)"
     write_override plan ${leave[@]+"${leave[@]}"}
     place_models plan
     fill_audio plan

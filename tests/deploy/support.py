@@ -14,7 +14,8 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SCRIPTS = ["airgap.sh", "backup.sh", "test-project.sh", "restore-test.sh", "rollback-test.sh", "recovery-check.py"]
+SCRIPTS = ["airgap.sh", "backup.sh", "test-project.sh", "restore-test.sh", "rollback-test.sh", "recovery-check.py",
+           "installer.sh", "make-installer.sh", "make-cert.sh", "setup-hosts.sh"]
 COMPOSE = """name: arena
 services:
   traefik:
@@ -47,7 +48,7 @@ SERVICES = "traefik\nweb\napp\npostgres\nlitellm\nargus\ncpu-temp-exporter\n"
 
 
 class Sandbox:
-    def __init__(self):
+    def __init__(self, curl: bool = False):
         self.dir = Path(tempfile.mkdtemp(prefix="deploy-test-"))
         self.repo = self.dir / "repo"
         self.deploy = self.repo / "deploy"
@@ -63,6 +64,14 @@ class Sandbox:
             target = self.bin / name
             shutil.copy2(Path(__file__).with_name("fake_engine.py"), target)
             target.chmod(target.stat().st_mode | stat.S_IXUSR)
+        if curl:
+            target = self.bin / "curl"
+            shutil.copy2(Path(__file__).with_name("fake_curl.py"), target)
+            target.chmod(target.stat().st_mode | stat.S_IXUSR)
+            # A GPU, unless FAKE_NO_GPU.
+            gpu = self.bin / "nvidia-smi"
+            gpu.write_text('#!/bin/sh\n[ -n "${FAKE_NO_GPU:-}" ] && exit 9\necho "GPU 0: Fake GPU (UUID: GPU-0)"\n')
+            gpu.chmod(0o755)
         self.log = self.dir / "engine.log"
         self.log.touch()
         self.env: dict[str, str] = {}
