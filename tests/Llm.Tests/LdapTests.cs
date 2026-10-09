@@ -1002,6 +1002,202 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
     }
 
     [Fact]
+    public async Task A_posixGroup_as_the_required_group_fails_the_test_and_changes_nobody()
+    {
+        // Its members are uids (memberUid), which signing in never reads. Before, the test said "found" and
+        // passed, and the check the save woke took the group as there and disabled everyone.
+        await ldap.ModifyAsync("""
+            dn: cn=llm-posix,ou=groups,dc=example,dc=test
+            changetype: add
+            objectClass: posixGroup
+            cn: llm-posix
+            gidNumber: 5000
+            memberUid: alice
+            memberUid: bob
+
+            """);
+        try
+        {
+            var gateway = new FakeGateway();
+            await using var f = app.Create(app.ConnectionStringFor("ldapposix_" + Guid.NewGuid().ToString("N")[..8]), gateway,
+                new Dictionary<string, string?>(Settings(ldap.Url)) { ["Auth:DataKey"] = "ldap-settings-data-key", ["Ldap:RequiredGroup"] = "" });
+            var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+            var bob = await new TestBrowser(f).SignedInAsync("bob", "bob-directory-pw");
+
+            const string Posix = "cn=llm-posix,ou=groups,dc=example,dc=test is a posixGroup, whose members (memberUid) are not read here";
+            foreach (var (groupBase, required) in new[] { ("ou=groups," + LdapServer.Base, "llm-posix"), ("", "llm-posix"), ("ou=groups," + LdapServer.Base, "cn=llm-posix,ou=groups," + LdapServer.Base) })
+            {
+                var test = await TestAsync(admin, Form(null, ("GroupBaseDn", groupBase), ("AdminGroup", ""), ("RequiredGroup", required)));
+                Assert.False(test.GetProperty("ok").GetBoolean(), Says(test));
+                Assert.StartsWith("Required group: " + Posix + ", so nobody from the directory can sign in. Signing in reads groupOfNames and groupOfUniqueNames groups",
+                    test.GetProperty("message").GetString(), StringComparison.Ordinal);
+            }
+            // As the admin group, a warning: nobody would be an admin, and the rest works.
+            var asAdmin = await TestAsync(admin, Form(null, ("AdminGroup", "llm-posix")));
+            Assert.True(asAdmin.GetProperty("ok").GetBoolean(), Says(asAdmin));
+            Assert.Contains("warn: Admin group: " + Posix + ", so nobody from the directory will be an admin here.", Says(asAdmin), StringComparison.Ordinal);
+
+            // Saved anyway: the check changes nobody, and says why.
+            await SaveAsync(admin, new() { ["Ldap:RequiredGroup"] = "llm-posix" });
+            var sync = await admin.PostAsync("/api/admin/ldap/sync");
+            await StatusAssert.Is(HttpStatusCode.ServiceUnavailable, sync);
+            Assert.Contains("no required group \"llm-posix\" is found below \"ou=groups,dc=example,dc=test\", so nobody is disabled for not being in it",
+                (await admin.JsonAsync(sync)).GetProperty("error").GetString(), StringComparison.Ordinal);
+            await Task.Delay(TimeSpan.FromSeconds(3)); // the background check, woken by saving, did the same
+            var people = await admin.JsonAsync(await admin.GetAsync("/api/admin/people"));
+            Assert.False(people.GetProperty("people").EnumerateArray().Single(p => p.GetProperty("userName").GetString() == "bob").GetProperty("disabled").GetBoolean());
+            await StatusAssert.Is(HttpStatusCode.OK, await bob.GetAsync("/api/auth/me"));
+            Assert.All(gateway.KeysOf("bob@example.test"), k => Assert.False(k.Blocked));
+
+            // A try says the reason, not only "not in the required group".
+            var tried = await admin.JsonAsync(await admin.PostAsync("/api/admin/config/ldap-try", new { settings = new Dictionary<string, string?>(), login = "bob", password = "bob-directory-pw" }));
+            Assert.Contains("not in the required group \"llm-posix\", so they may not sign in, and nobody can be: " + Posix, tried.GetProperty("message").GetString(), StringComparison.Ordinal);
+            var triedAdmin = await admin.JsonAsync(await admin.PostAsync("/api/admin/config/ldap-try",
+                new { settings = new Dictionary<string, string?> { ["Ldap:RequiredGroup"] = "", ["Ldap:AdminGroup"] = "llm-posix" }, login = "bob", password = "bob-directory-pw" }));
+            Assert.Contains("warn: Nobody can be an admin through \"Admin group\": " + Posix, Says(triedAdmin), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await ldap.ModifyAsync("""
+                dn: cn=llm-posix,ou=groups,dc=example,dc=test
+                changetype: delete
+
+                """);
+        }
+    }
+
+    [Fact]
+    public async Task A_group_named_by_its_DN_matches_however_the_DN_is_written_and_a_DN_of_no_group_changes_nobody()
+    {
+        // Spaces after its commas, in capitals: the server reads it, and so do signing in and the check.
+        // Before, the test found it while signing in matched nobody, and the check then disabled everyone.
+        var gateway = new FakeGateway();
+        await using var f = app.Create(app.ConnectionStringFor("ldapdn_" + Guid.NewGuid().ToString("N")[..8]), gateway,
+            new Dictionary<string, string?>(Settings(ldap.Url))
+            {
+                ["Auth:DataKey"] = "ldap-settings-data-key",
+                ["Ldap:AdminGroup"] = "CN=llm-admins, OU=groups, DC=example, DC=test",
+                ["Ldap:RequiredGroup"] = "cn=llm-users, ou=groups, dc=example, dc=test",
+            });
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var test = await TestAsync(admin, new());
+        Assert.True(test.GetProperty("ok").GetBoolean(), Says(test));
+        Assert.Contains("ok: Admin group: found cn=llm-admins,ou=groups,dc=example,dc=test.", Says(test), StringComparison.Ordinal);
+        Assert.Contains("ok: Required group: found cn=llm-users,ou=groups,dc=example,dc=test.", Says(test), StringComparison.Ordinal);
+        var alice = await new TestBrowser(f).SignedInAsync("alice", "alice-directory-pw");
+        Assert.True((await alice.JsonAsync(await alice.GetAsync("/api/auth/me"))).GetProperty("isAdmin").GetBoolean());
+        var bob = await new TestBrowser(f).SignedInAsync("bob", "bob-directory-pw");
+        Assert.Equal(HttpStatusCode.Forbidden, (await new TestBrowser(f).LoginAsync("dave", "dave-directory-pw")).StatusCode);
+        var tried = await admin.JsonAsync(await admin.PostAsync("/api/admin/config/ldap-try", new { settings = new Dictionary<string, string?>(), login = "alice", password = "alice-directory-pw" }));
+        Assert.Contains("as an admin", tried.GetProperty("message").GetString(), StringComparison.Ordinal);
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync("/api/admin/ldap/sync"));
+        await StatusAssert.Is(HttpStatusCode.OK, await bob.GetAsync("/api/auth/me"));
+        Assert.True((await alice.JsonAsync(await alice.GetAsync("/api/auth/me"))).GetProperty("isAdmin").GetBoolean());
+
+        // The OU above the groups, pasted by mistake: it is no group, so the test fails and the check changes nobody.
+        var ou = await TestAsync(admin, Form(null, ("RequiredGroup", "ou=groups," + LdapServer.Base)));
+        Assert.False(ou.GetProperty("ok").GetBoolean(), Says(ou));
+        Assert.StartsWith("Required group: \"ou=groups,dc=example,dc=test\" names ou=groups,dc=example,dc=test, which is not a group (its objectClass: organizationalUnit)",
+            ou.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.Contains("warn: Admin group: \"ou=groups,dc=example,dc=test\" names", Says(await TestAsync(admin, Form(null, ("AdminGroup", "ou=groups," + LdapServer.Base)))), StringComparison.Ordinal);
+        await SaveAsync(admin, new() { ["Ldap:RequiredGroup"] = "ou=groups," + LdapServer.Base });
+        var sync = await admin.PostAsync("/api/admin/ldap/sync");
+        await StatusAssert.Is(HttpStatusCode.ServiceUnavailable, sync);
+        Assert.Contains("no required group \"ou=groups,dc=example,dc=test\" is found (no group has that DN, or the service account cannot see it)",
+            (await admin.JsonAsync(sync)).GetProperty("error").GetString(), StringComparison.Ordinal);
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        await StatusAssert.Is(HttpStatusCode.OK, await bob.GetAsync("/api/auth/me"));
+        Assert.All(gateway.KeysOf("bob@example.test"), k => Assert.False(k.Blocked));
+    }
+
+    [Fact]
+    public void A_DN_is_the_same_however_it_is_written()
+    {
+        const string Dn = @"CN=Sales\, EMEA,OU=Groups,DC=corp,DC=example,DC=com";
+        Assert.True(Llm.Api.Ldap.LdapDirectory.IsNamed(Dn, @"cn=sales\2c emea, ou=groups, dc=corp, dc=example, dc=com"));
+        Assert.True(Llm.Api.Ldap.LdapDirectory.IsNamed(Dn, @" CN = Sales\, EMEA , OU = Groups;DC=corp,DC=example,DC=com "));
+        // Linked groups, and with them what company knowledge each may read, agree with signing in.
+        Assert.True(Llm.Api.Access.AccessService.InDirectoryGroup([Dn], @"cn=Sales\2C EMEA, ou=Groups, dc=corp, dc=example, dc=com"));
+        Assert.False(Llm.Api.Ldap.LdapDirectory.IsNamed(Dn, "OU=Groups,DC=corp,DC=example,DC=com"));
+        Assert.False(Llm.Api.Ldap.LdapDirectory.IsNamed(Dn, @"CN=Sales\, EMEA,OU=Groups,DC=corp,DC=example,DC=org"));
+        Assert.False(Llm.Api.Ldap.LdapDirectory.IsNamed(Dn, "CN=Sales, EMEA,OU=Groups,DC=corp,DC=example,DC=com"));
+        Assert.True(Llm.Api.Ldap.LdapDirectory.IsUnder(Dn, "dc=corp, dc=example, dc=com"));
+        Assert.False(Llm.Api.Ldap.LdapDirectory.IsUnder("DC=example,DC=com", Dn));
+        Assert.False(Llm.Api.Ldap.LdapDirectory.IsUnder(@"cn=x\,dc=example,dc=com", "dc=example,dc=com")); // an escaped comma parts nothing
+        // An escaped space at a value's end is part of it; a plain one is not.
+        Assert.True(Llm.Api.Ldap.LdapDirectory.SameDn(@"cn=a\ ,dc=x", @"cn=a\20 , dc=x"));
+        Assert.False(Llm.Api.Ldap.LdapDirectory.SameDn(@"cn=a\ ,dc=x", "cn=a ,dc=x"));
+        Assert.True(Llm.Api.Ldap.LdapDirectory.SameDn("cn=a+uid=b,dc=x", "UID=b + CN=a,dc=x"));
+        Assert.False(Llm.Api.Ldap.LdapDirectory.SameDn("llm-users", "llm-users"));
+    }
+
+    [Fact]
+    public async Task Several_groups_of_one_name_all_count_and_the_test_says_so()
+    {
+        // With "Where groups are" empty, groups come from memberOf, from all over the directory: a group named
+        // by its name counts wherever one of that name is, such as another app's. The test lists them.
+        await ldap.ModifyAsync("""
+            dn: ou=ci,dc=example,dc=test
+            changetype: add
+            objectClass: organizationalUnit
+            ou: ci
+
+            dn: cn=llm-unique,ou=ci,dc=example,dc=test
+            changetype: add
+            objectClass: groupOfUniqueNames
+            cn: llm-unique
+            uniqueMember: uid=bob,ou=people,dc=example,dc=test
+
+            """);
+        try
+        {
+            var memberOf = Form(null, ("GroupBaseDn", ""), ("AdminGroup", "llm-unique"), ("RequiredGroup", ""));
+            var (f, _) = Fresh(more: memberOf);
+            await using var _f = f;
+            var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+            var test = await TestAsync(admin, memberOf);
+            Assert.False(test.GetProperty("ok").GetBoolean(), Says(test));
+            var message = test.GetProperty("message").GetString()!;
+            Assert.StartsWith("Admin group: 2 groups go by \"llm-unique\" (", message, StringComparison.Ordinal);
+            Assert.Contains("cn=llm-unique,ou=groups,dc=example,dc=test", message, StringComparison.Ordinal);
+            Assert.Contains("cn=llm-unique,ou=ci,dc=example,dc=test", message, StringComparison.Ordinal);
+            Assert.EndsWith("and every one counts: the members of each are admins here. Name the one meant by its full DN, or set \"Where groups are\" to a place that holds only it.", message, StringComparison.Ordinal);
+            // As signing in reads them: bob, in the other one only, is an admin here. Hence the failure.
+            var bob = await new TestBrowser(f).SignedInAsync("bob", "bob-directory-pw");
+            Assert.True((await bob.JsonAsync(await bob.GetAsync("/api/auth/me"))).GetProperty("isAdmin").GetBoolean());
+
+            // As the required group, a warning: the members of each may sign in.
+            var required = await TestAsync(admin, Form(null, ("GroupBaseDn", ""), ("AdminGroup", ""), ("RequiredGroup", "llm-unique")));
+            Assert.True(required.GetProperty("ok").GetBoolean(), Says(required));
+            Assert.Contains("warn: Required group: 2 groups go by \"llm-unique\"", Says(required), StringComparison.Ordinal);
+            Assert.Contains("the members of each may sign in", Says(required), StringComparison.Ordinal);
+
+            // Named by its DN, only that one counts: the test passes, and a try says bob is no admin.
+            var byDn = Form(null, ("GroupBaseDn", ""), ("AdminGroup", "cn=llm-unique,ou=groups," + LdapServer.Base), ("RequiredGroup", ""));
+            var named = await TestAsync(admin, byDn);
+            Assert.True(named.GetProperty("ok").GetBoolean(), Says(named));
+            Assert.DoesNotContain("go by", Says(named), StringComparison.Ordinal);
+            var tried = await admin.JsonAsync(await admin.PostAsync("/api/admin/config/ldap-try", new { settings = byDn, login = "bob", password = "bob-directory-pw" }));
+            Assert.Contains("A member here, not an admin.", Says(tried), StringComparison.Ordinal);
+            // With "Where groups are" set, OpenLDAP's people have only the groups there: one of that name.
+            var below = await TestAsync(admin, Form(null, ("AdminGroup", "llm-unique")));
+            Assert.True(below.GetProperty("ok").GetBoolean(), Says(below));
+            Assert.DoesNotContain("go by", Says(below), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await ldap.ModifyAsync("""
+                dn: cn=llm-unique,ou=ci,dc=example,dc=test
+                changetype: delete
+
+                dn: ou=ci,dc=example,dc=test
+                changetype: delete
+
+                """);
+        }
+    }
+
+    [Fact]
     public async Task A_try_is_held_by_the_same_brakes_as_signing_in()
     {
         // A try tells whether a password is right: wrong ones count as wrong sign-ins do, against the
