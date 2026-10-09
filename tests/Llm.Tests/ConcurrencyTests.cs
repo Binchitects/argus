@@ -867,6 +867,28 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
     }
 
     [Fact]
+    public async Task A_chat_that_chose_no_model_stays_on_the_one_new_chats_use_while_the_engine_had_it_unloaded()
+    {
+        await using var f = NewApp(new Dictionary<string, string?> { ["Chat:DefaultModel"] = "" }, parallel: 1, keep: [], others: [("tiny-a", 1)]);
+        var state = f.Services.GetRequiredService<EngineState>();
+        var watcher = f.Services.GetRequiredService<EngineWatcher>();
+        await EventuallyAsync(() => state.Default == Big, "the big model is the one new chats get");
+        // The engine loaded tiny-a, and unloaded the big one (a request that did not ask the app first).
+        var engine = f.Services.GetRequiredService<EngineClient>();
+        await engine.LoadAsync("tiny-a");
+        await engine.UnloadAsync(Big);
+        watcher.Wake();
+        await EventuallyAsync(() => state.StatusOf(Big) == "unloaded" && state.StatusOf("tiny-a") == "loaded", "the watcher sees it");
+
+        // A chat that chose no model is answered by the big one, which loads again for it, not by tiny-a.
+        var b = await PersonAsync(f);
+        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { thinking = "off", tools = Array.Empty<string>() }))).GetProperty("id").GetGuid();
+        var events = await AskAsync(b, chat, "which model?");
+        Assert.Equal(Big, events.First(e => e.GetProperty("type").GetString() == "assistant").GetProperty("model").GetString());
+        Assert.Equal(Big, state.Default);
+    }
+
+    [Fact]
     public async Task The_model_new_chats_use_comes_back_after_an_API_keys_request_had_the_engine_unload_it()
     {
         var clock = new MovableClock(DateTimeOffset.UtcNow);

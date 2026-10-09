@@ -636,9 +636,9 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
 
     /// <summary>
     /// The model a chat that chose none uses, of <paramref name="mine"/> (ForAsync): the working hours' default
-    /// when it can answer, else the admin's, else the one new chats have been using while it is loaded (the
-    /// watcher keeps it: EngineState.Default), else the first loaded, then the first that loads when asked,
-    /// the model for small steps last.
+    /// when it can answer, else the admin's, else the one new chats have been using while it can answer (the
+    /// watcher keeps it: EngineState.Default; unloaded by the engine, it keeps its place and loads again), else
+    /// the first loaded, then the first that loads when asked, the model for small steps last.
     /// </summary>
     public GatewayModel? DefaultOf(IReadOnlyList<GatewayModel> mine, IReadOnlySet<string> onEngine)
     {
@@ -646,8 +646,9 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
         var o = chat.CurrentValue;
         var adminDefault = o.DefaultModel is { Length: > 0 } chosen && chosen != Chat.SmallModel.Auto ? mine.FirstOrDefault(m => m.Name == chosen && Ready(m.Name, onEngine)) : null;
         var others = mine.Where(m => m.Name != o.SmallModel).ToList();
-        // With none named: a model loaded on request that the list puts first does not take the place of the one everyone is on.
-        var usual = engine.Default is { } d ? others.FirstOrDefault(m => m.Name == d && onEngine.Contains(d) && Loaded(d, onEngine)) : null;
+        // With none named: a model loaded on request that the list puts first, or that took the place of the one everyone is on
+        // while the engine had it unloaded, does not become theirs.
+        var usual = engine.Default is { } d ? others.FirstOrDefault(m => m.Name == d && onEngine.Contains(d) && Ready(d, onEngine)) : null;
         return hoursDefault ?? adminDefault ?? usual
             ?? others.FirstOrDefault(m => Loaded(m.Name, onEngine)) ?? others.FirstOrDefault(m => Ready(m.Name, onEngine))
             ?? mine.FirstOrDefault(m => Loaded(m.Name, onEngine)) ?? mine.FirstOrDefault(m => Ready(m.Name, onEngine)) ?? (mine.Count > 0 ? mine[0] : null);
