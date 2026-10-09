@@ -470,7 +470,7 @@ state_image_pre() { awk -F'\t' -v r="$1" '$1 == r { print $3 }' "$STATE/IMAGES" 
 # The bundle's images into the engine, each only when it is not there already; the release's own
 # images tagged as compose names them. fresh: an image already here is recorded as not ours.
 load_images() {   # load_images fresh|upgrade|repair
-  local ref file have pre n=0 skipped=0 tmp svc id
+  local ref file have pre n=0 skipped=0 tmp svc id out
   step "images ($ENGINE load; nothing is pulled)"
   tmp="$STATE/IMAGES.new"; : > "$tmp" || die "cannot write $tmp"
   while IFS=$'\t' read -r ref file _ _ _; do
@@ -482,7 +482,10 @@ load_images() {   # load_images fresh|upgrade|repair
       skipped=$((skipped + 1))
     else
       [[ -f "$BUNDLE/images/$file" ]] || die "the bundle has no images/$file (unpacked only in part?)"
-      E load -i "$BUNDLE/images/$file" >/dev/null || die "$ENGINE load of $ref failed (disk full? see $ENGINE system df)"
+      if ! out="$(E load -q -i "$BUNDLE/images/$file" 2>&1)"; then
+        printf '%s\n' "$out" | tail -n 5 | sed 's/^/    /'
+        die "$ENGINE load of $ref failed (disk full? see $ENGINE system df)"
+      fi
       have="$(image_id "$ref")"
       [[ -n "$have" ]] || die "$ref is not in $ENGINE after loading images/$file"
       n=$((n + 1)); say "  loaded $ref$([[ $pre -eq 1 && "$have" != "$(state_image_id "$ref")" ]] && echo " (it was here before the install: remove keeps it)")"

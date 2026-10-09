@@ -253,10 +253,12 @@ if [[ $ACTION == pack ]]; then
 
   say "==> images"
   : > "$B/images/IMAGES"
+  # Podman's progress lines are noise in a log; Docker's save prints none.
+  QUIET=(); [[ $ENGINE == podman ]] && QUIET=(-q)
   for ref in "${IMAGES[@]}"; do
     id="$("$ENGINE" image inspect --format '{{.Id}}' "$ref" 2>/dev/null)" || die "$ref is not on this host: build or pull it first (this script pulls nothing)"
     file="$(image_file "$ref")"
-    "$ENGINE" save -o "$B/images/$file" "$ref" || die "$ENGINE save $ref failed"
+    "$ENGINE" save ${QUIET[@]+"${QUIET[@]}"} -o "$B/images/$file" "$ref" || die "$ENGINE save $ref failed"
     printf '%s\t%s\t%s\n' "$ref" "$file" "$id" >> "$B/images/IMAGES"
     printf '  %-60s %8s\n' "$ref" "$(human "$(stat -c %s "$B/images/$file")")"
   done

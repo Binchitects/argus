@@ -456,6 +456,8 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(app["image_id"], self.r.store()["images"]["arena-app:9.9.9"])
         self.assertIn("ok     app: 9.9.9 (its own /api/info)", r.stdout)
         self.assertIn("Argus Arena 9.9.9 runs: https://arena.test:18443", r.stdout)
+        # Loaded quietly: the engines' progress lines are noise in a log.
+        self.assertTrue(self.r.s.called("load", "-q", "-i"))
         # Third-party images that were here before: recorded so, and remove leaves them.
         rows = [line.split("\t") for line in (self.dir / ".arena-install" / "IMAGES").read_text().splitlines()]
         self.assertEqual([r_[2] for r_ in rows if r_[0] == "traefik:v3.6.7"], ["1"])
