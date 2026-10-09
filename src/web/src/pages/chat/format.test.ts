@@ -39,9 +39,9 @@ describe('what an answer used and cost', () => {
     expect(u.cost).toBeCloseTo(0.001 + 0.04 + 0.0005 + 0.0002, 12)
   })
 
-  it('prices cached tokens at nothing for a model with no cached price, as the gateway does', () => {
+  it('prices cached tokens at the input price for a model with no cached price of its own (an answer from before costs were kept)', () => {
     const a = { ...blank('a', 'assistant', 'q'), model: 'Local', promptTokens: 3000, cachedTokens: 2000, completionTokens: 100 }
-    expect(answerUsage([a], config).cost).toBeCloseTo((1000 * 0.2 + 100 * 0.8) / 1e6, 12)
+    expect(answerUsage([a], config).cost).toBeCloseTo((1000 * 0.2 + 2000 * 0.2 + 100 * 0.8) / 1e6, 12)
   })
 
   it('has no cost when no model has a price', () => {
