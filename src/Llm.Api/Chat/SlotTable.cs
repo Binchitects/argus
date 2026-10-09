@@ -106,15 +106,6 @@ public sealed class SlotTable(TimeProvider clock)
         return side ? SideSlot(count) is not null : count >= 2;
     }
 
-    /// <summary>Whether a request sent from here is answering on <paramref name="model"/> now (in a slot chosen here).</summary>
-    public bool Answering(string model)
-    {
-        lock (_lock)
-        {
-            return _models.GetValueOrDefault(model)?.Busy.Any(b => b > 0) == true;
-        }
-    }
-
     /// <summary>
     /// A slot for one request to <paramref name="model"/>: for <paramref name="conversation"/>'s turn, or a side
     /// request when it is null. <paramref name="seen"/>: what the engine said of the model's slots, lately; null: go

@@ -10,7 +10,8 @@ namespace Llm.Api.Models;
 /// Keeps the engine as admins chose: the models kept loaded loaded (again after
 /// the engine restarts, or after a model loaded on request pushed one out), and
 /// with 2 or more at once the model new chats use too (after the engine unloaded it
-/// by its own choice to load another); the presets and the gateway in step with
+/// by its own choice to load another), and the model for small steps (in its place,
+/// or in the one it shares, once that is free or idle a while); the presets and the gateway in step with
 /// the database, and Prometheus scraping whichever models are loaded. Checks every
 /// 10 seconds, every 3 while a model loads. A model that fails to load is tried
 /// again after a minute, then less and less often (not every few seconds); when
@@ -104,8 +105,10 @@ public sealed partial class EngineWatcher : BackgroundService
                     await catalog.SyncGatewayAsync(stoppingToken);
                     nextSync = DateTimeOffset.UtcNow.AddMinutes(1);
                 }
-                var models = await engine.ModelsAsync(stoppingToken);
-                state.Set(models);
+                var asked = state.Asking();
+                state.Set(await engine.ModelsAsync(stoppingToken), asked);
+                // As the engine said, with the models the app told to unload unloaded (the engine lists them loaded until they stop).
+                var models = state.Now.Models;
                 loading = models.Any(m => m.Status == "loading");
                 string? Status(string name) => models.FirstOrDefault(m => m.Name == name)?.Status;
                 // Never more than the engine holds at once: past that, each load would unload another kept model.
@@ -118,6 +121,7 @@ public sealed partial class EngineWatcher : BackgroundService
                     {
                         LogHoursUnload(logger, gone, hours.Window?.Name ?? "the pinned models");
                         await engine.UnloadAsync(gone, stoppingToken);
+                        route.Unloaded(gone);
                     }
                     chatModels.Forget();
                 }
@@ -147,7 +151,7 @@ public sealed partial class EngineWatcher : BackgroundService
                         loading = true;
                     }
                     else if (options.Value.ModelsMax >= 2 && usual is { } back && !state.WasDropped(back) && (Status(back) == "unloaded" || state.MayRetry(back))
-                        && await route.RoomForAsync(back, stoppingToken))
+                        && await route.RoomForAsync(back, EngineRoute.Quiet, stoppingToken))
                     {
                         // The model new chats use, unloaded by the engine to load another (an admin's Load at the limit, a request
                         // that did not ask the app first): back, in a place left free or made by a model that may make room, idle
@@ -158,6 +162,20 @@ public sealed partial class EngineWatcher : BackgroundService
                             state.Tried(back);
                         }
                         await engine.LoadAsync(back, stoppingToken);
+                        loading = true;
+                    }
+                    else if (options.Value.ModelsMax >= 2 && small is { } helper && helper != usual && !state.WasDropped(helper)
+                        && (Status(helper) == "unloaded" || state.MayRetry(helper))
+                        && await route.RoomForAsync(helper, held.Contains(helper) ? EngineRoute.Quiet : SmallQuiet, stoppingToken))
+                    {
+                        // The model for small steps: in the place kept for it, or, when it shares the last place with the models
+                        // loaded on request, in that place while it is free, or once the model there has been idle a while.
+                        LogSmall(logger, helper);
+                        if (Status(helper) == "failed")
+                        {
+                            state.Tried(helper);
+                        }
+                        await engine.LoadAsync(helper, stoppingToken);
                         loading = true;
                     }
                     else if (kept.Count > 0 && kept.All(k => Status(k) == "failed") && !models.Any(m => m.Status == "loaded"))
@@ -254,13 +272,30 @@ public sealed partial class EngineWatcher : BackgroundService
 
     /// <summary>
     /// The models that never make room for another (EngineState.Held), at most as many as the engine holds: those
-    /// <paramref name="kept"/> loaded, then the one new chats use (<paramref name="usual"/>), then the model for
-    /// small steps (<paramref name="small"/>), each its own (<paramref name="status"/> knows it). With one model at
-    /// a time, only the kept: people on different models take turns, each loading theirs again.
+    /// <paramref name="kept"/> loaded, then the one new chats use (<paramref name="usual"/>), each the engine's own
+    /// (<paramref name="status"/> knows it); then the model for small steps (<paramref name="small"/>), only while a
+    /// place is left beside it for the others: else it shares that place with them, making room once idle, and comes
+    /// back to it once free (or once the model there has been idle a while). With one model at a time, only the kept.
     /// </summary>
-    public static IReadOnlyList<string> Held(IReadOnlyList<string> kept, string? usual, string? small, int max, Func<string, string?> status) =>
-        max < 2 ? [.. kept.Take(max)]
-            : [.. kept.Concat(new[] { usual, small }.OfType<string>().Where(n => status(n) is not null)).Distinct(StringComparer.Ordinal).Take(max)];
+    public static IReadOnlyList<string> Held(IReadOnlyList<string> kept, string? usual, string? small, int max, Func<string, string?> status)
+    {
+        if (max < 2)
+        {
+            return [.. kept.Take(max)];
+        }
+        var held = kept.Concat(new[] { usual }.OfType<string>().Where(n => status(n) is not null)).Distinct(StringComparer.Ordinal).Take(max).ToList();
+        if (small is not null && status(small) is not null && !held.Contains(small) && held.Count + 1 < max)
+        {
+            held.Add(small);
+        }
+        return held;
+    }
+
+    /// <summary>
+    /// How long the model loaded in the place the model for small steps shares with the others must have been idle before
+    /// it makes room for it: longer than for the model new chats use, as small steps meanwhile use the answer's own model.
+    /// </summary>
+    public static readonly TimeSpan SmallQuiet = TimeSpan.FromMinutes(5);
 
     /// <summary>
     /// The engine model new chats use (EngineState.Default): the working hours' default, the admin's (Settings), the
@@ -353,6 +388,9 @@ public sealed partial class EngineWatcher : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Engine: loading {Model} again, the model new chats use")]
     private static partial void LogBack(ILogger logger, string model);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Engine: loading {Model} again, the model for small steps")]
+    private static partial void LogSmall(ILogger logger, string model);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Engine: {Model} failed to load (the engine's log says why); load another from Admin -> Models")]
     private static partial void LogNothing(ILogger logger, string model);

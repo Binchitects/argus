@@ -282,6 +282,8 @@ public static class ModelEndpoints
         }
         try
         {
+            // Loaded again, though the app told it to unload a moment ago.
+            state.Loading(name);
             await engine.LoadAsync(name, ct);
         }
         catch (EngineException ex)
@@ -294,7 +296,7 @@ public static class ModelEndpoints
         return Results.Accepted();
     }
 
-    private static async Task<IResult> UnloadAsync(string name, EngineClient engine, EngineState state, ModelCatalog catalog, EngineWatcher watcher,
+    private static async Task<IResult> UnloadAsync(string name, EngineClient engine, EngineState state, EngineRoute route, ModelCatalog catalog, EngineWatcher watcher,
         ChatModels chatModels, ModelHoursState hours, MediaControl media, Audit audit, CancellationToken ct)
     {
         if (MediaControl.Find(name) is not null)
@@ -321,6 +323,8 @@ public static class ModelEndpoints
             // Nor loaded again by the app as the model new chats use.
             state.Dropped(name);
             await engine.UnloadAsync(name, ct);
+            // Unloaded at once for every request, though the engine lists it loaded until it has stopped.
+            route.Unloaded(name);
         }
         catch (EngineException ex)
         {
@@ -430,7 +434,8 @@ public static class ModelEndpoints
         }
         try
         {
-            state.Set(await engine.ModelsAsync(ct));
+            var asked = state.Asking();
+            state.Set(await engine.ModelsAsync(ct), asked);
         }
         catch (EngineException ex)
         {

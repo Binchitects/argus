@@ -673,7 +673,7 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
     {
         var clock = new MovableClock(DateTimeOffset.UtcNow);
         var state = new EngineState(clock);
-        state.Set([new EngineModel("small", "failed"), new EngineModel("big", "loaded")]);
+        state.Set([new EngineModel("small", "failed"), new EngineModel("big", "loaded")], state.Asking());
         Assert.False(state.MayRetry("small"));
         Assert.False(state.MayAsk("small"));
         Assert.False(state.MayRetry("big"));
@@ -688,12 +688,12 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         Assert.False(state.MayRetry("small"));
         clock.Now += TimeSpan.FromSeconds(3);
         // Still failed 3 seconds after the try: the engine has not begun yet, it is part of the try.
-        state.Set([new EngineModel("small", "failed")]);
+        state.Set([new EngineModel("small", "failed")], state.Asking());
         Assert.True(state.MayAsk("small"));
         Assert.False(state.MayRetry("small"));
         // Still failed 6 seconds after: the try failed, and the requests that follow wait for the next one.
         clock.Now += TimeSpan.FromSeconds(3);
-        state.Set([new EngineModel("small", "failed")]);
+        state.Set([new EngineModel("small", "failed")], state.Asking());
         Assert.False(state.MayAsk("small"));
         Assert.False(state.MayRetry("small"));
         // Two minutes from the try, then four.
@@ -711,11 +711,67 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         Assert.Equal([1d, 2, 4, 8, 16, 30, 30], Enumerable.Range(1, 7).Select(n => EngineState.Wait(n).TotalMinutes));
 
         // Once it loads, all is forgotten: a new failure waits a minute again.
-        state.Set([new EngineModel("small", "loaded")]);
-        state.Set([new EngineModel("small", "failed")]);
+        state.Set([new EngineModel("small", "loaded")], state.Asking());
+        state.Set([new EngineModel("small", "failed")], state.Asking());
         Assert.False(state.MayRetry("small"));
         clock.Now += TimeSpan.FromMinutes(1);
         Assert.True(state.MayRetry("small"));
+    }
+
+    [Fact]
+    public void A_model_told_to_unload_counts_as_unloaded_at_once_until_the_engine_has_stopped_it()
+    {
+        var clock = new MovableClock(DateTimeOffset.UtcNow);
+        var state = new EngineState(clock);
+        IReadOnlyList<EngineModel> Spare(string status) => [new EngineModel("big", "loaded"), new EngineModel("spare", status)];
+        var before = state.Asking();
+        state.Set(Spare("loaded"), before);
+        Assert.Equal(clock.Now, state.LoadedSince("spare"));
+
+        // Told to unload: unloaded at once, though the watcher's list said loaded a moment ago, though a list asked before
+        // says loaded (or unloaded), and though the engine lists it loaded while it stops.
+        clock.Now += TimeSpan.FromSeconds(1);
+        state.Unloading("spare");
+        Assert.Equal("unloaded", state.StatusOf("spare"));
+        state.Set(Spare("loaded"), before);
+        Assert.Equal("unloaded", state.StatusOf("spare"));
+        state.Set(Spare("unloaded"), before);
+        clock.Now += TimeSpan.FromSeconds(1);
+        state.Set(Spare("loaded"), state.Asking());
+        Assert.Equal("unloaded", state.StatusOf("spare"));
+        Assert.Equal("unloaded", state.Seen(Spare("loaded"), state.Asking()).Single(m => m.Name == "spare").Status);
+        Assert.Null(state.LoadedSince("spare"));
+        Assert.Equal("loaded", state.StatusOf("big"));
+
+        // Stopped: what the engine says goes again, and loaded once more it is loaded, seen from then.
+        state.Set(Spare("unloaded"), state.Asking());
+        clock.Now += TimeSpan.FromSeconds(1);
+        state.Set(Spare("loaded"), state.Asking());
+        Assert.Equal("loaded", state.StatusOf("spare"));
+        Assert.Equal(clock.Now, state.LoadedSince("spare"));
+
+        // Not unloaded after all (asked for meanwhile): loaded at once, as before.
+        state.Unloading("spare");
+        state.NotUnloading("spare");
+        Assert.Equal("loaded", state.StatusOf("spare"));
+        state.Set(Spare("loaded"), state.Asking());
+        Assert.Equal("loaded", state.StatusOf("spare"));
+
+        // Loaded again for a request (or by an admin) before it was seen stopped: as the engine says, seen loaded from then.
+        state.Unloading("spare");
+        state.Loading("spare");
+        Assert.Null(state.LoadedSince("spare"));
+        state.Set(Spare("loaded"), state.Asking());
+        Assert.Equal("loaded", state.StatusOf("spare"));
+
+        // An engine that never says it stopped is believed after half a minute.
+        state.Unloading("spare");
+        clock.Now += TimeSpan.FromSeconds(29);
+        state.Set(Spare("loaded"), state.Asking());
+        Assert.Equal("unloaded", state.StatusOf("spare"));
+        clock.Now += TimeSpan.FromSeconds(2);
+        state.Set(Spare("loaded"), state.Asking());
+        Assert.Equal("loaded", state.StatusOf("spare"));
     }
 
     [Fact]
@@ -726,13 +782,17 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         Assert.Equal(["small", "mid", "huge", "env"], EngineWatcher.SpareOf(["big", "env", "huge", "mid", "small"], ["big"], sizes));
         Assert.Empty(EngineWatcher.SpareOf(["big"], ["big"], sizes));
 
-        // Held: the kept, then the model new chats use, then the model for small steps; no more than the engine holds.
+        // Held: the kept, then the model new chats use, no more than the engine holds; then the model for small steps,
+        // only while a place is left beside it for the others (else it shares that one with them).
         string? Known(string name) => name == "gone" ? null : "loaded";
-        Assert.Equal(["big", "small"], EngineWatcher.Held([], "big", "small", 2, Known));
+        Assert.Equal(["big"], EngineWatcher.Held([], "big", "small", 2, Known));
+        Assert.Equal(["big", "small"], EngineWatcher.Held([], "big", "small", 3, Known));
         Assert.Equal(["kept", "big"], EngineWatcher.Held(["kept"], "big", "small", 2, Known));
-        Assert.Equal(["kept", "big", "small"], EngineWatcher.Held(["kept"], "big", "small", 3, Known));
+        Assert.Equal(["kept", "big"], EngineWatcher.Held(["kept"], "big", "small", 3, Known));
+        Assert.Equal(["kept", "big", "small"], EngineWatcher.Held(["kept"], "big", "small", 4, Known));
+        Assert.Equal(["small", "big"], EngineWatcher.Held(["small"], "big", "small", 2, Known));
         Assert.Equal(["big"], EngineWatcher.Held(["big"], "big", "gone", 3, Known));
-        // One model at a time: only a kept one stays, and people on different models take turns, the default's too.
+        // One model at a time: only a kept one stays; the others, the default included, make room once idle.
         Assert.Empty(EngineWatcher.Held([], "big", "small", 1, Known));
         Assert.Equal(["kept"], EngineWatcher.Held(["kept"], "big", "small", 1, Known));
     }
