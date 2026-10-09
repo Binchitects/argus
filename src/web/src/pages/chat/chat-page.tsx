@@ -23,6 +23,7 @@ import { QuestionRail } from './question-rail'
 import { toolsOn } from './tools'
 import { ToolsPicker } from './tools-picker'
 import { ChatList } from './sidebar'
+import { useListFolds } from './list-folds'
 import { ChatTree, toTurns } from './tree'
 import { AnswerTurn, CompactedMark, QuestionTurn } from './turns'
 import { ArenaTurn, ComparePicker } from './arena'
@@ -52,6 +53,7 @@ export function ChatPage() {
   const navigate = useNavigate()
   const config = useQuery(configQuery)
   const [listOpen, setListOpen] = useState(false)
+  const listFolded = useListFolds().listFolded
   // "Start a chat" from the gallery (/chat?assistant=…): a new chat with it; the address is tidied after.
   const [search, setSearch] = useSearchParams()
   useEffect(() => {
@@ -91,9 +93,9 @@ export function ChatPage() {
   })
 
   return (
-    <div className="grid h-[calc(100dvh-3.5rem)] min-h-0 lg:grid-cols-[16rem_minmax(0,1fr)] 2xl:grid-cols-[19rem_minmax(0,1fr)]">
+    <div className={cn('grid h-[calc(100dvh-3.5rem)] min-h-0', listFolded ? 'lg:grid-cols-[3rem_minmax(0,1fr)]' : 'lg:grid-cols-[16rem_minmax(0,1fr)] 2xl:grid-cols-[19rem_minmax(0,1fr)]')}>
       <div className="hidden min-h-0 border-r bg-sidebar lg:block">
-        <ChatList activeId={id} activeAssistant={assistantId} onNew={() => startNew()} />
+        <ChatList activeId={id} activeAssistant={assistantId} onNew={() => startNew()} foldable />
       </div>
       <Sheet open={listOpen} onOpenChange={setListOpen}>
         <SheetContent side="left" className="w-80 gap-0 bg-sidebar p-0">
