@@ -327,12 +327,16 @@ public static class People
     const string CannotVerify = "Cannot verify your GitLab access right now and no recent cached " +
                                 "permission exists, so access is denied. Retry shortly.";
 
+    /// <summary>Argus's repository rows as they are now: each row's id and its GitLab project.</summary>
+    public static List<(long Id, long GitlabId)> Repos(SqliteConnection conn) =>
+        Sql.Query(conn, "SELECT id, gitlab_id FROM repos").Select(r => (r.Long("id"), r.Long("gitlab_id"))).ToList();
+
     /// <summary>
-    /// The Identity of a signed-in person, from GitLab membership read with the
+    /// A signed-in person's access to these GitLab projects, from GitLab membership read with the
     /// service credential. Matched by email, then by the GitLab username the
     /// administrator linked to the account, if any.
     /// </summary>
-    public static Identity ResolvePerson(SqliteConnection conn, MemberDirectory directory, string? email, string? gitlabUsername = null)
+    public static Grant GrantFor(MemberDirectory directory, string? email, string? gitlabUsername, IReadOnlyCollection<long> projects)
     {
         email = PyStr.Strip(email ?? "");
         if (email.Length == 0) throw new AclDenied("No email is known for this person, so access is denied.");
@@ -354,24 +358,17 @@ public static class People
             throw new AclDenied($"The GitLab account {user["username"]} is not active.");
 
         var uid = Convert.ToInt64(user["id"]!.ToString());
-        var byProject = new Dictionary<long, List<long>>();
-        var order = new List<long>();
-        foreach (var r in Sql.Query(conn, "SELECT id, gitlab_id FROM repos"))
-        {
-            var gid = r.Long("gitlab_id");
-            if (!byProject.TryGetValue(gid, out var list)) { byProject[gid] = list = []; order.Add(gid); }
-            list.Add(r.Long("id"));
-        }
-        var allowed = new List<long>();
+        var order = projects.Distinct().ToList();
+        var readable = new HashSet<long>();
         try
         {
             directory.Prefetch(order);
             foreach (var gid in order)
                 if (directory.Members(gid).Any(m => m.Id == uid && m.AccessLevel >= Acl.MinAccessLevel && m.State == "active"))
-                    allowed.AddRange(byProject[gid]);
+                    readable.Add(gid);
         }
         catch (GitLabUnavailable exc) { throw new AclDenied(CannotVerify, exc); }
-        return new Identity(uid, user["username"]?.ToString() ?? "", allowed.Order().ToList());
+        return new Grant(uid, user["username"]?.ToString() ?? "", order.ToHashSet(), readable);
     }
 
     /// <summary>An access check that came to a definite no (not GitLab being unwell).</summary>
@@ -407,32 +404,78 @@ public static class People
 }
 
 /// <summary>
+/// A person's access in GitLab's own terms: their account, the GitLab projects checked, and those of
+/// them they may read. It is what <see cref="PersonAccess"/> keeps, and it is laid over Argus's
+/// repository rows as they are at each request (<see cref="Over"/>): a row id is given again to the
+/// next repository indexed once its own is taken out, so a list of row ids kept for minutes could
+/// open another repository to someone who may not read it.
+/// </summary>
+public sealed record Grant(long UserId, string Username, IReadOnlySet<long> Checked, IReadOnlySet<long> Readable)
+{
+    /// <summary>The Identity over these repository rows: the rows of the projects the person may read.</summary>
+    public Identity Over(IEnumerable<(long Id, long GitlabId)> repos) =>
+        new(UserId, Username, repos.Where(r => Readable.Contains(r.GitlabId)).Select(r => r.Id).Order().ToList());
+
+    /// <summary>This, and the projects checked since.</summary>
+    public Grant With(Grant more) => this with
+    {
+        Checked = Checked.Union(more.Checked).ToHashSet(),
+        Readable = Readable.Union(more.Readable).ToHashSet(),
+    };
+}
+
+/// <summary>
 /// The repositories each person may read, resolved from their GitLab membership apart from the
 /// requests that need them. Connecting never waits for it: a person known to the gate is
 /// connected at once, the resolution starts then (<see cref="Warm"/>), and only a tool that reads
 /// code waits, for the first answer only. An answer is kept ten minutes, then served while a fresh
 /// one is fetched in the background (for an hour at most while GitLab cannot answer), and is
-/// fetched once for everyone asking at the same moment.
+/// fetched once for everyone asking at the same moment. What is kept is a <see cref="Grant"/>, in
+/// GitLab project ids; a repository indexed since is checked at the next request.
 /// </summary>
-public sealed class PersonAccess(Func<string, string?, Identity> resolve, Func<double>? now = null, double ttl = Acl.TtlSeconds)
+/// <param name="resolve">The person's (email, linked GitLab username) access to these GitLab projects.</param>
+/// <param name="repos">The repository rows as they are now.</param>
+public sealed class PersonAccess(Func<string, string?, IReadOnlyCollection<long>, Grant> resolve,
+    Func<IReadOnlyList<(long Id, long GitlabId)>> repos, Func<double>? now = null, double ttl = Acl.TtlSeconds)
 {
     const int MaxKept = 5000;
     readonly Func<double> _now = now ?? (() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0);
     readonly Lock _gate = new();
-    readonly Dictionary<string, (double At, Identity Value)> _known = new(StringComparer.Ordinal);
-    readonly Dictionary<string, Task<Identity>> _resolving = new(StringComparer.Ordinal);
+    readonly Dictionary<string, (double At, Grant Value)> _known = new(StringComparer.Ordinal);
+    readonly Dictionary<string, Task<Grant>> _resolving = new(StringComparer.Ordinal);
+
+    /// <summary>The server's: GitLab membership read with the service credential, over the index's repository rows.</summary>
+    public static PersonAccess For(string dbPath, Lazy<MemberDirectory> directory) => new(
+        (email, username, projects) => People.GrantFor(directory.Value, email, username, projects),
+        () =>
+        {
+            using var conn = Db.Connect(dbPath);
+            return People.Repos(conn);
+        });
 
     static string Key(string email, string? username) => PyStr.Strip(email).ToLowerInvariant() + "\n" + (username ?? "").Trim().ToLowerInvariant();
 
+    static List<long> Projects(IEnumerable<(long Id, long GitlabId)> rows) => rows.Select(r => r.GitlabId).Distinct().ToList();
+
     /// <summary>
-    /// The person's repositories: as kept, else resolved now, on this thread (or by joining the
+    /// The person's repositories: what is kept, laid over the repository rows as they are now, with
+    /// any repository indexed since checked now; else resolved now, on this thread (or by joining the
     /// resolution already under way: no thread waits for another that is not running yet).
     /// </summary>
     public Identity Resolve(string email, string? username)
     {
         var key = Key(email, username);
-        Task<Identity>? running;
-        TaskCompletionSource<Identity>? mine = null;
+        var grant = Kept(key, email, username);
+        var rows = repos();
+        var added = Projects(rows).Where(p => !grant.Checked.Contains(p)).ToList();
+        if (added.Count > 0) grant = Extend(key, email, username, grant, added);
+        return grant.Over(rows);
+    }
+
+    Grant Kept(string key, string email, string? username)
+    {
+        Task<Grant>? running;
+        TaskCompletionSource<Grant>? mine = null;
         lock (_gate)
         {
             if (_known.TryGetValue(key, out var hit))
@@ -447,12 +490,35 @@ public sealed class PersonAccess(Func<string, string?, Identity> resolve, Func<d
             }
             if (!_resolving.TryGetValue(key, out running))
             {
-                mine = new TaskCompletionSource<Identity>(TaskCreationOptions.RunContinuationsAsynchronously);
+                mine = new TaskCompletionSource<Grant>(TaskCreationOptions.RunContinuationsAsynchronously);
                 _resolving[key] = running = mine.Task;
             }
         }
         if (mine is not null) Run(key, email, username, mine);
         return running.GetAwaiter().GetResult();
+    }
+
+    /// <summary>
+    /// The grant with these projects (indexed since it was resolved) checked too, and kept so. While
+    /// GitLab cannot answer they stay unreadable, and the next request asks again.
+    /// </summary>
+    Grant Extend(string key, string email, string? username, Grant grant, IReadOnlyCollection<long> added)
+    {
+        Grant more;
+        try { more = resolve(email, username, added); }
+        catch (AclDenied exc) when (!People.Definite(exc))
+        {
+            Console.Error.WriteLine($"could not check a person's access to repositories indexed since: {exc.Message}");
+            return grant;
+        }
+        catch (AclDenied)
+        {
+            lock (_gate) _known.Remove(key);
+            throw;
+        }
+        lock (_gate)
+            if (_known.TryGetValue(key, out var hit)) _known[key] = (hit.At, hit.Value.With(more));
+        return grant.With(more);
     }
 
     /// <summary>Starts resolving when nothing fresh is kept and nothing is under way, so the first tool call finds it ready.</summary>
@@ -470,18 +536,18 @@ public sealed class PersonAccess(Func<string, string?, Identity> resolve, Func<d
     void Background(string key, string email, string? username)
     {
         if (_resolving.ContainsKey(key)) return;
-        var mine = new TaskCompletionSource<Identity>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var mine = new TaskCompletionSource<Grant>(TaskCreationOptions.RunContinuationsAsynchronously);
         _resolving[key] = mine.Task;
         _ = Task.Run(() => Run(key, email, username, mine));
     }
 
-    /// <summary>One resolution: kept when it worked; a definite no forgets what was kept; GitLab unwell leaves it.</summary>
-    void Run(string key, string email, string? username, TaskCompletionSource<Identity> mine)
+    /// <summary>One resolution over every project indexed: kept when it worked; a definite no forgets what was kept; GitLab unwell leaves it.</summary>
+    void Run(string key, string email, string? username, TaskCompletionSource<Grant> mine)
     {
-        Identity identity;
+        Grant grant;
         try
         {
-            identity = resolve(email, username);
+            grant = resolve(email, username, Projects(repos()));
         }
         catch (Exception exc)
         {
@@ -506,8 +572,8 @@ public sealed class PersonAccess(Func<string, string?, Identity> resolve, Func<d
                 foreach (var old in _known.Where(e => now - e.Value.At >= Acl.StaleGraceSeconds).Select(e => e.Key).ToList()) _known.Remove(old);
                 if (_known.Count >= MaxKept) _known.Clear();
             }
-            _known[key] = (_now(), identity);
+            _known[key] = (_now(), grant);
         }
-        mine.SetResult(identity);
+        mine.SetResult(grant);
     }
 }

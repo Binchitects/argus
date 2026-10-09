@@ -125,21 +125,26 @@ public sealed class SlowGitLabTests : IAsyncLifetime
 /// <summary>A person's repositories, kept and refreshed apart from the requests.</summary>
 public sealed class PersonAccessTests
 {
-    static Identity Alice(params long[] repos) => new(5, "alice", repos);
+    /// <summary>Repository rows whose id is their GitLab project's.</summary>
+    static readonly IReadOnlyList<(long Id, long GitlabId)> Rows = [(1, 1), (2, 2), (3, 3), (7, 7)];
+
+    /// <summary>Alice's access to the projects asked about: those of <paramref name="readable"/> among them.</summary>
+    static Grant Alice(IReadOnlyCollection<long> projects, params long[] readable) =>
+        new(5, "alice", projects.ToHashSet(), readable.Where(projects.Contains).ToHashSet());
 
     [Fact]
     public async Task Kept_ten_minutes_then_served_while_refreshed_and_resolved_once_for_everyone_asking_at_once()
     {
         double now = 1000;
         var calls = 0;
-        var answer = Alice(1, 2);
+        long[] answer = [1, 2];
         var gate = new TaskCompletionSource();
-        var access = new PersonAccess((_, _) =>
+        var access = new PersonAccess((_, _, projects) =>
         {
             Interlocked.Increment(ref calls);
             gate.Task.Wait();
-            return answer;
-        }, () => now);
+            return Alice(projects, answer);
+        }, () => Rows, () => now);
 
         var asking = Enumerable.Range(0, 10).Select(_ => Task.Run(() => access.Resolve("Alice@corp.example", "alice"))).ToList();
         await Task.Delay(200);
@@ -153,7 +158,7 @@ public sealed class PersonAccessTests
 
         // Past ten minutes: the last answer at once, a fresh one fetched behind it.
         now += 2;
-        answer = Alice(1, 2, 3);
+        answer = [1, 2, 3];
         Assert.Equal([1L, 2L], access.Resolve("alice@corp.example", "alice").AllowedRepoIds);
         await Until(() => access.Resolve("alice@corp.example", "alice").AllowedRepoIds.Count == 3);
         Assert.Equal(2, calls);
@@ -163,19 +168,19 @@ public sealed class PersonAccessTests
     public async Task A_definite_no_is_not_served_from_before_but_gitlab_being_unwell_is()
     {
         double now = 1000;
-        Func<Identity> next = () => Alice(1);
-        var access = new PersonAccess((_, _) => next(), () => now);
+        Func<IReadOnlyCollection<long>, Grant> next = projects => Alice(projects, 1);
+        var access = new PersonAccess((_, _, projects) => next(projects), () => Rows, () => now);
         Assert.Single(access.Resolve("alice@corp.example", null).AllowedRepoIds);
 
         // GitLab unwell: the last answer stays, within the hour.
         now += Acl.TtlSeconds + 1;
-        next = () => throw new AclDenied("Cannot verify", new GitLabUnavailable("503"));
+        next = _ => throw new AclDenied("Cannot verify", new GitLabUnavailable("503"));
         access.Resolve("alice@corp.example", null);
         await Task.Delay(300);
         Assert.Single(access.Resolve("alice@corp.example", null).AllowedRepoIds);
 
         // The account gone in GitLab: refused from then on.
-        next = () => throw new AclDenied("No GitLab account matches alice@corp.example");
+        next = _ => throw new AclDenied("No GitLab account matches alice@corp.example");
         now += 1;
         access.Resolve("alice@corp.example", null);
         await Until(() =>
@@ -190,18 +195,61 @@ public sealed class PersonAccessTests
     {
         var started = new TaskCompletionSource();
         var release = new TaskCompletionSource();
-        var access = new PersonAccess((_, _) =>
+        var access = new PersonAccess((_, _, projects) =>
         {
             started.TrySetResult();
             release.Task.Wait();
-            return Alice(7);
-        });
+            return Alice(projects, 7);
+        }, () => Rows);
         var clock = Stopwatch.StartNew();
         access.Warm("alice@corp.example", "alice");
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(1));
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
         release.SetResult();
         Assert.Equal([7L], access.Resolve("alice@corp.example", "alice").AllowedRepoIds);
+    }
+
+    [Fact]
+    public void What_is_kept_follows_the_repositories_not_their_row_ids_and_one_indexed_since_is_seen_at_once()
+    {
+        // Alice may read GitLab projects 200 (corp/payments) and 300; not 999 (corp/hr-secrets).
+        IReadOnlyList<(long Id, long GitlabId)> rows = [(1, 100), (2, 200)];
+        var asked = new List<long[]>();
+        var access = new PersonAccess((_, _, projects) =>
+        {
+            lock (asked) asked.Add([.. projects.Order()]);
+            return Alice(projects, 200, 300);
+        }, () => rows, () => 1000);
+        Assert.Equal([2L], access.Resolve("alice@corp.example", "alice").AllowedRepoIds);
+
+        // corp/payments taken out, and corp/hr-secrets indexed into the row id it left (SQLite gives the highest one again).
+        rows = [(1, 100)];
+        Assert.Empty(access.Resolve("alice@corp.example", "alice").AllowedRepoIds);
+        rows = [(1, 100), (2, 999)];
+        Assert.Empty(access.Resolve("alice@corp.example", "alice").AllowedRepoIds);
+
+        // A repository she may read, indexed since: hers at the next request, not ten minutes later.
+        rows = [(1, 100), (2, 999), (3, 300)];
+        Assert.Equal([3L], access.Resolve("alice@corp.example", "alice").AllowedRepoIds);
+        Assert.Equal([3L], access.Resolve("alice@corp.example", "alice").AllowedRepoIds);
+        // Each project asked about once: all of them first, then each newly indexed one alone.
+        Assert.Equal(["100,200", "999", "300"], asked.Select(a => string.Join(",", a)));
+    }
+
+    [Fact]
+    public void A_repository_indexed_while_gitlab_is_unwell_stays_closed_and_is_asked_about_again()
+    {
+        IReadOnlyList<(long Id, long GitlabId)> rows = [(1, 1)];
+        var down = false;
+        var access = new PersonAccess((_, _, projects) =>
+            down ? throw new AclDenied("Cannot verify", new GitLabUnavailable("503")) : Alice(projects, 1, 2), () => rows, () => 1000);
+        Assert.Equal([1L], access.Resolve("alice@corp.example", null).AllowedRepoIds);
+
+        rows = [(1, 1), (2, 2)];
+        down = true;
+        Assert.Equal([1L], access.Resolve("alice@corp.example", null).AllowedRepoIds);
+        down = false;
+        Assert.Equal([1L, 2L], access.Resolve("alice@corp.example", null).AllowedRepoIds);
     }
 
     static async Task Until(Func<bool> done)

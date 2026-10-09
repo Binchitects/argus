@@ -181,11 +181,7 @@ public static partial class ArgusServer
         var gateway = Gateway.FromEnvironment();
         var directory = new Lazy<MemberDirectory>(() => new MemberDirectory(cfg.GitLab));
         var keys = ArenaKeys.FromEnvironment(ChatTokenEnv);
-        var access = new PersonAccess((email, username) =>
-        {
-            using var conn = Db.Connect(cfg.Index.DbPath);
-            return People.ResolvePerson(conn, directory.Value, email, username);
-        });
+        var access = PersonAccess.For(cfg.Index.DbPath, directory);
         Identity IdentityFor(AppUser user) => access.Resolve(user.Email ?? "", user.GitlabUsername);
         var chat = new ChatService(tools, gateway, IdentityFor, appDbPath);
         var builder = WebApplication.CreateSlimBuilder(args ?? []);

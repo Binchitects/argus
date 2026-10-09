@@ -236,6 +236,34 @@ public sealed class ArenaKeyServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_repository_taken_out_does_not_pass_its_access_on_to_the_next_one_given_its_row_id()
+    {
+        // Alice may read grp/payments, the highest row.
+        _platform.Members[13] = [(5, "alice", "Alice", 30)];
+        var payments = _ix.Repo(13, "grp/payments");
+        _ix.Symbol(payments, _ix.File(payments, "pay.c", "int ChargeCard(void);\n"), "ChargeCard");
+        var session = await McpCalls.Session(_http, "sk-alice");
+        Assert.False((await McpCalls.Call(_http, "sk-alice", session, "find_symbol", new { name = "ChargeCard" }))["isError"]!.GetValue<bool>());
+
+        // Taken out of Argus; grp/hr-secrets, which only Bob may read, is indexed next and SQLite gives it the same row id.
+        Writes.DeleteRepos(_ix.Conn, [payments]);
+        _platform.Members[14] = [(7, "bob", "Bob", 40)];
+        var secrets = _ix.Repo(14, "grp/hr-secrets");
+        Assert.Equal(payments, secrets);
+        _ix.Symbol(secrets, _ix.File(secrets, "salaries.c", "int SalaryTable(void);\n"), "SalaryTable");
+
+        var notice = await McpCalls.Call(_http, "sk-alice", session, "find_symbol", new { name = "SalaryTable" });
+        Assert.True(notice["isError"]!.GetValue<bool>(), notice.ToJsonString());
+        Assert.Contains("- grp/hr-secrets (1 match) -- maintainers: @bob (Bob)", notice["content"]![0]!["text"]!.GetValue<string>(), StringComparison.Ordinal);
+
+        // A repository she may read, indexed now, is hers at the next call.
+        _platform.Members[15] = [(5, "alice", "Alice", 30)];
+        var ledger = _ix.Repo(15, "grp/ledger");
+        _ix.Symbol(ledger, _ix.File(ledger, "ledger.c", "int PostEntry(void);\n"), "PostEntry");
+        Assert.False((await McpCalls.Call(_http, "sk-alice", session, "find_symbol", new { name = "PostEntry" }))["isError"]!.GetValue<bool>());
+    }
+
+    [Fact]
     public async Task A_refused_key_is_401_and_the_app_is_not_asked_again_at_once()
     {
         for (var i = 0; i < 2; i++)

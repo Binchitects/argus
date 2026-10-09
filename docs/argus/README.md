@@ -132,7 +132,10 @@ lists of the indexed projects are fetched at most eight at a time for everyone
 together, on one connection pool, each once for everyone asking at the same
 moment; the answer is kept ten
 minutes, then served while a fresh one is fetched (for an hour at most while
-GitLab cannot answer). With GitLab down, an agent still connects, the
+GitLab cannot answer). What is kept is the GitLab projects the person may
+read, matched to Argus's repositories at each request: a repository taken out
+of Argus takes its access with it, and one indexed since is checked at the
+person's next request. With GitLab down, an agent still connects, the
 documentation tools work, and a code tool says why it cannot answer.
 
 Before 5.3, every request (connecting too) resolved them first, one project
