@@ -414,7 +414,10 @@ volume and the configuration into `backups/`; `--install-timer` runs it daily.
 Models are not backed up: they are in `MODELS_DIR` and can be fetched again.
 `BACKUP_DIR`, `BACKUP_COPY_DIR` (a verified second copy on another disk),
 `BACKUP_KEEP`, `BACKUP_INCLUDE_LOGS` and `BACKUP_TIME` in `.env` change where,
-how many and when ([configuration.md](configuration.md#env)).
+how many and when ([configuration.md](configuration.md#env)). The app mounts
+`BACKUP_DIR` at `/backups` to show the backups under Admin → Storage and, on
+request, remove old ones ([admin.md](admin.md#storage)). It runs as uid 1000:
+backups taken by another user it cannot read, and says so.
 
 To put a backup back, stop the stack and restore it: the volumes and the
 database, and with `--with-config` also `.env` and the files under `config/`.

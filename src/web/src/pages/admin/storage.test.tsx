@@ -104,6 +104,14 @@ describe('Admin → Storage', () => {
     expect(screen.getByText('docker system df -v')).toBeInTheDocument()
   })
 
+  it('Measure again measures the folders now', async () => {
+    const calls = fakeApi(admin, routes)
+    renderApp('/admin/storage')
+    await screen.findByText('/ is 90% full')
+    await userEvent.click(screen.getByRole('button', { name: 'Measure again' }))
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/admin/storage?fresh=true')).toBe(true))
+  })
+
   it('a part that cannot be measured says why, and the rest still shows', async () => {
     fakeApi(admin, {
       ...routes,

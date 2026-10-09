@@ -31,7 +31,7 @@ public sealed record KeepRule(string What, string Rule);
 /// library, Argus's index and packs, the backups, logs and metrics, how long each is kept, what the app cannot
 /// see, and how each grew (the daily samples). Each part answers on its own: one missing says why, the rest stand.
 /// </summary>
-public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, StorageFiles files, StoragePlaces places, ArgusAdmin argus,
+public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, StorageFiles files, StoragePlaces places, StorageCache cache, ArgusAdmin argus,
     PromDatasource prom, LokiDatasource loki, IConfiguration config, IOptions<DashboardOptions> dashboards, IOptionsMonitor<StorageOptions> options,
     IOptionsMonitor<Retention.RetentionOptions> retention, IOptionsMonitor<Gateway.AnswerCacheOptions> answerCache, TimeProvider clock, ILogger<StorageReport> logger)
 {
@@ -70,11 +70,16 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
 
     public StorageOptions Settings => options.CurrentValue;
 
-    public async Task<JsonObject> BuildAsync(CancellationToken ct)
+    /// <summary>The whole page; <paramref name="fresh"/>: the folders (and Argus's) measured again now.</summary>
+    public async Task<JsonObject> BuildAsync(bool fresh, CancellationToken ct)
     {
+        if (fresh)
+        {
+            cache.Forget();
+        }
         // What needs no database runs beside what does (one DbContext answers one query at a time).
         var disksTask = DisksAsync(ct);
-        var argusTask = ArgusAsync(ct);
+        var argusTask = ArgusAsync(fresh, ct);
         var metricsTask = MetricsAsync(ct);
         var logsTask = LogsAsync(ct);
         var backupsTask = Task.Run(places.Backups, ct);
@@ -242,7 +247,7 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
         };
 
     /// <summary>Argus's disk (its index, GitLab mirrors, trees and packs) and its packs, as Argus reports them.</summary>
-    public async Task<JsonObject> ArgusAsync(CancellationToken ct)
+    public async Task<JsonObject> ArgusAsync(bool fresh, CancellationToken ct)
     {
         if (!argus.Enabled)
         {
@@ -251,7 +256,7 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
         var result = new JsonObject { ["configured"] = true };
         try
         {
-            result["report"] = await argus.GetAsync("storage", ct);
+            result["report"] = await argus.GetAsync(fresh ? "storage?fresh" : "storage", ct);
         }
         catch (ArgusException ex)
         {

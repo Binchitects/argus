@@ -672,6 +672,10 @@ public sealed class StorageTests(AppFixture app)
             Assert.Equal(5_000_000 + 20_000_000 + 3_000_000 + 1000, trends.GetProperty("argus")[0][1].GetInt64());
             Assert.Equal(1_250_000, trends.GetProperty("metrics")[0][1].GetInt64());
 
+            // Measure again: the folders now, and Argus's too.
+            await StatusAssert.Is(HttpStatusCode.OK, await admin.GetAsync("/api/admin/storage?fresh=true"));
+            Assert.Contains(app.Argus.Calls, c => c.PathAndQuery == "/admin/storage?fresh");
+
             // Again the same day: today's row is measured again, not doubled.
             await f.Services.GetRequiredService<StorageWatch>().SampleAsync(CancellationToken.None);
             await using var scope = f.Services.CreateAsyncScope();

@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Archive, Boxes, Database, FileStack, HardDrive, RotateCw } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router'
@@ -11,6 +11,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { toast } from '@/components/ui/toaster'
+import { api, errorMessage } from '@/lib/api'
 import { ago, when } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { growth, origins, plural, size, states, storageQuery, uses, type Disk, type StorageReport } from './storage-api'
@@ -36,13 +38,20 @@ export function StoragePage() {
   const [params, setParams] = useSearchParams()
   const tab: Tab = tabs.some((t) => t.value === params.get('tab')) ? (params.get('tab') as Tab) : 'room'
   const report = useQuery({ ...storageQuery, staleTime: 60_000 })
+  const client = useQueryClient()
+  // Every folder measured now, not as measured in the last two minutes.
+  const again = useMutation({
+    mutationFn: () => api<StorageReport>('/api/admin/storage?fresh=true'),
+    onSuccess: (r) => client.setQueryData(storageQuery.queryKey, r),
+    onError: (e) => toast.error(errorMessage(e)),
+  })
   return (
     <>
       <PageHeader
         title="Storage"
         description="What takes room and where, how long it stays, and ways to free it. Nothing of a person on legal hold is ever deleted here."
         actions={
-          <Button variant="outline" size="sm" onClick={() => void report.refetch()} loading={report.isFetching} aria-label="Measure again">
+          <Button variant="outline" size="sm" onClick={() => again.mutate()} loading={again.isPending || report.isFetching}>
             <RotateCw /> Measure again
           </Button>
         }
@@ -135,7 +144,7 @@ function Room({ r }: { r: StorageReport }) {
           </ul>
         </CardContent>
       </Card>
-      <p className="text-xs text-muted-foreground">Measured {ago(r.at)}. Folders are measured again at most every two minutes.</p>
+      <p className="text-xs text-muted-foreground">Measured {ago(r.at)}. Folders are measured again at most every two minutes, or now with Measure again.</p>
     </div>
   )
 }

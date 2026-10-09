@@ -24,6 +24,7 @@ page covers the rest.
 | **Groups** | App groups (the people you add), directory groups (whoever the company directory or the identity provider's groups claim puts in them, by name or DN) and SCIM groups (made and filled by the identity provider; their name and members are changed there). Tools and models are given to groups. Per group: how long members' chats are kept, a credit a month (shared or each member's), a cost centre, and which safeguards apply. A group's **priority in the answers' line** (-10 to 10, 0 for everyone) decides who goes first when the model is busy: higher first, and within one priority the line stays fair (fewest answers running, then served longest ago). Someone in several groups takes the highest. A change is audited. Below the list, the monthly **Chargeback** report. See [Retention, legal hold and exports](#retention-legal-hold-and-exports) and [Credit for groups](#credit-for-groups). |
 | **Tools** | What the chat's model may call: Argus, Python (the sandbox), the web (off until you turn it on and allow sites), image generation, the calculator, date and time, reading long files in parts, the canvas (documents and code beside the chat, changed by the model part by part), questions for the person (the model asks with choices instead of guessing), sub-agents (the model splits a task into parts done side by side), memory (the model remembers what each person asks it to; off for everyone under **Settings → Chat → Memory**, and nobody but the person sees their memories), **Decide (Laya)** (typed questions about a text answered with probabilities by the Laya decision model on the CPU; offered only while the `laya` module runs and has a checkpoint loaded, and otherwise says why: [chat.md](chat.md#decide-laya)), and the MCP servers and APIs you add. An **API** is added by its OpenAPI 3 document (JSON or YAML, pasted or fetched from its address): each operation becomes a function, its parameters and JSON body the arguments, and a call that changes something (POST, PUT, PATCH, DELETE) always asks the person first. **Read it** lists the operations before you add it. Per tool: on or off, who may use it (everyone, admins, or chosen groups), on in new chats, ask before each call. An MCP server is tested before it is added; its key is stored encrypted and never shown. **Its certificate (https)**, per server or API: **Check the certificate** (the default: the CAs the app's system trusts), **Trust this CA** (a CA's certificate in PEM, pasted or from a file: a company CA, its issuing CA alone, or a self-signed server's own certificate; the chain must lead to it, each certificate up to it within its dates, and the name must still match; a server that does not send its issuing CA needs it given too, with the root in one bundle, or alone), or **Do not check** (any certificate is accepted; the form and the tool's card warn). When **Test** or **Read it** meets a certificate it does not trust, it says why (self-signed, issued by a CA it does not trust, for another name, not meant for a server, expired or not yet valid, it or a CA in its chain), who issued it, for which names, its dates and fingerprint, and offers both choices there; **Read it** checks the API's address too, even when its document was pasted. A secure connection that fails for another reason (no https at that address, a server that speaks only an old TLS version, no cipher in common) says so instead, as the chat does: no certificate choice helps there. The choice applies to everything sent to that server (its tools listed and called, long calls, an API's document fetched from its address, its calls, and a plugin's OAuth token address on the same server), never to anything else: with **Trust this CA** or **Do not check**, a redirect is followed only on the same host, and one to another host is not (the test or the call ends with its `HTTP 3xx`), so nothing is sent there; each change is audited (`tool.server_tls`, the CA by name and fingerprint). A server whose tools run long can have its own **Longest call** (up to 24 hours; otherwise **Settings → Chat → Longest tool call**, an hour). The same choices decide what [Arena MCP](mcp.md) serves each person's own agent (`mcp.call` in the audit log). |
 | **Knowledge** | Company knowledge the chat searches: GitLab projects or groups (their wikis and issues, read by each project's members), Confluence spaces and SharePoint or OneDrive sites and libraries (read by whom Confluence or SharePoint lets read, and the groups you choose where they cannot tell), folders mounted under `/knowledge`, and websites (read by the groups you choose). Confluence and SharePoint take an account's token or an app's secret, stored encrypted, and have **Test connection**. Per source: the last sync's state and errors, documents and passages, who may read it and what is mirrored, **Sync now**, its documents, **Settings**, remove. Needs the embedder. See [knowledge.md](knowledge.md). |
+| **Storage** | What takes room and where: the disks (the host's, and the folders the app mounts), each database and its largest tables, the chat's files by kind and by person, the model library and what uses each model, Argus's index and packs, backups, logs and metrics, how each grew, and how long each is kept. The chat's files to find, download and delete; clean-ups that show what would go first; each person's room for files. See [Storage](#storage) below. |
 | **Models** | Every model at the gateway. The engine's models load and unload with one click (one at a time on one GPU); more are added from the model library on the host. Per model: who may use it, in the chat and with API keys. See [Models](#models) below. |
 | **Deployment** | The `.env` model the engine starts with (file, context, longest reply, multi-token prediction, thinking presets, power limits, prices) and every shipped sample with the exact `.env` block to paste to switch to it. |
 | **Indexing** | The Argus code index: which repositories GitLab lists are indexed and which branches of each (with each branch's latest commit), every indexed branch at its commit (hash, message, when), **Update** per repository, the reindex schedule (in words or cron, in a time zone), the GitLab push and merge webhook (its secret, shown once, the steps for GitLab, and the last deliveries), and a run's progress (a percentage overall and per repository) and log. See [Choosing what is indexed](argus/README.md#choosing-what-is-indexed). |
@@ -254,6 +255,85 @@ branch on screen as Markdown, and every file (the file itself and the text the
 model read). The chats they deleted under hold are in it, marked with
 `deletedAt`. Each export is audited (`person.export`). People download their own
 copy from Your account → **Your data** (`account.export`), without hidden chats.
+
+### Storage
+
+Admin → Storage has four tabs. Nothing of a person on legal hold is ever
+deleted from it.
+
+**Where the room goes.** The disks first: the host's, from node-exporter
+through Prometheus (one line per device, as the disk alerts count them), and
+the folders the app mounts (the model library, the backups, and Docker's own
+data behind the app's root), each matched to the host's disk it is on, so a
+disk says what of the stack it holds. Each disk shows how full it is, how fast
+it filled over the last week, and, when it is filling, in about how many days
+it is full. Then what takes room:
+
+| What | Measured from |
+|---|---|
+| Each database on the stack's Postgres (`llmapp`, `litellm`, `argus`, `langfuse` where they are) and the largest tables of the app's and the gateway's | Postgres itself |
+| The chat's files (uploads, and the pictures, videos, speech and other files the tools made), by where they came from, whether a chat still has them, and by person | the app's database: the files are kept there, inside `llmapp` |
+| The model library (`MODELS_DIR`): each model file, which model of Admin → Models uses it (loaded or kept loaded), or which server reads it, and downloads not finished | the folder |
+| Argus: its index, GitLab mirrors, checked-out trees and installed packs, and its disk | Argus measures its own data folder (`GET /admin/storage`), at most every ten minutes |
+| Backups (`BACKUP_DIR`, mounted in the app at `/backups`): each backup, how it ended, and which is the latest | the folder |
+| Metrics: what Prometheus keeps and for how long (30 days or 20 GB) | Prometheus's own metrics and flags |
+| Logs: how long Loki keeps them (14 days), and what each container wrote over the last week | Loki's configuration and its volume API |
+
+Every six hours the app writes down what each thing takes (one row a day for
+each, kept 400 days): the 30-day growth beside each. **How long things stay**
+lists the rules in force (retention, legal hold, rooms, the answer cache,
+backups). **What the app cannot see** says what is left: the app has no Docker
+socket (that would be root on the host for anyone who reaches it), so Docker's
+images and build cache, the containers' own logs (at most 5 files of 20 MB each)
+and the volumes it does not mount are not measured as folders;
+`docker system df -v` on the host lists them. Folders are measured at most
+every two minutes; **Measure again** asks now.
+
+**A disk past the share.** Every five minutes the app compares each disk with
+**Settings → Storage → Warn when a disk is fuller than** (80% by default). A
+disk past it is an alert like the stack's own (`DiskAboveThreshold`, from the
+app): given to Alertmanager, so it is on the Alerts page and reaches the bell,
+email and the alerts webhook once, and it ends when the disk is below again.
+With Alertmanager away, the admins are told directly, once each time a disk
+passes the share. The Overview shows the fullest disk and warns about any past
+the share. Prometheus's own rules still warn at 85% and 95%.
+
+**Files.** The chat's files and what the tools made: whose, which chat, from
+where, the kind, the size (the file, its text, a video's sound and the pages
+drawn of a document) and when. Filter by person, kind, where from, whether a
+chat still has it (in a chat, an assistant's, in a chat deleted under legal
+hold, in no chat), size and age; search by the file's name, the person or the
+chat's title. The list holds the first thousand in the order chosen; the totals
+count every match. **Download** gives the file itself, never shown in the page,
+audited (`storage.download`). Ticked files are deleted after a confirmation
+that says how many, what they take, how many are in chats (the chats keep their
+words, without the file) and how many legal hold keeps. Deletions are audited
+per person, with counts and sizes (`storage.delete`).
+
+**Clean-ups.** Each shows what it would remove now and the room that frees
+(**Preview**), and runs after a confirmation; each run is audited
+(`storage.cleanup`), and none touches anything of a person on legal hold.
+
+| Clean-up | What it removes |
+|---|---|
+| Files in no chat | files no chat, assistant or waiting message has, older than the age chosen (7 days by default: a younger one may be being written) |
+| Old pictures, videos and speech | what those tools made, past the age chosen (**Settings → Storage → Old generated media**, 90 days by default); the chats keep their words |
+| Files of deleted chats | chats deleted while their owner was on legal hold, once the hold is over, with their files (the hourly retention job takes them too); it shows what the holds still keep |
+| Leftovers on disk | what no database row owns: a download's `.part` file no download will finish, and Python sandbox jobs left behind (older than an hour) |
+| Old backups | backups beyond the newest ones kept (**Settings → Storage → Backups the clean-up keeps**, 14 by default), never the latest nor the newest that ended well; `scripts/backup.sh` keeps `BACKUP_KEEP` by itself |
+| Models nothing uses | model files no model of Admin → Models uses and no server reads, each chosen by hand: one deleted is gone from the library, and using it again means downloading it again |
+
+A clean-up that cannot run says why (the backups not mounted, or another
+user's).
+
+**People.** Each person with files, what their files take, and their room.
+**Settings → Storage → Room for each person's files** is everyone's (empty: no
+limit); **Room** gives someone their own (0: no limit) or the company's again,
+audited (`storage.quota`). Past it, uploads are refused (HTTP 413, saying what
+their files take of their room) and so are the picture, video and speech tools
+(the model is told why, and tells them); what Python makes and long tool
+results still go, as the answer needs them. Your account shows each person what
+their files take of their room.
 
 ### Credit for groups
 

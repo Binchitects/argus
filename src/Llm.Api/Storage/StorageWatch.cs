@@ -191,7 +191,7 @@ public sealed partial class StorageWatch(IServiceScopeFactory scopes, IConfigura
             {
                 samples["backups"] = backups.Bytes + backups.OtherBytes;
             }
-            if ((await report.ArgusAsync(ct))["report"] is JsonObject argus && argus["index_bytes"] is not null)
+            if ((await report.ArgusAsync(fresh: false, ct))["report"] is JsonObject argus && argus["index_bytes"] is not null)
             {
                 samples["argus"] = ArgusParts.Sum(k => argus[k]?.GetValue<long>() ?? 0);
                 samples["packs"] = argus["packs_bytes"]?.GetValue<long>() ?? 0;

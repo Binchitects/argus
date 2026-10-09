@@ -412,7 +412,7 @@ export const topics = {
       { name: 'Files', text: 'The chat\'s files and what the tools made: whose, which chat, from where, how big and when. Filter by person, kind, where from, whether a chat still has it, size and age. Each downloads (audited); ticked ones are deleted after you confirm.' },
       { name: 'Clean-ups', text: 'Files in no chat, old pictures, videos and speech, files of deleted chats, leftovers on disk, old backups, and models nothing uses. **Preview** says what would go and the room it frees; **Clean up** asks first, and each run is audited.' },
       { name: 'People', text: 'Each person\'s files against their room. **Room** gives someone their own (0: no limit), or the company\'s again.' },
-      { name: 'Measure again', text: 'Measures everything now. Folders are measured at most every two minutes, and the trends every six hours.' },
+      { name: 'Measure again', text: 'Measures everything now. Otherwise folders are measured at most every two minutes, and the trends written down every six hours.' },
     ],
     tasks: [
       { title: 'Free room on a full disk', steps: ['Look at **Where the room goes**: the disk says what of the stack is on it.', 'Open **Clean-ups** and press **Preview** on the ones that take most there.', 'Press **Clean up**, read what goes, and confirm.'] },

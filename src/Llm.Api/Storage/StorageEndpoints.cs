@@ -37,7 +37,8 @@ public static class StorageEndpoints
     public static void MapStorage(IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/api/admin/storage").RequireAuthorization(AdminEndpoints.Policy);
-        g.MapGet("/", async (StorageReport report, CancellationToken ct) => Results.Ok(await report.BuildAsync(ct)));
+        // ?fresh: every folder measured again now (Measure again), not as measured in the last two minutes.
+        g.MapGet("/", async (bool? fresh, StorageReport report, CancellationToken ct) => Results.Ok(await report.BuildAsync(fresh is true, ct)));
         g.MapGet("/files", ListAsync);
         g.MapGet("/files/{id:guid}/download", DownloadAsync);
         g.MapPost("/files/delete", DeleteAsync);
