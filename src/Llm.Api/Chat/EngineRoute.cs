@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using Llm.Api.Models;
 using Microsoft.Extensions.Options;
 
@@ -12,7 +13,9 @@ namespace Llm.Api.Chat;
 /// busy, the request is not sent: the engine would unload the model used least recently to load it,
 /// which may be the big one everyone is on. It waits a minute for one to be idle (an answer or a side
 /// request alike), then says the engine is full; with none that may (every loaded one never makes
-/// room), it says so at once. Then its slot (<see cref="SlotTable"/>), by what the engine said of the
+/// room), it says so at once. The place found or made is the model's for a few seconds, until the
+/// engine loads it. An API key's request gets room the same way, when the gateway asks the app
+/// first (<see cref="RoomForKeyAsync"/>). Then its slot (<see cref="SlotTable"/>), by what the engine said of the
 /// model's slots: how many it has, and which are busy with requests not sent from here (API keys',
 /// other replicas'). What it said within the last second is used as it is; else it is asked, and the
 /// request waits half a second for its word. llama-server answers between two batches of its work,
@@ -59,28 +62,27 @@ public sealed partial class EngineRoute(SlotTable slots, EngineState engine, Eng
     /// <summary>Since when each loaded model has been seen idle, each time the watcher looked for room (<see cref="Quiet"/>).</summary>
     private readonly ConcurrentDictionary<string, DateTimeOffset> _quiet = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// How long a place found or made for a model stays its own while its request is on the way to the engine (which then
+    /// loads it): another model asked for meanwhile does not take it, nor have the engine unload one to load both.
+    /// </summary>
+    private static readonly TimeSpan OnItsWay = TimeSpan.FromSeconds(15);
+
+    /// <summary>The models a place was found or made for, and when (<see cref="OnItsWay"/>).</summary>
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _coming = new(StringComparer.Ordinal);
+
     /// <summary>What a look for room found: a place, or one made; models that may make room, all busy; none that may.</summary>
     private enum Room { Free, Made, Busy, None }
 
     /// <summary>The slot for a request to <paramref name="model"/>: <paramref name="conversation"/>'s turn, or a side request when null.</summary>
     public async Task<SlotTable.Lease> TakeAsync(string? model, Guid? conversation, CancellationToken ct)
     {
-        if (model is null || !options.Value.Enabled || engine.StatusOf(model) is null)
+        if (!Ours(model))
         {
             // Not this engine's: the gateway's, or another GPU server's.
             return slots.Take(null, conversation);
         }
-        // In use: not quiet.
-        _quiet.TryRemove(model, out _);
-        // A model that failed to load is refused until its wait is over, before any room is made for it.
-        Refuse(model);
-        await RoomAsync(model, ct);
-        if (engine.StatusOf(model) == "failed")
-        {
-            Refuse(model);
-            // This request has the engine load it again: a try, after which the next wait is longer.
-            engine.Tried(model);
-        }
+        await ReadyAsync(model, ct);
         if (!slots.Chooses(model, side: conversation is null))
         {
             return slots.Take(null, conversation);
@@ -91,6 +93,50 @@ public sealed partial class EngineRoute(SlotTable slots, EngineState engine, Eng
             return slots.Take(model, conversation);
         }
         return await ViewAsync(model, ct) is { } view ? slots.Take(model, conversation, view.Seen) : slots.Take(null, conversation);
+    }
+
+    /// <summary>
+    /// Before an API key's request, when the gateway asks the app first (its guardrail): room for <paramref name="model"/>
+    /// as for the app's own requests, so the engine never chooses which model unloads for it (the one used least recently
+    /// may be the big one everyone is on). Null: the request may go; else why not (the engine is full, or the model failed
+    /// to load and waits for its next try).
+    /// </summary>
+    public async Task<string?> RoomForKeyAsync(string? model, CancellationToken ct)
+    {
+        if (!Ours(model))
+        {
+            return null;
+        }
+        try
+        {
+            await ReadyAsync(model, ct);
+            return null;
+        }
+        catch (ChatGatewayException ex) when (ex.NotLoaded)
+        {
+            return ex.Message;
+        }
+    }
+
+    /// <summary>Whether <paramref name="model"/> is this engine's (not the gateway's, nor only another GPU server's).</summary>
+    private bool Ours([NotNullWhen(true)] string? model) => model is not null && options.Value.Enabled && engine.StatusOf(model) is not null;
+
+    /// <summary>
+    /// <paramref name="model"/> about to be asked for: refused while it failed to load and waits for its next try (before
+    /// any room is made for it), then room for it; a request for one that failed is a try.
+    /// </summary>
+    private async Task ReadyAsync(string model, CancellationToken ct)
+    {
+        // In use: not quiet.
+        _quiet.TryRemove(model, out _);
+        Refuse(model);
+        await RoomAsync(model, ct);
+        if (engine.StatusOf(model) == "failed")
+        {
+            Refuse(model);
+            // This request has the engine load it again: a try, after which the next wait is longer.
+            engine.Tried(model);
+        }
     }
 
     /// <summary>Says so when <paramref name="model"/> failed to load and its wait for the next try is not over (EngineState.MayAsk).</summary>
@@ -197,13 +243,25 @@ public sealed partial class EngineRoute(SlotTable slots, EngineState engine, Eng
             // The request says why itself.
             return Room.Free;
         }
-        if (models.FirstOrDefault(m => m.Name == model)?.Status is "loaded" or "loading"
-            || models.Count(m => m.Status is "loaded" or "loading") < options.Value.ModelsMax)
+        bool Up(string name) => models.FirstOrDefault(m => m.Name == name)?.Status is "loaded" or "loading";
+        if (Up(model))
         {
             return Room.Free;
         }
+        // A place just given to another model whose request is on its way (the engine does not load it yet) is taken.
+        var now = clock.GetUtcNow();
+        foreach (var (name, at) in _coming.Where(c => now - c.Value >= OnItsWay || Up(c.Key)))
+        {
+            _coming.TryRemove(new KeyValuePair<string, DateTimeOffset>(name, at));
+        }
+        var coming = _coming.Keys.Count(k => k != model);
+        if (models.Count(m => m.Status is "loaded" or "loading") + coming < options.Value.ModelsMax)
+        {
+            _coming[model] = now;
+            return Room.Free;
+        }
         var others = models.Where(m => m.Status is "loaded" or "loading" && m.Name != model).ToList();
-        if (others.All(m => engine.Held.Contains(m.Name)))
+        if (coming == 0 && others.All(m => engine.Held.Contains(m.Name)))
         {
             // Each one there never makes room: waiting would not help.
             return Room.None;
@@ -237,6 +295,7 @@ public sealed partial class EngineRoute(SlotTable slots, EngineState engine, Eng
                 continue;
             }
             _quiet.TryRemove(spare, out _);
+            _coming[model] = clock.GetUtcNow();
             return Room.Made;
         }
         return Room.Busy;

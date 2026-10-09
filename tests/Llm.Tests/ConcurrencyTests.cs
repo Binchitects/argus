@@ -1019,6 +1019,98 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         Assert.Equal(1, app.Engine.LoadsOf(Big));
     }
 
+    /// <summary>An API key's request for <paramref name="model"/>, as the gateway asks the app before sending it (its guardrail): the app's verdict.</summary>
+    private static async Task<JsonElement> GuardAsync(WebApplicationFactory<Program> f, string model)
+    {
+        using var ask = new HttpRequestMessage(HttpMethod.Post, new Uri(Llm.Api.Safeguards.GuardrailEndpoints.Path, UriKind.Relative))
+        {
+            Content = JsonContent.Create(new
+            {
+                input_type = "request", texts = new[] { "hello" }, structured_messages = new[] { new { role = "user", content = "hello" } },
+                request_data = new { user_api_key_user_id = "admin@llm.test", user_api_key_alias = "agent", user_api_key_hash = "hash" }, model,
+            }),
+        };
+        ask.Headers.Add("x-api-key", "sk-master-for-tests");
+        using var res = await new TestBrowser(f).Http.SendAsync(ask);
+        await StatusAssert.Is(HttpStatusCode.OK, res);
+        return JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement.Clone();
+    }
+
+    [Fact]
+    public async Task An_API_keys_request_for_a_model_not_loaded_gets_room_as_the_chats_do_and_never_has_the_engine_unload_the_big_one()
+    {
+        var clock = new MovableClock(DateTimeOffset.UtcNow);
+        await using var f = NewApp(parallel: 1, clock: clock, others: [("tiny-a", 1), ("tiny-b", 1)]);
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var state = f.Services.GetRequiredService<EngineState>();
+        var engine = f.Services.GetRequiredService<EngineClient>();
+        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-a/load"));
+        await EventuallyAsync(() => state.Spare.SequenceEqual(["tiny-a"]), "the watcher knows tiny-a may make room");
+
+        // An agent asks for tiny-b: the idle tiny-a makes room first. Left to the engine, it would unload the big one,
+        // the model it loaded first (used least recently), to load tiny-b.
+        Assert.Equal("NONE", (await GuardAsync(f, "tiny-b")).GetProperty("action").GetString());
+        Assert.Equal("unloaded", app.Engine.StatusOf("tiny-a"));
+        await engine.LoadAsync("tiny-b");
+        Assert.Equal("loaded", app.Engine.StatusOf(Big));
+        Assert.Single(app.Engine.Calls, c => c.Path == "/models/unload");
+
+        // tiny-b answers the agent: another agent's request for tiny-a waits a minute for it, then is refused, as the chat's are.
+        app.Engine.BusySlots["tiny-b"] = [0];
+        await EventuallyAsync(() => state.Spare.SequenceEqual(["tiny-b"]), "the watcher sees tiny-b loaded");
+        var asked = app.Engine.Calls.Count(c => c.Path == "/slots" && c.Model == "tiny-b");
+        var waiting = GuardAsync(f, "tiny-a");
+        await EventuallyAsync(() => app.Engine.Calls.Count(c => c.Path == "/slots" && c.Model == "tiny-b") > asked + 1, "the request waits for room");
+        Assert.False(waiting.IsCompleted);
+        clock.Now += EngineRoute.RoomWait + TimeSpan.FromSeconds(1);
+        var verdict = await waiting.WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Equal("BLOCKED", verdict.GetProperty("action").GetString());
+        Assert.StartsWith("tiny-a cannot be loaded now: the engine holds all the models it may, and those that may make room have been in use",
+            verdict.GetProperty("blocked_reason").GetString(), StringComparison.Ordinal);
+
+        // tiny-b set for new chats: every loaded model is held, and the request is refused at once.
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative),
+            new { changes = new[] { new { key = "Chat:DefaultModel", value = (string?)"tiny-b", reset = false } } }));
+        f.Services.GetRequiredService<EngineWatcher>().Wake();
+        await EventuallyAsync(() => state.Spare.Count == 0, "the watcher holds tiny-b");
+        verdict = await GuardAsync(f, "tiny-a").WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Equal("BLOCKED", verdict.GetProperty("action").GetString());
+        Assert.StartsWith("tiny-a cannot be loaded now: the engine holds all the models it may, and each is kept loaded or used by everyone",
+            verdict.GetProperty("blocked_reason").GetString(), StringComparison.Ordinal);
+        Assert.Single(app.Engine.Calls, c => c.Path == "/models/unload");
+        Assert.Equal("loaded", app.Engine.StatusOf(Big));
+        // A model that is loaded, or not the engine's, goes as it is.
+        Assert.Equal("NONE", (await GuardAsync(f, Big)).GetProperty("action").GetString());
+        Assert.Equal("NONE", (await GuardAsync(f, "gpt-elsewhere")).GetProperty("action").GetString());
+    }
+
+    [Fact]
+    public async Task A_place_made_for_one_model_is_its_own_until_it_loads()
+    {
+        await using var f = NewApp(new Dictionary<string, string?> { ["Engine:ModelsMax"] = "3" }, parallel: 1, others: [("tiny-a", 1), ("tiny-b", 1), ("tiny-c", 1), ("tiny-d", 1)]);
+        app.Engine.Max = 3;
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var state = f.Services.GetRequiredService<EngineState>();
+        var engine = f.Services.GetRequiredService<EngineClient>();
+        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-a/load"));
+        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-b/load"));
+        await EventuallyAsync(() => state.Spare.SequenceEqual(["tiny-a", "tiny-b"]), "the watcher knows which may make room");
+
+        // Two agents at once, for two models not loaded: each gets a place of its own, before the engine loads either.
+        Assert.Equal("NONE", (await GuardAsync(f, "tiny-c")).GetProperty("action").GetString());
+        Assert.Equal("NONE", (await GuardAsync(f, "tiny-d")).GetProperty("action").GetString());
+        Assert.Equal("unloaded", app.Engine.StatusOf("tiny-a"));
+        Assert.Equal("unloaded", app.Engine.StatusOf("tiny-b"));
+        // A second request for a model on its way rides on its place.
+        Assert.Equal("NONE", (await GuardAsync(f, "tiny-c")).GetProperty("action").GetString());
+        Assert.Equal(2, app.Engine.Calls.Count(c => c.Path == "/models/unload"));
+
+        // The engine loads both: the big one stays.
+        await engine.LoadAsync("tiny-c");
+        await engine.LoadAsync("tiny-d");
+        Assert.Equal("loaded", app.Engine.StatusOf(Big));
+    }
+
     [Fact]
     public async Task A_model_that_failed_to_load_is_tried_again_after_its_wait_once_asked_for_or_kept()
     {
