@@ -73,6 +73,8 @@ export interface Message {
   promptTokens: number | null
   cachedTokens: number | null
   completionTokens: number | null
+  /** What it cost at the prices when it ran, in dollars: an answer's round; a tool call's pictures, video, speech or sub-agents. Null or missing: not known. */
+  cost?: number | null
   thinkingMs: number | null
   durationMs: number | null
   createdAt: string
@@ -330,12 +332,26 @@ export type ChatEvent =
   | { type: 'reasoning'; text: string }
   | { type: 'thought'; ms: number; cutShort?: boolean }
   | { type: 'content'; text: string }
-  | { type: 'usage'; prompt: number | null; cached: number | null; completion: number | null; thinkingMs: number | null; durationMs: number | null; context?: ContextFill | null }
+  | { type: 'usage'; prompt: number | null; cached: number | null; completion: number | null; cost?: number | null; thinkingMs: number | null; durationMs: number | null; context?: ContextFill | null }
   | { type: 'tool_call'; id: string; name: string; arguments: string; tool?: string | null }
   | { type: 'approval'; id: string; name: string; arguments: string; tool: string; title: string }
   /** How far a long tool call is, as its server says (`total` when it knows the end). */
   | { type: 'tool_progress'; id: string; progress: number; total: number | null; message: string | null }
-  | { type: 'tool_result'; id: string; messageId: string; name: string; text: string; isError: boolean; declined?: boolean; noAccess: boolean; durationMs: number; attachments?: Attachment[]; details?: Message['details'] }
+  | {
+      type: 'tool_result'
+      id: string
+      messageId: string
+      name: string
+      text: string
+      isError: boolean
+      declined?: boolean
+      noAccess: boolean
+      durationMs: number
+      attachments?: Attachment[]
+      details?: Message['details']
+      /** What the call spent: its pictures, video, speech or sub-agents. */
+      cost?: number | null
+    }
   /** A sub-agent's step (the delegate tool's call `id`, the agent's `index`): started, thinking or words as they come, a tool call, its result, done. */
   | {
       type: 'agent'

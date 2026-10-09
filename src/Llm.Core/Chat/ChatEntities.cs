@@ -84,9 +84,17 @@ public sealed class ChatMessage
     /// <summary>Assistant: its thinking was cut short ("Answer now"), and it answered without more.</summary>
     public bool CutShort { get; set; }
     public string? Model { get; set; }
+    /// <summary>Assistant: its round's tokens. A delegate call: its sub-agents' together.</summary>
     public int? PromptTokens { get; set; }
     public int? CachedTokens { get; set; }
     public int? CompletionTokens { get; set; }
+    /// <summary>
+    /// What it cost, in dollars, at the prices when it ran: an assistant round's tokens; a tool call's
+    /// pictures, video or speech, or its sub-agents' tokens. Null: not known (before prices were kept).
+    /// </summary>
+    public decimal? Cost { get; set; }
+    /// <summary>Assistant and tool: the answer it is part of, by the id of the answer's first round (which has its own).</summary>
+    public Guid? AnswerId { get; set; }
     /// <summary>Assistant: how long the model thought before answering. Tool: how long the tool took.</summary>
     public int? ThinkingMs { get; set; }
     public int? DurationMs { get; set; }

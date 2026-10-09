@@ -15,20 +15,25 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api, type Me } from '@/lib/api'
 import { formatValue, money } from '@/lib/format'
 import { intervalFor, presets, resolve } from '@/lib/time'
+import { PromptList } from './usage-prompts'
 
 export function UsagePage() {
   const me = useOutletContext<Me>()
   return (
     <>
-      <PageHeader title="Usage & cost" description="Tokens and cost. Input is split into cache miss and cache hit, which are priced differently." />
+      <PageHeader title="Usage & cost" description="Tokens and cost, and each prompt with what it cost. Input is split into cache miss and cache hit, which are priced differently." />
       {me.isAdmin ? (
         <Tabs defaultValue="everyone">
           <TabsList>
             <TabsTrigger value="everyone">Everyone</TabsTrigger>
+            <TabsTrigger value="prompts">Everyone's prompts</TabsTrigger>
             <TabsTrigger value="mine">Mine</TabsTrigger>
           </TabsList>
           <TabsContent value="everyone">
             <DashboardView uid="usage-by-user" />
+          </TabsContent>
+          <TabsContent value="prompts">
+            <PromptList everyone />
           </TabsContent>
           <TabsContent value="mine">
             <MyUsage />
@@ -135,6 +140,17 @@ function MyUsage() {
           )}
         </>
       )}
+      <Card>
+        <CardHeader>
+          <CardTitle>Your prompts</CardTitle>
+          <CardDescription>
+            Each answer in your chats (its tool calls and sub-agents included) and each request of your API keys, with its tokens and what it cost at the prices when it ran.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <PromptList from={from} />
+        </CardContent>
+      </Card>
     </div>
   )
 }

@@ -121,6 +121,9 @@ public sealed class AppFixture : IAsyncLifetime
         await insert.ExecuteNonQueryAsync();
     }
 
+    /// <summary>The gateway's database (its request log), for tests that seed rows of their own.</summary>
+    public string LitellmConnectionString => ConnectionStringFor("litellm_test" + _run);
+
     public string ConnectionStringFor(string database) =>
         new Npgsql.NpgsqlConnectionStringBuilder(Server) { Database = database }.ConnectionString;
 

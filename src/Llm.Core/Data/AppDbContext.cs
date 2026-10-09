@@ -111,6 +111,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             // Answers by when (the quality page), and the finished answers by when (the slowest, for traces).
             e.HasIndex(m => m.CreatedAt);
             e.HasIndex(m => m.CreatedAt, "IX_chat_messages_Answered").HasFilter("\"AnswerMs\" IS NOT NULL");
+            // Usage → prompts: an answer's rounds and tool calls together.
+            e.HasIndex(m => m.AnswerId);
         });
         builder.Entity<ChatAttachment>(e =>
         {

@@ -92,10 +92,12 @@ public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFacto
     /// <param name="contentType">An MP3 unless said otherwise (Talk sends what the browser recorded: WebM or MP4).</param>
     public async Task<string> TranscribeAsync(string model, byte[] sound, string fileName, string personEmail, CancellationToken ct, string contentType = "audio/mpeg")
     {
+        // verbose_json says the sound's length: the gateway prices a transcription by it (a plain json answer is priced at nothing).
         using var res = await WithKeyAsync(() => PostAsync("/v1/audio/transcriptions", () => new MultipartFormDataContent
         {
             { new ByteArrayContent(sound) { Headers = { ContentType = new MediaTypeHeaderValue(contentType) } }, "file", fileName },
             { new StringContent(model), "model" },
+            { new StringContent("verbose_json"), "response_format" },
             { new StringContent(personEmail), "user" },
         }, personEmail, "application/json", ct), ct);
         return JsonNode.Parse(await res.Content.ReadAsStringAsync(ct))?["text"]?.GetValue<string>() ?? "";

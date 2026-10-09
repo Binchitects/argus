@@ -320,10 +320,15 @@ export function AnswerTurn({
                 usage.agents.prompt + usage.agents.completion > 0 ? `; sub-agents: ${usage.agents.prompt.toLocaleString()} in, ${usage.agents.completion.toLocaleString()} out` : ''
               }`}
             >
-              · {formatValue(usage.prompt)} in · {formatValue(usage.completion)} out
+              · {formatValue(usage.prompt)} in · {formatValue(usage.cached)} cached · {formatValue(usage.completion)} out
             </span>
           )}
-          {usage.cost !== null && <span>· {money(usage.cost)}</span>}
+          {usage.cost !== null && (
+            <span title={usage.estimated ? "Partly at today's prices: it ran before costs were kept" : 'At the prices when it ran, sub-agents and pictures included'}>
+              · {usage.estimated && '≈ '}
+              {money(usage.cost)}
+            </span>
+          )}
         </span>
       </div>
     )

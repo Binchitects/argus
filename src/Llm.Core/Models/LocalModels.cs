@@ -46,8 +46,10 @@ public sealed class LocalModel
     public string? ExtraPreset { get; set; }
     public bool Thinking { get; set; } = true;
     public bool Tools { get; set; } = true;
-    /// <summary>Per million tokens; null: the gateway prices of .env apply.</summary>
+    /// <summary>Per million tokens; null: the default price (Settings → Prices).</summary>
     public decimal? InputPerMtok { get; set; }
+    /// <summary>Per million prompt tokens the engine read from its cache; null: the default, never above <see cref="InputPerMtok"/>.</summary>
+    public decimal? CachedInputPerMtok { get; set; }
     public decimal? OutputPerMtok { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;

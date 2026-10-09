@@ -48,6 +48,12 @@ public sealed record ToolResult(string Text, bool IsError = false, IReadOnlyList
 {
     /// <summary>What the page shows beyond the text the model reads (sub-agents' work), kept with the call.</summary>
     public System.Text.Json.Nodes.JsonNode? Details { get; init; }
+
+    /// <summary>What the call spent, in dollars: the pictures, video or speech it made, its sub-agents' tokens. Null: nothing.</summary>
+    public decimal? Cost { get; init; }
+
+    /// <summary>A delegate call: its sub-agents' tokens together (their model is in <see cref="Details"/>).</summary>
+    public UsageReport? Usage { get; init; }
 }
 
 /// <summary>A tool made ready for one answer: its functions, and how to run them.</summary>
@@ -242,7 +248,8 @@ public sealed class TimeTool(TimeProvider clock) : IChatTool
 }
 
 /// <summary>Pictures from the gateway's image model, kept as the person's files.</summary>
-public sealed partial class ImageTool(ChatModels models, GatewayChat gateway, AppDbContext db, Safeguards.Safeguards safeguards, Models.MediaControl media) : IChatTool
+public sealed partial class ImageTool(ChatModels models, GatewayChat gateway, AppDbContext db, Safeguards.Safeguards safeguards, Models.MediaControl media,
+    Gateway.PriceBook prices) : IChatTool
 {
     public static readonly string[] Sizes = ["1024x1024", "1024x768", "768x1024", "768x768", "512x512"];
 
@@ -303,7 +310,7 @@ public sealed partial class ImageTool(ChatModels models, GatewayChat gateway, Ap
                 return new ToolResult(new JsonObject
                 {
                     ["shown_to_the_person"] = true, ["file"] = file.FileName, ["size"] = size, ["model"] = model.Name,
-                }.ToJsonString(Mcp.Plain), Files: [file]);
+                }.ToJsonString(Mcp.Plain), Files: [file]) { Cost = prices.Images(1) };
             });
     }
 

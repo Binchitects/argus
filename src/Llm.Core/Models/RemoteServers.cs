@@ -35,7 +35,9 @@ public sealed class RemoteModel
     public bool Thinking { get; set; }
     /// <summary>Requests it serves at once (its parallel slots); null: not said. With other servers of the same model, the gateway sends it no more.</summary>
     public int? Parallel { get; set; }
-    /// <summary>Per million tokens; null: free.</summary>
+    /// <summary>Per million tokens; null: the default price (Settings → Prices).</summary>
     public decimal? InputPerMtok { get; set; }
+    /// <summary>Per million prompt tokens read from the server's cache; null: the default, never above <see cref="InputPerMtok"/>.</summary>
+    public decimal? CachedInputPerMtok { get; set; }
     public decimal? OutputPerMtok { get; set; }
 }

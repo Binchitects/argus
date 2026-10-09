@@ -41,6 +41,8 @@ public sealed partial class AnswerJobs
                         return;
                     }
                     stopped |= type == "stopped";
+                    // A cost would tell the two models apart by their prices.
+                    node.Remove("cost");
                     if (type == "assistant")
                     {
                         node["side"] = side;

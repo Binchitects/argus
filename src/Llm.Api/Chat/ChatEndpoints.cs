@@ -317,6 +317,8 @@ public static partial class ChatEndpoints
             m.CutShort,
             status = m.Status.ToString().ToLowerInvariant(), error = quality is null ? m.Error : quality.Error(m), model = quality is null ? m.Model : quality.Model(m),
             m.PromptTokens, m.CachedTokens, m.CompletionTokens, m.ThinkingMs, m.DurationMs, m.CreatedAt, m.Summary,
+            // An arena answer's cost waits for the vote, as its model does: prices would tell the two apart.
+            cost = quality is not null && quality.Model(m) != m.Model ? null : m.Cost,
             noAccess = m.Role == "tool" && ArgusMcp.IsNoAccess(m.Content),
             feedback = quality?.Feedback(m.Id),
         });

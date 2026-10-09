@@ -26,6 +26,10 @@ export interface RemoteModel {
   thinking: boolean
   /** Requests it serves at once (its parallel slots); null: not said. */
   parallel?: number | null
+  /** Its prices in dollars per million tokens; null: the default (Settings → Prices). */
+  inputPerMtok?: number | null
+  cachedInputPerMtok?: number | null
+  outputPerMtok?: number | null
   /** The server lists it (false: it no longer has it, and it cannot answer). */
   listed?: boolean
 }
@@ -157,9 +161,34 @@ function ServerRow({ server: s, onEdit, onChanged }: { server: RemoteServer; onE
   )
 }
 
+const priceKeys = ['inputPerMtok', 'cachedInputPerMtok', 'outputPerMtok'] as const
+
 interface Pick extends RemoteModel {
   on: boolean
+  /** The prices as typed ("" for the default). */
+  prices: Record<(typeof priceKeys)[number], string>
 }
+
+const typed = (m: RemoteModel): Pick['prices'] => ({
+  inputPerMtok: m.inputPerMtok?.toString() ?? '',
+  cachedInputPerMtok: m.cachedInputPerMtok?.toString() ?? '',
+  outputPerMtok: m.outputPerMtok?.toString() ?? '',
+})
+
+/** What is wrong with a typed price, if anything (empty is the default). The API checks the same, with the default input too. */
+function priceError(prices: Pick['prices'], k: (typeof priceKeys)[number]): string | undefined {
+  const text = prices[k].trim()
+  if (text === '') return undefined
+  const n = Number(text)
+  if (!Number.isFinite(n)) return 'Enter a number.'
+  if (n < 0) return 'Prices cannot be negative.'
+  const input = Number(prices.inputPerMtok)
+  if (k === 'cachedInputPerMtok' && prices.inputPerMtok.trim() !== '' && Number.isFinite(input) && n > input) return 'Never above input.'
+  return undefined
+}
+
+/** A typed price: empty for the default, else the number (one with an error blocks the save). */
+const price = (text: string) => (text.trim() === '' ? null : Number(text))
 
 function ServerForm({ saved, onDone }: { saved: RemoteServer | null; onDone: () => void }) {
   const queryClient = useQueryClient()
@@ -167,7 +196,7 @@ function ServerForm({ saved, onDone }: { saved: RemoteServer | null; onDone: () 
   const [baseUrl, setBaseUrl] = useState(saved?.baseUrl ?? '')
   const [apiKey, setApiKey] = useState('')
   const [verifyTls, setVerifyTls] = useState(saved?.verifyTls ?? true)
-  const [picks, setPicks] = useState<Pick[]>(() => (saved?.models ?? []).map((m) => ({ ...m, on: true })))
+  const [picks, setPicks] = useState<Pick[]>(() => (saved?.models ?? []).map((m) => ({ ...m, on: true, prices: typed(m) })))
   const probe = useMutation({
     mutationFn: () =>
       api<{ models: { id: string; context: number | null }[] }>('/api/admin/servers/probe', { body: { baseUrl, apiKey: apiKey || null, verifyTls, id: saved?.id ?? null } }),
@@ -176,7 +205,10 @@ function ServerForm({ saved, onDone }: { saved: RemoteServer | null; onDone: () 
         ...now,
         ...r.models
           .filter((o) => !now.some((p) => p.remote === o.id))
-          .map((o) => ({ remote: o.id, name: o.id.split('/').pop()!.replace(/[^A-Za-z0-9._:-]/g, '-'), context: o.context, maxOutput: null, vision: false, tools: true, thinking: false, parallel: null, on: false })),
+          .map((o) => ({
+            remote: o.id, name: o.id.split('/').pop()!.replace(/[^A-Za-z0-9._:-]/g, '-'), context: o.context, maxOutput: null, vision: false, tools: true, thinking: false, parallel: null,
+            on: false, prices: { inputPerMtok: '', cachedInputPerMtok: '', outputPerMtok: '' },
+          })),
       ]),
   })
   const save = useMutation({
@@ -188,7 +220,10 @@ function ServerForm({ saved, onDone }: { saved: RemoteServer | null; onDone: () 
         ...(apiKey || !saved ? { apiKey } : {}),
         models: picks
           .filter((p) => p.on)
-          .map((p) => ({ remote: p.remote, name: p.name, context: p.context, maxOutput: p.maxOutput, vision: p.vision, tools: p.tools, thinking: p.thinking, parallel: p.parallel ?? null })),
+          .map((p) => ({
+            remote: p.remote, name: p.name, context: p.context, maxOutput: p.maxOutput, vision: p.vision, tools: p.tools, thinking: p.thinking, parallel: p.parallel ?? null,
+            inputPerMtok: price(p.prices.inputPerMtok), cachedInputPerMtok: price(p.prices.cachedInputPerMtok), outputPerMtok: price(p.prices.outputPerMtok),
+          })),
       }
       return saved ? api<{ warning: string | null }>(`/api/admin/servers/${saved.id}`, { method: 'PATCH', body }) : api<{ warning: string | null }>('/api/admin/servers', { body })
     },
@@ -202,6 +237,7 @@ function ServerForm({ saved, onDone }: { saved: RemoteServer | null; onDone: () 
   })
   const set = (i: number, change: Partial<Pick>) => setPicks((now) => now.map((p, j) => (j === i ? { ...p, ...change } : p)))
   const chosen = picks.filter((p) => p.on).length
+  const invalid = picks.some((p) => p.on && priceKeys.some((k) => priceError(p.prices, k)))
   return (
     <form
       className="grid gap-4"
@@ -259,6 +295,20 @@ function ServerForm({ saved, onDone }: { saved: RemoteServer | null; onDone: () 
                   <Field label="At once" hint="Its parallel slots">
                     <Input inputMode="numeric" value={p.parallel ?? ''} onChange={(e) => set(i, { parallel: e.target.value ? Number(e.target.value) : null })} aria-label={`Requests at once for ${p.remote}`} />
                   </Field>
+                  {priceKeys.map((k) => {
+                    const label = k === 'inputPerMtok' ? 'Input, $ per 1M tokens' : k === 'cachedInputPerMtok' ? 'Cached input, $ per 1M' : 'Output, $ per 1M tokens'
+                    return (
+                      <Field key={k} label={label} error={priceError(p.prices, k)} hint={k === 'inputPerMtok' ? 'Empty: the default (Settings → Prices)' : undefined}>
+                        <Input
+                          inputMode="decimal"
+                          value={p.prices[k]}
+                          placeholder="the default"
+                          onChange={(e) => set(i, { prices: { ...p.prices, [k]: e.target.value } })}
+                          aria-label={`${label} for ${p.remote}`}
+                        />
+                      </Field>
+                    )
+                  })}
                   <div className="flex flex-wrap gap-4 sm:col-span-4">
                     {(['tools', 'thinking', 'vision'] as const).map((k) => (
                       <Label key={k} className="flex items-center gap-2 font-normal">
@@ -277,7 +327,7 @@ function ServerForm({ saved, onDone }: { saved: RemoteServer | null; onDone: () 
         <Button type="button" variant="outline" onClick={onDone}>
           Cancel
         </Button>
-        <Button type="submit" loading={save.isPending} disabled={chosen === 0 || !name || !baseUrl}>
+        <Button type="submit" loading={save.isPending} disabled={chosen === 0 || !name || !baseUrl || invalid}>
           {saved ? 'Save' : 'Add server'}
         </Button>
       </DialogFooter>

@@ -9,8 +9,9 @@ using Microsoft.EntityFrameworkCore;
 namespace Llm.Api.Models;
 
 /// <param name="Parallel">Requests it serves at once (its parallel slots); with other servers of the same model, the gateway sends it no more.</param>
+/// <param name="InputPerMtok">Its prices per million tokens; null: the default (Settings → Prices).</param>
 public sealed record RemoteModelRequest(string? Remote, string? Name, int? Context, int? MaxOutput, bool? Vision, bool? Tools, bool? Thinking,
-    decimal? InputPerMtok, decimal? OutputPerMtok, int? Parallel = null);
+    decimal? InputPerMtok, decimal? OutputPerMtok, int? Parallel = null, decimal? CachedInputPerMtok = null);
 
 /// <summary>A server to add or change: a key of "" removes it, a missing one is kept.</summary>
 public sealed record RemoteServerRequest(string? Name, string? BaseUrl, string? ApiKey, bool? VerifyTls, RemoteModelRequest[]? Models);
@@ -44,7 +45,7 @@ public static class RemoteServerEndpoints
             status = new { st.Up, st.Error, checkedAt = st.At, offers = st.Models },
             models = s.Models.Select(m => new
             {
-                m.Remote, m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking, m.InputPerMtok, m.OutputPerMtok, m.Parallel,
+                m.Remote, m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking, m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, m.Parallel,
                 // Listed by the server: a model it no longer has cannot answer.
                 listed = !st.Up || st.Models.Any(o => o.Id == m.Remote),
             }),
@@ -74,10 +75,10 @@ public static class RemoteServerEndpoints
     }
 
     private static async Task<IResult> AddAsync(RemoteServerRequest body, AppDbContext db, RemoteServerClient client, RemoteHealth health, ModelCatalog catalog,
-        ChatModels chatModels, KeyAccessWatcher keys, Audit audit, CancellationToken ct)
+        ChatModels chatModels, KeyAccessWatcher keys, PriceBook prices, Audit audit, CancellationToken ct)
     {
         var server = new RemoteServer { Name = "", BaseUrl = "" };
-        if (await ApplyAsync(server, body, db, client, ct) is { } problem)
+        if (await ApplyAsync(server, body, db, client, prices, ct) is { } problem)
         {
             return problem;
         }
@@ -97,13 +98,13 @@ public static class RemoteServerEndpoints
     }
 
     private static async Task<IResult> UpdateAsync(Guid id, RemoteServerRequest body, AppDbContext db, RemoteServerClient client, RemoteHealth health, ModelCatalog catalog,
-        ChatModels chatModels, KeyAccessWatcher keys, Audit audit, CancellationToken ct)
+        ChatModels chatModels, KeyAccessWatcher keys, PriceBook prices, Audit audit, CancellationToken ct)
     {
         if (await db.RemoteServers.SingleOrDefaultAsync(s => s.Id == id, ct) is not { } server)
         {
             return Results.NotFound();
         }
-        if (await ApplyAsync(server, body, db, client, ct) is { } problem)
+        if (await ApplyAsync(server, body, db, client, prices, ct) is { } problem)
         {
             return problem;
         }
@@ -127,7 +128,7 @@ public static class RemoteServerEndpoints
     }
 
     /// <summary>Checks and applies a request over the server's values.</summary>
-    private static async Task<IResult?> ApplyAsync(RemoteServer server, RemoteServerRequest body, AppDbContext db, RemoteServerClient client, CancellationToken ct)
+    private static async Task<IResult?> ApplyAsync(RemoteServer server, RemoteServerRequest body, AppDbContext db, RemoteServerClient client, PriceBook prices, CancellationToken ct)
     {
         var name = (body.Name ?? server.Name).Trim();
         if (name.Length is 0 or > 100)
@@ -143,7 +144,8 @@ public static class RemoteServerEndpoints
         {
             return AuthEndpoints.Problem(400, "baseUrl", bad);
         }
-        var models = body.Models ?? [.. server.Models.Select(m => new RemoteModelRequest(m.Remote, m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking, m.InputPerMtok, m.OutputPerMtok, m.Parallel))];
+        var models = body.Models ?? [.. server.Models.Select(m => new RemoteModelRequest(m.Remote, m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking, m.InputPerMtok, m.OutputPerMtok, m.Parallel,
+            m.CachedInputPerMtok))];
         if (models.Length == 0)
         {
             return AuthEndpoints.Problem(400, "models", "Choose at least one of its models.");
@@ -170,9 +172,9 @@ public static class RemoteServerEndpoints
             {
                 return AuthEndpoints.Problem(400, "models", $"{as_}: the context is 1,024 to {ModelAdvisor.MaxContext:N0} tokens, and the longest answer at most the context.");
             }
-            if (m.InputPerMtok < 0 || m.OutputPerMtok < 0)
+            if (TokenPrice.Check(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, prices.Defaults) is { } price)
             {
-                return AuthEndpoints.Problem(400, "models", $"{as_}: prices cannot be negative.");
+                return AuthEndpoints.Problem(400, "models", $"{as_}: {char.ToLowerInvariant(price[0])}{price[1..]}");
             }
             if (m.Parallel is < 1 or > 256)
             {
@@ -181,7 +183,7 @@ public static class RemoteServerEndpoints
             chosen.Add(new RemoteModel
             {
                 Remote = remote, Name = as_, Context = m.Context, MaxOutput = m.MaxOutput, Vision = m.Vision ?? false, Tools = m.Tools ?? true,
-                Thinking = m.Thinking ?? false, InputPerMtok = m.InputPerMtok, OutputPerMtok = m.OutputPerMtok, Parallel = m.Parallel,
+                Thinking = m.Thinking ?? false, InputPerMtok = m.InputPerMtok, CachedInputPerMtok = m.CachedInputPerMtok, OutputPerMtok = m.OutputPerMtok, Parallel = m.Parallel,
             });
         }
         server.Name = name;

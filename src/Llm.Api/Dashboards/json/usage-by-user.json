@@ -676,7 +676,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select s.\"startTime\" as \"Time\", coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)') as \"Person\", coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') as \"Key\", case when coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') = 'chat' then 'Chat' when coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') = '(master key)' then 'Master key (unattributed)' else 'API / agent' end as \"Surface\", s.model as \"Model\", s.prompt_tokens as \"Prompt\", s.completion_tokens as \"Completion\", round(coalesce(s.spend,0)::numeric,6) as \"Spend\" from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\") order by s.\"startTime\" desc limit 200"
+          "rawSql": "select s.\"startTime\" as \"Time\", coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)') as \"Person\", coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') as \"Key\", case when coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') = 'chat' then 'Chat' when coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') = '(master key)' then 'Master key (unattributed)' else 'API / agent' end as \"Surface\", coalesce(nullif(s.model_group,''), s.model) as \"Model\", s.prompt_tokens as \"Prompt\", s.completion_tokens as \"Completion\", round(coalesce(s.spend,0)::numeric,6) as \"Spend\" from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\") order by s.\"startTime\" desc limit 200"
         }
       ],
       "fieldConfig": {
@@ -706,7 +706,7 @@
     {
       "type": "stat",
       "title": "Input tokens, cache miss",
-      "description": "Prompt tokens the engine had to process: charged at PRICE_INPUT_PER_MTOK.",
+      "description": "Prompt tokens the engine had to process: charged at the model's input price (Admin \u2192 Models, else Settings \u2192 Prices).",
       "datasource": {
         "type": "postgres",
         "uid": "litellm-db"
@@ -753,7 +753,7 @@
     {
       "type": "stat",
       "title": "Input tokens, cache hit",
-      "description": "Prompt tokens served from the engine's prefix cache (a resent conversation or system prompt): charged at PRICE_CACHED_INPUT_PER_MTOK.",
+      "description": "Prompt tokens served from the engine's prefix cache (a resent conversation or system prompt): charged at the model's cached input price (Admin \u2192 Models, else Settings \u2192 Prices).",
       "datasource": {
         "type": "postgres",
         "uid": "litellm-db"
@@ -847,7 +847,7 @@
     {
       "type": "stat",
       "title": "Output tokens",
-      "description": "Generated tokens, reasoning included: charged at PRICE_OUTPUT_PER_MTOK.",
+      "description": "Generated tokens, reasoning included: charged at the model's output price (Admin \u2192 Models, else Settings \u2192 Prices).",
       "datasource": {
         "type": "postgres",
         "uid": "litellm-db"
@@ -894,7 +894,7 @@
     {
       "type": "stat",
       "title": "Cost",
-      "description": "What the gateway charged, request by request, at the prices in .env when each request ran.",
+      "description": "What the gateway charged, request by request, at the prices the model had when each request ran (Admin \u2192 Models, else Settings \u2192 Prices).",
       "datasource": {
         "type": "postgres",
         "uid": "litellm-db"

@@ -252,12 +252,20 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { context = 32768 }));
         Assert.NotEqual(first, gateway.Managed.Keys.Single());
         Assert.Contains("ctx-size = 32768", await File.ReadAllTextAsync(Path.Combine(Config, "models.ini")), StringComparison.Ordinal);
+        // Cached input is never priced above input: above its own (0.1) is refused.
+        var above = await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { cachedInputPerMtok = 0.5m });
+        await StatusAssert.Is(HttpStatusCode.BadRequest, above);
+        Assert.Contains("Cached input cannot cost more than input (0.1).", await above.Content.ReadAsStringAsync(), StringComparison.Ordinal);
         // A value left out is kept; one named in "clear" is emptied.
         Assert.Equal(4096, Row(await ModelsAsync(admin), "tiny-b").GetProperty("maxOutput").GetInt32());
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { clear = new[] { "maxOutput", "inputPerMtok" } }));
         var cleared = Row(await ModelsAsync(admin), "tiny-b");
         Assert.Equal(JsonValueKind.Null, cleared.GetProperty("maxOutput").ValueKind);
         Assert.Equal(JsonValueKind.Null, cleared.GetProperty("inputPerMtok").ValueKind);
+        // Without its own input, nor above the default it takes.
+        var aboveDefault = await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { cachedInputPerMtok = 0.3m });
+        await StatusAssert.Is(HttpStatusCode.BadRequest, aboveDefault);
+        Assert.Contains("(0.2, the default)", await aboveDefault.Content.ReadAsStringAsync(), StringComparison.Ordinal);
         // Without a longest answer: half the context.
         Assert.Equal(16384, gateway.Managed.Values.Single().Info["max_output_tokens"]!.GetValue<int>());
 

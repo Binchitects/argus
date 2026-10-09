@@ -335,9 +335,55 @@ the host for anyone who reaches it.
 and first characters into every screenshot. A secret can be replaced, never
 read back.
 
-**Prices are each model's** (Admin → Models); a new person's credit is in
+**Prices** are below ([Prices](#prices)); a new person's credit is in
 `config/litellm.yaml`, each person's own under People, and a group's under
 Groups.
+
+### Prices
+
+Every model has a price, so every request has a cost:
+
+- **A chat model's own** (Admin → Models → Edit, or a model of another GPU
+  server in its server's form): dollars per million tokens of **input** (the
+  prompt the model reads), **cached input** (prompt tokens the engine reads
+  from its cache: the start of a conversation it has seen, sent again with
+  every answer) and **output** (what it writes, thinking included). Each one
+  left empty is the default. Cached input is never priced above the model's
+  input: a price above it (its own, else the default) is refused on save, and
+  one a lower default input later puts above it costs what input does. The
+  models list shows each model's prices, and which are defaults.
+- **The defaults**, for every model without its own: Settings → **Prices**
+  ([settings.md](settings.md#prices)), $0.20, $0.02 and $0.80 per million
+  tokens out of the box.
+- **Pictures, video and speech**, by what they are (Settings → Prices): a
+  picture ($0.01), a second of video ($0.05), a minute of sound turned into
+  text ($0.006), 1,000 characters read aloud ($0.015).
+
+The app gives the gateway every model's prices when it registers it
+(`input_cost_per_token`, `cache_read_input_token_cost`,
+`output_cost_per_token`; per picture, per second of sound, per character for
+the picture and speech models), again within a minute of any change, and at
+once when the defaults are saved. LiteLLM prices a request's cached tokens at
+nothing when a model has no cache read price, so every model has one. The chat
+asks the speech server for a transcription's length (`verbose_json`), which is
+what LiteLLM prices it by. The video server is not behind the gateway: the app
+books each clip in the gateway's request log itself, as the chat's request,
+with its length.
+
+**Recalculate past costs** (Settings → Prices): requests booked before a model
+had a price (or before cached input had one) cost nothing, or too little. Pick
+the days, count, then **Recalculate**: requests in the gateway's request log
+(what usage, credit, chargeback and the dashboards count) and the parts of chat
+answers (what each answer shows) are worked out again at today's prices.
+**Only costs booked as free** (on by default) leaves the others as they are; off,
+every cost in the range is worked out again. A picture request booked as free
+counts as one picture; one with a cost keeps it either way, since the log does
+not say how many pictures it made (an API key can ask for several at once).
+Speech and transcriptions in the log cannot be priced again
+(their length is not kept), nor pictures, video and speech whose files were
+deleted since. Each recalculation is audited (`usage.recalculate`, with the
+counts and totals); the gateway's own running totals (a key's spend in LiteLLM's
+own pages) are left as they are. It never runs by itself, not on upgrade either.
 
 ## Usage & cost
 
@@ -348,9 +394,27 @@ surface (API or chat); budget headroom; unattributed usage to fix; recent
 requests; and input split into **cache miss** and **cache hit** with the cache
 hit rate, output, cost, cost per 1M tokens, per person and over time.
 
+**Everyone's prompts** (admins): each prompt of the time range (or between two
+days) with who asked, when, the model, tokens in, cached and out, and its cost;
+by person, group, model, and chat or API keys. It shows no chat's title, only
+who, when, which model, tokens and cost. Totals count every prompt the filters
+match; the table holds the newest 1,000 and sorts by any column. An admin's own
+comparisons stay blind to them here until they vote, as below.
+
 **Mine** (everyone) is the same numbers for the signed-in person only: requests,
 input cache miss, input cache hit (and what share of input it is), output, cost,
-over time and by model.
+over time and by model; and **Your prompts**, the same list of their own, each
+answer linked to its chat.
+
+A prompt is a chat answer, with its rounds, tool calls (pictures, video,
+speech) and sub-agents added up at the prices when each ran, or one request of
+an API key (from the gateway's request log). The chat's own small steps around
+the answers (titles, summaries, the safeguards' check, transcribing a file) are
+in the totals above, not in the list. An answer from before costs were kept is
+marked with `*`: its cost leaves those parts out until an admin recalculates.
+An answer of a comparison (Compare) not voted on yet stays blind, as in the
+chat: its model is "Model A" or "Model B", its cost waits for the vote (and is
+out of the cost total until then), and the model filter does not find it.
 
 ### Dashboards
 

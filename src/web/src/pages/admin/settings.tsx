@@ -21,6 +21,7 @@ import { api, ApiError, errorMessage, infoQuery } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { CompanySignInPanel } from './company-sign-in'
 import { BotAddresses } from './bot-addresses'
+import { RecalculatePanel } from './recalculate'
 import { bytesHint, initialValue, isShown, slug, wireValue, type SettingsData, type SettingView } from './settings-model'
 
 const settingsQuery = {
@@ -198,6 +199,7 @@ export function SettingsPage() {
                 {g.title.startsWith('Company directory') && <DirectoryTest draft={draft} />}
                 {g.title === 'Company sign-in' && <CompanySignInPanel draft={draft} />}
                 {g.title === 'Chat bots' && <BotAddresses />}
+                {g.title === 'Prices' && <RecalculatePanel />}
               </CardContent>
             </Card>
           ))}
@@ -372,6 +374,7 @@ function Editor({ s, id, value, onChange, describedBy, invalid }: { s: SettingVi
         <div className="flex items-center gap-2">
           <Input {...common} inputMode={s.type === 'number' ? 'decimal' : 'numeric'} value={value} onChange={(e) => onChange(e.target.value)} placeholder={s.optional ? 'not set' : undefined} className="w-40" />
           {hint && <span className="text-sm text-muted-foreground">= {hint}</span>}
+          {s.type === 'number' && s.unit && <span className="text-sm text-muted-foreground">{s.unit}</span>}
           {s.min !== null && s.max !== null && s.unit !== 'bytes' && (
             <span className="text-xs text-muted-foreground">
               {s.min}–{s.max}

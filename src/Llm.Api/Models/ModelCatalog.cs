@@ -41,7 +41,7 @@ public sealed class EngineState
 /// (config/engine/targets.json), and keeps the gateway's list in step.
 /// </summary>
 public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOptions<EngineOptions> options, ModelLibrary library, ChatModels chatModels,
-    RemoteServerClient remote, ModelHoursState hours, Modules modules, MediaControl media, ILogger<ModelCatalog> logger)
+    RemoteServerClient remote, ModelHoursState hours, Modules modules, MediaControl media, IOptionsMonitor<PriceOptions> prices, ILogger<ModelCatalog> logger)
 {
     public const string PresetsFile = "models.ini";
     public const string KeepFile = "keep";
@@ -267,9 +267,11 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// chosen from other GPU servers. Each deployment is known by a fingerprint of everything
     /// it is registered with, so a changed one is replaced and two of one name (a model here
     /// and its copy on a server) are both kept: the gateway spreads requests between them.
+    /// Every model carries its prices (its own, else Settings → Prices), so every request has a cost.
     /// </summary>
     public async Task SyncGatewayAsync(CancellationToken ct = default)
     {
+        var defaults = prices.CurrentValue;
         var wanted = new Dictionary<string, (string Name, JsonObject Params, JsonObject Info)>(StringComparer.Ordinal);
         // Each chat model on each server first, with what makes it this one and the requests it serves at once.
         var deployments = new List<(string Name, JsonObject Params, JsonObject Info, object?[] Print, int? Slots)>();
@@ -279,8 +281,10 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             var projector = m.Projector is { Length: > 0 } p ? library.Find(p)?.Profile.Projector ?? new ProjectorInfo(true, false, null, null) : null;
             var info = Info(m.Context, m.MaxOutput ?? DefaultMaxOutput(m.Context), projector?.Vision == true, m.Tools, m.Thinking, projector?.Audio == true);
             var litellm = new JsonObject { ["model"] = "openai/" + m.Name, ["api_base"] = "os.environ/ENGINE_API_BASE", ["api_key"] = "os.environ/ENGINE_API_KEY" };
-            Prices(litellm, m.InputPerMtok, m.OutputPerMtok);
-            deployments.Add((m.Name, litellm, info, ["local", m.Name, m.File, m.Context, m.MaxOutput, m.Projector, projector?.Audio, m.Tools, m.Thinking, m.InputPerMtok, m.OutputPerMtok], m.Parallel));
+            var price = TokenPrice.Of(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, defaults);
+            Prices(litellm, price);
+            deployments.Add((m.Name, litellm, info, ["local", m.Name, m.File, m.Context, m.MaxOutput, m.Projector, projector?.Audio, m.Tools, m.Thinking,
+                price.Input, price.CachedInput, price.Output], m.Parallel));
         }
         foreach (var server in await db.RemoteServers.AsNoTracking().ToListAsync(ct))
         {
@@ -295,10 +299,11 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
                     // The public roots, or no check at all.
                     litellm["ssl_verify"] = server.VerifyTls;
                 }
-                Prices(litellm, m.InputPerMtok, m.OutputPerMtok);
+                var price = TokenPrice.Of(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, defaults);
+                Prices(litellm, price);
                 var keyPrint = key is null ? "" : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..16];
                 deployments.Add((m.Name, litellm, info, ["remote", server.Id, server.BaseUrl, keyPrint, server.VerifyTls, m.Remote, m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking,
-                    m.InputPerMtok, m.OutputPerMtok], m.Parallel));
+                    price.Input, price.CachedInput, price.Output], m.Parallel));
             }
         }
         foreach (var pool in deployments.GroupBy(d => d.Name, StringComparer.Ordinal))
@@ -310,7 +315,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
                 wanted[Fingerprint(size == 1 ? d.Print : [.. d.Print, "pool", size, d.Slots])] = (d.Name, size == 1 ? d.Params : Pooled(d.Params, d.Info, size, d.Slots), d.Info);
             }
         }
-        await MediaAsync(wanted, ct);
+        await MediaAsync(wanted, defaults, ct);
         var managed = await gateway.ManagedModelsAsync(ct);
         foreach (var old in managed.Where(g => g.Fingerprint is null || !wanted.ContainsKey(g.Fingerprint)))
         {
@@ -326,12 +331,13 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     }
 
     /// <summary>The picture and speech models turned on, while their servers run: people's keys reach them too.</summary>
-    private async Task MediaAsync(Dictionary<string, (string Name, JsonObject Params, JsonObject Info)> wanted, CancellationToken ct)
+    private async Task MediaAsync(Dictionary<string, (string Name, JsonObject Params, JsonObject Info)> wanted, PriceOptions defaults, CancellationToken ct)
     {
         void Add(string name, string model, string url, JsonObject info)
         {
             var litellm = new JsonObject { ["model"] = model, ["api_base"] = url + "/v1", ["api_key"] = "none" };
-            wanted[Fingerprint("media", name, model, url, info.ToJsonString())] = (name, litellm, info);
+            MediaPrices(litellm, info["mode"]!.GetValue<string>(), defaults);
+            wanted[Fingerprint("media", name, model, url, info.ToJsonString(), litellm.ToJsonString())] = (name, litellm, info);
         }
         var on = (await media.ListAsync(ct)).Where(x => x.State.Enabled).Select(x => x.Model.Name).ToHashSet(StringComparer.Ordinal);
         if (on.Contains(MediaModels.ImageModel) && await modules.HasAsync("imagegen", ct))
@@ -344,6 +350,32 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             {
                 Add(name, "openai/" + id, MediaModels.AudioUrl, new JsonObject { ["mode"] = mode });
             }
+        }
+    }
+
+    /// <summary>
+    /// A picture or speech model's price as LiteLLM reads it: per picture, per second of sound
+    /// transcribed, per character read aloud. Pictures and speech also carry token prices of 0:
+    /// LiteLLM prices a request by its deployment's own entry only when that entry has a token
+    /// or per-second price (LiteLLM 1.100, cost_calculator._select_model_name_for_cost_calc).
+    /// </summary>
+    private static void MediaPrices(JsonObject litellm, string mode, PriceOptions p)
+    {
+        switch (mode)
+        {
+            case "image_generation":
+                litellm["input_cost_per_image"] = p.PerImage;
+                litellm["input_cost_per_token"] = 0m;
+                litellm["output_cost_per_token"] = 0m;
+                break;
+            case "audio_transcription":
+                litellm["input_cost_per_second"] = p.PerAudioMinute / 60m;
+                break;
+            case "audio_speech":
+                litellm["input_cost_per_character"] = p.PerThousandCharacters / 1000m;
+                litellm["input_cost_per_token"] = 0m;
+                litellm["output_cost_per_token"] = 0m;
+                break;
         }
     }
 
@@ -381,16 +413,12 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         return info;
     }
 
-    private static void Prices(JsonObject litellm, decimal? input, decimal? output)
+    /// <summary>A chat model's prices, per token: LiteLLM prices a prompt's cached tokens at the cache read price, and at nothing without one.</summary>
+    private static void Prices(JsonObject litellm, TokenPrice price)
     {
-        if (input is { } i)
-        {
-            litellm["input_cost_per_token"] = i / 1_000_000m;
-        }
-        if (output is { } o)
-        {
-            litellm["output_cost_per_token"] = o / 1_000_000m;
-        }
+        litellm["input_cost_per_token"] = price.Input / 1_000_000m;
+        litellm["cache_read_input_token_cost"] = price.CachedInput / 1_000_000m;
+        litellm["output_cost_per_token"] = price.Output / 1_000_000m;
     }
 
     /// <summary>The longest answer when none is set: half the context, at most 32,768 tokens.</summary>
