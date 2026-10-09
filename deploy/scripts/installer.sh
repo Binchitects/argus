@@ -353,6 +353,19 @@ argus_version() {
   printf '%s' "$v"
 }
 
+# What app_version or argus_version says once it says WANT, or when the wait is over (90 s at
+# most; less with a shorter --timeout): Traefik reaches a recreated container a few seconds after
+# compose calls it healthy (a new address, a connection kept to the old one).
+answer_until() {   # answer_until WANT FUNCTION -> the last answer
+  local want=$1 fn=$2 v secs deadline
+  secs=$(( ${TIMEOUT%s} * 60 )); [[ $TIMEOUT == *s ]] && secs=${TIMEOUT%s}
+  (( secs > 90 )) && secs=90
+  deadline=$(( $(date +%s) + secs ))
+  v="$("$fn")"
+  while [[ "$v" != "$want" && $(date +%s) -lt $deadline ]]; do sleep 3; v="$("$fn")"; done
+  printf '%s' "$v"
+}
+
 # The version installed: the installer's record, a release's VERSION beside deploy/, or the app's word.
 installed_version() {
   local v
@@ -848,13 +861,13 @@ check_versions() {   # check_versions VERSION
   local want=$1 v failed=0 svc name img ref id
   step "versions"
   read_settings
-  v="$(app_version)"
+  v="$(answer_until "$want" app_version)"
   if [[ "$v" == "$want" ]]; then ok "app: $v (its own /api/info)"
   elif [[ -z "$v" ]]; then bad "app: no answer at https://$DOMAIN:$HTTPS_PORT/api/info"; failed=1
   else bad "app: it says $v, not $want"; failed=1
   fi
   if dc config --services 2>/dev/null | grep -qx argus; then
-    v="$(argus_version)"
+    v="$(answer_until "$want" argus_version)"
     if [[ "$v" == "$want" ]]; then ok "argus: $v (its own metrics)"
     elif [[ -z "$v" ]]; then note "argus: no answer at argus.$DOMAIN (its image is checked below)"
     else bad "argus: it says $v, not $want"; failed=1
@@ -1097,7 +1110,7 @@ rollback() {   # rollback STARTED -> 0 when FROM runs again
   fi
   start_stack || return 1
   wait_healthy || return 1
-  local v; read_settings; v="$(app_version)"
+  local v; read_settings; v="$(answer_until "$FROM" app_version)"
   if [[ -n "$v" && "$v" != "$FROM" ]]; then bad "the app says $v after the rollback, not $FROM"; return 1; fi
   ok "$FROM runs again${v:+ (the app says $v)}"
   return $rc

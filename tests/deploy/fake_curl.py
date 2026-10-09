@@ -4,6 +4,8 @@ A stand-in for curl on PATH, for the installer's tests: the app's /api/info and
 Argus's metrics answer with the version of the image the fake engine
 (FAKE_STATE) runs for them: the tag of the reference it was loaded as, when that
 is a version, else FAKE_OLD_VERSION. No running container: no answer (exit 7).
+FAKE_CURL_LATE=N: the first N asks of /api/info get no answer, as while Traefik
+has yet to reach a container compose just recreated.
 """
 from __future__ import annotations
 
@@ -34,6 +36,14 @@ def main() -> int:
         log.write(json.dumps(["curl"] + sys.argv[1:]) + "\n")
     url = next((a for a in sys.argv[1:] if a.startswith("https://")), "")
     if url.endswith("/api/info"):
+        late = int(os.environ.get("FAKE_CURL_LATE", "0"))
+        if late:
+            count = os.environ["FAKE_LOG"] + ".info-asks"
+            n = int(open(count).read()) + 1 if os.path.exists(count) else 1
+            with open(count, "w") as f:
+                f.write(str(n))
+            if n <= late:
+                return 7
         v = running("app")
         if v is None:
             return 7
