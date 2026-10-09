@@ -154,6 +154,10 @@ public static class SettingsCatalog
             { Default = "off", Options = ["off", "opt-in", "all"], Optional = false },
         new("Gateway:AnswerCacheTtl", Api, "Keep cached answers for", "An answer older than this is asked of the model again.", SettingType.Duration, SettingScope.Live)
             { Default = "1.00:00:00", Unit = "hours", Min = 1, Max = 720, Optional = false },
+        new("Gateway:RequestsPerMinute", Api, "Requests a minute, per key", "Requests one API key may send to the gateway in a minute; more are refused (HTTP 429, with Retry-After) until the minute is over. A group's own (Admin → Groups) or a person's own (Admin → People) replaces it. The chat is never limited by it. 0: no limit.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "0", Min = 0, Max = Gateway.RateLimits.MaxRequests, Optional = false },
+        new("Gateway:TokensPerMinute", Api, "Tokens a minute, per key", "Tokens one API key may use at the gateway in a minute: what the model reads and writes, less the prompt it reads from its cache. A request is let through only if its prompt and its max_tokens fit what is left, so keep it well above the largest request. A group's or a person's own replaces it. 0: no limit.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "0", Min = 0, Max = Gateway.RateLimits.MaxTokens, Optional = false },
         new("Chat:AgentsAtOnce", Chat, "Sub-agents at once", "How many sub-agents of one answer run side by side (the Sub-agents tool); the rest wait their turn. Each is a request to the model like an answer of its own, inside the answer's place in line: 1 runs them one after another.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "3", Min = 1, Max = 8, Optional = false },
         new("Chat:ToolCallTimeout", Chat, "Longest tool call", "A call to Argus or an MCP server still running after this long is stopped, and the model told so. An MCP server can have its own limit (Admin → Tools). The chat shows how long a call has run, and the progress the server reports.", SettingType.Duration, SettingScope.Live)

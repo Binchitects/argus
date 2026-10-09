@@ -175,6 +175,7 @@ through a pipe, as above, or `< /dev/null`.
 | `The gateway's certificate is not trusted` | the deployment's certificate is its own: set `ARENA_CA_CERT` |
 | `The gateway refused the key (401)` | a wrong or replaced key, or a model the key may not use |
 | `Budget has been exceeded` | the key's credit is used up (**Admin → People**) |
+| `The gateway answered 429 ... Rate limit exceeded ... Limit type: requests` (or `tokens`) | the key used its requests or tokens for this minute: run again after a minute, or give the key's person a limit of their own (**Admin → People** → **Rate limits**; 0 is no limit) |
 | `GitLab says ARENA_GITLAB_TOKEN may not do this (403)` | the token needs the `api` scope and Reporter |
 | `set ARENA_PROJECT ... or ARENA_CLI` | the jobs do not know where the CLI is (step 4) |
 

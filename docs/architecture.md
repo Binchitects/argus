@@ -66,8 +66,9 @@ One issuer, the app.
 - **People** sign in at the app: accounts, LDAP or Active Directory,
   two-factor. A session cookie for the domain, 1 hour idle, 12 at most.
 - **A person's tools** use their API key at the gateway (`sk-...`), which LiteLLM
-  checks itself: the spend is theirs, within their credit and the models
-  they may use.
+  checks itself: the spend is theirs, within their credit, the models
+  they may use and the key's rate limits (which the app puts on it, and
+  LiteLLM counts).
 - **Coding agents at Argus** bring the person's API key (`sk-...`); Argus asks
   the app whose it is (with `ARGUS_KEY`, inside the network) and answers within
   that person's GitLab membership. Argus takes no GitLab token in the platform.
@@ -168,6 +169,7 @@ or the Helm chart's `app.replicas`). What must happen once runs on one of them:
 - **Kept in the database already**: sessions and two-factor (the Data
   Protection key ring), OIDC keys, settings, chats. Per replica: the sign-in
   throttle and rate limits, the gateway's model list cache (a minute).
+  API keys' rate limits are counted by the gateway, once for every replica.
 
 ## 10. What is generated, and what you edit
 

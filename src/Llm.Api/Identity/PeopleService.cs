@@ -21,6 +21,7 @@ public sealed partial class PeopleService(
     AppDbContext db,
     ILiteLlm gateway,
     Models.KeyAccess keyAccess,
+    RateLimits rateLimits,
     Audit audit,
     DirectoryFile directory,
     IOpenIddictTokenManager tokens,
@@ -83,7 +84,7 @@ public sealed partial class PeopleService(
             {
                 await gateway.SetBudgetAsync(email, p.Budget);
             }
-            var key = await gateway.GenerateKeyAsync(email, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel);
+            var key = await gateway.GenerateKeyAsync(email, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel, (await rateLimits.ForAsync(user)).Key);
             return (user, new Secrets(password, key));
         }
         catch (GatewayException ex)
@@ -98,7 +99,7 @@ public sealed partial class PeopleService(
         await gateway.EnsureUserAsync(user.Email!);
         if ((await gateway.KeysAsync(user.Email!)).Count == 0)
         {
-            await gateway.GenerateKeyAsync(user.Email!, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel);
+            await gateway.GenerateKeyAsync(user.Email!, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel, (await rateLimits.ForAsync(user)).Key);
         }
     }
 
@@ -181,7 +182,7 @@ public sealed partial class PeopleService(
         var old = await gateway.KeysAsync(user.Email!);
         await gateway.DeleteKeysAsync(old.Select(k => k.Token));
         await gateway.EnsureUserAsync(user.Email!);
-        var key = await gateway.GenerateKeyAsync(user.Email!, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel);
+        var key = await gateway.GenerateKeyAsync(user.Email!, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel, (await rateLimits.ForAsync(user)).Key);
         await audit.WriteAsync("person.rotate_key", user.UserName, detail: $"revoked {old.Count}");
         return new Secrets(null, key);
     }
@@ -195,6 +196,43 @@ public sealed partial class PeopleService(
         await gateway.EnsureUserAsync(user.Email!);
         await gateway.SetBudgetAsync(user.Email!, budget);
         await audit.WriteAsync("person.set_budget", user.UserName, detail: budget?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unlimited");
+    }
+
+    /// <summary>
+    /// Their own requests and tokens a minute, for each of their API keys (null: their groups' or
+    /// the company's; 0: no limit). Audited; their keys have it at once, or, when the gateway cannot
+    /// be reached, at the next check (the warning returned says so).
+    /// </summary>
+    public async Task<string?> SetLimitsAsync(AppUser user, int? requestsPerMinute, int? tokensPerMinute)
+    {
+        if (requestsPerMinute is < 0 or > RateLimits.MaxRequests)
+        {
+            throw new PeopleException($"Requests a minute are 0 (no limit) to {RateLimits.MaxRequests:N0}, or empty for their groups' or the company's.");
+        }
+        if (tokensPerMinute is < 0 or > RateLimits.MaxTokens)
+        {
+            throw new PeopleException($"Tokens a minute are 0 (no limit) to {RateLimits.MaxTokens:N0}, or empty for their groups' or the company's.");
+        }
+        user.RequestsPerMinute = requestsPerMinute;
+        user.TokensPerMinute = tokensPerMinute;
+        Check(await users.UpdateAsync(user));
+        await audit.WriteAsync("person.set_limits", user.UserName, detail: $"requests a minute {Limit(requestsPerMinute)}; tokens a minute {Limit(tokensPerMinute)}");
+        try
+        {
+            await rateLimits.ApplyAsync(user);
+            return null;
+        }
+        catch (GatewayException ex)
+        {
+            return $"Saved. The gateway could not be reached, so their keys get it at the next check, within ten minutes: {ex.Message}";
+        }
+
+        static string Limit(int? value) => value switch
+        {
+            null => "from their groups or the company",
+            0 => "no limit",
+            { } n => n.ToString("N0", System.Globalization.CultureInfo.InvariantCulture),
+        };
     }
 
     public async Task DeleteAsync(AppUser actor, AppUser user)

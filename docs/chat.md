@@ -797,7 +797,8 @@ request with an API key, the gateway asks the app (its guardrail,
 the blocked words and the model's check read its last question; personal data
 is masked when the policy says so. A refused request gets the gateway's error
 with the same sentence the chat shows. The chat's limits per person (length, messages a
-minute) are the chat's only: keys have their own requests-at-once limit.
+minute) are the chat's only: keys have their own, requests at once and the rate
+limits (requests and tokens a minute), and the chat is held to none of those.
 
 ## Fair use
 
@@ -814,6 +815,12 @@ So that everyone gets their turn:
 - **API keys** (Qwen Code, IDEs, scripts) have at most two requests at once
   (API requests at once, per key); a third at the same time gets HTTP 429 and
   can retry. It applies to every key, within seconds of a change.
+- **Rate limits** hold each key to so many requests and tokens a minute, when
+  an admin sets them: the company's (Settings → API keys), a group's, or a
+  person's own. Past one, a request gets HTTP 429 with `Retry-After` and the
+  limit it met. Your key's card (Your account) shows its limits, what it used
+  in the last minute and what was refused in the last day. None is set out of
+  the box ([admin.md](admin.md#rate-limits-for-api-keys)).
 - **Credit** is one per person, over the chat and their keys together, per
   calendar month (UTC), and a group can have one too, shared by its members or
   each member's (Admin → Groups). Past any of them, the chat says which, and API
@@ -991,7 +998,7 @@ use and edit one); a new chat takes `assistantId`.
 | "… is not loaded right now" | the chat's model is not the one the engine has loaded | choose a loaded model, or ask an admin to load it (Admin → Models) |
 | "Waiting for your turn: N answers ahead of you" | the model is serving others; your answer is in line | nothing: it starts on its own. A group with a higher priority goes first (Admin → Groups). An admin can change the limits (Settings → Chat) |
 | "The model has been busy for 10 minutes" | the line did not move for that long | ask again later; tell an admin if it happens often |
-| An API call answers **429** | the key already has as many requests running as it may | wait for one to finish, or retry; an admin sets the limit (API requests at once, per key) |
+| An API call answers **429** | the key already has as many requests running as it may (`Limit type: max_parallel_requests`), or used its requests or tokens for this minute (`Limit type: requests` or `tokens`) | wait as long as `Retry-After` says, then send again; Your account → API key shows the limits and what was used. An admin sets them (Settings → API keys, a group's Policies, a person's Rate limits) |
 | "Argus is not available for this answer: …" | Argus's reason follows | usually no GitLab account matches the person's email; see [ARGUS.md](argus/README.md) |
 | "… is not available for this answer: … did not answer" | an MCP server is down or refused the key | Admin → Tools → the server's **Edit** → **Test** |
 | No **Image generation** or **Video generation** in the Tools menu | the model is off, or its server does not run | Admin → Models: turn it on; a module left out in `docker-compose.override.yml` stays out |

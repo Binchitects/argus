@@ -52,6 +52,10 @@ public sealed class AppUser : IdentityUser<Guid>
     public string? LegalHoldReason { get; set; }
     /// <summary>Their API key's repeated requests are answered from the answer cache (when an admin lets people choose).</summary>
     public bool CacheApiAnswers { get; set; }
+    /// <summary>Requests a minute each of their API keys may send to the gateway, their own; null: their groups' or the company's, 0: no limit.</summary>
+    public int? RequestsPerMinute { get; set; }
+    /// <summary>Tokens a minute each of their API keys may use at the gateway, their own; null: their groups' or the company's, 0: no limit.</summary>
+    public int? TokensPerMinute { get; set; }
 }
 
 public sealed class AppRole : IdentityRole<Guid>

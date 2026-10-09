@@ -127,7 +127,8 @@ public static class AccountEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> KeysAsync(ClaimsPrincipal p, UserManager<AppUser> users, ILiteLlm gateway, Ledger ledger)
+    /// <summary>The person's keys, their spend and credit, and their keys' rate limits with what the keys used in the last minute.</summary>
+    private static async Task<IResult> KeysAsync(ClaimsPrincipal p, UserManager<AppUser> users, ILiteLlm gateway, Ledger ledger, RateLimits rateLimits, Models.KeyAccess keyAccess)
     {
         var user = (await users.GetUserAsync(p))!;
         var keys = await gateway.KeysAsync(user.Email!);
@@ -138,6 +139,7 @@ public static class AccountEndpoints
             keys = keys.Select(k => new { alias = k.Alias, preview = k.Preview, spend = k.Spend, blocked = k.Blocked, createdAt = k.CreatedAt }),
             spend = standing?.Spend ?? 0,
             budget = standing?.Budget,
+            limits = await rateLimits.ViewAsync(user, keys, keyAccess.MaxParallel),
         });
     }
 

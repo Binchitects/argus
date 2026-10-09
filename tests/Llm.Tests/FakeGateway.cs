@@ -19,7 +19,12 @@ public sealed class FakeGateway : ILiteLlm
         public DateTimeOffset? Expires { get; set; }
         /// <summary>The team (a group's credit) the key is in, if any.</summary>
         public string? TeamId { get; set; }
+        /// <summary>Its requests and tokens a minute.</summary>
+        public KeyRate Rate { get; set; } = KeyRate.None;
     }
+
+    /// <summary>Every rate the app set on a key, in order (the key's hashed token and the rate), so tests see what changed.</summary>
+    public ConcurrentQueue<(string Token, KeyRate Rate)> RateChanges { get; } = new();
 
     /// <summary>The teams the app made for groups, by id, with the duration their budget is per.</summary>
     public ConcurrentDictionary<string, (GatewayTeam Team, string Duration)> Teams { get; } = new();
@@ -45,14 +50,26 @@ public sealed class FakeGateway : ILiteLlm
         return Task.CompletedTask;
     }
 
-    public Task<string> GenerateKeyAsync(string email, string keyAlias, IReadOnlyList<string>? models = null, int? maxParallel = null, CancellationToken ct = default)
+    public Task<string> GenerateKeyAsync(string email, string keyAlias, IReadOnlyList<string>? models = null, int? maxParallel = null, KeyRate? rate = null,
+        CancellationToken ct = default)
     {
         Check();
         var secret = "sk-" + Guid.NewGuid().ToString("N");
         // As LiteLLM keeps it: the key's SHA-256, in hex.
         var token = AnswerCache.HashOf(secret);
-        Keys[token] = new Key { Secret = secret, Token = token, Email = email, Alias = keyAlias, Models = models ?? [], MaxParallel = maxParallel };
+        Keys[token] = new Key { Secret = secret, Token = token, Email = email, Alias = keyAlias, Models = models ?? [], MaxParallel = maxParallel, Rate = rate ?? KeyRate.None };
         return Task.FromResult(secret);
+    }
+
+    public Task SetKeyRateAsync(string token, KeyRate rate, CancellationToken ct = default)
+    {
+        Check();
+        if (Keys.TryGetValue(token, out var key))
+        {
+            key.Rate = rate;
+            RateChanges.Enqueue((token, rate));
+        }
+        return Task.CompletedTask;
     }
 
     public Task SetKeyAccessAsync(string token, IReadOnlyList<string> models, int? maxParallel, CancellationToken ct = default)
@@ -90,7 +107,7 @@ public sealed class FakeGateway : ILiteLlm
     public Task<IReadOnlyList<GatewayKey>> KeysAsync(string email, CancellationToken ct = default)
     {
         Check();
-        IReadOnlyList<GatewayKey> list = [.. KeysOf(email).Select(k => new GatewayKey(k.Token, k.Alias, "sk-...", 0, k.Blocked, DateTimeOffset.UtcNow, k.Models, k.MaxParallel, k.TeamId))];
+        IReadOnlyList<GatewayKey> list = [.. KeysOf(email).Select(k => new GatewayKey(k.Token, k.Alias, "sk-...", 0, k.Blocked, DateTimeOffset.UtcNow, k.Models, k.MaxParallel, k.TeamId, k.Rate))];
         return Task.FromResult(list);
     }
 

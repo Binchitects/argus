@@ -17,6 +17,9 @@ public sealed class LiteLlmClientTests
         /// <summary>What /key/info answers: null = 404 (no such key).</summary>
         public string? KeyInfo { get; set; } = """{"key":"abc123","info":{"user_id":"p@example.test","blocked":true,"expires":"2030-01-02T03:04:05Z","models":["qwen"],"key_alias":"p"}}""";
 
+        /// <summary>What /key/list answers.</summary>
+        public string KeyList { get; set; } = """{"keys":[]}""";
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             var body = request.Content is null ? default : JsonDocument.Parse(await request.Content.ReadAsStringAsync(ct)).RootElement;
@@ -30,6 +33,7 @@ public sealed class LiteLlmClientTests
                 "/key/generate" => """{"key":"sk-new"}""",
                 "/end_user/info" => EndUser!,
                 "/key/info" => KeyInfo!,
+                "/key/list" => KeyList,
                 "/budget/new" => """{"budget_id":"b-new"}""",
                 _ => "{}",
             };
@@ -104,6 +108,44 @@ public sealed class LiteLlmClientTests
         var (client, recorder) = Create();
         Assert.Equal("sk-new", await client.GenerateKeyAsync("p@example.test", "app-p"));
         Assert.Equal("app-p", recorder.Calls.Single().Body.GetProperty("key_alias").GetString());
+    }
+
+    [Fact]
+    public async Task A_keys_rate_limits_are_given_with_it_changed_lifted_and_read_back()
+    {
+        var (client, recorder) = Create();
+        await client.GenerateKeyAsync("p@example.test", "app-p", rate: new KeyRate(60, 100_000));
+        var made = recorder.Calls.Single().Body;
+        Assert.Equal((60, 100_000), (made.GetProperty("rpm_limit").GetInt32(), made.GetProperty("tpm_limit").GetInt32()));
+
+        // No limit: nothing sent, so LiteLLM keeps none.
+        recorder.Calls.Clear();
+        await client.GenerateKeyAsync("p@example.test", "app-p", rate: KeyRate.None);
+        Assert.False(recorder.Calls.Single().Body.TryGetProperty("rpm_limit", out _));
+        Assert.False(recorder.Calls.Single().Body.TryGetProperty("tpm_limit", out _));
+
+        // A change names the key by its hash; null lifts a limit (LiteLLM's key update keeps what is sent, null too).
+        recorder.Calls.Clear();
+        await client.SetKeyRateAsync("hash-p", new KeyRate(30, null));
+        var (path, body) = recorder.Calls.Single();
+        Assert.Equal("/key/update", path);
+        Assert.Equal(("hash-p", 30, JsonValueKind.Null), (body.GetProperty("key").GetString(), body.GetProperty("rpm_limit").GetInt32(), body.GetProperty("tpm_limit").ValueKind));
+        Assert.False(body.TryGetProperty("models", out _));
+
+        recorder.KeyList = """{"keys":[{"token":"hash-p","key_alias":"app-p","rpm_limit":30,"tpm_limit":null},{"token":"hash-q","key_alias":"q"}]}""";
+        var keys = await client.KeysAsync("p@example.test");
+        Assert.Equal([new KeyRate(30, null), KeyRate.None], keys.Select(k => k.Rate));
+    }
+
+    [Fact]
+    public async Task The_chats_own_key_is_made_without_rate_limits()
+    {
+        var (client, recorder) = Create();
+        await client.GenerateServiceKeyAsync("chat");
+        var body = recorder.Calls.Single().Body;
+        Assert.False(body.TryGetProperty("rpm_limit", out _));
+        Assert.False(body.TryGetProperty("tpm_limit", out _));
+        Assert.False(body.TryGetProperty("user_id", out _));
     }
 
     [Fact]

@@ -55,7 +55,8 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
         }
     }
 
-    public async Task<string> GenerateKeyAsync(string email, string keyAlias, IReadOnlyList<string>? models = null, int? maxParallel = null, CancellationToken ct = default)
+    public async Task<string> GenerateKeyAsync(string email, string keyAlias, IReadOnlyList<string>? models = null, int? maxParallel = null, KeyRate? rate = null,
+        CancellationToken ct = default)
     {
         var body = new JsonObject { ["user_id"] = email, ["key_alias"] = keyAlias };
         if (models is { Count: > 0 })
@@ -65,6 +66,14 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
         if (maxParallel is > 0)
         {
             body["max_parallel_requests"] = maxParallel;
+        }
+        if (rate?.RequestsPerMinute is > 0)
+        {
+            body["rpm_limit"] = rate.RequestsPerMinute;
+        }
+        if (rate?.TokensPerMinute is > 0)
+        {
+            body["tpm_limit"] = rate.TokensPerMinute;
         }
         var res = await SendAsync(HttpMethod.Post, "/key/generate", body, ct);
         return res?["key"]?.GetValue<string>() is { Length: > 0 } key
@@ -114,6 +123,15 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
             ["max_parallel_requests"] = maxParallel is > 0 ? maxParallel : null,
         }, ct);
 
+    public async Task SetKeyRateAsync(string token, KeyRate rate, CancellationToken ct = default) =>
+        await SendAsync(HttpMethod.Post, "/key/update", new JsonObject
+        {
+            ["key"] = token,
+            // LiteLLM counts each key's requests and tokens a minute and refuses past them (429, Retry-After); null lifts a limit.
+            ["rpm_limit"] = rate.RequestsPerMinute is > 0 ? rate.RequestsPerMinute : null,
+            ["tpm_limit"] = rate.TokensPerMinute is > 0 ? rate.TokensPerMinute : null,
+        }, ct);
+
     public async Task<IReadOnlyList<ManagedModel>> ManagedModelsAsync(CancellationToken ct = default)
     {
         var res = await SendAsync(HttpMethod.Get, "/model/info", null, ct);
@@ -155,7 +173,7 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
                 DateTimeOffset.TryParse(Str(k, "created_at"), CultureInfo.InvariantCulture, out var at) ? at : null,
                 [.. (k["models"] as JsonArray ?? []).Select(m => m?.GetValue<string>() ?? "")],
                 k["max_parallel_requests"] is JsonValue p && p.TryGetValue<int>(out var parallel) ? parallel : null,
-                Str(k, "team_id")));
+                Str(k, "team_id"), new KeyRate(Limit(k, "rpm_limit"), Limit(k, "tpm_limit"))));
         }
         return keys;
     }
@@ -335,4 +353,7 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
         JsonValue v when v.TryGetValue<double>(out var f) => (decimal)f,
         _ => null,
     };
+
+    /// <summary>A key's limit a minute (LiteLLM keeps a bigint); null when it has none.</summary>
+    private static int? Limit(JsonObject o, string name) => Dec(o, name) is { } n && n >= 1 ? (int)Math.Min(Math.Floor(n), int.MaxValue) : null;
 }

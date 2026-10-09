@@ -300,6 +300,26 @@ def main():
         rec("key", "given back to everyone, it is listed again", code == 204 and wait_listed(key, IMAGE, True), f"HTTP {code}")
     code, _ = Browser().req(u("gateway", "/v1/models"))[:2]
     rec("key", "no key is refused", code in (400, 401, 403), f"HTTP {code}")
+    # Rate limits (Admin -> People -> Rate limits): at one request a minute, the next one in the
+    # minute is refused (429) with Retry-After and the limit it met, and the person sees the limit
+    # on their key's card. It stays on through the app's chat below, which is never held to it.
+    code, _ = admin.app("PUT", f"/api/admin/people/{pid}/limits", {"requestsPerMinute": 1})
+    tries = []
+    for _ in range(3):
+        status, body, headers, _ = Browser().req(
+            u("gateway", "/v1/chat/completions"),
+            {"model": MODEL, "messages": [{"role": "user", "content": "Reply with the single word: pong"}], "max_tokens": 20},
+            headers={"Authorization": f"Bearer {key}"}, timeout=300)
+        tries.append((status, headers.get("Retry-After") if headers else None, body))
+        if status == 429:
+            break
+    status, retry_after, body = tries[-1]
+    rec("rate", "past its requests a minute a key is refused (429) with Retry-After, naming the limit",
+        code == 200 and status == 429 and bool(retry_after) and "Limit type: requests" in body,
+        f"{[t[0] for t in tries]}, Retry-After {retry_after}")
+    code, own = person.app("GET", "/api/account/keys")
+    limit = (own.get("limits") or {}).get("requestsPerMinute") or {}
+    rec("rate", "the person sees the limit, their own, on their key's card", (limit.get("value"), limit.get("from")) == (1, "person"), f"HTTP {code} {limit}")
 
     # ------------------------------------------------------------ SSO + roles
     print("\n4. Single sign-on and roles")
@@ -322,6 +342,9 @@ def main():
 
     result, conv_id = app_chat(person)
     rec("chat", "a chat in the app gets an answer", result == "answered", result)
+    code, _ = admin.app("PUT", f"/api/admin/people/{pid}/limits", {})
+    rec("rate", "the chat answered while the person's key was held to one request a minute; the limit is lifted",
+        result == "answered" and code == 200, f"HTTP {code}")
     code, conv = person.app("GET", f"/api/chat/conversations/{conv_id}") if conv_id else (0, {})
     answer = next((m for m in reversed(conv.get("messages", [])) if m.get("role") == "assistant"), {})
     rec("chat", "the app saves the chat with its answer and token counts",

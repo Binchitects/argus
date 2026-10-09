@@ -27,6 +27,8 @@ public static class AdminEndpoints
             WithPerson(id, people, async u => Results.Ok(await people.RotateKeyAsync(u))));
         admin.MapPut("/people/{id:guid}/budget", (Guid id, BudgetRequest body, PeopleService people) =>
             WithPerson(id, people, async u => { await people.SetBudgetAsync(u, body.Budget); return Results.NoContent(); }));
+        admin.MapPut("/people/{id:guid}/limits", (Guid id, LimitsRequest body, PeopleService people) =>
+            WithPerson(id, people, async u => Results.Ok(new { warning = await people.SetLimitsAsync(u, body.RequestsPerMinute, body.TokensPerMinute) })));
         admin.MapPost("/people/{id:guid}/2fa/reset", (Guid id, PeopleService people) =>
             WithPerson(id, people, async u => { await people.ResetTwoFactorAsync(u); return Results.NoContent(); }));
         admin.MapPost("/people/{id:guid}/sign-out", (Guid id, PeopleService people, Audit audit) =>
@@ -124,7 +126,8 @@ public static class AdminEndpoints
         }
     }
 
-    private static Task<IResult> GetAsync(Guid id, PeopleService people, UserManager<AppUser> users, ILiteLlm gateway, Ledger ledger, Access.AccessService access, AppDbContext db) =>
+    private static Task<IResult> GetAsync(Guid id, PeopleService people, UserManager<AppUser> users, ILiteLlm gateway, Ledger ledger, Access.AccessService access, AppDbContext db,
+        RateLimits rateLimits, Models.KeyAccess keyAccess) =>
         WithPerson(id, people, async u =>
         {
             IReadOnlyList<GatewayKey> keys = [];
@@ -148,6 +151,7 @@ public static class AdminEndpoints
                 groups,
                 directoryGroups = u.DirectoryGroups,
                 keys = keys.Select(k => new { alias = k.Alias, preview = k.Preview, spend = k.Spend, blocked = k.Blocked, createdAt = k.CreatedAt }),
+                limits = await rateLimits.ViewAsync(u, keys, keyAccess.MaxParallel),
                 warning,
             });
         });

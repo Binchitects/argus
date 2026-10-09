@@ -25,10 +25,12 @@ public sealed record MembersRequest(Guid[] UserIds);
 /// <param name="RedactPii">mask or off.</param>
 /// <param name="Moderation">check or off.</param>
 /// <param name="BlockedPatterns">Whether the blocked words apply.</param>
+/// <param name="RequestsPerMinute">Requests a minute each member's API key may send; 0: no limit.</param>
+/// <param name="TokensPerMinute">Tokens a minute each member's API key may use; 0: no limit.</param>
 public sealed record PoliciesRequest(int? RetentionDays = null, decimal? Credit = null, bool CreditPerMember = false, string? CostCentre = null,
-    string? SecretScanning = null, string? RedactPii = null, string? Moderation = null, bool? BlockedPatterns = null);
+    string? SecretScanning = null, string? RedactPii = null, string? Moderation = null, bool? BlockedPatterns = null, int? RequestsPerMinute = null, int? TokensPerMinute = null);
 
-/// <summary>Groups for access rules, retention, credit and safeguards: app groups whose members are chosen here, and directory groups.</summary>
+/// <summary>Groups for access rules, retention, credit, safeguards and API keys' rate limits: app groups whose members are chosen here, and directory groups.</summary>
 public static class GroupEndpoints
 {
     private const string ScimOwned = "The company's identity provider decides this group's name and members (SCIM).";
@@ -61,7 +63,7 @@ public static class GroupEndpoints
         {
             x.Id, x.Name, x.Description, x.Directory, x.Scim, x.Priority, x.CreatedAt,
             members = x.Directory is { } d ? directoryPeople.Count(m => AccessService.InDirectoryGroup(m, d)) : counts.GetValueOrDefault(x.Id),
-            x.RetentionDays, x.Credit, x.CreditPerMember, x.CostCentre,
+            x.RetentionDays, x.Credit, x.CreditPerMember, x.CostCentre, x.RequestsPerMinute, x.TokensPerMinute,
         }));
     }
 
@@ -102,7 +104,7 @@ public static class GroupEndpoints
             policies = new
             {
                 group.RetentionDays, group.Credit, group.CreditPerMember, group.CostCentre,
-                group.SecretScanning, group.RedactPii, group.Moderation, group.BlockedPatterns,
+                group.SecretScanning, group.RedactPii, group.Moderation, group.BlockedPatterns, group.RequestsPerMinute, group.TokensPerMinute,
             },
             spentThisMonth = month is null ? (decimal?)null : people.Sum(u => month.Spend.GetValueOrDefault(u.Email ?? "")),
         });
@@ -232,7 +234,7 @@ public static class GroupEndpoints
         return Results.NoContent();
     }
 
-    /// <summary>Sets a group's retention, credit, cost centre and safeguards. Audited; the gateway's teams follow (KeyAccessWatcher).</summary>
+    /// <summary>Sets a group's retention, credit, cost centre, safeguards and rate limits. Audited; the gateway's teams and keys follow (KeyAccessWatcher).</summary>
     private static async Task<IResult> PoliciesAsync(Guid id, PoliciesRequest body, AppDbContext db, Audit audit, Models.KeyAccessWatcher keys)
     {
         if (await db.Groups.SingleOrDefaultAsync(x => x.Id == id) is not { } group)
@@ -246,6 +248,11 @@ public static class GroupEndpoints
         if (body.Credit is < 0 or > 1_000_000_000)
         {
             return AuthEndpoints.Problem(400, "credit", "Credit is a number of dollars from 0, or empty for no group limit.");
+        }
+        if (body.RequestsPerMinute is < 0 or > RateLimits.MaxRequests || body.TokensPerMinute is < 0 or > RateLimits.MaxTokens)
+        {
+            return AuthEndpoints.Problem(400, "rate_limits",
+                $"Requests a minute are 0 (no limit) to {RateLimits.MaxRequests:N0}, tokens a minute 0 to {RateLimits.MaxTokens:N0}; empty: the company's setting.");
         }
         if (body.CostCentre?.Trim() is { Length: > 100 })
         {
@@ -264,6 +271,8 @@ public static class GroupEndpoints
         group.RedactPii = Clean(body.RedactPii);
         group.Moderation = Clean(body.Moderation);
         group.BlockedPatterns = body.BlockedPatterns;
+        group.RequestsPerMinute = body.RequestsPerMinute;
+        group.TokensPerMinute = body.TokensPerMinute;
         await db.SaveChangesAsync();
         await audit.WriteAsync("group.policies", group.Name, detail: Describe(group));
         keys.Wake();
@@ -282,6 +291,8 @@ public static class GroupEndpoints
         g.RedactPii is { } p ? $"personal data {p}" : null,
         g.Moderation is { } m ? $"model's check {m}" : null,
         g.BlockedPatterns is { } b ? $"blocked words {(b ? "on" : "off")}" : null,
+        g.RequestsPerMinute is { } r ? $"requests a minute {(r == 0 ? "no limit" : r.ToString("N0", CultureInfo.InvariantCulture))}" : null,
+        g.TokensPerMinute is { } t ? $"tokens a minute {(t == 0 ? "no limit" : t.ToString("N0", CultureInfo.InvariantCulture))}" : null,
     }.OfType<string>());
 
     /// <summary>

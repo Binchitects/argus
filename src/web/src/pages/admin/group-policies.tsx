@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { money } from '@/lib/format'
+import { maxRequests, maxTokens, parseLimit } from '@/lib/rate-limits'
 import { noPolicies, type GroupDetail, type GroupPolicies } from './groups-api'
 import { parseCredit } from './people-api'
 
@@ -38,7 +39,7 @@ const choices = {
 
 type Choice = keyof typeof choices
 
-/** A group's retention, credit, cost centre and safeguards: one form, saved together. */
+/** A group's retention, credit, cost centre, safeguards and API keys' rate limits: one form, saved together. */
 export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
   const queryClient = useQueryClient()
   const p = group.policies ?? noPolicies
@@ -46,6 +47,8 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
   const [credit, setCredit] = useState(p.credit === null ? '' : String(p.credit))
   const [perMember, setPerMember] = useState(p.creditPerMember ? 'member' : 'shared')
   const [costCentre, setCostCentre] = useState(p.costCentre ?? '')
+  const [requests, setRequests] = useState(p.requestsPerMinute === null || p.requestsPerMinute === undefined ? '' : String(p.requestsPerMinute))
+  const [tokens, setTokens] = useState(p.tokensPerMinute === null || p.tokensPerMinute === undefined ? '' : String(p.tokensPerMinute))
   const [checks, setChecks] = useState<Record<Choice, string>>({
     secretScanning: p.secretScanning ?? company,
     redactPii: p.redactPii ?? company,
@@ -69,6 +72,10 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
     if (retention !== null && !(Number.isInteger(retention) && retention >= 1 && retention <= 36500)) return setError('Keep chats a whole number of days, 1 to 36,500, or empty.')
     const c = parseCredit(credit)
     if (c === 'invalid') return setError('Credit is a number of dollars, or empty for no group limit.')
+    const r = parseLimit(requests, maxRequests)
+    const t = parseLimit(tokens, maxTokens)
+    if (r === 'invalid' || t === 'invalid')
+      return setError(`Limits are whole numbers: requests 0 to ${maxRequests.toLocaleString('en-US')}, tokens 0 to ${maxTokens.toLocaleString('en-US')} a minute. 0: no limit; empty: the company's setting.`)
     save.mutate({
       retentionDays: retention,
       credit: c,
@@ -78,6 +85,8 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
       redactPii: pick('redactPii') as GroupPolicies['redactPii'],
       moderation: pick('moderation') as GroupPolicies['moderation'],
       blockedPatterns: checks.blockedPatterns === company ? null : checks.blockedPatterns === 'on',
+      requestsPerMinute: r,
+      tokensPerMinute: t,
     })
   }
   const spent = group.spentThisMonth
@@ -85,7 +94,7 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
     <Card>
       <CardHeader>
         <CardTitle>Policies</CardTitle>
-        <CardDescription>For the members: how long their chats are kept, what they may spend, and which safeguards apply. Empty or the company&apos;s setting: Admin → Settings decides.</CardDescription>
+        <CardDescription>For the members: how long their chats are kept, what they may spend, which safeguards apply, and how much their API keys may use a minute. Empty or the company&apos;s setting: Admin → Settings decides.</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-5">
         {error && <Alert variant="destructive">{error}</Alert>}
@@ -125,6 +134,15 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
           <ChoiceField label="Blocked words" choice="blockedPatterns" value={checks.blockedPatterns} onChange={(v) => setChecks({ ...checks, blockedPatterns: v })} />
         </div>
         <p className="text-xs text-muted-foreground">A person in several groups gets the strictest of the groups that set a safeguard. They apply in the chat and to API keys alike.</p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Requests a minute, per key" hint="Each member's API key, at the gateway; past it, HTTP 429. 0: no limit. Empty: the company's setting.">
+            <Input inputMode="numeric" value={requests} onChange={(e) => setRequests(e.target.value)} placeholder="the company's setting" />
+          </Field>
+          <Field label="Tokens a minute, per key" hint="What the model reads and writes for each member's key. 0: no limit. Empty: the company's setting.">
+            <Input inputMode="numeric" value={tokens} onChange={(e) => setTokens(e.target.value)} placeholder="the company's setting" />
+          </Field>
+        </div>
+        <p className="text-xs text-muted-foreground">A person in several groups gets the highest limit of the groups that set one (0, no limit, is the highest); their own (Admin → People) replaces it. The chat is not limited by these.</p>
       </CardContent>
       <CardFooter>
         <Button onClick={submit} loading={save.isPending}>

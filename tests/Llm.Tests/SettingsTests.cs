@@ -287,6 +287,9 @@ public sealed partial class SettingsTests(AppFixture app)
             ["Chat:ThinkingPresets"] = chat.ThinkingPresets,
             ["Chat:DefaultThinking"] = chat.DefaultThinking,
             ["Engine:ModelsMax"] = new Llm.Api.Models.EngineOptions().ModelsMax.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            // No rate limit for API keys until an admin sets one.
+            ["Gateway:RequestsPerMinute"] = new Llm.Api.Gateway.RateLimitOptions().RequestsPerMinute.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Gateway:TokensPerMinute"] = new Llm.Api.Gateway.RateLimitOptions().TokensPerMinute.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
         var prices = new Llm.Api.Gateway.PriceOptions();
         foreach (var (key, price) in new Dictionary<string, decimal>

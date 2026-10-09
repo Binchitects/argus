@@ -87,9 +87,25 @@ Groups → a group → Policies):
 | Safeguards → **Mask personal data** | mask or off | mask |
 | Safeguards → **The model checks each message** | check or off | check |
 | Safeguards → **Blocked words and patterns** | apply, or not for this group | apply |
+| API keys → **Requests a minute, per key** | a number, or 0 for no limit | the highest (0 first) |
+| API keys → **Tokens a minute, per key** | a number, or 0 for no limit | the highest (0 first) |
 
 A group also has a credit a month and a cost centre, which have no company
 setting ([admin.md](admin.md#credit-for-groups)).
+
+## Rate limits for API keys
+
+**Settings → API keys → Requests a minute, per key** and **Tokens a minute,
+per key** are the company's rate limits for API keys at the gateway: 0 (the
+default, and what an upgrade from v5.2.0 keeps) is no limit. A request past
+one is refused with HTTP 429 and `Retry-After`. A group's own (above) replaces
+them for its members, and a person's own (Admin → People) replaces both. A
+change reaches every key within seconds. The chat is never limited by them.
+Tokens count what the model reads and writes, less the prompt it reads from
+its cache; a request goes ahead only if its prompt and its `max_tokens` fit
+what is left of the minute, so keep the limit well above the largest request.
+How they are counted, and what people and admins see of them:
+[admin.md](admin.md#rate-limits-for-api-keys).
 
 ## What cannot be changed here, and why
 

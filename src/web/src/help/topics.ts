@@ -210,7 +210,7 @@ export const topics = {
     about: 'Use the models from your own tools: a coding agent, your editor, a script. They sign in with your API key and spend from your credit.',
     parts: [
       { name: 'Trust this site\'s certificate', text: 'Shown when the site uses a private certificate: the file to download, its fingerprint, and how to install it so your tools trust the site.' },
-      { name: 'API key', text: 'Your key for every tool. **New key** makes one and shows it once; the old one stops working.' },
+      { name: 'API key', text: 'Your key for every tool. **New key** makes one and shows it once; the old one stops working. **Rate limits** say what it may send a minute, what it used in the last one, and what was refused.' },
       { name: 'The address, and your models', text: 'The gateway\'s address (OpenAI-compatible, and Anthropic\'s), and the models you may use with what each can do.' },
       { name: 'Set up your tool', text: 'Choose your system and your tool (Code Arena, Claude Code, Qwen Code, Continue, Python, curl, GitLab CI…), then follow its steps. Each ends with a check that it works.' },
       { name: 'Arena MCP', text: 'Your chat tools for your own agent, at one address, with your API key.' },
@@ -226,7 +226,7 @@ export const topics = {
     title: 'Your account',
     about: 'Your profile, API key, answers, memory, sign-in security and appearance.',
     parts: [
-      { name: 'API key', text: 'Your key for your tools. **New key** replaces it; the old one stops working at once.' },
+      { name: 'API key', text: 'Your key for your tools. **New key** replaces it; the old one stops working at once. **Rate limits**: the requests and tokens it may use a minute, what it used in the last one, and what the gateway refused in the last day (HTTP 429: wait as long as its Retry-After says).' },
       { name: 'Answers', text: 'How long answers are, in every chat: Short, Normal or Thorough.' },
       { name: 'Memory', text: 'What the chat remembers about you. Add, edit or delete one, **Forget everything**, or turn memory off. Nobody else sees it, admins included.' },
       { name: 'Appearance', text: 'Theme and width, remembered on this device.' },
@@ -325,11 +325,15 @@ export const topics = {
       { name: 'Profile', text: 'Name, username and email; **Change name**.' },
       { name: 'Access', text: '**Reset password**, **Reset 2FA**, **Sign out everywhere**, **Make admin** and **Disable** (signed out, their API keys stop until enabled again).' },
       { name: 'Credit and API key', text: 'Their spend against their credit, **Set credit**, and **New API key** (the old one stops at once).' },
+      { name: 'Rate limits', text: 'The requests and tokens each of their API keys may use a minute, where each comes from (theirs, a group\'s or the company\'s), what they used in the last minute and what was refused in the last day. **Set limits** gives them their own.' },
       { name: 'Groups', text: 'The groups they are in: these decide which tools and models they may use.' },
       { name: 'Legal hold', text: 'While on hold nothing of theirs is deleted. **Export their data** for eDiscovery. Both are audited.' },
       { name: 'Delete', text: 'Removes them, their chats and their API keys. Their usage stays in the reports.' },
     ],
-    tasks: [{ title: 'Help someone who lost their phone', steps: ['Press **Reset 2FA**.', 'They sign in with their password and can turn it on again.'] }],
+    tasks: [
+      { title: 'Help someone who lost their phone', steps: ['Press **Reset 2FA**.', 'They sign in with their password and can turn it on again.'] },
+      { title: 'Hold back a script that floods the gateway', steps: ['Under **Rate limits**, type **Requests a minute** (and **Tokens a minute** if it sends long prompts).', 'Press **Set limits**: their keys have them at once.', 'Empty puts back their groups\' or the company\'s; 0 is no limit.'] },
+    ],
     manual: { doc: 'authentication', section: 'managing-people' },
   },
 
@@ -353,7 +357,7 @@ export const topics = {
     parts: [
       { name: 'Members', text: 'Who is in it. In an app group, **Add people** and **Remove**; a directory or SCIM group is filled from outside.' },
       { name: 'Edit', text: 'Its name, description, and **Priority in the answers** (-10 to 10): when the model is busy, higher goes first.' },
-      { name: 'Policies', text: 'How long members\' chats are kept, a credit a month (shared or each member\'s), a cost centre, and which safeguards apply to them.' },
+      { name: 'Policies', text: 'How long members\' chats are kept, a credit a month (shared or each member\'s), a cost centre, which safeguards apply to them, and the requests and tokens a minute each member\'s API key may use.' },
       { name: 'Delete', text: 'Tools and models given to it stop being available to its members.' },
     ],
     tasks: [{ title: 'Give a team a monthly credit', steps: ['Under **Policies**, type **Credit a month ($)**.', 'Choose whether it is shared by the members or each member\'s.', 'Press **Save policies**: the gateway has it within a minute.'] }],
@@ -469,7 +473,7 @@ export const topics = {
       'company-knowledge': { name: 'Company knowledge', text: 'How often sources are read again, and how much of long files comes with each question.' },
       'data-retention': { name: 'Data retention', text: 'How long chats are kept before they are deleted with their files. A group can keep its own.' },
       prices: { name: 'Prices', text: 'What a chat model costs when it has no price of its own under Admin → Models (input, cached input and output, per million tokens), and what pictures, video and speech cost. Every request gets its cost from these. **Recalculate past costs** prices requests recorded at no cost, for the dates you choose, after showing how many and the total.' },
-      'api-keys': { name: 'API keys', text: 'The answer cache: repeated API requests answered from it, at no cost, and for how long.' },
+      'api-keys': { name: 'API keys', text: 'The requests and tokens a minute each key may use (a group\'s or a person\'s own replaces them; 0: no limit), and the answer cache: repeated API requests answered from it, at no cost, and for how long.' },
       'chat-bots': { name: 'Chat bots', text: 'The Slack, Mattermost and Teams bots and email in: their secrets, channels, model and tools. The addresses to give each platform are below the settings.' },
     },
   },

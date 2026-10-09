@@ -96,6 +96,37 @@ describe('people', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Set credit' }))
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ budget: null }))
   })
+
+  it('rate limits show what applies and where from, and their own are set from the person page', async () => {
+    const limits = {
+      requestsPerMinute: { value: 60, from: 'group', group: 'Data science' },
+      tokensPerMinute: { value: null, from: 'none', group: null },
+      own: { requestsPerMinute: null, tokensPerMinute: null },
+      atOnce: 2,
+      used: { requests: 12, tokens: 3400 },
+      refused: [{ limit: 'requests', count: 3, last: new Date().toISOString() }],
+    }
+    const calls = fakeApi(admin, {
+      'GET /api/admin/people/p1': () => ({ json: { person: people[0], keys: [], groups: [], directoryGroups: [], limits, warning: null } }),
+      'PUT /api/admin/people/p1/limits': () => ({ json: { warning: null } }),
+    })
+    renderApp('/admin/people/p1')
+    const card = (await screen.findByRole('heading', { name: 'Rate limits' })).closest('section')!
+    expect(within(card).getByText('from Data science', { exact: false })).toBeInTheDocument()
+    expect(within(card).getByText(/3 requests refused in the last day \(3 for requests a minute\)/)).toBeInTheDocument()
+
+    const requests = within(card).getByLabelText('Requests a minute')
+    await userEvent.type(requests, 'many')
+    await userEvent.click(within(card).getByRole('button', { name: 'Set limits' }))
+    expect(await within(card).findByText(/Whole numbers/)).toBeInTheDocument()
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false)
+
+    await userEvent.clear(requests)
+    await userEvent.type(requests, '0')
+    await userEvent.type(within(card).getByLabelText('Tokens a minute'), '50000')
+    await userEvent.click(within(card).getByRole('button', { name: 'Set limits' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ requestsPerMinute: 0, tokensPerMinute: 50000 }))
+  })
 })
 
 describe('admin pages', () => {

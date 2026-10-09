@@ -20,8 +20,8 @@ page covers the rest.
 | Page | What it is for |
 |---|---|
 | **Overview** | Services up, people and admins, total spend, who is at or past their credit, the code index's health, and the certificate the site serves. When the index is stale it says how many repositories, which ones, and *why* when the last run's exit code tells (GitLab unreachable, a token that cannot list every repository, ctags missing). The certificate (from Traefik's metrics in Prometheus) shows the days until it expires and who issued it (your own, or Let's Encrypt); within 30 days it says what to do, and it says so when Traefik serves its own default (browsers warn). |
-| **People** | Add, search, and per person: credit, a new API key, password and 2FA resets, admin role, disable, sign out everywhere, legal hold, an export of their data, delete. **Export CSV** downloads everyone with spend and credit left. |
-| **Groups** | App groups (the people you add), directory groups (whoever the company directory or the identity provider's groups claim puts in them, by name or DN) and SCIM groups (made and filled by the identity provider; their name and members are changed there). Tools and models are given to groups. Per group: how long members' chats are kept, a credit a month (shared or each member's), a cost centre, and which safeguards apply. A group's **priority in the answers' line** (-10 to 10, 0 for everyone) decides who goes first when the model is busy: higher first, and within one priority the line stays fair (fewest answers running, then served longest ago). Someone in several groups takes the highest. A change is audited. Below the list, the monthly **Chargeback** report. See [Retention, legal hold and exports](#retention-legal-hold-and-exports) and [Credit for groups](#credit-for-groups). |
+| **People** | Add, search, and per person: credit, rate limits for their API keys, a new API key, password and 2FA resets, admin role, disable, sign out everywhere, legal hold, an export of their data, delete. **Export CSV** downloads everyone with spend and credit left. |
+| **Groups** | App groups (the people you add), directory groups (whoever the company directory or the identity provider's groups claim puts in them, by name or DN) and SCIM groups (made and filled by the identity provider; their name and members are changed there). Tools and models are given to groups. Per group: how long members' chats are kept, a credit a month (shared or each member's), a cost centre, which safeguards apply, and the requests and tokens a minute each member's API key may use. A group's **priority in the answers' line** (-10 to 10, 0 for everyone) decides who goes first when the model is busy: higher first, and within one priority the line stays fair (fewest answers running, then served longest ago). Someone in several groups takes the highest. A change is audited. Below the list, the monthly **Chargeback** report. See [Retention, legal hold and exports](#retention-legal-hold-and-exports), [Credit for groups](#credit-for-groups) and [Rate limits for API keys](#rate-limits-for-api-keys). |
 | **Tools** | What the chat's model may call: Argus, Python (the sandbox), the web (off until you turn it on and allow sites), image generation, the calculator, date and time, reading long files in parts, the canvas (documents and code beside the chat, changed by the model part by part), questions for the person (the model asks with choices instead of guessing), sub-agents (the model splits a task into parts done side by side), memory (the model remembers what each person asks it to; off for everyone under **Settings → Chat → Memory**, and nobody but the person sees their memories), **Decide (Laya)** (typed questions about a text answered with probabilities by the Laya decision model on the CPU; offered only while the `laya` module runs and has a checkpoint loaded, and otherwise says why: [chat.md](chat.md#decide-laya)), and the MCP servers and APIs you add. An **API** is added by its OpenAPI 3 document (JSON or YAML, pasted or fetched from its address): each operation becomes a function, its parameters and JSON body the arguments, and a call that changes something (POST, PUT, PATCH, DELETE) always asks the person first. **Read it** lists the operations before you add it. Per tool: on or off, who may use it (everyone, admins, or chosen groups), on in new chats, ask before each call. An MCP server is tested before it is added; its key is stored encrypted and never shown. **Its certificate (https)**, per server or API: **Check the certificate** (the default: the CAs the app's system trusts), **Trust this CA** (a CA's certificate in PEM, pasted or from a file: a company CA, its issuing CA alone, or a self-signed server's own certificate; the chain must lead to it, each certificate up to it within its dates, and the name must still match; a server that does not send its issuing CA needs it given too, with the root in one bundle, or alone), or **Do not check** (any certificate is accepted; the form and the tool's card warn). When **Test** or **Read it** meets a certificate it does not trust, it says why (self-signed, issued by a CA it does not trust, for another name, not meant for a server, expired or not yet valid, it or a CA in its chain), who issued it, for which names, its dates and fingerprint, and offers both choices there; **Read it** checks the API's address too, even when its document was pasted. A secure connection that fails for another reason (no https at that address, a server that speaks only an old TLS version, no cipher in common) says so instead, as the chat does: no certificate choice helps there. The choice applies to everything sent to that server (its tools listed and called, long calls, an API's document fetched from its address, its calls, and a plugin's OAuth token address on the same server), never to anything else: with **Trust this CA** or **Do not check**, a redirect is followed only on the same host, and one to another host is not (the test or the call ends with its `HTTP 3xx`), so nothing is sent there; each change is audited (`tool.server_tls`, the CA by name and fingerprint). A server whose tools run long can have its own **Longest call** (up to 24 hours; otherwise **Settings → Chat → Longest tool call**, an hour). The same choices decide what [Arena MCP](mcp.md) serves each person's own agent (`mcp.call` in the audit log). |
 | **Knowledge** | Company knowledge the chat searches: GitLab projects or groups (their wikis and issues, read by each project's members), Confluence spaces and SharePoint or OneDrive sites and libraries (read by whom Confluence or SharePoint lets read, and the groups you choose where they cannot tell), folders mounted under `/knowledge`, and websites (read by the groups you choose). Confluence and SharePoint take an account's token or an app's secret, stored encrypted, and have **Test connection**. Per source: the last sync's state and errors, documents and passages, who may read it and what is mirrored, **Sync now**, its documents, **Settings**, remove. Needs the embedder. See [knowledge.md](knowledge.md). |
 | **Models** | Every model at the gateway. The engine's models load and unload with one click (one at a time on one GPU); more are added from the model library on the host. Per model: who may use it, in the chat and with API keys. See [Models](#models) below. |
@@ -322,6 +322,72 @@ instead of the model:
   everything it does not answer on to LiteLLM with the caller's own key, and
   streams the answer back as it comes.
 
+### Rate limits for API keys
+
+How much each API key may use a minute at the gateway: **requests a minute**,
+and **tokens a minute** (what the model reads and writes, less the prompt it
+reads from its cache, as the gateway counts them). Each of the two is, for a
+person's keys:
+
+1. **their own** (Admin → People → the person → **Rate limits**), else
+2. **the highest of their groups** that set one (Admin → Groups → a group →
+   Policies), else
+3. **the company's** (Settings → API keys → **Requests a minute, per key** and
+   **Tokens a minute, per key**), else no limit.
+
+0 is no limit wherever it is set; an empty box is "not set here". A group's 0
+is the highest of all, so a group can free its members (an automation team)
+from the company's limit. A person in several groups gets the most generous:
+a group that needs more is not held back by a broader one with less, and a
+person's own holds back anyone who needs it. (Credit and safeguards are the
+other way: the strictest group applies.) Out of the box nothing is set, so
+nothing is limited; an upgrade from v5.2.0 sets nothing either.
+
+Each of a person's keys carries the limits: the app gives each person one key,
+and **New key** makes the next with the same limits, so they are the person's.
+**API requests at once, per key** (Settings → Chat) stays as it was, beside
+them.
+
+- **Where it is counted.** The app puts the limits on each key at the gateway
+  (LiteLLM's `rpm_limit` and `tpm_limit`), and LiteLLM counts every request of
+  the key in windows of a minute: one count, whichever app replica a change
+  came from. A request past a limit gets **HTTP 429** with `Retry-After: 60`,
+  and says which limit: `Rate limit exceeded for api_key: <the key's hash>.
+  Limit type: requests. Current limit: 60, Remaining: 0. Limit resets at: …`
+  (`tokens` for tokens a minute, `max_parallel_requests` for requests at once).
+  Most clients wait that long and send again on their own (the OpenAI and
+  Anthropic libraries do); a script of your own should too.
+- **Tokens are checked before the model runs.** A request goes ahead only if
+  its prompt (a quarter of its characters, as tokens) and its `max_tokens`
+  (when it sets none, as much as its prompt and at least 1,024) fit what is
+  left of the minute; the real count replaces the guess when it ends. Keep
+  the limit well above the largest request a tool sends: a coding agent's
+  prompt is often 30,000 tokens or more. Below 4,096 tokens a minute, the
+  gateway also cuts answers that set no `max_tokens` to a quarter of the limit.
+- **When a change applies**: a person's own at once; a group's, a change of
+  members and the company's within seconds (the same check that keeps each
+  key's models in step, on the replica that leads), and every ten minutes
+  (directory groups change on their own). A limit set in the gateway's own
+  pages is replaced by the app's.
+- **The chat is not limited by these.** Its requests go with the chat's own
+  key, which carries none: the chat has its fair line (Settings → Chat).
+  Answers from the [answer cache](#the-answer-cache-for-api-keys) do not count
+  either: they never reach the gateway.
+- **What people see**: their key's card (Your account, and Connect your tools)
+  shows each limit and where it comes from, what the key used in the last
+  minute, and what was refused in the last day. The minute is read from the
+  gateway's request log, which LiteLLM writes every few seconds (a streamed
+  answer when it ends): close, not exact.
+- **What admins see**: the same on the person's page, and **Refused by rate
+  limits** on the Usage by person dashboard: who, with which key, which limit,
+  how often and when last. A refusal is in the gateway's request log as a
+  failed request with its reason and no prompt or answer; refusals for credit
+  are not counted there. Each change of a limit is audited
+  (`person.set_limits`, `group.policies` and `settings.change`).
+- **Several gateways.** LiteLLM counts in its own memory. Compose runs one,
+  and so does the Helm chart unless `litellm.replicas` is raised: with several,
+  each counts on its own, and a key can send up to that many times its limit.
+
 ### What the admin area deliberately does not do
 
 **It does not recreate containers.** Admin → Models loads and unloads models
@@ -390,8 +456,8 @@ own pages) are left as they are. It never runs by itself, not on upgrade either.
 **Everyone** (admins) is the "Usage by person" dashboard: people active,
 requests, tokens, spend, how much is attributed to a person, requests made with
 the master key; per-person and per-key tables; tokens per day by person and by
-surface (API or chat); budget headroom; unattributed usage to fix; recent
-requests; and input split into **cache miss** and **cache hit** with the cache
+surface (API or chat); budget headroom; unattributed usage to fix; requests
+refused by [rate limits](#rate-limits-for-api-keys); recent requests; and input split into **cache miss** and **cache hit** with the cache
 hit rate, output, cost, cost per 1M tokens, per person and over time.
 
 **Everyone's prompts** (admins): each prompt of the time range (or between two

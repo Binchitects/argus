@@ -18,9 +18,9 @@ public sealed record GatewayModel(string Name, int? Context, int? MaxOutput, boo
 public sealed record ManagedModel(string Id, string Name, string? Fingerprint);
 
 /// <summary>A key as the gateway lists it: the hashed token (never the key itself), alias, spend and state.</summary>
-/// <remarks>Models: the models the key may call; empty means every model.</remarks>
+/// <remarks>Models: the models the key may call; empty means every model. Rate: its requests and tokens a minute.</remarks>
 public sealed record GatewayKey(string Token, string Alias, string? Preview, decimal Spend, bool Blocked, DateTimeOffset? CreatedAt, IReadOnlyList<string>? Models = null, int? MaxParallel = null,
-    string? TeamId = null);
+    string? TeamId = null, KeyRate? Rate = null);
 
 /// <summary>A group's credit at the gateway: a LiteLLM team (id "group-..."), its members and the budget it holds the keys in it to.</summary>
 /// <param name="MemberBudget">Each member's own ceiling in the team; null: the team's budget is shared.</param>
@@ -43,11 +43,15 @@ public interface ILiteLlm
     Task SetBudgetAsync(string email, decimal? budget, CancellationToken ct = default);
 
     /// <param name="models">The models the key may call; empty or null: every model.</param>
-    Task<string> GenerateKeyAsync(string email, string keyAlias, IReadOnlyList<string>? models = null, int? maxParallel = null, CancellationToken ct = default);
+    /// <param name="rate">Its requests and tokens a minute; null: no limit.</param>
+    Task<string> GenerateKeyAsync(string email, string keyAlias, IReadOnlyList<string>? models = null, int? maxParallel = null, KeyRate? rate = null, CancellationToken ct = default);
 
     /// <summary>Which models a key may call (by its hashed token); empty: every model.</summary>
     /// <summary>The models a key may call, and how many requests it may have at once (null: no limit).</summary>
     Task SetKeyAccessAsync(string token, IReadOnlyList<string> models, int? maxParallel, CancellationToken ct = default);
+
+    /// <summary>How many requests and tokens a minute a key may use (by its hashed token); past either the gateway answers HTTP 429.</summary>
+    Task SetKeyRateAsync(string token, KeyRate rate, CancellationToken ct = default);
 
     /// <summary>A key that belongs to no person (the chat's): spend is attributed by the request's `user`.</summary>
     Task<string> GenerateServiceKeyAsync(string keyAlias, CancellationToken ct = default);
