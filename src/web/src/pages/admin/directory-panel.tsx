@@ -25,7 +25,7 @@ const examples: [string, string, string][] = [
   ['Where people are', '`ou=people,dc=example,dc=com`', '`OU=Staff,DC=corp,DC=example,DC=com`'],
   ['Which entries are people', 'the default: it finds `uid` and `mail`', 'the default: it finds `sAMAccountName`, `userPrincipalName` and `mail`'],
   ['Where groups are', '`ou=groups,dc=example,dc=com`', 'empty: `memberOf` is always there'],
-  ['Admin group', '`llm-admins`', '`LLM Admins`'],
+  ['Admin group', '`llm-admins`, or its DN when another group has that name', '`LLM Admins`, or its DN'],
   ['Required group', '`llm-users`, or empty for everyone', '`LLM Users`, or empty for everyone'],
 ]
 
@@ -67,7 +67,8 @@ export function DirectoryGuide({ open }: { open: boolean }) {
           </li>
           <li>
             <span className="text-foreground">Admin group</span>, whose members are admins here, and, if only some people may use the app, a <span className="text-foreground">Required group</span>. If the
-            test says people's groups are not in their memberOf, fill in Where groups are.
+            test says people's groups are not in their memberOf, fill in Where groups are. By its name, every group of that name counts; when the test lists several, give the
+            group's full DN.
           </li>
           <li>
             <span className="text-foreground">Test the settings</span> below: each step says what works and, when something does not, exactly what to fix. Testing saves nothing.
@@ -105,7 +106,7 @@ export function DirectoryGuide({ open }: { open: boolean }) {
           </table>
         </div>
         <p className="text-muted-foreground">
-          <Example text="On the osixia/openldap image, the service account is `cn=readonly,dc=example,dc=org` (with LDAP_READONLY_USER=true) or `cn=admin,dc=example,dc=org`, with its own base DN (from LDAP_DOMAIN) in place of `dc=example,dc=org`. For StartTLS and ldaps:// it needs LDAP_TLS_VERIFY_CLIENT=try (else it demands a certificate from the app, which has none) and a certificate of your own (the image's own CA expired on 2026-01-15). With groupOfNames groups, fill in Where groups are." />
+          <Example text="On the osixia/openldap image, the service account is `cn=readonly,dc=example,dc=org` (with LDAP_READONLY_USER=true) or `cn=admin,dc=example,dc=org`, with its own base DN (from LDAP_DOMAIN) in place of `dc=example,dc=org`. For StartTLS and ldaps:// it needs LDAP_TLS_VERIFY_CLIENT=try (else it demands a certificate from the app, which has none) and a certificate of your own (the image's own CA expired on 2026-01-15). With groupOfNames groups, fill in Where groups are. A posixGroup (members by memberUid) is never read: use a groupOfNames or groupOfUniqueNames group." />
         </p>
       </div>
     </details>

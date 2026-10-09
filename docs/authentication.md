@@ -159,7 +159,9 @@ service account (a wrong DN or password, a DN in another domain than the server
 holds, `user@domain` or `DOMAIN\user` on a server that takes
 only DNs, Active Directory's own reasons below), where people are (empty, not a
 DN, or missing, with the part that exists), the user filter, and the groups (not
-found, or not in their members' `memberOf`). It says which password it used: the
+found; a `posixGroup` or no group at all, such as the OU above it; not in their
+members' `memberOf`; or several groups of one name, which all count: a failure
+for the admin group, a warning for the required group). It says which password it used: the
 one typed in the field, or the saved one when the field is blank. The saved one
 is used only with the saved server (its host and port) and service account, over
 a connection at least as safe as the saved one: with another server or account
@@ -197,15 +199,30 @@ as them. On the first sign-in it creates them, gives them an API key, and sets
 their role from the admin group. The directory stays in charge of their name,
 email, role and password; the app does not let those be changed here. With
 **Where groups are** empty, groups come from each person's `memberOf`, asked for
-by name (OpenLDAP's overlay sends it only then). With it set, they come from the
-groups there that name them as a `member` or `uniqueMember`, and from `memberOf`
-only where the server sends it unasked (Active Directory does, OpenLDAP does not),
-as in v5.2.0: on OpenLDAP a group of the same name elsewhere, such as another
-app's `admins`, never makes anyone an admin here. Direct members only: a group
-inside a group does not count. A group goes by its full DN or its common name, a comma in it
-included (`CN=Sales\, EMEA,...` is `Sales, EMEA`); a group, admin group or
-required group saved in v5.2.0 as `Sales\` (its name cut at the comma) keeps
-matching.
+by name (OpenLDAP's overlay sends it only then), from anywhere in the directory.
+With it set, they come from the groups there that name them as a `member` or
+`uniqueMember`, and from `memberOf` only where the server sends it unasked
+(Active Directory does, OpenLDAP does not), as in v5.2.0: on OpenLDAP a group of
+the same name elsewhere, such as another app's `admins`, never makes anyone an
+admin here. Direct members only: a group inside a group does not count. A group
+is a `groupOfNames`, a `groupOfUniqueNames` or an Active Directory group; a
+`posixGroup` lists its members by uid (`memberUid`), which is not read, so nobody
+is ever in one here (with the rfc2307bis schema a `posixGroup` can also be a
+`groupOfNames`, its members listed in `member`). A group goes by its full DN or
+its common name, a comma in it included (`CN=Sales\, EMEA,...` is `Sales, EMEA`);
+a DN matches however it is written (capitals, spaces after its commas, `\,` or
+`\2C`). A group, admin group or required group saved in v5.2.0 as `Sales\` (its
+name cut at the comma) keeps matching.
+
+By its name, every group of that name counts, wherever people's groups come
+from: with **Where groups are** empty, any group of that name in the directory.
+When another group has the same name (another app's `admins`, say), name the
+group by its full DN; **Test the settings** lists the groups a name matches.
+This is new for OpenLDAP with the memberOf overlay and **Where groups are**
+empty, as v5.2.0's help advised: v5.2.0 never asked for `memberOf` there, so its
+admin and required groups matched nobody, while from this version on they apply
+as soon as it starts, from `memberOf`, by name across the whole directory. Run
+**Test the settings** after upgrading such an installation.
 
 Every **Check the directory every** the app re-reads every directory person.
 Anyone who left the directory, or the required group, is disabled: signed out,
@@ -214,9 +231,10 @@ Check the directory now** runs the same check at once. When the directory cannot
 be used (not reached, its certificate refused, the service account refused,
 **Where groups are** not there), nobody is changed and the check says why; the
 app keeps running. Only a person's own entry gone counts as leaving. The same
-goes for the required group: when nobody at all is in it, it must be found before
-anyone is disabled for not being in it, so a typo in its name changes nobody and
-the check says to fix **Required group**.
+goes for the required group: when nobody at all is in it, it must be found (a
+group of a kind signing in reads, not a `posixGroup` or an OU) before anyone is
+disabled for not being in it, so a typo in its name changes nobody and the check
+says to fix **Required group**.
 
 A directory that is busy or unavailable when it checks someone's password
 (rather than refusing it) is the directory's state, not a wrong password: they
