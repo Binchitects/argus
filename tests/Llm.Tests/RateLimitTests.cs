@@ -226,6 +226,93 @@ public sealed class RateLimitTests(AppFixture app)
         await KeyHasAsync(gateway, p.Email, new KeyRate(9, 1));
     }
 
+    /// <summary>Holds the first call a fake gateway's hook sees for one person or key until released, and says when it holds it.</summary>
+    private sealed class Hold
+    {
+        private readonly TaskCompletionSource _held = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _go = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _once;
+
+        public Task Held => _held.Task.WaitAsync(TimeSpan.FromSeconds(15));
+
+        public Func<string, Task> For(string target) => async seen =>
+        {
+            if (seen == target && Interlocked.Exchange(ref _once, 1) == 0)
+            {
+                _held.SetResult();
+                await _go.Task;
+            }
+        };
+
+        public void Release() => _go.TrySetResult();
+    }
+
+    [Fact]
+    public async Task A_persons_own_limit_set_while_a_key_sync_runs_wins_over_what_the_sync_read()
+    {
+        var gateway = new FakeGateway();
+        await using var f = NewApp(gateway);
+        var admin = await AdminAsync(f);
+        var p = await PersonAsync(admin);
+        var hold = new Hold();
+        gateway.BeforeKeys = hold.For(p.Email);
+        await using var scope = f.Services.CreateAsyncScope();
+        // A sync reads everyone (no limit of their own yet) and is held at the person's keys...
+        var sync = scope.ServiceProvider.GetRequiredService<RateLimits>().SyncAsync();
+        try
+        {
+            await hold.Held;
+            // ...while an admin sets their own, which is on their key at once.
+            await StatusAssert.Is(HttpStatusCode.OK, await LimitsAsync(admin, p.Id, 5, 500));
+            Assert.Equal(new KeyRate(5, 500), RateOf(gateway, p.Email));
+        }
+        finally
+        {
+            hold.Release();
+        }
+        await sync;
+        // The sync read their own again before it changed their key: what the admin set stays.
+        Assert.Equal(new KeyRate(5, 500), RateOf(gateway, p.Email));
+        Assert.DoesNotContain(gateway.RateChanges, c => c.Rate == KeyRate.None);
+    }
+
+    [Fact]
+    public async Task A_sync_that_undoes_a_persons_own_limit_is_followed_by_one_that_puts_it_back()
+    {
+        var gateway = new FakeGateway();
+        await using var f = NewApp(gateway);
+        var admin = await AdminAsync(f);
+        var p = await PersonAsync(admin);
+        var token = gateway.KeysOf(p.Email).Single().Token;
+        var group = await GroupAsync(admin, new { requestsPerMinute = 20 }, p.Id);
+        await KeyHasAsync(gateway, p.Email, new KeyRate(20, null));
+        // The syncs those changes woke are done.
+        await Task.Delay(500);
+        var hold = new Hold();
+        gateway.BeforeRate = hold.For(token);
+        try
+        {
+            // A new limit for the group starts one sync, held just as it gives the key the group's 30...
+            await StatusAssert.Is(HttpStatusCode.NoContent,
+                await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/groups/{group}/policies", UriKind.Relative), new { requestsPerMinute = 30 }));
+            await hold.Held;
+            // ...while an admin sets the person's own, on their key at once.
+            await StatusAssert.Is(HttpStatusCode.OK, await LimitsAsync(admin, p.Id, 5, null));
+            Assert.Equal(new KeyRate(5, null), RateOf(gateway, p.Email));
+        }
+        finally
+        {
+            hold.Release();
+        }
+        // The held sync gives the key the 30 it decided before; the sync the change woke puts their own back.
+        for (var i = 0; i < 150 && !gateway.RateChanges.Contains((token, new KeyRate(30, null))); i++)
+        {
+            await Task.Delay(100);
+        }
+        Assert.Contains((token, new KeyRate(30, null)), gateway.RateChanges);
+        await KeyHasAsync(gateway, p.Email, new KeyRate(5, null));
+    }
+
     [Fact]
     public async Task The_chat_is_never_held_to_a_persons_rate_limits()
     {

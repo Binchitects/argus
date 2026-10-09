@@ -27,8 +27,14 @@ public static class AdminEndpoints
             WithPerson(id, people, async u => Results.Ok(await people.RotateKeyAsync(u))));
         admin.MapPut("/people/{id:guid}/budget", (Guid id, BudgetRequest body, PeopleService people) =>
             WithPerson(id, people, async u => { await people.SetBudgetAsync(u, body.Budget); return Results.NoContent(); }));
-        admin.MapPut("/people/{id:guid}/limits", (Guid id, LimitsRequest body, PeopleService people) =>
-            WithPerson(id, people, async u => Results.Ok(new { warning = await people.SetLimitsAsync(u, body.RequestsPerMinute, body.TokensPerMinute) })));
+        admin.MapPut("/people/{id:guid}/limits", (Guid id, LimitsRequest body, PeopleService people, Models.KeyAccessWatcher keys) =>
+            WithPerson(id, people, async u =>
+            {
+                var warning = await people.SetLimitsAsync(u, body.RequestsPerMinute, body.TokensPerMinute);
+                // A key sync already under way read the person before this change: one more after it puts the new limit back if that sync undid it.
+                keys.Wake();
+                return Results.Ok(new { warning });
+            }));
         admin.MapPost("/people/{id:guid}/2fa/reset", (Guid id, PeopleService people) =>
             WithPerson(id, people, async u => { await people.ResetTwoFactorAsync(u); return Results.NoContent(); }));
         admin.MapPost("/people/{id:guid}/sign-out", (Guid id, PeopleService people, Audit audit) =>

@@ -91,25 +91,31 @@ public sealed class RateLimits(AppDbContext db, AccessService access, ILiteLlm g
         var member = await access.MembershipAsync(user, ct);
         var groups = await db.Groups.AsNoTracking().Where(g => member.Groups.Contains(g.Id) && (g.RequestsPerMinute != null || g.TokensPerMinute != null))
             .Select(g => new { g.Name, g.RequestsPerMinute, g.TokensPerMinute }).ToListAsync(ct);
-        return Rates(user, [.. groups.Select(g => (g.Name, g.RequestsPerMinute, g.TokensPerMinute))]);
+        return Rates((user.RequestsPerMinute, user.TokensPerMinute), [.. groups.Select(g => (g.Name, g.RequestsPerMinute, g.TokensPerMinute))]);
     }
 
-    private PersonRates Rates(AppUser user, IReadOnlyList<(string Name, int? Requests, int? Tokens)> groups)
+    private PersonRates Rates((int? Requests, int? Tokens) own, IReadOnlyList<(string Name, int? Requests, int? Tokens)> groups)
     {
         var company = options.CurrentValue;
         return new PersonRates(
-            Resolve(user.RequestsPerMinute, groups.Select(g => (g.Name, g.Requests)), company.RequestsPerMinute),
-            Resolve(user.TokensPerMinute, groups.Select(g => (g.Name, g.Tokens)), company.TokensPerMinute));
+            Resolve(own.Requests, groups.Select(g => (g.Name, g.Requests)), company.RequestsPerMinute),
+            Resolve(own.Tokens, groups.Select(g => (g.Name, g.Tokens)), company.TokensPerMinute));
     }
 
     /// <summary>Puts a person's limits on each of their keys at the gateway; returns how many keys changed.</summary>
     public async Task<int> ApplyAsync(AppUser user, CancellationToken ct = default) =>
-        user.Email is { } email ? await ApplyAsync(email, (await ForAsync(user, ct)).Key, ct) : 0;
+        user.Email is { } email ? await ApplyAsync(email, (await ForAsync(user, ct)).Key, null, ct) : 0;
 
-    private async Task<int> ApplyAsync(string email, KeyRate want, CancellationToken ct)
+    /// <param name="recheck">What the person's keys should carry as the database says it now, asked only when a key is to change.</param>
+    private async Task<int> ApplyAsync(string email, KeyRate want, Func<Task<KeyRate>>? recheck, CancellationToken ct)
     {
+        var keys = await gateway.KeysAsync(email, ct);
+        if (recheck is not null && keys.Any(k => (k.Rate ?? KeyRate.None) != want))
+        {
+            want = await recheck();
+        }
         var changed = 0;
-        foreach (var key in await gateway.KeysAsync(email, ct))
+        foreach (var key in keys)
         {
             if ((key.Rate ?? KeyRate.None) != want)
             {
@@ -120,7 +126,11 @@ public sealed class RateLimits(AppDbContext db, AccessService access, ILiteLlm g
         return changed;
     }
 
-    /// <summary>Brings everyone's keys to their limits (groups, their members and the company's may have changed); returns how many keys changed.</summary>
+    /// <summary>
+    /// Brings everyone's keys to their limits (groups, their members and the company's may have
+    /// changed); returns how many keys changed. A person's own limit is read again before their
+    /// keys change: an admin may have set it, and put it on their keys, since this sync began.
+    /// </summary>
     public async Task<int> SyncAsync(CancellationToken ct = default)
     {
         var groups = await db.Groups.AsNoTracking().Where(g => g.RequestsPerMinute != null || g.TokensPerMinute != null).ToListAsync(ct);
@@ -131,7 +141,12 @@ public sealed class RateLimits(AppDbContext db, AccessService access, ILiteLlm g
         {
             var mine = groups.Where(g => g.Directory is { } d ? AccessService.InDirectoryGroup(user.DirectoryGroups, d) : added[user.Id].Contains(g.Id))
                 .Select(g => (g.Name, g.RequestsPerMinute, g.TokensPerMinute)).ToList();
-            changed += await ApplyAsync(user.Email!, Rates(user, mine).Key, ct);
+            var want = Rates((user.RequestsPerMinute, user.TokensPerMinute), mine).Key;
+            changed += await ApplyAsync(user.Email!, want, async () =>
+            {
+                var own = await db.Users.AsNoTracking().Where(u => u.Id == user.Id).Select(u => new { u.RequestsPerMinute, u.TokensPerMinute }).SingleOrDefaultAsync(ct);
+                return own is null ? want : Rates((own.RequestsPerMinute, own.TokensPerMinute), mine).Key;
+            }, ct);
         }
         return changed;
     }

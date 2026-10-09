@@ -61,15 +61,24 @@ public sealed class FakeGateway : ILiteLlm
         return Task.FromResult(secret);
     }
 
-    public Task SetKeyRateAsync(string token, KeyRate rate, CancellationToken ct = default)
+    /// <summary>Runs before a key's rate is set (its hashed token): a test holds a sync there.</summary>
+    public Func<string, Task>? BeforeRate { get; set; }
+
+    /// <summary>Runs before a person's keys are listed (their email): a test holds a sync there.</summary>
+    public Func<string, Task>? BeforeKeys { get; set; }
+
+    public async Task SetKeyRateAsync(string token, KeyRate rate, CancellationToken ct = default)
     {
         Check();
+        if (BeforeRate is { } before)
+        {
+            await before(token);
+        }
         if (Keys.TryGetValue(token, out var key))
         {
             key.Rate = rate;
             RateChanges.Enqueue((token, rate));
         }
-        return Task.CompletedTask;
     }
 
     public Task SetKeyAccessAsync(string token, IReadOnlyList<string> models, int? maxParallel, CancellationToken ct = default)
@@ -104,11 +113,14 @@ public sealed class FakeGateway : ILiteLlm
         return Task.FromResult(secret);
     }
 
-    public Task<IReadOnlyList<GatewayKey>> KeysAsync(string email, CancellationToken ct = default)
+    public async Task<IReadOnlyList<GatewayKey>> KeysAsync(string email, CancellationToken ct = default)
     {
         Check();
-        IReadOnlyList<GatewayKey> list = [.. KeysOf(email).Select(k => new GatewayKey(k.Token, k.Alias, "sk-...", 0, k.Blocked, DateTimeOffset.UtcNow, k.Models, k.MaxParallel, k.TeamId, k.Rate))];
-        return Task.FromResult(list);
+        if (BeforeKeys is { } before)
+        {
+            await before(email);
+        }
+        return [.. KeysOf(email).Select(k => new GatewayKey(k.Token, k.Alias, "sk-...", 0, k.Blocked, DateTimeOffset.UtcNow, k.Models, k.MaxParallel, k.TeamId, k.Rate))];
     }
 
     /// <summary>The keys looked up by the key itself (each one asked about), so tests can see what was cached.</summary>
