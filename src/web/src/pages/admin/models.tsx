@@ -174,7 +174,7 @@ function EngineSummary({ engine }: { engine: ModelsView['engine'] }) {
           {engine.kept.length > 0 ? `, ${engine.kept.length} kept loaded (${engine.kept.join(', ')})` : ', none kept loaded'}
           {engine.hours ? ` by the working hours "${engine.hours.name}"${engine.hours.until ? ` until ${new Date(engine.hours.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}, instead of the pinned ${engine.pinned.length ? engine.pinned.join(', ') : 'none'}` : ''}.{' '}
           {engine.onRequest
-            ? 'Any other loads when someone asks for it. At the limit, an idle one makes room first; one kept loaded, the one new chats use and the one for small steps never do.'
+            ? 'Any other loads when someone asks for it. At the limit, an idle one makes room first; one kept loaded, the one new chats use, and the one for small steps while a place is left beside it, never do.'
             : 'Every place is kept loaded, or held by the model new chats use or the one for small steps, so no other model loads on request. Raise "Models loaded at once" under Settings for more.'}
         </CardDescription>
       </CardHeader>

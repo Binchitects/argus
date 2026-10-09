@@ -1156,7 +1156,7 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
     }
 
     [Fact]
-    public async Task One_model_at_a_time_saved_on_v5_2_0_has_people_on_different_models_take_turns()
+    public async Task One_model_at_a_time_saved_on_v5_2_0_has_each_model_make_room_for_the_other_once_idle()
     {
         // A v5.2.0 installation whose admin saved one model at a time, nothing kept, the big model set for new chats.
         string database;

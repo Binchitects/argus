@@ -65,13 +65,22 @@ would be with them.
   loads again quickest). Three never make room, so the models everyone relies
   on stay: one kept loaded, the one new chats use (Settings, or the working
   hours', else the first kept; with none of them, the one new chats have been
-  getting), and the model for small steps. While one of them is not loaded,
-  its place is kept for it (it loads again soon: the app loads the first two,
-  the next small step the third), unless an admin unloaded it. When none that
+  getting), and the model for small steps while a place is left beside it for
+  the others (with fewer places, it shares the last one with them: see **Two
+  models at once**). While one of them is not loaded, its place is kept for it
+  (the app loads it again), unless an admin unloaded it. When none that
   may make room is idle, the request (an answer, a title, the safeguards'
   check) waits up to a minute for one, then says the engine is full; when each
   place is taken by, or kept for, one of the three, it says so at once, and
   the chat's menu does not offer the others.
+  A model is idle only when nothing is on its way to it either: the app's own
+  requests until they end (side requests too), and an API key's for 10
+  seconds after the gateway let it through, or after the model loaded for it
+  (by then the engine says its slot is busy). A model the app unloads (to make
+  room, or an admin's **Unload**) counts as unloaded at once, on every replica,
+  though the engine lists it as loaded until it has stopped: a request for it
+  a moment later waits for room like any other, instead of reaching an engine
+  that would load it by unloading the model used least recently.
   The app never leaves the choice to the engine, which would unload the model
   used least recently, whichever it is. An API key's request (a coding agent,
   an IDE) gets room the same way: the gateway asks the app before sending it
@@ -100,17 +109,23 @@ would be with them.
   when it loads, so a big model that loads after a small one took its room
   fails. Keep the big model loaded (**Keep loaded**): it loads first when the
   engine starts, and models asked for take what it left. With two at once and
-  a model for small steps set, it and the big model fill the engine: a third
-  model asked for has no place (raise **Models loaded at once** to 3 for one).
-  With
-  **Models loaded at once** at 1, people on two models take turns: only a kept
-  model stays, and any other loaded one, the one new chats use included, makes
-  room once idle. Every switch unloads the other's model (measured:
+  a model for small steps set, the small model shares the second place with
+  the models loaded on request: the app loads it there while the place is
+  free; it makes room once idle for a model someone asks for, and while that
+  one sits there each small step uses the answer's own model (slower, and on
+  the big model's slots) rather than wait; it loads again once that one has
+  been idle five minutes. With 3 or more, it keeps a place of its own beside
+  the big one, and one is left for the others.
+  With **Models loaded at once** at 1, only a kept model stays, and any other
+  loaded one, the one new chats use included, makes room once idle: a request
+  for another model waits for the loaded one to be idle, a minute at most, then
+  is refused. While people keep the loaded model busy (new answers start as
+  others end), those on another model are refused each time, not served in
+  turn. Every switch unloads the other's model (measured:
   Qwen3.8-Flash-Next reloads in 15 to 20 seconds from the page cache, and its
-  cached prompts are lost), a person on the small model waits behind everyone
-  on the big one, and a model asked for while the other still loads can be
-  stopped mid-load and read **Could not load**. With a model kept loaded and
-  one at a time, no other model loads at all.
+  cached prompts are lost), and a model asked for while the other still loads
+  can be stopped mid-load and read **Could not load**. With a model kept loaded
+  and one at a time, no other model loads at all. Raise it to 2 or more.
 - **Could not load** is not always a broken file. To make room, the engine
   tells the model to stop; one told so while it still loads goes on loading
   and answering, and the engine kills it 10 seconds later and marks it failed.
@@ -130,16 +145,19 @@ would be with them.
   and small steps**) does the many short steps around an answer: sub-agents,
   chat titles, compaction summaries, the safeguards' check, and Auto in the
   chat's model menu. It is only fast when the engine holds it beside the big
-  model: set **Models loaded at once** to 2 or more, and **Keep loaded** both.
-  Once loaded it stays (it never makes room for another). Its card reads
-  **Small steps**. The page, and the setting itself, warn while it is not at
-  the gateway, not kept loaded (until it loads, steps wait for it, and for an
-  idle model to make room when the engine is full), every place is kept for
-  other models (it cannot load, so each step uses the answer's own model), or
-  the engine holds one model at once (the two take turns, loading again for
-  every step). When the safeguards' check cannot have its model (the engine
-  stays full for a minute), the message is refused with a note to try again,
-  never let through unread; it is not a strike. On the GPU beside the big
+  model: set **Models loaded at once** to 3 or more (it keeps a place of its
+  own, and never makes room for another), or keep it loaded (**Keep loaded**).
+  At 2 it shares the second place with the models loaded on request (see **Two
+  models at once**). It is used only while it is loaded, or the engine has a
+  free place for it: else each step uses the answer's own model, rather than
+  wait for another model to make room. Its card reads **Small steps**. The
+  page, and the setting itself, warn while it is not at the gateway, shares
+  the last place with the others, every place is kept for other models (it
+  cannot load, so each step uses the answer's own model), or the engine holds
+  one model at once (a step waits for the loaded model to be idle). When the
+  safeguards' check cannot have its model (the engine stays full for a
+  minute), the message is refused with a note to try again, never let through
+  unread; it is not a strike. On the GPU beside the big
   model it takes some of the big one's memory (for a mixture of experts, more
   experts in RAM); a model on another GPU server costs this engine nothing.
   Who may use it is set on its card as for any model: Auto is offered only to
