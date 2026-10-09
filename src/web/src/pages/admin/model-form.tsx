@@ -436,7 +436,7 @@ export function ModelForm({
               <Field
                 label="Answers at once"
                 error={errors.parallel}
-                hint={`1 to ${limits?.parallel.max ?? 32}. They share the context${profile?.recurrentBytesPerSlot ? `; each keeps ${bytes(profile.recurrentBytesPerSlot)} of recurrent state` : ''}.`}
+                hint={`1 to ${limits?.parallel.max ?? 32}: the engine's slots, each keeping a conversation's prompt. They share the context${profile?.recurrentBytesPerSlot ? `; each keeps ${bytes(profile.recurrentBytesPerSlot)} of recurrent state` : ''}. From 3, small steps (titles, checks, summaries) go to the last one first.`}
               >
                 <Input inputMode="numeric" value={form.parallel} onChange={(e) => set('parallel', e.target.value)} />
               </Field>

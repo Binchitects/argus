@@ -20,7 +20,7 @@ import { AccessPicker, type AccessRule } from './access-picker'
 import { ModelForm, type SavedModel } from './model-form'
 import { WorkingHours } from './model-hours'
 import { DownloadsCard, HuggingFaceBrowser } from './huggingface'
-import { bytes, summary, type ModelProfile } from './model-profile'
+import { bytes, cacheLine, summary, type ModelProfile, type TokenCache } from './model-profile'
 import { ServersSection } from './servers'
 
 interface ModelRow extends SavedModel {
@@ -40,6 +40,10 @@ interface ModelRow extends SavedModel {
   access: AccessRule
   /** What its file is, when it is in the library. */
   profile?: ModelProfile | null
+  /** A model added here: what its token cache keeps, and the RAM it takes. */
+  cache?: TokenCache | null
+  /** Failed to load: when it is tried again by itself. */
+  retryAt?: string | null
   /** Pinned to keep loaded: loaded at start, and again whenever it is not (outside working hours). */
   kept?: boolean
   /** Kept loaded now: pinned, or by the working hours in force. */
@@ -183,8 +187,8 @@ function EngineSummary({ engine }: { engine: ModelsView['engine'] }) {
           {engine.kept.length > 0 ? `, ${engine.kept.length} kept loaded (${engine.kept.join(', ')})` : ', none kept loaded'}
           {engine.hours ? ` by the working hours "${engine.hours.name}"${engine.hours.until ? ` until ${new Date(engine.hours.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}, instead of the pinned ${engine.pinned.length ? engine.pinned.join(', ') : 'none'}` : ''}.{' '}
           {engine.onRequest
-            ? 'Any other loads when someone asks for it; at the limit, the one used least recently unloads, and a kept one comes back.'
-            : 'Every place is kept, so no other model loads on request. Raise "Models loaded at once" under Settings for more.'}
+            ? 'Any other loads when someone asks for it. At the limit, an idle one makes room first; one kept loaded, the one new chats use, and the one for small steps while a place is left beside it, never do.'
+            : 'Every place is kept loaded, or held by the model new chats use or the one for small steps, so no other model loads on request. Raise "Models loaded at once" under Settings for more.'}
         </CardDescription>
       </CardHeader>
       {plan && (plan.gpus.length > 0 || plan.problems.length > 0) && (
@@ -342,6 +346,7 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
           </CardDescription>
           {m.profile && <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{summary(m.profile)}</p>}
           {priceLine(m) && <p className="mt-1 text-xs text-muted-foreground tabular-nums">{priceLine(m)}</p>}
+          {m.cache && <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{cacheLine(m.cache)}</p>}
         </div>
         <Status status={m.status} />
       </CardHeader>
@@ -363,7 +368,9 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
               the engine's warnings and errors
             </Link>
             , or <code className="text-xs">docker compose logs llamacpp</code> on the host. An incomplete download, a file this llama.cpp cannot read, or too
-            little GPU memory are the usual causes. It is not tried again until you load it.
+            little GPU memory are the usual causes; a model stopped while it still loaded, to make room for another, ends this way too, with nothing wrong.
+            It is tried again by itself after a minute, then after 2, 4, 8, 16 and at most 30 minutes (kept loaded, by the app; else at the next question for
+            it){m.retryAt ? `: next from ${new Date(m.retryAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}. Loading it tries at once.
           </Alert>
         )}
         {media && (
@@ -410,7 +417,7 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
                     description: media
                       ? 'It loads on its own server, beside the chat models. A model not kept loaded unloads again after ten minutes unused.'
                       : full
-                      ? 'The engine is full: the model used least recently unloads to make room (a kept one comes back after). Answers wait until this one is loaded: seconds for a small model, minutes for a large one.'
+                      ? 'The engine is full: the model used least recently unloads to make room (a kept one, or the one new chats use, comes back after). Answers wait until this one is loaded: seconds for a small model, minutes for a large one.'
                       : 'It loads beside the models loaded now. Answers wait until it is loaded: seconds for a small model, minutes for a large one.',
                     confirm: 'Load',
                   })

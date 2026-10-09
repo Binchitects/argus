@@ -285,6 +285,23 @@ public sealed class QualityTests(AppFixture app)
     }
 
     [Fact]
+    public async Task An_arena_answer_that_waits_in_line_too_long_never_names_its_model()
+    {
+        // One answer at once in the whole chat, held by someone else's; a wait in line of a second at most.
+        await using var f = TwoModels(new Dictionary<string, string?> { ["Chat:AnswersAtOnce"] = "1", ["Chat:QueueTimeout"] = "00:00:01" });
+        var (b, _, _) = await PersonAsync(f);
+        var id = await NewChatAsync(b);
+        using var held = await f.Services.GetRequiredService<Llm.Api.Chat.AnswerGate>().EnterAsync(Guid.NewGuid(), "someone-elses-model", _ => Task.CompletedTask, default);
+
+        var (events, raw) = await StreamAsync(b, $"/api/chat/conversations/{id}/compare", new { content = "Which sort is stable?" });
+        // The wait gives up and says which model was busy: by its label, as everything else in the arena.
+        var error = Assert.Single(events, e => Type(e) == "error");
+        Assert.StartsWith("Model A has been busy", error.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(Main, raw, StringComparison.Ordinal);
+        Assert.DoesNotContain(Other, raw, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task The_leaderboard_can_be_kept_to_the_admins()
     {
         await using var f = TwoModels(new Dictionary<string, string?> { ["Quality:PublicLeaderboard"] = "false" });

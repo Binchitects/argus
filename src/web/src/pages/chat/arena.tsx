@@ -15,7 +15,7 @@ import type { ToolRunning } from './live'
 import { comparable, sideMessages, type ArenaView, type CompareChoice } from './quality'
 import type { ChatTree } from './tree'
 import { AnswerTurn } from './turns'
-import type { AgentWork, ArenaVote, ChatConfig, ChatModel, Message } from './types'
+import type { AgentWork, ArenaVote, ChatConfig, ChatModel, InLine, Message } from './types'
 
 /**
  * Compare, beside Deep research in the composer: the next question goes to two models,
@@ -128,7 +128,7 @@ export function ArenaTurn({
   config: ChatConfig
   chatId?: string
   thinkingSince: number | null
-  queued?: number | null
+  queued?: InLine | null
   busy: boolean
   onOpenFile: (name: string) => void
   onPreview?: (code: string) => void

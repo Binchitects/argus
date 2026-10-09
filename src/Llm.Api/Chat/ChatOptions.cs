@@ -36,11 +36,8 @@ public sealed class ChatOptions
     /// <summary>Answers one person may have running at once, across their chats; more wait their turn.</summary>
     public int AnswersPerPerson { get; set; } = 1;
 
-    /// <summary>Answers running at once in the whole chat; 0: as many as the engine serves at once (<see cref="EngineSlots"/>).</summary>
+    /// <summary>Answers running at once in the whole chat, all models together; 0: no limit but each model's own (its slots, AnswerGate).</summary>
     public int AnswersAtOnce { get; set; }
-
-    /// <summary>What the engine serves at once, when set; 0: the loaded models' parallel slots together.</summary>
-    public int EngineSlots { get; set; }
 
     /// <summary>The model new chats use ("auto": Auto, while <see cref="SmallModel"/> is set); empty: the first kept loaded (Admin -> Models).</summary>
     public string? DefaultModel { get; set; }

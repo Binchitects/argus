@@ -80,7 +80,25 @@ One issuer, the app.
 **A person chats.** Browser → Traefik → app (session) → the gateway with the
 chat's own key, naming the person (their spend, their credit) → llama.cpp. The
 app streams the answer back, runs tools (Argus, Python in the sandbox, the web,
-pictures, video, speech), and keeps every message.
+pictures, video, speech), and keeps every message. An answer first takes a
+place in its model's line (`AnswerGate`: each model has as many places as it
+serves at once, so people on one model never wait for another's). Each turn
+goes to the engine slot that holds its conversation's start (`SlotTable`, sent
+as `id_slot`, which LiteLLM passes on), so the engine reads only the new turn
+(a sub-agent keeps a slot the same way); side requests (titles, the
+safeguards' check, summaries, Auto's choice) go to the last slot first, and to
+another idle one while it is busy. A model that is not loaded while the engine
+is full gets room from an idle model, whatever its size, that is not kept
+loaded, not the one new chats use and not the one for small steps while it
+keeps a place (`EngineRoute`); with none idle, the request waits a minute, then
+says the engine is full rather than have it unload the big model. Idle means
+no request on its way to it either (the app's until they end, an API key's for
+10 seconds after it was let through), and a model the app unloads counts as
+unloaded at once, on every replica, though the engine lists it loaded until it
+has stopped (`EngineState`). An API key's request gets room the same way: the
+gateway asks the app before sending it (its guardrail). The watcher loads the
+model new chats use again should the engine unload it by its own choice, and
+the model for small steps in its place (or in the one it shares, once free).
 
 **Sound and video in.** On upload the app has the sandbox's ffmpeg make an MP3
 of a sound, and a video's frames and sound track. A model that hears gets the

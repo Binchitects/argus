@@ -18,16 +18,40 @@ public sealed record EngineTimings(double? ReadTokens, double? ReadMs, double? W
 public sealed class ChatGatewayException(string message, int? status = null) : Exception(message)
 {
     public int? Status { get; } = status;
+
+    /// <summary>Nothing was sent: the model is the engine's and cannot be loaded now (the engine is full, or it failed to load and waits for its next try).</summary>
+    public bool NotLoaded { get; init; }
 }
 
-/// <summary>Streams a chat completion from LiteLLM and turns its SSE lines into events.</summary>
-public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFactory scopes)
+/// <summary>
+/// Streams a chat completion from LiteLLM and turns its SSE lines into events. A request to a model
+/// of this engine goes to the slot the <see cref="SlotTable"/> chooses (id_slot, which the gateway
+/// passes on): a conversation's turn to the slot that holds its start, a side request to the last
+/// slot first (<see cref="EngineRoute"/>, which also makes room for a model that is not loaded).
+/// </summary>
+public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFactory scopes, EngineRoute route)
 {
     /// <summary>The person a request is for, as LiteLLM attributes spend (its user_header_mappings).</summary>
     public const string UserEmailHeader = "X-LLM-User-Email";
 
-    public async IAsyncEnumerable<StreamEvent> StreamAsync(JsonObject request, string personEmail, [EnumeratorCancellation] CancellationToken ct)
+    /// <summary>A side request (a title, the safeguards' check, a summary, Auto's choice): it goes to the side requests' slot first (SlotTable).</summary>
+    public IAsyncEnumerable<StreamEvent> StreamAsync(JsonObject request, string personEmail, CancellationToken ct) => StreamAsync(request, personEmail, null, ct);
+
+    /// <summary>
+    /// A turn of <paramref name="conversation"/> (or of a sub-agent's run; null: a side request): it goes back to the
+    /// engine slot that holds the conversation's start.
+    /// </summary>
+    public async IAsyncEnumerable<StreamEvent> StreamAsync(JsonObject request, string personEmail, Guid? conversation, [EnumeratorCancellation] CancellationToken ct)
     {
+        using var slot = await route.TakeAsync(request["model"] is JsonValue v && v.TryGetValue<string>(out var model) ? model : null, conversation, ct);
+        if (slot.Slot is { } id)
+        {
+            request["id_slot"] = id;
+        }
+        else
+        {
+            request.Remove("id_slot");
+        }
         var registered = false;
         for (var attempt = 1; ; attempt++)
         {

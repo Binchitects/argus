@@ -7,6 +7,7 @@ const config = {
   models: [
     { name: 'Main', prices: { input: 0.2, cachedInput: 0.02, output: 0.8 } },
     { name: 'Free', prices: { input: null, cachedInput: null, output: null } },
+    { name: 'Local', prices: { input: 0.2, cachedInput: null, output: 0.8 } },
   ],
 } as unknown as ChatConfig
 
@@ -36,6 +37,11 @@ describe('what an answer used and cost', () => {
     expect(u).toMatchObject({ prompt: 1600, cached: 500, completion: 230, agents: { prompt: 500, cached: 100, completion: 20 }, estimated: false })
     // Kept costs as they are, even for a model with no price now.
     expect(u.cost).toBeCloseTo(0.001 + 0.04 + 0.0005 + 0.0002, 12)
+  })
+
+  it('prices cached tokens at nothing for a model with no cached price, as the gateway does', () => {
+    const a = { ...blank('a', 'assistant', 'q'), model: 'Local', promptTokens: 3000, cachedTokens: 2000, completionTokens: 100 }
+    expect(answerUsage([a], config).cost).toBeCloseTo((1000 * 0.2 + 100 * 0.8) / 1e6, 12)
   })
 
   it('has no cost when no model has a price', () => {

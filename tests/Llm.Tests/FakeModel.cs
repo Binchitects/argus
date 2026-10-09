@@ -21,6 +21,7 @@ namespace Llm.Tests;
 /// JSON); asked for a chat's title, "Title: "Named &lt;the first three words&gt;".".
 ///   [budget]   refuses as LiteLLM does when credit is used up
 ///   [harm]      flagged (as weapons) by the safeguards' check
+///   [slow check]  the safeguards' check takes 10 seconds to answer
 ///   [call NAME {json}]  asks for any tool NAME with those arguments, then answers "Found it."
 ///   [script [[{"name":N,"arguments":{…}}, …], …]]  the k-th round of tool calls asks for the k-th list's calls, until
 ///               the lists run out or calling is switched off (tool_choice none); then answers "Found it."
@@ -113,12 +114,14 @@ public sealed class FakeModel : HttpMessageHandler
         }
         IEnumerable<string> chunks;
         var delay = TimeSpan.Zero;
-        // The safeguards' check: "[harm]" in a message is flagged as weapons.
+        // The safeguards' check: "[harm]" in a message is flagged as weapons; "[slow check]" takes 10 seconds to say.
         if (messages[0]!["content"]?.GetValue<string>().StartsWith("You check messages sent to an AI assistant", StringComparison.Ordinal) == true)
         {
             var flagged = lastUser.Contains("[harm]", StringComparison.Ordinal);
-            chunks = [Delta(new JsonObject { ["content"] = flagged ? "{\"flagged\": true, \"category\": \"weapons\"}" : "{\"flagged\": false, \"category\": null}" }), Finish("stop"), Usage(50, 0, 10)];
-            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+            var slow = lastUser.Contains("[slow check]", StringComparison.Ordinal);
+            chunks = [.. Enumerable.Repeat(Delta(new JsonObject { ["content"] = " " }), slow ? 100 : 0),
+                Delta(new JsonObject { ["content"] = flagged ? "{\"flagged\": true, \"category\": \"weapons\"}" : "{\"flagged\": false, \"category\": null}" }), Finish("stop"), Usage(50, 0, 10)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, slow ? TimeSpan.FromMilliseconds(100) : delay) };
         }
         // Auto's sorting: the kind a "[kind:X]" marker says (the last one), "lookup" without one; "[kind:?]" is not JSON at all.
         if (messages[0]!["content"]?.GetValue<string>().StartsWith("You sort the questions people send", StringComparison.Ordinal) == true)

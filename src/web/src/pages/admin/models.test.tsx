@@ -2,6 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { admin, fakeApi, renderApp } from '@/test/utils'
+import { cacheLine } from './model-profile'
 
 const everyone = { audience: 'Everyone', groups: [] }
 
@@ -13,7 +14,10 @@ const view = (over: object = {}) => ({
     ...over,
   },
   models: [
-    { name: 'Big-Model', source: 'local', mode: 'chat', status: 'loaded', file: 'big/Big-Q4.gguf', context: 131072, vision: false, access: everyone, kept: true },
+    {
+      name: 'Big-Model', source: 'local', mode: 'chat', status: 'loaded', file: 'big/Big-Q4.gguf', context: 131072, vision: false, access: everyone, kept: true,
+      cache: { slots: 4, sideSlot: 3, pinned: true, keepsIdle: true, checkpoints: 4, checkpointBytes: 117_669_888, ramBytes: 16 * 117_669_888 },
+    },
     {
       name: 'Small-Model', source: 'local', mode: 'chat', status: 'unloaded', file: 'small/Small-Q8.gguf', projector: null, context: 32768, maxOutput: null,
       gpuLayers: 99, cpuMoe: 0, kvType: 'q8_0', parallel: 1, extraPreset: null, thinking: true, tools: true, inputPerMtok: null, outputPerMtok: null,
@@ -88,6 +92,26 @@ describe('admin models', () => {
     await userEvent.click(within(big).getByRole('button', { name: 'Choose groups' }))
     await userEvent.click(await screen.findByRole('checkbox', { name: /Research/ }))
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toMatchObject({ audience: 'Groups', groups: ['g1'] }))
+  })
+
+  it("a model's card says what its token cache keeps and the RAM it takes", async () => {
+    fakeApi(admin, { 'GET /api/admin/models': () => ({ json: view() }) })
+    renderApp('/admin/models')
+    const big = (await screen.findByRole('heading', { name: /Big-Model/ })).closest('section')!
+    expect(
+      within(big).getByText('Token cache: 4 slots, each keeping a conversation; small steps (titles, checks, summaries) go to the last first · 4 checkpoints a slot of 112.2 MiB: up to 1.8 GiB of RAM'),
+    ).toBeInTheDocument()
+    // A model without a cache line (a gateway one) shows none.
+    const image = screen.getByRole('heading', { name: /flux-image/ }).closest('section')!
+    expect(within(image).queryByText(/Token cache/)).not.toBeInTheDocument()
+  })
+
+  it('the token cache line covers one slot, copies elsewhere and idle slots emptied', () => {
+    const c = { slots: 2, sideSlot: null, pinned: true, keepsIdle: true, checkpoints: null, checkpointBytes: null, ramBytes: null }
+    expect(cacheLine(c)).toBe('Token cache: 2 slots, each keeping a conversation')
+    expect(cacheLine({ ...c, slots: 1, pinned: false })).toBe('Token cache: 1 slot: conversations take turns in it')
+    expect(cacheLine({ ...c, slots: 4, pinned: false })).toBe('Token cache: 4 slots; the gateway shares requests among its copies, so a conversation does not keep one')
+    expect(cacheLine({ ...c, keepsIdle: false, checkpoints: 8 })).toBe('Token cache: 2 slots, each keeping a conversation · idle slots are emptied at each new request · 8 checkpoints a slot, in RAM')
   })
 
   it('a model is added from the library, starting from what fits its kind and the machine', async () => {
@@ -192,7 +216,7 @@ describe('admin models', () => {
   it('with every place kept, a model that is not kept cannot load', async () => {
     fakeApi(admin, { 'GET /api/admin/models': () => ({ json: view({ max: 1, onRequest: false }) }) })
     renderApp('/admin/models')
-    expect(await screen.findByText(/Every place is kept, so no other model loads on request/)).toBeInTheDocument()
+    expect(await screen.findByText(/Every place is kept loaded, or held by the model new chats use or the one for small steps, so no other model loads on request/)).toBeInTheDocument()
     const small = screen.getByRole('heading', { name: /Small-Model/ }).closest('section')!
     expect(within(small).getByRole('button', { name: /Load/ })).toBeDisabled()
     expect(within(small).getByText('Otherwise it loads only when an admin loads it.')).toBeInTheDocument()
@@ -296,13 +320,21 @@ describe('admin models', () => {
     expect(within(card).getByText(/org\/Big-Remote on GPU box/)).toBeInTheDocument()
   })
 
-  it('a model that could not load says so, and where to find why', async () => {
+  it('a model that could not load says so, where to find why, and when it is tried again', async () => {
     const v = view()
-    fakeApi(admin, { 'GET /api/admin/models': () => ({ json: { ...v, models: v.models.map((m) => (m.name === 'Small-Model' ? { ...m, status: 'failed' } : m)) } }) })
+    const retryAt = '2026-09-25T10:04:00Z'
+    fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: { ...v, models: v.models.map((m) => (m.name === 'Small-Model' ? { ...m, status: 'failed', retryAt } : m)) } }),
+    })
     renderApp('/admin/models')
     const small = (await screen.findByRole('heading', { name: /Small-Model/ })).closest('section')!
     expect(within(small).getByText('Could not load')).toBeInTheDocument()
-    expect(within(small).getByRole('alert')).toHaveTextContent(/docker compose logs llamacpp/)
+    const alert = within(small).getByRole('alert')
+    expect(alert).toHaveTextContent(/docker compose logs llamacpp/)
+    // Not for good: tried again by itself, less and less often, and the card says from when.
+    expect(alert).toHaveTextContent(/tried again by itself after a minute, then after 2, 4, 8, 16 and at most 30 minutes/)
+    expect(alert).toHaveTextContent(`next from ${new Date(retryAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`)
+    expect(alert).not.toHaveTextContent(/not tried again/)
     expect(within(small).getByRole('button', { name: /Load/ })).toBeEnabled()
   })
 

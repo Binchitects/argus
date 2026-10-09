@@ -242,12 +242,12 @@ public sealed class ScaleOutTests(AppFixture app)
             }
             return Task.CompletedTask;
         };
-        var first = await gate.EnterAsync(holder, 0, _ => Task.CompletedTask, default);
-        var lowWaits = gate.EnterAsync(low, 0, Tell(low), default);
+        var first = await gate.EnterAsync(holder, 0, "m", _ => Task.CompletedTask, default);
+        var lowWaits = gate.EnterAsync(low, 0, "m", Tell(low), default);
         await Task.Delay(50);
-        var highWaits = gate.EnterAsync(high, 5, Tell(high), default);
+        var highWaits = gate.EnterAsync(high, 5, "m", Tell(high), default);
         await Task.Delay(50);
-        var high2Waits = gate.EnterAsync(high2, 5, Tell(high2), default);
+        var high2Waits = gate.EnterAsync(high2, 5, "m", Tell(high2), default);
         await Task.Delay(1500);
         lock (lines)
         {
@@ -276,9 +276,9 @@ public sealed class ScaleOutTests(AppFixture app)
         var gate = Gate(perPerson: 1, atOnce: 4);
         gate.Replicas = 3;
         // Four places on three replicas: two here (rounded up).
-        var one = await gate.EnterAsync(Guid.NewGuid(), _ => Task.CompletedTask, default);
-        var two = await gate.EnterAsync(Guid.NewGuid(), _ => Task.CompletedTask, default);
-        var three = gate.EnterAsync(Guid.NewGuid(), _ => Task.CompletedTask, default);
+        var one = await gate.EnterAsync(Guid.NewGuid(), "m", _ => Task.CompletedTask, default);
+        var two = await gate.EnterAsync(Guid.NewGuid(), "m", _ => Task.CompletedTask, default);
+        var three = gate.EnterAsync(Guid.NewGuid(), "m", _ => Task.CompletedTask, default);
         await Task.Delay(100);
         Assert.False(three.IsCompleted);
         gate.Replicas = 1;

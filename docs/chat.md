@@ -21,8 +21,9 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   It never thinks for them. The answer itself stays with the chat's model.
   Under an answer, the sub-agents' model shows beside the answer's when it is
   another, and each sub-agent's line names its model. For someone who may not
-  use the small model, or while it cannot load, each step uses the answer's
-  own model.
+  use the small model, or while it is not loaded and the engine has no free
+  place for it (another model sits in the place it shares), each step uses the
+  answer's own model rather than wait.
 - **Auto.** While a model for small steps is set, the picker offers **Auto**
   (an admin can make it the default: **Model new chats use** `auto`). The small
   model sorts each question in one short call: small talk, a quick lookup or
@@ -834,16 +835,23 @@ minute) are the chat's only: keys have their own requests-at-once limit.
 
 ## Fair use
 
-The model serves few people at once (llama.cpp's `LLAMACPP_PARALLEL` slots).
-So that everyone gets their turn:
+A model serves few people at once: its slots (**Answers at once** on its card
+in Admin → Models, and its copies on other GPU servers). So that everyone gets
+their turn:
 
-- **In the chat**, a person has one answer running at a time (Settings → Chat →
-  Answers at once, per person), and the chat as many as the engine serves at
-  once (Answers at once, everyone; 0 means the engine's slots). Others wait in
-  line and see how many answers are ahead of them. A free place goes to
-  whoever has had least: someone with nothing running goes before someone
-  whose last answer just ended. A wait of more than ten minutes gives up and
-  says the model is busy.
+- **In the chat**, each model has its own line: it runs as many answers at
+  once as it serves, so someone on a small model never waits behind people on
+  the big one. A person has one answer running at a time, on any model
+  (Settings → Chat → Answers at once, per person).
+  **Answers at once, everyone** can also limit all models together (0, the
+  default: no limit beyond each model's own). Who waits sees which model is
+  busy and how many answers are ahead of them ("Qwen3.8-Flash-Next is busy:
+  2 answers ahead of you"), or that their own other answer goes first. A free
+  place goes to whoever has had least: someone with nothing running goes
+  before someone whose last answer just ended. A wait of more than ten minutes
+  gives up and says which model is busy.
+- **Each conversation keeps its slot** in the engine, so the next turn reads
+  only what is new from the cache (see [admin.md](admin.md#the-token-cache)).
 - **API keys** (Qwen Code, IDEs, scripts) have at most two requests at once
   (API requests at once, per key); a third at the same time gets HTTP 429 and
   can retry. It applies to every key, within seconds of a change.
@@ -1022,8 +1030,12 @@ use and edit one); a new chat takes `assistantId`.
 | "Auto is not available to you" | Auto needs a model for small steps that you may use | choose a model; an admin sets the small model and who may use it (Admin → Models) |
 | An Auto answer says "The model for small steps is not available to you now" | the small model is not yours to use, or cannot load now | nothing: the main model answered. An admin can keep it loaded (Admin → Models) |
 | "… is not loaded right now" | the chat's model is not the one the engine has loaded | choose a loaded model, or ask an admin to load it (Admin → Models) |
-| "Waiting for your turn: N answers ahead of you" | the model is serving others; your answer is in line | nothing: it starts on its own. A group with a higher priority goes first (Admin → Groups). An admin can change the limits (Settings → Chat) |
-| "The model has been busy for 10 minutes" | the line did not move for that long | ask again later; tell an admin if it happens often |
+| "… cannot be loaded now" (in the chat, or an API call's error) | the engine holds all the models it may: those that may make room answered others all that minute, or each place is taken by, or kept for, a model that never makes room (one kept loaded, the model new chats use, the one for small steps) | choose a model that is loaded, or try again in a few minutes; an admin can raise Models loaded at once (Settings → Model) |
+| "This message was not sent: the safeguards could not read it first" | the safeguards' check could not have its model: the engine stayed full for a minute | send it again in a moment; it is not counted against you |
+| "… is busy: N answers ahead of you." (or "your turn is next") | the chat's model is serving as many answers as it can at once; yours is in its line (people on other models do not wait for it) | nothing: it starts on its own. A group with a higher priority goes first (Admin → Groups). An admin can change the limits (Settings → Chat) |
+| "The chat is busy: N answers ahead of you." | the whole chat runs as many answers as an admin allows at once (Answers at once, everyone) | nothing: it starts on its own; an admin can raise the limit (Settings → Chat) |
+| "Waiting for your other answer to end first." | you have as many answers running as you may (Answers at once, per person), in other chats or on other models | nothing: it starts when one of yours ends, or stop one |
+| "… has been busy for 10 minutes: nothing was sent" | the line did not move for that long (Longest wait in line) | ask again later, or choose another model; tell an admin if it happens often |
 | An API call answers **429** | the key already has as many requests running as it may | wait for one to finish, or retry; an admin sets the limit (API requests at once, per key) |
 | "Argus is not available for this answer: …" | Argus's reason follows | usually no GitLab account matches the person's email; see [ARGUS.md](argus/README.md) |
 | "… is not available for this answer: … did not answer" | an MCP server is down or refused the key | Admin → Tools → the server's **Edit** → **Test** |

@@ -46,9 +46,10 @@ that it is not set up, and how to turn it on.
 ### Models
 
 llama.cpp runs in **router mode**: one server that knows several models and
-holds up to **Models loaded at once** (under Settings, default 1) of them. Loading and unloading is an API call, not a
-restart. The page opens with **the engine**: how many it holds, which are kept
-loaded, and how full each GPU would be with them.
+holds up to **Models loaded at once** (under Settings, default 2) of them.
+Loading and unloading is an API call, not a restart. The page opens with **the
+engine**: how many it holds, which are kept loaded, and how full each GPU
+would be with them.
 
 - **Keep loaded** (a switch on each engine model) pins a model: it loads now,
   loads again when the engine starts, and comes back whenever it is not loaded.
@@ -59,21 +60,104 @@ loaded, and how full each GPU would be with them.
   when it starts; without it, the `.env` model is kept.
 - **Loaded on request.** While a place is left beside the kept models, any other
   model loads when someone asks for it: a chat, an API key, a coding agent. Its
-  first answer waits while it loads. At the limit, the model used least
-  recently unloads first; when that is a kept one, it comes back, and the one
-  not kept makes room. In the chat such a model reads **Loads when asked**.
+  first answer waits while it loads. At the limit, the app first unloads an
+  idle model that may make room, whatever its size (the smallest first: it
+  loads again quickest). Three never make room, so the models everyone relies
+  on stay: one kept loaded, the one new chats use (Settings, or the working
+  hours', else the first kept; with none of them, the one new chats have been
+  getting), and the model for small steps while a place is left beside it for
+  the others (with fewer places, it shares the last one with them: see **Two
+  models at once**). While one of them is not loaded, its place is kept for it
+  (the app loads it again), unless an admin unloaded it. When none that
+  may make room is idle, the request (an answer, a title, the safeguards'
+  check) waits up to a minute for one, then says the engine is full; when each
+  place is taken by, or kept for, one of the three, it says so at once, and
+  the chat's menu does not offer the others.
+  A model is idle only when nothing is on its way to it either: the app's own
+  requests until they end (side requests too), and an API key's for 10
+  seconds after the gateway let it through, or after the model loaded for it
+  (by then the engine says its slot is busy). A model the app unloads (to make
+  room, or an admin's **Unload**) counts as unloaded at once, on every replica,
+  though the engine lists it as loaded until it has stopped: a request for it
+  a moment later waits for room like any other, instead of reaching an engine
+  that would load it by unloading the model used least recently.
+  The app never leaves the choice to the engine, which would unload the model
+  used least recently, whichever it is. An API key's request (a coding agent,
+  an IDE) gets room the same way: the gateway asks the app before sending it
+  (its guardrail), and the app makes room, or the request waits, or it is
+  refused with the reason. A place made for a model is its own until the
+  engine loads it, so two requests at once for two models take two places.
+  Should the engine still unload a model by its own choice (an admin's
+  **Load** at the limit, or a request let through while the app is down,
+  with the guardrail's `fail_open`), a kept one comes back, and so does the
+  one new chats use, once a model that may make room has been idle for a
+  minute (so an agent pausing between its requests is not pushed out for
+  it). After an admin's **Unload**, it stays unloaded. In the chat such a
+  model reads **Loads when asked**.
   When every place is kept, no other model loads on request, and the chat says
   so. A change of the kept list that flips this restarts llama-server (the kept
   models load again, one after another).
+- **Two models at once** (the default). Someone who picks a small model gets it
+  loaded beside the big one, instead of unloading the big one for everyone:
+  each model has its own line in the chat, so both answer at once. llama.cpp
+  places a model loaded on request in what the loaded ones left of the GPU
+  (automatic placement), else partly or wholly in RAM, where it is slower. Each
+  model is a process of its own: one that does not fit fails to load and says
+  so on its card, and the loaded ones go on. The trade-off is memory: the
+  second model takes GPU memory or RAM the first could have used, and a model
+  placed by hand (layers and experts set on its form) needs all its memory free
+  when it loads, so a big model that loads after a small one took its room
+  fails. Keep the big model loaded (**Keep loaded**): it loads first when the
+  engine starts, and models asked for take what it left. With two at once and
+  a model for small steps set, the small model shares the second place with
+  the models loaded on request: the app loads it there while the place is
+  free; it makes room once idle for a model someone asks for, and while that
+  one sits there each small step uses the answer's own model (slower, and on
+  the big model's slots) rather than wait; it loads again once that one has
+  been idle five minutes. With 3 or more, it keeps a place of its own beside
+  the big one, and one is left for the others.
+  With **Models loaded at once** at 1, only a kept model stays, and any other
+  loaded one, the one new chats use included, makes room once idle: a request
+  for another model waits for the loaded one to be idle, a minute at most, then
+  is refused. While people keep the loaded model busy (new answers start as
+  others end), those on another model are refused each time, not served in
+  turn. Every switch unloads the other's model (measured:
+  Qwen3.8-Flash-Next reloads in 15 to 20 seconds from the page cache, and its
+  cached prompts are lost), and a model asked for while the other still loads
+  can be stopped mid-load and read **Could not load**. With a model kept loaded
+  and one at a time, no other model loads at all. Raise it to 2 or more.
+- **Could not load** is not always a broken file. To make room, the engine
+  tells the model to stop; one told so while it still loads goes on loading
+  and answering, and the engine kills it 10 seconds later and marks it failed.
+  This is what happened to SmolLM2 in a load test with one model at a time:
+  the questions waiting for the big model had the engine stop SmolLM2 the
+  moment it started for its own questions; it answered them, and was killed
+  and marked failed. The app tries a model that failed again after a minute,
+  then after 2, 4, 8, 16 and at most 30 minutes, once each time: a kept one
+  is loaded again by the app, any other by the next question asked of it, in
+  the chat or with an API key (the questions of the next half minute go too,
+  while it loads, unless it is seen failing again). Meanwhile the chat, and an
+  API key's request, say it could not be loaded just now, and its card says
+  from when it is tried again; **Load** tries at once (should it
+  fail, the next wait is the longer one). A model that loads is known to be
+  fine again.
 - **The model for small steps** (Settings → Model → **Model for sub-agents
   and small steps**) does the many short steps around an answer: sub-agents,
   chat titles, compaction summaries, the safeguards' check, and Auto in the
   chat's model menu. It is only fast when the engine holds it beside the big
-  model: set **Models loaded at once** to 2 or more, and **Keep loaded** both.
-  Its card reads **Small steps**. The page, and the setting itself, warn while
-  it is not at the gateway, not kept loaded (each step would wait for it and
-  push another model out), or the engine holds one model at once (the two
-  would take turns, loading again for every step). On the GPU beside the big
+  model: set **Models loaded at once** to 3 or more (it keeps a place of its
+  own, and never makes room for another), or keep it loaded (**Keep loaded**).
+  At 2 it shares the second place with the models loaded on request (see **Two
+  models at once**). It is used only while it is loaded, or the engine has a
+  free place for it: else each step uses the answer's own model, rather than
+  wait for another model to make room. Its card reads **Small steps**. The
+  page, and the setting itself, warn while it is not at the gateway, shares
+  the last place with the others, every place is kept for other models (it
+  cannot load, so each step uses the answer's own model), or the engine holds
+  one model at once (a step waits for the loaded model to be idle). When the
+  safeguards' check cannot have its model (the engine stays full for a
+  minute), the message is refused with a note to try again, never let through
+  unread; it is not a strike. On the GPU beside the big
   model it takes some of the big one's memory (for a mixture of experts, more
   experts in RAM); a model on another GPU server costs this engine nothing.
   Who may use it is set on its card as for any model: Auto is offered only to
@@ -182,8 +266,10 @@ loaded, and how full each GPU would be with them.
   all on the GPU: it is what limits one.
 - The added models share one cache between the answers in parallel
   (`kv-unified`, as the `.env` model): one conversation can use all of the
-  context. They run with `LLAMACPP_THREADS`. Sampling left empty is the model's
-  own recommendation from its file, which the engine applies.
+  context. Each conversation keeps its own slot of it ([the token
+  cache](#the-token-cache)). They run with `LLAMACPP_THREADS`. Sampling left
+  empty is the model's own recommendation from its file, which the engine
+  applies.
 - **More engine options** are `key = value` lines with llama-server's long
   option names. Options the app or the engine owns (files and paths, the port,
   the key), those the form sets, and names this engine does not know are
@@ -208,6 +294,74 @@ The app writes `config/engine/models.ini` (the models added here),
 `config/engine/active` (the model to keep loaded) and
 `config/engine/targets.json` (which model Prometheus scrapes). The engine and
 Prometheus read them; nothing else does.
+
+#### The token cache
+
+The engine keeps each conversation's prompt in a slot, so its next turn reads
+only what is new. A model has as many slots as its **Answers at once**.
+
+- **Each conversation keeps its slot.** The app sends each turn back to the
+  slot that holds its conversation (llama.cpp's `id_slot`, which the gateway
+  passes on), while that slot is idle. A new conversation takes the slot used
+  least recently: it holds another chat's start, so the system prompt and the
+  tools (the same for everyone, thousands of tokens) come from the cache too. A
+  busy slot is never chosen: the app goes by what the engine said of its slots
+  within the last second, so API keys' and other replicas' requests count, or
+  asks it and waits half a second for its word. While the engine reads a long
+  prompt it may not answer for seconds: then what it said within the last 5
+  seconds goes, else the turn goes without a slot (the engine gives it an idle
+  one). With none idle, the turn goes without a slot and the engine gives it
+  the first that frees. A model with one slot, or with copies on other GPU
+  servers (the gateway picks the copy), is left to the engine.
+- **Every slot serves answers**: a model runs as many answers at once as it
+  has slots (4 slots: 4 answers).
+- **Side requests go to the last slot first.** From 3 slots, chat titles, the
+  safeguards' check, compaction summaries and Auto's choice go to the last
+  slot, which conversations take only when all the others are busy, so they
+  seldom push a conversation out of its slot. While it is busy (a long
+  summary, an API key's request, an answer), a side request takes another idle
+  slot, one no conversation holds first, rather than wait behind it. With 1 or
+  2 slots, the engine places them.
+- **A sub-agent keeps a slot too**, as a conversation does: each of its steps
+  reads only what its last tool call added. An answer runs no more sub-agents
+  at once than its model runs answers (and **Sub-agents at once**).
+- **Idle slots keep what they hold** (`no-cache-idle-slots`, in every model's
+  preset). By default, with one cache for all slots, llama.cpp moves idle slots
+  to RAM and empties them at every new request, and a hybrid model's never come
+  back (measured: with each chat in its own slot, not one token then came from
+  the cache). When the cache is full, the engine still empties idle slots, one
+  at a time.
+- **Checkpoints.** A hybrid or recurrent model cannot cut its state back to an
+  earlier point of a prompt (a retry, an edited question, a changed tool list):
+  it keeps copies of its state in RAM to go back to. Each such model's preset
+  keeps 4 a slot (`ctx-checkpoints = 4`; llama.cpp's own is 32), which read as
+  fast as 32 in every test, for an eighth of the RAM. `cache-reuse` (moving
+  matching chunks into place) does not work for these models; llama.cpp says
+  so in its log and goes without.
+- The model's **More engine options** can set each of these otherwise
+  (`cache-idle-slots = true`, `ctx-checkpoints = 8`, `cache-reuse = 0`).
+- **Its card says what the cache keeps and costs**, for example "Token cache:
+  4 slots, each keeping a conversation; small steps (titles, checks,
+  summaries) go to the last first · 4 checkpoints a slot of 112.2 MiB: up to
+  1.8 GiB of RAM".
+
+**What it costs**, measured with Qwen3.8-Flash-Next (hybrid, 4 slots) on an
+RTX 3090:
+
+| What | Cost |
+|---|---|
+| RAM for checkpoints | 4 a slot × 112.6 MiB = 450 MiB a slot, 1.8 GiB for 4 slots (32 a slot: 3.6 GiB a slot) |
+| GPU memory for one more slot | about 113 MiB, its recurrent state (worked out from the file; the context's cache is shared by the slots, so it does not grow). Measured: 21.0 GiB in use at 4 slots, the same as at 2 |
+| RAM for the prompt cache | up to 8 GiB per loaded model (llama.cpp's `cache-ram`: each model is a llama-server process of its own), so 16 GiB with two loaded, the default now |
+| Price | Cached input tokens are charged at the model's cached price. A model added here registers none, so the gateway charges them nothing (measured: 3,912 cached tokens cost $0), and so does the cost under an answer in the chat. At Flash-Next's 0.20 in and 0.80 out per Mtok, 1,000 turns of 10,000 prompt tokens cost $2.00 of input without the cache; with 77% from the cache (each conversation in its slot), $0.46: $1.54 saved. At a cached price of a tenth (0.02), $0.61: $1.39 saved. Output is the same either way. |
+
+**What it gains**, measured on the same machine (4 chats taking turns, 5 turns
+each, a shared start of about 9,000 tokens): with each chat in its own slot,
+the later turns read their prompt in 7 to 11 seconds whatever the chat's
+length; with llama.cpp choosing the slots, the chats pushed each other out and
+the turns took 14, 20, 25 and 31 seconds, growing with the chat. 77% of the
+prompt tokens came from the cache instead of 72%, and the prompts took 356
+seconds to read instead of 428.
 
 ### Quality
 
@@ -280,8 +434,11 @@ in a cost centre.
 **The gateway's guardrail.** `config/litellm.yaml` has LiteLLM's generic
 guardrail API call the app (`http://app:8080/internal/guardrail`, with the
 gateway's master key) before each request. The app answers in milliseconds:
-the credit, and the safeguards ([chat.md](chat.md#safeguards)) for API keys; the
-chat's own requests pass at once (the chat checked them). The path is not
+the credit, and the safeguards ([chat.md](chat.md#safeguards)) for API keys,
+then room in the engine for a model that is not loaded (see **Loaded on
+request** above: at the limit, the request may wait up to a minute for an idle
+model to make room, or is refused with the reason); the chat's own requests
+pass at once (the chat checked them, and made room). The path is not
 routed by Traefik: only the gateway, inside the network, reaches it. With
 `unreachable_fallback: fail_closed`, API requests are refused while the app is
 down (a restart); `fail_open` lets them through unchecked instead.

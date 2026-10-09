@@ -27,12 +27,12 @@ public sealed class FairUseTests(AppFixture app)
         var gate = Gate(perPerson: 1, atOnce: 2);
         var (alice, bob, carol) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         Task Nothing(AnswerGate.Line _) => Task.CompletedTask;
-        var a1 = await gate.EnterAsync(alice, Nothing, default);
+        var a1 = await gate.EnterAsync(alice, "m", Nothing, default);
         // Alice's second answer waits for her first, even with a place free.
-        var a2 = gate.EnterAsync(alice, Nothing, default);
-        var b1 = await gate.EnterAsync(bob, Nothing, default);
+        var a2 = gate.EnterAsync(alice, "m", Nothing, default);
+        var b1 = await gate.EnterAsync(bob, "m", Nothing, default);
         Assert.False(a2.IsCompleted);
-        var c1 = gate.EnterAsync(carol, Nothing, default);
+        var c1 = gate.EnterAsync(carol, "m", Nothing, default);
         Assert.Equal((2, 2), gate.Now());
 
         // Alice's first ends: Carol, who has had nothing yet, goes before Alice's second.
@@ -54,9 +54,9 @@ public sealed class FairUseTests(AppFixture app)
     {
         var gate = Gate(perPerson: 1, atOnce: 1);
         var lines = new List<AnswerGate.Line>();
-        using var first = await gate.EnterAsync(Guid.NewGuid(), _ => Task.CompletedTask, default);
+        using var first = await gate.EnterAsync(Guid.NewGuid(), "m", _ => Task.CompletedTask, default);
         using var cts = new CancellationTokenSource();
-        var waiting = gate.EnterAsync(Guid.NewGuid(), l => { lines.Add(l); return Task.CompletedTask; }, cts.Token);
+        var waiting = gate.EnterAsync(Guid.NewGuid(), "m", l => { lines.Add(l); return Task.CompletedTask; }, cts.Token);
         await Task.Delay(200);
         Assert.Equal(0, Assert.Single(lines).Ahead);
         await cts.CancelAsync();

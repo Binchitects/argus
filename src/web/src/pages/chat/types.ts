@@ -7,7 +7,7 @@ export interface ChatModel {
   thinking: boolean
   /** False for an engine model that is not loaded now. */
   loaded: boolean
-  /** Not loaded, but loads when asked for (the engine has a place beside the models kept loaded): its first answer waits. */
+  /** Not loaded, but loads when asked for (the engine has a place beside the models that never make room: those kept loaded, the one new chats use, the one for small steps): its first answer waits. */
   onRequest?: boolean
   prices: { input: number | null; cachedInput: number | null; output: number | null }
 }
@@ -319,6 +319,13 @@ export interface ChatSettings {
   assistantId?: string | null
 }
 
+/** In line for a turn (the model serves few at once): how many go first, whose line (null: the whole chat's), and whether the person's own answers hold it. */
+export interface InLine {
+  ahead: number
+  model: string | null
+  yours: boolean
+}
+
 export type ChatEvent =
   | { type: 'question'; id: string; parentId: string | null }
   /** The chat's title: the first line, then (with a model for small steps) the one it wrote. */
@@ -374,8 +381,8 @@ export type ChatEvent =
   | { type: 'notice'; kind: string; text: string }
   /** The answer is deep research: the page says which step it is on. */
   | { type: 'research' }
-  /** Waiting for a turn: the model serves few at once, in turn (fair use). */
-  | { type: 'queued'; ahead: number }
+  /** Waiting for a turn: the model serves few at once, in turn (fair use). Model: whose line (null: the whole chat's); yours: the person's own answers hold it. */
+  | { type: 'queued'; ahead: number; model?: string | null; yours?: boolean }
   | { type: 'error'; message: string }
   /** The older messages are being summarized (compaction), before an answer or because the person asked. */
   | { type: 'compacting' }

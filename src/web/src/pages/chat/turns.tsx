@@ -14,7 +14,7 @@ import { ImageViewer } from './image-viewer'
 import { asViewerImages } from './viewer-images'
 import type { Notice, ToolRunning } from './live'
 import { Markdown } from './markdown'
-import { answerUsage, seconds } from './format'
+import { answerUsage, seconds, waitingText } from './format'
 import { NoticeLine, Thinking, ToolCard } from './parts'
 import { useNow } from './use-now'
 import { QuestionCard } from './questions'
@@ -22,7 +22,7 @@ import { RouteNote } from './route-note'
 import { researchStep } from './research'
 import { MemoryCard } from './memory'
 import { FeedbackButtons } from './feedback'
-import type { AgentWork, ChatConfig, Message } from './types'
+import type { AgentWork, ChatConfig, InLine, Message } from './types'
 
 /** Where a chat was compacted: the model reads a summary of everything above instead of the messages. */
 export function CompactedMark({ summary, onOpenFile }: { summary: string; onOpenFile: (name: string) => void }) {
@@ -192,8 +192,8 @@ export function AnswerTurn({
   siblings: Message[]
   live: boolean
   thinkingSince: number | null
-  /** In line for a turn: how many go first (null: not waiting). */
-  queued?: number | null
+  /** In line for a turn: how many go first, for which model (null: not waiting). */
+  queued?: InLine | null
   /** The chat's older messages are being summarized before this answer. */
   compacting?: boolean
   notices: Notice[]
@@ -346,9 +346,7 @@ export function AnswerTurn({
             <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
             <span className="size-1.5 animate-bounce rounded-full bg-current" />
           </span>
-          {compacting
-            ? 'Compacting the chat: summarizing its older messages so the answer fits…'
-            : queued == null ? 'Waiting for the model…' : queued === 0 ? 'Your turn is next: the model is answering others.' : `Waiting for your turn: ${queued} ${queued === 1 ? 'answer' : 'answers'} ahead of you.`}
+          {compacting ? 'Compacting the chat: summarizing its older messages so the answer fits…' : waitingText(queued)}
           <Waited since={question?.createdAt} />
         </output>
       )}

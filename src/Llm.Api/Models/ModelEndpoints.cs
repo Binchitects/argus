@@ -53,7 +53,7 @@ public static class ModelEndpoints
     }
 
     private static async Task<IResult> ListAsync(AppDbContext db, ChatModels gatewayModels, EngineState state, ModelCatalog catalog, ModelLibrary library,
-        HardwareProbe hardware, ModelHoursState hours, IOptions<EngineOptions> engine, MediaControl media, SmallModel small, PriceBook prices, CancellationToken ct)
+        HardwareProbe hardware, ModelHoursState hours, IOptions<EngineOptions> engine, MediaControl media, SmallModel small, PriceBook prices, ModelPolicy policy, CancellationToken ct)
     {
         var e = engine.Value;
         // What each costs: its own prices, else the defaults (Settings → Prices); own says which it sets.
@@ -85,6 +85,8 @@ public static class ModelEndpoints
         var kept = e.Enabled ? catalog.Kept() : [];
         var pinned = e.Enabled ? catalog.Pinned() : [];
         var hw = e.Enabled ? await hardware.GetAsync(ct) : null;
+        var servers = await db.RemoteServers.AsNoTracking().OrderBy(s => s.Name).ToListAsync(ct);
+        var onServers = servers.SelectMany(s => s.Models).Select(m => m.Name).ToHashSet(StringComparer.Ordinal);
         var rows = new List<object>();
         foreach (var m in local)
         {
@@ -93,14 +95,17 @@ public static class ModelEndpoints
                 name = m.Name, source = "local", mode = "chat",
                 // Not in the engine's list although it answered: not read yet (it restarts), or its preset refused.
                 status = state.StatusOf(m.Name) ?? (now is { Error: null, At: not null } ? "missing" : null), kept = pinned.Contains(m.Name), keptNow = kept.Contains(m.Name), m.Devices,
+                // Failed to load: when it is tried again.
+                retryAt = state.NextTry(m.Name),
                 file = m.File, m.Projector, context = m.Context, m.MaxOutput, m.Placement, m.GpuLayers, m.CpuMoe, m.KvType, m.Parallel, m.Ubatch,
                 m.Mtp, m.DraftHead, m.DraftMax, m.Yarn, m.Temperature, m.TopP, m.TopK, m.MinP, m.PresencePenalty,
                 m.ExtraPreset, m.Thinking, m.Tools, m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, price = Price(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok),
                 vision = m.Projector is { Length: > 0 }, atGateway = At(m.Name) is not null, access = Access(m.Name),
                 profile = files.GetValueOrDefault(m.File),
+                // What its token cache keeps, and the RAM it takes.
+                cache = TokenCache.Of(m, files.GetValueOrDefault(m.File), onServers.Contains(m.Name)),
             });
         }
-        var servers = await db.RemoteServers.AsNoTracking().OrderBy(s => s.Name).ToListAsync(ct);
         foreach (var s in servers)
         {
             foreach (var m in s.Models)
@@ -123,7 +128,6 @@ public static class ModelEndpoints
                 unitPrice = MediaPrice(x.Model.Name),
             });
         }
-        var onServers = servers.SelectMany(s => s.Models).Select(m => m.Name).ToHashSet(StringComparer.Ordinal);
         foreach (var m in atGateway.Where(m => local.All(l => l.Name != m.Name) && !onServers.Contains(m.Name) && MediaControl.Find(m.Name) is null))
         {
             rows.Add(new { name = m.Name, source = "gateway", mode = m.Mode, status = (string?)null, context = m.Context, vision = m.Vision, access = Access(m.Name) });
@@ -134,8 +138,8 @@ public static class ModelEndpoints
             {
                 enabled = e.Enabled, error = now.Error, checkedAt = now.At, kept, pinned, max = e.ModelsMax,
                 hours = hoursNow.Window is { } window ? new { window.Id, window.Name, until = hoursNow.Until } : null,
-                // A place left besides the kept models: the others load when asked for (the least recently used unloads first).
-                onRequest = e.Enabled && kept.Count < e.ModelsMax,
+                // A place left besides the kept models and those that never make room: the others load when asked for.
+                onRequest = e.Enabled && policy.PlaceLeft,
                 loaded = now.Models.Where(m => m.Status == "loaded").Select(m => m.Name),
                 loading = now.Models.Where(m => m.Status == "loading").Select(m => m.Name),
                 gpus = hw?.Devices?.Select(g => new { g.Index, g.Name, g.Total }) ?? [],
@@ -262,7 +266,10 @@ public static class ModelEndpoints
         }
     }
 
-    /// <summary>Loads a model now, beside the kept ones: at the engine's limit, the one used least recently unloads (a kept one comes back).</summary>
+    /// <summary>
+    /// Loads a model now, beside the kept ones: at the engine's limit, the one used least recently unloads (a kept one,
+    /// or the one new chats use, comes back, and then this one may make room for it).
+    /// </summary>
     private static async Task<IResult> LoadAsync(string name, EngineClient engine, EngineState state, ModelCatalog catalog, EngineWatcher watcher,
         ChatModels chatModels, IOptions<EngineOptions> options, MediaControl media, Audit audit, CancellationToken ct)
     {
@@ -285,8 +292,15 @@ public static class ModelEndpoints
         {
             return AuthEndpoints.Problem(409, "full", FullMessage(kept.Count, options.Value.ModelsMax));
         }
+        if (state.StatusOf(name) == "failed")
+        {
+            // A try of a model that failed to load: should it fail again, the next try by itself waits longer.
+            state.Tried(name);
+        }
         try
         {
+            // Loaded again, though the app told it to unload a moment ago.
+            state.Loading(name);
             await engine.LoadAsync(name, ct);
         }
         catch (EngineException ex)
@@ -299,7 +313,7 @@ public static class ModelEndpoints
         return Results.Accepted();
     }
 
-    private static async Task<IResult> UnloadAsync(string name, EngineClient engine, EngineState state, ModelCatalog catalog, EngineWatcher watcher,
+    private static async Task<IResult> UnloadAsync(string name, EngineClient engine, EngineState state, EngineRoute route, ModelCatalog catalog, EngineWatcher watcher,
         ChatModels chatModels, ModelHoursState hours, MediaControl media, Audit audit, CancellationToken ct)
     {
         if (MediaControl.Find(name) is not null)
@@ -323,7 +337,11 @@ public static class ModelEndpoints
             {
                 catalog.SetKept(catalog.Pinned().Where(k => k != name));
             }
+            // Nor loaded again by the app as the model new chats use.
+            state.Dropped(name);
             await engine.UnloadAsync(name, ct);
+            // Unloaded at once for every request, though the engine lists it loaded until it has stopped.
+            route.Unloaded(name);
         }
         catch (EngineException ex)
         {
@@ -433,7 +451,8 @@ public static class ModelEndpoints
         }
         try
         {
-            state.Set(await engine.ModelsAsync(ct));
+            var asked = state.Asking();
+            state.Set(await engine.ModelsAsync(ct), asked);
         }
         catch (EngineException ex)
         {

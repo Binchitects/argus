@@ -14,8 +14,10 @@ namespace Llm.Api.Safeguards;
 /// The gateway's guardrail: LiteLLM's generic guardrail API (deploy/config/litellm.yaml) posts
 /// each request's texts and its key's owner here before sending it, and this answers NONE,
 /// BLOCKED with the reason the client sees, or GUARDRAIL_INTERVENED with the texts masked. API
-/// keys so get the chat's checks (Safeguards.CheckApiAsync) and the credit (one credit over the
-/// chat and keys, and the groups' credit). The chat's own requests pass: the chat checked them.
+/// keys so get the chat's checks (Safeguards.CheckApiAsync), the credit (one credit over the
+/// chat and keys, and the groups' credit), and room in the engine for a model that is not loaded
+/// as the chat's requests get it (EngineRoute), so the engine never unloads the big model
+/// everyone is on for them. The chat's own requests pass: the chat checked them, and made room.
 /// Only inside the network (Traefik routes no /internal path) and with the gateway's master key.
 /// </summary>
 public static partial class GuardrailEndpoints
@@ -26,7 +28,7 @@ public static partial class GuardrailEndpoints
     public static void MapGuardrail(this IEndpointRouteBuilder app) => app.MapPost(Path, CheckAsync).AllowAnonymous();
 
     private static async Task<IResult> CheckAsync(HttpContext http, IOptions<LiteLlmOptions> gateway, UserManager<AppUser> users, Safeguards safeguards, Credit credit,
-        ILoggerFactory logs)
+        EngineRoute route, ILoggerFactory logs)
     {
         var expected = gateway.Value.MasterKey;
         var given = http.Request.Headers["x-api-key"].ToString();
@@ -70,7 +72,15 @@ public static partial class GuardrailEndpoints
             return Answer(new ApiVerdict("BLOCKED", refusal));
         }
         var texts = (body["texts"] as JsonArray ?? []).Select(t => t is JsonValue v && v.TryGetValue<string>(out var s) ? s : "").ToList();
-        var verdict = await safeguards.CheckApiAsync(user, texts, LastQuestion(body) ?? texts.LastOrDefault(), Str(body, "model"), http.RequestAborted);
+        var model = Str(body, "model");
+        var verdict = await safeguards.CheckApiAsync(user, texts, LastQuestion(body) ?? texts.LastOrDefault(), model, http.RequestAborted);
+        // Room for its model last, once nothing else holds it back: a model the engine has not loaded, at its limit.
+        if (verdict.Action != "BLOCKED" && await route.RoomForKeyAsync(model, http.RequestAborted) is { } full)
+        {
+            var logger = logs.CreateLogger(nameof(GuardrailEndpoints));
+            LogRefused(logger, user?.UserName ?? "?", full);
+            return Answer(new ApiVerdict("BLOCKED", full));
+        }
         return Answer(verdict);
     }
 

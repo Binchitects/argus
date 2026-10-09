@@ -937,7 +937,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                           <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
                           <span className="size-1.5 animate-bounce rounded-full bg-current" />
                         </span>
-                        {view.queued != null ? `Waiting for the model to compact the chat (${view.queued} ahead)…` : 'Compacting the chat: summarizing it so the next answers read the summary…'}
+                        Compacting the chat: summarizing it so the next answers read the summary…
                       </output>
                     )}
                     {error && <Alert variant="destructive">{error}</Alert>}

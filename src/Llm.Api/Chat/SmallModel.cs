@@ -10,10 +10,12 @@ namespace Llm.Api.Chat;
 /// The model for sub-agents and small steps (Chat:SmallModel): a small, fast model beside the
 /// big one, for the many short calls around an answer (sub-agents, the chat's title,
 /// compaction summaries, the safeguards' check, Auto's choice), so they do not wait on the
-/// big model's slow writing. It never thinks for them. Not set, not at the gateway, or not
-/// one the person may use now: each step uses the answer's own model.
+/// big model's slow writing. It never thinks for them. Not set, not at the gateway, not one
+/// the person may use now, or the engine's and neither loaded nor with a free place (another
+/// model sits in the place it shares with them): each step uses the answer's own model.
 /// </summary>
-public sealed class SmallModel(IOptionsMonitor<ChatOptions> chat, ChatModels models, ModelPolicy policy, ModelCatalog catalog, IOptions<EngineOptions> engine)
+public sealed class SmallModel(IOptionsMonitor<ChatOptions> chat, ChatModels models, ModelPolicy policy, ModelCatalog catalog, IOptions<EngineOptions> engine,
+    EngineState state, EngineRoute route)
     : ISettingWarning
 {
     /// <summary>What a chat that chose Auto has as its model: the small model answers the easy questions and hands the rest on.</summary>
@@ -32,9 +34,12 @@ public sealed class SmallModel(IOptionsMonitor<ChatOptions> chat, ChatModels mod
         return (await policy.AllowedAsync(user, [name], ct)).Contains(name) ? model : null;
     }
 
-    /// <summary>The small model for this person now: offered to them, and loaded or loading when asked; else null (the step uses the answer's own model).</summary>
+    /// <summary>
+    /// The small model for this person now: offered to them, and loaded, or loading when asked without another model making
+    /// room for it (EngineRoute.PlaceFor); else null (the step uses the answer's own model rather than wait).
+    /// </summary>
     public async Task<GatewayModel?> ForAsync(AppUser user, CancellationToken ct = default) =>
-        await OfferedAsync(user, ct) is { } model && await policy.RefusalAsync(user, model.Name, ct) is null ? model : null;
+        await OfferedAsync(user, ct) is { } model && await policy.RefusalAsync(user, model.Name, ct) is null && route.PlaceFor(model.Name) ? model : null;
 
     /// <summary>"Thinking off" for a model that thinks; nothing for one that does not (its template may not know the switch).</summary>
     public static string? NoThinking(GatewayModel model) => model.Thinking ? "off" : null;
@@ -44,7 +49,8 @@ public sealed class SmallModel(IOptionsMonitor<ChatOptions> chat, ChatModels mod
     /// <summary>
     /// Why the small model cannot do its work well now: it is not at the gateway, or it is the
     /// engine's and the engine cannot hold it beside the big model (one model at once, not kept
-    /// loaded, or every place kept for others). Null when all is well, or nothing is set.
+    /// loaded, every place kept for others: the kept models and the one new chats use, or the
+    /// last place shared with the models loaded on request). Null when all is well, or nothing is set.
     /// </summary>
     public async Task<string?> WarningAsync(CancellationToken ct = default)
     {
@@ -65,16 +71,25 @@ public sealed class SmallModel(IOptionsMonitor<ChatOptions> chat, ChatModels mod
         var kept = catalog.Kept();
         if (max < 2)
         {
-            return $"The engine holds one model at once: {name} and the big model would take turns, each loading again for every step. " +
-                "Raise \"Models loaded at once\" to 2 and keep both loaded (Admin → Models).";
+            return $"The engine holds one model at once: {name} and the big model cannot both be loaded, so a small step waits for the loaded one to be idle " +
+                "(a minute at most, else it is refused). Raise \"Models loaded at once\" to 2 or more (Admin → Models).";
         }
         if (kept.Contains(name))
         {
             return null;
         }
-        return kept.Count >= max
-            ? $"{name} is not kept loaded, and every place in the engine keeps another model, so it cannot load: each small step uses the answer's own model. " +
-              $"Keep it loaded instead of one of them, or raise \"Models loaded at once\" to {kept.Count + 1} (Admin → Models)."
-            : $"{name} is not kept loaded: each small step waits for it to load, and pushes another model out. Keep it loaded beside the big model (Admin → Models).";
+        // The places that never free for it: the kept models, and the one new chats use.
+        var taken = kept.Append(models.DefaultName ?? state.Default).OfType<string>().Where(n => n != name).Distinct(StringComparer.Ordinal).Count();
+        if (taken >= max)
+        {
+            return $"{name} is not kept loaded, and every place in the engine is kept for another model (those kept loaded, and the one new chats use), so it cannot load: " +
+                $"each small step uses the answer's own model. Keep it loaded instead of one of them, or raise \"Models loaded at once\" to {taken + 1} (Admin → Models).";
+        }
+        return taken + 1 >= max
+            ? $"{name} is not kept loaded, and shares the engine's last place with the models people load on request: it makes room for them once idle, and while another sits there, " +
+              "small steps use the answer's own model (slower, and on the big model's slots); it loads again once the place is free, or once the model there " +
+              $"has been idle {EngineWatcher.SmallQuiet.TotalMinutes:0} minutes. Raise \"Models loaded at once\" to {taken + 2} to keep a place for it and one for the others, " +
+              "or keep it loaded (then no other model loads on request)."
+            : null;
     }
 }

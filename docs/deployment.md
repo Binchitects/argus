@@ -237,9 +237,14 @@ What to know:
 - An answer runs on the replica that was asked. A yes to a tool call, **Stop**
   and **Answer now** reach it from any replica; a page on another replica sees
   the answer when it is saved.
-- Each replica keeps its own line with its share of the places (**Settings →
-  Chat → Answers at once, everyone**, or the engine's slots, divided among the replicas,
-  rounded up).
+- Each replica keeps its own line for each model, with its share of the
+  model's places (its slots, divided among the replicas, rounded up; and of
+  **Settings → Chat → Answers at once, everyone** when set).
+- Each replica keeps its own table of which conversation holds which engine
+  slot. It goes by what the engine said of its slots within the last second
+  (or asks it), so it never sends a turn to a slot another replica (or an API
+  key) is using; a conversation whose turns reach both replicas may lose its
+  slot now and then (its turn is read whole once).
 - A scheduled task runs once, whichever replica its event reaches.
 
 **More GPU servers**: add them under **Admin → Models → Other GPU servers**

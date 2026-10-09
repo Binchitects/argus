@@ -67,6 +67,43 @@ export function params(n: number | null | undefined): string | null {
   return `${Math.round(n / 1e6)}M`
 }
 
+/** What a model's token cache keeps and costs, as the API works it out from its settings and file. */
+export interface TokenCache {
+  /** Its slots: the answers and side requests it serves at once. */
+  slots: number
+  /** The slot side requests (titles, checks, summaries) go to first, from 3 slots; conversations take it last. Null: none. */
+  sideSlot: number | null
+  /** Each conversation keeps its slot (on this engine alone, with 2 or more). */
+  pinned: boolean
+  /** An idle slot keeps its prompt (else the engine empties it at the next request). */
+  keepsIdle: boolean
+  /** Checkpoints a slot keeps in RAM (hybrid and recurrent models), and the size of one. */
+  checkpoints: number | null
+  checkpointBytes: number | null
+  ramBytes: number | null
+}
+
+/** One line for a model's card: "4 slots, each keeping a conversation; small steps go to the last first · 4 checkpoints a slot of 112 MiB: 1.8 GB of RAM". */
+export function cacheLine(c: TokenCache): string {
+  const slots =
+    c.slots === 1
+      ? '1 slot: conversations take turns in it'
+      : !c.pinned
+        ? `${c.slots} slots; the gateway shares requests among its copies, so a conversation does not keep one`
+        : c.sideSlot != null
+          ? `${c.slots} slots, each keeping a conversation; small steps (titles, checks, summaries) go to the last first`
+          : `${c.slots} slots, each keeping a conversation`
+  const parts = [`Token cache: ${slots}`]
+  if (!c.keepsIdle) parts.push('idle slots are emptied at each new request')
+  if (c.checkpoints != null && c.checkpoints > 0)
+    parts.push(
+      c.checkpointBytes != null && c.ramBytes != null
+        ? `${c.checkpoints} checkpoints a slot of ${bytes(c.checkpointBytes)}: up to ${bytes(c.ramBytes)} of RAM`
+        : `${c.checkpoints} checkpoints a slot, in RAM`,
+    )
+  return parts.join(' · ')
+}
+
 /** One line for a card or a list: "Mixture of experts · 177B, 6.7B active · UD-IQ4_XS". */
 export function summary(p: ModelProfile | null | undefined): string | null {
   if (!p) return null

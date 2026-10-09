@@ -1,4 +1,4 @@
-import type { AgentWork, Attachment, ChatEvent, Message } from './types'
+import type { AgentWork, Attachment, ChatEvent, InLine, Message } from './types'
 
 /** A tool call while it runs: since when, and the progress its server last reported. */
 export interface ToolRunning {
@@ -28,8 +28,8 @@ export interface LiveState {
   calls?: Record<string, ToolRunning>
   /** Sub-agents of a delegate call (by its id), as they work. */
   agents?: Record<string, AgentWork[]>
-  /** In line for a turn (the model serves few at once): how many go first. */
-  queued?: number | null
+  /** In line for a turn (the model serves few at once): how many go first, and for which model. */
+  queued?: InLine | null
   /** The answer being written: text and tool calls go to it. */
   current?: string | null
   /** The older messages are being summarized. */
@@ -116,7 +116,7 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
       return { ...state, arena: { a: same?.a, b: same?.b, id: e.id, questionId: e.questionId, side: e.side, step: e.step, of: e.of }, thinkingSince: null }
     }
     case 'queued':
-      return { ...state, queued: e.ahead }
+      return { ...state, queued: { ahead: e.ahead, model: e.model ?? null, yours: e.yours === true } }
     case 'reasoning': {
       const a = lastAssistant()
       if (a) a.reasoning = (a.reasoning ?? '') + e.text

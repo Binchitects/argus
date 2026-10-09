@@ -6,6 +6,7 @@ import type { AnswerTrace } from '@/pages/admin/traces-api'
 import { toast } from '@/components/ui/toaster'
 import { admin, fakeApi, member, renderApp } from '@/test/utils'
 import { blank } from './live'
+import { waitingText } from './format'
 import type { ChatConfig, Conversation, Message } from './types'
 
 vi.mock('./api', async (original) => ({
@@ -128,11 +129,19 @@ describe('chat', () => {
     expect(screen.getByRole('menuitem', { name: /Main-Model/ })).toHaveAttribute('aria-disabled', 'true')
   })
 
-  it('an answer waiting its turn says how many go first', async () => {
-    backend({ events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'queued', ahead: 2 }], hang: true })
+  it('an answer waiting its turn says which model is busy and how many go first', async () => {
+    backend({ events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'queued', ahead: 2, model: 'Main-Model', yours: false }], hang: true })
     renderApp('/chat')
     await ask('busy day')
-    expect(await screen.findByText('Waiting for your turn: 2 answers ahead of you.')).toBeInTheDocument()
+    expect(await screen.findByText('Main-Model is busy: 2 answers ahead of you.')).toBeInTheDocument()
+  })
+
+  it("the waiting line names the model, the whole chat, or the person's own other answer", () => {
+    expect(waitingText(null)).toBe('Waiting for the model…')
+    expect(waitingText({ ahead: 0, model: 'Big', yours: false })).toBe('Big is busy: your turn is next.')
+    expect(waitingText({ ahead: 1, model: 'Big', yours: false })).toBe('Big is busy: 1 answer ahead of you.')
+    expect(waitingText({ ahead: 3, model: null, yours: false })).toBe('The chat is busy: 3 answers ahead of you.')
+    expect(waitingText({ ahead: 0, model: 'Big', yours: true })).toBe('Waiting for your other answer to end first.')
   })
 
   it('a model that is not loaded is listed but cannot be chosen', async () => {
