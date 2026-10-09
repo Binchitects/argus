@@ -474,6 +474,45 @@ public sealed class StorageTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_backup_is_from_before_a_hold_by_its_start_in_UTC_and_without_one_by_its_name_in_any_zone()
+    {
+        await using var s = NewApp();
+        var f = s.App;
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        // A host at UTC+03:30: each backup named in its time; MANIFEST says the start in UTC, except in a backup from before that.
+        void Backup(string name, string? started)
+        {
+            Directory.CreateDirectory(Path.Combine(s.Backups, name));
+            File.WriteAllText(Path.Combine(s.Backups, name, "RESULT"), "ok\n");
+            File.WriteAllText(Path.Combine(s.Backups, name, "MANIFEST"), $"backup: {name}\n{(started is null ? "" : $"started: {started}\n")}host: h\n");
+        }
+        Backup("2026-10-10_033000", "2026-10-10T00:00:00Z");
+        Backup("2026-10-09_170000", null);
+        Backup("2026-10-09_150000", null);
+        Backup("2026-10-09_073000", "2026-10-09T04:00:00Z");
+        Backup("2026-10-09_033000", "2026-10-09T00:00:00Z");
+        File.CreateSymbolicLink(Path.Combine(s.Backups, "latest"), "2026-10-10_033000");
+        var (_, heldId, _) = await PersonAsync(f, admin);
+        await using (var scope = f.Services.CreateAsyncScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<AppDbContext>().Users.Where(u => u.Id == heldId)
+                .ExecuteUpdateAsync(u => u.SetProperty(x => x.LegalHoldSince, DateTimeOffset.Parse("2026-10-09T02:00:00Z", System.Globalization.CultureInfo.InvariantCulture)));
+        }
+
+        var plan = await admin.JsonAsync(await admin.GetAsync("/api/admin/storage/cleanups/old-backups?keep=1"));
+        var items = plan.GetProperty("items").EnumerateArray().ToList();
+        Assert.Equal(["2026-10-09_170000", "2026-10-09_150000", "2026-10-09_073000", "2026-10-09_033000"], items.Select(i => i.GetProperty("id").GetString()));
+        // 03:30 there began at 00:00 UTC, before the hold; 07:30 after it. Without the start, 15:00 may be 01:00 UTC (at UTC+14),
+        // so it counts as before; 17:00 is after 02:00 UTC in every zone.
+        Assert.Equal(["ok", "ok · taken before a legal hold began", "ok", "ok · taken before a legal hold began"], items.Select(i => i.GetProperty("note").GetString()));
+        Assert.Equal([null, null, "2026-10-09T04:00:00+00:00", "2026-10-09T00:00:00+00:00"],
+            items.Select(i => i.GetProperty("at") is { ValueKind: JsonValueKind.String } at ? at.GetDateTimeOffset().ToString("yyyy-MM-ddTHH:mm:sszzz", System.Globalization.CultureInfo.InvariantCulture) : null));
+        Assert.Contains("2 of these are from before it", plan.GetProperty("warning").GetString(), StringComparison.Ordinal);
+        var report = (await admin.JsonAsync(await admin.GetAsync("/api/admin/storage"))).GetProperty("backups").GetProperty("backups");
+        Assert.Equal("2026-10-10T00:00:00+00:00", report[0].GetProperty("at").GetDateTimeOffset().ToString("yyyy-MM-ddTHH:mm:sszzz", System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
     public async Task A_persons_room_for_files_refuses_uploads_past_it_and_an_admin_can_give_them_their_own()
     {
         await using var s = NewApp(new() { ["Storage:PersonMegabytes"] = "1" });

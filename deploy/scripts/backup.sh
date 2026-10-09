@@ -28,7 +28,8 @@
 #                          with SQLite's online backup, so a write in progress cannot tear them.
 #   config/                .env, every compose file named in COMPOSE_FILE, and config/
 #                          (Traefik's routes, Prometheus's rules, the other files compose mounts).
-#   MANIFEST, SHA256SUMS   what was taken, from which commit; a checksum for every file.
+#   MANIFEST, SHA256SUMS   what was taken, from which commit, when it started (UTC); a checksum
+#                          for every file. The directory's name is the host's local time.
 #
 # The backup directory holds every secret of the stack: it is created 0700 and
 # its files 0600. Models are not backed up (MODELS_DIR, re-downloadable).
@@ -74,7 +75,7 @@ while [[ $# -gt 0 ]]; do
     --include-model-cache) SKIP_VOLUMES="${SKIP_VOLUMES/ audio / }"; shift ;;
     --prune) ACTION=prune; shift ;;
     --keep) [[ $# -ge 2 ]] || die "--keep takes a number"; KEEP="$2"; shift 2 ;;
-    -h|--help) sed -n '2,35p' "$0" | grep '^#'; exit 0 ;;
+    -h|--help) sed -n '2,36p' "$0" | grep '^#'; exit 0 ;;
     *) die "unknown option: $1 (see --help)" ;;
   esac
 done
@@ -273,12 +274,14 @@ own_dir "$BACKUP_DIR"
 exec 9>"$BACKUP_DIR/.backup.lock"
 flock -n 9 || die "another backup is running"
 
-STAMP="$(date +%Y-%m-%d_%H%M%S)"
+# The folder is named in the host's local time; MANIFEST says when in UTC as well.
+START=$(date +%s)
+STAMP="$(date -d "@$START" +%Y-%m-%d_%H%M%S)"
 OUT="$BACKUP_DIR/$STAMP"
 mkdir -p "$OUT/volumes" "$OUT/config/compose" || die "cannot create $OUT"
 LOG="$OUT/backup.log"
 exec > >(tee -a "$LOG") 2>&1
-START=$(date +%s); FAILED=0
+FAILED=0
 fail() { say "  FAILED: $*"; FAILED=$((FAILED+1)); }
 UIDGID="$(id -u):$(id -g)"
 
@@ -366,6 +369,7 @@ done
 # ---- 4. manifest, checksums, verify ----------------------------------------------
 {
   echo "backup: $STAMP"
+  echo "started: $(date -u -d "@$START" +%Y-%m-%dT%H:%M:%SZ)"
   echo "host: $(hostname)"
   echo "project: $PROJECT   domain: $(env_get DOMAIN)"
   echo "commit: $(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null)"

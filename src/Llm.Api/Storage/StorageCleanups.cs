@@ -223,7 +223,11 @@ public sealed partial class StorageCleanups(AppDbContext db, StorageFiles files,
         };
         var holds = await db.Users.AsNoTracking().Where(u => u.LegalHoldSince != null).Select(u => u.LegalHoldSince!.Value).ToListAsync(ct);
         DateTimeOffset? since = holds.Count > 0 ? holds.Min() : null;
-        bool Before(Backup b) => since is { } s && b.At is { } at && new DateTimeOffset(at, TimeSpan.Zero) < s;
+        // A backup from before scripts/backup.sh wrote its start in UTC has only its name, the host's local time in a zone
+        // the app does not know: one named up to 14 hours after the hold began may be from before it (no zone is further
+        // ahead of UTC), and counts as before.
+        bool Before(Backup b) => since is { } s
+            && (b.At ?? (StoragePlaces.Named(b.Name) is { } named ? new DateTimeOffset(named, TimeSpan.Zero) - TimeSpan.FromHours(14) : null)) < s;
         var beyond = StoragePlaces.Beyond(report, keep);
         var warnings = new List<string>();
         if (report.Backups.Count > 0)
@@ -238,7 +242,7 @@ public sealed partial class StorageCleanups(AppDbContext db, StorageFiles files,
                 (taken > 0 ? $" {taken} of these {(taken == 1 ? "is" : "are")} from before it: ask whoever placed the hold before removing {(taken == 1 ? "it" : "them")}." : ""));
         }
         return new CleanupPlan("old-backups", beyond.Count, beyond.Sum(b => b.Bytes), Amount.None,
-            [.. beyond.Select(b => new CleanupItem(b.Name, b.Name, null, b.Bytes, b.At is { } at ? new DateTimeOffset(at, TimeSpan.Zero) : null,
+            [.. beyond.Select(b => new CleanupItem(b.Name, b.Name, null, b.Bytes, b.At,
                 string.Join(" · ", new[] { b.Result, Before(b) ? "taken before a legal hold began" : null }.OfType<string>()) is { Length: > 0 } note ? note : null))],
             problem, warnings.Count > 0 ? string.Join(" ", warnings) : null, null, keep, $"scripts/backup.sh --prune --keep {keep}");
     }

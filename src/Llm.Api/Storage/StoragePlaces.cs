@@ -24,8 +24,9 @@ public sealed record LibraryReport(string Dir, bool Exists, long Bytes, IReadOnl
 public sealed record FolderSize(string Name, long Bytes);
 
 /// <summary>A backup (one folder of scripts/backup.sh) and how it ended.</summary>
-/// <param name="At">When it was taken, as the host's clock named it.</param>
-public sealed record Backup(string Name, long Bytes, DateTime? At, string? Result, bool Latest);
+/// <param name="Name">When it began, in the host's local time: a zone the app does not know.</param>
+/// <param name="At">When it began, as its MANIFEST says in UTC; null for a backup from before scripts/backup.sh wrote that.</param>
+public sealed record Backup(string Name, long Bytes, DateTimeOffset? At, string? Result, bool Latest);
 
 /// <summary>The backups folder as the app sees it (read only).</summary>
 /// <param name="State">ok, missing (not mounted) or unreadable (another user's).</param>
@@ -272,7 +273,7 @@ public sealed partial class StoragePlaces(AppDbContext db, ModelLibrary library,
             }
             if (e is DirectoryInfo d && BackupName().IsMatch(d.Name))
             {
-                backups.Add(new Backup(d.Name, cache.Bytes(d.FullName), At(d.Name), Result(d.FullName), d.Name == latest));
+                backups.Add(new Backup(d.Name, cache.Bytes(d.FullName), Started(d.FullName), Result(d.FullName), d.Name == latest));
             }
             else
             {
@@ -303,8 +304,26 @@ public sealed partial class StoragePlaces(AppDbContext db, ModelLibrary library,
         }
     }
 
-    private static DateTime? At(string name) =>
+    /// <summary>The time a backup's name says: the host's clock, in its own zone.</summary>
+    public static DateTime? Named(string name) =>
         DateTime.TryParseExact(name, "yyyy-MM-dd_HHmmss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var at) ? at : null;
+
+    /// <summary>When a backup began, from the "started:" line (UTC) scripts/backup.sh writes in its MANIFEST.</summary>
+    private static DateTimeOffset? Started(string dir)
+    {
+        const string Key = "started: ";
+        try
+        {
+            var path = Path.Combine(dir, "MANIFEST");
+            var line = File.Exists(path) ? File.ReadLines(path).FirstOrDefault(l => l.StartsWith(Key, StringComparison.Ordinal)) : null;
+            return line is not null && DateTimeOffset.TryParse(line[Key.Length..].Trim(), CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var at) ? at : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
 
     private static IEnumerable<FileSystemInfo> SafeEntries(string dir)
     {

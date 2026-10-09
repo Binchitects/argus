@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import unittest
+from datetime import datetime, timedelta
 
 from support import REPO, Sandbox
 
@@ -89,6 +90,27 @@ class PruneTests(unittest.TestCase):
         self.assertEqual(self.s.calls(), [["docker", "run", "--rm", "--network", "none", "-v", f"{empty}:/d", "python:3.13-slim",
                                            "chown", f"{os.getuid()}:{os.getgid()}", "/d"]])
         self.assertIn("sudo chown", r.stderr)
+
+
+class StartedTests(unittest.TestCase):
+    def setUp(self):
+        self.s = Sandbox()
+
+    def tearDown(self):
+        self.s.cleanup()
+
+    def test_A_backup_is_named_in_the_host_s_time_and_its_MANIFEST_says_when_in_UTC(self):
+        # Admin -> Storage marks the backups taken before a legal hold began: the name alone is in a zone the app
+        # does not know. (With fake docker the backup itself fails; its MANIFEST is written all the same.)
+        self.s.write(".env", "")
+        self.s.run("backup.sh", extra={"TZ": "XYZ-3:30"})
+        [name] = [d for d in os.listdir(self.s.deploy / "backups") if re.fullmatch(r"20\d\d-\d\d-\d\d_\d{6}", d)]
+        manifest = (self.s.deploy / "backups" / name / "MANIFEST").read_text()
+        started = re.search(r"^started: (\S+)$", manifest, re.M)
+        self.assertIsNotNone(started, manifest)
+        local = datetime.strptime(name, "%Y-%m-%d_%H%M%S")
+        utc = datetime.strptime(started.group(1), "%Y-%m-%dT%H:%M:%SZ")
+        self.assertEqual(local - utc, timedelta(hours=3, minutes=30))
 
 
 def real_compose() -> str | None:
