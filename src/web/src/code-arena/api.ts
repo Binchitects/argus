@@ -87,7 +87,7 @@ export const historyQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => api<{ text: string }[]>('/api/history', { signal }),
 }
 
-export const changeSettings =(body: { mode?: Mode; model?: string; thinking?: string | null }) => api<CodeState>('/api/settings', { body })
+export const changeSettings = (body: { mode?: Mode; model?: string; thinking?: string | null }) => api<CodeState>('/api/settings', { body })
 export const newSession = () => api<CodeSession>('/api/sessions/new', { body: {} })
 export const resumeSession = (id: string) => api<CodeSession>('/api/sessions/resume', { body: { id } })
 export const stopTurn = () => api('/api/stop', { body: {} })

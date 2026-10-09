@@ -375,6 +375,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
         abort.current = null
         if (wasStopped) setLive((s) => (s ? stopped(s) : s))
         void queryClient.invalidateQueries({ queryKey: ['chat', 'list'] })
+        // ↑ in another chat has this message among the person's others at once.
+        void queryClient.invalidateQueries({ queryKey: ['chat', 'history'] })
         // A model refused as not loaded, or switched meanwhile: the menu learns of it now.
         void queryClient.invalidateQueries({ queryKey: configQuery.queryKey })
         // The server's copy is the truth (ids, statuses, what a stop kept). After a

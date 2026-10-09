@@ -111,6 +111,18 @@ describe('↑ in the message box', () => {
     expect(screen.getAllByText('second question').length).toBeGreaterThan(0)
   })
 
+  it('asks again for the person’s other messages once one is sent, so the next chat’s ↑ has it', async () => {
+    const calls = backend()
+    const el = await box()
+    const asked = () => calls.filter((c) => c.path.startsWith('/api/chat/history')).length
+    await userEvent.keyboard('{ArrowUp}{ArrowUp}{ArrowUp}')
+    await waitFor(() => expect(el).toHaveValue('from another chat'))
+    expect(asked()).toBe(1)
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST')?.body).toMatchObject({ content: 'from another chat' }))
+    await waitFor(() => expect(asked()).toBe(2))
+  })
+
   it('leaves the arrows to the prompts menu while it is open', async () => {
     backend()
     const el = await box()
