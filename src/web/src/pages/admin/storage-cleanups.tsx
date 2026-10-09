@@ -92,7 +92,7 @@ function CleanupCard({ k, start }: { k: CleanupType; start: number | undefined }
                 className="h-9 w-28"
                 value={number}
                 onChange={(e) => setValue(e.target.value)}
-                aria-invalid={!valid}
+                aria-invalid={!valid && value !== null}
                 aria-label={`${k.title}: ${k.param === 'days' ? 'older than, in days' : 'backups to keep'}`}
               />
             </Label>
@@ -106,7 +106,7 @@ function CleanupCard({ k, start }: { k: CleanupType; start: number | undefined }
             </Button>
           )}
         </div>
-        {!valid && <p className="text-sm text-destructive-ink">A whole number, 1 or more.</p>}
+        {!valid && value !== null && <p className="text-sm text-destructive-ink">A whole number, 1 or more.</p>}
         {plan.error && <QueryError error={plan.error} retry={() => plan.refetch()} />}
         {p && (
           <div className="grid gap-2 text-sm" aria-live="polite">
