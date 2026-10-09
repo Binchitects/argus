@@ -1544,12 +1544,21 @@ cmd_remove() {
     ok "kept: $(ls -1d "$FINAL_BACKUP"/20* 2>/dev/null | tail -n1)"
   fi
   step "containers"
+  # The unnamed volumes the containers have (an image's VOLUME, such as SearXNG's cache): each new
+  # container gets its own, so once the container is gone nothing uses them.
+  local anon=""
+  # shellcheck disable=SC2086
+  [[ -n "$ids" ]] && anon="$(E inspect --format '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\n"}}{{end}}{{end}}' $ids 2>/dev/null | grep -E '^[0-9a-f]{64}$' | sort -u)"
   if [[ -f "$DEPLOY/docker-compose.yml" ]]; then dc_down --remove-orphans; fi
   ids="$(E ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null)"
   # shellcheck disable=SC2086
   [[ -n "$ids" ]] && E rm -f $ids >/dev/null 2>&1
   for f in $(E network ls -q --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null); do E network rm "$f" >/dev/null 2>&1; done
   if E ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | grep -q .; then bad "some containers of $PROJECT remain: $ENGINE ps -a"; else ok "none of $PROJECT's left"; fi
+  if [[ -n "$anon" ]]; then
+    n=0; for f in $anon; do E volume rm "$f" >/dev/null 2>&1 && n=$((n + 1)); done
+    did "$n unnamed volume(s) of those containers"
+  fi
   step "images"
   while IFS=$'\t' read -r what f why; do
     [[ -n "$f" ]] || continue

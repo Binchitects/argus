@@ -211,7 +211,9 @@ def stateful(args: list[str]) -> int | None:
             c = next((c for c in s["containers"] if key in (c["id"], c["name"])), None)
             if c is None:
                 return 1
-            if "com.docker.compose.service" in fmt:
+            if ".Mounts" in fmt:
+                print(c.get("anon", ""))
+            elif "com.docker.compose.service" in fmt:
                 print(f'{c["service"]}|/{c["name"]}|{c["state"]}|{c["health"]}|sha256:{c["image_id"]}|{c["image_ref"]}')
             elif "working_dir" in fmt:
                 print(c["workdir"])

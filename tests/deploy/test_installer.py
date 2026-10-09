@@ -800,6 +800,11 @@ class InstallerTests(unittest.TestCase):
         self.install()
         store = self.r.store()
         store["volumes"]["arena_postgres"] = {"labels": ["com.docker.compose.project=arena"]}
+        # An image's VOLUME (SearXNG's cache): an unnamed volume of one container, and another's.
+        anon, other = "a" * 64, "b" * 64
+        store["volumes"][anon] = {"labels": []}
+        store["volumes"][other] = {"labels": []}
+        next(c for c in store["containers"] if c["service"] == "web")["anon"] = anon
         self.r.state.write_text(json.dumps(store))
         r = self.r.run("remove", "--dir", str(self.dir), "--yes")
         self.assertEqual(r.returncode, 0, self.output(r))
@@ -811,6 +816,9 @@ class InstallerTests(unittest.TestCase):
             self.assertIn(kept, images)
         self.assertIn("kept traefik:v3.6.7: on this host before Argus Arena was installed", r.stdout)
         self.assertIn("arena_postgres", self.r.store()["volumes"])
+        self.assertNotIn(anon, self.r.store()["volumes"])
+        self.assertIn(other, self.r.store()["volumes"])
+        self.assertIn("1 unnamed volume(s) of those containers", r.stdout)
         self.assertTrue((self.dir / "deploy" / ".env").is_file())
         r = self.r.run("remove", "--dir", str(self.dir), "--yes")
         self.assertEqual(r.returncode, 0, self.output(r))
