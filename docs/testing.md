@@ -28,12 +28,31 @@ the stack with `podman.yml` (and with `podman compose` when the runner has it),
 and parses every script, the services' (the picture and video servers', the
 engine's) with `/bin/sh` too, the shell they run under.
 
+**The offline installer** was proved by hand in rootless Podman beside the live
+Docker stack, which it never touched (2026-10-09, Podman 5.7): a 5.2.0
+installation made the 5.2.0 way (5.2.0's `airgap.sh` bundle of the 5.2.0 images,
+then `podman compose up`) with a person, a group, a chat and a setting put in
+through the API; bundles made by `make-installer.sh` of a "5.3.0-test" (this
+branch's app, Argus and web built over 5.2.0's images) and of a release whose
+app cannot start; then `upgrade` (the backup, the files, the images, every
+service's version, the data kept), `upgrade --rollback` (what went in after
+the upgrade gone, what was there before kept), the upgrade again, a failed
+upgrade rolled back by itself with its data, `repair` after a deleted and a
+changed file, a stopped container, a removed container and image and a volume
+given to root, `remove`, `install` over the kept data, `remove --purge` with a
+last backup, and a fresh unattended `install` and `--purge` again. Left out:
+the GPU's services (the live stack holds the GPU), the speech and embedding
+servers, and Laya. Not proved there: a second host with no network at all,
+Docker as the engine (the fakes only), a GPU through CDI, and models in the
+bundle.
+
 ## 2. What is not tested
 
 | gap | what it would catch |
 |---|---|
 | `restore-test.sh` and `rollback-test.sh` run in CI (they need the stack's images) | a backup that cannot be restored, a release that cannot be rolled back |
-| An offline bundle loaded on a second host with no network, then `up` | a first start that needs the internet |
+| An offline bundle loaded on a second host with no network, then `up` (the installer's run in Podman pulled nothing, but its host had a network) | a first start that needs the internet |
+| The offline installer with Docker as the engine, and with models and a GPU (proved in Podman without them) | an engine or GPU difference past what the fakes model |
 | The stack running under Podman in CI (needs a GPU runner; CI only renders `podman.yml`) | a Podman regression past the compose files |
 | Video generation in CI (minutes on a GPU) | a change in stable-diffusion.cpp's job API |
 | Code Arena's terminals on a Mac and on Windows (the tests run on Linux, the macOS helper's path included; ConPTY is only built) | a pseudo-terminal that does not start, or loses its size or Ctrl+C, on those systems |
