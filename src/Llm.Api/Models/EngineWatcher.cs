@@ -140,7 +140,8 @@ public sealed partial class EngineWatcher : BackgroundService
                     // which may be a kept one that sat idle; it comes back on a later round.
                     // One that failed is tried again once its wait is over: the router also marks failed a model it
                     // had to kill while it was being stopped, which is not broken (EngineState.MayRetry).
-                    if ((kept.FirstOrDefault(k => Status(k) == "unloaded") ?? kept.FirstOrDefault(state.MayRetry)) is { } next)
+                    if ((kept.FirstOrDefault(k => Status(k) == "unloaded") ?? kept.FirstOrDefault(state.MayRetry)
+                        ?? models.FirstOrDefault(m => m.Status == "unloaded" && state.StillAsked(m.Name))?.Name) is { } next)
                     {
                         LogLoading(logger, next);
                         if (Status(next) == "failed")

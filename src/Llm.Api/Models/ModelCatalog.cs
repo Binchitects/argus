@@ -40,6 +40,12 @@ public sealed class EngineState(TimeProvider clock)
     private readonly ConcurrentDictionary<string, Failure> _failed = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, bool> _dropped = new(StringComparer.Ordinal);
 
+    /// <summary>The models an admin loaded, and when: loaded again should the engine lose the load (a restart under it).</summary>
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _asked = new(StringComparer.Ordinal);
+
+    /// <summary>How long an admin's Load is followed up: past this, a model the engine never loaded stays as it is.</summary>
+    public static readonly TimeSpan AskedFor = TimeSpan.FromMinutes(10);
+
     /// <summary>The models the app told to unload, and when (a <see cref="TimeProvider.GetTimestamp"/>: <see cref="Unloading"/>).</summary>
     private readonly ConcurrentDictionary<string, long> _stopping = new(StringComparer.Ordinal);
 
@@ -81,6 +87,23 @@ public sealed class EngineState(TimeProvider clock)
 
     /// <summary>Whether an admin unloaded it and it has not loaded since.</summary>
     public bool WasDropped(string model) => _dropped.ContainsKey(model);
+
+    /// <summary>
+    /// An admin loaded it (Admin → Models): an Unload before no longer holds it back, and until it loads (for
+    /// <see cref="AskedFor"/>) the watcher asks the engine again whenever it lists it unloaded: a load sent while the
+    /// engine restarted (its presets changed) is otherwise lost, and the model stayed unloaded.
+    /// </summary>
+    public void Asked(string model)
+    {
+        _dropped.TryRemove(model, out _);
+        _asked[model] = clock.GetUtcNow();
+    }
+
+    /// <summary>An admin unloaded it: an earlier Load of theirs is no longer followed up.</summary>
+    public void Forget(string model) => _asked.TryRemove(model, out _);
+
+    /// <summary>Whether an admin's Load of it is still being followed up: asked within <see cref="AskedFor"/>, not loaded since.</summary>
+    public bool StillAsked(string model) => _asked.TryGetValue(model, out var at) && clock.GetUtcNow() - at < AskedFor;
 
     /// <summary>The time to give <see cref="Set"/> and <see cref="Seen"/> (a <see cref="TimeProvider.GetTimestamp"/>): taken just before the engine is asked for its models.</summary>
     public long Asking() => clock.GetTimestamp();
@@ -170,6 +193,10 @@ public sealed class EngineState(TimeProvider clock)
             if (m.Status is "loaded" or "loading")
             {
                 _dropped.TryRemove(m.Name, out _);
+            }
+            if (m.Status == "loaded")
+            {
+                _asked.TryRemove(m.Name, out _);
             }
             if (m.Status == "failed")
             {

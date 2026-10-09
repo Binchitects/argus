@@ -42,6 +42,9 @@ public sealed class FakeEngine : HttpMessageHandler
     /// </summary>
     public bool SlowStop { get; set; }
 
+    /// <summary>Loads answered but never done, as when the engine restarts under them (its presets changed).</summary>
+    public int LostLoads { get; set; }
+
     /// <summary>The models told to unload that have not stopped yet (<see cref="SlowStop"/>).</summary>
     private readonly HashSet<string> _stopping = [];
     public List<(string Method, string Path, string? Model)> Calls { get; } = [];
@@ -165,6 +168,9 @@ public sealed class FakeEngine : HttpMessageHandler
                             ["status"] = s.Value == "failed" ? new JsonObject { ["value"] = "unloaded", ["exit_code"] = 1, ["failed"] = true } : new JsonObject { ["value"] = s.Value },
                         })]),
                     }.ToJsonString());
+                case "/models/load" when model is not null && _status.ContainsKey(model) && LostLoads > 0:
+                    LostLoads--;
+                    return Json(HttpStatusCode.OK, """{"success":true}""");
                 case "/models/load" when model is not null && _status.ContainsKey(model):
                     _used.Remove(model);
                     _stopping.Remove(model);

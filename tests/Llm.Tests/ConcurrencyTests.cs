@@ -864,6 +864,28 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
     }
 
     [Fact]
+    public async Task An_admins_Load_lost_in_an_engine_restart_is_sent_again_and_ends_an_earlier_Unload()
+    {
+        await using var f = NewApp(parallel: 1, others: [("tiny-a", 1)]);
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-a/load"));
+        await EventuallyAsync(() => app.Engine.StatusOf("tiny-a") == "loaded", "tiny-a loads");
+        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-a/unload"));
+        await EventuallyAsync(() => app.Engine.StatusOf("tiny-a") == "unloaded", "tiny-a unloads");
+
+        // Loaded again while the engine restarts: the engine answers, and never loads it.
+        app.Engine.LostLoads = 1;
+        var loads = app.Engine.LoadsOf("tiny-a");
+        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-a/load"));
+        // The watcher asks again; the Unload before no longer holds it back.
+        await EventuallyAsync(() => app.Engine.StatusOf("tiny-a") == "loaded", "the lost load is sent again");
+        Assert.True(app.Engine.LoadsOf("tiny-a") >= loads + 2);
+        var state = f.Services.GetRequiredService<EngineState>();
+        Assert.False(state.WasDropped("tiny-a"));
+        await EventuallyAsync(() => !state.StillAsked("tiny-a"), "once the watcher sees it loaded, the Load is done with");
+    }
+
+    [Fact]
     public async Task An_idle_model_bigger_than_the_one_asked_for_makes_room_for_it()
     {
         await using var f = NewApp(parallel: 1, others: [("tiny-a", 1), ("tiny-b", 1)]);

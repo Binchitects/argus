@@ -368,6 +368,12 @@ the turns took 14, 20, 25 and 31 seconds, growing with the chat. 77% of the
 prompt tokens came from the cache instead of 72%, and the prompts took 356
 seconds to read instead of 428.
 
+An admin's **Load** is followed up: should the engine lose it (it restarts
+when the models' settings change, and a load sent meanwhile is never done),
+the app asks again until the model loads, for ten minutes. A **Load** also
+ends an earlier **Unload**, so the model new chats use loads again by itself
+afterwards.
+
 #### A model bigger than RAM and the GPU
 
 A model larger than the GPU's memory and RAM together still loads: llama.cpp

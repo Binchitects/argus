@@ -299,8 +299,9 @@ public static class ModelEndpoints
         }
         try
         {
-            // Loaded again, though the app told it to unload a moment ago.
+            // Loaded again, though the app told it to unload a moment ago; followed up should the engine lose it.
             state.Loading(name);
+            state.Asked(name);
             await engine.LoadAsync(name, ct);
         }
         catch (EngineException ex)
@@ -337,8 +338,9 @@ public static class ModelEndpoints
             {
                 catalog.SetKept(catalog.Pinned().Where(k => k != name));
             }
-            // Nor loaded again by the app as the model new chats use.
+            // Nor loaded again by the app as the model new chats use, nor as an admin's Load being followed up.
             state.Dropped(name);
+            state.Forget(name);
             await engine.UnloadAsync(name, ct);
             // Unloaded at once for every request, though the engine lists it loaded until it has stopped.
             route.Unloaded(name);
