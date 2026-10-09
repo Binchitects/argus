@@ -1133,7 +1133,8 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
     public async Task The_place_of_the_model_for_small_steps_is_kept_for_it_while_it_is_not_loaded()
     {
         // The model for small steps is set, not kept loaded, and not loaded yet: the big one and it fill the engine.
-        await using var f = NewApp(new Dictionary<string, string?> { ["Chat:SmallModel"] = "tiny-small" }, parallel: 1, others: [("tiny-small", 1), ("tiny-b", 1)]);
+        await using var f = NewApp(new Dictionary<string, string?> { ["Chat:SmallModel"] = "tiny-small" }, parallel: 1,
+            others: [("tiny-small", 1), ("tiny-b", 1), ("tiny-c", 1)]);
         var state = f.Services.GetRequiredService<EngineState>();
         f.Services.GetRequiredService<EngineWatcher>().Wake();
         await EventuallyAsync(() => state.Held.SequenceEqual([Big, "tiny-small"]), "the watcher holds the big model and the one for small steps");
@@ -1160,6 +1161,20 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         // The model for small steps has its place: a chat on it is answered.
         Assert.Contains(await AskAsync(b, await ChatAsync(b, "tiny-small"), "hello"), e => e.GetProperty("type").GetString() == "done");
         Assert.Equal("NONE", (await GuardAsync(f, "tiny-small")).GetProperty("action").GetString());
+
+        // An admin loaded tiny-b, which now sits in that place: another model is still refused at once (tiny-b making room
+        // would only hand it the place kept for the small model), and tiny-b stays.
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-b/load"));
+        await EventuallyAsync(() => state.Spare.SequenceEqual(["tiny-b"]), "the watcher sees tiny-b loaded");
+        verdict = await GuardAsync(f, "tiny-c");
+        Assert.Equal("BLOCKED", verdict.GetProperty("action").GetString());
+        Assert.StartsWith("tiny-c cannot be loaded now: each place in the engine is taken by, or kept for", verdict.GetProperty("blocked_reason").GetString(), StringComparison.Ordinal);
+        Assert.Equal("loaded", app.Engine.StatusOf("tiny-b"));
+        Assert.DoesNotContain(app.Engine.Calls, c => c.Path == "/models/unload");
+        // The model for small steps, asked for, has tiny-b make room.
+        Assert.Equal("NONE", (await GuardAsync(f, "tiny-small")).GetProperty("action").GetString());
+        Assert.Equal("unloaded", app.Engine.StatusOf("tiny-b"));
     }
 
     [Fact]

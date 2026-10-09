@@ -600,13 +600,13 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
 
     /// <summary>
     /// An engine model that is not loaded but loads when asked for: one of those that never make room (those kept
-    /// loaded, the one new chats use, the one for small steps: EngineState.Held), which has its place, or another
-    /// while the engine has a place besides theirs (an idle one that may makes room: EngineRoute). One that failed
-    /// to load does too once its wait is over (EngineState.MayAsk).
+    /// loaded, the one new chats use, the one for small steps: EngineState.Held), which has its place unless an admin
+    /// unloaded it, or another while the engine has a place besides theirs (an idle one that may makes room:
+    /// EngineRoute). One that failed to load does too once its wait is over (EngineState.MayAsk).
     /// </summary>
     public bool OnRequest(string model, IReadOnlySet<string> onEngine) =>
         onEngine.Contains(model) && !Loaded(model, onEngine) && (engine.StatusOf(model) is "unloaded" or "loading" || engine.MayAsk(model))
-        && (engine.Held.Contains(model) || PlaceLeft);
+        && ((engine.Held.Contains(model) && !engine.WasDropped(model)) || PlaceLeft);
 
     /// <summary>
     /// Whether the engine has a place for any other model: the places of those that never make room (the models kept
@@ -648,7 +648,7 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
         var others = mine.Where(m => m.Name != o.SmallModel).ToList();
         // With none named: a model loaded on request that the list puts first, or that took the place of the one everyone is on
         // while the engine had it unloaded, does not become theirs.
-        var usual = engine.Default is { } d ? others.FirstOrDefault(m => m.Name == d && onEngine.Contains(d) && Ready(d, onEngine)) : null;
+        var usual = engine.Default is { } d && !engine.WasDropped(d) ? others.FirstOrDefault(m => m.Name == d && onEngine.Contains(d) && Ready(d, onEngine)) : null;
         return hoursDefault ?? adminDefault ?? usual
             ?? others.FirstOrDefault(m => Loaded(m.Name, onEngine)) ?? others.FirstOrDefault(m => Ready(m.Name, onEngine))
             ?? mine.FirstOrDefault(m => Loaded(m.Name, onEngine)) ?? mine.FirstOrDefault(m => Ready(m.Name, onEngine)) ?? (mine.Count > 0 ? mine[0] : null);

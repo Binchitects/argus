@@ -254,19 +254,23 @@ public sealed partial class EngineRoute(SlotTable slots, EngineState engine, Eng
         {
             _coming.TryRemove(new KeyValuePair<string, DateTimeOffset>(name, at));
         }
-        var coming = _coming.Keys.Count(k => k != model);
-        // The places of the models that never make room and are not loaded now are kept for them (each loads again: the
-        // watcher's, or the next small step's), unless an admin unloaded it.
-        var reserved = engine.Held.Count(h => h != model && !Up(h) && !_coming.ContainsKey(h) && !engine.WasDropped(h) && models.Any(m => m.Name == h));
-        if (models.Count(m => m.Status is "loaded" or "loading") + coming + reserved < options.Value.ModelsMax)
+        var held = engine.Held;
+        var coming = _coming.Keys.Count(k => k != model && !held.Contains(k));
+        var others = models.Where(m => m.Status is "loaded" or "loading" && m.Name != model).ToList();
+        // The places of the models that never make room: taken, or kept for them while they are not loaded (each loads again:
+        // the watcher's, or the next small step's), unless an admin unloaded it. The others share what is left.
+        var heldUp = others.Count(m => held.Contains(m.Name));
+        var reserved = held.Count(h => h != model && !Up(h) && !engine.WasDropped(h) && models.Any(m => m.Name == h));
+        var open = options.Value.ModelsMax - heldUp - reserved;
+        var sparesUp = others.Count - heldUp;
+        if (sparesUp + coming < open)
         {
             _coming[model] = now;
             return Room.Free;
         }
-        var others = models.Where(m => m.Status is "loaded" or "loading" && m.Name != model).ToList();
-        if (coming == 0 && others.All(m => engine.Held.Contains(m.Name)))
+        if (open <= 0)
         {
-            // Each one there never makes room, and the other places are kept for those that do not either: waiting would not help.
+            // Each place is taken by, or kept for, a model that never makes room: waiting would not help.
             return Room.None;
         }
         var loaded = others.Where(m => m.Status == "loaded").Select(m => m.Name).ToList();
@@ -274,9 +278,10 @@ public sealed partial class EngineRoute(SlotTable slots, EngineState engine, Eng
         {
             _quiet.TryRemove(gone, out _);
         }
-        // Those that may make room, smallest first. One loaded since the watcher last looked is neither yet: it is waited for.
-        var spares = engine.Spare.Where(loaded.Contains).ToList();
-        foreach (var spare in spares)
+        // Those that may make room, smallest first, as many as it takes (one, unless some sit in places kept for a model that
+        // never makes room). One loaded since the watcher last looked is neither yet: it is waited for.
+        var needed = sparesUp + coming - open + 1;
+        foreach (var spare in engine.Spare.Where(loaded.Contains).ToList())
         {
             if (!await IdleAsync(spare, ct))
             {
@@ -298,8 +303,11 @@ public sealed partial class EngineRoute(SlotTable slots, EngineState engine, Eng
                 continue;
             }
             _quiet.TryRemove(spare, out _);
-            _coming[model] = clock.GetUtcNow();
-            return Room.Made;
+            if (--needed == 0)
+            {
+                _coming[model] = clock.GetUtcNow();
+                return Room.Made;
+            }
         }
         return Room.Busy;
     }
