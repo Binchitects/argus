@@ -10,7 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
-import { languageName, readsAloud, voiceDetail, voiceName, voiceQuery, type OfferedVoice, type VoiceChange, type VoiceSettings } from '@/lib/voice'
+import { languageName, readsAloud, voiceLabel, voiceQuery, type VoiceChange, type VoiceSettings } from '@/lib/voice'
 import { play } from './chat/sound'
 
 /** The choice that leaves it to the company (a select's item cannot have an empty value). */
@@ -20,8 +20,6 @@ const theirs = 'company'
 const nothing: VoiceChange = { language: null, voices: null, speed: null, readAloud: null }
 
 const times = (n: number) => `${Number(n.toFixed(2))}×`
-
-const describe = (v: OfferedVoice) => (voiceDetail(v) ? `${voiceName(v)} (${voiceDetail(v)})` : voiceName(v))
 
 const spoken = (code: string) => (code === 'auto' ? 'Detect it' : languageName(code))
 
@@ -143,11 +141,11 @@ function Voices({ settings: v, disabled, onChange }: { settings: VoiceSettings; 
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={theirs}>The company's: {company ? describe(company) : 'none'}</SelectItem>
+                <SelectItem value={theirs}>The company's: {company ? voiceLabel(company) : 'none'}</SelectItem>
                 {gone && <SelectItem value={chosen}>{chosen} (not offered now)</SelectItem>}
                 {offered.map((x) => (
                   <SelectItem key={x.id} value={x.id}>
-                    {describe(x)}
+                    {voiceLabel(x)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -170,8 +168,8 @@ function Voices({ settings: v, disabled, onChange }: { settings: VoiceSettings; 
   )
 }
 
-/** Reads a sample in a voice, at the person's speed; again to stop it. */
-function TryIt({ voice, language, label, speed }: { voice: string | null; language: string; label: string; speed: number }) {
+/** Reads a sample in a voice, at a speed (the person's here; Settings → Speech tries the company's at its own path); again to stop it. */
+export function TryIt({ voice, language, label, speed, path = '/api/account/voice/try' }: { voice: string | null; language: string; label: string; speed?: number; path?: string }) {
   const [playing, setPlaying] = useState(false)
   const stopRef = useRef<(() => void) | null>(null)
   useEffect(() => () => stopRef.current?.(), [])
@@ -179,7 +177,7 @@ function TryIt({ voice, language, label, speed }: { voice: string | null; langua
     if (playing) return stopRef.current?.()
     setPlaying(true)
     try {
-      stopRef.current = await play('/api/account/voice/try', { voice, language, speed }, () => {
+      stopRef.current = await play(path, { voice, language, speed }, () => {
         stopRef.current = null
         setPlaying(false)
       })

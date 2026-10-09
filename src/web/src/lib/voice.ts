@@ -73,3 +73,32 @@ export function voiceDetail(v: OfferedVoice): string {
   const accent = v.accent.includes('-') ? languageName(v.accent) : null
   return [who, accent].filter(Boolean).join(', ')
 }
+
+/** A voice as the lists name it: "Adam (man, American English)". */
+export const voiceLabel = (v: OfferedVoice) => (voiceDetail(v) ? `${voiceName(v)} (${voiceDetail(v)})` : voiceName(v))
+
+/** What Settings → Speech chooses the company's voices from: every voice offered, and the text to speech models at the gateway. */
+export interface SpeechOffer {
+  voices: OfferedVoice[]
+  models: string[]
+  /** The speech server said what it offers. */
+  known: boolean
+}
+
+/**
+ * The company's voices as the app reads Settings → Speech's value: "en:kokoro/af_heart, fa:piper-fa/gyro" → each
+ * language with its voice, in order. A pair not in that form is left out, and a language's first pair is the one kept.
+ */
+export function voicePairs(value: string): [string, string][] {
+  const pairs = new Map<string, string>()
+  for (const pair of value.split(',')) {
+    const at = pair.indexOf(':')
+    const language = pair.slice(0, at).trim().toLowerCase()
+    const id = pair.slice(at + 1).trim()
+    if (at > 0 && /^[a-z]{2,3}$/.test(language) && /^[^/\s,:]+\/[^/\s,:]+$/.test(id) && !pairs.has(language)) pairs.set(language, id)
+  }
+  return [...pairs]
+}
+
+/** Each language with its voice, as Settings → Speech keeps them: "en:kokoro/af_heart,fa:piper-fa/gyro". */
+export const voiceValue = (pairs: [string, string][]) => pairs.map(([language, id]) => `${language}:${id}`).join(',')

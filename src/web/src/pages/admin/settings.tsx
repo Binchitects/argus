@@ -20,6 +20,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { api, ApiError, errorMessage, infoQuery } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { CompanySignInPanel } from './company-sign-in'
+import { SpeechVoices } from './speech-voices'
 import { BotAddresses } from './bot-addresses'
 import { bytesHint, initialValue, isShown, slug, wireValue, type SettingsData, type SettingView } from './settings-model'
 
@@ -185,6 +186,7 @@ export function SettingsPage() {
                     s={s}
                     value={draft[s.key] ?? initialValue(s)}
                     error={errors[s.key]}
+                    valueOf={valueOf}
                     onChange={(v) => {
                       setDraft((d) => ({ ...d, [s.key]: v }))
                       setErrors((prev) => {
@@ -234,7 +236,7 @@ const scopeBadge: Record<SettingView['scope'], { icon: typeof Zap; text: string;
   apprestart: { icon: RotateCw, text: 'Restart', tip: 'Read when the app starts: restart it to apply (a few seconds).' },
 }
 
-function SettingRow({ s, value, error, onChange }: { s: SettingView; value: string; error?: string; onChange: (v: string) => void }) {
+function SettingRow({ s, value, error, valueOf, onChange }: { s: SettingView; value: string; error?: string; valueOf: (key: string) => string; onChange: (v: string) => void }) {
   const id = `setting-${s.key.replace(/[^A-Za-z0-9]/g, '-')}`
   const scope = scopeBadge[s.scope]
   const save = useSave()
@@ -276,7 +278,7 @@ function SettingRow({ s, value, error, onChange }: { s: SettingView; value: stri
         <code className="mt-1 block font-mono text-[0.6875rem] text-muted-foreground">{s.key}</code>
       </div>
       <div className="grid content-start gap-1.5">
-        <Editor s={s} id={id} value={value} onChange={onChange} describedBy={describedBy} invalid={!!error} />
+        <Editor s={s} id={id} value={value} onChange={onChange} describedBy={describedBy} invalid={!!error} valueOf={valueOf} />
         {error && (
           <p id={`${id}-error`} className="text-xs font-medium text-destructive-ink">
             {error}
@@ -315,8 +317,18 @@ function Provenance({ s }: { s: SettingView }) {
   return text ? <p className="text-xs text-muted-foreground">{text}</p> : null
 }
 
-function Editor({ s, id, value, onChange, describedBy, invalid }: { s: SettingView; id: string; value: string; onChange: (v: string) => void; describedBy: string; invalid: boolean }) {
+function Editor({ s, id, value, onChange, describedBy, invalid, valueOf }: {
+  s: SettingView
+  id: string
+  value: string
+  onChange: (v: string) => void
+  describedBy: string
+  invalid: boolean
+  valueOf: (key: string) => string
+}) {
   const common = { id, 'aria-describedby': describedBy, 'aria-invalid': invalid || undefined }
+  // Chosen from the voices the speech models offer, each tried at the reading speed on the page.
+  if (s.key === 'Speech:Voices') return <SpeechVoices id={id} label={s.label} value={value} onChange={onChange} speed={readingSpeed(valueOf('Speech:Speed'))} describedBy={describedBy} invalid={invalid} />
   switch (s.type) {
     case 'boolean':
       return <Switch {...common} checked={value === 'true'} onCheckedChange={(v) => onChange(v ? 'true' : 'false')} />
@@ -387,6 +399,12 @@ function Editor({ s, id, value, onChange, describedBy, invalid }: { s: SettingVi
         return <Textarea {...common} rows={s.lines} spellCheck={false} value={value} onChange={(e) => onChange(e.target.value)} placeholder={s.optional ? 'not set' : undefined} className="font-mono text-xs" />
       return <Input {...common} value={value} onChange={(e) => onChange(e.target.value)} placeholder={s.patternHelp ?? (s.optional ? 'not set' : undefined)} className={cn(s.key.includes('ARGS') || s.key.includes('FILES') ? 'font-mono text-xs' : undefined)} />
   }
+}
+
+/** The reading speed on the page as Try it takes it: none while it is not one (0.5 to 2). */
+function readingSpeed(text: string): number | undefined {
+  const speed = Number(text)
+  return text.trim() && speed >= 0.5 && speed <= 2 ? speed : undefined
 }
 
 function DirectoryTest({ draft }: { draft: Record<string, string> }) {

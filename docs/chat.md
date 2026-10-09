@@ -1053,9 +1053,12 @@ use and edit one); a new chat takes `assistantId`.
   voices found at a fake speech server (only the app's models, with language,
   accent and gender), the choices saved and used by read aloud, Talk, voice
   messages and Try it, the company's defaults from Settings (and the warning
-  under a voice there that is not offered), a text's language picking its voice
-  (a short Latin sentence going by what came before it or the language spoken,
-  and falling back when no voice reads it), a change keeping the choices it
+  under a voice there that is not offered), the voices Settings chooses the
+  company's from and Try it there (admins only, at the speed given or the
+  company's, a voice of a model not listed yet tried as named), a text's
+  language picking its voice (a short Latin sentence going by what came before
+  it or the language spoken, a short English one of words Portuguese writes too
+  staying English, and falling back when no voice reads it), a change keeping the choices it
   does not name, changes made at once all kept, a voice no longer offered not
   stopping other changes, new choices refused that the speech models do not
   offer, an API key's speech that names no voice read in its person's voice and
@@ -1180,6 +1183,13 @@ use and edit one); a new chat takes `assistantId`.
     longer offered shown as such and put back alone; Try it with the voice
     shown and the person's speed, and again to stop; what it says when speech
     is not set up or the speech server cannot be asked
+  - Settings → Speech → Voice for each language: a row per language offered,
+    each voice by name with its id, chosen and saved as the setting's pairs (a
+    language back to the first offered dropping its pair, the last one naming
+    that voice); Try it at the speed on the page, saved or not; a voice not
+    offered said in its row, one of a model not listed yet tried as named;
+    Edit as text and back; typed as text while the speech server cannot be
+    asked
   - the canvas: the line diff, a selection's lines and its message; the panel
     from the header, a save as a version, the versions' diff and a restore, a
     selection sent to the chat quoted, a tool card opening its canvas, the
