@@ -20,7 +20,7 @@ namespace Llm.Api.Chat;
 /// <param name="Again">Said with the question for this answer only: answer again shorter or longer (AnswerLengths.Again), or answer in spoken sentences (Talk.Note).</param>
 /// <param name="Titled">The chat's first question: the model for small steps writes its title beside the answer (ChatTitles).</param>
 /// <param name="QueuedMs">How long the answer waited in line (AnswerGate) before it started, for its trace.</param>
-/// <param name="Unattended">Nobody watches the answer (a bot's thread, a scheduled task): a tool that would wait for the person's Allow is not offered.</param>
+/// <param name="Unattended">Nobody watches the answer (a bot's thread, a scheduled task): deep research is not offered while it asks first (nobody would press Allow).</param>
 /// <param name="Compare">One of Compare's two answers: the model starts no deep research (that is one model's report).</param>
 public sealed record AnswerOverrides(string? Model = null, string? Thinking = null, Hurry? Hurry = null, bool Research = false, string? Again = null, bool Titled = false,
     int? QueuedMs = null, bool Unattended = false, bool Compare = false);
