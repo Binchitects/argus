@@ -7,7 +7,7 @@ of range. Each panel is asked as its page asks it: through the app's
 /api/dashboards API, signed in as the admin (the password comes from .env and
 is never printed).
 
-    python3 scripts/audit-dashboards.py              # metrics and logs over 30 minutes
+    python3 scripts/audit-dashboards.py              # metrics and logs over the last hour, as the pages open
     python3 scripts/audit-dashboards.py 6h           # another window (usage panels: 30 days)
     python3 scripts/audit-dashboards.py --json out.json
 
@@ -97,7 +97,7 @@ def main():
         i = args.index("--json")
         dump = args[i + 1]
         del args[i:i + 2]
-    window = args[0].removeprefix("now-") if args else "30m"
+    window = args[0].removeprefix("now-") if args else "1h"
     code, body = call("/api/auth/login", {"userName": "admin", "password": env("ADMIN_PASSWORD")})
     if code != 200 or body.get("status") != "ok":
         sys.exit(f"cannot sign in to the app: HTTP {code} {body.get('error', '')}")

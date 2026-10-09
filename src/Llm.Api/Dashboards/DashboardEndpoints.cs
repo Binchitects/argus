@@ -79,7 +79,8 @@ public static partial class DashboardEndpoints
             return Results.NotFound();
         }
         var end = to ?? DateTimeOffset.UtcNow;
-        var start = from ?? end.AddHours(-6);
+        // No range asked: the last hour, as a dashboard opens.
+        var start = from ?? end.AddHours(-1);
         var list = new List<object>();
         foreach (var v in (d.Variables ?? []).Where(v => v.Hide < 2))
         {

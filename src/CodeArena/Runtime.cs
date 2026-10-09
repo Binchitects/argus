@@ -30,6 +30,8 @@ internal sealed partial class Runtime : IAsyncDisposable
     public Agent Agent { get; private set; } = null!;
     public Workspace Workspace { get; private set; } = null!;
     public SessionStore Session { get; private set; } = null!;
+    /// <summary>What was sent in this folder, in the terminal and the IDE's chat alike.</summary>
+    public InputHistory History { get; private set; } = null!;
     public Spend Total { get; } = new();
     /// <summary>The turn running now, so a sub-agent's tokens count in it.</summary>
     public Spend? Turn { get; set; }
@@ -73,6 +75,7 @@ internal sealed partial class Runtime : IAsyncDisposable
     private async Task InitAsync(Options o, CancellationToken ct)
     {
         Workspace = new Workspace(Env.Cwd, Config.AllowedPaths.Concat(o.AddDirs));
+        History = new InputHistory(Env.Paths.HistoryDir, Workspace.Root);
         var models = Gateway.ModelsAsync(ct);
         var arena = Config.ArenaTools && Config.ArenaMcpUrl is { } mcpUrl ? ConnectArenaAsync(mcpUrl, ct) : Task.FromResult<McpClient?>(null);
         var own = Config.McpServers.Where(s => !s.Disabled).Select(s => ConnectOwnAsync(s, ct)).ToList();

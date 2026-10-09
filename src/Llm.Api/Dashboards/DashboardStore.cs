@@ -102,8 +102,12 @@ public sealed class DashboardStore(IOptions<DashboardOptions> options)
             v["current"]?.DeepClone(),
             [.. (v["options"] as JsonArray ?? []).OfType<JsonObject>().Select(o => o["value"]?.GetValue<string>() ?? "")],
             v["hide"] is JsonValue hv && hv.TryGetValue<int>(out var hide) ? hide : 0)).Where(v => v.Name.Length > 0).ToList();
-        return new Dashboard(uid, d["title"]?.GetValue<string>() ?? uid, d["time"]?.DeepClone() as JsonObject, d["refresh"]?.GetValue<string>(), panels, variables);
+        var time = d["time"] is JsonObject t && t["from"] is JsonValue ? (JsonObject)t.DeepClone() : DefaultTime();
+        return new Dashboard(uid, d["title"]?.GetValue<string>() ?? uid, time, d["refresh"]?.GetValue<string>(), panels, variables);
     }
+
+    /// <summary>The time range a dashboard opens on when its file gives none: the last hour, as every dashboard of the app does.</summary>
+    public static JsonObject DefaultTime() => new() { ["from"] = "now-1h", ["to"] = "now" };
 
     private static IEnumerable<JsonObject> Walk(JsonArray? panels)
     {

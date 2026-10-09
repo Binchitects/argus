@@ -24,6 +24,8 @@ var env = new CliEnv
     OutTerminal = !Console.IsOutputRedirected && colours,
     ErrTerminal = !Console.IsErrorRedirected && colours,
     ReadSecret = Console.IsInputRedirected ? null : ConsoleSetup.ReadSecret,
+    // The prompt's line editor draws with escape codes: a terminal both ways, one that takes them.
+    Keys = Console.IsInputRedirected || Console.IsOutputRedirected || !colours ? null : new ConsoleSetup.Keyboard(),
 };
 Console.CancelKeyPress += (_, e) => e.Cancel = env.Cancel.Press();
 return await Cli.RunAsync(args, env);
@@ -80,6 +82,98 @@ internal static class ConsoleSetup
             }
         }
     }
+
+    /// <summary>The real terminal, key by key, for the prompt's line editor.</summary>
+    internal sealed class Keyboard : IKeyboard
+    {
+        public ConsoleKeyInfo? ReadKey()
+        {
+            try
+            {
+                return Console.ReadKey(intercept: true);
+            }
+            catch (InvalidOperationException)
+            {
+                return null; // input ended, or is no longer a terminal
+            }
+        }
+
+        public bool KeyAvailable
+        {
+            get
+            {
+                try
+                {
+                    return Console.KeyAvailable;
+                }
+                catch (InvalidOperationException)
+                {
+                    return false;
+                }
+            }
+        }
+
+        public int Width
+        {
+            get
+            {
+                try
+                {
+                    return Console.WindowWidth is > 0 and var w ? w : 80;
+                }
+                catch (IOException)
+                {
+                    return 80;
+                }
+            }
+        }
+
+        public int Height
+        {
+            get
+            {
+                try
+                {
+                    return Console.WindowHeight is > 0 and var h ? h : 24;
+                }
+                catch (IOException)
+                {
+                    return 24;
+                }
+            }
+        }
+
+        public IDisposable CaptureCtrlC()
+        {
+            var before = Console.TreatControlCAsInput;
+            Console.TreatControlCAsInput = true;
+            return new Restore(() => Console.TreatControlCAsInput = before);
+        }
+
+        public Action? Suspend => OperatingSystem.IsWindows() ? null : Stop;
+
+        /// <summary>
+        /// SIGTSTP to the process group, as the terminal sends it for Ctrl+Z (a script that started the program stops
+        /// with it, so the shell gets the terminal back), and to this thread, which stops at once: back here on fg.
+        /// </summary>
+        private static void Stop()
+        {
+            var tstp = OperatingSystem.IsLinux() ? 20 : 18;
+            _ = kill(0, tstp);
+            _ = raise(tstp);
+        }
+
+        private sealed class Restore(Action undo) : IDisposable
+        {
+            public void Dispose() => undo();
+        }
+    }
+
+    [DllImport("libc")]
+    private static extern int kill(int pid, int signal);
+
+    [DllImport("libc")]
+    private static extern int raise(int signal);
 
     [DllImport("kernel32.dll")]
     private static extern IntPtr GetStdHandle(int which);

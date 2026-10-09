@@ -81,6 +81,12 @@ export const sessionQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => api<CodeSession>('/api/session', { signal }),
 }
 
+/** What this folder sent before, newest first: the terminal's and the page's, without the terminal's own commands. */
+export const historyQuery = {
+  queryKey: ['code', 'history'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ text: string }[]>('/api/history', { signal }),
+}
+
 export const changeSettings = (body: { mode?: Mode; model?: string; thinking?: string | null }) => api<CodeState>('/api/settings', { body })
 export const newSession = () => api<CodeSession>('/api/sessions/new', { body: {} })
 export const resumeSession = (id: string) => api<CodeSession>('/api/sessions/resume', { body: { id } })

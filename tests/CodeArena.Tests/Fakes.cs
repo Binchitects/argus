@@ -380,6 +380,10 @@ public sealed class Harness : IDisposable
     public string Out { get; private set; } = "";
     public string Err { get; private set; } = "";
     public string? Secret { get; set; }
+    /// <summary>A terminal read key by key (the prompt's line editor); null: lines from the typed input.</summary>
+    internal IKeyboard? Keys { get; set; }
+    /// <summary>The folder it runs in; null: Work.</summary>
+    public string? Cwd { get; set; }
 
     /// <summary>Runs code-arena with these arguments and typed input; a terminal on stdin unless said otherwise.</summary>
     public async Task<int> Run(string input, params string[] args) => await Run(input, terminal: true, args);
@@ -394,10 +398,11 @@ public sealed class Harness : IDisposable
             Out = output,
             Err = error,
             Env = k => Env.GetValueOrDefault(k),
-            Cwd = Work,
+            Cwd = Cwd ?? Work,
             Paths = Paths,
             InTerminal = terminal,
             ReadSecret = Secret is null ? null : _ => Secret,
+            Keys = Keys,
         };
         var code = await Cli.RunAsync(args, env);
         Out = output.ToString();

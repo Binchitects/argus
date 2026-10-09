@@ -324,6 +324,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             case ("GET", "/api/session"):
                 await res.JsonAsync(200, SessionJson(), ct);
                 return;
+            case ("GET", "/api/history"):
+                await res.JsonAsync(200, Sent(), ct);
+                return;
             case ("GET", "/api/turn"):
                 if (Current() is { } running)
                 {
@@ -456,6 +459,13 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         ["messages"] = s.Messages,
     })]);
 
+    /// <summary>
+    /// What was sent in this folder, newest first, the terminal's and the page's alike, without the commands only
+    /// the terminal has: the chat's ↑ goes on to these after the session's own messages.
+    /// </summary>
+    private JsonArray Sent() => new([.. _rt.History.Entries().AsEnumerable().Reverse().Where(t => !Repl.TerminalOnly(t)).Distinct().Take(500)
+        .Select(t => (JsonNode)new JsonObject { ["text"] = t })]);
+
     /// <summary>The session open now, as the page shows it.</summary>
     private JsonObject SessionJson()
     {
@@ -494,6 +504,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             await res.ErrorAsync(409, "busy", "An answer is being written: wait for it, or stop it.", ct);
             return;
         }
+        // Kept for ↑, here and in the terminal: the folder's history.
+        _rt.History.Add(text);
         var count = _rt.Agent.Messages.Count;
         job.Emit(new JsonObject { ["type"] = "question", ["id"] = $"m{count}", ["parentId"] = count == 0 ? null : $"m{count - 1}" });
         job.Running = Task.Run(() => RunTurnAsync(job, text));

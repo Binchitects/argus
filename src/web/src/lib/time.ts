@@ -22,6 +22,49 @@ export const metricPresets: { label: string; from: string }[] = [
   { label: 'Last 30 days', from: 'now-30d' },
 ]
 
+/** The ranges a dashboard offers: five minutes to three months. */
+export const dashboardPresets: { label: string; from: string }[] = [...metricPresets, { label: 'Last 90 days', from: 'now-90d' }]
+
+/** A dashboard's range when neither the address nor its file says another. */
+export const defaultRange: TimeRange = { from: 'now-1h', to: 'now' }
+
+/** A range that can be drawn: both ends read as times, the start before the end. */
+function readable(r: TimeRange): boolean {
+  try {
+    return resolve(r.from).getTime() < resolve(r.to).getTime()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * A dashboard's range: the address's (Grafana's from and to, so a link opens the
+ * same view), else the dashboard file's, else the last hour.
+ */
+export function dashboardRange(params: URLSearchParams, own?: TimeRange | null): TimeRange {
+  const asked = params.get('from')
+  if (asked) {
+    const r = { from: asked, to: params.get('to') || 'now' }
+    if (readable(r)) return r
+  }
+  return own && readable(own) ? { from: own.from, to: own.to } : defaultRange
+}
+
+/** A range as one value for a menu: "now-6h", or "from|to" when it does not end now. */
+export const rangeKey = (r: TimeRange) => (r.to === 'now' ? r.from : `${r.from}|${r.to}`)
+
+export function fromRangeKey(key: string): TimeRange {
+  const [from = '', to = 'now'] = key.split('|')
+  return { from, to }
+}
+
+/** The dashboard's ranges for a menu, and the one shown now when it is not one of them (from a link). */
+export function dashboardRangeOptions(current: TimeRange): { value: string; label: string }[] {
+  const options = dashboardPresets.map((p) => ({ value: p.from, label: p.label }))
+  const key = rangeKey(current)
+  return options.some((o) => o.value === key) ? options : [...options, { value: key, label: rangeLabel(current) }]
+}
+
 /** "30s", "1m", "5m" (a dashboard's refresh) in milliseconds, or null. */
 export function refreshMs(text: string | undefined | null): number | null {
   const m = /^(\d+)([smhd])$/.exec(text ?? '')
@@ -30,12 +73,12 @@ export function refreshMs(text: string | undefined | null): number | null {
 
 const units: Record<string, number> = { s: 1e3, m: 6e4, h: 3.6e6, d: 8.64e7, w: 6.048e8, M: 2.592e9, y: 3.1536e10 }
 
-/** "now", "now-30d", or an ISO time, as a Date. */
+/** "now", "now-30d", an ISO time, or milliseconds since 1970 (as Grafana's links have them), as a Date. */
 export function resolve(t: string, now: Date = new Date()): Date {
   if (t === 'now') return now
   const m = /^now-(\d+)([smhdwMy])$/.exec(t)
   if (m) return new Date(now.getTime() - Number(m[1]) * units[m[2]])
-  const d = new Date(t)
+  const d = /^\d{10,}$/.test(t) ? new Date(Number(t)) : new Date(t)
   if (Number.isNaN(d.getTime())) throw new Error(`Not a time: ${t}`)
   return d
 }
@@ -57,6 +100,23 @@ export function intervalFor(from: Date, to: Date, points: number): number {
   return roundInterval((to.getTime() - from.getTime()) / Math.max(10, points))
 }
 
+const unitNames: Record<string, string> = { s: 'second', m: 'minute', h: 'hour', d: 'day', w: 'week', M: 'month', y: 'year' }
+
+/** "Last hour", "Last 30 minutes", or the two times of a range that does not end now (the day once when both are on it). */
 export function rangeLabel(r: TimeRange): string {
-  return [...presets, ...metricPresets].find((p) => p.from === r.from && r.to === 'now')?.label ?? `${r.from} to ${r.to}`
+  const named = [...presets, ...dashboardPresets].find((p) => p.from === r.from && r.to === 'now')?.label
+  if (named) return named
+  const m = /^now-(\d+)([smhdwMy])$/.exec(r.from)
+  if (m && r.to === 'now') return `Last ${m[1] === '1' ? '' : `${m[1]} `}${unitNames[m[2]!]}${m[1] === '1' ? '' : 's'}`
+  const when = (t: string) => {
+    try {
+      return t === 'now' ? null : resolve(t)
+    } catch {
+      return null
+    }
+  }
+  const [from, to] = [when(r.from), when(r.to)]
+  const show = (d: Date | null, t: string) => d?.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) ?? t
+  if (from && to && from.toDateString() === to.toDateString()) return `${show(from, r.from)} to ${to.toLocaleTimeString(undefined, { timeStyle: 'short' })}`
+  return `${show(from, r.from)} to ${show(to, r.to)}`
 }

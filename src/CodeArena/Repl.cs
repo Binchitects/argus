@@ -5,6 +5,14 @@ namespace CodeArena;
 /// <summary>The interactive session: the prompt, turns, and the slash commands.</summary>
 internal sealed class Repl(Runtime rt)
 {
+    /// <summary>
+    /// The prompt edited key by key, with what was sent before on ↑, when someone types at a terminal that can
+    /// take it; lines as they come otherwise (a pipe, a dumb terminal).
+    /// </summary>
+    private readonly LineEditor? _editor = rt.Env.Keys is { } keys && rt.Ui.CanAsk && !rt.Ui.Quiet && rt.Env.Env("TERM") != "dumb"
+        ? new LineEditor(keys, rt.Ui.Out, () => rt.History.Entries()) { Interrupted = rt.Env.Cancel.Press }
+        : null;
+
     private Ui Ui => rt.Ui;
 
     public static readonly (string Name, string What)[] Commands =
@@ -32,8 +40,8 @@ internal sealed class Repl(Runtime rt)
             pending = null;
             if (input is null)
             {
-                // A read cut short by Ctrl+C (Windows) is not the end of input.
-                if (DateTime.UtcNow - rt.Env.Cancel.LastPress < TimeSpan.FromSeconds(1))
+                // A read cut short by Ctrl+C (Windows) is not the end of input. The line editor reads Ctrl+C itself.
+                if (_editor is null && DateTime.UtcNow - rt.Env.Cancel.LastPress < TimeSpan.FromSeconds(1))
                 {
                     continue;
                 }
@@ -43,6 +51,11 @@ internal sealed class Repl(Runtime rt)
             if (input.Length == 0)
             {
                 continue;
+            }
+            // Kept for ↑, as a shell keeps its history: what someone typed here, not a pipe's lines, nor leaving.
+            if (rt.Env.InTerminal && !Leaves(input))
+            {
+                rt.History.Add(input);
             }
             if (input.StartsWith('/'))
             {
@@ -82,7 +95,26 @@ internal sealed class Repl(Runtime rt)
         {
             Ui.Warn("yolo: edits and commands run without asking. Use it in a folder you can throw away.");
         }
-        Ui.Info("/help for commands · Ctrl+C stops a turn · end a line with \\ to go on to the next");
+        Ui.Info(_editor is null
+            ? "/help for commands · Ctrl+C stops a turn · end a line with \\ to go on to the next"
+            : "/help for commands · ↑ for what you sent before · Ctrl+C stops a turn · end a line with \\ to go on to the next");
+    }
+
+    /// <summary>The commands that leave: not kept in the history.</summary>
+    private static bool Leaves(string input) => input.ToLowerInvariant() is "/exit" or "/quit" or "/q";
+
+    /// <summary>
+    /// A command only the terminal has (all but /compact and /clear, which the IDE's chat has too): the IDE's ↑
+    /// leaves them out of what it offers again.
+    /// </summary>
+    public static bool TerminalOnly(string input)
+    {
+        if (!input.StartsWith('/'))
+        {
+            return false;
+        }
+        var name = input.Split([' ', '\n'], 2)[0].ToLowerInvariant();
+        return name is not ("/compact" or "/clear") && (name is "/quit" or "/q" or "/?" || Commands.Any(c => c.Name.Split(' ')[0] == name));
     }
 
     private string ModeLabel(Mode mode) => mode switch
@@ -97,6 +129,10 @@ internal sealed class Repl(Runtime rt)
     private string? ReadInput()
     {
         Ui.Line();
+        if (_editor is not null)
+        {
+            return _editor.Read(Ui.Cyan("› "), Ui.Dim("… "));
+        }
         var line = Ui.ReadLine(Ui.Cyan("› "));
         if (line is null)
         {
@@ -154,6 +190,10 @@ internal sealed class Repl(Runtime rt)
                 foreach (var (command, what) in Commands)
                 {
                     Ui.Line($"  {command,-20} {Ui.Dim(what)}");
+                }
+                if (_editor is not null)
+                {
+                    Ui.Info("Keys: ↑ and ↓ step through what you sent in this folder, Esc goes back to what you were typing; a line ending in \\ goes on to the next.");
                 }
                 Ui.Info("Files: ARENA.md in the repository (and in your config folder) is read into every session.");
                 break;

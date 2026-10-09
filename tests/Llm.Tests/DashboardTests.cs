@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Llm.Api.Dashboards;
+using Microsoft.Extensions.Options;
 
 namespace Llm.Tests;
 
@@ -101,6 +102,35 @@ public sealed class DashboardTests(AppFixture app)
             new { from = LitellmSeed.From, to = LitellmSeed.To, maxDataPoints = 100 });
         // 9 days / 100 points = 7776 s -> rounded to 2 h, as Grafana does.
         Assert.Equal(7_200_000, (await b.JsonAsync(res)).GetProperty("intervalMs").GetInt64());
+    }
+
+    [Fact]
+    public async Task Every_dashboard_opens_on_the_last_hour_and_one_whose_file_gives_no_range_does_too()
+    {
+        var b = await Admin();
+        var listed = (await b.JsonAsync(await b.GetAsync("/api/dashboards/"))).EnumerateArray().Select(d => d.GetProperty("uid").GetString()!).ToList();
+        Assert.Contains("usage-by-user", listed);
+        foreach (var uid in listed)
+        {
+            var time = (await b.JsonAsync(await b.GetAsync($"/api/dashboards/{uid}"))).GetProperty("time");
+            Assert.Equal(("now-1h", "now"), (time.GetProperty("from").GetString(), time.GetProperty("to").GetString()));
+        }
+
+        // A file of one's own keeps its range; one without a range opens on the last hour.
+        var dir = Directory.CreateTempSubdirectory("dashboards-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "mine.json"), """{"uid":"mine","title":"Mine","panels":[]}""");
+            File.WriteAllText(Path.Combine(dir, "day.json"), """{"uid":"day","title":"Day","time":{"from":"now-24h","to":"now"},"panels":[]}""");
+            var store = new DashboardStore(Options.Create(new DashboardOptions { Path = dir }));
+            Assert.Equal("now-1h", store.Find("mine")!.Time!["from"]!.GetValue<string>());
+            Assert.Equal("now", store.Find("mine")!.Time!["to"]!.GetValue<string>());
+            Assert.Equal("now-24h", store.Find("day")!.Time!["from"]!.GetValue<string>());
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
     }
 
     [Fact]

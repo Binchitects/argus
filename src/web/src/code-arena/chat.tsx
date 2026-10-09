@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowUp, FolderGit2, GitBranch, History, ListChecks, MessageSquarePlus, Monitor, Moon, PanelRightClose, ScrollText, ShieldCheck, Square, Sun, TestTubeDiagonal } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -17,6 +17,7 @@ import { ContextGauge } from '@/pages/chat/context-gauge'
 import { answerNews, bucket } from '@/pages/chat/format'
 import { ModelPicker, ThinkingPicker } from '@/pages/chat/header'
 import { stopped, withQuestion } from '@/pages/chat/live'
+import { useRecall, type Older, type RecallSource } from '@/pages/chat/recall'
 import { toTurns } from '@/pages/chat/tree'
 import { CompactedMark, QuestionTurn } from '@/pages/chat/turns'
 import type { ChatConfig } from '@/pages/chat/types'
@@ -24,6 +25,7 @@ import {
   answerApproval,
   changeSettings,
   fromSession,
+  historyQuery,
   inOrder,
   modeLabels,
   newSession,
@@ -232,6 +234,10 @@ export function Thread({
   const turns = toTurns(path)
   const model = config.models.find((m) => m.name === state.model)
   const answering = streaming && view.mode !== 'compact'
+  // ↑ in the box: this session's messages, newest first, then what this folder sent before (the terminal's too).
+  const sentHere = useMemo(() => path.flatMap((m) => (m.role === 'user' && !m.summary ? [m.content] : [])).reverse(), [path])
+  const older = useFolderHistory()
+  const history: RecallSource = { here: sentHere, older }
   const lastUsage = [...path].reverse().find((m) => m.role === 'assistant' && m.promptTokens != null)
   const context = contextOf(lastUsage, state.context, null)
 
@@ -246,7 +252,7 @@ export function Thread({
    * it is: it would read every file again after each answer.
    */
   const refresh = useCallback(async () => {
-    for (const queryKey of [changesQuery.queryKey, ['code', 'files'], sessionsQuery.queryKey]) void queryClient.invalidateQueries({ queryKey })
+    for (const queryKey of [changesQuery.queryKey, ['code', 'files'], sessionsQuery.queryKey, historyQuery.queryKey]) void queryClient.invalidateQueries({ queryKey })
     await Promise.all([queryClient.invalidateQueries({ queryKey: stateQuery.queryKey }), queryClient.invalidateQueries({ queryKey: sessionQuery.queryKey })])
   }, [queryClient])
 
@@ -346,6 +352,7 @@ export function Thread({
       big={big}
       mode={<ModePicker state={state} onChange={(mode) => void settings({ mode })} />}
       context={context ? <ContextGauge context={context} onCompact={!streaming && path.length >= 2 ? () => void compact() : undefined} busy={streaming} /> : null}
+      history={history}
     />
   )
 
@@ -468,14 +475,45 @@ export function Thread({
   )
 }
 
+/** What this folder sent before, newest first (the terminal's too, as code-arena keeps it): asked for the first time ↑ needs it. */
+function useFolderHistory(): Older {
+  const queryClient = useQueryClient()
+  const [on, setOn] = useState(false)
+  const q = useQuery({ ...historyQuery, enabled: on, staleTime: 30_000 })
+  const items = useMemo(() => q.data?.map((e) => e.text) ?? [], [q.data])
+  const load = async () => {
+    setOn(true)
+    return (await queryClient.fetchQuery({ ...historyQuery, staleTime: 30_000 })).map((e) => e.text)
+  }
+  return { items, done: on && !q.isFetching, load }
+}
+
 /**
  * Where the message is written, as in the chat: Enter sends, Shift+Enter adds a
- * line. /compact summarizes the conversation, /clear starts a new session. A
- * message that did not reach the server comes back into the box.
+ * line, ↑ brings back what was sent before. /compact summarizes the
+ * conversation, /clear starts a new session. A message that did not reach the
+ * server comes back into the box.
  */
-function Composer({ streaming, onSend, onStop, big, mode, context }: { streaming: boolean; onSend: (text: string) => Promise<boolean>; onStop: () => void; big: boolean; mode: ReactNode; context: ReactNode }) {
+function Composer({
+  streaming,
+  onSend,
+  onStop,
+  big,
+  mode,
+  context,
+  history,
+}: {
+  streaming: boolean
+  onSend: (text: string) => Promise<boolean>
+  onStop: () => void
+  big: boolean
+  mode: ReactNode
+  context: ReactNode
+  history: RecallSource
+}) {
   const [text, setText] = useState('')
   const area = useRef<HTMLTextAreaElement>(null)
+  const recall = useRecall({ area, setText, source: history })
   useEffect(() => {
     const el = area.current
     if (!el) return
@@ -488,10 +526,12 @@ function Composer({ streaming, onSend, onStop, big, mode, context }: { streaming
     if (!canSend) return
     const sent = text.trim()
     setText('')
+    recall.reset()
     if (!(await onSend(sent))) setText((now) => now || sent)
     area.current?.focus()
   }
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (recall.onKeyDown(e)) return
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       void submit()
@@ -519,7 +559,9 @@ function Composer({ streaming, onSend, onStop, big, mode, context }: { streaming
       />
       <div className="flex items-center gap-2 px-2 pt-1 pb-2">
         {mode}
-        <span className="hidden text-xs text-muted-foreground @2xl:inline">Enter to send · Shift+Enter for a new line · /compact · /clear</span>
+        <span className="hidden text-xs text-muted-foreground @2xl:inline">
+          Enter to send · Shift+Enter for a new line<span className="hidden @4xl:inline"> · ↑ for what you sent before</span> · /compact · /clear
+        </span>
         <span className="ml-auto" />
         {context}
         {streaming ? (

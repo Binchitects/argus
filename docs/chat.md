@@ -126,6 +126,26 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   (Workspace → Prompts): yours, your groups', the company's or a plugin's.
   Chosen, it asks for its blanks and sends it filled in
   ([below](#prompts-and-slash-commands)).
+- **What you sent before (↑).** As in Claude's apps: with the box empty, or
+  the caret on its first line, **↑** brings back your last message in this
+  chat, then older ones; when this chat has none left, your messages in your
+  other chats (archived ones too), newest first, each text once. A scheduled
+  task's runs are not among them (an event's text rides in their questions),
+  nor what a fork copied from the chat it came from: someone else's questions,
+  or yours, still in that chat. **↓** goes back toward the newest, and past
+  it to what you were typing, kept as it was; **Esc** goes straight back to it.
+  **Enter** sends the message again, as a new one; editing it changes a copy,
+  never the message it came from. Only its
+  words come back, not its files. In anything of several lines, a draft or a
+  message brought back, ↑ and ↓ move between its lines first, and go on from
+  its first or last line. A message of one line brought back steps on with
+  the next ↑ at once, even when the box wraps it; once you move the caret
+  into it or edit it, ↑ and ↓ move between its rows first. The `/` menu
+  keeps its own arrows while it is open, and a message brought back that
+  starts with `/` does not open it. Keys with Shift, Ctrl, Alt or ⌘, a
+  selection, and typing that composes (an input method) are the box's own.
+  Messages over 32,000 characters (a pasted document) stay in their chat.
+  Phones have no arrow keys: nothing changes there.
 - **Rating answers.** Thumbs up or down under each answer. Down asks why:
   wrong, incomplete, too long, unsafe, ignored instructions or other, and a
   few words if you like. One rating per answer; rate again to change it, or
@@ -1197,7 +1217,11 @@ use and edit one); a new chat takes `assistantId`.
   and the company's; the block's budget. And the prompt library: a person's own, shared with their groups
   (only the owner changes it), the company's (admins only, audited), the
   checks on names and groups, and a plugin's `/triage` installed with it, for
-  whoever may use its tool, and removed with it.
+  whoever may use its tool, and removed with it. And ↑'s history: one's own
+  messages across chats, newest first, a page at a time, archived chats' too,
+  a deleted chat's and pasted documents left out, and nobody else's: not a
+  triggered task's run, nor a shared chat's questions copied into a fork (what
+  is written in the fork after counts).
   Also ratings (kept, changed, taken back, answers and known reasons only, the
   owner only), the quality page's numbers per model and assistant, a shared chat
   read by an admin and audited, and closed again; arena mode (both models
@@ -1240,6 +1264,14 @@ use and edit one); a new chat takes `assistantId`.
     see" note, settings validation, and hostile HTML and maths
   - Argus's answers linking to GitLab, **Raw answer**, a failed tool in its
     own words, and the image viewer (arrows, keys, actual size)
+  - ↑ and ↓ in the box: this chat's messages newest first, then the person's
+    other chats (asked for only then, each text once; a new chat's box goes
+    straight to them), back down to the draft
+    kept, Esc to it, a message brought back sent as a new one and edited as a
+    copy, the `/` menu keeping its arrows (and not opened by a message
+    brought back), lines of a draft or of a message brought back first (a
+    line brought back that the box wraps stepping on at once), and keys that
+    compose or carry Shift, Ctrl, Alt or ⌘ left to the box
   - the list's fork, archive, Archived view and unarchive; fork from an
     answer; the question rail; the archived notice
   - Auto in the model menu, its note under an answer (the small model's, or

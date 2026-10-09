@@ -152,6 +152,71 @@ describe('dashboards', () => {
     expect(within(panel).getByRole('button', { name: 'Show chart' })).toBeInTheDocument()
   })
 
+  it('opens on the last hour, and a range chosen goes in the address, so a link opens the same view', async () => {
+    const result = { json: { intervalMs: 1000, results: [{ refId: 'A', format: 'time_series', table: null, error: null, series: [{ name: 'up', points: [[1, 1]] }] }] } }
+    const def = (uid: string, time?: { from: string; to: string }) => ({
+      json: { uid, title: uid, ...(time ? { time } : {}), panels: [{ key: 0, type: 'stat', title: 'Up', gridPos: { x: 0, y: 0, w: 6, h: 4 }, supported: true, datasources: ['prometheus'] }] },
+    })
+    const calls = fakeApi(admin, {
+      'GET /api/dashboards/plain': () => def('plain'),
+      'GET /api/dashboards/day': () => def('day', { from: 'now-24h', to: 'now' }),
+      'POST /api/dashboards/plain/panels/0/query': () => result,
+      'POST /api/dashboards/day/panels/0/query': () => result,
+    })
+    /** The span of the last query a panel of this dashboard made, in minutes. */
+    const asked = (uid: string) => {
+      const body = calls.filter((c) => c.path === `/api/dashboards/${uid}/panels/0/query`).at(-1)?.body as { from: string; to: string } | undefined
+      return body ? Math.round((Date.parse(body.to) - Date.parse(body.from)) / 60_000) : null
+    }
+
+    // A dashboard whose file gives no range: the last hour, never an empty menu.
+    const { router, unmount } = renderApp('/admin/dashboards/plain')
+    const range = await screen.findByRole('combobox', { name: 'Time range' })
+    expect(range).toHaveTextContent('Last hour')
+    await waitFor(() => expect(asked('plain')).toBe(60))
+    expect(router.state.location.search).toBe('')
+
+    await userEvent.click(range)
+    expect((await screen.findAllByRole('option')).map((o) => o.textContent)).toEqual(['Last 5 minutes', 'Last 15 minutes', 'Last hour', 'Last 6 hours', 'Last 24 hours', 'Last 7 days', 'Last 30 days', 'Last 90 days'])
+    await userEvent.click(screen.getByRole('option', { name: 'Last 6 hours' }))
+    await waitFor(() => expect(asked('plain')).toBe(360))
+    expect(new URLSearchParams(router.state.location.search).get('from')).toBe('now-6h')
+    expect(new URLSearchParams(router.state.location.search).get('to')).toBe('now')
+    unmount()
+
+    // A file's own range stands until another is chosen; a link's range, even one not in the menu, is the view it opens.
+    const day = renderApp('/admin/dashboards/day')
+    expect(await screen.findByRole('combobox', { name: 'Time range' })).toHaveTextContent('Last 24 hours')
+    day.unmount()
+    renderApp('/admin/dashboards/day?from=now-30m&to=now')
+    expect(await screen.findByRole('combobox', { name: 'Time range' })).toHaveTextContent('Last 30 minutes')
+    await waitFor(() => expect(asked('day')).toBe(30))
+  })
+
+  it('a link’s range that does not end now shows its times, the day once, in a menu no wider than the page', async () => {
+    fakeApi(admin, {
+      'GET /api/dashboards/plain': () => ({ json: { uid: 'plain', title: 'plain', panels: [] } }),
+    })
+    const from = new Date(2025, 9, 9, 10, 53).getTime()
+    renderApp(`/admin/dashboards/plain?from=${from}&to=${from + 3_600_000}`)
+    const range = await screen.findByRole('combobox', { name: 'Time range' })
+    const day = new Date(from).toLocaleDateString(undefined, { dateStyle: 'medium' })
+    expect(range.textContent?.split(day).length).toBe(2)
+    expect(range).toHaveTextContent(`to ${new Date(from + 3_600_000).toLocaleTimeString(undefined, { timeStyle: 'short' })}`)
+    // As wide as its label up to the page's width; the label is the span the menu cuts short with an ellipsis.
+    expect(range).toHaveClass('w-auto', 'max-w-full')
+    expect(range.firstElementChild?.tagName).toBe('SPAN')
+    expect(range.className).toContain('[&>span]:truncate')
+  })
+
+  it('a range in the address that cannot be read is the last hour', async () => {
+    fakeApi(admin, {
+      'GET /api/dashboards/plain': () => ({ json: { uid: 'plain', title: 'plain', panels: [] } }),
+    })
+    renderApp('/admin/dashboards/plain?from=yesterday-ish&to=now')
+    expect(await screen.findByRole('combobox', { name: 'Time range' })).toHaveTextContent('Last hour')
+  })
+
   it('is for admins only', async () => {
     fakeApi(member)
     renderApp('/admin/dashboards')

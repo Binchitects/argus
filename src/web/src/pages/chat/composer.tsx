@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils'
 import type { ContextView } from './context'
 import { ContextGauge } from './context-gauge'
 import { VoiceButton } from './media'
+import { useRecall, type RecallSource } from './recall'
 import { PromptFields, SlashMenu } from './slash'
 import type { Attachment, ChatModel } from './types'
 
@@ -26,7 +27,8 @@ import type { Uploads } from './uploads'
  * by the button, by pasting, or by dropping them on the page. A question that did
  * not reach the server comes back here rather than being lost. "/" at the start
  * finds a prompt of the library: chosen, its text comes into the box with a field
- * for each of its blanks, and sending fills them in.
+ * for each of its blanks, and sending fills them in. ↑ brings back what was sent
+ * before (useRecall).
  */
 export function Composer({
   streaming,
@@ -48,6 +50,7 @@ export function Composer({
   researchOff,
   compare,
   talk,
+  history,
 }: {
   streaming: boolean
   onSend: (text: string) => Promise<boolean>
@@ -76,6 +79,8 @@ export function Composer({
   compare?: ReactNode
   /** The Talk button: a voice conversation. */
   talk?: ReactNode
+  /** What ↑ brings back: this chat's messages, then the person's others. */
+  history?: RecallSource
 }) {
   const [text, setText] = useState('')
   const researchOffId = useId()
@@ -96,6 +101,8 @@ export function Composer({
   const [missing, setMissing] = useState<string[]>([])
   const fields = useRef<Record<string, HTMLTextAreaElement | null>>({})
   const blanks = chosen ? variablesOf(text) : []
+  // ↑ and ↓: what was sent before. Not while a prompt's blanks are filled in; a message brought back keeps the / menu shut.
+  const recall = useRecall({ area, setText, source: history, enabled: !chosen, onRecall: setClosedAt })
 
   useEffect(() => {
     const el = area.current
@@ -145,6 +152,7 @@ export function Composer({
     const before = { text, chosen, values }
     setText('')
     unchoose()
+    recall.reset()
     // An answer is running: this one waits its turn (or goes at once with Send now).
     if (!(await (streaming && onQueue ? onQueue(t) : onSend(t)))) {
       setText((now) => now || before.text)
@@ -173,6 +181,7 @@ export function Composer({
         return
       }
     }
+    if (recall.onKeyDown(e)) return
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       void submit()

@@ -132,8 +132,12 @@ test('a chart has a table view, and the time range changes what is asked', async
   } else {
     await expect(panel.getByText('No data in this time range.')).toBeVisible()
   }
+  // The dashboard opens on the last hour; the range chosen goes in the address.
+  await expect(page.getByRole('combobox', { name: 'Time range' }).first()).toHaveText('Last hour')
   const request = page.waitForRequest((r) => r.url().includes('/panels/') && r.method() === 'POST')
-  await page.getByRole('radio', { name: '7 days' }).first().click()
+  await page.getByRole('combobox', { name: 'Time range' }).first().click()
+  await page.getByRole('option', { name: 'Last 7 days' }).click()
+  await expect(page).toHaveURL(/[?&]from=now-7d&to=now/)
   const body = (await request).postDataJSON()
   expect(Object.keys(body).sort()).toEqual(['from', 'intervalMs', 'to'])
   expect(new Date(body.to).getTime() - new Date(body.from).getTime()).toBeGreaterThan(6.9 * 86400000)

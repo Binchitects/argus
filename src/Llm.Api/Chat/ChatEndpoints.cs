@@ -86,6 +86,7 @@ public static partial class ChatEndpoints
         g.MapGet("/attachments/{id:guid}/content", ContentAsync);
         g.MapGet("/attachments/{id:guid}/pages", PagesAsync);
         g.MapGet("/search", SearchAsync);
+        g.MapGet("/history", HistoryAsync);
         g.MapGet("/attachments/{id:guid}/pages/{number:int}", PageAsync);
     }
 
