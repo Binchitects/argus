@@ -36,7 +36,8 @@ function mark(key: string, on: boolean) {
  */
 export function useResearchGone(person: string | undefined, can: boolean) {
   useEffect(() => {
-    const key = `research-had:${person ?? ''}`
+    if (!person) return
+    const key = `research-had:${person}`
     if (can) {
       mark(key, true)
     } else if (had(key)) {
