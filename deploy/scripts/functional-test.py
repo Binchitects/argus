@@ -317,8 +317,8 @@ def main():
     rec("rate", "past its requests a minute a key is refused (429) with Retry-After, naming the limit",
         code == 200 and status == 429 and bool(retry_after) and "Limit type: requests" in body,
         f"{[t[0] for t in tries]}, Retry-After {retry_after}")
-    code, own = person.app("GET", "/api/account/keys")
-    limit = (own.get("limits") or {}).get("requestsPerMinute") or {}
+    code, own = person.app("GET", "/api/account/keys/limits")
+    limit = (own if isinstance(own, dict) else {}).get("requestsPerMinute") or {}
     rec("rate", "the person sees the limit, their own, on their key's card", (limit.get("value"), limit.get("from")) == (1, "person"), f"HTTP {code} {limit}")
 
     # ------------------------------------------------------------ SSO + roles

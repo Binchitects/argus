@@ -17,7 +17,7 @@ What runs today, what it leaves out, and the tests that would close the gap.
 | **Restore and rollback** | `scripts/restore-test.sh [--from DIR]`, `scripts/rollback-test.sh FROM_TAG TO_TAG` | a backup restores into a throwaway project beside the live one, with its people, chats, settings and spend; a release rolls back by restoring the backup taken before the upgrade | a host with the stack's images |
 | **Clients** | `scripts/clients-check.py` | the API as developers use it: OpenAI and Anthropic protocols, streaming, tool calls, spend per key, Argus over MCP, Qwen Code and DeepSeek Harness through the API and MCP | a running stack |
 | **Scale** | `scripts/scale-test.py` | many people at once: the chat's queue (and no answer carrying another's secret), every key at once, a burst of sandbox jobs | a running stack |
-| **Functional** | `scripts/functional-test.py` | what a person does: sign-in, provisioning, key rotation, budget exhaustion and restoration, password reset, per-person billing, access per model, fair use, dashboards and logs for admins only | a running stack |
+| **Functional** | `scripts/functional-test.py` | what a person does: sign-in, provisioning, key rotation, budget exhaustion and restoration, password reset, per-person billing, access per model, fair use, a key's rate limit (refused past it, seen by the person, the chat not held to it), dashboards and logs for admins only | a running stack |
 | **Sandbox** | `scripts/sandbox-check.py` | the running sandbox's isolation: no network, no reading others' runs, limits bind, nothing outlives a run | a running stack |
 | **Dashboard audit** | `scripts/audit-dashboards.py` | every panel's queries in the app: no errors, no values out of range | a running stack |
 
@@ -72,8 +72,14 @@ emitted), `dcgm-exporter`, `promtail` (a log line reaches Loki), `langfuse-worke
 
 ### S4 — Gateway *(good)*
 
-Covered by `functional-test.py`. Missing: per-person **rate** limits (as opposed
-to spend), and behaviour when the engine is down (retry, then a clear error).
+Covered by `functional-test.py`, rate limits included: a key held to one
+request a minute is refused past it with HTTP 429, `Retry-After` and
+`Limit type: requests`, the person sees the limit (theirs) on their key's card,
+and the chat answers meanwhile (checks named `rate`). `RateLimitTests` covers
+the rest without a stack: the company's, a group's and a person's own, the
+key sync (two replicas, a change made while it runs), new keys a few an hour,
+Arena MCP's pictures counted, and refusals counted apart from requests.
+Missing: behaviour when the engine is down (retry, then a clear error).
 
 ### S5 — Argus *(strong unit, weak integration)*
 
