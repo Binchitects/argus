@@ -54,7 +54,10 @@ internal sealed class McpClient : IAsyncDisposable
     public string? ServerName { get; private set; }
     public List<JsonObject> Tools { get; private set; } = [];
 
-    /// <summary>Connects and lists the tools; the handshake has 20 seconds.</summary>
+    /// <summary>How long the handshake (initialize, then the tools listed) may take.</summary>
+    public static readonly TimeSpan Handshake = TimeSpan.FromSeconds(20);
+
+    /// <summary>Connects and lists the tools, within <see cref="Handshake"/>.</summary>
     public static async Task<McpClient> ConnectAsync(string name, IMcpTransport transport, CancellationToken ct)
     {
         var client = new McpClient(name, transport);
@@ -63,7 +66,7 @@ internal sealed class McpClient : IAsyncDisposable
             http.Reinitialize = client.InitializeAsync;
         }
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(TimeSpan.FromSeconds(20));
+        deadline.CancelAfter(Handshake);
         try
         {
             await client.InitializeAsync(deadline.Token);

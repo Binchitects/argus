@@ -211,6 +211,28 @@ public sealed class PersonAccessTests
     }
 }
 
+/// <summary>GitLab asked for a bounded number of member lists at once, however many people ask.</summary>
+public sealed class MemberDirectoryTests : IAsyncLifetime
+{
+    readonly FakePlatform _platform = new() { GitLabDelay = TimeSpan.FromMilliseconds(150) };
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public async Task DisposeAsync() => await _platform.DisposeAsync();
+
+    [Fact]
+    public async Task People_resolving_at_the_same_moment_ask_gitlab_for_at_most_eight_member_lists_at_once()
+    {
+        var directory = new MemberDirectory(GitLabConfig.Create(_platform.Url, "svc"));
+        // Four people's agents reconnect together after a restart, each with 16 projects of their own: 64 lists to fetch.
+        var people = Enumerable.Range(0, 4).Select(p => (IReadOnlyCollection<long>)[.. Enumerable.Range(0, 16).Select(i => 1000L + p * 100 + i)]).ToList();
+        await Task.WhenAll(people.Select(ids => Task.Run(() => directory.Prefetch(ids)))).WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(64, _platform.GitLabCalls);
+        // Each person's are fetched in parallel, but not eight for each of them: eight for all of them.
+        Assert.InRange(_platform.GitLabMostAtOnce, 2, MemberDirectory.Parallel);
+    }
+}
+
 /// <summary>The key check asked once for requests that bring the same key together.</summary>
 public sealed class ArenaKeySingleFlightTests : IAsyncLifetime
 {

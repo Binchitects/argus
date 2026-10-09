@@ -139,7 +139,10 @@ public sealed class MemberDirectory(GitLabConfig cfg, HttpClient? client = null,
 {
     public const int MaintainerLevel = 40;
     const int MaxMemberPages = 50;
-    /// <summary>Member lists fetched at once when a person's repositories are resolved: GitLab is asked in parallel, not one project after another.</summary>
+    /// <summary>
+    /// Member lists asked of GitLab at once, for everyone together: a person's repositories are resolved in
+    /// parallel, not one project after another, and twenty people resolving at the same moment still send this many.
+    /// </summary>
     public const int Parallel = 8;
 
     public GitLabConfig Config { get; } = cfg;
@@ -149,6 +152,7 @@ public sealed class MemberDirectory(GitLabConfig cfg, HttpClient? client = null,
     readonly Dictionary<string, (double At, JsonObject? Value)> _users = new(StringComparer.Ordinal);
     readonly System.Collections.Concurrent.ConcurrentDictionary<object, object> _fetching = new();
     readonly Lazy<HttpClient> _shared = new(() => client ?? Tls.ClientFor(cfg, 15.0));
+    readonly SemaphoreSlim _lists = new(Parallel, Parallel);
 
     public sealed record Member(long Id, string Username, string Name, int AccessLevel, string State);
 
@@ -213,6 +217,13 @@ public sealed class MemberDirectory(GitLabConfig cfg, HttpClient? client = null,
     /// <summary>Everyone with access to a project, inherited memberships included.</summary>
     public List<Member> Members(long gitlabId) => Cached(_members, gitlabId, () =>
     {
+        _lists.Wait();
+        try { return FetchMembers(gitlabId); }
+        finally { _lists.Release(); }
+    });
+
+    List<Member> FetchMembers(long gitlabId)
+    {
         var output = new List<Member>();
         for (int page = 1; page <= MaxMemberPages; page++)
         {
@@ -231,7 +242,7 @@ public sealed class MemberDirectory(GitLabConfig cfg, HttpClient? client = null,
             if (batch.Count < Acl.PerPage) break;
         }
         return output;
-    });
+    }
 
     /// <summary>A GitLab account by exact email (public or, for an admin token, private), else by exact username.</summary>
     public JsonObject? User(string? username = null, string? email = null)

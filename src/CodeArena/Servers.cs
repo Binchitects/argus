@@ -93,6 +93,19 @@ internal sealed class ServerLink : IAsyncDisposable
 
     private async Task LoopAsync()
     {
+        try
+        {
+            await TryAsync();
+        }
+        finally
+        {
+            // However the loop ends, its first try has: nothing waits for it for ever.
+            _first.TrySetResult();
+        }
+    }
+
+    private async Task TryAsync()
+    {
         var failures = 0;
         while (!_stop.IsCancellationRequested)
         {
@@ -118,10 +131,7 @@ internal sealed class ServerLink : IAsyncDisposable
                 NextTry = null;
                 failures = 0;
                 Changed?.Invoke(this, client, old);
-                if (old is not null)
-                {
-                    await old.DisposeAsync();
-                }
+                await CloseAsync(old);
                 _first.TrySetResult();
                 // Connected: nothing to do until a retry is asked for (or a call finds the server gone).
                 await Task.WhenAny(woken, Task.Delay(Timeout.Infinite, _stop.Token));
@@ -143,18 +153,25 @@ internal sealed class ServerLink : IAsyncDisposable
             {
                 (State, Error, wait) = (LinkState.Failed, $"{Url ?? Title} did not answer in time.", Backoff[Math.Min(failures++, Backoff.Length - 1)]);
             }
-            catch (Exception e) when (e is IOException or HttpRequestException or InvalidOperationException or System.ComponentModel.Win32Exception)
+            catch (Exception e)
             {
-                (State, Error, wait) = (LinkState.Failed, e.Message, Backoff[Math.Min(failures++, Backoff.Length - 1)]);
+                // Anything else (an address .NET cannot use, a scheme it does not speak, a fault in what hears of the change)
+                // is a failure like the others: said, and tried again later. It never ends the loop.
+                (State, Error, wait) = (LinkState.Failed, Url is { } url && !e.Message.Contains(url, StringComparison.Ordinal) ? $"{url}: {e.Message}" : e.Message,
+                    Backoff[Math.Min(failures++, Backoff.Length - 1)]);
             }
             var gone = Client;
             Client = null;
             NextTry = DateTime.UtcNow + wait;
-            Changed?.Invoke(this, null, gone);
-            if (gone is not null)
+            try
             {
-                await gone.DisposeAsync();
+                Changed?.Invoke(this, null, gone);
             }
+            catch
+            {
+                // What hears of it failed too: the link still tries again, and its state says why it is down.
+            }
+            await CloseAsync(gone);
             _first.TrySetResult();
             try
             {
@@ -165,18 +182,32 @@ internal sealed class ServerLink : IAsyncDisposable
                 break;
             }
         }
-        _first.TrySetResult();
+    }
+
+    /// <summary>Lets a client go; one that fails as it closes is gone all the same.</summary>
+    private static async Task CloseAsync(McpClient? client)
+    {
+        if (client is null)
+        {
+            return;
+        }
+        try
+        {
+            await client.DisposeAsync();
+        }
+        catch
+        {
+            // Its transport was broken already.
+        }
     }
 
     public async ValueTask DisposeAsync()
     {
         await _stop.CancelAsync();
         await Task.WhenAny(_loop, Task.Delay(TimeSpan.FromSeconds(3)));
-        if (Client is { } client)
-        {
-            Client = null;
-            await client.DisposeAsync();
-        }
+        var client = Client;
+        Client = null;
+        await CloseAsync(client);
         _stop.Dispose();
     }
 }

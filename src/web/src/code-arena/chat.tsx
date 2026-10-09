@@ -236,6 +236,11 @@ export function Thread({
   const answering = streaming && view.mode !== 'compact'
   const lastUsage = [...path].reverse().find((m) => m.role === 'assistant' && m.promptTokens != null)
   const context = contextOf(lastUsage, state.context, null)
+  // The commands the turn watches, and any still running that no turn here watches (each with its Stop).
+  const jobs = [
+    ...view.jobs,
+    ...state.jobs.filter((j) => j.running && !view.jobs.some((v) => v.id === j.id)).map((j): LiveJob => ({ ...j, output: '', failed: false, unwatched: true })),
+  ]
 
   useEffect(() => {
     const el = scroller.current
@@ -462,7 +467,7 @@ export function Thread({
                 <ArrowDown />
               </Button>
             )}
-            {view.jobs.length > 0 && <Jobs jobs={view.jobs} />}
+            {jobs.length > 0 && <Jobs jobs={jobs} onStopped={() => void queryClient.invalidateQueries({ queryKey: stateQuery.queryKey })} />}
             {composer(false)}
           </div>
         </>
@@ -476,17 +481,17 @@ export function Thread({
  * one's output as it comes, how it ended, and Stop. The turn waits for them;
  * the agent is told how each ended.
  */
-function Jobs({ jobs }: { jobs: LiveJob[] }) {
+function Jobs({ jobs, onStopped }: { jobs: LiveJob[]; onStopped: () => void }) {
   return (
     <section aria-label="Commands with no time limit" className="mb-2 grid max-h-[45vh] gap-2 overflow-y-auto">
       {jobs.map((j) => (
-        <JobBox key={j.id} job={j} />
+        <JobBox key={j.id} job={j} onStopped={onStopped} />
       ))}
     </section>
   )
 }
 
-function JobBox({ job }: { job: LiveJob }) {
+function JobBox({ job, onStopped }: { job: LiveJob; onStopped: () => void }) {
   const [open, setOpen] = useState(true)
   const [stopping, setStopping] = useState(false)
   const out = useRef<HTMLPreElement>(null)
@@ -500,6 +505,7 @@ function JobBox({ job }: { job: LiveJob }) {
     setStopping(true)
     try {
       await stopJob(job.id)
+      onStopped()
     } catch (e) {
       setStopping(false)
       toast.error(errorMessage(e))
@@ -534,7 +540,7 @@ function JobBox({ job }: { job: LiveJob }) {
       </div>
       {open && (
         <pre ref={out} aria-label={`Output of job ${job.id}`} className="max-h-48 overflow-auto border-t bg-muted/40 px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all">
-          {text || 'No output yet.'}
+          {job.unwatched ? 'Its output is not streamed here: the agent reads it with command_output.' : text || 'No output yet.'}
         </pre>
       )}
     </div>

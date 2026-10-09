@@ -128,8 +128,9 @@ credential) is all a request waits for: `initialize`, `tools/list` and the
 documentation tools answer at once. The person's repositories are resolved
 apart, from their GitLab membership: started in the background as they
 connect, and waited for only by the first tool that reads code. The member
-lists of the indexed projects are fetched eight at a time on one connection
-pool, once for everyone asking at the same moment; the answer is kept ten
+lists of the indexed projects are fetched at most eight at a time for everyone
+together, on one connection pool, each once for everyone asking at the same
+moment; the answer is kept ten
 minutes, then served while a fresh one is fetched (for an hour at most while
 GitLab cannot answer). With GitLab down, an agent still connects, the
 documentation tools work, and a code tool says why it cannot answer.

@@ -71,6 +71,11 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             throw new StartException("Not signed in to an Arena yet. Run: code-arena login");
         }
+        // Said now, not found later as a server that never connects.
+        if (config.WrongAddress(env.Paths.ConfigFile) is { } wrong)
+        {
+            throw new StartException(wrong);
+        }
         HttpClient http;
         try
         {
@@ -263,6 +268,11 @@ internal sealed partial class Runtime : IAsyncDisposable
             if (server.Url is not { Length: > 0 } && server.Command is not { Length: > 0 })
             {
                 Ui.Warn($"MCP server {server.Name} has neither a command nor a url: skipped.");
+                continue;
+            }
+            if (server.Url is { Length: > 0 } address && !Config.IsWebAddress(address))
+            {
+                Ui.Warn($"MCP server {server.Name}: {address} is not an http or https address: skipped.");
                 continue;
             }
             Link(new ServerLink(server.Name, server.Name, server.Url ?? server.Command, ct =>

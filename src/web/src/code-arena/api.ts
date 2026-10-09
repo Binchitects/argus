@@ -141,6 +141,8 @@ export interface LiveJob {
   status: string
   output: string
   failed: boolean
+  /** Running, but no turn on this page streams it: known from the state, with its Stop. */
+  unwatched?: boolean
 }
 
 /** The output a page keeps of each command: the end of it (the agent reads the rest with command_output). */

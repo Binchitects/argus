@@ -158,8 +158,8 @@ internal sealed class Ui(TextReader input, TextWriter output, TextWriter error, 
     /// <summary>A secret (the API key): not echoed on a terminal.</summary>
     public string? ReadSecret(string prompt) => SecretReader is not null ? SecretReader(prompt) : ReadLine(prompt);
 
-    /// <summary>Asks to allow an action: yes, no, or always (for this session). No one there to ask is a no.</summary>
-    public Approval Ask(string question, string always)
+    /// <summary>Asks to allow an action: yes, no, or always (for this session) where <paramref name="always"/> says what it covers. No one there to ask is a no.</summary>
+    public Approval Ask(string question, string? always)
     {
         if (!CanAsk)
         {
@@ -167,14 +167,14 @@ internal sealed class Ui(TextReader input, TextWriter output, TextWriter error, 
         }
         while (true)
         {
-            var answer = ReadLine($"{Yellow("?")} {question} {Dim($"[y]es, [n]o, [a]lways {always}")} › ")?.Trim().ToLowerInvariant();
+            var answer = ReadLine($"{Yellow("?")} {question} {Dim(always is null ? "[y]es, [n]o" : $"[y]es, [n]o, [a]lways {always}")} › ")?.Trim().ToLowerInvariant();
             switch (answer)
             {
                 case null or "" or "n" or "no":
                     return Approval.No;
                 case "y" or "yes":
                     return Approval.Yes;
-                case "a" or "always":
+                case "a" or "always" when always is not null:
                     return Approval.Always;
             }
         }

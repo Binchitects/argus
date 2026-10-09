@@ -101,9 +101,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     private int? _thinkingMs;
     // How full the window was when no turn ran: the history is not read while a turn changes it.
     private long _lastUsed;
-    // The commands with no time limit: their output to the page, a few times a second, at most MaxJobOutput each.
-    private const int MaxJobOutput = 256 * 1024;
-    private readonly Dictionary<int, (StringBuilder Pending, long Sent, bool Flushing)> _jobOutput = [];
+    // The commands with no time limit: their output to the page as it comes, a few times a second, for as long as they run.
+    private readonly Dictionary<int, (StringBuilder Pending, bool Flushing)> _jobOutput = [];
 
     private WebApp(Runtime rt, WebAssets assets, HttpServer server)
     {
@@ -932,17 +931,20 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     private void JobStarted(CommandJob job) =>
         Emit(new JsonObject { ["type"] = "job", ["job"] = job.Id, ["command"] = job.Command, ["running"] = true, ["status"] = job.Status() });
 
-    /// <summary>A job's output, gathered for a quarter of a second at a time: the page gets a few events a second, not one per write.</summary>
+    /// <summary>
+    /// A job's output, gathered for a quarter of a second at a time: the page gets a few events a second, not one per
+    /// write, until the command ends. What comes faster than a page keeps (<see cref="Job.KeptOutput"/>) is sent as its end.
+    /// </summary>
     private void JobOutput(CommandJob job, string text)
     {
         lock (_jobOutput)
         {
-            (StringBuilder Pending, long Sent, bool Flushing) state = _jobOutput.TryGetValue(job.Id, out var s) ? s : (new StringBuilder(), 0L, false);
-            if (state.Sent + state.Pending.Length >= MaxJobOutput)
-            {
-                return;
-            }
+            (StringBuilder Pending, bool Flushing) state = _jobOutput.TryGetValue(job.Id, out var s) ? s : (new StringBuilder(), false);
             state.Pending.Append(text);
+            if (state.Pending.Length > Job.KeptOutput * 2)
+            {
+                state.Pending.Remove(0, state.Pending.Length - Job.KeptOutput);
+            }
             if (!state.Flushing)
             {
                 state.Flushing = true;
@@ -963,16 +965,11 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             }
             text = state.Pending.ToString();
             state.Pending.Clear();
-            var sent = state.Sent + text.Length;
-            if (sent >= MaxJobOutput)
-            {
-                text += "\n… (more output: the agent reads the latest with command_output)\n";
-            }
-            _jobOutput[id] = (state.Pending, sent, false);
+            _jobOutput[id] = (state.Pending, false);
         }
         if (text.Length > 0)
         {
-            Emit(new JsonObject { ["type"] = "job_output", ["job"] = id, ["text"] = text });
+            Current()?.EmitOutput(id, text);
         }
     }
 
@@ -1015,8 +1012,13 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     /// </summary>
     private sealed class Job(string kind)
     {
+        /// <summary>What a page keeps of a command's output, and so what a page that comes back is sent of it: the end.</summary>
+        public const int KeptOutput = 64 * 1024;
+
         private readonly object _gate = new();
-        private readonly List<string> _events = [];
+        // Each event as sent, or a command's output kept as one event (its end), in the place of its first piece.
+        private readonly List<object> _events = [];
+        private readonly Dictionary<int, OutputTail> _outputs = [];
         private readonly List<Channel<string>> _watchers = [];
         private bool _done;
 
@@ -1034,6 +1036,32 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                     return;
                 }
                 _events.Add(line);
+                foreach (var w in _watchers)
+                {
+                    w.Writer.TryWrite(line);
+                }
+            }
+        }
+
+        /// <summary>
+        /// A piece of a command's output: sent as it comes, however long the command runs; kept for a page that
+        /// comes back as the end of it only, so a command that writes for hours does not fill the memory.
+        /// </summary>
+        public void EmitOutput(int job, string text)
+        {
+            var line = Json.Line(new JsonObject { ["type"] = "job_output", ["job"] = job, ["text"] = text });
+            lock (_gate)
+            {
+                if (_done)
+                {
+                    return;
+                }
+                if (!_outputs.TryGetValue(job, out var tail))
+                {
+                    _outputs[job] = tail = new OutputTail(job);
+                    _events.Add(tail);
+                }
+                tail.Add(text);
                 foreach (var w in _watchers)
                 {
                     w.Writer.TryWrite(line);
@@ -1061,7 +1089,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             {
                 foreach (var e in _events)
                 {
-                    channel.Writer.TryWrite(e);
+                    channel.Writer.TryWrite(e is OutputTail tail ? tail.Event() : (string)e);
                 }
                 if (_done)
                 {
@@ -1073,6 +1101,34 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 }
             }
             return channel.Reader;
+        }
+
+        /// <summary>The end of a command's output so far, at most <see cref="KeptOutput"/>, with a line where the start was cut.</summary>
+        private sealed class OutputTail(int job)
+        {
+            private readonly StringBuilder _text = new();
+            private bool _cut;
+
+            public void Add(string text)
+            {
+                _text.Append(text);
+                if (_text.Length > KeptOutput * 2)
+                {
+                    _text.Remove(0, _text.Length - KeptOutput);
+                    _cut = true;
+                }
+            }
+
+            public string Event()
+            {
+                var text = _text.Length > KeptOutput ? _text.ToString(_text.Length - KeptOutput, KeptOutput) : _text.ToString();
+                return Json.Line(new JsonObject
+                {
+                    ["type"] = "job_output",
+                    ["job"] = job,
+                    ["text"] = _cut || _text.Length > KeptOutput ? "… (the start is not shown here: the agent reads the output with command_output)\n" + text : text,
+                });
+            }
         }
     }
 }

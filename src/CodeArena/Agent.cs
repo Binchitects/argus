@@ -172,22 +172,65 @@ internal sealed class Agent
         Session?.Message(message);
     }
 
-    /// <summary>One turn: the person's message in, the final answer out. Cancelling stops it and keeps the history valid.</summary>
+    /// <summary>
+    /// One turn: the person's message in, the final answer out. Cancelling stops it and keeps the history valid.
+    /// It never ends while a command it started with no time limit runs: those the person stops (Ctrl+C, Stop)
+    /// stop with it; when it fails (the gateway down), it still waits for them, watched, before the error comes out.
+    /// </summary>
     public async Task<string> RunAsync(string input, Spend turn, CancellationToken ct)
     {
         try
         {
-            return await TurnAsync(input, turn, ct);
+            var answer = await TurnAsync(input, turn, ct);
+            // Out of steps with a command still running: the turn ends when it does (the model hears of it next turn).
+            await WaitForAllJobsAsync(ct);
+            return answer;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested && Context.Jobs is { } jobs)
         {
-            // The person stopped the turn: the commands it ran with no time limit stop with it.
-            jobs.StopAll("by the person");
-            foreach (var job in jobs.All)
+            await StopJobsAsync(jobs);
+            throw;
+        }
+        catch (Exception e) when (Context.Jobs is { Running.Count: > 0 } jobs)
+        {
+            // Only the person stops a command with no time limit: a failed request to the model does not.
+            Warn($"The model cannot carry on: {Fmt.OneLine(e.Message, 300)} The commands still running are watched until they end " +
+                 "(Ctrl+C or Stop ends them); the model hears how they ended with your next message.");
+            try
             {
-                job.Reported = true;
+                await WaitForAllJobsAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                await StopJobsAsync(jobs);
+                throw;
             }
             throw;
+        }
+    }
+
+    /// <summary>The person stopped the turn: the commands it ran with no time limit stop with it, and their ends are said before the turn's.</summary>
+    private static async Task StopJobsAsync(CommandJobs jobs)
+    {
+        var running = jobs.Running;
+        jobs.StopAll("by the person");
+        // A stopped command ends in a moment (its output read to the end): the watchers hear of it while the turn is still theirs.
+        await Task.WhenAny(Task.WhenAll(running.Select(j => j.Done)), Task.Delay(TimeSpan.FromSeconds(5)));
+        foreach (var job in jobs.All)
+        {
+            job.Reported = true;
+        }
+    }
+
+    /// <summary>
+    /// Until no command with no time limit runs (only the person's Ctrl+C or Stop ends the wait); the model
+    /// hears how they ended at the next turn's start.
+    /// </summary>
+    private async Task WaitForAllJobsAsync(CancellationToken ct)
+    {
+        while (Context.Jobs?.Running is { Count: > 0 } running)
+        {
+            await WaitingAsync(running, Task.WhenAll(running.Select(j => j.Done)).WaitAsync(ct));
         }
     }
 
@@ -258,15 +301,17 @@ internal sealed class Agent
     }
 
     /// <summary>Until one of the running commands ends: no time limit, only the person's Ctrl+C or Stop ends the wait.</summary>
-    private async Task WaitForJobsAsync(CommandJobs jobs, CancellationToken ct)
+    private Task WaitForJobsAsync(CommandJobs jobs, CancellationToken ct) => WaitingAsync(jobs.Running, jobs.WaitAnyAsync(ct));
+
+    /// <summary>Says which commands the turn waits for, and shows it waiting, until <paramref name="wait"/> is done.</summary>
+    private async Task WaitingAsync(IReadOnlyList<CommandJob> running, Task wait)
     {
-        var running = jobs.Running;
         var what = string.Join(", ", running.Select(j => $"job {j.Id} ({Fmt.OneLine(j.Command, 40)})"));
         Ui.Info($"Waiting for {what} to end: no time limit, Ctrl+C stops {(running.Count == 1 ? "it" : "them")}.");
         Ui.StartSpinner($"Waiting for {(running.Count == 1 ? $"job {running[0].Id}" : $"{running.Count} jobs")}");
         try
         {
-            await jobs.WaitAnyAsync(ct);
+            await wait;
         }
         finally
         {

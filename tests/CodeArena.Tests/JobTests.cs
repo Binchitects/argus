@@ -227,12 +227,32 @@ public sealed class JobTests : IDisposable
                      "Say what you would have done; the person can run again with --mode auto-edit (edits) or --mode yolo (everything).",
             await cannot.CheckAsync(shell, Command("make", unlimited: true), default));
 
-        // Yolo runs it (watched; Ctrl+C or Stop ends it), but stopping one asks first.
-        var yolo = new Permissions(new Ui(new StringReader("n\n"), output, output, false, true), Mode.Yolo);
+        // Yolo runs it (watched; Ctrl+C or Stop ends it), but stopping one asks first, every time: no "always" is offered
+        // ("a" is no answer to it), and none is kept.
+        var said = new StringWriter();
+        var yolo = new Permissions(new Ui(new StringReader("n\na\ny\ny\n"), said, said, false, true), Mode.Yolo);
         Assert.Null(await yolo.CheckAsync(shell, Command("make", unlimited: true), default));
         Assert.Contains("declined", await yolo.CheckAsync(stop, new JsonObject { ["job"] = 1 }, default));
-        Assert.Contains("Allow stop_command?", output.ToString());
-        Assert.Contains("for stop_command", output.ToString());
+        Assert.Null(await yolo.CheckAsync(stop, new JsonObject { ["job"] = 1 }, default));
+        Assert.Null(await yolo.CheckAsync(stop, new JsonObject { ["job"] = 2 }, default));
+        Assert.Equal(4, System.Text.RegularExpressions.Regex.Matches(said.ToString(), @"Allow stop_command\?").Count);
+        Assert.Contains("[y]es, [n]o ›", said.ToString());
+        Assert.DoesNotContain("lways", said.ToString());
+
+        // The same in the IDE: its question carries no "always", and "always" sent anyway is a yes for this call only.
+        var questions = new List<ApprovalQuestion>();
+        var ide = new Permissions(new Ui(new StringReader(""), said, said, false, false), Mode.Yolo)
+        {
+            Asker = (q, _) =>
+            {
+                questions.Add(q);
+                return Task.FromResult(Approval.Always);
+            },
+        };
+        Assert.Null(await ide.CheckAsync(stop, new JsonObject { ["job"] = 1 }, default));
+        Assert.Null(await ide.CheckAsync(stop, new JsonObject { ["job"] = 1 }, default));
+        Assert.Equal(2, questions.Count);
+        Assert.All(questions, q => Assert.Null(q.Always));
     }
 
     [Fact]

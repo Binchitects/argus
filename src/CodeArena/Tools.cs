@@ -111,8 +111,8 @@ internal static class Modes
     };
 }
 
-/// <summary>A question for the web interface: the call waiting, and what "always" would cover.</summary>
-internal sealed record ApprovalQuestion(string CallId, ToolDef Tool, JsonObject Args, string Always)
+/// <summary>A question for the web interface: the call waiting, and what "always" would cover (null: it cannot be said, the call asks every time).</summary>
+internal sealed record ApprovalQuestion(string CallId, ToolDef Tool, JsonObject Args, string? Always)
 {
     /// <summary>Laya's probabilities for a command (LayaGuard), and why it asks when the mode would not.</summary>
     public string? Risk { get; init; }
@@ -142,6 +142,9 @@ internal sealed class Permissions(Ui ui, Mode mode)
     /// </summary>
     public Task GuardReady { get; set; } = Task.CompletedTask;
 
+    /// <summary>The longest a command waits for <see cref="GuardReady"/>: Arena's handshake time, so no command waits for ever.</summary>
+    public TimeSpan GuardWait { get; set; } = McpClient.Handshake;
+
     /// <summary>Null when the call may run; otherwise why not, for the model.</summary>
     public async Task<string?> CheckAsync(ToolDef tool, JsonObject args, CancellationToken ct, string? callId = null)
     {
@@ -158,9 +161,10 @@ internal sealed class Permissions(Ui ui, Mode mode)
             ToolKind.Edit => Mode == Mode.Ask,
             _ => Mode != Mode.Yolo,
         };
-        if (tool.Kind == ToolKind.Shell && !tool.AlwaysAsks)
+        if (tool.Kind == ToolKind.Shell && !tool.AlwaysAsks && !GuardReady.IsCompleted)
         {
-            await GuardReady.WaitAsync(ct);
+            await Task.WhenAny(GuardReady, Task.Delay(GuardWait, ct));
+            ct.ThrowIfCancellationRequested();
         }
         // A command Laya flags asks whatever the mode; its probabilities show whenever a command asks.
         var risk = tool.Kind == ToolKind.Shell && !tool.AlwaysAsks && Guard is { } guard ? await guard.AssessAsync(args.Str("command"), ct) : null;
@@ -169,7 +173,8 @@ internal sealed class Permissions(Ui ui, Mode mode)
         {
             return null;
         }
-        var (key, always) = tool.Kind switch
+        // A tool that asks every time (stop_command) offers no "always", and none is remembered for it.
+        var (key, always) = tool.AlwaysAsks ? ("", null) : tool.Kind switch
         {
             ToolKind.Edit => ("edit", "for file edits"),
             ToolKind.Shell when !tool.AlwaysAsks && CommandPrefix(args.Str("command")) is { Length: > 0 } prefix => unlimited
@@ -184,7 +189,7 @@ internal sealed class Permissions(Ui ui, Mode mode)
         await _asking.WaitAsync(ct);
         try
         {
-            if (_always.Contains(remembered))
+            if (always is not null && _always.Contains(remembered))
             {
                 return null;
             }
@@ -198,11 +203,11 @@ internal sealed class Permissions(Ui ui, Mode mode)
                 : ui.Ask(LayaGuard.Question(label, risk, ask), always);
             switch (answer)
             {
-                case Approval.Always:
+                case Approval.Always when always is not null:
                     _always.Add(key);
                     _always.Add(remembered);
                     return null;
-                case Approval.Yes:
+                case Approval.Yes or Approval.Always:
                     return null;
                 default:
                     return $"The person declined this {tool.Name} call. Ask them what to do instead, or find another way.";

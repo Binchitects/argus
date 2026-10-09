@@ -92,7 +92,6 @@ internal static class Net
         return chain.Build(leaf);
     }
 
-    /// <summary>What went wrong reaching an address, in words a person can act on.</summary>
     /// <summary>The name in the address does not resolve (as opposed to a server that is down or refuses).</summary>
     public static bool NoSuchHost(Exception e)
     {
@@ -106,6 +105,7 @@ internal static class Net
         return false;
     }
 
+    /// <summary>What went wrong reaching an address, in words a person can act on.</summary>
     public static string Explain(Exception e, string url)
     {
         for (var inner = e; inner is not null; inner = inner.InnerException)

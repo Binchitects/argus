@@ -79,7 +79,10 @@ export function StatusBar({ state, onChanges, onTerminal, onChat, onAbout }: { s
       )}
       {state.servers.length > 0 && (
         <Item onClick={() => setDialog('servers')} aria-label={`MCP servers: ${serversSaid(state.servers)}`} title="The MCP servers: Arena's, Argus's and your own" className={cn(down && 'bg-warning text-black')}>
-          {down ? <Unplug aria-hidden="true" /> : <Plug aria-hidden="true" />} {connected}/{state.servers.length}
+          {down ? <Unplug aria-hidden="true" /> : <Plug aria-hidden="true" />}
+          <span className="hidden tabular-nums md:inline">
+            {connected}/{state.servers.length}
+          </span>
         </Item>
       )}
       <Item
@@ -89,7 +92,8 @@ export function StatusBar({ state, onChanges, onTerminal, onChat, onAbout }: { s
         className={cn(used >= state.compactAt && 'bg-warning text-black')}
       >
         <Gauge aria-hidden="true" />
-        <span className="tabular-nums">
+        {/* The numbers from md up: on a phone the icon says it, so the model and About keep their room. */}
+        <span className="hidden tabular-nums md:inline">
           {formatValue(state.contextUsed)} / {formatValue(state.context)}
         </span>
       </Item>
@@ -114,19 +118,22 @@ export function StatusBar({ state, onChanges, onTerminal, onChat, onAbout }: { s
  * Kept in code-arena's config.json, as /compact-at keeps them.
  */
 function ContextSettings({ open, onOpenChange, state }: { open: boolean; onOpenChange: (open: boolean) => void; state: CodeState }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md text-foreground">
+        {/* Mounted at each opening: it starts from the session's values, not from what was typed and cancelled. */}
+        <ContextForm state={state} onDone={() => onOpenChange(false)} />
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ContextForm({ state, onDone }: { state: CodeState; onDone: () => void }) {
   const queryClient = useQueryClient()
   const [at, setAt] = useState(String(state.compactAt))
   const [target, setTarget] = useState(String(state.compactTarget))
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const reset = (o: boolean) => {
-    if (o) {
-      setAt(String(state.compactAt))
-      setTarget(String(state.compactTarget))
-      setError(null)
-    }
-    onOpenChange(o)
-  }
   const save = async (e: FormEvent) => {
     e.preventDefault()
     const a = Number(at)
@@ -137,7 +144,7 @@ function ContextSettings({ open, onOpenChange, state }: { open: boolean; onOpenC
     try {
       queryClient.setQueryData(stateQuery.queryKey, await changeSettings({ compactAt: a, compactTarget: t }))
       toast.success(`The session compacts at ${a}% of the window, keeping ${t}%.`)
-      onOpenChange(false)
+      onDone()
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -146,51 +153,49 @@ function ContextSettings({ open, onOpenChange, state }: { open: boolean; onOpenC
   }
   const used = share(state)
   return (
-    <Dialog open={open} onOpenChange={reset}>
-      <DialogContent className="max-w-md text-foreground">
-        <DialogHeader>
-          <DialogTitle>Context</DialogTitle>
-          <DialogDescription>
-            About {formatValue(state.contextUsed)} of {formatValue(state.context)} tokens in use ({used}%). When the conversation reaches the threshold, its older part is summarized and the recent part
-            kept whole.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="h-2 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-          <div className="relative h-full rounded-full bg-primary" style={{ width: `${Math.min(100, used)}%` }} />
+    <>
+      <DialogHeader>
+        <DialogTitle>Context</DialogTitle>
+        <DialogDescription>
+          About {formatValue(state.contextUsed)} of {formatValue(state.context)} tokens in use ({used}%). When the conversation reaches the threshold, its older part is summarized and the recent part kept
+          whole.
+        </DialogDescription>
+      </DialogHeader>
+      <div className="h-2 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+        <div className="relative h-full rounded-full bg-primary" style={{ width: `${Math.min(100, used)}%` }} />
+      </div>
+      <form className="grid gap-4" onSubmit={(e) => void save(e)} noValidate>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Compact at (% of the window)" hint={`Default ${compaction.defaultAt}%`}>
+            <Input type="number" inputMode="numeric" min={compaction.minAt} max={compaction.maxAt} value={at} onChange={(e) => setAt(e.target.value)} />
+          </Field>
+          <Field label="Keep the recent part within (%)" hint={`Default ${compaction.defaultTarget}%`}>
+            <Input type="number" inputMode="numeric" min={compaction.minTarget} max={Math.max(compaction.minTarget, Number(at) - compaction.gap)} value={target} onChange={(e) => setTarget(e.target.value)} />
+          </Field>
         </div>
-        <form className="grid gap-4" onSubmit={(e) => void save(e)} noValidate>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Compact at (% of the window)" hint={`Default ${compaction.defaultAt}%`}>
-              <Input type="number" inputMode="numeric" min={compaction.minAt} max={compaction.maxAt} value={at} onChange={(e) => setAt(e.target.value)} />
-            </Field>
-            <Field label="Keep the recent part within (%)" hint={`Default ${compaction.defaultTarget}%`}>
-              <Input type="number" inputMode="numeric" min={compaction.minTarget} max={Math.max(compaction.minTarget, Number(at) - compaction.gap)} value={target} onChange={(e) => setTarget(e.target.value)} />
-            </Field>
-          </div>
-          {error && (
-            <p role="alert" className="text-sm font-medium text-destructive">
-              {error}
-            </p>
-          )}
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => {
-                setAt(String(compaction.defaultAt))
-                setTarget(String(compaction.defaultTarget))
-                setError(null)
-              }}
-            >
-              Defaults
-            </Button>
-            <Button type="submit" loading={saving}>
-              Save
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+        {error && (
+          <p role="alert" className="text-sm font-medium text-destructive">
+            {error}
+          </p>
+        )}
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              setAt(String(compaction.defaultAt))
+              setTarget(String(compaction.defaultTarget))
+              setError(null)
+            }}
+          >
+            Defaults
+          </Button>
+          <Button type="submit" loading={saving}>
+            Save
+          </Button>
+        </DialogFooter>
+      </form>
+    </>
   )
 }
 

@@ -20,7 +20,7 @@ internal sealed class Repl(Runtime rt)
         ("/context", "how full the model's window is"),
         ("/cost", "tokens spent, and how full the window is"),
         ("/mcp [retry]", "Arena's, Argus's and your MCP servers: connected or not; retry tries now"),
-        ("/jobs", "the commands running with no time limit"),
+        ("/jobs [stop N]", "the commands run with no time limit; stop N stops job N"),
         ("/clear", "start a new session (this one stays saved)"),
         ("/resume [id]", "switch to a saved session"),
         ("/exit", "leave (also Ctrl+D, or Ctrl+C twice)"),
@@ -162,6 +162,27 @@ internal sealed class Repl(Runtime rt)
         if (turn.Requests > 0)
         {
             Ui.Info(turn.Describe(Ui) + " · " + ContextUse());
+        }
+    }
+
+    /// <summary>/jobs stop N: the person stops a command they let run with no time limit (the model hears of it at the next turn).</summary>
+    private async Task StopJobAsync(string id)
+    {
+        if (!int.TryParse(id, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n) || rt.Jobs.Find(n) is not { } job)
+        {
+            Ui.Warn(id.Length == 0 ? "Which job? /jobs stop N (/jobs lists them)." : $"There is no job {id}: /jobs lists them.");
+            return;
+        }
+        if (!job.Running)
+        {
+            Ui.Info($"job {job.Id} has ended: {job.Status()}.");
+            return;
+        }
+        job.Stop("by the person, with /jobs stop");
+        // Its end is said by the watcher as it comes.
+        if (await Task.WhenAny(job.Done, Task.Delay(TimeSpan.FromSeconds(5))) != job.Done)
+        {
+            Ui.Warn($"job {job.Id} is being stopped.");
         }
     }
 
@@ -330,6 +351,11 @@ internal sealed class Repl(Runtime rt)
                 }
                 break;
             case "/jobs":
+                if (arg.StartsWith("stop", StringComparison.OrdinalIgnoreCase))
+                {
+                    await StopJobAsync(arg[4..].Trim().TrimStart('#'));
+                    break;
+                }
                 if (rt.Jobs.All.Count == 0)
                 {
                     Ui.Info("No commands with no time limit in this session.");

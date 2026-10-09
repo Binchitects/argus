@@ -189,6 +189,26 @@ internal sealed class Config
         return config;
     }
 
+    /// <summary>An address Code Arena can reach: absolute, http or https (a port out of range, a space or another scheme is not).</summary>
+    public static bool IsWebAddress(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var u) && (u.Scheme == Uri.UriSchemeHttps || u.Scheme == Uri.UriSchemeHttp) && u.Host.Length > 0;
+
+    /// <summary>
+    /// The first of the addresses given (gateway, mcpUrl, argusUrl, from the file or the environment) that is not
+    /// an http or https one, said with where to fix it; null when they all are.
+    /// </summary>
+    public string? WrongAddress(string file)
+    {
+        foreach (var (value, key, variable) in new[] { (Gateway, "gateway", "ARENA_GATEWAY_URL"), (McpUrl, "mcpUrl", "ARENA_MCP_URL"), (ArgusUrl, "argusUrl", "ARENA_ARGUS_URL") })
+        {
+            if (value is { Length: > 0 } && !IsWebAddress(value))
+            {
+                return $"{value} is not an http or https address: fix \"{key}\" in {file} (or {variable}).";
+            }
+        }
+        return null;
+    }
+
     /// <summary>Overrides from the environment: ARENA_URL, ARENA_API_KEY, ARENA_GATEWAY_URL, ARENA_MCP_URL, ARENA_ARGUS_URL, ARENA_MODEL.</summary>
     public void ApplyEnvironment(Func<string, string?> env)
     {

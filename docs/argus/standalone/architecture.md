@@ -68,7 +68,8 @@ and who can grant access. The same resolution applies to chat tool calls, to
 `ak_` keys on `/mcp`, and — through GitLab itself — to GitLab tokens. It is
 made apart from the request that brings the person (connecting never waits for
 it): started as they connect, waited for by the first tool that reads code,
-the member lists fetched eight at a time and kept ten minutes.
+the member lists fetched at most eight at a time (for everyone together) and
+kept ten minutes.
 
 ## A chat turn
 
