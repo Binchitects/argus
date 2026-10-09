@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -33,7 +34,7 @@ public sealed class StorageTests(AppFixture app)
     }
 
     /// <summary>An app on its own database, with a clock to move and folders of its own (none made yet).</summary>
-    private Setup NewApp(Dictionary<string, string?>? settings = null, FakeGateway? gateway = null)
+    private Setup NewApp(Dictionary<string, string?>? settings = null, FakeGateway? gateway = null, Action<IServiceCollection>? services = null)
     {
         var root = Directory.CreateTempSubdirectory("storage-").FullName;
         var all = new Dictionary<string, string?>
@@ -48,7 +49,11 @@ public sealed class StorageTests(AppFixture app)
             all[k] = v;
         }
         var clock = new MovableClock(DateTimeOffset.UtcNow);
-        var f = app.Create(app.ConnectionStringFor("st_" + Guid.NewGuid().ToString("N")[..8]), gateway ?? new FakeGateway(), all, s => s.AddSingleton<TimeProvider>(clock));
+        var f = app.Create(app.ConnectionStringFor("st_" + Guid.NewGuid().ToString("N")[..8]), gateway ?? new FakeGateway(), all, s =>
+        {
+            s.AddSingleton<TimeProvider>(clock);
+            services?.Invoke(s);
+        });
         return new Setup(f, clock, root);
     }
 
@@ -533,6 +538,49 @@ public sealed class StorageTests(AppFixture app)
         // Nothing was asked of the image model, and nothing was kept.
         Assert.Equal(before, app.Model.ImageRequests.Count);
         Assert.Equal(1, (await FilesAsync(admin)).GetProperty("total").GetProperty("count").GetInt64());
+    }
+
+    /// <summary>The video server, which must not be asked for a clip: what it was asked, and nothing made.</summary>
+    private sealed class NoVideo : HttpMessageHandler
+    {
+        public ConcurrentQueue<string> Asked { get; } = new();
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Asked.Enqueue(request.RequestUri!.AbsolutePath);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"data":[]}""", Encoding.UTF8, "application/json") });
+        }
+    }
+
+    [Theory]
+    [InlineData("video", "generate_video", """{"prompt":"A fox running","seconds":2}""", "No video was made")]
+    [InlineData("speech", "speak", """{"text":"Hello there"}""", "No sound file was made")]
+    public async Task With_the_room_full_the_video_and_speech_tools_make_nothing_and_say_why(string tool, string function, string arguments, string refusal)
+    {
+        var gateway = new FakeGateway();
+        gateway.Models.Add(new GatewayModel(Llm.Api.Models.MediaModels.TextToSpeech, null, null, false, false, false, null, null, null, Mode: "audio_speech"));
+        var video = new NoVideo();
+        await using var s = NewApp(new() { ["Storage:PersonMegabytes"] = "1", ["Modules:videogen"] = "true" }, gateway, services => services
+            .AddHttpClient(Llm.Api.Chat.Tools.VideoTool.Client).ConfigurePrimaryHttpMessageHandler(() => video)
+            .Services.AddHttpClient(Llm.Api.Models.MediaControl.Client).ConfigurePrimaryHttpMessageHandler(() => video));
+        var f = s.App;
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (ann, annId, annName) = await PersonAsync(f, admin);
+        await StatusAssert.Is(HttpStatusCode.OK, await UploadAsync(ann, "full.png", Png(1024 * 1024), "image/png"));
+
+        var chat = (await ann.JsonAsync(await ann.PostAsync("/api/chat/conversations", new { useArgus = false, tools = new[] { tool } }))).GetProperty("id").GetGuid();
+        var res = await ann.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = $"Make it: [call {function} {arguments}]" });
+        Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
+        var result = (await res.Content.ReadAsStringAsync()).Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => JsonDocument.Parse(l[6..]).RootElement)
+            .Single(e => e.GetProperty("type").GetString() == "tool_result");
+        Assert.True(result.GetProperty("isError").GetBoolean());
+        Assert.StartsWith(refusal + ": the person's files are full. Tell them: Your files take", result.GetProperty("text").GetString(), StringComparison.Ordinal);
+        // Nothing was asked of the video server or the speech model, and nothing was kept.
+        Assert.DoesNotContain(video.Asked, p => p.Contains("vid_gen", StringComparison.Ordinal));
+        Assert.DoesNotContain(app.Model.SpeechRequests, r => r["user"]?.GetValue<string>() == $"{annName}@example.test");
+        await using var scope = f.Services.CreateAsyncScope();
+        Assert.Equal(["full.png"], await scope.ServiceProvider.GetRequiredService<AppDbContext>().ChatAttachments.Where(a => a.UserId == annId).Select(a => a.FileName).ToListAsync());
     }
 
     [Fact]
