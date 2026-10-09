@@ -111,6 +111,19 @@ describe('↑ in the message box', () => {
     expect(screen.getAllByText('second question').length).toBeGreaterThan(0)
   })
 
+  it('in a new chat, brings back the person’s messages in their other chats', async () => {
+    backend()
+    renderApp('/chat')
+    const el = (await screen.findByRole('textbox', { name: 'Message' })) as HTMLTextAreaElement
+    el.focus()
+    await userEvent.keyboard('{ArrowUp}')
+    await waitFor(() => expect(el).toHaveValue('from another chat'))
+    await userEvent.keyboard('{ArrowUp}')
+    expect(el).toHaveValue('first question')
+    await userEvent.keyboard('{Escape}')
+    expect(el).toHaveValue('')
+  })
+
   it('asks again for the person’s other messages once one is sent, so the next chat’s ↑ has it', async () => {
     const calls = backend()
     const el = await box()

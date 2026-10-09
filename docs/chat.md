@@ -1115,7 +1115,8 @@ use and edit one); a new chat takes `assistantId`.
   - Argus's answers linking to GitLab, **Raw answer**, a failed tool in its
     own words, and the image viewer (arrows, keys, actual size)
   - ↑ and ↓ in the box: this chat's messages newest first, then the person's
-    other chats (asked for only then, each text once), back down to the draft
+    other chats (asked for only then, each text once; a new chat's box goes
+    straight to them), back down to the draft
     kept, Esc to it, a message brought back sent as a new one and edited as a
     copy, the `/` menu keeping its arrows (and not opened by a message
     brought back), lines of a draft or of a message brought back first (a
