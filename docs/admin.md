@@ -275,7 +275,7 @@ it is full. Then what takes room:
 | The chat's files (uploads, and the pictures, videos, speech and other files the tools made), by where they came from, whether a chat still has them, and by person | the app's database: the files are kept there, inside `llmapp` |
 | The model library (`MODELS_DIR`): each model file, which model of Admin → Models uses it (loaded or kept loaded), or which server reads it, and downloads not finished | the folder |
 | Argus: its index, GitLab mirrors, checked-out trees and installed packs, and its disk | Argus measures its own data folder (`GET /admin/storage`), at most every ten minutes |
-| Backups (`BACKUP_DIR`, mounted in the app at `/backups`): each backup, how it ended, and which is the latest | the folder |
+| Backups (`BACKUP_DIR`, mounted in the app at `/backups`, read only): each backup, how it ended, and which is the latest | the folder |
 | Metrics: what Prometheus keeps and for how long (30 days or 20 GB) | Prometheus's own metrics and flags |
 | Logs: how long Loki keeps them (14 days), and what each container wrote over the last week | Loki's configuration and its volume API |
 
@@ -314,7 +314,10 @@ per person, with counts and sizes (`storage.delete`).
 
 **Clean-ups.** Each shows what it would remove now and the room that frees
 (**Preview**), and runs after a confirmation; each run is audited
-(`storage.cleanup`), and none touches anything of a person on legal hold.
+(`storage.cleanup`), and none touches anything of a person on legal hold. Old
+backups are the exception: the app sees the backups read only (they hold every
+secret of the stack, and the compose files a restore puts back), so their
+preview gives the command that removes them on the host instead.
 
 | Clean-up | What it removes |
 |---|---|
@@ -322,7 +325,7 @@ per person, with counts and sizes (`storage.delete`).
 | Old pictures, videos and speech | what those tools made, past the age chosen (**Settings → Storage → Old generated media**, 90 days by default); the chats keep their words |
 | Files of deleted chats | chats deleted while their owner was on legal hold, once the hold is over, with their files (the hourly retention job takes them too); it shows what the holds still keep |
 | Leftovers on disk | what no database row owns: a download's `.part` file no download will finish, and Python sandbox jobs left behind (older than an hour) |
-| Old backups | backups beyond the newest ones kept (**Settings → Storage → Backups the clean-up keeps**, 14 by default), never the latest nor the newest that ended well; `scripts/backup.sh` keeps `BACKUP_KEEP` by itself |
+| Old backups | shown only: backups beyond the newest ones kept (`BACKUP_KEEP` in `.env`, 14 by default, or the number typed), never the latest nor the newest that ended well, and `scripts/backup.sh --prune --keep N` to run in `deploy/` on the host. With anyone on legal hold it warns that backups from before the hold hold their data (what they deleted since, too) and marks those taken before it: ask whoever placed the hold before removing them |
 | Models nothing uses | model files no model of Admin → Models uses and no server reads, each chosen by hand: one deleted is gone from the library, and using it again means downloading it again |
 
 A clean-up that cannot run says why (the backups not mounted, or another

@@ -27,7 +27,7 @@ public sealed record FolderSize(string Name, long Bytes);
 /// <param name="At">When it was taken, as the host's clock named it.</param>
 public sealed record Backup(string Name, long Bytes, DateTime? At, string? Result, bool Latest);
 
-/// <summary>The backups folder as the app sees it.</summary>
+/// <summary>The backups folder as the app sees it (read only).</summary>
 /// <param name="State">ok, missing (not mounted) or unreadable (another user's).</param>
 /// <param name="OtherBytes">What else is in the folder (not taken by backup.sh, never touched).</param>
 public sealed record BackupReport(string Dir, string State, long Bytes, long OtherBytes, IReadOnlyList<Backup> Backups);
@@ -289,9 +289,6 @@ public sealed partial class StoragePlaces(AppDbContext db, ModelLibrary library,
         var newestOk = report.Backups.FirstOrDefault(b => b.Result == "ok")?.Name;
         return [.. report.Backups.Skip(Math.Max(1, keep)).Where(b => !b.Latest && b.Name != newestOk)];
     }
-
-    /// <summary>A backup's folder by its name, when the name is one backup.sh gives (no way out of the folder).</summary>
-    public string? BackupPath(string name) => BackupName().IsMatch(name) ? Path.Combine(options.Value.BackupDir, name) : null;
 
     private static string? Result(string dir)
     {

@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Eye, Trash2 } from 'lucide-react'
 import { useState } from 'react'
+import { CodeBlock } from '@/components/app/code-block'
 import { QueryError } from '@/components/app/query-state'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -100,7 +101,7 @@ function CleanupCard({ k, start }: { k: CleanupType; start: number | undefined }
           <Button variant="outline" size="sm" className="h-9" disabled={!valid} loading={plan.isFetching} onClick={() => (asked ? void plan.refetch() : setAsked(true))}>
             <Eye /> {asked ? 'Look again' : 'Preview'}
           </Button>
-          {p && !p.problem && (
+          {p && !p.problem && !p.command && (
             <Button variant="destructive" size="sm" className="h-9" disabled={count === 0 || plan.isFetching} loading={running} onClick={() => void run()}>
               <Trash2 /> Clean up
             </Button>
@@ -147,6 +148,17 @@ function CleanupCard({ k, start }: { k: CleanupType; start: number | undefined }
               </ul>
             )}
             {models && p.items.length > 0 && <p className="text-xs text-muted-foreground">{chosen.size ? `${plural(chosen.size, 'model')} chosen, ${size(bytes)}.` : 'Choose the models to delete.'}</p>}
+            {p.command && !p.problem && p.count > 0 && (
+              <div className="grid gap-1.5">
+                <p className="text-muted-foreground">
+                  The app never deletes a backup. On the host, in <code className="font-mono text-xs">deploy/</code>, run:
+                </p>
+                <CodeBlock code={p.command} label={`${k.title}: the command`} />
+                <p className="text-xs text-muted-foreground">
+                  To keep this many from now on, set <code className="font-mono">BACKUP_KEEP={p.keep}</code> in <code className="font-mono">.env</code>: each good backup then removes older ones.
+                </p>
+              </div>
+            )}
           </div>
         )}
       </CardContent>

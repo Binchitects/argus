@@ -340,7 +340,7 @@ public sealed class StorageTests(AppFixture app)
     }
 
     [Fact]
-    public async Task On_disk_leftovers_old_backups_and_unused_models_are_shown_then_removed_as_chosen()
+    public async Task On_disk_leftovers_and_unused_models_are_shown_then_removed_as_chosen_and_old_backups_only_shown_with_the_command()
     {
         await using var s = NewApp();
         var f = s.App;
@@ -405,13 +405,32 @@ public sealed class StorageTests(AppFixture app)
         Assert.True(File.Exists(Path.Combine(s.Library, "paused", "Paused.gguf.part")));
         Assert.True(Directory.Exists(Path.Combine(s.Sandbox, "out", "new-job")));
 
-        // Backups beyond one: never the latest, nor the newest that ended well.
+        // Backups beyond one: never the latest, nor the newest that ended well. Only shown, with the command that removes them:
+        // the app sees them read only (they hold every secret of the stack).
         var plan = await admin.JsonAsync(await admin.GetAsync("/api/admin/storage/cleanups/old-backups?keep=1"));
         Assert.Equal(new[] { "2026-09-03_030000", "2026-09-01_030000" }, plan.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("id").GetString()));
-        Assert.Equal(2, (await admin.JsonAsync(await admin.PostAsync("/api/admin/storage/cleanups/old-backups", new { keep = 1 }))).GetProperty("count").GetInt64());
-        Assert.Equal(new[] { "2026-09-02_030000", "2026-09-04_030000", "latest", "notes.txt" }, Directory.EnumerateFileSystemEntries(s.Backups).Select(Path.GetFileName).Order(StringComparer.Ordinal));
-        // The default keeps 14: nothing more goes.
-        Assert.Equal(0, (await admin.JsonAsync(await admin.GetAsync("/api/admin/storage/cleanups/old-backups"))).GetProperty("count").GetInt64());
+        Assert.Equal(2 * 1000 + "FAILED (1 problem(s))\n".Length + "ok\n".Length, plan.GetProperty("bytes").GetInt64());
+        Assert.Equal("scripts/backup.sh --prune --keep 1", plan.GetProperty("command").GetString());
+        Assert.Equal(JsonValueKind.Null, plan.GetProperty("problem").ValueKind);
+        Assert.DoesNotContain("legal hold", plan.GetProperty("warning").GetString(), StringComparison.Ordinal);
+        var refused = await admin.PostAsync("/api/admin/storage/cleanups/old-backups", new { keep = 1 });
+        await StatusAssert.Is(HttpStatusCode.Conflict, refused);
+        Assert.Contains("read only", await refused.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Contains("scripts/backup.sh --prune --keep 1", await refused.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(new[] { "2026-09-01_030000", "2026-09-02_030000", "2026-09-03_030000", "2026-09-04_030000", "latest", "notes.txt" },
+            Directory.EnumerateFileSystemEntries(s.Backups).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+        // By default it keeps BACKUP_KEEP (14): nothing goes.
+        var kept = await admin.JsonAsync(await admin.GetAsync("/api/admin/storage/cleanups/old-backups"));
+        Assert.Equal((0, 14, "scripts/backup.sh --prune --keep 14"), (kept.GetProperty("count").GetInt64(), kept.GetProperty("keep").GetInt32(), kept.GetProperty("command").GetString()));
+        // Someone on legal hold: backups from before it hold their data, and those are named.
+        var (_, heldId, _) = await PersonAsync(f, admin);
+        await HoldAsync(admin, heldId, true);
+        var held = await admin.JsonAsync(await admin.GetAsync("/api/admin/storage/cleanups/old-backups?keep=1"));
+        Assert.Contains("1 person is on legal hold", held.GetProperty("warning").GetString(), StringComparison.Ordinal);
+        Assert.Contains("2 of these are from before it", held.GetProperty("warning").GetString(), StringComparison.Ordinal);
+        Assert.Equal("FAILED (1 problem(s)) · taken before a legal hold began", held.GetProperty("items")[0].GetProperty("note").GetString());
+        Assert.Contains((await admin.JsonAsync(await admin.GetAsync("/api/admin/storage"))).GetProperty("rules").EnumerateArray(),
+            r => r.GetProperty("rule").GetString()!.Contains("Backups taken before a hold began", StringComparison.Ordinal));
 
         // Models nothing uses: chosen one by one, with a warning; one in use is refused.
         var models = await admin.JsonAsync(await admin.GetAsync("/api/admin/storage/cleanups/unused-models"));
@@ -431,7 +450,7 @@ public sealed class StorageTests(AppFixture app)
         }
         var audit = await AuditAsync(admin, "storage.cleanup");
         Assert.Contains(audit, e => e.GetProperty("target").GetString() == "unused-models" && e.GetProperty("detail").GetString()!.Contains("split/Split-00001-of-00002.gguf", StringComparison.Ordinal));
-        Assert.Contains(audit, e => e.GetProperty("target").GetString() == "old-backups" && e.GetProperty("detail").GetString()!.Contains("2026-09-01_030000", StringComparison.Ordinal));
+        Assert.DoesNotContain(audit, e => e.GetProperty("target").GetString() == "old-backups");
         Assert.Contains(audit, e => e.GetProperty("target").GetString() == "disk-orphans");
     }
 

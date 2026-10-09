@@ -74,7 +74,7 @@ const people: PersonFiles[] = [
   { id: 'p2', userName: 'hal', displayName: 'Hal', email: 'hal@example.test', count: 1, bytes: MB, ownMegabytes: 0, held: true },
 ]
 
-const plan = (over: Partial<CleanupPlan>): CleanupPlan => ({ kind: 'unused-files', count: 0, bytes: 0, held: { count: 0, bytes: 0 }, items: [], problem: null, warning: null, days: 7, keep: null, ...over })
+const plan = (over: Partial<CleanupPlan>): CleanupPlan => ({ kind: 'unused-files', count: 0, bytes: 0, held: { count: 0, bytes: 0 }, items: [], problem: null, warning: null, days: 7, keep: null, command: null, ...over })
 
 const routes = {
   'GET /api/admin/storage': () => ({ json: report }),
@@ -254,6 +254,34 @@ describe('Admin → Storage', () => {
     expect(ask).toHaveTextContent('gone from the library')
     await userEvent.click(within(ask).getByRole('button', { name: 'Clean up' }))
     await waitFor(() => expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ only: ['old/llama-70b.gguf'] }))
+  })
+
+  it('old backups are only shown, with the command that removes them on the host and what legal hold asks', async () => {
+    const calls = fakeApi(admin, {
+      ...routes,
+      'GET /api/admin/storage/cleanups/old-backups': () => ({
+        json: plan({
+          kind: 'old-backups', days: null, keep: 3, count: 1, bytes: 2 * GB, command: 'scripts/backup.sh --prune --keep 3',
+          warning: '1 person is on legal hold, the first since 2026-10-01: a backup taken before then holds their data.',
+          items: [{ id: '2026-09-01_030000', name: '2026-09-01_030000', person: null, bytes: 2 * GB, at: '2026-09-01T03:00:00Z', note: 'ok · taken before a legal hold began' }],
+        }),
+      }),
+    })
+    renderApp('/admin/storage?tab=cleanups')
+    const backups = (await screen.findByText('Old backups')).closest('section') as HTMLElement
+    const keep = within(backups).getByRole('textbox', { name: /backups to keep/ })
+    await waitFor(() => expect(keep).toHaveValue('14'))
+    await userEvent.clear(keep)
+    await userEvent.type(keep, '3')
+    await userEvent.click(within(backups).getByRole('button', { name: 'Preview' }))
+    expect(await within(backups).findByText('scripts/backup.sh --prune --keep 3')).toBeInTheDocument()
+    expect(within(backups).getByText(/taken before a legal hold began/)).toBeInTheDocument()
+    expect(within(backups).getByText(/1 person is on legal hold/)).toBeInTheDocument()
+    expect(within(backups).getByText('BACKUP_KEEP=3')).toBeInTheDocument()
+    expect(within(backups).getByRole('button', { name: /Copy Old backups: the command/ })).toBeInTheDocument()
+    // Nothing to run here: the app sees the backups read only.
+    expect(within(backups).queryByRole('button', { name: 'Clean up' })).not.toBeInTheDocument()
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
   })
 
   it("each person's room: their own, no limit, or the company's again", async () => {

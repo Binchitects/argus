@@ -414,10 +414,29 @@ volume and the configuration into `backups/`; `--install-timer` runs it daily.
 Models are not backed up: they are in `MODELS_DIR` and can be fetched again.
 `BACKUP_DIR`, `BACKUP_COPY_DIR` (a verified second copy on another disk),
 `BACKUP_KEEP`, `BACKUP_INCLUDE_LOGS` and `BACKUP_TIME` in `.env` change where,
-how many and when ([configuration.md](configuration.md#env)). The app mounts
-`BACKUP_DIR` at `/backups` to show the backups under Admin → Storage and, on
-request, remove old ones ([admin.md](admin.md#storage)). It runs as uid 1000:
-backups taken by another user it cannot read, and says so.
+how many and when ([configuration.md](configuration.md#env)). After each good
+backup it keeps the newest `BACKUP_KEEP`; `scripts/backup.sh --prune [--keep N]`
+removes older ones now, never the latest nor the newest that ended well.
+
+The app mounts `BACKUP_DIR` at `/backups` **read only**, to show the backups
+under Admin → Storage: their sizes, how each ended, and which old ones `--prune`
+would remove ([admin.md](admin.md#storage)). It never changes or deletes a
+backup: a backup holds `.env` and the compose files `--restore --with-config`
+puts back, so an app that could write there could change what a restore runs.
+It can read them, though, `.env` included, when it runs as the user who took
+them (uid 1000, as most operators are); it already has most of the stack's keys
+in its own environment. To keep the backups out of its sight as well, take them
+as another user (the folder is `0700`), or list the app's volumes without
+`/backups` in `docker-compose.override.yml` (`volumes: !override`): the page
+then says the backups are not seen. Backups taken by a user the app is not, it
+cannot read, and says so.
+
+Docker makes a folder it mounts root's when the folder is not there yet: start
+the stack before the first backup with `BACKUP_DIR` set to a new folder, and
+`scripts/backup.sh` (run as you) could not write in it. It says so and how to
+fix it; `sudo scripts/backup.sh --install-timer` makes the folder (or takes it
+back from root) for the user the timer runs as. The default `./backups` is in
+the repository, so it is always yours.
 
 To put a backup back, stop the stack and restore it: the volumes and the
 database, and with `--with-config` also `.env` and the files under `config/`.

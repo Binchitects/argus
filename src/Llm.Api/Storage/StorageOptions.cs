@@ -12,7 +12,7 @@ public sealed class StorageOptions
     /// <summary>Pictures, videos and speech the tools made are old after this many days (the clean-up's default).</summary>
     public int MediaDays { get; set; } = 90;
 
-    /// <summary>How many backups the clean-up keeps, the newest.</summary>
+    /// <summary>How many backups scripts/backup.sh keeps (BACKUP_KEEP, which compose gives the app): what the preview of old ones keeps unless asked otherwise.</summary>
     public int BackupsKept { get; set; } = 14;
 
     /// <summary>The backups folder (BACKUP_DIR), as the app mounts it.</summary>

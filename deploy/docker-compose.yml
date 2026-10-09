@@ -90,6 +90,8 @@ services:
       Argus__AdminToken: ${ARGUS_KEY:?set ARGUS_KEY in .env}
       Argus__GitlabUrl: ${GITLAB_URL:-}
       HuggingFace__Token: ${HF_TOKEN:-}
+      # How many backups scripts/backup.sh keeps, for Admin -> Storage's preview of old ones.
+      Storage__BackupsKept: ${BACKUP_KEEP:-14}
       # Who issued the certificate Traefik serves, for Admin -> Overview.
       Stack__Acme: ${ACME_EMAIL:+letsencrypt}
     volumes:
@@ -97,8 +99,10 @@ services:
       - engine:/engine-config
       - directory:/directory
       - sandbox:/sandbox
-      # scripts/backup.sh's backups, for Admin -> Storage (their sizes, and the clean-up of old ones).
-      - ${BACKUP_DIR:-./backups}:/backups
+      # scripts/backup.sh's backups, for Admin -> Storage: their sizes and how each ended.
+      # Read only: they hold .env and the compose files a restore puts back, so the app
+      # never changes or deletes them (scripts/backup.sh --prune removes old ones).
+      - ${BACKUP_DIR:-./backups}:/backups:ro
     # The stack's network, and Laya's, which leads nowhere else.
     networks: [default, laya]
     # Not required: with an external Postgres this stack's is left out.

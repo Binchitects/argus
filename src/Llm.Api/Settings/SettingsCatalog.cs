@@ -240,8 +240,6 @@ public static class SettingsCatalog
             { Unit = "MB", Min = 1, Max = 100_000_000 },
         new("Storage:MediaDays", StorageGroup, "Old generated media", "The clean-up of old pictures, videos and speech the tools made (Admin → Storage) takes them as old after this many days, unless you choose another age there. Nothing is deleted by itself.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "90", Unit = "days", Min = 1, Max = 36500, Optional = false },
-        new("Storage:BackupsKept", StorageGroup, "Backups the clean-up keeps", "The clean-up of old backups (Admin → Storage) keeps this many, the newest, and always the latest and the newest that ended well. scripts/backup.sh keeps BACKUP_KEEP by itself.", SettingType.WholeNumber, SettingScope.Live)
-            { Default = "14", Min = 1, Max = 1000, Optional = false },
         new("Schedules:Enabled", Schedules, "Scheduled tasks", "People may set questions to be asked on a schedule (a daily digest, a weekly report), answered as them, with their model, tools and credit.", SettingType.Boolean, SettingScope.Live)
             { Default = "true" },
         new("Schedules:PerPerson", Schedules, "Tasks per person", "How many scheduled tasks one person may have.", SettingType.WholeNumber, SettingScope.Live)

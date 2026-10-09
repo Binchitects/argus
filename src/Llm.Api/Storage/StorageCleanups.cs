@@ -15,7 +15,9 @@ public sealed record CleanupItem(string Id, string Name, string? Person, long By
 /// <param name="Items">The things, the largest first (the first 500).</param>
 /// <param name="Days">The age it took as old, for those that take one.</param>
 /// <param name="Keep">The backups it keeps, for that one.</param>
-public sealed record CleanupPlan(string Kind, long Count, long Bytes, Amount Held, IReadOnlyList<CleanupItem> Items, string? Problem, string? Warning, int? Days, int? Keep);
+/// <param name="Command">For one the app does not run itself (old backups, which it sees read only): what does, on the host.</param>
+public sealed record CleanupPlan(string Kind, long Count, long Bytes, Amount Held, IReadOnlyList<CleanupItem> Items, string? Problem, string? Warning, int? Days, int? Keep,
+    string? Command = null);
 
 /// <summary>What a clean-up removed, what legal hold kept, and what could not be removed, with why.</summary>
 public sealed record CleanupDone(string Kind, long Count, long Bytes, Amount Held, IReadOnlyList<string> Failed);
@@ -26,8 +28,9 @@ public sealed class CleanupException(string message) : Exception(message);
 /// The storage page's clean-ups, each shown before it runs (what would go, and the room it frees) and run on
 /// request, audited. Nothing of a person on legal hold is ever removed. Files of deleted chats go as retention's
 /// sweep would take them; files in no chat and the tools' old pictures, videos and speech past an age; on disk,
-/// downloads' parts no download owns and sandbox jobs left behind; backups beyond a count (never the latest, nor
-/// the newest that ended well); and models nothing uses, chosen one by one.
+/// downloads' parts no download owns and sandbox jobs left behind; and models nothing uses, chosen one by one.
+/// Backups beyond a count (never the latest, nor the newest that ended well) are only shown: the app sees them
+/// read only, as they hold every secret of the stack, and scripts/backup.sh --prune removes them on the host.
 /// </summary>
 public sealed partial class StorageCleanups(AppDbContext db, StorageFiles files, StoragePlaces places, Retention.Retention retention, StorageCache cache,
     IOptionsMonitor<StorageOptions> options, Audit audit, TimeProvider clock, ILogger<StorageCleanups> logger)
@@ -47,7 +50,7 @@ public sealed partial class StorageCleanups(AppDbContext db, StorageFiles files,
         "old-media" => await FilesAsync(kind, Days(days, options.CurrentValue.MediaDays), new FileFilter(Origins: ["picture", "video", "speech"], States: ["chat", "deleted", "none"]),
             "The chats keep their words; the pictures, videos and sound files are gone from them.", ct),
         "disk-orphans" => await OrphansAsync(ct),
-        "old-backups" => Backups(Keep(keep)),
+        "old-backups" => await BackupsAsync(Keep(keep), ct),
         "unused-models" => await ModelsAsync(ct),
         _ => null,
     };
@@ -68,7 +71,7 @@ public sealed partial class StorageCleanups(AppDbContext db, StorageFiles files,
             "deleted-chats" => await EraseHiddenAsync(ct),
             "unused-files" or "old-media" => await DeleteFilesAsync(kind, plan, ct),
             "disk-orphans" => await RemoveOrphansAsync(plan, ct),
-            "old-backups" => await RemoveBackupsAsync(plan),
+            "old-backups" => throw new CleanupException($"The app sees the backups read only and never deletes one. On the host, in deploy/: {plan.Command}"),
             _ => await RemoveModelsAsync(plan, only ?? [], ct),
         };
         cache.Forget();
@@ -204,7 +207,12 @@ public sealed partial class StorageCleanups(AppDbContext db, StorageFiles files,
         return new CleanupDone("disk-orphans", done.Count, done.Bytes, Amount.None, failed);
     }
 
-    private CleanupPlan Backups(int keep)
+    /// <summary>
+    /// The backups beyond the newest <paramref name="keep"/>, with the command that removes them. Backups hold the data of
+    /// people on legal hold from before their hold (what they deleted since, too): with anyone on hold, it says so, and
+    /// marks the backups taken before the earliest hold began.
+    /// </summary>
+    private async Task<CleanupPlan> BackupsAsync(int keep, CancellationToken ct)
     {
         var report = places.Backups();
         var problem = report.State switch
@@ -213,44 +221,26 @@ public sealed partial class StorageCleanups(AppDbContext db, StorageFiles files,
             "unreadable" => $"The app may not read the backups: {report.Dir} belongs to another user (scripts/backup.sh ran as root?).",
             _ => null,
         };
+        var holds = await db.Users.AsNoTracking().Where(u => u.LegalHoldSince != null).Select(u => u.LegalHoldSince!.Value).ToListAsync(ct);
+        DateTimeOffset? since = holds.Count > 0 ? holds.Min() : null;
+        bool Before(Backup b) => since is { } s && b.At is { } at && new DateTimeOffset(at, TimeSpan.Zero) < s;
         var beyond = StoragePlaces.Beyond(report, keep);
+        var warnings = new List<string>();
+        if (report.Backups.Count > 0)
+        {
+            warnings.Add($"The newest {keep} stay, and always the latest one and the newest that ended well.");
+        }
+        if (since is { } start)
+        {
+            var taken = beyond.Count(Before);
+            warnings.Add($"{holds.Count} {(holds.Count == 1 ? "person is" : "people are")} on legal hold, the first since {start:yyyy-MM-dd}: a backup taken before then holds their data " +
+                "from before the hold, what they deleted since too, and may be its only copy." +
+                (taken > 0 ? $" {taken} of these {(taken == 1 ? "is" : "are")} from before it: ask whoever placed the hold before removing {(taken == 1 ? "it" : "them")}." : ""));
+        }
         return new CleanupPlan("old-backups", beyond.Count, beyond.Sum(b => b.Bytes), Amount.None,
-            [.. beyond.Select(b => new CleanupItem(b.Name, b.Name, null, b.Bytes, b.At is { } at ? new DateTimeOffset(at, TimeSpan.Zero) : null, b.Result))], problem,
-            report.Backups.Count > 0 ? $"The newest {keep} stay, and always the latest one and the newest that ended well." : null, null, keep);
-    }
-
-    private async Task<CleanupDone> RemoveBackupsAsync(CleanupPlan plan)
-    {
-        var failed = new List<string>();
-        var done = new List<CleanupItem>();
-        foreach (var item in plan.Items)
-        {
-            if (places.BackupPath(item.Id) is not { } path || !Directory.Exists(path))
-            {
-                continue;
-            }
-            try
-            {
-                Directory.Delete(path, recursive: true);
-                done.Add(item);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                failed.Add($"{item.Name}: the app may not delete it (it belongs to another user)");
-            }
-            catch (IOException ex)
-            {
-                failed.Add($"{item.Name}: {ex.Message}");
-            }
-        }
-        var amount = new Amount(done.Count, done.Sum(d => d.Bytes));
-        if (done.Count > 0 || failed.Count > 0)
-        {
-            await audit.WriteAsync("storage.cleanup", "old-backups",
-                detail: $"{Of(amount, "backup", "backups")} removed, keeping the newest {plan.Keep}: {string.Join(", ", done.Select(d => d.Name))}" + (failed.Count > 0 ? $"; {failed.Count} could not be" : ""));
-        }
-        LogRan(logger, "old-backups", amount.Count, amount.Bytes);
-        return new CleanupDone("old-backups", amount.Count, amount.Bytes, Amount.None, failed);
+            [.. beyond.Select(b => new CleanupItem(b.Name, b.Name, null, b.Bytes, b.At is { } at ? new DateTimeOffset(at, TimeSpan.Zero) : null,
+                string.Join(" · ", new[] { b.Result, Before(b) ? "taken before a legal hold began" : null }.OfType<string>()) is { Length: > 0 } note ? note : null))],
+            problem, warnings.Count > 0 ? string.Join(" ", warnings) : null, null, keep, $"scripts/backup.sh --prune --keep {keep}");
     }
 
     private async Task<CleanupPlan> ModelsAsync(CancellationToken ct)

@@ -163,6 +163,8 @@ export interface CleanupPlan {
   warning: string | null
   days: number | null
   keep: number | null
+  /** For one the app does not run (old backups, which it sees read only): the command that does, on the host. */
+  command: string | null
 }
 
 export interface CleanupDone {
@@ -302,7 +304,7 @@ export const cleanupKinds: CleanupType[] = [
   {
     kind: 'old-backups',
     title: 'Old backups',
-    about: 'Backups beyond the newest ones; never the latest, nor the newest that ended well.',
+    about: 'Backups beyond the newest ones; never the latest, nor the newest that ended well. The app sees the backups read only (they hold every secret of the stack): the preview gives the command that removes them on the host.',
     param: 'keep',
     noun: ['backup', 'backups'],
   },
