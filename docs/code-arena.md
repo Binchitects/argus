@@ -559,9 +559,14 @@ hold.
   Make a new one under **Your account → API key** and run `code-arena login`.
 - **"Your API key reached its limit of … a minute"**: an admin gave your key a
   rate limit (requests or tokens a minute). Wait a minute and ask again; **Your
-  account → API key** shows the limits and what you used. **"… requests at
-  once"**: more answers at once than your key may have (sub-agents count). Code
-  Arena tries again twice, a few seconds apart, before it says either.
+  account → API key** shows the limits and what you used. Code Arena does not
+  ask again by itself: the minute is not over in a few seconds, and the
+  gateway counts each try. For tokens a minute, the gateway counts a request's
+  prompt and the answer it asks for before it runs, so a request bigger than
+  the limit is refused every minute: `/compact` makes the conversation smaller,
+  or ask an admin to raise the limit. **"… requests at once"**: more answers at
+  once than your key may have (sub-agents count). Code Arena tries again twice,
+  a few seconds apart, before it says so.
 - **"… has no OpenAI API (404)"**: the gateway is not at `gateway.DOMAIN`. Give
   it: `code-arena login --gateway https://…`.
 - **"Arena's tools are not available here"**: this Arena has no MCP endpoint
