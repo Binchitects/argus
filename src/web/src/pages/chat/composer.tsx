@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ArrowUp, Clock3, EyeOff, FileText, ListEnd, Paperclip, Square, Telescope, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
+import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
 import { formatValue } from '@/lib/format'
 import { fillPrompt, promptsQuery, slashItems, slashQuery, variablesOf, type PromptItem, type SlashItem } from '@/lib/prompts'
@@ -315,11 +316,12 @@ export function Composer({
                 size="sm"
                 className={cn('h-8 gap-1.5 rounded-full px-2.5', research && 'text-primary-ink', researchOff && 'cursor-not-allowed text-muted-foreground')}
                 aria-pressed={!!research}
-                // Not disabled: a disabled button shows no tooltip, and the tooltip says why.
+                // Not disabled: a disabled button shows no tooltip, and the tooltip says why. A tap (phones show
+                // no tooltip) says it too.
                 aria-disabled={researchOff ? true : undefined}
                 aria-describedby={researchOff ? researchOffId : undefined}
                 aria-label="Deep research"
-                onClick={() => !researchOff && onResearch(!research)}
+                onClick={() => (researchOff ? toast(researchOff, { id: 'research-off' }) : onResearch(!research))}
               >
                 <Telescope /> <span className="hidden sm:inline">Deep research</span>
               </Button>

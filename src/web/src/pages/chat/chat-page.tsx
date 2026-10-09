@@ -30,6 +30,7 @@ import { ArenaTurn, ComparePicker } from './arena'
 import { arenaView, type CompareChoice } from './quality'
 import type { Attachment, ChatConfig, ChatEvent, ChatSettings, Conversation, Message, QueuedMessage } from './types'
 import { useUploads } from './uploads'
+import { useResearchGone } from './use-research-gone'
 import { AssistantView } from './assistant-view'
 import { ShareDialog } from './share-dialog'
 import { chatToJson, chatToMarkdown, exportName, markdownToHtml } from './export'
@@ -547,6 +548,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       ? 'Not with Compare: deep research is one model’s report. Turn Compare off for it.'
       : undefined
   const researchSwitch = canResearch ? { research: research && !researchOff, onResearch: setResearch, researchOff } : {}
+  // Taken away from someone who had it: the switch goes, and they are told why.
+  useResearchGone(me?.id, canResearch)
 
   // Written while an answer runs: each waits on the server (a reload, or another tab, still shows it)
   // and becomes the next question once the answer before is over, or at once with Send now (which
@@ -583,6 +586,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       return true
     } catch (e) {
       toast.error(errorMessage(e, 'The message could not be queued. It is back in the box.'))
+      // Refused as deep research taken away meanwhile: the switch goes now.
+      if (e instanceof ApiError && e.status === 'research') void queryClient.invalidateQueries({ queryKey: configQuery.queryKey })
       return false
     }
   }

@@ -113,6 +113,27 @@ describe('connect your tools', () => {
     expect(other.mcpServers.arena).toEqual({ type: 'http', url: 'https://llm.example.com/mcp', headers: { Authorization: 'Bearer <your API key>' } })
   })
 
+  it('says which of the person\'s tools Arena MCP cannot serve now, and why', async () => {
+    const why = 'the web asks before each call (Admin → Tools) and nobody is in an agent\'s research to allow it: start deep research in the chat instead'
+    fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config() }),
+      'GET /api/account/mcp': () => ({
+        json: {
+          enabled: true,
+          url: 'https://llm.example.com/mcp',
+          tools: [{ id: 'web', title: 'Web', askFirst: true }],
+          notServed: [{ id: 'research', title: 'Deep research', why }],
+        },
+      }),
+    })
+    renderApp('/setup')
+    const served = await screen.findByRole('list', { name: 'Tools it serves you' })
+    expect(within(served).getByText('Web · asks first')).toBeInTheDocument()
+    expect(within(served).queryByText(/Deep research/)).not.toBeInTheDocument()
+    const note = screen.getByText(/is not served there now/)
+    expect(note).toHaveTextContent(`Deep research is not served there now: ${why}.`)
+  })
+
   it('leaves Arena MCP out when an admin turned it off', async () => {
     fakeApi(member, {
       'GET /api/chat/config': () => ({ json: config() }),
