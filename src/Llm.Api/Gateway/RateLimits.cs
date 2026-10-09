@@ -49,8 +49,19 @@ public sealed record RateUse(long Requests, long Tokens, IReadOnlyList<Refusal> 
 /// rest with HTTP 429 and Retry-After, in one place for every app replica. The chat's own key
 /// carries none: the chat has its fair line. Nothing is limited until an admin sets a limit.
 /// </summary>
-public sealed class RateLimits(AppDbContext db, AccessService access, ILiteLlm gateway, SqlDatasource sql, IOptionsMonitor<RateLimitOptions> options, TimeProvider clock)
+public sealed class RateLimits(AppDbContext db, AccessService access, ILiteLlm gateway, SqlDatasource sql, IOptionsMonitor<RateLimitOptions> options, TimeProvider clock,
+    ModelCalls running)
 {
+    /// <summary>
+    /// The chat's tools that reach a model (pictures, speech, video). Through Arena MCP they go with
+    /// the chat's own key (video with none), so the gateway cannot count them against the person's
+    /// key: the app counts them against its requests a minute (<see cref="StartModelCallAsync"/>).
+    /// </summary>
+    public static readonly string[] ModelTools = ["image", "speech", "video"];
+
+    /// <summary>The audit log's word for an Arena MCP call refused for the person's requests a minute.</summary>
+    public const string McpRefused = "mcp.rate_limited";
+
     /// <summary>The most requests a minute an admin may set (0 is no limit).</summary>
     public const int MaxRequests = 1_000_000;
 
@@ -172,20 +183,9 @@ public sealed class RateLimits(AppDbContext db, AccessService access, ILiteLlm g
         {
             ["keys"] = tokens.ToArray(),
             ["me"] = email?.ToLowerInvariant() ?? "",
-            ["minute"] = Logged(now.AddMinutes(-1)),
             ["day"] = Logged(now.AddDays(-1)),
         };
-        long requests = 0, used = 0;
-        if (tokens.Count > 0)
-        {
-            var minute = await sql.QueryAsync($"""
-                select count(*) as requests, coalesce(sum(greatest(coalesce(s.total_tokens,0) - {UsageEndpoints.Cached}, 0)),0) as tokens
-                from "LiteLLM_SpendLogs" s
-                where s.api_key = any(@keys) and s."startTime" >= @minute and coalesce(s.metadata->'error_information'->>'error_code','') <> '429'
-                """, p, ct);
-            requests = Convert.ToInt64(minute.Rows[0][0] ?? 0L, CultureInfo.InvariantCulture);
-            used = Convert.ToInt64(minute.Rows[0][1] ?? 0L, CultureInfo.InvariantCulture);
-        }
+        var (requests, used) = await MinuteAsync(tokens, ct);
         // A key's refusals are booked to its person (its user id is their email).
         var refused = await sql.QueryAsync($"""
             select {Kind} as "limit", count(*) as refusals, max(s."startTime") as last
@@ -198,8 +198,58 @@ public sealed class RateLimits(AppDbContext db, AccessService access, ILiteLlm g
             [.. refused.Rows.Select(r => new Refusal((string)r[0]!, Convert.ToInt64(r[1] ?? 0L, CultureInfo.InvariantCulture), Utc(r[2])))]);
     }
 
+    /// <summary>What these keys (hashed tokens) sent in the last minute that the gateway took: requests, and tokens less those read from the cache.</summary>
+    private async Task<(long Requests, long Tokens)> MinuteAsync(IReadOnlyCollection<string> tokens, CancellationToken ct)
+    {
+        if (tokens.Count == 0)
+        {
+            return (0, 0);
+        }
+        var minute = await sql.QueryAsync($"""
+            select count(*) as requests, coalesce(sum(greatest(coalesce(s.total_tokens,0) - {UsageEndpoints.Cached}, 0)),0) as tokens
+            from "LiteLLM_SpendLogs" s
+            where s.api_key = any(@keys) and s."startTime" >= @minute and coalesce(s.metadata->'error_information'->>'error_code','') <> '429'
+            """, new Dictionary<string, object> { ["keys"] = tokens.ToArray(), ["minute"] = Logged(clock.GetUtcNow().AddMinutes(-1)) }, ct);
+        return (Convert.ToInt64(minute.Rows[0][0] ?? 0L, CultureInfo.InvariantCulture), Convert.ToInt64(minute.Rows[0][1] ?? 0L, CultureInfo.InvariantCulture));
+    }
+
     /// <summary>The log's times are UTC without a zone: compared as they are, its index on startTime serves.</summary>
     private static DateTime Logged(DateTimeOffset at) => DateTime.SpecifyKind(at.UtcDateTime, DateTimeKind.Unspecified);
+
+    /// <summary>The person's Arena MCP calls of <see cref="ModelTools"/> that ended since then (the audit log has each one when it ends).</summary>
+    private Task<int> ModelCallsSinceAsync(Guid user, DateTimeOffset since, CancellationToken ct) =>
+        db.AuditEvents.AsNoTracking().CountAsync(a => a.Action == "mcp.call" && a.ActorId == user && a.At >= since && ModelTools.Contains(a.Target!), ct);
+
+    /// <summary>
+    /// Before an Arena MCP call of a tool that reaches a model: whether the person's requests a
+    /// minute leave room for it. It counts what their keys sent in the last minute (the gateway's
+    /// log), their Arena MCP model calls that ended in it (the audit log, one for every replica)
+    /// and those running now on this replica. Room: a slot (none without a limit) to dispose of once
+    /// the call is audited. No room: why. Tokens a minute does not apply: pictures, speech and video
+    /// have no tokens, as the gateway counts them.
+    /// </summary>
+    public async Task<(IDisposable? Slot, string? Refusal)> StartModelCallAsync(AppUser user, CancellationToken ct)
+    {
+        if ((await ForAsync(user, ct)).RequestsPerMinute.Value is not { } most)
+        {
+            return (null, null);
+        }
+        var counted = await ModelCallsSinceAsync(user.Id, clock.GetUtcNow().AddMinutes(-1), ct);
+        try
+        {
+            counted += (int)(await MinuteAsync([.. (await gateway.KeysAsync(user.Email!, ct)).Select(k => k.Token)], ct)).Requests;
+        }
+        catch (Exception ex) when (ex is GatewayException or Npgsql.NpgsqlException or InvalidOperationException)
+        {
+            // The gateway or its log cannot be read now: what the app counted itself still holds.
+        }
+        if (running.TryStart(user.Id, now => counted + now < most) is { } slot)
+        {
+            return (slot, null);
+        }
+        return (null, $"Your API key reached its limit of {most.ToString(CultureInfo.InvariantCulture)} requests a minute; pictures, speech and video made " +
+            "through Arena MCP count too. Try again in a minute. Your account → API key shows your limits and what you used.");
+    }
 
     /// <summary>The log's times are UTC without a zone.</summary>
     private static DateTimeOffset Utc(object? value) => value switch
@@ -227,6 +277,24 @@ public sealed class RateLimits(AppDbContext db, AccessService access, ILiteLlm g
         {
             // The limits still show; only what was used is missing.
         }
+        if (use is not null)
+        {
+            // Arena MCP's pictures, speech and video count against requests a minute too, and their refusals are in the audit log.
+            var now = clock.GetUtcNow();
+            var day = now.AddDays(-1);
+            var mcp = await ModelCallsSinceAsync(user.Id, now.AddMinutes(-1), ct);
+            var refused = await db.AuditEvents.AsNoTracking().Where(a => a.Action == McpRefused && a.ActorId == user.Id && a.At >= day).Select(a => a.At).ToListAsync(ct);
+            var requests = use.Refused.FirstOrDefault(r => r.Limit == "requests");
+            use = use with
+            {
+                Requests = use.Requests + mcp,
+                Refused = refused.Count == 0 ? use.Refused :
+                [
+                    new Refusal("requests", (requests?.Count ?? 0) + refused.Count, refused.Append(requests?.Last ?? default).Max()),
+                    .. use.Refused.Where(r => r.Limit != "requests"),
+                ],
+            };
+        }
         return new
         {
             requestsPerMinute = new { value = rates.RequestsPerMinute.Value, from = rates.RequestsPerMinute.From, group = rates.RequestsPerMinute.Group },
@@ -236,5 +304,63 @@ public sealed class RateLimits(AppDbContext db, AccessService access, ILiteLlm g
             used = use is null ? null : new { requests = use.Requests, tokens = use.Tokens },
             refused = use?.Refused.Select(r => new { limit = r.Limit, count = r.Count, last = r.Last }),
         };
+    }
+}
+
+/// <summary>
+/// Arena MCP's calls that reach a model, running now on this replica, by person: they count against
+/// the person's requests a minute until the audit log has them, so calls started at once are
+/// counted too.
+/// </summary>
+public sealed class ModelCalls
+{
+    private readonly Dictionary<Guid, int> _running = [];
+
+    /// <summary>A slot for one more call when <paramref name="may"/> allows it, given how many of theirs run now; null when not.</summary>
+    public IDisposable? TryStart(Guid user, Func<int, bool> may)
+    {
+        lock (_running)
+        {
+            var now = _running.GetValueOrDefault(user);
+            if (!may(now))
+            {
+                return null;
+            }
+            _running[user] = now + 1;
+            return new Slot(this, user);
+        }
+    }
+
+    /// <summary>How many of the person's calls run now.</summary>
+    public int Running(Guid user)
+    {
+        lock (_running)
+        {
+            return _running.GetValueOrDefault(user);
+        }
+    }
+
+    private void End(Guid user)
+    {
+        lock (_running)
+        {
+            if (--_running[user] <= 0)
+            {
+                _running.Remove(user);
+            }
+        }
+    }
+
+    private sealed class Slot(ModelCalls calls, Guid user) : IDisposable
+    {
+        private int _ended;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _ended, 1) == 0)
+            {
+                calls.End(user);
+            }
+        }
     }
 }

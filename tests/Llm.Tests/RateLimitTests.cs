@@ -26,11 +26,11 @@ public sealed class RateLimitTests(AppFixture app)
 
     private static async Task<TestBrowser> AdminAsync(WebApplicationFactory<Program> f) => await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
 
-    private static async Task<(Guid Id, string Name, string Email, string Password)> PersonAsync(TestBrowser admin)
+    private static async Task<(Guid Id, string Name, string Email, string Password, string Key)> PersonAsync(TestBrowser admin)
     {
         var name = "rl" + Guid.NewGuid().ToString("N")[..10];
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
-        return (made.GetProperty("id").GetGuid(), name, $"{name}@example.test", made.GetProperty("password").GetString()!);
+        return (made.GetProperty("id").GetGuid(), name, $"{name}@example.test", made.GetProperty("password").GetString()!, made.GetProperty("apiKey").GetString()!);
     }
 
     private static async Task<Guid> GroupAsync(TestBrowser admin, object policies, params Guid[] members)
@@ -344,6 +344,100 @@ public sealed class RateLimitTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync($"/api/admin/people/{p.Id}/key"));
         Assert.NotEqual(key.Token, app.Gateway.KeysOf(p.Email).Single().Token);
         await StatusAssert.Is(HttpStatusCode.TooManyRequests, await me.PostAsync("/api/account/keys/rotate"));
+    }
+
+    /// <summary>One Arena MCP tool call with the person's key, as an outside agent makes it: the result's text and whether it is an error.</summary>
+    private static async Task<(string Text, bool IsError)> McpCallAsync(WebApplicationFactory<Program> f, string key, string function, object arguments)
+    {
+        using var http = f.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://{AppFixture.Domain}"), HandleCookies = false });
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", key);
+        http.DefaultRequestHeaders.Add("MCP-Protocol-Version", "2025-06-18");
+        http.DefaultRequestHeaders.Accept.ParseAdd("application/json");
+        http.DefaultRequestHeaders.Accept.ParseAdd("text/event-stream");
+        var res = await http.PostAsync(new Uri($"https://{AppFixture.Domain}/mcp"),
+            JsonContent.Create(new { jsonrpc = "2.0", id = 1, method = "tools/call", @params = new { name = function, arguments } }));
+        var body = await res.Content.ReadAsStringAsync();
+        Assert.True(res.IsSuccessStatusCode, body);
+        var answer = res.Content.Headers.ContentType?.MediaType == "text/event-stream"
+            ? body.Split("\n\n").Where(e => e.StartsWith("data: ", StringComparison.Ordinal)).Select(e => JsonDocument.Parse(e[6..]).RootElement).Single(m => m.TryGetProperty("id", out _))
+            : JsonDocument.Parse(body).RootElement;
+        var result = answer.GetProperty("result");
+        return (result.GetProperty("content")[0].GetProperty("text").GetString()!, result.GetProperty("isError").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Pictures_made_through_Arena_MCP_count_against_the_persons_requests_a_minute()
+    {
+        var gateway = new FakeGateway();
+        gateway.Models.Add(new GatewayModel("FLUX.2-klein-4B", null, null, false, false, false, null, null, null, Mode: "image_generation"));
+        await using var f = app.Create(app.ConnectionStringFor("ratesmcp_" + Guid.NewGuid().ToString("N")[..8]), gateway,
+            new Dictionary<string, string?> { ["Auth:DataKey"] = "a-data-key-for-rate-tests" });
+        var admin = await AdminAsync(f);
+        var p = await PersonAsync(admin);
+        await LimitsAsync(admin, p.Id, 2, null);
+        var picture = new { prompt = "A red fox in the snow" };
+
+        // Two a minute: the third is refused, says which limit, and is audited; a tool that reaches no model still runs.
+        Assert.False((await McpCallAsync(f, p.Key, "generate_image", picture)).IsError);
+        Assert.False((await McpCallAsync(f, p.Key, "generate_image", picture)).IsError);
+        var (text, isError) = await McpCallAsync(f, p.Key, "generate_image", picture);
+        Assert.True(isError);
+        Assert.StartsWith("Your API key reached its limit of 2 requests a minute; pictures, speech and video made through Arena MCP count too.", text, StringComparison.Ordinal);
+        Assert.False((await McpCallAsync(f, p.Key, "calculate", new { expression = "1 + 1" })).IsError);
+        var audit = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit"))).EnumerateArray().ToList();
+        var refusal = Assert.Single(audit, e => e.GetProperty("action").GetString() == RateLimits.McpRefused);
+        Assert.Equal(("image", "generate_image", p.Name, false),
+            (refusal.GetProperty("target").GetString(), refusal.GetProperty("detail").GetString(), refusal.GetProperty("actor").GetString(), refusal.GetProperty("success").GetBoolean()));
+
+        // Their key's card counts them as requests of the last minute, and the refusal.
+        var me = await new TestBrowser(f).SignedInAsync(p.Name, p.Password);
+        var limits = await me.JsonAsync(await me.GetAsync("/api/account/keys/limits"));
+        Assert.Equal(2, limits.GetProperty("used").GetProperty("requests").GetInt64());
+        Assert.Equal(1, limits.GetProperty("refused").EnumerateArray().Single(r => r.GetProperty("limit").GetString() == "requests").GetProperty("count").GetInt64());
+
+        // What their key sent through the gateway this minute counts too.
+        var q = await PersonAsync(admin);
+        await LimitsAsync(admin, q.Id, 1, null);
+        var run = "rl-" + Guid.NewGuid().ToString("N")[..8] + "-";
+        try
+        {
+            await LogAsync(run + "1", gateway.KeysOf(q.Email).Single().Token, q.Email, DateTimeOffset.UtcNow.AddSeconds(-5), total: 10);
+            Assert.True((await McpCallAsync(f, q.Key, "generate_image", picture)).IsError);
+        }
+        finally
+        {
+            await using var conn = new NpgsqlConnection(app.LitellmConnectionString);
+            await conn.OpenAsync();
+            await using var delete = new NpgsqlCommand("""delete from "LiteLLM_SpendLogs" where request_id like @run""", conn);
+            delete.Parameters.AddWithValue("run", run + "%");
+            await delete.ExecuteNonQueryAsync();
+        }
+
+        // Someone with no limit is never counted.
+        var r = await PersonAsync(admin);
+        for (var i = 0; i < 3; i++)
+        {
+            Assert.False((await McpCallAsync(f, r.Key, "generate_image", picture)).IsError);
+        }
+    }
+
+    [Fact]
+    public void Arena_MCP_calls_started_at_once_each_count_until_they_end()
+    {
+        var calls = new ModelCalls();
+        var p = Guid.NewGuid();
+        var first = calls.TryStart(p, n => n < 2);
+        var second = calls.TryStart(p, n => n < 2);
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+        Assert.Null(calls.TryStart(p, n => n < 2));
+        // Someone else's are their own.
+        Assert.NotNull(calls.TryStart(Guid.NewGuid(), n => n < 1));
+        second!.Dispose();
+        second.Dispose();
+        Assert.Equal(1, calls.Running(p));
+        Assert.NotNull(calls.TryStart(p, n => n < 2));
+        first!.Dispose();
     }
 
     [Fact]

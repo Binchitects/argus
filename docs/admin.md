@@ -378,6 +378,17 @@ them.
   key, which carries none: the chat has its fair line (Settings → Chat).
   Answers from the [answer cache](#the-answer-cache-for-api-keys) do not count
   either: they never reach the gateway.
+- **Arena MCP.** An agent signs in to Arena MCP with the person's key, but the
+  tools that reach a model (pictures, speech, video) make their requests with
+  the chat's own key, so the gateway cannot count them. The app counts them
+  instead, against the person's requests a minute: what their keys sent in the
+  last minute, their Arena MCP pictures, speech and video that ended in it
+  (the audit log) and those running now. Past the limit, the tool call is an
+  error saying which limit, audited as `mcp.rate_limited`; their key's card
+  counts these calls and refusals too, the Refused by rate limits panel does
+  not (it reads the gateway's log). Tokens a minute and requests at once do
+  not apply to these tools: they have no tokens, and the chat's own limits for
+  pictures and videos hold. Arena MCP's other tools reach no model.
 - **What people see**: their key's card (Your account, and Connect your tools)
   shows each limit and where it comes from, what the key used in the last
   minute, and what was refused in the last day. The minute is read from the
