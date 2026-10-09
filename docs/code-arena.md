@@ -136,7 +136,7 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/context` | how full the model's window is |
 | `/cost` | tokens spent, and how full the model's window is |
 | `/mcp [retry [name]]` | Arena's, Argus's and your MCP servers: connected or not and why; `retry` tries those not connected now |
-| `/jobs [stop N]` | the commands run with no time limit, running or ended; `stop N` stops job N |
+| `/jobs [stop N]` | the commands run with no time limit, running or ended; `stop N` stops job N (typed while the turn waits for them) |
 | `/clear` | a new session (the last stays saved) |
 | `/resume [id]` | switch to a saved session |
 | `/exit` | leave (also Ctrl+D) |
@@ -495,7 +495,8 @@ A command that takes longer than `run_shell`'s limit (a full build, a long
 test suite, an install, a migration) runs with `no_time_limit`: in the
 background, with a watcher that shows its output as it comes (in the terminal
 under its job number, `│1 …`; in the IDE above the chat's box), however long
-it takes. The model gets a job number at once and can go on with other work,
+it takes. In the terminal its lines never break into a question waiting for the
+person's answer or into the middle of the model's line: they wait, and follow. The model gets a job number at once and can go on with other work,
 or wait with `command_output`; the turn does not end while one it started
 runs, and when one ends the model is told, as a `command_output` result, its
 exit code and the end of its output (the last 8,000 characters; the last
@@ -506,8 +507,11 @@ keeps watching it until it ends, and the model is told how it ended with the
 person's next message.
 
 Only the person stops one: **Ctrl+C** in the terminal stops the turn and the
-commands it started, `/jobs stop N` stops one, **Stop** in the IDE stops the
-turn or one command (a command running that no turn on the page shows, after
+commands it started; while the turn waits for them, the terminal still reads
+what the person types: `/jobs` lists them and `/jobs stop N` stops one (the
+model is told how it ended and the turn goes on), and anything else is taken
+as the next message when the turn ends (not if they stop it). **Stop** in the
+IDE stops the turn or one command (a command running that no turn on the page shows, after
 a reload, is listed from the session's state with its **Stop**), and the
 model's `stop_command` asks the person first in every mode, every time: it
 offers no **always**. Ordinary commands keep their limit (120 s by default, at

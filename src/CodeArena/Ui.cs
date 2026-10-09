@@ -12,9 +12,14 @@ internal enum Approval { No, Yes, Always }
 /// </summary>
 internal sealed class Ui(TextReader input, TextWriter output, TextWriter error, bool color, bool canAsk)
 {
+    private const int MaxHeld = 400;
     private readonly object _gate = new();
+    private readonly Queue<string> _held = new();
     private Spinner? _spinner;
     private bool _midLine;
+    private bool _asking;
+    private int _heldDropped;
+    private Task<string?>? _reading;
 
     public TextReader In { get; } = input;
     public TextWriter Out { get; } = output;
@@ -54,6 +59,7 @@ internal sealed class Ui(TextReader input, TextWriter output, TextWriter error, 
             Out.Write(text);
             Out.Flush();
             _midLine = !text.EndsWith('\n');
+            PrintHeldLocked();
         }
     }
 
@@ -68,8 +74,62 @@ internal sealed class Ui(TextReader input, TextWriter output, TextWriter error, 
                 Out.WriteLine();
                 _midLine = false;
             }
+            PrintHeldLocked();
             Progress.WriteLine(text);
             Progress.Flush();
+        }
+    }
+
+    /// <summary>
+    /// A line from what runs in the background (a command's output, its end), from any thread: held
+    /// back while a question waits for its answer or the answer streams mid-line, and printed once
+    /// they are done (the last <see cref="MaxHeld"/>); a spinner goes on under it.
+    /// </summary>
+    public void Background(string text)
+    {
+        lock (_gate)
+        {
+            if (_asking || _midLine)
+            {
+                if (_held.Count >= MaxHeld)
+                {
+                    _held.Dequeue();
+                    _heldDropped++;
+                }
+                _held.Enqueue(text);
+                return;
+            }
+            PrintBackgroundLocked(text);
+        }
+    }
+
+    private void PrintBackgroundLocked(string text)
+    {
+        if (_spinner is not null)
+        {
+            // Its line is cleared for this one; its next frame is drawn under it.
+            Err.Write("\r\e[2K");
+            Err.Flush();
+        }
+        Progress.WriteLine(text);
+        Progress.Flush();
+    }
+
+    /// <summary>What was held back, once nothing is asked and no answer is mid-line.</summary>
+    private void PrintHeldLocked()
+    {
+        if (_asking || _midLine)
+        {
+            return;
+        }
+        if (_heldDropped > 0)
+        {
+            PrintBackgroundLocked(Dim($"… {_heldDropped:N0} more line{(_heldDropped == 1 ? "" : "s")} came meanwhile (command_output has them)"));
+            _heldDropped = 0;
+        }
+        while (_held.TryDequeue(out var line))
+        {
+            PrintBackgroundLocked(line);
         }
     }
 
@@ -87,6 +147,7 @@ internal sealed class Ui(TextReader input, TextWriter output, TextWriter error, 
                 Out.WriteLine();
                 _midLine = false;
             }
+            PrintHeldLocked();
             Err.WriteLine(Red("✗ " + text));
             Err.Flush();
         }
@@ -103,6 +164,7 @@ internal sealed class Ui(TextReader input, TextWriter output, TextWriter error, 
                 Out.Flush();
             }
             _midLine = false;
+            PrintHeldLocked();
         }
     }
 
@@ -138,9 +200,10 @@ internal sealed class Ui(TextReader input, TextWriter output, TextWriter error, 
         Err.Flush();
     }
 
-    /// <summary>A line the person types; null at the end of input.</summary>
+    /// <summary>A line the person types; null at the end of input. A line typed while a turn waited and not taken yet comes first.</summary>
     public string? ReadLine(string prompt)
     {
+        Task<string?>? reading;
         lock (_gate)
         {
             StopSpinnerLocked();
@@ -149,10 +212,38 @@ internal sealed class Ui(TextReader input, TextWriter output, TextWriter error, 
                 Out.WriteLine();
                 _midLine = false;
             }
+            PrintHeldLocked();
             Progress.Write(prompt);
             Progress.Flush();
+            reading = _reading;
         }
-        return In.ReadLine();
+        return reading is null ? In.ReadLine() : Take(reading);
+    }
+
+    /// <summary>
+    /// The next line typed, read on a thread of its own while something else is awaited (a turn
+    /// waiting for its commands): the same read until it is taken (<see cref="Take"/>), so a line
+    /// not taken then is the next one <see cref="ReadLine"/> returns. Nothing is read ahead.
+    /// </summary>
+    public Task<string?> NextLineAsync()
+    {
+        lock (_gate)
+        {
+            return _reading ??= Task.Run(() => In.ReadLine());
+        }
+    }
+
+    /// <summary>The line of that read (waiting for it): the next read starts afresh.</summary>
+    public string? Take(Task<string?> read)
+    {
+        lock (_gate)
+        {
+            if (_reading == read)
+            {
+                _reading = null;
+            }
+        }
+        return read.GetAwaiter().GetResult();
     }
 
     /// <summary>A secret (the API key): not echoed on a terminal.</summary>
@@ -165,17 +256,33 @@ internal sealed class Ui(TextReader input, TextWriter output, TextWriter error, 
         {
             return Approval.No;
         }
-        while (true)
+        // What runs in the background waits for the answer: it would push the question off the screen.
+        lock (_gate)
         {
-            var answer = ReadLine($"{Yellow("?")} {question} {Dim(always is null ? "[y]es, [n]o" : $"[y]es, [n]o, [a]lways {always}")} › ")?.Trim().ToLowerInvariant();
-            switch (answer)
+            _asking = true;
+        }
+        try
+        {
+            while (true)
             {
-                case null or "" or "n" or "no":
-                    return Approval.No;
-                case "y" or "yes":
-                    return Approval.Yes;
-                case "a" or "always" when always is not null:
-                    return Approval.Always;
+                var answer = ReadLine($"{Yellow("?")} {question} {Dim(always is null ? "[y]es, [n]o" : $"[y]es, [n]o, [a]lways {always}")} › ")?.Trim().ToLowerInvariant();
+                switch (answer)
+                {
+                    case null or "" or "n" or "no":
+                        return Approval.No;
+                    case "y" or "yes":
+                        return Approval.Yes;
+                    case "a" or "always" when always is not null:
+                        return Approval.Always;
+                }
+            }
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                _asking = false;
+                PrintHeldLocked();
             }
         }
     }

@@ -5,6 +5,9 @@ namespace CodeArena;
 /// <summary>The interactive session: the prompt, turns, and the slash commands.</summary>
 internal sealed class Repl(Runtime rt)
 {
+    // What the person typed while a turn waited for its commands: taken when it ends.
+    private readonly Queue<string> _typed = new();
+
     private Ui Ui => rt.Ui;
 
     public static readonly (string Name, string What)[] Commands =
@@ -20,7 +23,7 @@ internal sealed class Repl(Runtime rt)
         ("/context", "how full the model's window is"),
         ("/cost", "tokens spent, and how full the window is"),
         ("/mcp [retry]", "Arena's, Argus's and your MCP servers: connected or not; retry tries now"),
-        ("/jobs [stop N]", "the commands run with no time limit; stop N stops job N"),
+        ("/jobs [stop N]", "the commands run with no time limit; stop N stops job N (also while a turn waits for them)"),
         ("/clear", "start a new session (this one stays saved)"),
         ("/resume [id]", "switch to a saved session"),
         ("/exit", "leave (also Ctrl+D, or Ctrl+C twice)"),
@@ -29,10 +32,21 @@ internal sealed class Repl(Runtime rt)
     public async Task<int> RunAsync(string? first, CancellationToken ct)
     {
         Banner();
+        if (Ui.CanAsk)
+        {
+            // While a turn waits for its commands, the person can still type: /jobs stop N stops one of them.
+            rt.Agent.Listen = ListenAsync;
+        }
         var pending = first;
         while (!ct.IsCancellationRequested)
         {
             rt.SayLater();
+            if (pending is null && _typed.TryDequeue(out var typed))
+            {
+                Ui.Line();
+                Ui.Line(Ui.Cyan("› ") + typed);
+                pending = typed;
+            }
             string? input;
             if (pending is null)
             {
@@ -149,6 +163,12 @@ internal sealed class Repl(Runtime rt)
         catch (OperationCanceledException) when (linked.IsCancellationRequested)
         {
             Ui.Warn("Stopped.");
+            if (_typed.Count > 0)
+            {
+                // Stopping the turn stops what was typed for after it too: it may no longer apply.
+                Ui.Info($"Not sent, as the turn was stopped: {string.Join(" · ", _typed.Select(t => Fmt.OneLine(t, 60)))}");
+                _typed.Clear();
+            }
         }
         catch (Exception e) when (e is GatewayException or HttpRequestException or IOException)
         {
@@ -165,7 +185,72 @@ internal sealed class Repl(Runtime rt)
         }
     }
 
-    /// <summary>/jobs stop N: the person stops a command they let run with no time limit (the model hears of it at the next turn).</summary>
+    /// <summary>
+    /// What the person types while the turn waits for its commands with no time limit, until
+    /// <paramref name="wait"/> is done: /jobs lists them and /jobs stop N stops one; anything else
+    /// is kept and taken when the turn ends, as if typed then. A line being typed as the wait ends
+    /// goes to whatever reads next (the prompt, or a question).
+    /// </summary>
+    private async Task ListenAsync(Task wait)
+    {
+        var lines = new StringBuilder();
+        while (!wait.IsCompleted)
+        {
+            var read = Ui.NextLineAsync();
+            if (await Task.WhenAny(wait, read) != read)
+            {
+                break;
+            }
+            if (Ui.Take(read) is not { } line)
+            {
+                // The end of input (or Ctrl+C, on Windows): only the wait is left.
+                break;
+            }
+            if (line.EndsWith('\\'))
+            {
+                lines.Append(line[..^1]).Append('\n');
+                continue;
+            }
+            var text = lines.Append(line).ToString().Trim();
+            lines.Clear();
+            if (text.Length == 0)
+            {
+                continue;
+            }
+            if (text.Equals("/jobs", StringComparison.OrdinalIgnoreCase) || text.StartsWith("/jobs ", StringComparison.OrdinalIgnoreCase))
+            {
+                await JobsAsync(text[5..].Trim());
+                continue;
+            }
+            _typed.Enqueue(text);
+            Ui.Info($"Taken when this turn ends: {Fmt.OneLine(text, 60)} (while it waits, /jobs and /jobs stop N work)");
+        }
+        if (lines.ToString().Trim() is { Length: > 0 } unfinished)
+        {
+            _typed.Enqueue(unfinished);
+        }
+        await wait;
+    }
+
+    /// <summary>/jobs: the commands with no time limit and how each is; /jobs stop N stops one.</summary>
+    private async Task JobsAsync(string arg)
+    {
+        if (arg.StartsWith("stop", StringComparison.OrdinalIgnoreCase))
+        {
+            await StopJobAsync(arg[4..].Trim().TrimStart('#'));
+            return;
+        }
+        if (rt.Jobs.All.Count == 0)
+        {
+            Ui.Info("No commands with no time limit in this session.");
+        }
+        foreach (var job in rt.Jobs.All)
+        {
+            Ui.Line($"  job {job.Id}  {Fmt.OneLine(job.Command, 70)}  {Ui.Dim(job.Status())}");
+        }
+    }
+
+    /// <summary>/jobs stop N: the person stops a command they let run with no time limit (the model is told how it ended).</summary>
     private async Task StopJobAsync(string id)
     {
         if (!int.TryParse(id, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n) || rt.Jobs.Find(n) is not { } job)
@@ -351,19 +436,7 @@ internal sealed class Repl(Runtime rt)
                 }
                 break;
             case "/jobs":
-                if (arg.StartsWith("stop", StringComparison.OrdinalIgnoreCase))
-                {
-                    await StopJobAsync(arg[4..].Trim().TrimStart('#'));
-                    break;
-                }
-                if (rt.Jobs.All.Count == 0)
-                {
-                    Ui.Info("No commands with no time limit in this session.");
-                }
-                foreach (var job in rt.Jobs.All)
-                {
-                    Ui.Line($"  job {job.Id}  {Fmt.OneLine(job.Command, 70)}  {Ui.Dim(job.Status())}");
-                }
+                await JobsAsync(arg);
                 break;
             case "/clear":
                 var previous = rt.Session.Id;

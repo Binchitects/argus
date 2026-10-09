@@ -160,7 +160,8 @@ internal sealed class CommandJob
 /// <summary>
 /// The terminal's watcher of the commands with no time limit: their output line by line, dimmed
 /// under the job's number, at most 30 lines a second for each (beyond that, how many were not
-/// shown: command_output has them), and how each ended.
+/// shown: command_output has them), and how each ended. They come as they come, but never into a
+/// question waiting for the person's answer or the middle of the model's line (<see cref="Ui.Background"/>).
 /// </summary>
 internal sealed class JobPrinter(Ui ui)
 {
@@ -208,7 +209,7 @@ internal sealed class JobPrinter(Ui ui)
         }
         foreach (var line in lines)
         {
-            ui.Line(ui.Dim($"  │{job.Id} ") + Fmt.OneLine(line.Replace("\r", ""), 200));
+            ui.Background(ui.Dim($"  │{job.Id} ") + Fmt.OneLine(line.Replace("\r", ""), 200));
         }
     }
 
@@ -231,17 +232,10 @@ internal sealed class JobPrinter(Ui ui)
         }
         foreach (var line in rest)
         {
-            ui.Line(ui.Dim($"  │{job.Id} ") + Fmt.OneLine(line, 200));
+            ui.Background(ui.Dim($"  │{job.Id} ") + Fmt.OneLine(line, 200));
         }
         var said = $"job {job.Id} ended: {job.Status()}";
-        if (job.ExitCode == 0 && job.StoppedBy is null)
-        {
-            ui.Info(said);
-        }
-        else
-        {
-            ui.Warn(said);
-        }
+        ui.Background(job.ExitCode == 0 && job.StoppedBy is null ? ui.Dim(said) : ui.Yellow("! " + said));
     }
 
     private static string Hidden(int n) => $"… {n:N0} more line{(n == 1 ? "" : "s")} not shown (command_output has the latest)";

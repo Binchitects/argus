@@ -152,6 +152,11 @@ internal sealed class Agent
     public IAgentEvents? Events { get; set; }
     /// <summary>When the history is compacted, and to what.</summary>
     public Compaction Compaction { get; init; } = new();
+    /// <summary>
+    /// The terminal's: what the person types while the turn waits for its commands with no time limit
+    /// (<c>/jobs stop N</c>), until the wait it is given is done; null shows a spinner instead.
+    /// </summary>
+    public Func<Task, Task>? Listen { get; set; }
 
     private bool _parallelCalls = true;
     private long _knownTokens;
@@ -303,10 +308,17 @@ internal sealed class Agent
     /// <summary>Until one of the running commands ends: no time limit, only the person's Ctrl+C or Stop ends the wait.</summary>
     private Task WaitForJobsAsync(CommandJobs jobs, CancellationToken ct) => WaitingAsync(jobs.Running, jobs.WaitAnyAsync(ct));
 
-    /// <summary>Says which commands the turn waits for, and shows it waiting, until <paramref name="wait"/> is done.</summary>
+    /// <summary>Says which commands the turn waits for, and shows it waiting (or listens to the person), until <paramref name="wait"/> is done.</summary>
     private async Task WaitingAsync(IReadOnlyList<CommandJob> running, Task wait)
     {
         var what = string.Join(", ", running.Select(j => $"job {j.Id} ({Fmt.OneLine(j.Command, 40)})"));
+        if (Listen is { } listen)
+        {
+            // No spinner: it would draw over what the person types.
+            Ui.Info($"Waiting for {what} to end: no time limit. /jobs stop N stops one, Ctrl+C stops the turn and {(running.Count == 1 ? "it" : "them")}.");
+            await listen(wait);
+            return;
+        }
         Ui.Info($"Waiting for {what} to end: no time limit, Ctrl+C stops {(running.Count == 1 ? "it" : "them")}.");
         Ui.StartSpinner($"Waiting for {(running.Count == 1 ? $"job {running[0].Id}" : $"{running.Count} jobs")}");
         try

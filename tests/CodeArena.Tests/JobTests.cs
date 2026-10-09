@@ -349,27 +349,120 @@ public sealed class JobTests : IDisposable
     }
 
     [Fact]
-    public async Task Jobs_stop_in_the_terminal_stops_the_one_named()
+    public async Task While_a_turn_waits_for_its_commands_the_terminal_takes_jobs_stop_for_one_of_them()
     {
         if (OperatingSystem.IsWindows())
         {
             return;
         }
-        using var h = new Harness(_gateway, _mcp);
-        var output = new StringWriter();
-        var env = new CliEnv { In = new StringReader("/jobs stop\n/jobs stop 9\n/jobs stop 1\n/jobs stop 1\n/jobs\n/exit\n"), Out = TextWriter.Synchronized(output), Err = TextWriter.Synchronized(output), Env = _ => null, Cwd = h.Work, Paths = h.Paths };
-        var ui = new Ui(env.In, env.Out, env.Err, false, true);
-        await using var rt = await Runtime.StartAsync(new Options(), env, ui, CancellationToken.None);
-        var job = rt.Jobs.Start("serve", Sh("echo up; sleep 300"));
+        using var h = new Harness(_gateway, _mcp, c => c["mode"] = "yolo");
+        // The model starts a build and a test server with no time limit, and waits for both.
+        _gateway.Answer = req => FakeGateway.Last(req) switch
+        {
+            var last when last.Contains("job 1 has ended", StringComparison.Ordinal) => Reply.Say("Build done."),
+            var last when last.Contains("job 2 has ended", StringComparison.Ordinal) => Reply.Say("The server is stopped; the build goes on."),
+            _ when FakeGateway.HasToolResults(req) => Reply.Say("Both run; I wait for them."),
+            _ => Reply.Call(
+                ("run_shell", """{"command":"echo building; sleep 2; echo built","no_time_limit":true}"""),
+                ("run_shell", """{"command":"echo up; sleep 300","no_time_limit":true}""")),
+        };
 
-        Assert.Equal(0, await new Repl(rt).RunAsync(null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(20)));
-        Assert.False(job.Running);
-        var said = output.ToString();
-        Assert.Contains("Which job? /jobs stop N (/jobs lists them).", said);
-        Assert.Contains("There is no job 9: /jobs lists them.", said);
-        Assert.Matches(@"job 1 ended: stopped \(by the person, with /jobs stop\) after \d+s", said);
-        Assert.Matches(@"job 1 has ended: stopped \(by the person, with /jobs stop\) after \d+s\.", said);
-        Assert.Matches(@"job 1  serve  stopped \(by the person, with /jobs stop\)", said);
+        // Typed while the turn waits: the list, one stopped, and something for after the turn.
+        Assert.Equal(0, await h.Run("build and serve\n/jobs\n/jobs stop 2\n/jobs stop 9\nwhat now?\n/exit\n", "chat").WaitAsync(TimeSpan.FromSeconds(60)));
+
+        Assert.Contains("Waiting for job 1 (echo building; sleep 2; echo built), job 2 (echo up; sleep 300) to end: no time limit. /jobs stop N stops one, Ctrl+C stops the turn and them.", h.Out);
+        Assert.Matches(@"job 1  echo building; sleep 2; echo built  running for \d+s", h.Out);
+        Assert.Matches(@"job 2  echo up; sleep 300  running for \d+s", h.Out);
+        Assert.Contains("There is no job 9: /jobs lists them.", h.Out);
+        Assert.Matches(@"job 2 ended: stopped \(by the person, with /jobs stop\) after \d+s", h.Out);
+        Assert.Contains("Taken when this turn ends: what now? (while it waits, /jobs and /jobs stop N work)", h.Out);
+        // The model was told within the turn that job 2 was stopped, went on waiting for the build, then heard how it ended.
+        var told = _gateway.Requests.Select(FakeGateway.Last).ToList();
+        Assert.Contains(told, t => t.Contains("job 2 has ended", StringComparison.Ordinal) && t.Contains("stopped (by the person, with /jobs stop)", StringComparison.Ordinal));
+        Assert.Contains(told, t => t.Contains("job 1 has ended", StringComparison.Ordinal) && t.Contains("exit code 0", StringComparison.Ordinal) && t.Contains("built", StringComparison.Ordinal));
+        Assert.True(h.Out.IndexOf("Build done.", StringComparison.Ordinal) < h.Out.IndexOf("› what now?", StringComparison.Ordinal), h.Out);
+        // What was typed meanwhile was the next message, after the turn.
+        Assert.Equal("what now?", told[^1]);
+    }
+
+    [Fact]
+    public async Task Jobs_stop_with_no_turn_running_says_there_is_nothing_running()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        Assert.Equal(0, await h.Run("/jobs\n/jobs stop\n/jobs stop 1\n/exit\n", "chat"));
+        Assert.Contains("No commands with no time limit in this session.", h.Out);
+        Assert.Contains("Which job? /jobs stop N (/jobs lists them).", h.Out);
+        Assert.Contains("There is no job 1: /jobs lists them.", h.Out);
+    }
+
+    [Fact]
+    public async Task A_commands_output_waits_while_the_person_is_asked_and_after_the_answers_line()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        var typed = new TypedLines();
+        var output = new StringWriter();
+        var screen = TextWriter.Synchronized(output);
+        var ui = new Ui(typed, screen, screen, false, canAsk: true);
+        var jobs = new CommandJobs();
+        var printer = new JobPrinter(ui);
+        jobs.Output += printer.Output;
+        jobs.Ended += printer.Ended;
+
+        // The question is asked; the tests run meanwhile, to their end.
+        var asked = Task.Run(() => ui.Ask("edit_file src/App.cs", "for file edits"));
+        await Until(() => output.ToString().EndsWith("for file edits › ", StringComparison.Ordinal), "the question is asked");
+        var job = jobs.Start("tests", Sh("i=1; while [ $i -le 20 ]; do echo test $i; i=$((i+1)); sleep 0.02; done"));
+        await job.Done.WaitAsync(TimeSpan.FromSeconds(10));
+        await Task.Delay(200);
+        Assert.EndsWith("for file edits › ", output.ToString());
+
+        // Answered: what came meanwhile follows, in order.
+        typed.Add("y");
+        Assert.Equal(Approval.Yes, await asked.WaitAsync(TimeSpan.FromSeconds(5)));
+        var after = output.ToString()[(output.ToString().IndexOf("for file edits › ", StringComparison.Ordinal) + 17)..];
+        Assert.StartsWith("  │1 test 1\n", after);
+        Assert.True(after.IndexOf("│1 test 20\n", StringComparison.Ordinal) < after.IndexOf("job 1 ended: exit code 0", StringComparison.Ordinal), after);
+
+        // The model's answer streaming: no line breaks into it; they come when its line ends.
+        output.GetStringBuilder().Clear();
+        ui.Write("The tests ");
+        var more = jobs.Start("more", Sh("echo more done"));
+        await more.Done.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal("The tests ", output.ToString());
+        ui.Write("pass.\n");
+        Assert.StartsWith("The tests pass.\n  │2 more done\n", output.ToString());
+    }
+
+    [Fact]
+    public async Task The_spinner_goes_on_under_a_commands_output()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        var output = new StringWriter();
+        var screen = TextWriter.Synchronized(output);
+        var ui = new Ui(TextReader.Null, screen, screen, false, canAsk: false) { Animate = true };
+        var jobs = new CommandJobs();
+        var printer = new JobPrinter(ui);
+        jobs.Output += printer.Output;
+        ui.StartSpinner("Working");
+        var job = jobs.Start("watch", Sh("echo compiling; sleep 300"));
+        try
+        {
+            await Until(() => output.ToString().Contains("│1 compiling\n", StringComparison.Ordinal), "the output came");
+            var said = output.ToString();
+            var at = said.IndexOf("│1 compiling\n", StringComparison.Ordinal);
+            await Until(() => output.ToString()[at..].Contains("Working", StringComparison.Ordinal), "the spinner is drawn again under it", seconds: 3);
+        }
+        finally
+        {
+            ui.StopSpinner();
+            job.Stop("the test");
+        }
     }
 
     [Fact]
@@ -448,4 +541,14 @@ public sealed class JobTests : IDisposable
         {
         }
     }
+}
+
+/// <summary>A terminal's input: each line waits until the test types it.</summary>
+internal sealed class TypedLines : TextReader
+{
+    private readonly System.Collections.Concurrent.BlockingCollection<string> _lines = [];
+
+    public void Add(string line) => _lines.Add(line);
+
+    public override string? ReadLine() => _lines.Take();
 }
