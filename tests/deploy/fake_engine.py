@@ -19,10 +19,15 @@ With FAKE_STATE (a JSON file) docker (or FAKE_STATE_ENGINE) keeps a store, for i
 reference (load, tag, rm, inspect), volumes, and the containers `compose up`
 makes, one per service of FAKE_SERVICES. Compose's images are read from the
 compose files (COMPOSE_FILE, -f, else docker-compose.yml and its override): a
-service's image:, else PROJECT-service when it builds. A container is healthy
-unless its image was loaded from a reference in FAKE_UNHEALTHY; the services in
-FAKE_DOWN keep restarting. As podman, a short name tagged lands under localhost/,
-and a short name is looked for there first, as Podman does.
+service's image:, else PROJECT-service when it builds; `compose config` prints
+each service's bind mounts (a one-line `volumes: [...]`) as compose does. A
+container is healthy unless its image was loaded from a reference in
+FAKE_UNHEALTHY; the services in FAKE_DOWN keep restarting; a service of
+FAKE_WAITS_FOR (SERVICE=FILE, a file in MODELS_DIR) is unhealthy while that file
+is missing, as the embedding server is on Docker. As podman, a short name tagged
+lands under localhost/, and a short name is looked for there first, as Podman
+does. A helper container asking a service (python3 -c ... http://app:8080/...)
+gets the answer fake_curl.py gives.
 """
 from __future__ import annotations
 
@@ -31,6 +36,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import sys
 import tarfile
 
@@ -81,6 +87,37 @@ def store_key(ref: str) -> str:
 def keys(ref: str) -> list[str]:
     """The names a reference may mean, the first found wins: Podman looks under localhost/ first."""
     return (["localhost/" + norm(ref)] if PODMAN and is_short(ref) else []) + [store_key(ref)]
+
+
+VERSION = re.compile(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$")
+
+
+def running_version(s: dict, service: str) -> str | None:
+    """The version the service's running container says it is (as fake_curl.py)."""
+    for c in s.get("containers", []):
+        if c["service"] == service and c["state"] == "running":
+            tag = s.get("origins", {}).get(c["image_id"], "").rsplit(":", 1)[-1]
+            return tag if VERSION.match(tag) else os.environ.get("FAKE_OLD_VERSION", "5.2.0")
+    return None
+
+
+def health(c: dict) -> str:
+    """A container's health now: a model file it waits for may have come meanwhile."""
+    if c.get("waits_for") and not os.path.exists(c["waits_for"]):
+        return "unhealthy"
+    return c["health"]
+
+
+def models_dir() -> str:
+    """MODELS_DIR as compose reads it from .env here, made absolute."""
+    value = "./models"
+    try:
+        for line in open(".env"):
+            if line.startswith("MODELS_DIR=") and line.strip() != "MODELS_DIR=":
+                value = line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return os.path.normpath(os.path.join(os.getcwd(), value))
 
 
 class Store:
@@ -214,7 +251,7 @@ def stateful(args: list[str]) -> int | None:
             if ".Mounts" in fmt:
                 print(c.get("anon", ""))
             elif "com.docker.compose.service" in fmt:
-                print(f'{c["service"]}|/{c["name"]}|{c["state"]}|{c["health"]}|sha256:{c["image_id"]}|{c["image_ref"]}')
+                print(f'{c["service"]}|/{c["name"]}|{c["state"]}|{health(c)}|sha256:{c["image_id"]}|{c["image_ref"]}')
             elif "working_dir" in fmt:
                 print(c["workdir"])
             else:
@@ -231,6 +268,13 @@ def stateful(args: list[str]) -> int | None:
         return 0
     if args[0] == "run":
         joined = " ".join(args)
+        if "python3 -c" in joined and args[-1].startswith("http://"):
+            url = args[-1]
+            v = running_version(s, "app" if url.endswith("/api/info") else "argus")
+            if v is None:
+                return 1
+            print(json.dumps({"name": "Argus Arena", "version": v}) if url.endswith("/api/info") else f'argus_index_build_info{{version="{v}"}} 1')
+            return 0
         if "stat -c %u:%g" in joined:
             vol = (mount(args, "/v") or "").split("_", 1)[-1]
             print(os.environ.get(f"FAKE_OWNER_{vol}", OWNERS.get(vol, "0:0")))
@@ -287,7 +331,7 @@ def compose_model(args: list[str], project: str, everything: bool = False) -> di
                 continue
             if line.startswith("  ") and not line.startswith("   "):
                 svc = line.strip().split(":", 1)[0]
-                entry = model.setdefault(svc, {"image": None, "build": False, "profiles": []})
+                entry = model.setdefault(svc, {"image": None, "build": False, "profiles": [], "binds": []})
                 rest = line.split(":", 1)[1]
                 if "image:" in rest:
                     entry["image"] = rest.split("image:", 1)[1].split("}")[0].strip().strip('"')
@@ -301,6 +345,11 @@ def compose_model(args: list[str], project: str, everything: bool = False) -> di
                     model[svc]["build"] = True
                 elif key == "profiles":
                     model[svc]["profiles"] = merge_profiles(model[svc]["profiles"], line)
+                elif key == "volumes" and value.strip().startswith("["):
+                    for item in value.strip().strip("[]").split(","):
+                        source = item.strip().strip('"').split(":")[0]
+                        if source.startswith(("./", "/")):
+                            model[svc]["binds"].append(os.path.normpath(os.path.join(os.getcwd(), source)))
     if everything:
         return model
     on = set(x for x in os.environ.get("COMPOSE_PROFILES", "").split(",") if x)
@@ -337,12 +386,23 @@ def compose(st: Store, args: list[str], project: str) -> int:
                     print("    build:\n      context: .")
                 if model[name]["image"]:
                     print(f"    image: {model[name]['image']}")
+                if model[name]["binds"]:
+                    print("    volumes:")
+                    for source in model[name]["binds"]:
+                        print(f"      - type: bind\n        source: {source}\n        target: /x")
         return 0
     if "version" in args:
         print("Docker Compose version v9")
         return 0
     if "down" in args:
         s["containers"] = [c for c in s["containers"] if c["project"] != project]
+        st.save()
+        return 0
+    if "stop" in args:
+        named = args[args.index("stop") + 1:]
+        for c in s["containers"]:
+            if c["project"] == project and (not named or c["service"] in named):
+                c["state"] = "exited"
         st.save()
         return 0
     if "up" in args:
@@ -358,6 +418,7 @@ def compose(st: Store, args: list[str], project: str) -> int:
             s["volumes"].setdefault(f"{project}_{vol}", {"labels": [f"com.docker.compose.project={project}"]})
         unhealthy = set(norm(x) for x in lines("FAKE_UNHEALTHY"))
         down = set(lines("FAKE_DOWN"))
+        waits = dict(x.split("=", 1) for x in lines("FAKE_WAITS_FOR"))
         for svc in services:
             ref = service_image(model, svc, project)
             image_id = st.image(ref)
@@ -371,7 +432,8 @@ def compose(st: Store, args: list[str], project: str) -> int:
                 "id": f"c{n:04d}", "name": svc, "service": svc, "project": project, "workdir": os.getcwd(),
                 "image_ref": ref, "image_id": image_id,
                 "state": "created" if "--no-start" in args else "restarting" if svc in down else "running",
-                "health": "unhealthy" if st.origin(image_id) in unhealthy else "healthy"})
+                "health": "unhealthy" if st.origin(image_id) in unhealthy else "healthy",
+                "waits_for": os.path.join(models_dir(), waits[svc]) if svc in waits else ""})
         st.save()
         return 0
     return 0

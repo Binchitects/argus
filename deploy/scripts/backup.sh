@@ -66,8 +66,9 @@ INCLUDE_LOGS="$(env_get BACKUP_INCLUDE_LOGS)"; INCLUDE_LOGS="${INCLUDE_LOGS:-1}"
 BACKUP_TIME="$(env_get BACKUP_TIME)"; BACKUP_TIME="${BACKUP_TIME:-03:30}"
 PG_USER=arena
 # The image cpu-temp-exporter already runs: on an air-gapped host a backup must
-# not need an image that was never pulled (or was pruned as unused).
+# not need an image that was never pulled (or was pruned as unused). It is never pulled.
 HELPER=python:3.13-slim
+HELPER_MISSING="the helper image $HELPER is not on this host, and nothing is pulled: load it from the offline bundle (or $ENGINE pull $HELPER where there is a network)"
 case "$BACKUP_DIR" in /*) ;; *) BACKUP_DIR="$ROOT/${BACKUP_DIR#./}" ;; esac
 COPY_DIR="$(env_get BACKUP_COPY_DIR)"
 case "$COPY_DIR" in ""|/*) ;; *) COPY_DIR="$ROOT/${COPY_DIR#./}" ;; esac
@@ -181,6 +182,7 @@ if [[ $ACTION == restore ]]; then
   [[ -n "$FROM" && -d "$FROM" ]] || die "pass --from <backup directory>"
   FROM="$(cd "$FROM" && pwd)"
   verify_dir "$FROM" || die "the backup does not verify; not restoring from it"
+  "$ENGINE" image inspect "$HELPER" >/dev/null 2>&1 || die "$HELPER_MISSING"
   if "$ENGINE" compose ps -q 2>/dev/null | grep -q .; then
     die "the stack is running. Stop it first: $ENGINE compose down   (volumes are kept)"
   fi
@@ -207,14 +209,14 @@ if [[ $ACTION == restore ]]; then
   for a in "$FROM"/volumes/*.tar.gz; do
     [[ -f "$a" ]] || continue
     vol="$(basename "$a" .tar.gz)"
-    "$ENGINE" run --rm --network none -v "${PROJECT}_${vol}:/target" -v "$FROM/volumes:/backup:ro" "$HELPER" \
+    "$ENGINE" run --rm --pull never --network none -v "${PROJECT}_${vol}:/target" -v "$FROM/volumes:/backup:ro" "$HELPER" \
       sh -c "find /target -mindepth 1 -delete && tar -xzpf /backup/${vol}.tar.gz --numeric-owner -C /target" \
       && say "  restored  $vol" || die "restoring $vol failed"
   done
 
   if [[ -f "$FROM/postgres.sql.gz" ]]; then
     say "==> gateway database"
-    "$ENGINE" run --rm --network none -v "${PROJECT}_postgres:/target" "$HELPER" sh -c "find /target -mindepth 1 -delete"
+    "$ENGINE" run --rm --pull never --network none -v "${PROJECT}_postgres:/target" "$HELPER" sh -c "find /target -mindepth 1 -delete"
     "$ENGINE" compose up -d --no-build --pull never postgres >/dev/null 2>&1 || die "postgres did not start"
     # Through compose: the project's own postgres, whatever the project is called.
     for _ in $(seq 1 60); do "$ENGINE" compose exec -T postgres pg_isready -U "$PG_USER" >/dev/null 2>&1 && break; sleep 2; done
@@ -314,11 +316,14 @@ with tarfile.open(out, "w:gz", compresslevel=6) as tar:
                 tar.add(path, arcname=arc, recursive=False)
 print(n_sql)
 '
+HAVE_HELPER=1
+"$ENGINE" image inspect "$HELPER" >/dev/null 2>&1 || { HAVE_HELPER=0; fail "$HELPER_MISSING"; }
 for vol in $(compose_volumes); do
+  [[ $HAVE_HELPER -eq 1 ]] || break
   case "$SKIP_VOLUMES" in *" $vol "*) continue ;; esac
   if [[ "$INCLUDE_LOGS" != 1 ]]; then case "$LOG_VOLUMES" in *" $vol "*) continue ;; esac; fi
   "$ENGINE" volume inspect "${PROJECT}_${vol}" >/dev/null 2>&1 || continue
-  n_sql=$("$ENGINE" run --rm --network none -v "${PROJECT}_${vol}:/src" -v "$OUT/volumes:/out" "$HELPER" \
+  n_sql=$("$ENGINE" run --rm --pull never --network none -v "${PROJECT}_${vol}:/src" -v "$OUT/volumes:/out" "$HELPER" \
           sh -c "python -c '$SNAPSHOT_PY' /out/${vol}.tar.gz && chown ${UIDGID} /out/${vol}.tar.gz && chmod 600 /out/${vol}.tar.gz" 2>>"$LOG")
   if [[ $? -eq 0 && -s "$OUT/volumes/${vol}.tar.gz" ]]; then
     printf '  %-22s %7s%s\n' "$vol" "$(du -h "$OUT/volumes/${vol}.tar.gz" | cut -f1)" "$([[ "${n_sql:-0}" -gt 0 ]] && echo "  (${n_sql} SQLite database(s) via online backup)")"

@@ -148,7 +148,7 @@ class AirgapTests(unittest.TestCase):
     def test_The_speech_models_come_from_the_audio_volume(self):
         self.pack()
         self.assertIn("arena-airgap/audio/audio.tar.gz", self.members())
-        self.assertTrue(self.s.called("run", "--rm", "--network", "none", "-v", "arena_audio:/src:ro"))
+        self.assertTrue(self.s.called("run", "--rm", "--pull", "never", "--network", "none", "-v", "arena_audio:/src:ro"))
 
     def test_Packing_never_pulls_and_stops_on_an_image_that_is_not_here(self):
         self.s.env["FAKE_MISSING"] = "ghcr.io/berriai/litellm:main-stable"

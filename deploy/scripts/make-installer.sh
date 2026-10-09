@@ -11,7 +11,9 @@
 #   --project NAME     the compose project whose images and volumes it takes (default arena):
 #                      the release's own images are NAME-app, NAME-web... as compose built them
 #   --podman           from Podman's store in place of Docker's
-#   --models           the models too (airgap.sh --models); without it they are listed
+#   --models           the models too (airgap.sh --models); without it they are listed, and
+#                      only the embedding model goes in (small, and the embedding server
+#                      waits for it)
 #   --models-dir DIR   the model library (as airgap.sh: MODELS_DIR in .env, else ./models)
 #   --packs            the knowledge packs in packs/ (*.arguspack)
 #   --code-arena DIR   Code Arena's packages (default dist/: code-arena-*.tar.gz and .zip,
@@ -32,7 +34,8 @@
 #                  override, and only the files git has when this is a checkout
 #   known/         each release's deploy files' checksums since 5.2.0, from its git tag: an
 #                  upgrade tells the files a host changed from the ones it was shipped with
-#   models/, audio/  as airgap.sh packs them
+#                  (5.2.0's tag must be here: git fetch --tags)
+#   models/, audio/  as airgap.sh packs them; models/library/ has the embedding model always
 #   docs/, LICENSE.md, LICENSING.md, VERSION, code-arena/, packs/
 #
 # The file is the installer's shell header, then a small tar (the installer, MANIFEST,
@@ -45,6 +48,8 @@ umask 022
 FORMAT="argus-arena-offline 1"
 # The oldest release an upgrade starts from (installer.sh refuses older ones).
 UPGRADES_FROM=5.2.0
+# The embedding server waits for this file in MODELS_DIR (docker-compose.yml): every bundle has it.
+EMBED_FILE=embed/nomic-embed-text-v1.5.f16.gguf
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'make-installer: ERROR: %s\n' "$*" >&2; exit 1; }
@@ -143,6 +148,29 @@ AIRGAP=(bash "$ROOT/scripts/airgap.sh" pack)
 [[ -n "$MODELS_ARG" ]] && AIRGAP+=(--models-dir "$MODELS_ARG")
 CA_FILES=(); for f in "$CA_DIR"/code-arena-*.tar.gz "$CA_DIR"/code-arena-*.zip; do [[ -f "$f" ]] && CA_FILES+=("$f"); done
 PACK_FILES=(); [[ $PACKS -eq 1 ]] && for f in "$REPO"/packs/*.arguspack; do [[ -f "$f" ]] && PACK_FILES+=("$f"); done
+# The model library, as airgap.sh finds it.
+MODELS_DIR="${MODELS_ARG:-$(sed -n 's/^MODELS_DIR=//p' "$ROOT/.env" 2>/dev/null | tail -n1 | sed -e 's/^"//' -e 's/"$//')}"
+MODELS_DIR="${MODELS_DIR:-./models}"
+case "$MODELS_DIR" in /*) ;; *) MODELS_DIR="$ROOT/${MODELS_DIR#./}" ;; esac
+if left embed || [[ "$ALL" != *" embed "* ]]; then EMBEDDING="left out"
+elif [[ -f "$MODELS_DIR/$EMBED_FILE" ]]; then EMBEDDING=packed
+else EMBEDDING=missing; fi
+
+# known/: each release's deploy files since UPGRADES_FROM, from its git tag (TAG<TAB>VERSION).
+# Without UPGRADES_FROM's, an upgrade from it could not tell a file the host changed from one it
+# was shipped with: every file the release changed would look changed by the host.
+KNOWN=()
+if git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
+  for tag in $(git -C "$REPO" tag -l 'v[0-9]*'); do
+    v="$(git -C "$REPO" show "$tag:VERSION" 2>/dev/null | tr -d '[:space:]')"
+    valid_version "$v" || continue
+    [[ "$(vercmp "$v" "$UPGRADES_FROM")" != -1 && "$(vercmp "$v" "$VERSION")" == -1 ]] && KNOWN+=("$tag"$'\t'"$v")
+  done
+fi
+KNOWN_MISSING=""
+if [[ "$(vercmp "$VERSION" "$UPGRADES_FROM")" == 1 ]] && ! printf '%s\n' ${KNOWN[@]+"${KNOWN[@]}"} | cut -f2 | grep -qxF "$UPGRADES_FROM"; then
+  KNOWN_MISSING="no git tag of $UPGRADES_FROM in $REPO (v$UPGRADES_FROM): its deploy files' checksums cannot go in known/. Fetch the tags first (git fetch --tags; a shallow CI clone: fetch-depth 0)"
+fi
 
 if [[ $DRY -eq 1 ]]; then
   say "Would make $RUN and $(basename "$RUN").sha256 (dry run: nothing is written or saved)"
@@ -153,7 +181,9 @@ if [[ $DRY -eq 1 ]]; then
   done
   [[ -n "$LEAVE" ]] && say "  left out: ${LEAVE//,/ }"
   "${AIRGAP_ENV[@]}" "${AIRGAP[@]}" --dry-run "$WORK/plan.tar" | sed -n '2,$p' | sed 's/^/  /'
-  say "  then gzipped, with installer.sh, docs/, LICENSE.md, LICENSING.md, VERSION, known/ (the deploy files of each release since $UPGRADES_FROM)"
+  say "  the embedding model ($EMBED_FILE): $(case "$EMBEDDING" in packed) echo "from $MODELS_DIR" ;; missing) echo "NOT IN $MODELS_DIR: the embedding server would wait for it on the other host" ;; *) echo "$EMBEDDING" ;; esac)"
+  say "  then gzipped, with installer.sh, docs/, LICENSE.md, LICENSING.md, VERSION, known/ ($(printf '%s\n' ${KNOWN[@]+"${KNOWN[@]}"} | cut -f2 | paste -sd' ' -))"
+  [[ -n "$KNOWN_MISSING" ]] && say "  known/: NOT MADE: $KNOWN_MISSING"
   say "  Code Arena's packages: ${#CA_FILES[@]} in $CA_DIR$([[ ${#CA_FILES[@]} -eq 0 ]] && echo " (none: tools/package-code-arena.sh makes them)")"
   say "  knowledge packs: $([[ $PACKS -eq 1 ]] && echo "${#PACK_FILES[@]} from packs/" || echo "none (--packs)")"
   exit 0
@@ -173,6 +203,9 @@ for s in "${BUILT[@]}"; do
   elif [[ "$have" != "$id" ]]; then die "$dst is here already and is not $src: remove that tag first ($ENGINE image rm $dst)"; fi
   say "  $src -> arena-$s:$VERSION"
 done
+
+# Before the long part: a bundle without known/ would upgrade the oldest release blind.
+[[ -z "$KNOWN_MISSING" ]] || die "$KNOWN_MISSING"
 
 # The free space for the staging folder and the file: the images, twice over.
 STAGE="$(mktemp -d "$OUT_DIR/.make-installer.XXXXXX")" || die "cannot make a work folder in $OUT_DIR"
@@ -233,18 +266,28 @@ fi
 
 say "==> known/: each release's deploy files since $UPGRADES_FROM"
 mkdir -p "$B/known"
-if git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
-  for tag in $(git -C "$REPO" tag -l 'v[0-9]*'); do
-    v="$(git -C "$REPO" show "$tag:VERSION" 2>/dev/null | tr -d '[:space:]')"
-    valid_version "$v" || continue
-    [[ "$(vercmp "$v" "$UPGRADES_FROM")" != -1 && "$(vercmp "$v" "$VERSION")" == -1 ]] || continue
-    git -C "$REPO" ls-tree -r "$tag" -- deploy | while read -r mode type sha path; do
-      [[ $type == blob && $mode != 120000 ]] || continue
-      printf '%s  %s\n' "$(git -C "$REPO" cat-file blob "$sha" | sha256sum | cut -d' ' -f1)" "${path#deploy/}"
-    done > "$B/known/$v.sha256"
-    say "  $v ($tag): $(wc -l < "$B/known/$v.sha256") files"
-  done
+for kv in ${KNOWN[@]+"${KNOWN[@]}"}; do
+  tag="${kv%%$'\t'*}" v="${kv#*$'\t'}"
+  git -C "$REPO" ls-tree -r "$tag" -- deploy | while read -r mode type sha path; do
+    [[ $type == blob && $mode != 120000 ]] || continue
+    printf '%s  %s\n' "$(git -C "$REPO" cat-file blob "$sha" | sha256sum | cut -d' ' -f1)" "${path#deploy/}"
+  done > "$B/known/$v.sha256"
+  say "  $v ($tag): $(wc -l < "$B/known/$v.sha256") files"
+done
+[[ ${#KNOWN[@]} -gt 0 ]] || say "  none: $VERSION is the oldest release an upgrade starts from"
+
+say "==> the embedding model (the embedding server waits for it; the app would fetch it, which needs the network)"
+if [[ $EMBEDDING == packed && ! -f "$B/models/library/$EMBED_FILE" ]]; then
+  mkdir -p "$B/models/library/$(dirname "$EMBED_FILE")"
+  ln "$MODELS_DIR/$EMBED_FILE" "$B/models/library/$EMBED_FILE" 2>/dev/null || cp -L "$MODELS_DIR/$EMBED_FILE" "$B/models/library/$EMBED_FILE" \
+    || die "copying $EMBED_FILE failed (disk full?)"
 fi
+case "$EMBEDDING" in
+  packed) say "  $EMBED_FILE: $(human "$(stat -L -c %s "$B/models/library/$EMBED_FILE")")" ;;
+  missing) say "  WARNING: $EMBED_FILE is not in $MODELS_DIR: the bundle goes without it, and the embedding server" \
+             "of a host installed from it waits until someone brings the file (Argus's and the app's search by meaning need it)" ;;
+  *) say "  none: the embedding server is left out" ;;
+esac
 
 ai() { sed -n "s/^$1: //p" <<<"$AIRGAP_MANIFEST" | head -n1; }
 {
@@ -259,6 +302,7 @@ ai() { sed -n "s/^$1: //p" <<<"$AIRGAP_MANIFEST" | head -n1; }
   echo "left-out: ${LEAVE//,/ }"
   echo "models: $(ai models)"
   echo "model: $(ai model)"
+  echo "embedding: $EMBEDDING"
   echo "audio: $(ai audio)"
   echo "packs: ${#PACK_FILES[@]}"
   echo "code-arena: ${#CA_FILES[@]}"

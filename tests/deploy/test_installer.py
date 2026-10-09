@@ -14,9 +14,10 @@ import tarfile
 import unittest
 from pathlib import Path
 
-from support import COMPOSE, Sandbox
+from support import COMPOSE, REPO, Sandbox
 
-SERVICES = "traefik\nweb\napp\npostgres\nlitellm\nargus\ncpu-temp-exporter\n"
+SERVICES = "traefik\nweb\napp\npostgres\nlitellm\nargus\ncpu-temp-exporter\nembed\n"
+EMBED = "embed/nomic-embed-text-v1.5.f16.gguf"
 THIRD_PARTY = ["traefik:v3.6.7", "pgvector/pgvector:0.8.0-pg16", "ghcr.io/berriai/litellm:main-stable", "python:3.13-slim",
                "ghcr.io/ggml-org/llama.cpp:server-cuda"]
 # What compose names with make-installer's release.yml on top: the release's own by version.
@@ -26,6 +27,10 @@ IMAGES_NEW = "\n".join(THIRD_PARTY + ["arena-web:9.9.9", "arena-app:9.9.9", "are
 COMPOSE = COMPOSE.replace("volumes:\n", "  llamacpp:\n    image: ghcr.io/ggml-org/llama.cpp:server-cuda\nvolumes:\n", 1)
 # And one the release builds that runs only when asked for (laya).
 COMPOSE = COMPOSE.replace("volumes:\n", "  laya:\n    build: ./services/laya\n    profiles: [laya]\nvolumes:\n", 1)
+# The embedding server, on the CPU: it waits for its model file (FAKE_WAITS_FOR).
+COMPOSE = COMPOSE.replace("volumes:\n", "  embed:\n    image: ghcr.io/ggml-org/llama.cpp:server-cuda\n    container_name: embed\nvolumes:\n", 1)
+# LiteLLM reads a file of deploy/ as it starts.
+COMPOSE = COMPOSE.replace("    container_name: litellm\n", "    container_name: litellm\n    volumes: [\"./config/litellm.yaml:/app/config.yaml:ro\"]\n", 1)
 COMPOSE_OLD = COMPOSE.replace("name: arena\n", "name: arena\n# 5.2.0\n")
 COMPOSE_NEW = COMPOSE.replace("    container_name: app\n", "    container_name: app\n    environment: { NEW_KEY: \"${NEW_KEY:?set NEW_KEY}\", APP_KEY: \"${APP_KEY:?}\" }\n")
 ENV_EXAMPLE_OLD = "DOMAIN=llm.localhost\nADMIN_EMAIL=admin@example.com\nMODELS_DIR=./models\nMODEL=org/repo:Q4\nADMIN_PASSWORD=\nAPP_KEY=\nDB_PASSWORD=\nGATEWAY_KEY=\nENGINE_KEY=\nARGUS_KEY=\n"
@@ -41,7 +46,7 @@ def git(repo: Path, *args: str) -> None:
 class Release:
     """A repository with v5.2.0 tagged and 9.9.9 at HEAD, its images in a fake store, and its bundle."""
 
-    def __init__(self, *make_args: str, services: str = SERVICES):
+    def __init__(self, *make_args: str, services: str = SERVICES, embed_model: bool = False, tag: bool = True):
         self.s = s = Sandbox(curl=True)
         self.repo = s.repo
         s.write("docker-compose.yml", COMPOSE_OLD)
@@ -55,7 +60,8 @@ class Release:
         git(self.repo, "init", "-q")
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-q", "-m", "5.2.0")
-        git(self.repo, "tag", "v5.2.0")
+        if tag:
+            git(self.repo, "tag", "v5.2.0")
         self.old = s.dir / "old-deploy"
         shutil.copytree(s.deploy, self.old)
         s.write("docker-compose.yml", COMPOSE_NEW)
@@ -79,7 +85,10 @@ class Release:
         refs = THIRD_PARTY + ["arena-app:latest", "arena-web:latest", "arena-argus:latest", "arena-laya:latest"]
         self.state.write_text(json.dumps({"images": {r: f"{i:064x}" for i, r in enumerate(refs, start=1)}}))
         s.env = {"FAKE_STATE": str(self.state), "FAKE_SERVICES": services,
-                 "FAKE_COMPOSE_VOLUMES": "postgres\nengine\nargus\n"}
+                 "FAKE_COMPOSE_VOLUMES": "postgres\nengine\nargus\n", "FAKE_WAITS_FOR": f"embed={EMBED}"}
+        if embed_model:
+            # On the packing host, in its model library (deploy/models: no .env there).
+            s.write(f"models/{EMBED}", "an embedding model\n")
         self.dist = self.repo / "dist"
         self.made = s.run("make-installer.sh", *make_args)
         self.run_file = self.dist / "argus-arena-9.9.9-offline.run"
@@ -153,7 +162,8 @@ class BundleTests(unittest.TestCase):
     def test_The_bundle_holds_the_release_and_nothing_of_the_host(self):
         b = self.r.unpack()
         manifest = (b / "MANIFEST").read_text()
-        for line in ("format: argus-arena-offline 1", "version: 9.9.9", "upgrades-from: 5.2.0", "engine: docker", "packs: 1", "code-arena: 1"):
+        for line in ("format: argus-arena-offline 1", "version: 9.9.9", "upgrades-from: 5.2.0", "engine: docker", "packs: 1", "code-arena: 1",
+                     "embedding: missing"):
             self.assertIn(line + "\n", manifest)
         self.assertRegex(manifest, r"commit: [0-9a-f]{7}")
         self.assertEqual((b / "installer.sh").read_text(), (self.r.s.deploy / "scripts" / "installer.sh").read_text())
@@ -181,6 +191,10 @@ class BundleTests(unittest.TestCase):
         r = subprocess.run(["sha256sum", "-c", "--strict", "--quiet", "SHA256SUMS"], cwd=b, capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
+    def test_A_bundle_without_the_embedding_model_says_so_loudly(self):
+        self.assertIn(f"WARNING: {EMBED} is not in", self.r.made.stdout)
+        self.assertFalse((self.r.unpack() / "models" / "library").exists())
+
     def test_The_version_tags_it_made_are_gone_afterwards(self):
         images = self.r.store()["images"]
         self.assertNotIn("arena-app:9.9.9", images)
@@ -194,7 +208,7 @@ class LeaveOutTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # On the packing host every service is there, Laya when its profile is asked for.
-        cls.r = Release("--leave-out", "laya,llamacpp", services=SERVICES + "llamacpp\nlaya\n")
+        cls.r = Release("--leave-out", "laya,llamacpp,embed", services=SERVICES + "llamacpp\nlaya\n")
 
     @classmethod
     def tearDownClass(cls):
@@ -207,10 +221,11 @@ class LeaveOutTests(unittest.TestCase):
         self.assertEqual(sorted(release), ["app", "argus", "web"])
         refs = [line.split("\t")[0] for line in (b / "images" / "IMAGES").read_text().splitlines()]
         self.assertFalse([ref for ref in refs if "laya" in ref or "llama.cpp" in ref], refs)
-        self.assertIn("left-out: laya llamacpp\n", (b / "MANIFEST").read_text())
+        self.assertIn("left-out: laya llamacpp embed\n", (b / "MANIFEST").read_text())
+        self.assertIn("embedding: left out\n", (b / "MANIFEST").read_text())
 
     def test_A_dry_run_finds_the_images_as_they_are_before_they_are_tagged(self):
-        r = self.r.s.run("make-installer.sh", "--dry-run", "--version", "9.9.10", "--leave-out", "laya,llamacpp")
+        r = self.r.s.run("make-installer.sh", "--dry-run", "--version", "9.9.10", "--leave-out", "laya,llamacpp,embed")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("arena-app", r.stdout)
         self.assertNotIn("NOT ON THIS HOST", r.stdout)
@@ -251,6 +266,8 @@ class MakeInstallerArgumentTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("Would make", r.stdout)
         self.assertIn("left out: argus", r.stdout)
+        # No git here, so no tag of 5.2.0: said in the plan, refused by the real run.
+        self.assertIn("known/: NOT MADE: no git tag of 5.2.0", r.stdout)
         self.assertFalse((self.s.repo / "dist").exists())
         self.assertFalse(self.s.called("save") or self.s.called("tag"))
 
@@ -295,6 +312,8 @@ class InstallerTests(unittest.TestCase):
         (deploy / ".env").write_text(OLD_ENV)
         (deploy / ".env").chmod(0o600)
         (deploy / "config" / "edited.yml").write_text("shipped: 1\nmine: yes\n")
+        # Changed here, as an admin changes budgets; 9.9.9 ships it as 5.2.0 did.
+        (deploy / "config" / "litellm.yaml").write_text("model_list: []\nbudget: mine\n")
         (deploy / "config" / "mine.yml").write_text("my own\n")
         (deploy / "certs" / "tls.key").write_text("KEY\n")
         if version_file:
@@ -368,7 +387,9 @@ class InstallerTests(unittest.TestCase):
         out = r.stdout
         self.assertIn("from 5.2.0 (" + str(self.dir / "VERSION") + ") to 9.9.9", out)
         self.assertIn("would  update docker-compose.yml", out)
-        self.assertIn("would  update config/edited.yml, which was changed here: that copy kept as config/edited.yml.before-9.9.9", out)
+        self.assertIn("would  update config/edited.yml, which was changed here and in 9.9.9: that copy kept as config/edited.yml.before-9.9.9", out)
+        self.assertIn("note   kept config/litellm.yaml as it was changed here: 9.9.9 ships it as it was", out)
+        self.assertNotIn("update config/litellm.yaml", out)
         self.assertIn("would  add config/added.yml", out)
         self.assertIn("would  remove config/dropped.yml: not in 9.9.9 (it is 5.2.0's, unchanged)", out)
         self.assertIn("kept config/mine.yml: not in 9.9.9; yours", out)
@@ -484,6 +505,10 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(app["image_id"], self.r.store()["images"]["arena-app:9.9.9"])
         self.assertIn("ok     app: 9.9.9 (its own /api/info)", r.stdout)
         self.assertIn("Argus Arena 9.9.9 runs: https://arena.test:18443", r.stdout)
+        # Asked through Traefik here, never through a proxy (which would not take --resolve).
+        asks = [c for c in self.r.calls() if c[0] == "curl"]
+        self.assertTrue(asks)
+        self.assertTrue(all(c[c.index("--noproxy") + 1] == "*" for c in asks), asks)
         # Loaded quietly: the engines' progress lines are noise in a log.
         self.assertTrue(self.r.s.called("load", "-q", "-i"))
         # Third-party images that were here before: recorded so, and remove leaves them.
@@ -560,6 +585,11 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual((deploy / "docker-compose.yml").read_text(), COMPOSE_NEW)
         self.assertEqual((deploy / "config" / "edited.yml").read_text(), "shipped: 2\n")
         self.assertEqual((deploy / "config" / "edited.yml.before-9.9.9").read_text(), "shipped: 1\nmine: yes\n")
+        # Changed here and not by the release: the host's stays in effect, and both are named at the end.
+        self.assertEqual((deploy / "config" / "litellm.yaml").read_text(), "model_list: []\nbudget: mine\n")
+        self.assertFalse((deploy / "config" / "litellm.yaml.before-9.9.9").exists())
+        self.assertIn("changes of yours to apply again (9.9.9 changed these files too; yours are beside them as FILE.before-9.9.9): config/edited.yml\n", out)
+        self.assertIn("kept as you changed them (9.9.9 ships them as they were): config/litellm.yaml\n", out)
         self.assertFalse((deploy / "config" / "dropped.yml").exists())
         self.assertEqual((deploy / "config" / "mine.yml").read_text(), "my own\n")
         self.assertEqual((deploy / "certs" / "tls.key").read_text(), "KEY\n")
@@ -643,12 +673,29 @@ class InstallerTests(unittest.TestCase):
         (snap / "data-before-rollback").unlink()
         r = self.r.run("upgrade", "--dir", str(self.dir), "--rollback", "--dry-run")
         self.assertEqual(r.returncode, 0, self.output(r))
-        self.assertIn("would  stop it, put back 5.2.0's files and images", r.stdout)
+        self.assertIn("would  stop it but postgres, back up the data as it is, put back 5.2.0's files and images", r.stdout)
+        self.assertIn("the certificates, the override and your other files stay as they are", r.stdout)
+        # A week on: a new certificate and key, and the override changed.
+        upgraded_env = (deploy / ".env").read_text()
+        (deploy / "certs" / "tls.key").write_text("NEW KEY\n")
+        (deploy / "certs" / "tls.crt").write_text("NEW CERTIFICATE\n")
+        (deploy / "docker-compose.override.yml").write_text("services: {}\n# changed after the upgrade\n")
         r = self.r.run("upgrade", "--dir", str(self.dir), "--rollback", "--yes", "--timeout", "5s")
         self.assertEqual(r.returncode, 0, self.output(r))
         self.assertIn("Rolled back: 5.2.0 runs", r.stdout)
         self.assertEqual((deploy / "docker-compose.yml").read_text(), COMPOSE_OLD)
         self.assertEqual((deploy / ".env").read_text(), OLD_ENV)
+        # The certificates and the override as they are now; the .env there was, kept.
+        self.assertEqual((deploy / "certs" / "tls.key").read_text(), "NEW KEY\n")
+        self.assertEqual((deploy / "certs" / "tls.crt").read_text(), "NEW CERTIFICATE\n")
+        self.assertEqual((deploy / "docker-compose.override.yml").read_text(), "services: {}\n# changed after the upgrade\n")
+        self.assertEqual((snap / "files-before-rollback" / ".env").read_text(), upgraded_env)
+        self.assertEqual(oct((snap / "files-before-rollback" / ".env").stat().st_mode & 0o777), "0o600")
+        back = next(line for line in r.stdout.splitlines() if "put back as 5.2.0 had them:" in line).split(": ", 1)[1].split()
+        for f in (".env", "docker-compose.yml", "config/dropped.yml"):
+            self.assertIn(f, back)
+        self.assertFalse([f for f in back if f.startswith("certs/") or "override" in f])
+        self.assertIn("took out config/added.yml (the upgrade added it)", r.stdout)
         self.assertFalse((self.dir / "VERSION").exists())
         self.assertEqual(next(c for c in self.containers() if c["service"] == "app")["image_id"], old_app)
         self.assertEqual(len(list((snap / "data-before-rollback").glob("20*"))), 1)
@@ -756,6 +803,7 @@ class InstallerTests(unittest.TestCase):
         del store["images"]["arena-web:9.9.9"]
         next(c for c in store["containers"] if c["service"] == "argus")["state"] = "exited"
         self.r.state.write_text(json.dumps(store))
+        litellm = next(c for c in store["containers"] if c["service"] == "litellm")["id"]
         r = self.r.run("repair", "--dir", str(self.dir), "--yes", "--timeout", "5s")
         self.assertEqual(r.returncode, 0, self.output(r))
         out = r.stdout
@@ -766,6 +814,9 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("missing or not the release's: arena-web:9.9.9", out)
         self.assertIn("loaded arena-web:9.9.9", out)
         self.assertIn("argus (argus): exited", out)
+        # LiteLLM reads the file put back: it starts again, on the shipped copy.
+        self.assertIn("they read a file put back, so they start again: litellm", out)
+        self.assertNotEqual(next(c for c in self.containers() if c["service"] == "litellm")["id"], litellm)
         self.assertIn("Repaired:", out)
         self.assertEqual({c["state"] for c in self.containers()}, {"running"})
         # Again: nothing to do.
@@ -823,12 +874,13 @@ class InstallerTests(unittest.TestCase):
         r = self.r.run("remove", "--dir", str(self.dir), "--yes")
         self.assertEqual(r.returncode, 0, self.output(r))
         # And back: install over it brings it up on the same data, and a file changed meanwhile
-        # is put back with the changed copy kept beside it.
+        # stays as it was changed (the release ships it as it was installed).
         (self.dir / "deploy" / "config" / "litellm.yaml").write_text("changed while it was removed\n")
         r = self.install()
-        self.assertIn("updated config/litellm.yaml; the copy you had is kept as config/litellm.yaml.before-9.9.9", r.stdout)
-        self.assertEqual((self.dir / "deploy" / "config" / "litellm.yaml").read_text(), "model_list: []\n")
-        self.assertEqual((self.dir / "deploy" / "config" / "litellm.yaml.before-9.9.9").read_text(), "changed while it was removed\n")
+        self.assertIn("kept config/litellm.yaml as it was changed here", r.stdout)
+        self.assertEqual((self.dir / "deploy" / "config" / "litellm.yaml").read_text(), "changed while it was removed\n")
+        self.assertFalse((self.dir / "deploy" / "config" / "litellm.yaml.before-9.9.9").exists())
+        self.assertIn("kept as you changed them (9.9.9 ships them as they were): config/litellm.yaml\n", r.stdout)
 
     def test_Purge_asks_for_the_word_and_offers_a_last_backup(self):
         self.install()
@@ -875,6 +927,213 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("was started from /somewhere/else/deploy", r.stderr)
         self.assertEqual(len(self.containers()), len(SERVICES.split()))
 
+
+    # ------------------------------------------------- the embedding model
+
+    def test_Without_its_model_the_embedding_server_is_named_and_not_waited_for(self):
+        """On Docker the llama.cpp image's health check fails until the file is there (FAKE_WAITS_FOR)."""
+        r = self.install()
+        out = r.stdout
+        self.assertIn(f"the embedding server waits for {EMBED} in {self.dir}/deploy/models, which the bundle does not carry", out)
+        self.assertIn(f"waiting for its model, {EMBED} in {self.dir}/deploy/models, and not waited for: embed: running (unhealthy)", out)
+        self.assertIn("Argus Arena 9.9.9 runs:", out)
+        self.assertIn(f"the embedding server waits for its model: bring {EMBED} into", out)
+        # status names it and is not failed by it; repair does not recreate it (nothing would change).
+        r = self.r.run("status", "--dir", str(self.dir))
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn(f"(waits for {EMBED} in MODELS_DIR)", r.stdout)
+        embed = next(c for c in self.containers() if c["service"] == "embed")["id"]
+        r = self.r.run("repair", "--dir", str(self.dir), "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("embed waits for its model", r.stdout)
+        self.assertEqual(next(c for c in self.containers() if c["service"] == "embed")["id"], embed)
+        # The file brought in: healthy by itself.
+        model = self.dir / "deploy" / "models" / EMBED
+        model.parent.mkdir(parents=True, exist_ok=True)
+        model.write_text("an embedding model\n")
+        r = self.r.run("status", "--dir", str(self.dir))
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertNotIn("waits for", r.stdout)
+        self.assertRegex(r.stdout, r"embed +running +healthy")
+
+    # ------------------------------------------------------------ no curl
+
+    def no_curl_path(self) -> str:
+        """A PATH with the fakes and the system's commands, but no curl at all."""
+        base = self.r.s.dir / "nocurl"
+        if not base.exists():
+            (base / "bin").mkdir(parents=True)
+            (base / "sys").mkdir()
+            for f in self.r.s.bin.iterdir():
+                if f.name != "curl":
+                    os.symlink(f, base / "bin" / f.name)
+            for d in ("/usr/local/bin", "/usr/bin", "/bin"):
+                for f in Path(d).iterdir() if Path(d).is_dir() else []:
+                    target = base / "sys" / f.name
+                    if f.name != "curl" and not target.is_symlink():
+                        os.symlink(f, target)
+        return f"{base / 'bin'}:{base / 'sys'}"
+
+    def test_Without_curl_the_app_and_Argus_are_asked_from_the_stacks_network(self):
+        deploy = self.old_install()
+        # No VERSION and no record: the version comes from the running app, asked without curl.
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s", extra={"PATH": self.no_curl_path()})
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("curl is not installed: the app and Argus are asked their version from a helper container", r.stdout)
+        self.assertIn("from 5.2.0 (the running app (/api/info)) to 9.9.9", r.stdout)
+        self.assertIn("ok     app: 9.9.9 (its own /api/info)", r.stdout)
+        self.assertIn("ok     argus: 9.9.9 (its own metrics)", r.stdout)
+        asks = [c for c in self.r.calls() if c[1:2] == ["run"] and "arena_default" in c]
+        self.assertTrue(asks)
+        self.assertFalse([c for c in self.r.calls() if c[0] == "curl"])
+        for c in asks:
+            self.assertEqual(c[c.index("--pull") + 1], "never")
+            # The admin token goes in the environment (-e ASK_TOKEN), never on a command line.
+            self.assertNotIn("old-argus", " ".join(c))
+        self.assertIn("ASK_TOKEN", [c for c in asks if c[-1].endswith("/admin/metrics")][0])
+        self.assertTrue((deploy / ".env").read_text().startswith(OLD_ENV))
+
+    # ------------------------------------------- the backup and the rollback
+
+    def test_The_images_load_while_5_2_0_runs_and_the_backup_is_taken_with_it_stopped(self):
+        """The backup is the data the new release starts from: nothing writes after it."""
+        self.old_install(version_file=True)
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        calls = self.r.calls()
+
+        def first(pred) -> int:
+            return next(i for i, c in enumerate(calls) if pred(c))
+        kept = first(lambda c: c[1:2] == ["tag"] and any(a.startswith("arena-rollback:") for a in c))
+        load = first(lambda c: c[1:2] == ["load"])
+        stop = first(lambda c: c[1:3] == ["compose", "stop"])
+        dump = first(lambda c: "pg_dumpall" in c)
+        up = max(i for i, c in enumerate(calls) if c[1:2] == ["compose"] and "up" in c)
+        self.assertLess(kept, load)
+        self.assertLess(load, stop)
+        self.assertLess(stop, dump)
+        self.assertLess(dump, up)
+        self.assertNotIn("postgres", calls[stop])
+        self.assertIn("app", calls[stop])
+        self.assertIn("stopped for the backup: every service but postgres", r.stdout)
+
+    def test_A_rollback_that_cannot_keep_the_data_restores_nothing_and_is_finished_when_run_again(self):
+        deploy = self.old_install(version_file=True)
+        old_app = next(c for c in self.containers() if c["service"] == "app")["image_id"]
+        snap = self.dir / ".arena-install" / "rollback" / "5.2.0"
+        snap.mkdir(parents=True)
+        # The backup of the data as it is cannot be made (as on a full disk).
+        (snap / "data-before-rollback").write_text("in the way\n")
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "3s", extra={"FAKE_UNHEALTHY": "arena-app:9.9.9"})
+        self.assertEqual(r.returncode, 5, self.output(r))
+        self.assertIn("nothing is restored over the data, which would be lost", r.stdout)
+        self.assertFalse([c for c in self.r.calls() if "find /target -mindepth 1 -delete" in " ".join(c)])
+        # The steps by hand: the rollback's own backup.sh, which takes --deploy (5.2.0's put back does not).
+        self.assertTrue((snap / "backup.sh").is_file())
+        self.assertIn(f"bash {snap}/backup.sh --deploy {deploy} --restore --from {deploy}/backups/", r.stdout)
+        self.assertIn("docker compose -p arena down", r.stdout)
+        self.assertIn("run the same upgrade again: it finishes", r.stdout)
+        self.assertIn("rolling-back=1\n", (self.dir / ".arena-install" / "upgrade").read_text())
+        self.assertIn("a rollback to 5.2.0 was cut off: run upgrade again to finish it", self.r.run("status", "--dir", str(self.dir)).stdout)
+        r = self.r.run("repair", "--dir", str(self.dir), "--yes")
+        self.assertEqual(r.returncode, 3, self.output(r))
+        # Run again, the cause gone and the release now healthy: the rollback is finished, not the upgrade.
+        (snap / "data-before-rollback").unlink()
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 4, self.output(r))
+        self.assertIn("A rollback of " + str(self.dir) + " to 5.2.0 was cut off: it is finished now", r.stdout)
+        self.assertIn("Rolled back: 5.2.0 runs again, with the data of", r.stdout)
+        self.assertEqual((deploy / "docker-compose.yml").read_text(), COMPOSE_OLD)
+        self.assertEqual(next(c for c in self.containers() if c["service"] == "app")["image_id"], old_app)
+        self.assertTrue([c for c in self.r.calls() if "find /target -mindepth 1 -delete" in " ".join(c)])
+        self.assertTrue(list((snap / "data-before-rollback").glob("20*")))
+        self.assertFalse((self.dir / ".arena-install" / "upgrade").exists())
+        self.assertEqual((self.dir / "VERSION").read_text(), "5.2.0\n")
+
+    def test_On_Podman_the_steps_by_hand_name_its_compose_files(self):
+        podman = {"FAKE_STATE_ENGINE": "podman"}
+        deploy = self.old_install(version_file=True, running=False)
+        subprocess.run(["podman", "compose", "-f", "docker-compose.yml", "-f", "podman.yml", "up", "-d"], cwd=deploy,
+                       env=self.r.env(podman), check=True)
+        snap = self.dir / ".arena-install" / "rollback" / "5.2.0"
+        snap.mkdir(parents=True)
+        (snap / "data-before-rollback").write_text("in the way\n")
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "3s", extra={**podman, "FAKE_UNHEALTHY": "arena-app:9.9.9"})
+        self.assertEqual(r.returncode, 5, self.output(r))
+        self.assertIn("podman compose -p arena -f docker-compose.yml -f podman.yml down", r.stdout)
+        self.assertIn(f"COMPOSE_PROJECT_NAME=arena COMPOSE_FILE=docker-compose.yml:podman.yml bash {snap}/backup.sh --deploy {deploy} --podman --restore", r.stdout)
+
+    # ------------------------------------------------ remove and the helper
+
+    def test_A_plain_remove_keeps_the_helper_that_backs_up_the_data_it_keeps(self):
+        store = self.r.store()
+        del store["images"]["python:3.13-slim"]
+        self.r.state.write_text(json.dumps(store))
+        self.install()
+        rows = [line.split("\t") for line in (self.dir / ".arena-install" / "IMAGES").read_text().splitlines()]
+        self.assertEqual([x[2] for x in rows if x[0] == "python:3.13-slim"], ["0"])
+        r = self.r.run("remove", "--dir", str(self.dir), "--yes")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("python:3.13-slim", self.r.store()["images"])
+        self.assertIn("kept python:3.13-slim: backups read the kept volumes with it (remove --purge takes it)", r.stdout)
+        # Later, a last backup before the purge: the helper is here, and is never pulled.
+        final = self.r.s.dir / "final"
+        r = self.r.run("remove", "--dir", str(self.dir), "--yes", "--purge", "--confirm", "PURGE", "--final-backup", str(final))
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertEqual(len(list(final.glob("20*"))), 1)
+        self.assertNotIn("python:3.13-slim", self.r.store()["images"])
+        runs = [c for c in self.r.calls() if c[1:2] == ["run"]]
+        self.assertTrue(runs)
+        for c in runs:
+            self.assertEqual(c[c.index("--pull") + 1], "never", c)
+
+    def old_backup_sh(self) -> str:
+        """5.2.0's backup.sh, from its tag: it takes neither --deploy nor --podman."""
+        r = subprocess.run(["git", "-C", str(REPO), "show", "v5.2.0:deploy/scripts/backup.sh"], capture_output=True, text=True)
+        if r.returncode != 0:
+            self.skipTest("no v5.2.0 tag in this clone (git fetch --tags)")
+        self.assertNotIn("--deploy)", r.stdout)
+        return r.stdout
+
+    def test_A_last_backup_of_a_5_2_0_installation_is_taken_with_a_backup_sh_that_can(self):
+        old = self.old_backup_sh()
+        deploy = self.old_install(version_file=True)
+        (deploy / "scripts" / "backup.sh").write_text(old)
+        final = self.r.s.dir / "final"
+        # From the bundle: its backup.sh.
+        r = self.r.run("remove", "--dir", str(self.dir), "--yes", "--purge", "--confirm", "PURGE", "--final-backup", str(final))
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertEqual(len(list(final.glob("20*"))), 1)
+        self.assertFalse((deploy / ".env").exists())
+        # Without a bundle, on Docker: 5.2.0's, as it is called (no --deploy).
+        shutil.rmtree(self.dir)
+        shutil.rmtree(final)
+        self.r.state.write_text(json.dumps(self.pristine))
+        deploy = self.old_install(version_file=True)
+        (deploy / "scripts" / "backup.sh").write_text(old)
+        r = subprocess.run(["bash", str(deploy / "scripts" / "installer.sh"), "remove", "--dir", str(self.dir), "--yes", "--purge",
+                            "--confirm", "PURGE", "--final-backup", str(final)], env=self.r.env(), capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertEqual(len(list(final.glob("20*"))), 1)
+        self.assertNotIn("unknown option", self.output(r))
+        # Without a bundle, on Podman: 5.2.0's cannot; refused before anything is removed.
+        shutil.rmtree(self.dir)
+        shutil.rmtree(final)
+        self.r.state.write_text(json.dumps(self.pristine))
+        podman = {"FAKE_STATE_ENGINE": "podman"}
+        deploy = self.old_install(version_file=True, running=False)
+        (deploy / "scripts" / "backup.sh").write_text(old)
+        subprocess.run(["podman", "compose", "-f", "docker-compose.yml", "-f", "podman.yml", "up", "-d"], cwd=deploy,
+                       env=self.r.env(podman), check=True)
+        r = subprocess.run(["bash", str(deploy / "scripts" / "installer.sh"), "remove", "--dir", str(self.dir), "--yes", "--purge",
+                            "--confirm", "PURGE", "--final-backup", str(final)], env=self.r.env(podman), capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 3, self.output(r))
+        self.assertIn("backs up only with Docker: run remove from the release's bundle", r.stderr)
+        self.assertTrue((deploy / ".env").is_file())
+        self.assertTrue(self.containers())
+
     # ----------------------------------------------------------------- status
 
     def test_Status_says_what_runs_and_what_does_not(self):
@@ -891,6 +1150,54 @@ class InstallerTests(unittest.TestCase):
         r = subprocess.run(["bash", str(self.dir / "deploy" / "scripts" / "installer.sh"), "status"], env=self.r.env(), capture_output=True, text=True)
         self.assertEqual(r.returncode, 1, self.output(r))
         self.assertIn("1 service(s) not up or not healthy", r.stdout)
+
+
+class EmbedModelTests(unittest.TestCase):
+    """A bundle made where the embedding model is: it carries it, and a fresh install is healthy, embed too."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.r = Release(embed_model=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.r.s.cleanup()
+
+    def test_The_bundle_carries_the_embedding_model_and_a_fresh_install_runs_it(self):
+        self.assertEqual(self.r.made.returncode, 0, self.r.made.stdout + self.r.made.stderr)
+        b = self.r.unpack()
+        self.assertIn("embedding: packed\n", (b / "MANIFEST").read_text())
+        self.assertEqual((b / "models" / "library" / EMBED).read_text(), "an embedding model\n")
+        self.assertIn(f"  models/library/{EMBED}\n", (b / "SHA256SUMS").read_text())
+        # Not a model bundle (no --models): no chat model is offered as MODEL.
+        self.assertNotIn("models: copied", (b / "MANIFEST").read_text())
+        target = self.r.s.dir / "fresh"
+        token = self.r.s.dir / "gitlab-token"
+        token.write_text("glpat-a-token-for-the-test\n")
+        r = self.r.run("install", "--dir", str(target), "--docker", "--yes", "--cpu-only", "--skip-requirements", "--timeout", "5s",
+                       "--domain", "arena.test", "--https-port", "18443", "--http-port", "18080",
+                       "--gitlab-url", "https://gitlab.test", "--gitlab-token-file", str(token))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"  model {EMBED}", r.stdout)
+        self.assertEqual((target / "deploy" / "models" / EMBED).read_text(), "an embedding model\n")
+        self.assertIn(f"ok     {len(SERVICES.split())} of {len(SERVICES.split())} services up", r.stdout)
+        self.assertNotIn("waits for", r.stdout)
+        embed = next(c for c in self.r.store()["containers"] if c["service"] == "embed")
+        self.assertTrue(embed["waits_for"].endswith(EMBED))
+        self.assertIn("\nMODEL=\n", (target / "deploy" / ".env").read_text())
+
+
+class KnownTests(unittest.TestCase):
+    def test_Without_the_tag_of_5_2_0_no_bundle_is_made(self):
+        r = Release(tag=False)
+        try:
+            self.assertEqual(r.made.returncode, 1, r.made.stdout + r.made.stderr)
+            self.assertIn("no git tag of 5.2.0", r.made.stderr)
+            self.assertIn("git fetch --tags", r.made.stderr)
+            self.assertFalse(list(r.dist.glob("*.run")))
+            self.assertFalse([c for c in r.calls() if c[1:2] == ["save"]])
+        finally:
+            r.s.cleanup()
 
 
 if __name__ == "__main__":

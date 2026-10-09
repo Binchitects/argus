@@ -11,16 +11,20 @@
 # Commands:
 #   install   a new installation: checks the host, loads the images, writes DIR/deploy, makes
 #             .env (secrets generated), starts the stack and waits until it is healthy
-#   upgrade   an installation of 5.2.0 or newer: a backup first, then the new images and files
-#             (.env, overrides, certificates and backups kept; new .env keys added and listed),
-#             started and checked. On a failure it rolls back by itself: the files, the images
-#             and the data from the backup. --rollback goes back to before the last upgrade
-#             (the data as it is now kept in a backup first).
+#   upgrade   an installation of 5.2.0 or newer: the new images loaded while it runs, then a
+#             backup with the stack stopped (but its database), then the new files (.env,
+#             overrides, certificates, backups and files changed here that the release did not
+#             change kept; new .env keys added and listed), started and checked. On a failure it
+#             rolls back by itself: the files, the images and the data from the backup (the data
+#             as it is kept in a backup first). --rollback goes back to before the last upgrade
+#             (the certificates, the override and the other files of the host stay as they are).
+#             A rollback cut off half way is finished when upgrade runs again.
 #   repair    checks the installation against the bundle and puts right what is wrong:
 #             missing or changed files, missing images, volumes' owners, stopped or unhealthy
 #             containers; each finding is reported with what was done
 #   remove    stops and removes the stack's containers and images. The data stays (volumes,
-#             .env, backups, models) unless --purge
+#             .env, backups, models, and python:3.13-slim, which backups read them with) unless
+#             --purge
 #   status    what is installed: the version each service runs, health, disk and GPU
 #   verify    the bundle's checksums; with an installation, its files' too
 #
@@ -62,15 +66,20 @@
 #   2  a wrong command or option
 #   3  refused: a requirement not met, a version it does not upgrade from, no confirmation
 #   4  the upgrade failed and was rolled back: the version before it runs again
-#   5  the upgrade failed and so did the rollback: the backup to restore by hand is named
+#   5  the upgrade failed and so did the rollback: upgrade again finishes the rollback once the
+#      cause is put right; the steps by hand are printed
 #   6  checksums do not match: the bundle, or the installed files, are damaged
 set -uo pipefail
 # Deploy files are read by the containers' users; .env, the state and the logs are made 0600/0700.
 umask 022
 
 FORMAT="argus-arena-offline 1"
-# In the compose file already (cpu-temp-exporter): every bundle has it.
+# In the compose file already (cpu-temp-exporter): every bundle has it. backup.sh and this script
+# read the volumes with it, so a plain remove keeps it.
 HELPER=python:3.13-slim
+# The embedding server waits for this file in MODELS_DIR (docker-compose.yml); the app would fetch
+# it, which needs the network. The bundle carries it.
+EMBED_FILE=embed/nomic-embed-text-v1.5.f16.gguf
 GPU_SERVICES="llamacpp imagegen videogen gpu-exporter power-limits"
 # The services' users, for the volumes they write: repair puts a wrong owner right.
 VOLUME_OWNERS="engine:1000:1000 directory:1000:1000 sandbox:1000:1000 audio:1000:1000 argus:10001:10001 loki:10001:10001 prometheus:65534:65534 alertmanager:65534:65534"
@@ -268,17 +277,25 @@ DIR="$(abspath "$DIR")"; DIR="${DIR%/}"
 # DIR may be the deploy folder itself (a checkout's deploy/, or one airgap.sh loaded).
 if [[ -f "$DIR/docker-compose.yml" && ! -d "$DIR/deploy" ]]; then DEPLOY="$DIR"; DIR="$(dirname "$DIR")"; else DEPLOY="$DIR/deploy"; fi
 STATE="$DIR/.arena-install"
-state_get() { sed -n "s/^$1=//p" "$STATE/state" 2>/dev/null | tail -n1; }
-state_set() {   # state_set KEY VALUE ...
-  local tmp
-  mkdir -p "$STATE" && chmod 700 "$STATE" || die "cannot write $STATE"
-  tmp="$(mktemp "$STATE/state.XXXXXX")"
-  cp "$STATE/state" "$tmp" 2>/dev/null || : > "$tmp"
+kv_set() {   # kv_set FILE KEY VALUE ...: KEY=VALUE lines, each key once
+  local file=$1 tmp
+  shift
+  tmp="$(mktemp "$file.XXXXXX")" || die "cannot write $file"
+  cp "$file" "$tmp" 2>/dev/null || : > "$tmp"
   while [[ $# -gt 1 ]]; do
     grep -v -E "^$1=" "$tmp" > "$tmp.n"; printf '%s=%s\n' "$1" "$2" >> "$tmp.n"; mv "$tmp.n" "$tmp"; shift 2
   done
-  mv "$tmp" "$STATE/state"
+  mv "$tmp" "$file"
 }
+state_get() { sed -n "s/^$1=//p" "$STATE/state" 2>/dev/null | tail -n1; }
+state_set() {   # state_set KEY VALUE ...
+  mkdir -p "$STATE" && chmod 700 "$STATE" || die "cannot write $STATE"
+  kv_set "$STATE/state" "$@"
+}
+# The record of an upgrade under way, or of its rollback: what a run cut off carries on from.
+MARKER="$STATE/upgrade"
+marker_get() { sed -n "s/^$1=//p" "$MARKER" 2>/dev/null | tail -n1; }
+marker_set() { kv_set "$MARKER" "$@"; }
 
 PROJECT="${PROJECT_ARG:-$(env_get COMPOSE_PROJECT_NAME)}"; PROJECT="${PROJECT:-$(state_get project)}"; PROJECT="${PROJECT:-arena}"
 
@@ -314,12 +331,28 @@ dc() {
 }
 # Down, once more if the first fails (rootless Podman's network teardown sometimes does).
 dc_down() { dc down "$@" >/dev/null 2>&1 || { sleep 3; dc down "$@" >/dev/null 2>&1; }; }
+# The same compose command, for a person to type in DEPLOY.
+dc_hint() {
+  local cf; cf="$(compose_files)"
+  printf '%s compose -p %s%s' "$ENGINE" "$PROJECT" "${cf:+ -f ${cf//:/ -f }}"
+}
 # The environment backup.sh needs to aim at this project with these compose files.
 backup_env() { local cf; cf="$(compose_files)"; env COMPOSE_PROJECT_NAME="$PROJECT" ${cf:+COMPOSE_FILE="$cf"} "$@"; }
+env_hint() { local cf; cf="$(compose_files)"; printf 'COMPOSE_PROJECT_NAME=%s%s' "$PROJECT" "${cf:+ COMPOSE_FILE=$cf}"; }
+# backup.sh: the bundle's or a rollback's copy where one is set, else the one installed.
 BACKUP_SCRIPT=""
+# 5.2.0's backup.sh takes neither --deploy nor --podman: it backs up the folder it is in, with Docker.
+backup_takes_deploy() { grep -q -- '--deploy)' "${BACKUP_SCRIPT:-$DEPLOY/scripts/backup.sh}" 2>/dev/null; }
 backup_sh() {
-  local -a eng=(); [[ $ENGINE == podman ]] && eng=(--podman)
-  backup_env bash "${BACKUP_SCRIPT:-$DEPLOY/scripts/backup.sh}" --deploy "$DEPLOY" "${eng[@]}" "$@"
+  local -a opts=(--deploy "$DEPLOY")
+  [[ $ENGINE == podman ]] && opts+=(--podman)
+  backup_takes_deploy || opts=()
+  backup_env bash "${BACKUP_SCRIPT:-$DEPLOY/scripts/backup.sh}" "${opts[@]}" "$@"
+}
+# Whether that backup.sh can back up this installation (an old one cannot on Podman).
+backup_usable() {
+  [[ -f "${BACKUP_SCRIPT:-$DEPLOY/scripts/backup.sh}" ]] || return 1
+  backup_takes_deploy || [[ $ENGINE == docker && -z "$BACKUP_SCRIPT" ]]
 }
 
 image_id() { E image inspect --format '{{.Id}}' "$1" 2>/dev/null | head -n1 | sed 's/^sha256://'; }
@@ -335,7 +368,8 @@ container_rows() {
     | sed -e 's/|\//|/' -e 's/|sha256:/|/'
 }
 volume_exists() { E volume inspect "$1" >/dev/null 2>&1; }
-in_helper() { E run --rm --network none "$@"; }
+# A throwaway container of HELPER: it is never pulled.
+in_helper() { E run --rm --pull never --network none "$@"; }
 
 # Settings from .env, with the stack's defaults.
 read_settings() {
@@ -348,19 +382,35 @@ read_settings() {
   case "$BACKUP_DIR" in /*) ;; *) BACKUP_DIR="$DEPLOY/${BACKUP_DIR#./}" ;; esac
 }
 
-# What the app and Argus say of themselves, through Traefik on this host.
-fetch() {   # fetch HOST PATH [HEADER_FILE]
-  command -v curl >/dev/null || return 1
-  curl -sk --max-time 10 --resolve "$1:$HTTPS_PORT:127.0.0.1" ${3:+-H "@$3"} "https://$1:$HTTPS_PORT$2" 2>/dev/null
+# What the app and Argus say of themselves: through Traefik on this host with curl (never through
+# a proxy, which would not take the --resolve address); a host without curl asks the service
+# itself from a helper container on the stack's network.
+ASK_PY='
+import os, sys, urllib.request
+r = urllib.request.Request(sys.argv[1])
+if os.environ.get("ASK_TOKEN"): r.add_header("x-argus-admin-token", os.environ["ASK_TOKEN"])
+o = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+sys.stdout.write(o.open(r, timeout=10).read().decode())
+'
+ask_service() {   # ask_service TRAEFIK_HOST SERVICE_URL PATH [TOKEN] -> the answer's body
+  local host=$1 inside=$2 path=$3 token=${4:-} hdr=""
+  if command -v curl >/dev/null; then
+    if [[ -n "$token" ]]; then
+      hdr="$(mktemp)" && chmod 600 "$hdr" || return 1
+      printf 'x-argus-admin-token: %s\n' "$token" > "$hdr"
+    fi
+    curl -sk --noproxy '*' --max-time 10 --resolve "$host:$HTTPS_PORT:127.0.0.1" ${hdr:+-H "@$hdr"} "https://$host:$HTTPS_PORT$path" 2>/dev/null
+    [[ -z "$hdr" ]] || rm -f "$hdr"
+  else
+    # The token goes in the environment (-e NAME takes it from here), never on a command line.
+    ASK_TOKEN="$token" E run --rm --pull never --network "${PROJECT}_default" -e ASK_TOKEN "$HELPER" \
+      python3 -c "$ASK_PY" "$inside$path" 2>/dev/null
+  fi
 }
-app_version() { fetch "$DOMAIN" /api/info | sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p' | head -n1; }
+app_version() { ask_service "$DOMAIN" http://app:8080 /api/info | sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p' | head -n1; }
 argus_version() {
-  local hdr v
-  hdr="$(mktemp)" && chmod 600 "$hdr" || return 1
-  printf 'x-argus-admin-token: %s\n' "$(env_get ARGUS_KEY)" > "$hdr"
-  v="$(fetch "argus.$DOMAIN" /admin/metrics "$hdr" | sed -n 's/^argus_index_build_info{version="\([^"]*\)"}.*/\1/p' | head -n1)"
-  rm -f "$hdr"
-  printf '%s' "$v"
+  ask_service "argus.$DOMAIN" http://argus:7700 /admin/metrics "$(env_get ARGUS_KEY)" \
+    | sed -n 's/^argus_index_build_info{version="\([^"]*\)"}.*/\1/p' | head -n1
 }
 
 # What app_version or argus_version says once it says WANT, or when the wait is over (90 s at
@@ -482,7 +532,7 @@ check_requirements() {   # check_requirements fresh|upgrade
     done
   fi
   for p in tar sha256sum gzip; do command -v "$p" >/dev/null || req_bad "$p is not installed"; done
-  command -v curl >/dev/null || note "curl is not installed: the app's own version check is left out"
+  command -v curl >/dev/null || note "curl is not installed: the app and Argus are asked their version from a helper container on the stack's network, not through Traefik"
 }
 
 # ======================================================================== images
@@ -569,14 +619,18 @@ installed_files() {   # the files in DEPLOY that are not the host's own
   (cd "$DEPLOY" 2>/dev/null && find . -type f -printf '%P\n' | sort) | while IFS= read -r f; do is_user_path "$f" || printf '%s\n' "$f"; done
 }
 # Brings DEPLOY to the bundle's files. The host's own (.env, overrides, certificates, backups,
-# models) are never touched. A release file someone changed is replaced, their copy kept beside it
-# as FILE.before-VERSION; a file the new release dropped is removed only when it is the old
-# release's own, unchanged; every other file stays. Each is listed. plan: only says so.
-# Writes $SYNC_LOG: one line per file it added (to undo a failed upgrade).
-SYNC_ADDED=""
+# models) are never touched. A file changed here stays as it is when the release ships it as it
+# was (an Alertmanager receiver, a budget: the admin's), and is replaced only when the release
+# changed it too (or what was shipped is not known): then the host's copy is kept beside it as
+# FILE.before-VERSION and it is named at the end, to apply again. A file the new release dropped
+# is removed only when it is the old release's own, unchanged; every other file stays. Each is
+# listed. plan: only says so. The same for an install over a removed installation's deploy/.
+# Writes $SYNC_ADDED: one line per file it added (to undo a failed upgrade).
+SYNC_ADDED="" SYNC_REAPPLY=() SYNC_KEPT=()
 sync_deploy() {   # sync_deploy install|upgrade|repair OLD_VERSION plan|do
-  local mode=$1 oldv=$2 act=$3 f sum cur old n_add=0 n_upd=0 n_mine=0 n_rm=0 n_keep=0
+  local mode=$1 oldv=$2 act=$3 f sum cur old n_add=0 n_upd=0 n_mine=0 n_yours=0 n_rm=0 n_keep=0
   local -A OLD=() NEW=()
+  SYNC_REAPPLY=() SYNC_KEPT=()
   while IFS=$'\t' read -r f sum; do [[ -n "$f" ]] && NEW["$f"]=$sum; done < <(bundle_deploy_sums)
   while IFS=$'\t' read -r f sum; do [[ -n "$f" ]] && OLD["$f"]=$sum; done < <(old_deploy_sums "$oldv")
   [[ $act == do ]] && mkdir -p "$DEPLOY"
@@ -591,19 +645,24 @@ sync_deploy() {   # sync_deploy install|upgrade|repair OLD_VERSION plan|do
     cur="$(sha_of "$DEPLOY/$f")"
     [[ "$cur" == "${NEW[$f]}" ]] && continue
     old="${OLD[$f]:-}"
-    # As shipped before (or as this installer wrote it): replaced. Changed here: kept beside too,
-    # an install over a removed one's deploy/ as much as an upgrade.
     if [[ -n "$old" && "$cur" == "$old" ]]; then
+      # As shipped before (or as this installer wrote it): the release's new copy.
       n_upd=$((n_upd + 1))
       [[ $act == do ]] && did "updated $f" || would "update $f"
+    elif [[ -n "$old" && "$old" == "${NEW[$f]}" ]]; then
+      # Changed here, and the release did not change it: the host's stays in effect.
+      n_yours=$((n_yours + 1)); SYNC_KEPT+=("$f")
+      note "kept $f as it was changed here: $BVERSION ships it as it was"
+      continue
     else
-      n_mine=$((n_mine + 1))
+      # Changed here and in the release: the release's, the host's copy beside it.
+      n_mine=$((n_mine + 1)); SYNC_REAPPLY+=("$f")
       if [[ $act == do ]]; then
         cp -p "$DEPLOY/$f" "$DEPLOY/$f.before-$BVERSION" || die "keeping $f failed"
         [[ -n "$SYNC_ADDED" ]] && echo "$f.before-$BVERSION" >> "$SYNC_ADDED"
-        did "updated $f; the copy you had is kept as $f.before-$BVERSION"
+        did "updated $f, which $([[ -n "$old" ]] && echo "$BVERSION changes too" || echo "may be the release's or yours"); the copy you had is kept as $f.before-$BVERSION"
       else
-        would "update $f, which was changed here: that copy kept as $f.before-$BVERSION"
+        would "update $f, which was changed here$([[ -n "$old" ]] && echo " and in $BVERSION"): that copy kept as $f.before-$BVERSION"
       fi
     fi
     [[ $act == do ]] && { cp -p "$BUNDLE/deploy/$f" "$DEPLOY/$f.installer-new" && mv -f "$DEPLOY/$f.installer-new" "$DEPLOY/$f" || die "writing $DEPLOY/$f failed"; }
@@ -621,10 +680,18 @@ sync_deploy() {   # sync_deploy install|upgrade|repair OLD_VERSION plan|do
       fi
     done < <(installed_files)
   fi
-  SYNC_SUMMARY="$n_add added, $n_upd updated, $n_mine updated with your copy kept beside, $n_rm removed, $n_keep kept"
+  SYNC_SUMMARY="$n_add added, $n_upd updated, $n_yours kept as changed here, $n_mine replaced with your copy kept beside, $n_rm removed, $n_keep kept"
   SYNC_CHANGES=$((n_add + n_upd + n_mine + n_rm))
 }
 SYNC_SUMMARY="" SYNC_CHANGES=0
+# What a person must look at once the release's files are in: named again at the end.
+say_file_changes() {   # say_file_changes "REPLACED FILES" "KEPT FILES"
+  local replaced kept
+  replaced="$(xargs <<<"$1")" kept="$(xargs <<<"$2")"
+  [[ -n "$replaced" ]] && say "  changes of yours to apply again ($BVERSION changed these files too; yours are beside them as FILE.before-$BVERSION): $replaced"
+  [[ -n "$kept" ]] && say "  kept as you changed them ($BVERSION ships them as they were): $kept"
+  return 0
+}
 record_deploy() {   # what this installer wrote, to tell later what was changed
   (umask 077; bundle_deploy_sums | awk -F'\t' '{ print $2 "  " $1 }' > "$STATE/deploy.sha256")
 }
@@ -784,26 +851,54 @@ write_override() {   # write_override plan|do SERVICES...
 }
 
 # ========================================================================= models
+# The model files the bundle carries (all with --models; the embedding model always), as its
+# checksums name them: known from the small part of the .run too.
+bundle_model_files() { sed -n -E 's|^[0-9a-f]{64} [ *]models/library/(.*)$|\1|p' "$BUNDLE/SHA256SUMS" 2>/dev/null; }
+# Whether the embedding server runs here: install, from the bundle and what it leaves out.
+INSTALL_LEAVE=""
+embed_runs() {
+  if [[ $CMD == install ]]; then
+    grep -q '^  embed:' "$BUNDLE/deploy/docker-compose.yml" 2>/dev/null && [[ " $INSTALL_LEAVE " != *" embed "* ]]
+  else
+    dc config --services 2>/dev/null | grep -qx embed
+  fi
+}
+# The services that wait for a model file MODELS_DIR does not have: the embedding server starts by
+# itself once its file is there. Named, and not waited for (nothing here can fetch it).
+model_waits() {
+  [[ -n "${MODELS_DIR:-}" && ! -f "$MODELS_DIR/$EMBED_FILE" ]] || return 0
+  embed_runs && echo embed
+}
 place_models() {   # place_models plan|do
   local f n=0 absent=0 kind path
-  if [[ -d "$BUNDLE/models/library" ]]; then
-    if [[ $1 == plan ]]; then would "put the bundle's models in $MODELS_DIR ($(find "$BUNDLE/models/library" -type f | wc -l) files; those there already kept)"; return 0; fi
-    mkdir -p "$MODELS_DIR" || die "cannot make $MODELS_DIR"
-    while IFS= read -r f; do
-      [[ -f "$MODELS_DIR/$f" && "$(stat -c %s "$MODELS_DIR/$f")" == "$(stat -c %s "$BUNDLE/models/library/$f")" ]] && continue
-      mkdir -p "$MODELS_DIR/$(dirname "$f")" || die "cannot write $MODELS_DIR"
-      ln -f "$BUNDLE/models/library/$f" "$MODELS_DIR/$f" 2>/dev/null || cp "$BUNDLE/models/library/$f" "$MODELS_DIR/$f" || die "copying $f into $MODELS_DIR failed (disk full?)"
-      n=$((n + 1)); say "  model $f"
-    done < <(cd "$BUNDLE/models/library" && find . -type f -printf '%P\n' | sort)
-    ok "$n model file(s) put in $MODELS_DIR"
-  else
-    [[ $1 == do ]] && mkdir -p "$MODELS_DIR"
-    while IFS=$'\t' read -r kind _ path; do
-      [[ -n "$path" && ! -f "$MODELS_DIR/$path" ]] || continue
-      absent=$((absent + 1)); note "bring $path ($kind) into $MODELS_DIR: the bundle has no models"
-    done < <(tail -n +2 "$BUNDLE/models/MODELS" 2>/dev/null)
-    [[ $absent -eq 0 ]] && ok "models: every model the bundle lists is in $MODELS_DIR"
+  local -A carried=()
+  while IFS= read -r f; do [[ -n "$f" ]] && carried["$f"]=1; done < <(bundle_model_files)
+  if [[ ${#carried[@]} -gt 0 ]]; then
+    if [[ $1 == plan ]]; then
+      would "put the bundle's model files in $MODELS_DIR (${#carried[@]}: $(printf '%s\n' "${!carried[@]}" | sort | head -n 3 | paste -sd' ' -)$([[ ${#carried[@]} -gt 3 ]] && echo " ..."); those there already kept)"
+    else
+      mkdir -p "$MODELS_DIR" || die "cannot make $MODELS_DIR"
+      while IFS= read -r f; do
+        [[ -f "$MODELS_DIR/$f" && "$(stat -c %s "$MODELS_DIR/$f")" == "$(stat -c %s "$BUNDLE/models/library/$f")" ]] && continue
+        mkdir -p "$MODELS_DIR/$(dirname "$f")" || die "cannot write $MODELS_DIR"
+        ln -f "$BUNDLE/models/library/$f" "$MODELS_DIR/$f" 2>/dev/null || cp "$BUNDLE/models/library/$f" "$MODELS_DIR/$f" || die "copying $f into $MODELS_DIR failed (disk full?)"
+        n=$((n + 1)); say "  model $f"
+      done < <(printf '%s\n' "${!carried[@]}" | sort)
+      ok "$n model file(s) put in $MODELS_DIR"
+    fi
+  elif [[ $1 == do ]]; then
+    mkdir -p "$MODELS_DIR"
   fi
+  # What the packing host had that this bundle does not carry.
+  while IFS=$'\t' read -r kind _ path; do
+    [[ -n "$path" && ! -f "$MODELS_DIR/$path" && -z "${carried[$path]:-}" ]] || continue
+    absent=$((absent + 1)); note "bring $path ($kind) into $MODELS_DIR: the bundle does not carry it"
+  done < <(tail -n +2 "$BUNDLE/models/MODELS" 2>/dev/null)
+  if [[ ! -f "$MODELS_DIR/$EMBED_FILE" && -z "${carried[$EMBED_FILE]:-}" ]] && embed_runs; then
+    absent=$((absent + 1))
+    note "the embedding server waits for $EMBED_FILE in $MODELS_DIR, which the bundle does not carry: bring it there (it starts by itself then)"
+  fi
+  [[ $absent -eq 0 && ${#carried[@]} -eq 0 ]] && ok "models: every model the bundle lists is in $MODELS_DIR"
   # Docker runs the app as uid 1000: it writes there. (Rootless Podman runs it as you.)
   if [[ $1 == do && $ENGINE == docker && $EUID -eq 0 && "$(stat -c %u "$MODELS_DIR")" != 1000 ]]; then
     chown -R 1000:1000 "$MODELS_DIR" && did "$MODELS_DIR is uid 1000's, the app's"
@@ -849,10 +944,11 @@ not_up_now() {
   for svc in $(dc config --services 2>/dev/null); do [[ -n "${good[$svc]:-}" ]] || printf '%s ' "$svc"; done
 }
 wait_healthy() {
-  local secs=$(( ${TIMEOUT%s} * 60 )) last=0 services svc waiting n m deadline
+  local secs=$(( ${TIMEOUT%s} * 60 )) last=0 services svc waiting n m deadline models
   [[ $TIMEOUT == *s ]] && secs=${TIMEOUT%s}
   deadline=$(( $(date +%s) + secs ))
   services="$(dc config --services 2>/dev/null | sort -u)"
+  models=" $(model_waits | tr '\n' ' ') "
   step "waiting for every service to be up and healthy (up to $(( secs / 60 )) min $(( secs % 60 )) s)"
   while :; do
     local -A STATEOF=()
@@ -862,15 +958,17 @@ wait_healthy() {
       else STATEOF[$svc]="$st${health:+ ($health)}"; fi
     done < <(container_rows)
     waiting=(); n=0; m=0
-    local excused=()
+    local excused=() for_model=()
     for svc in $services; do
       m=$((m + 1))
       if [[ "${STATEOF[$svc]:-}" == ok ]]; then n=$((n + 1))
+      elif [[ "$models" == *" $svc "* && "${STATEOF[$svc]:-}" == running* ]]; then for_model+=("$svc: ${STATEOF[$svc]}")
       elif [[ " $EXCUSED " == *" $svc "* ]]; then excused+=("$svc: ${STATEOF[$svc]:-no container}")
       else waiting+=("$svc: ${STATEOF[$svc]:-no container}"); fi
     done
     if [[ ${#waiting[@]} -eq 0 ]]; then
       ok "$n of $m services up"
+      [[ ${#for_model[@]} -gt 0 ]] && note "waiting for its model, $EMBED_FILE in $MODELS_DIR, and not waited for: ${for_model[*]} (it starts by itself once the file is there)"
       [[ ${#excused[@]} -gt 0 ]] && note "not up, as before the upgrade: ${excused[*]} (status, repair)"
       return 0
     fi
@@ -967,7 +1065,9 @@ print_access() {
   say "Argus Arena $BVERSION runs: https://$DOMAIN$port"
   say "  the API:  https://gateway.$DOMAIN$port/v1     Argus:  https://argus.$DOMAIN$port/mcp"
   say "  sign in as admin$([[ -n "$(env_get ADMIN_EMAIL)" ]] && echo " ($(env_get ADMIN_EMAIL))")"
-  say "  in $DEPLOY: $ENGINE compose$([[ -n "$(compose_files)" ]] && echo " -f ${COMPOSE_FILES_HINT:-$(compose_files | sed 's/:/ -f /g')}") ps"
+  say "  in $DEPLOY: $(dc_hint) ps"
+  [[ -n "$(model_waits)" ]] && say "  the embedding server waits for its model: bring $EMBED_FILE into $MODELS_DIR (Argus's and the app's search by meaning need it)"
+  return 0
 }
 show_password_once() {
   [[ -n "$ADMIN_PASSWORD_NEW" ]] || return 0
@@ -1016,7 +1116,8 @@ cmd_install() {
     NEW_DOMAIN="$(ask "The address people open (DOMAIN)" "${DOMAIN_ARG:-llm.localhost}")"
     NEW_EMAIL="$(ask "The admin's e-mail" "${EMAIL_ARG:-admin@example.com}")"
     NEW_MODELS_DIR="$(ask "Where models live (MODELS_DIR)" "${MODELS_ARG:-./models}")"
-    s="$(bundle_get model)"; [[ -d "$BUNDLE/models/library" || $PARTIAL == 1 && "$(bundle_get models)" == copied* ]] || s=""
+    # The bundle's first chat model, when it carries the file.
+    s="$(bundle_get model)"; [[ -n "$s" ]] && bundle_model_files | grep -qxF "$s" || s=""
     NEW_MODEL="$(ask "The first chat model, a .gguf in MODELS_DIR (empty: none yet)" "${MODEL_ARG:-$s}")"
     NEW_HTTP="$(ask "HTTP port" "${HTTP_ARG:-$([[ $podman -eq 1 ]] && echo 8080 || echo 80)}")"
     NEW_HTTPS="$(ask "HTTPS port" "${HTTPS_ARG:-$([[ $podman -eq 1 ]] && echo 8443 || echo 443)}")"
@@ -1038,6 +1139,7 @@ cmd_install() {
   HTTP_PORT="$NEW_HTTP" HTTPS_PORT="$NEW_HTTPS" DOMAIN="$NEW_DOMAIN"
   MODELS_DIR="$NEW_MODELS_DIR"; case "$MODELS_DIR" in /*) ;; *) MODELS_DIR="$DEPLOY/${MODELS_DIR#./}" ;; esac
   BACKUP_DIR="$DEPLOY/backups"
+  INSTALL_LEAVE="${leave[*]}"
 
   say "Install Argus Arena $BVERSION in $DIR ($ENGINE, project $PROJECT)$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is done")"
   say "  https://$NEW_DOMAIN$([[ "$NEW_HTTPS" != 443 ]] && echo ":$NEW_HTTPS"), models in $MODELS_DIR${leave[*]:+, left out: ${leave[*]}}"
@@ -1048,7 +1150,12 @@ cmd_install() {
     [[ $REQ_FAIL -gt 0 ]] && note "$REQ_FAIL requirement(s) not met: install would stop here$([[ $SKIP_REQ -eq 1 ]] && echo " (not with --skip-requirements)")"
     step "the plan"
     would "load $(bundle_images | wc -l) images into $ENGINE (those there already kept) and tag the release's own for $PROJECT"
-    would "write $(bundle_deploy_sums | wc -l) files into $DEPLOY"
+    if [[ -f "$DEPLOY/docker-compose.yml" ]]; then
+      step "deploy/ (there already: the files changed here kept where $BVERSION ships them as they were)"
+      sync_deploy install "" plan
+    else
+      would "write $(bundle_deploy_sums | wc -l) files into $DEPLOY"
+    fi
     write_extras plan
     [[ -f "$DEPLOY/.env" ]] && would "keep the .env there, adding what it lacks" || would "write $DEPLOY/.env: these answers, the secrets generated (none printed; the admin's first password shown once, on the terminal)"
     write_override plan ${leave[@]+"${leave[@]}"}
@@ -1099,6 +1206,7 @@ cmd_install() {
   record_state
   state_set target ""
   print_access
+  say_file_changes "${SYNC_REAPPLY[*]}" "${SYNC_KEPT[*]}"
   show_password_once
   say "Installed. Status: $DEPLOY/scripts/installer.sh status --dir $DIR"
 }
@@ -1128,35 +1236,87 @@ snapshot_deploy() {
   rm -f "$SNAP/VERSION"; [[ -f "$DIR/VERSION" ]] && cp -p "$DIR/VERSION" "$SNAP/VERSION"
   ok "a copy of $DEPLOY for a rollback ($(human "$(stat -c %s "$SNAP/deploy.tar")"))"
 }
-# Back to FROM: its files, its images, and (once the new version had started) the data
-# of the backup taken before the upgrade, after keeping the data as it is (unless KEPT).
-KEPT=0
-rollback() {   # rollback STARTED -> 0 when FROM runs again
-  local started=$1 ref id tag f rc=0
-  step "rolling back to $FROM"
-  dc_down --remove-orphans
-  if [[ -f "$SNAP/added" ]]; then while IFS= read -r f; do [[ -n "$f" ]] && rm -f "$DEPLOY/$f"; done < "$SNAP/added"; fi
-  tar -xpf "$SNAP/deploy.tar" -C "$DEPLOY" || { bad "putting $DEPLOY back from $SNAP/deploy.tar failed"; return 1; }
+# Every service but the database stops: nothing writes while the backup is taken, and pg_dumpall
+# still has its server. The backup is then the data the new release starts from.
+stop_writers() {
+  local -a svcs=()
+  mapfile -t svcs < <(dc config --services 2>/dev/null | grep -vx postgres)
+  [[ ${#svcs[@]} -gt 0 ]] || return 0
+  if dc stop "${svcs[@]}" >> "$STATE/up.log" 2>&1; then ok "stopped for the backup: every service but postgres (people cannot use it from here)"
+  else note "stopping the services for the backup failed: it is taken as they run"; fi
+}
+
+# FROM's files from the copy taken before the upgrade: each file it shipped, and .env, as they were
+# then (the data goes back to then too, and .env's secrets open it); what the upgrade added taken
+# out. The certificates, the override and the host's other files stay as they are now; the .env
+# there was is kept in SNAP/files-before-rollback. Each file put back is named.
+same() { [[ -f "$1" && -f "$2" && "$(sha_of "$1")" == "$(sha_of "$2")" ]]; }
+restore_files() {
+  local old="$SNAP/old-deploy" keep="$SNAP/files-before-rollback" f
+  local -a back=()
+  rm -rf "$old" && mkdir -p "$old" && tar -xpf "$SNAP/deploy.tar" -C "$old" || { bad "unpacking $SNAP/deploy.tar failed (disk full?)"; return 1; }
+  if [[ -f "$SNAP/added" ]]; then
+    while IFS= read -r f; do
+      [[ -n "$f" && -e "$DEPLOY/$f" && ! -e "$old/$f" ]] || continue
+      rm -f "$DEPLOY/$f" && did "took out $f (the upgrade added it)"
+    done < "$SNAP/added"
+  fi
+  while IFS= read -r f; do
+    [[ $f == .env ]] || ! is_user_path "$f" || continue
+    same "$old/$f" "$DEPLOY/$f" && continue
+    if [[ $f == .env && -f "$DEPLOY/.env" ]]; then
+      (umask 077; mkdir -p "$keep" && cp -p "$DEPLOY/.env" "$keep/.env") || { bad "keeping the .env there is failed"; return 1; }
+    fi
+    { mkdir -p "$DEPLOY/$(dirname "$f")" && cp -p "$old/$f" "$DEPLOY/$f.installer-new" && mv -f "$DEPLOY/$f.installer-new" "$DEPLOY/$f"; } \
+      || { bad "putting back $f failed"; return 1; }
+    back+=("$f")
+  done < <(cd "$old" && find . -type f -printf '%P\n' | sort)
   if [[ -f "$SNAP/VERSION" ]]; then cp -p "$SNAP/VERSION" "$DIR/VERSION"; else rm -f "$DIR/VERSION"; fi
-  ok "$DEPLOY as it was (with its .env)"
+  if [[ ${#back[@]} -gt 0 ]]; then did "put back as $FROM had them: ${back[*]}"; else ok "every file of $FROM is as it was"; fi
+  [[ " ${back[*]} " == *" .env "* ]] && note ".env as $FROM had it, as the data will be; the one there was is kept as $keep/.env"
+  # The override as it is now, unless FROM's compose file cannot read it: then FROM's, and it is said.
+  if [[ -f "$DEPLOY/docker-compose.override.yml" ]] && ! same "$old/docker-compose.override.yml" "$DEPLOY/docker-compose.override.yml" \
+     && ! dc config -q >/dev/null 2>&1; then
+    (umask 077; mkdir -p "$keep") && cp -p "$DEPLOY/docker-compose.override.yml" "$keep/"
+    if [[ -f "$old/docker-compose.override.yml" ]]; then cp -p "$old/docker-compose.override.yml" "$DEPLOY/docker-compose.override.yml"
+    else rm -f "$DEPLOY/docker-compose.override.yml"; fi
+    note "$FROM's compose file cannot read the docker-compose.override.yml there was: $FROM's is back, yours is kept as $keep/docker-compose.override.yml"
+  fi
+  rm -rf "$old"
+  return 0
+}
+
+# Back to FROM: its files and images, and (once the new release had started) the data of the backup
+# from before the upgrade, after a backup of the data as it is now (the marker's kept=1: taken
+# already). Without that backup nothing is restored over the data. Recorded in the marker first:
+# a rollback cut off is finished when upgrade runs again, never taken for the upgrade.
+rollback() {   # rollback STARTED -> 0 when FROM runs again
+  local started=$1 ref id tag rc=0 out
+  step "rolling back to $FROM"
+  marker_set rolling-back 1 started "$started"
+  dc_down --remove-orphans
+  restore_files || return 1
   while IFS=$'\t' read -r ref id tag; do
     [[ -n "$ref" ]] || continue
     E tag "$tag" "$ref" >/dev/null 2>&1 || { bad "the old image of $ref ($tag) is gone"; rc=1; }
   done < "$SNAP/IMAGES"
-  # The release's own as compose names them, from the old ones.
-  ok "the old images tagged back"
+  ok "$FROM's images tagged back"
   if [[ $started -eq 1 ]]; then
-    if [[ -n "$BACKUP" && -d "$BACKUP" ]]; then
-      if [[ $KEPT -eq 0 ]]; then
-        say "  keeping the data as it is now, then restoring the backup from before the upgrade"
-        backup_sh --out "$SNAP/data-before-rollback" >/dev/null 2>&1 && ok "the data as it was: $SNAP/data-before-rollback" \
-          || note "could not keep the data as it was (the failed release's)"
+    [[ -n "$BACKUP" && -d "$BACKUP" ]] || { bad "no backup to restore (${BACKUP:-none})"; return 1; }
+    if [[ "$(marker_get kept)" != 1 ]]; then
+      say "  a backup of the data as it is now, before the restore replaces it"
+      out="$SNAP/data-before-rollback.log"
+      if backup_sh --out "$SNAP/data-before-rollback" > "$out" 2>&1; then
+        marker_set kept 1
+        ok "the data as it was: $SNAP/data-before-rollback"
+      else
+        tail -n 5 "$out" | sed 's/^/    /'
+        bad "that backup failed (disk full?): nothing is restored over the data, which would be lost"
+        return 1
       fi
-      backup_sh --restore --from "$BACKUP" --yes || { bad "restoring $BACKUP failed"; return 1; }
-      ok "the data from $BACKUP"
-    else
-      bad "no backup to restore"; return 1
     fi
+    backup_sh --restore --from "$BACKUP" --yes || { bad "restoring $BACKUP failed"; return 1; }
+    ok "the data from $BACKUP"
   fi
   start_stack || return 1
   wait_healthy || return 1
@@ -1164,6 +1324,62 @@ rollback() {   # rollback STARTED -> 0 when FROM runs again
   if [[ -n "$v" && "$v" != "$FROM" ]]; then bad "the app says $v after the rollback, not $FROM"; return 1; fi
   ok "$FROM runs again${v:+ (the app says $v)}"
   return $rc
+}
+# What to type when the rollback failed too.
+by_hand() {
+  local started=$1 eng=""
+  [[ $ENGINE == podman ]] && eng=" --podman"
+  say ""
+  say "The rollback failed too (above). Once its cause is put right, run the same upgrade again: it finishes"
+  say "the rollback. Or by hand, in $DEPLOY:"
+  say "  $(dc_hint) down"
+  say "  tar -xpf $SNAP/deploy.tar -C $DEPLOY      ($FROM's files; the certificates and override as they were then too)"
+  say "  the old images: each line of $SNAP/IMAGES is REFERENCE ID TAG: $ENGINE tag TAG REFERENCE"
+  if [[ $started -eq 1 ]]; then
+    say "  $(env_hint) bash $SNAP/backup.sh --deploy $DEPLOY$eng --out $SNAP/data-before-rollback   (the data as it is, kept)"
+    say "  $(env_hint) bash $SNAP/backup.sh --deploy $DEPLOY$eng --restore --from $BACKUP --yes"
+  fi
+  say "  $(dc_hint) up -d --pull never"
+}
+# Rolls back and says how it went: exit 4 (FROM runs again), 0 after upgrade --rollback, 5 (failed too).
+run_rollback() {   # run_rollback STARTED
+  local started=$1 manual
+  manual="$(marker_get manual)"
+  if rollback "$started"; then
+    rm -f "$MARKER"
+    if [[ $manual == 1 ]]; then
+      state_set version "$FROM" previous "" status installed target ""
+      rm -f "$STATE/deploy.sha256" "$STATE/MANIFEST"
+      say ""; say "Rolled back: $FROM runs, with the data of $BACKUP. The data as it was before: $SNAP/data-before-rollback"
+      exit 0
+    fi
+    state_set status installed target ""
+    [[ -n "$(state_get version)" ]] || state_set version "$FROM" engine "$ENGINE" project "$PROJECT"
+    say ""
+    if [[ $started -eq 1 ]]; then say "Rolled back: $FROM runs again, with the data of $BACKUP (what the new release wrote is in $SNAP/data-before-rollback). The log: $LOG"
+    else say "Rolled back: $FROM runs again; its data was not touched (the new release never started). The log: $LOG"; fi
+    exit 4
+  fi
+  by_hand "$started"
+  exit 5
+}
+# A rollback that was cut off (the marker says rolling-back=1): finished, never taken for the upgrade.
+finish_rollback() {
+  local started
+  FROM="$(marker_get from)"; SNAP="$STATE/rollback/$FROM"; BACKUP="$(marker_get backup)"
+  started="$(marker_get started)"; started="${started:-0}"
+  EXCUSED="$(marker_get excused)"
+  say "A rollback of $DIR to $FROM was cut off: it is finished now$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is done")"
+  if [[ $DRY -eq 1 ]]; then
+    would "stop it, put back $FROM's files and images$([[ $started == 1 ]] && echo ", restore $BACKUP"), start $FROM"
+    return 0
+  fi
+  confirm "Finish the rollback to $FROM?" || refuse "not confirmed"
+  lock; start_log
+  [[ -f "$SNAP/deploy.tar" && -f "$SNAP/IMAGES" ]] || die "the rollback copy is not in $SNAP: put $FROM back by hand (docs/deployment.md, Upgrades)" 5
+  BACKUP_SCRIPT="$SNAP/backup.sh"
+  [[ -f "$BACKUP_SCRIPT" ]] || BACKUP_SCRIPT=""
+  run_rollback "$started"
 }
 # Disk for the backup: the volumes it takes (an estimate, before compression).
 backup_need_kb() {
@@ -1178,16 +1394,16 @@ backup_need_kb() {
 }
 
 cmd_upgrade() {
-  local iv src cmp marker started=0 need free
+  local iv src cmp started=0 need free
   need_bundle
   [[ -f "$DEPLOY/docker-compose.yml" ]] || refuse "no installation in $DIR (no deploy/docker-compose.yml): install instead"
   [[ -f "$DEPLOY/.env" ]] || refuse "$DEPLOY has no .env: its secrets open the data; put it back first"
   read_settings
-  marker="$STATE/upgrade"
+  if [[ -f "$MARKER" && "$(marker_get rolling-back)" == 1 ]]; then finish_rollback; return; fi
   if [[ $ROLLBACK -eq 1 ]]; then cmd_rollback; return; fi
-  if [[ -f "$marker" ]]; then
-    iv="$(sed -n 's/^from=//p' "$marker")"
-    [[ "$(sed -n 's/^to=//p' "$marker")" == "$BVERSION" ]] || refuse "an upgrade to $(sed -n 's/^to=//p' "$marker") was interrupted here: run that bundle's upgrade again (it carries on)"
+  if [[ -f "$MARKER" ]]; then
+    iv="$(marker_get from)"
+    [[ "$(marker_get to)" == "$BVERSION" ]] || refuse "an upgrade to $(marker_get to) was interrupted here: run that bundle's upgrade again (it carries on)"
     src="the interrupted upgrade's record"
   else
     iv="$(installed_version)"; src="$(version_source)"
@@ -1200,12 +1416,10 @@ cmd_upgrade() {
     refuse "$iv is installed ($src); this bundle upgrades $UPGRADES_FROM or newer. Upgrade to $UPGRADES_FROM first (its own way, docs/deployment.md), then run this"
   fi
   cmp="$(vercmp "$iv" "$BVERSION")"
-  if [[ $cmp == 0 && ! -f "$marker" ]]; then say "Argus Arena $iv is installed in $DIR already ($src): nothing to upgrade. (repair checks it against this bundle.)"; return 0; fi
+  if [[ $cmp == 0 && ! -f "$MARKER" ]]; then say "Argus Arena $iv is installed in $DIR already ($src): nothing to upgrade. (repair checks it against this bundle.)"; return 0; fi
   [[ $cmp == 1 ]] && refuse "$iv is installed ($src), newer than this bundle's $BVERSION: going back is a restore of the backup taken before that upgrade (upgrade --rollback with its bundle)"
   FROM="$iv"
   SNAP="$STATE/rollback/$FROM"
-  # This release's backup.sh (5.2.0's takes neither --deploy nor --podman), for the backup and a rollback.
-  BACKUP_SCRIPT="$BUNDLE/deploy/scripts/backup.sh"
 
   say "Upgrade Argus Arena in $DIR from $FROM ($src) to $BVERSION ($ENGINE, project $PROJECT)$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is done")"
   # The services this bundle has no image for must be left out here.
@@ -1217,10 +1431,10 @@ cmd_upgrade() {
   if [[ $DRY -eq 1 ]]; then
     check_bundle
     step "the plan"
-    [[ -f "$marker" ]] && would "carry on the upgrade that was interrupted (its backup: $(sed -n 's/^backup=//p' "$marker"))" \
-      || would "back up first: scripts/backup.sh (the database, the volumes, .env and config) into $BACKUP_DIR"
-    would "keep the images $FROM runs (tagged $PROJECT-rollback:$FROM-...) and a copy of $DEPLOY, for a rollback"
-    would "load $(bundle_images | wc -l) images into $ENGINE (those there already kept)"
+    if [[ -f "$MARKER" ]]; then would "carry on the upgrade that was interrupted$([[ -n "$(marker_get backup)" ]] && echo " (its backup: $(marker_get backup))")"
+    else would "keep the images $FROM runs (tagged $PROJECT-rollback:$FROM-...) and a copy of $DEPLOY, for a rollback"; fi
+    would "load $(bundle_images | wc -l) images into $ENGINE (those there already kept), while $FROM still runs"
+    [[ -n "$(marker_get backup)" ]] || would "stop every service but postgres, and back up: scripts/backup.sh (the database, the volumes, .env and config) into $BACKUP_DIR"
     step "deploy/ ($FROM -> $BVERSION; .env, overrides, certificates, backups and models kept)"
     sync_deploy upgrade "$FROM" plan
     [[ $SYNC_CHANGES -eq 0 ]] && ok "no file changes"
@@ -1230,7 +1444,7 @@ cmd_upgrade() {
     place_models plan
     fill_audio plan
     would "start $BVERSION (the app and Argus migrate their data as they start), wait until every service is healthy, check every service's version"
-    would "on a failure: roll back by itself to $FROM (its files, its images, and the data from the backup)"
+    would "on a failure: roll back by itself to $FROM (its files, its images, and the data from the backup, the data as it is kept first)"
     return 0
   fi
   confirm "Upgrade from $FROM to $BVERSION? (a backup is taken first)" || refuse "not confirmed"
@@ -1238,42 +1452,56 @@ cmd_upgrade() {
   check_bundle
   check_requirements upgrade
   [[ $REQ_FAIL -gt 0 ]] && refuse "$REQ_FAIL requirement(s) not met (above): nothing was changed"
+  # This release's backup.sh (5.2.0's takes neither --deploy nor --podman), kept with the rollback
+  # copy: the bundle's folder is gone when the .run ends, and a rollback by hand needs it.
+  BACKUP_SCRIPT="$SNAP/backup.sh"
 
-  if [[ -f "$marker" ]]; then
-    BACKUP="$(sed -n 's/^backup=//p' "$marker")"; started="$(sed -n 's/^started=//p' "$marker")"; started="${started:-0}"
-    EXCUSED="$(sed -n 's/^excused=//p' "$marker")"
-    note "carrying on the upgrade from $FROM that was interrupted: its backup $BACKUP, its rollback copy $SNAP"
+  if [[ -f "$MARKER" ]]; then
+    BACKUP="$(marker_get backup)"; started="$(marker_get started)"; started="${started:-0}"
+    EXCUSED="$(marker_get excused)"
+    note "carrying on the upgrade from $FROM that was interrupted: ${BACKUP:+its backup $BACKUP, }its rollback copy $SNAP"
     [[ -f "$SNAP/deploy.tar" && -f "$SNAP/IMAGES" ]] || die "the interrupted upgrade's rollback copy is not in $SNAP"
+    [[ -f "$BACKUP_SCRIPT" ]] || cp -p "$BUNDLE/deploy/scripts/backup.sh" "$BACKUP_SCRIPT" || die "cannot write $BACKUP_SCRIPT"
   else
-    step "backup (scripts/backup.sh: the database, the volumes, .env and config)"
+    step "room for the backup"
     need="$(backup_need_kb)"; mkdir -p "$BACKUP_DIR" 2>/dev/null; free="$(free_kb "$(existing_parent "$BACKUP_DIR")")"
     if [[ -n "$free" && $free -lt $((need / 2 + 1024 * 1024)) ]]; then
       refuse "$(human $((free * 1024))) free in $BACKUP_DIR, and the volumes hold $(human $((need * 1024))): make room (or BACKUP_DIR elsewhere in .env); nothing was changed"
     fi
-    [[ -n "$free" && $free -lt $need ]] && note "$(human $((free * 1024))) free in $BACKUP_DIR for volumes of $(human $((need * 1024))): tight, if they do not compress"
-    backup_sh || die "the backup failed: nothing was changed (its log is in $BACKUP_DIR)"
-    BACKUP="$(ls -1d "$BACKUP_DIR"/20[0-9][0-9]-*_* 2>/dev/null | grep -v '\.part$' | sort | tail -n1)"
-    [[ -n "$BACKUP" && "$(cat "$BACKUP/RESULT" 2>/dev/null)" == ok ]] || die "the backup did not finish ok: nothing was changed"
-    ok "backup: $BACKUP"
+    if [[ -n "$free" && $free -lt $need ]]; then note "$(human $((free * 1024))) free in $BACKUP_DIR for volumes of $(human $((need * 1024))): tight, if they do not compress"
+    else ok "$(human $(( ${free:-0} * 1024 ))) free in $BACKUP_DIR, for volumes of $(human $((need * 1024)))"; fi
     step "a rollback point"
     mkdir -p "$SNAP" && chmod 700 "$STATE/rollback" "$SNAP" || die "cannot write $SNAP"
-    rm -f "$SNAP/added"
+    rm -f "$SNAP/added" "$SNAP/env-added" "$SNAP/reapply" "$SNAP/kept" "$SNAP/info"
+    (umask 077; cp -p "$BUNDLE/deploy/scripts/backup.sh" "$BACKUP_SCRIPT") || die "cannot write $BACKUP_SCRIPT"
     keep_old_images
     snapshot_deploy
     EXCUSED="$(not_up_now)"
     [[ -n "$EXCUSED" ]] && note "not up before the upgrade: $EXCUSED(the upgrade does not wait for them)"
-    (umask 077; printf 'from=%s\nto=%s\nbackup=%s\nstarted=0\nexcused=%s\n' "$FROM" "$BVERSION" "$BACKUP" "$EXCUSED" > "$marker")
-    printf 'from=%s\nto=%s\nbackup=%s\nwhen=%s\n' "$FROM" "$BVERSION" "$BACKUP" "$(date '+%Y-%m-%d %H:%M:%S')" > "$SNAP/info"
+    marker_set from "$FROM" to "$BVERSION" backup "" started 0 excused "$EXCUSED"
   fi
   state_set status upgrading target "$BVERSION"
 
   # From here a failure rolls back.
   local failed=""
   upgrade_steps() {
+    # While FROM still serves: the longest step, and it changes nothing FROM runs on.
     load_images upgrade || return 1
+    if [[ -z "$BACKUP" ]]; then
+      step "backup (scripts/backup.sh: the database, the volumes, .env and config)"
+      stop_writers
+      backup_sh || { bad "the backup failed (its log is in $BACKUP_DIR)"; return 1; }
+      BACKUP="$(ls -1d "$BACKUP_DIR"/20[0-9][0-9]-*_* 2>/dev/null | grep -v '\.part$' | sort | tail -n1)"
+      [[ -n "$BACKUP" && "$(cat "$BACKUP/RESULT" 2>/dev/null)" == ok ]] || { bad "the backup did not finish ok${BACKUP:+: $BACKUP}"; return 1; }
+      marker_set backup "$BACKUP"
+      printf 'from=%s\nto=%s\nbackup=%s\nwhen=%s\n' "$FROM" "$BVERSION" "$BACKUP" "$(date '+%Y-%m-%d %H:%M:%S')" > "$SNAP/info"
+      ok "backup: $BACKUP"
+    fi
     step "deploy/ ($FROM -> $BVERSION; .env, overrides, certificates, backups and models kept)"
     SYNC_ADDED="$SNAP/added"; touch "$SYNC_ADDED"
     sync_deploy upgrade "$FROM" do
+    printf '%s\n' ${SYNC_REAPPLY[@]+"${SYNC_REAPPLY[@]}"} > "$SNAP/reapply"
+    printf '%s\n' ${SYNC_KEPT[@]+"${SYNC_KEPT[@]}"} > "$SNAP/kept"
     ok "$SYNC_SUMMARY"
     step ".env"
     ENV_ADDED_FILE="$SNAP/env-added"; : > "$ENV_ADDED_FILE"
@@ -1284,73 +1512,85 @@ cmd_upgrade() {
     fill_audio do
     step "permissions"
     fix_permissions do
-    sed -i 's/^started=.*/started=1/' "$marker"; started=1
+    marker_set started 1
     start_stack || return 1
     fix_started
     wait_healthy || return 1
     check_versions "$BVERSION" || return 1
   }
   if ( upgrade_steps ); then :; else failed=1; fi
-  started="$(sed -n 's/^started=//p' "$marker")"; started="${started:-0}"
+  BACKUP="$(marker_get backup)"
+  started="$(marker_get started)"; started="${started:-0}"
   if [[ -n "$failed" ]]; then
     say ""
     say "The upgrade to $BVERSION failed (above). Rolling back to $FROM."
     # The images it loaded stay on the host (an upgrade again finds them): remove knows them.
     record_images
-    if rollback "$started"; then
-      rm -f "$marker"; state_set status installed target ""
-      [[ -n "$(state_get version)" ]] || state_set version "$FROM" engine "$ENGINE" project "$PROJECT"
-      say ""; say "Rolled back: $FROM runs again, with the data of $BACKUP. The log: $LOG"
-      exit 4
-    fi
-    say ""
-    say "The rollback failed too. To put $FROM back by hand, in $DEPLOY:"
-    say "  $ENGINE compose down; tar -xpf $SNAP/deploy.tar -C $DEPLOY"
-    say "  the old images: each line of $SNAP/IMAGES is REFERENCE ID TAG: $ENGINE tag TAG REFERENCE"
-    say "  scripts/backup.sh$([[ $ENGINE == podman ]] && echo " --podman") --restore --from $BACKUP --yes; $ENGINE compose up -d"
-    exit 5
+    run_rollback "$started"
   fi
   record_state
   state_set target "" previous "$FROM"
-  rm -f "$marker"
+  rm -f "$MARKER"
   say ""
   say "Upgraded from $FROM to $BVERSION. The backup from before it: $BACKUP"
   say "  .env: $(cat "$SNAP/env-added" 2>/dev/null | grep -c .) key(s) added$([[ -s "$SNAP/env-added" ]] && echo " ($(tr '\n' ' ' < "$SNAP/env-added" | sed 's/ $//'))")"
+  say_file_changes "$(tr '\n' ' ' < "$SNAP/reapply" 2>/dev/null)" "$(tr '\n' ' ' < "$SNAP/kept" 2>/dev/null)"
   say "  $FROM's images stay for a rollback (upgrade --rollback): $(wc -l < "$SNAP/IMAGES") tags $PROJECT-rollback:$FROM-...;"
   say "  to free their space: $ENGINE image rm \$(cut -f3 $SNAP/IMAGES)"
   print_access
 }
 
-# upgrade --rollback: back to the version before the last upgrade, with its backup's data.
+# upgrade --rollback: back to the version before the last upgrade, with its backup's data. The
+# certificates, the override and the host's other files stay as they are now.
 cmd_rollback() {
-  local prev
-  prev="$(state_get previous)"
+  local prev cur
+  prev="$(state_get previous)"; cur="$(state_get version)"
   [[ -n "$prev" && -f "$STATE/rollback/$prev/info" ]] || refuse "no upgrade of this installer to roll back here"
   FROM="$prev"; SNAP="$STATE/rollback/$prev"; BACKUP="$(sed -n 's/^backup=//p' "$SNAP/info")"
   [[ -d "$BACKUP" ]] || refuse "the backup from before the upgrade, $BACKUP, is gone"
-  say "Roll back $DIR from $(state_get version) to $FROM: the data goes back to $BACKUP ($(sed -n 's/^when=//p' "$SNAP/info")); what was written since is lost (a backup of it is kept)"
-  [[ $DRY -eq 1 ]] && { would "stop it, put back $FROM's files and images, restore $BACKUP, start $FROM"; return 0; }
+  say "Roll back $DIR from $cur to $FROM: the data goes back to $BACKUP ($(sed -n 's/^when=//p' "$SNAP/info")); what was written since is lost (a backup of it is kept)"
+  say "  $FROM's files and .env come back; the certificates, the override and your other files stay as they are"
+  [[ $DRY -eq 1 ]] && { would "stop it but postgres, back up the data as it is, put back $FROM's files and images, restore $BACKUP, start $FROM"; return 0; }
   confirm "Roll back to $FROM?" || refuse "not confirmed"
   lock; start_log
   # The one installed now: the rollback puts the older one back.
   BACKUP_SCRIPT="$SNAP/backup.sh"; cp "$DEPLOY/scripts/backup.sh" "$BACKUP_SCRIPT" || die "cannot copy backup.sh"
-  # What was written since the upgrade, kept before anything stops: no backup, no rollback.
+  # What was written since the upgrade, kept before anything is replaced: no backup, no rollback.
   step "a backup of the data as it is now, kept (the rollback replaces the data)"
-  backup_sh --out "$SNAP/data-before-rollback" || die "that backup failed: nothing was rolled back"
-  KEPT=1
-  if rollback 1; then
-    state_set version "$FROM" previous "" status installed
-    rm -f "$STATE/deploy.sha256" "$STATE/MANIFEST"
-    say "Rolled back: $FROM runs, with the data of $BACKUP. The data as it was before: $SNAP/data-before-rollback"
-    return 0
+  EXCUSED="$(not_up_now)"
+  stop_writers
+  if ! backup_sh --out "$SNAP/data-before-rollback"; then
+    start_stack >/dev/null 2>&1
+    die "that backup failed: nothing was rolled back (the stack is started again)"
   fi
-  die "the rollback failed: see above" 5
+  marker_set from "$FROM" to "$cur" backup "$BACKUP" started 1 excused "$EXCUSED" manual 1 kept 1 rolling-back 1
+  run_rollback 1
 }
 
 # ======================================================================== repair
+# The services that mount a file of DEPLOY (or a folder that holds it): they read it as they
+# start, and a file put back is a new one their running mount does not show.
+readers_of() {   # readers_of FILE... (paths in DEPLOY)
+  local real
+  real="$(cd "$DEPLOY" && pwd -P)"
+  dc config 2>/dev/null | awk -v d1="$DEPLOY" -v d2="$real" -v files="$*" '
+    BEGIN { n = split(files, F, " ") }
+    /^services:/ { s = 1; next }
+    s && /^[^ ]/ { s = 0 }
+    s && /^  [A-Za-z0-9_.-]+:[[:space:]]*$/ { svc = $1; sub(/:$/, "", svc); next }
+    s && /^ +source: \// {
+      src = $0; sub(/^ +source: /, "", src); gsub(/"/, "", src)
+      for (i = 1; i <= n; i++) for (k = 1; k <= 2; k++) {
+        p = (k == 1 ? d1 : d2) "/" F[i]
+        if (p == src || index(p, src "/") == 1) print svc
+      }
+    }' | sort -u
+}
 cmd_repair() {
   local iv f sum cur problems=0 svc name st health ref act=do pre
+  local -a restored=()
   [[ -f "$DEPLOY/docker-compose.yml" ]] || refuse "no installation in $DIR"
+  [[ -f "$MARKER" ]] && refuse "an upgrade to $(marker_get to)$([[ "$(marker_get rolling-back)" == 1 ]] && echo ", or its rollback,") was cut off here: run upgrade again (with that bundle) to finish it first"
   read_settings
   iv="$(installed_version)"
   [[ $DRY -eq 1 ]] && act=plan
@@ -1369,14 +1609,18 @@ cmd_repair() {
     done < <(bundle_deploy_sums)
     for f in ${missing[@]+"${missing[@]}"}; do
       problems=$((problems + 1))
+      restored+=("$f")
       if [[ $act == plan ]]; then would "restore $f (missing)"; else mkdir -p "$DEPLOY/$(dirname "$f")" && cp -p "$BUNDLE/deploy/$f" "$DEPLOY/$f" && did "restored $f (it was missing)" || bad "restoring $f failed"; fi
     done
     if [[ ${#changed[@]} -gt 0 ]]; then
       problems=$((problems + ${#changed[@]}))
       for f in "${changed[@]}"; do note "changed here: $f"; done
-      if [[ $act == plan ]]; then would "put back the ${#changed[@]} changed file(s), each changed copy kept beside as FILE.changed-DATE (asked first)"
+      if [[ $act == plan ]]; then
+        would "put back the ${#changed[@]} changed file(s), each changed copy kept beside as FILE.changed-DATE (asked first)"
+        restored+=("${changed[@]}")
       elif confirm "Put back the ${#changed[@]} changed file(s) above? (each changed copy is kept beside it)"; then
         for f in "${changed[@]}"; do
+          restored+=("$f")
           cp -p "$DEPLOY/$f" "$DEPLOY/$f.changed-$(date +%Y%m%d-%H%M%S)" && cp -p "$BUNDLE/deploy/$f" "$DEPLOY/$f" && did "put back $f (the changed copy kept beside it)" || bad "putting back $f failed"
         done
       else
@@ -1421,17 +1665,27 @@ cmd_repair() {
   [[ $FIX_FAILED -eq 1 && $FIX_FOUND -eq 0 ]] && problems=$((problems + 1))
 
   step "containers"
-  local -a sick=()
+  local -a sick=() readers=()
   local -A seen=()
+  local models
+  models=" $(model_waits | tr '\n' ' ') "
   while IFS='|' read -r svc name st health _ _; do
     [[ -n "$svc" ]] || continue
     seen[$svc]=1
-    [[ $st == running && $health != unhealthy ]] || sick+=("$svc")
-    [[ $st == running && $health != unhealthy ]] || note "$svc ($name): $st${health:+, $health}"
+    [[ $st == running && $health != unhealthy ]] && continue
+    # Waiting for its model file: recreating it brings nothing.
+    if [[ $st == running && "$models" == *" $svc "* ]]; then note "$svc waits for its model: bring $EMBED_FILE into $MODELS_DIR (it starts by itself then)"; continue; fi
+    sick+=("$svc"); note "$svc ($name): $st${health:+, $health}"
   done < <(container_rows)
   for svc in $(dc config --services 2>/dev/null); do [[ -n "${seen[$svc]:-}" ]] || { note "$svc: no container"; sick+=("$svc"); }; done
   mapfile -t sick < <(printf '%s\n' ${sick[@]+"${sick[@]}"} | sed '/^$/d' | sort -u)
   problems=$((problems + ${#sick[@]}))
+  # A service that reads a file put back starts again, on the shipped copy (counted above).
+  if [[ ${#restored[@]} -gt 0 ]]; then
+    mapfile -t readers < <(readers_of "${restored[@]}")
+    for svc in ${readers[@]+"${readers[@]}"}; do [[ " ${sick[*]} " == *" $svc "* ]] || sick+=("$svc"); done
+    [[ ${#readers[@]} -gt 0 ]] && note "they read a file put back, so they start again: ${readers[*]}"
+  fi
   # A service whose volume was just given back starts again, to write there (counted above).
   for f in ${FIXED[@]+"${FIXED[@]}"}; do
     for svc in $(dc config --services 2>/dev/null); do [[ $svc == "$f" && " ${sick[*]} " != *" $svc "* ]] && sick+=("$svc"); done
@@ -1462,7 +1716,8 @@ cmd_repair() {
 
 # ======================================================================== remove
 # The stack's images: what compose names, the release's own, the rollback tags; never one a
-# container of another project uses, nor one that was on this host before the install.
+# container of another project uses, nor one that was on this host before the install. The helper
+# stays until --purge: the data a plain remove keeps is backed up (and read) with it.
 images_to_remove() {
   local ref id user
   {
@@ -1472,6 +1727,7 @@ images_to_remove() {
   } | sed '/^$/d' | sort -u | while IFS= read -r ref; do
     id="$(image_id "$ref")"; [[ -n "$id" ]] || continue
     if [[ "$(state_image_pre "$ref")" == 1 ]]; then printf 'keep\t%s\t%s\n' "$ref" "on this host before Argus Arena was installed"; continue; fi
+    if [[ $PURGE -eq 0 && "${ref#docker.io/library/}" == "$HELPER" ]]; then printf 'keep\t%s\t%s\n' "$ref" "backups read the kept volumes with it (remove --purge takes it)"; continue; fi
     user="$(E ps -a --filter "ancestor=$id" --format '{{.Names}}' 2>/dev/null | while IFS= read -r n; do
       [[ "$(E inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$n" 2>/dev/null)" == "$PROJECT" ]] || echo "$n"; done | head -n1)"
     if [[ -n "$user" ]]; then printf 'keep\t%s\t%s\n' "$ref" "the container $user (not $PROJECT's) uses it"; continue; fi
@@ -1487,6 +1743,9 @@ project_volumes() {
 }
 cmd_remove() {
   local ids other list vols f n own=0
+  # The bundle's backup.sh for a last backup when there is a bundle: the one installed may be an
+  # older release's (5.2.0's takes neither --deploy nor --podman).
+  [[ -n "$BUNDLE" && -f "$BUNDLE/deploy/scripts/backup.sh" ]] && BACKUP_SCRIPT="$BUNDLE/deploy/scripts/backup.sh"
   # A folder this installer made, and not a git checkout: purge may take it whole.
   [[ -f "$STATE/MANIFEST" && ! -e "$DIR/.git" ]] && own=1
   if [[ ! -f "$DEPLOY/docker-compose.yml" && ! -d "$STATE" ]]; then say "Nothing installed in $DIR: nothing to remove."; return 0; fi
@@ -1535,6 +1794,7 @@ cmd_remove() {
   if [[ -n "$FINAL_BACKUP" ]]; then
     FINAL_BACKUP="$(abspath "$FINAL_BACKUP")"
     [[ "$FINAL_BACKUP" == "$DIR" || "$FINAL_BACKUP" == "$DIR"/* || "$FINAL_BACKUP" == "$BACKUP_DIR"* ]] && refuse "the last backup must go outside $DIR and $BACKUP_DIR, which are removed"
+    backup_usable || refuse "the backup.sh installed in $DEPLOY/scripts is an older release's, which backs up only with Docker: run remove from the release's bundle (sh argus-arena-VERSION-offline.run remove ...), whose backup.sh does; nothing removed"
   fi
   mkdir -p "$STATE" 2>/dev/null; lock; start_log
   if [[ -n "$FINAL_BACKUP" ]]; then
@@ -1609,19 +1869,23 @@ cmd_status() {
   iv="$(installed_version)"
   say "Argus Arena in $DIR ($ENGINE, project $PROJECT)"
   say "  installed: ${iv:-unknown} ($(version_source))$([[ -n "$(state_get status)" && "$(state_get status)" != installed ]] && echo "; status: $(state_get status)")"
-  [[ -f "$STATE/upgrade" ]] && say "  an upgrade to $(sed -n 's/^to=//p' "$STATE/upgrade") was interrupted: run that bundle's upgrade again"
+  if [[ -f "$MARKER" && "$(marker_get rolling-back)" == 1 ]]; then say "  a rollback to $(marker_get from) was cut off: run upgrade again to finish it"
+  elif [[ -f "$MARKER" ]]; then say "  an upgrade to $(marker_get to) was interrupted: run that bundle's upgrade again"; fi
   [[ -n "$BUNDLE" ]] && say "  this bundle: $BVERSION ($(bundle_get commit)), upgrades $UPGRADES_FROM or newer"
   say "  https://$DOMAIN$([[ "$HTTPS_PORT" != 443 ]] && echo ":$HTTPS_PORT")"
   step "services"
   local -A seen=()
+  local models
+  models=" $(model_waits | tr '\n' ' ') "
   while IFS='|' read -r svc name st health img ref; do
     [[ -n "$svc" ]] || continue
     seen[$svc]=1
     v=""
     [[ $svc == app ]] && v="$(app_version)" && v="${v:+says $v}"
     [[ $svc == argus ]] && v="$(argus_version)" && v="${v:+says $v}"
+    [[ "$models" == *" $svc "* ]] && v="waits for $EMBED_FILE in MODELS_DIR"
     printf '  %-18s %-10s %-10s %s%s\n' "$svc" "$st" "${health:--}" "$ref" "${v:+  ($v)}"
-    [[ $st == running && $health != unhealthy && $health != starting ]] || problems=$((problems + 1))
+    [[ $st == running && ( "$models" == *" $svc "* || ( $health != unhealthy && $health != starting ) ) ]] || problems=$((problems + 1))
   done < <(container_rows | sort)
   for svc in $(dc config --services 2>/dev/null); do [[ -n "${seen[$svc]:-}" ]] || { printf '  %-18s %s\n' "$svc" "no container"; problems=$((problems + 1)); }; done
   left="$(comm -13 <(dc config --services 2>/dev/null | sort) <(sed -n '/^services:/,/^[^ ]/s/^  \([a-z0-9-]*\):.*/\1/p' "$DEPLOY/docker-compose.yml" | sort) | tr '\n' ' ')"
@@ -1640,6 +1904,7 @@ cmd_status() {
   if [[ -n "$v" ]]; then say "  latest: $(basename "$v") $(cat "$v/RESULT" 2>/dev/null) ($(ls -1d "$BACKUP_DIR"/20[0-9][0-9]-*_* | wc -l) in $BACKUP_DIR)"; else say "  none in $BACKUP_DIR (scripts/backup.sh)"; fi
   [[ -n "$(state_get previous)" ]] && say "  rollback: to $(state_get previous) (upgrade --rollback), its images kept as $PROJECT-rollback:$(state_get previous)-..."
   say ""
+  [[ -n "${models// /}" ]] && say "The embedding server waits for its model: bring $EMBED_FILE into $MODELS_DIR (search by meaning needs it)."
   if [[ $problems -eq 0 ]]; then say "Every service is up."; return 0; fi
   say "$problems service(s) not up or not healthy: repair puts them right."
   return 1
