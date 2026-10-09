@@ -77,10 +77,11 @@ export function voiceDetail(v: OfferedVoice): string {
 /** A voice as the lists name it: "Adam (man, American English)". */
 export const voiceLabel = (v: OfferedVoice) => (voiceDetail(v) ? `${voiceName(v)} (${voiceDetail(v)})` : voiceName(v))
 
-/** What Settings → Speech chooses the company's voices from: every voice offered, and the text to speech models at the gateway. */
+/** What Settings → Speech chooses the company's voices and language from: every voice offered, the text to speech models at the gateway, and the languages speech to text knows. */
 export interface SpeechOffer {
   voices: OfferedVoice[]
   models: string[]
+  languages: string[]
   /** The speech server said what it offers. */
   known: boolean
 }

@@ -142,3 +142,34 @@ export function SpeechVoices({ id, label, value, onChange, speed, describedBy, i
     </fieldset>
   )
 }
+
+/**
+ * Settings → Speech → Language people speak: auto (Whisper hears which), or one of the languages speech to text knows,
+ * by name with its code. A code it does not list stays shown as such (the warning under the setting says why).
+ */
+export function SpeechLanguage({ id, value, onChange, describedBy, invalid }: Omit<Props, 'label' | 'speed'>) {
+  const offer = useQuery(offerQuery)
+  if (offer.isPending) return <Skeleton className="h-9" />
+  const known = offer.data?.languages ?? []
+  const common = { id, 'aria-describedby': describedBy, 'aria-invalid': invalid || undefined }
+  if (known.length === 0) return <Input {...common} value={value} onChange={(e) => onChange(e.target.value)} placeholder="auto, or a language's code" />
+  const current = value.trim().toLowerCase() || 'auto'
+  return (
+    <Select value={current} onValueChange={onChange}>
+      <SelectTrigger {...common}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="auto">Detect it (auto)</SelectItem>
+        {current !== 'auto' && !known.includes(current) && <SelectItem value={current}>{current} (not known here)</SelectItem>}
+        {[...known]
+          .sort((a, b) => languageName(a).localeCompare(languageName(b)))
+          .map((l) => (
+            <SelectItem key={l} value={l}>
+              {languageName(l)} <span className="font-mono text-xs text-muted-foreground">{l}</span>
+            </SelectItem>
+          ))}
+      </SelectContent>
+    </Select>
+  )
+}

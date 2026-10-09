@@ -20,7 +20,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { api, ApiError, errorMessage, infoQuery } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { CompanySignInPanel } from './company-sign-in'
-import { SpeechVoices } from './speech-voices'
+import { SpeechLanguage, SpeechVoices } from './speech-voices'
 import { BotAddresses } from './bot-addresses'
 import { bytesHint, initialValue, isShown, slug, wireValue, type SettingsData, type SettingView } from './settings-model'
 
@@ -327,8 +327,9 @@ function Editor({ s, id, value, onChange, describedBy, invalid, valueOf }: {
   valueOf: (key: string) => string
 }) {
   const common = { id, 'aria-describedby': describedBy, 'aria-invalid': invalid || undefined }
-  // Chosen from the voices the speech models offer, each tried at the reading speed on the page.
+  // Chosen from what the speech models offer: the voices each tried at the reading speed on the page.
   if (s.key === 'Speech:Voices') return <SpeechVoices id={id} label={s.label} value={value} onChange={onChange} speed={readingSpeed(valueOf('Speech:Speed'))} describedBy={describedBy} invalid={invalid} />
+  if (s.key === 'Speech:Language') return <SpeechLanguage id={id} value={value} onChange={onChange} describedBy={describedBy} invalid={invalid} />
   switch (s.type) {
     case 'boolean':
       return <Switch {...common} checked={value === 'true'} onCheckedChange={(v) => onChange(v ? 'true' : 'false')} />

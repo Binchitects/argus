@@ -12,12 +12,13 @@ const setting = (over: Partial<SettingView>): SettingView => ({
   restartPending: false, ...over,
 })
 
-function speech(voices = 'en:kokoro/af_heart,fa:piper-fa/gyro', warning: string | null = null): SettingsData {
+function speech(voices = 'en:kokoro/af_heart,fa:piper-fa/gyro', warning: string | null = null, language = 'auto'): SettingsData {
   return {
     groups: [
       {
         title: 'Speech',
         settings: [
+          setting({ key: 'Speech:Language', label: 'Language people speak', value: language, default: 'auto', max: 4, patternHelp: 'auto, or the code of a language Whisper knows' }),
           setting({ value: voices, warning }),
           setting({ key: 'Speech:Speed', label: 'Reading speed', type: 'number', value: '1', default: '1', min: 0.5, max: 2, patternHelp: null }),
         ],
@@ -37,6 +38,7 @@ const offered = (): SpeechOffer => ({
     { id: 'piper-fa/gyro', model: 'piper-fa', name: 'gyro', language: 'fa', accent: 'fa', gender: null },
   ],
   models: ['kokoro', 'piper-fa'],
+  languages: ['en', 'fa', 'de', 'es'],
   known: true,
 })
 
@@ -161,7 +163,7 @@ describe('settings → speech → voice for each language', () => {
   })
 
   it('while the speech server cannot be asked, the value is typed as text', async () => {
-    const calls = backend(speech(), { voices: [], models: ['kokoro', 'piper-fa'], known: false })
+    const calls = backend(speech(), { voices: [], models: ['kokoro', 'piper-fa'], languages: ['en', 'fa'], known: false })
     renderApp('/admin/settings#speech')
     const text = await screen.findByLabelText('Voice for each language')
     expect(text).toHaveValue('en:kokoro/af_heart,fa:piper-fa/gyro')
@@ -172,6 +174,26 @@ describe('settings → speech → voice for each language', () => {
     await waitFor(() =>
       expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ changes: [{ key: 'Speech:Voices', value: 'en:kokoro/af_heart,fa:piper-fa/gyro,es:kokoro/ef_dora' }] }),
     )
+  })
+
+  it('the language people speak is auto or one speech to text knows, by name with its code', async () => {
+    const calls = backend(speech(undefined, null, 'it'))
+    renderApp('/admin/settings#speech')
+    const language = await screen.findByRole('combobox', { name: 'Language people speak' })
+    // A code speech to text does not list stays shown as such.
+    expect(language).toHaveTextContent('it (not known here)')
+    await userEvent.click(language)
+    expect((await screen.findAllByRole('option')).map((o) => o.textContent)).toEqual([
+      'Detect it (auto)',
+      'it (not known here)',
+      'English en',
+      'German de',
+      'Persian fa',
+      'Spanish es',
+    ])
+    await userEvent.click(screen.getByRole('option', { name: 'Persian fa' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ changes: [{ key: 'Speech:Language', value: 'fa' }] }))
   })
 
   it('reads the value as the app does: pairs in order, the first for a language kept, the rest left out', () => {

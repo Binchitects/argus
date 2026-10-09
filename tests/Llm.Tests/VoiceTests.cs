@@ -424,6 +424,8 @@ public sealed class VoiceTests(AppFixture app)
         Assert.Equal(("es", "es", "female"), (voices["kokoro/ef_dora"].GetProperty("language").GetString(), voices["kokoro/ef_dora"].GetProperty("accent").GetString(),
             voices["kokoro/ef_dora"].GetProperty("gender").GetString()));
         Assert.Equal(["kokoro", "piper-fa"], offer.GetProperty("models").EnumerateArray().Select(m => m.GetString()));
+        // The languages speech to text knows, for the company's language.
+        Assert.Equal(["en", "fa", "de", "fr", "es", "ja"], offer.GetProperty("languages").EnumerateArray().Select(l => l.GetString()));
         // Admins only.
         await StatusAssert.Is(HttpStatusCode.Forbidden, await b.GetAsync("/api/admin/speech/voices"));
         await StatusAssert.Is(HttpStatusCode.Forbidden, await b.PostAsync("/api/admin/speech/try", new { voice = "kokoro/ef_dora" }));

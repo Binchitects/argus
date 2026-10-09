@@ -100,13 +100,17 @@ public static class VoiceEndpoints
     private static object Shown(OfferedVoice v) => new { id = v.Id, model = v.Model, name = v.Name, language = v.Language, accent = v.Accent, gender = v.Gender };
 
     /// <summary>
-    /// What Settings → Speech chooses the company's voices from: every voice the speech models offer, and the text to
-    /// speech models at the gateway (a voice of one whose voices the speech server has not listed is used as named).
+    /// What Settings → Speech chooses the company's voices and language from: every voice the speech models offer, the
+    /// text to speech models at the gateway (a voice of one whose voices the speech server has not listed is used as
+    /// named), and the languages speech to text knows.
     /// </summary>
     private static async Task<IResult> OfferedAsync(VoiceCatalog voices, CancellationToken ct)
     {
         var offer = await voices.OfferAsync(ct);
-        return Results.Ok(new { voices = offer.Voices.Select(Shown), models = offer.Models.Order(StringComparer.Ordinal), known = offer.Known });
+        return Results.Ok(new
+        {
+            voices = offer.Voices.Select(Shown), models = offer.Models.Order(StringComparer.Ordinal), languages = offer.Languages, known = offer.Known,
+        });
     }
 
     /// <summary>
