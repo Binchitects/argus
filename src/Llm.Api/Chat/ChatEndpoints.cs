@@ -33,8 +33,8 @@ public sealed record ToolDecision(bool Allow);
 /// <summary>Fork up to this message (default: the end of the branch on screen).</summary>
 public sealed record ForkRequest(Guid? MessageId = null);
 
-/// <summary>A text to read aloud (an answer, as it is shown: Markdown and code are left out).</summary>
-public sealed record SpeechRequest(string? Text);
+/// <summary>A text to read aloud (an answer, as it is shown: Markdown and code are left out), and what came before it (Talk: the answer so far), whose language a short sentence takes.</summary>
+public sealed record SpeechRequest(string? Text, string? Context = null);
 
 /// <summary>
 /// A question. It follows <see cref="ParentId"/> (default: the end of the branch on
@@ -765,10 +765,13 @@ public static partial class ChatEndpoints
         await http.Response.WriteAsJsonAsync(new { status = code, error = message });
     }
 
+    /// <summary>How much of what came before a sentence tells its language: its last characters.</summary>
+    private const int MaxSpeechContext = 2000;
+
     /// <summary>
     /// A text read aloud: an MP3 from the gateway's text to speech, in the person's name and in their voice for the
     /// text's language, at their speed (Your account → Voice), passed on as the speech server writes it. Talk asks for
-    /// each sentence of an answer as it is written.
+    /// each sentence of an answer as it is written, with the answer so far.
     /// </summary>
     private static async Task<IResult> SpeechAsync(SpeechRequest body, HttpContext http, ClaimsPrincipal p, UserManager<AppUser> users, GatewayChat gateway, VoiceCatalog voices, CancellationToken ct)
     {
@@ -779,7 +782,8 @@ public static partial class ChatEndpoints
             return AuthEndpoints.Problem(400, "text", "Nothing to read aloud.");
         }
         var speech = await voices.ForAsync(me, ct);
-        return await VoiceEndpoints.ReadAloudAsync(http, gateway, speech.For(text), text, speech.Speed, me.Email!, ct);
+        var context = body.Context is { Length: > MaxSpeechContext } c ? c[^MaxSpeechContext..] : body.Context;
+        return await VoiceEndpoints.ReadAloudAsync(http, gateway, speech.For(text, context: context), text, speech.Speed, me.Email!, ct);
     }
 
     private static async Task<IResult> UploadAsync(HttpRequest request, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> monitor,

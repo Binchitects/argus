@@ -19,13 +19,13 @@ export const canTalk = () =>
 
 /** Each sentence through the app's text to speech (in the person's voice for its language), played as an MP3. */
 export const browserVoice: Voice = {
-  fetch: async (text, signal) => {
+  fetch: async (text, signal, context) => {
     const res = await fetch('/api/chat/speech', {
       method: 'POST',
       signal,
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(context ? { text, context } : { text }),
     })
     // Nothing to say in it (only marks, a link): on to the next.
     if (res.status === 400) return null
@@ -53,6 +53,9 @@ export const browserVoice: Voice = {
     }),
 }
 
+/** How much of the answer before a sentence goes with it: its last characters. */
+const contextChars = 1000
+
 interface Live {
   stream: MediaStream
   context: AudioContext
@@ -79,8 +82,8 @@ export function useTalk({ onHeard, onInterrupt, voice = browserVoice, readAloud 
     handlers.current = { onHeard, onInterrupt, readAloud }
   })
   const live = useRef<Live | null>(null)
-  /** The answer being heard: its number (a newer one or an interruption leaves older ones' words unsaid), its sentences, whether it is over. */
-  const turn = useRef<{ n: number; sentences: Sentences; over: boolean } | null>(null)
+  /** The answer being heard: its number (a newer one or an interruption leaves older ones' words unsaid), its sentences, what of it was read, whether it is over. */
+  const turn = useRef<{ n: number; sentences: Sentences; said: string; over: boolean } | null>(null)
   const turns = useRef(0)
   /** What was said before a pause that turned out to be mid-sentence: it goes with what comes next. */
   const pending = useRef('')
@@ -116,11 +119,19 @@ export function useTalk({ onHeard, onInterrupt, voice = browserVoice, readAloud 
     setState('off')
   }, [])
 
+  /** Sentences of an answer read aloud, each with the answer before it: a short one ("Claro que sí.") is read in the answer's language. */
+  const read = (now: { said: string }, sentences: string[]) => {
+    for (const s of sentences) {
+      live.current?.queue.say(s, now.said)
+      now.said = `${now.said} ${s}`.trim().slice(-contextChars)
+    }
+  }
+
   const finish = (n: number) => {
     const now = turn.current
     if (now?.n !== n || now.over) return
     now.over = true
-    for (const s of now.sentences.flush()) live.current?.queue.say(s)
+    read(now, now.sentences.flush())
     settle()
   }
 
@@ -145,14 +156,14 @@ export function useTalk({ onHeard, onInterrupt, voice = browserVoice, readAloud 
     pending.current = ''
     if (!question) return settle()
     const n = ++turns.current
-    turn.current = { n, sentences: new Sentences(), over: false }
+    turn.current = { n, sentences: new Sentences(), said: '', over: false }
     settle()
     handlers.current.onHeard(question, {
       watch: (e) => {
         const now = turn.current
         if (now?.n !== n || !live.current) return
         // Not read aloud: the answer is only shown, and speaking still stops it.
-        if (e.type === 'content' && handlers.current.readAloud) for (const s of now.sentences.push(e.text)) live.current.queue.say(s)
+        if (e.type === 'content' && handlers.current.readAloud) read(now, now.sentences.push(e.text))
         if (e.type === 'done' || e.type === 'error' || e.type === 'stopped') finish(n)
       },
       ended: () => finish(n),
@@ -220,8 +231,8 @@ export function useTalk({ onHeard, onInterrupt, voice = browserVoice, readAloud 
       analyser.fftSize = 1024
       context.createMediaStreamSource(stream).connect(analyser)
       const queue = new SpeechQueue({
-        fetch: (text, signal) =>
-          voice.fetch(text, signal).catch((e: unknown) => {
+        fetch: (text, signal, context) =>
+          voice.fetch(text, signal, context).catch((e: unknown) => {
             if (!signal.aborted && !warned.current) {
               warned.current = true
               toast.error('The answer cannot be read aloud', { description: errorMessage(e) })

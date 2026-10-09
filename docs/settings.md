@@ -70,20 +70,22 @@ setting ([admin.md](admin.md#credit-for-groups)).
 **Settings → Speech** is how everyone is heard and read to until they make
 their own choices under **Your account → Voice**
 ([chat.md](chat.md#your-voice)). A person's choice wins; a voice of theirs
-that is no longer offered (its model turned off) gives way to the company's.
+that is no longer offered (its model turned off) gives way to the company's
+until it is offered again.
 
 | Setting | What it holds |
 |---|---|
-| **Language people speak** | `auto` (Whisper hears which) or a language's code (`en`, `fa`, `de`): Talk and voice messages are written down in it |
-| **Voice for each language** | `language:model/voice` pairs, comma-separated: `en:kokoro/af_heart,fa:piper-fa/gyro` (the default). A text is read in the voice of its language; a language not named here gets the first voice offered for it. Your account → Voice lists every voice the speech models offer, with its name (`am_adam`, `bf_emma`) |
+| **Language people speak** | `auto` (Whisper hears which) or a language's code (`en`, `fa`, `de`): Talk, voice messages and API keys' speech to text are written down in it |
+| **Voice for each language** | `language:model/voice` pairs, comma-separated: `en:kokoro/af_heart,fa:piper-fa/gyro` (the default). A text is read in the voice of its language; a language not named here gets the first voice offered for it. Your account → Voice lists every voice the speech models offer, with its id under each language (`kokoro/am_adam`, `kokoro/pf_dora`). A voice here that is not offered (mistyped, its model turned off) is said under the setting, with the voice that reads instead and the ones offered |
 | **Reading speed** | 0.5 to 2; 1 is the voice's own pace |
 | **Read answers aloud in Talk** | on or off, for Talk and the answer to a voice message |
 
-They apply to read aloud, Talk, the Speech tool, and API keys' speech
-(`/v1/audio/speech` at `gateway.DOMAIN`) that names no voice: Traefik sends
-those requests by the app, which fills in the key's person's voice and passes
-them on to LiteLLM with the same key (straight to LiteLLM while the app is
-down). An installation upgraded from v5.2.0 starts with these defaults for
+They apply to read aloud, Talk, the Speech tool, and API keys' speech at
+`gateway.DOMAIN`: `/v1/audio/speech` that names no voice and
+`/v1/audio/transcriptions` that names no language. Traefik sends those
+requests by the app, which fills in the key's person's voice or language and
+passes them on to LiteLLM with the same key (straight to LiteLLM while the app
+is down). An installation upgraded from v5.2.0 starts with these defaults for
 everyone: the voices it used before.
 
 ## What cannot be changed here, and why

@@ -10,13 +10,14 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
-import { languageName, readsAloud, voiceDetail, voiceName, voiceQuery, type OfferedVoice, type VoiceChoices, type VoiceSettings } from '@/lib/voice'
+import { languageName, readsAloud, voiceDetail, voiceName, voiceQuery, type OfferedVoice, type VoiceChange, type VoiceSettings } from '@/lib/voice'
 import { play } from './chat/sound'
 
 /** The choice that leaves it to the company (a select's item cannot have an empty value). */
 const theirs = 'company'
 
-const nothing: VoiceChoices = { language: null, voices: {}, speed: null, readAloud: null }
+/** Every choice back to the company's. */
+const nothing: VoiceChange = { language: null, voices: null, speed: null, readAloud: null }
 
 const times = (n: number) => `${Number(n.toFixed(2))}×`
 
@@ -32,7 +33,9 @@ export function VoiceSection() {
   const queryClient = useQueryClient()
   const voice = useQuery(voiceQuery)
   const save = useMutation({
-    mutationFn: (choices: VoiceChoices) => api<VoiceSettings>('/api/account/voice', { method: 'PUT', body: choices }),
+    // Only what changed is sent, one change after another: each answer is the choices with every change before it.
+    mutationFn: (change: VoiceChange) => api<VoiceSettings>('/api/account/voice', { method: 'PATCH', body: change }),
+    scope: { id: 'account-voice' },
     onSuccess: (v) => {
       queryClient.setQueryData(voiceQuery.queryKey, v)
       toast.success('Saved')
@@ -41,7 +44,7 @@ export function VoiceSection() {
   })
   const v = voice.data
   const mine = v?.chosen
-  const change = (next: Partial<VoiceChoices>) => mine && save.mutate({ ...mine, ...next })
+  const change = (next: VoiceChange) => save.mutate(next)
   const chosenAny = !!mine && (mine.language !== null || Object.keys(mine.voices).length > 0 || mine.speed !== null || mine.readAloud !== null)
   return (
     <Card id="voice">
@@ -86,7 +89,7 @@ export function VoiceSection() {
                 </SelectContent>
               </Select>
             </Field>
-            <Voices settings={v} disabled={save.isPending} onChange={(language, id) => change({ voices: withVoice(mine.voices, language, id) })} />
+            <Voices settings={v} disabled={save.isPending} onChange={(language, id) => change({ voices: { [language]: id } })} />
             <Speed key={mine.speed ?? v.company.speed} settings={v} onChange={(speed) => change({ speed })} />
             <ReadAloud settings={v} disabled={save.isPending} onChange={(readAloud) => change({ readAloud })} />
           </>
@@ -96,21 +99,23 @@ export function VoiceSection() {
   )
 }
 
-/** The person's voices with one language's changed (null: back to the company's). */
-function withVoice(voices: Record<string, string>, language: string, id: string | null): Record<string, string> {
-  const next = { ...voices }
-  if (id) next[language] = id
-  else delete next[language]
-  return next
-}
-
 /** The speed the person reads at now: theirs, else the company's. */
 const speedOf = (v: VoiceSettings) => v.chosen.speed ?? v.company.speed
 
-/** A row for each language a voice reads: the voice that reads it, and Try it. */
+/** The language the person speaks now (theirs, else the company's); null when it is detected. */
+const speaks = (v: VoiceSettings) => {
+  const language = v.chosen.language ?? v.company.language
+  return language === 'auto' ? null : language
+}
+
+/**
+ * A row for each language a voice reads (and each the person chose a voice for that is not offered now): the voice
+ * that reads it, its id (as Settings → Speech names it), and Try it. The language they speak comes first.
+ */
 function Voices({ settings: v, disabled, onChange }: { settings: VoiceSettings; disabled: boolean; onChange: (language: string, id: string | null) => void }) {
-  const languages = [...new Set(v.voices.map((x) => x.language))].sort((a, b) =>
-    a === v.chosen.language ? -1 : b === v.chosen.language ? 1 : languageName(a).localeCompare(languageName(b)),
+  const first = speaks(v)
+  const languages = [...new Set([...v.voices.map((x) => x.language), ...Object.keys(v.chosen.voices)])].sort((a, b) =>
+    a === first ? -1 : b === first ? 1 : languageName(a).localeCompare(languageName(b)),
   )
   return (
     <div className="grid gap-2">
@@ -124,10 +129,14 @@ function Voices({ settings: v, disabled, onChange }: { settings: VoiceSettings; 
       )}
       {languages.map((language) => {
         const label = languageName(language)
-        const company = v.voices.find((x) => x.id === v.company.voices[language])
+        const offered = v.voices.filter((x) => x.language === language)
+        const company = offered.find((x) => x.id === v.company.voices[language])
         const chosen = v.chosen.voices[language]
+        // A voice of theirs the speech models no longer offer: kept, and the company's reads until it is offered again.
+        const gone = chosen !== undefined && !offered.some((x) => x.id === chosen)
+        const reads = gone ? company : (offered.find((x) => x.id === chosen) ?? company)
         return (
-          <div key={language} className="grid grid-cols-[minmax(0,6rem)_minmax(0,1fr)_auto] items-center gap-2">
+          <div key={language} className="grid grid-cols-[minmax(0,6rem)_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5">
             <span className="truncate text-sm">{label}</span>
             <Select value={chosen ?? theirs} onValueChange={(id) => onChange(language, id === theirs ? null : id)} disabled={disabled}>
               <SelectTrigger aria-label={`Voice for ${label}`}>
@@ -135,16 +144,18 @@ function Voices({ settings: v, disabled, onChange }: { settings: VoiceSettings; 
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={theirs}>The company's: {company ? describe(company) : 'none'}</SelectItem>
-                {v.voices
-                  .filter((x) => x.language === language)
-                  .map((x) => (
-                    <SelectItem key={x.id} value={x.id}>
-                      {describe(x)}
-                    </SelectItem>
-                  ))}
+                {gone && <SelectItem value={chosen}>{chosen} (not offered now)</SelectItem>}
+                {offered.map((x) => (
+                  <SelectItem key={x.id} value={x.id}>
+                    {describe(x)}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
-            <TryIt voice={chosen ?? company?.id ?? null} language={language} label={label} speed={speedOf(v)} />
+            {reads ? <TryIt voice={reads.id} language={language} label={label} speed={speedOf(v)} /> : <span />}
+            <span className="col-start-2 truncate font-mono text-xs text-muted-foreground" title="The voice's id, as Settings → Speech names it">
+              {gone ? `${chosen} is not offered now: ${reads ? `${reads.id} reads ${label}` : `no voice reads ${label}`}` : (reads?.id ?? 'No voice reads it here')}
+            </span>
           </div>
         )
       })}

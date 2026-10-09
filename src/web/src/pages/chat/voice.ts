@@ -167,8 +167,8 @@ export class Sentences {
 
 /** How a sentence becomes sound, and how sound is played. */
 export interface Voice {
-  /** The sentence as sound, or null when there is nothing to say in it. */
-  fetch: (text: string, signal: AbortSignal) => Promise<Blob | null>
+  /** The sentence as sound, or null when there is nothing to say in it; `context` is what came before it, whose language a short sentence takes. */
+  fetch: (text: string, signal: AbortSignal, context?: string) => Promise<Blob | null>
   /** Plays it to its end; ends early when the signal is aborted. */
   play: (sound: Blob, signal: AbortSignal) => Promise<void>
 }
@@ -183,7 +183,7 @@ export class SpeechQueue {
   playing = false
   /** Called when playing starts or stops, and when the queue runs dry. */
   onChange?: () => void
-  private items: { text: string; sound?: Promise<Blob | null> }[] = []
+  private items: { text: string; context?: string; sound?: Promise<Blob | null> }[] = []
   private controller = new AbortController()
   private generation = 0
   private running = false
@@ -198,8 +198,9 @@ export class SpeechQueue {
     return this.running
   }
 
-  say(text: string) {
-    this.items.push({ text })
+  /** A sentence to read, after what came before it in the answer (which tells the language of a short one). */
+  say(text: string, context?: string) {
+    this.items.push({ text, context })
     this.prefetch()
     if (!this.running) void this.run()
   }
@@ -217,7 +218,7 @@ export class SpeechQueue {
 
   private prefetch() {
     const signal = this.controller.signal
-    for (const item of this.items.slice(0, 2)) item.sound ??= this.voice.fetch(item.text, signal).catch(() => null)
+    for (const item of this.items.slice(0, 2)) item.sound ??= this.voice.fetch(item.text, signal, item.context).catch(() => null)
   }
 
   private async run() {

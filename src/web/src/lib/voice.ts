@@ -19,6 +19,14 @@ export interface VoiceChoices {
   readAloud: boolean | null
 }
 
+/** A change to a person's choices: only the ones named change; null puts one back to the company's (`voices: null` all the voices, a language's null its voice). */
+export interface VoiceChange {
+  language?: string | null
+  voices?: Record<string, string | null> | null
+  speed?: number | null
+  readAloud?: boolean | null
+}
+
 /** Your account → Voice: what the person chose, the company's defaults, and what the speech models offer. */
 export interface VoiceSettings {
   chosen: VoiceChoices

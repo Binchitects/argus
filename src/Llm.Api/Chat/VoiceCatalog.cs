@@ -152,13 +152,19 @@ public sealed class PersonalSpeech(VoiceChoices mine, SpeechOptions company, Spe
 
     /// <summary>
     /// The voice a text is read in: the voice of its language (Persian text in the Persian voice, whatever the person
-    /// speaks). A language no voice reads goes to the voice of the language they speak, then English's, then any.
-    /// Null: no text to speech model at the gateway (of <paramref name="model"/>, when given).
+    /// speaks). A Latin text whose words do not tell its language ("Claro que sí.") takes the language of
+    /// <paramref name="context"/> (what came before it: in Talk, the answer so far), else the language the person
+    /// speaks when it is one of the Latin script, else English. A language no voice reads goes to the voice of the
+    /// language they speak, then English's, then any. Null: no text to speech model at the gateway (of
+    /// <paramref name="model"/>, when given).
     /// </summary>
-    public OfferedVoice? For(string text, string? model = null)
+    public OfferedVoice? For(string text, string? model = null, string? context = null)
     {
         var usable = Usable.Where(v => model is null || v.Model == model).ToList();
-        var language = Tools.Voices.LanguageOf(text, usable.Select(v => v.Language).ToHashSet(StringComparer.Ordinal));
+        var among = usable.Select(v => v.Language).ToHashSet(StringComparer.Ordinal);
+        var language = Tools.Voices.LanguageOf(text, among)
+            ?? (context is { Length: > 0 } && Tools.Voices.LanguageOf(context, among) is { } before && Tools.Voices.IsLatin(before) ? before : null)
+            ?? (Language is { } speaks && Tools.Voices.IsLatin(speaks) && among.Contains(speaks) ? speaks : "en");
         return VoiceFor(language, model) ?? (Language is { } spoken ? VoiceFor(spoken, model) : null) ?? VoiceFor("en", model) ?? usable.FirstOrDefault();
     }
 }
@@ -170,7 +176,7 @@ public sealed class PersonalSpeech(VoiceChoices mine, SpeechOptions company, Spe
 /// last answer stays, or the voices chosen are believed.
 /// </summary>
 public sealed partial class VoiceCatalog(IHttpClientFactory http, Operations.Modules modules, ChatModels models, IOptionsMonitor<SpeechOptions> options,
-    TimeProvider clock, ILogger<VoiceCatalog> logger) : IDisposable
+    TimeProvider clock, ILogger<VoiceCatalog> logger) : Settings.ISettingWarning, IDisposable
 {
     public const string Client = "voices";
     public const double Slowest = 0.5;
@@ -216,6 +222,26 @@ public sealed partial class VoiceCatalog(IHttpClientFactory http, Operations.Mod
 
     /// <summary>The language a person speaks, for speech to text (the speech server is not asked); null: Whisper hears which.</summary>
     public string? LanguageOf(AppUser person) => PersonalSpeech.Spoken(VoiceChoices.Of(person.Voice), options.CurrentValue);
+
+    string Settings.ISettingWarning.Key => "Speech:Voices";
+
+    /// <summary>
+    /// The company's voices the speech models do not offer (a name mistyped, a model turned off), each with the voice its
+    /// language gets instead and the ones offered for it. Null when all are offered, or the speech server cannot be asked.
+    /// </summary>
+    public async Task<string?> WarningAsync(CancellationToken ct = default)
+    {
+        var offer = await OfferAsync(ct);
+        if (!offer.Known)
+        {
+            return null;
+        }
+        var wrong = options.CurrentValue.VoiceMap().Where(p => !offer.Voices.Any(v => v.Id == p.Value && v.Language == p.Key)).Select(p =>
+            offer.Voices.Where(v => v.Language == p.Key).Select(v => v.Id).ToList() is { Count: > 0 } ids
+                ? $"{p.Key}:{p.Value} is not a voice offered for {p.Key}, so {ids[0]} reads it. Offered: {string.Join(", ", ids)}."
+                : $"{p.Key}:{p.Value} is not offered, and no voice reads {p.Key} here.").ToList();
+        return wrong.Count > 0 ? string.Join(" ", wrong) : null;
+    }
 
     private async Task<Heard?> HeardAsync(CancellationToken ct)
     {

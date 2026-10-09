@@ -25,10 +25,11 @@ public static partial class Voices
 
     /// <summary>
     /// The language a text is written in, as far as reading it aloud needs: by its script (Persian for the Arabic
-    /// script, Hindi, Japanese, Chinese), and for the Latin script by its small words, else English. Only
-    /// <paramref name="among"/> (the languages there are voices for) are told apart; null: all of these.
+    /// script, Hindi, Japanese, Chinese), and for the Latin script by its small words. Only <paramref name="among"/>
+    /// (the languages there are voices for) are told apart; null: all of these. Null when a Latin text's words do not
+    /// tell (a short sentence, a name or two): the reader goes by what came before it, or the language the person speaks.
     /// </summary>
-    public static string LanguageOf(string text, IReadOnlyCollection<string>? among = null)
+    public static string? LanguageOf(string text, IReadOnlyCollection<string>? among = null)
     {
         int arabic = 0, devanagari = 0, kana = 0, han = 0, latin = 0;
         foreach (var c in text)
@@ -60,8 +61,11 @@ public static partial class Voices
         return most == arabic ? "fa" : most == devanagari ? "hi" : kana > 0 ? "ja" : "zh";
     }
 
-    /// <summary>English, unless another language's small words (and accents) are clearly more of the text: a name or two in it is not enough.</summary>
-    private static string LatinLanguage(string text, IReadOnlyCollection<string>? among)
+    /// <summary>A language whose small words tell it apart in the Latin script: en, es, fr, it, pt.</summary>
+    public static bool IsLatin(string language) => Latin.Any(l => l.Language == language);
+
+    /// <summary>The language whose small words (and accents) are clearly more of the text than English's, or English's more than any other's; null when neither is.</summary>
+    private static string? LatinLanguage(string text, IReadOnlyCollection<string>? among)
     {
         var words = LatinWord().Matches(text.ToLowerInvariant()).Select(m => m.Value).ToList();
         var scores = Latin.Where(l => l.Language == "en" || among is null || among.Contains(l.Language))
@@ -69,7 +73,9 @@ public static partial class Voices
             .ToList();
         var english = scores[0].Score;
         var best = scores.Skip(1).OrderByDescending(s => s.Score).FirstOrDefault();
-        return best.Language is { } other && best.Score >= 2 && best.Score > 2 * english ? other : "en";
+        return best.Language is { } other && best.Score >= 2 && best.Score > 2 * english ? other
+            : english >= 2 && english > 2 * best.Score ? "en"
+            : null;
     }
 
     [GeneratedRegex(@"[\p{L}']+")]

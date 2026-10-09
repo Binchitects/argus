@@ -29,9 +29,10 @@ http:
       middlewares: [secure]
       tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}
     # Speech with keys goes by the app, which reads a text that names no voice in the
-    # key's person's voice (Your account → Voice); straight to LiteLLM when the app is down.
+    # key's person's voice, and writes down speech that names no language in the
+    # language they speak (Your account → Voice); straight to LiteLLM when the app is down.
     gateway-speech:
-      rule: Host(`gateway.{{ $domain }}`) && (Path(`/v1/audio/speech`) || Path(`/audio/speech`))
+      rule: Host(`gateway.{{ $domain }}`) && (Path(`/v1/audio/speech`) || Path(`/audio/speech`) || Path(`/v1/audio/transcriptions`) || Path(`/audio/transcriptions`))
       service: speech
       middlewares: [secure]
       tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}

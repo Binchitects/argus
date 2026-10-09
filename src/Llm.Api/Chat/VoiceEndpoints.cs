@@ -1,14 +1,13 @@
 using System.Security.Claims;
+using System.Text.Json.Nodes;
 using Llm.Api.Endpoints;
 using Llm.Api.Gateway;
+using Llm.Core.Data;
 using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Chat;
-
-/// <summary>A person's speech choices, all at once; each null (a language left out): the company's.</summary>
-public sealed record VoiceRequest(string? Language = null, Dictionary<string, string?>? Voices = null, double? Speed = null, bool? ReadAloud = null);
 
 /// <summary>A voice to try: one offered (none: theirs for <paramref name="Language"/>), at a speed (none: theirs).</summary>
 public sealed record VoiceTry(string? Voice = null, string? Language = null, double? Speed = null);
@@ -34,10 +33,14 @@ public static class VoiceEndpoints
         ["hi"] = "नमस्ते! आपके उत्तर पढ़कर सुनाए जाने पर ऐसे सुनाई देते हैं।",
     };
 
+    /// <summary>Times a change is put on top of another change of the same person's saved meanwhile.</summary>
+    private const int Tries = 5;
+
     public static IServiceCollection AddVoices(this IServiceCollection services, IConfiguration config)
     {
         services.Configure<SpeechOptions>(config.GetSection("Speech"));
         services.AddSingleton<VoiceCatalog>();
+        services.AddSingleton<Settings.ISettingWarning>(sp => sp.GetRequiredService<VoiceCatalog>());
         services.AddHttpClient(VoiceCatalog.Client, c => c.Timeout = TimeSpan.FromSeconds(5));
         services.AddHttpClient(KeySpeech.Client, (sp, c) =>
         {
@@ -52,11 +55,13 @@ public static class VoiceEndpoints
     {
         var me = app.MapGroup("/api/account/voice").RequireAuthorization();
         me.MapGet("", MineAsync);
-        me.MapPut("", ChooseAsync);
+        me.MapPatch("", ChooseAsync);
         me.MapPost("/try", TryAsync);
         // API keys' speech at gateway.DOMAIN, sent here by Traefik while the app is up.
-        app.MapPost("/v1/audio/speech", KeySpeech.ProxyAsync).AllowAnonymous().DisableAntiforgery();
-        app.MapPost("/audio/speech", KeySpeech.ProxyAsync).AllowAnonymous().DisableAntiforgery();
+        foreach (var path in KeySpeech.Paths)
+        {
+            app.MapPost(path, KeySpeech.ProxyAsync).AllowAnonymous().DisableAntiforgery();
+        }
     }
 
     private static async Task<IResult> MineAsync(ClaimsPrincipal p, UserManager<AppUser> users, VoiceCatalog voices, CancellationToken ct)
@@ -85,46 +90,98 @@ public static class VoiceEndpoints
         };
     }
 
-    private static async Task<IResult> ChooseAsync(VoiceRequest body, ClaimsPrincipal p, UserManager<AppUser> users, VoiceCatalog voices, IOptionsMonitor<SpeechOptions> options,
-        CancellationToken ct)
+    /// <summary>
+    /// The choices a request names change, and only those: null puts one back to the company's ("voices": null all the
+    /// voices, a language's null its voice). A voice must be one offered for its language, unless it is the one the person
+    /// has already (its model turned off since: it stays theirs, and reads again when the model is back).
+    /// </summary>
+    private static async Task<IResult> ChooseAsync(JsonObject body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, VoiceCatalog voices,
+        IOptionsMonitor<SpeechOptions> options, CancellationToken ct)
     {
         var me = (await users.GetUserAsync(p))!;
         var offer = await voices.OfferAsync(ct);
-        var language = body.Language is { Length: > 0 } l ? l.Trim().ToLowerInvariant() : null;
+        var had = VoiceChoices.Of(me.Voice);
+        string? language;
+        double? speed;
+        bool? readAloud;
+        Dictionary<string, string?>? voiceChanges = null;
+        try
+        {
+            language = body["language"]?.GetValue<string>().Trim() is { Length: > 0 } l ? l.ToLowerInvariant() : null;
+            speed = body["speed"]?.GetValue<double>();
+            readAloud = body["readAloud"]?.GetValue<bool>();
+            if (body["voices"] is JsonObject named)
+            {
+                voiceChanges = named.ToDictionary(x => x.Key.Trim().ToLowerInvariant(), x => x.Value?.GetValue<string>()?.Trim() is { Length: > 0 } id ? id : null);
+            }
+            else if (body["voices"] is not null)
+            {
+                throw new InvalidOperationException();
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or FormatException or ArgumentException)
+        {
+            return AuthEndpoints.Problem(400, "choices", "Send the language as text, the voices as an object of a language and a voice, the speed as a number and reading aloud as true or false.");
+        }
         if (language is not null && language != SpeechOptions.Auto && !offer.Languages.Contains(language))
         {
-            return AuthEndpoints.Problem(400, "language", $"\"{body.Language}\" is not a language speech to text knows here.");
+            return AuthEndpoints.Problem(400, "language", $"\"{language}\" is not a language speech to text knows here.");
         }
-        if (body.Speed is { } speed && (double.IsNaN(speed) || speed < VoiceCatalog.Slowest || speed > VoiceCatalog.Fastest))
+        if (speed is { } fast && (double.IsNaN(fast) || fast < VoiceCatalog.Slowest || fast > VoiceCatalog.Fastest))
         {
             return AuthEndpoints.Problem(400, "speed", $"The speed is {VoiceCatalog.Slowest} to {VoiceCatalog.Fastest}.");
         }
-        if (body.Voices is { Count: > 50 })
+        if (voiceChanges is { Count: > 50 })
         {
             return AuthEndpoints.Problem(400, "voices", "Choose a voice for at most 50 languages.");
         }
-        var chosen = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var (key, id) in body.Voices ?? [])
+        foreach (var (lang, id) in voiceChanges ?? [])
         {
-            if (string.IsNullOrWhiteSpace(id))
-            {
-                continue;
-            }
-            var lang = key.Trim().ToLowerInvariant();
             // Offered for that language; while the speech server cannot be asked, any voice of a text to speech model at the gateway.
-            var fits = offer.Known
+            var fits = id is null || had.Voices?.GetValueOrDefault(lang) == id || (offer.Known
                 ? offer.Voices.Any(v => v.Id == id && v.Language == lang)
-                : SpeechOptions.IsLanguage(lang) && OfferedVoice.Assumed(id, lang) is { } assumed && offer.Models.Contains(assumed.Model);
+                : SpeechOptions.IsLanguage(lang) && OfferedVoice.Assumed(id, lang) is { } assumed && offer.Models.Contains(assumed.Model));
             if (!fits)
             {
                 return AuthEndpoints.Problem(400, "voice", $"\"{id}\" is not a voice for {lang} here.");
             }
-            chosen[lang] = id;
         }
-        var choices = new VoiceChoices { Language = language, Voices = chosen, Speed = body.Speed, ReadAloud = body.ReadAloud };
-        me.Voice = choices.ToJson();
-        await users.UpdateAsync(me);
-        return Results.Ok(View(new PersonalSpeech(choices, options.CurrentValue, offer)));
+
+        for (var tries = 1; ; tries++)
+        {
+            var saved = VoiceChoices.Of(me.Voice);
+            var mine = new Dictionary<string, string>(body.ContainsKey("voices") && voiceChanges is null ? [] : saved.Voices ?? [], StringComparer.Ordinal);
+            foreach (var (lang, id) in voiceChanges ?? [])
+            {
+                if (id is null)
+                {
+                    mine.Remove(lang);
+                }
+                else
+                {
+                    mine[lang] = id;
+                }
+            }
+            var choices = new VoiceChoices
+            {
+                Language = body.ContainsKey("language") ? language : saved.Language,
+                Voices = mine,
+                Speed = body.ContainsKey("speed") ? speed : saved.Speed,
+                ReadAloud = body.ContainsKey("readAloud") ? readAloud : saved.ReadAloud,
+            };
+            me.Voice = choices.ToJson();
+            var result = await users.UpdateAsync(me);
+            if (result.Succeeded)
+            {
+                return Results.Ok(View(new PersonalSpeech(choices, options.CurrentValue, offer)));
+            }
+            if (tries == Tries || result.Errors.All(e => e.Code != nameof(IdentityErrorDescriber.ConcurrencyFailure)))
+            {
+                return AuthEndpoints.Problem(409, "busy", "Your voice could not be saved just now: try again.");
+            }
+            // Another change of theirs was saved meanwhile (another control, another tab): this one goes on top of it.
+            await db.Entry(me).ReloadAsync(ct);
+        }
     }
 
     /// <summary>A sample read in a voice, before (or after) choosing it.</summary>

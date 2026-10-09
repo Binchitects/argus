@@ -59,8 +59,12 @@ public sealed class VoiceTests(AppFixture app)
         return (browser, made.GetProperty("apiKey").GetString()!, $"{name}@example.test");
     }
 
+    /// <summary>Changes the choices named, and only those.</summary>
     private static Task<HttpResponseMessage> ChooseAsync(TestBrowser b, object choices) =>
-        b.Http.PutAsJsonAsync(new Uri("/api/account/voice", UriKind.Relative), choices);
+        b.Http.PatchAsJsonAsync(new Uri("/api/account/voice", UriKind.Relative), choices);
+
+    /// <summary>Every choice back to the company's.</summary>
+    private static readonly object Theirs = new { language = (string?)null, voices = (object?)null, speed = (double?)null, readAloud = (bool?)null };
 
     /// <summary>What text to speech was last asked for this person.</summary>
     private JsonObject Spoken(string email) => app.Model.SpeechRequests.Last(r => r["user"]?.GetValue<string>() == email);
@@ -141,7 +145,7 @@ public sealed class VoiceTests(AppFixture app)
         Assert.Contains("name=language\r\n\r\nfa", Heard(email), StringComparison.Ordinal);
 
         // Back to the company's: nothing kept on them, Kokoro's default voice at its own pace, and Whisper hears the language.
-        await StatusAssert.Is(HttpStatusCode.OK, await ChooseAsync(b, new { }));
+        await StatusAssert.Is(HttpStatusCode.OK, await ChooseAsync(b, Theirs));
         using (var scope = s.App.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -166,6 +170,47 @@ public sealed class VoiceTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.BadRequest, await ChooseAsync(b, new { speed = 3 }));
         await StatusAssert.Is(HttpStatusCode.BadRequest, await ChooseAsync(b, new { speed = 0.4 }));
         await StatusAssert.Is(HttpStatusCode.OK, await ChooseAsync(b, new { language = "auto", speed = 2, voices = new Dictionary<string, string> { ["es"] = "kokoro/ef_dora" } }));
+    }
+
+    [Fact]
+    public async Task A_change_keeps_the_choices_it_does_not_name_and_a_voice_no_longer_offered_does_not_stop_it()
+    {
+        await using var s = NewApp();
+        var (b, _, email) = await PersonAsync(s.App);
+        await StatusAssert.Is(HttpStatusCode.OK, await ChooseAsync(b, new { language = "es", voices = new Dictionary<string, string> { ["es"] = "kokoro/ef_dora" }, speed = 1.25 }));
+        // Only the switch: the rest stays as it was.
+        var chosen = (await b.JsonAsync(await ChooseAsync(b, new { readAloud = false }))).GetProperty("chosen");
+        Assert.Equal(("es", "kokoro/ef_dora", 1.25, false), (chosen.GetProperty("language").GetString(), chosen.GetProperty("voices").GetProperty("es").GetString(),
+            chosen.GetProperty("speed").GetDouble(), chosen.GetProperty("readAloud").GetBoolean()));
+
+        // A voice of theirs that the speech models stopped offering (its model turned off, the server upgraded).
+        using (var scope = s.App.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.Users.Where(u => u.Email == email).ExecuteUpdateAsync(x => x.SetProperty(u => u.Voice,
+                """{"language":"es","voices":{"es":"kokoro/ef_dora","en":"kokoro/af_bella"},"speed":1.25}"""));
+        }
+        // Other changes are still saved, and so is that voice: it reads again when it is offered again; until then the company's reads.
+        await StatusAssert.Is(HttpStatusCode.OK, await ChooseAsync(b, new { speed = 1.5 }));
+        await StatusAssert.Is(HttpStatusCode.OK, await ChooseAsync(b, new { voices = new Dictionary<string, string> { ["en"] = "kokoro/af_bella", ["es"] = "kokoro/ef_dora" } }));
+        chosen = (await b.JsonAsync(await b.GetAsync("/api/account/voice"))).GetProperty("chosen");
+        Assert.Equal(("kokoro/af_bella", 1.5), (chosen.GetProperty("voices").GetProperty("en").GetString(), chosen.GetProperty("speed").GetDouble()));
+        await b.PostAsync("/api/chat/speech", new { text = "Paris is the capital of France." });
+        Assert.Equal("af_heart", Spoken(email)["voice"]!.GetValue<string>());
+        // A new voice that is not offered is still refused; that one language goes back to the company's alone.
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await ChooseAsync(b, new { voices = new Dictionary<string, string> { ["en"] = "kokoro/af_nicole" } }));
+        chosen = (await b.JsonAsync(await ChooseAsync(b, new { voices = new Dictionary<string, string?> { ["en"] = null } }))).GetProperty("chosen");
+        Assert.Equal(["es"], chosen.GetProperty("voices").EnumerateObject().Select(v => v.Name));
+        Assert.Equal(1.5, chosen.GetProperty("speed").GetDouble());
+
+        // Changes made at once (the slider and the switch) are all kept.
+        await Task.WhenAll(ChooseAsync(b, new { speed = 0.75 }), ChooseAsync(b, new { readAloud = true }), ChooseAsync(b, new { language = "fa" }));
+        chosen = (await b.JsonAsync(await b.GetAsync("/api/account/voice"))).GetProperty("chosen");
+        Assert.Equal((0.75, true, "fa"), (chosen.GetProperty("speed").GetDouble(), chosen.GetProperty("readAloud").GetBoolean(), chosen.GetProperty("language").GetString()));
+
+        // What is not a choice is refused.
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await ChooseAsync(b, new { speed = "fast" }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await ChooseAsync(b, new { voices = "kokoro/am_adam" }));
     }
 
     [Fact]
@@ -242,6 +287,76 @@ public sealed class VoiceTests(AppFixture app)
         Assert.Null(SpokenText(stranger)["voice"]);
     }
 
+    /// <summary>Speech to text as a tool sends it at gateway.DOMAIN: the key, a form with the sound, a marker to find it by, and the fields given.</summary>
+    private static async Task<HttpResponseMessage> KeyHearAsync(WebApplicationFactory<Program> f, string key, string marker, string? language = null, string path = "/v1/audio/transcriptions")
+    {
+        var client = f.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://gateway.{AppFixture.Domain}"), HandleCookies = false });
+        using var form = new MultipartFormDataContent();
+        var file = new ByteArrayContent("RIFF0000WAVEfmt "u8.ToArray());
+        file.Headers.ContentType = MediaTypeHeaderValue.Parse("audio/wav");
+        form.Add(file, "file", "meeting.wav");
+        form.Add(new StringContent(MediaModels.SpeechToText), "model");
+        form.Add(new StringContent(marker), "prompt");
+        if (language is not null)
+        {
+            form.Add(new StringContent(language), "language");
+        }
+        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(path, UriKind.Relative)) { Content = form };
+        req.Headers.Authorization = new("Bearer", key);
+        return await client.SendAsync(req);
+    }
+
+    /// <summary>The form the gateway got for a marker, read as a form.</summary>
+    private async Task<Dictionary<string, List<string>>> HeardFormAsync(string marker)
+    {
+        var sent = app.Model.Transcriptions.Last(t => t.Contains(marker, StringComparison.Ordinal));
+        var boundary = sent[2..sent.IndexOf("\r\n", StringComparison.Ordinal)];
+        var reader = new Microsoft.AspNetCore.WebUtilities.MultipartReader(boundary, new MemoryStream(Encoding.UTF8.GetBytes(sent)));
+        var fields = new Dictionary<string, List<string>>();
+        while (await reader.ReadNextSectionAsync() is { } section)
+        {
+            var name = Microsoft.Net.Http.Headers.ContentDispositionHeaderValue.Parse(section.ContentDisposition).Name.Value!.Trim('"');
+            using var text = new StreamReader(section.Body);
+            (fields.TryGetValue(name, out var list) ? list : fields[name] = []).Add(await text.ReadToEndAsync());
+        }
+        return fields;
+    }
+
+    [Fact]
+    public async Task An_API_keys_speech_to_text_that_names_no_language_is_written_down_in_the_language_its_person_speaks()
+    {
+        await using var s = NewApp();
+        var (b, key, _) = await PersonAsync(s.App);
+        await StatusAssert.Is(HttpStatusCode.OK, await ChooseAsync(b, new { language = "fa" }));
+        var marker = "m" + Guid.NewGuid().ToString("N")[..10];
+
+        var res = await KeyHearAsync(s.App, key, marker);
+        await StatusAssert.Is(HttpStatusCode.OK, res);
+        Assert.Equal("What is the capital of France?", (await res.Content.ReadFromJsonAsync<JsonObject>())!["text"]!.GetValue<string>());
+        var form = await HeardFormAsync(marker);
+        Assert.Equal(["fa"], form["language"]);
+        // The rest of the form goes on as it came.
+        Assert.Equal([MediaModels.SpeechToText], form["model"]);
+        Assert.Equal("RIFF0000WAVEfmt ", form["file"].Single());
+
+        // A language named is kept, without the path's /v1 too.
+        var named = "n" + Guid.NewGuid().ToString("N")[..10];
+        await StatusAssert.Is(HttpStatusCode.OK, await KeyHearAsync(s.App, key, named, "en", "/audio/transcriptions"));
+        Assert.Equal(["en"], (await HeardFormAsync(named))["language"]);
+
+        // Detect it (theirs or the company's): Whisper hears which.
+        await StatusAssert.Is(HttpStatusCode.OK, await ChooseAsync(b, new { language = "auto" }));
+        var auto = "a" + Guid.NewGuid().ToString("N")[..10];
+        await StatusAssert.Is(HttpStatusCode.OK, await KeyHearAsync(s.App, key, auto));
+        Assert.False((await HeardFormAsync(auto)).ContainsKey("language"));
+
+        // A key the gateway does not know: as it came, and the gateway answers for it.
+        await ChooseAsync(b, new { language = "fa" });
+        var stranger = "s" + Guid.NewGuid().ToString("N")[..10];
+        await KeyHearAsync(s.App, "sk-not-a-key", stranger);
+        Assert.False((await HeardFormAsync(stranger)).ContainsKey("language"));
+    }
+
     [Fact]
     public async Task The_companys_voices_language_speed_and_reading_aloud_are_everyones_until_they_choose()
     {
@@ -276,7 +391,19 @@ public sealed class VoiceTests(AppFixture app)
         // A value that is not pairs of a language and a voice is refused.
         await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative),
             new { changes = new[] { new { key = "Speech:Voices", value = "kokoro" } } }));
+
+        // A voice the speech models do not offer is said under the setting, with the voice that reads instead and the ones offered.
+        Assert.Null(await SettingWarningAsync(admin));
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative),
+            new { changes = new[] { new { key = "Speech:Voices", value = "en:kokoro/emma,es:kokoro/ef_dora,de:kokoro/df_anna" } } }));
+        Assert.Equal("en:kokoro/emma is not a voice offered for en, so kokoro/af_heart reads it. Offered: kokoro/af_heart, kokoro/am_adam, kokoro/bf_emma. " +
+            "de:kokoro/df_anna is not offered, and no voice reads de here.", await SettingWarningAsync(admin));
     }
+
+    /// <summary>What the Settings page says under Speech:Voices, if anything.</summary>
+    private static async Task<string?> SettingWarningAsync(TestBrowser admin) =>
+        (await admin.JsonAsync(await admin.GetAsync("/api/admin/config"))).GetProperty("groups").EnumerateArray().SelectMany(g => g.GetProperty("settings").EnumerateArray())
+            .Single(x => x.GetProperty("key").GetString() == "Speech:Voices").GetProperty("warning").GetString();
 
     [Fact]
     public async Task While_the_speech_server_cannot_be_asked_the_voices_chosen_are_believed()
@@ -304,16 +431,20 @@ public sealed class VoiceTests(AppFixture app)
     [InlineData("東京は日本の首都です。", "ja")]
     [InlineData("北京是中国的首都。", "zh")]
     [InlineData("दिल्ली भारत की राजधानी है।", "hi")]
-    [InlineData("Version 2.0 of Kubernetes", "en")]
-    [InlineData("Il Divo and Le Monde", "en")]
-    [InlineData("", "en")]
-    public void A_texts_language_is_told_by_its_script_and_its_small_words(string text, string language) =>
+    // A Latin text whose small words do not tell: the reader decides.
+    [InlineData("Version 2.0 of Kubernetes", null)]
+    [InlineData("Il Divo and Le Monde", null)]
+    [InlineData("Claro que sí.", null)]
+    [InlineData("¡Hola!", null)]
+    [InlineData("Vado in Italia.", null)]
+    [InlineData("", null)]
+    public void A_texts_language_is_told_by_its_script_and_its_small_words(string text, string? language) =>
         Assert.Equal(language, Voices.LanguageOf(text));
 
     [Fact]
     public void A_language_with_no_voice_is_not_told_apart()
     {
-        Assert.Equal("en", Voices.LanguageOf("¿Dónde está la estación de tren?", ["en", "fa"]));
+        Assert.Null(Voices.LanguageOf("¿Dónde está la estación de tren?", ["en", "fa"]));
         Assert.Equal("es", Voices.LanguageOf("¿Dónde está la estación de tren?", ["en", "es"]));
     }
 
@@ -345,6 +476,18 @@ public sealed class VoiceTests(AppFixture app)
         Assert.Equal("kokoro/af_heart", noPersian.For("صبح بخیر")!.Id);
         // No text to speech at all: nothing to read with.
         Assert.Null(new PersonalSpeech(new VoiceChoices(), new SpeechOptions(), new SpeechOffer([], [], new HashSet<string>(), false, false)).For("Hello"));
+
+        // A short sentence whose words do not tell: the language of what came before it (Talk's answer so far), else the
+        // language the person speaks when the Latin script writes it, else English.
+        var spanish = new PersonalSpeech(new VoiceChoices { Language = "es" }, new SpeechOptions(), Offer);
+        Assert.Equal("kokoro/ef_dora", spanish.For("Claro que sí.")!.Id);
+        Assert.Equal("kokoro/ef_dora", spanish.For("¡Hola!")!.Id);
+        Assert.Equal("kokoro/af_heart", spanish.For("Sure.", context: "The capital of France is Paris, and it is on the Seine.")!.Id);
+        Assert.Equal("kokoro/am_adam", english.For("Claro que sí.")!.Id);
+        Assert.Equal("kokoro/ef_dora", english.For("Claro que sí.", context: "¿Dónde está la estación de tren? Está muy cerca.")!.Id);
+        // Not Persian's voice for a Latin sentence: it speaks no Latin script.
+        Assert.Equal("kokoro/af_heart", persian.For("OK.", context: "پاریس پایتخت فرانسه است.")!.Id);
+        Assert.Equal("kokoro/af_heart", persian.For("OK.")!.Id);
 
         // A voice chosen that is no longer offered gives way to the company's.
         var gone = new PersonalSpeech(new VoiceChoices { Voices = new() { ["en"] = "kokoro/af_bella" } }, new SpeechOptions(), Offer);
@@ -407,7 +550,9 @@ public sealed class VoiceTests(AppFixture app)
         var routes = File.ReadAllText(Path.Combine(deploy, "config", "traefik", "routes.yml"));
         Assert.Contains("Path(`/v1/audio/speech`) || Path(`/audio/speech`)", routes, StringComparison.Ordinal);
         Assert.Contains("failover: { service: app-speech, fallback: litellm }", routes, StringComparison.Ordinal);
+        Assert.Contains("Path(`/v1/audio/transcriptions`) || Path(`/audio/transcriptions`)", routes, StringComparison.Ordinal);
         var ingress = File.ReadAllText(Path.Combine(deploy, "helm", "argus-arena", "templates", "ingress.yaml"));
-        Assert.Contains("\"/v1/audio/speech\" \"/audio/speech\"", ingress, StringComparison.Ordinal);
+        Assert.Contains("\"/v1/audio/speech\" \"/audio/speech\" \"/v1/audio/transcriptions\" \"/audio/transcriptions\"", ingress, StringComparison.Ordinal);
+        Assert.Equal(["/v1/audio/speech", "/audio/speech", "/v1/audio/transcriptions", "/audio/transcriptions"], KeySpeech.Paths);
     }
 }

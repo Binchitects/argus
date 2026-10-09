@@ -170,6 +170,34 @@ describe('talk', () => {
     expect(screen.getByRole('button', { name: 'Talk' })).toHaveAttribute('aria-pressed', 'false')
   })
 
+  it('each sentence is read with the answer before it, so a short one is read in the answer’s language', async () => {
+    const calls = backend({
+      'POST /api/chat/conversations/c1/messages': () => ({
+        events: [
+          { type: 'question', id: 'q1', parentId: null },
+          { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' },
+          { type: 'content', text: '¿Dónde está la estación de tren? ' },
+          { type: 'content', text: 'Claro que sí. Está' },
+        ],
+        hang: true,
+      }),
+    })
+    renderApp('/chat')
+    await userEvent.click(await screen.findByRole('button', { name: 'Talk' }))
+    const status = () => screen.getByRole('status', { name: 'Talk' })
+    await waitFor(() => expect(status()).toHaveTextContent('Listening: speak when you are ready.'))
+    mic = 0.2
+    await waitFor(() => expect(status()).toHaveTextContent('Hearing you…'))
+    mic = 0.001
+    await waitFor(() =>
+      expect(calls.filter((c) => c.path === '/api/chat/speech').map((c) => c.body)).toEqual([
+        { text: '¿Dónde está la estación de tren?' },
+        { text: 'Claro que sí.', context: '¿Dónde está la estación de tren?' },
+      ]),
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'End talk' }))
+  })
+
   it('with reading aloud turned off (Your account → Voice) the answer is only shown, and speaking still stops it', async () => {
     const voice = {
       chosen: { language: null, voices: {}, speed: null, readAloud: false },

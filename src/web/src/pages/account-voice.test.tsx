@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { VoiceChoices, VoiceSettings } from '@/lib/voice'
+import type { VoiceChange, VoiceSettings } from '@/lib/voice'
 import { fakeApi, member, renderApp, type Call } from '@/test/utils'
 
 const offered = (): VoiceSettings => ({
@@ -50,31 +50,44 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/** The person's voice as the server keeps it: each PUT replaces their choices. */
+/** The person's voice as the server keeps it: each PATCH changes the choices it names, and only those. */
 function backend(settings = offered()) {
   let state = settings
   const calls = fakeApi(member, {
     'GET /api/account/voice': () => ({ json: state }),
-    'PUT /api/account/voice': (body) => {
-      state = { ...state, chosen: body as VoiceChoices }
+    'PATCH /api/account/voice': (body) => {
+      const change = body as VoiceChange
+      const chosen = { ...state.chosen }
+      if ('language' in change) chosen.language = change.language ?? null
+      if ('speed' in change) chosen.speed = change.speed ?? null
+      if ('readAloud' in change) chosen.readAloud = change.readAloud ?? null
+      if ('voices' in change) {
+        const voices = change.voices ? { ...chosen.voices } : {}
+        for (const [language, id] of Object.entries(change.voices ?? {})) {
+          if (id) voices[language] = id
+          else delete voices[language]
+        }
+        chosen.voices = voices
+      }
+      state = { ...state, chosen }
       return { json: state }
     },
     'POST /api/account/voice/try': () => ({ json: {} }),
   })
-  return calls
+  return { calls, now: () => state }
 }
 
-const lastSaved = (calls: Call[]) => calls.filter((c) => c.method === 'PUT' && c.path === '/api/account/voice').at(-1)?.body
+const lastSaved = (calls: Call[]) => calls.filter((c) => c.method === 'PATCH' && c.path === '/api/account/voice').at(-1)?.body
 
 describe('your voice', () => {
-  it('the language spoken, a voice per language, the speed and reading aloud are saved, and all go back to the company’s', async () => {
-    const calls = backend()
+  it('the language spoken, a voice per language, the speed and reading aloud are saved one by one, and all go back to the company’s', async () => {
+    const { calls, now } = backend()
     renderApp('/account')
     const language = await screen.findByRole('combobox', { name: 'The language you speak' })
     expect(language).toHaveTextContent("The company's: Detect it")
     await userEvent.click(language)
     await userEvent.click(await screen.findByRole('option', { name: 'Persian' }))
-    await waitFor(() => expect(lastSaved(calls)).toEqual({ language: 'fa', voices: {}, speed: null, readAloud: null }))
+    await waitFor(() => expect(lastSaved(calls)).toEqual({ language: 'fa' }))
 
     // A row per language a voice reads, the language spoken first; each starts as the company's.
     const rows = screen.getAllByRole('combobox', { name: /^Voice for / }).map((c) => c.getAttribute('aria-label'))
@@ -90,22 +103,26 @@ describe('your voice', () => {
       'Emma (woman, British English)',
     ])
     await userEvent.click(screen.getByRole('option', { name: 'Adam (man, American English)' }))
-    await waitFor(() => expect(lastSaved(calls)).toEqual({ language: 'fa', voices: { en: 'kokoro/am_adam' }, speed: null, readAloud: null }))
+    await waitFor(() => expect(lastSaved(calls)).toEqual({ voices: { en: 'kokoro/am_adam' } }))
     expect(screen.getByRole('combobox', { name: 'Voice for Persian' })).toHaveTextContent("The company's: Gyro")
+    // Each voice's id, as Settings → Speech names it.
+    expect(screen.getByText('kokoro/am_adam')).toBeInTheDocument()
+    expect(screen.getByText('piper-fa/gyro')).toBeInTheDocument()
 
-    // The speed is saved once the slider rests.
+    // The speed is saved once the slider rests; the switch flipped meanwhile is kept too.
     fireEvent.change(screen.getByRole('slider', { name: 'Speed' }), { target: { value: '1.25' } })
     expect(screen.getByText('1.25×')).toBeInTheDocument()
-    await waitFor(() => expect(lastSaved(calls)).toEqual({ language: 'fa', voices: { en: 'kokoro/am_adam' }, speed: 1.25, readAloud: null }))
-
     const aloud = screen.getByRole('switch', { name: 'Read answers aloud in Talk' })
     expect(aloud).toBeChecked()
     await userEvent.click(aloud)
-    await waitFor(() => expect(lastSaved(calls)).toEqual({ language: 'fa', voices: { en: 'kokoro/am_adam' }, speed: 1.25, readAloud: false }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PATCH').map((c) => c.body)).toContainEqual({ speed: 1.25 }))
+    expect(calls.filter((c) => c.method === 'PATCH').map((c) => c.body)).toContainEqual({ readAloud: false })
+    expect(now().chosen).toEqual({ language: 'fa', voices: { en: 'kokoro/am_adam' }, speed: 1.25, readAloud: false })
     await waitFor(() => expect(screen.getByRole('switch', { name: 'Read answers aloud in Talk' })).not.toBeChecked())
+    expect(screen.getByText('1.25×')).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: "Use the company's" }))
-    await waitFor(() => expect(lastSaved(calls)).toEqual({ language: null, voices: {}, speed: null, readAloud: null }))
+    await waitFor(() => expect(lastSaved(calls)).toEqual({ language: null, voices: null, speed: null, readAloud: null }))
     await waitFor(() => expect(screen.queryByRole('button', { name: "Use the company's" })).not.toBeInTheDocument())
     expect(screen.getByRole('switch', { name: 'Read answers aloud in Talk' })).toBeChecked()
   })
@@ -113,7 +130,7 @@ describe('your voice', () => {
   it('Try it reads a sample in the voice shown for its language, at the person’s speed, and again stops it', async () => {
     const settings = offered()
     settings.chosen = { language: null, voices: { en: 'kokoro/bf_emma' }, speed: 1.5, readAloud: null }
-    const calls = backend(settings)
+    const { calls } = backend(settings)
     renderApp('/account')
     const english = await screen.findByRole('button', { name: 'Try it: English' })
     await userEvent.click(english)
@@ -127,6 +144,41 @@ describe('your voice', () => {
     // A language left to the company: its voice.
     await userEvent.click(screen.getByRole('button', { name: 'Try it: Persian' }))
     await waitFor(() => expect(calls.filter((c) => c.path === '/api/account/voice/try').at(-1)?.body).toEqual({ voice: 'piper-fa/gyro', language: 'fa', speed: 1.5 }))
+  })
+
+  it('a voice of theirs no longer offered is shown as such, the company’s reads meanwhile, and it alone goes back to the company’s', async () => {
+    const settings = offered()
+    settings.chosen = { language: null, voices: { en: 'kokoro/af_bella', pt: 'kokoro/pf_dora' }, speed: null, readAloud: null }
+    const { calls, now } = backend(settings)
+    renderApp('/account')
+    const english = await screen.findByRole('combobox', { name: 'Voice for English' })
+    expect(english).toHaveTextContent('kokoro/af_bella (not offered now)')
+    expect(screen.getByText('kokoro/af_bella is not offered now: kokoro/af_heart reads English')).toBeInTheDocument()
+    // A language no voice reads now still has its row, to put it back.
+    expect(screen.getByRole('combobox', { name: 'Voice for Portuguese' })).toBeInTheDocument()
+    expect(screen.getByText('kokoro/pf_dora is not offered now: no voice reads Portuguese')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Try it: Portuguese' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Try it: English' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/account/voice/try')?.body).toEqual({ voice: 'kokoro/af_heart', language: 'en', speed: 1 }))
+
+    // Other changes save as usual.
+    await userEvent.click(screen.getByRole('switch', { name: 'Read answers aloud in Talk' }))
+    await waitFor(() => expect(lastSaved(calls)).toEqual({ readAloud: false }))
+    await userEvent.click(screen.getByRole('combobox', { name: 'Voice for Portuguese' }))
+    await userEvent.click(await screen.findByRole('option', { name: "The company's: none" }))
+    await waitFor(() => expect(lastSaved(calls)).toEqual({ voices: { pt: null } }))
+    await waitFor(() => expect(screen.queryByRole('combobox', { name: 'Voice for Portuguese' })).not.toBeInTheDocument())
+    expect(now().chosen).toEqual({ language: null, voices: { en: 'kokoro/af_bella' }, speed: null, readAloud: false })
+  })
+
+  it('the language the company says people speak comes first while the person leaves it to the company', async () => {
+    const settings = offered()
+    settings.company.language = 'fa'
+    backend(settings)
+    renderApp('/account')
+    await screen.findByRole('combobox', { name: 'Voice for Persian' })
+    const rows = screen.getAllByRole('combobox', { name: /^Voice for / }).map((c) => c.getAttribute('aria-label'))
+    expect(rows).toEqual(['Voice for Persian', 'Voice for English', 'Voice for Spanish'])
   })
 
   it('says when reading aloud or speech to text is not set up, and when only the voices chosen can be listed', async () => {

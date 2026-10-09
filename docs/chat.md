@@ -516,7 +516,9 @@ many as it needs (up to 50).
 - The speech models are at the gateway too: `/v1/audio/transcriptions` and
   `/v1/audio/speech` with a person's key. Speech that names no voice is read in
   the key's person's voice for the text's language, at their speed when it names
-  none; with no model either, that voice's model.
+  none; with no model either, that voice's model. Speech to text that names no
+  language is written down in the language the key's person speaks, when they
+  chose one.
 
 ### Talk
 
@@ -532,7 +534,9 @@ chat. The browser asks for the microphone once.
 - **The answer is read aloud as it is written.** Each sentence is spoken as
   soon as it is complete, in order, while the next ones are still being
   written, each in your voice for its language: a Persian sentence in the
-  Persian voice. Code blocks are not read. The text appears as usual. With
+  Persian voice. A short sentence whose words do not say its language
+  ("Claro que sí.") is read in the language of the answer so far. Code blocks
+  are not read. The text appears as usual. With
   **Read answers aloud in Talk** off (Your account → Voice) the answer is only
   shown, and speaking still stops it.
 - **Speak over it to stop it.** Your voice while the answer is read (or while
@@ -566,20 +570,28 @@ company's** puts them all back.
   really offer. The app asks the speech server: Kokoro reads American and
   British English, Spanish, French, Italian, Brazilian Portuguese, Japanese,
   Chinese and Hindi, each voice a woman's or a man's; Piper reads Persian. A
-  model turned off (Admin → Models) offers none. **Try it** reads a sample in
-  the voice, at your speed.
+  model turned off (Admin → Models) offers none. Under each language is the
+  id of the voice that reads it (`kokoro/pf_dora`), as Settings → Speech names
+  it. **Try it** reads a sample in the voice, at your speed.
+- **A voice of yours no longer offered** (its model turned off) stays yours
+  and reads again when it is back. Meanwhile the company's voice reads that
+  language, the row says so, and your other choices save as usual; choosing
+  the company's for that language alone drops it.
 - **A text is read in the voice of its language**: Persian text in your Persian
   voice when English is the one you speak. The language is told by the
   text's script (Persian, Hindi, Japanese, Chinese) and, in the Latin script,
-  by its small words (Spanish, French, Italian, Portuguese, else English). A
-  language with no voice is read in the voice of the language you speak, then
-  in English's.
+  by its small words (English, Spanish, French, Italian, Portuguese). A Latin
+  text whose words do not tell (a short sentence, a name) takes the language
+  of what came before it in Talk, else the language you speak when it is one
+  of these, else English. A language with no voice is read in the voice of the
+  language you speak, then in English's.
 - **Speed**: 0.5 to 2 times the voice's own pace.
 - **Read answers aloud in Talk**: off, the answers in Talk and to your voice
   messages are only shown.
 - **Everywhere you hear or are heard**: read aloud, Talk, voice messages, the
-  Speech tool, and your API key's `/v1/audio/speech` when the request names no
-  voice.
+  Speech tool, your API key's `/v1/audio/speech` when the request names no
+  voice, and its `/v1/audio/transcriptions` when the request names no
+  language.
 - While the speech server cannot be asked, only the voices already chosen (by
   you or the company) are listed, and they are used as chosen.
 
@@ -1035,11 +1047,16 @@ use and edit one); a new chat takes `assistantId`.
   sentence read in the voice of its language. And each person's voice: the
   voices found at a fake speech server (only the app's models, with language,
   accent and gender), the choices saved and used by read aloud, Talk, voice
-  messages and Try it, the company's defaults from Settings, a text's language
-  picking its voice (and falling back when no voice reads it), choices refused
-  that the speech models do not offer, an API key's speech that names no voice
-  read in its person's voice, the voices chosen believed while the speech server
-  is down, and a person from v5.2.0 upgraded with nothing lost.
+  messages and Try it, the company's defaults from Settings (and the warning
+  under a voice there that is not offered), a text's language picking its voice
+  (a short Latin sentence going by what came before it or the language spoken,
+  and falling back when no voice reads it), a change keeping the choices it
+  does not name, changes made at once all kept, a voice no longer offered not
+  stopping other changes, new choices refused that the speech models do not
+  offer, an API key's speech that names no voice read in its person's voice and
+  its speech to text that names no language written down in theirs, the voices
+  chosen believed while the speech server is down, and a person from v5.2.0
+  upgraded with nothing lost.
   Also branches (edits, answering again, switching, parents from another chat
   refused), archiving (and coming back when written in), forks (up to the
   chosen answer, with settings and files; never inside a tool round; the owner
@@ -1145,12 +1162,15 @@ use and edit one); a new chat takes `assistantId`.
     while the answer is still being written, speaking over it stopping both,
     and End talk letting go of the microphone; the voice activity check, the
     sentence cutting (code left out, Persian marks) and the reading queue;
-    with reading aloud off, the answer only shown
+    with reading aloud off, the answer only shown; each sentence read with the
+    answer before it, which tells a short one's language
   - Your account → Voice: the language spoken, a voice per language (the
-    language spoken first), the speed once the slider rests, reading aloud, and
-    back to the company's; Try it with the voice shown and the person's speed,
-    and again to stop; what it says when speech is not set up or the speech
-    server cannot be asked
+    language spoken first, theirs or the company's) with each voice's id, the
+    speed once the slider rests, reading aloud, each saved alone (the slider
+    and the switch together both kept), and back to the company's; a voice no
+    longer offered shown as such and put back alone; Try it with the voice
+    shown and the person's speed, and again to stop; what it says when speech
+    is not set up or the speech server cannot be asked
   - the canvas: the line diff, a selection's lines and its message; the panel
     from the header, a save as a version, the versions' diff and a restore, a
     selection sent to the chat quoted, a tool card opening its canvas, the
