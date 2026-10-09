@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, FolderGit2, GitBranch, History, ListChecks, MessageSquarePlus, Monitor, Moon, PanelRightClose, ScrollText, ShieldCheck, Square, Sun, TestTubeDiagonal } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronDown, FolderGit2, GitBranch, History, ListChecks, LoaderCircle, MessageSquarePlus, Monitor, Moon, PanelRightClose, ScrollText, ShieldCheck, Square, Sun, TestTubeDiagonal } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -32,10 +32,12 @@ import {
   sessionQuery,
   sessionsQuery,
   stateQuery,
+  stopJob,
   stopTurn,
   type CodeEvent,
   type CodeLive,
   type CodeState,
+  type LiveJob,
   type Mode,
   type SessionSummary,
 } from './api'
@@ -460,11 +462,82 @@ export function Thread({
                 <ArrowDown />
               </Button>
             )}
+            {view.jobs.length > 0 && <Jobs jobs={view.jobs} />}
             {composer(false)}
           </div>
         </>
       )}
     </section>
+  )
+}
+
+/**
+ * The commands the agent runs with no time limit in this turn: the end of each
+ * one's output as it comes, how it ended, and Stop. The turn waits for them;
+ * the agent is told how each ended.
+ */
+function Jobs({ jobs }: { jobs: LiveJob[] }) {
+  return (
+    <section aria-label="Commands with no time limit" className="mb-2 grid max-h-[45vh] gap-2 overflow-y-auto">
+      {jobs.map((j) => (
+        <JobBox key={j.id} job={j} />
+      ))}
+    </section>
+  )
+}
+
+function JobBox({ job }: { job: LiveJob }) {
+  const [open, setOpen] = useState(true)
+  const [stopping, setStopping] = useState(false)
+  const out = useRef<HTMLPreElement>(null)
+  // The last 200 lines; the agent reads all of it with command_output.
+  const text = job.output.split('\n').slice(-200).join('\n').trimEnd()
+  useEffect(() => {
+    const el = out.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [text, open])
+  const stop = async () => {
+    setStopping(true)
+    try {
+      await stopJob(job.id)
+    } catch (e) {
+      setStopping(false)
+      toast.error(errorMessage(e))
+    }
+  }
+  return (
+    <div className="min-w-0 animate-enter rounded-xl border bg-card text-sm">
+      <div className="flex min-w-0 items-center gap-2 px-3 py-1.5">
+        {job.running ? (
+          <LoaderCircle className="size-3.5 shrink-0 animate-spin text-primary motion-reduce:animate-none" aria-hidden="true" />
+        ) : (
+          <span className={cn('size-2 shrink-0 rounded-full', job.failed ? 'bg-destructive' : 'bg-success')} aria-hidden="true" />
+        )}
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-label={`job ${job.id}: ${job.command}`}
+          title={job.command}
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
+        >
+          <ChevronDown className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', !open && '-rotate-90')} aria-hidden="true" />
+          <span className="shrink-0 text-xs text-muted-foreground">job {job.id}</span>
+          <span className="truncate font-mono text-xs">{job.command}</span>
+        </button>
+        <span className={cn('shrink-0 text-xs', job.failed ? 'text-destructive-ink' : 'text-muted-foreground')}>{job.running ? 'running, no time limit' : job.status}</span>
+        {job.running && (
+          <Button size="sm" variant="outline" className="h-7 shrink-0" onClick={() => void stop()} disabled={stopping} aria-label={`Stop job ${job.id}`}>
+            <Square className="fill-current" /> {stopping ? 'Stopping…' : 'Stop'}
+          </Button>
+        )}
+      </div>
+      {open && (
+        <pre ref={out} aria-label={`Output of job ${job.id}`} className="max-h-48 overflow-auto border-t bg-muted/40 px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all">
+          {text || 'No output yet.'}
+        </pre>
+      )}
+    </div>
   )
 }
 

@@ -5,11 +5,11 @@ import { makeQueryClient, Providers } from '@/app/providers'
 import { blank } from '@/pages/chat/live'
 import type { ChatConfig, Message } from '@/pages/chat/types'
 import { fakeApi, type Handler } from '@/test/utils'
-import type { CodeSession, CodeState, FileDiff, SessionSummary } from './api'
+import { fromSession, keptOutput, reduceCode, type CodeSession, type CodeState, type FileDiff, type SessionSummary } from './api'
 import { App } from './app'
 
 const state = (over: Partial<CodeState> = {}): CodeState => ({
-  name: 'Code Arena', version: '5.0.0', license: 'AGPL-3.0-only', source: 'https://github.com/Binchitects/argus', manual: 'https://llm.test/help/code-arena', folder: '/home/ada/shop', project: 'shop', branch: 'main', model: 'model-a', context: 32768, thinking: null, mode: 'ask',
+  name: 'Code Arena', version: '5.0.0', license: 'AGPL-3.0-only', source: 'https://github.com/Binchitects/argus', manual: 'https://llm.test/help/code-arena', folder: '/home/ada/shop', project: 'shop', branch: 'main', model: 'model-a', context: 32768, contextUsed: 4200, compactAt: 80, compactTarget: 25, servers: [], jobs: [], thinking: null, mode: 'ask',
   modes: [
     { name: 'ask', description: 'edits and commands ask first' },
     { name: 'auto-edit', description: 'file edits run without asking; commands ask' },
@@ -243,6 +243,62 @@ describe('Code Arena in the browser', () => {
     expect(await screen.findByText('The first answer.')).toBeInTheDocument()
     expect(within(screen.getByRole('region', { name: 'You' })).getByText('First question')).toBeInTheDocument()
     await waitFor(() => expect(within(list).getByRole('button', { name: 'First question' })).toHaveAttribute('aria-current', 'page'))
+  })
+
+  it('shows a command with no time limit as it runs: the end of its output, and Stop; the status bar counts it', async () => {
+    let end!: () => void
+    const over = new Promise<void>((r) => (end = r))
+    const { calls } = backend({
+      state: { jobs: [{ id: 1, command: 'npm test', running: true, status: 'running for 3s' }] },
+      extra: {
+        'POST /api/messages': () => ({
+          events: [
+            { type: 'question', id: 'm0', parentId: null },
+            { type: 'assistant', id: 'm1', parentId: 'm0', model: 'model-a' },
+            { type: 'tool_call', id: 'c1', name: 'run_shell', arguments: '{"command":"npm test","no_time_limit":true}', tool: 'local' },
+            { type: 'job', job: 1, command: 'npm test', running: true, status: 'running for 0s' },
+            { type: 'tool_result', id: 'c1', messageId: 'm2', name: 'run_shell', text: 'Started as job 1, with no time limit.', isError: false, declined: false, noAccess: false, durationMs: 5 },
+            { type: 'job_output', job: 1, text: 'PASS cart.test.ts\n' },
+            { type: 'job_output', job: 1, text: 'RUNS checkout.test.ts\n' },
+          ],
+          until: over,
+        }),
+        'POST /api/jobs/stop': () => ({ status: 204 }),
+      },
+    })
+    renderCode()
+    await ask('Run the tests')
+
+    const jobs = await screen.findByRole('region', { name: 'Commands with no time limit' })
+    expect(within(jobs).getByText('npm test')).toBeInTheDocument()
+    expect(within(jobs).getByText('running, no time limit')).toBeInTheDocument()
+    expect(within(jobs).getByLabelText('Output of job 1')).toHaveTextContent(/PASS cart\.test\.ts\s+RUNS checkout\.test\.ts/)
+    const status = screen.getByRole('contentinfo', { name: 'Status bar' })
+    expect(within(status).getByRole('button', { name: '1 command running with no time limit: show them in the chat' })).toBeInTheDocument()
+
+    // Folded and opened; Stop asks code-arena to end it (the agent is told).
+    await userEvent.click(within(jobs).getByRole('button', { name: 'job 1: npm test' }))
+    expect(within(jobs).queryByLabelText('Output of job 1')).not.toBeInTheDocument()
+    await userEvent.click(within(jobs).getByRole('button', { name: 'Stop job 1' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/jobs/stop')?.body).toEqual({ id: 1 }))
+    expect(within(jobs).getByRole('button', { name: 'Stop job 1' })).toBeDisabled()
+
+    end()
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Commands with no time limit' })).not.toBeInTheDocument())
+  })
+
+  it("keeps the end of a command's output, and how it ended", () => {
+    let live = reduceCode(fromSession(undefined), { type: 'job', job: 2, command: 'make', running: true, status: 'running for 0s' }, null)
+    live = reduceCode(live, { type: 'job_output', job: 2, text: 'x'.repeat(keptOutput) }, null)
+    live = reduceCode(live, { type: 'job_output', job: 2, text: 'the end\n' }, null)
+    live = reduceCode(live, { type: 'job_output', job: 7, text: 'no such job' }, null)
+    expect(live.jobs).toHaveLength(1)
+    expect(live.jobs[0]!.output).toHaveLength(keptOutput)
+    expect(live.jobs[0]!.output.endsWith('xthe end\n')).toBe(true)
+    live = reduceCode(live, { type: 'job_end', job: 2, running: false, status: 'exit code 2 after 1m 03s', exitCode: 2, stopped: false }, null)
+    expect(live.jobs[0]).toMatchObject({ running: false, status: 'exit code 2 after 1m 03s', failed: true })
+    const ok = reduceCode(reduceCode(fromSession(undefined), { type: 'job', job: 1, command: 'ls', running: true, status: '' }, null), { type: 'job_end', job: 1, running: false, status: 'exit code 0 after 0s', exitCode: 0, stopped: false }, null)
+    expect(ok.jobs[0]!.failed).toBe(false)
   })
 
   it('says so when the page holds the key of an earlier run', async () => {

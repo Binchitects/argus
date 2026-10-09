@@ -34,7 +34,8 @@ const TerminalPanel = lazy(() => import('./terminals'))
  * web on 127.0.0.1, behind the key in the address it printed.
  */
 export function App() {
-  const state = useQuery({ ...stateQuery, refetchInterval: 30_000 })
+  // Read again every 30 seconds; every 5 while an MCP server is connecting or down, so the status bar says when it connects.
+  const state = useQuery({ ...stateQuery, refetchInterval: (q) => (q.state.data?.servers.some((s) => s.state === 'connecting' || s.state === 'failed') ? 5_000 : 30_000) })
   const config = useQuery(configQuery)
   // The layout and the theme as they were left, in any run: waited for, so the workbench opens as it was.
   const preferences = useQuery(preferencesQuery)
