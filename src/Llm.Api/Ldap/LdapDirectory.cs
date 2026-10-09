@@ -68,15 +68,17 @@ public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapD
         var o = _o;
         return WithServiceAsync(o, async conn =>
         {
+            List<LdapEntry> matches;
             try
             {
-                var matches = await SearchAsync(conn, dn, LdapConnection.ScopeBase, "(objectClass=*)", PersonAttributes, ct);
-                return matches.Count == 1 ? await ToPersonAsync(o, conn, matches[0], ct) : null;
+                matches = await SearchAsync(conn, dn, LdapConnection.ScopeBase, "(objectClass=*)", PersonAttributes, ct);
             }
             catch (LdapException ex) when (ex.ResultCode == LdapException.NoSuchObject)
             {
+                // Only their own entry missing means they left: a failure below (their groups) is the settings', and changes nobody.
                 return null;
             }
+            return matches.Count == 1 ? await ToPersonAsync(o, conn, matches[0], ct) : null;
         }, ct);
     }
 
@@ -88,16 +90,28 @@ public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapD
 
     public static bool IsAllowed(LdapOptions o, LdapPerson person) => string.IsNullOrWhiteSpace(o.RequiredGroup) || InGroup(person, o.RequiredGroup);
 
-    private static bool InGroup(LdapPerson person, string? group)
+    private static bool InGroup(LdapPerson person, string? group) =>
+        !string.IsNullOrWhiteSpace(group) && person.Groups.Any(g => IsNamed(g, group));
+
+    /// <summary>Whether a directory group (its DN) goes by this name: its full DN, or its common name, in any case.</summary>
+    public static bool IsNamed(string dn, string group)
     {
-        if (string.IsNullOrWhiteSpace(group))
-        {
-            return false;
-        }
         group = group.Trim();
-        return person.Groups.Any(g =>
-            string.Equals(g, group, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(CommonName(g), group, StringComparison.OrdinalIgnoreCase));
+        return Names(dn).Any(n => string.Equals(n, group, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The names a directory group goes by: its DN, its common name, and the name v5.2.0 gave it (cut at
+    /// the first comma, escapes left in: CN=Sales\, EMEA,... was "Sales\"), which groups and settings saved
+    /// then may still hold.
+    /// </summary>
+    public static IEnumerable<string> Names(string dn)
+    {
+        var name = CommonName(dn);
+        var first = dn.Split(',')[0];
+        var eq = first.IndexOf('=', StringComparison.Ordinal);
+        var old = eq >= 0 ? first[(eq + 1)..].Trim() : dn;
+        return old == name ? [dn, name] : [dn, name, old];
     }
 
     /// <summary>
@@ -156,13 +170,27 @@ public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapD
         if (!string.IsNullOrWhiteSpace(o.GroupBaseDn))
         {
             var filter = o.GroupFilter.Replace("{0}", EscapeFilter(entry.Dn), StringComparison.Ordinal);
-            foreach (var g in await SearchAsync(conn, o.GroupBaseDn.Trim(), LdapConnection.ScopeSub, filter, ["1.1"], ct))
+            List<LdapEntry> found;
+            try
+            {
+                found = await SearchAsync(conn, o.GroupBaseDn.Trim(), LdapConnection.ScopeSub, filter, ["1.1"], ct);
+            }
+            catch (LdapException ex) when (ex.ResultCode == LdapException.NoSuchObject)
+            {
+                // A typo in the settings, not the person gone: nobody may be judged by it.
+                throw new LdapUnavailableException($"The directory at {o.Url} cannot be used: {GroupBaseMissing(o)}.", ex);
+            }
+            foreach (var g in found)
             {
                 groups.Add(g.Dn);
             }
         }
         return new LdapPerson(entry.Dn, userName.ToLowerInvariant(), Value(attrs, o.EmailAttribute)?.ToLowerInvariant(), display, [.. groups]);
     }
+
+    /// <summary>Why a person's groups cannot be read: "Where groups are" is not there.</summary>
+    internal static string GroupBaseMissing(LdapOptions o) =>
+        $"\"{o.GroupBaseDn?.Trim()}\" (where groups are) does not exist, or the service account cannot see it: fix \"Where groups are\" in the Settings page";
 
     /// <summary>
     /// Why the service account cannot be used as set, before trying: a name with no password. Many
@@ -197,14 +225,17 @@ public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapD
         {
             // Any failure here is the directory's or its settings' (the service account refused, a
             // search refused, a certificate refused), never a person's: nobody is judged by it.
-            throw new LdapUnavailableException($"The directory at {o.Url} cannot be used: {LdapErrors.Describe(o, ex, seen.Certificate)}", ex);
+            throw new LdapUnavailableException($"The directory at {o.Url} cannot be used: {LdapErrors.Describe(o, ex, seen)}", ex);
         }
     }
 
-    /// <summary>What the certificate check saw of the server's certificate, to say why it was refused.</summary>
+    /// <summary>What the TLS handshake saw, to say why it failed: the server's certificate refused, and why; a client certificate asked for.</summary>
     internal sealed class Seen
     {
         public List<string>? Certificate { get; set; }
+
+        /// <summary>The server asked for a certificate of this app's own, which it has none of.</summary>
+        public bool ClientCertificateAsked { get; set; }
     }
 
     internal static bool IsLdaps(Uri uri) => uri.Scheme.Equals("ldaps", StringComparison.OrdinalIgnoreCase);
@@ -256,6 +287,15 @@ public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapD
                 seen.Certificate = problems.Count > 0 ? problems : [$"It is not trusted ({errors})."];
             }
             return trusted;
+        });
+        // Called when the server asks for a client certificate (with its own already in hand): none is given, but it is noted.
+        opts = opts.ConfigureLocalCertificateSelectionCallback((_, _, _, remote, _) =>
+        {
+            if (remote is not null)
+            {
+                seen.ClientCertificateAsked = true;
+            }
+            return null!;
         });
         var conn = new LdapConnection(opts) { ConnectionTimeout = 10_000 };
         try

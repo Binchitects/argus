@@ -104,6 +104,9 @@ export function DirectoryGuide({ open }: { open: boolean }) {
             </tbody>
           </table>
         </div>
+        <p className="text-muted-foreground">
+          <Example text="On the osixia/openldap image, the service account is `cn=readonly,dc=example,dc=org` (with LDAP_READONLY_USER=true) or `cn=admin,dc=example,dc=org`, with its own base DN (from LDAP_DOMAIN) in place of `dc=example,dc=org`. For StartTLS and ldaps:// it needs LDAP_TLS_VERIFY_CLIENT=try (else it demands a certificate from the app, which has none) and a certificate of your own (the image's own CA expired on 2026-01-15). With groupOfNames groups, fill in Where groups are." />
+        </p>
       </div>
     </details>
   )
@@ -126,7 +129,7 @@ export function DirectoryChecks({ draft }: { draft: Record<string, string> }) {
           <PlugZap /> Test the settings
         </Button>
         <span className="text-sm text-muted-foreground">
-          Tries the values above, saved or not: the server, its certificate, the service account, where people are and the groups. A blank password field uses the saved password.
+          Tries the values above, saved or not: the server, its certificate, the service account, where people are and the groups. A blank password field uses the saved password, but only with the saved server and service account.
         </span>
       </div>
       {test.data && <CheckResult result={test.data} />}
@@ -177,7 +180,8 @@ function CheckResult({ result }: { result: DirectoryCheck }) {
   const warned = result.steps.some((s) => s.state === 'warn')
   const steps = result.steps.filter((s) => !(s.state === 'fail' && s.text === result.message))
   return (
-    <Alert variant={!result.ok ? 'destructive' : warned ? 'warning' : 'success'} title={result.message}>
+    // Messages hold long unbroken filters and DNs: they wrap anywhere rather than widen the page.
+    <Alert variant={!result.ok ? 'destructive' : warned ? 'warning' : 'success'} title={result.message} className="[&_p]:break-words">
       {steps.length > 0 && (
         <ol className="mt-2 grid gap-1.5" aria-label={result.ok ? 'Steps' : 'Steps before it'}>
           {steps.map((s, i) => {

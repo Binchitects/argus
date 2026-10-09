@@ -7,10 +7,10 @@ namespace Llm.Tests;
 
 /// <summary>
 /// The Settings page's directory flows against a real directory of your own (OpenLDAP, Active
-/// Directory), run only when LDAP_TEST_URL names one. Passwords come from files, so no shell ever
-/// sees them: <c>tools/dn test tests/Llm.Tests --filter RealDirectory -e LDAP_TEST_URL=ldaps://dc1.corp.example.com
-/// -e LDAP_TEST_BIND_DN=reader@corp.example.com -e LDAP_TEST_BIND_PASSWORD_FILE=/repo/.reader-pw
-/// -e LDAP_TEST_USER_BASE_DN=DC=corp,DC=example,DC=com -e LDAP_TEST_USER=jsmith -e LDAP_TEST_USER_PASSWORD_FILE=/repo/.jsmith-pw</c>.
+/// Directory), run only when LDAP_TEST_URL names one. Passwords come from files in data/ (which git
+/// ignores), so no shell ever sees them: <c>tools/dn test tests/Llm.Tests --filter RealDirectory -e LDAP_TEST_URL=ldaps://dc1.corp.example.com
+/// -e LDAP_TEST_BIND_DN=reader@corp.example.com -e LDAP_TEST_BIND_PASSWORD_FILE=/repo/data/reader-pw
+/// -e LDAP_TEST_USER_BASE_DN=DC=corp,DC=example,DC=com -e LDAP_TEST_USER=jsmith -e LDAP_TEST_USER_PASSWORD_FILE=/repo/data/jsmith-pw</c>.
 /// Also LDAP_TEST_START_TLS, LDAP_TEST_CA_FILE, LDAP_TEST_IGNORE_CERTIFICATE, LDAP_TEST_GROUP_BASE_DN,
 /// LDAP_TEST_ADMIN_GROUP, LDAP_TEST_REQUIRED_GROUP and LDAP_TEST_USER_FILTER.
 /// </summary>

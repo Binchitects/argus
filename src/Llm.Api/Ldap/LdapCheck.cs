@@ -17,6 +17,8 @@ public enum PasswordFrom
     Saved,
     /// <summary>Saved, but it no longer decrypts: APP_KEY changed since.</summary>
     SavedUnreadable,
+    /// <summary>Saved, but the form names another server or service account: the saved one is never sent there.</summary>
+    SavedWithheld,
     /// <summary>None typed and none saved.</summary>
     None,
 }
@@ -144,9 +146,12 @@ public static class LdapCheck
             }
             if (LdapDirectory.ServiceAccountProblem(o) is not null)
             {
-                Failed(from == PasswordFrom.SavedUnreadable
-                    ? "The saved service account password no longer reads: APP_KEY changed since it was saved. Type it again in \"Service account password\"."
-                    : "The service account has no password: none is typed above and none is saved. Type it in \"Service account password\". (Without one, the server would take it for an anonymous connection.)");
+                Failed(from switch
+                {
+                    PasswordFrom.SavedUnreadable => "The saved service account password no longer reads: APP_KEY changed since it was saved. Type it again in \"Service account password\".",
+                    PasswordFrom.SavedWithheld => "Type the service account's password: the saved one is sent only to the saved server, as the saved service account, and the form changes the server or the account.",
+                    _ => "The service account has no password: none is typed above and none is saved. Type it in \"Service account password\". (Without one, the server would take it for an anonymous connection.)",
+                });
                 return null;
             }
             var ldaps = LdapDirectory.IsLdaps(uri);
@@ -159,7 +164,7 @@ public static class LdapCheck
             }
             catch (Exception ex) when (LdapErrors.IsDirectoryFailure(ex))
             {
-                Failed("Could not connect: " + (LdapErrors.Unreached(o, ex, seen.Certificate, startTls: false) ?? LdapErrors.Describe(o, ex, seen.Certificate)));
+                Failed("Could not connect: " + (LdapErrors.Unreached(o, ex, seen, startTls: false) ?? LdapErrors.Describe(o, ex, seen)));
                 return null;
             }
             try
@@ -187,7 +192,7 @@ public static class LdapCheck
                     }
                     catch (Exception ex) when (LdapErrors.IsDirectoryFailure(ex))
                     {
-                        Failed("StartTLS failed: " + (LdapErrors.Unreached(o, ex, seen.Certificate, startTls: true) ?? LdapErrors.Describe(o, ex, seen.Certificate)));
+                        Failed("StartTLS failed: " + (LdapErrors.Unreached(o, ex, seen, startTls: true) ?? LdapErrors.Describe(o, ex, seen)));
                         conn.Dispose();
                         return null;
                     }
@@ -218,7 +223,7 @@ public static class LdapCheck
             }
             catch (Exception ex) when (LdapErrors.IsDirectoryFailure(ex))
             {
-                Failed("The connection failed: " + LdapErrors.Describe(o, ex, seen.Certificate));
+                Failed("The connection failed: " + LdapErrors.Describe(o, ex, seen));
                 conn.Dispose();
                 return null;
             }
@@ -272,7 +277,7 @@ public static class LdapCheck
             }
             catch (LdapException ex) when (!LdapErrors.IsConnectionFailure(ex))
             {
-                Failed(Anonymous ? AnonymousRefused(ex) : ServiceRefused(ex));
+                Failed(Anonymous ? AnonymousRefused(ex) : await ServiceRefusedAsync(ex, ct));
                 return false;
             }
             if (Anonymous)
@@ -293,7 +298,7 @@ public static class LdapCheck
             _ => $"The server does not let anonymous connections in ({LdapErrors.Answer(ex)}): set a service account and its password.",
         };
 
-        private string ServiceRefused(LdapException ex)
+        private async Task<string> ServiceRefusedAsync(LdapException ex, CancellationToken ct)
         {
             var dn = o.BindDn!.Trim();
             switch (ex.ResultCode)
@@ -305,11 +310,23 @@ public static class LdapCheck
                             ? $"Active Directory refused the service account {dn}: {why}. Check the account's name and {Password}. On Active Directory it can also be written user@domain or DOMAIN\\user, which is easier to get right than its DN (whose CN is the account's full name, not its login)."
                             : $"Active Directory refused the service account {dn}: {why}. The name and the password are right; fix the account in Active Directory (a service account's password is best set never to expire), then test again.";
                     }
-                    var elsewhere = LooksLikeDn(dn) && _contexts.Count > 0 && !_contexts.Any(c => IsUnder(dn, c))
-                        ? $" No such entry can be here: this server holds {Holds}, and {dn} is not below it."
-                        : "";
-                    return $"The server refused the service account {dn} with {Password}: the DN or the password is wrong (the server says the same for both).{elsewhere}"
-                        + (LdapErrors.ServerMessage(ex) is { } said ? $" It said: {said}." : "");
+                    var said = LdapErrors.ServerMessage(ex) is { } m ? $" It said: {m}." : "";
+                    if (LooksLikeDn(dn) && _contexts.Count > 0 && !_contexts.Any(c => IsUnder(dn, c)))
+                    {
+                        return $"The server refused the service account {dn}: no such entry can be here, as this server holds {Holds} and {dn} is not below it.{said}";
+                    }
+                    if (LooksLikeDn(dn))
+                    {
+                        // OpenLDAP answers a DN with no entry as it answers a wrong password: an anonymous look tells them apart where it may.
+                        switch (await LookAsync(dn, ct))
+                        {
+                            case (true, _):
+                                return $"The server refused the service account {dn} with {Password}: the password is wrong. The DN is right (an entry has it), unless that entry has no password of its own (no userPassword) or a password policy has locked it.{said}";
+                            case (false, var matched):
+                                return $"The server refused the service account {dn}: no entry has this DN. The part of it that exists is \"{matched}\": check the rest letter by letter.{said}";
+                        }
+                    }
+                    return $"The server refused the service account {dn} with {Password}: the DN or the password is wrong. The server says the same for both, and does not let an anonymous look see whether the DN exists, so this test cannot tell which. Check the DN letter by letter (a typo in it reads the same as a wrong password), then the password.{said}";
                 case LdapException.InvalidDnSyntax:
                     return NotADn("The service account", dn, ex);
                 case LdapException.ConfidentialityRequired or LdapException.StrongAuthRequired:
@@ -318,6 +335,29 @@ public static class LdapCheck
                     return $"The server will not let {dn} sign in: {LdapErrors.Answer(ex)}.";
                 default:
                     return $"The server refused the service account {dn}: {LdapErrors.Answer(ex)}.";
+            }
+        }
+
+        /// <summary>
+        /// Whether an entry has this DN, as an anonymous look sees it (a new connection, no sign-in): yes; no,
+        /// with the part of it that exists; or null when the server shows an anonymous look nothing there.
+        /// </summary>
+        private async Task<(bool Exists, string? Matched)?> LookAsync(string dn, CancellationToken ct)
+        {
+            try
+            {
+                using var look = await LdapDirectory.ConnectAsync(o, new LdapDirectory.Seen(), ct);
+                await look.ReadAsync(dn, ["1.1"], ct);
+                return (true, null);
+            }
+            catch (LdapException ex) when (ex.ResultCode == LdapException.NoSuchObject && ex.MatchedDn is { Length: > 0 } matched)
+            {
+                // OpenLDAP names the part that exists only when the entry is truly missing, never for one it hides.
+                return (false, matched);
+            }
+            catch (Exception ex) when (LdapErrors.IsDirectoryFailure(ex))
+            {
+                return null;
             }
         }
 
@@ -560,6 +600,12 @@ public static class LdapCheck
             try
             {
                 signIn = await LdapDirectory.SignInWithAsync(o, conn, login, password, ct);
+            }
+            catch (LdapUnavailableException)
+            {
+                // Where groups are is missing: signing in would refuse everyone with "cannot be reached".
+                Failed($"Their groups cannot be read: {LdapDirectory.GroupBaseMissing(o)}. Signing in would answer \"the directory cannot be reached\" for everyone.");
+                return null;
             }
             catch (LdapException ex) when (ex.ResultCode == LdapException.NoSuchObject)
             {

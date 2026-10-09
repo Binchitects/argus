@@ -44,10 +44,6 @@ public static partial class LdapErrors
             ? AdReasons.GetValueOrDefault(d.Groups[1].Value) ?? $"Active Directory refused it (code {d.Groups[1].Value})"
             : null;
 
-    /// <summary>Whether the message is Active Directory's (it names AcceptSecurityContext or an LdapErr).</summary>
-    public static bool IsActiveDirectoryMessage(LdapException ex) =>
-        ServerMessage(ex) is { } m && (m.Contains("AcceptSecurityContext", StringComparison.Ordinal) || m.Contains("LdapErr:", StringComparison.Ordinal));
-
     /// <summary>The connection itself failed (not reached, closed, timed out): not an answer from the server.</summary>
     public static bool IsConnectionFailure(LdapException ex) =>
         ex.ResultCode is LdapException.ConnectError or LdapException.ServerDown or LdapException.LdapTimeout;
@@ -68,9 +64,9 @@ public static partial class LdapErrors
             : ex.ResultCodeToString(CultureInfo.InvariantCulture);
 
     /// <summary>One sentence for a failure, without more context: for the logs, the sync and the sign-in page's admin.</summary>
-    public static string Describe(LdapOptions o, Exception ex, IReadOnlyList<string>? certificate)
+    internal static string Describe(LdapOptions o, Exception ex, LdapDirectory.Seen? seen)
     {
-        if (Unreached(o, ex, certificate, startTls: o.StartTls) is { } unreached)
+        if (Unreached(o, ex, seen, startTls: o.StartTls) is { } unreached)
         {
             return unreached;
         }
@@ -93,20 +89,27 @@ public static partial class LdapErrors
     /// Why the server could not be reached or spoken to (the address, the port, TLS, a certificate),
     /// or null when the connection worked and this is an answer of the server.
     /// </summary>
-    public static string? Unreached(LdapOptions o, Exception ex, IReadOnlyList<string>? certificate, bool startTls)
+    internal static string? Unreached(LdapOptions o, Exception ex, LdapDirectory.Seen? seen, bool startTls)
     {
         var uri = new Uri(o.Url!.Trim());
         var ldaps = LdapDirectory.IsLdaps(uri);
         var (host, port) = (uri.IdnHost, LdapDirectory.PortOf(uri));
         var at = $"{host}:{port}";
-        if (certificate is { Count: > 0 })
+        if (seen?.Certificate is { Count: > 0 } certificate)
         {
-            return $"the server's certificate is not trusted: {string.Join(" ", certificate)} Paste the CA that issued it in \"Directory's CA\" or, for a test server only, turn on \"Accept any certificate\".";
+            return $"the server's certificate is not trusted: {string.Join(" ", certificate)} {CertificateFix(certificate, host)}";
         }
         var causes = new List<Exception>();
         for (var e = ex; e is not null; e = e.InnerException)
         {
             causes.Add(e);
+        }
+        if (seen?.ClientCertificateAsked == true && (causes.Any(c => c is AuthenticationException or IOException or SocketException)
+            || ex is LdapException { ResultCode: LdapException.ConnectError or LdapException.ServerDown }))
+        {
+            // OpenLDAP's TLSVerifyClient demand: every client without a certificate of its own is cut off.
+            return $"{at} asked this app for a client certificate during TLS and closed the connection without one: the directory demands one, and the app has none to give. "
+                + "On OpenLDAP set TLSVerifyClient (olcTLSVerifyClient) to never or allow; on the osixia/openldap image, LDAP_TLS_VERIFY_CLIENT=never or try (its default, demand, refuses every client without one).";
         }
         if (causes.OfType<SocketException>().FirstOrDefault() is { } s)
         {
@@ -138,5 +141,33 @@ public static partial class LdapErrors
                     : $"{at} closed the connection: if it is the ldaps:// port (usually 636), write ldaps://{host}:{port}.";
         }
         return null;
+    }
+
+    /// <summary>
+    /// What to do about a refused certificate, by what is wrong with it (in ServerTls's words): the CA
+    /// that issued it given, a certificate in date (no CA pasted here mends an expired one), or the
+    /// name it is for used.
+    /// </summary>
+    public static string CertificateFix(IReadOnlyList<string> reasons, string host)
+    {
+        var name = reasons.Any(r => r.StartsWith("It is for ", StringComparison.Ordinal));
+        var dates = reasons.Any(r => r.Contains(" expired on ", StringComparison.Ordinal) || r.Contains(" is not valid before ", StringComparison.Ordinal) || r.Contains("outside its dates", StringComparison.Ordinal));
+        var trust = reasons.Any(r => r.Contains("self-signed", StringComparison.Ordinal) || r.Contains("does not trust", StringComparison.Ordinal) || r.Contains("does not lead to the CA you gave", StringComparison.Ordinal));
+        var fixes = new List<string>();
+        if (name)
+        {
+            fixes.Add($"Write \"Directory server\" with a name the certificate is for, or give the directory a certificate for {host}.");
+        }
+        if (dates)
+        {
+            fixes.Add(trust
+                ? "Give the directory a certificate that is in date, from a CA that is in date, and paste that CA in \"Directory's CA\" (or check this machine's clock)."
+                : "Give the directory a certificate that is in date, from a CA that is in date (or check this machine's clock): pasting a CA does not mend dates.");
+        }
+        else if (trust || !name)
+        {
+            fixes.Add("Paste the CA that issued it in \"Directory's CA\".");
+        }
+        return string.Join(" ", fixes) + " For a test server only, \"Accept any certificate\" turns the check off.";
     }
 }

@@ -40,10 +40,5 @@ public sealed class AccessService(AppDbContext db, UserManager<AppUser> users)
     }
 
     /// <summary>The directory's rule for group names: the full DN, or its common name, in any case.</summary>
-    public static bool InDirectoryGroup(IEnumerable<string> memberOf, string group)
-    {
-        group = group.Trim();
-        return memberOf.Any(g => string.Equals(g, group, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(LdapDirectory.CommonName(g), group, StringComparison.OrdinalIgnoreCase));
-    }
+    public static bool InDirectoryGroup(IEnumerable<string> memberOf, string group) => memberOf.Any(g => LdapDirectory.IsNamed(g, group));
 }

@@ -80,7 +80,9 @@ instead.
   from `APP_KEY`. A database dump alone does not reveal it. One that no longer
   decrypts (`APP_KEY` lost and replaced) says so under it, to be typed again.
 - A blank secret field keeps the saved value. The directory's **Test the
-  settings** then uses the saved password, and says so. Other values are saved
+  settings** then uses the saved password, and says so, but only with the saved
+  server and service account: with another one in the form, type the password
+  to test it. Other values are saved
   without spaces at their ends; the directory's service password is saved
   exactly as typed, since a space can be part of a password (the test says
   when a typed one starts or ends with a space).

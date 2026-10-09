@@ -109,6 +109,46 @@ public sealed class GroupsTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_directory_group_with_a_comma_in_its_name_keeps_the_members_it_had_in_v5_2_0()
+    {
+        // v5.2.0 cut a group's name at its first comma, escaped or not: Active Directory's CN=Sales\, EMEA,...
+        // was "Sales\", and admins picked that name. Groups saved so keep their members; the name is now "Sales, EMEA".
+        var admin = await AdminAsync();
+        var (dana, _, _) = await PersonAsync(admin);
+        var id = Guid.NewGuid().ToString("N")[..6];
+        var activeDirectory = $@"CN=Sales{id}\, EMEA,OU=Groups,DC=corp,DC=example,DC=com";
+        var openLdap = $@"cn=Ops{id}\2C EU,ou=groups,dc=example,dc=test";
+        await using (var scope = app.Factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var user = await db.Users.SingleAsync(u => u.Id == dana);
+            user.DirectoryGroups = [activeDirectory, openLdap];
+            await db.SaveChangesAsync();
+        }
+        var groups = new[] { $@"Sales{id}\", $"Sales{id}, EMEA", $@"Ops{id}\2C EU", $"Ops{id}, EU" };
+        var made = new List<Guid>();
+        foreach (var directory in groups)
+        {
+            made.Add(await GroupAsync(admin, new { name = Unique("Directory " + directory), directory }));
+        }
+        var membership = await MembershipAsync(dana);
+        Assert.All(made, g => Assert.Contains(g, membership.Groups));
+        foreach (var g in made)
+        {
+            var group = await admin.JsonAsync(await admin.GetAsync($"/api/admin/groups/{g}"));
+            Assert.Equal([dana], group.GetProperty("members").EnumerateArray().Select(m => m.GetProperty("id").GetGuid()));
+        }
+        var seen = (await admin.JsonAsync(await admin.GetAsync("/api/admin/groups/directory"))).EnumerateArray().Select(g => g.GetProperty("name").GetString()).ToList();
+        Assert.Contains($"Sales{id}, EMEA", seen);
+        Assert.Contains($"Ops{id}, EU", seen);
+        // The directory's admin and required groups, saved in v5.2.0 the same way, still match.
+        var person = new Llm.Api.Ldap.LdapPerson("uid=dana,ou=people,dc=example,dc=test", "dana", null, "Dana", [activeDirectory]);
+        Assert.True(Llm.Api.Ldap.LdapDirectory.IsAdmin(new Llm.Api.Ldap.LdapOptions { AdminGroup = $@"Sales{id}\" }, person));
+        Assert.True(Llm.Api.Ldap.LdapDirectory.IsAllowed(new Llm.Api.Ldap.LdapOptions { RequiredGroup = $"Sales{id}, EMEA" }, person));
+        Assert.False(Llm.Api.Ldap.LdapDirectory.IsAllowed(new Llm.Api.Ldap.LdapOptions { RequiredGroup = "Sales" }, person));
+    }
+
+    [Fact]
     public void Who_may_use_something_admins_always_everyone_or_members()
     {
         var group = Guid.NewGuid();

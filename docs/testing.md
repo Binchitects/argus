@@ -331,10 +331,11 @@ cd deploy
 
 # the Settings page's directory flows (test typed, saved, after a restart; a person tried and signed in)
 # against a directory of your own, OpenLDAP or Active Directory; skipped without LDAP_TEST_URL.
-# Passwords come from files under the repository (mounted at /repo), never the command line.
+# Passwords come from files in data/ (git ignores it; the repository is mounted at /repo), never
+# the command line. Delete them when done.
 ../tools/dn test tests/Llm.Tests --filter RealDirectory -e LDAP_TEST_URL=ldaps://dc1.corp.example.com \
-  -e LDAP_TEST_BIND_DN=reader@corp.example.com -e LDAP_TEST_BIND_PASSWORD_FILE=/repo/.reader-pw \
-  -e LDAP_TEST_USER_BASE_DN=DC=corp,DC=example,DC=com -e LDAP_TEST_USER=jsmith -e LDAP_TEST_USER_PASSWORD_FILE=/repo/.jsmith-pw
+  -e LDAP_TEST_BIND_DN=reader@corp.example.com -e LDAP_TEST_BIND_PASSWORD_FILE=/repo/data/reader-pw \
+  -e LDAP_TEST_USER_BASE_DN=DC=corp,DC=example,DC=com -e LDAP_TEST_USER=jsmith -e LDAP_TEST_USER_PASSWORD_FILE=/repo/data/jsmith-pw
 
 # with the stack up
 make health          # container state + in-network probes

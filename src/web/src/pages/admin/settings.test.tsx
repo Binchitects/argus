@@ -200,6 +200,8 @@ describe('settings', () => {
     const steps = await screen.findByRole('list', { name: 'Steps before it' })
     expect(within(steps).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Done: Reached dc1:389.', 'Warning: Not encrypted.'])
     expect(screen.getByRole('alert')).toHaveTextContent('the DN or the password is wrong')
+    // Its DNs and filters are long words: the answer wraps them, as the steps do, rather than widen a phone's page.
+    expect(screen.getByRole('alert')).toHaveClass('[&_p]:break-words')
     expect(screen.getAllByText(/the DN or the password is wrong/)).toHaveLength(1)
     expect(calls.find((c) => c.path === '/api/admin/config/ldap-test')?.body).toEqual({ 'Ldap:Url': 'ldap://dc1:389' })
   })
@@ -233,6 +235,9 @@ describe('settings', () => {
     const examples = within(guide).getByRole('table', { name: 'An example of each field' })
     expect(within(examples).getByRole('row', { name: /Service account/ })).toHaveTextContent('cn=readonly,dc=example,dc=com')
     expect(within(examples).getByRole('row', { name: /Service account/ })).toHaveTextContent('reader@corp.example.com')
+    // The osixia/openldap image's own accounts, and the TLS setting without which its StartTLS and ldaps:// refuse the app.
+    expect(guide).toHaveTextContent('cn=readonly,dc=example,dc=org')
+    expect(guide).toHaveTextContent('LDAP_TLS_VERIFY_CLIENT=try')
   })
 
   it('each example for OpenLDAP and Active Directory in a setting\'s help is on a line of its own', async () => {

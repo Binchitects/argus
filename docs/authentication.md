@@ -152,14 +152,20 @@ account and looks for people and the groups named, step by step. Each step says
 what works and, when something does not, exactly what to fix: the address or
 the port ("nothing answers at", "ldaps:// needs the TLS port"), the certificate
 (self-signed, issued by a CA this server does not trust, for another name,
-expired), the service account (a wrong DN or password, a DN in another domain
-than the server holds, `user@domain` or `DOMAIN\user` on a server that takes
+expired; or the directory demanding a client certificate, which the app has none
+of: OpenLDAP's `TLSVerifyClient demand`, the default of the osixia/openldap
+image, whose `LDAP_TLS_VERIFY_CLIENT` must then be `never` or `try`), the
+service account (a wrong DN or password, a DN in another domain than the server
+holds, `user@domain` or `DOMAIN\user` on a server that takes
 only DNs, Active Directory's own reasons below), where people are (empty, not a
 DN, or missing, with the part that exists), the user filter, and the groups (not
 found, or not in their members' `memberOf`). It says which password it used: the
-one typed in the field, or the saved one when the field is blank. The password
-is tried and saved exactly as typed; one that starts or ends with a space (often
-a copy and paste) is pointed out.
+one typed in the field, or the saved one when the field is blank. The saved one
+is used only with the saved server (its host and port) and service account: with
+another one in the form, type the password, so a saved password never goes to a
+server it was not saved for. The password is tried and saved exactly as typed;
+one that starts or ends with a space (often a copy and paste) is pointed out.
+Each test is in the audit log (`settings.ldap_test`) with the server it went to.
 
 Active Directory refuses a sign-in with one code for many reasons; the test and
 the audit log say which: `52e` the name or password is wrong, `525` no such
@@ -175,7 +181,8 @@ directory, the same groups, and this app's own rules (an email is needed, a loca
 account of that name is never taken over). It shows who they would be here
 (username, email, name, groups, admin or not), or exactly why they could not
 sign in. Nothing is saved or changed; the password is never stored or logged,
-and the try is in the audit log (`settings.ldap_try`) with its outcome.
+and the try is in the audit log (`settings.ldap_try`) with the server and its
+outcome.
 
 People sign in with their directory name (`uid` or `sAMAccountName`), their email
 or `userPrincipalName`, or `DOMAIN\name` (the domain is left out). The app
@@ -186,14 +193,18 @@ email, role and password; the app does not let those be changed here. Groups com
 from each person's `memberOf` (asked for by name, as OpenLDAP's overlay sends it
 only then) and, with **Where groups are** set, from the groups there that name
 them as a `member` or `uniqueMember`. Direct members only: a group inside a group
-does not count.
+does not count. A group goes by its full DN or its common name, a comma in it
+included (`CN=Sales\, EMEA,...` is `Sales, EMEA`); a group, admin group or
+required group saved in v5.2.0 as `Sales\` (its name cut at the comma) keeps
+matching.
 
 Every **Check the directory every** the app re-reads every directory person.
 Anyone who left the directory, or the required group, is disabled: signed out,
 API keys blocked. They are enabled again if they come back. **Admin → Sign-in →
 Check the directory now** runs the same check at once. When the directory cannot
-be used (not reached, its certificate refused, the service account refused),
-nobody is changed and the check says why; the app keeps running.
+be used (not reached, its certificate refused, the service account refused,
+**Where groups are** not there), nobody is changed and the check says why; the
+app keeps running. Only a person's own entry gone counts as leaving.
 
 Safeguards: an empty password is refused before the directory sees it (many
 servers treat it as an anonymous bind and say yes); the service account is never
@@ -527,12 +538,38 @@ service account refused. **Test the settings** says which, and the app's log has
 the same sentence. Local accounts still work.
 
 **The test says the server refused the service account.** The step says why.
-"The DN or the password is wrong" is OpenLDAP's one answer for both: check the
-DN letter by letter (a comma inside a name is written `\,`) and retype the
-password (the test says whether it used the typed one or the saved one). If it
-adds that the server holds another domain, the DN cannot be there. On Active
-Directory the reason is exact (expired, must change, disabled, locked); for a
-DN that is hard to get right, write the account as `reader@corp.example.com`.
+OpenLDAP gives one answer for a DN with no entry and for a wrong password, so
+the test then looks the DN up anonymously: "the password is wrong" when an entry
+has the DN, "no entry has this DN" with the part of it that exists when it has
+none. Where the server shows anonymous lookups nothing (as many do), it cannot
+tell and says "the DN or the password is wrong": check the DN letter by letter
+(a comma inside a name is written `\,`; copy it from the directory as its admin
+sees it) and retype the password (the test says whether it used the typed one
+or the saved one). If it says the server holds another domain, the DN cannot be
+there. On Active Directory the reason is exact (no such account, wrong password,
+expired, must change, disabled, locked); for a DN that is hard to get right,
+write the account as `reader@corp.example.com`.
+
+**The directory is the osixia/openldap image.** Its base DN comes from
+`LDAP_DOMAIN` (`example.org`, so `dc=example,dc=org`, unless it or
+`LDAP_BASE_DN` is set). Its accounts are `cn=admin,<base DN>` with
+`LDAP_ADMIN_PASSWORD` and, with `LDAP_READONLY_USER=true`, the better choice
+`cn=readonly,<base DN>` (`LDAP_READONLY_USER_USERNAME`) with
+`LDAP_READONLY_USER_PASSWORD`. It holds no people until you add them: **Where
+people are** is where you put them. Anonymous connections see nothing in it, so
+the test cannot tell a misspelt service account DN from a wrong password there.
+Its memberOf overlay covers only `groupOfUniqueNames` groups: with
+`groupOfNames` groups, set **Where groups are**. For StartTLS or `ldaps://` it
+needs two changes, then the container recreated: its TLS (on by default)
+demands a client certificate, which the app has none of, so set
+`LDAP_TLS_VERIFY_CLIENT=try`; and the certificate it makes for itself comes from
+the image's own CA, which expired on 2026-01-15, so mount a certificate of your
+own, for the name the app reaches it by, at
+`/container/service/slapd/assets/certs` (`ldap.crt`, `ldap.key` and `ca.crt`,
+or the names in `LDAP_TLS_CRT_FILENAME`, `LDAP_TLS_KEY_FILENAME` and
+`LDAP_TLS_CA_CRT_FILENAME`) and paste its CA in **Directory's CA**. From the
+app's container, `localhost` is the app itself: reach the directory by its
+container name on a Docker network the two share, or by the host's address.
 
 **A service is unreachable through the proxy after a config change.** Traefik
 labels are baked in at container creation. Changing a label requires
