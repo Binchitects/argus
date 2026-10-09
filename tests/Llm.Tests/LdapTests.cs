@@ -1,18 +1,75 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Text.Json;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace Llm.Tests;
 
-/// <summary>A real OpenLDAP with a small company in it.</summary>
+/// <summary>
+/// A real OpenLDAP with a small company in it, a read-only service account whose DN and password
+/// are as awkward as real ones get, and a certificate from its own CA (for localhost and 127.0.0.1).
+/// </summary>
 public sealed class LdapServer : IAsyncLifetime
 {
     public const string Base = "dc=example,dc=test";
     public const string AdminDn = "cn=admin," + Base;
     public const string AdminPassword = "ldap-admin-pw";
+
+    /// <summary>A comma inside its CN, spaces in its OU: escaped as \2C, as the server writes it back.</summary>
+    public const string ServiceDn = @"cn=Svc Reader\2C LDAP,ou=Service Accounts,dc=example,dc=test";
+
+    /// <summary>Characters that break shells, .env files, JSON and LDIF: $, #, &amp;, quotes, a backslash, é.</summary>
+    public const string ServicePassword = "S3rv!ce #pw $HOME &amp; \"q\" \\ é";
+
+    /// <summary>More people than OpenLDAP shows one search (500), below ou=many.</summary>
+    public const int Many = 510;
+
+    /// <summary>Where the tests reach the container (an address of the Docker host when they run in a container themselves).</summary>
+    private static readonly string Host = new ContainerBuilder("osixia/openldap:1.5.0").Build().Hostname;
+
+    private static readonly (string Ca, string Certificate, string Key) Tls = MakeCertificates();
+
+    /// <summary>The directory's CA, in PEM: what an admin pastes in "Directory's CA".</summary>
+    public static string CaPem => Tls.Ca;
+
+    private static (string Ca, string Certificate, string Key) MakeCertificates()
+    {
+        using var caKey = RSA.Create(2048);
+        var caRequest = new CertificateRequest("CN=Example Test Directory CA", caKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        caRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+        caRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
+        caRequest.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(caRequest.PublicKey, false));
+        using var ca = caRequest.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+        using var key = RSA.Create(2048);
+        var request = new CertificateRequest("CN=localhost", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var names = new SubjectAlternativeNameBuilder();
+        names.AddDnsName("localhost");
+        if (!IPAddress.TryParse(Host, out _))
+        {
+            names.AddDnsName(Host);
+        }
+        // Every address of this machine: Testcontainers may name the Docker host by one of them
+        // (its bridge's gateway, when the tests run in a container on the host's network).
+        foreach (var address in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
+            .SelectMany(n => n.GetIPProperties().UnicastAddresses).Select(a => a.Address).Append(IPAddress.Loopback).Distinct())
+        {
+            names.AddIpAddress(address);
+        }
+        request.CertificateExtensions.Add(names.Build());
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, false));
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, true));
+        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([new Oid("1.3.6.1.5.5.7.3.1")], false));
+        request.CertificateExtensions.Add(X509AuthorityKeyIdentifierExtension.CreateFromCertificate(ca, true, false));
+        using var certificate = request.Create(ca, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddMonths(6), RandomNumberGenerator.GetBytes(16));
+        return (ca.ExportCertificatePem(), certificate.ExportCertificatePem(), key.ExportPkcs8PrivateKeyPem());
+    }
 
     private const string Seed = """
         dn: ou=people,dc=example,dc=test
@@ -78,13 +135,84 @@ public sealed class LdapServer : IAsyncLifetime
 
         """;
 
+    /// <summary>
+    /// The service account; a person whose uid has a space, which no username here can have; a group of
+    /// the kind the image's memberOf overlay keeps (groupOfUniqueNames, unlike the groupOfNames above); and many people.
+    /// </summary>
+    private static string Extra()
+    {
+        var sb = new StringBuilder($"""
+            dn: ou=Service Accounts,dc=example,dc=test
+            objectClass: organizationalUnit
+            ou: Service Accounts
+
+            dn: {ServiceDn}
+            objectClass: inetOrgPerson
+            cn: Svc Reader, LDAP
+            sn: Reader
+            userPassword:: {Convert.ToBase64String(Encoding.UTF8.GetBytes(ServicePassword))}
+
+            dn: uid=gina space,ou=people,dc=example,dc=test
+            objectClass: inetOrgPerson
+            uid: gina space
+            cn: Gina Space
+            sn: Space
+            mail: gina@example.test
+            userPassword: gina-directory-pw
+
+            dn: cn=llm-unique,ou=groups,dc=example,dc=test
+            objectClass: groupOfUniqueNames
+            cn: llm-unique
+            uniqueMember: uid=alice,ou=people,dc=example,dc=test
+
+            dn: ou=many,dc=example,dc=test
+            objectClass: organizationalUnit
+            ou: many
+
+
+            """);
+        for (var i = 0; i < Many; i++)
+        {
+            sb.Append(System.Globalization.CultureInfo.InvariantCulture, $"dn: uid=m{i:D4},ou=many,dc=example,dc=test\nobjectClass: inetOrgPerson\nuid: m{i:D4}\ncn: Many {i}\nsn: Many\n\n");
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Service accounts may read the directory (the image's rules let only its admin), and anonymous sign-ins
+    /// are refused, as in most companies. An anonymous look sees which service accounts exist and nothing
+    /// else, as on many OpenLDAP servers: the test then tells a DN with no entry from a wrong password.
+    /// </summary>
+    private const string ReadAccess = """
+        dn: olcDatabase={1}mdb,cn=config
+        changetype: modify
+        add: olcAccess
+        olcAccess: {2}to dn.subtree="ou=Service Accounts,dc=example,dc=test" attrs=entry,objectClass by anonymous read by * break
+        olcAccess: {3}to * by dn.subtree="ou=Service Accounts,dc=example,dc=test" read by * break
+
+        dn: cn=config
+        changetype: modify
+        add: olcDisallows
+        olcDisallows: bind_anon
+
+        """;
+
+    private const string Certificates = "/container/service/slapd/assets/certs/";
+
     private readonly IContainer _ldap = new ContainerBuilder("osixia/openldap:1.5.0")
         .WithEnvironment("LDAP_ORGANISATION", "Example")
         .WithEnvironment("LDAP_DOMAIN", "example.test")
         .WithEnvironment("LDAP_ADMIN_PASSWORD", AdminPassword)
         .WithEnvironment("LDAP_TLS_VERIFY_CLIENT", "never")
         .WithPortBinding(389, true)
+        .WithPortBinding(636, true)
         .WithResourceMapping(Encoding.UTF8.GetBytes(Seed), "/tmp/seed.ldif")
+        .WithResourceMapping(Encoding.UTF8.GetBytes(Extra()), "/tmp/extra.ldif")
+        .WithResourceMapping(Encoding.UTF8.GetBytes(ReadAccess), "/tmp/access.ldif")
+        // Its own CA's certificate in place of the one the image would make (which has expired).
+        .WithResourceMapping(Encoding.UTF8.GetBytes(Tls.Certificate), Certificates + "ldap.crt")
+        .WithResourceMapping(Encoding.UTF8.GetBytes(Tls.Key), Certificates + "ldap.key")
+        .WithResourceMapping(Encoding.UTF8.GetBytes(Tls.Ca), Certificates + "ca.crt")
         // -ZZ: the image first runs a temporary server to configure itself and adds TLS
         // after; a StartTLS search only succeeds against the final one.
         .WithWaitStrategy(Wait.ForUnixContainer().UntilCommandIsCompleted(
@@ -92,6 +220,8 @@ public sealed class LdapServer : IAsyncLifetime
         .Build();
 
     public string Url => $"ldap://{_ldap.Hostname}:{_ldap.GetMappedPublicPort(389)}";
+
+    public string LdapsUrl => $"ldaps://{_ldap.Hostname}:{_ldap.GetMappedPublicPort(636)}";
 
     /// <summary>The app wired to this directory, created once by the first test that needs it.</summary>
     public WebApplicationFactory<Program>? App { get; set; }
@@ -101,6 +231,8 @@ public sealed class LdapServer : IAsyncLifetime
     {
         await _ldap.StartAsync();
         await RunAsync("ldapadd", "-x", "-D", AdminDn, "-w", AdminPassword, "-f", "/tmp/seed.ldif");
+        await RunAsync("ldapadd", "-x", "-D", AdminDn, "-w", AdminPassword, "-f", "/tmp/extra.ldif");
+        await RunAsync("ldapmodify", "-Y", "EXTERNAL", "-H", "ldapi:///", "-f", "/tmp/access.ldif");
     }
 
     /// <summary>Applies an LDIF change (ldapmodify) as the directory admin.</summary>
@@ -109,6 +241,14 @@ public sealed class LdapServer : IAsyncLifetime
         var path = $"/tmp/change-{Guid.NewGuid():N}.ldif";
         await _ldap.CopyAsync(Encoding.UTF8.GetBytes(ldif), path);
         await RunAsync("ldapmodify", "-x", "-D", AdminDn, "-w", AdminPassword, "-f", path);
+    }
+
+    /// <summary>Applies an LDIF change to the server's own configuration (cn=config), as root in the container.</summary>
+    public async Task ConfigureAsync(string ldif)
+    {
+        var path = $"/tmp/config-{Guid.NewGuid():N}.ldif";
+        await _ldap.CopyAsync(Encoding.UTF8.GetBytes(ldif), path);
+        await RunAsync("ldapmodify", "-Y", "EXTERNAL", "-H", "ldapi:///", "-f", path);
     }
 
     private async Task RunAsync(params string[] command)
@@ -137,8 +277,9 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
         ["Ldap:Url"] = url,
         ["Ldap:StartTls"] = startTls.ToString(),
         ["Ldap:IgnoreCertificateErrors"] = ignoreCerts.ToString(),
-        ["Ldap:BindDn"] = LdapServer.AdminDn,
-        ["Ldap:BindPassword"] = LdapServer.AdminPassword,
+        // The read-only service account, with its awkward DN and password, through every path.
+        ["Ldap:BindDn"] = LdapServer.ServiceDn,
+        ["Ldap:BindPassword"] = LdapServer.ServicePassword,
         ["Ldap:UserBaseDn"] = "ou=people," + LdapServer.Base,
         ["Ldap:GroupBaseDn"] = "ou=groups," + LdapServer.Base,
         ["Ldap:AdminGroup"] = "llm-admins",
@@ -365,14 +506,1017 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
     [Fact]
     public async Task StartTls_checks_the_certificate_unless_told_not_to()
     {
-        // The test server's certificate is self-signed: refused by default, accepted only with the explicit test switch.
+        // The test server's certificate comes from its own CA, which nothing here trusts: refused by
+        // default, accepted with the directory's CA given, or with the explicit test switch.
         await using (var strict = app.Create(app.ConnectionStringFor("tls1_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), Settings(ldap.Url, startTls: true)))
         {
             await StatusAssert.Is(HttpStatusCode.ServiceUnavailable, await new TestBrowser(strict).LoginAsync("bob", "bob-directory-pw"));
         }
+        await using (var ca = app.Create(app.ConnectionStringFor("tls3_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
+            new Dictionary<string, string?>(Settings(ldap.Url, startTls: true)) { ["Ldap:CaCertificate"] = LdapServer.CaPem }))
+        {
+            await new TestBrowser(ca).SignedInAsync("bob", "bob-directory-pw");
+        }
         await using (var lax = app.Create(app.ConnectionStringFor("tls2_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), Settings(ldap.Url, startTls: true, ignoreCerts: true)))
         {
             await new TestBrowser(lax).SignedInAsync("bob", "bob-directory-pw");
+        }
+    }
+
+    /// <summary>An app with no directory and a key for secrets, as an admin sets one up in the Settings page.</summary>
+    private (WebApplicationFactory<Program> App, string Db) Fresh(string dataKey = "ldap-settings-data-key", string? db = null, IDictionary<string, string?>? more = null)
+    {
+        db ??= app.ConnectionStringFor("ldapfresh_" + Guid.NewGuid().ToString("N")[..8]);
+        var settings = new Dictionary<string, string?> { ["Auth:DataKey"] = dataKey };
+        foreach (var (k, v) in more ?? new Dictionary<string, string?>())
+        {
+            settings[k] = v;
+        }
+        return (app.Create(db, new FakeGateway(), settings), db);
+    }
+
+    private Dictionary<string, string?> Form(string? url = null, params (string Key, string? Value)[] changes)
+    {
+        var form = Settings(url ?? ldap.Url);
+        foreach (var (k, v) in changes)
+        {
+            form["Ldap:" + k] = v;
+        }
+        return form;
+    }
+
+    private static async Task<JsonElement> TestAsync(TestBrowser admin, Dictionary<string, string?> form) =>
+        await admin.JsonAsync(await admin.PostAsync("/api/admin/config/ldap-test", form));
+
+    private static async Task SaveAsync(TestBrowser admin, Dictionary<string, string?> form) =>
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative),
+            new { changes = form.Select(kv => new { key = kv.Key, value = kv.Value }).ToArray() }));
+
+    private static string Says(JsonElement result) =>
+        result.GetProperty("message").GetString() + " | " + string.Join(" | ", result.GetProperty("steps").EnumerateArray().Select(s => $"{s.GetProperty("state").GetString()}: {s.GetProperty("text").GetString()}"));
+
+    [Fact]
+    public async Task The_test_uses_the_saved_password_when_the_field_is_blank_at_once_and_after_a_restart()
+    {
+        var (first, db) = Fresh();
+        await using (first)
+        {
+            var admin = await new TestBrowser(first).SignedInAsync("admin", AppFixture.AdminPassword);
+            // Typed and tested before saving.
+            var typed = await TestAsync(admin, Form());
+            Assert.True(typed.GetProperty("ok").GetBoolean(), Says(typed));
+            Assert.Contains("with the password typed above", Says(typed), StringComparison.Ordinal);
+            // What the server says of itself, read before signing in.
+            Assert.Contains("It is OpenLDAP, holding \"dc=example,dc=test\"", Says(typed), StringComparison.Ordinal);
+            Assert.Contains("This server offers StartTLS", Says(typed), StringComparison.Ordinal);
+
+            // Saved: the field shows blank, and the test uses the saved (encrypted, then decrypted) one at once.
+            await SaveAsync(admin, Form());
+            var blank = Form(null, ("BindPassword", ""));
+            var saved = await TestAsync(admin, blank);
+            Assert.True(saved.GetProperty("ok").GetBoolean(), Says(saved));
+            Assert.Contains("with the saved password", Says(saved), StringComparison.Ordinal);
+            var refused = await TestAsync(admin, Form(null, ("BindPassword", "not-the-password")));
+            Assert.False(refused.GetProperty("ok").GetBoolean());
+            Assert.Contains("with the password typed above: the password is wrong", Says(refused), StringComparison.Ordinal);
+
+            // A wrong password saved, then the right one: each in effect at once, no restart.
+            await SaveAsync(admin, new() { ["Ldap:BindPassword"] = "a-wrong-one" });
+            Assert.False((await TestAsync(admin, blank)).GetProperty("ok").GetBoolean());
+            await SaveAsync(admin, new() { ["Ldap:BindPassword"] = LdapServer.ServicePassword });
+            Assert.True((await TestAsync(admin, blank)).GetProperty("ok").GetBoolean());
+
+            // A password is tried and saved exactly as typed: a space at an end is part of it (before,
+            // saving cut it off, so a test that passed before saving failed after). One pasted with a
+            // stray space is said, not fixed silently.
+            var spaced = await TestAsync(admin, Form(null, ("BindPassword", LdapServer.ServicePassword + " ")));
+            Assert.False(spaced.GetProperty("ok").GetBoolean(), Says(spaced));
+            Assert.Contains("starts or ends with a space", Says(spaced), StringComparison.Ordinal);
+            await ldap.ModifyAsync($"""
+                dn: {LdapServer.ServiceDn}
+                changetype: modify
+                replace: userPassword
+                userPassword:: {Convert.ToBase64String(Encoding.UTF8.GetBytes(LdapServer.ServicePassword + " "))}
+
+                """);
+            try
+            {
+                var typedSpace = await TestAsync(admin, Form(null, ("BindPassword", LdapServer.ServicePassword + " ")));
+                Assert.True(typedSpace.GetProperty("ok").GetBoolean(), Says(typedSpace));
+                await SaveAsync(admin, new() { ["Ldap:BindPassword"] = LdapServer.ServicePassword + " " });
+                var savedSpace = await TestAsync(admin, blank);
+                Assert.True(savedSpace.GetProperty("ok").GetBoolean(), Says(savedSpace));
+            }
+            finally
+            {
+                await ldap.ModifyAsync($"""
+                    dn: {LdapServer.ServiceDn}
+                    changetype: modify
+                    replace: userPassword
+                    userPassword:: {Convert.ToBase64String(Encoding.UTF8.GetBytes(LdapServer.ServicePassword))}
+
+                    """);
+            }
+            await SaveAsync(admin, new() { ["Ldap:BindPassword"] = LdapServer.ServicePassword });
+        }
+        // After a restart: the same database, read again at start.
+        var (second, _) = Fresh(db: db);
+        await using (second)
+        {
+            var admin = await new TestBrowser(second).SignedInAsync("admin", AppFixture.AdminPassword);
+            var afterRestart = await TestAsync(admin, new());
+            Assert.True(afterRestart.GetProperty("ok").GetBoolean(), Says(afterRestart));
+            await new TestBrowser(second).SignedInAsync("bob", "bob-directory-pw");
+        }
+        // A lost APP_KEY, recovered as docs/authentication.md says (the key ring and the sign-in keys
+        // removed, a new key): the saved password no longer reads, and the page and the test say so.
+        await using (var conn = new Npgsql.NpgsqlConnection(db))
+        {
+            await conn.OpenAsync();
+            await using var cmd = new Npgsql.NpgsqlCommand("""delete from "DataProtectionKeys"; delete from settings where key like 'oidc.%'""", conn);
+            await cmd.ExecuteNonQueryAsync();
+        }
+        var (rekeyed, _) = Fresh("another-data-key", db);
+        await using (rekeyed)
+        {
+            var admin = await new TestBrowser(rekeyed).SignedInAsync("admin", AppFixture.AdminPassword);
+            var view = await admin.JsonAsync(await admin.GetAsync("/api/admin/config"));
+            var row = view.GetProperty("groups").EnumerateArray().SelectMany(g => g.GetProperty("settings").EnumerateArray())
+                .Single(s => s.GetProperty("key").GetString() == "Ldap:BindPassword");
+            Assert.Contains("APP_KEY", row.GetProperty("warning").GetString(), StringComparison.Ordinal);
+            var unreadable = await TestAsync(admin, new());
+            Assert.False(unreadable.GetProperty("ok").GetBoolean());
+            Assert.Contains("no longer reads", unreadable.GetProperty("message").GetString(), StringComparison.Ordinal);
+            // Sign-in says the directory cannot be used, rather than binding anonymously.
+            await StatusAssert.Is(HttpStatusCode.ServiceUnavailable, await new TestBrowser(rekeyed).LoginAsync("bob", "bob-directory-pw"));
+        }
+    }
+
+    [Fact]
+    public async Task The_test_says_exactly_what_is_wrong()
+    {
+        var (f, _) = Fresh();
+        await using var _f = f;
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        async Task<string> Fails(Dictionary<string, string?> form)
+        {
+            var r = await TestAsync(admin, form);
+            Assert.False(r.GetProperty("ok").GetBoolean(), Says(r));
+            return r.GetProperty("message").GetString()!;
+        }
+
+        // OpenLDAP refuses a DN with no entry as it refuses a wrong password; an anonymous look tells them apart where it may.
+        var wrong = await Fails(Form(null, ("BindPassword", "wrong")));
+        Assert.Contains("the password is wrong. The DN is right (an entry has it)", wrong, StringComparison.Ordinal);
+        var misspelt = await Fails(Form(null, ("BindDn", @"cn=Svc Raeder\2C LDAP,ou=Service Accounts,dc=example,dc=test")));
+        Assert.Contains("no entry has this DN. The part of it that exists is \"ou=Service Accounts,dc=example,dc=test\"", misspelt, StringComparison.Ordinal);
+        Assert.DoesNotContain("the password is wrong", misspelt, StringComparison.Ordinal);
+        // The server's own administrator (rootdn) has no entry: the one case where the DN is right all the same.
+        Assert.Contains("Only the server's own administrator (its root DN, OpenLDAP's rootdn or olcRootDN) signs in with no entry", misspelt, StringComparison.Ordinal);
+        // Where an anonymous look sees nothing (here, the rest of the domain), the test says it cannot tell.
+        var hidden = await Fails(Form(null, ("BindDn", @"cn=Svc Reader\2C LDAP,ou=Service Acounts,dc=example,dc=test")));
+        Assert.Contains("the DN or the password is wrong. The server says the same for both", hidden, StringComparison.Ordinal);
+        Assert.Contains("cannot tell which", hidden, StringComparison.Ordinal);
+        var otherDomain = await Fails(Form(null, ("BindDn", "cn=reader,dc=example,dc=com")));
+        Assert.Contains("no entry here has this DN, as this server holds \"dc=example,dc=test\"", otherDomain, StringComparison.Ordinal);
+        Assert.Contains("Only the server's own administrator (its root DN, like cn=Directory Manager", otherDomain, StringComparison.Ordinal);
+        // A server's own administrator lives outside what it holds, with no entry: a wrong password is said to be one.
+        // Before, "no such entry can be here" sent the admin looking for a DN problem that was not there.
+        foreach (var (dn, what) in new[] { ("cn=admin,cn=config", "an administrator of the server's own settings (cn=config)"), ("cn=Directory Manager", "the administrator of 389 Directory Server and FreeIPA") })
+        {
+            var administrator = await Fails(Form(null, ("BindDn", dn), ("BindPassword", "not-the-config-password")));
+            Assert.StartsWith($"The server refused the service account {dn} with the password typed above: the password is wrong", administrator, StringComparison.Ordinal);
+            Assert.Contains($"{dn} is {what}", administrator, StringComparison.Ordinal);
+            Assert.DoesNotContain("no entry here has this DN", administrator, StringComparison.Ordinal);
+            Assert.DoesNotContain("can be here", administrator, StringComparison.Ordinal);
+        }
+        Assert.Contains("LDAP_CONFIG_PASSWORD, not LDAP_ADMIN_PASSWORD", await Fails(Form(null, ("BindDn", "cn=admin,cn=config"), ("BindPassword", "wrong"))), StringComparison.Ordinal);
+        Assert.Contains("works only with Active Directory", await Fails(Form(null, ("BindDn", "reader@example.test"))), StringComparison.Ordinal);
+        Assert.Contains("works only with Active Directory", await Fails(Form(null, ("BindDn", "EXAMPLE\\reader"))), StringComparison.Ordinal);
+        Assert.Contains("is not a valid DN", await Fails(Form(null, ("BindDn", "cn=Svc Reader, LDAP,ou=Service Accounts,dc=example,dc=test"))), StringComparison.Ordinal);
+        Assert.Contains("ou=people,dc=example,dc=test", await Fails(Form(null, ("UserBaseDn", ""))), StringComparison.Ordinal);
+        Assert.Contains("The part of it that exists is \"dc=example,dc=test\"", await Fails(Form(null, ("UserBaseDn", "ou=staff,dc=example,dc=test"))), StringComparison.Ordinal);
+        Assert.Contains("dc=example,dc=test", await Fails(Form(null, ("UserBaseDn", "example.test"))), StringComparison.Ordinal);
+        Assert.Contains("Which entries are people", await Fails(Form(null, ("UserFilter", "(uid=bob)"))), StringComparison.Ordinal);
+        Assert.Contains("no group \"llm-userz\"", await Fails(Form(null, ("RequiredGroup", "llm-userz"))), StringComparison.Ordinal);
+        // groupOfNames groups are not in the image's memberOf: without "Where groups are", nobody could sign in.
+        Assert.Contains("Where groups are", await Fails(Form(null, ("GroupBaseDn", ""))), StringComparison.Ordinal);
+        Assert.Contains("nothing answers at 127.0.0.1:9", await Fails(Form("ldap://127.0.0.1:9")), StringComparison.Ordinal);
+        Assert.Contains("ldaps://", await Fails(Form(ldap.LdapsUrl.Replace("ldaps://", "ldap://", StringComparison.Ordinal))), StringComparison.Ordinal);
+        // No service account: anonymous, never a saved password with no name (which servers refuse as
+        // wrong credentials: "refused the service account" for settings that were right).
+        await SaveAsync(admin, new() { ["Ldap:BindPassword"] = "left behind" });
+        var anonymous = await Fails(Form(null, ("BindDn", ""), ("BindPassword", "")));
+        Assert.Contains("does not let anonymous connections in", anonymous, StringComparison.Ordinal);
+        Assert.DoesNotContain("refused", anonymous, StringComparison.Ordinal);
+
+        // groupOfUniqueNames is in memberOf: then "Where groups are" may stay empty.
+        var unique = await TestAsync(admin, Form(null, ("GroupBaseDn", ""), ("AdminGroup", "llm-unique"), ("RequiredGroup", "")));
+        Assert.True(unique.GetProperty("ok").GetBoolean(), Says(unique));
+    }
+
+    [Fact]
+    public async Task A_directory_past_the_servers_search_limit_passes_the_test()
+    {
+        var (f, _) = Fresh();
+        await using var _f = f;
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        // More than OpenLDAP's 500 below the whole domain: before, the count failed with "Size Limit Exceeded".
+        var r = await TestAsync(admin, Form(null, ("UserBaseDn", LdapServer.Base)));
+        Assert.True(r.GetProperty("ok").GetBoolean(), Says(r));
+        Assert.Contains("or more", r.GetProperty("message").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Ldaps_is_checked_against_the_directorys_CA_and_a_refused_certificate_is_explained_not_a_500()
+    {
+        var (f, _) = Fresh(more: new Dictionary<string, string?> { ["Replicas:Enabled"] = "false" });
+        await using var _f = f;
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var strict = await TestAsync(admin, Form(ldap.LdapsUrl));
+        Assert.False(strict.GetProperty("ok").GetBoolean());
+        Assert.Contains("certificate is not trusted", strict.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.Contains("Example Test Directory CA", strict.GetProperty("message").GetString(), StringComparison.Ordinal);
+        var withCa = await TestAsync(admin, Form(ldap.LdapsUrl, ("CaCertificate", LdapServer.CaPem)));
+        Assert.True(withCa.GetProperty("ok").GetBoolean(), Says(withCa));
+        var garbage = await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative), new { changes = new[] { new { key = "Ldap:CaCertificate", value = "not a certificate" } } });
+        await StatusAssert.Is(HttpStatusCode.BadRequest, garbage);
+
+        // Someone from the directory signs in, then the directory moves to ldaps:// with no CA given.
+        await SaveAsync(admin, Form());
+        await new TestBrowser(f).SignedInAsync("bob", "bob-directory-pw");
+        await SaveAsync(admin, new() { ["Ldap:Url"] = ldap.LdapsUrl });
+        // Sign-in: "cannot be reached", never a 500; the check: the reason in words.
+        await StatusAssert.Is(HttpStatusCode.ServiceUnavailable, await new TestBrowser(f).LoginAsync("bob", "bob-directory-pw"));
+        var sync = await admin.PostAsync("/api/admin/ldap/sync");
+        await StatusAssert.Is(HttpStatusCode.ServiceUnavailable, sync);
+        Assert.Contains("certificate is not trusted", (await admin.JsonAsync(sync)).GetProperty("error").GetString(), StringComparison.Ordinal);
+        // The background check ran with the new settings (a change wakes it): the app is still up.
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        Assert.False(f.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.IsCancellationRequested);
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.GetAsync("/api/auth/me"));
+        // With its CA, it works again.
+        await SaveAsync(admin, new() { ["Ldap:CaCertificate"] = LdapServer.CaPem });
+        await new TestBrowser(f).SignedInAsync("bob", "bob-directory-pw");
+    }
+
+    [Fact]
+    public async Task A_directory_that_demands_a_client_certificate_is_said_to()
+    {
+        // osixia/openldap's default (LDAP_TLS_VERIFY_CLIENT=demand): TLS ends at once for a client without a certificate.
+        var (f, _) = Fresh();
+        await using var _f = f;
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        await ldap.ConfigureAsync(VerifyClient("demand"));
+        try
+        {
+            foreach (var form in new[] { Form(null, ("StartTls", "true"), ("CaCertificate", LdapServer.CaPem)), Form(ldap.LdapsUrl, ("CaCertificate", LdapServer.CaPem)) })
+            {
+                var r = await TestAsync(admin, form);
+                Assert.False(r.GetProperty("ok").GetBoolean());
+                Assert.Contains("asked this app for a client certificate", r.GetProperty("message").GetString(), StringComparison.Ordinal);
+                Assert.Contains("TLSVerifyClient", r.GetProperty("message").GetString(), StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            await ldap.ConfigureAsync(VerifyClient("never"));
+        }
+        Assert.True((await TestAsync(admin, Form(ldap.LdapsUrl, ("CaCertificate", LdapServer.CaPem)))).GetProperty("ok").GetBoolean());
+    }
+
+    private static string VerifyClient(string how) => $"""
+        dn: cn=config
+        changetype: modify
+        replace: olcTLSVerifyClient
+        olcTLSVerifyClient: {how}
+
+        """;
+
+    [Fact]
+    public async Task A_persons_sign_in_can_be_tried_with_unsaved_settings_and_nothing_is_kept()
+    {
+        var b = await Browser();
+        var admin = await b.SignedInAsync("admin", AppFixture.AdminPassword);
+        async Task<JsonElement> Try(string login, string password, Dictionary<string, string?>? settings = null) =>
+            await admin.JsonAsync(await admin.PostAsync("/api/admin/config/ldap-try", new { settings = settings ?? new(), login, password }));
+
+        var alice = await Try("alice", "alice-directory-pw");
+        Assert.True(alice.GetProperty("ok").GetBoolean(), Says(alice));
+        Assert.Contains("as an admin", alice.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.True((await Try("EXAMPLE\\bob", "bob-directory-pw")).GetProperty("ok").GetBoolean());
+        Assert.Contains("the password is wrong", (await Try("bob", "not-it")).GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.Contains("is called \"zed\"", (await Try("zed", "whatever")).GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.Contains("not in the required group", (await Try("dave", "dave-directory-pw")).GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.Contains("no email", (await Try("carol", "carol-directory-pw")).GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.Contains("a local account named erin", (await Try("erin", "erin-directory-pw")).GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.Contains("an empty one is never tried", (await Try("bob", "")).GetProperty("message").GetString(), StringComparison.Ordinal);
+        // With unsaved settings: no required group, so dave would come in.
+        Assert.True((await Try("dave", "dave-directory-pw", new() { ["Ldap:RequiredGroup"] = "" })).GetProperty("ok").GetBoolean());
+        // The directory lets gina in, but her account could not be made: the try says so, as signing in would refuse her.
+        var gina = await Try("gina space", "gina-directory-pw", new() { ["Ldap:RequiredGroup"] = "" });
+        Assert.False(gina.GetProperty("ok").GetBoolean(), Says(gina));
+        Assert.Contains("their account cannot be made", gina.GetProperty("message").GetString(), StringComparison.Ordinal);
+
+        // Audited as a try, with the outcome; the password is nowhere.
+        var audit = await admin.GetAsync("/api/admin/audit?take=50");
+        var text = await audit.Content.ReadAsStringAsync();
+        Assert.Contains("settings.ldap_try", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("alice-directory-pw", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("dave-directory-pw", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task OpenLdaps_memberOf_counts_without_where_groups_are_and_people_sign_in_with_a_domain_in_front()
+    {
+        // memberOf is an operational attribute in OpenLDAP: sent only when asked for by name.
+        var (f, _) = Fresh(more: Form(null, ("GroupBaseDn", ""), ("AdminGroup", "llm-unique"), ("RequiredGroup", "")));
+        await using var _f = f;
+        var alice = await new TestBrowser(f).SignedInAsync("EXAMPLE\\alice", "alice-directory-pw");
+        var me = await alice.JsonAsync(await alice.GetAsync("/api/auth/me"));
+        Assert.Equal("alice", me.GetProperty("userName").GetString());
+        Assert.True(me.GetProperty("isAdmin").GetBoolean());
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await new TestBrowser(f).LoginAsync("EXAMPLE\\bob", "not-bobs"));
+        var audit = await admin.JsonAsync(await admin.GetAsync("/api/admin/audit?take=20"));
+        // The audit log has the directory's reason, under the name without its domain (one name for the
+        // throttle and the lockout however the domain is typed); the person was told only "wrong username or password".
+        Assert.Contains(audit.EnumerateArray(), e => e.GetProperty("action").GetString() == "sign_in" && e.GetProperty("target").GetString() == "bob"
+            && e.GetProperty("detail").GetString() == "directory refused: the password is wrong");
+    }
+
+    [Fact]
+    public async Task A_wrong_where_groups_are_changes_nobody_and_says_so()
+    {
+        // Before, the sync took "Where groups are" missing for every person gone: one typo, saved, disabled them all.
+        var gateway = new FakeGateway();
+        await using var f = app.Create(app.ConnectionStringFor("ldapgroups_" + Guid.NewGuid().ToString("N")[..8]), gateway,
+            new Dictionary<string, string?>(Settings(ldap.Url)) { ["Auth:DataKey"] = "ldap-settings-data-key" });
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var bob = await new TestBrowser(f).SignedInAsync("bob", "bob-directory-pw");
+
+        // Saving wakes the background check at once, as well as the one run here.
+        await SaveAsync(admin, new() { ["Ldap:GroupBaseDn"] = "ou=grups," + LdapServer.Base });
+        var sync = await admin.PostAsync("/api/admin/ldap/sync");
+        await StatusAssert.Is(HttpStatusCode.ServiceUnavailable, sync);
+        Assert.Contains("\"ou=grups,dc=example,dc=test\" (where groups are) does not exist", (await admin.JsonAsync(sync)).GetProperty("error").GetString(), StringComparison.Ordinal);
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        var people = await admin.JsonAsync(await admin.GetAsync("/api/admin/people"));
+        Assert.False(people.GetProperty("people").EnumerateArray().Single(p => p.GetProperty("userName").GetString() == "bob").GetProperty("disabled").GetBoolean());
+        await StatusAssert.Is(HttpStatusCode.OK, await bob.GetAsync("/api/auth/me"));
+        Assert.All(gateway.KeysOf("bob@example.test"), k => Assert.False(k.Blocked));
+
+        // Signing in says the directory cannot be used; the test and the try say why.
+        await StatusAssert.Is(HttpStatusCode.ServiceUnavailable, await new TestBrowser(f).LoginAsync("bob", "bob-directory-pw"));
+        var test = await TestAsync(admin, new());
+        Assert.Contains("\"ou=grups,dc=example,dc=test\" (where groups are) does not exist", test.GetProperty("message").GetString(), StringComparison.Ordinal);
+        var tried = await admin.JsonAsync(await admin.PostAsync("/api/admin/config/ldap-try", new { settings = new Dictionary<string, string?>(), login = "bob", password = "bob-directory-pw" }));
+        Assert.Contains("Their groups cannot be read", tried.GetProperty("message").GetString(), StringComparison.Ordinal);
+
+        // Fixed: the check runs again. Someone whose own entry is gone from the directory still leaves.
+        await SaveAsync(admin, new() { ["Ldap:GroupBaseDn"] = "ou=groups," + LdapServer.Base });
+        await ldap.ModifyAsync("""
+            dn: uid=hank,ou=people,dc=example,dc=test
+            changetype: add
+            objectClass: inetOrgPerson
+            uid: hank
+            cn: Hank Gone
+            sn: Gone
+            mail: hank@example.test
+            userPassword: hank-directory-pw
+
+            dn: cn=llm-users,ou=groups,dc=example,dc=test
+            changetype: modify
+            add: member
+            member: uid=hank,ou=people,dc=example,dc=test
+
+            """);
+        var hank = await new TestBrowser(f).SignedInAsync("hank", "hank-directory-pw");
+        await ldap.ModifyAsync("""
+            dn: cn=llm-users,ou=groups,dc=example,dc=test
+            changetype: modify
+            delete: member
+            member: uid=hank,ou=people,dc=example,dc=test
+
+            dn: uid=hank,ou=people,dc=example,dc=test
+            changetype: delete
+
+            """);
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync("/api/admin/ldap/sync"));
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await hank.GetAsync("/api/auth/me"));
+        var after = await admin.JsonAsync(await admin.GetAsync("/api/admin/people"));
+        Assert.Equal("ldap", after.GetProperty("people").EnumerateArray().Single(p => p.GetProperty("userName").GetString() == "hank").GetProperty("disabledReason").GetString());
+        await StatusAssert.Is(HttpStatusCode.OK, await bob.GetAsync("/api/auth/me"));
+    }
+
+    [Fact]
+    public async Task A_group_of_the_same_name_elsewhere_counts_for_nobody_when_where_groups_are_is_set()
+    {
+        // Another app's groups, of the kind the image's memberOf overlay keeps: in v5.2.0 only the groups
+        // below "Where groups are" counted on OpenLDAP (it never asked for memberOf), and so it stays.
+        const string Jenkins = """
+            dn: ou=jenkins,dc=example,dc=test
+            changetype: add
+            objectClass: organizationalUnit
+            ou: jenkins
+
+            dn: cn=llm-admins,ou=jenkins,dc=example,dc=test
+            changetype: add
+            objectClass: groupOfUniqueNames
+            cn: llm-admins
+            uniqueMember: uid=bob,ou=people,dc=example,dc=test
+
+            dn: cn=llm-users,ou=jenkins,dc=example,dc=test
+            changetype: add
+            objectClass: groupOfUniqueNames
+            cn: llm-users
+            uniqueMember: uid=dave,ou=people,dc=example,dc=test
+
+            """;
+        await ldap.ModifyAsync(Jenkins);
+        try
+        {
+            var (f, _) = Fresh(more: Settings(ldap.Url));
+            await using var _f = f;
+            var bob = await new TestBrowser(f).SignedInAsync("bob", "bob-directory-pw");
+            Assert.False((await bob.JsonAsync(await bob.GetAsync("/api/auth/me"))).GetProperty("isAdmin").GetBoolean());
+            var dave = await new TestBrowser(f).LoginAsync("dave", "dave-directory-pw");
+            await StatusAssert.Is(HttpStatusCode.Forbidden, dave);
+
+            // The try agrees, and the test says why a group named by its DN there would not count.
+            var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+            var tried = await admin.JsonAsync(await admin.PostAsync("/api/admin/config/ldap-try", new { settings = new Dictionary<string, string?>(), login = "bob", password = "bob-directory-pw" }));
+            Assert.True(tried.GetProperty("ok").GetBoolean(), Says(tried));
+            Assert.Contains("A member here, not an admin.", Says(tried), StringComparison.Ordinal);
+            var elsewhere = await TestAsync(admin, Form(null, ("AdminGroup", "cn=llm-admins,ou=jenkins," + LdapServer.Base)));
+            Assert.Contains("is not below \"ou=groups,dc=example,dc=test\" (where groups are), and on OpenLDAP only the groups there count", Says(elsewhere), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await ldap.ModifyAsync("""
+                dn: cn=llm-admins,ou=jenkins,dc=example,dc=test
+                changetype: delete
+
+                dn: cn=llm-users,ou=jenkins,dc=example,dc=test
+                changetype: delete
+
+                dn: ou=jenkins,dc=example,dc=test
+                changetype: delete
+
+                """);
+        }
+    }
+
+    [Fact]
+    public async Task A_typo_in_the_required_group_changes_nobody_and_says_so()
+    {
+        // Before, one letter wrong in "Required group", saved, disabled every directory person at the next check.
+        var gateway = new FakeGateway();
+        await using var f = app.Create(app.ConnectionStringFor("ldapreq_" + Guid.NewGuid().ToString("N")[..8]), gateway,
+            new Dictionary<string, string?>(Settings(ldap.Url)) { ["Auth:DataKey"] = "ldap-settings-data-key" });
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var bob = await new TestBrowser(f).SignedInAsync("bob", "bob-directory-pw");
+
+        await SaveAsync(admin, new() { ["Ldap:RequiredGroup"] = "llm-user" });
+        var sync = await admin.PostAsync("/api/admin/ldap/sync");
+        await StatusAssert.Is(HttpStatusCode.ServiceUnavailable, sync);
+        Assert.Contains("no required group \"llm-user\" is found below \"ou=groups,dc=example,dc=test\", so nobody is disabled for not being in it",
+            (await admin.JsonAsync(sync)).GetProperty("error").GetString(), StringComparison.Ordinal);
+        await Task.Delay(TimeSpan.FromSeconds(3)); // the background check, woken by saving, did the same
+        var people = await admin.JsonAsync(await admin.GetAsync("/api/admin/people"));
+        Assert.False(people.GetProperty("people").EnumerateArray().Single(p => p.GetProperty("userName").GetString() == "bob").GetProperty("disabled").GetBoolean());
+        await StatusAssert.Is(HttpStatusCode.OK, await bob.GetAsync("/api/auth/me"));
+        Assert.All(gateway.KeysOf("bob@example.test"), k => Assert.False(k.Blocked));
+
+        // A required group that exists, with bob not in it: he leaves, as before. Here by a name written as
+        // v5.2.0 saved it (its comma escaped as the server writes it), which still finds the group.
+        await ldap.ModifyAsync("""
+            dn: cn=Ops\2C EU,ou=groups,dc=example,dc=test
+            changetype: add
+            objectClass: groupOfNames
+            cn: Ops, EU
+            member: uid=alice,ou=people,dc=example,dc=test
+
+            """);
+        try
+        {
+            Assert.Contains("Required group: found cn=Ops\\2C EU,ou=groups,dc=example,dc=test", Says(await TestAsync(admin, Form(null, ("RequiredGroup", "Ops, EU")))), StringComparison.Ordinal);
+            await SaveAsync(admin, new() { ["Ldap:RequiredGroup"] = @"Ops\2C EU" });
+            await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync("/api/admin/ldap/sync"));
+            await StatusAssert.Is(HttpStatusCode.Unauthorized, await bob.GetAsync("/api/auth/me"));
+            Assert.All(gateway.KeysOf("bob@example.test"), k => Assert.True(k.Blocked));
+        }
+        finally
+        {
+            await ldap.ModifyAsync("""
+                dn: cn=Ops\2C EU,ou=groups,dc=example,dc=test
+                changetype: delete
+
+                """);
+        }
+    }
+
+    [Fact]
+    public async Task A_required_group_that_signing_in_sees_nobody_in_changes_nobody()
+    {
+        // The group is there, but signing in finds none of its members in it: before, the guard took it as
+        // there and the check disabled every directory person. (a) "Where groups are" emptied on this image,
+        // whose memberOf overlay keeps groupOfUniqueNames only, with a groupOfNames as the required group;
+        // (b) a required group named by its DN outside "Where groups are", on OpenLDAP.
+        await ldap.ModifyAsync("""
+            dn: ou=other,dc=example,dc=test
+            changetype: add
+            objectClass: organizationalUnit
+            ou: other
+
+            dn: cn=llm-outside,ou=other,dc=example,dc=test
+            changetype: add
+            objectClass: groupOfUniqueNames
+            cn: llm-outside
+            uniqueMember: uid=bob,ou=people,dc=example,dc=test
+
+            """);
+        try
+        {
+            var gateway = new FakeGateway();
+            await using var f = app.Create(app.ConnectionStringFor("ldapunseen_" + Guid.NewGuid().ToString("N")[..8]), gateway,
+                new Dictionary<string, string?>(Settings(ldap.Url)) { ["Auth:DataKey"] = "ldap-settings-data-key" });
+            var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+            var bob = await new TestBrowser(f).SignedInAsync("bob", "bob-directory-pw");
+            async Task NobodyChangedAsync(string why)
+            {
+                var sync = await admin.PostAsync("/api/admin/ldap/sync");
+                await StatusAssert.Is(HttpStatusCode.ServiceUnavailable, sync);
+                Assert.Contains(why, (await admin.JsonAsync(sync)).GetProperty("error").GetString(), StringComparison.Ordinal);
+                await Task.Delay(TimeSpan.FromSeconds(3)); // the background check, woken by saving, did the same
+                var people = await admin.JsonAsync(await admin.GetAsync("/api/admin/people"));
+                Assert.False(people.GetProperty("people").EnumerateArray().Single(p => p.GetProperty("userName").GetString() == "bob").GetProperty("disabled").GetBoolean());
+                await StatusAssert.Is(HttpStatusCode.OK, await bob.GetAsync("/api/auth/me"));
+                Assert.All(gateway.KeysOf("bob@example.test"), k => Assert.False(k.Blocked));
+            }
+
+            await SaveAsync(admin, new() { ["Ldap:GroupBaseDn"] = "" });
+            await NobodyChangedAsync("the required group cn=llm-users,ou=groups,dc=example,dc=test is there, but its members do not show it in their memberOf");
+
+            await SaveAsync(admin, new() { ["Ldap:GroupBaseDn"] = "ou=groups," + LdapServer.Base, ["Ldap:RequiredGroup"] = "cn=llm-outside,ou=other," + LdapServer.Base });
+            await NobodyChangedAsync("the required group cn=llm-outside,ou=other,dc=example,dc=test is not below \"ou=groups,dc=example,dc=test\" (where groups are)");
+
+            // Set right again: the check runs, and bob, in the group, stays.
+            await SaveAsync(admin, new() { ["Ldap:RequiredGroup"] = "llm-users" });
+            await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync("/api/admin/ldap/sync"));
+            await StatusAssert.Is(HttpStatusCode.OK, await bob.GetAsync("/api/auth/me"));
+        }
+        finally
+        {
+            await ldap.ModifyAsync("""
+                dn: cn=llm-outside,ou=other,dc=example,dc=test
+                changetype: delete
+
+                dn: ou=other,dc=example,dc=test
+                changetype: delete
+
+                """);
+        }
+    }
+
+    [Fact]
+    public async Task A_posixGroup_as_the_required_group_fails_the_test_and_changes_nobody()
+    {
+        // Its members are uids (memberUid), which signing in never reads. Before, the test said "found" and
+        // passed, and the check the save woke took the group as there and disabled everyone.
+        await ldap.ModifyAsync("""
+            dn: cn=llm-posix,ou=groups,dc=example,dc=test
+            changetype: add
+            objectClass: posixGroup
+            cn: llm-posix
+            gidNumber: 5000
+            memberUid: alice
+            memberUid: bob
+
+            """);
+        try
+        {
+            var gateway = new FakeGateway();
+            await using var f = app.Create(app.ConnectionStringFor("ldapposix_" + Guid.NewGuid().ToString("N")[..8]), gateway,
+                new Dictionary<string, string?>(Settings(ldap.Url)) { ["Auth:DataKey"] = "ldap-settings-data-key", ["Ldap:RequiredGroup"] = "" });
+            var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+            var bob = await new TestBrowser(f).SignedInAsync("bob", "bob-directory-pw");
+
+            const string Posix = "cn=llm-posix,ou=groups,dc=example,dc=test is a posixGroup, whose members (memberUid) are not read here";
+            foreach (var (groupBase, required) in new[] { ("ou=groups," + LdapServer.Base, "llm-posix"), ("", "llm-posix"), ("ou=groups," + LdapServer.Base, "cn=llm-posix,ou=groups," + LdapServer.Base) })
+            {
+                var test = await TestAsync(admin, Form(null, ("GroupBaseDn", groupBase), ("AdminGroup", ""), ("RequiredGroup", required)));
+                Assert.False(test.GetProperty("ok").GetBoolean(), Says(test));
+                Assert.StartsWith("Required group: " + Posix + ", so nobody from the directory can sign in. Signing in reads groupOfNames and groupOfUniqueNames groups",
+                    test.GetProperty("message").GetString(), StringComparison.Ordinal);
+            }
+            // As the admin group, a warning: nobody would be an admin, and the rest works.
+            var asAdmin = await TestAsync(admin, Form(null, ("AdminGroup", "llm-posix")));
+            Assert.True(asAdmin.GetProperty("ok").GetBoolean(), Says(asAdmin));
+            Assert.Contains("warn: Admin group: " + Posix + ", so nobody from the directory will be an admin here.", Says(asAdmin), StringComparison.Ordinal);
+
+            // Saved anyway: the check changes nobody, and says why.
+            await SaveAsync(admin, new() { ["Ldap:RequiredGroup"] = "llm-posix" });
+            var sync = await admin.PostAsync("/api/admin/ldap/sync");
+            await StatusAssert.Is(HttpStatusCode.ServiceUnavailable, sync);
+            Assert.Contains("no required group \"llm-posix\" is found below \"ou=groups,dc=example,dc=test\", so nobody is disabled for not being in it",
+                (await admin.JsonAsync(sync)).GetProperty("error").GetString(), StringComparison.Ordinal);
+            await Task.Delay(TimeSpan.FromSeconds(3)); // the background check, woken by saving, did the same
+            var people = await admin.JsonAsync(await admin.GetAsync("/api/admin/people"));
+            Assert.False(people.GetProperty("people").EnumerateArray().Single(p => p.GetProperty("userName").GetString() == "bob").GetProperty("disabled").GetBoolean());
+            await StatusAssert.Is(HttpStatusCode.OK, await bob.GetAsync("/api/auth/me"));
+            Assert.All(gateway.KeysOf("bob@example.test"), k => Assert.False(k.Blocked));
+
+            // A try says the reason, not only "not in the required group".
+            var tried = await admin.JsonAsync(await admin.PostAsync("/api/admin/config/ldap-try", new { settings = new Dictionary<string, string?>(), login = "bob", password = "bob-directory-pw" }));
+            Assert.Contains("not in the required group \"llm-posix\", so they may not sign in, and nobody can be: " + Posix, tried.GetProperty("message").GetString(), StringComparison.Ordinal);
+            var triedAdmin = await admin.JsonAsync(await admin.PostAsync("/api/admin/config/ldap-try",
+                new { settings = new Dictionary<string, string?> { ["Ldap:RequiredGroup"] = "", ["Ldap:AdminGroup"] = "llm-posix" }, login = "bob", password = "bob-directory-pw" }));
+            Assert.Contains("warn: Nobody can be an admin through \"Admin group\": " + Posix, Says(triedAdmin), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await ldap.ModifyAsync("""
+                dn: cn=llm-posix,ou=groups,dc=example,dc=test
+                changetype: delete
+
+                """);
+        }
+    }
+
+    [Fact]
+    public async Task A_group_named_by_its_DN_matches_however_the_DN_is_written_and_a_DN_of_no_group_changes_nobody()
+    {
+        // Spaces after its commas, in capitals: the server reads it, and so do signing in and the check.
+        // Before, the test found it while signing in matched nobody, and the check then disabled everyone.
+        var gateway = new FakeGateway();
+        await using var f = app.Create(app.ConnectionStringFor("ldapdn_" + Guid.NewGuid().ToString("N")[..8]), gateway,
+            new Dictionary<string, string?>(Settings(ldap.Url))
+            {
+                ["Auth:DataKey"] = "ldap-settings-data-key",
+                ["Ldap:AdminGroup"] = "CN=llm-admins, OU=groups, DC=example, DC=test",
+                ["Ldap:RequiredGroup"] = "cn=llm-users, ou=groups, dc=example, dc=test",
+            });
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var test = await TestAsync(admin, new());
+        Assert.True(test.GetProperty("ok").GetBoolean(), Says(test));
+        Assert.Contains("ok: Admin group: found cn=llm-admins,ou=groups,dc=example,dc=test.", Says(test), StringComparison.Ordinal);
+        Assert.Contains("ok: Required group: found cn=llm-users,ou=groups,dc=example,dc=test.", Says(test), StringComparison.Ordinal);
+        var alice = await new TestBrowser(f).SignedInAsync("alice", "alice-directory-pw");
+        Assert.True((await alice.JsonAsync(await alice.GetAsync("/api/auth/me"))).GetProperty("isAdmin").GetBoolean());
+        var bob = await new TestBrowser(f).SignedInAsync("bob", "bob-directory-pw");
+        Assert.Equal(HttpStatusCode.Forbidden, (await new TestBrowser(f).LoginAsync("dave", "dave-directory-pw")).StatusCode);
+        var tried = await admin.JsonAsync(await admin.PostAsync("/api/admin/config/ldap-try", new { settings = new Dictionary<string, string?>(), login = "alice", password = "alice-directory-pw" }));
+        Assert.Contains("as an admin", tried.GetProperty("message").GetString(), StringComparison.Ordinal);
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync("/api/admin/ldap/sync"));
+        await StatusAssert.Is(HttpStatusCode.OK, await bob.GetAsync("/api/auth/me"));
+        Assert.True((await alice.JsonAsync(await alice.GetAsync("/api/auth/me"))).GetProperty("isAdmin").GetBoolean());
+
+        // The OU above the groups, pasted by mistake: it is no group, so the test fails and the check changes nobody.
+        var ou = await TestAsync(admin, Form(null, ("RequiredGroup", "ou=groups," + LdapServer.Base)));
+        Assert.False(ou.GetProperty("ok").GetBoolean(), Says(ou));
+        Assert.StartsWith("Required group: \"ou=groups,dc=example,dc=test\" names ou=groups,dc=example,dc=test, which is not a group (its objectClass: organizationalUnit)",
+            ou.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.Contains("warn: Admin group: \"ou=groups,dc=example,dc=test\" names", Says(await TestAsync(admin, Form(null, ("AdminGroup", "ou=groups," + LdapServer.Base)))), StringComparison.Ordinal);
+        await SaveAsync(admin, new() { ["Ldap:RequiredGroup"] = "ou=groups," + LdapServer.Base });
+        var sync = await admin.PostAsync("/api/admin/ldap/sync");
+        await StatusAssert.Is(HttpStatusCode.ServiceUnavailable, sync);
+        Assert.Contains("no required group \"ou=groups,dc=example,dc=test\" is found (no group has that DN, or the service account cannot see it)",
+            (await admin.JsonAsync(sync)).GetProperty("error").GetString(), StringComparison.Ordinal);
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        await StatusAssert.Is(HttpStatusCode.OK, await bob.GetAsync("/api/auth/me"));
+        Assert.All(gateway.KeysOf("bob@example.test"), k => Assert.False(k.Blocked));
+    }
+
+    [Fact]
+    public void A_DN_is_the_same_however_it_is_written()
+    {
+        const string Dn = @"CN=Sales\, EMEA,OU=Groups,DC=corp,DC=example,DC=com";
+        Assert.True(Llm.Api.Ldap.LdapDirectory.IsNamed(Dn, @"cn=sales\2c emea, ou=groups, dc=corp, dc=example, dc=com"));
+        Assert.True(Llm.Api.Ldap.LdapDirectory.IsNamed(Dn, @" CN = Sales\, EMEA , OU = Groups;DC=corp,DC=example,DC=com "));
+        // Linked groups, and with them what company knowledge each may read, agree with signing in.
+        Assert.True(Llm.Api.Access.AccessService.InDirectoryGroup([Dn], @"cn=Sales\2C EMEA, ou=Groups, dc=corp, dc=example, dc=com"));
+        Assert.False(Llm.Api.Ldap.LdapDirectory.IsNamed(Dn, "OU=Groups,DC=corp,DC=example,DC=com"));
+        Assert.False(Llm.Api.Ldap.LdapDirectory.IsNamed(Dn, @"CN=Sales\, EMEA,OU=Groups,DC=corp,DC=example,DC=org"));
+        Assert.False(Llm.Api.Ldap.LdapDirectory.IsNamed(Dn, "CN=Sales, EMEA,OU=Groups,DC=corp,DC=example,DC=com"));
+        Assert.True(Llm.Api.Ldap.LdapDirectory.IsUnder(Dn, "dc=corp, dc=example, dc=com"));
+        Assert.False(Llm.Api.Ldap.LdapDirectory.IsUnder("DC=example,DC=com", Dn));
+        Assert.False(Llm.Api.Ldap.LdapDirectory.IsUnder(@"cn=x\,dc=example,dc=com", "dc=example,dc=com")); // an escaped comma parts nothing
+        // An escaped space at a value's end is part of it; a plain one is not.
+        Assert.True(Llm.Api.Ldap.LdapDirectory.SameDn(@"cn=a\ ,dc=x", @"cn=a\20 , dc=x"));
+        Assert.False(Llm.Api.Ldap.LdapDirectory.SameDn(@"cn=a\ ,dc=x", "cn=a ,dc=x"));
+        Assert.True(Llm.Api.Ldap.LdapDirectory.SameDn("cn=a+uid=b,dc=x", "UID=b + CN=a,dc=x"));
+        Assert.False(Llm.Api.Ldap.LdapDirectory.SameDn("llm-users", "llm-users"));
+    }
+
+    [Fact]
+    public async Task Several_groups_of_one_name_all_count_and_the_test_says_so()
+    {
+        // With "Where groups are" empty, groups come from memberOf, from all over the directory: a group named
+        // by its name counts wherever one of that name is, such as another app's. The test lists them.
+        await ldap.ModifyAsync("""
+            dn: ou=ci,dc=example,dc=test
+            changetype: add
+            objectClass: organizationalUnit
+            ou: ci
+
+            dn: cn=llm-unique,ou=ci,dc=example,dc=test
+            changetype: add
+            objectClass: groupOfUniqueNames
+            cn: llm-unique
+            uniqueMember: uid=bob,ou=people,dc=example,dc=test
+
+            """);
+        try
+        {
+            var memberOf = Form(null, ("GroupBaseDn", ""), ("AdminGroup", "llm-unique"), ("RequiredGroup", ""));
+            var (f, _) = Fresh(more: memberOf);
+            await using var _f = f;
+            var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+            var test = await TestAsync(admin, memberOf);
+            Assert.False(test.GetProperty("ok").GetBoolean(), Says(test));
+            var message = test.GetProperty("message").GetString()!;
+            Assert.StartsWith("Admin group: 2 groups go by \"llm-unique\" (", message, StringComparison.Ordinal);
+            Assert.Contains("cn=llm-unique,ou=groups,dc=example,dc=test", message, StringComparison.Ordinal);
+            Assert.Contains("cn=llm-unique,ou=ci,dc=example,dc=test", message, StringComparison.Ordinal);
+            Assert.EndsWith("and every one counts: the members of each are admins here. Name the one meant by its full DN, or set \"Where groups are\" to a place that holds only it.", message, StringComparison.Ordinal);
+            // As signing in reads them: bob, in the other one only, is an admin here. Hence the failure.
+            var bob = await new TestBrowser(f).SignedInAsync("bob", "bob-directory-pw");
+            Assert.True((await bob.JsonAsync(await bob.GetAsync("/api/auth/me"))).GetProperty("isAdmin").GetBoolean());
+
+            // As the required group, a warning: the members of each may sign in.
+            var required = await TestAsync(admin, Form(null, ("GroupBaseDn", ""), ("AdminGroup", ""), ("RequiredGroup", "llm-unique")));
+            Assert.True(required.GetProperty("ok").GetBoolean(), Says(required));
+            Assert.Contains("warn: Required group: 2 groups go by \"llm-unique\"", Says(required), StringComparison.Ordinal);
+            Assert.Contains("the members of each may sign in", Says(required), StringComparison.Ordinal);
+
+            // Named by its DN, only that one counts: the test passes, and a try says bob is no admin.
+            var byDn = Form(null, ("GroupBaseDn", ""), ("AdminGroup", "cn=llm-unique,ou=groups," + LdapServer.Base), ("RequiredGroup", ""));
+            var named = await TestAsync(admin, byDn);
+            Assert.True(named.GetProperty("ok").GetBoolean(), Says(named));
+            Assert.DoesNotContain("go by", Says(named), StringComparison.Ordinal);
+            var tried = await admin.JsonAsync(await admin.PostAsync("/api/admin/config/ldap-try", new { settings = byDn, login = "bob", password = "bob-directory-pw" }));
+            Assert.Contains("A member here, not an admin.", Says(tried), StringComparison.Ordinal);
+            // With "Where groups are" set, OpenLDAP's people have only the groups there: one of that name.
+            var below = await TestAsync(admin, Form(null, ("AdminGroup", "llm-unique")));
+            Assert.True(below.GetProperty("ok").GetBoolean(), Says(below));
+            Assert.DoesNotContain("go by", Says(below), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await ldap.ModifyAsync("""
+                dn: cn=llm-unique,ou=ci,dc=example,dc=test
+                changetype: delete
+
+                dn: ou=ci,dc=example,dc=test
+                changetype: delete
+
+                """);
+        }
+    }
+
+    [Fact]
+    public async Task A_try_is_held_by_the_same_brakes_as_signing_in()
+    {
+        // A try tells whether a password is right: wrong ones count as wrong sign-ins do, against the
+        // name from this address (the throttle) and against their account here (the lockout).
+        var (f, _) = Fresh(more: Settings(ldap.Url));
+        await using var _f = f;
+        await new TestBrowser(f).SignedInAsync("bob", "bob-directory-pw");
+        async Task<(TestBrowser Admin, JsonElement Result)> Try(TestBrowser? admin, string password)
+        {
+            admin ??= await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+            return (admin, await admin.JsonAsync(await admin.PostAsync("/api/admin/config/ldap-try", new { settings = new Dictionary<string, string?>(), login = "bob", password })));
+        }
+
+        var (first, _) = await Try(null, "guess-0");
+        for (var i = 1; i < 5; i++)
+        {
+            Assert.Contains("the password is wrong", Says((await Try(first, $"guess-{i}")).Result), StringComparison.Ordinal);
+        }
+        var held = (await Try(first, "bob-directory-pw")).Result;
+        Assert.False(held.GetProperty("ok").GetBoolean());
+        Assert.StartsWith("Not tried: too many wrong passwords for \"bob\"", held.GetProperty("message").GetString(), StringComparison.Ordinal);
+        // The same name from the same address cannot sign in either; from elsewhere it can (one office's typos lock out nobody else).
+        await StatusAssert.Is(HttpStatusCode.TooManyRequests, await new TestBrowser(f, first.Ip).LoginAsync("bob", "bob-directory-pw"));
+        await new TestBrowser(f).SignedInAsync("bob", "bob-directory-pw");
+
+        // Ten wrong ones from several addresses lock the account here, for tries and sign-ins alike.
+        for (var round = 0; round < 2; round++)
+        {
+            var (admin, _) = await Try(null, "guess-a");
+            for (var i = 1; i < 5; i++)
+            {
+                await Try(admin, $"guess-{round}-{i}");
+            }
+        }
+        var locked = (await Try(null, "bob-directory-pw")).Result;
+        Assert.StartsWith("Not tried: their account here (bob) is locked", locked.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.False((await new TestBrowser(f).LoginAsync("bob", "bob-directory-pw")).IsSuccessStatusCode);
+    }
+
+    [Fact]
+    public async Task A_test_of_another_account_is_held_by_the_same_brakes_as_signing_in()
+    {
+        // The test says whether a typed password is right for the DN typed: with someone's DN as the service
+        // account, a guess at their password. Before, nothing held it (only the try was).
+        var (f, _) = Fresh(more: Settings(ldap.Url));
+        await using var _f = f;
+        await new TestBrowser(f).SignedInAsync("bob", "bob-directory-pw");
+        const string Bob = "uid=bob,ou=people,dc=example,dc=test";
+        async Task<(TestBrowser Admin, JsonElement Result)> Test(TestBrowser? admin, string password, string dn = Bob)
+        {
+            admin ??= await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+            return (admin, await TestAsync(admin, Form(null, ("BindDn", dn), ("BindPassword", password))));
+        }
+
+        var (first, firstResult) = await Test(null, "guess-0");
+        Assert.Contains("refused the service account uid=bob", Says(firstResult), StringComparison.Ordinal);
+        for (var i = 1; i < 5; i++)
+        {
+            Assert.False((await Test(first, $"guess-{i}")).Result.GetProperty("ok").GetBoolean());
+        }
+        // Held, however the DN is written, and the try that would sign in as it too.
+        foreach (var dn in new[] { Bob, "UID=bob, ou=people, dc=example, dc=test" })
+        {
+            var held = (await Test(first, "bob-directory-pw", dn)).Result;
+            Assert.False(held.GetProperty("ok").GetBoolean());
+            Assert.StartsWith($"Not tested: too many wrong passwords for \"{dn}\"", held.GetProperty("message").GetString(), StringComparison.Ordinal);
+        }
+        var tried = await first.JsonAsync(await first.PostAsync("/api/admin/config/ldap-try",
+            new { settings = Form(null, ("BindDn", Bob), ("BindPassword", "bob-directory-pw")), login = "alice", password = "alice-directory-pw" }));
+        Assert.StartsWith($"Not tried: too many wrong passwords for \"{Bob}\"", tried.GetProperty("message").GetString(), StringComparison.Ordinal);
+        // From another address it goes ahead (one office's typos hold nobody else), and the right password says so.
+        var (_, right) = await Test(null, "bob-directory-pw");
+        Assert.Contains("Signed in as uid=bob,ou=people,dc=example,dc=test with the password typed above", Says(right), StringComparison.Ordinal);
+
+        // Wrong ones from several addresses lock bob's account here, for tests and sign-ins alike.
+        for (var round = 0; round < 2; round++)
+        {
+            var (admin, _) = await Test(null, "guess-a");
+            for (var i = 1; i < 5; i++)
+            {
+                await Test(admin, $"guess-{round}-{i}");
+            }
+        }
+        var locked = (await Test(null, "bob-directory-pw")).Result;
+        Assert.StartsWith("Not tested: their account here (bob) is locked", locked.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.False((await new TestBrowser(f).LoginAsync("bob", "bob-directory-pw")).IsSuccessStatusCode);
+
+        // The saved service account's own password, typed again (it changed in the directory, say): never held.
+        var (owner, _) = await Test(null, "not-the-password", LdapServer.ServiceDn);
+        for (var i = 0; i < 6; i++)
+        {
+            Assert.Contains("the password is wrong", Says((await Test(owner, $"not-it-{i}", LdapServer.ServiceDn)).Result), StringComparison.Ordinal);
+        }
+        Assert.True((await Test(owner, LdapServer.ServicePassword, LdapServer.ServiceDn)).Result.GetProperty("ok").GetBoolean());
+
+        // And the test is rate limited as signing in is.
+        var endpoints = f.Services.GetRequiredService<Microsoft.AspNetCore.Routing.EndpointDataSource>().Endpoints.OfType<Microsoft.AspNetCore.Routing.RouteEndpoint>();
+        foreach (var path in new[] { "/api/admin/config/ldap-test", "/api/admin/config/ldap-try" })
+        {
+            var endpoint = endpoints.Single(e => "/" + e.RoutePattern.RawText?.TrimStart('/') == path);
+            Assert.Equal("sign-in", endpoint.Metadata.GetMetadata<Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute>()?.PolicyName);
+        }
+    }
+
+    [Fact]
+    public async Task The_saved_password_goes_only_to_the_saved_server_and_account()
+    {
+        var (f, _) = Fresh();
+        await using var _f = f;
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        await SaveAsync(admin, Form());
+
+        // Another server in the form, the password field blank: nothing connects there, and it says why.
+        using var elsewhere = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        elsewhere.Start();
+        var other = $"ldap://127.0.0.1:{((IPEndPoint)elsewhere.LocalEndpoint).Port}";
+        var test = await TestAsync(admin, Form(other, ("BindPassword", "")));
+        Assert.False(test.GetProperty("ok").GetBoolean());
+        Assert.Contains("the saved one is sent only to the saved server, as the saved service account", test.GetProperty("message").GetString(), StringComparison.Ordinal);
+        var tried = await admin.JsonAsync(await admin.PostAsync("/api/admin/config/ldap-try",
+            new { settings = Form(other, ("BindPassword", "")), login = "bob", password = "bob-directory-pw" }));
+        Assert.False(tried.GetProperty("ok").GetBoolean());
+        Assert.False(elsewhere.Pending());
+        // Another service account on the saved server: the same.
+        var account = await TestAsync(admin, Form(null, ("BindDn", "cn=admin," + LdapServer.Base), ("BindPassword", "")));
+        Assert.Contains("the saved one is sent only to the saved server", account.GetProperty("message").GetString(), StringComparison.Ordinal);
+        // The saved server and account, written a little differently: the saved password.
+        var same = await TestAsync(admin, Form(ldap.Url.ToUpperInvariant().Replace("LDAP://", "ldap://", StringComparison.Ordinal), ("BindDn", LdapServer.ServiceDn.ToUpperInvariant()), ("BindPassword", "")));
+        Assert.True(same.GetProperty("ok").GetBoolean(), Says(same));
+        Assert.Contains("with the saved password", Says(same), StringComparison.Ordinal);
+
+        // Each check is audited with the server it went to.
+        var audit = await admin.JsonAsync(await admin.GetAsync("/api/admin/audit?take=20"));
+        Assert.Contains(audit.EnumerateArray(), e => e.GetProperty("action").GetString() == "settings.ldap_test" && e.GetProperty("target").GetString() == other
+            && !e.GetProperty("success").GetBoolean());
+        Assert.Contains(audit.EnumerateArray(), e => e.GetProperty("action").GetString() == "settings.ldap_try" && e.GetProperty("target").GetString() == "bob"
+            && e.GetProperty("detail").GetString()!.StartsWith(other + ": ", StringComparison.Ordinal));
+
+        // Saved encrypted, with the directory's CA: the saved password never goes over a weaker connection.
+        await SaveAsync(admin, Form(null, ("StartTls", "true"), ("CaCertificate", LdapServer.CaPem)));
+        async Task<string> Withheld(params (string Key, string? Value)[] changes)
+        {
+            var r = await TestAsync(admin, Form(null, [("StartTls", "true"), ("CaCertificate", LdapServer.CaPem), ("BindPassword", ""), .. changes]));
+            Assert.False(r.GetProperty("ok").GetBoolean(), Says(r));
+            return r.GetProperty("message").GetString()!;
+        }
+        Assert.Contains("the form turns \"Use StartTLS\" off, so it would cross the network unencrypted", await Withheld(("StartTls", "false")), StringComparison.Ordinal);
+        Assert.Contains("the form turns \"Accept any certificate\" on", await Withheld(("IgnoreCertificateErrors", "true")), StringComparison.Ordinal);
+        using var otherKey = RSA.Create(2048);
+        var otherCa = new CertificateRequest("CN=Someone Else's CA", otherKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        otherCa.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+        using var otherCaCertificate = otherCa.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+        Assert.Contains("the form changes \"Directory's CA\"", await Withheld(("CaCertificate", otherCaCertificate.ExportCertificatePem())), StringComparison.Ordinal);
+        // As safe as saved, the CA pasted again with other line breaks: the saved password.
+        var safe = await TestAsync(admin, Form(null, ("StartTls", "true"), ("CaCertificate", LdapServer.CaPem.Replace("\n", "\r\n", StringComparison.Ordinal)), ("BindPassword", "")));
+        Assert.True(safe.GetProperty("ok").GetBoolean(), Says(safe));
+        Assert.Contains("with the saved password", Says(safe), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Active_Directorys_reasons_and_escaped_names_read_in_plain_words()
+    {
+        static Novell.Directory.Ldap.LdapException Refused(string data) => new("Invalid Credentials", Novell.Directory.Ldap.LdapException.InvalidCredentials,
+            $"80090308: LdapErr: DSID-0C09044E, comment: AcceptSecurityContext error, data {data}, v4563\0");
+        Assert.Equal("the name or the password is wrong", Llm.Api.Ldap.LdapErrors.AdReason(Refused("52e")));
+        Assert.Contains("must be changed", Llm.Api.Ldap.LdapErrors.AdReason(Refused("773")), StringComparison.Ordinal);
+        Assert.Equal("its password has expired", Llm.Api.Ldap.LdapErrors.AdReason(Refused("532")));
+        Assert.Equal("the account is disabled", Llm.Api.Ldap.LdapErrors.AdReason(Refused("533")));
+        Assert.Equal("the account has expired", Llm.Api.Ldap.LdapErrors.AdReason(Refused("701")));
+        Assert.Equal("the account is locked out after too many wrong passwords", Llm.Api.Ldap.LdapErrors.PersonRefused(Refused("775")));
+        Assert.Null(Llm.Api.Ldap.LdapErrors.AdReason(new("Invalid Credentials", Novell.Directory.Ldap.LdapException.InvalidCredentials, "")));
+        Assert.Equal("Smith, Jane", Llm.Api.Ldap.LdapDirectory.CommonName(@"CN=Smith\, Jane,OU=Staff,DC=corp,DC=example,DC=com"));
+        Assert.Equal("Svc Reader, LDAP", Llm.Api.Ldap.LdapDirectory.CommonName(LdapServer.ServiceDn));
+        Assert.Equal("Zoë", Llm.Api.Ldap.LdapDirectory.CommonName(@"cn=Zo\C3\AB,ou=people,dc=example,dc=test"));
+        Assert.Equal("llm-admins", Llm.Api.Ldap.LdapDirectory.CommonName("cn=llm-admins,ou=groups,dc=example,dc=test"));
+    }
+
+    [Fact]
+    public void A_busy_directory_is_never_taken_for_a_wrong_password()
+    {
+        // Only the person's own refusals count against them (the throttle, the lockout); the directory's
+        // state (busy, unavailable, out of time, wanting encryption) answers "cannot be reached" instead.
+        static Novell.Directory.Ldap.LdapException Answer(int code, string message = "") => new("refused", code, message);
+        Assert.True(Llm.Api.Ldap.LdapErrors.IsPersonRefusal(Answer(Novell.Directory.Ldap.LdapException.InvalidCredentials, "80090308: LdapErr: DSID-0C09044E, comment: AcceptSecurityContext error, data 775, v4563")));
+        Assert.True(Llm.Api.Ldap.LdapErrors.IsPersonRefusal(Answer(Novell.Directory.Ldap.LdapException.UnwillingToPerform)));
+        foreach (var code in new[] { Novell.Directory.Ldap.LdapException.Busy, Novell.Directory.Ldap.LdapException.Unavailable, Novell.Directory.Ldap.LdapException.Other,
+            Novell.Directory.Ldap.LdapException.TimeLimitExceeded, Novell.Directory.Ldap.LdapException.AdminLimitExceeded, Novell.Directory.Ldap.LdapException.ConfidentialityRequired })
+        {
+            Assert.False(Llm.Api.Ldap.LdapErrors.IsPersonRefusal(Answer(code)), code.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+        Assert.Contains("when asked to check the password of uid=bob,ou=people,dc=example,dc=test",
+            Llm.Api.Ldap.LdapErrors.PersonNotChecked("uid=bob,ou=people,dc=example,dc=test", Answer(Novell.Directory.Ldap.LdapException.Busy, "too busy")), StringComparison.Ordinal);
+        Assert.Contains("use ldaps:// or turn on \"Use StartTLS\"",
+            Llm.Api.Ldap.LdapErrors.PersonNotChecked("uid=bob,ou=people,dc=example,dc=test", Answer(Novell.Directory.Ldap.LdapException.ConfidentialityRequired)), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_refused_certificate_says_what_mends_it()
+    {
+        // As osixia/openldap 1.5.0's own: a certificate in date from a CA that expired (on 2026-01-15). Pasting that CA mends nothing.
+        var now = DateTimeOffset.UtcNow;
+        using var oldKey = RSA.Create(2048);
+        using var oldCa = Ca("Old Directory CA", oldKey, now.AddYears(-3), now.AddDays(-30));
+        using var key = RSA.Create(2048);
+        var request = new CertificateRequest("CN=ldap.example.test", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var names = new SubjectAlternativeNameBuilder();
+        names.AddDnsName("ldap.example.test");
+        request.CertificateExtensions.Add(names.Build());
+        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([new Oid("1.3.6.1.5.5.7.3.1")], false));
+        // Signed past its CA's own end, as that image's are: CertificateRequest.Create(issuer) would refuse to.
+        using var leaf = request.Create(oldCa.SubjectName, X509SignatureGenerator.CreateForRSA(oldKey, RSASignaturePadding.Pkcs1), now.AddDays(-1), now.AddYears(1), RandomNumberGenerator.GetBytes(16));
+        var expired = Llm.Api.Chat.Tools.ServerTls.Problems(Llm.Core.Chat.TlsCheck.OwnCa, [oldCa], leaf, null, System.Net.Security.SslPolicyErrors.RemoteCertificateChainErrors, "ldap.example.test");
+        Assert.Contains(expired, r => r.Contains("Old Directory CA, a CA in its chain, expired on", StringComparison.Ordinal));
+        var fix = Llm.Api.Ldap.LdapErrors.CertificateFix(expired, "ldap.example.test");
+        Assert.Contains("a certificate that is in date, from a CA that is in date", fix, StringComparison.Ordinal);
+        Assert.DoesNotContain("Paste the CA", fix, StringComparison.Ordinal);
+        // That image sends its CA along, so without it given the CA is also untrusted: one fix for both.
+        fix = Llm.Api.Ldap.LdapErrors.CertificateFix([.. expired, "It was issued by Old Directory CA, a CA this server does not trust."], "ldap.example.test");
+        Assert.StartsWith("Give the directory a certificate that is in date, from a CA that is in date, and paste that CA in \"Directory's CA\"", fix, StringComparison.Ordinal);
+        Assert.DoesNotContain("Paste the CA", fix, StringComparison.Ordinal);
+
+        // Another name than the one it is for: that name, not a CA.
+        var otherName = Llm.Api.Chat.Tools.ServerTls.Problems(Llm.Core.Chat.TlsCheck.OwnCa, [oldCa], leaf, null, System.Net.Security.SslPolicyErrors.RemoteCertificateNameMismatch, "10.0.0.5");
+        Assert.Contains("It is for ldap.example.test, not 10.0.0.5.", otherName);
+        fix = Llm.Api.Ldap.LdapErrors.CertificateFix(["It is for ldap.example.test, not 10.0.0.5."], "10.0.0.5");
+        Assert.StartsWith("Write \"Directory server\" with a name the certificate is for, or give the directory a certificate for 10.0.0.5.", fix, StringComparison.Ordinal);
+        Assert.DoesNotContain("Paste the CA", fix, StringComparison.Ordinal);
+
+        // Issued by a CA not given: that CA is what is missing. Each ends with the way round it, for tests only.
+        using var otherKey = RSA.Create(2048);
+        using var otherCa = Ca("Another CA", otherKey, now.AddDays(-1), now.AddYears(1));
+        var untrusted = Llm.Api.Chat.Tools.ServerTls.Problems(Llm.Core.Chat.TlsCheck.OwnCa, [otherCa], leaf, null, System.Net.Security.SslPolicyErrors.RemoteCertificateChainErrors, "ldap.example.test");
+        fix = Llm.Api.Ldap.LdapErrors.CertificateFix(untrusted, "ldap.example.test");
+        Assert.Equal("Paste the CA that issued it in \"Directory's CA\". For a test server only, \"Accept any certificate\" turns the check off.", fix);
+
+        static X509Certificate2 Ca(string name, RSA key, DateTimeOffset from, DateTimeOffset to)
+        {
+            var ca = new CertificateRequest("CN=" + name, key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            ca.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+            ca.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
+            return ca.CreateSelfSigned(from, to);
         }
     }
 }

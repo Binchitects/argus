@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, PlugZap, RotateCcw, RotateCw, Save, Search, Undo2, Zap } from 'lucide-react'
-import { useMemo, useState, type ReactNode } from 'react'
+import { AlertTriangle, RotateCcw, RotateCw, Save, Search, Undo2, Zap } from 'lucide-react'
+import { Fragment, useMemo, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
@@ -19,6 +19,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, ApiError, errorMessage, infoQuery } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { CompanySignInPanel } from './company-sign-in'
+import { DirectoryChecks, DirectoryGuide } from './directory-panel'
 import { BotAddresses } from './bot-addresses'
 import { RecalculatePanel } from './recalculate'
 import { bytesHint, initialValue, isShown, limits, shownValue, slug, wireValue, type SettingsData, type SettingView } from './settings-model'
@@ -184,6 +185,7 @@ export function SettingsPage() {
                 <CardDescription>{groupNote(g.settings)}</CardDescription>
               </CardHeader>
               <CardContent className="grid gap-0 divide-y">
+                {g.title.startsWith('Company directory') && !q && <DirectoryGuide open={!valueOf('Ldap:Url').trim()} />}
                 {g.settings.map((s) => (
                   <SettingRow
                     key={s.key}
@@ -200,7 +202,7 @@ export function SettingsPage() {
                     }}
                   />
                 ))}
-                {g.title.startsWith('Company directory') && <DirectoryTest draft={draft} />}
+                {g.title.startsWith('Company directory') && <DirectoryChecks draft={draft} />}
                 {g.title === 'Company sign-in' && <CompanySignInPanel draft={draft} />}
                 {g.title === 'Chat bots' && <BotAddresses />}
                 {g.title === 'Prices' && <RecalculatePanel />}
@@ -266,7 +268,7 @@ function SettingRow({ s, value, error, onChange }: { s: SettingView; value: stri
           )}
         </div>
         <p id={`${id}-help`} className="mt-1 text-sm text-muted-foreground">
-          {s.help}
+          <HelpText text={s.help} />
           {/* A space before each line: read as one description, the sentences stay apart. */}
           {s.impact && <> <span className="block text-xs">{s.impact}</span></>}
           {scope.note && <> <span className="block text-xs">{scope.note}</span></>}
@@ -305,6 +307,29 @@ function SettingRow({ s, value, error, onChange }: { s: SettingView; value: stri
         )}
       </div>
     </div>
+  )
+}
+
+/** A setting's help, with each example for OpenLDAP or Active Directory ("OpenLDAP: …") on a line of its own. */
+function HelpText({ text }: { text: string }) {
+  const [first, ...examples] = text.split(/ (?=(?:OpenLDAP|Active Directory)[^.:]{0,40}: )/)
+  return (
+    <>
+      {first}
+      {examples.map((e) => {
+        const colon = e.indexOf(': ')
+        // The space keeps the words apart where the help is read as one (a screen reader's description).
+        return (
+          <Fragment key={e}>
+            {' '}
+            <span className="mt-1 block">
+              <span className="font-medium text-foreground">{e.slice(0, colon)}:</span>
+              {e.slice(colon + 1)}
+            </span>
+          </Fragment>
+        )
+      })}
+    </>
   )
 }
 
@@ -404,24 +429,6 @@ function Editor({ s, id, value, onChange, describedBy, invalid }: { s: SettingVi
         return <Textarea {...common} rows={s.lines} spellCheck={false} value={value} onChange={(e) => onChange(e.target.value)} placeholder={s.optional ? 'not set' : undefined} className="font-mono text-xs" />
       return <Input {...common} value={value} onChange={(e) => onChange(e.target.value)} placeholder={s.patternHelp ?? (s.optional ? 'not set' : undefined)} className={cn(s.key.includes('ARGS') || s.key.includes('FILES') ? 'font-mono text-xs' : undefined)} />
   }
-}
-
-function DirectoryTest({ draft }: { draft: Record<string, string> }) {
-  const test = useMutation({
-    mutationFn: () => api<{ ok: boolean; message: string }>('/api/admin/config/ldap-test', { body: Object.fromEntries(Object.entries(draft).filter(([k]) => k.startsWith('Ldap:'))) }),
-  })
-  return (
-    <div className="grid gap-3 pt-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <Button variant="outline" onClick={() => test.mutate()} loading={test.isPending}>
-          <PlugZap /> Test connection
-        </Button>
-        <span className="text-sm text-muted-foreground">Tries the values above, saved or not.</span>
-      </div>
-      {test.data && <Alert variant={test.data.ok ? 'success' : 'destructive'}>{test.data.message}</Alert>}
-      {test.error && <Alert variant="destructive">{errorMessage(test.error)}</Alert>}
-    </div>
-  )
 }
 
 function RestartBanner() {

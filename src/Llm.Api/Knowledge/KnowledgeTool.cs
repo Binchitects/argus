@@ -50,7 +50,7 @@ public sealed class KnowledgeSearch(AppDbContext db, AccessService access, Embed
         }
         // Their directory groups, as SharePoint names Microsoft Entra groups: by the group's name or ID, as the company sign-in's groups claim
         // does; and the app's groups that stand for one (linked to a directory group, or provisioned by SCIM under the group's name).
-        var directory = user.DirectoryGroups.SelectMany(g => new[] { g, Ldap.LdapDirectory.CommonName(g) }).ToList();
+        var directory = user.DirectoryGroups.SelectMany(Ldap.LdapDirectory.Names).ToList();
         if (member.Groups.Count > 0)
         {
             directory.AddRange(await db.Groups.AsNoTracking().Where(g => member.Groups.Contains(g.Id) && (g.Directory != null || g.Scim))

@@ -73,7 +73,9 @@ public sealed partial class SignInService(
 
     private async Task<SignInOutcome> PasswordOnceAsync(string login, string password, bool remember)
     {
-        login = login.Trim();
+        // "CORP\jsmith" is jsmith (no username here holds a backslash): one name for the
+        // directory, the lockout and the throttle, however the domain in front is typed.
+        login = LdapDirectory.SignInName(login);
         if (throttle.IsBanned(Ip, login))
         {
             await audit.WriteAsync("sign_in", login, success: false, detail: "address banned");
@@ -107,10 +109,10 @@ public sealed partial class SignInService(
         {
             return await FailAsync(login, SignInOutcome.LockedOut, "account locked");
         }
-        LdapPerson? person;
+        LdapSignIn directorySays;
         try
         {
-            person = await ldap.AuthenticateAsync(login, password);
+            directorySays = await ldap.SignInAsync(login, password);
         }
         catch (LdapUnavailableException ex)
         {
@@ -118,13 +120,15 @@ public sealed partial class SignInService(
             await audit.WriteAsync("sign_in", login, success: false, detail: "directory unavailable");
             return SignInOutcome.Unavailable;
         }
-        if (person is null)
+        if (directorySays.Person is not { } person)
         {
             if (user is not null)
             {
                 await CountFailureAsync(user);
             }
-            return await FailAsync(login, SignInOutcome.Invalid, "directory refused");
+            // The directory's reason (a wrong password, an expired one) is for the audit log only:
+            // the person is told what anyone is told, so nobody learns which accounts exist.
+            return await FailAsync(login, SignInOutcome.Invalid, $"directory refused: {directorySays.Refusal}");
         }
         if (!ldap.IsAllowed(person))
         {
@@ -175,11 +179,8 @@ public sealed partial class SignInService(
         return SignInOutcome.Success;
     }
 
-    /// <summary>
-    /// Creates or updates the local record of a directory person. The directory
-    /// is authoritative for their name, email and admin role.
-    /// </summary>
-    public async Task<(AppUser? User, string Refusal)> SyncFromDirectoryAsync(LdapPerson person)
+    /// <summary>The local record of a directory person (null before their first sign-in), or why they cannot have one here.</summary>
+    private async Task<(AppUser? User, string? Refusal)> MatchDirectoryPersonAsync(LdapPerson person)
     {
         if (string.IsNullOrEmpty(person.Email))
         {
@@ -196,6 +197,105 @@ public sealed partial class SignInService(
         if (byEmail is not null && byEmail.Id != user?.Id)
         {
             return (null, $"another account already uses {person.Email}");
+        }
+        return (user, null);
+    }
+
+    /// <summary>
+    /// Why the admin's check of a typed password may not go ahead, or null: a try of a person's sign-in (their
+    /// username), or a test of a service account other than the saved one (its DN, or user@domain). Either is a
+    /// guess at a password like any sign-in, so the same brakes hold it: the throttle on that name from this
+    /// address, and the lock on their account here.
+    /// </summary>
+    public async Task<string?> TryRefusalAsync(string login)
+    {
+        var (key, shown, user) = await GuessedAsync(login);
+        if (throttle.IsBanned(Ip, key))
+        {
+            return $"too many wrong passwords for \"{shown}\" (or for many names) from this address: sign-ins, tries and tests of it from here are refused for a while (how long: Settings → Sign-in and sessions)";
+        }
+        return user is not null && await users.IsLockedOutAsync(user)
+            ? $"their account here ({user.UserName}) is locked for a while after wrong passwords, and a check waits as signing in does"
+            : null;
+    }
+
+    /// <summary>A password the directory refused in the admin's try or test: counted as a sign-in's would be, against this address and their account here.</summary>
+    public async Task TryRefusedAsync(string login)
+    {
+        var (key, _, user) = await GuessedAsync(login);
+        throttle.Failure(Ip, key);
+        if (user is not null)
+        {
+            await CountFailureAsync(user);
+        }
+    }
+
+    /// <summary>
+    /// Whose password a check guesses: the name the throttle holds (a username as signing in reads it; a DN in
+    /// one form, however it is written), that name as shown, and their directory account here, if any.
+    /// </summary>
+    private async Task<(string Key, string Shown, AppUser? User)> GuessedAsync(string login)
+    {
+        if (LdapDirectory.Rdns(login) is { } rdns)
+        {
+            // A DN: the person whose entry it is, if they have signed in here (by their name first, then by the DN as written).
+            var dn = login.Trim();
+            var named = await users.FindByNameAsync(LdapDirectory.CommonName(dn).ToLowerInvariant());
+            var exactly = dn.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal);
+            var user = named is { Source: UserSource.Ldap, LdapDn: { } stored } && LdapDirectory.SameDn(stored, dn) ? named
+                : await users.Users.FirstOrDefaultAsync(u => u.Source == UserSource.Ldap && u.LdapDn != null && EF.Functions.ILike(u.LdapDn, exactly));
+            return (string.Join(',', rdns), dn, user);
+        }
+        var name = LdapDirectory.SignInName(login);
+        var found = await users.FindByNameAsync(name.ToLowerInvariant()) ?? await users.FindByEmailAsync(name);
+        return (name, name, found is { Source: UserSource.Ldap } ? found : null);
+    }
+
+    /// <summary>
+    /// What signing in would do here for a person the directory let in, changing nothing (the
+    /// admin's try): why the app would still refuse them, or how they come in.
+    /// </summary>
+    public async Task<(string? Refusal, string Verdict)> DirectoryVerdictAsync(LdapPerson person)
+    {
+        var (user, refusal) = await MatchDirectoryPersonAsync(person);
+        if (refusal is not null)
+        {
+            return (refusal, "");
+        }
+        if (user is null)
+        {
+            // The checks that making the account runs (a username of letters, digits and - . _ @ +).
+            var candidate = new AppUser { UserName = person.UserName, Email = person.Email, Source = UserSource.Ldap, LdapDn = person.Dn };
+            foreach (var validator in users.UserValidators)
+            {
+                if (await validator.ValidateAsync(users, candidate) is { Succeeded: false } invalid)
+                {
+                    return ($"their account cannot be made: {string.Join(" ", invalid.Errors.Select(e => e.Description)).TrimEnd('.')}", "");
+                }
+            }
+            return (null, "Their account here is made when they first sign in.");
+        }
+        if (user.IsDisabled && user.DisabledReason != "ldap")
+        {
+            return ("an admin disabled their account here (Admin → People)", "");
+        }
+        if (await users.IsLockedOutAsync(user))
+        {
+            return ("their account here is locked for a while after wrong passwords", "");
+        }
+        return (null, $"They have an account here ({user.UserName}): signing in brings it up to date with the directory.");
+    }
+
+    /// <summary>
+    /// Creates or updates the local record of a directory person. The directory
+    /// is authoritative for their name, email and admin role.
+    /// </summary>
+    public async Task<(AppUser? User, string Refusal)> SyncFromDirectoryAsync(LdapPerson person)
+    {
+        var (user, refusal) = await MatchDirectoryPersonAsync(person);
+        if (refusal is not null)
+        {
+            return (null, refusal);
         }
 
         var admin = ldap.IsAdmin(person);

@@ -129,37 +129,146 @@ API key.
 
 ## The company directory (LDAP / Active Directory)
 
-Off while `LDAP_URL` is empty. Set these in `.env`:
+Set up in **Admin → Settings → Company directory (LDAP)**
+(`/admin/settings#company-directory-ldap`), and off while **Directory server**
+is empty. Every setting applies as soon as it is saved, with no restart. The
+section opens with a step-by-step guide (open until a directory is set), each
+field's help has an example for OpenLDAP and one for Active Directory, and it
+ends with two checks that use the values in the form, saved or not.
 
-| Setting | Example |
-|---|---|
-| `LDAP_URL` | `ldaps://dc1.example.com:636`, or `ldap://ldap.example.com` with `LDAP_STARTTLS=true` |
-| `LDAP_BIND_DN` / `LDAP_BIND_PASSWORD` | a **read-only** service account that can search people and groups |
-| `LDAP_USER_BASE_DN` | `OU=Staff,DC=example,DC=com` |
-| `LDAP_GROUP_BASE_DN` | only for directories without `memberOf` (OpenLDAP without the overlay) |
-| `LDAP_ADMIN_GROUP` | `llm-admins`: members are admins here |
-| `LDAP_REQUIRED_GROUP` | `llm-users`: only members may sign in (empty = anyone the search finds) |
-| `LDAP_SYNC_INTERVAL` | `00:15:00` |
+| Setting | OpenLDAP | Active Directory |
+|---|---|---|
+| **Directory server** | `ldap://ldap.example.com:389` with **Use StartTLS**, or `ldaps://ldap.example.com:636` | `ldaps://dc1.corp.example.com:636` |
+| **Directory's CA** | the CA of its TLS certificate, in PEM, when it is your own | your enterprise CA's root (`certutil -ca.cert ca.cer`, then `certutil -encode ca.cer ca.pem`) |
+| **Service account** / its password | a **read-only** DN: `cn=readonly,dc=example,dc=com` | `reader@corp.example.com`, `CORP\reader`, or its DN |
+| **Where people are** | `ou=people,dc=example,dc=com` | `OU=Staff,DC=corp,DC=example,DC=com`, or the domain, `DC=corp,DC=example,DC=com` |
+| **Which entries are people** | the default, which finds `uid`, `sAMAccountName`, `userPrincipalName` and `mail` (`{0}` is the name typed) | without disabled accounts: `(&(objectCategory=person)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2))(\|(sAMAccountName={0})(userPrincipalName={0})(mail={0})))` |
+| **Where groups are** | `ou=groups,dc=example,dc=com`, unless its memberOf overlay covers your kind of group | empty: `memberOf` is always there |
+| **Admin group** | `llm-admins`, or its DN | `LLM Admins`, or its DN |
+| **Required group** | `llm-users` (empty: everyone the search finds) | `LLM Users`; never `Domain Users`, which is in nobody's `memberOf` |
 
-People sign in with their directory name (`uid` or `sAMAccountName`) or email.
-The app searches for them with the service account, then checks the password by
-binding as them. On the first sign-in it creates them, gives them an API key,
-and sets their role from the admin group. The directory stays in charge of
-their name, email, role and password; the app does not let those be changed
-here.
+**Test the settings** connects, checks the certificate, signs in as the service
+account and looks for people and the groups named, step by step. Each step says
+what works and, when something does not, exactly what to fix: the address or
+the port ("nothing answers at", "ldaps:// needs the TLS port"), the certificate
+(self-signed, issued by a CA this server does not trust, for another name,
+expired; or the directory demanding a client certificate, which the app has none
+of: OpenLDAP's `TLSVerifyClient demand`, the default of the osixia/openldap
+image, whose `LDAP_TLS_VERIFY_CLIENT` must then be `never` or `try`), the
+service account (a wrong DN or password, a DN in another domain than the server
+holds, `user@domain` or `DOMAIN\user` on a server that takes
+only DNs, Active Directory's own reasons below), where people are (empty, not a
+DN, or missing, with the part that exists), the user filter, and the groups (not
+found; a `posixGroup` or no group at all, such as the OU above it; not in their
+members' `memberOf`; or several groups of one name, which all count: a failure
+for the admin group, a warning for the required group). It says which password it used: the
+one typed in the field, or the saved one when the field is blank. The saved one
+is used only with the saved server (its host and port) and service account, over
+a connection at least as safe as the saved one: with another server or account
+in the form, or with **Use StartTLS** turned off, **Accept any certificate**
+turned on or another CA in **Directory's CA**, type the password, so a saved
+password never goes to a server it was not saved for, nor in the clear. The test
+says which change kept it back. The password is tried and saved exactly as typed;
+one that starts or ends with a space (often a copy and paste) is pointed out.
+Each test is in the audit log (`settings.ldap_test`) with the server it went to.
 
-Every `LDAP_SYNC_INTERVAL` the app re-reads every directory person. Anyone who
-left the directory, or the required group, is disabled: signed out, API keys
-blocked. They are enabled again if they come back. **Admin → Sign-in → Check the
-directory now** runs the same check at once. When the directory cannot be
-reached, nobody is changed.
+OpenLDAP refuses a DN with no entry just as it refuses a wrong password, so the
+test looks the DN up without signing in: an entry found means the password is
+wrong; none, with the part of the DN that exists, means a typo in it. A server's
+own administrator has no entry and often lies outside what the server holds:
+`cn=Directory Manager` on 389 Directory Server and FreeIPA, `cn=admin,cn=config`
+on OpenLDAP (on the osixia/openldap image its password is `LDAP_CONFIG_PASSWORD`,
+not `LDAP_ADMIN_PASSWORD`, and it may read only the server's settings, not
+people). For those the test says the password is wrong; for any other DN with no
+entry it adds that only such an administrator (OpenLDAP's `rootdn`) signs in
+without one. A password typed for another service account than the saved one (or
+for any, before one is saved) tells whether it is right, as a sign-in does, so
+the same brakes hold the test: a refused one counts against that DN from your
+address and against the account here of the person whose DN it is, and the test
+is refused while either is held. Typing the saved account's own password again
+(after it changed in the directory, say) is never held.
+
+Active Directory refuses a sign-in with one code for many reasons; the test and
+the audit log say which: `52e` the name or password is wrong, `525` no such
+account, `530` not at this time, `531` not from this computer, `532` the
+password has expired, `533` the account is disabled, `701` the account has
+expired, `773` the password must be changed first ("User must change password at
+next logon", ticked by default for a new account), `775` the account is locked
+out. A service account is best set to **Password never expires**.
+
+**Try a person's sign-in** takes a username and a password and checks them as
+signing in does: the same search, the same check of the password by the
+directory, the same groups, and this app's own rules (an email is needed, a local
+account of that name is never taken over). It shows who they would be here
+(username, email, name, groups, admin or not), or exactly why they could not
+sign in. Nothing is saved or changed; the password is never stored or logged,
+and the try is in the audit log (`settings.ldap_try`) with the server and its
+outcome. A try is a guess at a password like any sign-in, so the same brakes
+hold it: a wrong password counts as a wrong sign-in does, against that name from
+your address and against their account here, and a try is refused while either
+is held (**Settings → Sign-in and sessions** says for how long). A service
+account's password typed for the try is held as for the test.
+
+People sign in with their directory name (`uid` or `sAMAccountName`), their email
+or `userPrincipalName`, or `DOMAIN\name` (the domain is left out). The app
+searches for them with the service account, then checks the password by binding
+as them. On the first sign-in it creates them, gives them an API key, and sets
+their role from the admin group. The directory stays in charge of their name,
+email, role and password; the app does not let those be changed here. With
+**Where groups are** empty, groups come from each person's `memberOf`, asked for
+by name (OpenLDAP's overlay sends it only then), from anywhere in the directory.
+With it set, they come from the groups there that name them as a `member` or
+`uniqueMember`, and from `memberOf` only where the server sends it unasked
+(Active Directory does, OpenLDAP does not), as in v5.2.0: on OpenLDAP a group of
+the same name elsewhere, such as another app's `admins`, never makes anyone an
+admin here. Direct members only: a group inside a group does not count. A group
+is a `groupOfNames`, a `groupOfUniqueNames` or an Active Directory group; a
+`posixGroup` lists its members by uid (`memberUid`), which is not read, so nobody
+is ever in one here (with the rfc2307bis schema a `posixGroup` can also be a
+`groupOfNames`, its members listed in `member`). A group goes by its full DN or
+its common name, a comma in it included (`CN=Sales\, EMEA,...` is `Sales, EMEA`);
+a DN matches however it is written (capitals, spaces after its commas, `\,` or
+`\2C`). A group, admin group or required group saved in v5.2.0 as `Sales\` (its
+name cut at the comma) keeps matching.
+
+By its name, every group of that name counts, wherever people's groups come
+from: with **Where groups are** empty, any group of that name in the directory.
+When another group has the same name (another app's `admins`, say), name the
+group by its full DN; **Test the settings** lists the groups a name matches.
+This is new for OpenLDAP with the memberOf overlay and **Where groups are**
+empty, as v5.2.0's help advised: v5.2.0 never asked for `memberOf` there, so its
+admin and required groups matched nobody, while from this version on they apply
+as soon as it starts, from `memberOf`, by name across the whole directory. Run
+**Test the settings** after upgrading such an installation.
+
+Every **Check the directory every** the app re-reads every directory person.
+Anyone who left the directory, or the required group, is disabled: signed out,
+API keys blocked. They are enabled again if they come back. **Admin → Sign-in →
+Check the directory now** runs the same check at once. When the directory cannot
+be used (not reached, its certificate refused, the service account refused,
+**Where groups are** not there), nobody is changed and the check says why; the
+app keeps running. Only a person's own entry gone counts as leaving. The same
+goes for the required group: when nobody at all is in it, it must be found (a
+group of a kind signing in reads, not a `posixGroup` or an OU), and one of its
+members must be in it as signing in reads people, before anyone is disabled for
+not being in it. So a typo in its name changes nobody, and nor does a group that
+signing in cannot see anyone in: a `groupOfNames` with **Where groups are** empty
+on a server whose memberOf overlay keeps only `groupOfUniqueNames` (the
+osixia/openldap image), or a group named by its DN outside **Where groups are**
+on OpenLDAP. The check says what to fix.
+
+A directory that is busy or unavailable when it checks someone's password
+(rather than refusing it) is the directory's state, not a wrong password: they
+are told it cannot be reached, and nothing counts against them.
 
 Safeguards: an empty password is refused before the directory sees it (many
-servers treat it as an anonymous bind and say yes); sign-in names are escaped,
-so `*` or `)(` cannot change the search; a directory entry never takes over a
-local account of the same name or email; an entry without an email cannot sign
-in. `LDAP_INSECURE_SKIP_VERIFY=true` turns off the certificate check and is for
-testing only; the app logs a warning while it is on.
+servers treat it as an anonymous bind and say yes); the service account is never
+used with a name and no password, which servers would take for anonymous;
+sign-in names are escaped, so `*` or `)(` cannot change the search; a directory
+entry never takes over a local account of the same name or email; an entry
+without an email cannot sign in. **Accept any certificate** turns off the
+certificate check and is for testing only; the app logs a warning while it is on.
+Give a company CA in **Directory's CA** instead.
 
 Local accounts keep working next to the directory: keep at least one local admin
 as a way in if the directory is down.
@@ -385,7 +494,8 @@ set by hand is changed by hand.
 | Guessing one account | 5 failures for one name from one address in 10 minutes ban that pair for 12 hours; colleagues behind the same NAT are unaffected |
 | Password spraying | 50 failures from one address in 10 minutes ban the address for 1 hour |
 | Guessing from many addresses | 10 failures on an account lock it for 15 minutes, counted atomically so parallel guesses cannot slip past |
-| Floods | 120 sign-in requests per minute per address |
+| Floods | 120 sign-in requests per minute per address, the directory's test and try included |
+| Guessing through the directory's checks | a password typed in **Test the settings** for another service account, or in **Try a person's sign-in**, counts as a sign-in does |
 | Sessions | 1 hour idle, 12 hours absolute (no action extends that), 30 days with "keep me signed in"; re-checked against the account every minute |
 | Cross-site requests | every state change needs an `X-Requested-With` header, which another site cannot send; the SAML Reply URL, which the provider's page posts to, is guarded by the signature and the request this browser made |
 | Answers | a wrong password and an unknown name get the same answer |
@@ -453,12 +563,18 @@ STALE, `docker compose up -d` recreates it.
 `APP_KEY` differs from the value of the first start. Put the old value
 back. (Only if it is truly lost: stop the app, delete the rows of the
 `DataProtectionKeys` table and the `oidc.%` rows of `settings` in the `llmapp`
-database, and start it. Everyone signs in again.)
+database, and start it. Everyone signs in again, and the secrets saved in the
+Settings page, such as the directory's service password, no longer read: each
+says so under it, to be typed again.)
 
 **Someone cannot sign in.** Look them up in **Admin → Audit log**: it says
 whether it was a wrong password, a lock, a ban, a disabled account, or (for the
-directory) not being in the sign-in group. A locked person can wait 15 minutes
-or be given a new password.
+directory) the directory's own reason (`directory refused: the password is
+wrong`, `nobody by that name`, `its password has expired`, `the account is
+disabled`...) or not being in the sign-in group. A locked person can wait 15
+minutes or be given a new password. For a directory person, **Settings →
+Company directory → Try a person's sign-in** with their name and password shows
+every step.
 
 **Company sign-in answers "did not work".** **Admin → Audit log** has the
 reason: a signature that does not match the provider's keys, another issuer or
@@ -471,10 +587,46 @@ needs exactly the redirect URI the Settings page shows.
 email, an email the provider has not verified, a username or email someone else
 here has, or a local admin's email (local admins are never taken over).
 
-**Directory sign-ins answer "cannot be reached".** The app could not bind with
-the service account: wrong `LDAP_URL`, a firewall, a certificate the app does not
-trust (for `ldaps://` or StartTLS), or a wrong `LDAP_BIND_DN` / password.
-Local accounts still work.
+**Directory sign-ins answer "cannot be reached".** The app could not use the
+directory: a wrong **Directory server**, a firewall, a certificate the app does
+not trust (for `ldaps://` or StartTLS; give its CA in **Directory's CA**), the
+service account refused, **Where groups are** not there, or the directory busy
+when it checked the password. **Test the settings** says which, and the app's log has
+the same sentence. Local accounts still work.
+
+**The test says the server refused the service account.** The step says why.
+OpenLDAP gives one answer for a DN with no entry and for a wrong password, so
+the test then looks the DN up anonymously: "the password is wrong" when an entry
+has the DN, "no entry has this DN" with the part of it that exists when it has
+none. Where the server shows anonymous lookups nothing (as many do), it cannot
+tell and says "the DN or the password is wrong": check the DN letter by letter
+(a comma inside a name is written `\,`; copy it from the directory as its admin
+sees it) and retype the password (the test says whether it used the typed one
+or the saved one). If it says the server holds another domain, the DN cannot be
+there. On Active Directory the reason is exact (no such account, wrong password,
+expired, must change, disabled, locked); for a DN that is hard to get right,
+write the account as `reader@corp.example.com`.
+
+**The directory is the osixia/openldap image.** Its base DN comes from
+`LDAP_DOMAIN` (`example.org`, so `dc=example,dc=org`, unless it or
+`LDAP_BASE_DN` is set). Its accounts are `cn=admin,<base DN>` with
+`LDAP_ADMIN_PASSWORD` and, with `LDAP_READONLY_USER=true`, the better choice
+`cn=readonly,<base DN>` (`LDAP_READONLY_USER_USERNAME`) with
+`LDAP_READONLY_USER_PASSWORD`. It holds no people until you add them: **Where
+people are** is where you put them. Anonymous connections see nothing in it, so
+the test cannot tell a misspelt service account DN from a wrong password there.
+Its memberOf overlay covers only `groupOfUniqueNames` groups: with
+`groupOfNames` groups, set **Where groups are**. For StartTLS or `ldaps://` it
+needs two changes, then the container recreated: its TLS (on by default)
+demands a client certificate, which the app has none of, so set
+`LDAP_TLS_VERIFY_CLIENT=try`; and the certificate it makes for itself comes from
+the image's own CA, which expired on 2026-01-15, so mount a certificate of your
+own, for the name the app reaches it by, at
+`/container/service/slapd/assets/certs` (`ldap.crt`, `ldap.key` and `ca.crt`,
+or the names in `LDAP_TLS_CRT_FILENAME`, `LDAP_TLS_KEY_FILENAME` and
+`LDAP_TLS_CA_CRT_FILENAME`) and paste its CA in **Directory's CA**. From the
+app's container, `localhost` is the app itself: reach the directory by its
+container name on a Docker network the two share, or by the host's address.
 
 **A service is unreachable through the proxy after a config change.** Traefik
 labels are baked in at container creation. Changing a label requires

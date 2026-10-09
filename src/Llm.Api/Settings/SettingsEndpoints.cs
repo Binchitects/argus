@@ -1,7 +1,6 @@
 using Llm.Api.Endpoints;
 using Llm.Api.Identity;
 using Llm.Api.Ldap;
-using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Settings;
 
@@ -46,23 +45,7 @@ public static class SettingsEndpoints
             return Results.Accepted(value: new { status = "restarting" });
         });
 
-        // Tries directory settings before they are saved: the form's values over the current ones.
-        g.MapPost("/ldap-test", async (Dictionary<string, string?> form, IOptionsMonitor<LdapOptions> current, CancellationToken ct) =>
-        {
-            var c = current.CurrentValue;
-            string? F(string name, string? fallback) => form.TryGetValue(name, out var v) ? v : fallback;
-            var o = new LdapOptions
-            {
-                Url = F("Ldap:Url", c.Url)?.Trim(),
-                StartTls = bool.TryParse(F("Ldap:StartTls", c.StartTls.ToString()), out var tls) && tls,
-                IgnoreCertificateErrors = bool.TryParse(F("Ldap:IgnoreCertificateErrors", c.IgnoreCertificateErrors.ToString()), out var ignore) && ignore,
-                BindDn = F("Ldap:BindDn", c.BindDn)?.Trim(),
-                // A blank password field means "keep the saved one".
-                BindPassword = string.IsNullOrEmpty(F("Ldap:BindPassword", null)) ? c.BindPassword : form["Ldap:BindPassword"],
-                UserBaseDn = F("Ldap:UserBaseDn", c.UserBaseDn)?.Trim() ?? "",
-                UserFilter = c.UserFilter,
-            };
-            return Results.Ok(await LdapDirectory.TestAsync(o, ct));
-        });
+        // Tries directory settings before they are saved (the form's values over the saved ones), and a person's sign-in.
+        g.MapDirectoryChecks();
     }
 }

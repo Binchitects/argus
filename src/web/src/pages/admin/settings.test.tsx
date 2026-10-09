@@ -178,16 +178,90 @@ describe('settings', () => {
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toMatchObject({ changes: [{}, {}] }))
   })
 
-  it('the directory test sends the unsaved values and shows the answer', async () => {
+  it('the directory test sends the unsaved values and shows the answer and each step', async () => {
     const calls = fakeApi(admin, {
       'GET /api/admin/config': () => ({ json: data() }),
-      'POST /api/admin/config/ldap-test': () => ({ json: { ok: false, message: 'Could not reach ldap://dc1:389' } }),
+      'POST /api/admin/config/ldap-test': () => ({
+        json: {
+          ok: false,
+          message: 'The server refused the service account cn=reader,dc=example,dc=com with the saved password: the DN or the password is wrong.',
+          steps: [
+            { state: 'ok', text: 'Reached dc1:389.' },
+            { state: 'warn', text: 'Not encrypted.' },
+            { state: 'fail', text: 'The server refused the service account cn=reader,dc=example,dc=com with the saved password: the DN or the password is wrong.' },
+          ],
+        },
+      }),
     })
     renderApp('/admin/settings#company-directory-ldap')
     await userEvent.type(await screen.findByLabelText('Directory server'), 'ldap://dc1:389')
-    await userEvent.click(screen.getByRole('button', { name: 'Test connection' }))
-    expect(await screen.findByText('Could not reach ldap://dc1:389')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Test the settings' }))
+    // What failed is said once, first; then the steps that led to it.
+    const steps = await screen.findByRole('list', { name: 'Steps before it' })
+    expect(within(steps).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Done: Reached dc1:389.', 'Warning: Not encrypted.'])
+    expect(screen.getByRole('alert')).toHaveTextContent('the DN or the password is wrong')
+    // Its DNs and filters are long words: the answer wraps them, as the steps do, rather than widen a phone's page.
+    expect(screen.getByRole('alert')).toHaveClass('[&_p]:break-words')
+    expect(screen.getAllByText(/the DN or the password is wrong/)).toHaveLength(1)
     expect(calls.find((c) => c.path === '/api/admin/config/ldap-test')?.body).toEqual({ 'Ldap:Url': 'ldap://dc1:389' })
+  })
+
+  it('a person’s sign-in is tried with the unsaved values, and the password goes only to that check', async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/config': () => ({ json: data() }),
+      'POST /api/admin/config/ldap-try': () => ({
+        json: { ok: true, message: 'jsmith can sign in, as an admin.', steps: [{ state: 'ok', text: 'Found uid=jsmith,ou=people,dc=example,dc=com.' }, { state: 'ok', text: 'Their password is right.' }] },
+      }),
+    })
+    renderApp('/admin/settings#company-directory-ldap')
+    await userEvent.type(await screen.findByLabelText('Directory server'), 'ldap://dc1:389')
+    const tryIt = screen.getByRole('button', { name: 'Try it' })
+    expect(tryIt).toBeDisabled()
+    await userEvent.type(screen.getByLabelText('Their username'), 'CORP\\jsmith')
+    await userEvent.type(screen.getByLabelText('Their password'), 'their pw')
+    await userEvent.click(tryIt)
+    expect(await screen.findByText('jsmith can sign in, as an admin.')).toBeInTheDocument()
+    expect(screen.getByText('Their password is right.')).toBeInTheDocument()
+    expect(calls.find((c) => c.path === '/api/admin/config/ldap-try')?.body).toEqual({ settings: { 'Ldap:Url': 'ldap://dc1:389' }, login: 'CORP\\jsmith', password: 'their pw' })
+    // It is not a setting: nothing to save.
+    expect(screen.queryByRole('region', { name: 'Unsaved changes' })).toHaveTextContent('1 unsaved change')
+  })
+
+  it('the setup guide is open while no directory is set, with an example for OpenLDAP and Active Directory', async () => {
+    fakeApi(admin, { 'GET /api/admin/config': () => ({ json: data() }) })
+    renderApp('/admin/settings#company-directory-ldap')
+    const guide = (await screen.findByText('How to set it up, step by step')).closest('details')!
+    expect(guide).toHaveAttribute('open')
+    const examples = within(guide).getByRole('table', { name: 'An example of each field' })
+    expect(within(examples).getByRole('row', { name: /Service account/ })).toHaveTextContent('cn=readonly,dc=example,dc=com')
+    expect(within(examples).getByRole('row', { name: /Service account/ })).toHaveTextContent('reader@corp.example.com')
+    // The osixia/openldap image's own accounts, and the TLS setting without which its StartTLS and ldaps:// refuse the app.
+    expect(guide).toHaveTextContent('cn=readonly,dc=example,dc=org')
+    expect(guide).toHaveTextContent('LDAP_TLS_VERIFY_CLIENT=try')
+  })
+
+  it('each example for OpenLDAP and Active Directory in a setting\'s help is on a line of its own', async () => {
+    const set = data()
+    set.groups[1].settings[0] = {
+      ...set.groups[1].settings[0],
+      help: 'Where the directory listens. OpenLDAP: ldaps://ldap.example.com:636. Active Directory: ldaps://dc1.corp.example.com:636, a domain controller.',
+    }
+    fakeApi(admin, { 'GET /api/admin/config': () => ({ json: set }) })
+    renderApp('/admin/settings#company-directory-ldap')
+    const help = (await screen.findByText('Where the directory listens.', { exact: false })).closest('p')!
+    const lines = [...help.querySelectorAll(':scope > span.block')].map((l) => l.textContent)
+    expect(lines).toEqual(['OpenLDAP: ldaps://ldap.example.com:636.', 'Active Directory: ldaps://dc1.corp.example.com:636, a domain controller.'])
+    expect(screen.getByLabelText('Directory server')).toHaveAccessibleDescription(
+      'Where the directory listens. OpenLDAP: ldaps://ldap.example.com:636. Active Directory: ldaps://dc1.corp.example.com:636, a domain controller.',
+    )
+  })
+
+  it('the setup guide starts closed once a directory is set', async () => {
+    const set = data()
+    set.groups[1].settings[0] = { ...set.groups[1].settings[0], value: 'ldaps://dc1.corp.example.com:636', source: 'saved' }
+    fakeApi(admin, { 'GET /api/admin/config': () => ({ json: set }) })
+    renderApp('/admin/settings#company-directory-ldap')
+    expect((await screen.findByText('How to set it up, step by step')).closest('details')).not.toHaveAttribute('open')
   })
 
   it('the app restarts itself and the page waits for it', async () => {

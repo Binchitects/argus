@@ -67,6 +67,15 @@ public sealed partial class SettingsService(
                 said[w.Key] = warning;
             }
         }
+        // A saved secret that no longer decrypts is left out of the configuration, silently: say so where it is set.
+        var secretRows = SettingsCatalog.All.Where(d => d.IsSecret && saved.Contains(d.Key)).Select(d => Row + d.Key).ToList();
+        foreach (var row in await db.Settings.AsNoTracking().Where(s => secretRows.Contains(s.Key)).ToListAsync(ct))
+        {
+            if (SettingsCrypto.Decrypt(row.Value, auth.Value.DataKey) is null)
+            {
+                said[row.Key[Row.Length..]] = "Saved, but it no longer reads: APP_KEY changed since it was saved. Type it again.";
+            }
+        }
         var rows = SettingsCatalog.All.Select(d => View(d, saved, said.GetValueOrDefault(d.Key))).ToList();
         return new
         {
@@ -147,6 +156,11 @@ public sealed partial class SettingsService(
                 errors[hook.Key] = refusal;
             }
         }
+        // The directory's CA must read as a certificate: a wrong one would refuse every connection.
+        if (normalised.FirstOrDefault(n => n.Def.Key == "Ldap:CaCertificate") is { Def: { } caDef, Value: { Length: > 0 } ca } && Chat.Tools.ServerTls.CheckCa(ca) is { } caError)
+        {
+            errors[caDef.Key] = caError;
+        }
         if (normalised.Any(n => n.Def.IsSecret && !n.Reset) && string.IsNullOrEmpty(auth.Value.DataKey))
         {
             errors["_"] = "APP_KEY is not set, so secrets cannot be stored.";
@@ -199,6 +213,10 @@ public sealed partial class SettingsService(
         if (value.Length == 0)
         {
             return d.Optional ? null : "Required.";
+        }
+        if (d.Exact)
+        {
+            value = raw!;
         }
         // A box of several lines may say it takes more (pasted metadata XML).
         if (value.Length > (d.Lines is not null && d.Max is { } longest && longest > 4096 ? longest : 4096))

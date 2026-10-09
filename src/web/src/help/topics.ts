@@ -410,10 +410,13 @@ export const topics = {
     admin: true,
     parts: [
       { name: 'Local accounts', text: 'Always on. Admins add people under People. **Sessions and limits** opens their settings.' },
-      { name: 'Company directory (LDAP)', text: 'When set up: the server, the admin and required groups, and how often people are checked. **Check the directory now** disables people who left.' },
+      { name: 'Company directory (LDAP)', text: 'When set up: the server, the admin and required groups, and how often people are checked. **Check the directory now** disables people who left the directory or the required group; if the directory cannot be used, or the required group is not found or nobody can be found in it, it changes nobody and says why.' },
       { name: 'Company sign-in', text: 'OIDC or SAML at your identity provider: its admin and required groups, and whether SCIM is on. **Configure** opens its settings.' },
     ],
-    tasks: [{ title: 'Turn on the company directory', steps: ['Press **Configure** on the directory card (Settings → Company directory).', 'Fill in the server, the service account and where people are.', 'Press **Test connection**, then save.'] }],
+    tasks: [
+      { title: 'Turn on the company directory', steps: ['Press **Configure** on the directory card (Settings → Company directory).', 'Follow the guide at the top: the server, the service account and where people are, then the groups. Each field\'s help has an OpenLDAP and an Active Directory example.', 'Press **Test the settings**: each step says what works and, when something does not, exactly what to fix.', 'Under **Try a person\'s sign-in**, type someone\'s username and password and press **Try it**: it shows who they would be here. Then save.'] },
+      { title: 'Find out why someone cannot sign in', steps: ['Open **Audit log** and look for their sign-in: it has the directory\'s reason.', 'In Settings → Company directory, under **Try a person\'s sign-in**, type their username and password and press **Try it**: it shows each step, and who they would be here or why not. A wrong password counts as a wrong sign-in does.'] },
+    ],
     manual: { doc: 'authentication', section: 'the-company-directory-ldap--active-directory' },
   },
 
@@ -455,7 +458,7 @@ export const topics = {
     sections: {
       branding: { name: 'Branding', text: 'The product\'s name, the sign-in page\'s headline, where people get help, and where the source is.' },
       'sign-in-and-sessions': { name: 'Sign-in and sessions', text: 'How long sessions last, and how many wrong passwords lock an account or an address, and for how long.' },
-      'company-directory-ldap': { name: 'Company directory (LDAP)', text: 'Sign-in with the company directory (LDAP or Active Directory): the server, a read-only service account, where people and groups are, and the admin and required groups. **Test connection** tries the values before you save them.' },
+      'company-directory-ldap': { name: 'Company directory (LDAP)', text: 'Sign-in with the company directory (LDAP or Active Directory): the server, a read-only service account, where people and groups are, and the admin and required groups. A guide opens the group, with OpenLDAP and Active Directory examples. **Test the settings** checks the values in the form before you save them, step by step, and says exactly what is wrong; **Try a person\'s sign-in** checks someone\'s username and password as signing in would. Neither saves anything.' },
       'company-sign-in': { name: 'Company sign-in', text: 'Sign-in at the company\'s identity provider, by OIDC or SAML: the provider, its admin and required groups, and the button\'s label. Below the settings: what to register at the provider, a test, and SCIM.' },
       chat: { name: 'Chat', text: 'The chat\'s limits: tool calls, attachments, when a chat compacts, answers at once and the wait in line, sub-agents, the longest answer and tool call, memory and the leaderboard.' },
       model: { name: 'Model', text: 'The model new chats use, the model for sub-agents and small steps, the thinking levels, how many models the engine holds at once, and the time zone of working hours.' },
