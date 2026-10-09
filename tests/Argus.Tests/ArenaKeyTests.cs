@@ -32,6 +32,33 @@ public sealed class FakePlatform : IAsyncDisposable
     public ConcurrentQueue<(string Auth, string Key)> Checks { get; } = new();
     /// <summary>The app answers 503 (its gateway down).</summary>
     public bool Down { get; set; }
+    /// <summary>How long the app takes over a key check.</summary>
+    public TimeSpan KeyDelay { get; set; }
+    /// <summary>Each project's members in GitLab: (id, username, name, access level).</summary>
+    public ConcurrentDictionary<long, (long Id, string Username, string Name, int Level)[]> Members { get; } = new();
+    /// <summary>How long GitLab takes over each request, as a busy company GitLab does.</summary>
+    public TimeSpan GitLabDelay { get; set; }
+    /// <summary>GitLab answers 503 to everything.</summary>
+    public bool GitLabDown { get; set; }
+    /// <summary>GitLab requests answered, and the most there were at once.</summary>
+    public int GitLabCalls => _gitlabCalls;
+    public int GitLabMostAtOnce => _gitlabMost;
+    int _gitlabCalls, _gitlabNow, _gitlabMost;
+
+    /// <summary>GitLab's delay, counted; a 503 when it is down.</summary>
+    async Task<IResult?> GitLabAsync()
+    {
+        Interlocked.Increment(ref _gitlabCalls);
+        var now = Interlocked.Increment(ref _gitlabNow);
+        int most;
+        while (now > (most = _gitlabMost) && Interlocked.CompareExchange(ref _gitlabMost, now, most) != most) { }
+        try
+        {
+            if (GitLabDelay > TimeSpan.Zero) await Task.Delay(GitLabDelay);
+            return GitLabDown ? Results.Json(new { message = "503 Service Unavailable" }, statusCode: 503) : null;
+        }
+        finally { Interlocked.Decrement(ref _gitlabNow); }
+    }
 
     public int ChecksOf(string key) => Checks.Count(c => c.Key == key);
 
@@ -46,6 +73,7 @@ public sealed class FakePlatform : IAsyncDisposable
             var key = (await JsonNode.ParseAsync(c.Request.Body))?["key"]?.ToString() ?? "";
             var auth = c.Request.Headers.Authorization.ToString();
             Checks.Enqueue((auth, key));
+            if (KeyDelay > TimeSpan.Zero) await Task.Delay(KeyDelay);
             if (auth != $"Bearer {Credential}") return Results.Json(new { status = "credential", error = "Wrong or missing credential." }, statusCode: 401);
             if (Down) return Results.Json(new { status = "gateway", error = "The gateway could not be asked." }, statusCode: 503);
             return Keys.TryGetValue(key, out var who)
@@ -58,19 +86,18 @@ public sealed class FakePlatform : IAsyncDisposable
             new JsonObject { ["id"] = 5, ["username"] = "alice", ["name"] = "Alice", ["state"] = "active" },
             new JsonObject { ["id"] = 7, ["username"] = "bob", ["name"] = "Bob", ["state"] = "active", ["public_email"] = "bob@corp.example" },
         };
-        _app.MapGet("/api/v4/users", (string? search, string? username) =>
+        _app.MapGet("/api/v4/users", async (string? search, string? username) =>
         {
+            if (await GitLabAsync() is { } down) return down;
             var hits = users.Where(u => (search is not null && u["public_email"]?.ToString() == search) || (username is not null && u["username"]!.ToString() == username));
             return Results.Text(new JsonArray([.. hits.Select(u => (JsonNode)u.DeepClone())]).ToJsonString(), "application/json");
         });
-        var members = new Dictionary<long, (long Id, string Username, string Name, int Level)[]>
+        Members[11] = [(5, "alice", "Alice", 30), (7, "bob", "Bob", 40)];
+        Members[12] = [(7, "bob", "Bob", 40)];
+        _app.MapGet("/api/v4/projects/{id:long}/members/all", async (long id, int page) =>
         {
-            [11] = [(5, "alice", "Alice", 30), (7, "bob", "Bob", 40)],
-            [12] = [(7, "bob", "Bob", 40)],
-        };
-        _app.MapGet("/api/v4/projects/{id:long}/members/all", (long id, int page) =>
-        {
-            var list = page == 1 && members.TryGetValue(id, out var m) ? m : [];
+            if (await GitLabAsync() is { } down) return down;
+            var list = page == 1 && Members.TryGetValue(id, out var m) ? m : [];
             return Results.Text(new JsonArray([.. list.Select(x => (JsonNode)new JsonObject
             {
                 ["id"] = x.Id, ["username"] = x.Username, ["name"] = x.Name, ["access_level"] = x.Level, ["state"] = "active",

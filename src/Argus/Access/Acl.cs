@@ -132,49 +132,82 @@ public sealed class GitLabUnavailable(string message, Exception? inner = null) :
 /// Project member lists and user lookups via the READ-ONLY service credential:
 /// how a signed-in person (identified by their email, or the GitLab username an
 /// administrator linked) gets exactly the repositories their GitLab membership
-/// grants, and how a refusal names whom to ask.
+/// grants, and how a refusal names whom to ask. One connection pool for every
+/// call; each answer is fetched once for everyone asking at the same moment.
 /// </summary>
 public sealed class MemberDirectory(GitLabConfig cfg, HttpClient? client = null, double ttl = Acl.TtlSeconds, Func<double>? now = null)
 {
     public const int MaintainerLevel = 40;
     const int MaxMemberPages = 50;
+    /// <summary>Member lists fetched at once when a person's repositories are resolved: GitLab is asked in parallel, not one project after another.</summary>
+    public const int Parallel = 8;
 
     public GitLabConfig Config { get; } = cfg;
     readonly Func<double> _now = now ?? (() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0);
     readonly Lock _gate = new();
     readonly Dictionary<long, (double At, List<Member> Value)> _members = new();
     readonly Dictionary<string, (double At, JsonObject? Value)> _users = new(StringComparer.Ordinal);
+    readonly System.Collections.Concurrent.ConcurrentDictionary<object, object> _fetching = new();
+    readonly Lazy<HttpClient> _shared = new(() => client ?? Tls.ClientFor(cfg, 15.0));
 
     public sealed record Member(long Id, string Username, string Name, int AccessLevel, string State);
 
-    HttpResult Get(string path, IEnumerable<(string, string)> query)
-    {
-        var c = client ?? Tls.ClientFor(Config, 15.0);
-        try { return Tls.Get(c, $"{Config.Url}/api/v4{path}", Credentials.Headers(Config), query); }
-        finally { if (client is null) c.Dispose(); }
-    }
+    HttpResult Get(string path, IEnumerable<(string, string)> query) =>
+        Tls.Get(_shared.Value, $"{Config.Url}/api/v4{path}", Credentials.Headers(Config), query);
 
     T Cached<TKey, T>(Dictionary<TKey, (double At, T Value)> cache, TKey key, Func<T> fetch) where TKey : notnull
+    {
+        if (Fresh(cache, key, out var value)) return value;
+        // One fetch per key at a time: who asks meanwhile waits for it and takes its answer.
+        lock (_fetching.GetOrAdd((cache, key), _ => new object()))
+        {
+            if (Fresh(cache, key, out value)) return value;
+            (double At, T Value) hit;
+            bool found;
+            lock (_gate) found = cache.TryGetValue(key, out hit);
+            double? age = found ? _now() - hit.At : null;
+            try { value = fetch(); }
+            catch (Exception exc) when (exc is HttpRequestException or TaskCanceledException or JsonException or GitLabUnavailable
+                                            or InvalidOperationException or FormatException)
+            {
+                if (found && age < Acl.StaleGraceSeconds)
+                {
+                    Console.Error.WriteLine($"GitLab is unwell ({exc.Message}); serving a cached answer {age:0}s old");
+                    return hit.Value;
+                }
+                throw new GitLabUnavailable(exc.Message, exc);
+            }
+            lock (_gate) cache[key] = (_now(), value);
+            return value;
+        }
+    }
+
+    bool Fresh<TKey, T>(Dictionary<TKey, (double At, T Value)> cache, TKey key, out T value) where TKey : notnull
     {
         (double At, T Value) hit;
         bool found;
         lock (_gate) found = cache.TryGetValue(key, out hit);
-        double? age = found ? _now() - hit.At : null;
-        if (found && age >= 0 && age < ttl) return hit.Value;
-        T value;
-        try { value = fetch(); }
-        catch (Exception exc) when (exc is HttpRequestException or TaskCanceledException or JsonException or GitLabUnavailable
-                                        or InvalidOperationException or FormatException)
+        var age = found ? _now() - hit.At : -1;
+        value = hit.Value;
+        return found && age >= 0 && age < ttl;
+    }
+
+    /// <summary>
+    /// The member lists of these projects, fetched <see cref="Parallel"/> at a time where they
+    /// are not known or are older than the TTL. A project GitLab cannot answer for (and nothing
+    /// recent is kept of) fails the whole: <see cref="GitLabUnavailable"/>, once every one was tried.
+    /// </summary>
+    public void Prefetch(IReadOnlyCollection<long> gitlabIds)
+    {
+        var missing = gitlabIds.Distinct().Where(id => !Fresh(_members, id, out _)).ToList();
+        if (missing.Count == 0) return;
+        GitLabUnavailable? failed = null;
+        System.Threading.Tasks.Parallel.ForEach(missing, new ParallelOptions { MaxDegreeOfParallelism = Parallel }, id =>
         {
-            if (found && age < Acl.StaleGraceSeconds)
-            {
-                Console.Error.WriteLine($"GitLab is unwell ({exc.Message}); serving a cached answer {age:0}s old");
-                return hit.Value;
-            }
-            throw new GitLabUnavailable(exc.Message, exc);
-        }
-        lock (_gate) cache[key] = (_now(), value);
-        return value;
+            try { Members(id); }
+            catch (GitLabUnavailable exc) { Interlocked.CompareExchange(ref failed, exc, null); }
+        });
+        if (failed is not null) throw failed;
     }
 
     /// <summary>Everyone with access to a project, inherited memberships included.</summary>
@@ -321,6 +354,7 @@ public static class People
         var allowed = new List<long>();
         try
         {
+            directory.Prefetch(order);
             foreach (var gid in order)
                 if (directory.Members(gid).Any(m => m.Id == uid && m.AccessLevel >= Acl.MinAccessLevel && m.State == "active"))
                     allowed.AddRange(byProject[gid]);
@@ -328,6 +362,9 @@ public static class People
         catch (GitLabUnavailable exc) { throw new AclDenied(CannotVerify, exc); }
         return new Identity(uid, user["username"]?.ToString() ?? "", allowed.Order().ToList());
     }
+
+    /// <summary>An access check that came to a definite no (not GitLab being unwell).</summary>
+    public static bool Definite(AclDenied exc) => exc.InnerException is not GitLabUnavailable;
 
     /// <summary>Explain matches the person cannot read: which repositories, and whom to ask.</summary>
     public static string NoAccessMessage(IReadOnlyList<(string Path, long GitlabId, int Count)> repos, MemberDirectory? directory)
@@ -355,5 +392,111 @@ public static class People
                "\nTell the person asking that they do not have access, and that they can ask a " +
                "maintainer listed above to add them in GitLab with at least Reporter access. " +
                "Argus picks the change up within 10 minutes.";
+    }
+}
+
+/// <summary>
+/// The repositories each person may read, resolved from their GitLab membership apart from the
+/// requests that need them. Connecting never waits for it: a person known to the gate is
+/// connected at once, the resolution starts then (<see cref="Warm"/>), and only a tool that reads
+/// code waits, for the first answer only. An answer is kept ten minutes, then served while a fresh
+/// one is fetched in the background (for an hour at most while GitLab cannot answer), and is
+/// fetched once for everyone asking at the same moment.
+/// </summary>
+public sealed class PersonAccess(Func<string, string?, Identity> resolve, Func<double>? now = null, double ttl = Acl.TtlSeconds)
+{
+    const int MaxKept = 5000;
+    readonly Func<double> _now = now ?? (() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0);
+    readonly Lock _gate = new();
+    readonly Dictionary<string, (double At, Identity Value)> _known = new(StringComparer.Ordinal);
+    readonly Dictionary<string, Task<Identity>> _resolving = new(StringComparer.Ordinal);
+
+    static string Key(string email, string? username) => PyStr.Strip(email).ToLowerInvariant() + "\n" + (username ?? "").Trim().ToLowerInvariant();
+
+    /// <summary>
+    /// The person's repositories: as kept, else resolved now, on this thread (or by joining the
+    /// resolution already under way: no thread waits for another that is not running yet).
+    /// </summary>
+    public Identity Resolve(string email, string? username)
+    {
+        var key = Key(email, username);
+        Task<Identity>? running;
+        TaskCompletionSource<Identity>? mine = null;
+        lock (_gate)
+        {
+            if (_known.TryGetValue(key, out var hit))
+            {
+                var age = _now() - hit.At;
+                if (age >= 0 && age < ttl) return hit.Value;
+                if (age >= 0 && age < Acl.StaleGraceSeconds)
+                {
+                    Background(key, email, username);
+                    return hit.Value;
+                }
+            }
+            if (!_resolving.TryGetValue(key, out running))
+            {
+                mine = new TaskCompletionSource<Identity>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _resolving[key] = running = mine.Task;
+            }
+        }
+        if (mine is not null) Run(key, email, username, mine);
+        return running.GetAwaiter().GetResult();
+    }
+
+    /// <summary>Starts resolving when nothing fresh is kept and nothing is under way, so the first tool call finds it ready.</summary>
+    public void Warm(string email, string? username)
+    {
+        var key = Key(email, username);
+        lock (_gate)
+        {
+            if (_known.TryGetValue(key, out var hit) && _now() - hit.At is var age && age >= 0 && age < ttl) return;
+            Background(key, email, username);
+        }
+    }
+
+    /// <summary>Under the gate: a resolution on a thread of its own, unless one is under way.</summary>
+    void Background(string key, string email, string? username)
+    {
+        if (_resolving.ContainsKey(key)) return;
+        var mine = new TaskCompletionSource<Identity>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _resolving[key] = mine.Task;
+        _ = Task.Run(() => Run(key, email, username, mine));
+    }
+
+    /// <summary>One resolution: kept when it worked; a definite no forgets what was kept; GitLab unwell leaves it.</summary>
+    void Run(string key, string email, string? username, TaskCompletionSource<Identity> mine)
+    {
+        Identity identity;
+        try
+        {
+            identity = resolve(email, username);
+        }
+        catch (Exception exc)
+        {
+            lock (_gate)
+            {
+                _resolving.Remove(key);
+                // A definite no (no account, not active): what was kept is not served again.
+                if (exc is AclDenied denied && People.Definite(denied)) _known.Remove(key);
+                else Console.Error.WriteLine($"could not resolve a person's repositories: {exc.Message}");
+            }
+            mine.SetException(exc);
+            // Seen here: nobody may be waiting for a resolution started in the background.
+            _ = mine.Task.Exception;
+            return;
+        }
+        lock (_gate)
+        {
+            _resolving.Remove(key);
+            if (_known.Count >= MaxKept)
+            {
+                var now = _now();
+                foreach (var old in _known.Where(e => now - e.Value.At >= Acl.StaleGraceSeconds).Select(e => e.Key).ToList()) _known.Remove(old);
+                if (_known.Count >= MaxKept) _known.Clear();
+            }
+            _known[key] = (_now(), identity);
+        }
+        mine.SetResult(identity);
     }
 }
