@@ -222,7 +222,9 @@ public sealed partial class ObserveTests(AppFixture app) : IAsyncLifetime
         Assert.Equal(["TargetDown", "GpuHot"], now.GetProperty("firing").EnumerateArray().Select(a => a.GetProperty("name").GetString()));
         Assert.Equal(["s1"], now.GetProperty("firing")[1].GetProperty("silencedBy").EnumerateArray().Select(s => s.GetString()));
         var rules = now.GetProperty("rules").EnumerateArray().ToList();
-        Assert.Equal(["TargetDown", "GpuHot"], rules.Select(r => r.GetProperty("name").GetString()));
+        // Prometheus's rules, then the app's own (a disk past the share Settings -> Storage sets).
+        Assert.Equal(["TargetDown", "GpuHot", Llm.Api.Storage.StorageWatch.AlertName], rules.Select(r => r.GetProperty("name").GetString()));
+        Assert.Equal("inactive", rules[2].GetProperty("state").GetString());
         Assert.Equal("firing", rules[0].GetProperty("state").GetString());
         Assert.Equal(300, rules[0].GetProperty("for").GetDouble());
         Assert.Equal(1, rules[0].GetProperty("active").GetInt32());
@@ -232,7 +234,7 @@ public sealed partial class ObserveTests(AppFixture app) : IAsyncLifetime
         now = await b.JsonAsync(await b.GetAsync("/api/admin/alerts/"));
         Assert.Equal(JsonValueKind.Null, now.GetProperty("firing").ValueKind);
         Assert.Equal("Alertmanager is not reachable.", now.GetProperty("errors").GetProperty("alertmanager").GetString());
-        Assert.Equal(2, now.GetProperty("rules").GetArrayLength());
+        Assert.Equal(3, now.GetProperty("rules").GetArrayLength());
     }
 
     [Fact]
