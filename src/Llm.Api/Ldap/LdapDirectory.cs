@@ -115,8 +115,12 @@ public sealed class LdapDirectory(IOptionsMonitor<LdapOptions> options) : ILdapD
     }
 
     /// <summary>Why nobody is disabled for the required group: it is not in the directory.</summary>
-    internal static string RequiredGroupMissing(LdapOptions o, IReadOnlyList<string> contexts) =>
-        $"no required group \"{o.RequiredGroup?.Trim()}\" is found {GroupPlaces(o, contexts)}, so nobody is disabled for not being in it: fix \"Required group\" in the Settings page";
+    internal static string RequiredGroupMissing(LdapOptions o, IReadOnlyList<string> contexts)
+    {
+        var group = o.RequiredGroup?.Trim() ?? "";
+        var where = group.Contains('=', StringComparison.Ordinal) ? "(no entry has that DN, or the service account cannot see it)" : GroupPlaces(o, contexts);
+        return $"no required group \"{group}\" is found {where}, so nobody is disabled for not being in it: fix \"Required group\" in the Settings page";
+    }
 
     /// <summary>Where a group named by its name is looked for, in words.</summary>
     internal static string GroupPlaces(LdapOptions o, IReadOnlyList<string> contexts) =>
