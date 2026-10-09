@@ -18,7 +18,8 @@ reference (load, tag, rm, inspect), volumes, and the containers `compose up`
 makes, one per service of FAKE_SERVICES. Compose's images are read from the
 compose files (COMPOSE_FILE, -f, else docker-compose.yml and its override): a
 service's image:, else PROJECT-service when it builds. A container is healthy
-unless its image was loaded from a reference in FAKE_UNHEALTHY.
+unless its image was loaded from a reference in FAKE_UNHEALTHY; the services in
+FAKE_DOWN keep restarting.
 """
 from __future__ import annotations
 
@@ -301,6 +302,7 @@ def compose(st: Store, args: list[str], project: str) -> int:
         if named:
             services = [x for x in services if x in named]
         unhealthy = set(norm(x) for x in lines("FAKE_UNHEALTHY"))
+        down = set(lines("FAKE_DOWN"))
         for svc in services:
             ref = service_image(model, svc, project)
             image_id = st.image(ref)
@@ -312,7 +314,8 @@ def compose(st: Store, args: list[str], project: str) -> int:
             s["next"] = n + 1
             s["containers"].append({
                 "id": f"c{n:04d}", "name": svc, "service": svc, "project": project, "workdir": os.getcwd(),
-                "image_ref": ref, "image_id": image_id, "state": "created" if "--no-start" in args else "running",
+                "image_ref": ref, "image_id": image_id,
+                "state": "created" if "--no-start" in args else "restarting" if svc in down else "running",
                 "health": "unhealthy" if st.origin(image_id) in unhealthy else "healthy"})
         st.save()
         return 0

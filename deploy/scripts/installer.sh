@@ -37,6 +37,10 @@
 # install:
 #   --domain NAME  --admin-email ADDRESS  --models-dir DIR  --model FILE  --acme-email ADDRESS
 #   --http-port N  --https-port N   (default 80 and 443; Podman 8080 and 8443)
+#   --gitlab-url URL  --gitlab-token-file FILE   the GitLab Argus indexes, and its read-only
+#                        token (read from the file, never from the command line). Without them
+#                        Argus, which cannot start without a GitLab, is left out until they are
+#                        in .env
 #   --cpu-only           no NVIDIA GPU: llamacpp, imagegen, videogen, gpu-exporter and
 #                        power-limits are left out (in docker-compose.override.yml)
 #   --leave-out A,B      more services to leave out
@@ -147,7 +151,7 @@ case "$CMD" in
   *) usage_error "unknown command: $CMD" ;;
 esac
 DIR="" BUNDLE_ARG="" ENGINE="" PROJECT_ARG="" YES=0 DRY=0 LOG_ARG="" TIMEOUT=15
-DOMAIN_ARG="" EMAIL_ARG="" MODELS_ARG="" MODEL_ARG="" HTTP_ARG="" HTTPS_ARG="" ACME_ARG=""
+DOMAIN_ARG="" EMAIL_ARG="" MODELS_ARG="" MODEL_ARG="" HTTP_ARG="" HTTPS_ARG="" ACME_ARG="" GITLAB_ARG="" GITLAB_TOKEN_FILE=""
 CPU_ONLY=0 LEAVE_ARG="" MAKE_CERT=0 HOSTS=0 SKIP_REQ=0 PURGE=0 CONFIRM_ARG="" FINAL_BACKUP="" ROLLBACK=0
 only() { local c; for c in "${@:2}"; do [[ $CMD == "$c" ]] && return 0; done; usage_error "$1 is for ${*:2}"; }
 value() { [[ $2 -gt 1 ]] || usage_error "$1 needs a value"; }
@@ -170,6 +174,8 @@ while [[ $# -gt 0 ]]; do
     --http-port) only "$1" install; value "$1" $#; HTTP_ARG="$2"; shift ;;
     --https-port) only "$1" install; value "$1" $#; HTTPS_ARG="$2"; shift ;;
     --acme-email) only "$1" install; value "$1" $#; ACME_ARG="$2"; shift ;;
+    --gitlab-url) only "$1" install; value "$1" $#; GITLAB_ARG="$2"; shift ;;
+    --gitlab-token-file) only "$1" install; value "$1" $#; GITLAB_TOKEN_FILE="$2"; shift; [[ -r "$GITLAB_TOKEN_FILE" ]] || usage_error "cannot read $GITLAB_TOKEN_FILE" ;;
     --cpu-only) only "$1" install; CPU_ONLY=1 ;;
     --leave-out) only "$1" install; value "$1" $#; LEAVE_ARG="${LEAVE_ARG:+$LEAVE_ARG,}$2"; shift ;;
     --make-cert) only "$1" install; MAKE_CERT=1 ;;
@@ -666,7 +672,7 @@ merge_env() {   # merge_env plan|do (the release's .env.example and compose file
 }
 
 # A new .env from .env.example: the answers, and secrets generated (none of them printed or logged).
-ADMIN_PASSWORD_NEW=""
+ADMIN_PASSWORD_NEW="" NEW_GITLAB="" NEW_GITLAB_TOKEN="" NO_GITLAB=0
 make_env() {
   local env="$DEPLOY/.env" tmp key line val model example="$DEPLOY/.env.example"
   local -A V=()
@@ -692,10 +698,11 @@ make_env() {
     [[ "$NEW_HTTP" != 80 ]] && echo "HTTP_PORT=$NEW_HTTP"
     [[ "$NEW_HTTPS" != 443 ]] && echo "HTTPS_PORT=$NEW_HTTPS"
     [[ -n "$ACME_ARG" ]] && echo "ACME_EMAIL=$ACME_ARG"
+    [[ -n "$NEW_GITLAB" ]] && { echo "GITLAB_URL=$NEW_GITLAB"; echo "GITLAB_TOKEN=$NEW_GITLAB_TOKEN"; }
     if [[ "$PROJECT" != arena ]]; then echo "COMPOSE_PROJECT_NAME=$PROJECT"; fi
   ) > "$tmp" || die "cannot write $tmp"
   mv -f "$tmp" "$env" && chmod 600 "$env" || die "writing $env failed"
-  did ".env written (0600): DOMAIN=$NEW_DOMAIN, MODELS_DIR=$NEW_MODELS_DIR, MODEL=${NEW_MODEL:-none yet}; the secrets generated, none printed"
+  did ".env written (0600): DOMAIN=$NEW_DOMAIN, MODELS_DIR=$NEW_MODELS_DIR, MODEL=${NEW_MODEL:-none yet}${NEW_GITLAB:+, GITLAB_URL=$NEW_GITLAB and its token}; the secrets generated, none printed"
 }
 
 # docker-compose.override.yml for this host, when it has none: what it leaves out, and the
@@ -716,6 +723,9 @@ write_override() {   # write_override plan|do SERVICES...
     echo "# Written by installer.sh ($BVERSION) for this host. Yours to change: upgrades and repairs keep it."
     echo "services:"
     for svc in "$@"; do echo "  $svc: { profiles: [off] }"; done
+    if [[ $NO_GITLAB -eq 1 ]]; then
+      echo "  # Argus waits for a GitLab: put GITLAB_URL and GITLAB_TOKEN in .env, take out the argus line above, then up -d."
+    fi
     if [[ $audio_on -eq 1 ]]; then
       echo "  # No network here: the speech server uses the models it has and never looks for others."
       echo "  audio: { environment: { HF_HUB_OFFLINE: \"1\" } }"
@@ -774,7 +784,21 @@ start_stack() {
   dc up -d --no-build --pull never --remove-orphans > "$STATE/up.log" 2>&1 || { tail -n 20 "$STATE/up.log" | sed 's/^/    /'; bad "$ENGINE compose up failed"; return 1; }
   ok "started"
 }
-# Every service compose runs: up, and healthy where it has a health check.
+# Every service compose runs: up, and healthy where it has a health check. Those in EXCUSED
+# (not up before an upgrade either) are named, and do not hold it up.
+EXCUSED=""
+# The services not up now, while the stack runs: an upgrade does not answer for them.
+not_up_now() {
+  local svc st health
+  local -A good=() seen=()
+  container_rows | grep -q '|running|' || return 0
+  while IFS='|' read -r svc _ st health _ _; do
+    [[ -n "$svc" ]] || continue
+    seen[$svc]=1
+    [[ $st == running && ( -z "$health" || $health == healthy ) ]] && good[$svc]=1
+  done < <(container_rows)
+  for svc in $(dc config --services 2>/dev/null); do [[ -n "${good[$svc]:-}" ]] || printf '%s ' "$svc"; done
+}
 wait_healthy() {
   local secs=$(( ${TIMEOUT%s} * 60 )) last=0 services svc waiting n m deadline
   [[ $TIMEOUT == *s ]] && secs=${TIMEOUT%s}
@@ -789,11 +813,18 @@ wait_healthy() {
       else STATEOF[$svc]="$st${health:+ ($health)}"; fi
     done < <(container_rows)
     waiting=(); n=0; m=0
+    local excused=()
     for svc in $services; do
       m=$((m + 1))
-      if [[ "${STATEOF[$svc]:-}" == ok ]]; then n=$((n + 1)); else waiting+=("$svc: ${STATEOF[$svc]:-no container}"); fi
+      if [[ "${STATEOF[$svc]:-}" == ok ]]; then n=$((n + 1))
+      elif [[ " $EXCUSED " == *" $svc "* ]]; then excused+=("$svc: ${STATEOF[$svc]:-no container}")
+      else waiting+=("$svc: ${STATEOF[$svc]:-no container}"); fi
     done
-    if [[ ${#waiting[@]} -eq 0 ]]; then ok "all $m services up"; return 0; fi
+    if [[ ${#waiting[@]} -eq 0 ]]; then
+      ok "$n of $m services up"
+      [[ ${#excused[@]} -gt 0 ]] && note "not up, as before the upgrade: ${excused[*]} (status, repair)"
+      return 0
+    fi
     if [[ $(date +%s) -ge $deadline ]]; then
       bad "after $(( secs / 60 )) min $(( secs % 60 )) s, $n of $m services are up; not: ${waiting[*]}"
       say "    their logs: $ENGINE logs --tail 50 CONTAINER (the names: $ENGINE ps -a)"
@@ -923,6 +954,18 @@ cmd_install() {
     NEW_MODEL="$(ask "The first chat model, a .gguf in MODELS_DIR (empty: none yet)" "${MODEL_ARG:-$s}")"
     NEW_HTTP="$(ask "HTTP port" "${HTTP_ARG:-$([[ $podman -eq 1 ]] && echo 8080 || echo 80)}")"
     NEW_HTTPS="$(ask "HTTPS port" "${HTTPS_ARG:-$([[ $podman -eq 1 ]] && echo 8443 || echo 443)}")"
+    NEW_GITLAB="$(ask "The GitLab Argus indexes, its address (empty: none yet)" "$GITLAB_ARG")"
+    NEW_GITLAB_TOKEN=""
+    if [[ -n "$GITLAB_TOKEN_FILE" ]]; then NEW_GITLAB_TOKEN="$(head -n1 "$GITLAB_TOKEN_FILE" | tr -d '[:space:]')"
+    elif [[ -n "$NEW_GITLAB" && $YES -eq 0 && $DRY -eq 0 ]]; then
+      printf 'Its read-only token (read_api, read_repository; not shown): ' >&2; read -r -s NEW_GITLAB_TOKEN <&7 || true; echo >&2
+    fi
+    if [[ -z "$NEW_GITLAB" || -z "$NEW_GITLAB_TOKEN" ]]; then
+      [[ -n "$NEW_GITLAB" && $DRY -eq 0 ]] && refuse "--gitlab-url needs its token: --gitlab-token-file FILE"
+      NEW_GITLAB=""
+      # Argus cannot start without a GitLab: left out until .env names one.
+      [[ "$known" == *" argus "* && " ${leave[*]} " != *" argus "* ]] && { leave+=(argus); NO_GITLAB=1; }
+    fi
   fi
   [[ "$NEW_DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] || usage_error "the domain is a host name: $NEW_DOMAIN"
   [[ "$NEW_MODEL" == *:* ]] && refuse "MODEL=$NEW_MODEL is a Hugging Face name (repo:quant), which needs the network: name a .gguf file in MODELS_DIR"
@@ -932,6 +975,7 @@ cmd_install() {
 
   say "Install Argus Arena $BVERSION in $DIR ($ENGINE, project $PROJECT)$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is done")"
   say "  https://$NEW_DOMAIN$([[ "$NEW_HTTPS" != 443 ]] && echo ":$NEW_HTTPS"), models in $MODELS_DIR${leave[*]:+, left out: ${leave[*]}}"
+  [[ $NO_GITLAB -eq 1 ]] && note "no GitLab given (--gitlab-url, --gitlab-token-file): Argus is left out; to add it later, GITLAB_URL and GITLAB_TOKEN in .env, its line out of docker-compose.override.yml, then up -d"
   if [[ $DRY -eq 1 ]]; then
     [[ -n "$BUNDLE" ]] && check_bundle
     check_requirements fresh
@@ -1123,6 +1167,7 @@ cmd_upgrade() {
 
   if [[ -f "$marker" ]]; then
     BACKUP="$(sed -n 's/^backup=//p' "$marker")"; started="$(sed -n 's/^started=//p' "$marker")"; started="${started:-0}"
+    EXCUSED="$(sed -n 's/^excused=//p' "$marker")"
     note "carrying on the upgrade from $FROM that was interrupted: its backup $BACKUP, its rollback copy $SNAP"
     [[ -f "$SNAP/deploy.tar" && -f "$SNAP/IMAGES" ]] || die "the interrupted upgrade's rollback copy is not in $SNAP"
   else
@@ -1141,7 +1186,9 @@ cmd_upgrade() {
     rm -f "$SNAP/added"
     keep_old_images
     snapshot_deploy
-    (umask 077; printf 'from=%s\nto=%s\nbackup=%s\nstarted=0\n' "$FROM" "$BVERSION" "$BACKUP" > "$marker")
+    EXCUSED="$(not_up_now)"
+    [[ -n "$EXCUSED" ]] && note "not up before the upgrade: $EXCUSED(the upgrade does not wait for them)"
+    (umask 077; printf 'from=%s\nto=%s\nbackup=%s\nstarted=0\nexcused=%s\n' "$FROM" "$BVERSION" "$BACKUP" "$EXCUSED" > "$marker")
     printf 'from=%s\nto=%s\nbackup=%s\nwhen=%s\n' "$FROM" "$BVERSION" "$BACKUP" "$(date '+%Y-%m-%d %H:%M:%S')" > "$SNAP/info"
   fi
   state_set status upgrading target "$BVERSION"

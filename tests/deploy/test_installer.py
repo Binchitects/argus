@@ -249,9 +249,12 @@ class InstallerTests(unittest.TestCase):
 
     # ---------------------------------------------------------------- helpers
 
-    def install(self, *extra: str, code: int = 0) -> subprocess.CompletedProcess:
+    def install(self, *extra: str, code: int = 0, gitlab: bool = True) -> subprocess.CompletedProcess:
+        token = self.r.s.dir / "gitlab-token"
+        token.write_text("glpat-a-token-for-the-test\n")
+        more = ["--gitlab-url", "https://gitlab.test", "--gitlab-token-file", str(token)] if gitlab else []
         r = self.r.run("install", "--dir", str(self.dir), "--yes", "--cpu-only", "--skip-requirements", "--timeout", "5s",
-                       "--domain", "arena.test", "--https-port", "18443", "--http-port", "18080", *extra)
+                       "--domain", "arena.test", "--https-port", "18443", "--http-port", "18080", *more, *extra)
         self.assertEqual(r.returncode, code, r.stdout + r.stderr)
         return r
 
@@ -319,7 +322,8 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("dry run: nothing is done", out)
         self.assertIn("the small ones: the rest is checked when it is unpacked", out)
         self.assertIn("would  load 8 images", out)
-        self.assertIn("would  write docker-compose.override.yml: llamacpp left out; the speech server offline", out)
+        self.assertIn("would  write docker-compose.override.yml: llamacpp argus left out; the speech server offline", out)
+        self.assertIn("no GitLab given (--gitlab-url, --gitlab-token-file): Argus is left out", out)
         self.assertFalse(self.dir.exists())
         mutating = {"load", "tag", "run", "rm", "rmi", "save"}
         self.assertFalse([c for c in self.r.calls() if c[1:2] and c[1] in mutating], self.r.calls())
@@ -427,6 +431,9 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(values["DOMAIN"], "arena.test")
         self.assertEqual(values["HTTPS_PORT"], "18443")
         self.assertEqual(values["MODEL"], "")
+        self.assertEqual(values["GITLAB_URL"], "https://gitlab.test")
+        self.assertEqual(values["GITLAB_TOKEN"], "glpat-a-token-for-the-test")
+        self.assertNotIn("glpat-a-token-for-the-test", self.output(r) + self.logs())
         for key in ("ADMIN_PASSWORD", "APP_KEY", "DB_PASSWORD", "ENGINE_KEY", "ARGUS_KEY", "NEW_KEY"):
             self.assertGreaterEqual(len(values[key]), 24, key)
             self.assertNotIn(values[key], self.output(r) + self.logs(), key)
@@ -456,6 +463,33 @@ class InstallerTests(unittest.TestCase):
         r = self.install()
         self.assertEqual((deploy / ".env").read_text(), env)
         self.assertFalse(any(c[1:2] == ["load"] for c in self.r.calls()), "loaded again")
+
+    def test_Without_a_GitLab_Argus_is_left_out_and_said_so(self):
+        r = self.install(gitlab=False)
+        override = (self.dir / "deploy" / "docker-compose.override.yml").read_text()
+        self.assertIn("  argus: { profiles: [off] }", override)
+        self.assertIn("Argus is left out", r.stdout)
+        self.assertNotIn("argus", [c["service"] for c in self.containers()])
+        r = self.r.run("install", "--dir", str(self.r.s.dir / "x"), "--yes", "--project", "other", "--gitlab-url", "https://gitlab.test")
+        self.assertEqual(r.returncode, 3, self.output(r))
+        self.assertIn("--gitlab-url needs its token", r.stderr)
+
+    def test_An_upgrade_does_not_wait_for_a_service_that_was_down_before_it(self):
+        self.old_install(version_file=True)
+        store = self.r.store()
+        next(c for c in store["containers"] if c["service"] == "argus")["state"] = "restarting"
+        self.r.state.write_text(json.dumps(store))
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "3s", extra={"FAKE_DOWN": "argus"})
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("not up before the upgrade: argus", r.stdout)
+        self.assertIn("not up, as before the upgrade: argus: restarting", r.stdout)
+        # Down after the upgrade but up before: that fails it.
+        shutil.rmtree(self.dir)
+        self.r.state.write_text(json.dumps(self.pristine))
+        self.old_install(version_file=True)
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "3s", extra={"FAKE_DOWN": "web"})
+        self.assertEqual(r.returncode, 5, self.output(r))
+        self.assertIn("web: restarting", r.stdout)
 
     def test_Install_refuses_a_folder_or_project_that_has_an_installation(self):
         self.old_install()
