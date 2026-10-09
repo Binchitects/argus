@@ -347,7 +347,8 @@ user's).
 **People.** Each person with files, what their files take, and their room.
 **Settings → Storage → Room for each person's files** is everyone's (empty: no
 limit); **Room** gives someone their own (0: no limit) or the company's again,
-audited (`storage.quota`). Past it, uploads are refused (HTTP 413, saying what
+audited (`storage.quota`). **Give someone a room** finds anyone by name, to give
+them their own before they have files. Past it, uploads are refused (HTTP 413, saying what
 their files take of their room) and so are the picture, video and speech tools
 (the model is told why, and tells them); what Python makes and long tool
 results still go, as the answer needs them. Your account shows each person what

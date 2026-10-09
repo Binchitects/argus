@@ -411,7 +411,7 @@ export const topics = {
       { name: 'Where the room goes', text: 'The disks (the host\'s, and the folders the app mounts), how full each is and how fast it fills; then what takes room: each database and its largest tables, the chat\'s files, the model library, Argus, backups, logs and metrics, with their growth over 30 days. **How long things stay** lists the rules in force, and **What the app cannot see** what to look at on the host.' },
       { name: 'Files', text: 'The chat\'s files and what the tools made: whose, which chat, from where, how big and when. Filter by person, kind, where from, whether a chat still has it, size and age. Each downloads (audited); ticked ones are deleted after you confirm.' },
       { name: 'Clean-ups', text: 'Files in no chat, old pictures, videos and speech, files of deleted chats, leftovers on disk, old backups, and models nothing uses. **Preview** says what would go and the room it frees; **Clean up** asks first, and each run is audited. Old backups are only shown, with the command that removes them on the host: the app sees the backups read only.' },
-      { name: 'People', text: 'Each person\'s files against their room. **Room** gives someone their own (0: no limit), or the company\'s again.' },
+      { name: 'People', text: 'Each person\'s files against their room. **Room** gives someone their own (0: no limit), or the company\'s again. **Give someone a room** finds anyone by name, before they have files.' },
       { name: 'Measure again', text: 'Measures everything now. Otherwise folders are measured at most every two minutes, and the trends written down every six hours.' },
     ],
     tasks: [

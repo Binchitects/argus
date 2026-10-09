@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Gauge } from 'lucide-react'
+import { Gauge, UserPlus } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { QueryError } from '@/components/app/query-state'
@@ -13,11 +13,13 @@ import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { peopleQuery, type Person } from './people-api'
 import { parseRoom, plural, roomOf, size, type PersonFiles } from './storage-api'
 
-/** Each person with files or a room of their own: what their files take of their room, and theirs to set. */
+/** Each person with files or a room of their own: what their files take of their room, and theirs to set; anyone else's too. */
 export function StoragePeople({ personMegabytes }: { personMegabytes: number | null }) {
   const [editing, setEditing] = useState<PersonFiles | null>(null)
+  const [choosing, setChoosing] = useState(false)
   const people = useQuery({
     queryKey: ['admin', 'storage', 'people'],
     queryFn: ({ signal }) => api<{ people: PersonFiles[]; personMegabytes: number | null }>('/api/admin/storage/people', { signal }),
@@ -84,19 +86,86 @@ export function StoragePeople({ personMegabytes }: { personMegabytes: number | n
       ),
     },
   ]
+  // Someone not listed has no files and the company's room.
+  const choose = (p: Person) => {
+    setChoosing(false)
+    setEditing(
+      people.data?.people.find((x) => x.id === p.id) ?? {
+        id: p.id, userName: p.userName, displayName: p.displayName, email: p.email, count: 0, bytes: 0, ownMegabytes: null, held: !!p.legalHoldSince,
+      },
+    )
+  }
   return (
     <div className="grid gap-4">
-      <p className="text-sm text-muted-foreground">
-        {company ? `Each person's files may take ${size(company * 1024 * 1024)}` : "Each person's files may take any room"} (Settings → Storage), unless they have their own here. Past it,
-        uploads and the pictures and videos the tools make are refused until they delete chats.
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <p className="max-w-3xl text-sm text-muted-foreground">
+          {company ? `Each person's files may take ${size(company * 1024 * 1024)}` : "Each person's files may take any room"} (Settings → Storage), unless they have their own here. Past it,
+          uploads and the pictures and videos the tools make are refused until they delete chats.
+        </p>
+        <Button variant="outline" size="sm" onClick={() => setChoosing(true)}>
+          <UserPlus /> Give someone a room
+        </Button>
+      </div>
       {people.error ? (
         <QueryError error={people.error} retry={() => people.refetch()} />
       ) : (
         <DataTable columns={columns} data={people.data?.people} loading={people.isPending} noun="people" getRowId={(p) => p.id} initialSorting={[{ id: 'bytes', desc: true }]} empty="Nobody has files yet." />
       )}
       <RoomDialog person={editing} company={company} onClose={() => setEditing(null)} />
+      <ChoosePerson open={choosing} onClose={() => setChoosing(false)} onChoose={choose} />
     </div>
+  )
+}
+
+/** Anyone, found by name, to give a room of their own before they have files (the list shows only those who have). */
+function ChoosePerson({ open, onClose, onChoose }: { open: boolean; onClose: () => void; onChoose: (p: Person) => void }) {
+  const [q, setQ] = useState('')
+  const people = useQuery({ ...peopleQuery, enabled: open })
+  const needle = q.trim().toLowerCase()
+  const found = needle
+    ? (people.data?.people ?? []).filter((p) => [p.displayName, p.userName, p.email].some((s) => s?.toLowerCase().includes(needle))).slice(0, 20)
+    : []
+  const close = () => {
+    setQ('')
+    onClose()
+  }
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && close()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Give someone a room</DialogTitle>
+          <DialogDescription>Their own room for files, before they have any: less than the company's, more, or no limit.</DialogDescription>
+        </DialogHeader>
+        {people.error ? (
+          <QueryError error={people.error} retry={() => people.refetch()} />
+        ) : (
+          <div className="grid gap-2">
+            <Input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, user name or email" aria-label="Find a person" autoComplete="off" autoFocus />
+            {needle && (
+              <ul className="grid max-h-64 gap-0.5 overflow-y-auto" aria-label="People found">
+                {people.isPending && <li className="px-2 py-1 text-sm text-muted-foreground">Loading people…</li>}
+                {people.isSuccess && found.length === 0 && <li className="px-2 py-1 text-sm text-muted-foreground">Nobody by that name.</li>}
+                {found.map((p) => (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQ('')
+                        onChoose(p)
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent focus-visible:bg-accent"
+                    >
+                      <span className="truncate font-medium">{p.displayName || p.userName}</span>
+                      <span className="truncate text-xs text-muted-foreground">{p.email || p.userName}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }
 

@@ -554,6 +554,15 @@ public sealed class StorageTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.RequestEntityTooLarge, await UploadAsync(ann, "three.png", Png(1000), "image/png"));
         Assert.Equal(new[] { "no limit", "5 MB", "the company's room again" },
             (await AuditAsync(admin, "storage.quota")).Where(e => e.GetProperty("target").GetString() == annName).Select(e => e.GetProperty("detail").GetString()).Reverse());
+
+        // Someone with no files yet (Give someone a room): listed once they have a room of their own, before any upload.
+        var (bob, bobId, _) = await PersonAsync(f, admin);
+        async Task<List<JsonElement>> PeopleAsync() => [.. (await admin.JsonAsync(await admin.GetAsync("/api/admin/storage/people"))).GetProperty("people").EnumerateArray()];
+        Assert.DoesNotContain(await PeopleAsync(), p => p.GetProperty("id").GetGuid() == bobId);
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/storage/people/{bobId}/quota", UriKind.Relative), new { megabytes = 3 }));
+        var listed = (await PeopleAsync()).Single(p => p.GetProperty("id").GetGuid() == bobId);
+        Assert.Equal((0L, 3), (listed.GetProperty("count").GetInt64(), listed.GetProperty("ownMegabytes").GetInt32()));
+        await StatusAssert.Is(HttpStatusCode.OK, await UploadAsync(bob, "big.png", Png(2 * 1024 * 1024), "image/png"));
     }
 
     [Fact]

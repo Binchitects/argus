@@ -333,6 +333,28 @@ describe('Admin → Storage', () => {
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ megabytes: 2000 }))
   })
 
+  it('someone with no files yet is given a room of their own, found by name', async () => {
+    const zed = { id: 'p9', userName: 'zed', displayName: 'Zed', email: 'zed@example.test', isAdmin: false, source: 'local', disabled: false, disabledReason: null, twoFactorEnabled: false, lockedOut: false, lastSignInAt: null, createdAt: '2026-10-01T00:00:00Z', spend: null, budget: null }
+    const calls = fakeApi(admin, {
+      ...routes,
+      'GET /api/admin/people': () => ({ json: { warning: null, people: [{ ...zed, id: 'p1', userName: 'ann', displayName: 'Ann', email: 'ann@example.test' }, zed] } }),
+      'PUT /api/admin/storage/people/p9/quota': () => ({ status: 204 }),
+    })
+    renderApp('/admin/storage?tab=people')
+    expect(await screen.findByText(/Each person's files may take 500.0 MiB/)).toBeInTheDocument()
+    await screen.findByRole('button', { name: 'Set the room of Ann' })
+    expect(screen.queryByRole('button', { name: 'Set the room of Zed' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Give someone a room' }))
+    const pick = await screen.findByRole('dialog', { name: 'Give someone a room' })
+    await userEvent.type(within(pick).getByRole('searchbox', { name: 'Find a person' }), 'zed@')
+    await userEvent.click(await within(pick).findByRole('button', { name: /Zed/ }))
+    const dialog = await screen.findByRole('dialog', { name: "Room for Zed's files" })
+    expect(dialog).toHaveTextContent('(0 files)')
+    await userEvent.type(within(dialog).getByRole('textbox', { name: 'Room (MB)' }), '50')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')).toMatchObject({ path: '/api/admin/storage/people/p9/quota', body: { megabytes: 50 } }))
+  })
+
   it('is for admins only', async () => {
     fakeApi(member, routes)
     renderApp('/admin/storage')
