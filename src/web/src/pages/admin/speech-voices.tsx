@@ -62,7 +62,7 @@ export function SpeechVoices({ id, label, value, onChange, speed, describedBy, i
         {offer.data?.known && voices.length === 0 && (
           <p className="text-xs text-muted-foreground">
             {offer.data.models.length > 0
-              ? 'The speech server lists no voice yet (its models are still downloading): type each language’s voice as language:model/voice.'
+              ? "The speech server lists no voice yet (its models are still downloading): type each language's voice as language:model/voice."
               : 'No voice is offered here: the gateway has no text to speech model (the audio module).'}
           </p>
         )}

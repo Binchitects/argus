@@ -162,6 +162,17 @@ describe('settings → speech → voice for each language', () => {
     expect(screen.queryByRole('combobox', { name: 'Voice for Persian' })).not.toBeInTheDocument()
   })
 
+  it('while the speech server lists no voice yet, or there is no text to speech, the value is typed as text', async () => {
+    backend(speech(), { voices: [], models: ['kokoro'], languages: ['en'], known: true })
+    const { unmount } = renderApp('/admin/settings#speech')
+    expect(await screen.findByLabelText('Voice for each language')).toHaveValue('en:kokoro/af_heart,fa:piper-fa/gyro')
+    expect(screen.getByText(/lists no voice yet \(its models are still downloading\)/)).toBeInTheDocument()
+    unmount()
+    backend(speech(), { voices: [], models: [], languages: ['en'], known: true })
+    renderApp('/admin/settings#speech')
+    expect(await screen.findByText(/the gateway has no text to speech model/)).toBeInTheDocument()
+  })
+
   it('while the speech server cannot be asked, the value is typed as text', async () => {
     const calls = backend(speech(), { voices: [], models: ['kokoro', 'piper-fa'], languages: ['en', 'fa'], known: false })
     renderApp('/admin/settings#speech')
