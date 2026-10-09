@@ -266,6 +266,9 @@ public sealed class FakeMcp : FakeServer
     /// <summary>The tools it lists instead of Arena's three (web_search, read_file, create_issue): Argus's, say.</summary>
     public JsonArray? ToolList { get; set; }
     public string Url => BaseUrl + "/mcp";
+    /// <summary>The sessions closed (DELETE), as a client that lets a connection go does.</summary>
+    public int Closed => Volatile.Read(ref _closed);
+    private int _closed;
 
     public List<(string Method, string? Session)> Calls
     {
@@ -297,6 +300,7 @@ public sealed class FakeMcp : FakeServer
         }
         if (ctx.Request.HttpMethod == "DELETE")
         {
+            Interlocked.Increment(ref _closed);
             ctx.Response.StatusCode = 204;
             return;
         }

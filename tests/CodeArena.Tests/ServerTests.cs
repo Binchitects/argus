@@ -263,6 +263,22 @@ public sealed class ServerTests : IDisposable
         link.Retry();
         await Until(() => link.State == LinkState.Connected, "connected on retry");
         Assert.Equal(3, link.Client!.Tools.Count);
+        Assert.Equal(1, _mcp.Closed);
+
+        // Connected anew while what hears of it fails: the connection it replaces is let go all the same, and so is the new one.
+        var faults = 0;
+        link.Changed = (_, client, _) =>
+        {
+            if (client is not null && Interlocked.Increment(ref faults) == 1)
+            {
+                throw new InvalidCastException("a fault in the handler, again");
+            }
+        };
+        link.Retry();
+        await Until(() => _mcp.Closed == 3, "both connections closed");
+        // Then it is tried again, as after any failure, and connects.
+        await Until(() => link.State == LinkState.Connected, "connected after the fault");
+        Assert.Equal(3, _mcp.Closed);
     }
 
     [Fact]

@@ -130,8 +130,15 @@ internal sealed class ServerLink : IAsyncDisposable
                 Error = null;
                 NextTry = null;
                 failures = 0;
-                Changed?.Invoke(this, client, old);
-                await CloseAsync(old);
+                try
+                {
+                    Changed?.Invoke(this, client, old);
+                }
+                finally
+                {
+                    // The one replaced goes, even when what hears of it fails (then the new one goes too, below).
+                    await CloseAsync(old);
+                }
                 _first.TrySetResult();
                 // Connected: nothing to do until a retry is asked for (or a call finds the server gone).
                 await Task.WhenAny(woken, Task.Delay(Timeout.Infinite, _stop.Token));
