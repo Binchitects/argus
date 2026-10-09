@@ -58,7 +58,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) AS \"Requests\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")"
+          "rawSql": "SELECT count(*) AS \"Requests\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND coalesce(metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError'"
         }
       ],
       "fieldConfig": {
@@ -90,7 +90,8 @@
         "textMode": "auto",
         "graphMode": "none",
         "colorMode": "value"
-      }
+      },
+      "description": "Requests the gateway took. A request refused for its key's rate limit never reached a model: it is not counted here, nor in any panel of this dashboard (Usage by person lists them)."
     },
     {
       "type": "stat",
@@ -170,7 +171,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY request_duration_ms),0) AS \"p50\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND request_duration_ms IS NOT NULL"
+          "rawSql": "SELECT COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY request_duration_ms),0) AS \"p50\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND coalesce(metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError' AND request_duration_ms IS NOT NULL"
         }
       ],
       "fieldConfig": {
@@ -227,7 +228,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY request_duration_ms),0) AS \"p95\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND request_duration_ms IS NOT NULL"
+          "rawSql": "SELECT COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY request_duration_ms),0) AS \"p95\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND coalesce(metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError' AND request_duration_ms IS NOT NULL"
         }
       ],
       "fieldConfig": {
@@ -342,7 +343,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) FILTER (WHERE status IS NOT NULL AND status <> 'success') AS \"Failures\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")"
+          "rawSql": "SELECT count(*) FILTER (WHERE status IS NOT NULL AND status <> 'success') AS \"Failures\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND coalesce(metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError'"
         }
       ],
       "fieldConfig": {
@@ -378,7 +379,8 @@
         "textMode": "auto",
         "graphMode": "none",
         "colorMode": "value"
-      }
+      },
+      "description": "Requests that failed: refused for credit, a model's error, a timeout. Refusals for a key's rate limit are the client's limit, not a failure: Usage by person lists them."
     },
     {
       "type": "timeseries",
@@ -403,7 +405,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval), model AS metric, count(*) AS \"requests\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") GROUP BY 1, 2 ORDER BY 1"
+          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval), model AS metric, count(*) AS \"requests\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND coalesce(metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError' GROUP BY 1, 2 ORDER BY 1"
         }
       ],
       "fieldConfig": {
@@ -513,7 +515,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval), percentile_cont(0.5) WITHIN GROUP (ORDER BY request_duration_ms) AS \"p50\", percentile_cont(0.95) WITHIN GROUP (ORDER BY request_duration_ms) AS \"p95\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND request_duration_ms IS NOT NULL GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval), percentile_cont(0.5) WITHIN GROUP (ORDER BY request_duration_ms) AS \"p50\", percentile_cont(0.95) WITHIN GROUP (ORDER BY request_duration_ms) AS \"p95\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND coalesce(metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError' AND request_duration_ms IS NOT NULL GROUP BY 1 ORDER BY 1"
         }
       ],
       "fieldConfig": {
@@ -740,7 +742,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT model AS \"Model\", count(*) AS \"Requests\", COALESCE(sum(prompt_tokens),0) AS \"Prompt tokens\", COALESCE(sum(completion_tokens),0) AS \"Completion tokens\", COALESCE(round(100.0*sum(coalesce((metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0))/NULLIF(sum(coalesce(prompt_tokens,0)),0),1),0) AS \"Cache hit %\", round(COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY request_duration_ms),0)::numeric,0) AS \"p50 ms\", round(COALESCE(sum(spend),0)::numeric,4) AS \"Spend\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") GROUP BY 1 ORDER BY 2 DESC"
+          "rawSql": "SELECT model AS \"Model\", count(*) AS \"Requests\", COALESCE(sum(prompt_tokens),0) AS \"Prompt tokens\", COALESCE(sum(completion_tokens),0) AS \"Completion tokens\", COALESCE(round(100.0*sum(coalesce((metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0))/NULLIF(sum(coalesce(prompt_tokens,0)),0),1),0) AS \"Cache hit %\", round(COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY request_duration_ms),0)::numeric,0) AS \"p50 ms\", round(COALESCE(sum(spend),0)::numeric,4) AS \"Spend\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND coalesce(metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError' GROUP BY 1 ORDER BY 2 DESC"
         }
       ],
       "fieldConfig": {
@@ -778,7 +780,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT \"startTime\" AS \"Time\", \"user\" AS \"User\", model AS \"Model\", prompt_tokens AS \"Prompt\", completion_tokens AS \"Completion\", request_duration_ms AS \"ms\", cache_hit AS \"Cached\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") ORDER BY \"startTime\" DESC LIMIT 100"
+          "rawSql": "SELECT \"startTime\" AS \"Time\", \"user\" AS \"User\", model AS \"Model\", prompt_tokens AS \"Prompt\", completion_tokens AS \"Completion\", request_duration_ms AS \"ms\", cache_hit AS \"Cached\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND coalesce(metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError' ORDER BY \"startTime\" DESC LIMIT 100"
         }
       ],
       "fieldConfig": {

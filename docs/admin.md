@@ -387,7 +387,11 @@ them.
   limits** on the Usage by person dashboard: who, with which key, which limit,
   how often and when last. A refusal is in the gateway's request log as a
   failed request with its reason and no prompt or answer; refusals for credit
-  are not counted there. Each change of a limit is audited
+  are not counted there. A refused request never reached a model, so it is not
+  counted as a request anywhere else (a person's own usage, the dashboards'
+  requests, the LLM overview's failures and times): a script that retries
+  every second shows as the requests that were answered, plus its refusals
+  apart. Each change of a limit is audited
   (`person.set_limits`, `group.policies` and `settings.change`).
 - **Several gateways.** LiteLLM counts in its own memory. Compose runs one,
   and so does the Helm chart unless `litellm.replicas` is raised: with several,

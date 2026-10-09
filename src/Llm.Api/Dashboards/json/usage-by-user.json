@@ -101,7 +101,7 @@
         "type": "postgres",
         "uid": "litellm-db"
       },
-      "description": "",
+      "description": "Requests the gateway took, every surface. Refusals for a key's rate limit are not counted: they are under Refused by rate limits.",
       "gridPos": {
         "x": 4,
         "y": 8,
@@ -117,7 +117,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select count(*) as v from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\")"
+          "rawSql": "select count(*) as v from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\") and coalesce(s.metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError'"
         }
       ],
       "fieldConfig": {
@@ -416,7 +416,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)') as \"Person\", count(*) as \"Requests\", coalesce(sum(s.prompt_tokens),0) as \"Prompt\", coalesce(sum(s.completion_tokens),0) as \"Completion\", coalesce(sum(s.total_tokens),0) as \"Tokens\", round(coalesce(sum(s.spend),0)::numeric,4) as \"Spend\", count(distinct coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)')) as \"Keys used\", string_agg(distinct case when coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') = 'chat' then 'Chat' when coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') = '(master key)' then 'Master key (unattributed)' else 'API / agent' end, ', ') as \"Surfaces\" from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\") group by 1 order by 5 desc nulls last"
+          "rawSql": "select coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)') as \"Person\", count(*) as \"Requests\", coalesce(sum(s.prompt_tokens),0) as \"Prompt\", coalesce(sum(s.completion_tokens),0) as \"Completion\", coalesce(sum(s.total_tokens),0) as \"Tokens\", round(coalesce(sum(s.spend),0)::numeric,4) as \"Spend\", count(distinct coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)')) as \"Keys used\", string_agg(distinct case when coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') = 'chat' then 'Chat' when coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') = '(master key)' then 'Master key (unattributed)' else 'API / agent' end, ', ') as \"Surfaces\" from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\") and coalesce(s.metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError' group by 1 order by 5 desc nulls last"
         }
       ],
       "fieldConfig": {
@@ -660,7 +660,7 @@
         "type": "postgres",
         "uid": "litellm-db"
       },
-      "description": "API requests the gateway refused (HTTP 429) for a key's rate limits: requests a minute, tokens a minute, or requests at once. Who, with which key, which limit, how often and when last. Refusals for credit are not here. The gateway keeps no prompt or answer with a refusal.",
+      "description": "API requests the gateway refused (HTTP 429) for a key's rate limits: requests a minute, tokens a minute, or requests at once. Who, with which key, which limit, how often and when last. They are not counted as requests in the other panels. Refusals for credit are not here. The gateway keeps no prompt or answer with a refusal.",
       "gridPos": {
         "x": 0,
         "y": 38,
@@ -714,7 +714,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select s.\"startTime\" as \"Time\", coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)') as \"Person\", coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') as \"Key\", case when coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') = 'chat' then 'Chat' when coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') = '(master key)' then 'Master key (unattributed)' else 'API / agent' end as \"Surface\", coalesce(nullif(s.model_group,''), s.model) as \"Model\", s.prompt_tokens as \"Prompt\", s.completion_tokens as \"Completion\", round(coalesce(s.spend,0)::numeric,6) as \"Spend\" from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\") order by s.\"startTime\" desc limit 200"
+          "rawSql": "select s.\"startTime\" as \"Time\", coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)') as \"Person\", coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') as \"Key\", case when coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') = 'chat' then 'Chat' when coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') = '(master key)' then 'Master key (unattributed)' else 'API / agent' end as \"Surface\", coalesce(nullif(s.model_group,''), s.model) as \"Model\", s.prompt_tokens as \"Prompt\", s.completion_tokens as \"Completion\", round(coalesce(s.spend,0)::numeric,6) as \"Spend\" from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\") and coalesce(s.metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError' order by s.\"startTime\" desc limit 200"
         }
       ],
       "fieldConfig": {
@@ -1046,7 +1046,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)') as \"Person\", count(*) as \"Requests\", sum(greatest(coalesce(s.prompt_tokens,0) - coalesce((s.metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0), 0)) as \"Input, cache miss\", sum(coalesce((s.metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0)) as \"Input, cache hit\", round(100.0*sum(coalesce((s.metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0))/nullif(sum(coalesce(s.prompt_tokens,0)),0),1) as \"Cache hit %\", sum(coalesce(s.completion_tokens,0)) as \"Output\", round(sum(s.spend)::numeric,4) as \"Cost\" from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\") group by 1 order by \"Cost\" desc nulls last",
+          "rawSql": "select coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)') as \"Person\", count(*) as \"Requests\", sum(greatest(coalesce(s.prompt_tokens,0) - coalesce((s.metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0), 0)) as \"Input, cache miss\", sum(coalesce((s.metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0)) as \"Input, cache hit\", round(100.0*sum(coalesce((s.metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0))/nullif(sum(coalesce(s.prompt_tokens,0)),0),1) as \"Cache hit %\", sum(coalesce(s.completion_tokens,0)) as \"Output\", round(sum(s.spend)::numeric,4) as \"Cost\" from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\") and coalesce(s.metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError' group by 1 order by \"Cost\" desc nulls last",
           "refId": "A"
         }
       ],

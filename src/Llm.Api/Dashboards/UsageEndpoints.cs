@@ -8,6 +8,7 @@ namespace Llm.Api.Dashboards;
 /// <summary>
 /// A person's own usage: the same rows and the same attribution as the
 /// "Usage by person" dashboard, filtered to them, with their email as a parameter.
+/// Requests refused for a key's rate limit are left out, as there: they never reached a model.
 /// </summary>
 public static class UsageEndpoints
 {
@@ -43,7 +44,7 @@ public static class UsageEndpoints
             ["to"] = to.UtcDateTime,
             ["secs"] = interval.TotalSeconds,
         };
-        var where = $""" where lower({Person}) = @me and s."startTime" between @from and @to """;
+        var where = $""" where lower({Person}) = @me and s."startTime" between @from and @to and {Gateway.RateLimits.NotRefused} """;
         try
         {
             var totals = await sql.QueryAsync($"""

@@ -398,6 +398,50 @@ public sealed class RateLimitTests(AppFixture app)
         await insert.ExecuteNonQueryAsync();
     }
 
+    /// <summary>A dashboard panel's table (Usage by person's unless said), by its title, for a time range.</summary>
+    private static async Task<JsonElement> PanelAsync(TestBrowser admin, string title, DateTimeOffset from, DateTimeOffset to, string dashboard = "usage-by-user")
+    {
+        var d = await admin.JsonAsync(await admin.GetAsync($"/api/dashboards/{dashboard}"));
+        var key = d.GetProperty("panels").EnumerateArray().Single(x => x.GetProperty("title").GetString() == title).GetProperty("key").GetInt32();
+        var res = await admin.Http.PostAsJsonAsync(new Uri($"/api/dashboards/{dashboard}/panels/{key}/query", UriKind.Relative), new { from, to });
+        return (await admin.JsonAsync(res)).GetProperty("results")[0].GetProperty("table");
+    }
+
+    [Fact]
+    public async Task The_dashboards_count_refused_requests_as_refused_not_as_requests_or_failures()
+    {
+        var admin = await AdminAsync(app.Factory);
+        var p = await PersonAsync(admin);
+        var token = app.Gateway.KeysOf(p.Email).Single().Token;
+        // A second of its own, long ago: no other test's rows are in it.
+        var at = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero).AddSeconds(Random.Shared.Next(86_000));
+        var run = "rl-" + Guid.NewGuid().ToString("N")[..8] + "-";
+        try
+        {
+            await LogAsync(run + "1", token, p.Email, at, total: 100);
+            await LogAsync(run + "2", token, p.Email, at, total: 50);
+            await LogAsync(run + "3", token, p.Email, at, error: ("BudgetExceededError", "Budget has been exceeded!"));
+            await LogAsync(run + "4", token, p.Email, at, error: Over(token, "requests"));
+            await LogAsync(run + "5", token, p.Email, at, error: Over(token, "tokens"));
+            var (from, to) = (at.AddSeconds(-1), at.AddSeconds(1));
+            double Stat(JsonElement table) => table.GetProperty("rows")[0][0].GetDouble();
+            Assert.Equal(3, Stat(await PanelAsync(admin, "Requests", from, to)));
+            Assert.Equal(3, Stat(await PanelAsync(admin, "Requests", from, to, "llm-overview")));
+            // Refused for credit is a failure; refused for a key's rate limit is the client's limit.
+            Assert.Equal(1, Stat(await PanelAsync(admin, "Failures", from, to, "llm-overview")));
+            Assert.Equal(3, (await PanelAsync(admin, "By model", from, to, "llm-overview")).GetProperty("rows")[0][1].GetDouble());
+            Assert.Equal(2, (await PanelAsync(admin, "Refused by rate limits", from, to)).GetProperty("rows").EnumerateArray().Sum(r => r[3].GetDouble()));
+        }
+        finally
+        {
+            await using var conn = new NpgsqlConnection(app.LitellmConnectionString);
+            await conn.OpenAsync();
+            await using var delete = new NpgsqlCommand("""delete from "LiteLLM_SpendLogs" where request_id like @run""", conn);
+            delete.Parameters.AddWithValue("run", run + "%");
+            await delete.ExecuteNonQueryAsync();
+        }
+    }
+
     private static (string, string) Over(string token, string limit) =>
         ("ProxyRateLimitError", $"litellm.RateLimitError: Rate limit exceeded for api_key: {token}. Limit type: {limit}. Current limit: 60, Remaining: 0. Limit resets at: 2026-10-09 10:01:00 UTC");
 
@@ -439,11 +483,7 @@ public sealed class RateLimitTests(AppFixture app)
             Assert.Equal(3, seen.GetProperty("refused").GetArrayLength());
 
             // The Usage by person dashboard: who was refused, with which key, for which limit.
-            var d = await admin.JsonAsync(await admin.GetAsync("/api/dashboards/usage-by-user"));
-            var key = d.GetProperty("panels").EnumerateArray().Single(x => x.GetProperty("title").GetString() == "Refused by rate limits").GetProperty("key").GetInt32();
-            var res = await admin.Http.PostAsJsonAsync(new Uri($"/api/dashboards/usage-by-user/panels/{key}/query", UriKind.Relative),
-                new { from = now.AddDays(-1), to = now.AddMinutes(1) });
-            var table = (await admin.JsonAsync(res)).GetProperty("results")[0].GetProperty("table");
+            var table = await PanelAsync(admin, "Refused by rate limits", now.AddDays(-1), now.AddMinutes(1));
             var cols = table.GetProperty("columns").EnumerateArray().Select(c => c.GetProperty("name").GetString()).ToList();
             Assert.Equal(["Person", "Key", "Limit", "Refused", "Last"], cols);
             var rows = table.GetProperty("rows").EnumerateArray().Where(r => r[0].GetString() == p.Email)
@@ -453,6 +493,17 @@ public sealed class RateLimitTests(AppFixture app)
                 ["requests a minute"] = ("app-" + p.Name, 2), ["tokens a minute"] = ("app-" + p.Name, 1), ["requests at once"] = ("app-" + p.Name, 1),
             }, rows);
             Assert.Contains(table.GetProperty("rows").EnumerateArray(), r => r[0].GetString() == other.Email);
+
+            // A refusal never reached a model: their usage and the dashboard's requests count the four that did (one refused for credit), not the four refused.
+            var q = $"from={Uri.EscapeDataString(now.AddDays(-1).ToString("o"))}&to={Uri.EscapeDataString(now.AddMinutes(1).ToString("o"))}";
+            Assert.Equal(4, (await me.JsonAsync(await me.GetAsync("/api/usage/me?" + q))).GetProperty("totals").GetProperty("requests").GetDouble());
+            foreach (var panel in new[] { "Per person — every surface combined", "Tokens and cost per person" })
+            {
+                var people = (await PanelAsync(admin, panel, now.AddDays(-1), now.AddMinutes(1))).GetProperty("rows").EnumerateArray();
+                Assert.Equal(4, people.Single(r => r[0].GetString() == p.Email)[1].GetDouble());
+            }
+            var recent = (await PanelAsync(admin, "Recent requests, resolved", now.AddDays(-1), now.AddMinutes(1))).GetProperty("rows").EnumerateArray();
+            Assert.Equal(4, recent.Count(r => r[1].GetString() == p.Email));
         }
         finally
         {

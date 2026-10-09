@@ -60,6 +60,9 @@ public sealed class RateLimits(AppDbContext db, AccessService access, ILiteLlm g
     /// <summary>A rate-limit refusal in the gateway's request log: LiteLLM's own limiter (its error class), never a refusal for credit.</summary>
     public const string Refused = """(s.status = 'failure' and s.metadata->'error_information'->>'error_class' = 'ProxyRateLimitError')""";
 
+    /// <summary>Not a rate-limit refusal: such a request never reached a model, so usage does not count it (it is counted as refused).</summary>
+    public const string NotRefused = """coalesce(s.metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError'""";
+
     /// <summary>Which limit refused it, from LiteLLM's message ("Limit type: requests"): requests, tokens, at once, or other.</summary>
     public const string Kind = """
         case substring(s.metadata->'error_information'->>'error_message' from 'Limit type: ([a-z_]+)')
