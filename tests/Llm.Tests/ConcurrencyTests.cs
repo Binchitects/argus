@@ -1461,6 +1461,43 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
     }
 
     [Fact]
+    public async Task Another_replica_hears_at_once_of_a_model_let_through_to_and_of_one_unloaded_to_make_room()
+    {
+        var clock = new MovableClock(DateTimeOffset.UtcNow);
+        var renew = new Dictionary<string, string?> { ["Replicas:Renew"] = "00:00:01" };
+        await using var a = NewApp(renew, parallel: 1, clock: clock, others: [("tiny-a", 1), ("tiny-b", 1)]);
+        string database;
+        using (var scope = a.Services.CreateScope())
+        {
+            database = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>().Database.GetConnectionString()!;
+        }
+        await using var b = Start(database, renew, clock);
+        var (onA, onB) = (a.Services.GetRequiredService<Llm.Api.Operations.Replicas>(), b.Services.GetRequiredService<Llm.Api.Operations.Replicas>());
+        await EventuallyAsync(() => onA.Count == 2 && onB.Count == 2, "both replicas counted");
+        var (stateA, stateB) = (a.Services.GetRequiredService<EngineState>(), b.Services.GetRequiredService<EngineState>());
+        var admin = await new TestBrowser(a).SignedInAsync("admin", AppFixture.AdminPassword);
+        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-a/load"));
+        await EventuallyAsync(() => stateA.Spare.SequenceEqual(["tiny-a"]) && stateB.Spare.SequenceEqual(["tiny-a"]), "both replicas know tiny-a may make room");
+
+        // An agent's request for tiny-a is let through on one replica: the other does not unload tiny-a for another request
+        // in the same moment, before the engine has started on it.
+        Assert.Equal("NONE", (await GuardAsync(b, "tiny-a")).GetProperty("action").GetString());
+        var waiting = GuardAsync(a, "tiny-b");
+        await LookedAsync(3, "the request for tiny-b waits for room");
+        Assert.False(waiting.IsCompleted);
+        Assert.Equal(0, app.Engine.CallsTo("/models/unload"));
+
+        // Its time to reach the engine passed: tiny-a, idle, makes room, and the other replica counts it unloaded at once,
+        // though the engine lists it loaded until it has stopped.
+        app.Engine.SlowStop = true;
+        clock.Now += EngineRoute.Starting;
+        Assert.Equal("NONE", (await waiting.WaitAsync(TimeSpan.FromSeconds(20))).GetProperty("action").GetString());
+        Assert.Equal(1, app.Engine.CallsTo("/models/unload", "tiny-a"));
+        await EventuallyAsync(() => stateB.StatusOf("tiny-a") == "unloaded", "the other replica hears tiny-a unloaded");
+        Assert.Equal("loaded", app.Engine.StatusOf("tiny-a"));
+    }
+
+    [Fact]
     public async Task A_model_that_failed_to_load_is_tried_again_after_its_wait_once_asked_for_or_kept()
     {
         var clock = new MovableClock(DateTimeOffset.UtcNow);

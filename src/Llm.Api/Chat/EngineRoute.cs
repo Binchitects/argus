@@ -323,7 +323,8 @@ public sealed partial class EngineRoute
     /// <summary>
     /// Whether <paramref name="model"/> is loaded (or loading) now: what the watcher saw when it is under a second old,
     /// else what the engine said within the last second (asked again when older; the requests of that second share one
-    /// ask). A model the app told to unload is unloaded (<see cref="EngineState.Unloading"/>).
+    /// ask, and wait half a second for it at most, then go by the watcher's). A model the app told to unload is unloaded
+    /// (<see cref="EngineState.Unloading"/>).
     /// </summary>
     private async Task<string?> StatusAsync(string model, CancellationToken ct)
     {
@@ -341,19 +342,24 @@ public sealed partial class EngineRoute
             }
             listed = _listed;
         }
-        return await listed.Models.WaitAsync(ct) is { } models
-            ? engine.Seen(models, listed.Asked).FirstOrDefault(m => m.Name == model)?.Status
-            : engine.StatusOf(model);
+        var left = Quick - clock.GetElapsedTime(listed.Asked);
+        if ((listed.Models.IsCompleted || (left > TimeSpan.Zero && await Task.WhenAny(listed.Models, Task.Delay(left, clock, ct)) == listed.Models))
+            && await listed.Models is { } models)
+        {
+            return engine.Seen(models, listed.Asked).FirstOrDefault(m => m.Name == model)?.Status;
+        }
+        ct.ThrowIfCancellationRequested();
+        return engine.StatusOf(model);
     }
 
-    /// <summary>The engine's models; null when it cannot be asked (the request says why itself).</summary>
+    /// <summary>The engine's models; null when it cannot be asked, or said something else (the watcher's list goes then).</summary>
     private async Task<IReadOnlyList<EngineModel>?> ListAsync()
     {
         try
         {
             return await client.ModelsAsync(CancellationToken.None);
         }
-        catch (EngineException)
+        catch (Exception ex) when (ex is EngineException or InvalidOperationException or System.Text.Json.JsonException)
         {
             return null;
         }
