@@ -59,6 +59,22 @@ before keeps the price it had. Below the prices, **Recalculate past costs**
 works out the costs of chosen days again at today's prices, on request
 ([admin.md](admin.md#prices)).
 
+## Storage
+
+**Settings → Storage** decides when a disk is too full and how much each
+person's files may take; Admin → Storage uses the rest ([admin.md](admin.md#storage)).
+Each applies at once.
+
+| Setting | Default | What it does |
+|---|---|---|
+| Warn when a disk is fuller than | 80% | a disk of the host, or a folder the app mounts, past this share is an alert (the Alerts page, the bell, email and the alerts webhook), once each time it passes it |
+| Room for each person's files | empty: no limit | what one person's files may take, in MB: uploads, and the pictures, videos and speech the tools make; past it those are refused. An admin can give someone their own under Admin → Storage → People |
+| Old generated media | 90 days | the age at which the clean-up of old pictures, videos and speech takes them (nothing is deleted by itself) |
+
+How many backups are kept is `BACKUP_KEEP` in `.env`, read by
+`scripts/backup.sh`; Admin → Storage previews old backups against it
+([deployment.md](deployment.md#backups-and-restore)).
+
 ## The source link
 
 **Settings → Branding → Where the source is** is linked as **Source** beside

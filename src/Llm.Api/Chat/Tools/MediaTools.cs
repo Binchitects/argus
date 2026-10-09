@@ -128,7 +128,7 @@ public static partial class Voices
 /// <summary>Short videos from the stack's video server (Wan2.2 TI2V 5B), kept as the person's files.</summary>
 /// <remarks>The video server is not behind the gateway: each clip is booked in the gateway's request log by the app, at its price per second.</remarks>
 public sealed partial class VideoTool(IHttpClientFactory http, Operations.Modules modules, AppDbContext db, Safeguards.Safeguards safeguards, MediaControl media,
-    Gateway.PriceBook prices, Gateway.SpendLog spendLog, ChatKey chatKey) : IChatTool
+    Gateway.PriceBook prices, Gateway.SpendLog spendLog, ChatKey chatKey, Storage.StorageQuotas quotas) : IChatTool
 {
     public const string Client = "videogen";
     private const int Fps = 16;
@@ -160,6 +160,10 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
                 return new ToolResult("Say what the clip shows in 'prompt'.", IsError: true);
             }
             var seconds = Math.Clamp(args["seconds"] is JsonValue v && v.TryGetValue<int>(out var n) ? n : 3, 1, 5);
+            if (await quotas.ToolRefusalAsync(context.User.Id, "video", token) is { } full)
+            {
+                return new ToolResult(full, IsError: true);
+            }
             if (await safeguards.TakeImageAsync(context.User.Id, token) is { } limit)
             {
                 return new ToolResult(limit, IsError: true);
@@ -186,7 +190,7 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
             var file = new ChatAttachment
             {
                 UserId = context.User.Id, FileName = Path.ChangeExtension(ImageTool.FileName(prompt), type == "video/webm" ? ".webm" : ".avi"),
-                ContentType = type, Size = video.Length, Kind = "video", Data = video, Text = "", Seconds = seconds,
+                ContentType = type, Size = video.Length, Kind = "video", Data = video, Text = "", Seconds = seconds, Origin = "video",
             };
             db.ChatAttachments.Add(file);
             await db.SaveChangesAsync(token);
@@ -246,7 +250,7 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
 }
 
 /// <summary>A text read aloud into a sound file, by the gateway's text to speech, in the person's voice for its language.</summary>
-public sealed class SpeechTool(ChatModels models, GatewayChat gateway, AppDbContext db, VoiceCatalog voices, Gateway.PriceBook prices) : IChatTool
+public sealed class SpeechTool(ChatModels models, GatewayChat gateway, AppDbContext db, VoiceCatalog voices, Gateway.PriceBook prices, Storage.StorageQuotas quotas) : IChatTool
 {
     public string Id => "speech";
     public string Title => "Speech";
@@ -271,6 +275,10 @@ public sealed class SpeechTool(ChatModels models, GatewayChat gateway, AppDbCont
             {
                 return new ToolResult("Give the words to say in 'text'.", IsError: true);
             }
+            if (await quotas.ToolRefusalAsync(context.User.Id, "sound file", token) is { } full)
+            {
+                return new ToolResult(full, IsError: true);
+            }
             var speech = await voices.ForAsync(context.User, token);
             if (speech.For(text) is not { } voice)
             {
@@ -289,7 +297,7 @@ public sealed class SpeechTool(ChatModels models, GatewayChat gateway, AppDbCont
             var file = new ChatAttachment
             {
                 UserId = context.User.Id, FileName = Path.ChangeExtension(ImageTool.FileName(name), ".mp3"), ContentType = "audio/mpeg",
-                Size = mp3.Length, Kind = "audio", Data = mp3, Text = text,
+                Size = mp3.Length, Kind = "audio", Data = mp3, Text = text, Origin = "speech",
             };
             db.ChatAttachments.Add(file);
             await db.SaveChangesAsync(token);

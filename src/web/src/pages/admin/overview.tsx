@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Activity, Coins, Copy, Database, ShieldCheck, Users, WalletCards } from 'lucide-react'
+import { Activity, Coins, Copy, Database, HardDrive, ShieldCheck, Users, WalletCards } from 'lucide-react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
@@ -8,7 +8,7 @@ import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { api } from '@/lib/api'
-import { money } from '@/lib/format'
+import { formatValue, money } from '@/lib/format'
 import { indexExit, type CertificateStatus, type IndexSummary, type Overview } from './ops-api'
 import { ServiceList } from './services'
 
@@ -39,6 +39,7 @@ export function OverviewPage() {
             />
           )}
           {d.certificate && <CertificateStat cert={d.certificate} />}
+          {d.storage?.disks[0] && <DiskStat disk={d.storage.disks[0]} />}
         </StatGrid>
         {d.warning && <Alert variant="warning">{d.warning}</Alert>}
         {d.overCredit.length > 0 && (
@@ -57,6 +58,22 @@ export function OverviewPage() {
         )}
         <IndexAlert configured={d.index.configured} idx={idx} error={d.index.error} />
         {d.certificate && <CertificateAlert cert={d.certificate} />}
+        {d.storage?.disks
+          .filter((disk) => disk.above)
+          .map((disk) => (
+            <Alert
+              key={disk.id}
+              variant="warning"
+              title={`${disk.name} is ${Math.round(disk.percent)}% full`}
+              action={
+                <Button size="sm" variant="outline" asChild>
+                  <Link to="/admin/storage">Open Storage</Link>
+                </Button>
+              }
+            >
+              {formatValue(disk.free, 'bytes')} free; the alert is at {d.storage!.alertPercent}%.{disk.holds.length > 0 && ` On it: ${disk.holds.join('; ')}.`} Storage shows what takes the room, and its clean-ups.
+            </Alert>
+          ))}
         <Card>
           <CardHeader>
             <CardTitle>Services</CardTitle>
@@ -68,6 +85,23 @@ export function OverviewPage() {
         </Card>
       </div>
     </>
+  )
+}
+
+/** The fullest disk, and how much room is left on it. */
+function DiskStat({ disk }: { disk: NonNullable<Overview['storage']>['disks'][number] }) {
+  return (
+    <Stat
+      icon={HardDrive}
+      label="Fullest disk"
+      value={`${Math.round(disk.percent)}%`}
+      tone={disk.above ? 'warning' : undefined}
+      hint={
+        <Link to="/admin/storage" className="underline-offset-2 hover:underline">
+          {disk.name} · {formatValue(disk.free, 'bytes')} free
+        </Link>
+      }
+    />
   )
 }
 

@@ -14,6 +14,7 @@ import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { formatValue } from '@/lib/format'
+import { useDebounced } from '@/lib/use-debounced'
 import { cn } from '@/lib/utils'
 import { attentionLabel, bytes, kindLabel, params, summary, tokens, type LibraryFile, type ModelProfile } from './model-profile'
 
@@ -127,15 +128,6 @@ export interface ModelPrice {
 const defaultMaxOutput = (context: number) => Math.max(256, Math.min(32768, Math.floor(context / 2 / 1024) * 1024))
 
 const baseName = (path: string) => (path.split('/').pop() ?? '').replace(/(-\d{5}-of-\d{5})?\.gguf$/i, '')
-
-function useDebounced<T>(value: T, ms: number): T {
-  const [v, setV] = useState(value)
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms)
-    return () => clearTimeout(t)
-  }, [value, ms])
-  return v
-}
 
 type FormState = ReturnType<typeof initial>
 

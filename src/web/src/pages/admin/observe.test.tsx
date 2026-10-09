@@ -309,6 +309,7 @@ describe('alerts', () => {
             rule({ group: 'gpu', name: 'GpuHot', severity: 'warning', state: 'pending', query: 'gpu_temp > 85' }),
             rule({ group: 'gpu', name: 'GpuFan', severity: 'warning', health: 'err', lastError: 'bad metric', query: 'fan == 0' }),
             rule({ group: 'host', name: 'DiskFull', severity: 'warning' }),
+            rule({ group: "The app's own", name: 'DiskAboveThreshold', severity: 'warning', state: 'firing', active: 1, query: null, checks: "A disk's used share ≥ 80%, by the app every 5 minutes (Settings → Storage)" }),
           ],
           errors: { alertmanager: null, prometheus: null },
         },
@@ -340,6 +341,13 @@ describe('alerts', () => {
     await userEvent.click(screen.getByText('GpuFan'))
     expect(screen.getByText('bad metric')).toBeVisible()
     expect(screen.getByText('fan == 0')).toBeVisible()
+
+    // The app's own rule says what it checks in words, with no PromQL to copy.
+    await userEvent.click(screen.getByText('DiskAboveThreshold'))
+    const own = screen.getByText('DiskAboveThreshold').closest('details') as HTMLElement
+    expect(within(own).getByText(/A disk's used share ≥ 80%/)).toBeVisible()
+    expect(within(own).queryByRole('button', { name: /Copy PromQL/ })).not.toBeInTheDocument()
+    expect(within(screen.getByText('GpuFan').closest('details') as HTMLElement).getByRole('button', { name: /Copy PromQL/ })).toBeInTheDocument()
   })
 
   it('still shows the rules when Alertmanager does not answer, and says nothing fires when nothing does', async () => {

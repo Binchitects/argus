@@ -4,6 +4,8 @@
 #   ./scripts/backup.sh                          one complete backup now (what the timer runs)
 #   ./scripts/backup.sh --list                   the backups present
 #   ./scripts/backup.sh --verify [DIR]           check a backup (default: latest) against its checksums
+#   ./scripts/backup.sh --prune [--keep N]       remove the backups beyond the newest N (default BACKUP_KEEP) now:
+#                                                never the latest, nor the newest that ended well
 #   sudo ./scripts/backup.sh --install-timer     run it daily through systemd
 #   ./scripts/backup.sh --restore --from DIR     put volumes and the database back (stack stopped)
 #   ./scripts/backup.sh --restore --from DIR --with-config   also .env, overrides and config files
@@ -11,6 +13,7 @@
 #
 # Settings, all in .env:
 #   BACKUP_DIR            where backups go                        default ./backups
+#                         (absolute, or relative to deploy/; the app mounts it read only)
 #   BACKUP_COPY_DIR       a second copy of each good backup, verified, on ANOTHER disk:
 #                         then one failed disk cannot take the data and every backup   default none
 #   BACKUP_KEEP           how many backups to keep                default 14
@@ -25,7 +28,8 @@
 #                          with SQLite's online backup, so a write in progress cannot tear them.
 #   config/                .env, every compose file named in COMPOSE_FILE, and config/
 #                          (Traefik's routes, Prometheus's rules, the other files compose mounts).
-#   MANIFEST, SHA256SUMS   what was taken, from which commit; a checksum for every file.
+#   MANIFEST, SHA256SUMS   what was taken, from which commit, when it started (UTC); a checksum
+#                          for every file. The directory's name is the host's local time.
 #
 # The backup directory holds every secret of the stack: it is created 0700 and
 # its files 0600. Models are not backed up (MODELS_DIR, re-downloadable).
@@ -69,7 +73,9 @@ while [[ $# -gt 0 ]]; do
     --yes) YES=1; shift ;;
     --out) BACKUP_DIR="$2"; shift 2 ;;   # kept for compatibility
     --include-model-cache) SKIP_VOLUMES="${SKIP_VOLUMES/ audio / }"; shift ;;
-    -h|--help) sed -n '2,32p' "$0" | grep '^#'; exit 0 ;;
+    --prune) ACTION=prune; shift ;;
+    --keep) [[ $# -ge 2 ]] || die "--keep takes a number"; KEEP="$2"; shift 2 ;;
+    -h|--help) sed -n '2,36p' "$0" | grep '^#'; exit 0 ;;
     *) die "unknown option: $1 (see --help)" ;;
   esac
 done
@@ -94,6 +100,26 @@ verify_dir() {   # verify_dir <backup dir>
 
 latest_backup() { ls -1d "$BACKUP_DIR"/20[0-9][0-9]-*_* 2>/dev/null | sort | tail -n1; }
 
+# A folder the backups go to: made private when it is ours. The app mounts BACKUP_DIR,
+# and Docker makes a missing folder it mounts root's: an empty one we may not write in
+# is taken back through Docker (as the backup's own containers run), with no step by
+# hand. One with something in it is used if we may write in it, and named otherwise.
+own_dir() {   # own_dir <dir>
+  local dir=$1
+  mkdir -p "$dir" || die "cannot create $dir"
+  if [[ ! -O "$dir" && ! -w "$dir" && -r "$dir" && -z "$(ls -A "$dir")" ]] && command -v docker >/dev/null; then
+    docker run --rm --network none -v "$dir:/d" "$HELPER" chown "$(id -u):$(id -g)" /d >/dev/null \
+      && [[ -O "$dir" ]] && say "  $dir was root's (Docker made it for the app's mount): now $(id -un)'s"
+  fi
+  if [[ -O "$dir" ]]; then
+    chmod 700 "$dir" || die "cannot make $dir private"
+  elif [[ ! -w "$dir" ]]; then
+    die "$dir belongs to $(stat -c %U "$dir") and $(id -un) may not write in it (Docker makes a folder it mounts root's when it is missing): sudo chown $(id -un) $dir, or sudo $0 --install-timer"
+  fi
+}
+
+check_keep() { [[ "$KEEP" =~ ^[1-9][0-9]*$ ]] || die "BACKUP_KEEP and --keep take a whole number, 1 or more (not '$KEEP')"; }
+
 # ============================================================================ list
 if [[ $ACTION == list ]]; then
   for where in "$BACKUP_DIR" ${COPY_DIR:+"$COPY_DIR"}; do
@@ -111,10 +137,47 @@ if [[ $ACTION == verify ]]; then
   if verify_dir "$d"; then say "  $(basename "$d"): OK ($(wc -l < "$d/SHA256SUMS") files)"; exit 0; else exit 1; fi
 fi
 
+# =========================================================================== prune
+# What Admin -> Storage previews as old backups (the app sees them read only).
+if [[ $ACTION == prune ]]; then
+  check_keep
+  [[ -d "$BACKUP_DIR" ]] || die "no backups in $BACKUP_DIR"
+  exec 9>"$BACKUP_DIR/.backup.lock"
+  flock -n 9 || die "a backup is running; prune after it"
+  for where in "$BACKUP_DIR" ${COPY_DIR:+"$COPY_DIR"}; do
+    [[ -d "$where" ]] || continue
+    latest="$(readlink "$where/latest" 2>/dev/null)"; latest="${latest%/}"; latest="${latest##*/}"
+    mapfile -t all < <(ls -1d "$where"/20[0-9][0-9]-*_* 2>/dev/null | grep -v '\.part$' | sort -r)
+    good=""
+    for d in "${all[@]}"; do
+      if [[ "$(head -n1 "$d/RESULT" 2>/dev/null)" == ok ]]; then good="${d##*/}"; break; fi
+    done
+    removed=0
+    for d in "${all[@]:KEEP}"; do
+      case "${d##*/}" in "$latest"|"$good") continue ;; esac
+      rm -rf "$d" && say "  removed old backup $d" && removed=$((removed+1))
+    done
+    say "$where: kept the newest $KEEP$([[ -n "$good" ]] && echo " and $good (the newest that ended well)"), removed $removed"
+  done
+  exit 0
+fi
+
 # =========================================================================== timer
 if [[ $ACTION == timer ]]; then
   [[ $EUID -eq 0 ]] || die "--install-timer needs root: sudo $0 --install-timer"
   RUN_USER="${SUDO_USER:-root}"
+  # The folders the timer writes, the user's: made now, or taken back from root when
+  # Docker made one first (it does for a folder it mounts that is not there yet).
+  if [[ $RUN_USER != root ]]; then
+    RUN_GROUP="$(id -gn "$RUN_USER")"
+    for dir in "$BACKUP_DIR" ${COPY_DIR:+"$COPY_DIR"}; do
+      if [[ ! -e "$dir" ]]; then
+        install -d -m 700 -o "$RUN_USER" -g "$RUN_GROUP" "$dir" && say "  made $dir for $RUN_USER"
+      elif [[ "$(stat -c %u "$dir")" == 0 ]]; then
+        chown "$RUN_USER:$RUN_GROUP" "$dir" && chmod 700 "$dir" && say "  $dir was root's (Docker made it?): now $RUN_USER's"
+      fi
+    done
+  fi
   case "$BACKUP_TIME" in *:*:*|*-*|*" "*) CAL="$BACKUP_TIME" ;; *) CAL="*-*-* ${BACKUP_TIME}:00" ;; esac
   cat > /etc/systemd/system/${PROJECT}-backup.service <<EOF
 [Unit]
@@ -206,16 +269,19 @@ fi
 # ========================================================================== backup
 command -v docker >/dev/null || die "docker not found"
 [[ -f .env ]] || die "no .env in $ROOT"
-mkdir -p "$BACKUP_DIR" && chmod 700 "$BACKUP_DIR" || die "cannot create $BACKUP_DIR"
+check_keep
+own_dir "$BACKUP_DIR"
 exec 9>"$BACKUP_DIR/.backup.lock"
 flock -n 9 || die "another backup is running"
 
-STAMP="$(date +%Y-%m-%d_%H%M%S)"
+# The folder is named in the host's local time; MANIFEST says when in UTC as well.
+START=$(date +%s)
+STAMP="$(date -d "@$START" +%Y-%m-%d_%H%M%S)"
 OUT="$BACKUP_DIR/$STAMP"
 mkdir -p "$OUT/volumes" "$OUT/config/compose" || die "cannot create $OUT"
 LOG="$OUT/backup.log"
 exec > >(tee -a "$LOG") 2>&1
-START=$(date +%s); FAILED=0
+FAILED=0
 fail() { say "  FAILED: $*"; FAILED=$((FAILED+1)); }
 UIDGID="$(id -u):$(id -g)"
 
@@ -303,6 +369,7 @@ done
 # ---- 4. manifest, checksums, verify ----------------------------------------------
 {
   echo "backup: $STAMP"
+  echo "started: $(date -u -d "@$START" +%Y-%m-%dT%H:%M:%SZ)"
   echo "host: $(hostname)"
   echo "project: $PROJECT   domain: $(env_get DOMAIN)"
   echo "commit: $(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null)"

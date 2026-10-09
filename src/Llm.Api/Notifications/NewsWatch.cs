@@ -67,7 +67,7 @@ public sealed partial class NewsWatch(IServiceScopeFactory scopes, IConfiguratio
             {
                 var severity = a.Severity is { Length: > 0 } s ? char.ToUpperInvariant(s[0]) + s[1..] : "Alert";
                 await news.ToAdminsAsync(new News("alert", $"{severity}: {a.Summary ?? a.Name}", a.Description ?? a.Summary, "/admin/alerts",
-                    $"alert:{a.Name}:{Fingerprint(a.Labels)}:{a.StartsAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)}"), ct);
+                    AlertKey(a.Name, a.Labels, a.StartsAt)), ct);
             }
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or DatasourceException or System.Text.Json.JsonException or DbUpdateException or Npgsql.NpgsqlException)
@@ -117,6 +117,10 @@ public sealed partial class NewsWatch(IServiceScopeFactory scopes, IConfiguratio
     }
 
     private static string Money(decimal v) => "$" + v.ToString(v is > 0 and < 0.01m ? "0.####" : "0.00", CultureInfo.InvariantCulture);
+
+    /// <summary>What an alert's news is said once by: its name, labels and start. The app's own alerts told without Alertmanager use it too.</summary>
+    public static string AlertKey(string name, IReadOnlyDictionary<string, string> labels, DateTimeOffset startsAt) =>
+        $"alert:{name}:{Fingerprint(labels)}:{startsAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)}";
 
     private static string Fingerprint(IReadOnlyDictionary<string, string> labels) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', labels.OrderBy(l => l.Key, StringComparer.Ordinal).Select(l => $"{l.Key}={l.Value}")))))[..12];

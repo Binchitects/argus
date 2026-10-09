@@ -24,6 +24,7 @@ public static class SettingsCatalog
     private const string Safeguards = "Safeguards";
     private const string Knowledge = "Company knowledge";
     private const string Retention = "Data retention";
+    private const string StorageGroup = "Storage";
     private const string Api = "API keys";
     private const string BotsGroup = "Chat bots";
     private const string Oidc = "CompanySignIn:Protocol=oidc";
@@ -254,6 +255,14 @@ public static class SettingsCatalog
         // ---------------------------------------------------------------- retention, live --
         new("Retention:Days", Retention, "Keep chats for", "A chat and its files are deleted this many days after its last message, and so are files nobody uses that are as old. A group can set its own (Admin → Groups); the shortest of a person's groups applies. People on legal hold keep everything. Each deletion is audited, with counts. Empty: forever.", SettingType.WholeNumber, SettingScope.Live)
             { Unit = "days", Min = 1, Max = 36500 },
+
+        // ---------------------------------------------------------------- storage, live --
+        new("Storage:AlertPercent", StorageGroup, "Warn when a disk is fuller than", "A disk of the host (or a folder the app mounts) past this share raises an alert: on the Alerts page, in the admins' bell, by email and the alerts webhook, once each time it passes it. The stack's own rules warn at 85% and 95% besides.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "80", Unit = "%", Min = 50, Max = 99, Optional = false },
+        new("Storage:PersonMegabytes", StorageGroup, "Room for each person's files", "What one person's files may take: uploads, and the pictures, videos and speech the tools make. Past it, uploads and those tools are refused until they delete chats. An admin can give someone their own (Admin → Storage → People). Empty: no limit.", SettingType.WholeNumber, SettingScope.Live)
+            { Unit = "MB", Min = 1, Max = 100_000_000 },
+        new("Storage:MediaDays", StorageGroup, "Old generated media", "The clean-up of old pictures, videos and speech the tools made (Admin → Storage) takes them as old after this many days, unless you choose another age there. Nothing is deleted by itself.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "90", Unit = "days", Min = 1, Max = 36500, Optional = false },
         new("Schedules:Enabled", Schedules, "Scheduled tasks", "People may set questions to be asked on a schedule (a daily digest, a weekly report), answered as them, with their model, tools and credit.", SettingType.Boolean, SettingScope.Live)
             { Default = "true" },
         new("Schedules:PerPerson", Schedules, "Tasks per person", "How many scheduled tasks one person may have.", SettingType.WholeNumber, SettingScope.Live)

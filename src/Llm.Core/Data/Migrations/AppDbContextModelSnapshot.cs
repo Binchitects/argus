@@ -491,6 +491,10 @@ namespace Llm.Core.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<string>("Origin")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.Property<double?>("Seconds")
                         .HasColumnType("double precision");
 
@@ -1586,6 +1590,36 @@ namespace Llm.Core.Data.Migrations
                     b.HasKey("Key");
 
                     b.ToTable("settings", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Data.StorageQuota", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Megabytes")
+                        .HasColumnType("integer");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("storage_quotas", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Data.StorageSample", b =>
+                {
+                    b.Property<DateOnly>("Day")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Key")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<long>("Bytes")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Day", "Key");
+
+                    b.ToTable("storage_samples", (string)null);
                 });
 
             modelBuilder.Entity("Llm.Core.Identity.AppRole", b =>
@@ -2752,6 +2786,15 @@ namespace Llm.Core.Data.Migrations
                     b.HasOne("Llm.Core.Chat.ScheduledTask", null)
                         .WithMany()
                         .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Data.StorageQuota", b =>
+                {
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

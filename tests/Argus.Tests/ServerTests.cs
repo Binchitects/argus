@@ -217,6 +217,39 @@ public sealed class ServerTests : IDisposable
         Assert.Equal(1, text.Split('\n').Count(l => l.StartsWith("# HELP argus_index_files ", StringComparison.Ordinal)));
     }
 
+    [Fact]
+    public async Task Storage_says_what_argus_keeps_on_its_disk_and_a_loaded_pack_is_not_counted_twice()
+    {
+        Assert.Equal(HttpStatusCode.Forbidden, (await _http.GetAsync("/admin/storage")).StatusCode);
+        var data = _ix.Config().Index.DataDir;
+        Directory.CreateDirectory(Path.Combine(data, "mirrors", "grp", "alpha.git"));
+        File.WriteAllBytes(Path.Combine(data, "mirrors", "grp", "alpha.git", "pack"), new byte[3000]);
+        Directory.CreateDirectory(Path.Combine(data, "trees"));
+        File.WriteAllBytes(Path.Combine(data, "trees", "a.c"), new byte[200]);
+        Directory.CreateDirectory(Path.Combine(data, "packs"));
+        File.WriteAllBytes(Path.Combine(data, "packs", "own.arguspack"), new byte[1000]);
+        // A pack loaded from the library is a link to it: its bytes are the library's.
+        var library = Path.Combine(data, "..", Path.GetFileName(data) + "-library");
+        Directory.CreateDirectory(library);
+        File.WriteAllBytes(Path.Combine(library, "big.arguspack"), new byte[50_000]);
+        File.CreateSymbolicLink(Path.Combine(data, "packs", "big.arguspack"), Path.Combine(library, "big.arguspack"));
+        try
+        {
+            var (status, body) = await AdminGet("/admin/storage?fresh");
+            Assert.Equal(HttpStatusCode.OK, status);
+            Assert.Equal(3000, body["mirrors_bytes"]!.GetValue<long>());
+            Assert.Equal(200, body["trees_bytes"]!.GetValue<long>());
+            Assert.Equal(1000, body["packs_bytes"]!.GetValue<long>());
+            Assert.True(body["index_bytes"]!.GetValue<long>() > 0);
+            Assert.True(body["disk"]!["size_bytes"]!.GetValue<long>() >= body["disk"]!["free_bytes"]!.GetValue<long>());
+            Assert.Equal(data, body["data_dir"]!.GetValue<string>());
+        }
+        finally
+        {
+            Directory.Delete(library, recursive: true);
+        }
+    }
+
     async Task<(HttpStatusCode Status, JsonNode Body)> AdminGet(string path)
     {
         var req = new HttpRequestMessage(HttpMethod.Get, path);

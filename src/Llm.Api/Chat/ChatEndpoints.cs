@@ -796,7 +796,7 @@ public static partial class ChatEndpoints
     }
 
     private static async Task<IResult> UploadAsync(HttpRequest request, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> monitor,
-        Media media, Safeguards.Safeguards safeguards)
+        Media media, Safeguards.Safeguards safeguards, Storage.StorageQuotas quotas)
     {
         var options = monitor.CurrentValue;
         var me = await Me(p, users);
@@ -813,6 +813,11 @@ public static partial class ChatEndpoints
         if (file.Length > options.MaxUploadBytes)
         {
             return AuthEndpoints.Problem(413, "too_large", $"{file.FileName} is larger than {options.MaxUploadBytes / 1024 / 1024} MB.");
+        }
+        // The person's room for files (Settings → Storage).
+        if (await quotas.RefusalAsync(me.Id, file.Length, request.HttpContext.RequestAborted) is { } full)
+        {
+            return AuthEndpoints.Problem(413, "quota", full);
         }
         using var ms = new MemoryStream();
         await file.CopyToAsync(ms);

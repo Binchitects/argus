@@ -65,6 +65,10 @@ public sealed class FakeArgus : HttpMessageHandler
                  "job":{"state":"idle","action":null,"target":null,"started":null,"finished":null,"returncode":null,"tail":[]},
                  "index_url":null,"packs_dir":"/var/lib/argus/packs"}
                 """),
+            ("GET", "/admin/storage") => Json(HttpStatusCode.OK, """
+                {"data_dir":"/var/lib/argus","index_bytes":5000000,"mirrors_bytes":20000000,"trees_bytes":3000000,"packs_bytes":1048576,"other_bytes":1000,
+                 "library_dir":null,"library_bytes":null,"measured_at":1790000000,"disk":{"size_bytes":1000000000000,"free_bytes":400000000000}}
+                """),
             ("POST", "/admin/packs/remove") => body?.GetProperty("name").GetString() == "dotnet-docs"
                 ? Json(HttpStatusCode.OK, """{"status":"removed","name":"dotnet-docs"}""")
                 : Json(HttpStatusCode.NotFound, """{"error":"no installed pack named 'x'"}"""),

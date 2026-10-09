@@ -120,6 +120,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(a => a.FileName).HasMaxLength(260);
             e.Property(a => a.ContentType).HasMaxLength(200);
             e.Property(a => a.Kind).HasMaxLength(20);
+            e.Property(a => a.Origin).HasMaxLength(20);
             e.HasIndex(a => a.UserId);
             e.HasOne<AppUser>().WithMany().HasForeignKey(a => a.UserId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -389,6 +390,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
         });
         KnowledgeModel(builder);
         SamlModel(builder);
+        StorageModel(builder);
 
         builder.Entity<AuditEvent>(e =>
         {

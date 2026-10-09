@@ -38,6 +38,7 @@ class AirgapTests(unittest.TestCase):
         s.write(".env.example", "DOMAIN=llm.localhost\n")
         s.write(".env.old", "APP_KEY=an-old-secret\n")
         s.write("backups/2026-01-01_000000/postgres.sql.gz", "dump")
+        s.write("backups/.gitkeep", "")
         s.write("certs/README.md", "certificates\n")
         s.write("certs/tls.key", "PRIVATE KEY\n")
         s.write("config/traefik/routes.yml", "http: {}\n")
@@ -110,7 +111,7 @@ class AirgapTests(unittest.TestCase):
     def test_The_deploy_folder_goes_in_without_secrets_backups_models_or_keys(self):
         self.pack()
         deploy = {n[len("arena-airgap/deploy/"):] for n in self.members() if n.startswith("arena-airgap/deploy/")}
-        for kept in ("docker-compose.yml", "podman.yml", ".env.example", "certs/README.md", "models/.gitkeep",
+        for kept in ("docker-compose.yml", "podman.yml", ".env.example", "certs/README.md", "models/.gitkeep", "backups/.gitkeep",
                      "config/traefik/routes.yml", "config/litellm.yaml", "argus-standalone/env-samples/gpu.env", "scripts/airgap.sh"):
             self.assertIn(kept, deploy)
         for left in (".env", ".env.old", "backups/2026-01-01_000000/postgres.sql.gz", "certs/tls.key", "config/traefik/certificate.yml",

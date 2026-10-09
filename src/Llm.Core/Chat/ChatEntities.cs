@@ -136,6 +136,12 @@ public sealed class ChatAttachment
     public byte[]? Sound { get; set; }
     /// <summary>A sound's or video's length.</summary>
     public double? Seconds { get; set; }
+    /// <summary>
+    /// What made it, when a tool did: "picture", "video", "speech" (those tools) or "tool" (Python's files, long tool
+    /// results). Null for an upload, and for files from before v5.3, whose messages say. A tool called over Arena MCP
+    /// writes no message: this is what names its files.
+    /// </summary>
+    public string? Origin { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 

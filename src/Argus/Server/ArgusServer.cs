@@ -497,6 +497,7 @@ public static partial class ArgusServer
 
     static void MapAdmin(WebApplication app, ArgusConfig cfg, Jobs jobs)
     {
+        MapStorage(app, cfg);
         app.MapPost(AdminPrefix + "index", async (HttpRequest request) =>
         {
             if (!Authorised(request)) return Forbidden();

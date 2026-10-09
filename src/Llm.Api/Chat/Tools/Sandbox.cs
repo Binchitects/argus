@@ -265,7 +265,7 @@ public sealed class PythonTool(SandboxClient sandbox, AppDbContext db, IOptionsM
     {
         if (Attachments.ImageType(f.Name, f.Bytes) is { } image)
         {
-            return new ChatAttachment { UserId = userId, FileName = f.Name, ContentType = image, Size = f.Bytes.Length, Kind = "image", Data = f.Bytes, Text = "" };
+            return new ChatAttachment { UserId = userId, FileName = f.Name, ContentType = image, Size = f.Bytes.Length, Kind = "image", Data = f.Bytes, Text = "", Origin = "tool" };
         }
         try
         {
@@ -276,12 +276,12 @@ public sealed class PythonTool(SandboxClient sandbox, AppDbContext db, IOptionsM
             return new ChatAttachment
             {
                 UserId = userId, FileName = f.Name, ContentType = converted ? "application/octet-stream" : "text/plain", Size = f.Bytes.Length,
-                Kind = "text", Text = text, Truncated = truncated, Data = converted || page ? f.Bytes : null,
+                Kind = "text", Text = text, Truncated = truncated, Data = converted || page ? f.Bytes : null, Origin = "tool",
             };
         }
         catch (AttachmentException)
         {
-            return new ChatAttachment { UserId = userId, FileName = f.Name, ContentType = "application/octet-stream", Size = f.Bytes.Length, Kind = "file", Data = f.Bytes, Text = "" };
+            return new ChatAttachment { UserId = userId, FileName = f.Name, ContentType = "application/octet-stream", Size = f.Bytes.Length, Kind = "file", Data = f.Bytes, Text = "", Origin = "tool" };
         }
     }
 }
