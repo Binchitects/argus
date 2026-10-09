@@ -566,7 +566,8 @@ target), in the IDE's **Context** (the window's use in the status bar), or
 `"compactAt"` and `"compactTarget"` in `config.json`: `/compact-at` and the
 IDE keep them there for the next sessions, and `/compact-at default` goes back
 to 80 and 25. `--compact-at 70 --compact-to 30` sets them for one run. A share
-is written `70`, `70%` or `0.7`. The threshold is from 20% to 95%, and the
+is written `70`, `70%` or `0.7` (in `config.json` too: `70`, `"70%"` or `0.7`;
+anything else stops the session with where it is). The threshold is from 20% to 95%, and the
 target from 5% to 10 points under the threshold (a lower threshold brings the
 target down with it), so a compaction does not start the next one. The use of
 the window shows after each turn in the terminal (`/context` at any time) and

@@ -134,6 +134,25 @@ public sealed class CompactionTests : IDisposable
     }
 
     [Fact]
+    public async Task The_config_file_takes_a_share_written_as_the_flags_take_it()
+    {
+        // As the manual writes them: a fraction, and a percent as text.
+        using var h = new Harness(_gateway, _mcp, c =>
+        {
+            c["compactAt"] = 0.7;
+            c["compactTarget"] = "30%";
+        });
+        Assert.Equal(0, await h.Run("/context\n/exit\n", "chat"));
+        Assert.Contains("compacts at 70%, keeping the recent part within 30%", h.Out);
+
+        // Not a share at all: said, with where, rather than the default quietly kept.
+        using var wrong = new Harness(_gateway, _mcp, c => c["compactAt"] = "most of it");
+        Assert.Equal(1, await wrong.Run("", "-p", "hi"));
+        Assert.Contains($"\"compactAt\" in {wrong.Paths.ConfigFile} is a share of the model's window: 70, \"70%\" or 0.7.", wrong.Err);
+        Assert.Equal("most of it", JsonNode.Parse(File.ReadAllText(wrong.Paths.ConfigFile))!["compactAt"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task The_turns_summary_says_how_full_the_window_is()
     {
         using var h = new Harness(_gateway, _mcp);

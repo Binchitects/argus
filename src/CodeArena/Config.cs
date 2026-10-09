@@ -172,8 +172,8 @@ internal sealed class Config
         config.ArenaTools = raw.Bool("arenaTools") ?? true;
         config.ArgusUrl = raw.Str("argusUrl");
         config.ArgusTools = raw.Bool("argusTools") ?? true;
-        config.CompactAt = raw.Int("compactAt");
-        config.CompactTarget = raw.Int("compactTarget");
+        config.CompactAt = Share(raw, "compactAt", file);
+        config.CompactTarget = Share(raw, "compactTarget", file);
         config.ApiKey = raw.Str("apiKey");
         config.Ca = raw.Str("ca");
         config.Model = raw.Str("model");
@@ -187,6 +187,21 @@ internal sealed class Config
             ? [.. servers.Select(s => McpServerConfig.From(s.Key, s.Value)).OfType<McpServerConfig>()]
             : [];
         return config;
+    }
+
+    /// <summary>
+    /// A share of the model's window as the file gives it, written as the flags and /compact-at take
+    /// it (70, "70%", 0.7); null when it is not there. Anything else is said, not passed over: it
+    /// would leave the default in place, or be dropped from the file at the next save.
+    /// </summary>
+    private static int? Share(JsonObject raw, string key, string file)
+    {
+        if (raw[key] is not { } value)
+        {
+            return null;
+        }
+        var text = value is JsonValue v && v.TryGetValue<string>(out var s) ? s : value.ToJsonString();
+        return Compaction.Percent(text) ?? throw new InvalidOperationException($"\"{key}\" in {file} is a share of the model's window: 70, \"70%\" or 0.7.");
     }
 
     /// <summary>An address Code Arena can reach: absolute, http or https (a port out of range, a space or another scheme is not).</summary>
