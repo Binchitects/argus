@@ -414,14 +414,8 @@ internal sealed partial class Runtime : IAsyncDisposable
             _later.Enqueue((warn, text));
             return;
         }
-        if (warn)
-        {
-            Ui.Warn(text);
-        }
-        else
-        {
-            Ui.Info(text);
-        }
+        // Not into a question waiting for its answer, nor the middle of the model's line.
+        Ui.Background(warn ? Ui.Yellow("! " + text) : Ui.Dim(text));
     }
 
     /// <summary>What the servers said while the terminal waited at its prompt.</summary>
