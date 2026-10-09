@@ -13,7 +13,8 @@ namespace Llm.Api.Chat;
 /// big model's slow writing. It never thinks for them. Not set, not at the gateway, or not
 /// one the person may use now: each step uses the answer's own model.
 /// </summary>
-public sealed class SmallModel(IOptionsMonitor<ChatOptions> chat, ChatModels models, ModelPolicy policy, ModelCatalog catalog, IOptions<EngineOptions> engine)
+public sealed class SmallModel(IOptionsMonitor<ChatOptions> chat, ChatModels models, ModelPolicy policy, ModelCatalog catalog, IOptions<EngineOptions> engine,
+    EngineState state)
     : ISettingWarning
 {
     /// <summary>What a chat that chose Auto has as its model: the small model answers the easy questions and hands the rest on.</summary>
@@ -44,7 +45,8 @@ public sealed class SmallModel(IOptionsMonitor<ChatOptions> chat, ChatModels mod
     /// <summary>
     /// Why the small model cannot do its work well now: it is not at the gateway, or it is the
     /// engine's and the engine cannot hold it beside the big model (one model at once, not kept
-    /// loaded, or every place kept for others). Null when all is well, or nothing is set.
+    /// loaded, or every place kept for others: the kept models and the one new chats use). Null
+    /// when all is well, or nothing is set.
     /// </summary>
     public async Task<string?> WarningAsync(CancellationToken ct = default)
     {
@@ -65,16 +67,19 @@ public sealed class SmallModel(IOptionsMonitor<ChatOptions> chat, ChatModels mod
         var kept = catalog.Kept();
         if (max < 2)
         {
-            return $"The engine holds one model at once: {name} and the big model would take turns, each loading again for every step. " +
+            return $"The engine holds one model at once: {name} and the big model take turns, each loading again for every step. " +
                 "Raise \"Models loaded at once\" to 2 and keep both loaded (Admin → Models).";
         }
         if (kept.Contains(name))
         {
             return null;
         }
-        return kept.Count >= max
-            ? $"{name} is not kept loaded, and every place in the engine keeps another model, so it cannot load: each small step uses the answer's own model. " +
-              $"Keep it loaded instead of one of them, or raise \"Models loaded at once\" to {kept.Count + 1} (Admin → Models)."
-            : $"{name} is not kept loaded: each small step waits for it to load, and pushes another model out. Keep it loaded beside the big model (Admin → Models).";
+        // The places that never free for it: the kept models, and the one new chats use.
+        var taken = kept.Append(models.DefaultName ?? state.Default).OfType<string>().Where(n => n != name).Distinct(StringComparer.Ordinal).Count();
+        return taken >= max
+            ? $"{name} is not kept loaded, and every place in the engine is kept for another model (those kept loaded, and the one new chats use), so it cannot load: " +
+              $"each small step uses the answer's own model. Keep it loaded instead of one of them, or raise \"Models loaded at once\" to {taken + 1} (Admin → Models)."
+            : $"{name} is not kept loaded: until it is loaded, small steps wait for it to load (and, with the engine full, for an idle model that may make room). " +
+              "Once loaded it stays, as it never makes room for another. Keep it loaded beside the big model (Admin → Models), so it loads with the engine.";
     }
 }

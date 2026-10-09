@@ -16,7 +16,7 @@ using Microsoft.Extensions.Options;
 namespace Llm.Api.Safeguards;
 
 /// <summary>Whether a message may go to the model; when not, why (for the person) and what kind of refusal it is.</summary>
-/// <param name="Kind">length, files, rate, research, blocked, flagged, secret.</param>
+/// <param name="Kind">length, files, rate, research, blocked, flagged, secret, check (the model check could not run).</param>
 public sealed record Verdict(bool Allowed, string? Reason = null, string Kind = "", int Status = 400)
 {
     public static readonly Verdict Ok = new(true);
@@ -139,9 +139,23 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
         {
             return await RefuseAsync(user, "blocked", $"matched \"{match}\"", ct);
         }
-        if (policy.Moderation == "check" && await ModerateAsync(user, checkedText, model, ct) is { } category)
+        if (policy.Moderation == "check")
         {
-            return await RefuseAsync(user, "flagged", $"the model judged it {category}", ct);
+            string? category;
+            try
+            {
+                category = await ModerateAsync(user, checkedText, model, ct);
+            }
+            catch (ChatGatewayException ex) when (ex.NotLoaded)
+            {
+                // Not let through unread. Not a strike either: nothing is wrong with the message.
+                return new(false, $"This message was not sent: the safeguards read each message first, and their model ({model}) cannot be loaded now. "
+                    + "Try again in a few minutes.", "check", 503);
+            }
+            if (category is not null)
+            {
+                return await RefuseAsync(user, "flagged", $"the model judged it {category}", ct);
+            }
         }
         return checkedText == text ? Verdict.Ok : Verdict.Ok with { Text = checkedText };
     }
@@ -220,9 +234,22 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
             {
                 return new ApiVerdict("BLOCKED", (await RefuseAsync(user, "blocked", $"matched \"{match}\" (API)", ct)).Reason);
             }
-            if (policy.Moderation == "check" && await ModerateAsync(user, Secrets.Mask(question, Secrets.Find(question)), model, ct) is { } category)
+            if (policy.Moderation == "check")
             {
-                return new ApiVerdict("BLOCKED", (await RefuseAsync(user, "flagged", $"the model judged it {category} (API)", ct)).Reason);
+                string? category;
+                try
+                {
+                    category = await ModerateAsync(user, Secrets.Mask(question, Secrets.Find(question)), model, ct);
+                }
+                catch (ChatGatewayException ex) when (ex.NotLoaded)
+                {
+                    return new ApiVerdict("BLOCKED", $"The request was refused: the safeguards read each request first, and their model ({model}) cannot be loaded now. "
+                        + "Try again in a few minutes.");
+                }
+                if (category is not null)
+                {
+                    return new ApiVerdict("BLOCKED", (await RefuseAsync(user, "flagged", $"the model judged it {category} (API)", ct)).Reason);
+                }
             }
         }
         else if (question is { Length: > 0 } && policy.BlockedPatterns && Blocked(question, o.BlockedPatterns) is { } match)
@@ -316,7 +343,10 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
 
     /// <summary>
     /// The model reads the message first, as a classifier, and names the category it asks
-    /// for harm in, or nothing. When it cannot answer, the message goes (and it is logged).
+    /// for harm in, or nothing. When it cannot answer, the message goes (and it is logged);
+    /// when its model cannot be loaded now (the engine is full), it says so (a
+    /// <see cref="ChatGatewayException"/>, <see cref="ChatGatewayException.NotLoaded"/>):
+    /// the message is refused rather than go unread.
     /// </summary>
     private async Task<string?> ModerateAsync(AppUser user, string text, string? model, CancellationToken ct)
     {
@@ -351,10 +381,15 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
             var json = JsonObjectIn(said.ToString());
             return json?["flagged"]?.GetValue<bool>() == true ? json["category"]?.ToString() ?? "harmful" : null;
         }
-        catch (Exception ex) when (ex is ChatGatewayException or JsonException or InvalidOperationException or HttpRequestException)
+        catch (Exception ex) when (ex is ChatGatewayException { NotLoaded: false } or JsonException or InvalidOperationException or HttpRequestException)
         {
             LogModerationFailed(logger, ex.Message);
             return null;
+        }
+        catch (ChatGatewayException ex) when (ex.NotLoaded)
+        {
+            LogModerationNotLoaded(logger, ex.Message);
+            throw;
         }
     }
 
@@ -390,6 +425,9 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Moderation could not read a message, so it went: {Reason}")]
     private static partial void LogModerationFailed(ILogger logger, string reason);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Moderation's model cannot be loaded now, so the message was refused: {Reason}")]
+    private static partial void LogModerationNotLoaded(ILogger logger, string reason);
 }
 
 /// <summary>Personal data in text, masked: e-mail addresses, phone numbers, card numbers (Luhn-checked), IBANs.</summary>

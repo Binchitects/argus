@@ -249,7 +249,10 @@ public static class ModelEndpoints
         }
     }
 
-    /// <summary>Loads a model now, beside the kept ones: at the engine's limit, the one used least recently unloads (a kept one comes back).</summary>
+    /// <summary>
+    /// Loads a model now, beside the kept ones: at the engine's limit, the one used least recently unloads (a kept one,
+    /// or the one new chats use, comes back, and then this one may make room for it).
+    /// </summary>
     private static async Task<IResult> LoadAsync(string name, EngineClient engine, EngineState state, ModelCatalog catalog, EngineWatcher watcher,
         ChatModels chatModels, IOptions<EngineOptions> options, MediaControl media, Audit audit, CancellationToken ct)
     {
@@ -315,6 +318,8 @@ public static class ModelEndpoints
             {
                 catalog.SetKept(catalog.Pinned().Where(k => k != name));
             }
+            // Nor loaded again by the app as the model new chats use.
+            state.Dropped(name);
             await engine.UnloadAsync(name, ct);
         }
         catch (EngineException ex)

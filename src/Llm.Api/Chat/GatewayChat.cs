@@ -18,6 +18,9 @@ public sealed record EngineTimings(double? ReadTokens, double? ReadMs, double? W
 public sealed class ChatGatewayException(string message, int? status = null) : Exception(message)
 {
     public int? Status { get; } = status;
+
+    /// <summary>Nothing was sent: the model is the engine's and cannot be loaded now (the engine is full, or it failed to load and waits for its next try).</summary>
+    public bool NotLoaded { get; init; }
 }
 
 /// <summary>

@@ -32,6 +32,7 @@ public sealed class EngineState(TimeProvider clock)
 
     private volatile Snapshot _now = new([], null, null);
     private readonly ConcurrentDictionary<string, Failure> _failed = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, bool> _dropped = new(StringComparer.Ordinal);
 
     public sealed record Snapshot(IReadOnlyList<EngineModel> Models, string? Error, DateTimeOffset? At);
 
@@ -44,19 +45,40 @@ public sealed class EngineState(TimeProvider clock)
     public Snapshot Now => _now;
 
     /// <summary>
-    /// Loaded models that may make room for another, the quickest to load again first: those not kept loaded and
-    /// not the chat's default, smallest file first (the watcher keeps it). A kept or default one never makes room.
+    /// Loaded models that may make room for another, the quickest to load again first: those not in <see cref="Held"/>,
+    /// smallest file first, whatever their size (the watcher keeps it).
     /// </summary>
     public IReadOnlyList<string> Spare { get; set; } = [];
 
-    /// <summary>The file size of each model added here, by name (the watcher keeps it): a model makes room only for one at least as big.</summary>
-    public IReadOnlyDictionary<string, long> Sizes { get; set; } = new Dictionary<string, long>();
+    /// <summary>
+    /// The models that never make room (the watcher keeps it): those kept loaded and, with 2 or more at once, the one
+    /// new chats use (<see cref="Default"/>) and the model for small steps, no more than the engine holds. With one at
+    /// a time, only the kept: people on different models take turns.
+    /// </summary>
+    public IReadOnlyCollection<string> Held { get; set; } = [];
+
+    /// <summary>
+    /// The engine model new chats use, as the watcher last worked it out: the working hours', the one under Settings,
+    /// the first kept; with none of them, the one new chats got while it was loaded (so neither one loaded on request
+    /// nor an engine that unloaded it to load another takes its place). Null: none of the engine's.
+    /// </summary>
+    public string? Default { get; set; }
+
+    /// <summary>An admin unloaded it (Admin → Models): it is not loaded again by itself until it loads once more.</summary>
+    public void Dropped(string model) => _dropped[model] = true;
+
+    /// <summary>Whether an admin unloaded it and it has not loaded since.</summary>
+    public bool WasDropped(string model) => _dropped.ContainsKey(model);
 
     public void Set(IReadOnlyList<EngineModel> models)
     {
         var now = clock.GetUtcNow();
         foreach (var m in models)
         {
+            if (m.Status is "loaded" or "loading")
+            {
+                _dropped.TryRemove(m.Name, out _);
+            }
             if (m.Status == "failed")
             {
                 if (!_failed.TryAdd(m.Name, new Failure(1, now, null)) && _failed.TryGetValue(m.Name, out var f)
@@ -577,13 +599,18 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
         !onEngine.Contains(model) || engine.Now is not { Error: null, At: not null } || engine.StatusOf(model) == "loaded";
 
     /// <summary>
-    /// An engine model that is not loaded but loads when asked for: the engine has a place
-    /// besides the models kept loaded (one not kept, idle and no bigger, makes room: EngineRoute).
-    /// One that failed to load does too once its wait is over (EngineState.MayAsk).
+    /// An engine model that is not loaded but loads when asked for: the engine has a place besides the
+    /// models that never make room, those kept loaded and those loaded that new chats or small steps use
+    /// (EngineState.Held; an idle one that may makes room: EngineRoute). One that failed to load does too
+    /// once its wait is over (EngineState.MayAsk).
     /// </summary>
     public bool OnRequest(string model, IReadOnlySet<string> onEngine) =>
         onEngine.Contains(model) && !Loaded(model, onEngine) && (engine.StatusOf(model) is "unloaded" or "loading" || engine.MayAsk(model))
-        && catalog.Kept().Count < options.Value.ModelsMax;
+        && Holding().Count < options.Value.ModelsMax;
+
+    /// <summary>The places that never free: the models kept loaded, and the loaded ones that never make room.</summary>
+    private HashSet<string> Holding() =>
+        [.. catalog.Kept().Concat(engine.Held.Where(h => engine.StatusOf(h) is "loaded" or "loading"))];
 
     /// <summary>Whether a model can answer: loaded, or loaded on request.</summary>
     public bool Ready(string model, IReadOnlySet<string> onEngine) => Loaded(model, onEngine) || OnRequest(model, onEngine);
@@ -600,13 +627,26 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
         var allowed = await AllowedAsync(user, chatModels.Select(m => m.Name), ct);
         var onEngine = await OnEngineAsync(ct);
         var mine = chatModels.Where(m => allowed.Contains(m.Name)).ToList();
+        return (mine, DefaultOf(mine, onEngine), onEngine);
+    }
+
+    /// <summary>
+    /// The model a chat that chose none uses, of <paramref name="mine"/> (ForAsync): the working hours' default
+    /// when it can answer, else the admin's, else the one new chats have been using while it is loaded (the
+    /// watcher keeps it: EngineState.Default), else the first loaded, then the first that loads when asked,
+    /// the model for small steps last.
+    /// </summary>
+    public GatewayModel? DefaultOf(IReadOnlyList<GatewayModel> mine, IReadOnlySet<string> onEngine)
+    {
         var hoursDefault = hours.Now.Window?.DefaultModel is { } preferred ? mine.FirstOrDefault(m => m.Name == preferred && Ready(m.Name, onEngine)) : null;
         var o = chat.CurrentValue;
         var adminDefault = o.DefaultModel is { Length: > 0 } chosen && chosen != Chat.SmallModel.Auto ? mine.FirstOrDefault(m => m.Name == chosen && Ready(m.Name, onEngine)) : null;
         var others = mine.Where(m => m.Name != o.SmallModel).ToList();
-        return (mine, hoursDefault ?? adminDefault
+        // With none named: a model loaded on request that the list puts first does not take the place of the one everyone is on.
+        var usual = engine.Default is { } d ? others.FirstOrDefault(m => m.Name == d && onEngine.Contains(d) && Loaded(d, onEngine)) : null;
+        return hoursDefault ?? adminDefault ?? usual
             ?? others.FirstOrDefault(m => Loaded(m.Name, onEngine)) ?? others.FirstOrDefault(m => Ready(m.Name, onEngine))
-            ?? mine.FirstOrDefault(m => Loaded(m.Name, onEngine)) ?? mine.FirstOrDefault(m => Ready(m.Name, onEngine)) ?? mine.FirstOrDefault(), onEngine);
+            ?? mine.FirstOrDefault(m => Loaded(m.Name, onEngine)) ?? mine.FirstOrDefault(m => Ready(m.Name, onEngine)) ?? (mine.Count > 0 ? mine[0] : null);
     }
 
     /// <summary>Why this person cannot have an answer from this model now, or null.</summary>
@@ -624,7 +664,8 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
                 ? $"{model} is loading. Try again in a minute, or choose another model."
                 : engine.StatusOf(model) == "failed"
                     ? $"{model} could not be loaded just now. Choose another model, or try again in a few minutes; an admin can see why under Admin → Models."
-                    : $"{model} is not loaded right now, and the engine has no place for it beside the models kept loaded. An admin can load it under Admin → Models, or choose another model.";
+                    : $"{model} is not loaded right now, and the engine has no place for it: each model it holds at once is kept loaded, or used by everyone "
+                      + "(the model new chats use, the one for small steps). Choose another model, or ask an admin to raise Models loaded at once.";
         }
         // One credit over the chat and API keys, and the groups' credit.
         return await credit.RefusalAsync(user, ct);
