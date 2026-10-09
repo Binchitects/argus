@@ -328,6 +328,41 @@ public sealed class ArenaMcpTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_server_slow_to_open_does_not_hold_the_agents_connection()
+    {
+        // Connecting used to start every tool one after another, each waited for up to a minute: one slow server held
+        // initialize (and so Claude Code, Qwen Code and Code Arena, which give up after 10 to 30 seconds) for its whole time.
+        await using var f = NewApp(settings: new() { ["Mcp:ListWaitSeconds"] = "2" });
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        await StatusAssert.Is(HttpStatusCode.Created,
+            await admin.PostAsync("/api/admin/tools/servers", new { name = "Slow Desk", url = "https://tools.example.test/mcp", headerName = "X-Api-Key", headerValue = FakeMcp.ApiKey }));
+        var (_, _, _, key) = await PersonAsync(f);
+        var hold = new TaskCompletionSource();
+        app.Mcp.Hold = hold;
+        try
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var (_, init, _) = await RpcAsync(Agent(f, key), "initialize", new { protocolVersion = "2025-06-18", capabilities = new { }, clientInfo = new { name = "test", version = "1" } });
+            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10), $"initialize took {clock.Elapsed.TotalSeconds:0.0} s");
+            Assert.Contains("Slow Desk (it did not answer within 2 seconds)", init.GetProperty("result").GetProperty("instructions").GetString(), StringComparison.Ordinal);
+            // The rest are served meanwhile: the built-in tools, and Argus, which started beside the slow server.
+            var names = (await RpcAsync(Agent(f, key), "tools/list")).Answer.GetProperty("result").GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("name").GetString()).ToList();
+            Assert.Contains("calculate", names);
+            Assert.Contains("find_symbol", names);
+            Assert.DoesNotContain("slow_desk__echo", names);
+        }
+        finally
+        {
+            app.Mcp.Hold = null;
+            hold.TrySetResult();
+        }
+        // Answering again, it is listed on the next connection.
+        var (_, again, _) = await RpcAsync(Agent(f, key), "initialize", new { protocolVersion = "2025-06-18" });
+        Assert.DoesNotContain("Slow Desk", again.GetProperty("result").GetProperty("instructions").GetString(), StringComparison.Ordinal);
+        Assert.Contains("slow_desk__echo", (await RpcAsync(Agent(f, key), "tools/list")).Answer.GetProperty("result").GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("name").GetString()));
+    }
+
+    [Fact]
     public async Task A_client_cancels_a_running_call_and_it_stops()
     {
         await using var f = NewApp();
