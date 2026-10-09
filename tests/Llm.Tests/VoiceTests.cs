@@ -408,6 +408,56 @@ public sealed class VoiceTests(AppFixture app)
             "de:kokoro/df_anna is not offered, and no voice reads de here.", await SettingWarningAsync(admin));
     }
 
+    [Fact]
+    public async Task Settings_lists_the_voices_offered_to_choose_the_companys_from_and_tries_one_before_it_is_everyones()
+    {
+        var clock = new MovableClock(DateTimeOffset.UtcNow);
+        await using var s = NewApp(clock: clock);
+        var (b, _, _) = await PersonAsync(s.App);
+        var admin = await new TestBrowser(s.App).SignedInAsync("admin", AppFixture.AdminPassword);
+        var adminEmail = (await admin.JsonAsync(await admin.GetAsync("/api/auth/me"))).GetProperty("email").GetString()!;
+        var offer = await admin.JsonAsync(await admin.GetAsync("/api/admin/speech/voices"));
+        Assert.True(offer.GetProperty("known").GetBoolean());
+        // Every voice offered, with its language, accent and gender, and the text to speech models at the gateway.
+        var voices = offer.GetProperty("voices").EnumerateArray().ToDictionary(v => v.GetProperty("id").GetString()!);
+        Assert.Equal(["kokoro/af_heart", "kokoro/am_adam", "kokoro/bf_emma", "kokoro/ef_dora", "kokoro/ff_siwis", "kokoro/jf_alpha", "piper-fa/gyro"], voices.Keys);
+        Assert.Equal(("es", "es", "female"), (voices["kokoro/ef_dora"].GetProperty("language").GetString(), voices["kokoro/ef_dora"].GetProperty("accent").GetString(),
+            voices["kokoro/ef_dora"].GetProperty("gender").GetString()));
+        Assert.Equal(["kokoro", "piper-fa"], offer.GetProperty("models").EnumerateArray().Select(m => m.GetString()));
+        // Admins only.
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await b.GetAsync("/api/admin/speech/voices"));
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await b.PostAsync("/api/admin/speech/try", new { voice = "kokoro/ef_dora" }));
+
+        // Tried at the speed on the page (not saved yet), in its language; else at the company's speed. Nothing is saved.
+        var res = await admin.PostAsync("/api/admin/speech/try", new { voice = "kokoro/ef_dora", language = "es", speed = 1.25 });
+        await StatusAssert.Is(HttpStatusCode.OK, res);
+        Assert.Equal("audio/mpeg", res.Content.Headers.ContentType!.MediaType);
+        Assert.Equal(("ef_dora", 1.25), (Spoken(adminEmail)["voice"]!.GetValue<string>(), Spoken(adminEmail)["speed"]!.GetValue<double>()));
+        Assert.StartsWith("¡Hola!", Spoken(adminEmail)["input"]!.GetValue<string>(), StringComparison.Ordinal);
+        await StatusAssert.Is(HttpStatusCode.OK, await SetAsync(admin, "Speech:Speed", "0.75"));
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync("/api/admin/speech/try", new { voice = "piper-fa/gyro", language = "fa" }));
+        Assert.Equal(("gyro", 0.75), (Spoken(adminEmail)["voice"]!.GetValue<string>(), Spoken(adminEmail)["speed"]!.GetValue<double>()));
+        Assert.StartsWith("سلام", Spoken(adminEmail)["input"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Null(await SettingWarningAsync(admin));
+        Assert.Equal("en:kokoro/af_heart,fa:piper-fa/gyro", (await admin.JsonAsync(await admin.GetAsync("/api/admin/config"))).GetProperty("groups").EnumerateArray()
+            .SelectMany(g => g.GetProperty("settings").EnumerateArray()).Single(x => x.GetProperty("key").GetString() == "Speech:Voices").GetProperty("value").GetString());
+
+        // Not offered, or not for that language, or too fast: refused.
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/speech/try", new { voice = "kokoro/nobody", language = "en" }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/speech/try", new { voice = "kokoro/ef_dora", language = "fr" }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/speech/try", new { voice = "kokoro/ef_dora", speed = 5 }));
+
+        // A model the speech server has not listed yet (still downloading): its voices are tried as named, for the language given.
+        s.Audio.Downloading["speaches-ai/piper-fa_IR-gyro-medium"] = true;
+        clock.Now += TimeSpan.FromMinutes(11);
+        var listed = await admin.JsonAsync(await admin.GetAsync("/api/admin/speech/voices"));
+        Assert.DoesNotContain("piper-fa/gyro", listed.GetProperty("voices").EnumerateArray().Select(v => v.GetProperty("id").GetString()));
+        Assert.Contains("piper-fa", listed.GetProperty("models").EnumerateArray().Select(m => m.GetString()));
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync("/api/admin/speech/try", new { voice = "piper-fa/amir", language = "fa" }));
+        Assert.Equal(("piper-fa", "amir"), (Spoken(adminEmail)["model"]!.GetValue<string>(), Spoken(adminEmail)["voice"]!.GetValue<string>()));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/speech/try", new { voice = "piper-fa/amir" }));
+    }
+
     /// <summary>What the Settings page says under a setting (Speech:Voices), if anything.</summary>
     private static async Task<string?> SettingWarningAsync(TestBrowser admin, string key = "Speech:Voices") =>
         (await admin.JsonAsync(await admin.GetAsync("/api/admin/config"))).GetProperty("groups").EnumerateArray().SelectMany(g => g.GetProperty("settings").EnumerateArray())

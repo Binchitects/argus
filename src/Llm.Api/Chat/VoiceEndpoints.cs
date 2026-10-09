@@ -15,7 +15,8 @@ public sealed record VoiceTry(string? Voice = null, string? Language = null, dou
 /// <summary>
 /// A person's voice (Your account → Voice): the language they speak, the voice that reads each language to them, the
 /// speed, and whether Talk reads its answers aloud. What they chose, the company's defaults (Settings → Speech), and what
-/// the speech models offer; trying a voice reads a sample in it.
+/// the speech models offer; trying a voice reads a sample in it. Settings → Speech chooses the company's voices from the
+/// same offer, and tries them the same way.
 /// </summary>
 public static class VoiceEndpoints
 {
@@ -58,6 +59,10 @@ public static class VoiceEndpoints
         me.MapGet("", MineAsync);
         me.MapPatch("", ChooseAsync);
         me.MapPost("/try", TryAsync);
+        // Settings → Speech: the voices to choose the company's from, and a sample of one before it reads for everyone.
+        var company = app.MapGroup("/api/admin/speech").RequireAuthorization(AdminEndpoints.Policy);
+        company.MapGet("/voices", OfferedAsync);
+        company.MapPost("/try", TryCompanyAsync);
         // API keys' speech at gateway.DOMAIN, sent here while the app is up: every method, as the gateway answers them all
         // (a browser's preflight gets its CORS headers).
         foreach (var path in KeySpeech.Paths)
@@ -85,12 +90,56 @@ public static class VoiceEndpoints
                 speed = Math.Clamp(s.Company.Speed, VoiceCatalog.Slowest, VoiceCatalog.Fastest),
                 readAloud = s.Company.ReadAloud,
             },
-            voices = s.Usable.Select(v => new { id = v.Id, model = v.Model, name = v.Name, language = v.Language, accent = v.Accent, gender = v.Gender }),
+            voices = s.Usable.Select(Shown),
             languages = s.Offer.Languages,
             hears = s.Offer.Hears,
             known = s.Offer.Known,
         };
     }
+
+    private static object Shown(OfferedVoice v) => new { id = v.Id, model = v.Model, name = v.Name, language = v.Language, accent = v.Accent, gender = v.Gender };
+
+    /// <summary>
+    /// What Settings → Speech chooses the company's voices from: every voice the speech models offer, and the text to
+    /// speech models at the gateway (a voice of one whose voices the speech server has not listed is used as named).
+    /// </summary>
+    private static async Task<IResult> OfferedAsync(VoiceCatalog voices, CancellationToken ct)
+    {
+        var offer = await voices.OfferAsync(ct);
+        return Results.Ok(new { voices = offer.Voices.Select(Shown), models = offer.Models.Order(StringComparer.Ordinal), known = offer.Known });
+    }
+
+    /// <summary>
+    /// A sample read in a voice before it is made the company's: one offered for <see cref="VoiceTry.Language"/>, or of a
+    /// model whose voices the speech server has not listed; at a speed (none: the company's).
+    /// </summary>
+    private static async Task<IResult> TryCompanyAsync(VoiceTry body, HttpContext http, ClaimsPrincipal p, UserManager<AppUser> users, GatewayChat gateway,
+        VoiceCatalog voices, IOptionsMonitor<SpeechOptions> options, CancellationToken ct)
+    {
+        if (WrongSpeed(body.Speed) is { } wrong)
+        {
+            return wrong;
+        }
+        var offer = await voices.OfferAsync(ct);
+        var voice = offer.Voices.FirstOrDefault(v => v.Id == body.Voice && (body.Language is null || v.Language == body.Language))
+            ?? (body.Voice is { } id && offer.Believes(id) && SpeechOptions.IsLanguage(body.Language) ? OfferedVoice.Assumed(id, body.Language!) : null);
+        if (voice is null)
+        {
+            return AuthEndpoints.Problem(400, "voice", $"\"{body.Voice}\" is not a voice offered here{(body.Language is null ? "" : $" for {body.Language}")}.");
+        }
+        var me = (await users.GetUserAsync(p))!;
+        var speed = body.Speed ?? Math.Clamp(options.CurrentValue.Speed, VoiceCatalog.Slowest, VoiceCatalog.Fastest);
+        return await ReadAloudAsync(http, gateway, voice, Sample(voice.Language), speed, me.Email!, ct);
+    }
+
+    /// <summary>Why a speed tried cannot be; null when it can (or none is given).</summary>
+    private static IResult? WrongSpeed(double? speed) =>
+        speed is { } fast && (double.IsNaN(fast) || fast < VoiceCatalog.Slowest || fast > VoiceCatalog.Fastest)
+            ? AuthEndpoints.Problem(400, "speed", $"The speed is {VoiceCatalog.Slowest} to {VoiceCatalog.Fastest}.")
+            : null;
+
+    /// <summary>What a voice says when it is tried: the sample of its language, else English's.</summary>
+    private static string Sample(string? language) => Samples.GetValueOrDefault(language ?? "en") ?? Samples["en"];
 
     /// <summary>
     /// The choices a request names change, and only those: null puts one back to the company's ("voices": null all the
@@ -192,9 +241,9 @@ public static class VoiceEndpoints
     {
         var me = (await users.GetUserAsync(p))!;
         var speech = await voices.ForAsync(me, ct);
-        if (body.Speed is { } speed && (double.IsNaN(speed) || speed < VoiceCatalog.Slowest || speed > VoiceCatalog.Fastest))
+        if (WrongSpeed(body.Speed) is { } wrong)
         {
-            return AuthEndpoints.Problem(400, "speed", $"The speed is {VoiceCatalog.Slowest} to {VoiceCatalog.Fastest}.");
+            return wrong;
         }
         OfferedVoice? voice;
         if (body.Voice is { Length: > 0 } id)
@@ -209,8 +258,7 @@ public static class VoiceEndpoints
         {
             voice = speech.VoiceFor(body.Language ?? speech.Language ?? "en") ?? speech.For("");
         }
-        var text = Samples.GetValueOrDefault(voice?.Language ?? "en") ?? Samples["en"];
-        return await ReadAloudAsync(http, gateway, voice, text, body.Speed ?? speech.Speed, me.Email!, ct);
+        return await ReadAloudAsync(http, gateway, voice, Sample(voice?.Language), body.Speed ?? speech.Speed, me.Email!, ct);
     }
 
     /// <summary>A text read aloud in a voice, in the person's name: the MP3 passed on as the speech server writes it.</summary>
