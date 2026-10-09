@@ -557,6 +557,9 @@ on the terminal and never in the log: it is `ADMIN_PASSWORD` in `.env` (0600).
 - `--make-cert` makes a certificate (`scripts/make-cert.sh`); `--hosts` adds the
   names to `/etc/hosts` (`scripts/setup-hosts.sh`, as root).
 - The folder defaults to `/srv/arena` as root, else `~/arena`.
+- Rootless Podman makes some new volumes root's (Alertmanager's then cannot
+  write): once the stack runs, install and upgrade give each volume to its
+  service's user and start that service again.
 
 #### Upgrade from 5.2.0
 

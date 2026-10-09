@@ -892,26 +892,43 @@ record_state() {   # what is installed now
 
 # =================================================================== permissions
 # The volumes the services write, owned by the services' users; Docker's MODELS_DIR by uid 1000.
-fix_permissions() {   # fix_permissions plan|do -> FIX_FAILED
+FIXED=()
+FIX_FOUND=0
+fix_permissions() {   # fix_permissions plan|do -> FIX_FAILED, FIX_FOUND (owners wrong); FIXED: the volumes given back
   local entry vol uid gid have
-  FIX_FAILED=0
+  FIX_FAILED=0 FIX_FOUND=0 FIXED=()
   for entry in $VOLUME_OWNERS; do
     IFS=: read -r vol uid gid <<<"$entry"
     volume_exists "${PROJECT}_$vol" || continue
     have="$(in_helper -v "${PROJECT}_$vol:/v:ro" "$HELPER" stat -c %u:%g /v 2>/dev/null)"
     if [[ -z "$have" ]]; then bad "the $vol volume: cannot read its owner"; FIX_FAILED=1; continue; fi
     [[ "$have" == "$uid:$gid" ]] && continue
+    FIX_FOUND=$((FIX_FOUND + 1))
     if [[ $1 == plan ]]; then would "give the $vol volume to $uid:$gid (it is $have's)"; continue; fi
-    if in_helper -v "${PROJECT}_$vol:/v" "$HELPER" chown -R "$uid:$gid" /v; then did "the $vol volume was $have's: now $uid:$gid's, its service's"
+    if in_helper -v "${PROJECT}_$vol:/v" "$HELPER" chown -R "$uid:$gid" /v; then did "the $vol volume was $have's: now $uid:$gid's, its service's"; FIXED+=("$vol")
     else bad "the $vol volume is $have's, not $uid:$gid's, and chown failed"; FIX_FAILED=1; fi
   done
   if [[ $ENGINE == docker && -d "$MODELS_DIR" && "$(stat -c %u "$MODELS_DIR")" != 1000 ]]; then
+    FIX_FOUND=$((FIX_FOUND + 1))
     if [[ $1 == plan ]]; then would "give $MODELS_DIR to uid 1000 (the app writes there)"
     elif [[ $EUID -eq 0 ]] && chown -R 1000:1000 "$MODELS_DIR"; then did "$MODELS_DIR is now uid 1000's (the app writes there)"
     else bad "$MODELS_DIR is not uid 1000's and the app writes there: sudo chown -R 1000:1000 $MODELS_DIR"; FIX_FAILED=1; fi
   fi
-  [[ $FIX_FAILED -eq 0 ]] && ok "the volumes' owners are their services' users"
+  [[ $FIX_FAILED -eq 0 && $FIX_FOUND -eq 0 ]] && ok "the volumes' owners are their services' users"
   return 0
+}
+
+# Once the stack runs, its volumes all exist: a new one rootless Podman made root's (Alertmanager's)
+# is given to its service, which starts again to write there.
+fix_started() {
+  local vol svc restart=()
+  step "permissions, now that every volume exists"
+  fix_permissions do
+  for vol in ${FIXED[@]+"${FIXED[@]}"}; do
+    for svc in $(dc config --services 2>/dev/null); do [[ $svc == "$vol" ]] && restart+=("$svc"); done
+  done
+  [[ ${#restart[@]} -gt 0 ]] || return 0
+  if dc restart "${restart[@]}" >> "$STATE/up.log" 2>&1; then did "restarted: ${restart[*]}"; else bad "restarting ${restart[*]} failed"; fi
 }
 
 # ================================================================== the summary
@@ -1049,6 +1066,7 @@ cmd_install() {
   step "permissions"
   fix_permissions do
   start_stack || die "the stack did not start; fix what is named above and run install again"
+  fix_started
   wait_healthy || die "the stack is not healthy; repair (or install again) after the cause is fixed"
   check_versions "$BVERSION" || die "the stack does not run $BVERSION as it should; see above"
   record_state
@@ -1241,6 +1259,7 @@ cmd_upgrade() {
     fix_permissions do
     sed -i 's/^started=.*/started=1/' "$marker"; started=1
     start_stack || return 1
+    fix_started
     wait_healthy || return 1
     check_versions "$BVERSION" || return 1
   }
@@ -1370,7 +1389,9 @@ cmd_repair() {
 
   step "permissions"
   fix_permissions "$act"
-  [[ $FIX_FAILED -eq 1 ]] && problems=$((problems + 1))
+  local fix_failed=$FIX_FAILED
+  problems=$((problems + FIX_FOUND))
+  [[ $FIX_FAILED -eq 1 && $FIX_FOUND -eq 0 ]] && problems=$((problems + 1))
 
   step "containers"
   local -a sick=()
@@ -1383,8 +1404,12 @@ cmd_repair() {
   done < <(container_rows)
   for svc in $(dc config --services 2>/dev/null); do [[ -n "${seen[$svc]:-}" ]] || { note "$svc: no container"; sick+=("$svc"); }; done
   mapfile -t sick < <(printf '%s\n' ${sick[@]+"${sick[@]}"} | sed '/^$/d' | sort -u)
+  problems=$((problems + ${#sick[@]}))
+  # A service whose volume was just given back starts again, to write there (counted above).
+  for f in ${FIXED[@]+"${FIXED[@]}"}; do
+    for svc in $(dc config --services 2>/dev/null); do [[ $svc == "$f" && " ${sick[*]} " != *" $svc "* ]] && sick+=("$svc"); done
+  done
   if [[ ${#sick[@]} -gt 0 ]]; then
-    problems=$((problems + ${#sick[@]}))
     if [[ $act == plan ]]; then would "start or recreate: ${sick[*]}"
     else
       images_present || die "images are missing (above): repair from the bundle"
@@ -1399,7 +1424,7 @@ cmd_repair() {
     say ""; say "$problems finding(s); the repair would act on them as above."
     return 0
   fi
-  if wait_healthy && check_versions "${iv:-$BVERSION}"; then
+  if wait_healthy && check_versions "${iv:-$BVERSION}" && [[ $fix_failed -eq 0 ]]; then
     [[ -n "$BUNDLE" && -n "$(state_get version)" ]] && record_images
     say ""; say "Repaired: $problems finding(s) dealt with; every service is up and healthy."
     return 0

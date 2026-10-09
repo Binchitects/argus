@@ -351,6 +351,9 @@ def compose(st: Store, args: list[str], project: str) -> int:
         named = [a for a in args[args.index("up") + 1:] if not a.startswith("-") and a not in ("never",)]
         if named:
             services = [x for x in services if x in named]
+        # The project's volumes, as compose makes them when they are not there.
+        for vol in lines("FAKE_COMPOSE_VOLUMES"):
+            s["volumes"].setdefault(f"{project}_{vol}", {"labels": [f"com.docker.compose.project={project}"]})
         unhealthy = set(norm(x) for x in lines("FAKE_UNHEALTHY"))
         down = set(lines("FAKE_DOWN"))
         for svc in services:

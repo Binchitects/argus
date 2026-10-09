@@ -279,12 +279,12 @@ class InstallerTests(unittest.TestCase):
 
     # ---------------------------------------------------------------- helpers
 
-    def install(self, *extra: str, code: int = 0, gitlab: bool = True) -> subprocess.CompletedProcess:
+    def install(self, *extra: str, code: int = 0, gitlab: bool = True, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
         token = self.r.s.dir / "gitlab-token"
         token.write_text("glpat-a-token-for-the-test\n")
         more = ["--gitlab-url", "https://gitlab.test", "--gitlab-token-file", str(token)] if gitlab else []
         r = self.r.run("install", "--dir", str(self.dir), "--yes", "--cpu-only", "--skip-requirements", "--timeout", "5s",
-                       "--domain", "arena.test", "--https-port", "18443", "--http-port", "18080", *more, *extra)
+                       "--domain", "arena.test", "--https-port", "18443", "--http-port", "18080", *more, *extra, extra=extra_env)
         self.assertEqual(r.returncode, code, r.stdout + r.stderr)
         return r
 
@@ -742,6 +742,18 @@ class InstallerTests(unittest.TestCase):
         r = self.r.run("repair", "--dir", str(self.dir), "--yes", "--timeout", "5s", extra={"FAKE_OWNER_argus": "0:0"})
         self.assertIn("the argus volume was 0:0's: now 10001:10001's", r.stdout)
         self.assertTrue(any(c[-3:] == ["chown", "-R", "10001:10001"] or "10001:10001" in c for c in self.r.calls() if "chown" in c))
+        # A finding, and its service starts again to write there.
+        self.assertIn("recreated: argus", r.stdout)
+        self.assertIn("Repaired: 1 finding(s)", r.stdout)
+
+    def test_A_volume_rootless_Podman_makes_roots_is_given_to_its_service_on_install(self):
+        r = self.install(extra_env={"FAKE_OWNER_argus": "0:0"})
+        out = r.stdout
+        # Not there before the stack starts: put right once it is, and the service restarted.
+        self.assertIn("permissions, now that every volume exists", out)
+        self.assertIn("the argus volume was 0:0's: now 10001:10001's", out)
+        self.assertIn("restarted: argus", out)
+        self.assertTrue(self.r.s.called("compose", "restart", "argus"))
 
     # ----------------------------------------------------------------- remove
 
