@@ -102,7 +102,7 @@ public sealed partial class EngineRoute
     private sealed record Asking(Task<View?> Answer, long Began);
 
     /// <summary>An ask of the engine for its models, and when it was asked (<see cref="EngineState.Asking"/>); null: no answer.</summary>
-    private sealed record Listing(Task<IReadOnlyList<EngineModel>?> Models, DateTimeOffset Asked);
+    private sealed record Listing(Task<IReadOnlyList<EngineModel>?> Models, long Asked);
 
     private readonly ConcurrentDictionary<string, View> _views = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, Asking> _asking = new(StringComparer.Ordinal);
@@ -334,7 +334,7 @@ public sealed partial class EngineRoute
         Listing listed;
         lock (_listing)
         {
-            if (_listed is not { } was || (was.Models.IsCompleted && clock.GetUtcNow() - was.Asked >= Fresh))
+            if (_listed is not { } was || (was.Models.IsCompleted && clock.GetElapsedTime(was.Asked) >= Fresh))
             {
                 var asked = engine.Asking();
                 _listed = new Listing(ListAsync(), asked);

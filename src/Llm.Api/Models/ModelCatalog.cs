@@ -40,8 +40,8 @@ public sealed class EngineState(TimeProvider clock)
     private readonly ConcurrentDictionary<string, Failure> _failed = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, bool> _dropped = new(StringComparer.Ordinal);
 
-    /// <summary>The models the app told to unload, and when (<see cref="Unloading"/>).</summary>
-    private readonly ConcurrentDictionary<string, DateTimeOffset> _stopping = new(StringComparer.Ordinal);
+    /// <summary>The models the app told to unload, and when (a <see cref="TimeProvider.GetTimestamp"/>: <see cref="Unloading"/>).</summary>
+    private readonly ConcurrentDictionary<string, long> _stopping = new(StringComparer.Ordinal);
 
     /// <summary>Since when each loaded model has been seen loaded, as the engine said (<see cref="LoadedSince"/>).</summary>
     private readonly ConcurrentDictionary<string, DateTimeOffset> _loaded = new(StringComparer.Ordinal);
@@ -82,8 +82,8 @@ public sealed class EngineState(TimeProvider clock)
     /// <summary>Whether an admin unloaded it and it has not loaded since.</summary>
     public bool WasDropped(string model) => _dropped.ContainsKey(model);
 
-    /// <summary>The time to give <see cref="Set"/> and <see cref="Seen"/>: taken just before the engine is asked for its models.</summary>
-    public DateTimeOffset Asking() => clock.GetUtcNow();
+    /// <summary>The time to give <see cref="Set"/> and <see cref="Seen"/> (a <see cref="TimeProvider.GetTimestamp"/>): taken just before the engine is asked for its models.</summary>
+    public long Asking() => clock.GetTimestamp();
 
     /// <summary>
     /// The app told the engine to unload <paramref name="model"/> (to make room for another, an admin's Unload, working
@@ -94,7 +94,7 @@ public sealed class EngineState(TimeProvider clock)
     /// </summary>
     public void Unloading(string model)
     {
-        _stopping[model] = clock.GetUtcNow();
+        _stopping[model] = clock.GetTimestamp();
         lock (_stopping)
         {
             _now = _now with { Models = [.. _now.Models.Select(m => m.Name == model && m.Status == "loaded" ? m with { Status = "unloaded" } : m)] };
@@ -127,26 +127,19 @@ public sealed class EngineState(TimeProvider clock)
     /// What the engine said (asked at <paramref name="asked"/>, from <see cref="Asking"/>), with the models the app told to
     /// unload shown unloaded while it still lists them loaded (<see cref="Unloading"/>).
     /// </summary>
-    public IReadOnlyList<EngineModel> Seen(IReadOnlyList<EngineModel> models, DateTimeOffset asked)
-    {
-        if (_stopping.IsEmpty)
-        {
-            return models;
-        }
-        var now = clock.GetUtcNow();
-        return [.. models.Select(m => Stopped(m, asked, now) ? m : m with { Status = "unloaded" })];
-    }
+    public IReadOnlyList<EngineModel> Seen(IReadOnlyList<EngineModel> models, long asked) =>
+        _stopping.IsEmpty ? models : [.. models.Select(m => Stopped(m, asked) ? m : m with { Status = "unloaded" })];
 
     /// <summary>Whether what the engine said of <paramref name="m"/> goes: it was not told to unload, or no longer lists it loaded.</summary>
-    private bool Stopped(EngineModel m, DateTimeOffset asked, DateTimeOffset now)
+    private bool Stopped(EngineModel m, long asked)
     {
         if (!_stopping.TryGetValue(m.Name, out var told))
         {
             return true;
         }
-        if (now - told >= Stopping || (m.Status != "loaded" && asked >= told))
+        if (clock.GetElapsedTime(told) >= Stopping || (m.Status != "loaded" && asked >= told))
         {
-            _stopping.TryRemove(new KeyValuePair<string, DateTimeOffset>(m.Name, told));
+            _stopping.TryRemove(new KeyValuePair<string, long>(m.Name, told));
             return true;
         }
         return m.Status != "loaded";
@@ -159,7 +152,7 @@ public sealed class EngineState(TimeProvider clock)
     public DateTimeOffset? LoadedSince(string model) => _loaded.TryGetValue(model, out var since) ? since : null;
 
     /// <param name="asked">When the engine was asked (<see cref="Asking"/>).</param>
-    public void Set(IReadOnlyList<EngineModel> engine, DateTimeOffset asked)
+    public void Set(IReadOnlyList<EngineModel> engine, long asked)
     {
         var models = Seen(engine, asked);
         var now = clock.GetUtcNow();

@@ -35,6 +35,15 @@ public sealed class FakeEngine : HttpMessageHandler
 
     /// <summary>How long /slots takes to answer: llama-server answers between two batches, so while it reads a long prompt, seconds.</summary>
     public TimeSpan SlotsDelay { get; set; }
+
+    /// <summary>
+    /// Whether a model told to unload stops slowly, as the router's do: listed loaded (and no longer counted against
+    /// <see cref="Max"/>) until <see cref="Stop"/>.
+    /// </summary>
+    public bool SlowStop { get; set; }
+
+    /// <summary>The models told to unload that have not stopped yet (<see cref="SlowStop"/>).</summary>
+    private readonly HashSet<string> _stopping = [];
     public List<(string Method, string Path, string? Model)> Calls { get; } = [];
 
     public void Reset(string? presetsFile)
@@ -50,9 +59,33 @@ public sealed class FakeEngine : HttpMessageHandler
             BusySlots.Clear();
             SlotCounts.Clear();
             SlotsDelay = TimeSpan.Zero;
+            SlowStop = false;
+            _stopping.Clear();
             Max = 1;
         }
         PresetsFile = presetsFile;
+    }
+
+    /// <summary>The models told to unload have stopped (<see cref="SlowStop"/>).</summary>
+    public void Stop()
+    {
+        lock (_status)
+        {
+            foreach (var m in _stopping)
+            {
+                _status[m] = "unloaded";
+            }
+            _stopping.Clear();
+        }
+    }
+
+    /// <summary>How many times the app called <paramref name="path"/> (for <paramref name="model"/>, when given).</summary>
+    public int CallsTo(string path, string? model = null)
+    {
+        lock (_status)
+        {
+            return Calls.Count(c => c.Path == path && (model is null || c.Model == model));
+        }
     }
 
     /// <summary>The engine restarted: nothing is loaded.</summary>
@@ -134,6 +167,7 @@ public sealed class FakeEngine : HttpMessageHandler
                     }.ToJsonString());
                 case "/models/load" when model is not null && _status.ContainsKey(model):
                     _used.Remove(model);
+                    _stopping.Remove(model);
                     // At the limit, the one used least recently makes room.
                     while (_used.Count >= Max && _used.Count > 0)
                     {
@@ -152,7 +186,14 @@ public sealed class FakeEngine : HttpMessageHandler
                     return Json(HttpStatusCode.OK, new JsonArray([.. Enumerable.Range(0, SlotCounts.GetValueOrDefault(model, ParallelOf(model)))
                         .Select(i => (JsonNode)new JsonObject { ["id"] = i, ["is_processing"] = busy.Contains(i), ["n_ctx"] = 8192 })]).ToJsonString());
                 case "/models/unload" when model is not null && _status.ContainsKey(model):
-                    _status[model] = "unloaded";
+                    if (SlowStop && _status[model] == "loaded")
+                    {
+                        _stopping.Add(model);
+                    }
+                    else
+                    {
+                        _status[model] = "unloaded";
+                    }
                     _used.Remove(model);
                     return Json(HttpStatusCode.OK, """{"success":true}""");
                 default:
