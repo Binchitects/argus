@@ -921,8 +921,13 @@ public sealed class StorageTests(AppFixture app)
             // v5.2.0's last migration, and a file as v5.2.0 keeps one (its columns then).
             await Microsoft.EntityFrameworkCore.Infrastructure.AccessorExtensions.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>(db)
                 .MigrateAsync("20261005151513_ToolCertificates");
-            db.Users.Add(person);
-            await db.SaveChangesAsync();
+            // As v5.2.0 keeps a person: its columns then (later migrations add more).
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "AspNetUsers" ("Id", "UserName", "NormalizedUserName", "Email", "NormalizedEmail", "DisplayName", "EmailConfirmed", "PhoneNumberConfirmed",
+                    "TwoFactorEnabled", "LockoutEnabled", "AccessFailedCount", "CacheApiAnswers", "CreatedAt", "IsDisabled", "MemoryOff", "Source")
+                VALUES ({person.Id}, {person.UserName}, {person.NormalizedUserName}, {person.Email}, {person.NormalizedEmail}, 'Kept', false, false,
+                    false, true, 0, false, now(), false, false, 0)
+                """);
             await db.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO chat_attachments ("Id", "UserId", "FileName", "ContentType", "Size", "Text", "Truncated", "Kind", "CreatedAt")
                 VALUES ({fileId}, {person.Id}, 'kept.txt', 'text/plain', 4, 'kept', false, 'text', now())

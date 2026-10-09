@@ -226,7 +226,9 @@ public class RepoIdentityTests
             // The chat's Argus tools: a person in eal-core and etl-decoder (by GitLab's membership of
             // the ids it gives them now) reads what was indexed under either copy.
             using var http = new HttpClient(new Members(new() { [11] = [5], [12] = [5], [13] = [] }));
-            var person = People.ResolvePerson(conn, new MemberDirectory(GitLabConfig.Create(GitLabA, "svc"), http), "alice@example.test");
+            var directory = new MemberDirectory(GitLabConfig.Create(GitLabA, "svc"), http);
+            var person = new PersonAccess((email, username, projects) => People.GrantFor(directory, email, username, projects), () => People.Repos(conn))
+                .Resolve("alice@example.test", null);
             Assert.Equal([ealOldV2, etlOld, ealNewMain], person.AllowedRepoIds.Order());
             Assert.Single(Queries.FindSymbol(person.AllowedRepoIds, conn, "OldEtl"));
             Assert.Single(Queries.FindSymbol(person.AllowedRepoIds, conn, "OldEalV2"));
