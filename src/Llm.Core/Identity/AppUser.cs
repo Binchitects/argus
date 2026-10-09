@@ -54,6 +54,10 @@ public sealed class AppUser : IdentityUser<Guid>
     public bool CacheApiAnswers { get; set; }
     /// <summary>Their speech choices (Your account → Voice) as JSON: the language they speak, a voice per language, the speed, reading aloud. Null: the company's.</summary>
     public string? Voice { get; set; }
+    /// <summary>Requests a minute each of their API keys may send to the gateway, their own; null: their groups' or the company's, 0: no limit.</summary>
+    public int? RequestsPerMinute { get; set; }
+    /// <summary>Tokens a minute each of their API keys may use at the gateway, their own; null: their groups' or the company's, 0: no limit.</summary>
+    public int? TokensPerMinute { get; set; }
 }
 
 public sealed class AppRole : IdentityRole<Guid>

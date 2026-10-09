@@ -26,12 +26,14 @@ public sealed record McpCatalog(JsonArray Tools, string Instructions, IReadOnlyD
 /// The person's chat tools, served to outside agents: exactly those they may use in the chat
 /// (the admins' choices, their groups), with the same function names and schemas, run as them
 /// (Argus with their GitLab access, a plugin with their own account, the gateway on their
-/// credit). Each call is audited (mcp.call). A tool set to ask first cannot show the app's
-/// approval card here: it is marked destructive, and its description tells the client to ask.
+/// credit). Each call is audited (mcp.call) at the time it started. A tool set to ask first cannot
+/// show the app's approval card here: it is marked destructive, and its description tells the
+/// client to ask. A tool that reaches a model counts against the person's requests a minute, in
+/// the minute it started (RateLimits).
 /// </summary>
 public sealed partial class McpTools(
     ToolRegistry registry, AccessService access, Audit audit, AppDbContext db, IMemoryCache cache, McpResearch research,
-    IOptions<AuthOptions> auth, IOptionsMonitor<BrandingOptions> branding, ILogger<McpTools> logger)
+    IOptions<AuthOptions> auth, IOptionsMonitor<BrandingOptions> branding, Gateway.RateLimits rateLimits, TimeProvider clock, ILogger<McpTools> logger)
 {
     /// <summary>Tools that only make sense inside a chat: its files, questions to the person, sub-agents.</summary>
     public static readonly string[] ChatOnly = ["files", "ask", "agents"];
@@ -111,6 +113,21 @@ public sealed partial class McpTools(
         {
             return failure is null ? null : new ToolResult(failure, IsError: true);
         }
+        // A call counts, and is audited, at its start: the gateway counts a request when it starts too.
+        var started = clock.GetUtcNow();
+        IDisposable? slot = null;
+        if (Gateway.RateLimits.ModelTools.Contains(found.Choice.Tool.Id))
+        {
+            // Its model requests go with the chat's key: the person's requests a minute are checked here instead.
+            (slot, var refusal) = await rateLimits.StartModelCallAsync(user, started, ct);
+            if (refusal is not null)
+            {
+                await audit.WriteAsync(Gateway.RateLimits.McpRefused, Target(found.Choice.Tool), success: false, detail: function, actor: user);
+                return new ToolResult(refusal, IsError: true);
+            }
+        }
+        // Counted as running until it is audited: then the audit log counts it, at its start.
+        using var running = slot;
         ToolResult outcome;
         try
         {
@@ -122,7 +139,7 @@ public sealed partial class McpTools(
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            await audit.WriteAsync("mcp.call", Target(found.Choice.Tool), success: false, detail: $"{function}, stopped by the client", actor: user);
+            await audit.WriteAsync("mcp.call", Target(found.Choice.Tool), success: false, detail: $"{function}, stopped by the client", actor: user, at: started);
             throw;
         }
         catch (Exception ex)
@@ -131,7 +148,7 @@ public sealed partial class McpTools(
             LogCallFailed(logger, function, ex);
             outcome = new ToolResult($"{function} failed: {ex.Message}", IsError: true);
         }
-        await audit.WriteAsync("mcp.call", Target(found.Choice.Tool), success: !outcome.IsError, detail: function, actor: user);
+        await audit.WriteAsync("mcp.call", Target(found.Choice.Tool), success: !outcome.IsError, detail: function, actor: user, at: started);
         return outcome;
     }
 

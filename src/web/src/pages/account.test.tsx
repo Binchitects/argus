@@ -35,6 +35,79 @@ describe('account', () => {
     expect(screen.getByRole('meter', { name: 'Credit used' })).toHaveAttribute('aria-valuenow', '10')
   })
 
+  it('a sixth new key in an hour is refused, and says when the next is possible', async () => {
+    fakeApi(member, {
+      'GET /api/account/keys': () => ({ json: { keys: [{ alias: 'mo', preview: 'sk-...abcd', spend: 1, blocked: false, createdAt: null }], spend: 1, budget: 10 } }),
+      'POST /api/account/keys/rotate': () => ({
+        status: 429,
+        json: { status: 'too_many_keys', error: 'You made 5 new keys in the last hour, the most there may be. Make the next in 12 minutes, or ask an admin, who can make one for you now.' },
+      }),
+    })
+    renderApp('/account')
+    await userEvent.click(await screen.findByRole('button', { name: 'New key' }))
+    await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Make a new key' }))
+    expect(await screen.findByText(/You made 5 new keys in the last hour.*Make the next in 12 minutes/)).toBeInTheDocument()
+    expect(screen.getByText('sk-...abcd')).toBeInTheDocument()
+    expect(screen.queryByText(/shown only this once/)).toBeNull()
+  })
+
+  it('the API key shows its rate limits, what was used in the last minute and what was refused', async () => {
+    fakeApi(member, {
+      'GET /api/account/keys': () => ({
+        json: { keys: [{ alias: 'mo', preview: 'sk-...abcd', spend: 1, blocked: false, createdAt: '2026-09-01T10:00:00Z' }], spend: 1, budget: 10 },
+      }),
+      'GET /api/account/keys/limits': () => ({
+        json: {
+          requestsPerMinute: { value: 60, from: 'company', group: null },
+          tokensPerMinute: { value: 100000, from: 'group', group: 'Developers' },
+          own: { requestsPerMinute: null, tokensPerMinute: null },
+          atOnce: 2,
+          used: { requests: 12, tokens: 3400 },
+          refused: [
+            { limit: 'tokens', count: 2, last: new Date(Date.now() - 5 * 60_000).toISOString() },
+            { limit: 'at once', count: 1, last: new Date(Date.now() - 60 * 60_000).toISOString() },
+          ],
+        },
+      }),
+    })
+    renderApp('/account')
+    const limits = (await screen.findByRole('heading', { name: 'Rate limits' })).closest('section')!
+    expect(within(limits).getByText("· the company's", { exact: false })).toBeInTheDocument()
+    expect(within(limits).getByText('· from Developers', { exact: false })).toBeInTheDocument()
+    expect(within(limits).getByText('3,400')).toBeInTheDocument()
+    expect(within(limits).getByText('100K', { exact: false })).toBeInTheDocument()
+    expect(within(limits).getByText(/3 requests refused in the last day \(2 for tokens a minute, 1 for requests at once\), the last 5 minutes ago/)).toBeInTheDocument()
+    expect(within(limits).getByText(/HTTP 429 and Retry-After/)).toBeInTheDocument()
+  })
+
+  it('the home page shows the credit without asking for the key’s rate limits', async () => {
+    const calls = fakeApi(member)
+    renderApp('/')
+    expect(await screen.findByText('Your credit')).toBeInTheDocument()
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/account/keys')).toBe(true))
+    expect(calls.some((c) => c.path === '/api/account/keys/limits')).toBe(false)
+  })
+
+  it('a key with no limits says so, and nothing was refused', async () => {
+    fakeApi(member, {
+      'GET /api/account/keys': () => ({ json: { keys: [{ alias: 'mo', preview: 'sk-...abcd', spend: 1, blocked: false, createdAt: null }], spend: 1, budget: null } }),
+      'GET /api/account/keys/limits': () => ({
+        json: {
+          requestsPerMinute: { value: null, from: 'none', group: null },
+          tokensPerMinute: { value: null, from: 'none', group: null },
+          own: { requestsPerMinute: null, tokensPerMinute: null },
+          atOnce: null,
+          used: null,
+          refused: null,
+        },
+      }),
+    })
+    renderApp('/account')
+    const limits = (await screen.findByRole('heading', { name: 'Rate limits' })).closest('section')!
+    expect(within(limits).getAllByText('no limit')).toHaveLength(3)
+    expect(within(limits).queryByText(/refused in the last day/)).toBeNull()
+  })
+
   it('the answer cache is each person’s choice for their key when an admin lets them choose', async () => {
     let chosen = false
     const calls = fakeApi(member, {

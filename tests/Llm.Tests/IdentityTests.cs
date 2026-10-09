@@ -249,7 +249,7 @@ public sealed class IdentityTests(AppFixture app)
         app.Gateway.Down = true;
         try
         {
-            foreach (var res in new[] { await person.GetAsync("/api/account/keys"), await person.PostAsync("/api/account/keys/rotate") })
+            foreach (var res in new[] { await person.GetAsync("/api/account/keys"), await person.GetAsync("/api/account/keys/limits"), await person.PostAsync("/api/account/keys/rotate") })
             {
                 await StatusAssert.Is(HttpStatusCode.BadGateway, res);
                 Assert.Contains("gateway is not reachable", (await person.JsonAsync(res)).GetProperty("error").GetString(), StringComparison.Ordinal);

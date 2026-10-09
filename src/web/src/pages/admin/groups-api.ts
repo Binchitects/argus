@@ -16,6 +16,8 @@ export interface GroupSummary {
   credit?: number | null
   creditPerMember?: boolean
   costCentre?: string | null
+  requestsPerMinute?: number | null
+  tokensPerMinute?: number | null
 }
 
 export interface GroupMember {
@@ -28,7 +30,7 @@ export interface GroupMember {
   spend?: number | null
 }
 
-/** A group's own retention, credit and safeguards; null keeps the company's setting. */
+/** A group's own retention, credit, safeguards and API keys' rate limits; null keeps the company's setting. */
 export interface GroupPolicies {
   retentionDays: number | null
   credit: number | null
@@ -38,6 +40,9 @@ export interface GroupPolicies {
   redactPii: 'mask' | 'off' | null
   moderation: 'check' | 'off' | null
   blockedPatterns: boolean | null
+  /** Each member's API key, a minute: null is the company's setting, 0 no limit. */
+  requestsPerMinute: number | null
+  tokensPerMinute: number | null
 }
 
 export const noPolicies: GroupPolicies = {
@@ -49,6 +54,8 @@ export const noPolicies: GroupPolicies = {
   redactPii: null,
   moderation: null,
   blockedPatterns: null,
+  requestsPerMinute: null,
+  tokensPerMinute: null,
 }
 
 export interface GroupDetail extends Omit<GroupSummary, 'members'> {

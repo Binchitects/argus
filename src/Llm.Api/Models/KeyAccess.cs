@@ -51,8 +51,8 @@ public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, Ch
 }
 
 /// <summary>
-/// Runs <see cref="KeyAccess.SyncAsync"/> and <see cref="Gateway.GroupTeams.SyncAsync"/> when access or groups change, and every 10 minutes (the directory's groups change on their own).
-/// With several replicas, the one that leads runs it.
+/// Runs <see cref="KeyAccess.SyncAsync"/>, <see cref="Gateway.GroupTeams.SyncAsync"/> and <see cref="Gateway.RateLimits.SyncAsync"/> when access, groups or
+/// the company's rate limits change, and every 10 minutes (the directory's groups change on their own). With several replicas, the one that leads runs it.
 /// </summary>
 public sealed partial class KeyAccessWatcher : BackgroundService
 {
@@ -62,8 +62,10 @@ public sealed partial class KeyAccessWatcher : BackgroundService
     private readonly Replicas replicas;
     private readonly ILogger<KeyAccessWatcher> logger;
     private readonly IDisposable? _onChange;
+    private readonly IDisposable? _onRates;
 
-    public KeyAccessWatcher(IServiceScopeFactory scopes, Replicas replicas, ILogger<KeyAccessWatcher> logger, IOptionsMonitor<ChatOptions> chat)
+    public KeyAccessWatcher(IServiceScopeFactory scopes, Replicas replicas, ILogger<KeyAccessWatcher> logger, IOptionsMonitor<ChatOptions> chat,
+        IOptionsMonitor<Gateway.RateLimitOptions> rates)
     {
         this.scopes = scopes;
         this.replicas = replicas;
@@ -80,6 +82,16 @@ public sealed partial class KeyAccessWatcher : BackgroundService
             if (o.ApiRequestsPerKey != perKey)
             {
                 perKey = o.ApiRequestsPerKey;
+                Wake();
+            }
+        });
+        // So does the company's rate limit.
+        var limits = (rates.CurrentValue.RequestsPerMinute, rates.CurrentValue.TokensPerMinute);
+        _onRates = rates.OnChange(o =>
+        {
+            if ((o.RequestsPerMinute, o.TokensPerMinute) != limits)
+            {
+                limits = (o.RequestsPerMinute, o.TokensPerMinute);
                 Wake();
             }
         });
@@ -102,6 +114,7 @@ public sealed partial class KeyAccessWatcher : BackgroundService
     public override void Dispose()
     {
         _onChange?.Dispose();
+        _onRates?.Dispose();
         _wake.Dispose();
         base.Dispose();
     }
@@ -132,6 +145,11 @@ public sealed partial class KeyAccessWatcher : BackgroundService
                 {
                     LogTeams(logger, teams);
                 }
+                // And each key's rate limits: the person's own, their groups' or the company's.
+                if (await scope.ServiceProvider.GetRequiredService<Gateway.RateLimits>().SyncAsync(stoppingToken) is > 0 and var rated)
+                {
+                    LogRates(logger, rated);
+                }
             }
             catch (GatewayException ex)
             {
@@ -154,6 +172,9 @@ public sealed partial class KeyAccessWatcher : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Groups' credit: {Changed} teams, members or keys changed at the gateway")]
     private static partial void LogTeams(ILogger logger, int changed);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Rate limits: {Changed} keys now carry their person's requests and tokens a minute")]
+    private static partial void LogRates(ILogger logger, int changed);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "API keys: the sync failed; trying again later")]
     private static partial void LogError(ILogger logger, Exception ex);

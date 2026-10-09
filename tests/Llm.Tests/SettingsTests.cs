@@ -293,6 +293,9 @@ public sealed partial class SettingsTests(AppFixture app)
             ["Speech:Voices"] = speech.Voices,
             ["Speech:Speed"] = speech.Speed.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["Speech:ReadAloud"] = speech.ReadAloud ? "true" : "false",
+            // No rate limit for API keys until an admin sets one.
+            ["Gateway:RequestsPerMinute"] = new Llm.Api.Gateway.RateLimitOptions().RequestsPerMinute.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Gateway:TokensPerMinute"] = new Llm.Api.Gateway.RateLimitOptions().TokensPerMinute.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
         var prices = new Llm.Api.Gateway.PriceOptions();
         foreach (var (key, price) in new Dictionary<string, decimal>

@@ -7,3 +7,5 @@ public sealed record CodeRequest(string Code);
 public sealed record CreatePersonRequest(string UserName, string Email, string? DisplayName, bool Admin = false, decimal? Budget = null);
 public sealed record UpdatePersonRequest(bool? Admin = null, bool? Disabled = null, string? DisplayName = null);
 public sealed record BudgetRequest(decimal? Budget);
+/// <summary>A person's own rate limits for their API keys, a minute: null takes their groups' or the company's, 0 is no limit.</summary>
+public sealed record LimitsRequest(int? RequestsPerMinute = null, int? TokensPerMinute = null);

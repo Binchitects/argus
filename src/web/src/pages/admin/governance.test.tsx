@@ -8,7 +8,10 @@ import type { Person } from './people-api'
 const group: GroupDetail = {
   id: 'g1', name: 'Data science', description: null, directory: null, scim: false, priority: 0, createdAt: '',
   members: [{ id: 'p1', userName: 'ann', displayName: 'Ann', email: 'ann@example.test', isDisabled: false, spend: 3.5 }],
-  policies: { retentionDays: null, credit: 50, creditPerMember: false, costCentre: null, secretScanning: null, redactPii: null, moderation: null, blockedPatterns: null },
+  policies: {
+    retentionDays: null, credit: 50, creditPerMember: false, costCentre: null, secretScanning: null, redactPii: null, moderation: null, blockedPatterns: null,
+    requestsPerMinute: null, tokensPerMinute: null,
+  },
   spentThisMonth: 3.5,
 }
 
@@ -41,8 +44,34 @@ describe('retention, credit and safeguards per group', () => {
     await waitFor(() =>
       expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({
         retentionDays: 90, credit: 50, creditPerMember: true, costCentre: 'CC-42', secretScanning: 'mask', redactPii: null, moderation: null, blockedPatterns: false,
+        requestsPerMinute: null, tokensPerMinute: null,
       }),
     )
+  })
+
+  it("a group's rate limits for its members' keys are saved with its policies, and a wrong one is caught", async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/groups/g1': () => ({ json: { ...group, policies: { ...group.policies!, requestsPerMinute: 30, tokensPerMinute: null } } }),
+      'PUT /api/admin/groups/g1/policies': () => ({ status: 204 }),
+    })
+    renderApp('/admin/groups/g1')
+    const requests = await screen.findByLabelText('Requests a minute, per key')
+    expect(requests).toHaveValue('30')
+    const tokens = screen.getByLabelText('Tokens a minute, per key')
+    expect(tokens).toHaveValue('')
+    expect(tokens).toHaveAttribute('placeholder', "the company's setting")
+
+    await userEvent.type(tokens, '-5')
+    await userEvent.click(screen.getByRole('button', { name: 'Save policies' }))
+    expect(await screen.findByText(/Limits are whole numbers/)).toBeInTheDocument()
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false)
+
+    await userEvent.clear(tokens)
+    await userEvent.type(tokens, '200,000')
+    await userEvent.clear(requests)
+    await userEvent.type(requests, '0')
+    await userEvent.click(screen.getByRole('button', { name: 'Save policies' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toMatchObject({ credit: 50, requestsPerMinute: 0, tokensPerMinute: 200000 }))
   })
 
   it('a wrong number of days is caught before it is sent', async () => {

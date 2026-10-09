@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
 namespace CodeArena;
 
@@ -35,13 +36,16 @@ internal interface IStreamSink
     void Reasoning(string text);
 }
 
-internal sealed class GatewayException(string message, int? status = null) : Exception(message)
+internal sealed class GatewayException(string message, int? status = null, bool perMinute = false) : Exception(message)
 {
     public int? Status { get; } = status;
+
+    /// <summary>Refused for the key's requests or tokens a minute: asking again within seconds is refused too.</summary>
+    public bool PerMinute { get; } = perMinute;
 }
 
 /// <summary>The gateway's OpenAI-compatible API, with the person's key.</summary>
-internal sealed class GatewayClient(HttpClient http, string baseUrl, string key)
+internal sealed partial class GatewayClient(HttpClient http, string baseUrl, string key)
 {
     public string BaseUrl { get; } = baseUrl.TrimEnd('/');
 
@@ -112,7 +116,8 @@ internal sealed class GatewayClient(HttpClient http, string baseUrl, string key)
     /// One answer, streamed: text and reasoning go to the sink as they come, tool
     /// calls are put together from their pieces. A gateway that is briefly away
     /// (502, 503, 504, 429, a dropped connection) is tried again while nothing has
-    /// been shown yet.
+    /// been shown yet; a key past its requests or tokens a minute is not (the
+    /// minute is not over in a few seconds, and each try counts).
     /// </summary>
     public async Task<Completion> CompleteAsync(JsonObject body, IStreamSink? sink, CancellationToken ct)
     {
@@ -134,11 +139,11 @@ internal sealed class GatewayClient(HttpClient http, string baseUrl, string key)
         }
     }
 
-    private static bool Retryable(Exception e)
+    internal static bool Retryable(Exception e)
     {
         if (e is GatewayException g)
         {
-            return g.Status is 429 or 502 or 503 or 504;
+            return (g.Status is 429 or 502 or 503 or 504) && !g.PerMinute;
         }
         if (e is not (HttpRequestException or IOException))
         {
@@ -340,7 +345,24 @@ internal sealed class GatewayClient(HttpClient http, string baseUrl, string key)
                 new GatewayException($"The gateway refused your API key ({(int)status}). Make a new one under Your account → API key, then run code-arena login.", (int)status),
             HttpStatusCode.NotFound when detail.Length == 0 || detail.StartsWith('<') =>
                 new GatewayException($"{BaseUrl} has no OpenAI API (404). Is this the gateway's address (https://gateway.DOMAIN)?", 404),
+            HttpStatusCode.TooManyRequests when RateLimit().Match(detail) is { Success: true } m && m.Groups[1].Value == "requests" =>
+                new GatewayException($"Your API key reached its limit of {Count(m.Groups[2].Value, "request")} a minute. Try again in a minute; " +
+                    "Your account → API key shows your limits and what you used.", 429, perMinute: true),
+            // The gateway counts a request's prompt and answer before it runs: one bigger than the limit is refused every minute.
+            HttpStatusCode.TooManyRequests when RateLimit().Match(detail) is { Success: true } m && m.Groups[1].Value == "tokens" =>
+                new GatewayException($"Your API key reached its limit of {Count(m.Groups[2].Value, "token")} a minute. Try again in a minute; " +
+                    "a request bigger than the limit (its prompt and the answer it asks for) is refused every time, so if this one is, " +
+                    "make it smaller (/compact) or ask an admin to raise the limit. Your account → API key shows your limits and what you used.", 429, perMinute: true),
+            HttpStatusCode.TooManyRequests when RateLimit().Match(detail) is { Success: true } m && m.Groups[1].Value == "max_parallel_requests" =>
+                new GatewayException($"Your API key reached its limit of {Count(m.Groups[2].Value, "request")} at once. Wait for one to finish, then try again.", 429),
             _ => new GatewayException($"The gateway answered {(int)status}: {detail}", (int)status),
         };
     }
+
+    /// <summary>A limit with its word: "1 request", "60 requests".</summary>
+    private static string Count(string limit, string one) => limit == "1" ? $"1 {one}" : $"{limit} {one}s";
+
+    /// <summary>The gateway's (LiteLLM's) refusal for a key's rate limit: "Limit type: requests. Current limit: 60, …".</summary>
+    [GeneratedRegex(@"Limit type: (\w+)\. Current limit: (\d+)")]
+    private static partial Regex RateLimit();
 }

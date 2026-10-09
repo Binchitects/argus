@@ -9,15 +9,17 @@ namespace Llm.Api.Identity;
 /// whatever else the request's context is tracking -- a failed sign-in leaves the
 /// person's row modified, and saving that again was a concurrency error. Measured.
 /// </summary>
-public sealed class Audit(Microsoft.EntityFrameworkCore.DbContextOptions<AppDbContext> options, IHttpContextAccessor http)
+public sealed class Audit(Microsoft.EntityFrameworkCore.DbContextOptions<AppDbContext> options, IHttpContextAccessor http, TimeProvider clock)
 {
-    public async Task WriteAsync(string action, string? target = null, bool success = true, string? detail = null, AppUser? actor = null)
+    /// <param name="at">When it happened, if not now: a call that ran long is entered at its start.</param>
+    public async Task WriteAsync(string action, string? target = null, bool success = true, string? detail = null, AppUser? actor = null, DateTimeOffset? at = null)
     {
         await using var db = new AppDbContext(options);
         var ctx = http.HttpContext;
         var principal = ctx?.User;
         db.AuditEvents.Add(new AuditEvent
         {
+            At = at ?? clock.GetUtcNow(),
             Action = action,
             Target = target,
             Success = success,

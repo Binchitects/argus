@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useOutletContext, useParams } from 'react-router'
 import { KeyValues } from '@/components/app/key-values'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
+import { LimitRows } from '@/components/app/rate-limits'
 import { Secret } from '@/components/app/secret'
 import { Alert } from '@/components/ui/alert'
 import { Avatar } from '@/components/ui/avatar'
@@ -17,6 +18,7 @@ import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage, type Me } from '@/lib/api'
 import { ago, money, when } from '@/lib/format'
+import { maxRequests, maxTokens, parseLimit, type KeyLimits } from '@/lib/rate-limits'
 import { LegalHoldCard } from './legal-hold'
 import { CreditMeter, PersonBadges } from './person-badges'
 import { parseCredit, personQuery, type Person, type PersonDetail } from './people-api'
@@ -36,7 +38,7 @@ export function PersonPage() {
 
   if (detail.isPending) return <PageSkeleton />
   if (detail.error) return <QueryError error={detail.error} retry={() => detail.refetch()} />
-  const { person: p, keys, warning, groups, directoryGroups } = detail.data
+  const { person: p, keys, warning, groups, directoryGroups, limits } = detail.data
   const self = p.id === me.id
 
   return (
@@ -79,6 +81,7 @@ export function PersonPage() {
           <Profile p={p} />
           <Groups groups={groups} directoryGroups={directoryGroups} />
           <Credit p={p} keys={keys} onSecret={setSecret} />
+          {limits && <RateLimitsCard key={`${limits.own.requestsPerMinute}-${limits.own.tokensPerMinute}`} p={p} limits={limits} />}
         </div>
         <div className="grid content-start gap-6">
           <Access p={p} self={self} onSecret={setSecret} />
@@ -304,6 +307,63 @@ function Credit({ p, keys, onSecret }: { p: Person; keys: { alias: string; previ
           <RefreshCw /> New API key
         </Button>
       </CardFooter>
+    </Card>
+  )
+}
+
+const limitText = (v: number | null) => (v === null ? '' : String(v))
+
+/** Their API keys' requests and tokens a minute: what applies now, and their own (empty: their groups' or the company's; 0: no limit). */
+function RateLimitsCard({ p, limits }: { p: Person; limits: KeyLimits }) {
+  const refresh = useRefresh(p.id)
+  const [requests, setRequests] = useState(limitText(limits.own.requestsPerMinute))
+  const [tokens, setTokens] = useState(limitText(limits.own.tokensPerMinute))
+  const [error, setError] = useState<string | null>(null)
+  const save = useMutation({
+    mutationFn: (body: { requestsPerMinute: number | null; tokensPerMinute: number | null }) =>
+      api<{ warning: string | null }>(`/api/admin/people/${p.id}/limits`, { method: 'PUT', body }),
+    onSuccess: (r) => {
+      if (r?.warning) toast.warning('Limits saved', { description: r.warning })
+      else toast.success('Limits set', { description: 'Their API keys have them at once.' })
+      refresh()
+    },
+    onError: (e) => setError(errorMessage(e)),
+  })
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Rate limits</CardTitle>
+        <CardDescription>What each of their API keys may use a minute at the gateway; past it, requests are refused (HTTP 429). The chat is not limited by these.</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <LimitRows limits={limits} you={false} />
+        <form
+          className="flex flex-wrap items-end gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            setError(null)
+            const r = parseLimit(requests, maxRequests)
+            const t = parseLimit(tokens, maxTokens)
+            if (r === 'invalid' || t === 'invalid') setError(`Whole numbers: requests 0 to ${maxRequests.toLocaleString('en-US')}, tokens 0 to ${maxTokens.toLocaleString('en-US')}. 0: no limit; empty: their groups' or the company's.`)
+            else save.mutate({ requestsPerMinute: r, tokensPerMinute: t })
+          }}
+        >
+          <Field label="Requests a minute" className="w-40">
+            <Input inputMode="numeric" value={requests} onChange={(e) => setRequests(e.target.value)} placeholder="from groups" />
+          </Field>
+          <Field label="Tokens a minute" className="w-40">
+            <Input inputMode="numeric" value={tokens} onChange={(e) => setTokens(e.target.value)} placeholder="from groups" />
+          </Field>
+          <Button type="submit" variant="outline" loading={save.isPending}>
+            Set limits
+          </Button>
+        </form>
+        {error ? (
+          <Alert variant="destructive">{error}</Alert>
+        ) : (
+          <p className="text-xs text-muted-foreground">Their own replace their groups&apos; and the company&apos;s. Empty: from their groups (the highest), else the company&apos;s. 0: no limit.</p>
+        )}
+      </CardContent>
     </Card>
   )
 }

@@ -45,6 +45,12 @@ public sealed class Group
 
     /// <summary>Whether the blocked words apply to members; null: they do.</summary>
     public bool? BlockedPatterns { get; set; }
+
+    /// <summary>Requests a minute each member's API key may send to the gateway; null: the company's setting, 0: no limit. A person in several groups gets the highest.</summary>
+    public int? RequestsPerMinute { get; set; }
+
+    /// <summary>Tokens a minute each member's API key may use at the gateway; null: the company's setting, 0: no limit. A person in several groups gets the highest.</summary>
+    public int? TokensPerMinute { get; set; }
 }
 
 /// <summary>Someone an admin put in an app group.</summary>

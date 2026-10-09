@@ -1,3 +1,4 @@
+import type { KeyLimits } from '@/lib/rate-limits'
 import { api } from '@/lib/api'
 
 export interface Person {
@@ -34,6 +35,8 @@ export interface PersonDetail {
   groups: { id: string; name: string; directory: boolean }[]
   /** For directory people: the directory's groups, as of their last sign-in or check. */
   directoryGroups: string[]
+  /** Their API keys' rate limits: their own, and what applies with where it comes from. */
+  limits?: KeyLimits
   warning: string | null
 }
 

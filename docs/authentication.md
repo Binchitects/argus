@@ -83,8 +83,9 @@ Open `https://DOMAIN`. The first admin is `admin`, with the password in
 account** afterwards).
 
 Your account page has your API key, for your tools and for coding agents at
-Argus (make a new one there; the old one stops at once, at Argus within six
-minutes), your spend and credit, two-factor sign-in (scan a QR code; you get
+Argus (make a new one there, up to five an hour; the old one stops at once, at
+Argus within six minutes), its rate limits (what it may use a minute, what it used, what was
+refused), your spend and credit, two-factor sign-in (scan a QR code; you get
 ten one-time recovery codes), and your password. Changing your password or
 turning two-factor sign-in on or off signs you out on every other device; this
 one stays signed in. Opening two-factor setup and cancelling changes nothing.
