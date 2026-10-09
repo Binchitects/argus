@@ -41,8 +41,7 @@ public static class AccountEndpoints
         });
         me.MapGet("/keys", KeysAsync);
         me.MapGet("/keys/limits", LimitsAsync);
-        me.MapPost("/keys/rotate", async (ClaimsPrincipal p, UserManager<AppUser> users, PeopleService people) =>
-            Results.Ok(await people.RotateKeyAsync((await users.GetUserAsync(p))!)));
+        me.MapPost("/keys/rotate", RotateAsync);
     }
 
     private static async Task<IResult> ChangePasswordAsync(ChangePasswordRequest body, ClaimsPrincipal p, UserManager<AppUser> users,
@@ -126,6 +125,24 @@ public static class AccountEndpoints
         await signIn.RefreshSignInAsync(user);
         await audit.WriteAsync("account.disable_2fa", user.UserName);
         return Results.NoContent();
+    }
+
+    /// <summary>
+    /// A new key for the person, the old one revoked. A few an hour: each new key starts its rate
+    /// limits' minute at zero at the gateway, so making keys must not be a way round them.
+    /// </summary>
+    private static async Task<IResult> RotateAsync(ClaimsPrincipal p, UserManager<AppUser> users, PeopleService people, Audit audit, TimeProvider clock, HttpContext http)
+    {
+        var user = (await users.GetUserAsync(p))!;
+        if (await people.OwnKeyWaitAsync(user, clock.GetUtcNow()) is { Ticks: > 0 } wait)
+        {
+            var minutes = (int)Math.Ceiling(wait.TotalMinutes);
+            await audit.WriteAsync("person.rotate_key", user.UserName, success: false, detail: $"refused: {PeopleService.OwnKeysPerHour} new keys in the last hour");
+            http.Response.Headers.RetryAfter = ((int)Math.Ceiling(wait.TotalSeconds)).ToString(CultureInfo.InvariantCulture);
+            return AuthEndpoints.Problem(429, "too_many_keys",
+                $"You made {PeopleService.OwnKeysPerHour} new keys in the last hour, the most there may be. Make the next in {minutes} minute{(minutes == 1 ? "" : "s")}, or ask an admin, who can make one for you now.");
+        }
+        return Results.Ok(await people.RotateKeyAsync(user));
     }
 
     /// <summary>The person's keys, their spend and credit (the home page shows these too).</summary>

@@ -210,7 +210,7 @@ export const topics = {
     about: 'Use the models from your own tools: a coding agent, your editor, a script. They sign in with your API key and spend from your credit.',
     parts: [
       { name: 'Trust this site\'s certificate', text: 'Shown when the site uses a private certificate: the file to download, its fingerprint, and how to install it so your tools trust the site.' },
-      { name: 'API key', text: 'Your key for every tool. **New key** makes one and shows it once; the old one stops working. **Rate limits** say what it may send a minute, what it used in the last one, and what was refused.' },
+      { name: 'API key', text: 'Your key for every tool. **New key** makes one and shows it once (five an hour at most); the old one stops working. **Rate limits** say what it may send a minute, what it used in the last one, and what was refused.' },
       { name: 'The address, and your models', text: 'The gateway\'s address (OpenAI-compatible, and Anthropic\'s), and the models you may use with what each can do.' },
       { name: 'Set up your tool', text: 'Choose your system and your tool (Code Arena, Claude Code, Qwen Code, Continue, Python, curl, GitLab CI…), then follow its steps. Each ends with a check that it works.' },
       { name: 'Arena MCP', text: 'Your chat tools for your own agent, at one address, with your API key.' },
@@ -226,7 +226,7 @@ export const topics = {
     title: 'Your account',
     about: 'Your profile, API key, answers, memory, sign-in security and appearance.',
     parts: [
-      { name: 'API key', text: 'Your key for your tools. **New key** replaces it; the old one stops working at once. **Rate limits**: the requests and tokens it may use a minute, what it used in the last one, and what the gateway refused in the last day (HTTP 429: wait as long as its Retry-After says).' },
+      { name: 'API key', text: 'Your key for your tools. **New key** replaces it (five an hour at most); the old one stops working at once. **Rate limits**: the requests and tokens it may use a minute, what it used in the last one, and what the gateway refused in the last day (HTTP 429: wait as long as its Retry-After says).' },
       { name: 'Answers', text: 'How long answers are, in every chat: Short, Normal or Thorough.' },
       { name: 'Memory', text: 'What the chat remembers about you. Add, edit or delete one, **Forget everything**, or turn memory off. Nobody else sees it, admins included.' },
       { name: 'Appearance', text: 'Theme and width, remembered on this device.' },

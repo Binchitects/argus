@@ -152,41 +152,51 @@ public sealed class RateLimits(AppDbContext db, AccessService access, ILiteLlm g
     }
 
     /// <summary>
-    /// What these keys (hashed tokens) used in the last minute, and what the gateway refused them
-    /// in the last day, from its request log. LiteLLM writes the log every few seconds, and a
-    /// streamed answer when it ends, so the minute is close, not exact. Tokens count as the
-    /// gateway counts them: what the model read and wrote, less the prompt it read from its cache.
+    /// What these keys (hashed tokens) used in the last minute, and what the gateway refused the
+    /// person (any key of theirs, older ones too: a new key must not hide them) in the last day,
+    /// from its request log. LiteLLM writes the log every few seconds, and a streamed answer when
+    /// it ends, so the minute is close, not exact. Tokens count as the gateway counts them: what
+    /// the model read and wrote, less the prompt it read from its cache.
     /// </summary>
-    public async Task<RateUse> UseAsync(IReadOnlyCollection<string> tokens, CancellationToken ct = default)
+    public async Task<RateUse> UseAsync(IReadOnlyCollection<string> tokens, string? email, CancellationToken ct = default)
     {
-        if (tokens.Count == 0)
+        if (tokens.Count == 0 && email is null)
         {
             return new RateUse(0, 0, []);
         }
         var now = clock.GetUtcNow();
-        // The log's times are UTC without a zone: compared as they are, its index on startTime serves.
-        DateTime Logged(DateTimeOffset at) => DateTime.SpecifyKind(at.UtcDateTime, DateTimeKind.Unspecified);
         var p = new Dictionary<string, object>
         {
             ["keys"] = tokens.ToArray(),
+            ["me"] = email?.ToLowerInvariant() ?? "",
             ["minute"] = Logged(now.AddMinutes(-1)),
             ["day"] = Logged(now.AddDays(-1)),
         };
-        var used = await sql.QueryAsync($"""
-            select count(*) as requests, coalesce(sum(greatest(coalesce(s.total_tokens,0) - {UsageEndpoints.Cached}, 0)),0) as tokens
-            from "LiteLLM_SpendLogs" s
-            where s.api_key = any(@keys) and s."startTime" >= @minute and coalesce(s.metadata->'error_information'->>'error_code','') <> '429'
-            """, p, ct);
+        long requests = 0, used = 0;
+        if (tokens.Count > 0)
+        {
+            var minute = await sql.QueryAsync($"""
+                select count(*) as requests, coalesce(sum(greatest(coalesce(s.total_tokens,0) - {UsageEndpoints.Cached}, 0)),0) as tokens
+                from "LiteLLM_SpendLogs" s
+                where s.api_key = any(@keys) and s."startTime" >= @minute and coalesce(s.metadata->'error_information'->>'error_code','') <> '429'
+                """, p, ct);
+            requests = Convert.ToInt64(minute.Rows[0][0] ?? 0L, CultureInfo.InvariantCulture);
+            used = Convert.ToInt64(minute.Rows[0][1] ?? 0L, CultureInfo.InvariantCulture);
+        }
+        // A key's refusals are booked to its person (its user id is their email).
         var refused = await sql.QueryAsync($"""
             select {Kind} as "limit", count(*) as refusals, max(s."startTime") as last
             from "LiteLLM_SpendLogs" s
-            where s.api_key = any(@keys) and s."startTime" >= @day and {Refused}
+            where s."startTime" >= @day and {Refused}
+              and (s.api_key = any(@keys) or lower(coalesce(nullif(s."user",''), s.metadata->>'user_api_key_user_id', '')) = @me)
             group by 1 order by 2 desc
             """, p, ct);
-        var row = used.Rows[0];
-        return new RateUse(Convert.ToInt64(row[0] ?? 0L, CultureInfo.InvariantCulture), Convert.ToInt64(row[1] ?? 0L, CultureInfo.InvariantCulture),
+        return new RateUse(requests, used,
             [.. refused.Rows.Select(r => new Refusal((string)r[0]!, Convert.ToInt64(r[1] ?? 0L, CultureInfo.InvariantCulture), Utc(r[2])))]);
     }
+
+    /// <summary>The log's times are UTC without a zone: compared as they are, its index on startTime serves.</summary>
+    private static DateTime Logged(DateTimeOffset at) => DateTime.SpecifyKind(at.UtcDateTime, DateTimeKind.Unspecified);
 
     /// <summary>The log's times are UTC without a zone.</summary>
     private static DateTimeOffset Utc(object? value) => value switch
@@ -208,7 +218,7 @@ public sealed class RateLimits(AppDbContext db, AccessService access, ILiteLlm g
         RateUse? use = null;
         try
         {
-            use = await UseAsync([.. keys.Select(k => k.Token)], ct);
+            use = await UseAsync([.. keys.Select(k => k.Token)], user.Email, ct);
         }
         catch (Exception ex) when (ex is Npgsql.NpgsqlException or InvalidOperationException)
         {

@@ -316,6 +316,37 @@ public sealed class RateLimitTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_person_makes_a_few_new_keys_an_hour_so_a_new_key_is_no_way_round_their_limits()
+    {
+        var admin = await AdminAsync(app.Factory);
+        var p = await PersonAsync(admin);
+        await LimitsAsync(admin, p.Id, 10, null);
+        var me = await new TestBrowser(app.Factory).SignedInAsync(p.Name, p.Password);
+        for (var i = 0; i < Llm.Api.Identity.PeopleService.OwnKeysPerHour; i++)
+        {
+            await StatusAssert.Is(HttpStatusCode.OK, await me.PostAsync("/api/account/keys/rotate"));
+        }
+        var key = app.Gateway.KeysOf(p.Email).Single();
+        Assert.Equal(new KeyRate(10, null), key.Rate);
+
+        // One more within the hour: refused, said why and how long to wait, audited; the key stays.
+        var res = await me.PostAsync("/api/account/keys/rotate");
+        await StatusAssert.Is(HttpStatusCode.TooManyRequests, res);
+        var wait = int.Parse(res.Headers.GetValues("Retry-After").Single(), CultureInfo.InvariantCulture);
+        Assert.InRange(wait, 3000, 3600);
+        Assert.StartsWith($"You made {Llm.Api.Identity.PeopleService.OwnKeysPerHour} new keys in the last hour", (await me.JsonAsync(res)).GetProperty("error").GetString(), StringComparison.Ordinal);
+        Assert.Equal(key.Token, app.Gateway.KeysOf(p.Email).Single().Token);
+        var audit = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit"))).EnumerateArray().ToList();
+        Assert.Contains(audit, e => e.GetProperty("action").GetString() == "person.rotate_key" && e.GetProperty("target").GetString() == p.Name
+            && !e.GetProperty("success").GetBoolean());
+
+        // An admin still makes one for them, and it does not count against theirs.
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync($"/api/admin/people/{p.Id}/key"));
+        Assert.NotEqual(key.Token, app.Gateway.KeysOf(p.Email).Single().Token);
+        await StatusAssert.Is(HttpStatusCode.TooManyRequests, await me.PostAsync("/api/account/keys/rotate"));
+    }
+
+    [Fact]
     public async Task The_chat_is_never_held_to_a_persons_rate_limits()
     {
         var admin = await AdminAsync(app.Factory);
@@ -388,6 +419,8 @@ public sealed class RateLimitTests(AppFixture app)
             await LogAsync(run + "4", token, p.Email, now.AddSeconds(-10), error: Over(token, "requests"));
             await LogAsync(run + "5", token, p.Email, now.AddHours(-2), error: Over(token, "tokens"));
             await LogAsync(run + "6", token, p.Email, now.AddHours(-3), error: Over(token, "max_parallel_requests"));
+            // A key of theirs that is gone (they made a new one): its refusals are still theirs.
+            await LogAsync(run + "10", "hash-of-their-old-key", p.Email, now.AddHours(-1), error: Over("hash-of-their-old-key", "requests"));
             // Not a rate limit: refused for credit. Nor this one: two days ago. Nor another person's.
             await LogAsync(run + "7", token, p.Email, now.AddSeconds(-20), error: ("BudgetExceededError", "Budget has been exceeded!"));
             await LogAsync(run + "8", token, p.Email, now.AddDays(-2), error: Over(token, "requests"));
@@ -399,7 +432,7 @@ public sealed class RateLimitTests(AppFixture app)
             // Two requests in the last minute; their tokens less the prompt read from the cache.
             Assert.Equal((2, 500), (limits.GetProperty("used").GetProperty("requests").GetInt64(), limits.GetProperty("used").GetProperty("tokens").GetInt64()));
             var refused = limits.GetProperty("refused").EnumerateArray().ToDictionary(r => r.GetProperty("limit").GetString()!, r => r.GetProperty("count").GetInt64());
-            Assert.Equal(new Dictionary<string, long> { ["requests"] = 1, ["tokens"] = 1, ["at once"] = 1 }, refused);
+            Assert.Equal(new Dictionary<string, long> { ["requests"] = 2, ["tokens"] = 1, ["at once"] = 1 }, refused);
             // The admin's page of them says the same.
             var seen = (await admin.JsonAsync(await admin.GetAsync($"/api/admin/people/{p.Id}"))).GetProperty("limits");
             Assert.Equal(2, seen.GetProperty("used").GetProperty("requests").GetInt64());
@@ -417,7 +450,7 @@ public sealed class RateLimitTests(AppFixture app)
                 .ToDictionary(r => r[2].GetString()!, r => (Key: r[1].GetString(), Count: r[3].GetDouble()));
             Assert.Equal(new Dictionary<string, (string?, double)>
             {
-                ["requests a minute"] = ("app-" + p.Name, 1), ["tokens a minute"] = ("app-" + p.Name, 1), ["requests at once"] = ("app-" + p.Name, 1),
+                ["requests a minute"] = ("app-" + p.Name, 2), ["tokens a minute"] = ("app-" + p.Name, 1), ["requests at once"] = ("app-" + p.Name, 1),
             }, rows);
             Assert.Contains(table.GetProperty("rows").EnumerateArray(), r => r[0].GetString() == other.Email);
         }

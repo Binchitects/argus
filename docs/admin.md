@@ -345,6 +345,11 @@ nothing is limited; an upgrade from v5.2.0 sets nothing either.
 
 Each of a person's keys carries the limits: the app gives each person one key,
 and **New key** makes the next with the same limits, so they are the person's.
+The gateway counts each key on its own, so a new key starts a fresh minute:
+people may make at most five new keys an hour themselves (the sixth is refused
+with HTTP 429 and audited as a failed `person.rotate_key`), so a new key is no
+way round a limit. **New key** on the person's page is not counted. What was
+refused is the person's, whichever of their keys met the limit.
 **API requests at once, per key** (Settings → Chat) stays as it was, beside
 them.
 

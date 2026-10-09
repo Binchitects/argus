@@ -176,6 +176,23 @@ public sealed partial class PeopleService(
         await audit.WriteAsync("person.reset_2fa", user.UserName);
     }
 
+    /// <summary>New keys a person may make for themselves in an hour: the gateway counts each key's rate limits on its own, so a new key starts a fresh minute.</summary>
+    public const int OwnKeysPerHour = 5;
+
+    /// <summary>
+    /// How long until the person may make a new key for themselves: zero, or the wait once they made
+    /// <see cref="OwnKeysPerHour"/> in the last hour. Counted in the audit log, one count for every
+    /// replica; keys an admin made for them do not count.
+    /// </summary>
+    public async Task<TimeSpan> OwnKeyWaitAsync(AppUser user, DateTimeOffset now)
+    {
+        var since = now.AddHours(-1);
+        var made = await db.AuditEvents.AsNoTracking()
+            .Where(a => a.Action == "person.rotate_key" && a.Success && a.ActorId == user.Id && a.Target == user.UserName && a.At >= since)
+            .OrderByDescending(a => a.At).Select(a => a.At).Take(OwnKeysPerHour).ToListAsync();
+        return made.Count < OwnKeysPerHour ? TimeSpan.Zero : made[^1].AddHours(1) - now;
+    }
+
     /// <summary>Revoke first, then mint: the reverse leaves a window where the old key still works.</summary>
     public async Task<Secrets> RotateKeyAsync(AppUser user)
     {

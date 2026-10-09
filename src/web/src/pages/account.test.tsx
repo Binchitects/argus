@@ -35,6 +35,22 @@ describe('account', () => {
     expect(screen.getByRole('meter', { name: 'Credit used' })).toHaveAttribute('aria-valuenow', '10')
   })
 
+  it('a sixth new key in an hour is refused, and says when the next is possible', async () => {
+    fakeApi(member, {
+      'GET /api/account/keys': () => ({ json: { keys: [{ alias: 'mo', preview: 'sk-...abcd', spend: 1, blocked: false, createdAt: null }], spend: 1, budget: 10 } }),
+      'POST /api/account/keys/rotate': () => ({
+        status: 429,
+        json: { status: 'too_many_keys', error: 'You made 5 new keys in the last hour, the most there may be. Make the next in 12 minutes, or ask an admin, who can make one for you now.' },
+      }),
+    })
+    renderApp('/account')
+    await userEvent.click(await screen.findByRole('button', { name: 'New key' }))
+    await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Make a new key' }))
+    expect(await screen.findByText(/You made 5 new keys in the last hour.*Make the next in 12 minutes/)).toBeInTheDocument()
+    expect(screen.getByText('sk-...abcd')).toBeInTheDocument()
+    expect(screen.queryByText(/shown only this once/)).toBeNull()
+  })
+
   it('the API key shows its rate limits, what was used in the last minute and what was refused', async () => {
     fakeApi(member, {
       'GET /api/account/keys': () => ({
