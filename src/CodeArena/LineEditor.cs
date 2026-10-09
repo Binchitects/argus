@@ -16,6 +16,9 @@ internal interface IKeyboard
     /// <summary>The terminal's width, in columns.</summary>
     int Width { get; }
 
+    /// <summary>The terminal's height, in rows: the cursor cannot go back above the top one.</summary>
+    int Height { get; }
+
     /// <summary>Ctrl+C comes as a key (it clears the line) until disposed; otherwise it stops the turn.</summary>
     IDisposable CaptureCtrlC();
 }
@@ -26,7 +29,9 @@ internal interface IKeyboard
 /// in this folder, newest first, then back to what was being typed (Esc goes
 /// straight back to it). A message recalled is a copy: editing it leaves the
 /// history as it was. A line ending in \ goes on to the next, as Enter does in a
-/// paste; in a message of several lines ↑ and ↓ move between them first.
+/// paste; in a message of several lines ↑ and ↓ move between them first, a
+/// recalled one's too. A message taller than the screen shows the rows round
+/// the caret, and the whole of it once sent.
 /// </summary>
 internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func<IReadOnlyList<string>> history)
 {
@@ -35,8 +40,12 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
 
     private readonly StringBuilder _text = new();
     private int _caret;
-    /// <summary>Rows from the prompt's first to the one the terminal's cursor is on.</summary>
+    /// <summary>The first row drawn: past 0 when the text is taller than the screen.</summary>
+    private int _top;
+    /// <summary>The rows drawn last, from _top, and where the terminal's cursor is among them.</summary>
+    private List<string> _shown = [];
     private int _cursorRow;
+    private int _cursorCol;
     private string _prompt = "";
     private string _more = "";
     /// <summary>What ↑ steps through, oldest first, and which is shown: Count for what was being typed.</summary>
@@ -57,7 +66,7 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
         _more = more;
         _text.Clear();
         _caret = 0;
-        _cursorRow = 0;
+        Fresh();
         // The same text twice is stepped through once, where it was sent last.
         _entries = [.. history().Reverse().Distinct().Reverse()];
         _at = _entries.Count;
@@ -85,7 +94,7 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
                     {
                         return null;
                     }
-                    _cursorRow = 0;
+                    Fresh();
                     Render();
                     break;
                 // Half a character (the rest comes next), or a paste: drawn once it is all in.
@@ -193,7 +202,7 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
                 return DeleteBefore(WordStart(_caret));
             case 'l':
                 output.Write("\e[H\e[2J");
-                _cursorRow = 0;
+                Fresh();
                 return Outcome.Render;
             case 'c':
                 if (_text.Length == 0)
@@ -211,11 +220,11 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
         return c != '\0' && !char.IsControl(c) ? Insert(c.ToString()) : Outcome.None;
     }
 
-    /// <summary>↑: the line above, or (on the first line, or on a message recalled as it was) the one sent before.</summary>
+    /// <summary>↑: the line above, or (on the first line) the one sent before.</summary>
     private Outcome Up()
     {
         var start = LineStart(_caret);
-        if (start > 0 && !Unchanged())
+        if (start > 0)
         {
             var above = LineStart(start - 1);
             return Move(above + Math.Min(_caret - start, start - 1 - above));
@@ -242,9 +251,6 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
         }
         return _at < _entries.Count ? Show(_at + 1) : Outcome.None;
     }
-
-    /// <summary>A message recalled, untouched, with the caret where it was put: ↑ goes on to the one before at once.</summary>
-    private bool Unchanged() => _at < _entries.Count && _caret == _text.Length && _text.ToString() == _entries[_at];
 
     private Outcome Show(int at)
     {
@@ -337,71 +343,117 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
         return i;
     }
 
+    /// <summary>Nothing of this prompt drawn yet: it starts on the row the cursor is on.</summary>
+    private void Fresh()
+    {
+        (_top, _shown, _cursorRow, _cursorCol) = (0, [], 0, 0);
+    }
+
     /// <summary>
-    /// Draws the prompt and the text again from the prompt's first row, the
-    /// lines after the first behind the continuation mark, each wrapped at the
-    /// terminal's width, then puts the cursor at the caret.
+    /// Draws the prompt and the text again, then puts the cursor at the caret.
+    /// When they are taller than the screen, only the rows round the caret are
+    /// drawn, as many as fit, moved no further than the caret needs: rows that
+    /// went past the screen's top cannot be drawn over, so nothing goes there.
     /// </summary>
     private void Render()
     {
-        var width = Math.Max(10, keys.Width);
-        var sb = new StringBuilder();
-        if (_cursorRow > 0)
-        {
-            sb.Append($"\e[{_cursorRow}A");
-        }
-        sb.Append("\r\e[J");
-        var lines = _text.ToString().Split('\n');
-        int row = 0, offset = 0, caretRow = 0, caretCol = 0, endRow = 0;
-        for (var i = 0; i < lines.Length; i++)
-        {
-            var lead = i == 0 ? _prompt : _more;
-            var leadCells = Cells(Ansi().Replace(lead, ""));
-            var line = lines[i];
-            if (i > 0)
-            {
-                sb.Append("\r\n");
-            }
-            sb.Append(lead).Append(line.Replace("\t", Tab));
-            var cells = leadCells + Cells(line);
-            if (_caret >= offset && _caret <= offset + line.Length)
-            {
-                var at = leadCells + Cells(line[..(_caret - offset)]);
-                (caretRow, caretCol) = (row + at / width, at % width);
-            }
-            if (i == lines.Length - 1)
-            {
-                endRow = row + cells / width;
-                // A line that fills its last row leaves the cursor waiting at the edge: it goes on to the next row.
-                if (cells > 0 && cells % width == 0)
-                {
-                    sb.Append("\r\n");
-                }
-            }
-            row += Math.Max(1, (cells + width - 1) / width);
-            offset += line.Length + 1;
-        }
-        if (endRow > caretRow)
-        {
-            sb.Append($"\e[{endRow - caretRow}A");
-        }
-        sb.Append('\r');
-        if (caretCol > 0)
-        {
-            sb.Append($"\e[{caretCol}C");
-        }
-        _cursorRow = caretRow;
-        output.Write(sb.ToString());
-        output.Flush();
+        var rows = Layout(Math.Max(10, keys.Width), out var caretRow, out var caretCol);
+        var shown = Math.Min(rows.Count, Math.Max(1, keys.Height));
+        _top = Math.Clamp(Math.Clamp(_top, caretRow - shown + 1, caretRow), 0, rows.Count - shown);
+        Draw(rows.GetRange(_top, shown), caretRow - _top, caretCol);
     }
 
     /// <summary>The whole text drawn, the cursor under it: what follows starts on a new line.</summary>
     private void Finish()
     {
         _caret = _text.Length;
-        Render();
-        output.Write("\r\n");
+        var rows = Layout(Math.Max(10, keys.Width), out var caretRow, out var caretCol);
+        // All of it, once (what goes past the screen's top is in the scrollback), unless it is on the screen as it is.
+        if (_top > 0 || !rows.SequenceEqual(_shown) || (_cursorRow, _cursorCol) != (caretRow, caretCol))
+        {
+            Draw(rows, caretRow, caretCol);
+        }
+        // After a line that fills its row the cursor is on an empty one already.
+        output.Write(rows[^1].Length > 0 ? "\r\n" : "");
         output.Flush();
+    }
+
+    /// <summary>Goes back to the first row drawn (no higher than the screen's top) and draws these rows from there, the cursor at the given place among them.</summary>
+    private void Draw(List<string> rows, int cursorRow, int cursorCol)
+    {
+        var sb = new StringBuilder();
+        var up = Math.Min(_cursorRow, Math.Max(1, keys.Height) - 1);
+        if (up > 0)
+        {
+            sb.Append($"\e[{up}A");
+        }
+        sb.Append("\r\e[J").AppendJoin("\r\n", rows);
+        if (rows.Count - 1 > cursorRow)
+        {
+            sb.Append($"\e[{rows.Count - 1 - cursorRow}A");
+        }
+        sb.Append('\r');
+        if (cursorCol > 0)
+        {
+            sb.Append($"\e[{cursorCol}C");
+        }
+        (_shown, _cursorRow, _cursorCol) = (rows, cursorRow, cursorCol);
+        output.Write(sb.ToString());
+        output.Flush();
+    }
+
+    /// <summary>
+    /// The rows the prompt and the text take, as the terminal would wrap them:
+    /// the lines after the first behind the continuation mark, a character that
+    /// does not fit on a row on the next, and a line that fills its last row
+    /// followed by an empty one (where the caret after it goes). Also the
+    /// caret's row and column.
+    /// </summary>
+    private List<string> Layout(int width, out int caretRow, out int caretCol)
+    {
+        var rows = new List<string>();
+        var row = new StringBuilder();
+        (caretRow, caretCol) = (0, 0);
+        var lines = _text.ToString().Split('\n');
+        var offset = 0;
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var lead = i == 0 ? _prompt : _more;
+            row.Append(lead);
+            var col = Cells(Ansi().Replace(lead, ""));
+            var line = lines[i];
+            for (var j = 0; j < line.Length;)
+            {
+                Rune.DecodeFromUtf16(line.AsSpan(j), out var rune, out var n);
+                var cells = rune.Value == '\t' ? Tab.Length : Cells(rune);
+                if (col + cells > width)
+                {
+                    rows.Add(row.ToString());
+                    row.Clear();
+                    col = 0;
+                }
+                if (offset + j == _caret)
+                {
+                    (caretRow, caretCol) = (rows.Count, col);
+                }
+                row.Append(rune.Value == '\t' ? Tab : line.AsSpan(j, n));
+                col += cells;
+                j += n;
+            }
+            rows.Add(row.ToString());
+            row.Clear();
+            if (col >= width)
+            {
+                rows.Add("");
+                col = 0;
+            }
+            if (offset + line.Length == _caret)
+            {
+                (caretRow, caretCol) = (rows.Count - 1, col);
+            }
+            offset += line.Length + 1;
+        }
+        return rows;
     }
 
     /// <summary>The columns a text takes: two for a wide (East Asian, emoji) character, none for a combining mark.</summary>

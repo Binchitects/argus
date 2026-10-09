@@ -128,6 +128,21 @@ internal static class ConsoleSetup
             }
         }
 
+        public int Height
+        {
+            get
+            {
+                try
+                {
+                    return Console.WindowHeight is > 0 and var h ? h : 24;
+                }
+                catch (IOException)
+                {
+                    return 24;
+                }
+            }
+        }
+
         public IDisposable CaptureCtrlC()
         {
             var before = Console.TreatControlCAsInput;
