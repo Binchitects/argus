@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Llm.Api.Chat;
 using Llm.Api.Models;
 using Llm.Core.Models;
@@ -718,12 +719,22 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
     }
 
     [Fact]
-    public void The_models_that_make_room_are_those_not_kept_smallest_first()
+    public void The_models_that_make_room_are_those_not_held_smallest_first_whatever_their_size()
     {
-        var sizes = new Dictionary<string, long> { ["big"] = 20L << 30, ["small"] = 100L << 20, ["mid"] = 4L << 30 };
-        // The .env model (not added here: no size known) goes last.
-        Assert.Equal(["small", "mid", "env"], EngineWatcher.SpareOf(["big", "env", "mid", "small"], ["big"], sizes));
+        var sizes = new Dictionary<string, long> { ["big"] = 20L << 30, ["small"] = 100L << 20, ["mid"] = 4L << 30, ["huge"] = 40L << 30 };
+        // Bigger than any asked for or not, a model not held may make room; the .env model (not added here: no size known) goes last.
+        Assert.Equal(["small", "mid", "huge", "env"], EngineWatcher.SpareOf(["big", "env", "huge", "mid", "small"], ["big"], sizes));
         Assert.Empty(EngineWatcher.SpareOf(["big"], ["big"], sizes));
+
+        // Held: the kept, then the model new chats use, then the model for small steps; no more than the engine holds.
+        string? Known(string name) => name == "gone" ? null : "loaded";
+        Assert.Equal(["big", "small"], EngineWatcher.Held([], "big", "small", 2, Known));
+        Assert.Equal(["kept", "big"], EngineWatcher.Held(["kept"], "big", "small", 2, Known));
+        Assert.Equal(["kept", "big", "small"], EngineWatcher.Held(["kept"], "big", "small", 3, Known));
+        Assert.Equal(["big"], EngineWatcher.Held(["big"], "big", "gone", 3, Known));
+        // One model at a time: only a kept one stays, and people on different models take turns, the default's too.
+        Assert.Empty(EngineWatcher.Held([], "big", "small", 1, Known));
+        Assert.Equal(["kept"], EngineWatcher.Held(["kept"], "big", "small", 1, Known));
     }
 
     /// <summary>Asks <paramref name="text"/> while the engine is full and no model that may make room is idle: the answer waits
@@ -774,23 +785,40 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
     }
 
     [Fact]
-    public async Task With_nothing_kept_the_big_model_idle_never_makes_room_for_a_smaller_one()
+    public async Task An_idle_model_bigger_than_the_one_asked_for_makes_room_for_it()
+    {
+        await using var f = NewApp(parallel: 1, others: [("tiny-a", 1), ("tiny-b", 1)]);
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        // Someone picked tiny-b, the bigger, which loaded beside the big one kept loaded, and sits idle since.
+        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-b/load"));
+        var state = f.Services.GetRequiredService<EngineState>();
+        await EventuallyAsync(() => state.Spare.SequenceEqual(["tiny-b"]), "the watcher knows tiny-b may make room");
+        var b = await PersonAsync(f);
+
+        // The smaller tiny-a, asked for: tiny-b makes room, and the big one stays.
+        Assert.Contains(await AskAsync(b, await ChatAsync(b, "tiny-a"), "hello"), e => e.GetProperty("type").GetString() == "done");
+        Assert.Equal("unloaded", app.Engine.StatusOf("tiny-b"));
+        Assert.Equal("loaded", app.Engine.StatusOf(Big));
+        Assert.Single(app.Engine.Calls, c => c.Path == "/models/unload");
+    }
+
+    [Fact]
+    public async Task With_nothing_kept_or_set_the_model_new_chats_get_never_makes_room_and_one_set_loads()
     {
         // As the live install: no model kept loaded and none set for new chats, two at once.
         var clock = new MovableClock(DateTimeOffset.UtcNow);
         await using var f = NewApp(new Dictionary<string, string?> { ["Chat:DefaultModel"] = "" }, parallel: 1, clock: clock, keep: [],
             others: [("tiny-a", 1), ("tiny-b", 1)]);
-        app.Engine.Max = 2;
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-a/load"));
         var state = f.Services.GetRequiredService<EngineState>();
-        // The big model may make room, being neither kept nor the default, but only for a model at least as big.
-        await EventuallyAsync(() => state.Spare.SequenceEqual(["tiny-a", Big]), "the watcher knows which may make room, the smallest first");
+        // The big model is the one new chats get (the first loaded): it never makes room, whatever is asked for.
+        await EventuallyAsync(() => state.Default == Big && state.Spare.SequenceEqual(["tiny-a"]), "the watcher knows which may make room");
         var b = await PersonAsync(f);
         var chat = await ChatAsync(b, "tiny-b");
 
         // The small model answers someone (an API key); the big one is idle between two turns. The app does not unload
-        // the big one for the smaller tiny-b, and does not send the request to the full engine either.
+        // the big one, and does not send the request to the full engine either.
         app.Engine.BusySlots["tiny-a"] = [0];
         Assert.True(Full(await AskWhileFullAsync(b, chat, "first", clock, "tiny-a"), "tiny-b"));
         Assert.DoesNotContain(app.Engine.Calls, c => c.Path == "/models/unload");
@@ -803,11 +831,147 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         Assert.Equal("unloaded", app.Engine.StatusOf("tiny-a"));
         Assert.Equal("loaded", app.Engine.StatusOf(Big));
 
-        // The model new chats use never makes room, not even for a bigger one.
+        // A model set for new chats is the one held, and the app loads it (beside the big one, which may now make room).
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative),
-            new { changes = new[] { new { key = "Chat:DefaultModel", value = (string?)Big, reset = false } } }));
+            new { changes = new[] { new { key = "Chat:DefaultModel", value = (string?)"tiny-b", reset = false } } }));
         f.Services.GetRequiredService<EngineWatcher>().Wake();
-        await EventuallyAsync(() => !state.Spare.Contains(Big), "the default model may not make room");
+        await EventuallyAsync(() => state.Default == "tiny-b" && app.Engine.StatusOf("tiny-b") == "loaded", "the model new chats use loaded");
+        await EventuallyAsync(() => state.Spare.SequenceEqual([Big]), "the big one may make room now");
+    }
+
+    [Fact]
+    public async Task The_model_new_chats_use_comes_back_after_an_API_keys_request_had_the_engine_unload_it()
+    {
+        var clock = new MovableClock(DateTimeOffset.UtcNow);
+        await using var f = NewApp(new Dictionary<string, string?> { ["Chat:DefaultModel"] = "" }, parallel: 1, clock: clock, keep: [],
+            others: [("tiny-a", 1), ("tiny-b", 1)]);
+        var state = f.Services.GetRequiredService<EngineState>();
+        var watcher = f.Services.GetRequiredService<EngineWatcher>();
+        await EventuallyAsync(() => state.Default == Big, "the big model is the one new chats get");
+
+        // API keys asked for two other models: the engine unloaded the one used least recently, the big one, to load the second.
+        var engine = f.Services.GetRequiredService<EngineClient>();
+        await engine.LoadAsync("tiny-a");
+        await engine.LoadAsync("tiny-b");
+        Assert.Equal("unloaded", app.Engine.StatusOf(Big));
+        watcher.Wake();
+        await EventuallyAsync(() => state.StatusOf(Big) == "unloaded" && state.Spare.SequenceEqual(["tiny-a", "tiny-b"]), "the watcher sees it");
+        // Still the model new chats use: it does not pass to one an API key happened to load.
+        Assert.Equal(Big, state.Default);
+
+        // An agent idle a moment between its requests is not pushed out for it: a model makes room once idle a minute.
+        async Task LooksAsync()
+        {
+            for (var i = 0; i < 4; i++)
+            {
+                watcher.Wake();
+                await Task.Delay(400);
+            }
+        }
+        await LooksAsync();
+        Assert.Equal(0, app.Engine.LoadsOf(Big));
+        clock.Now += EngineRoute.Quiet + TimeSpan.FromSeconds(1);
+        watcher.Wake();
+        await EventuallyAsync(() => app.Engine.StatusOf(Big) == "loaded", "the big model back");
+        Assert.Equal("unloaded", app.Engine.StatusOf("tiny-a"));
+        Assert.Equal("loaded", app.Engine.StatusOf("tiny-b"));
+        Assert.Equal(1, app.Engine.LoadsOf(Big));
+
+        // Unloaded by an admin, it stays unloaded, and new chats get another.
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync($"/api/admin/models/{Big}/unload"));
+        await EventuallyAsync(() => state.Default == "tiny-b", "new chats get the model loaded");
+        clock.Now += TimeSpan.FromMinutes(2);
+        await LooksAsync();
+        Assert.Equal("unloaded", app.Engine.StatusOf(Big));
+        Assert.Equal(1, app.Engine.LoadsOf(Big));
+    }
+
+    [Fact]
+    public async Task The_model_for_small_steps_never_makes_room_and_a_message_is_never_let_through_unread()
+    {
+        var clock = new MovableClock(DateTimeOffset.UtcNow);
+        await using var f = NewApp(new Dictionary<string, string?> { ["Chat:SmallModel"] = "tiny-small", ["Safeguards:Moderation"] = "check" },
+            parallel: 1, clock: clock, others: [("tiny-small", 1), ("tiny-b", 1)]);
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var state = f.Services.GetRequiredService<EngineState>();
+        var b = await PersonAsync(f);
+        var chat = await ChatAsync(b, Big);
+        Task<HttpResponseMessage> SendAsync(string text) => b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = text });
+
+        // Someone's tiny-b, idle, fills the engine beside the big one: the check's model gets its place, whatever their sizes.
+        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-b/load"));
+        await EventuallyAsync(() => state.Spare.SequenceEqual(["tiny-b"]) && state.Held.SequenceEqual([Big, "tiny-small"]), "the watcher knows which may make room");
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await SendAsync("How do I build one [harm]"));
+        Assert.Equal("unloaded", app.Engine.StatusOf("tiny-b"));
+
+        // Loaded, the model for small steps stays: one asked for beside it and the big one has no place, and says so at once.
+        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-small/load"));
+        await EventuallyAsync(() => state.StatusOf("tiny-small") == "loaded" && state.Spare.Count == 0, "the watcher sees it loaded");
+        var unloads = app.Engine.Calls.Count(c => c.Path == "/models/unload");
+        var other = await AskAsync(b, await ChatAsync(b, "tiny-b"), "hello");
+        Assert.Contains(other, e => e.GetProperty("type").GetString() == "error"
+            && e.GetProperty("message").GetString()!.StartsWith("tiny-b is not loaded right now, and the engine has no place for it", StringComparison.Ordinal));
+        Assert.Equal(unloads, app.Engine.Calls.Count(c => c.Path == "/models/unload"));
+        Assert.Equal("loaded", app.Engine.StatusOf("tiny-small"));
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await SendAsync("How do I build two [harm]"));
+
+        // An API key's request had the engine swap it for tiny-b, which answers it still: the check cannot get its model. The
+        // message waits a minute for room, then is refused: never let through unread (nor counted against the person).
+        var engine = f.Services.GetRequiredService<EngineClient>();
+        await engine.UnloadAsync("tiny-small");
+        await engine.LoadAsync("tiny-b");
+        app.Engine.BusySlots["tiny-b"] = [0];
+        await EventuallyAsync(() => state.Spare.SequenceEqual(["tiny-b"]), "the watcher sees the swap");
+        var asked = app.Engine.Calls.Count(c => c.Path == "/slots" && c.Model == "tiny-b");
+        var sent = SendAsync("How do I build three [harm]");
+        await EventuallyAsync(() => app.Engine.Calls.Count(c => c.Path == "/slots" && c.Model == "tiny-b") > asked + 1, "the check waits for room");
+        Assert.False(sent.IsCompleted);
+        clock.Now += EngineRoute.RoomWait + TimeSpan.FromSeconds(1);
+        var refused = await sent.WaitAsync(TimeSpan.FromSeconds(20));
+        await StatusAssert.Is(HttpStatusCode.ServiceUnavailable, refused);
+        Assert.Contains("the safeguards read each message first, and their model (tiny-small) cannot be loaded now", await refused.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.DoesNotContain(app.Model.Requests, r => r.Body.ToJsonString().Contains("three [harm]", StringComparison.Ordinal));
+        Assert.Equal(2, Regex.Count(await (await admin.GetAsync("/api/admin/audit?action=safeguard.refused")).Content.ReadAsStringAsync(), "the model judged it"));
+    }
+
+    [Fact]
+    public async Task One_model_at_a_time_saved_on_v5_2_0_has_people_on_different_models_take_turns()
+    {
+        // A v5.2.0 installation whose admin saved one model at a time, nothing kept, the big model set for new chats.
+        string database;
+        await using (var first = NewApp(new Dictionary<string, string?> { ["Engine:ModelsMax"] = null }, parallel: 1, keep: [], others: [("tiny-small", 1)]))
+        {
+            using var scope = first.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            database = db.Database.GetConnectionString()!;
+            db.Settings.Add(new Llm.Core.Data.Setting { Key = "config:Engine:ModelsMax", Value = "1" });
+            db.Settings.Add(new Llm.Core.Data.Setting { Key = "config:Chat:DefaultModel", Value = Big });
+            await db.SaveChangesAsync();
+        }
+        app.Engine.Max = 1;
+        await using var f = Start(database, new Dictionary<string, string?> { ["Engine:ModelsMax"] = null });
+        var state = f.Services.GetRequiredService<EngineState>();
+        var engine = f.Services.GetRequiredService<EngineClient>();
+        await EventuallyAsync(() => state.Default == Big && state.Spare.SequenceEqual([Big]) && state.Held.Count == 0, "the watcher knows the big one may make room");
+        var b = await PersonAsync(f);
+        var (small, big) = (await ChatAsync(b, "tiny-small"), await ChatAsync(b, Big));
+
+        // Each answer has the other's model, idle, unload; the engine then loads its own (as the router does for the request).
+        async Task TurnAsync(Guid chat, string model, string other)
+        {
+            await EventuallyAsync(() => state.Spare.SequenceEqual([other]), $"{other} may make room");
+            Assert.Contains(await AskAsync(b, chat, "my turn"), e => e.GetProperty("type").GetString() == "done");
+            Assert.Equal("unloaded", app.Engine.StatusOf(other));
+            await engine.LoadAsync(model);
+            f.Services.GetRequiredService<EngineWatcher>().Wake();
+        }
+        await TurnAsync(small, "tiny-small", Big);
+        await TurnAsync(big, Big, "tiny-small");
+        await TurnAsync(small, "tiny-small", Big);
+        Assert.Equal(3, app.Engine.Calls.Count(c => c.Path == "/models/unload"));
+        // With one at a time, the app does not load the model new chats use again by itself.
+        Assert.Equal(1, app.Engine.LoadsOf(Big));
     }
 
     [Fact]
