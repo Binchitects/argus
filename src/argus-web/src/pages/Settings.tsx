@@ -3,6 +3,7 @@ import { api, money, relTime } from "../api";
 import { useAuth } from "../auth";
 import Secret from "../components/Secret";
 import { useAsync } from "../components/useAsync";
+import { useTable, type Key } from "../components/useTable";
 
 interface ApiKey {
   id: number;
@@ -17,6 +18,11 @@ interface ModelKey {
   masked: string | null;
   spend: number | null;
 }
+
+const CODE_KEYS: Record<string, Key<ApiKey>> = { name: (k) => k.name, key: (k) => k.prefix, created: (k) => k.created_at, used: (k) => k.last_used_at };
+const MODEL_KEYS: Record<string, Key<ModelKey>> = { name: (k) => k.alias, key: (k) => k.masked, spend: (k) => k.spend };
+const NO_CODE_KEYS: ApiKey[] = [];
+const NO_MODEL_KEYS: ModelKey[] = [];
 
 function Password() {
   const [current, setCurrent] = useState("");
@@ -48,6 +54,7 @@ function Password() {
 
 function CodeKeys({ mcpUrl }: { mcpUrl: string }) {
   const keys = useAsync(() => api.get<ApiKey[]>("/api/me/keys"), []);
+  const table = useTable(keys.value ?? NO_CODE_KEYS, CODE_KEYS, { by: "created", desc: true });
   const [name, setName] = useState("");
   const [shown, setShown] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +71,7 @@ function CodeKeys({ mcpUrl }: { mcpUrl: string }) {
   }
   return (
     <div className="card" data-testid="code-keys">
-      <h2>Code index keys</h2>
+      <div className="row between"><h2>Code index keys</h2>{table.search("Filter the code index keys")}</div>
       <p className="dim">
         For editors and agents that speak MCP (Claude Code, Continue, Qwen Code…). Point them at <code>{mcpUrl}</code> with{" "}
         <code>Authorization: Bearer &lt;key&gt;</code>. The key sees exactly the repositories your GitLab account can read.
@@ -73,10 +80,10 @@ function CodeKeys({ mcpUrl }: { mcpUrl: string }) {
       {error && <div className="msg bad">{error}</div>}
       <table>
         <thead>
-          <tr><th>Name</th><th>Key</th><th>Created</th><th>Last used</th><th /></tr>
+          <tr>{table.header("name", "Name")}{table.header("key", "Key")}{table.header("created", "Created")}{table.header("used", "Last used")}<th /></tr>
         </thead>
         <tbody>
-          {(keys.value ?? []).map((k) => (
+          {table.rows.map((k) => (
             <tr key={k.id}>
               <td>{k.name}</td>
               <td><code>{k.prefix}…</code></td>
@@ -104,6 +111,7 @@ function CodeKeys({ mcpUrl }: { mcpUrl: string }) {
 
 function ModelKeys({ gatewayUrl }: { gatewayUrl: string | null }) {
   const keys = useAsync(() => api.get<ModelKey[]>("/api/me/model-keys"), []);
+  const table = useTable(keys.value ?? NO_MODEL_KEYS, MODEL_KEYS, { by: "name", desc: false });
   const [name, setName] = useState("");
   const [shown, setShown] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -120,7 +128,7 @@ function ModelKeys({ gatewayUrl }: { gatewayUrl: string | null }) {
   }
   return (
     <div className="card" data-testid="model-keys">
-      <h2>Model API keys</h2>
+      <div className="row between"><h2>Model API keys</h2>{table.search("Filter the model API keys")}</div>
       <p className="dim">
         OpenAI-compatible keys for scripts and editors{gatewayUrl ? <> — base URL <code>{gatewayUrl}</code></> : null}. Usage counts
         against your budget, the same as chatting here.
@@ -130,10 +138,10 @@ function ModelKeys({ gatewayUrl }: { gatewayUrl: string | null }) {
       {error && <div className="msg bad">{error}</div>}
       <table>
         <thead>
-          <tr><th>Name</th><th>Key</th><th>Spend</th><th /></tr>
+          <tr>{table.header("name", "Name")}{table.header("key", "Key")}{table.header("spend", "Spend")}<th /></tr>
         </thead>
         <tbody>
-          {(keys.value ?? []).map((k) => (
+          {table.rows.map((k) => (
             <tr key={k.token}>
               <td>{k.alias || "—"}</td>
               <td><code>{k.masked ?? "sk-…"}</code></td>

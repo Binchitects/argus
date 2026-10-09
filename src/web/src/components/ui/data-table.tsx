@@ -7,6 +7,7 @@ import {
   useReactTable,
   type Column,
   type ColumnDef,
+  type HeaderContext,
   type RowSelectionState,
   type SortingState,
   type Table as TableType,
@@ -24,6 +25,13 @@ import { Skeleton } from './skeleton'
 
 export type { ColumnDef } from '@tanstack/react-table'
 
+declare module '@tanstack/react-table' {
+  interface ColumnMeta<TData, TValue> {
+    /** Classes for the column's header and cells: text-right for numbers. */
+    className?: string
+  }
+}
+
 /** A sortable column header: click toggles ascending, descending, off. */
 export function SortHeader<T>({ column, title }: { column: Column<T>; title: string }) {
   const sorted = column.getIsSorted()
@@ -38,6 +46,12 @@ export function SortHeader<T>({ column, title }: { column: Column<T>; title: str
       {sorted === 'asc' ? <ArrowUp className="size-3.5" /> : sorted === 'desc' ? <ArrowDown className="size-3.5" /> : <ChevronsUpDown className="size-3.5 opacity-40" />}
     </button>
   )
+}
+
+/** A column's header: a plain title sorts on click whenever the column can sort, so every table sorts by any of its columns. */
+function Header<T>({ header, column, context }: { header: ColumnDef<T>['header']; column: Column<T>; context: HeaderContext<T, unknown> }) {
+  if (typeof header === 'string' && column.getCanSort()) return <SortHeader column={column} title={header} />
+  return flexRender(header, context)
 }
 
 /** The selection column; put it first. */
@@ -73,6 +87,14 @@ export interface DataTableProps<T> {
   /** Extra controls next to the search box: filters, export. */
   toolbar?: ReactNode
   initialSorting?: SortingState
+  /** Smaller rows, no shadow: a table inside a card or a panel. */
+  compact?: boolean
+  /** Classes for the scroll region (max-h-96: a fixed height, the header stays in view). */
+  scrollClassName?: string
+  /** A label for the table region and its search, when the noun alone does not say which table this is. */
+  label?: string
+  /** Shown under the table, beside the count. */
+  footer?: ReactNode
 }
 
 export function DataTable<T>({
@@ -88,6 +110,10 @@ export function DataTable<T>({
   bulk,
   toolbar,
   initialSorting = [],
+  compact,
+  scrollClassName,
+  label,
+  footer,
 }: DataTableProps<T>) {
   const [sorting, setSorting] = useState<SortingState>(initialSorting)
   const [globalFilter, setGlobalFilter] = useState('')
@@ -117,15 +143,15 @@ export function DataTable<T>({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative w-full sm:w-72">
+        <div className={cn('relative w-full', compact ? 'sm:w-56' : 'sm:w-72')}>
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
           <Input
             type="search"
             value={globalFilter}
             onChange={(e) => setGlobalFilter(e.target.value)}
             placeholder={searchPlaceholder ?? `Search ${noun}`}
-            aria-label={`Search ${noun}`}
-            className="pl-8"
+            aria-label={`Search ${label ?? noun}`}
+            className={cn('pl-8', compact && 'h-8')}
           />
         </div>
         {toolbar}
@@ -159,20 +185,28 @@ export function DataTable<T>({
         </section>
       )}
 
-      <ScrollRegion label={`${noun[0]!.toUpperCase()}${noun.slice(1)}, table`} className="rounded-xl border bg-card shadow-xs">
+      <ScrollRegion
+        label={label ? `${label}, table` : `${noun[0]!.toUpperCase()}${noun.slice(1)}, table`}
+        className={cn('border bg-card', compact ? 'rounded-lg' : 'rounded-xl shadow-xs', scrollClassName)}
+      >
         <table className="w-full caption-bottom text-sm">
-          <caption className="sr-only">{noun}</caption>
-          <thead className="border-b bg-muted/40">
+          <caption className="sr-only">{label ?? noun}</caption>
+          <thead className={cn('border-b', scrollClassName ? 'sticky top-0 z-10 bg-muted/90 backdrop-blur' : 'bg-muted/40')}>
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
                 {hg.headers.map((h) => (
                   <th
                     key={h.id}
                     scope="col"
-                    className={cn('h-10 px-3 text-left align-middle font-medium whitespace-nowrap text-muted-foreground', h.column.id === 'select' && 'w-10')}
+                    className={cn(
+                      'px-3 text-left align-middle font-medium whitespace-nowrap text-muted-foreground',
+                      compact ? 'h-9 text-xs' : 'h-10',
+                      h.column.id === 'select' && 'w-10',
+                      h.column.columnDef.meta?.className,
+                    )}
                     aria-sort={h.column.getIsSorted() === 'asc' ? 'ascending' : h.column.getIsSorted() === 'desc' ? 'descending' : undefined}
                   >
-                    {h.isPlaceholder ? null : flexRender(h.column.columnDef.header, h.getContext())}
+                    {h.isPlaceholder ? null : <Header header={h.column.columnDef.header} column={h.column} context={h.getContext()} />}
                   </th>
                 ))}
               </tr>
@@ -198,7 +232,7 @@ export function DataTable<T>({
                   onClick={onRowClick ? () => onRowClick(row.original) : undefined}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-3 py-2.5 align-middle">
+                    <td key={cell.id} className={cn('px-3 align-middle', compact ? 'py-1.5' : 'py-2.5', cell.column.columnDef.meta?.className)}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>
                   ))}
@@ -220,6 +254,7 @@ export function DataTable<T>({
           <span>
             {total} {noun}
             {table.getPageCount() > 1 && ` · page ${pageIndex + 1} of ${table.getPageCount()}`}
+            {footer && <> · {footer}</>}
           </span>
           {table.getPageCount() > 1 && (
             <div className="flex gap-1">

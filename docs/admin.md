@@ -17,6 +17,10 @@ page covers the rest.
 
 ## Admin
 
+Every table here (and in Usage, the Leaderboard, the dashboards' table panels
+and Argus's own pages) sorts by any of its columns, by a click on the column's
+heading, and has a box above it that keeps the rows holding what is typed.
+
 | Page | What it is for |
 |---|---|
 | **Overview** | Services up, people and admins, total spend, who is at or past their credit, the code index's health, and the certificate the site serves. When the index is stale it says how many repositories, which ones, and *why* when the last run's exit code tells (GitLab unreachable, a token that cannot list every repository, ctags missing). The certificate (from Traefik's metrics in Prometheus) shows the days until it expires and who issued it (your own, or Let's Encrypt); within 30 days it says what to do, and it says so when Traefik serves its own default (browsers warn). |

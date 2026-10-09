@@ -2,6 +2,16 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import { api, relTime, type IndexStatus } from "../../api";
 import { useAsync } from "../../components/useAsync";
+import { useTable, type Key } from "../../components/useTable";
+
+type Indexed = IndexStatus["repos"][number];
+const NONE: Indexed[] = [];
+const INDEXED: Record<string, Key<Indexed>> = {
+  repo: (r) => r.repo,
+  branch: (r) => r.branch,
+  last: (r) => r.last_run_at,
+  result: (r) => (r.timed_out ? "timed out" : r.symbols_failed ? `${r.symbols_failed} failed` : "ok"),
+};
 
 const EXIT: Record<number, string> = {
   0: "completed",
@@ -23,6 +33,7 @@ export default function Indexing() {
   const [partial, setPartial] = useState(false);
   const [flash, setFlash] = useState<{ ok: boolean; text: string } | null>(null);
   const s = status.value;
+  const repos = useTable<Indexed>(s?.repos ?? NONE, INDEXED, { by: "repo", desc: false });
   const job = s?.job;
   const running = job?.state === "running";
 
@@ -83,12 +94,13 @@ export default function Indexing() {
         <div className="card">
           <div className="row between">
             <h2>Repositories ({s.index.repos ?? s.repos.length} refs, {s.index.symbols?.toLocaleString() ?? "?"} symbols)</h2>
+            {repos.search("Filter the indexed repositories")}
             <Link to="/manage/repositories">Find, filter and change them, with their schedules and logs</Link>
           </div>
           <table data-testid="repo-table">
-            <thead><tr><th>Repository</th><th>Branch</th><th>Last indexed</th><th>Result</th></tr></thead>
+            <thead><tr>{repos.header("repo", "Repository")}{repos.header("branch", "Branch")}{repos.header("last", "Last indexed")}{repos.header("result", "Result")}</tr></thead>
             <tbody>
-              {s.repos.map((r) => (
+              {repos.rows.map((r) => (
                 <tr key={`${r.repo}@${r.branch}`}>
                   <td>{r.repo}</td>
                   <td>{r.branch}{r.branch === r.default_branch && <span className="dim"> (default)</span>}</td>

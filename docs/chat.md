@@ -282,7 +282,7 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     branch asked about). Signatures and reference lines are highlighted. The
     words a search matched are marked.
   - A file Argus read shows as code, and goes into the Files panel.
-  - Other answers show as a table or a list of fields. **Raw answer** shows
+  - Other answers show as a table (it sorts and filters) or a list of fields. **Raw answer** shows
     the JSON, and errors are shown as the tool's own words.
   - When something exists that you can't read, a notice names the repository
     and its maintainers. It stays outside the fold, so it is never missed.
@@ -380,7 +380,10 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
 - **Answers.** Markdown with tables and maths (KaTeX), links that open safely
   in a new tab, and the model, time, tokens (in, cached, out) and cost under
   each answer, for everyone. Model output is sanitised: HTML in an answer never
-  runs.
+  runs. A table in an answer sorts by a column when its heading is clicked
+  (numbers as numbers, then the other way, then back to the answer's order),
+  and one of more than eight rows has a box that keeps the rows holding what
+  is typed.
 - **History.** Chats are grouped by date and can be searched. The first
   question becomes the title and the browser tab's name; with a model for
   small steps, it writes a short title from the question while the answer is

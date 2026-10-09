@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { Braces, ExternalLink } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { ScrollRegion } from '@/components/app/scroll-region'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { DataTable, type ColumnDef } from '@/components/ui/data-table'
 import { cn } from '@/lib/utils'
 import { configQuery } from './api'
 import { gitlabLink, isRow, snippetParts, toHits, type CodeHit, type Row } from './argus'
@@ -91,35 +91,15 @@ function cell(v: unknown): string {
   return JSON.stringify(v)
 }
 
-/** Rows that are not code locations (which_repo, index_status, a pack's search): a table. */
+/** Rows that are not code locations (which_repo, index_status, a pack's search): a table that sorts and filters. */
 function RowTable({ rows }: { rows: Row[] }) {
-  const columns = [...new Set(rows.slice(0, 50).flatMap(Object.keys))].slice(0, 8)
-  return (
-    <ScrollRegion label="Rows" className="rounded-md border">
-      <table className="w-full text-xs">
-        <thead className="bg-muted/60 text-start text-muted-foreground">
-          <tr>
-            {columns.map((c) => (
-              <th key={c} scope="col" className="px-2 py-1.5 font-medium whitespace-nowrap">
-                {c}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={i} className="border-t align-top">
-              {columns.map((c) => (
-                <td key={c} className="max-w-72 px-2 py-1.5 font-mono break-words">
-                  {cell(r[c])}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </ScrollRegion>
-  )
+  const columns: ColumnDef<Row>[] = [...new Set(rows.slice(0, 50).flatMap(Object.keys))].slice(0, 8).map((c) => ({
+    id: c,
+    header: c,
+    accessorFn: (r) => (typeof r[c] === 'number' ? r[c] : cell(r[c])),
+    meta: { className: 'max-w-72 font-mono text-xs break-words align-top' },
+  }))
+  return <DataTable columns={columns} data={rows} noun="rows" label="Rows" compact pageSize={50} />
 }
 
 /** An object that is not a file (overview, impact_of): short fields as a list; nested ones and text over a line as code blocks. */

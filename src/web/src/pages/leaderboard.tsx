@@ -4,6 +4,7 @@ import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { DataTable, type ColumnDef } from '@/components/ui/data-table'
 import { EmptyState } from '@/components/ui/empty-state'
 import { api, ApiError } from '@/lib/api'
 import { formatValue } from '@/lib/format'
@@ -26,42 +27,48 @@ export interface Board {
   models: Standing[]
 }
 
+const right = { className: 'text-right tabular-nums' }
+const count = (id: string, header: string, value: (s: Standing) => number): ColumnDef<Standing & { place: number }> => ({
+  id,
+  header,
+  accessorFn: value,
+  meta: right,
+})
+
+const boardColumns: ColumnDef<Standing & { place: number }>[] = [
+  { id: 'place', header: '#', accessorKey: 'place', meta: { className: 'tabular-nums text-muted-foreground' } },
+  {
+    id: 'model',
+    header: 'Model',
+    accessorKey: 'model',
+    cell: ({ row: { original: s } }) => (
+      <span className="inline-flex items-center gap-1.5 font-medium">
+        {s.place === 1 && <Trophy className="size-3.5 text-warning-ink" aria-label="First" />}
+        {s.model}
+      </span>
+    ),
+  },
+  { id: 'rating', header: 'Rating', accessorKey: 'rating', meta: { className: 'text-right font-semibold tabular-nums' } },
+  { ...count('winRate', 'Win rate', (s) => s.winRate), cell: ({ row }) => formatValue(row.original.winRate, 'percentunit', 0) },
+  count('wins', 'Won', (s) => s.wins),
+  count('losses', 'Lost', (s) => s.losses),
+  count('tied', 'Tied', (s) => s.ties - s.bad),
+  count('bad', 'Both bad', (s) => s.bad),
+  count('matches', 'Votes', (s) => s.matches),
+]
+
 /** The models by rating, with their votes. */
 export function LeaderboardTable({ board, label }: { board: Board; label: string }) {
   return (
-    <div className="overflow-x-auto rounded-lg border">
-      <table className="w-full text-sm" aria-label={label}>
-        <thead className="border-b bg-muted/40">
-          <tr>
-            {['#', 'Model', 'Rating', 'Win rate', 'Won', 'Lost', 'Tied', 'Both bad', 'Votes'].map((h, i) => (
-              <th key={h} scope="col" className={`h-9 px-3 text-xs font-medium text-muted-foreground ${i > 1 ? 'text-right' : 'text-left'}`}>
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {board.models.map((s, i) => (
-            <tr key={s.model} className="border-b last:border-0">
-              <td className="px-3 py-2 tabular-nums text-muted-foreground">{i + 1}</td>
-              <td className="px-3 py-2 font-medium">
-                <span className="inline-flex items-center gap-1.5">
-                  {i === 0 && <Trophy className="size-3.5 text-warning-ink" aria-label="First" />}
-                  {s.model}
-                </span>
-              </td>
-              <td className="px-3 py-2 text-right font-semibold tabular-nums">{s.rating}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{formatValue(s.winRate, 'percentunit', 0)}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{s.wins}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{s.losses}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{s.ties - s.bad}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{s.bad}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{s.matches}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <DataTable
+      columns={boardColumns}
+      data={board.models.map((s, i) => ({ ...s, place: i + 1 }))}
+      noun="models"
+      label={label}
+      compact
+      getRowId={(s) => s.model}
+      initialSorting={[{ id: 'place', desc: false }]}
+    />
   )
 }
 

@@ -3,8 +3,20 @@ import { api, money, relTime, type User } from "../../api";
 import { useAuth } from "../../auth";
 import Secret from "../../components/Secret";
 import { useAsync } from "../../components/useAsync";
+import { useTable, type Key } from "../../components/useTable";
 
 interface UsersResponse { users: User[]; usage_error: string | null }
+
+const EMPTY: User[] = [];
+
+const COLUMNS: Record<string, Key<User>> = {
+  person: (u) => `${u.display_name || u.username} ${u.username} ${u.email}`,
+  role: (u) => u.role,
+  status: (u) => (u.disabled ? "disabled" : "active"),
+  spend: (u) => u.spend ?? null,
+  last: (u) => u.last_login_at ?? null,
+  gitlab: (u) => u.gitlab_username ?? null,
+};
 
 function budgetValue(raw: string): number | null {
   const t = raw.trim();
@@ -47,7 +59,6 @@ function EditRow({ user, onClose, onSaved }: { user: User; onClose: () => void; 
 export default function People() {
   const { me } = useAuth();
   const data = useAsync(() => api.get<UsersResponse>("/api/admin/users"), []);
-  const [q, setQ] = useState("");
   const [editing, setEditing] = useState<number | null>(null);
   const [secret, setSecret] = useState<{ label: string; value: string } | null>(null);
   const [flash, setFlash] = useState<{ ok: boolean; text: string } | null>(null);
@@ -74,7 +85,8 @@ export default function People() {
     });
   }
 
-  const users = (data.value?.users ?? []).filter((u) => !q || `${u.username} ${u.email} ${u.display_name}`.toLowerCase().includes(q.toLowerCase()));
+  const table = useTable(data.value?.users ?? EMPTY, COLUMNS, { by: "person", desc: false });
+  const users = table.rows;
 
   return (
     <div className="page">
@@ -86,10 +98,10 @@ export default function People() {
       <div className="card">
         <div className="row between">
           <h2>Everyone ({data.value?.users.length ?? 0})</h2>
-          <input className="search" placeholder="Filter" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Filter people" />
+          {table.search("Filter people")}
         </div>
         <table data-testid="people-table">
-          <thead><tr><th>Person</th><th>Role</th><th>Status</th><th>Spend / budget</th><th>Last sign-in</th><th>GitLab</th><th /></tr></thead>
+          <thead><tr>{table.header("person", "Person")}{table.header("role", "Role")}{table.header("status", "Status")}{table.header("spend", "Spend / budget")}{table.header("last", "Last sign-in")}{table.header("gitlab", "GitLab")}<th /></tr></thead>
           <tbody>
             {users.map((u) => [
               <tr key={u.id}>

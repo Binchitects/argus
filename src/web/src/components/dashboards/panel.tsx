@@ -4,6 +4,7 @@ import { Info, Table2, TrendingUp } from 'lucide-react'
 import { marked } from 'marked'
 import { useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
+import { DataTable, type ColumnDef } from '@/components/ui/data-table'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip } from '@/components/ui/tooltip'
 import { ScrollRegion } from '@/components/app/scroll-region'
@@ -270,38 +271,32 @@ function columnUnit(panel: PanelDef, column: string): { unit?: string; decimals?
   return out
 }
 
-const th = 'h-9 px-3 text-left align-middle text-xs font-medium whitespace-nowrap text-muted-foreground'
-const td = 'px-3 py-2 align-middle whitespace-nowrap'
+const right = { className: 'text-right tabular-nums' }
 
 function ResultTable({ columns, rows, panel, capped }: { columns: Column[]; rows: unknown[][]; panel: PanelDef; capped: boolean }) {
   if (!rows.length) return <p className="py-6 text-center text-sm text-muted-foreground">No rows in this time range.</p>
   const fmt = columns.map((c) => columnUnit(panel, c.name))
+  const defs: ColumnDef<unknown[]>[] = columns.map((c, j) => ({
+    id: `c${j}`,
+    header: c.name,
+    accessorFn: (r) => r[j] ?? null,
+    meta: c.type === 'number' ? right : { className: 'whitespace-nowrap' },
+    cell: ({ row }) => {
+      const v = row.original[j]
+      return c.type === 'time' && typeof v === 'string' ? new Date(v).toLocaleString() : formatValue(v, fmt[j]!.unit, fmt[j]!.decimals)
+    },
+  }))
   return (
-    <ScrollRegion label={`${panel.title ?? 'Panel'}, table`} className="max-h-96 rounded-lg border">
-      <table className="w-full text-sm">
-        <thead className="sticky top-0 border-b bg-muted/60 backdrop-blur">
-          <tr>
-            {columns.map((c) => (
-              <th key={c.name} scope="col" className={cn(th, c.type === 'number' && 'text-right')}>
-                {c.name}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={i} className="border-b last:border-0 hover:bg-muted/40">
-              {r.map((v, j) => (
-                <td key={j} className={cn(td, columns[j]!.type === 'number' && 'text-right tabular-nums')}>
-                  {columns[j]!.type === 'time' && typeof v === 'string' ? new Date(v).toLocaleString() : formatValue(v, fmt[j]!.unit, fmt[j]!.decimals)}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {capped && <p className="border-t p-2 text-xs text-muted-foreground">Showing the first {rows.length} rows.</p>}
-    </ScrollRegion>
+    <DataTable
+      columns={defs}
+      data={rows}
+      noun="rows"
+      label={panel.title ?? 'Panel'}
+      compact
+      pageSize={500}
+      scrollClassName="max-h-96"
+      footer={capped ? `the first ${rows.length} only` : undefined}
+    />
   )
 }
 
@@ -309,34 +304,19 @@ function ResultTable({ columns, rows, panel, capped }: { columns: Column[]; rows
 function SeriesTable({ series, unit }: { series: { name: string; points: (number | null)[][] }[]; unit?: string }) {
   const times = [...new Set(series.flatMap((s) => s.points.map((p) => p[0] as number)))].sort((a, b) => a - b)
   const lookup = series.map((s) => new Map(s.points.map((p) => [p[0], p[1]])))
-  return (
-    <ScrollRegion label="Chart data, table" className="max-h-96 rounded-lg border">
-      <table className="w-full text-sm">
-        <thead className="sticky top-0 border-b bg-muted/60 backdrop-blur">
-          <tr>
-            <th scope="col" className={th}>
-              Time
-            </th>
-            {series.map((s) => (
-              <th key={s.name} scope="col" className={cn(th, 'text-right')}>
-                {s.name}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {times.map((t) => (
-            <tr key={t} className="border-b last:border-0">
-              <td className={td}>{new Date(t).toLocaleString()}</td>
-              {lookup.map((m, i) => (
-                <td key={i} className={cn(td, 'text-right tabular-nums')}>
-                  {formatValue(m.get(t) ?? null, unit)}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </ScrollRegion>
-  )
+  const rows = times.map((t) => [t, ...lookup.map((m) => m.get(t) ?? null)])
+  const defs: ColumnDef<(number | null)[]>[] = [
+    { id: 'time', header: 'Time', accessorFn: (r) => r[0], meta: { className: 'whitespace-nowrap' }, cell: ({ row }) => new Date(row.original[0]!).toLocaleString() },
+    ...series.map(
+      (s, i): ColumnDef<(number | null)[]> => ({
+        id: `s${i}`,
+        header: s.name,
+        accessorFn: (r) => r[i + 1],
+        sortUndefined: 'last',
+        meta: right,
+        cell: ({ row }) => formatValue(row.original[i + 1] ?? null, unit),
+      }),
+    ),
+  ]
+  return <DataTable columns={defs} data={rows} noun="times" label="Chart data" compact pageSize={500} scrollClassName="max-h-96" />
 }

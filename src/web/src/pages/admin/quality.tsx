@@ -8,6 +8,7 @@ import { Stat, StatGrid } from '@/components/app/stat'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { DataTable, type ColumnDef } from '@/components/ui/data-table'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -55,35 +56,35 @@ const reasonsLine = (reasons: Record<string, number>) =>
     .map(([r, n]) => `${reasonLabel(r)} ${n}`)
     .join(' · ') || '—'
 
-function CountsTable({ rows, first, label }: { rows: { key: string; name: string; counts: Counts }[]; first: string; label: string }) {
-  return (
-    <div className="overflow-x-auto rounded-lg border">
-      <table className="w-full text-sm" aria-label={label}>
-        <thead className="border-b bg-muted/40">
-          <tr>
-            {[first, 'Answers', 'Rated', 'Thumbs up', 'Why down'].map((h, i) => (
-              <th key={h} scope="col" className={cn('h-9 px-3 text-xs font-medium text-muted-foreground', i === 0 || i === 4 ? 'text-left' : 'text-right')}>
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.key} className="border-b last:border-0">
-              <td className="px-3 py-2 font-medium">{r.name}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{r.counts.answers.toLocaleString()}</td>
-              <td className="px-3 py-2 text-right tabular-nums">
-                {r.counts.rated.toLocaleString()} <span className="text-muted-foreground">({formatValue(r.counts.ratedShare, 'percentunit', 0)})</span>
-              </td>
-              <td className="px-3 py-2 text-right tabular-nums">{r.counts.upRate === null ? '—' : formatValue(r.counts.upRate, 'percentunit', 0)}</td>
-              <td className="px-3 py-2 text-muted-foreground">{reasonsLine(r.counts.reasons)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
+type CountsRow = { key: string; name: string; counts: Counts }
+const right = { className: 'text-right tabular-nums' }
+
+const countsColumns = (first: string): ColumnDef<CountsRow>[] => [
+  { id: 'name', header: first, accessorKey: 'name', meta: { className: 'font-medium' } },
+  { id: 'answers', header: 'Answers', accessorFn: (r) => r.counts.answers, meta: right, cell: ({ row }) => row.original.counts.answers.toLocaleString() },
+  {
+    id: 'rated',
+    header: 'Rated',
+    accessorFn: (r) => r.counts.rated,
+    meta: right,
+    cell: ({ row: { original: r } }) => (
+      <>
+        {r.counts.rated.toLocaleString()} <span className="text-muted-foreground">({formatValue(r.counts.ratedShare, 'percentunit', 0)})</span>
+      </>
+    ),
+  },
+  {
+    id: 'up',
+    header: 'Thumbs up',
+    accessorFn: (r) => r.counts.upRate ?? -1,
+    meta: right,
+    cell: ({ row: { original: r } }) => (r.counts.upRate === null ? '—' : formatValue(r.counts.upRate, 'percentunit', 0)),
+  },
+  { id: 'why', header: 'Why down', accessorFn: (r) => reasonsLine(r.counts.reasons), meta: { className: 'text-muted-foreground' } },
+]
+
+function CountsTable({ rows, first, label }: { rows: CountsRow[]; first: string; label: string }) {
+  return <DataTable columns={countsColumns(first)} data={rows} noun="rows" label={label} compact getRowId={(r) => r.key} />
 }
 
 /**

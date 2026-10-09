@@ -1,6 +1,27 @@
 import { useState, type FormEvent } from "react";
 import { api, megabytes, relTime, type PacksStatus } from "../../api";
 import { useAsync } from "../../components/useAsync";
+import { useTable, type Key } from "../../components/useTable";
+
+type Library = NonNullable<PacksStatus["library"]>[number];
+type Installed = PacksStatus["packs"][number];
+const NONE: never[] = [];
+
+const LIBRARY: Record<string, Key<Library>> = {
+  name: (p) => `${p.name} ${p.version}`,
+  file: (p) => p.file,
+  model: (p) => `${p.model}/${p.dim}`,
+  size: (p) => p.size_bytes,
+  state: (p) => (p.loaded ? "Loaded" : "Not loaded"),
+};
+
+const INSTALLED: Record<string, Key<Installed>> = {
+  name: (p) => p.name,
+  version: (p) => p.version,
+  model: (p) => `${p.model}/${p.dim}`,
+  size: (p) => p.size_bytes,
+  license: (p) => p.license,
+};
 
 export default function Packs() {
   const data = useAsync(() => api.get<PacksStatus>("/admin/packs"), [], (v) => (v?.job.state === "running" ? 1500 : null));
@@ -9,6 +30,8 @@ export default function Packs() {
   const [flash, setFlash] = useState<{ ok: boolean; text: string } | null>(null);
   const d = data.value;
   const running = d?.job.state === "running";
+  const library = useTable<Library>(d?.library ?? NONE, LIBRARY, { by: "name", desc: false });
+  const installed = useTable<Installed>(d?.packs ?? NONE, INSTALLED, { by: "name", desc: false });
 
   async function act(path: string, body: unknown, message: string) {
     try {
@@ -39,12 +62,12 @@ export default function Packs() {
       </div>
       {d?.library_dir && (
         <div className="card">
-          <h2>Pack library</h2>
+          <div className="row between"><h2>Pack library</h2>{library.search("Filter the library")}</div>
           <p className="dim small">Built packs in <code>{d.library_dir}</code>. Loading links one in: instant, nothing copied; unloading leaves it in the library.</p>
           <table data-testid="library-table">
-            <thead><tr><th>Pack</th><th>File</th><th>Embedding</th><th className="right">Size</th><th>State</th><th /></tr></thead>
+            <thead><tr>{library.header("name", "Pack")}{library.header("file", "File")}{library.header("model", "Embedding")}{library.header("size", "Size", "right")}{library.header("state", "State")}<th /></tr></thead>
             <tbody>
-              {(d.library ?? []).map((p) => (
+              {library.rows.map((p) => (
                 <tr key={p.file}>
                   <td><strong>{p.name}</strong> <span className="dim">{p.version}</span>{!p.compatible && <div className="warn small">{p.incompatible_reason}</div>}</td>
                   <td className="dim"><code>{p.file}</code></td>
@@ -71,10 +94,11 @@ export default function Packs() {
         ) : d?.job.finished ? (
           <div className={`msg ${d.job.returncode === 0 ? "ok" : "bad"}`} data-testid="pack-finished">Last pack operation finished {relTime(d.job.finished)} — {d.job.returncode === 0 ? "finished cleanly" : "failed; the log below names why"}</div>
         ) : null}
+        <div className="row between"><h2>Installed packs</h2>{installed.search("Filter the installed packs")}</div>
         <table data-testid="packs-table">
-          <thead><tr><th>Pack</th><th>Version</th><th>Embedding</th><th className="right">Size</th><th>Licence</th><th /></tr></thead>
+          <thead><tr>{installed.header("name", "Pack")}{installed.header("version", "Version")}{installed.header("model", "Embedding")}{installed.header("size", "Size", "right")}{installed.header("license", "Licence")}<th /></tr></thead>
           <tbody>
-            {(d?.packs ?? []).map((p) => (
+            {installed.rows.map((p) => (
               <tr key={p.name}>
                 <td><strong>{p.name}</strong>{!p.compatible && <div className="warn small">{p.incompatible_reason ?? "incompatible embedding model"} — lookup and text search still work</div>}</td>
                 <td>{p.version}</td>

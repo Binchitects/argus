@@ -1,5 +1,5 @@
 import DOMPurify from 'dompurify'
-import { Marked, type Token, type TokensList } from 'marked'
+import { Marked, type Token, type Tokens, type TokensList } from 'marked'
 import markedKatex from 'marked-katex-extension'
 import type { PreviewKind } from '@/preview/kind'
 import { parseFence } from './files'
@@ -43,7 +43,23 @@ export function sanitize(html: string): string {
   return purify.sanitize(html, { FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'iframe', 'object', 'embed'], ADD_ATTR: ['target', 'dir'] })
 }
 
-type Block = { kind: 'html'; html: string } | { kind: 'code'; code: string; lang: string | null; name: string | null; preview: PreviewKind | null }
+/** A table's cell: sanitised HTML to show, its text to sort and filter by. */
+export interface TableCell {
+  html: string
+  text: string
+}
+
+export type Align = 'left' | 'center' | 'right' | null
+
+type Block =
+  | { kind: 'html'; html: string }
+  | { kind: 'code'; code: string; lang: string | null; name: string | null; preview: PreviewKind | null }
+  | { kind: 'table'; head: TableCell[]; align: Align[]; rows: TableCell[][] }
+
+function tableCell(text: string): TableCell {
+  const html = sanitize(marked.parseInline(text, { async: false }))
+  return { html, text: new DOMParser().parseFromString(html, 'text/html').body.textContent ?? '' }
+}
 
 /** Markdown in blocks: top-level code fences become components, the rest sanitised HTML. */
 export function toBlocks(text: string): Block[] {
@@ -57,7 +73,12 @@ export function toBlocks(text: string): Block[] {
     pending = []
   }
   for (const t of tokens) {
-    if (t.type === 'code' && (t as { codeBlockStyle?: string }).codeBlockStyle !== 'indented') {
+    if (t.type === 'table') {
+      // A table of its own, so it sorts and filters (Tokens.Table: its header and rows of cells).
+      flush()
+      const table = t as Tokens.Table
+      out.push({ kind: 'table', head: table.header.map((c) => tableCell(c.text)), align: table.align, rows: table.rows.map((r) => r.map((c) => tableCell(c.text))) })
+    } else if (t.type === 'code' && (t as { codeBlockStyle?: string }).codeBlockStyle !== 'indented') {
       flush()
       const { lang, name, preview } = parseFence((t as { lang?: string }).lang, (t as { text: string }).text)
       out.push({ kind: 'code', code: (t as { text: string }).text, lang, name, preview })

@@ -10,12 +10,13 @@ import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { DataTable, type ColumnDef } from '@/components/ui/data-table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { ago, when } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { growth, origins, plural, size, states, storageQuery, uses, type Disk, type StorageReport } from './storage-api'
+import { growth, origins, plural, size, states, storageQuery, uses, type Disk, type LibraryUse, type StorageReport } from './storage-api'
 import { Cleanups } from './storage-cleanups'
 import { StorageFiles } from './storage-files'
 import { StoragePeople } from './storage-people'
@@ -222,6 +223,63 @@ interface Row {
   note?: ReactNode
 }
 
+const right = { className: 'text-right whitespace-nowrap tabular-nums' }
+
+const roomColumns = (r: StorageReport): ColumnDef<Row>[] => [
+  {
+    id: 'what',
+    header: 'What',
+    accessorKey: 'what',
+    meta: { className: 'align-top' },
+    cell: ({ row: { original: row } }) => (
+      <>
+        <p className="font-medium">{row.what}</p>
+        {row.note && <p className="text-xs text-muted-foreground">{row.note}</p>}
+      </>
+    ),
+  },
+  { id: 'where', header: 'Where', accessorKey: 'where', meta: { className: 'align-top text-muted-foreground' } },
+  { id: 'bytes', header: 'Takes', accessorFn: (row) => row.bytes ?? -1, meta: right, cell: ({ row }) => size(row.original.bytes) },
+  {
+    id: 'grew',
+    header: '30 days',
+    accessorFn: (row) => (row.trend ? growth(r.trends[row.trend]) : null) ?? Number.NEGATIVE_INFINITY,
+    meta: { className: 'text-right whitespace-nowrap text-muted-foreground tabular-nums' },
+    cell: ({ row: { original: row } }) => {
+      const grew = row.trend ? growth(r.trends[row.trend]) : null
+      return grew === null ? '—' : `${grew >= 0 ? '+' : '−'}${size(Math.abs(grew))}`
+    },
+  },
+  {
+    id: 'trend',
+    header: () => <span className="sr-only">Trend</span>,
+    enableSorting: false,
+    cell: ({ row: { original: row } }) => row.trend && r.trends[row.trend] && <Sparkline points={r.trends[row.trend]!} className="h-6 w-24 text-primary" />,
+  },
+]
+
+const libraryColumns: ColumnDef<LibraryUse>[] = [
+  {
+    id: 'path',
+    header: 'File',
+    accessorKey: 'path',
+    meta: { className: 'align-top' },
+    cell: ({ row: { original: f } }) => (
+      <>
+        <code className="font-mono text-xs break-all">{f.path}</code>
+        <p className="text-xs text-muted-foreground">{[f.kind, f.parts > 1 ? `${f.parts} parts` : null, f.note].filter(Boolean).join(' · ')}</p>
+      </>
+    ),
+  },
+  {
+    id: 'use',
+    header: 'Used by',
+    accessorFn: (f) => (f.use === 'engine' ? f.models.join('; ') : uses[f.use]),
+    cell: ({ row: { original: f } }) => (f.use === 'unused' ? <Badge variant="warning">{uses.unused}</Badge> : f.use === 'engine' ? f.models.join('; ') : uses[f.use]),
+  },
+  { id: 'bytes', header: 'Takes', accessorKey: 'bytes', meta: right, cell: ({ row }) => size(row.original.bytes) },
+]
+
 /** Each kind of thing kept, its room, where it lives, and how it grew over 30 days. */
 function WhatTakesRoom({ r }: { r: StorageReport }) {
   const a = r.argus.report
@@ -246,36 +304,8 @@ function WhatTakesRoom({ r }: { r: StorageReport }) {
         <CardTitle>What takes room</CardTitle>
         <CardDescription>Each kind of thing the stack keeps, where it lives, and how it grew over the last 30 days (measured every six hours).</CardDescription>
       </CardHeader>
-      <CardContent className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <caption className="sr-only">What takes room</caption>
-          <thead className="text-left text-muted-foreground">
-            <tr className="border-b">
-              <th scope="col" className="py-2 pr-3 font-medium">What</th>
-              <th scope="col" className="py-2 pr-3 font-medium">Where</th>
-              <th scope="col" className="py-2 pr-3 text-right font-medium">Takes</th>
-              <th scope="col" className="py-2 pr-3 text-right font-medium">30 days</th>
-              <th scope="col" className="py-2 font-medium"><span className="sr-only">Trend</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              const grew = row.trend ? growth(r.trends[row.trend]) : null
-              return (
-                <tr key={row.what} className="border-b align-top last:border-0">
-                  <td className="py-2 pr-3">
-                    <p className="font-medium">{row.what}</p>
-                    {row.note && <p className="text-xs text-muted-foreground">{row.note}</p>}
-                  </td>
-                  <td className="py-2 pr-3 text-muted-foreground">{row.where}</td>
-                  <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">{size(row.bytes)}</td>
-                  <td className="py-2 pr-3 text-right whitespace-nowrap text-muted-foreground tabular-nums">{grew === null ? '—' : `${grew >= 0 ? '+' : '−'}${size(Math.abs(grew))}`}</td>
-                  <td className="py-2">{row.trend && r.trends[row.trend] && <Sparkline points={r.trends[row.trend]!} className="h-6 w-24 text-primary" />}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+      <CardContent>
+        <DataTable columns={roomColumns(r)} data={rows} noun="kinds" label="What takes room" compact getRowId={(row) => row.what} />
       </CardContent>
     </Card>
   )
@@ -380,32 +410,7 @@ function Library({ r }: { r: StorageReport }) {
         {r.library.problem && <Alert variant="warning">{r.library.problem}</Alert>}
         {lib && !lib.exists && <p className="text-sm text-muted-foreground">The library ({lib.dir}) is not there.</p>}
         {lib && lib.files.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <caption className="sr-only">Model files</caption>
-              <thead className="text-left text-muted-foreground">
-                <tr className="border-b">
-                  <th scope="col" className="py-2 pr-3 font-medium">File</th>
-                  <th scope="col" className="py-2 pr-3 font-medium">Used by</th>
-                  <th scope="col" className="py-2 text-right font-medium">Takes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lib.files.map((f) => (
-                  <tr key={f.path} className="border-b align-top last:border-0">
-                    <td className="py-2 pr-3">
-                      <code className="font-mono text-xs break-all">{f.path}</code>
-                      <p className="text-xs text-muted-foreground">{[f.kind, f.parts > 1 ? `${f.parts} parts` : null, f.note].filter(Boolean).join(' · ')}</p>
-                    </td>
-                    <td className="py-2 pr-3">
-                      {f.use === 'unused' ? <Badge variant="warning">{uses.unused}</Badge> : f.use === 'engine' ? f.models.join('; ') : uses[f.use]}
-                    </td>
-                    <td className="py-2 text-right whitespace-nowrap tabular-nums">{size(f.bytes)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable columns={libraryColumns} data={lib.files} noun="model files" label="Model files" compact getRowId={(f) => f.path} initialSorting={[{ id: 'bytes', desc: true }]} />
         )}
         {lib && lib.partials.length > 0 && (
           <div>

@@ -47,6 +47,21 @@ describe('data table', () => {
     expect(screen.getByText(/bulk:/)).toHaveTextContent('bulk: Ada,Alan')
   })
 
+  it('a column with a plain title sorts too, and a column without data does not', async () => {
+    const plain: ColumnDef<Row>[] = [{ accessorKey: 'name', header: 'Name' }, { id: 'note', header: 'Note', cell: () => 'n' }]
+    render(
+      <Providers>
+        <DataTable columns={plain} data={rows} noun="people" />
+      </Providers>,
+    )
+    const first = () => screen.getAllByRole('row').slice(1).map((r) => within(r).getAllByRole('cell')[0]!.textContent)
+    await userEvent.click(screen.getByRole('button', { name: 'Name, sort ascending' }))
+    expect(first()).toEqual(['Ada', 'Alan', 'Grace'])
+    await userEvent.click(screen.getByRole('button', { name: 'Name, sort descending' }))
+    expect(first()).toEqual(['Grace', 'Alan', 'Ada'])
+    expect(screen.queryByRole('button', { name: /Note/ })).not.toBeInTheDocument()
+  })
+
   it('shows the empty message when there are no rows', () => {
     render(
       <Providers>

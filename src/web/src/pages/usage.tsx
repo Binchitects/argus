@@ -9,6 +9,7 @@ import { Stat, StatGrid } from '@/components/app/stat'
 import { TimeChart } from '@/components/charts/time-chart'
 import { DashboardView } from '@/components/dashboards/dashboard-view'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { DataTable, type ColumnDef } from '@/components/ui/data-table'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -50,8 +51,23 @@ interface Mine {
   intervalMs: number
   totals: { requests: number; inputMiss: number; inputHit: number; output: number; cost: number }
   series: { name: string; points: (number | null)[][] }[]
-  models: { model: string; requests: number; tokens: number; cost: number }[]
+  models: ModelUse[]
 }
+
+interface ModelUse {
+  model: string
+  requests: number
+  tokens: number
+  cost: number
+}
+
+const right = { className: 'text-right tabular-nums' }
+const modelColumns: ColumnDef<ModelUse>[] = [
+  { id: 'model', header: 'Model', accessorKey: 'model', cell: ({ row }) => <span className="font-medium">{row.original.model}</span> },
+  { id: 'requests', header: 'Requests', accessorKey: 'requests', meta: right, cell: ({ row }) => formatValue(row.original.requests) },
+  { id: 'tokens', header: 'Tokens', accessorKey: 'tokens', meta: right, cell: ({ row }) => formatValue(row.original.tokens) },
+  { id: 'cost', header: 'Cost', accessorKey: 'cost', meta: right, cell: ({ row }) => money(row.original.cost) },
+]
 
 function MyUsage() {
   const [from, setFrom] = useState('now-30d')
@@ -112,29 +128,7 @@ function MyUsage() {
                 <CardDescription>Everything you used in this time range.</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="overflow-x-auto rounded-lg border">
-                  <table className="w-full text-sm">
-                    <thead className="border-b bg-muted/40">
-                      <tr>
-                        {['Model', 'Requests', 'Tokens', 'Cost'].map((h, i) => (
-                          <th key={h} scope="col" className={`h-9 px-3 text-xs font-medium text-muted-foreground ${i ? 'text-right' : 'text-left'}`}>
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {d.models.map((m) => (
-                        <tr key={m.model} className="border-b last:border-0">
-                          <td className="px-3 py-2 font-medium">{m.model}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{formatValue(m.requests)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{formatValue(m.tokens)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{money(m.cost)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <DataTable columns={modelColumns} data={d.models} noun="models" label="By model" compact getRowId={(m) => m.model} initialSorting={[{ id: 'cost', desc: true }]} />
               </CardContent>
             </Card>
           )}
