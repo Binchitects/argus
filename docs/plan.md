@@ -1111,17 +1111,55 @@ Code Arena had when v5.4 began. "v5.4" marks what this release adds.
 | Hooks around tool calls | Claude Code | not in v5.4: the permission rules and the sandbox cover what hooks are mostly used for |
 | A plugin marketplace, output styles, a status line | Claude Code, dsh (plugins) | not planned: MCP servers, commands and skills are the extension points |
 
-## Next (after v5.4.0)
+## v5.5.0 — Argus's links sure and precise, credits per kind, a richer IDE (2026-10-11)
 
-1. **Argus on the real estate**: the reader reads every repository again once
-   after the upgrade; then measure the links found on the company's 200
-   repositories against what their owners know, and add the conventions it
-   misses (a service's HTTP or gRPC client named by address, generated code).
-2. **What each repository is for**, written once per repository by the model
+Asked on 2026-10-10, after v5.4.0, done one item at a time, each committed
+and pushed when its tests passed:
+
+- **"Cross-repo correlation is weak; make it stronger and more precise"**:
+  exact names (no false hubs from roots, fixtures, strings or comments), each
+  ecosystem's conventions, Python modules from their import roots, vendored
+  copies by content, headers between projects left ambiguous, images by their
+  project; then a link model: kind, layer, scope, a confidence from how the
+  name matched, evidence (uses, the provider's declaration, candidates), a
+  name several provide settled by what else the user has or kept as a
+  candidate; the graph tools filtered by confidence, layer and tests, the
+  surest paths, `change_impact` searched only where the change is used and
+  `impact_of` through imports. On the generated estate of 200 repositories
+  every link is found, none wrong, each strong.
+- **Credits per kind and API access per person.**
+- **Model states**: Unloading said while it lasts; models no longer push
+  each other out.
+- **Default models only from the installer.**
+- **Code Arena never looks stuck**, and the next message always runs.
+- **Every chat in step both ways.**
+- **A richer IDE**: citations to lines, edits' lines, ask about code,
+  completion, palette, Problems, Source control, replace.
+
+## Next (after v5.5.0)
+
+1. **Argus at run time**: what the build does not show. Service names to
+   hosts (Kubernetes, Helm, compose, environment, Spring and .NET config, CI's
+   helm and kubectl), gRPC (a .proto's services and options, server and client
+   markers, generated code), topics and queues (Kafka, RabbitMQ, NATS, SQS and
+   SNS, Service Bus), HTTP routes to calls and gateways, OpenAPI specs and
+   generated clients, shared databases and tables, Backstage catalog files and
+   Pact contracts as declared links. Each as its own layer, with its
+   confidence, settled and shown like the build links.
+2. **Argus's remaining precision work**: a .proto by its import root and the
+   well-known ones left out; an image by its registry host; vendored copies and
+   ambiguous #includes as evidence; more file types (lock files skipped,
+   .mjs/.cts, CMake's FetchContent, Terraform modules); GitLab CI and deploy
+   files read as YAML; co-change from the mirrors' history (never walked,
+   shown as hidden coupling).
+3. **Argus on the real estate**: measure the links on the company's 200
+   repositories against what their owners know (`argus graph-eval`), and
+   calibrate the priors.
+4. **What each repository is for**, written once per repository by the model
    from its README, layout and key symbols, for `system_map` and `overview`.
-3. **Code Arena**: a sandbox on Windows; a watchdog for an MCP call that never
+5. **Code Arena**: a sandbox on Windows; a watchdog for an MCP call that never
    ends; the IDE's page showing the sandbox and the sync's state.
-4. Carried over: the packs in the bucket (the maintainer), real platforms
+6. Carried over: the packs in the bucket (the maintainer), real platforms
    (Slack, Teams, SAML IdP, Confluence, SharePoint, Helm on a cluster), Code
    Arena's terminals on a real Mac and Windows, Laya's routing quality, deep
    research under six minutes.

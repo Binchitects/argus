@@ -12,6 +12,74 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v5.5.0 (2026-10-11)
+
+### :rocket: Epics and highlights
+
+- **Argus links repositories more strongly and more precisely**: every link
+  says how sure it is (strong, likely or weak), its layer (build, CI, deploy)
+  and why, with the files and lines that make it. A name several repositories
+  provide is settled by what else the user has (a package of one of them, the
+  same file's other uses, its other links), else kept as a candidate, shown but
+  never walked. Uses in tests, samples, generated code and vendored copies no
+  longer make false links or false hubs; names are matched exactly; each
+  ecosystem's own conventions are read (ProjectReference, parent POMs, version
+  catalogs, relative submodules, CI components, tsconfig aliases and more).
+  The graph tools take `min_confidence`, `layers` and `include_tests`;
+  `dependency_path` returns the surest chains, not the shortest;
+  `change_impact` searches a symbol only in the files that use the changed
+  repository, each line with how sure it is; `impact_of` follows imports, not
+  only #includes (docs/argus/graph.md)
+- **Credits per kind**: chat, API, pictures, video and speech each have a
+  credit a month for each person and group, any of them unlimited; **API
+  access** is on for everyone and an admin can take it from one person
+- **Code Arena's IDE comes closer to VS Code**: files cited in answers open at
+  their lines, edits name the lines they changed, ask about the code you chose
+  (add to chat, explain, fix, complete), grey-text completion from the model, a
+  command palette, @ files, go to line, terminal links, Problems from the
+  project's own check (fixed by the agent), Source control, and replace in
+  Search
+- **Every chat in step with Code Arena both ways**, within seconds, and the
+  web chat follows a chat changed in another tab or device
+
+### :sparkles: New features & Enhancements
+
+- **The default models are an installer choice**: downloaded at the first
+  start, copied from a folder, or skipped (`--default-models`); the app never
+  downloads them on its own, and Admin → Models → Default models lists what is
+  missing
+- Admin → Models says **Unloading…** while a model stops, and why a model
+  loads (an admin by name, a request, kept loaded, making room)
+- `/web all` and `/web WORDS` list and search every chat in Arena from Code
+  Arena; `/sync all` sends Arena what it lacks
+
+### :bug: Bugs fixed
+
+- Code Arena no longer looks stuck in the middle of work: a command with no
+  time limit runs on as a job and the model carries on when it ends; the next
+  message always runs, and what is typed while the model works is kept
+- Two models no longer push each other out: the app alone decides which model
+  makes room, a chat on a kept model that is loading again is answered, and a
+  model killed while answering reads "Not loaded", not "Could not load"
+- A picture asked for just as its server is turned off turns it on again
+- Code Arena's IDE reads .tsx and .jsx with JSX instead of marking errors
+- Argus no longer gives a header two projects have to the one with it nearer
+  its top, nor marks a repository's own code as vendored because of names
+  every project has
+
+### :boom: Breaking changes & Deprecations
+
+- Argus reads every repository again once after the upgrade (its reader's
+  contract moved to 5) and rebuilds its links; `repo_map`, `system_map`,
+  `dependency_path` and `change_impact` return confidence, tiers and possible
+  links, and only walk likely and strong links of the product's own code by
+  default
+- On the first start, each person's gateway budget becomes their credit of
+  every kind (a group's, its credit of every kind); the gateway's budgets and
+  the groups' teams are cleared
+- The app downloads the default models only with `DEFAULT_MODELS=download`
+  (`defaultModels` in the chart); the installer sets it when asked to
+
 ## v5.4.0 (2026-10-10)
 
 ### :rocket: Epics and highlights
