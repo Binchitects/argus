@@ -34,8 +34,10 @@ public static class Ctags
     /// <summary>
     /// Bump when a symbol ROW means something different; composed into the per-file stamp. 4: Go, Java, Kotlin, Rust and
     /// .proto files are read, and every file's declarations (file_decls) with them, so each repository is read again once.
+    /// 5 (v5.5): the declarations are read anew (exact and nested namespaces, code in strings and comments left out, Go's
+    /// import blocks, direct requirements only, and what v5.5 adds), so each repository is read again once more.
     /// </summary>
-    public const string SymbolContractVersion = "4";
+    public const string SymbolContractVersion = "5";
 
     public static readonly string[] Args =
     [

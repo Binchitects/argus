@@ -88,9 +88,10 @@ groups and six languages (C#, Go, Java, TypeScript, Python, C++, plus CI,
 image and submodule links), the 469 links between them were found exactly,
 none missing and none wrong, in 28 ms (`tests/Argus.Tests/GraphTests.cs`).
 
-The index is read again in full once after this release (the reader's
-contract changed): Go, Java, Kotlin, Rust and `.proto` files are indexed now,
-and the manifests are kept for what they declare.
+The index is read again in full once after an upgrade to v5.5 (the reader's
+contract changed: every file's declarations are read anew), as it was after
+v5.4, when Go, Java, Kotlin, Rust and `.proto` files began to be indexed and
+the manifests to be kept for what they declare.
 
 ## Keeping the index current
 
