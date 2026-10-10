@@ -19,7 +19,8 @@ public static class Resolve
         public const string NotFound = "not_found";
     }
 
-    public readonly record struct FileRow(long Id, long RepoId, string Path);
+    /// <summary>A file: its row, repository row and path; its content's hash and its project (GitLab's id), when known.</summary>
+    public readonly record struct FileRow(long Id, long RepoId, string Path, string Sha = "", long Project = 0);
 
     /// <summary>Every /-aligned suffix of <paramref name="path"/>, longest first.</summary>
     public static List<string> PathSuffixes(string path)
@@ -49,8 +50,8 @@ public static class Resolve
     /// <summary>Resolve every include in the database. Returns counts by state.</summary>
     public static Dictionary<string, long> ResolveIncludes(SqliteConnection conn)
     {
-        var allFiles = Sql.Query(conn, "SELECT id, repo_id, path FROM files")
-            .Select(r => new FileRow(r.Long("id"), r.Long("repo_id"), r.Str("path"))).ToList();
+        var allFiles = Sql.Query(conn, "SELECT f.id, f.repo_id, f.path, f.blob_sha, r.gitlab_id FROM files f JOIN repos r ON r.id = f.repo_id")
+            .Select(r => new FileRow(r.Long("id"), r.Long("repo_id"), r.Str("path"), r.Str("blob_sha"), r.Long("gitlab_id"))).ToList();
         var headers = allFiles.Where(f => IsHeader(f.Path)).ToList();
         var index = BuildSuffixIndex(headers);
         var byRepoPath = new Dictionary<(long, string), FileRow>();
@@ -109,26 +110,44 @@ public static class Resolve
     public const int VendorMinFiles = 4;
     public const double VendorMinShare = 0.6;
 
-    /// <summary>Directories that are a bundled copy of another indexed repository (see resolve.py).</summary>
+    /// <summary>
+    /// Names every project has its own of (a package's __init__.py, a README, an index or main file, a build file): sharing
+    /// them says nothing of a copy.
+    /// </summary>
+    static bool Conventional(string name) =>
+        name is "__init__.py" or "CMakeLists.txt" or "README.md" or "README" or "README.rst" or "LICENSE" or "Makefile" or ".gitignore"
+            or "models.py" or "setup.py" or "conftest.py" or "package.json" or "go.mod" or "Cargo.toml" or "pom.xml" or "build.gradle"
+            or "Dockerfile" or "__main__.py" or "mod.rs" or "lib.rs"
+        || name.StartsWith("index.", StringComparison.Ordinal) || name.StartsWith("main.", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Directories that are a bundled copy of another indexed repository (see resolve.py): most of their files, by name
+    /// and content (when known), are another project's, nearer its top. Conventional names do not count, nor does another
+    /// branch of the same project.
+    /// </summary>
     public static HashSet<(long RepoId, string Dir)> FindVendoredDirs(IEnumerable<FileRow> rows)
     {
-        var byRepo = new Dictionary<long, List<string>>();
+        var byRepo = new Dictionary<long, List<FileRow>>();
         var order = new List<long>();
         foreach (var r in rows)
         {
             if (!byRepo.TryGetValue(r.RepoId, out var list)) { byRepo[r.RepoId] = list = []; order.Add(r.RepoId); }
-            list.Add(r.Path);
+            list.Add(r);
         }
 
-        var owned = new Dictionary<long, Dictionary<string, int>>();
+        var owned = new Dictionary<long, Dictionary<string, (int Depth, HashSet<string> Shas)>>();
+        var projectOf = new Dictionary<long, long>();
         foreach (var repoId in order)
         {
-            var depths = new Dictionary<string, int>(StringComparer.Ordinal);
-            foreach (var path in byRepo[repoId])
+            var depths = new Dictionary<string, (int Depth, HashSet<string> Shas)>(StringComparer.Ordinal);
+            foreach (var row in byRepo[repoId])
             {
-                var name = PyStr.AfterLast(path, '/');
-                var depth = PyStr.Count(path, '/');
-                if (!depths.TryGetValue(name, out var d) || depth < d) depths[name] = depth;
+                projectOf[repoId] = row.Project;
+                var name = PyStr.AfterLast(row.Path, '/');
+                var depth = PyStr.Count(row.Path, '/');
+                if (!depths.TryGetValue(name, out var d)) depths[name] = d = (depth, new(StringComparer.Ordinal));
+                else if (depth < d.Depth) depths[name] = d = (depth, d.Shas);
+                if (row.Sha.Length > 0) d.Shas.Add(row.Sha);
             }
             owned[repoId] = depths;
         }
@@ -136,13 +155,14 @@ public static class Resolve
         var vendored = new HashSet<(long, string)>();
         foreach (var repoId in order)
         {
-            var dirs = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+            var dirs = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
             var dirOrder = new List<string>();
-            foreach (var path in byRepo[repoId])
+            foreach (var row in byRepo[repoId])
             {
-                var directory = path.Contains('/') ? PyStr.BeforeLast(path, '/') : "";
+                var directory = row.Path.Contains('/') ? PyStr.BeforeLast(row.Path, '/') : "";
                 if (!dirs.TryGetValue(directory, out var set)) { dirs[directory] = set = new(StringComparer.Ordinal); dirOrder.Add(directory); }
-                set.Add(PyStr.AfterLast(path, '/'));
+                var name = PyStr.AfterLast(row.Path, '/');
+                if (!Conventional(name)) set[name] = row.Sha;
             }
             foreach (var directory in dirOrder)
             {
@@ -152,11 +172,15 @@ public static class Resolve
                 foreach (var otherId in order)
                 {
                     if (otherId == repoId) continue;
+                    // Another branch of the same project is the same code, not a copy of it.
+                    if (projectOf.GetValueOrDefault(repoId) != 0 && projectOf.GetValueOrDefault(repoId) == projectOf.GetValueOrDefault(otherId)) continue;
                     var otherNames = owned[otherId];
-                    var shared = names.Where(otherNames.ContainsKey).ToList();
+                    // The same name, and the same content when both hashes are known.
+                    var shared = names.Where(n => otherNames.TryGetValue(n.Key, out var o) && (n.Value.Length == 0 || o.Shas.Count == 0 || o.Shas.Contains(n.Value)))
+                        .Select(n => n.Key).ToList();
                     if (shared.Count < VendorMinFiles) continue;
                     if ((double)shared.Count / names.Count < VendorMinShare) continue;
-                    int theirs = shared.Max(n => otherNames[n]);
+                    int theirs = shared.Max(n => otherNames[n].Depth);
                     if (theirs < here)
                     {
                         vendored.Add((repoId, directory));

@@ -268,6 +268,26 @@ public class ResolveTests
     }
 
     [Fact]
+    public void A_copy_is_told_by_content_not_by_conventional_names_nor_another_branch_of_the_same_project()
+    {
+        var names = new[] { "inflate.c", "deflate.c", "zutil.c", "adler32.c", "crc32.c" };
+        Resolve.FileRow Row(long id, long repo, string path, string sha, long project) => new(id, repo, path, sha, project);
+        // The same names with other content: a project of its own, not a copy.
+        var other = names.Select((n, i) => Row(i, 1, n, "a" + i, 10)).Concat(names.Select((n, i) => Row(100 + i, 2, "src/gzip/" + n, "b" + i, 20)));
+        Assert.Empty(Resolve.FindVendoredDirs(other));
+        // Their content: a copy.
+        var copy = names.Select((n, i) => Row(i, 1, n, "a" + i, 10)).Concat(names.Select((n, i) => Row(100 + i, 2, "src/gzip/" + n, "a" + i, 20)));
+        Assert.Equal([(2L, "src/gzip")], Resolve.FindVendoredDirs(copy).ToList());
+        // Another branch of the same project holds the same files deeper: not a copy.
+        var branch = names.Select((n, i) => Row(i, 1, n, "a" + i, 10)).Concat(names.Select((n, i) => Row(100 + i, 2, "moved/" + n, "a" + i, 10)));
+        Assert.Empty(Resolve.FindVendoredDirs(branch));
+        // Every package's own names (an __init__.py, a README, index and main files) say nothing.
+        var conventions = new[] { "__init__.py", "README.md", "index.ts", "main.go", "models.py" };
+        var common = conventions.Select((n, i) => Row(i, 1, n, "c", 10)).Concat(conventions.Select((n, i) => Row(100 + i, 2, "pkg/" + n, "c", 20)));
+        Assert.Empty(Resolve.FindVendoredDirs(common));
+    }
+
+    [Fact]
     public void A_directory_named_after_its_own_repo_is_not_vendored()
     {
         IReadOnlySet<string> names = new HashSet<string> { "eal", "zlib" };
