@@ -39,6 +39,7 @@ spec:
             {{- include "arena.secretEnv" (list $ "Engine__ApiKey" "ENGINE_KEY") | nindent 12 }}
             - { name: Engine__Enabled, value: {{ .Values.llamacpp.enabled | quote }} }
             - { name: Engine__FirstModel, value: {{ .Values.model | quote }} }
+            - { name: Engine__DefaultModels, value: {{ .Values.defaultModels | default "" | quote }} }
             {{- include "arena.secretEnv" (list $ "Argus__AdminToken" "ARGUS_KEY") | nindent 12 }}
             - { name: Argus__GitlabUrl, value: {{ .Values.gitlab.url | quote }} }
             {{- include "arena.optionalSecretEnv" (list $ "HuggingFace__Token" "HF_TOKEN") | nindent 12 }}

@@ -14,8 +14,13 @@ public sealed class EngineOptions
     public string Url { get; set; } = "http://llamacpp:8080";
     /// <summary>ENGINE_KEY.</summary>
     public string? ApiKey { get; set; }
-    /// <summary>MODEL in .env: the first chat model, fetched on the first start (Hugging Face repo:quant, or a file in the library).</summary>
+    /// <summary>MODEL in .env: the first chat model (Hugging Face repo:quant, or a file in the library), added once its files are in the library.</summary>
     public string? FirstModel { get; set; }
+    /// <summary>
+    /// DEFAULT_MODELS in .env, the installer's choice: "download" has the app download the default models once, at its first
+    /// start (Provisioning); anything else, nothing is downloaded but by an admin (Admin → Models → Default models).
+    /// </summary>
+    public string? DefaultModels { get; set; }
     /// <summary>Where the app writes the engine's presets, the models to keep loaded, how many at once, and Prometheus's targets.</summary>
     public string ConfigDir { get; set; } = "/engine-config";
     /// <summary>The model library as the app sees it (MODELS_DIR, writable: downloads land there).</summary>

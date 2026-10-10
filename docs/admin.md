@@ -189,6 +189,13 @@ would be with them.
   reads **Kept by working hours**, and cannot be unloaded by hand meanwhile.
   Chats that chose a model keep it; only new ones (and chats that chose none)
   start on the working hours' model.
+- **Default models** (shown while one is missing): the first chat model (`MODEL`),
+  the picture, video and embedding models and the speech server's, each with where
+  it comes from. The app downloads none on its own: **Download the default models**
+  does (from Hugging Face, under **Downloads**), as the installer's download
+  choice does once at the first start (`DEFAULT_MODELS=download`); or copy their
+  files into the library. `MODEL` is added and kept loaded once its files are
+  there, however they came.
 - **Find on Hugging Face** searches GGUF models (most downloaded first), opens
   one to list its files grouped as models (a split model's parts together, by
   quantisation, vision projectors apart) with their sizes, whether each fits

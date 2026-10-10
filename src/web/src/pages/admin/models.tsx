@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils'
 import { AccessPicker, type AccessRule } from './access-picker'
 import { ModelForm, type SavedModel } from './model-form'
 import { WorkingHours } from './model-hours'
+import { DefaultModelsCard } from './default-models'
 import { DownloadsCard, HuggingFaceBrowser } from './huggingface'
 import { bytes, cacheLine, summary, type ModelProfile, type TokenCache } from './model-profile'
 import { ServersSection } from './servers'
@@ -137,6 +138,7 @@ export function ModelsPage() {
           {engine.error}
         </Alert>
       )}
+      <DefaultModelsCard />
       {engine.enabled && <DownloadsCard onAdd={(preset) => setEditing({ preset })} />}
       {small?.warning && (
         <Alert variant="warning" className="mb-4" title="The model for small steps">

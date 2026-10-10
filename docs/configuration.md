@@ -16,7 +16,8 @@ Three places, each with one job:
 | `DOMAIN` | the address: `https://DOMAIN`, `gateway.DOMAIN`, `argus.DOMAIN` |
 | `ADMIN_EMAIL` | the first admin's email |
 | `MODELS_DIR` | where models live (a fast disk, writable by uid 1000) |
-| `MODEL` | the first chat model, fetched on the first start: `owner/repo:QUANT` on Hugging Face, or a file in `MODELS_DIR`. Empty: none |
+| `MODEL` | the first chat model: `owner/repo:QUANT` on Hugging Face, or a file in `MODELS_DIR`, added (and kept loaded) once its files are in `MODELS_DIR`. Empty: none |
+| `DEFAULT_MODELS` | `download`: the app downloads the default models (`MODEL`, pictures, video, embedding, speech) once, at its first start. Empty: it downloads nothing on its own (an admin does under Admin → Models → Default models, or the files are copied in) |
 | `ADMIN_PASSWORD` | the first admin's password; only used while nobody exists |
 | `DB_PASSWORD` | Postgres (the app and the gateway) |
 | `APP_KEY` | encrypts the app's key ring and saved secrets. **Never change it**: sessions, two-factor and saved secrets are lost |

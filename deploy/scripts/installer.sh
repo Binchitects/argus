@@ -45,7 +45,13 @@
 #   --timeout MIN        how long to wait for the stack to be healthy, in minutes (default 15;
 #                        30s: seconds)
 # install:
-#   --domain NAME  --admin-email ADDRESS  --models-dir DIR  --model FILE  --acme-email ADDRESS
+#   --domain NAME  --admin-email ADDRESS  --models-dir DIR  --model FILE|REPO:QUANT  --acme-email ADDRESS
+#   --default-models download|skip|DIR   the default models (the chat model, pictures, video, speech;
+#                        the app never fetches them on its own): download them from Hugging Face
+#                        once, at the app's first start (DEFAULT_MODELS=download in .env; needs the
+#                        network), copy them from DIR (a model library as MODELS_DIR holds it, and
+#                        audio.tar.gz for the speech server's), or skip (an admin downloads them later
+#                        under Admin -> Models -> Default models). Default: skip; asked on a terminal
 #   --http-port N  --https-port N   (default 80 and 443; Podman 8080 and 8443)
 #   --gitlab-url URL  --gitlab-token-file FILE   the GitLab Argus indexes, and its read-only
 #                        token (read from the file, never from the command line). Without them
@@ -176,7 +182,7 @@ case "$CMD" in
 esac
 DIR="" BUNDLE_ARG="" ENGINE="" PROJECT_ARG="" YES=0 DRY=0 LOG_ARG="" TIMEOUT=15
 DOMAIN_ARG="" EMAIL_ARG="" MODELS_ARG="" MODEL_ARG="" HTTP_ARG="" HTTPS_ARG="" ACME_ARG="" GITLAB_ARG="" GITLAB_TOKEN_FILE=""
-CPU_ONLY=0 LEAVE_ARG="" MAKE_CERT=0 HOSTS=0 SKIP_REQ=0 PURGE=0 CONFIRM_ARG="" FINAL_BACKUP="" ROLLBACK=0
+CPU_ONLY=0 LEAVE_ARG="" MAKE_CERT=0 HOSTS=0 SKIP_REQ=0 PURGE=0 CONFIRM_ARG="" FINAL_BACKUP="" ROLLBACK=0 DEFAULTS_ARG=""
 only() { local c; for c in "${@:2}"; do [[ $CMD == "$c" ]] && return 0; done; usage_error "$1 is for ${*:2}"; }
 value() { [[ $2 -gt 1 ]] || usage_error "$1 needs a value"; }
 while [[ $# -gt 0 ]]; do
@@ -195,6 +201,7 @@ while [[ $# -gt 0 ]]; do
     --admin-email) only "$1" install; value "$1" $#; EMAIL_ARG="$2"; shift ;;
     --models-dir) only "$1" install; value "$1" $#; MODELS_ARG="$2"; shift ;;
     --model) only "$1" install; value "$1" $#; MODEL_ARG="$2"; shift ;;
+    --default-models) only "$1" install; value "$1" $#; DEFAULTS_ARG="$2"; shift ;;
     --http-port) only "$1" install; value "$1" $#; HTTP_ARG="$2"; shift ;;
     --https-port) only "$1" install; value "$1" $#; HTTPS_ARG="$2"; shift ;;
     --acme-email) only "$1" install; value "$1" $#; ACME_ARG="$2"; shift ;;
@@ -218,6 +225,8 @@ for p in "$HTTP_ARG" "$HTTPS_ARG"; do
   [[ -z "$p" || ( "$p" =~ ^[0-9]+$ && $p -ge 1 && $p -le 65535 ) ]] || usage_error "a port is a number from 1 to 65535: $p"
 done
 [[ -z "$LEAVE_ARG" || "$LEAVE_ARG" =~ ^[a-z0-9,-]+$ ]] || usage_error "--leave-out names services: a,b,c"
+[[ -z "$DEFAULTS_ARG" || "$DEFAULTS_ARG" == download || "$DEFAULTS_ARG" == skip || -d "$DEFAULTS_ARG" ]] \
+  || usage_error "--default-models is download, skip, or a folder that holds the models: $DEFAULTS_ARG"
 [[ -n "$CONFIRM_ARG" && $PURGE -eq 0 ]] && usage_error "--confirm is for --purge"
 [[ -n "$FINAL_BACKUP" && $PURGE -eq 0 ]] && usage_error "--final-backup is for --purge"
 
@@ -831,6 +840,7 @@ make_env() {
   local env="$DEPLOY/.env" tmp key line val model example="$DEPLOY/.env.example"
   local -A V=()
   V[DOMAIN]="$NEW_DOMAIN"; V[ADMIN_EMAIL]="$NEW_EMAIL"; V[MODELS_DIR]="$NEW_MODELS_DIR"; V[MODEL]="$NEW_MODEL"
+  V[DEFAULT_MODELS]="$([[ "${NEW_DEFAULTS:-}" == download ]] && echo download)"
   # Every key compose cannot start without gets a secret of its own (the gateway's starts with sk-).
   for key in DB_PASSWORD APP_KEY ENGINE_KEY ARGUS_KEY $(required_keys "$DEPLOY"); do [[ -n "${V[$key]:-}" ]] || V[$key]="$(gen_secret)"; done
   V[GATEWAY_KEY]="sk-$(gen_secret)"
@@ -842,7 +852,7 @@ make_env() {
       key="${line%%=*}"
       if [[ "$line" =~ ^[A-Z][A-Z0-9_]*= && -n "${V[$key]+x}" ]]; then
         printf '%s=%s\n' "$key" "${V[$key]}"
-        [[ $key == MODEL && -z "${V[$key]}" ]] && echo "# (none yet: put a .gguf in MODELS_DIR and add it under Admin -> Models; offline, never repo:quant)"
+        [[ $key == MODEL && -z "${V[$key]}" ]] && echo "# (none yet: put a .gguf in MODELS_DIR and add it under Admin -> Models)"
       else
         printf '%s\n' "$line"
       fi
@@ -854,9 +864,11 @@ make_env() {
     [[ -n "$ACME_ARG" ]] && echo "ACME_EMAIL=$ACME_ARG"
     [[ -n "$NEW_GITLAB" ]] && { echo "GITLAB_URL=$NEW_GITLAB"; echo "GITLAB_TOKEN=$NEW_GITLAB_TOKEN"; }
     if [[ "$PROJECT" != arena ]]; then echo "COMPOSE_PROJECT_NAME=$PROJECT"; fi
+    # The release's .env.example names it; one that does not still gets the choice.
+    if [[ "${V[DEFAULT_MODELS]}" == download ]] && ! grep -q '^DEFAULT_MODELS=' "$example"; then echo "DEFAULT_MODELS=download"; fi
   ) > "$tmp" || die "cannot write $tmp"
   mv -f "$tmp" "$env" && chmod 600 "$env" || die "writing $env failed"
-  did ".env written (0600): DOMAIN=$NEW_DOMAIN, MODELS_DIR=$NEW_MODELS_DIR, MODEL=${NEW_MODEL:-none yet}${NEW_GITLAB:+, GITLAB_URL=$NEW_GITLAB and its token}; the secrets generated, none printed"
+  did ".env written (0600): DOMAIN=$NEW_DOMAIN, MODELS_DIR=$NEW_MODELS_DIR, MODEL=${NEW_MODEL:-none yet}$([[ "${NEW_DEFAULTS:-}" == download ]] && echo ", DEFAULT_MODELS=download")${NEW_GITLAB:+, GITLAB_URL=$NEW_GITLAB and its token}; the secrets generated, none printed"
 }
 
 # docker-compose.override.yml for this host, when it has none: what it leaves out, and the
@@ -928,6 +940,24 @@ place_models() {   # place_models plan|do
   elif [[ $1 == do ]]; then
     mkdir -p "$MODELS_DIR"
   fi
+  # The default models from a folder (--default-models DIR): what MODELS_DIR does not have yet, as the folder lays it out.
+  if [[ $CMD == install && -n "${NEW_DEFAULTS:-}" && -d "${NEW_DEFAULTS:-}" ]]; then
+    local from; from="$(cd "$NEW_DEFAULTS" && pwd)"
+    if [[ $1 == plan ]]; then
+      would "copy the default models from $from into $MODELS_DIR ($(find "$from" -type f ! -name audio.tar.gz | wc -l) file(s); those there already kept)"
+    else
+      mkdir -p "$MODELS_DIR" || die "cannot make $MODELS_DIR"
+      n=0
+      while IFS= read -r -d '' f; do
+        f="${f#"$from"/}"
+        [[ "$f" == audio.tar.gz || -f "$MODELS_DIR/$f" ]] && continue
+        mkdir -p "$MODELS_DIR/$(dirname "$f")" || die "cannot write $MODELS_DIR"
+        cp "$from/$f" "$MODELS_DIR/$f" || die "copying $f into $MODELS_DIR failed (disk full?)"
+        n=$((n + 1)); say "  model $f"
+      done < <(find "$from" -type f -print0 | sort -z)
+      ok "$n model file(s) copied from $from into $MODELS_DIR"
+    fi
+  fi
   # What the packing host had that this bundle does not carry.
   while IFS=$'\t' read -r kind _ path; do
     [[ -n "$path" && ! -f "$MODELS_DIR/$path" && -z "${carried[$path]:-}" ]] || continue
@@ -947,15 +977,17 @@ place_models() {   # place_models plan|do
 
 # The speech server's models into the audio volume, when it has none.
 fill_audio() {   # fill_audio plan|do
-  local vol="${PROJECT}_audio"
-  [[ -f "$BUNDLE/audio/audio.tar.gz" || ( $PARTIAL == 1 && "$(bundle_get audio)" == yes ) ]] || return 0
+  local vol="${PROJECT}_audio" from="$BUNDLE/audio"
+  # The speech server's models from the folder the default models are copied from, when it has them.
+  [[ $CMD == install && -n "${NEW_DEFAULTS:-}" && -f "${NEW_DEFAULTS:-}/audio.tar.gz" ]] && from="$(cd "$NEW_DEFAULTS" && pwd)"
+  [[ -f "$from/audio.tar.gz" || ( $PARTIAL == 1 && "$(bundle_get audio)" == yes ) ]] || return 0
   if volume_exists "$vol" && [[ -n "$(in_helper -v "$vol:/v:ro" "$HELPER" sh -c 'ls -A /v | head -n1' 2>/dev/null)" ]]; then
     ok "the speech server's models: $vol has them, kept"; return 0
   fi
   if [[ $1 == plan ]]; then would "fill $vol with the speech server's models"; return 0; fi
   volume_exists "$vol" || E volume create --label "com.docker.compose.project=$PROJECT" --label com.docker.compose.volume=audio "$vol" >/dev/null \
     || die "cannot make the $vol volume"
-  in_helper -v "$vol:/target" -v "$BUNDLE/audio:/bundle:ro" "$HELPER" tar -xzf /bundle/audio.tar.gz --numeric-owner -C /target \
+  in_helper -v "$vol:/target" -v "$from:/bundle:ro" "$HELPER" tar -xzf /bundle/audio.tar.gz --numeric-owner -C /target \
     || die "filling $vol failed"
   did "the speech server's models in $vol"
 }
@@ -1165,7 +1197,11 @@ cmd_install() {
     NEW_MODELS_DIR="$(ask "Where models live (MODELS_DIR)" "${MODELS_ARG:-./models}")"
     # The bundle's first chat model, when it carries the file.
     s="$(bundle_get model)"; [[ -n "$s" ]] && bundle_model_files | grep -qxF "$s" || s=""
-    NEW_MODEL="$(ask "The first chat model, a .gguf in MODELS_DIR (empty: none yet)" "${MODEL_ARG:-$s}")"
+    NEW_DEFAULTS="$(ask "The default models (chat, pictures, video, speech): download (from Hugging Face, once, at the first start), skip (an admin downloads them later), or a folder to copy them from" "${DEFAULTS_ARG:-skip}")"
+    [[ "$NEW_DEFAULTS" == download || "$NEW_DEFAULTS" == skip || -d "$NEW_DEFAULTS" ]] || usage_error "the default models: download, skip, or a folder that holds them: $NEW_DEFAULTS"
+    # Downloaded, the release's MODEL (a repo:quant) is the default; else the bundle's file, when it carries one.
+    [[ "$NEW_DEFAULTS" == download && -z "$s" ]] && s="$(sed -n 's/^MODEL=//p' "$BUNDLE/deploy/.env.example" 2>/dev/null | head -n1)"
+    NEW_MODEL="$(ask "The first chat model: a .gguf in MODELS_DIR, or a Hugging Face repo:quant (empty: none yet)" "${MODEL_ARG:-$s}")"
     NEW_HTTP="$(ask "HTTP port" "${HTTP_ARG:-$([[ $podman -eq 1 ]] && echo 8080 || echo 80)}")"
     NEW_HTTPS="$(ask "HTTPS port" "${HTTPS_ARG:-$([[ $podman -eq 1 ]] && echo 8443 || echo 443)}")"
     NEW_GITLAB="$(ask "The GitLab Argus indexes, its address (empty: none yet)" "$GITLAB_ARG")"
@@ -1182,7 +1218,9 @@ cmd_install() {
     fi
   fi
   [[ "$NEW_DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] || usage_error "the domain is a host name: $NEW_DOMAIN"
-  [[ "$NEW_MODEL" == *:* ]] && refuse "MODEL=$NEW_MODEL is a Hugging Face name (repo:quant), which needs the network: name a .gguf file in MODELS_DIR"
+  NEW_DEFAULTS="${NEW_DEFAULTS:-${DEFAULTS_ARG:-skip}}"
+  [[ "$NEW_MODEL" == *:* && "$NEW_DEFAULTS" == skip ]] \
+    && note "MODEL=$NEW_MODEL is a Hugging Face name: it is added once its files are in MODELS_DIR (Admin -> Models -> Default models downloads them)"
   HTTP_PORT="$NEW_HTTP" HTTPS_PORT="$NEW_HTTPS" DOMAIN="$NEW_DOMAIN"
   MODELS_DIR="$NEW_MODELS_DIR"; case "$MODELS_DIR" in /*) ;; *) MODELS_DIR="$DEPLOY/${MODELS_DIR#./}" ;; esac
   BACKUP_DIR="$DEPLOY/backups"

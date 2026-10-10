@@ -5,8 +5,11 @@
 # The address people open: https://DOMAIN, gateway.DOMAIN (the API) and argus.DOMAIN (Argus's MCP).
 domain: arena.example.com
 adminEmail: admin@example.com
-# The first chat model, fetched from Hugging Face on the first start (repo:quant). More under Admin -> Models.
+# The first chat model (repo:quant, or a .gguf in the library), added once its files are in the library. More under Admin -> Models.
 model: unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL
+# "download": the app downloads the default models (the chat model, pictures, video, speech) once, at its first start.
+# Empty: nothing is downloaded but by an admin (Admin -> Models -> Default models), or the files are copied into the library.
+defaultModels: ""
 gitlab:
   # Argus reads this GitLab with a read-only token (secrets.gitlabToken).
   url: ""

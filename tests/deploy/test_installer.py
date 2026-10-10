@@ -521,6 +521,34 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual((deploy / ".env").read_text(), env)
         self.assertFalse(any(c[1:2] == ["load"] for c in self.r.calls()), "loaded again")
 
+    def test_The_default_models_are_downloaded_by_the_app_once_when_chosen_and_otherwise_never(self):
+        # Downloaded: the choice in .env (the app downloads them once, at its first start), and a repo:quant is a fine MODEL.
+        self.install("--default-models", "download", "--model", "acme/Tiny-GGUF:Q4_K_M")
+        env = (self.dir / "deploy" / ".env").read_text()
+        self.assertIn("DEFAULT_MODELS=download\n", env)
+        self.assertIn("MODEL=acme/Tiny-GGUF:Q4_K_M\n", env)
+
+    def test_The_default_models_are_copied_from_a_folder_and_nothing_is_downloaded(self):
+        folder = self.r.s.dir / "usb"
+        (folder / "acme" / "Tiny-GGUF").mkdir(parents=True)
+        (folder / "acme" / "Tiny-GGUF" / "Tiny-Q4_K_M.gguf").write_text("weights\n")
+        (folder / "image").mkdir()
+        (folder / "image" / "flux.gguf").write_text("pictures\n")
+        models = self.dir / "models"
+        (models / "image").mkdir(parents=True)
+        (models / "image" / "flux.gguf").write_text("here already\n")
+        r = self.install("--default-models", str(folder), "--models-dir", str(models), "--model", "acme/Tiny-GGUF:Q4_K_M")
+        self.assertEqual((models / "acme" / "Tiny-GGUF" / "Tiny-Q4_K_M.gguf").read_text(), "weights\n")
+        # What was there already is kept.
+        self.assertEqual((models / "image" / "flux.gguf").read_text(), "here already\n")
+        self.assertIn("1 model file(s) copied from", r.stdout)
+        self.assertNotIn("DEFAULT_MODELS=download", (self.dir / "deploy" / ".env").read_text())
+
+    def test_A_default_models_choice_that_is_none_of_the_three_is_refused(self):
+        r = self.r.run("install", "--dir", str(self.dir), "--yes", "--default-models", "/no/such/folder")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("--default-models is download, skip, or a folder", r.stderr)
+
     def test_Without_a_GitLab_Argus_is_left_out_and_said_so(self):
         r = self.install(gitlab=False)
         override = (self.dir / "deploy" / "docker-compose.override.yml").read_text()

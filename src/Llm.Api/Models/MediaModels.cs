@@ -2,7 +2,7 @@ namespace Llm.Api.Models;
 
 /// <summary>
 /// The models of the picture, video, embedding, decision and speech servers. The file servers read files
-/// from the library and wait for them; the app fetches those on the first start (<see cref="Provisioning"/>).
+/// from the library and wait for them; they are downloaded only when asked (<see cref="Provisioning"/>).
 /// The speech server fetches its own when the app asks. Paths match docker-compose.yml.
 /// </summary>
 public static class MediaModels

@@ -44,12 +44,22 @@ docker compose up -d
 ```
 
 Open `https://llm.localhost` (or your `DOMAIN`) and sign in as `admin` with
-`ADMIN_PASSWORD`. On the first start the app fetches `MODEL` from Hugging Face
-into `MODELS_DIR`, adds it under **Admin → Models** with the settings that fit
-this machine, and keeps it loaded; it also fetches the picture, video and
-embedding models, and tells the speech server to fetch its own. **Admin →
-Models** shows the downloads as they go. `MODELS_DIR` must be writable by uid
-1000 (the app's user): create it yourself before the first `up`.
+`ADMIN_PASSWORD`. The app downloads no model on its own: a site may be offline
+or metered, or want to choose. The **default models** (`MODEL`, the picture,
+video and embedding models, and the speech server's) come one of three ways:
+
+- `DEFAULT_MODELS=download` in `.env`: the app downloads them once, at its first
+  start (the installer's **download** choice writes it). `MODEL` is a Hugging
+  Face `repo:quant` then.
+- Their files copied into `MODELS_DIR` as it lays them out (the installer's
+  folder choice, or by hand).
+- Later, by an admin: **Admin → Models → Default models** lists what is missing
+  and downloads it when told.
+
+Once `MODEL`'s files are in `MODELS_DIR` (however they came), the app adds it
+under **Admin → Models** with the settings that fit this machine, and keeps it
+loaded. **Admin → Models** shows the downloads as they go. `MODELS_DIR` must be
+writable by uid 1000 (the app's user): create it yourself before the first `up`.
 
 The addresses, all on port 443:
 
@@ -585,7 +595,10 @@ disk for the images and the files, Docker or Podman and compose, an NVIDIA GPU
 the engine can hand to containers (or `--cpu-only`), and the two ports free.
 `scripts/install-requirements.sh` installs what is missing, but it needs the
 network. Then it asks the domain, the admin's e-mail, where models live, the
-first model, the ports and the GitLab Argus indexes; loads the images; writes
+**default models** (download them from Hugging Face once, at the first start;
+copy them from a folder, the model library's layout, with `audio.tar.gz` for the
+speech server's; or skip, and an admin downloads them later under Admin →
+Models), the first model, the ports and the GitLab Argus indexes; loads the images; writes
 `/srv/arena/deploy` and its `.env`, with every secret generated; starts the
 stack, waits until each service is healthy, checks the version the app and
 Argus report, and prints the address. The admin's first password is shown once,
@@ -593,7 +606,8 @@ on the terminal and never in the log: it is `ADMIN_PASSWORD` in `.env` (0600).
 
 - Unattended, every answer is an option: `--yes --domain llm.example.com
   --admin-email a@example.com --gitlab-url URL --gitlab-token-file FILE`
-  (`--models-dir`, `--model`, `--http-port`, `--https-port`, `--acme-email`).
+  (`--models-dir`, `--default-models download|skip|DIR`, `--model`, `--http-port`,
+  `--https-port`, `--acme-email`).
   The token is read from the file, never from the command line.
 - Without a GitLab, Argus is left out until `GITLAB_URL` and `GITLAB_TOKEN` are
   in `.env` (and its line is out of `docker-compose.override.yml`).

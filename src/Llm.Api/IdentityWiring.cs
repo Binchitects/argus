@@ -335,9 +335,10 @@ public static class IdentityWiring
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { ConnectTimeout = TimeSpan.FromSeconds(20), PooledConnectionLifetime = TimeSpan.FromMinutes(10) });
         services.AddSingleton<Models.ModelDownloads>();
         services.AddHostedService(sp => sp.GetRequiredService<Models.ModelDownloads>());
-        // A new deployment's models, fetched by the app itself (MODEL in .env, and the picture, video and speech servers').
+        // A new deployment's default models (MODEL in .env, and the picture, video and speech servers'): fetched only when the installer or an admin asks.
         services.AddHttpClient(Models.Provisioning.Client, c => c.Timeout = TimeSpan.FromMinutes(30));
-        services.AddHostedService<Models.Provisioning>();
+        services.AddSingleton<Models.Provisioning>();
+        services.AddHostedService(sp => sp.GetRequiredService<Models.Provisioning>());
         services.AddHttpClient(Models.MediaControl.Client, c => c.Timeout = TimeSpan.FromSeconds(60));
         services.AddSingleton<Models.MediaControl>();
         services.AddHostedService(sp => sp.GetRequiredService<Models.MediaControl>());
@@ -469,6 +470,7 @@ public static class IdentityWiring
         ArenaMcp.McpEndpoints.MapArenaMcp(app);
         Knowledge.KnowledgeEndpoints.MapKnowledge(app);
         Models.ModelEndpoints.MapModels(app);
+        Models.DefaultModelEndpoints.MapDefaultModels(app);
         Models.ModelHoursEndpoints.MapModelHours(app);
         Models.HuggingFaceEndpoints.MapHuggingFace(app);
         Schedules.TaskEndpoints.MapTasks(app);

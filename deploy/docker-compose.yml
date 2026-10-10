@@ -87,6 +87,7 @@ services:
       Gateway__MasterKey: ${GATEWAY_KEY:?set GATEWAY_KEY in .env}
       Engine__ApiKey: ${ENGINE_KEY:?set ENGINE_KEY in .env}
       Engine__FirstModel: ${MODEL:-}
+      Engine__DefaultModels: ${DEFAULT_MODELS:-}
       Argus__AdminToken: ${ARGUS_KEY:?set ARGUS_KEY in .env}
       Argus__GitlabUrl: ${GITLAB_URL:-}
       HuggingFace__Token: ${HF_TOKEN:-}

@@ -10,18 +10,26 @@ using Microsoft.Extensions.Options;
 namespace Llm.Api.Models;
 
 /// <summary>
-/// What a new deployment needs before it answers, done by the app itself: the picture and video
-/// servers' files into the library (they wait for them), the speech server told to fetch its models,
-/// and the first chat model (MODEL in .env) fetched, added and kept loaded. At start, then every ten
-/// minutes: a module turned on later is provisioned then. Nothing already there is fetched again.
-/// With several replicas, the one that leads does it.
+/// The default models a deployment starts with: the first chat model (MODEL in .env), the picture and
+/// video servers' files (they wait for them in the library) and the speech server's models. Never
+/// fetched by the app on its own (a site may be offline, metered, or want to choose): the installer's
+/// "download the default models" option asks for them (through /internal/models/defaults), or an admin
+/// (Admin → Models → Default models), and only then are they downloaded (<see cref="RunAsync"/> with
+/// download). On its own, at start and every ten minutes, it only adds the first chat model, and keeps
+/// it loaded, once its files are in the library (copied there, or downloaded when asked). With several
+/// replicas, the one that leads does it.
 /// </summary>
+/// <summary>A default model's file (or the speech server's model): what serves it, its place in the library, where it comes from, and present, downloading, missing or unknown.</summary>
+public sealed record DefaultModel(string Server, string Name, string Source, string State);
+
 public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules modules, ModelDownloads downloads, IOptions<EngineOptions> engine,
     IHttpClientFactory http, Replicas replicas, ILogger<Provisioning> logger) : BackgroundService
 {
     public const string Client = "provisioning";
     private const string By = "setup";
     private bool _speechAsked;
+    /// <summary>MODEL's files were said to be missing (once, until they come).</summary>
+    private bool _toldMissing;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -32,7 +40,7 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
             {
                 if (lead)
                 {
-                    await RunAsync(stoppingToken);
+                    await RunAsync(download: await DownloadOnceAsync(stoppingToken), stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -56,31 +64,99 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
         }
     }
 
-    public async Task RunAsync(CancellationToken ct)
+    /// <summary>
+    /// The first chat model added once its files are in the library; with <paramref name="download"/> (asked by the
+    /// installer or an admin), the default models' missing files downloaded first: the servers' files of the modules
+    /// that run, the speech server's models, and MODEL's files. Returns what was started.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> RunAsync(bool download, CancellationToken ct)
     {
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var hf = scope.ServiceProvider.GetRequiredService<HuggingFace>();
+        var started = new List<string>();
+        if (download)
+        {
+            foreach (var (server, files) in MediaModels.Servers)
+            {
+                if (await modules.HasAsync(server, ct))
+                {
+                    started.AddRange(await ServerFilesAsync(files, db, hf, ct));
+                }
+            }
+            if (await modules.HasAsync("audio", ct))
+            {
+                started.AddRange(await SpeechAsync(ct));
+            }
+        }
+        if (engine.Value.Enabled && engine.Value.FirstModel is { Length: > 0 } first && !await db.LocalModels.AnyAsync(ct))
+        {
+            started.AddRange(await FirstModelAsync(first.Trim(), download, scope.ServiceProvider, db, hf, ct));
+        }
+        return started;
+    }
+
+    /// <summary>The setting that says the installer's download was started: it is done once.</summary>
+    public const string Downloaded = "setup.default_models_downloaded";
+
+    /// <summary>
+    /// Whether this round downloads the default models: the installer chose it (DEFAULT_MODELS=download), and it was not
+    /// started before. Marked started at once: a download that fails is the downloads' own to try again.
+    /// </summary>
+    private async Task<bool> DownloadOnceAsync(CancellationToken ct)
+    {
+        if (!string.Equals(engine.Value.DefaultModels?.Trim(), "download", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        if (await db.Settings.AnyAsync(s => s.Key == Downloaded, ct))
+        {
+            return false;
+        }
+        db.Settings.Add(new Setting { Key = Downloaded, Value = DateTimeOffset.UtcNow.ToString("O") });
+        await db.SaveChangesAsync(ct);
+        LogInstallerDownload(logger);
+        return true;
+    }
+
+    /// <summary>The default models' files and whether each is in the library (or, for speech, at the speech server), for the page and the installer.</summary>
+    public async Task<IReadOnlyList<DefaultModel>> ListAsync(CancellationToken ct)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var going = await db.ModelDownloads.AsNoTracking().Where(d => d.State == "queued" || d.State == "running" || d.State == "paused").Select(d => d.Dir).ToListAsync(ct);
+        var list = new List<DefaultModel>();
         foreach (var (server, files) in MediaModels.Servers)
         {
-            if (await modules.HasAsync(server, ct))
+            if (!await modules.HasAsync(server, ct))
             {
-                await ServerFilesAsync(files, db, hf, ct);
+                continue;
+            }
+            foreach (var f in files)
+            {
+                var there = File.Exists(Path.Combine(downloads.Root, f.Dir, f.Name));
+                list.Add(new DefaultModel(server, $"{f.Dir}/{f.Name}", f.Repo, there ? "present" : going.Contains(f.Dir) ? "downloading" : "missing"));
             }
         }
         if (await modules.HasAsync("audio", ct))
         {
-            await SpeechAsync(ct);
+            var have = await SpeechHasAsync(ct);
+            list.AddRange(MediaModels.Speech.Select(m => new DefaultModel("audio", m.Name, m.Id, have is null ? "unknown" : have.Contains(m.Id) ? "present" : "missing")));
         }
-        if (engine.Value.Enabled && engine.Value.FirstModel is { Length: > 0 } first && !await db.LocalModels.AnyAsync(ct))
+        if (engine.Value.Enabled && engine.Value.FirstModel is { Length: > 0 } first)
         {
-            await FirstModelAsync(first.Trim(), scope.ServiceProvider, db, hf, ct);
+            var file = LocalFirst(first.Trim());
+            list.Add(new DefaultModel("chat", first.Trim(), file?.File ?? first.Trim(), file is not null ? "present" : going.Any(d => first.StartsWith(d, StringComparison.Ordinal)) ? "downloading" : "missing"));
         }
+        return list;
     }
 
     /// <summary>The files a server reads that are not in the library: one download per repository.</summary>
-    private async Task ServerFilesAsync(IReadOnlyList<MediaModels.ServerFile> files, AppDbContext db, HuggingFace hf, CancellationToken ct)
+    private async Task<IReadOnlyList<string>> ServerFilesAsync(IReadOnlyList<MediaModels.ServerFile> files, AppDbContext db, HuggingFace hf, CancellationToken ct)
     {
+        var started = new List<string>();
         var missing = files.Where(f => !File.Exists(Path.Combine(downloads.Root, f.Dir, f.Name))).ToList();
         foreach (var repo in missing.GroupBy(f => (f.Repo, f.Dir)))
         {
@@ -99,6 +175,7 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
             Start(db, repo.Key.Repo, sha, repo.Key.Dir, chosen.Select(c => new DownloadFile { Path = c.f.Path, Target = c.f.Name, Size = c.Item2!.Size, Sha256 = c.Item2.Sha256 }));
             var names = string.Join(", ", repo.Select(f => f.Name));
             LogFetching(logger, names, repo.Key.Dir);
+            started.Add($"{repo.Key.Dir}: {names}");
         }
         if (db.ChangeTracker.HasChanges())
         {
@@ -106,6 +183,7 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
             // Woken once they are saved: woken before, it finds none and sleeps a minute.
             downloads.Wake();
         }
+        return started;
     }
 
     /// <summary>
@@ -113,19 +191,12 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
     /// every one (a download cut short is listed as there: asking again finishes it, and a whole one
     /// answers at once), then only for those it does not list.
     /// </summary>
-    private async Task SpeechAsync(CancellationToken ct)
+    private async Task<IReadOnlyList<string>> SpeechAsync(CancellationToken ct)
     {
         var client = http.CreateClient(Client);
-        var have = new HashSet<string>(StringComparer.Ordinal);
-        var list = await client.GetFromJsonAsync<JsonObject>($"{MediaModels.AudioUrl}/v1/models", ct);
-        foreach (var m in (list?["data"] as JsonArray ?? []).OfType<JsonObject>())
-        {
-            if (m["id"]?.GetValue<string>() is { } id)
-            {
-                have.Add(id);
-            }
-        }
+        var have = await SpeechHasAsync(ct) ?? [];
         var all = !_speechAsked;
+        var started = new List<string>();
         foreach (var (name, id, _) in MediaModels.Speech.Where(s => all || !have.Contains(s.Id)))
         {
             LogSpeech(logger, name, id);
@@ -134,8 +205,62 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
             {
                 LogSpeechFailed(logger, id, (int)res.StatusCode);
             }
+            else if (!have.Contains(id))
+            {
+                started.Add($"speech: {name}");
+            }
         }
         _speechAsked = true;
+        return started;
+    }
+
+    /// <summary>The models the speech server has; null when it cannot be asked.</summary>
+    private async Task<HashSet<string>?> SpeechHasAsync(CancellationToken ct)
+    {
+        try
+        {
+            var list = await http.CreateClient(Client).GetFromJsonAsync<JsonObject>($"{MediaModels.AudioUrl}/v1/models", ct);
+            return [.. (list?["data"] as JsonArray ?? []).OfType<JsonObject>().Select(m => m["id"]?.GetValue<string>()).OfType<string>()];
+        }
+        catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// MODEL's files in the library, without asking Hugging Face: a .gguf named, or a repository's quant (its first part
+    /// when split) and its projector, as a download (or a copy of one) leaves them, under the repository's folder.
+    /// </summary>
+    private (string File, string? Projector)? LocalFirst(string first)
+    {
+        if (first.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
+        {
+            return File.Exists(Path.Combine(downloads.Root, first.TrimStart('/'))) ? (first.TrimStart('/'), null) : null;
+        }
+        var at = first.LastIndexOf(':');
+        var (repo, quant) = at > 0 ? (first[..at], first[(at + 1)..]) : (first, "Q4_K_M");
+        var folder = Path.Combine(downloads.Root, repo);
+        if (!Directory.Exists(folder))
+        {
+            return null;
+        }
+        var ggufs = Directory.EnumerateFiles(folder, "*.gguf", SearchOption.AllDirectories)
+            .Select(f => Path.GetRelativePath(downloads.Root, f).Replace('\\', '/')).Order(StringComparer.Ordinal).ToList();
+        bool Projector(string f) => Path.GetFileName(f).Contains("mmproj", StringComparison.OrdinalIgnoreCase);
+        var parts = ggufs.Where(f => !Projector(f) && Path.GetFileName(f).Contains(quant, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (parts.Count == 0)
+        {
+            return null;
+        }
+        // A split model: all its parts, or not there yet.
+        var split = SplitPart().Match(Path.GetFileNameWithoutExtension(parts[0]));
+        if (split.Success && parts.Count < int.Parse(split.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture))
+        {
+            return null;
+        }
+        var projector = ggufs.Where(Projector).OrderBy(f => f.Contains("F16", StringComparison.OrdinalIgnoreCase) ? 0 : 1).FirstOrDefault();
+        return (parts[0], projector);
     }
 
     /// <summary>
@@ -143,14 +268,24 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
     /// vision projector, when it has one). Added once it is all there, with the settings recommended for
     /// this machine, and kept loaded.
     /// </summary>
-    private async Task FirstModelAsync(string first, IServiceProvider services, AppDbContext db, HuggingFace hf, CancellationToken ct)
+    private async Task<IReadOnlyList<string>> FirstModelAsync(string first, bool download, IServiceProvider services, AppDbContext db, HuggingFace hf, CancellationToken ct)
     {
         var library = services.GetRequiredService<ModelLibrary>();
         string file;
         string? projector = null;
-        if (first.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
+        if (LocalFirst(first) is { } local)
         {
-            file = first.TrimStart('/');
+            (file, projector) = local;
+            _toldMissing = false;
+        }
+        else if (!download || first.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!_toldMissing)
+            {
+                LogFirstMissing(logger, first);
+                _toldMissing = true;
+            }
+            return [];
         }
         else
         {
@@ -160,7 +295,7 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
             if (repo.Models.FirstOrDefault(m => !m.Projector && string.Equals(m.Quant, quant, StringComparison.OrdinalIgnoreCase)) is not { } model)
             {
                 LogNoQuant(logger, repoId, quant);
-                return;
+                return [];
             }
             var mmproj = repo.Models.Where(m => m.Projector).OrderBy(m => m.Quant is "F16" or "BF16" ? 0 : 1).ThenBy(m => m.Size).FirstOrDefault();
             file = $"{repo.Id}/{model.Files[0].Path}";
@@ -175,14 +310,15 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
                     downloads.Wake();
                     var fetching = Path.GetFileName(file);
                     LogFetching(logger, fetching, repo.Id);
+                    return [$"chat: {fetching}"];
                 }
-                return;
+                return [];
             }
         }
         if (library.Find(file) is not { } entry)
         {
             LogNotInLibrary(logger, file);
-            return;
+            return [];
         }
         var name = SplitPart().Replace(Path.GetFileNameWithoutExtension(file), "");
         var draft = new LocalModel { Name = name, File = file, Projector = projector };
@@ -201,6 +337,7 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
         await catalog.WritePresetsAsync(ct);
         services.GetRequiredService<EngineWatcher>().Wake();
         LogAdded(logger, name, file);
+        return [];
     }
 
     private static void Start(AppDbContext db, string repo, string sha, string dir, IEnumerable<DownloadFile> files)
@@ -236,4 +373,10 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Setup: {Name} ({File}) added and kept loaded")]
     private static partial void LogAdded(ILogger logger, string name, string file);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Setup: downloading the default models, as the installer was told (DEFAULT_MODELS=download); once")]
+    private static partial void LogInstallerDownload(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Setup: MODEL ({Model}) is not in the model library, and the app fetches nothing on its own: download the default models (the installer, or Admin -> Models -> Default models), or copy its files into the library")]
+    private static partial void LogFirstMissing(ILogger logger, string model);
 }
