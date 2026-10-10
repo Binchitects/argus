@@ -257,6 +257,23 @@ public class ResolveTests
     }
 
     [Fact]
+    public void A_header_two_projects_have_is_not_chosen_by_depth_and_a_projects_branches_count_once()
+    {
+        // Two projects, one with the header nearer its top: not a reason to choose it.
+        var files = new[] { F(1, 2, "config.h"), F(2, 3, "include/x/config.h") };
+        var (_, deep) = Resolve.ResolveOne(new(1, "config.h", false, "a.c"), Resolve.BuildSuffixIndex(files), files.ToDictionary(f => (f.RepoId, f.Path)));
+        Assert.Equal("ambiguous", deep);
+        // One project indexed at two branches (rows 2 and 3): its default branch's header.
+        var projects = new Dictionary<long, (long Project, bool Default)> { [1] = (10, true), [2] = (20, true), [3] = (20, false) };
+        var branches = new Dictionary<long, string> { [1] = "feature", [2] = "main", [3] = "dev" };
+        var two = new[] { F(1, 2, "include/money.h"), F(2, 3, "include/money.h") };
+        var (match, state) = Resolve.ResolveOne(new(1, "money.h", true, "a.c"), Resolve.BuildSuffixIndex(two), two.ToDictionary(f => (f.RepoId, f.Path)),
+            branchOfRepo: branches, projects: projects);
+        Assert.Equal("resolved", state);
+        Assert.Equal(2L, match!.Value.RepoId);
+    }
+
+    [Fact]
     public void A_bundled_copy_nested_deeper_than_the_original_is_vendored()
     {
         var names = new[] { "inflate.c", "deflate.c", "zutil.c", "adler32.c", "crc32.c" };

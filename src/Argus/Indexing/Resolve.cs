@@ -59,10 +59,12 @@ public static class Resolve
 
         var repoNamesById = new Dictionary<long, string>();
         var branchOfRepo = new Dictionary<long, string>();
-        foreach (var row in Sql.Query(conn, "SELECT id, path_with_namespace, branch FROM repos"))
+        var projects = new Dictionary<long, (long Project, bool Default)>();
+        foreach (var row in Sql.Query(conn, "SELECT id, gitlab_id, path_with_namespace, branch, default_branch FROM repos"))
         {
             repoNamesById[row.Long("id")] = PyStr.AfterLast(row.Str("path_with_namespace"), '/');
             branchOfRepo[row.Long("id")] = row.Str("branch");
+            projects[row.Long("id")] = (row.Long("gitlab_id"), row.Str("branch") == row.Str("default_branch"));
         }
         var repoNames = new HashSet<string>(repoNamesById.Values, StringComparer.Ordinal);
 
@@ -87,7 +89,7 @@ public static class Resolve
             {
                 var (match, state) = ResolveOne(
                     new IncludeRef(inc.Long("repo_id"), inc.Str("raw"), inc.Long("is_angle") != 0, inc.Str("from_path")),
-                    index, byRepoPath, repoNames, repoNamesById, vendoredDirs, branchOfRepo);
+                    index, byRepoPath, repoNames, repoNamesById, vendoredDirs, branchOfRepo, projects);
                 counts[state]++;
                 update.Parameters[0].Value = match is { } m1 ? m1.Id : DBNull.Value;
                 update.Parameters[1].Value = match is { } m2 ? m2.RepoId : DBNull.Value;
@@ -249,7 +251,8 @@ public static class Resolve
     public static (FileRow? Match, string State) ResolveOne(
         IncludeRef inc, Dictionary<string, List<FileRow>> index, Dictionary<(long, string), FileRow> byRepoPath,
         IReadOnlySet<string>? repoNames = null, IReadOnlyDictionary<long, string>? repoNamesById = null,
-        HashSet<(long, string)>? vendoredDirs = null, IReadOnlyDictionary<long, string>? branchOfRepo = null)
+        HashSet<(long, string)>? vendoredDirs = null, IReadOnlyDictionary<long, string>? branchOfRepo = null,
+        IReadOnlyDictionary<long, (long Project, bool Default)>? projects = null)
     {
         repoNames ??= new HashSet<string>();
         repoNamesById ??= new Dictionary<long, string>();
@@ -281,18 +284,32 @@ public static class Resolve
         if (sameRepo.Count > 0) candidates = sameRepo;
         else if (IsSystemHeader(raw)) return (null, Resolution.External);
 
-        if (branchOfRepo.Count > 0)
+        branchOfRepo.TryGetValue(inc.RepoId, out var want);
+        if (sameRepo.Count == 0 && projects is { Count: > 0 })
         {
-            branchOfRepo.TryGetValue(inc.RepoId, out var want);
+            // A project with several branches indexed is one candidate: at the asker's branch, else its default branch.
+            candidates = [.. candidates.GroupBy(c => projects.TryGetValue(c.RepoId, out var p) ? p.Project : -c.RepoId)
+                .Select(g => g.FirstOrDefault(c => branchOfRepo.TryGetValue(c.RepoId, out var b) && b == want)
+                    is { Path: not null } same ? [same]
+                    : g.Where(c => projects.TryGetValue(c.RepoId, out var p) && p.Default).ToList() is { Count: > 0 } byDefault ? byDefault : g.ToList())
+                .SelectMany(c => c)];
+        }
+        else if (branchOfRepo.Count > 0)
+        {
             var sameBranch = candidates.Where(c => branchOfRepo.TryGetValue(c.RepoId, out var b) && b == want).ToList();
             if (sameBranch.Count > 0) candidates = sameBranch;
         }
 
         if (candidates.Count == 1) return (candidates[0], Resolution.Resolved);
 
-        int shortest = candidates.Min(c => PyStr.Count(c.Path, '/'));
-        var fewest = candidates.Where(c => PyStr.Count(c.Path, '/') == shortest).ToList();
-        if (fewest.Count == 1) return (fewest[0], Resolution.Resolved);
+        // Within the asker's own repository, the shallowest file is the one meant; across repositories, a header two of
+        // them have is not chosen between by its depth.
+        if (sameRepo.Count > 0)
+        {
+            int shortest = candidates.Min(c => PyStr.Count(c.Path, '/'));
+            var fewest = candidates.Where(c => PyStr.Count(c.Path, '/') == shortest).ToList();
+            if (fewest.Count == 1) return (fewest[0], Resolution.Resolved);
+        }
 
         return (null, Resolution.Ambiguous);
     }
