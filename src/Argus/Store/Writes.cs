@@ -197,9 +197,16 @@ public static class Writes
         Atomic(conn, () =>
         {
             Sql.Exec(conn, "DELETE FROM file_decls WHERE file_id = ?", fileId);
+            if (decls.Count == 0) return;
+            // One prepared statement for the file's rows.
+            using var insert = Sql.Command(conn,
+                "INSERT INTO file_decls (repo_id, file_id, role, kind, name, line, form, scope, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", new object?[9]);
             foreach (var d in decls)
-                Sql.Exec(conn, "INSERT INTO file_decls (repo_id, file_id, role, kind, name, line) VALUES (?, ?, ?, ?, ?, ?)",
-                    repoId, fileId, d.Role, d.Kind, d.Name, d.Line);
+            {
+                object?[] values = [repoId, fileId, d.Role, d.Kind, d.Name, d.Line, d.Form, d.Scope, d.Origin];
+                for (var i = 0; i < values.Length; i++) insert.Parameters[i].Value = values[i] ?? DBNull.Value;
+                insert.ExecuteNonQuery();
+            }
         });
 
     public static void RecordError(SqliteConnection conn, long repoId, string? path, string stage, string message, long ts) =>

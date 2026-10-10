@@ -7,19 +7,8 @@ namespace Argus.Store;
 
 public static partial class Graph
 {
-    /// <summary>How a link came about, by the kind of what the file used.</summary>
-    public static string LinkKind(string declKind) => declKind switch
-    {
-        "nuget" or "npm" or "pypi" or "cargo" or "maven" => "package:" + declKind,
-        "cs" or "cs-type" => "import:csharp",
-        "java" or "java-package" => "import:java",
-        "py" => "import:python",
-        "go" => "import:go",
-        "proto" => "import:proto",
-        "repo" => "repository",
-        "image" => "image",
-        _ => declKind,
-    };
+    /// <summary>A link's kind, for what a file used (its layer and how sure it is: LinkKinds).</summary>
+    public static string LinkKind(string declKind, string form = "") => LinkKinds.Of(declKind, form).Kind;
 
     /// <summary>
     /// The kinds whose names are dotted or slashed paths: a use matches the longest name a repository provides that starts it
@@ -63,7 +52,10 @@ public static partial class Graph
     /// top of its chain of package folders (python/acme/money/__init__.py is acme.money), each module in it under it
     /// (acme.money.round), and a module beside no package at the repository's top (or in src/, lib/, python/) by its name.
     /// </summary>
-    public static IEnumerable<string> PythonModules(IReadOnlyCollection<string> files)
+    public static IEnumerable<string> PythonModules(IReadOnlyCollection<string> files) => PythonModulesAt(files).Select(m => m.Module);
+
+    /// <summary>Each Python module a repository's files make, with the file that makes it.</summary>
+    static IEnumerable<(string Module, string File)> PythonModulesAt(IReadOnlyCollection<string> files)
     {
         var packages = files.Where(f => f.EndsWith("/__init__.py", StringComparison.Ordinal) || f == "__init__.py")
             .Select(f => f.Contains('/') ? f[..f.LastIndexOf('/')] : "").ToHashSet(StringComparer.Ordinal);
@@ -83,11 +75,11 @@ public static partial class Graph
             var stem = Path.GetFileNameWithoutExtension(f);
             if (Dotted(dir) is { } package)
             {
-                yield return stem == "__init__" ? package : package + "." + stem;
+                yield return (stem == "__init__" ? package : package + "." + stem, f);
             }
             else if (stem != "__init__" && dir is "" or "src" or "lib" or "python" && !GenericModules.Contains(stem) && stem is not ("setup" or "conftest" or "manage" or "main"))
             {
-                yield return stem;
+                yield return (stem, f);
             }
         }
     }
@@ -120,31 +112,88 @@ public static partial class Graph
         return string.Join('/', parts).ToLowerInvariant();
     }
 
-    /// <summary>
-    /// Rebuilds repo_links from what files declare (file_decls) and from resolved #includes (repo_deps): each use resolved
-    /// to the one repository that provides its name. A repository's own name stays inside it; a name two repositories
-    /// provide links to neither (counted as ambiguous). Returns the counts by state, kept for index_status too.
-    /// </summary>
-    public static Dictionary<string, long> RebuildLinks(SqliteConnection conn)
+    /// <summary>What a use resolved to: its state, the projects (one when resolved, several when ambiguous), the name matched and how.</summary>
+    sealed record Match(string State, HashSet<long> Projects, string Matched, string How)
     {
-        var repos = Sql.Query(conn, "SELECT id, gitlab_id, lower(path_with_namespace) AS path, branch, default_branch FROM repos")
+        public static readonly Match External = new("external", [], "", "");
+    }
+
+    /// <summary>One way one repository uses another, as it is gathered from the files that make it.</summary>
+    sealed class Evidence
+    {
+        public required string DeclKind { get; init; }
+        public required string Layer { get; init; }
+        public required string How { get; set; }
+        public required int Providers { get; init; }
+        public required double Prior { get; set; }
+        public HashSet<long> MainFiles { get; } = [];
+        public HashSet<long> TestFiles { get; } = [];
+        public List<(string Path, long Line)> Uses { get; } = [];
+        public (string Path, long Line)? Provider { get; set; }
+        public List<string>? Candidates { get; set; }
+        public bool Candidate { get; set; }
+        public string? Why { get; set; }
+
+        public void Use(long fileId, string path, long line, string scope)
+        {
+            (scope == "test" ? TestFiles : MainFiles).Add(fileId);
+            if (Uses.Count < 3 && !Uses.Contains((path, line))) Uses.Add((path, line));
+        }
+    }
+
+    /// <summary>A use several repositories provide, kept to settle once every unique one is known.</summary>
+    sealed record Pending(RepoRow From, long FileId, string Path, long Line, string Scope, string DeclKind, string Form, Match Match);
+
+    /// <summary>
+    /// Rebuilds the links between repositories from what their files declare (file_decls) and from resolved #includes
+    /// (repo_deps), at their default branches (what others build against). Each use resolves to the repository that
+    /// provides its name; its own repository's name stays inside it. A way of using another is kept with its layer, its
+    /// scope (main, or test when only tests use it), how its name matched, how many repositories provide it, a confidence
+    /// and a tier, the files that make it and where. A name several repositories provide is settled by what else the user
+    /// has (a package or submodule of one of them, the same file's other uses, its other links); else it is kept as a
+    /// candidate of each, never walked. repo_edges sums each pair per layer (the noisy-OR of its kinds), and file_links says
+    /// which files make each link. Returns the counts by state, kept for index_status too.
+    /// </summary>
+    public static Dictionary<string, long> RebuildLinks(SqliteConnection conn, bool force = false)
+    {
+        // Nothing declared, resolved or vendored changed since the last rebuild: its links stand.
+        var stamp = string.Join("|",
+            Sql.Scalar(conn, "SELECT COUNT(*) || ':' || COALESCE(MAX(id), 0) FROM file_decls"),
+            Sql.Scalar(conn, "SELECT COUNT(*) || ':' || COALESCE(SUM(weight), 0) FROM repo_deps"),
+            Sql.Scalar(conn, "SELECT COUNT(*) FROM files WHERE is_vendored != 0"),
+            Sql.Scalar(conn, "SELECT COALESCE(group_concat(id || ':' || branch || ':' || default_branch || ':' || path_with_namespace, ','), '') FROM repos"));
+        if (!force && Sql.One(conn, "SELECT value FROM argus_meta WHERE key = 'graph_stamp'") is { } known && known.Str("value") == stamp
+            && Sql.One(conn, "SELECT value FROM argus_meta WHERE key = 'graph_stats'") is { } saved
+            && JsonNode.Parse(saved.Str("value")) is JsonObject kept)
+            return kept.ToDictionary(kv => kv.Key, kv => kv.Value?.GetValue<long>() ?? 0);
+
+        var repos = Sql.Query(conn, "SELECT id, gitlab_id, lower(path_with_namespace) AS path, branch, default_branch FROM repos ORDER BY id")
             .Select(r => new RepoRow(r.Long("id"), r.Long("gitlab_id"), r.Str("path"), r.Str("branch") == r.Str("default_branch")))
             .ToList();
         var byId = repos.ToDictionary(r => r.Id);
         // A library is linked at its default branch: that is what others build against.
         var defaultRow = repos.Where(r => r.Default).GroupBy(r => r.GitlabId).ToDictionary(g => g.Key, g => g.First().Id);
         var byPath = repos.Where(r => r.Default).GroupBy(r => r.Path).ToDictionary(g => g.Key, g => g.First());
+        var pathOfProject = byPath.Values.ToDictionary(r => r.GitlabId, r => r.Path);
 
-        // What each project provides, by kind and name (names of the default branch only).
+        // What each project provides, by kind and name (default branches, the product's own files only), and one place each says so.
         var provides = new Dictionary<string, Dictionary<string, HashSet<long>>>(StringComparer.Ordinal);
+        var providedAt = new Dictionary<(string Kind, string Name, long Project), (string Path, long Line)>();
         var protoFiles = new List<(string Path, long Project)>();
         var pyFiles = new Dictionary<long, List<string>>();
         var aliases = new Dictionary<long, HashSet<string>>();
         // A repository's own packages (its PackageIds): a .NET root of its own (Microsoft's own estate) is its to provide.
         var nugetRoots = Sql.Query(conn, "SELECT DISTINCT repo_id, name FROM file_decls WHERE role = 'provides' AND kind = 'nuget'")
             .Select(r => (r.Long("repo_id"), r.Str("name").Split('.')[0])).ToHashSet();
+        void Provide(string kind, string name, long project, string path, long line)
+        {
+            if (!provides.TryGetValue(kind, out var names)) provides[kind] = names = new(StringComparer.Ordinal);
+            if (!names.TryGetValue(name, out var projects)) names[name] = projects = [];
+            projects.Add(project);
+            providedAt.TryAdd((kind, name, project), (path, line));
+        }
         using (var cmd = Sql.Command(conn,
-            "SELECT d.repo_id, d.kind, d.name, f.path, f.is_vendored FROM file_decls d JOIN files f ON f.id = d.file_id WHERE d.role = 'provides'", null))
+            "SELECT d.repo_id, d.kind, d.name, f.path, f.is_vendored, d.line, d.scope, d.origin FROM file_decls d JOIN files f ON f.id = d.file_id WHERE d.role = 'provides'", null))
         using (var reader = cmd.ExecuteReader())
         {
             while (reader.Read())
@@ -152,19 +201,21 @@ public static partial class Graph
                 if (!byId.TryGetValue(reader.GetInt64(0), out var repo) || !repo.Default) continue;
                 var kind = reader.GetString(1);
                 var name = reader.GetString(2);
-                // A vendored copy, a test's fixture or a sample provides nothing: the library is the repository it came from.
-                if (reader.GetInt64(4) != 0 || NotAProvider(reader.GetString(3))) continue;
-                if (kind == "cs" && ForeignCsRoots.Contains(name.Split('.')[0]) && !nugetRoots.Contains((repo.Id, name.Split('.')[0].ToLowerInvariant()))) continue;
-                if (kind == "proto")
-                {
-                    protoFiles.Add((name, repo.GitlabId));
-                    continue;
-                }
+                var path = reader.GetString(3);
                 if (kind == "ts-alias")
                 {
                     // A path alias is the repository's own code under a package's name: never another's to provide.
                     if (!aliases.TryGetValue(repo.Id, out var own)) aliases[repo.Id] = own = new(StringComparer.Ordinal);
                     own.Add(name);
+                    continue;
+                }
+                // A vendored copy, a test's file, a fixture or a sample, generated code: the library is elsewhere.
+                if (reader.GetInt64(4) != 0 || NotAProvider(path) || reader.GetString(6) == "test" || reader.GetString(7) is "sample" or "generated") continue;
+                if (kind == "cs" && ForeignCsRoots.Contains(name.Split('.')[0]) && !nugetRoots.Contains((repo.Id, name.Split('.')[0].ToLowerInvariant()))) continue;
+                if (kind == "proto")
+                {
+                    protoFiles.Add((name, repo.GitlabId));
+                    providedAt.TryAdd(("proto", name, repo.GitlabId), (path, 1));
                     continue;
                 }
                 if (kind == "py-file")
@@ -173,20 +224,15 @@ public static partial class Graph
                     list.Add(name);
                     continue;
                 }
-                if (!provides.TryGetValue(kind, out var names)) provides[kind] = names = new(StringComparer.Ordinal);
-                if (!names.TryGetValue(name, out var projects)) names[name] = projects = [];
-                projects.Add(repo.GitlabId);
+                Provide(kind, name, repo.GitlabId, path, reader.GetInt64(5));
             }
         }
-
         // Python modules, named from each repository's import roots.
-        if (!provides.TryGetValue("py", out var pyNames)) provides["py"] = pyNames = new(StringComparer.Ordinal);
         foreach (var (project, files) in pyFiles)
-            foreach (var module in PythonModules(files))
-            {
-                if (!pyNames.TryGetValue(module, out var projects)) pyNames[module] = projects = [];
-                projects.Add(project);
-            }
+        {
+            foreach (var (module, file) in PythonModulesAt(files))
+                Provide("py", module, project, file, 1);
+        }
         // A top-level module name alone (config, utils) links only to a repository the user declares a dependency on.
         var pypiUses = Sql.Query(conn, "SELECT DISTINCT repo_id, name FROM file_decls WHERE role = 'uses' AND kind = 'pypi'")
             .GroupBy(r => r.Long("repo_id")).ToDictionary(g => g.Key, g => g.Select(r => r.Str("name")).ToHashSet(StringComparer.Ordinal));
@@ -201,64 +247,239 @@ public static partial class Graph
 
         var stats = new Dictionary<string, long>(StringComparer.Ordinal);
         void Count(string state) => stats[state] = stats.GetValueOrDefault(state) + 1;
-        // (from row, to row, link kind, name) -> files, one example
-        var links = new Dictionary<(long From, long To, string Kind, string Name), (HashSet<long> Files, long FileId, long Line)>();
+        var evidence = new Dictionary<(long From, long To, string Kind, string Name), Evidence>();
+        var pending = new List<Pending>();
+        // Which projects each file's uses resolved to uniquely: what settles a name its other uses agree on.
+        var perFile = new Dictionary<long, HashSet<long>>();
+        var memo = new Dictionary<(string Kind, string Name, long From), Match>();
 
-        using (var cmd = Sql.Command(conn, "SELECT d.repo_id, d.file_id, d.kind, d.name, d.line FROM file_decls d WHERE d.role = 'uses'", null))
+        // A name several provide that nothing settled is a candidate of each, kept apart: it is never walked.
+        var candidateEvidence = new Dictionary<(long From, long To, string Kind, string Name), Evidence>();
+        Evidence Add(RepoRow from, long to, string declKind, string form, string matched, string how, int providers, bool candidate = false)
+        {
+            var (kind, layer) = LinkKinds.Of(declKind, form);
+            var key = (from.Id, defaultRow[to], kind, matched);
+            var store = candidate ? candidateEvidence : evidence;
+            var prior = LinkKinds.Prior(kind, how);
+            if (!store.TryGetValue(key, out var ev))
+            {
+                store[key] = ev = new Evidence { DeclKind = declKind, Layer = layer, How = how, Providers = providers, Prior = prior, Candidate = candidate };
+                ev.Provider = providedAt.TryGetValue((declKind is "cs-type" ? "cs" : declKind is "java-package" ? "java" : declKind, matched, to), out var p) ? p : null;
+            }
+            else if (prior > ev.Prior)
+            {
+                // The surest way any of its files made it.
+                ev.How = how;
+                ev.Prior = prior;
+            }
+            return ev;
+        }
+
+        using (var cmd = Sql.Command(conn,
+            "SELECT d.repo_id, d.file_id, d.kind, d.name, d.line, d.form, d.scope, f.path FROM file_decls d JOIN files f ON f.id = d.file_id WHERE d.role = 'uses'", null))
         using (var reader = cmd.ExecuteReader())
         {
             while (reader.Read())
             {
-                if (!byId.TryGetValue(reader.GetInt64(0), out var from)) continue;
+                // The graph is between default branches: another branch's uses are that branch's own question.
+                if (!byId.TryGetValue(reader.GetInt64(0), out var from) || !from.Default) continue;
                 var fileId = reader.GetInt64(1);
                 var kind = reader.GetString(2);
                 var name = reader.GetString(3);
-                var (state, project, matched) = kind == "npm" && aliases.TryGetValue(from.Id, out var own) && own.Contains(name)
-                    ? ("internal", from.GitlabId, name)
-                    : Resolve(kind, name, from, provides, protoFiles, byPath);
-                if (state == "resolved" && kind == "py" && !matched.Contains('.')
-                    && !(pypiUses.TryGetValue(from.Id, out var declared) && pypiOf.TryGetValue(project, out var offered) && declared.Overlaps(offered)))
-                    state = "unconfirmed";
-                Count(state);
-                if (state != "resolved" || !defaultRow.TryGetValue(project, out var to) || project == from.GitlabId) continue;
-                var key = (from.Id, to, LinkKind(kind), matched);
-                if (!links.TryGetValue(key, out var link)) links[key] = link = ([], fileId, reader.GetInt64(4));
-                link.Files.Add(fileId);
+                var line = reader.GetInt64(4);
+                var form = reader.GetString(5);
+                var scope = reader.GetString(6);
+                var path = reader.GetString(7);
+                if (!memo.TryGetValue((kind, name, from.Id), out var match))
+                {
+                    match = kind == "npm" && aliases.TryGetValue(from.Id, out var own) && own.Contains(name)
+                        ? new Match("internal", [from.GitlabId], name, "exact")
+                        : Resolve(kind, name, from, provides, protoFiles, byPath);
+                    if (match.State == "resolved" && kind == "py" && !match.Matched.Contains('.')
+                        && !(pypiUses.TryGetValue(from.Id, out var declared) && pypiOf.TryGetValue(match.Projects.First(), out var offered) && declared.Overlaps(offered)))
+                        match = match with { State = "unconfirmed" };
+                    memo[(kind, name, from.Id)] = match;
+                }
+                Count(match.State);
+                if (scope == "test") Count("test");
+                switch (match.State)
+                {
+                    case "resolved" when defaultRow.ContainsKey(match.Projects.First()):
+                    {
+                        var to = match.Projects.First();
+                        Add(from, to, kind, form, match.Matched, match.How, 1).Use(fileId, path, line, scope);
+                        if (!perFile.TryGetValue(fileId, out var tied)) perFile[fileId] = tied = [];
+                        tied.Add(to);
+                        break;
+                    }
+                    case "ambiguous":
+                        pending.Add(new Pending(from, fileId, path, line, scope, kind, form, match));
+                        break;
+                }
+            }
+        }
+
+        // #include edges, resolved file by file before this (Resolve.ResolveIncludes), between default branches.
+        foreach (var d in Sql.Query(conn, "SELECT from_repo_id, to_repo_id, weight FROM repo_deps"))
+        {
+            if (!byId.TryGetValue(d.Long("from_repo_id"), out var from) || !from.Default) continue;
+            if (!byId.TryGetValue(d.Long("to_repo_id"), out var target) || !defaultRow.ContainsKey(target.GitlabId) || target.GitlabId == from.GitlabId) continue;
+            var ev = Add(from, target.GitlabId, "include", "", "#include", "include", 1);
+            ev.Why = $"{d.Long("weight")} #include line(s) resolved file by file";
+            for (var i = 0; i < d.Long("weight"); i++) ev.MainFiles.Add(-(i + 1));
+        }
+
+        // A name several repositories provide: settled by what else the user has of one of them, else a candidate of each.
+        var manifest = new Dictionary<long, HashSet<long>>();
+        var graph = new Dictionary<long, HashSet<long>>();
+        foreach (var ((from, to, kind, _), ev) in evidence)
+        {
+            var project = byId[to].GitlabId;
+            if (!graph.TryGetValue(from, out var g)) graph[from] = g = [];
+            if (ev.Prior >= LinkKinds.Walked) g.Add(project);
+            if (ev.MainFiles.Count > 0 && (kind.StartsWith("package:", StringComparison.Ordinal) || kind == "repository" || kind == "ci:include"))
+            {
+                if (!manifest.TryGetValue(from, out var m)) manifest[from] = m = [];
+                m.Add(project);
+            }
+        }
+        var unsettled = new List<(Pending Use, HashSet<long> Candidates)>();
+        var settledNames = new Dictionary<(long From, string Kind, string Name), HashSet<long>>();
+        foreach (var p in pending)
+        {
+            var candidates = p.Match.Projects.Where(defaultRow.ContainsKey).ToHashSet();
+            (long To, string How)? pick = null;
+            foreach (var (how, tied) in new[] { ("settled:manifest", manifest.GetValueOrDefault(p.From.Id)), ("settled:file", perFile.GetValueOrDefault(p.FileId)), ("settled:graph", graph.GetValueOrDefault(p.From.Id)) })
+            {
+                if (tied is null) continue;
+                var both = candidates.Where(tied.Contains).ToList();
+                if (both.Count == 1)
+                {
+                    pick = (both[0], how);
+                    break;
+                }
+                if (both.Count > 1) candidates = [.. both];
+            }
+            if (pick is not { } settled)
+            {
+                unsettled.Add((p, candidates));
+                continue;
+            }
+            Add(p.From, settled.To, p.DeclKind, p.Form, p.Match.Matched, settled.How, p.Match.Projects.Count).Use(p.FileId, p.Path, p.Line, p.Scope);
+            var name = (p.From.Id, LinkKinds.Of(p.DeclKind, p.Form).Kind, p.Match.Matched);
+            if (!settledNames.TryGetValue(name, out var to)) settledNames[name] = to = [];
+            to.Add(settled.To);
+            Count(settled.How);
+        }
+        foreach (var (p, candidates) in unsettled)
+        {
+            var kind = LinkKinds.Of(p.DeclKind, p.Form).Kind;
+            // The same name another of its files settled: the repository's own answer for it.
+            if (settledNames.TryGetValue((p.From.Id, kind, p.Match.Matched), out var named) && named.Count == 1 && candidates.Contains(named.First()))
+            {
+                evidence[(p.From.Id, defaultRow[named.First()], kind, p.Match.Matched)].Use(p.FileId, p.Path, p.Line, p.Scope);
+                Count("settled:name");
+                continue;
+            }
+            Count("candidate");
+            foreach (var to in candidates)
+            {
+                var ev = Add(p.From, to, p.DeclKind, p.Form, p.Match.Matched, p.Match.How, p.Match.Projects.Count, candidate: true);
+                ev.Candidates = [.. p.Match.Projects.Where(pathOfProject.ContainsKey).Select(x => pathOfProject[x]).Order(StringComparer.Ordinal)];
+                ev.Use(p.FileId, p.Path, p.Line, p.Scope);
             }
         }
 
         using var tx = conn.BeginTransaction();
         Sql.Exec(conn, "DELETE FROM repo_links");
-        foreach (var ((from, to, kind, name), (files, fileId, line)) in links)
-            Sql.Exec(conn, "INSERT INTO repo_links (from_repo_id, to_repo_id, kind, name, files, file_id, line) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                from, to, kind, name, files.Count, fileId, line);
-        // #include edges, resolved file by file before this (Resolve.ResolveIncludes): one link each, its weight the files.
-        Sql.Exec(conn,
-            "INSERT OR REPLACE INTO repo_links (from_repo_id, to_repo_id, kind, name, files, file_id, line)" +
-            " SELECT from_repo_id, to_repo_id, 'include', '#include', weight, NULL, NULL FROM repo_deps");
-        stats["links"] = (long)(Sql.Scalar(conn, "SELECT COUNT(*) FROM repo_links") ?? 0L);
-        stats["linked_pairs"] = (long)(Sql.Scalar(conn, "SELECT COUNT(*) FROM (SELECT DISTINCT from_repo_id, to_repo_id FROM repo_links)") ?? 0L);
+        Sql.Exec(conn, "DELETE FROM repo_edges");
+        Sql.Exec(conn, "DELETE FROM file_links");
+        var edges = new Dictionary<(long From, long To, string Layer), List<(string Kind, double Confidence, string Scope, HashSet<long> Files)>>();
+        using (var insert = Sql.Command(conn,
+            "INSERT INTO repo_links (from_repo_id, to_repo_id, kind, name, layer, scope, how, providers, confidence, tier, files, evidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            new object?[12]))
+        using (var fileLink = Sql.Command(conn, "INSERT OR IGNORE INTO file_links (file_id, to_repo_id, kind, name, confidence) VALUES (?, ?, ?, ?, ?)", new object?[5]))
+        {
+            foreach (var ((from, to, kind, name), ev) in evidence.Concat(candidateEvidence))
+            {
+                // A name several provide: a candidate (prior / k). Else its prior, less for a code link one file makes.
+                var main = ev.MainFiles.Count > 0;
+                var files = main ? ev.MainFiles : ev.TestFiles;
+                var confidence = ev.Candidate
+                    ? ev.Prior / Math.Max(2, ev.Providers)
+                    : Math.Min(0.999, ev.Prior * (LinkKinds.FromCode(kind) && kind != "include" && files.Count == 1 ? LinkKinds.OneFile : 1));
+                var tier = ev.Candidate ? "candidate" : LinkKinds.Tier(confidence);
+                var why = ev.Why ?? (ev.Candidate
+                    ? $"{name} is provided by {ev.Providers} repositories; nothing the user has settles which"
+                    : ev.How.StartsWith("settled:", StringComparison.Ordinal)
+                        ? $"{name} is provided by {ev.Providers} repositories; {ev.How[8..] switch { "manifest" => "a package or submodule of this one", "file" => "the same file's other uses", _ => "the user's other links" }} settles it"
+                        : $"{ev.MainFiles.Count + ev.TestFiles.Count} file(s) use {name}");
+                var json = new JsonObject
+                {
+                    ["why"] = why,
+                    ["uses"] = new JsonArray([.. ev.Uses.Select(u => (JsonNode)new JsonObject { ["path"] = u.Path, ["line"] = u.Line })]),
+                    ["provider"] = ev.Provider is { } at ? new JsonObject { ["path"] = at.Path, ["line"] = at.Line } : null,
+                    ["candidates"] = ev.Candidates is { } c ? new JsonArray([.. c.Select(x => (JsonNode)x)]) : null,
+                };
+                object?[] values = [from, to, kind, name, ev.Layer, main ? "main" : "test", ev.How, ev.Providers, Math.Round(confidence, 4), tier, (long)files.Count, json.ToJsonString()];
+                for (var i = 0; i < values.Length; i++) insert.Parameters[i].Value = values[i] ?? DBNull.Value;
+                insert.ExecuteNonQuery();
+                if (ev.Candidate) continue;
+                if (!edges.TryGetValue((from, to, ev.Layer), out var ways)) edges[(from, to, ev.Layer)] = ways = [];
+                ways.Add((kind, confidence, main ? "main" : "test", files));
+                // Which files make it, by the name they use: change_impact searches a symbol only in them.
+                if (LinkKinds.FromCode(kind) || kind.StartsWith("package:", StringComparison.Ordinal))
+                    foreach (var file in ev.MainFiles.Concat(ev.TestFiles).Where(f => f > 0))
+                    {
+                        object?[] row = [file, to, ev.DeclKind, name, Math.Round(confidence, 4)];
+                        for (var i = 0; i < row.Length; i++) fileLink.Parameters[i].Value = row[i];
+                        fileLink.ExecuteNonQuery();
+                    }
+            }
+        }
+        using (var insertEdge = Sql.Command(conn,
+            "INSERT INTO repo_edges (from_repo_id, to_repo_id, layer, scope, confidence, tier, files, kinds) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", new object?[8]))
+        {
+            foreach (var ((from, to, layer), ways) in edges)
+            {
+                // The product's when any way is; then its confidence is the product's ways', the best of each kind, as one.
+                var scope = ways.Any(w => w.Scope == "main") ? "main" : "test";
+                var counted = ways.Where(w => w.Scope == scope).ToList();
+                var byKind = counted.GroupBy(w => w.Kind).Select(g => (Kind: g.Key, Best: g.Max(w => w.Confidence))).OrderByDescending(k => k.Best).ToList();
+                var confidence = Math.Round(Math.Min(0.999, LinkKinds.AnyOf(byKind.Select(k => k.Best))), 4);
+                var files = counted.SelectMany(w => w.Files).ToHashSet().Count;
+                object?[] row = [from, to, layer, scope, confidence, LinkKinds.Tier(confidence), (long)files, string.Join(",", byKind.Select(k => k.Kind))];
+                for (var i = 0; i < row.Length; i++) insertEdge.Parameters[i].Value = row[i];
+                insertEdge.ExecuteNonQuery();
+                stats[$"{LinkKinds.Tier(confidence)}_edges"] = stats.GetValueOrDefault($"{LinkKinds.Tier(confidence)}_edges") + 1;
+            }
+        }
+        stats["links"] = (long)(Sql.Scalar(conn, "SELECT COUNT(*) FROM repo_links WHERE tier <> 'candidate'") ?? 0L);
+        stats["candidate_links"] = (long)(Sql.Scalar(conn, "SELECT COUNT(*) FROM repo_links WHERE tier = 'candidate'") ?? 0L);
+        stats["linked_pairs"] = (long)(Sql.Scalar(conn,
+            "SELECT COUNT(*) FROM (SELECT DISTINCT from_repo_id, to_repo_id FROM repo_edges WHERE confidence >= ? AND layer <> 'history')", LinkKinds.Walked) ?? 0L);
         Sql.Exec(conn, "INSERT OR REPLACE INTO argus_meta (key, value) VALUES ('graph_stats', ?)",
             new JsonObject(stats.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))).ToJsonString());
+        Sql.Exec(conn, "INSERT OR REPLACE INTO argus_meta (key, value) VALUES ('graph_stamp', ?)", stamp);
         tx.Commit();
         return stats;
     }
 
     /// <summary>
-    /// The project a use resolves to: "internal" (its own repository provides it), "resolved" (one other does), "ambiguous"
-    /// (several do), "external" (none: a public package, the standard library).
+    /// What a use resolves to: "internal" (its own repository provides it), "resolved" (one other does), "ambiguous"
+    /// (several do), "external" (none: a public package, the standard library); the name matched, and how.
     /// </summary>
-    static (string State, long Project, string Matched) Resolve(string kind, string name, RepoRow from,
+    static Match Resolve(string kind, string name, RepoRow from,
         Dictionary<string, Dictionary<string, HashSet<long>>> provides, List<(string Path, long Project)> protoFiles, Dictionary<string, RepoRow> byPath)
     {
         HashSet<long>? Lookup(string providerKind, string n) =>
             provides.TryGetValue(providerKind, out var names) && names.TryGetValue(n, out var p) ? p : null;
 
-        (string, long, string) Decide(HashSet<long>? projects, string matched)
+        Match Decide(HashSet<long>? projects, string matched, string how = "exact")
         {
-            if (projects is null || projects.Count == 0) return ("external", 0, "");
-            if (projects.Contains(from.GitlabId)) return ("internal", from.GitlabId, matched);
-            return projects.Count == 1 ? ("resolved", projects.First(), matched) : ("ambiguous", 0, matched);
+            if (projects is null || projects.Count == 0) return Match.External;
+            if (projects.Contains(from.GitlabId)) return new("internal", [from.GitlabId], matched, how);
+            return new(projects.Count == 1 ? "resolved" : "ambiguous", projects, matched, how);
         }
 
         switch (kind)
@@ -267,7 +488,7 @@ public static partial class Graph
             {
                 // A relative submodule URL is from this repository's own path (platform/auth + ../core/protos is platform/core/protos).
                 var path = name.StartsWith("rel:", StringComparison.Ordinal) ? Relative(from.Path, name[4..]) : name;
-                return byPath.TryGetValue(path, out var repo) ? Decide([repo.GitlabId], path) : ("external", 0, "");
+                return byPath.TryGetValue(path, out var repo) ? Decide([repo.GitlabId], path) : Match.External;
             }
             case "image":
             {
@@ -275,28 +496,24 @@ public static partial class Graph
                 {
                     // A private registry's flat name: the repository with that name, when only one has it.
                     var flat = name[2..];
-                    return Decide(byPath.Values.Where(r => r.Path.EndsWith("/" + flat, StringComparison.Ordinal)).Select(r => r.GitlabId).ToHashSet(), name);
+                    return Decide(byPath.Values.Where(r => r.Path.EndsWith("/" + flat, StringComparison.Ordinal)).Select(r => r.GitlabId).ToHashSet(), name, "flat");
                 }
                 // group/app; an image under a registry's own group (registry/team/group/app); a project's sub-image as GitLab's
                 // registry names them (group/app/api). A longer repository path is not one: a mirror of the image is not it.
                 var hits = byPath.Values.Where(r => r.Path == name || name.EndsWith("/" + r.Path, StringComparison.Ordinal) || name.StartsWith(r.Path + "/", StringComparison.Ordinal))
-                    .Select(r => r.GitlabId).ToHashSet();
+                    .ToList();
                 // The project itself rather than a group above it that is also a project.
-                if (hits.Count > 1)
-                {
-                    var longest = byPath.Values.Where(r => hits.Contains(r.GitlabId)).MaxBy(r => r.Path.Length)!;
-                    if (name == longest.Path || name.StartsWith(longest.Path + "/", StringComparison.Ordinal)) hits = [longest.GitlabId];
-                }
-                return Decide(hits, name);
+                if (hits.Count > 1 && hits.MaxBy(r => r.Path.Length) is { } longest && (name == longest.Path || name.StartsWith(longest.Path + "/", StringComparison.Ordinal)))
+                    hits = [longest];
+                var sub = hits.Count == 1 && name.StartsWith(hits[0].Path + "/", StringComparison.Ordinal);
+                return Decide(hits.Select(r => r.GitlabId).ToHashSet(), name, sub ? "sub" : "registry");
             }
             case "proto":
             {
-                var hits = protoFiles.Where(p => p.Path == name || p.Path.EndsWith("/" + name, StringComparison.Ordinal)).Select(p => p.Project).ToHashSet();
-                return Decide(hits, name);
+                var exact = protoFiles.Where(p => p.Path == name).Select(p => p.Project).ToHashSet();
+                if (exact.Count > 0) return Decide(exact, name);
+                return Decide(protoFiles.Where(p => p.Path.EndsWith("/" + name, StringComparison.Ordinal)).Select(p => p.Project).ToHashSet(), name, "suffix");
             }
-        }
-        switch (kind)
-        {
             case "cs":
             case "java-package":
                 return Decide(Lookup(kind == "cs" ? "cs" : "java", name), name);
@@ -305,7 +522,7 @@ public static partial class Graph
                 // using static A.B.Type; using X = A.B(.Type): the namespace itself, or the one that holds the type.
                 if (Lookup("cs", name) is { Count: > 0 } ns) return Decide(ns, name);
                 var up = name.LastIndexOf('.');
-                return up > 0 ? Decide(Lookup("cs", name[..up]), name[..up]) : ("external", 0, "");
+                return up > 0 ? Decide(Lookup("cs", name[..up]), name[..up], "type") : Match.External;
             }
             case "java":
             {
@@ -317,20 +534,21 @@ public static partial class Graph
                 var package = string.Join('.', parts[..cut]);
                 if (Lookup("java", package) is { Count: > 0 } exact) return Decide(exact, package);
                 if (cut == parts.Length && cut > 1 && string.Join('.', parts[..(cut - 1)]) is var holder && Lookup("java", holder) is { Count: > 0 } function)
-                    return Decide(function, holder);
-                return ("external", 0, "");
+                    return Decide(function, holder, "member");
+                return Match.External;
             }
             case "py" when PyStdlib.Contains(name.Split('.')[0]):
                 // The standard library's, whatever a repository calls its own package.
-                return ("external", 0, "");
+                return Match.External;
         }
         if (PrefixSeparator(kind) is not { } sep)
             return Decide(Lookup(kind, name), name);
         // The longest name provided that starts it: its own repository first at every length.
         for (var n = name; n.Length > 0; n = n.LastIndexOf(sep) is var cut and > 0 ? n[..cut] : "")
         {
-            if (Lookup(kind, n) is { Count: > 0 } projects) return Decide(projects, n);
+            if (Lookup(kind, n) is { Count: > 0 } projects)
+                return Decide(projects, n, kind == "go" ? "module" : n == name ? "exact" : !n.Contains('.') ? "top" : "prefix");
         }
-        return ("external", 0, "");
+        return Match.External;
     }
 }

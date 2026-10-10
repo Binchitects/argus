@@ -196,9 +196,11 @@ public sealed class GraphTests(Xunit.Abstractions.ITestOutputHelper output)
         return estate;
     }
 
+    /// <summary>The pairs walked by default: the product's own links, likely or strong, of any layer but history.</summary>
     static HashSet<(string, string)> Pairs(TestIndex ix) =>
         [.. Argus.Util.Sql.Query(ix.Conn,
-                "SELECT DISTINCT a.path_with_namespace AS f, b.path_with_namespace AS t FROM repo_links l JOIN repos a ON a.id = l.from_repo_id JOIN repos b ON b.id = l.to_repo_id")
+                "SELECT DISTINCT a.path_with_namespace AS f, b.path_with_namespace AS t FROM repo_edges e JOIN repos a ON a.id = e.from_repo_id JOIN repos b ON b.id = e.to_repo_id" +
+                " WHERE e.scope = 'main' AND e.confidence >= 0.5 AND e.layer <> 'history'")
             .Select(r => (r.Str("f"), r.Str("t")))];
 
     [Fact]
@@ -240,6 +242,83 @@ public sealed class GraphTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.Equal(1, stats["ambiguous"]);
         Assert.Empty(Pairs(ix));
     }
+
+    [Fact]
+    public void A_link_has_a_confidence_a_tier_a_scope_and_its_evidence_and_a_name_several_provide_is_settled_or_a_candidate()
+    {
+        using var ix = new TestIndex();
+        var a = ix.Repo(1, "g/a");
+        var b = ix.Repo(2, "g/b");
+        var byPackage = ix.Repo(3, "g/by-package");
+        var byFile = ix.Repo(4, "g/by-file");
+        var unsure = ix.Repo(5, "g/unsure");
+        var testsOnly = ix.Repo(6, "g/tests-only");
+        var once = ix.Repo(7, "g/once");
+        Index(ix,
+            (a, "src/A.csproj", "<Project><PropertyGroup><PackageId>Acme.A</PackageId></PropertyGroup></Project>"),
+            (a, "src/Shared.cs", "namespace Acme.Shared;"),
+            (a, "src/Only.cs", "namespace Acme.Only;"),
+            (b, "src/B.csproj", "<Project><PropertyGroup><PackageId>Acme.B</PackageId></PropertyGroup></Project>"),
+            (b, "src/Shared.cs", "namespace Acme.Shared;"),
+            // Its package reference says which Acme.Shared it means.
+            (byPackage, "App.csproj", "<Project><ItemGroup><PackageReference Include=\"Acme.B\" /></ItemGroup></Project>"),
+            (byPackage, "One.cs", "using Acme.Shared;"),
+            (byPackage, "Two.cs", "using Acme.Shared;"),
+            // The same file's other use says it.
+            (byFile, "One.cs", "using Acme.Only;\nusing Acme.Shared;"),
+            // Nothing says it.
+            (unsure, "One.cs", "using Acme.Shared;"),
+            // Only its tests use a.
+            (testsOnly, "tests/OnlyTests.cs", "using Acme.Only;"),
+            // One file uses a: a code link on one file is less sure.
+            (once, "One.cs", "using Acme.Only;"));
+        var stats = Graph.RebuildLinks(ix.Conn);
+
+        Link? Of(long from, long to, string kind, string name = "Acme.Shared") => Argus.Util.Sql.Query(ix.Conn,
+                "SELECT how, scope, confidence, tier, files, providers, evidence FROM repo_links WHERE from_repo_id = ? AND to_repo_id = ? AND kind = ? AND name = ?",
+                from, to, kind, kind == "package:nuget" ? "acme.b" : name)
+            .Select(r => new Link(r.Str("how"), r.Str("scope"), r.Double("confidence"), r.Str("tier"), r.Long("files"), r.Long("providers"), JsonNode.Parse(r.Str("evidence"))!))
+            .FirstOrDefault();
+
+        // By a package reference: the package (0.97) and the import it settles (0.85 × 0.95), as one pair.
+        var package = Of(byPackage, b, "package:nuget")!;
+        Assert.Equal(("strong", 0.97), (package.Tier, package.Confidence));
+        var settled = Of(byPackage, b, "import:csharp")!;
+        Assert.Equal(("settled:manifest", 2L, 2L), (settled.How, settled.Providers, settled.Files));
+        Assert.Equal(0.8075, settled.Confidence, 4);
+        Assert.Null(Of(byPackage, a, "import:csharp"));
+        var edge = Argus.Util.Sql.One(ix.Conn, "SELECT confidence, tier, kinds FROM repo_edges WHERE from_repo_id = ? AND to_repo_id = ? AND layer = 'build'", byPackage, b)!;
+        Assert.Equal(1 - (1 - 0.97) * (1 - 0.8075), edge.Double("confidence"), 4);
+        Assert.Equal(("strong", "package:nuget,import:csharp"), (edge.Str("tier"), edge.Str("kinds")));
+
+        // By the same file: Acme.Only is a's alone, so its Acme.Shared is a's too (0.85 × 0.8, less on one file).
+        var byItsFile = Of(byFile, a, "import:csharp")!;
+        Assert.Equal(("settled:file", "likely"), (byItsFile.How, byItsFile.Tier));
+        Assert.Equal(0.578, byItsFile.Confidence, 4);
+        Assert.Contains("same file", byItsFile.Evidence["why"]!.ToString());
+        Assert.Null(Of(byFile, b, "import:csharp"));
+
+        // Unsettled: a candidate of each, never walked, and says which.
+        var candidate = Of(unsure, a, "import:csharp")!;
+        Assert.Equal(("candidate", 0.425), (candidate.Tier, candidate.Confidence));
+        Assert.Equal(["g/a", "g/b"], candidate.Evidence["candidates"]!.AsArray().Select(n => n!.ToString()));
+        Assert.Equal("candidate", Of(unsure, b, "import:csharp")!.Tier);
+        Assert.Equal(1, stats["candidate"]);
+
+        // Tests only: kept as test scope, never walked by default.
+        Assert.Equal("test", Of(testsOnly, a, "import:csharp", "Acme.Only")!.Scope);
+
+        // One file: 0.85 × 0.85, likely; its evidence names the use and where a provides it.
+        var single = Of(once, a, "import:csharp", "Acme.Only")!;
+        Assert.Equal(("likely", 0.7225), (single.Tier, single.Confidence));
+        Assert.Equal("One.cs", single.Evidence["uses"]![0]!["path"]!.ToString());
+        Assert.Equal("src/Only.cs", single.Evidence["provider"]!["path"]!.ToString());
+        Assert.Equal(1L, Argus.Util.Sql.Scalar(ix.Conn, "SELECT COUNT(*) FROM file_links WHERE to_repo_id = ? AND name = 'Acme.Only' AND file_id IN (SELECT id FROM files WHERE repo_id = ?)", a, once));
+
+        Assert.Equal(new HashSet<(string, string)> { ("g/by-package", "g/b"), ("g/by-file", "g/a"), ("g/once", "g/a") }, Pairs(ix));
+    }
+
+    sealed record Link(string How, string Scope, double Confidence, string Tier, long Files, long Providers, JsonNode Evidence);
 
     /// <summary>Writes files into repositories as an index run would, with what they declare.</summary>
     static void Index(TestIndex ix, params (long Repo, string Path, string Content)[] files)
@@ -285,7 +364,7 @@ public sealed class GraphTests(Xunit.Abstractions.ITestOutputHelper output)
         // Each app links to the money library only: by C# (the nested namespace whole, and a using static) and by Java.
         Assert.Equal(users.Count, pairs.Count);
         Assert.All(pairs, p => Assert.Equal("lib/money", p.Item2));
-        var names = Argus.Util.Sql.Query(ix.Conn, "SELECT DISTINCT kind, name FROM repo_links").Select(r => (r.Str("kind"), r.Str("name"))).ToHashSet();
+        var names = Argus.Util.Sql.Query(ix.Conn, "SELECT DISTINCT kind, name FROM repo_links WHERE tier <> 'candidate'").Select(r => (r.Str("kind"), r.Str("name"))).ToHashSet();
         Assert.Equal(new HashSet<(string, string)> { ("import:csharp", "Acme.Money.Rounding"), ("import:java", "com.acme.money") }, names);
     }
 

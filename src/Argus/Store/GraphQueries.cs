@@ -14,10 +14,11 @@ public static class GraphQueries
 {
     public sealed record Repo(long Id, string Path, string Branch, bool Default);
 
-    /// <summary>One link between two repositories, with every way it is made.</summary>
-    public sealed record Edge(long From, long To, List<(string Kind, string Name, long Files, string? Where)> Ways)
+    /// <summary>One link between two repositories: how sure it is (the noisy-OR of its layers), and every way it is made.</summary>
+    public sealed record Edge(long From, long To, double Confidence, List<(string Kind, string Name, long Files, double Confidence, string? Where)> Ways)
     {
         public long Files => Ways.Sum(w => w.Files);
+        public string Tier => LinkKinds.Tier(Confidence);
     }
 
     public sealed class Estate
@@ -40,16 +41,29 @@ public static class GraphQueries
             if (ids.Contains(r.Long("id")))
                 repos[r.Long("id")] = new Repo(r.Long("id"), r.Str("path_with_namespace"), r.Str("branch"), r.Str("branch") == r.Str("default_branch"));
         }
-        var edges = new Dictionary<(long, long), Edge>();
-        foreach (var l in Sql.Query(conn,
-                     "SELECT l.from_repo_id, l.to_repo_id, l.kind, l.name, l.files, l.line, f.path" +
-                     "  FROM repo_links l LEFT JOIN files f ON f.id = l.file_id"))
+        // A pair is walked when the product's own code, build, pipeline or deployment makes it likely or strong: not its
+        // tests' alone, not what merely changes with it, not a name several repositories provide that nothing settled.
+        var layers = new Dictionary<(long, long), List<double>>();
+        foreach (var e in Sql.Query(conn, "SELECT from_repo_id, to_repo_id, layer, confidence FROM repo_edges WHERE scope = 'main'"))
         {
-            var (from, to) = (l.Long("from_repo_id"), l.Long("to_repo_id"));
-            if (!repos.ContainsKey(from) || !repos.ContainsKey(to)) continue;
-            if (!edges.TryGetValue((from, to), out var edge)) edges[(from, to)] = edge = new Edge(from, to, []);
-            var where = l.StrOrNull("path") is { } path ? $"{path}:{l.LongOrNull("line") ?? 1}" : null;
-            edge.Ways.Add((l.Str("kind"), l.Str("name"), l.Long("files"), where));
+            var (from, to) = (e.Long("from_repo_id"), e.Long("to_repo_id"));
+            if (!repos.ContainsKey(from) || !repos.ContainsKey(to) || !LinkKinds.Walkable.Contains(e.Str("layer"))) continue;
+            if (!layers.TryGetValue((from, to), out var list)) layers[(from, to)] = list = [];
+            list.Add(e.Double("confidence"));
+        }
+        var edges = new Dictionary<(long, long), Edge>();
+        foreach (var (pair, confidences) in layers)
+        {
+            var confidence = Math.Round(Math.Min(0.999, LinkKinds.AnyOf(confidences)), 4);
+            if (confidence >= LinkKinds.Walked) edges[pair] = new Edge(pair.Item1, pair.Item2, confidence, []);
+        }
+        foreach (var l in Sql.Query(conn,
+                     "SELECT from_repo_id, to_repo_id, kind, name, layer, files, confidence, evidence FROM repo_links WHERE scope = 'main' AND tier <> 'candidate'"))
+        {
+            if (!edges.TryGetValue((l.Long("from_repo_id"), l.Long("to_repo_id")), out var edge) || !LinkKinds.Walkable.Contains(l.Str("layer"))) continue;
+            var use = JsonNode.Parse(l.Str("evidence"))?["uses"]?.AsArray().FirstOrDefault();
+            var where = use is null ? null : $"{use["path"]}:{use["line"]}";
+            edge.Ways.Add((l.Str("kind"), l.Str("name"), l.Long("files"), l.Double("confidence"), where));
         }
         var estate = new Estate { Repos = repos, Edges = edges };
         foreach (var e in edges.Values)
@@ -90,15 +104,16 @@ public static class GraphQueries
             {
                 ["names"] = new JsonArray([.. g.OrderByDescending(w => w.Files).Take(most).Select(w => (JsonNode)w.Name)]),
                 ["files"] = g.Sum(w => w.Files),
+                ["confidence"] = g.Max(w => w.Confidence),
                 ["example"] = g.Select(w => w.Where).FirstOrDefault(w => w is not null),
             };
         }
         return kinds;
     }
 
-    /// <summary>One line for an edge: "a -> b (package:nuget Acme.Core; import:csharp Acme.Core ×37 files)".</summary>
+    /// <summary>One line for an edge: "a -> b 0.99 (package:nuget Acme.Core ×1; import:csharp Acme.Core ×37)".</summary>
     static string Line(Estate estate, Edge e) =>
-        $"{estate.Name(e.From)} -> {estate.Name(e.To)} (" +
+        $"{estate.Name(e.From)} -> {estate.Name(e.To)} {e.Confidence.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)} (" +
         string.Join("; ", e.Ways.GroupBy(w => w.Kind).OrderByDescending(g => g.Sum(w => w.Files))
             .Select(g => $"{g.Key} {string.Join(", ", g.OrderByDescending(w => w.Files).Take(2).Select(w => w.Name))}{(g.Count() > 2 ? ", …" : "")} ×{g.Sum(w => w.Files)}")) + ")";
 
@@ -117,7 +132,8 @@ public static class GraphQueries
                 arr.Add(new JsonObject
                 {
                     ["repo_id"] = id, ["path_with_namespace"] = estate.Name(id), ["depth"] = level,
-                    ["via"] = level > 1 ? estate.Name(via) : null, ["files"] = edge.Files, ["by"] = Ways(edge),
+                    ["via"] = level > 1 ? estate.Name(via) : null, ["files"] = edge.Files,
+                    ["confidence"] = edge.Confidence, ["tier"] = edge.Tier, ["by"] = Ways(edge),
                 });
             }
             return arr;

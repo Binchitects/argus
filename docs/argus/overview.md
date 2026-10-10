@@ -80,10 +80,19 @@ generator's template), a module's direct requirements (not `// indirect`
 ones, nor Maven's `<dependencyManagement>` pins or build plugins), Go's
 `replace` to a fork, and `requirements/*.txt` and `constraints*.txt` too.
 A repository's own name stays inside it
-(every Python repository's `utils` is its own); a name two repositories
-provide links to neither, and the run says how many were ambiguous; public
-packages and standard libraries stay outside. Links are made at a library's
-default branch. Measured on a generated estate of 200 repositories in seven
+(every Python repository's `utils` is its own); public packages and standard
+libraries stay outside. Links are made at a library's default branch.
+
+Every link says how sure it is, and why. Its kind (a package, an import, a
+CI include, an image) and how its name matched give it a confidence; a link
+is strong (0.85 or more), likely (0.5 or more) or weak, and a pair of
+repositories sums its kinds. A name two repositories provide is settled by
+what else the user has: a package or submodule of one of them, the same
+file's other uses, its other links; else it stays a candidate of each, never
+walked. What only a repository's tests use is kept apart. Each link keeps
+its evidence: up to three uses (file and line), where the provider declares
+the name, and the candidates when it is unsure. The model is in
+[graph.md](graph.md). Measured on a generated estate of 200 repositories in seven
 groups and six languages (C#, Go, Java, TypeScript, Python, C++, plus CI,
 image and submodule links), the 469 links between them were found exactly,
 none missing and none wrong, in 28 ms (`tests/Argus.Tests/GraphTests.cs`).

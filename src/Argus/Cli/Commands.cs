@@ -441,7 +441,8 @@ public static class Commands
         Out.WriteLine($"includes: {counts.GetValueOrDefault("resolved")} resolved, {counts.GetValueOrDefault("external")} external, " +
                       $"{counts.GetValueOrDefault("ambiguous")} ambiguous, {counts.GetValueOrDefault("not_found")} not found");
         Out.WriteLine($"repo graph: {edges} #include edges; {linked.GetValueOrDefault("linked_pairs")} linked pairs of repositories from packages, imports and the rest " +
-                      $"({linked.GetValueOrDefault("resolved")} uses resolved, {linked.GetValueOrDefault("ambiguous")} ambiguous, {linked.GetValueOrDefault("external")} outside the estate)");
+                      $"({linked.GetValueOrDefault("resolved")} uses resolved, {linked.GetValueOrDefault("ambiguous")} ambiguous of which " +
+                      $"{linked.GetValueOrDefault("candidate")} unsettled, {linked.GetValueOrDefault("external")} outside the estate)");
         if (empty > 0)
             Out.WriteLine($"repos: {projects.Count} seen, {empty} empty (nothing to index), {projects.Count - empty} indexed");
         // What the repositories of this run left waiting (and other repositories' backlog), with what is left of the share.
@@ -697,8 +698,9 @@ public static class Commands
         foreach (var state in new[] { "resolved", "external", "ambiguous", "not_found" })
             Out.WriteLine($"{state,-12} {counts.GetValueOrDefault(state)}");
         Out.WriteLine($"{"edges",-12} {edges}");
-        foreach (var state in new[] { "linked_pairs", "resolved", "internal", "ambiguous", "external" })
-            Out.WriteLine($"{state,-12} {linked.GetValueOrDefault(state)}");
+        foreach (var state in new[] { "linked_pairs", "strong_edges", "likely_edges", "weak_edges", "resolved", "internal", "ambiguous", "settled:manifest", "settled:file",
+                     "settled:graph", "settled:name", "candidate", "unconfirmed", "test", "external" })
+            Out.WriteLine($"{state,-16} {linked.GetValueOrDefault(state)}");
         return 0;
     }
 
