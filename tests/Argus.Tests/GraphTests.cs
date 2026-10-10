@@ -241,6 +241,78 @@ public sealed class GraphTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.Empty(Pairs(ix));
     }
 
+    /// <summary>Writes files into repositories as an index run would, with what they declare.</summary>
+    static void Index(TestIndex ix, params (long Repo, string Path, string Content)[] files)
+    {
+        foreach (var (repo, path, content) in files)
+        {
+            var lang = Filters.DetectLang(path);
+            Writes.ReplaceDecls(ix.Conn, repo, ix.File(repo, path, content, lang), Links.Extract(path, lang, content));
+        }
+    }
+
+    [Fact]
+    public void Names_that_only_look_alike_link_nothing_a_platform_root_a_package_root_the_standard_library_fixtures_and_strings()
+    {
+        using var ix = new TestIndex();
+        var trap = ix.Repo(1, "trap/polyfills");
+        var core = ix.Repo(2, "payments/app");
+        var stdlibish = ix.Repo(3, "tools/logging");
+        var lib = ix.Repo(4, "lib/money");
+        var users = Enumerable.Range(0, 20).Select(i => ix.Repo(100 + i, $"apps/app{i}")).ToList();
+        Index(ix,
+            // A polyfill declares .NET's own namespaces; a raw string holds code that is not this file's.
+            (trap, "Ext.cs", "namespace System;\npublic static class StringExt {}"),
+            (trap, "IsExternalInit.cs", "namespace System.Runtime.CompilerServices { internal static class IsExternalInit {} }"),
+            (trap, "Di.cs", "namespace Microsoft.Extensions.DependencyInjection;"),
+            (trap, "Gen.cs", "var src = \"\"\"\nnamespace Acme.Money;\nusing Acme.Secret;\n\"\"\";"),
+            // A root package, and a repository package named like the standard library.
+            (core, "src/main/java/com/acme/Application.java", "package com.acme;"),
+            (stdlibish, "logging/__init__.py", ""),
+            // The money library, and a test fixture elsewhere that claims its name.
+            (lib, "src/Money.cs", "namespace Acme.Money { namespace Rounding { class R {} } }"),
+            (lib, "src/main/java/com/acme/money/Cents.java", "package com.acme.money;"),
+            (core, "tests/fixtures/Fake.cs", "namespace Acme.Money.Rounding;"));
+        foreach (var u in users)
+        {
+            Index(ix,
+                (u, "Program.cs", "using System.Linq;\nusing System.Runtime.CompilerServices;\nusing Microsoft.Extensions.DependencyInjection;\nglobal using global::Acme.Money.Rounding;\nusing static Acme.Money.Rounding.R;"),
+                (u, "Pay.java", "import com.acme.generated.pay.v1.PayRequest;\nimport com.acme.money.Cents;\nimport com.acme.money.*;"),
+                (u, "app.py", "import logging\nfrom logging import getLogger"));
+        }
+        Graph.RebuildLinks(ix.Conn);
+        var pairs = Pairs(ix);
+        // Each app links to the money library only: by C# (the nested namespace whole, and a using static) and by Java.
+        Assert.Equal(users.Count, pairs.Count);
+        Assert.All(pairs, p => Assert.Equal("lib/money", p.Item2));
+        var names = Argus.Util.Sql.Query(ix.Conn, "SELECT DISTINCT kind, name FROM repo_links").Select(r => (r.Str("kind"), r.Str("name"))).ToHashSet();
+        Assert.Equal(new HashSet<(string, string)> { ("import:csharp", "Acme.Money.Rounding"), ("import:java", "com.acme.money") }, names);
+    }
+
+    [Fact]
+    public void Only_real_uses_count_imports_in_code_not_strings_direct_requirements_not_pinned_or_indirect_ones()
+    {
+        // Go: a quoted module path in code is not an import; an aliased or dot import is.
+        Assert.Equal([("uses", "go", "gitlab.acme.io/lib/money"), ("uses", "go", "gitlab.acme.io/lib/tax")],
+            Decls("main.go", "package main\nimport (\n  m \"gitlab.acme.io/lib/money\"\n  . \"gitlab.acme.io/lib/tax\"\n)\nvar s = []string{\n  \"gitlab.acme.io/lib/other\",\n}\n"));
+        // go.mod: an indirect requirement is not the module's own; a replace to a fork is.
+        Assert.Equal([("provides", "go", "gitlab.acme.io/app"), ("uses", "go", "gitlab.acme.io/lib/money"), ("uses", "go", "gitlab.acme.io/forks/tax")],
+            Decls("go.mod", "module gitlab.acme.io/app\nrequire (\n  gitlab.acme.io/lib/money v1.2.0\n  gitlab.acme.io/lib/util v0.1.0 // indirect\n)\nreplace gitlab.acme.io/lib/tax => gitlab.acme.io/forks/tax v1.0.0\n"));
+        // Maven: dependencyManagement only pins versions.
+        Assert.Equal([("provides", "maven", "com.acme:app"), ("uses", "maven", "com.acme:money")],
+            Decls("pom.xml", "<project><groupId>com.acme</groupId><artifactId>app</artifactId><dependencyManagement><dependencies><dependency><groupId>com.acme</groupId><artifactId>bom-only</artifactId></dependency></dependencies></dependencyManagement><dependencies><dependency><groupId>com.acme</groupId><artifactId>money</artifactId></dependency></dependencies></project>"));
+        // pyproject: an extra's bracket does not end the list.
+        Assert.Equal([("provides", "pypi", "app"), ("uses", "pypi", "acme-money"), ("uses", "pypi", "acme-tax")],
+            Decls("pyproject.toml", "[project]\nname = \"app\"\ndependencies = [\"acme-money[fast]>=1\", \"acme-tax\"]\n"));
+        // requirements/ files, and PackageReference with its version first; an Update item is not a use.
+        Assert.Equal([("uses", "pypi", "acme-money")], Decls("requirements/base.txt", "acme-money==1.0\n"));
+        Assert.Equal([("uses", "nuget", "acme.core")],
+            Decls("Directory.Packages.props", "<Project><ItemGroup><PackageReference Version=\"1\" Include=\"Acme.Core\" /><PackageReference Update=\"Acme.Old\" Version=\"2\" /></ItemGroup></Project>"));
+        // GitLab CI's image: name: form, and a chart's repository: is no image.
+        Assert.Equal([("uses", "image", "acme/build")], Decls(".gitlab-ci.yml", "image:\n  name: registry.acme.io/acme/build:1\n"));
+        Assert.Empty(Decls("Chart.yaml", "dependencies:\n  - name: redis\n    repository: https://charts.example.com/stable\n"));
+    }
+
     static (Estate, TestIndex) Linked()
     {
         var ix = new TestIndex();

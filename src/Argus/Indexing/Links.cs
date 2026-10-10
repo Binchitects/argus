@@ -43,15 +43,15 @@ public static partial class Links
                 case "cargo": Cargo(content, output); break;
                 case "toml" when name == "pyproject.toml": PyProject(content, output); break;
                 case "ini" when name == "setup.cfg": SetupCfg(content, output); break;
-                case "text" when name.StartsWith("requirements", StringComparison.OrdinalIgnoreCase): Requirements(content, output); break;
+                case "text" when IsRequirements(path, name): Requirements(content, output); break;
                 case "gitmodules": Matches(SubmoduleUrl(), content, "repo", output, lower: true, join: m => RepoPathOf(m.Groups["url"].Value)); break;
                 case "yaml": Yaml(name, content, output); break;
                 case "dockerfile": Matches(DockerFrom(), content, "image", output, lower: true, join: m => ImagePath(m.Groups["image"].Value)); break;
-                case "csharp": CSharp(content, output); break;
-                case "python": Python(path, content, output); break;
+                case "csharp": CSharp(Blank(content, Code.CSharp), output); break;
+                case "python": Python(path, Blank(content, Code.Python), output); break;
                 case "typescript" or "javascript": JavaScript(content, output); break;
-                case "go": Matches(GoImport(), content, "go", output, lower: false, role: Uses); break;
-                case "java" or "kotlin": Java(content, output); break;
+                case "go": Go(Blank(content, Code.Go), output); break;
+                case "java" or "kotlin": Java(Blank(content, Code.Java), output); break;
                 case "rust": Matches(RustUse(), content, "cargo", output, lower: true, join: m => m.Groups["crate"].Value.Replace('_', '-')); break;
                 case "proto": Proto(path, content, output); break;
             }
@@ -61,6 +61,92 @@ public static partial class Links
             // A file this cannot read declares nothing: the rest of the estate is still linked.
         }
         return [.. output.Where(d => d.Name.Length is > 0 and <= 300).Distinct()];
+    }
+
+    /// <summary>A language's comments and strings, as Blank reads them.</summary>
+    enum Code { CSharp, Java, Go, Python }
+
+    /// <summary>
+    /// The text with its comments and string literals blanked (spaces; line breaks kept, so lines stay where they are): code
+    /// inside a string (an analyzer's test, a generator's template, a docstring) declares nothing. Go's quoted strings stay
+    /// (its imports are strings); its raw strings go.
+    /// </summary>
+    static string Blank(string text, Code code)
+    {
+        var b = new System.Text.StringBuilder(text.Length);
+        var i = 0;
+        void Skip(int to)
+        {
+            for (; i < to && i < text.Length; i++) b.Append(text[i] == '\n' ? '\n' : ' ');
+        }
+        while (i < text.Length)
+        {
+            var c = text[i];
+            var next = i + 1 < text.Length ? text[i + 1] : '\0';
+            if (code != Code.Python && c == '/' && next == '/')
+            {
+                Skip(text.IndexOf('\n', i) is var nl and >= 0 ? nl : text.Length);
+            }
+            else if (code != Code.Python && c == '/' && next == '*')
+            {
+                Skip(text.IndexOf("*/", i + 2, StringComparison.Ordinal) is var end and >= 0 ? end + 2 : text.Length);
+            }
+            else if (code == Code.Python && c == '#')
+            {
+                Skip(text.IndexOf('\n', i) is var nl and >= 0 ? nl : text.Length);
+            }
+            else if (code is Code.Python or Code.CSharp or Code.Java && (text.AsSpan(i).StartsWith("\"\"\"") || (code == Code.Python && text.AsSpan(i).StartsWith("\'\'\'"))))
+            {
+                // Triple quotes: Python's, C#'s raw strings (three or more), Java's and Kotlin's text blocks.
+                var quote = text[i];
+                var run = 0;
+                while (i + run < text.Length && text[i + run] == quote) run++;
+                var close = new string(quote, code == Code.CSharp ? run : 3);
+                Skip(text.IndexOf(close, i + run, StringComparison.Ordinal) is var end and >= 0 ? end + close.Length : text.Length);
+            }
+            else if (code == Code.CSharp && (c == '@' || c == '$') && (next == '"' || (next is '@' or '$' && i + 2 < text.Length && text[i + 2] == '"')))
+            {
+                // Verbatim (@"…", "" inside) or interpolated strings.
+                var verbatim = c == '@' || next == '@';
+                var start = text.IndexOf('"', i) + 1;
+                var j = start;
+                while (j < text.Length)
+                {
+                    if (verbatim && text[j] == '"' && j + 1 < text.Length && text[j + 1] == '"') j += 2;
+                    else if (!verbatim && text[j] == '\\') j += 2;
+                    else if (text[j] == '"') break;
+                    else j++;
+                }
+                Skip(Math.Min(text.Length, j + 1));
+            }
+            else if ((c == '"' && code != Code.Go) || (c == '\'' && code is Code.Python))
+            {
+                var j = i + 1;
+                while (j < text.Length && text[j] != c && text[j] != '\n') j += text[j] == '\\' ? 2 : 1;
+                Skip(Math.Min(text.Length, j + 1));
+            }
+            else if (c == '\'' && code is Code.CSharp or Code.Java && i + 2 < text.Length)
+            {
+                // A character literal: 'x', '\n', '\''.
+                var end = text[i + 1] == '\\' ? text.IndexOf('\'', i + 3) : i + 2;
+                if (end > i && end < text.Length && text[end] == '\'' && end - i <= 8) Skip(end + 1);
+                else
+                {
+                    b.Append(c);
+                    i++;
+                }
+            }
+            else if (c == '`' && code == Code.Go)
+            {
+                Skip(text.IndexOf('`', i + 1) is var end and >= 0 ? end + 1 : text.Length);
+            }
+            else
+            {
+                b.Append(c);
+                i++;
+            }
+        }
+        return b.ToString();
     }
 
     [ThreadStatic] static string? _linesOf;
@@ -103,12 +189,41 @@ public static partial class Links
             output.Add(new Decl(Provides, "nuget", name.ToLowerInvariant(), id.Success ? LineAt(content, id.Index) : 1));
     }
 
+    /// <summary>
+    /// A C# file's namespaces, whole (a namespace inside another is Outer.Inner), and its usings: a namespace (cs, matched
+    /// exactly), or a type or a namespace (cs-type: `using static`, an alias), matched as it is or one segment up.
+    /// </summary>
     static void CSharp(string content, List<Decl> output)
     {
-        foreach (Match m in CsNamespace().Matches(content))
-            output.Add(new Decl(Provides, "cs", m.Groups["name"].Value, LineAt(content, m.Index)));
+        var open = new Stack<(string Name, int Depth)>();
+        var depth = 0;
+        string? fileScoped = null;
+        foreach (Match m in CsToken().Matches(content))
+        {
+            switch (m.Value)
+            {
+                case "{":
+                    depth++;
+                    break;
+                case "}":
+                    depth--;
+                    while (open.Count > 0 && open.Peek().Depth > depth) open.Pop();
+                    break;
+                default:
+                    var name = m.Groups["ns"].Value;
+                    var outer = open.Count > 0 ? string.Join('.', open.Reverse().Select(o => o.Name)) + "." : fileScoped is null ? "" : fileScoped + ".";
+                    output.Add(new Decl(Provides, "cs", outer + name, LineAt(content, m.Index)));
+                    if (m.Groups["end"].Value == ";") fileScoped = name;
+                    else
+                    {
+                        depth++;
+                        open.Push((name, depth));
+                    }
+                    break;
+            }
+        }
         foreach (Match m in CsUsing().Matches(content))
-            output.Add(new Decl(Uses, "cs", m.Groups["name"].Value, LineAt(content, m.Index)));
+            output.Add(new Decl(Uses, m.Groups["static"].Success || m.Groups["alias"].Success ? "cs-type" : "cs", m.Groups["name"].Value, LineAt(content, m.Index)));
     }
 
     // --- JavaScript and TypeScript ----------------------------------------------------
@@ -172,6 +287,11 @@ public static partial class Links
                     output.Add(new Decl(Uses, "pypi", PyName(d.Groups["name"].Value), LineAt(content, list.Index)));
     }
 
+    /// <summary>requirements*.txt, constraints*.txt, and any .txt in a requirements/ folder (requirements/base.txt).</summary>
+    static bool IsRequirements(string path, string name) =>
+        name.StartsWith("requirements", StringComparison.OrdinalIgnoreCase) || name.StartsWith("constraints", StringComparison.OrdinalIgnoreCase)
+        || path.Contains("requirements/", StringComparison.OrdinalIgnoreCase);
+
     static void Requirements(string content, List<Decl> output)
     {
         var lines = content.Split('\n');
@@ -220,7 +340,26 @@ public static partial class Links
         if (GoModule().Match(content) is { Success: true } m)
             output.Add(new Decl(Provides, "go", m.Groups["name"].Value, LineAt(content, m.Index)));
         foreach (Match r in GoRequire().Matches(content))
-            output.Add(new Decl(Uses, "go", r.Groups["name"].Value, LineAt(content, r.Index)));
+        {
+            // What the module needs only through another (// indirect) is not its own use.
+            var line = content[r.Index..(content.IndexOf('\n', r.Index) is var nl and >= 0 ? nl : content.Length)];
+            if (!line.Contains("// indirect", StringComparison.Ordinal))
+                output.Add(new Decl(Uses, "go", r.Groups["name"].Value, LineAt(content, r.Index)));
+        }
+        // replace a => estate.example.com/team/a-fork v1: the fork is what it builds against.
+        foreach (Match r in GoReplace().Matches(content))
+            output.Add(new Decl(Uses, "go", r.Groups["to"].Value, LineAt(content, r.Index)));
+    }
+
+    /// <summary>A Go file's imports: in import ( … ) blocks and import lines only, with or without an alias (., _, a name).</summary>
+    static void Go(string content, List<Decl> output)
+    {
+        foreach (Match block in GoImportBlock().Matches(content))
+        {
+            var body = block.Groups["body"];
+            foreach (Match m in GoImportSpec().Matches(body.Value))
+                output.Add(new Decl(Uses, "go", m.Groups["name"].Value, LineAt(content, body.Index + m.Index)));
+        }
     }
 
     static void Pom(string content, List<Decl> output)
@@ -231,7 +370,9 @@ public static partial class Links
             : PomParentGroup().Match(content) is { Success: true } pg ? pg.Groups["v"].Value : "";
         if (PomArtifact().Match(own) is { Success: true } a && group.Length > 0)
             output.Add(new Decl(Provides, "maven", $"{group}:{a.Groups["v"].Value}".ToLowerInvariant(), LineAt(content, a.Index)));
-        foreach (Match d in PomDependency().Matches(content))
+        // A <dependencyManagement> entry only pins a version, and build plugins are tools: neither is a use.
+        var used = PomManaged().Replace(content, m => new string('\n', m.Value.Count(c => c == '\n')));
+        foreach (Match d in PomDependency().Matches(used))
             output.Add(new Decl(Uses, "maven", $"{d.Groups["g"].Value}:{d.Groups["a"].Value}".ToLowerInvariant(), LineAt(content, d.Index)));
     }
 
@@ -240,7 +381,11 @@ public static partial class Links
         if (JavaPackage().Match(content) is { Success: true } p)
             output.Add(new Decl(Provides, "java", p.Groups["name"].Value, LineAt(content, p.Index)));
         foreach (Match m in JavaImport().Matches(content))
-            output.Add(new Decl(Uses, "java", m.Groups["name"].Value, LineAt(content, m.Index)));
+        {
+            // import a.b.*: the package a.b (the greedy name takes the dot before the star).
+            var name = m.Groups["name"].Value;
+            output.Add(new Decl(Uses, name.EndsWith('.') ? "java-package" : "java", name.TrimEnd('.'), LineAt(content, m.Index)));
+        }
     }
 
     static void Cargo(string content, List<Decl> output)
@@ -265,7 +410,9 @@ public static partial class Links
     {
         if (fileName.EndsWith("gitlab-ci.yml", StringComparison.OrdinalIgnoreCase) || fileName.EndsWith("gitlab-ci.yaml", StringComparison.OrdinalIgnoreCase))
             Matches(CiProject(), content, "repo", output, lower: true, join: m => m.Groups["name"].Value.Trim('\'', '"', '/'));
-        // compose files, Kubernetes manifests, Helm values: image: group/name:tag and repository: group/name.
+        // compose files, Kubernetes manifests, Helm values: image: group/name:tag and repository: group/name. A chart's
+        // repository: is where its dependencies' charts come from, not an image.
+        if (fileName is "Chart.yaml" or "Chart.lock" or "requirements.yaml") return;
         Matches(YamlImage(), content, "image", output, lower: true, join: m => ImagePath(m.Groups["image"].Value));
     }
 
@@ -301,7 +448,7 @@ public static partial class Links
 
     // --- Patterns -----------------------------------------------------------------------
 
-    [GeneratedRegex(@"<PackageReference\s+(?:Update|Include)\s*=\s*""(?<name>[^""$]+)""", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"<PackageReference\b[^>]*?\sInclude\s*=\s*""(?<name>[^""$]+)""", RegexOptions.IgnoreCase)]
     private static partial Regex PackageReference();
     [GeneratedRegex("""<PackageId>\s*(?<name>[^<\s]+)\s*</PackageId>""", RegexOptions.IgnoreCase)]
     private static partial Regex PackageId();
@@ -309,9 +456,10 @@ public static partial class Links
     private static partial Regex AssemblyName();
     [GeneratedRegex(@"<package\s+id\s*=\s*""(?<name>[^""]+)""", RegexOptions.IgnoreCase)]
     private static partial Regex PackagesConfig();
-    [GeneratedRegex(@"^\s*namespace\s+(?<name>[A-Za-z_][\w.]*)", RegexOptions.Multiline)]
-    private static partial Regex CsNamespace();
-    [GeneratedRegex(@"^\s*(?:global\s+)?using\s+(?:static\s+)?(?:\w+\s*=\s*)?(?<name>[A-Za-z_][\w.]*)\s*;", RegexOptions.Multiline)]
+    /// <summary>A namespace's start (its name, and { or ; after it), or a brace: what nests one namespace in another.</summary>
+    [GeneratedRegex(@"\bnamespace\s+(?<ns>[A-Za-z_][\w.]*)\s*(?<end>[{;])|[{}]")]
+    private static partial Regex CsToken();
+    [GeneratedRegex(@"^\s*(?:global\s+)?using\s+(?:(?<static>static)\s+)?(?:(?<alias>\w+)\s*=\s*)?(?:global::)?(?<name>[A-Za-z_][\w.]*)\s*;", RegexOptions.Multiline)]
     private static partial Regex CsUsing();
     [GeneratedRegex("""(?:\bimport\s+(?:[\w*{}\s,]+\s+from\s+)?|\bexport\s+[\w*{}\s,]+\s+from\s+|\brequire\s*\(\s*|\bimport\s*\(\s*)['"](?<spec>[^'"\s]+)['"]""")]
     private static partial Regex JsImport();
@@ -319,7 +467,8 @@ public static partial class Links
     private static partial Regex PyNorm();
     [GeneratedRegex(@"^\s*name\s*=\s*['""](?<name>[^'""]+)['""]", RegexOptions.Multiline)]
     private static partial Regex TomlName();
-    [GeneratedRegex(@"^\s*dependencies\s*=\s*\[(?<list>[^\]]*)\]", RegexOptions.Multiline)]
+    /// <summary>dependencies = [ … ]: quoted items (a ] inside one, as in extras, does not end the list).</summary>
+    [GeneratedRegex(@"^\s*dependencies\s*=\s*\[(?<list>(?:""[^""]*""|'[^']*'|[^\]""'])*)\]", RegexOptions.Multiline)]
     private static partial Regex TomlDependencies();
     [GeneratedRegex(@"^\[tool\.poetry\.dependencies\]\s*\n(?<body>(?:(?!\[).*\n?)*)", RegexOptions.Multiline)]
     private static partial Regex PoetryDependencies();
@@ -337,16 +486,23 @@ public static partial class Links
     private static partial Regex PyImport();
     [GeneratedRegex("""\bname\s*=\s*['"](?<name>[^'"]+)['"]""")]
     private static partial Regex SetupPyName();
-    [GeneratedRegex(@"\binstall_requires\s*=\s*\[(?<list>[^\]]*)\]")]
+    [GeneratedRegex(@"\binstall_requires\s*=\s*\[(?<list>(?:""[^""]*""|'[^']*'|[^\]""'])*)\]")]
     private static partial Regex SetupInstallRequires();
     [GeneratedRegex(@"^module\s+(?<name>\S+)", RegexOptions.Multiline)]
     private static partial Regex GoModule();
     [GeneratedRegex(@"^\s*(?:require\s+)?(?<name>[a-z0-9][\w.\-]*\.[a-z]{2,}/[\w./\-]+)\s+v\d", RegexOptions.Multiline)]
     private static partial Regex GoRequire();
-    [GeneratedRegex(@"^\s*(?:import\s+)?(?:\w+\s+)?""(?<name>[a-z0-9][\w.\-]*\.[a-z]{2,}/[\w./\-]+)""", RegexOptions.Multiline)]
-    private static partial Regex GoImport();
+    /// <summary>import "x" (a line), or import ( … ): the specs.</summary>
+    [GeneratedRegex(@"^\s*import\s*(?:\((?<body>[^)]*)\)|(?<body>(?:[\w.]+\s+)?""[^""\n]*""))", RegexOptions.Multiline)]
+    private static partial Regex GoImportBlock();
+    [GeneratedRegex(@"(?:^|\n)\s*(?:[\w.]+\s+)?""(?<name>[a-z0-9][\w.\-]*\.[a-z]{2,}/[\w./\-]+)""")]
+    private static partial Regex GoImportSpec();
+    [GeneratedRegex(@"^\s*(?:replace\s+)?[^\s=]+(?:\s+v\S+)?\s*=>\s*(?<to>[a-z0-9][\w.\-]*\.[a-z]{2,}/[\w./\-]+)\s+v\d", RegexOptions.Multiline)]
+    private static partial Regex GoReplace();
     [GeneratedRegex(@"<(?<tag>parent|dependencies|dependencyManagement|build|profiles|plugins)>[\s\S]*?</\k<tag>>")]
     private static partial Regex PomSections();
+    [GeneratedRegex(@"<(?<tag>dependencyManagement|build|plugins)>[\s\S]*?</\k<tag>>")]
+    private static partial Regex PomManaged();
     [GeneratedRegex(@"<groupId>\s*(?<v>[^<\s]+)\s*</groupId>")]
     private static partial Regex PomGroup();
     [GeneratedRegex(@"<parent>[\s\S]*?<groupId>\s*(?<v>[^<\s]+)\s*</groupId>")]
@@ -373,7 +529,8 @@ public static partial class Links
     private static partial Regex SubmoduleUrl();
     [GeneratedRegex(@"^\s*-?\s*project\s*:\s*(?<name>['""]?[\w.\-/]+['""]?)\s*$", RegexOptions.Multiline)]
     private static partial Regex CiProject();
-    [GeneratedRegex(@"^\s*-?\s*(?:image|repository)\s*:\s*['""]?(?<image>[\w.\-/:@${}]+)['""]?\s*$", RegexOptions.Multiline)]
+    /// <summary>image: x, repository: x, and the extended forms (image:\n  name: x; kustomize's newName: x).</summary>
+    [GeneratedRegex(@"^\s*-?\s*(?:image|repository|newName)\s*:\s*['""]?(?<image>[\w.\-/:@${}]+)['""]?\s*$|^\s*image\s*:\s*\n\s+name\s*:\s*['""]?(?<image>[\w.\-/:@${}]+)['""]?\s*$", RegexOptions.Multiline)]
     private static partial Regex YamlImage();
     [GeneratedRegex(@"^\s*FROM\s+(?:--platform=\S+\s+)?(?<image>\S+)", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
     private static partial Regex DockerFrom();

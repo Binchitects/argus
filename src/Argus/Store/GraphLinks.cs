@@ -11,8 +11,8 @@ public static partial class Graph
     public static string LinkKind(string declKind) => declKind switch
     {
         "nuget" or "npm" or "pypi" or "cargo" or "maven" => "package:" + declKind,
-        "cs" => "import:csharp",
-        "java" => "import:java",
+        "cs" or "cs-type" => "import:csharp",
+        "java" or "java-package" => "import:java",
         "py" => "import:python",
         "go" => "import:go",
         "proto" => "import:proto",
@@ -21,13 +21,53 @@ public static partial class Graph
         _ => declKind,
     };
 
-    /// <summary>The kinds whose names are dotted or slashed paths: a use matches the longest name a repository provides that starts it.</summary>
+    /// <summary>
+    /// The kinds whose names are dotted or slashed paths: a use matches the longest name a repository provides that starts it
+    /// (a Python import names a module in a package; a Go import, a package in a module). C# and Java name a namespace or
+    /// a package exactly: walking up them would let a repository that declares a root (System, com.acme) capture them all.
+    /// </summary>
     static char? PrefixSeparator(string kind) => kind switch
     {
-        "cs" or "java" or "py" => '.',
+        "py" => '.',
         "go" => '/',
         _ => null,
     };
+
+    /// <summary>
+    /// Namespace roots that are a platform's (.NET's): a repository declaring one (a polyfill's namespace System) provides
+    /// nothing to the estate under it, unless its own package carries that root.
+    /// </summary>
+    static readonly string[] ForeignCsRoots = ["System", "Microsoft", "Windows", "Internal", "Mono"];
+
+    /// <summary>Python's standard library, by its top-level modules: a repository's package with one of these names is never what an import of it means.</summary>
+    static readonly HashSet<string> PyStdlib = new(StringComparer.Ordinal)
+    {
+        "abc", "argparse", "array", "ast", "asyncio", "base64", "bisect", "builtins", "bz2", "calendar", "cmath", "codecs", "collections",
+        "concurrent", "configparser", "contextlib", "contextvars", "copy", "csv", "ctypes", "dataclasses", "datetime", "decimal", "difflib",
+        "dis", "email", "enum", "errno", "faulthandler", "fnmatch", "fractions", "functools", "gc", "getpass", "gettext", "glob", "gzip",
+        "hashlib", "heapq", "hmac", "html", "http", "imaplib", "importlib", "inspect", "io", "ipaddress", "itertools", "json", "keyword",
+        "linecache", "locale", "logging", "lzma", "mailbox", "math", "mimetypes", "multiprocessing", "netrc", "numbers", "operator", "os",
+        "pathlib", "pdb", "pickle", "pkgutil", "platform", "plistlib", "pprint", "profile", "pstats", "queue", "quopri", "random", "re",
+        "reprlib", "sched", "secrets", "select", "selectors", "shelve", "shlex", "shutil", "signal", "site", "smtplib", "socket",
+        "socketserver", "sqlite3", "ssl", "stat", "statistics", "string", "struct", "subprocess", "sys", "sysconfig", "tarfile", "tempfile",
+        "textwrap", "threading", "time", "timeit", "tkinter", "token", "tokenize", "tomllib", "trace", "traceback", "types", "typing",
+        "unicodedata", "unittest", "urllib", "uuid", "venv", "warnings", "wave", "weakref", "webbrowser", "wsgiref", "xml", "xmlrpc",
+        "zipfile", "zipimport", "zlib", "zoneinfo",
+    };
+
+    /// <summary>Folders whose files declare nothing for the estate: tests, fixtures, examples, samples and templates are not what others build against.</summary>
+    static bool NotAProvider(string path)
+    {
+        foreach (var part in path.Split('/')[..^1])
+        {
+            if (part.ToLowerInvariant() is "test" or "tests" or "testing" or "__tests__" or "fixtures" or "testdata" or "examples" or "example"
+                or "samples" or "sample" or "templates" or "demo" or "demos" or "benchmarks")
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     sealed record RepoRow(long Id, long GitlabId, string Path, bool Default);
 
@@ -49,7 +89,11 @@ public static partial class Graph
         // What each project provides, by kind and name (names of the default branch only).
         var provides = new Dictionary<string, Dictionary<string, HashSet<long>>>(StringComparer.Ordinal);
         var protoFiles = new List<(string Path, long Project)>();
-        using (var cmd = Sql.Command(conn, "SELECT d.repo_id, d.kind, d.name FROM file_decls d WHERE d.role = 'provides'", null))
+        // A repository's own packages (its PackageIds): a .NET root of its own (Microsoft's own estate) is its to provide.
+        var nugetRoots = Sql.Query(conn, "SELECT DISTINCT repo_id, name FROM file_decls WHERE role = 'provides' AND kind = 'nuget'")
+            .Select(r => (r.Long("repo_id"), r.Str("name").Split('.')[0])).ToHashSet();
+        using (var cmd = Sql.Command(conn,
+            "SELECT d.repo_id, d.kind, d.name, f.path, f.is_vendored FROM file_decls d JOIN files f ON f.id = d.file_id WHERE d.role = 'provides'", null))
         using (var reader = cmd.ExecuteReader())
         {
             while (reader.Read())
@@ -57,6 +101,9 @@ public static partial class Graph
                 if (!byId.TryGetValue(reader.GetInt64(0), out var repo) || !repo.Default) continue;
                 var kind = reader.GetString(1);
                 var name = reader.GetString(2);
+                // A vendored copy, a test's fixture or a sample provides nothing: the library is the repository it came from.
+                if (reader.GetInt64(4) != 0 || NotAProvider(reader.GetString(3))) continue;
+                if (kind == "cs" && ForeignCsRoots.Contains(name.Split('.')[0]) && !nugetRoots.Contains((repo.Id, name.Split('.')[0].ToLowerInvariant()))) continue;
                 if (kind == "proto")
                 {
                     protoFiles.Add((name, repo.GitlabId));
@@ -141,6 +188,35 @@ public static partial class Graph
                 var hits = protoFiles.Where(p => p.Path == name || p.Path.EndsWith("/" + name, StringComparison.Ordinal)).Select(p => p.Project).ToHashSet();
                 return Decide(hits, name);
             }
+        }
+        switch (kind)
+        {
+            case "cs":
+            case "java-package":
+                return Decide(Lookup(kind == "cs" ? "cs" : "java", name), name);
+            case "cs-type":
+            {
+                // using static A.B.Type; using X = A.B(.Type): the namespace itself, or the one that holds the type.
+                if (Lookup("cs", name) is { Count: > 0 } ns) return Decide(ns, name);
+                var up = name.LastIndexOf('.');
+                return up > 0 ? Decide(Lookup("cs", name[..up]), name[..up]) : ("external", 0, "");
+            }
+            case "java":
+            {
+                // import a.b.Type(.Nested): the package before the types (capitalised); a Kotlin top-level function
+                // (a.b.round) is one lower-case segment past its package.
+                var parts = name.Split('.');
+                var cut = parts.Length;
+                while (cut > 1 && parts[cut - 1].Length > 0 && char.IsUpper(parts[cut - 1][0])) cut--;
+                var package = string.Join('.', parts[..cut]);
+                if (Lookup("java", package) is { Count: > 0 } exact) return Decide(exact, package);
+                if (cut == parts.Length && cut > 1 && string.Join('.', parts[..(cut - 1)]) is var holder && Lookup("java", holder) is { Count: > 0 } function)
+                    return Decide(function, holder);
+                return ("external", 0, "");
+            }
+            case "py" when PyStdlib.Contains(name.Split('.')[0]):
+                // The standard library's, whatever a repository calls its own package.
+                return ("external", 0, "");
         }
         if (PrefixSeparator(kind) is not { } sep)
             return Decide(Lookup(kind, name), name);

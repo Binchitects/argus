@@ -63,8 +63,23 @@ the index already holds, ecosystem by ecosystem, with no build run:
 | C, C++ | headers | `#include` (resolved file by file, as before) |
 | The repository itself | its path | a submodule's URL, a GitLab CI `project:` include or trigger, a `git+https://...` requirement, an image built from it (`FROM`, `image:`, `repository:`) |
 
-A use resolves to the one repository that provides its name (for imports, the
-longest name provided that starts it). A repository's own name stays inside it
+A use resolves to the one repository that provides its name. A C# `using`
+and a Java or Kotlin `import` name a namespace or a package exactly (an
+import of a type is its package; a Kotlin function's, the package one segment
+up; `using static` and an alias, the namespace or the one holding the type):
+walking up them would let one repository that declares a root (`namespace
+System` in a polyfill, `package com.acme`) capture every use under it. A
+Python import and a Go import take the longest module or package provided
+that starts them; an import of the standard library's (`logging`, `json`)
+stays outside whatever a repository calls its own package. What a test's
+fixture, an example, a sample, a template or a vendored copy declares
+provides nothing, nor does a repository declaring .NET's own namespaces
+(`System`, `Microsoft`, `Windows`) unless its own package carries that root.
+Only real uses count: imports in code (not in a string, a comment or a
+generator's template), a module's direct requirements (not `// indirect`
+ones, nor Maven's `<dependencyManagement>` pins or build plugins), Go's
+`replace` to a fork, and `requirements/*.txt` and `constraints*.txt` too.
+A repository's own name stays inside it
 (every Python repository's `utils` is its own); a name two repositories
 provide links to neither, and the run says how many were ambiguous; public
 packages and standard libraries stay outside. Links are made at a library's
