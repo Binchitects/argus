@@ -16,7 +16,7 @@ the stack.
 
 ## What your agent gets
 
-**Your private code**, access-controlled per developer — 11 tools:
+**Your private code**, access-controlled per developer — 14 tools:
 
 | Tool | Answers |
 |---|---|
@@ -25,7 +25,10 @@ the stack.
 | `search_code` | Lexical search over millions of lines |
 | `semantic_search` | *"Where do we handle retry backoff for uploads?"* — when the question has no identifier in it |
 | `which_repo` | *"Which repo do I change for X?"* — from a description, a symbol, a stack trace, or a diff |
-| `repo_map` · `impact_of` | *"What breaks if I change this?"* — from resolved `#include` edges |
+| `system_map` | *"How is the whole system put together?"* — its hubs, layers, cycles and groups, and every link between repositories, one line each |
+| `dependency_path` | *"How does this repo affect that one?"* — the chains of dependencies between them, each step with what makes it and where |
+| `change_impact` | *"What does changing this library reach?"* — every repository that depends on it, by depth; with a symbol, the lines that use it there (and not in unrelated repos of the same name) |
+| `repo_map` · `impact_of` | *"What breaks if I change this?"* — a repository's links both ways (and further with depth); a header's includers, file by file |
 | `code_contracts` | Every in-house symbol a file references, with its definition |
 | `get_file` · `index_status` | Access-checked fetch; per-repo freshness, one row per branch |
 | `overview` | *"What is this repository?"* — its README, its layout, its key symbols. The one to call first in a codebase you have never seen |
@@ -40,8 +43,39 @@ the stack.
 | `docs_contracts` | Paste a file → header, library, DLL and IRQL of every API it calls |
 | `docs_verify` | Check a draft you already wrote; reports only contradictions |
 
-**17 tools in total**, and every one of them is contract-tested against a live
+**20 tools in total**, and every one of them is contract-tested against a live
 server — see [Checking it](#checking-it).
+
+## Across repositories
+
+Repositories are linked by what they use of each other, read from the files
+the index already holds, ecosystem by ecosystem, with no build run:
+
+| What | Provided by | Used by |
+|---|---|---|
+| .NET | a project's `PackageId` (else its assembly's or file's name); a file's `namespace` | `PackageReference`, `packages.config`; `using` |
+| JavaScript, TypeScript | `package.json`'s `name` | its dependencies; `import`, `require` |
+| Python | `pyproject.toml`, `setup.cfg`, `setup.py`'s name; a package folder (`__init__.py`) | requirements files, `pyproject.toml`, `setup.py`; `import`, `from` |
+| Go | `go.mod`'s `module` | its `require`s; `import` (the longest module path that starts it) |
+| Java, Kotlin | `pom.xml`'s group and artifact; a file's `package` | `<dependency>`, Gradle's `implementation` and the rest; `import` |
+| Rust | `Cargo.toml`'s `[package]` name | its dependencies; `use` |
+| Protocol Buffers | each `.proto` file, by its path | `import "x.proto"` |
+| C, C++ | headers | `#include` (resolved file by file, as before) |
+| The repository itself | its path | a submodule's URL, a GitLab CI `project:` include or trigger, a `git+https://...` requirement, an image built from it (`FROM`, `image:`, `repository:`) |
+
+A use resolves to the one repository that provides its name (for imports, the
+longest name provided that starts it). A repository's own name stays inside it
+(every Python repository's `utils` is its own); a name two repositories
+provide links to neither, and the run says how many were ambiguous; public
+packages and standard libraries stay outside. Links are made at a library's
+default branch. Measured on a generated estate of 200 repositories in seven
+groups and six languages (C#, Go, Java, TypeScript, Python, C++, plus CI,
+image and submodule links), the 469 links between them were found exactly,
+none missing and none wrong, in 28 ms (`tests/Argus.Tests/GraphTests.cs`).
+
+The index is read again in full once after this release (the reader's
+contract changed): Go, Java, Kotlin, Rust and `.proto` files are indexed now,
+and the manifests are kept for what they declare.
 
 ## Keeping the index current
 

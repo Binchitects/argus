@@ -15,6 +15,17 @@ public static class Filters
         [".ts"] = "typescript", [".tsx"] = "typescript",
         [".js"] = "javascript", [".jsx"] = "javascript",
         [".md"] = "markdown", [".txt"] = "text",
+        [".go"] = "go", [".java"] = "java", [".kt"] = "kotlin", [".rs"] = "rust", [".proto"] = "proto",
+        // Manifests: what a repository provides and uses (Links.cs); no symbols.
+        [".csproj"] = "msbuild", [".fsproj"] = "msbuild", [".vbproj"] = "msbuild", [".props"] = "msbuild", [".targets"] = "msbuild",
+        [".gradle"] = "gradle", [".toml"] = "toml", [".yml"] = "yaml", [".yaml"] = "yaml", [".cfg"] = "ini",
+    };
+
+    /// <summary>Manifests known by their whole name.</summary>
+    public static readonly Dictionary<string, string> NameLang = new(StringComparer.Ordinal)
+    {
+        ["package.json"] = "npm", ["go.mod"] = "gomod", ["pom.xml"] = "maven", ["Cargo.toml"] = "cargo", [".gitmodules"] = "gitmodules",
+        ["packages.config"] = "nugetconfig", ["Dockerfile"] = "dockerfile", ["Containerfile"] = "dockerfile", ["build.gradle.kts"] = "gradle",
     };
 
     public static readonly HashSet<string> HeaderExtensions = new(StringComparer.Ordinal) { ".h", ".hpp", ".hxx", ".inl" };
@@ -30,8 +41,17 @@ public static class Filters
         return name.Substring(i);
     }
 
-    public static string? DetectLang(string path) =>
-        ExtensionLang.TryGetValue(Suffix(path).ToLowerInvariant(), out var lang) ? lang : null;
+    public static string? DetectLang(string path)
+    {
+        var name = PyStr.AfterLast(path, '/');
+        if (NameLang.TryGetValue(name, out var known)) return known;
+        // Dockerfile.prod, app.Dockerfile.
+        if (name.StartsWith("Dockerfile.", StringComparison.Ordinal) || name.EndsWith(".Dockerfile", StringComparison.Ordinal)) return "dockerfile";
+        return ExtensionLang.TryGetValue(Suffix(path).ToLowerInvariant(), out var lang) ? lang : null;
+    }
+
+    /// <summary>Whether ctags reads the file for symbols: code, not manifests.</summary>
+    public static bool HasSymbols(string? lang) => lang is not null && !Links.ManifestLangs.Contains(lang);
 
     public static bool ShouldIndex(string path, long size, ReadOnlySpan<byte> data, long maxBytes, IReadOnlyList<string> excludeDirs)
     {

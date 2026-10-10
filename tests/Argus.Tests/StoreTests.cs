@@ -14,7 +14,7 @@ public class StoreTests
         var version = Convert.ToInt32(Sql.Scalar(ix.Conn, "PRAGMA user_version"));
         Assert.Equal(Db.Migrations[^1].Version, version);
         Assert.Equal(version, Db.Migrate(ix.Conn));
-        Assert.Equal(18, Db.Migrations.Count);
+        Assert.Equal(19, Db.Migrations.Count);
     }
 
     [Fact]

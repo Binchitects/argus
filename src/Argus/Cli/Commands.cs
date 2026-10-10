@@ -424,11 +424,13 @@ public static class Commands
         }
         Dictionary<string, long> counts;
         int edges;
+        Dictionary<string, long> linked;
         Progress.Finishing("includes");
         try
         {
             counts = Resolve.ResolveIncludes(conn);
             edges = Graph.RebuildRepoDeps(conn);
+            linked = Graph.RebuildLinks(conn);
         }
         catch (Exception exc)
         {
@@ -438,7 +440,8 @@ public static class Commands
         }
         Out.WriteLine($"includes: {counts.GetValueOrDefault("resolved")} resolved, {counts.GetValueOrDefault("external")} external, " +
                       $"{counts.GetValueOrDefault("ambiguous")} ambiguous, {counts.GetValueOrDefault("not_found")} not found");
-        Out.WriteLine($"repo graph: {edges} cross-repo edges");
+        Out.WriteLine($"repo graph: {edges} #include edges; {linked.GetValueOrDefault("linked_pairs")} linked pairs of repositories from packages, imports and the rest " +
+                      $"({linked.GetValueOrDefault("resolved")} uses resolved, {linked.GetValueOrDefault("ambiguous")} ambiguous, {linked.GetValueOrDefault("external")} outside the estate)");
         if (empty > 0)
             Out.WriteLine($"repos: {projects.Count} seen, {empty} empty (nothing to index), {projects.Count - empty} indexed");
         // What the repositories of this run left waiting (and other repositories' backlog), with what is left of the share.
@@ -678,11 +681,13 @@ public static class Commands
     {
         Dictionary<string, long> counts;
         int edges;
+        Dictionary<string, long> linked;
         using var conn = Db.Open(cfg.Index.DbPath);
         try
         {
             counts = Resolve.ResolveIncludes(conn);
             edges = Graph.RebuildRepoDeps(conn);
+            linked = Graph.RebuildLinks(conn);
         }
         catch (Exception exc)
         {
@@ -692,6 +697,8 @@ public static class Commands
         foreach (var state in new[] { "resolved", "external", "ambiguous", "not_found" })
             Out.WriteLine($"{state,-12} {counts.GetValueOrDefault(state)}");
         Out.WriteLine($"{"edges",-12} {edges}");
+        foreach (var state in new[] { "linked_pairs", "resolved", "internal", "ambiguous", "external" })
+            Out.WriteLine($"{state,-12} {linked.GetValueOrDefault(state)}");
         return 0;
     }
 

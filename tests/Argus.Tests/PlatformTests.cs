@@ -407,7 +407,7 @@ public sealed class PlatformHttpTests : IAsyncLifetime
         Assert.Equal(2, sent.Count);
         var key = _gateway.Keys.Single(k => k.Value == "root@example.invalid").Key;
         Assert.All(sent, s => Assert.Equal("Bearer " + key, s.Auth));
-        Assert.Equal(17, sent[0].Body["tools"]!.AsArray().Count);
+        Assert.Equal(20, sent[0].Body["tools"]!.AsArray().Count);
         Assert.Equal("tool", sent[1].Body["messages"]!.AsArray()[^1]!["role"]!.GetValue<string>());
 
         var stored = await b.Json(HttpMethod.Get, $"/api/conversations/{id}");

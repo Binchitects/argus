@@ -48,7 +48,7 @@ public static class Kpi
             ["includes"] = includes,
             ["resolved_include_rate"] = Rate(resolved, includes),
             ["ambiguous_include_rate"] = Rate(ambiguous, includes),
-            ["cross_repo_edges"] = Scalar("SELECT COUNT(*) FROM repo_deps"),
+            ["cross_repo_edges"] = Scalar("SELECT COUNT(*) FROM (SELECT DISTINCT from_repo_id, to_repo_id FROM repo_links)"),
             ["index_mb"] = sizeMb,
             ["mb_per_1k_files"] = sizeMb is > 0 && files != 0 ? R1(sizeMb.Value / files * 1000) : null,
             ["collected_at"] = t,

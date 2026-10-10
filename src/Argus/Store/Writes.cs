@@ -192,6 +192,16 @@ public static class Writes
                 Sql.Exec(conn, "INSERT INTO includes (repo_id, file_id, raw, is_angle) VALUES (?, ?, ?, ?)", repoId, fileId, i.Raw, i.IsAngle);
         });
 
+    /// <summary>What a file provides and uses (Links.Extract), replacing what it declared before.</summary>
+    public static void ReplaceDecls(SqliteConnection conn, long repoId, long fileId, IReadOnlyList<Indexing.Links.Decl> decls) =>
+        Atomic(conn, () =>
+        {
+            Sql.Exec(conn, "DELETE FROM file_decls WHERE file_id = ?", fileId);
+            foreach (var d in decls)
+                Sql.Exec(conn, "INSERT INTO file_decls (repo_id, file_id, role, kind, name, line) VALUES (?, ?, ?, ?, ?, ?)",
+                    repoId, fileId, d.Role, d.Kind, d.Name, d.Line);
+        });
+
     public static void RecordError(SqliteConnection conn, long repoId, string? path, string stage, string message, long ts) =>
         Atomic(conn, () => Sql.Exec(conn,
             "INSERT INTO index_errors (repo_id, path, stage, message, ts) VALUES (?, ?, ?, ?, ?)",

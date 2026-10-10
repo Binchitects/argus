@@ -101,7 +101,7 @@ public sealed class SlowGitLabTests : IAsyncLifetime
         _platform.GitLabDown = true;
         _platform.GitLabDelay = TimeSpan.Zero;
         var session = await McpCalls.Session(_http, "sk-alice");
-        Assert.Equal(17, (await ListTools(session))["tools"]!.AsArray().Count);
+        Assert.Equal(20, (await ListTools(session))["tools"]!.AsArray().Count);
 
         var refused = await McpCalls.Call(_http, "sk-alice", session, "find_symbol", new { name = "DecodeFrame" });
         Assert.True(refused["isError"]!.GetValue<bool>());

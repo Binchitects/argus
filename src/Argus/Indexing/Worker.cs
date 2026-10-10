@@ -143,9 +143,17 @@ public static class Worker
             try
             {
                 var content = Utf8.DecodeReplace(data);
-                var fileId = Writes.UpsertFile(conn, rid, change.Path, Filters.DetectLang(change.Path), data.Length,
+                var lang = Filters.DetectLang(change.Path);
+                var fileId = Writes.UpsertFile(conn, rid, change.Path, lang, data.Length,
                     shas.GetValueOrDefault(change.Path, ""), content);
                 Writes.ReplaceIncludes(conn, rid, fileId, Includes.Extract(content));
+                Writes.ReplaceDecls(conn, rid, fileId, Links.Extract(change.Path, lang, content));
+                if (!Filters.HasSymbols(lang))
+                {
+                    // A manifest: what it declares is read; ctags has nothing to say about it.
+                    result.Indexed++;
+                    continue;
+                }
             }
             catch (Exception exc)
             {

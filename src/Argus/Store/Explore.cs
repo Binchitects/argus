@@ -92,7 +92,7 @@ public static class Explore
 }
 
 /// <summary>Materialise the cross-repo dependency graph.</summary>
-public static class Graph
+public static partial class Graph
 {
     public static int RebuildRepoDeps(SqliteConnection conn)
     {

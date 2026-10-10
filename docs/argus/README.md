@@ -28,10 +28,13 @@ time, and claims quoted verbatim were wrong 0 times out of 18.
 
 ## What it serves
 
-**Your code.** Argus indexes GitLab repositories: symbols, references, include
-graphs and file contents. `find_symbol`, `find_references`, `search_code`,
-`semantic_search`, `get_file`, `repo_map`, `which_repo`, `impact_of` and
-`code_contracts` work across every repository the caller is allowed to see.
+**Your code.** Argus indexes GitLab repositories: symbols, references, file
+contents, and the graph of what each repository uses of the others (packages,
+imports, #includes, submodules, CI includes, images; see
+[overview.md](overview.md#across-repositories)). `find_symbol`,
+`find_references`, `search_code`, `semantic_search`, `get_file`, `repo_map`,
+`system_map`, `dependency_path`, `change_impact`, `which_repo`, `impact_of`
+and `code_contracts` work across every repository the caller is allowed to see.
 
 **Documentation packs.** Self-contained archives of public reference material —
 Windows SDK and WDK, MSVC C++, cppreference, Qt 4 to 6, .NET, Python, PowerShell and shell

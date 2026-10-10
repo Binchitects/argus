@@ -160,7 +160,7 @@ public sealed class ServerTests : IDisposable
         var session = await Initialize();
         var resp = await _http.SendAsync(Mcp(new { jsonrpc = "2.0", id = 3, method = "tools/list" }, session: session));
         var tools = ReadRpc(await resp.Content.ReadAsStringAsync())["result"]!["tools"]!.AsArray();
-        Assert.Equal(17, tools.Count);
+        Assert.Equal(20, tools.Count);
         Assert.Equal(ToolCatalog.Specs.Select(s => s.Name), tools.Select(t => t!["name"]!.GetValue<string>()));
     }
 

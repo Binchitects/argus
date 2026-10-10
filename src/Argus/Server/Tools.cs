@@ -270,11 +270,20 @@ public sealed class Tools
     public JsonNode Overview(Identity identity, string? repo) =>
         RunReadonly(conn => (JsonNode)Queries.RepoOverview(identity.AllowedRepoIds, conn, repo));
 
-    public JsonNode RepoMap(Identity identity, long repoId) => RunReadonly(conn =>
+    public JsonNode RepoMap(Identity identity, long repoId, long depth) => RunReadonly(conn =>
     {
         RaiseIfRepoDenied(conn, identity, repoId);
-        return (JsonNode)Queries.RepoMap(identity.AllowedRepoIds, conn, repoId);
+        return (JsonNode)GraphQueries.RepoMap(identity.AllowedRepoIds, conn, repoId, (int)Math.Clamp(depth, 1, 6));
     });
+
+    public JsonNode SystemMap(Identity identity, string? focus, long depth, string? group) =>
+        RunReadonly(conn => (JsonNode)GraphQueries.SystemMap(identity.AllowedRepoIds, conn, focus, (int)Math.Clamp(depth, 1, 6), group));
+
+    public JsonNode DependencyPath(Identity identity, string from, string to) =>
+        RunReadonly(conn => (JsonNode)GraphQueries.DependencyPath(identity.AllowedRepoIds, conn, from, to));
+
+    public JsonNode ChangeImpact(Identity identity, string repo, string? symbol, long depth) =>
+        RunReadonly(conn => (JsonNode)GraphQueries.ChangeImpact(identity.AllowedRepoIds, conn, repo, symbol, (int)Math.Clamp(depth, 1, 8)));
 
     public JsonNode WhichRepo(Identity identity, string description, string? branch) => RunReadonly(conn =>
     {
@@ -431,7 +440,13 @@ public sealed class Tools
                 () => GetFile(who, a.Int("repo_id"), a.Str("path"))),
             "index_status" => WithAudit(who, tool, [], () => IndexStatus(who)),
             "overview" => WithAudit(who, tool, new JsonObject { ["repo"] = a.OptStr("repo") }, () => Overview(who, a.OptStr("repo"))),
-            "repo_map" => WithAudit(who, tool, new JsonObject { ["repo_id"] = a.Int("repo_id") }, () => RepoMap(who, a.Int("repo_id"))),
+            "repo_map" => WithAudit(who, tool, new JsonObject { ["repo_id"] = a.Int("repo_id"), ["depth"] = a.Int("depth") }, () => RepoMap(who, a.Int("repo_id"), a.Int("depth"))),
+            "system_map" => WithAudit(who, tool, new JsonObject { ["focus"] = a.OptStr("focus"), ["depth"] = a.Int("depth"), ["group"] = a.OptStr("group") },
+                () => SystemMap(who, a.OptStr("focus"), a.Int("depth"), a.OptStr("group"))),
+            "dependency_path" => WithAudit(who, tool, new JsonObject { ["from"] = a.Str("from"), ["to"] = a.Str("to") },
+                () => DependencyPath(who, a.Str("from"), a.Str("to"))),
+            "change_impact" => WithAudit(who, tool, new JsonObject { ["repo"] = a.Str("repo"), ["symbol"] = a.OptStr("symbol"), ["depth"] = a.Int("depth") },
+                () => ChangeImpact(who, a.Str("repo"), a.OptStr("symbol"), a.Int("depth"))),
             "which_repo" => WithAudit(who, tool,
                 new JsonObject { ["description"] = PyStr.Prefix(a.Str("description"), 200), ["branch"] = a.OptStr("branch") },
                 () => WhichRepo(who, a.Str("description"), a.OptStr("branch"))),

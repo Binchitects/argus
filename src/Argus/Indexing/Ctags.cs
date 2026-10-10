@@ -31,8 +31,11 @@ public static class Ctags
     public static readonly HashSet<string> PrivateScopes = new(StringComparer.Ordinal) { "detail", "internal", "impl", "anonymous" };
     public const int TimeoutSeconds = 600;
 
-    /// <summary>Bump when a symbol ROW means something different; composed into the per-file stamp.</summary>
-    public const string SymbolContractVersion = "3";
+    /// <summary>
+    /// Bump when a symbol ROW means something different; composed into the per-file stamp. 4: Go, Java, Kotlin, Rust and
+    /// .proto files are read, and every file's declarations (file_decls) with them, so each repository is read again once.
+    /// </summary>
+    public const string SymbolContractVersion = "4";
 
     public static readonly string[] Args =
     [

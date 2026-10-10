@@ -275,43 +275,6 @@ public static class Queries
             .Take(limit).Select(r => r.Row).ToList();
     }
 
-    /// <summary>Dependencies and dependents of <paramref name="repoId"/>, filtered to the allowlist.</summary>
-    public static JsonObject RepoMap(IReadOnlyList<long> allowed, SqliteConnection conn, long repoId)
-    {
-        var ids = Ids(allowed);
-        if (ids.Count == 0 || !ids.Contains(repoId)) return [];
-        var row = Sql.One(conn, "SELECT id, path_with_namespace FROM repos WHERE id = ?", repoId);
-        if (row is null) return [];
-
-        JsonArray Edges(string sqlTemplate)
-        {
-            var output = new List<(long Other, string Path, long Weight)>();
-            foreach (var chunk in Chunks(ids, 1))
-            {
-                var sql = sqlTemplate.Replace("{marks}", Sql.Marks(chunk.Count));
-                foreach (var r in Sql.QueryList(conn, sql, new object?[] { repoId }.Concat(chunk.Cast<object?>()).ToArray()))
-                    output.Add((r.Long("other_id"), r.Str("path_with_namespace"), r.Long("weight")));
-            }
-            var arr = new JsonArray();
-            foreach (var e in output.OrderBy(e => -e.Weight).ThenBy(e => e.Path, StringComparer.Ordinal))
-                arr.Add(new JsonObject { ["repo_id"] = e.Other, ["path_with_namespace"] = e.Path, ["weight"] = e.Weight });
-            return arr;
-        }
-
-        return new JsonObject
-        {
-            ["repo"] = new JsonObject { ["repo_id"] = row.Long("id"), ["path_with_namespace"] = row.Str("path_with_namespace") },
-            ["depends_on"] = Edges(
-                "SELECT d.to_repo_id AS other_id, r.path_with_namespace, d.weight" +
-                "  FROM repo_deps d JOIN repos r ON r.id = d.to_repo_id" +
-                " WHERE d.from_repo_id = ? AND d.to_repo_id IN ({marks})"),
-            ["depended_on_by"] = Edges(
-                "SELECT d.from_repo_id AS other_id, r.path_with_namespace, d.weight" +
-                "  FROM repo_deps d JOIN repos r ON r.id = d.from_repo_id" +
-                " WHERE d.to_repo_id = ? AND d.from_repo_id IN ({marks})"),
-        };
-    }
-
     // --- which_repo ---------------------------------------------------------------
 
     static readonly Dictionary<string, (double Direct, double Lexical, double Central)> Weights = new()
@@ -753,6 +716,7 @@ public static class Queries
             $" ORDER BY r.path_with_namespace, r.branch{cap}", args);
         bool truncated = rows.Count > MaxOverviewRepos;
         rows = rows.Take(MaxOverviewRepos).ToList();
+        var estate = GraphQueries.Load(allowed, conn);
 
         var items = new List<JsonObject>();
         foreach (var row in rows)
@@ -767,18 +731,10 @@ public static class Queries
                          " GROUP BY lang ORDER BY n DESC LIMIT 8", repoId))
                 langs.Add(new JsonObject { ["lang"] = r.StrOrNull("lang") is { Length: > 0 } l ? l : "?", ["files"] = r.Long("n") });
             item["langs"] = langs;
-            item["depends_on"] = EdgeList(conn,
-                "SELECT r.path_with_namespace, d.weight FROM repo_deps d" +
-                "  JOIN repos r ON r.id = d.to_repo_id" +
-                " WHERE d.from_repo_id = ? AND d.to_repo_id IN" +
-                $" ({Sql.Marks(ids.Count)})" +
-                " ORDER BY d.weight DESC LIMIT 10", repoId, ids);
-            item["depended_on_by"] = EdgeList(conn,
-                "SELECT r.path_with_namespace, d.weight FROM repo_deps d" +
-                "  JOIN repos r ON r.id = d.from_repo_id" +
-                " WHERE d.to_repo_id = ? AND d.from_repo_id IN" +
-                $" ({Sql.Marks(ids.Count)})" +
-                " ORDER BY d.weight DESC LIMIT 10", repoId, ids);
+            // Linked by packages, imports, #includes, submodules, CI includes and images (GraphQueries).
+            var (uses, usedBy) = GraphQueries.Neighbours(estate, repoId);
+            item["depends_on"] = uses;
+            item["depended_on_by"] = usedBy;
             items.Add(item);
         }
 
@@ -799,11 +755,4 @@ public static class Queries
         return new JsonObject { ["repos"] = list, ["truncated"] = truncated, ["shown"] = items.Count };
     }
 
-    static JsonArray EdgeList(SqliteConnection conn, string sql, long repoId, List<long> ids)
-    {
-        var arr = new JsonArray();
-        foreach (var r in Sql.QueryList(conn, sql, new object?[] { repoId }.Concat(ids.Cast<object?>()).ToArray()))
-            arr.Add(new JsonObject { ["repo"] = r.Str("path_with_namespace"), ["weight"] = r.Long("weight") });
-        return arr;
-    }
 }
