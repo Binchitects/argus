@@ -1,3 +1,4 @@
+using Llm.Core.Access;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
@@ -278,20 +279,10 @@ public static class OperationsEndpoints
     {
         var people = await db.Users.AsNoTracking().Where(u => !u.IsDisabled).ToListAsync(ct);
         var admins = (await users.GetUsersInRoleAsync(Roles.Admin)).Count(u => !u.IsDisabled);
-        var spending = new Spending(new Dictionary<string, GatewayUser>(), 0);
-        string? warning = null;
-        try
-        {
-            spending = await ledger.ReadAsync(ct);
-            warning = spending.Problem;
-        }
-        catch (GatewayException ex)
-        {
-            warning = "Spend and credit are missing: " + ex.Message;
-        }
-        var standing = spending.People;
-        var mine = people.Select(p => (p, g: standing.GetValueOrDefault(p.Email ?? ""))).ToList();
-        var over = mine.Where(x => x.g is { Budget: > 0 } g && g.Spend >= g.Budget).Select(x => x.p.UserName).ToList();
+        // This month's spend, and who has used up a credit of their own (of any kind).
+        var spending = await ledger.ReadAsync(ct);
+        var warning = spending.Problem;
+        var over = people.Where(p => spending.Over(p).Count > 0).Select(p => p.UserName).ToList();
 
         var probes = ProbeAllAsync(factory, stack.Value, argusOptions.Value, dashboards.Value, media, ct);
         var certificate = Certificates.ReadAsync(prom, stack.Value, clock.GetUtcNow(), ct);
@@ -403,20 +394,22 @@ public static class OperationsEndpoints
     private static async Task<IResult> PeopleCsvAsync(AppDbContext db, UserManager<AppUser> users, Ledger ledger, CancellationToken ct)
     {
         var admins = (await users.GetUsersInRoleAsync(Roles.Admin)).Select(u => u.Id).ToHashSet();
-        var standing = (await ledger.ReadAsync(ct)).People;
-        var sb = new StringBuilder("username,display_name,email,role,source,disabled,spend,budget,credit_left\n");
+        var spending = await ledger.ReadAsync(ct);
+        // This month's spend, then each kind's spend and the person's own credit of it (empty: no limit).
+        var sb = new StringBuilder("username,display_name,email,role,source,disabled,api_access,spend_this_month,"
+            + string.Join(',', Credits.Kinds.Select(k => $"{Credits.Name(k)}_spend,{Credits.Name(k)}_credit")) + "\n");
         foreach (var u in await db.Users.AsNoTracking().OrderBy(u => u.UserName).ToListAsync(ct))
         {
-            var g = standing.GetValueOrDefault(u.Email ?? "");
-            var spend = g?.Spend ?? 0;
-            var left = g?.Budget is > 0 ? Math.Max(0, g.Budget.Value - spend).ToString("0.0000", CultureInfo.InvariantCulture) : "";
             sb.AppendJoin(',', new[]
             {
                 Csv(u.UserName), Csv(u.DisplayName), Csv(u.Email), admins.Contains(u.Id) ? "admin" : "member",
-                UserSources.Name(u.Source), u.IsDisabled ? "yes" : "no",
-                spend.ToString("0.0000", CultureInfo.InvariantCulture),
-                g?.Budget?.ToString(CultureInfo.InvariantCulture) ?? "", left,
-            }).Append('\n');
+                UserSources.Name(u.Source), u.IsDisabled ? "yes" : "no", u.ApiOff ? "off" : "on",
+                spending.Of(u.Email).ToString("0.0000", CultureInfo.InvariantCulture),
+            }.Concat(Credits.Kinds.SelectMany(k => new[]
+            {
+                spending.Of(u.Email, k).ToString("0.0000", CultureInfo.InvariantCulture),
+                Credits.Of(u, k)?.ToString(CultureInfo.InvariantCulture) ?? "",
+            }))).Append('\n');
         }
         return new CsvResult(sb.ToString(), $"people-{DateTime.UtcNow:yyyy-MM-dd}.csv");
     }

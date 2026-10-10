@@ -15,13 +15,15 @@ import { useConfirm } from '@/components/ui/confirm'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage, type Me } from '@/lib/api'
 import { ago, money, when } from '@/lib/format'
 import { maxRequests, maxTokens, parseLimit, type KeyLimits } from '@/lib/rate-limits'
 import { LegalHoldCard } from './legal-hold'
 import { CreditMeter, PersonBadges } from './person-badges'
-import { parseCredit, personQuery, type Person, type PersonDetail } from './people-api'
+import { creditKinds, parseCredit, personQuery, type CreditKind, type Person, type PersonDetail, type Standing } from './people-api'
 
 const sourceLabel: Record<Person['source'], string> = { local: 'Local account', ldap: 'Company directory', oidc: 'Company sign-in' }
 const signsInWith: Record<Person['source'], string> = {
@@ -38,7 +40,7 @@ export function PersonPage() {
 
   if (detail.isPending) return <PageSkeleton />
   if (detail.error) return <QueryError error={detail.error} retry={() => detail.refetch()} />
-  const { person: p, keys, warning, groups, directoryGroups, limits } = detail.data
+  const { person: p, keys, warning, groups, directoryGroups, limits, standing } = detail.data
   const self = p.id === me.id
 
   return (
@@ -80,7 +82,8 @@ export function PersonPage() {
         <div className="grid content-start gap-6">
           <Profile p={p} />
           <Groups groups={groups} directoryGroups={directoryGroups} />
-          <Credit p={p} keys={keys} onSecret={setSecret} />
+          <CreditsCard key={creditKinds.map((k) => p.credits[k.kind].credit).join('-')} p={p} standing={standing} />
+          <ApiKeyCard p={p} keys={keys} onSecret={setSecret} />
           {limits && <RateLimitsCard key={`${limits.own.requestsPerMinute}-${limits.own.tokensPerMinute}`} p={p} limits={limits} />}
         </div>
         <div className="grid content-start gap-6">
@@ -238,18 +241,90 @@ function Access({ p, self, onSecret }: { p: Person; self: boolean; onSecret: (s:
   )
 }
 
-function Credit({ p, keys, onSecret }: { p: Person; keys: { alias: string; preview: string | null; spend: number; blocked: boolean; createdAt: string | null }[]; onSecret: (s: { label: string; value: string }) => void }) {
+/** Their own credit of each kind for a calendar month, with this month's spend; the tightest group's credit beside it. */
+function CreditsCard({ p, standing }: { p: Person; standing: Standing[] | null }) {
   const refresh = useRefresh(p.id)
-  const confirm = useConfirm()
-  const [credit, setCredit] = useState(p.budget === null ? '' : String(p.budget))
+  const [values, setValues] = useState<Record<CreditKind, string>>(
+    () => Object.fromEntries(creditKinds.map(({ kind }) => [kind, p.credits[kind].credit === null ? '' : String(p.credits[kind].credit)])) as Record<CreditKind, string>,
+  )
   const [error, setError] = useState<string | null>(null)
   const save = useMutation({
-    mutationFn: (budget: number | null) => api(`/api/admin/people/${p.id}/budget`, { method: 'PUT', body: { budget } }),
+    mutationFn: (credits: Record<CreditKind, number | null>) => api(`/api/admin/people/${p.id}/credits`, { method: 'PUT', body: credits }),
     onSuccess: () => {
-      toast.success('Credit set', { description: 'API keys at once; the chat within about a minute (the gateway caches it).' })
+      toast.success('Credits set', { description: 'They hold at once, for the chat and for API keys.' })
       refresh()
     },
     onError: (e) => setError(errorMessage(e)),
+  })
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Credits this month</CardTitle>
+        <CardDescription>One per kind, each held to what they spent this month (UTC) on it, whichever way. Empty: no limit of their own.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form
+          className="grid gap-3"
+          onSubmit={(e) => {
+            e.preventDefault()
+            setError(null)
+            const parsed = Object.fromEntries(creditKinds.map(({ kind }) => [kind, parseCredit(values[kind])]))
+            if (Object.values(parsed).includes('invalid')) setError('Each credit is a number of dollars, or empty for no limit.')
+            else save.mutate(parsed as Record<CreditKind, number | null>)
+          }}
+        >
+          {error && <Alert variant="destructive">{error}</Alert>}
+          {creditKinds.map(({ kind, label, hint }) => {
+            const group = standing?.find((s) => s.kind === kind)
+            return (
+              <div key={kind} className="grid grid-cols-[minmax(0,1fr)_8rem] items-center gap-3">
+                <div className="grid min-w-0 gap-1">
+                  <span className="flex flex-wrap items-baseline gap-x-2 text-sm font-medium">
+                    {label} <span className="text-xs font-normal text-muted-foreground">{hint}</span>
+                  </span>
+                  <CreditMeter spend={p.credits[kind].spent} budget={p.credits[kind].credit} />
+                  {group?.group && (
+                    <span className="text-xs text-muted-foreground">
+                      {group.group}: {money(group.groupLeft ?? 0)} left this month
+                    </span>
+                  )}
+                </div>
+                <Input
+                  inputMode="decimal"
+                  aria-label={`${label} credit ($)`}
+                  value={values[kind]}
+                  onChange={(e) => setValues((v) => ({ ...v, [kind]: e.target.value }))}
+                  placeholder="no limit"
+                />
+              </div>
+            )
+          })}
+          <div>
+            <Button type="submit" variant="outline" loading={save.isPending}>
+              Set credits
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  )
+}
+
+/** API access (on for everyone; an admin can take it), and their keys. */
+function ApiKeyCard({ p, keys, onSecret }: { p: Person; keys: PersonDetail['keys']; onSecret: (s: { label: string; value: string }) => void }) {
+  const refresh = useRefresh(p.id)
+  const confirm = useConfirm()
+  const access = useMutation({
+    mutationFn: (on: boolean) => api<{ warning: string | null }>(`/api/admin/people/${p.id}/api`, { method: 'PUT', body: { on } }),
+    onSuccess: (r, on) => {
+      if (r.warning) toast.warning(on ? 'API access on' : 'API access off', { description: r.warning })
+      else
+        toast.success(on ? 'API access on' : 'API access off', {
+          description: on ? (p.disabled ? 'Their keys work again once they are enabled.' : 'Their keys work again.') : 'Their keys are blocked at once.',
+        })
+      refresh()
+    },
+    onError: (e) => toast.error(errorMessage(e)),
   })
   const rotate = useMutation({
     mutationFn: () => api<{ apiKey: string }>(`/api/admin/people/${p.id}/key`, { body: {} }),
@@ -262,28 +337,39 @@ function Credit({ p, keys, onSecret }: { p: Person; keys: { alias: string; previ
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Credit and API key</CardTitle>
-        <CardDescription>Spend from the chat and the API key counts against the credit.</CardDescription>
+        <CardTitle>API key</CardTitle>
+        <CardDescription>Coding agents, IDEs and scripts reach the models with it. Their text requests count to the API credit.</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4">
-        <CreditMeter spend={p.spend} budget={p.budget} />
-        <form
-          className="flex flex-wrap items-end gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            setError(null)
-            const c = parseCredit(credit)
-            if (c === 'invalid') setError('A number of dollars, or empty for no limit.')
-            else save.mutate(c)
-          }}
-        >
-          <Field label="Credit ($)" hint="Empty: no limit." error={error ?? undefined} className="w-40">
-            <Input inputMode="decimal" value={credit} onChange={(e) => setCredit(e.target.value)} placeholder="no limit" />
-          </Field>
-          <Button type="submit" variant="outline" loading={save.isPending}>
-            Set credit
-          </Button>
-        </form>
+        <Label className="flex items-start gap-3 font-normal">
+          <Switch
+            checked={!p.apiOff}
+            disabled={access.isPending}
+            onCheckedChange={async (on) => {
+              if (
+                on ||
+                (await confirm({
+                  title: `Take ${p.displayName}'s API access?`,
+                  description: 'Their keys are blocked at once, none is shown to them or made, and Arena MCP and Argus refuse them. The chat stays theirs.',
+                  confirm: 'Take API access',
+                  destructive: true,
+                }))
+              )
+                access.mutate(on)
+            }}
+            aria-describedby={`api-${p.id}`}
+          />
+          <span className="grid gap-0.5">
+            <span className="font-medium">API access</span>
+            <span id={`api-${p.id}`} className="text-xs text-muted-foreground">
+              {p.apiOff
+                ? 'Off: their keys are blocked, and they cannot make one.'
+                : p.disabled
+                  ? 'On, but they are disabled: their keys work once they are enabled.'
+                  : 'On: their keys work, within their API credit.'}
+            </span>
+          </span>
+        </Label>
         <ul className="grid gap-2">
           {keys.length === 0 && <li className="text-sm text-muted-foreground">No API key.</li>}
           {keys.map((k) => (
@@ -296,17 +382,19 @@ function Credit({ p, keys, onSecret }: { p: Person; keys: { alias: string; previ
           ))}
         </ul>
       </CardContent>
-      <CardFooter>
-        <Button
-          variant="outline"
-          loading={rotate.isPending}
-          onClick={async () => {
-            if (await confirm({ title: `New API key for ${p.displayName}?`, description: 'The current key stops working at once.', confirm: 'Make a new key', destructive: true })) rotate.mutate()
-          }}
-        >
-          <RefreshCw /> New API key
-        </Button>
-      </CardFooter>
+      {!p.apiOff && (
+        <CardFooter>
+          <Button
+            variant="outline"
+            loading={rotate.isPending}
+            onClick={async () => {
+              if (await confirm({ title: `New API key for ${p.displayName}?`, description: 'The current key stops working at once.', confirm: 'Make a new key', destructive: true })) rotate.mutate()
+            }}
+          >
+            <RefreshCw /> New API key
+          </Button>
+        </CardFooter>
+      )}
     </Card>
   )
 }

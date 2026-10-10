@@ -16,9 +16,14 @@ import type { KeyLimits } from '@/lib/rate-limits'
 import { cn } from '@/lib/utils'
 
 interface Keys {
+  /** An admin took their API access away: no key is shown or made. */
+  apiOff: boolean
   keys: { alias: string; preview: string | null; spend: number; blocked: boolean; createdAt: string | null }[]
-  spend: number
-  budget: number | null
+  /** This month: their API keys' text requests, and the credit for them (null: no limit of their own). */
+  apiSpend: number
+  apiCredit: number | null
+  /** Kind by kind, with the tightest of their groups' credits; null when the request log cannot be read. */
+  standing: { kind: string; group: string | null; groupLeft: number | null }[] | null
 }
 
 /** The answer cache for the key: off, each person's choice (opt-in), or every key (all); and how long answers are kept. */
@@ -78,13 +83,13 @@ export function ApiKey({ onNewKey }: { onNewKey?: (key: string) => void } = {}) 
     onError: (e) => toast.error(errorMessage(e)),
   })
   const d = keys.data
-  const used = d && d.budget ? Math.min(1, d.spend / d.budget) : null
+  const used = d && d.apiCredit ? Math.min(1, d.apiSpend / d.apiCredit) : null
   return (
     <Card>
       <CardHeader>
         <CardTitle>API key</CardTitle>
-        <CardDescription>For your tools: coding agents, editors, scripts. It spends from your credit.</CardDescription>
-        <CardAction>
+        <CardDescription>For your tools: coding agents, editors, scripts. Their text requests spend from your API credit; pictures, video and speech from theirs.</CardDescription>
+        {!d?.apiOff && <CardAction>
           <Button
             variant="outline"
             size="sm"
@@ -96,19 +101,28 @@ export function ApiKey({ onNewKey }: { onNewKey?: (key: string) => void } = {}) 
           >
             <RefreshCw /> New key
           </Button>
-        </CardAction>
+        </CardAction>}
       </CardHeader>
       <CardContent className="grid gap-4">
         {keys.isPending && <Skeleton className="h-16" />}
         {keys.error && <Alert variant="destructive">{errorMessage(keys.error)}</Alert>}
-        {d && (
+        {d?.apiOff && <Alert variant="warning" title="Your API access is off">An admin turned it off: your keys do not work, and you cannot make one. Ask them to turn it on.</Alert>}
+        {d && !d.apiOff && (
           <div className="grid gap-2">
             <div className="flex items-baseline justify-between text-sm">
-              <span className="text-muted-foreground">Credit used</span>
+              <span className="text-muted-foreground">API credit used this month</span>
               <span className="font-medium tabular-nums">
-                {money(d.spend)} <span className="text-muted-foreground">of {d.budget === null ? 'no limit' : money(d.budget)}</span>
+                {money(d.apiSpend)} <span className="text-muted-foreground">of {d.apiCredit === null ? 'no limit of your own' : money(d.apiCredit)}</span>
               </span>
             </div>
+            {d.standing?.find((x) => x.kind === 'api' && x.group) && (
+              <p className="text-xs text-muted-foreground">
+                {(() => {
+                  const g = d.standing!.find((x) => x.kind === 'api' && x.group)!
+                  return `${g.group}'s API credit: ${money(g.groupLeft ?? 0)} left this month.`
+                })()}
+              </p>
+            )}
             {used !== null && (
               // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a styled bar; <meter> cannot be styled consistently
               <div className="h-2 overflow-hidden rounded-full bg-muted" role="meter" aria-label="Credit used" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(used * 100)}>
@@ -117,7 +131,7 @@ export function ApiKey({ onNewKey }: { onNewKey?: (key: string) => void } = {}) 
             )}
           </div>
         )}
-        {d && (
+        {d && !d.apiOff && (
           <ul className="grid gap-2">
             {d.keys.length === 0 && <li className="text-sm text-muted-foreground">No key yet. Make one to use the API.</li>}
             {d.keys.map((k) => (

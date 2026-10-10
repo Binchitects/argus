@@ -25,10 +25,18 @@ public sealed class Group
     /// <summary>Members' chats and their files are kept this many days, then deleted; null: the company's setting. The shortest of a person's groups applies.</summary>
     public int? RetentionDays { get; set; }
 
-    /// <summary>What the group may spend in a calendar month, across the chat and API keys; null: no group limit.</summary>
-    public decimal? Credit { get; set; }
+    /// <summary>What the group may spend in a calendar month on the chat's answers; null: no group limit of that kind (Credits).</summary>
+    public decimal? ChatCredit { get; set; }
+    /// <summary>... on its members' API keys' text requests.</summary>
+    public decimal? ApiCredit { get; set; }
+    /// <summary>... on pictures made.</summary>
+    public decimal? PictureCredit { get; set; }
+    /// <summary>... on videos made.</summary>
+    public decimal? VideoCredit { get; set; }
+    /// <summary>... on speech.</summary>
+    public decimal? SpeechCredit { get; set; }
 
-    /// <summary>The credit is each member's, not shared by them all.</summary>
+    /// <summary>Each credit is each member's, not shared by them all.</summary>
     public bool CreditPerMember { get; set; }
 
     /// <summary>The label its spend is charged to in the monthly chargeback report.</summary>

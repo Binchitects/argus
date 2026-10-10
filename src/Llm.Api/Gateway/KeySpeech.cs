@@ -212,7 +212,8 @@ public static class KeySpeech
             return null;
         }
         var normalized = email.ToUpperInvariant();
-        return await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.NormalizedEmail == normalized, ct);
+        // A person whose API access was taken is not one here, whatever the gateway said of the key.
+        return await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.NormalizedEmail == normalized && !u.ApiOff && !u.IsDisabled, ct);
     }
 
     private static string? Str(JsonObject o, string name) => o[name] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;

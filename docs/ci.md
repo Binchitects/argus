@@ -174,7 +174,8 @@ through a pipe, as above, or `< /dev/null`.
 | `ARENA_URL answered with a web page, not the API` | `ARENA_URL` is the app's address: use `https://gateway.DOMAIN` |
 | `The gateway's certificate is not trusted` | the deployment's certificate is its own: set `ARENA_CA_CERT` |
 | `The gateway refused the key (401)` | a wrong or replaced key, or a model the key may not use |
-| `Budget has been exceeded` | the key's credit is used up (**Admin → People**) |
+| `You have used all your API credit for this month` (or a group's) | the person's API credit, or a group's, is used up (**Admin → People**, **Groups**) |
+| `Your API access is off` | an admin took the person's API access (**Admin → People** → the person → API access) |
 | `The gateway answered 429 ... Rate limit exceeded ... Limit type: requests` (or `tokens`) | the key used its requests or tokens for this minute: run again after a minute, or give the key's person a limit of their own (**Admin → People** → **Rate limits**; 0 is no limit) |
 | `GitLab says ARENA_GITLAB_TOKEN may not do this (403)` | the token needs the `api` scope and Reporter |
 | `set ARENA_PROJECT ... or ARENA_CLI` | the jobs do not know where the CLI is (step 4) |

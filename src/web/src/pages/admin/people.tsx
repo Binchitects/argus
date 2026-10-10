@@ -19,13 +19,14 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
-import { ago } from '@/lib/format'
+import { ago, money } from '@/lib/format'
 import { DirectoryMoveDialog } from './directory-move'
-import { CreditMeter, PersonBadges } from './person-badges'
-import { parseCredit, peopleQuery, signInQuery, type Created, type Person } from './people-api'
+import { PersonBadges } from './person-badges'
+import { creditKinds, parseCredit, peopleQuery, signInQuery, type Created, type CreditKind, type Person } from './people-api'
 
 const columns: ColumnDef<Person>[] = [
   selectColumn<Person>(),
@@ -61,9 +62,19 @@ const columns: ColumnDef<Person>[] = [
   { id: 'status', header: 'Status', accessorFn: (p) => (p.disabled ? 'disabled' : 'active'), cell: ({ row: { original: p } }) => <PersonBadges p={p} /> },
   {
     id: 'credit',
-    header: ({ column }) => <SortHeader column={column} title="Spend / credit" />,
+    header: ({ column }) => <SortHeader column={column} title="Spent this month" />,
     accessorFn: (p) => p.spend ?? 0,
-    cell: ({ row: { original: p } }) => <CreditMeter spend={p.spend} budget={p.budget} />,
+    cell: ({ row: { original: p } }) => (
+      <span className="flex flex-wrap items-center gap-1.5">
+        <span className="tabular-nums">{p.spend === null ? '—' : money(p.spend)}</span>
+        {p.overCredit.map((k) => (
+          <Badge key={k} variant="destructive" title={`Their ${creditKinds.find((c) => c.kind === k)?.label.toLowerCase()} credit is used up this month`}>
+            {creditKinds.find((c) => c.kind === k)?.label} used up
+          </Badge>
+        ))}
+        {p.apiOff && <Badge variant="outline">No API</Badge>}
+      </span>
+    ),
   },
   {
     id: 'lastSignIn',
@@ -91,7 +102,7 @@ export function PeoplePage() {
       : filter === 'disabled'
         ? p.disabled
         : filter === 'over'
-          ? p.budget !== null && (p.spend ?? 0) >= p.budget
+          ? p.overCredit.length > 0
           : filter === 'local'
             ? p.source === 'local'
             : true,
@@ -213,17 +224,21 @@ function useBulk() {
 
 function CreditDialog({ people, onClose }: { people: Person[] | null; onClose: () => void }) {
   const queryClient = useQueryClient()
+  const [kind, setKind] = useState<CreditKind>('chat')
   const [value, setValue] = useState('')
   const [error, setError] = useState<string | null>(null)
   const save = useMutation({
-    mutationFn: async (budget: number | null) => {
-      const results = await Promise.allSettled((people ?? []).map((p) => api(`/api/admin/people/${p.id}/budget`, { method: 'PUT', body: { budget } })))
+    mutationFn: async (credit: number | null) => {
+      const results = await Promise.allSettled((people ?? []).map((p) => api(`/api/admin/people/${p.id}/credits/${kind}`, { method: 'PUT', body: { credit } })))
       const failed = results.filter((r) => r.status === 'rejected')
       if (failed.length) throw (failed[0] as PromiseRejectedResult).reason
     },
     onSuccess: () => {
-      toast.success('Credit set', { description: 'API keys at once; the chat within about a minute.' })
+      toast.success('Credit set', { description: 'It holds at once; their other credits stay as they were.' })
       void queryClient.invalidateQueries({ queryKey: ['admin'] })
+      setValue('')
+      setKind('chat')
+      setError(null)
       onClose()
     },
     onError: (e) => setError(errorMessage(e)),
@@ -242,7 +257,7 @@ function CreditDialog({ people, onClose }: { people: Person[] | null; onClose: (
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Set credit for {people?.length === 1 ? people[0]!.displayName : `${people?.length} people`}</DialogTitle>
-          <DialogDescription>In dollars per period. Empty means no limit.</DialogDescription>
+          <DialogDescription>One kind at a time, in dollars a calendar month. Empty means no limit of that kind.</DialogDescription>
         </DialogHeader>
         <form
           className="grid gap-4"
@@ -254,6 +269,20 @@ function CreditDialog({ people, onClose }: { people: Person[] | null; onClose: (
           }}
         >
           {error && <Alert variant="destructive">{error}</Alert>}
+          <Field label="For">
+            <Select value={kind} onValueChange={(v) => setKind(v as CreditKind)}>
+              <SelectTrigger aria-label="Credit for">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {creditKinds.map((k) => (
+                  <SelectItem key={k.kind} value={k.kind}>
+                    {k.label}: {k.hint}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
           <Field label="Credit ($)">
             <Input inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} placeholder="no limit" autoFocus />
           </Field>
@@ -275,7 +304,8 @@ const addSchema = z.object({
     .regex(/^[a-z0-9][a-z0-9._-]{1,63}$/, 'Lower-case letters, digits and . _ -, 2 to 64 characters.'),
   email: z.string().trim().email('An email address.'),
   displayName: z.string().trim(),
-  credit: z.string().refine((v) => parseCredit(v) !== 'invalid', 'A number of dollars, or empty for no limit.'),
+  chatCredit: z.string().refine((v) => parseCredit(v) !== 'invalid', 'A number of dollars, or empty for no limit.'),
+  apiCredit: z.string().refine((v) => parseCredit(v) !== 'invalid', 'A number of dollars, or empty for no limit.'),
   admin: z.boolean(),
 })
 
@@ -283,7 +313,7 @@ function AddPersonDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
   const queryClient = useQueryClient()
   const [created, setCreated] = useState<Created | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const form = useForm({ resolver: zodResolver(addSchema), defaultValues: { userName: '', email: '', displayName: '', credit: '', admin: false } })
+  const form = useForm({ resolver: zodResolver(addSchema), defaultValues: { userName: '', email: '', displayName: '', chatCredit: '', apiCredit: '', admin: false } })
   const close = () => {
     onOpenChange(false)
     setTimeout(() => {
@@ -295,9 +325,12 @@ function AddPersonDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
   const submit = form.handleSubmit(async (v) => {
     setError(null)
     try {
-      const credit = parseCredit(v.credit)
+      const credit = (t: string) => {
+        const c = parseCredit(t)
+        return c === 'invalid' ? null : c
+      }
       const r = await api<Created>('/api/admin/people', {
-        body: { userName: v.userName, email: v.email, displayName: v.displayName || null, admin: v.admin, budget: credit === 'invalid' ? null : credit },
+        body: { userName: v.userName, email: v.email, displayName: v.displayName || null, admin: v.admin, credits: { chat: credit(v.chatCredit), api: credit(v.apiCredit) } },
       })
       setCreated(r)
       await queryClient.invalidateQueries({ queryKey: ['admin'] })
@@ -341,8 +374,11 @@ function AddPersonDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
               <Field label="Name" error={errors.displayName?.message}>
                 <Input autoComplete="off" {...form.register('displayName')} />
               </Field>
-              <Field label="Credit ($)" hint="Empty: no limit." error={errors.credit?.message}>
-                <Input inputMode="decimal" placeholder="no limit" {...form.register('credit')} />
+              <Field label="Chat credit ($ a month)" hint="Empty: no limit." error={errors.chatCredit?.message}>
+                <Input inputMode="decimal" placeholder="no limit" {...form.register('chatCredit')} />
+              </Field>
+              <Field label="API credit ($ a month)" hint="Empty: no limit. Pictures, video and speech: on their page." error={errors.apiCredit?.message}>
+                <Input inputMode="decimal" placeholder="no limit" {...form.register('apiCredit')} />
               </Field>
               <Label className="font-normal">
                 <Switch checked={form.watch('admin')} onCheckedChange={(v) => form.setValue('admin', v)} /> Admin

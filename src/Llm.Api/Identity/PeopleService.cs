@@ -8,7 +8,7 @@ using OpenIddict.Abstractions;
 
 namespace Llm.Api.Identity;
 
-public sealed record NewPerson(string UserName, string Email, string? DisplayName, bool Admin, decimal? Budget);
+public sealed record NewPerson(string UserName, string Email, string? DisplayName, bool Admin, CreditsRequest? Credits = null);
 
 /// <summary>Shown once and never stored: the generated password and the API key.</summary>
 public sealed record Secrets(string? Password, string? ApiKey, string? Warning = null);
@@ -25,7 +25,8 @@ public sealed partial class PeopleService(
     Audit audit,
     DirectoryFile directory,
     IOpenIddictTokenManager tokens,
-    IOpenIddictAuthorizationManager authorizations)
+    IOpenIddictAuthorizationManager authorizations,
+    CreditBook book)
 {
     [System.Text.RegularExpressions.GeneratedRegex("^[a-z0-9][a-z0-9._-]{1,63}$")]
     private static partial System.Text.RegularExpressions.Regex UserNamePattern();
@@ -63,6 +64,10 @@ public sealed partial class PeopleService(
             throw new PeopleException($"Someone already uses {email}.");
         }
 
+        if (p.Credits?.Problem() is { } wrong)
+        {
+            throw new PeopleException(wrong);
+        }
         var user = new AppUser
         {
             UserName = userName,
@@ -71,6 +76,7 @@ public sealed partial class PeopleService(
             DisplayName = string.IsNullOrWhiteSpace(p.DisplayName) ? userName : p.DisplayName.Trim(),
             Source = UserSource.Local,
         };
+        p.Credits?.Apply(user);
         var password = GeneratePassword();
         Check(await users.CreateAsync(user, password));
         Check(await users.AddToRoleAsync(user, p.Admin ? Roles.Admin : Roles.Member));
@@ -80,10 +86,8 @@ public sealed partial class PeopleService(
         try
         {
             await gateway.EnsureUserAsync(email);
-            if (p.Budget is not null)
-            {
-                await gateway.SetBudgetAsync(email, p.Budget);
-            }
+            // No budget at the gateway (an edited litellm.yaml may still give new people one): the credits are the app's.
+            await gateway.SetBudgetAsync(email, null);
             var key = await gateway.GenerateKeyAsync(email, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel, (await rateLimits.ForAsync(user)).Key);
             return (user, new Secrets(password, key));
         }
@@ -97,7 +101,8 @@ public sealed partial class PeopleService(
     public async Task ProvisionGatewayAsync(AppUser user)
     {
         await gateway.EnsureUserAsync(user.Email!);
-        if ((await gateway.KeysAsync(user.Email!)).Count == 0)
+        // Without API access, no key is made.
+        if (!user.ApiOff && (await gateway.KeysAsync(user.Email!)).Count == 0)
         {
             await gateway.GenerateKeyAsync(user.Email!, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel, (await rateLimits.ForAsync(user)).Key);
         }
@@ -146,7 +151,7 @@ public sealed partial class PeopleService(
         {
             await EndSessionsAsync(user);
         }
-        await SetKeysBlockedAsync(user, disabled);
+        await SetKeysBlockedAsync(user, disabled || user.ApiOff);
         await audit.WriteAsync(disabled ? "person.disable" : "person.enable", user.UserName, detail: reason);
         await directory.WriteAsync();
     }
@@ -196,6 +201,14 @@ public sealed partial class PeopleService(
     /// <summary>Revoke first, then mint: the reverse leaves a window where the old key still works.</summary>
     public async Task<Secrets> RotateKeyAsync(AppUser user)
     {
+        if (user.ApiOff)
+        {
+            throw new PeopleException($"{user.UserName} has no API access: turn it on first (Admin → People).");
+        }
+        if (user.IsDisabled)
+        {
+            throw new PeopleException($"{user.UserName} is disabled: enable them first.");
+        }
         var old = await gateway.KeysAsync(user.Email!);
         // Before the old keys go: a limit they carried from before the upgrade to rate limits is kept.
         var rate = await rateLimits.ForNewKeyAsync(user, old);
@@ -206,15 +219,50 @@ public sealed partial class PeopleService(
         return new Secrets(null, key);
     }
 
-    public async Task SetBudgetAsync(AppUser user, decimal? budget)
+    /// <summary>Their own credit of each kind for a calendar month (null: no limit of their own of that kind). Audited; it holds at once.</summary>
+    public async Task SetCreditsAsync(AppUser user, CreditsRequest credits)
     {
-        if (budget < 0)
+        if (credits.Problem() is { } wrong)
         {
-            throw new PeopleException("Credit cannot be negative.");
+            throw new PeopleException(wrong);
         }
-        await gateway.EnsureUserAsync(user.Email!);
-        await gateway.SetBudgetAsync(user.Email!, budget);
-        await audit.WriteAsync("person.set_budget", user.UserName, detail: budget?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unlimited");
+        credits.Apply(user);
+        Check(await users.UpdateAsync(user));
+        book.Forget();
+        await audit.WriteAsync("person.set_credits", user.UserName, detail: credits.Describe());
+    }
+
+    /// <summary>
+    /// API access on or off. Off, their keys are blocked at the gateway (and refused by the guardrail), no key is shown to
+    /// them or made, and Arena's MCP endpoint and Argus refuse them; on, their keys work again (unless they are disabled).
+    /// Audited. A warning when the gateway could not be reached (the keys follow at the next check).
+    /// </summary>
+    public async Task<string?> SetApiAccessAsync(AppUser user, bool on)
+    {
+        if (user.ApiOff == !on)
+        {
+            return null;
+        }
+        user.ApiOff = !on;
+        Check(await users.UpdateAsync(user));
+        await audit.WriteAsync(on ? "person.api_on" : "person.api_off", user.UserName);
+        try
+        {
+            var keys = await gateway.KeysAsync(user.Email!);
+            var blocked = user.IsDisabled || user.ApiOff;
+            await gateway.SetBlockedAsync(keys.Where(k => k.Blocked != blocked).Select(k => k.Token), blocked);
+            if (on && !user.IsDisabled && keys.Count == 0)
+            {
+                // Given back with no key left: one is made, as for a new person (they see it under Your account).
+                await gateway.EnsureUserAsync(user.Email!);
+                await gateway.GenerateKeyAsync(user.Email!, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel, (await rateLimits.ForAsync(user)).Key);
+            }
+            return null;
+        }
+        catch (GatewayException ex)
+        {
+            return $"Saved. The gateway could not be reached, so their keys follow at the next check, within ten minutes: {ex.Message}";
+        }
     }
 
     /// <summary>

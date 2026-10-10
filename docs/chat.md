@@ -1021,13 +1021,13 @@ as "Model A" and "Model B", without cost, until you vote)
 
 What a person has spent is what the gateway's request log puts to them, over
 every path (chat, API keys, agents), by the same rule as the usage dashboards;
-the overview, People, the export and Home all read it. LiteLLM's own counters
-split a person in two (the chat is booked to them as an end user, their keys
-as an internal user), and each would let the whole budget through on its path.
-So the credit is one: before each answer the app adds up what the log puts to
-the person this month, over every path, and checks it against their credit and
-their groups'; the gateway asks the same of the app before each API request.
-LiteLLM's own limits stay, as a backstop.
+the overview, People, the export and Home all read it, this month's. The credits
+are one per kind (the chat's answers, API keys' text requests, pictures, video,
+speech) and the app's ([admin.md](admin.md#credits)): before each answer the
+app checks what the log puts to the person this month for the chat against
+their chat credit and their groups'; before each picture, video or speech the
+chat makes, that kind's; the gateway asks the app before each API request,
+for the kind of its model. The gateway holds no budget of its own.
 
 ## Settings
 
@@ -1105,9 +1105,9 @@ use and edit one); a new chat takes `assistantId`.
 | The page says | Why | What to do |
 |---|---|---|
 | "The model gateway is not reachable right now" or "The model could not answer: …" | LiteLLM or the engine is down or still loading | Admin → Overview shows which; loading a model takes minutes |
-| "You have used all your credit. Ask an admin to raise it." | the person's credit is spent | an admin raises it under People; it takes effect within about a minute |
-| "You have used all your credit for this month (…, the chat and your API keys together)" | the chat and the person's keys together reached their credit | an admin raises it under People, or wait for the first of the month |
-| "… has used its credit for this month" or "You have used your credit as a member of …" | a group's credit is spent | an admin raises it under Admin → Groups → the group → Policies |
+| "You have used all your chat credit for this month (…)" (or API, picture, video, speech) | the person's credit of that kind is spent; the other kinds go on | an admin raises it under People, or wait for the first of the month |
+| "… has used its chat credit for this month" or "You have used your chat credit as a member of …" | a group's credit of that kind is spent | an admin raises it under Admin → Groups → the group → Policies |
+| "Your API access is off" | an admin took it (People → the person → API access) | an admin gives it back; the chat is not affected |
 | "This message was not sent: it holds a private key." | secret scanning found a secret | remove it (a placeholder will do) and send again |
 | "The message did not reach the server" | the network or TLS failed before the server got it | the text is back in the box; send again |
 | "This chat is already answering" | one answer at a time per chat | stop it, or wait |

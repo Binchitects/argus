@@ -27,6 +27,10 @@ public static class Talk
     {
         var ct = request.HttpContext.RequestAborted;
         var me = (await users.GetUserAsync(p))!;
+        if (await request.HttpContext.RequestServices.GetRequiredService<Gateway.Credit>().RefusalAsync(me, Llm.Core.Access.CreditKind.Speech, ct) is { } spent)
+        {
+            return AuthEndpoints.Problem(403, "credit", spent);
+        }
         if (request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
         {
             limit.MaxRequestBodySize = MaxBytes + 64 * 1024;

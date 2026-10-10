@@ -122,8 +122,8 @@ Groups → a group → Policies):
 | API keys → **Requests a minute, per key** | a number, or 0 for no limit | the highest (0 first) |
 | API keys → **Tokens a minute, per key** | a number, or 0 for no limit | the highest (0 first) |
 
-A group also has a credit a month and a cost centre, which have no company
-setting ([admin.md](admin.md#credit-for-groups)).
+A group also has credits a month, one per kind, and a cost centre, which have no
+company setting ([admin.md](admin.md#credits)).
 
 ## Speech: everyone's until they choose
 

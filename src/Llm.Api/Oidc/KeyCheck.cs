@@ -112,9 +112,9 @@ public static class KeyCheck
             known[hash] = (info.Expires is { } expires && expires < until ? expires : until, email);
         }
 
-        // The person now: someone disabled since is refused at once, whatever the gateway said.
+        // The person now: someone disabled, or whose API access was taken, since is refused at once, whatever the gateway said.
         var user = await users.FindByEmailAsync(email);
-        if (user is null || user.IsDisabled)
+        if (user is null || user.IsDisabled || user.ApiOff)
         {
             return Refused();
         }

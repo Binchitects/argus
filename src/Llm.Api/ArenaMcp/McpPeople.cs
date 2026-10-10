@@ -51,6 +51,8 @@ public sealed class McpPeople(ILiteLlm gateway, IMemoryCache cache, UserManager<
         {
             return new McpCaller(null, "That API key belongs to no one with an account here.");
         }
-        return user.IsDisabled ? new McpCaller(null, "Your account is disabled. Ask an admin.") : new McpCaller(user, null);
+        return user.IsDisabled ? new McpCaller(null, "Your account is disabled. Ask an admin.")
+            : user.ApiOff ? new McpCaller(null, "Your API access is off. Ask an admin to turn it on.")
+            : new McpCaller(user, null);
     }
 }

@@ -18,8 +18,8 @@ public sealed record MembersRequest(Guid[] UserIds);
 
 /// <summary>A group's policies, all of them at once: null keeps (or puts back) the company's setting.</summary>
 /// <param name="RetentionDays">Members' chats and files are kept this many days.</param>
-/// <param name="Credit">What the group may spend a month, across the chat and API keys.</param>
-/// <param name="CreditPerMember">The credit is each member's, not shared.</param>
+/// <param name="Credits">What the group may spend a month, kind by kind (the chat, API keys, pictures, video, speech).</param>
+/// <param name="CreditPerMember">The credits are each member's, not shared.</param>
 /// <param name="CostCentre">The label its spend is charged to (the chargeback report).</param>
 /// <param name="SecretScanning">refuse, mask or off.</param>
 /// <param name="RedactPii">mask or off.</param>
@@ -27,7 +27,7 @@ public sealed record MembersRequest(Guid[] UserIds);
 /// <param name="BlockedPatterns">Whether the blocked words apply.</param>
 /// <param name="RequestsPerMinute">Requests a minute each member's API key may send; 0: no limit.</param>
 /// <param name="TokensPerMinute">Tokens a minute each member's API key may use; 0: no limit.</param>
-public sealed record PoliciesRequest(int? RetentionDays = null, decimal? Credit = null, bool CreditPerMember = false, string? CostCentre = null,
+public sealed record PoliciesRequest(int? RetentionDays = null, CreditsRequest? Credits = null, bool CreditPerMember = false, string? CostCentre = null,
     string? SecretScanning = null, string? RedactPii = null, string? Moderation = null, bool? BlockedPatterns = null, int? RequestsPerMinute = null, int? TokensPerMinute = null);
 
 /// <summary>Groups for access rules, retention, credit, safeguards and API keys' rate limits: app groups whose members are chosen here, and directory groups.</summary>
@@ -63,7 +63,7 @@ public static class GroupEndpoints
         {
             x.Id, x.Name, x.Description, x.Directory, x.Scim, x.Priority, x.CreatedAt,
             members = x.Directory is { } d ? directoryPeople.Count(m => AccessService.InDirectoryGroup(m, d)) : counts.GetValueOrDefault(x.Id),
-            x.RetentionDays, x.Credit, x.CreditPerMember, x.CostCentre, x.RequestsPerMinute, x.TokensPerMinute,
+            x.RetentionDays, credits = CreditsRequest.Of(x), x.CreditPerMember, x.CostCentre, x.RequestsPerMinute, x.TokensPerMinute,
         }));
     }
 
@@ -76,7 +76,7 @@ public static class GroupEndpoints
             .OrderBy(x => x.name, StringComparer.OrdinalIgnoreCase));
     }
 
-    private static async Task<IResult> GetAsync(Guid id, AppDbContext db, CreditBook book, ILiteLlm gateway, CancellationToken ct)
+    private static async Task<IResult> GetAsync(Guid id, AppDbContext db, CreditBook book, CancellationToken ct)
     {
         if (await db.Groups.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct) is not { } group)
         {
@@ -93,20 +93,22 @@ public static class GroupEndpoints
             people = await db.GroupMembers.AsNoTracking().Where(m => m.GroupId == id)
                 .Join(db.Users.AsNoTracking(), m => m.UserId, u => u.Id, (_, u) => u).ToListAsync(ct);
         }
-        // This month's spend, each member's and the group's, when the gateway's request log can be read.
-        var month = await book.ReadAsync(gateway, ct);
-        decimal? Spent(AppUser u) => month is null ? null : month.Spend.GetValueOrDefault(u.Email ?? "");
+        // This month's spend, each member's and the group's, kind by kind, when the gateway's request log can be read.
+        var month = await book.ReadAsync(ct, fresh: true);
+        decimal? Spent(AppUser u) => month?.Total(u.Email ?? "");
+        object? Kinds(Func<CreditKind, decimal> spent) => month is null ? null : Credits.Kinds.ToDictionary(Credits.Name, k => spent(k));
         return Results.Ok(new
         {
             group.Id, group.Name, group.Description, group.Directory, group.Scim, group.Priority, group.CreatedAt,
             members = people.OrderBy(u => u.DisplayName, StringComparer.OrdinalIgnoreCase)
-                .Select(u => new { u.Id, u.UserName, u.DisplayName, u.Email, u.IsDisabled, spend = Spent(u) }),
+                .Select(u => new { u.Id, u.UserName, u.DisplayName, u.Email, u.IsDisabled, spend = Spent(u), spent = Kinds(k => month!.Of(u.Email ?? "", k)) }),
             policies = new
             {
-                group.RetentionDays, group.Credit, group.CreditPerMember, group.CostCentre,
+                group.RetentionDays, credits = CreditsRequest.Of(group), group.CreditPerMember, group.CostCentre,
                 group.SecretScanning, group.RedactPii, group.Moderation, group.BlockedPatterns, group.RequestsPerMinute, group.TokensPerMinute,
             },
-            spentThisMonth = month is null ? (decimal?)null : people.Sum(u => month.Spend.GetValueOrDefault(u.Email ?? "")),
+            spentThisMonth = month is null ? (decimal?)null : people.Sum(u => month.Total(u.Email ?? "")),
+            spentByKind = Kinds(k => people.Sum(u => month!.Of(u.Email ?? "", k))),
         });
     }
 
@@ -245,9 +247,10 @@ public static class GroupEndpoints
         {
             return AuthEndpoints.Problem(400, "retention", "Keep chats from 1 to 36,500 days, or leave it empty for the company's setting.");
         }
-        if (body.Credit is < 0 or > 1_000_000_000)
+        var credits = body.Credits ?? new CreditsRequest();
+        if (credits.Problem() is { } wrong)
         {
-            return AuthEndpoints.Problem(400, "credit", "Credit is a number of dollars from 0, or empty for no group limit.");
+            return AuthEndpoints.Problem(400, "credit", wrong);
         }
         if (body.RequestsPerMinute is < 0 or > RateLimits.MaxRequests || body.TokensPerMinute is < 0 or > RateLimits.MaxTokens)
         {
@@ -264,8 +267,8 @@ public static class GroupEndpoints
             return AuthEndpoints.Problem(400, "safeguards", $"\"{bad}\" is not one of the choices.");
         }
         group.RetentionDays = body.RetentionDays;
-        group.Credit = body.Credit;
-        group.CreditPerMember = body.Credit is not null && body.CreditPerMember;
+        credits.Apply(group);
+        group.CreditPerMember = Credits.Any(group) && body.CreditPerMember;
         group.CostCentre = Clean(body.CostCentre);
         group.SecretScanning = Clean(body.SecretScanning);
         group.RedactPii = Clean(body.RedactPii);
@@ -285,7 +288,7 @@ public static class GroupEndpoints
     private static string Describe(Group g) => string.Join("; ", new[]
     {
         $"chats kept {(g.RetentionDays is { } d ? $"{d} days" : "as the company's")}",
-        $"credit {(g.Credit is { } c ? Credit.Money(c) + (g.CreditPerMember ? " each member" : " shared") : "none")}",
+        $"credit {(Credits.Any(g) ? CreditsRequest.Of(g).Describe() + (g.CreditPerMember ? ", each member's" : ", shared") : "none")}",
         g.CostCentre is { } cc ? $"cost centre {cc}" : null,
         g.SecretScanning is { } s ? $"secrets {s}" : null,
         g.RedactPii is { } p ? $"personal data {p}" : null,

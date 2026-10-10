@@ -16,7 +16,7 @@ describe('account', () => {
 
   it('a new API key needs confirming, then is shown once', async () => {
     const calls = fakeApi(member, {
-      'GET /api/account/keys': () => ({ json: { keys: [{ alias: 'mo', preview: 'sk-...abcd', spend: 1, blocked: false, createdAt: '2026-09-01T10:00:00Z' }], spend: 1, budget: 10 } }),
+      'GET /api/account/keys': () => ({ json: { keys: [{ alias: 'mo', preview: 'sk-...abcd', spend: 1, blocked: false, createdAt: '2026-09-01T10:00:00Z' }], spend: 1, apiOff: false, apiSpend: 1, apiCredit: 10, standing: null } }),
       'POST /api/account/keys/rotate': () => ({ json: { apiKey: 'sk-secret-new-key' } }),
     })
     renderApp('/account')
@@ -37,7 +37,7 @@ describe('account', () => {
 
   it('a sixth new key in an hour is refused, and says when the next is possible', async () => {
     fakeApi(member, {
-      'GET /api/account/keys': () => ({ json: { keys: [{ alias: 'mo', preview: 'sk-...abcd', spend: 1, blocked: false, createdAt: null }], spend: 1, budget: 10 } }),
+      'GET /api/account/keys': () => ({ json: { keys: [{ alias: 'mo', preview: 'sk-...abcd', spend: 1, blocked: false, createdAt: null }], spend: 1, apiOff: false, apiSpend: 1, apiCredit: 10, standing: null } }),
       'POST /api/account/keys/rotate': () => ({
         status: 429,
         json: { status: 'too_many_keys', error: 'You made 5 new keys in the last hour, the most there may be. Make the next in 12 minutes, or ask an admin, who can make one for you now.' },
@@ -54,7 +54,7 @@ describe('account', () => {
   it('the API key shows its rate limits, what was used in the last minute and what was refused', async () => {
     fakeApi(member, {
       'GET /api/account/keys': () => ({
-        json: { keys: [{ alias: 'mo', preview: 'sk-...abcd', spend: 1, blocked: false, createdAt: '2026-09-01T10:00:00Z' }], spend: 1, budget: 10 },
+        json: { keys: [{ alias: 'mo', preview: 'sk-...abcd', spend: 1, blocked: false, createdAt: '2026-09-01T10:00:00Z' }], spend: 1, apiOff: false, apiSpend: 1, apiCredit: 10, standing: null },
       }),
       'GET /api/account/keys/limits': () => ({
         json: {
@@ -83,14 +83,17 @@ describe('account', () => {
   it('the home page shows the credit without asking for the key’s rate limits', async () => {
     const calls = fakeApi(member)
     renderApp('/')
-    expect(await screen.findByText('Your credit')).toBeInTheDocument()
+    expect(await screen.findByText('Your credit this month')).toBeInTheDocument()
+    // Kind by kind, with what is left: a group's credit when it binds first.
+    expect(await screen.findByText('$9.00 left')).toBeInTheDocument()
+    expect(screen.getByText('$3.00 left (Design)')).toBeInTheDocument()
     await waitFor(() => expect(calls.some((c) => c.path === '/api/account/keys')).toBe(true))
     expect(calls.some((c) => c.path === '/api/account/keys/limits')).toBe(false)
   })
 
   it('a key with no limits says so, and nothing was refused', async () => {
     fakeApi(member, {
-      'GET /api/account/keys': () => ({ json: { keys: [{ alias: 'mo', preview: 'sk-...abcd', spend: 1, blocked: false, createdAt: null }], spend: 1, budget: null } }),
+      'GET /api/account/keys': () => ({ json: { keys: [{ alias: 'mo', preview: 'sk-...abcd', spend: 1, blocked: false, createdAt: null }], spend: 1, apiOff: false, apiSpend: 1, apiCredit: null, standing: null } }),
       'GET /api/account/keys/limits': () => ({
         json: {
           requestsPerMinute: { value: null, from: 'none', group: null },
@@ -135,8 +138,16 @@ describe('account', () => {
 
     fakeApi(member, { 'GET /api/account/answer-cache': () => ({ json: { mode: 'off', chosen: false, on: false, ttlHours: 24 } }) })
     renderApp('/account')
-    expect(await screen.findByText('Credit used')).toBeInTheDocument()
+    expect(await screen.findByText('API credit used this month')).toBeInTheDocument()
     expect(screen.queryByText(/answered from the cache/)).not.toBeInTheDocument()
+  })
+
+  it('without API access the key card says so, shows no key and offers none', async () => {
+    fakeApi(member, { 'GET /api/account/keys': () => ({ json: { apiOff: true, keys: [], spend: 0, apiSpend: 0, apiCredit: null, standing: null } }) })
+    renderApp('/account')
+    expect(await screen.findByText('Your API access is off')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'New key' })).not.toBeInTheDocument()
+    expect(screen.queryByText('No key yet. Make one to use the API.')).not.toBeInTheDocument()
   })
 
   it('answers can be chosen short, normal or thorough', async () => {

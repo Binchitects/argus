@@ -418,7 +418,7 @@ became fixed, or went away:
 | `MODEL_NAME`, `MODEL_CONTEXT`, `MODEL_MAX_OUTPUT`, `LLAMACPP_PARALLEL`, `LLAMACPP_KV_TYPE`, `LLAMACPP_N_GPU_LAYERS`, `LLAMACPP_N_CPU_MOE`, `LLAMACPP_THREADS`, `LLAMACPP_MTP_*`, `LLAMACPP_EXTRA_ARGS`, `LLAMACPP_MLOCK`, `PRICE_*_PER_MTOK` | each model's own form in Admin → Models (any other llama.cpp option in its extra lines) |
 | `LLAMACPP_MODELS_MAX`, `LLAMACPP_PRELOAD` | Settings → Models loaded at once; Keep loaded on each model |
 | `MODEL_ENABLE_THINKING`, `MODEL_REASONING_EFFORT`, `THINKING_PRESETS` | Settings → Chat: default thinking, thinking levels offered |
-| `LITELLM_DEFAULT_USER_BUDGET`, `LITELLM_BUDGET_DURATION` | `config/litellm.yaml` (`max_internal_user_budget`, `internal_user_budget_duration`); each person's credit in Admin → People |
+| `LITELLM_DEFAULT_USER_BUDGET`, `LITELLM_BUDGET_DURATION` | gone: each person's and group's credits, one per kind, are the app's (Admin → People, Groups) |
 | `BACKUP_*` | unchanged, still read by `scripts/backup.sh` from `.env` |
 | `COMPOSE_PROFILES` | every module runs but Laya (`COMPOSE_PROFILES=laya`); leave one out in `docker-compose.override.yml` |
 | `IMAGEGEN_*` | the picture model is fixed (FLUX.2 klein 4B), fetched by the app; turned on or off, loaded or kept in Admin → Models |

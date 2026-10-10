@@ -30,6 +30,23 @@ public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, Ch
         return allowed.Count == all.Count ? [] : allowed.Count == 0 ? [NoModels] : [.. all.Where(allowed.Contains)];
     }
 
+    /// <summary>Each person's keys blocked while they are disabled or have no API access, unblocked otherwise; returns how many changed.</summary>
+    public async Task<int> BlocksAsync(CancellationToken ct = default)
+    {
+        var changed = 0;
+        foreach (var user in await users.Users.AsNoTracking().Where(u => u.Email != null).ToListAsync(ct))
+        {
+            var blocked = user.IsDisabled || user.ApiOff;
+            var wrong = (await gateway.KeysAsync(user.Email!, ct)).Where(k => k.Blocked != blocked).Select(k => k.Token).ToList();
+            if (wrong.Count > 0)
+            {
+                await gateway.SetBlockedAsync(wrong, blocked, ct);
+                changed += wrong.Count;
+            }
+        }
+        return changed;
+    }
+
     /// <summary>Brings everyone's keys in step; returns how many keys changed.</summary>
     public async Task<int> SyncAsync(CancellationToken ct = default)
     {
@@ -135,12 +152,22 @@ public sealed partial class KeyAccessWatcher : BackgroundService
                 }
                 wait = TimeSpan.FromMinutes(10);
                 await using var scope = scopes.CreateAsyncScope();
+                // The gateway holds no budget (the first time, the old ones become the app's credits).
+                if (await scope.ServiceProvider.GetRequiredService<Gateway.CreditMove>().RunAsync(stoppingToken) is > 0 and var moved)
+                {
+                    LogMoved(logger, moved);
+                }
+                // Each key blocked or not as its person is: disabled, or without API access (a block that failed is done again).
+                if (await scope.ServiceProvider.GetRequiredService<KeyAccess>().BlocksAsync(stoppingToken) is > 0 and var blocks)
+                {
+                    LogBlocks(logger, blocks);
+                }
                 var changed = await scope.ServiceProvider.GetRequiredService<KeyAccess>().SyncAsync(stoppingToken);
                 if (changed > 0)
                 {
                     LogChanged(logger, changed);
                 }
-                // Groups' credit at the gateway (teams) follows the same changes: groups, members, keys.
+                // The teams the app once made for groups' credit at the gateway go (the credits are the app's now).
                 if (await scope.ServiceProvider.GetRequiredService<Gateway.GroupTeams>().SyncAsync(stoppingToken) is > 0 and var teams)
                 {
                     LogTeams(logger, teams);
@@ -170,8 +197,14 @@ public sealed partial class KeyAccessWatcher : BackgroundService
     [LoggerMessage(Level = LogLevel.Information, Message = "API keys: {Changed} keys now carry the models their people may use")]
     private static partial void LogChanged(ILogger logger, int changed);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Groups' credit: {Changed} teams, members or keys changed at the gateway")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Groups' old teams at the gateway: {Changed} keys or teams taken away")]
     private static partial void LogTeams(ILogger logger, int changed);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Credits: the gateway's budgets of {Moved} people became their credits of every kind")]
+    private static partial void LogMoved(ILogger logger, int moved);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "API keys: {Changed} keys blocked or unblocked to match their people")]
+    private static partial void LogBlocks(ILogger logger, int changed);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Rate limits: {Changed} keys now carry their person's requests and tokens a minute")]
     private static partial void LogRates(ILogger logger, int changed);

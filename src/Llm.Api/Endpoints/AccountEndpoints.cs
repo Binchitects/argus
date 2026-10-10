@@ -1,3 +1,4 @@
+using Llm.Core.Access;
 using System.Globalization;
 using System.Security.Claims;
 using System.Text;
@@ -134,6 +135,10 @@ public static class AccountEndpoints
     private static async Task<IResult> RotateAsync(ClaimsPrincipal p, UserManager<AppUser> users, PeopleService people, Audit audit, TimeProvider clock, HttpContext http)
     {
         var user = (await users.GetUserAsync(p))!;
+        if (user.ApiOff)
+        {
+            return AuthEndpoints.Problem(403, "api_off", "Your API access is off: ask an admin to turn it on.");
+        }
         if (await people.OwnKeyWaitAsync(user, clock.GetUtcNow()) is { Ticks: > 0 } wait)
         {
             var minutes = (int)Math.Ceiling(wait.TotalMinutes);
@@ -145,18 +150,26 @@ public static class AccountEndpoints
         return Results.Ok(await people.RotateKeyAsync(user));
     }
 
-    /// <summary>The person's keys, their spend and credit (the home page shows these too).</summary>
-    private static async Task<IResult> KeysAsync(ClaimsPrincipal p, UserManager<AppUser> users, ILiteLlm gateway, Ledger ledger)
+    /// <summary>
+    /// The person's keys (none while their API access is off), what they spent this month, and where they stand on each kind
+    /// of credit (the home page shows these too).
+    /// </summary>
+    private static async Task<IResult> KeysAsync(ClaimsPrincipal p, UserManager<AppUser> users, ILiteLlm gateway, Ledger ledger, Credit credit)
     {
         var user = (await users.GetUserAsync(p))!;
-        var keys = await gateway.KeysAsync(user.Email!);
-        var all = (await ledger.ReadAsync()).People;
-        all.TryGetValue(user.Email!, out var standing);
+        var keys = user.ApiOff ? [] : await gateway.KeysAsync(user.Email!);
+        var spending = await ledger.ReadAsync();
+        var standing = await credit.StandingAsync(user);
+        var api = standing?.FirstOrDefault(s => s.Kind == CreditKind.Api);
         return Results.Ok(new
         {
+            apiOff = user.ApiOff,
             keys = keys.Select(k => new { alias = k.Alias, preview = k.Preview, spend = k.Spend, blocked = k.Blocked, createdAt = k.CreatedAt }),
-            spend = standing?.Spend ?? 0,
-            budget = standing?.Budget,
+            // This month, every kind together; the API keys' own credit and spend.
+            spend = spending.Of(user.Email),
+            apiSpend = api?.Spent ?? 0,
+            apiCredit = api?.Credit,
+            standing = standing?.Select(AdminEndpoints.Standing),
         });
     }
 

@@ -26,7 +26,7 @@ export function OverviewPage() {
         <StatGrid>
           <Stat icon={Activity} label="Services up" value={`${up}/${d.services.length}`} tone={up < d.services.length ? 'destructive' : undefined} hint={up < d.services.length ? `${d.services.length - up} down` : 'all healthy'} />
           <Stat icon={Users} label="People" value={d.people} hint={`${d.admins} admin${d.admins === 1 ? '' : 's'}`} />
-          <Stat icon={Coins} label="Spend" value={money(d.spend)} hint="every key and chat" />
+          <Stat icon={Coins} label="Spend this month" value={money(d.spend)} hint="every key and chat" />
           <Stat icon={WalletCards} label="Over credit" value={d.overCredit.length} tone={d.overCredit.length ? 'warning' : undefined} hint={d.overCredit.length ? 'at or past their credit' : 'nobody'} />
           {(d.replicas?.count ?? 1) > 1 && <Stat icon={Copy} label="App replicas" value={d.replicas!.count} hint={d.replicas!.leads ? 'this one leads' : 'another one leads'} />}
           {d.index.configured && (

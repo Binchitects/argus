@@ -68,7 +68,7 @@ export const topics = {
       { name: 'Start a chat', text: 'Opens the chat, with Argus searching the code you can read in GitLab.' },
       { name: 'Your usage', text: 'Your tokens, cache hits and cost, over time and by model.' },
       { name: 'Connect your tools', text: 'Your API key, and the steps for Claude Code, Qwen Code, your editor or a script.' },
-      { name: 'Your credit', text: 'What you spent this month, through the chat and your API key together, of your credit.' },
+      { name: 'Your credit this month', text: 'Kind by kind (the chat, API keys, pictures, video, speech): what you spent this month, of your credit, and what is left (your group\'s when it binds first).' },
       { name: 'System', text: 'For admins: the services, people, total spend and who is over credit, with a link to **Overview**.' },
     ],
     tasks: [{ title: 'Ask your first question', steps: ['Press **Start a chat**.', 'Type your question in the box at the bottom.', 'Press Enter.'] }],
@@ -307,15 +307,15 @@ export const topics = {
     about: 'Everyone who can sign in: their role, credit and sign-in security.',
     admin: true,
     parts: [
-      { name: 'The table', text: 'Each person with their spend and credit and last sign-in. **Show** filters to admins, the disabled, those over credit, or (with the company directory on) local accounts. A row opens the person.' },
+      { name: 'The table', text: 'Each person with their spend this month, the credits they have used up, and last sign-in. **Show** filters to admins, the disabled, those over a credit, or (with the company directory on) local accounts. A row opens the person.' },
       { name: 'Bulk actions', text: 'Tick people, then **Set credit**, **Disable**, **Enable**, **Sign out everywhere** or, with the company directory on, **Move to the directory**.' },
       { name: 'Add person', text: 'A local account with a password and an API key, shown once. People from the company directory or company sign-in appear by themselves at their first sign-in.' },
-      { name: 'Export CSV', text: 'Everyone, with spend and credit left.' },
+      { name: 'Export CSV', text: 'Everyone, with this month\'s spend and credit of each kind, and their API access.' },
     ],
     tasks: [
       { title: 'Add a person', steps: ['Press **Add person**.', 'Use their GitLab username, so Argus knows what they may read; add their email and name.', 'Press **Add person**, and give them the password and API key now: they are shown only once.'] },
       { title: 'Move local accounts to the directory', steps: ['Press **Show → Local accounts** and tick the people.', 'Press **Move to the directory**: each shows the directory entry they will sign in as and what changes, or why they stay.', 'Press **Move**: they sign in with their directory password from now on, and keep their chats, keys, spend and email.'] },
-      { title: 'Raise someone\'s credit', steps: ['Tick them in the table.', 'Press **Set credit** and type the new amount (empty: no limit).', 'API keys get it at once, the chat within about a minute.'] },
+      { title: 'Raise someone\'s credit', steps: ['Tick them in the table.', 'Press **Set credit**, choose the kind, and type the new amount (empty: no limit).', 'It holds at once; their other credits stay as they were.'] },
     ],
     manual: { doc: 'authentication', section: 'managing-people' },
   },
@@ -327,7 +327,8 @@ export const topics = {
     parts: [
       { name: 'Profile', text: 'Name, username and email; **Change name**.' },
       { name: 'Access', text: '**Reset password**, **Reset 2FA**, **Sign out everywhere**, **Make admin** and **Disable** (signed out, their API keys stop until enabled again).' },
-      { name: 'Credit and API key', text: 'Their spend against their credit, **Set credit**, and **New API key** (the old one stops at once).' },
+      { name: 'Credits this month', text: 'One per kind: their spend this month against their credit, the tightest group credit left, and **Set credits**.' },
+      { name: 'API key', text: 'The **API access** switch (on for everyone; off blocks their keys at once), their keys, and **New API key** (the old one stops at once).' },
       { name: 'Rate limits', text: 'The requests and tokens each of their API keys may use a minute, where each comes from (theirs, a group\'s or the company\'s), what they used in the last minute and what was refused in the last day. **Set limits** gives them their own.' },
       { name: 'Groups', text: 'The groups they are in: these decide which tools and models they may use.' },
       { name: 'Legal hold', text: 'While on hold nothing of theirs is deleted. **Export their data** for eDiscovery. Both are audited.' },
@@ -360,11 +361,11 @@ export const topics = {
     parts: [
       { name: 'Members', text: 'Who is in it. In an app group, **Add people** and **Remove**; a directory or SCIM group is filled from outside.' },
       { name: 'Edit', text: 'Its name, description, and **Priority in the answers** (-10 to 10): when the model is busy, higher goes first.' },
-      { name: 'Policies', text: 'How long members\' chats are kept, a credit a month (shared or each member\'s), a cost centre, which safeguards apply to them, and the requests and tokens a minute each member\'s API key may use.' },
+      { name: 'Policies', text: 'How long members\' chats are kept, credits a month, one per kind (the chat, API keys, pictures, video, speech; shared or each member\'s), a cost centre, which safeguards apply to them, and the requests and tokens a minute each member\'s API key may use.' },
       { name: 'Delete', text: 'Tools and models given to it stop being available to its members.' },
     ],
-    tasks: [{ title: 'Give a team a monthly credit', steps: ['Under **Policies**, type **Credit a month ($)**.', 'Choose whether it is shared by the members or each member\'s.', 'Press **Save policies**: the gateway has it within a minute.'] }],
-    manual: { doc: 'admin', section: 'credit-for-groups' },
+    tasks: [{ title: 'Give a team a monthly credit', steps: ['Under **Policies**, type a credit for each kind to limit (**Chat**, **API keys**, **Pictures**, **Video**, **Speech**); empty is no limit.', 'Choose whether they are shared by the members or each member\'s.', 'Press **Save policies**: they hold at once.'] }],
+    manual: { doc: 'admin', section: 'credits' },
   },
 
   tools: {

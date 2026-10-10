@@ -1,3 +1,4 @@
+using Llm.Core.Access;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -76,37 +77,49 @@ public sealed partial class NewsWatch(IServiceScopeFactory scopes, IConfiguratio
         }
     }
 
-    /// <summary>People at 80% of their credit, or past it.</summary>
+    /// <summary>
+    /// People at 80% of a credit of their own, or past it, kind by kind: each said once a month for each credit (a raised
+    /// credit says it again when reached).
+    /// </summary>
     public async Task CheckCreditAsync(CancellationToken ct)
     {
         try
         {
             await using var scope = scopes.CreateAsyncScope();
             var spending = await scope.ServiceProvider.GetRequiredService<Ledger>().ReadAsync(ct);
+            if (spending.Month is not { } month)
+            {
+                return;
+            }
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var news = scope.ServiceProvider.GetRequiredService<NewsDelivery>();
+            var when = month.Month.ToString("yyyy-MM", CultureInfo.InvariantCulture);
             foreach (var u in await db.Users.AsNoTracking().Where(u => !u.IsDisabled && u.Email != null).ToListAsync(ct))
             {
-                if (!spending.People.TryGetValue(u.Email!, out var g) || g.Budget is not > 0)
+                foreach (var kind in Credits.Kinds)
                 {
-                    continue;
-                }
-                var limit = g.Budget!.Value;
-                var of = $"{Money(g.Spend)} of {Money(limit)}";
-                var key = limit.ToString("0.####", CultureInfo.InvariantCulture);
-                if (g.Spend >= limit)
-                {
-                    if (await news.SendAsync(u, new News("usage", "Your credit is used up",
-                        $"You have spent {of}. The chat and your API keys are refused until an admin adds credit.", "/", $"credit:100:{key}"), ct))
+                    if (Credits.Of(u, kind) is not > 0 || Credits.Of(u, kind) is not { } limit)
                     {
-                        await news.ToAdminsAsync(new News("usage", $"{u.DisplayName ?? u.UserName} has used up their credit",
-                            $"{of}. Their chat and API keys are refused until you add credit (People).", "/admin/people", $"credit-of:{u.Id}:100:{key}"), ct);
+                        continue;
                     }
-                }
-                else if (g.Spend >= limit * 0.8m)
-                {
-                    await news.SendAsync(u, new News("usage", $"{Math.Floor(100 * g.Spend / limit)}% of your credit is used",
-                        $"You have spent {of}. Ask an admin for more before it runs out.", "/", $"credit:80:{key}"), ct);
+                    var spent = spending.Of(u.Email, kind);
+                    var what = Credits.Label(kind);
+                    var of = $"{Money(spent)} of {Money(limit)}";
+                    var key = $"{when}:{Credits.Name(kind)}:{limit.ToString("0.####", CultureInfo.InvariantCulture)}";
+                    if (spent >= limit)
+                    {
+                        if (await news.SendAsync(u, new News("usage", $"Your {what} credit is used up",
+                            $"You have spent {of} this month. {Refused(kind)} until an admin adds credit, or the month ends.", "/", $"credit:100:{key}"), ct))
+                        {
+                            await news.ToAdminsAsync(new News("usage", $"{u.DisplayName ?? u.UserName} has used up their {what} credit",
+                                $"{of} this month. {Refused(kind)} until you add credit (People).", "/admin/people", $"credit-of:{u.Id}:100:{key}"), ct);
+                        }
+                    }
+                    else if (spent >= limit * 0.8m)
+                    {
+                        await news.SendAsync(u, new News("usage", $"{Math.Floor(100 * spent / limit)}% of your {what} credit is used",
+                            $"You have spent {of} this month. Ask an admin for more before it runs out.", "/", $"credit:80:{key}"), ct);
+                    }
                 }
             }
         }
@@ -115,6 +128,16 @@ public sealed partial class NewsWatch(IServiceScopeFactory scopes, IConfiguratio
             LogSkipped(logger, "credit", ex.Message);
         }
     }
+
+    /// <summary>What a used-up credit of this kind refuses.</summary>
+    private static string Refused(CreditKind kind) => kind switch
+    {
+        CreditKind.Chat => "The chat's answers are refused",
+        CreditKind.Api => "API keys are refused",
+        CreditKind.Pictures => "Pictures are refused",
+        CreditKind.Video => "Videos are refused",
+        _ => "Speech (read aloud, sound turned into text) is refused",
+    };
 
     private static string Money(decimal v) => "$" + v.ToString(v is > 0 and < 0.01m ? "0.####" : "0.00", CultureInfo.InvariantCulture);
 

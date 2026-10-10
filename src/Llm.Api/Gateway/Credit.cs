@@ -16,13 +16,21 @@ public sealed class CreditOptions
     public TimeSpan Refresh { get; set; } = TimeSpan.FromSeconds(30);
 }
 
-/// <summary>This calendar month's spend per person (every path, by email), and each person's own budget at the gateway.</summary>
-public sealed record MonthBook(DateTimeOffset Month, IReadOnlyDictionary<string, decimal> Spend, IReadOnlyDictionary<string, decimal?> Budgets, DateTimeOffset ReadAt);
+/// <summary>This calendar month's spend per person (by email) and credit kind.</summary>
+public sealed record MonthBook(DateTimeOffset Month, IReadOnlyDictionary<string, IReadOnlyDictionary<CreditKind, decimal>> Spend, DateTimeOffset ReadAt)
+{
+    /// <summary>What a person spent this month on one kind.</summary>
+    public decimal Of(string email, CreditKind kind) =>
+        Spend.TryGetValue(email, out var kinds) && kinds.TryGetValue(kind, out var spent) ? spent : 0m;
+
+    /// <summary>What a person spent this month, every kind together.</summary>
+    public decimal Total(string email) => Spend.TryGetValue(email, out var kinds) ? kinds.Values.Sum() : 0m;
+}
 
 /// <summary>A group's spend in a month, or a cost centre's (each person once).</summary>
 public sealed record ChargeRow(string Month, string Kind, string Name, string? CostCentre, int Members, decimal Spend, decimal? Credit);
 
-/// <summary>The month's spend and the budgets, read at most every <see cref="CreditOptions.Refresh"/> (one reader at a time).</summary>
+/// <summary>The month's spend, read at most every <see cref="CreditOptions.Refresh"/> (one reader at a time).</summary>
 public sealed partial class CreditBook(SqlDatasource sql, IOptionsMonitor<CreditOptions> options, TimeProvider clock, ILogger<CreditBook> logger) : IDisposable
 {
     private readonly SemaphoreSlim _lock = new(1, 1);
@@ -30,27 +38,28 @@ public sealed partial class CreditBook(SqlDatasource sql, IOptionsMonitor<Credit
 
     public static DateTimeOffset MonthOf(DateTimeOffset at) => new(at.Year, at.Month, 1, 0, 0, 0, TimeSpan.Zero);
 
-    /// <summary>Null when the request log or the gateway cannot be read: the checks then let the request go (and it is logged).</summary>
-    public async Task<MonthBook?> ReadAsync(ILiteLlm gateway, CancellationToken ct)
+    /// <summary>
+    /// Null when the request log cannot be read: the checks then let the request go (and it is logged). <paramref name="fresh"/>:
+    /// read now, not what was read within <see cref="CreditOptions.Refresh"/> (the pages; the checks reuse it).
+    /// </summary>
+    public async Task<MonthBook?> ReadAsync(CancellationToken ct, bool fresh = false)
     {
         var now = clock.GetUtcNow();
-        if (_book is { } fresh && fresh.Month == MonthOf(now) && now - fresh.ReadAt < options.CurrentValue.Refresh)
+        if (!fresh && _book is { } known && known.Month == MonthOf(now) && now - known.ReadAt < options.CurrentValue.Refresh)
         {
-            return fresh;
+            return known;
         }
         await _lock.WaitAsync(ct);
         try
         {
-            if (_book is { } again && again.Month == MonthOf(now) && now - again.ReadAt < options.CurrentValue.Refresh)
+            if (!fresh && _book is { } again && again.Month == MonthOf(now) && now - again.ReadAt < options.CurrentValue.Refresh)
             {
                 return again;
             }
             var month = MonthOf(now);
-            var spend = await SpendAsync(month, month.AddMonths(1), ct);
-            var budgets = (await gateway.UsersAsync(ct)).ToDictionary(u => u.Key.ToLowerInvariant(), u => u.Value.Budget, StringComparer.OrdinalIgnoreCase);
-            return _book = new MonthBook(month, spend, budgets, now);
+            return _book = new MonthBook(month, await SpendAsync(month, month.AddMonths(1), ct), now);
         }
-        catch (Exception ex) when (ex is GatewayException or Npgsql.NpgsqlException or InvalidOperationException)
+        catch (Exception ex) when (ex is Npgsql.NpgsqlException or InvalidOperationException)
         {
             LogUnread(logger, ex.Message);
             return null;
@@ -61,15 +70,28 @@ public sealed partial class CreditBook(SqlDatasource sql, IOptionsMonitor<Credit
         }
     }
 
-    /// <summary>Spend per person (lower-case email) between two times, over every path, by the dashboards' rule.</summary>
-    public async Task<Dictionary<string, decimal>> SpendAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
+    /// <summary>The next read asks the request log again (a credit was just changed, a test moved on).</summary>
+    public void Forget() => _book = null;
+
+    /// <summary>Spend per person (lower-case email) and kind between two times, over every path, by the dashboards' rule.</summary>
+    public async Task<Dictionary<string, IReadOnlyDictionary<CreditKind, decimal>>> SpendAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
     {
         var rows = await sql.QueryAsync($"""
-            select lower({UsageEndpoints.Person}) as person, coalesce(sum(s.spend),0) as spend
+            select lower({UsageEndpoints.Person}) as person, {UsageEndpoints.CreditKind} as kind, coalesce(sum(s.spend),0) as spend
             {UsageEndpoints.From} where s."startTime" >= @from and s."startTime" < @to
-            group by 1
+            group by 1, 2
             """, new Dictionary<string, object> { ["from"] = from.UtcDateTime, ["to"] = to.UtcDateTime }, ct);
-        return rows.Rows.ToDictionary(r => (string)r[0]!, r => Convert.ToDecimal(r[1] ?? 0m, CultureInfo.InvariantCulture), StringComparer.OrdinalIgnoreCase);
+        var spend = new Dictionary<string, Dictionary<CreditKind, decimal>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in rows.Rows)
+        {
+            if (Credits.Parse((string?)r[1]) is not { } kind)
+            {
+                continue;
+            }
+            var person = spend.TryGetValue((string)r[0]!, out var p) ? p : spend[(string)r[0]!] = [];
+            person[kind] = person.GetValueOrDefault(kind) + Convert.ToDecimal(r[2] ?? 0m, CultureInfo.InvariantCulture);
+        }
+        return spend.ToDictionary(p => p.Key, p => (IReadOnlyDictionary<CreditKind, decimal>)p.Value, StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>Spend per month (yyyy-MM) and person, for the chargeback report.</summary>
@@ -89,46 +111,81 @@ public sealed partial class CreditBook(SqlDatasource sql, IOptionsMonitor<Credit
     private static partial void LogUnread(ILogger logger, string reason);
 }
 
+/// <summary>Where a person stands on one kind of credit this month: spent, their own credit, and the tightest of their groups'.</summary>
+/// <param name="Group">The group whose credit binds first (its name), and how much of it is left; null: no group credit of this kind.</param>
+public sealed record CreditStanding(CreditKind Kind, decimal Spent, decimal? Credit, string? Group, decimal? GroupLeft);
+
 /// <summary>
-/// One credit across the chat and API keys, and the credit of groups. The gateway's own counters
-/// keep a person's two paths apart (the chat books to them as an end user, their keys as an
-/// internal user), so each would let the full budget through. The app checks the sum instead:
-/// what the request log puts to a person this calendar month (UTC), over every path, against
-/// their own budget and each of their groups' credit (shared by the members, or each member's).
-/// The chat asks before every answer (ModelPolicy); the gateway asks for each API request
-/// (the guardrail, GuardrailEndpoints).
+/// A credit per kind (the chat's answers, API keys' text requests, pictures, videos, speech), each a calendar month's spend
+/// (UTC) as the gateway's request log puts it to the person, held to their own credit of that kind and to each of their
+/// groups' (shared by the members, or each member's). The chat asks before every answer and before each picture, video or
+/// speech it makes (ModelPolicy, the tools); the gateway asks for each API request, by its model's kind (the guardrail,
+/// GuardrailEndpoints). The credits are the app's: the gateway holds no budget of its own.
 /// </summary>
-public sealed class Credit(AppDbContext db, AccessService access, ILiteLlm gateway, CreditBook book)
+public sealed class Credit(AppDbContext db, AccessService access, CreditBook book)
 {
-    /// <summary>Why this person may not spend more now, or null.</summary>
-    public async Task<string?> RefusalAsync(AppUser user, CancellationToken ct = default)
+    /// <summary>Why this person may not spend more of this kind now, or null.</summary>
+    public async Task<string?> RefusalAsync(AppUser user, CreditKind kind, CancellationToken ct = default)
     {
-        if (user.Email is not { } email || await book.ReadAsync(gateway, ct) is not { } month)
+        if (user.Email is not { } email || await book.ReadAsync(ct) is not { } month)
         {
             return null;
         }
-        var spent = month.Spend.GetValueOrDefault(email);
-        if (month.Budgets.GetValueOrDefault(email) is { } budget && spent >= budget)
+        var spent = month.Of(email, kind);
+        var what = Credits.Label(kind);
+        if (Credits.Of(user, kind) is { } own && spent >= own)
         {
-            return $"You have used all your credit for this month ({Money(budget)}, the chat and your API keys together). Ask an admin to raise it.";
+            return $"You have used all your {what} credit for this month ({Money(own)}). Ask an admin to raise it.";
         }
-        var member = await access.MembershipAsync(user, ct);
-        var groups = await db.Groups.AsNoTracking().Where(g => member.Groups.Contains(g.Id) && g.Credit != null).OrderBy(g => g.Credit).ToListAsync(ct);
-        foreach (var g in groups)
+        foreach (var (g, credit) in await GroupsAsync(user, kind, ct))
         {
             if (g.CreditPerMember)
             {
-                if (spent >= g.Credit)
+                if (spent >= credit)
                 {
-                    return $"You have used your credit as a member of {g.Name} for this month ({Money(g.Credit!.Value)}). Ask an admin to raise it.";
+                    return $"You have used your {what} credit as a member of {g.Name} for this month ({Money(credit)}). Ask an admin to raise it.";
                 }
             }
-            else if ((await MembersAsync(g, ct)).Sum(e => month.Spend.GetValueOrDefault(e)) >= g.Credit)
+            else if ((await MembersAsync(g, ct)).Sum(e => month.Of(e, kind)) >= credit)
             {
-                return $"{g.Name} has used its credit for this month ({Money(g.Credit!.Value)}, shared by its members). Ask an admin to raise it.";
+                return $"{g.Name} has used its {what} credit for this month ({Money(credit)}, shared by its members). Ask an admin to raise it.";
             }
         }
         return null;
+    }
+
+    /// <summary>Where the person stands on each kind this month; null when the request log cannot be read.</summary>
+    public async Task<IReadOnlyList<CreditStanding>?> StandingAsync(AppUser user, CancellationToken ct = default)
+    {
+        if (user.Email is not { } email || await book.ReadAsync(ct) is not { } month)
+        {
+            return null;
+        }
+        var list = new List<CreditStanding>();
+        foreach (var kind in Credits.Kinds)
+        {
+            var spent = month.Of(email, kind);
+            (string Name, decimal Left)? tightest = null;
+            foreach (var (g, credit) in await GroupsAsync(user, kind, ct))
+            {
+                var used = g.CreditPerMember ? spent : (await MembersAsync(g, ct)).Sum(e => month.Of(e, kind));
+                var left = Math.Max(0, credit - used);
+                if (tightest is null || left < tightest.Value.Left)
+                {
+                    tightest = (g.Name, left);
+                }
+            }
+            list.Add(new CreditStanding(kind, spent, Credits.Of(user, kind), tightest?.Name, tightest?.Left));
+        }
+        return list;
+    }
+
+    /// <summary>The person's groups with a credit of this kind, the smallest first.</summary>
+    private async Task<List<(Group Group, decimal Credit)>> GroupsAsync(AppUser user, CreditKind kind, CancellationToken ct)
+    {
+        var member = await access.MembershipAsync(user, ct);
+        var groups = await db.Groups.AsNoTracking().Where(g => member.Groups.Contains(g.Id)).ToListAsync(ct);
+        return [.. groups.Select(g => (g, Credits.Of(g, kind))).Where(x => x.Item2 is not null).Select(x => (x.g, x.Item2!.Value)).OrderBy(x => x.Item2)];
     }
 
     /// <summary>A group's members' emails (lower case): those added to an app group, or whoever the directory puts in a directory group.</summary>
@@ -164,7 +221,7 @@ public sealed class Credit(AppDbContext db, AccessService access, ILiteLlm gatew
             var key = m.ToString("yyyy-MM", CultureInfo.InvariantCulture);
             var byPerson = spend.Where(s => s.Month == key).ToDictionary(s => s.Person, s => s.Spend, StringComparer.OrdinalIgnoreCase);
             decimal Sum(IEnumerable<string> people) => people.Sum(p => byPerson.GetValueOrDefault(p));
-            rows.AddRange(groups.Select(g => new ChargeRow(key, "group", g.Name, g.CostCentre, members[g.Id].Count, Sum(members[g.Id]), g.Credit)));
+            rows.AddRange(groups.Select(g => new ChargeRow(key, "group", g.Name, g.CostCentre, members[g.Id].Count, Sum(members[g.Id]), Total(g))));
             foreach (var centre in groups.Where(g => g.CostCentre is not null).GroupBy(g => g.CostCentre!, StringComparer.OrdinalIgnoreCase).OrderBy(c => c.Key, StringComparer.OrdinalIgnoreCase))
             {
                 var people = centre.SelectMany(g => members[g.Id]).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -179,6 +236,9 @@ public sealed class Credit(AppDbContext db, AccessService access, ILiteLlm gatew
         }
         return rows;
     }
+
+    /// <summary>A group's credits of every kind together, for the chargeback report; null: none.</summary>
+    private static decimal? Total(Group g) => Credits.Any(g) ? Credits.Kinds.Sum(k => Credits.Of(g, k) ?? 0m) : null;
 
     public static string Money(decimal value) => value.ToString("$0.00", CultureInfo.InvariantCulture);
 }

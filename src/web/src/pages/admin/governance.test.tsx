@@ -9,16 +9,18 @@ const group: GroupDetail = {
   id: 'g1', name: 'Data science', description: null, directory: null, scim: false, priority: 0, createdAt: '',
   members: [{ id: 'p1', userName: 'ann', displayName: 'Ann', email: 'ann@example.test', isDisabled: false, spend: 3.5 }],
   policies: {
-    retentionDays: null, credit: 50, creditPerMember: false, costCentre: null, secretScanning: null, redactPii: null, moderation: null, blockedPatterns: null,
-    requestsPerMinute: null, tokensPerMinute: null,
+    retentionDays: null, credits: { chat: 50, api: null, pictures: null, video: null, speech: null }, creditPerMember: false, costCentre: null,
+    secretScanning: null, redactPii: null, moderation: null, blockedPatterns: null, requestsPerMinute: null, tokensPerMinute: null,
   },
   spentThisMonth: 3.5,
+  spentByKind: { chat: 3, api: 0.5, pictures: 0, video: 0, speech: 0 },
 }
 
 const grace: Person = {
   id: 'p1', userName: 'grace', displayName: 'Grace Hopper', email: 'grace@example.test', isAdmin: false, source: 'local',
   disabled: false, disabledReason: null, twoFactorEnabled: false, lockedOut: false, lastSignInAt: null,
-  createdAt: '2026-01-01T00:00:00Z', spend: 3, budget: 10, legalHoldSince: null, legalHoldReason: null,
+  createdAt: '2026-01-01T00:00:00Z', spend: 3, legalHoldSince: null, legalHoldReason: null, overCredit: [], apiOff: false,
+  credits: { chat: { spent: 3, credit: 10 }, api: { spent: 0, credit: null }, pictures: { spent: 0, credit: null }, video: { spent: 0, credit: null }, speech: { spent: 0, credit: null } },
 }
 
 describe('retention, credit and safeguards per group', () => {
@@ -29,12 +31,15 @@ describe('retention, credit and safeguards per group', () => {
     })
     renderApp('/admin/groups/g1')
     const card = (await screen.findByText('Policies')).closest('section')!
-    expect(await screen.findByText('Spent this month: $3.50 of $50.00')).toBeInTheDocument()
+    expect(await screen.findByText('Spent this month, every kind together: $3.50')).toBeInTheDocument()
+    expect(within(card).getByLabelText('Chat credit a month ($)')).toHaveValue('50')
+    expect(within(card).getByText('$3.00 spent')).toBeInTheDocument()
     // Each member's spend this month.
     expect(screen.getByRole('button', { name: /This month/ })).toBeInTheDocument()
 
     await userEvent.type(within(card).getByLabelText('Keep chats for (days)'), '90')
     await userEvent.type(within(card).getByLabelText('Cost centre'), 'CC-42')
+    await userEvent.type(within(card).getByLabelText('API keys credit a month ($)'), '20')
     await userEvent.click(within(card).getByRole('radio', { name: 'Each member’s' }))
     await userEvent.click(within(card).getByRole('combobox', { name: 'Secrets in messages and files' }))
     await userEvent.click(await screen.findByRole('option', { name: 'Mask each secret' }))
@@ -43,8 +48,8 @@ describe('retention, credit and safeguards per group', () => {
     await userEvent.click(within(card).getByRole('button', { name: 'Save policies' }))
     await waitFor(() =>
       expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({
-        retentionDays: 90, credit: 50, creditPerMember: true, costCentre: 'CC-42', secretScanning: 'mask', redactPii: null, moderation: null, blockedPatterns: false,
-        requestsPerMinute: null, tokensPerMinute: null,
+        retentionDays: 90, credits: { chat: 50, api: 20, pictures: null, video: null, speech: null }, creditPerMember: true, costCentre: 'CC-42',
+        secretScanning: 'mask', redactPii: null, moderation: null, blockedPatterns: false, requestsPerMinute: null, tokensPerMinute: null,
       }),
     )
   })
@@ -71,7 +76,7 @@ describe('retention, credit and safeguards per group', () => {
     await userEvent.clear(requests)
     await userEvent.type(requests, '0')
     await userEvent.click(screen.getByRole('button', { name: 'Save policies' }))
-    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toMatchObject({ credit: 50, requestsPerMinute: 0, tokensPerMinute: 200000 }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toMatchObject({ credits: { chat: 50 }, requestsPerMinute: 0, tokensPerMinute: 200000 }))
   })
 
   it('a wrong number of days is caught before it is sent', async () => {
@@ -85,7 +90,7 @@ describe('retention, credit and safeguards per group', () => {
 
   it('the chargeback report lists spend per group and cost centre per month, with a CSV', async () => {
     const calls = fakeApi(admin, {
-      'GET /api/admin/groups': () => ({ json: [{ id: 'g1', name: 'Data science', description: null, directory: null, members: 2, createdAt: '', credit: 50, creditPerMember: false, costCentre: 'CC-42', retentionDays: 30 }] }),
+      'GET /api/admin/groups': () => ({ json: [{ id: 'g1', name: 'Data science', description: null, directory: null, members: 2, createdAt: '', credits: { chat: 50, api: null, pictures: null, video: null, speech: null }, creditPerMember: false, costCentre: 'CC-42', retentionDays: 30 }] }),
       'GET /api/admin/groups/chargeback': () => ({
         json: {
           from: '2026-08', to: '2026-10',

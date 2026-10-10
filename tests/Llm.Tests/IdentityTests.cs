@@ -11,11 +11,11 @@ public sealed class IdentityTests(AppFixture app)
 
     private async Task<TestBrowser> Admin() => await Browser().SignedInAsync("admin", AppFixture.AdminPassword);
 
-    private async Task<(Guid Id, string Password, string Key, string Email)> CreatePersonAsync(TestBrowser admin, bool isAdmin = false, decimal? budget = null)
+    private async Task<(Guid Id, string Password, string Key, string Email)> CreatePersonAsync(TestBrowser admin, bool isAdmin = false, object? credits = null)
     {
         var name = "p" + Guid.NewGuid().ToString("N")[..10];
         var email = $"{name}@example.test";
-        var res = await admin.PostAsync("/api/admin/people", new { userName = name, email, displayName = "Person " + name, admin = isAdmin, budget });
+        var res = await admin.PostAsync("/api/admin/people", new { userName = name, email, displayName = "Person " + name, admin = isAdmin, credits });
         await StatusAssert.Is(HttpStatusCode.Created, res);
         var body = await admin.JsonAsync(res);
         return (body.GetProperty("id").GetGuid(), body.GetProperty("password").GetString()!, body.GetProperty("apiKey").GetString()!, email);
@@ -72,11 +72,12 @@ public sealed class IdentityTests(AppFixture app)
     public async Task An_admin_creates_a_person_who_signs_in_as_a_member()
     {
         var admin = await Admin();
-        var (_, password, key, email) = await CreatePersonAsync(admin, budget: 12.5m);
+        var (_, password, key, email) = await CreatePersonAsync(admin, credits: new { api = 12.5m });
         Assert.Equal(20, password.Length);
         Assert.StartsWith("sk-", key, StringComparison.Ordinal);
         Assert.Contains(app.Gateway.KeysOf(email), k => k.Secret == key);
-        Assert.Equal(12.5m, app.Gateway.Budgets[email]);
+        // The credits are the app's: the gateway holds no budget.
+        Assert.Null(app.Gateway.Budgets.GetValueOrDefault(email));
 
         var person = await Browser().SignedInAsync(email, password); // by email works too
         var me = await person.JsonAsync(await person.GetAsync("/api/auth/me"));
@@ -85,7 +86,8 @@ public sealed class IdentityTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.Forbidden, await person.PostAsync("/api/admin/people", new { userName = "x1", email = "x1@example.test" }));
         var keys = await person.JsonAsync(await person.GetAsync("/api/account/keys"));
         Assert.Equal(1, keys.GetProperty("keys").GetArrayLength());
-        Assert.Equal(12.5m, keys.GetProperty("budget").GetDecimal());
+        Assert.Equal(12.5m, keys.GetProperty("apiCredit").GetDecimal());
+        Assert.False(keys.GetProperty("apiOff").GetBoolean());
     }
 
     [Theory]
@@ -196,15 +198,54 @@ public sealed class IdentityTests(AppFixture app)
     }
 
     [Fact]
-    public async Task Credit_is_set_on_the_gateway_and_can_be_unlimited()
+    public async Task Credits_are_set_kind_by_kind_and_each_can_be_unlimited()
     {
         var admin = await Admin();
         var (id, _, _, email) = await CreatePersonAsync(admin);
-        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{id}/budget", UriKind.Relative), new { budget = 0 }));
-        Assert.Equal(0m, app.Gateway.Budgets[email]);
-        await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{id}/budget", UriKind.Relative), new { budget = (decimal?)null });
-        Assert.Null(app.Gateway.Budgets[email]);
-        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{id}/budget", UriKind.Relative), new { budget = -1 }));
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{id}/credits", UriKind.Relative),
+            new { chat = 0, api = 5, pictures = 1.5, video = (decimal?)null, speech = 2 }));
+        var credits = (await admin.JsonAsync(await admin.GetAsync($"/api/admin/people/{id}"))).GetProperty("person").GetProperty("credits");
+        Assert.Equal([0m, 5m, 1.5m, 2m], new[] { "chat", "api", "pictures", "speech" }.Select(k => credits.GetProperty(k).GetProperty("credit").GetDecimal()));
+        Assert.Equal(JsonValueKind.Null, credits.GetProperty("video").GetProperty("credit").ValueKind);
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{id}/credits", UriKind.Relative), new { }));
+        credits = (await admin.JsonAsync(await admin.GetAsync($"/api/admin/people/{id}"))).GetProperty("person").GetProperty("credits");
+        Assert.All(new[] { "chat", "api", "pictures", "video", "speech" }, k => Assert.Equal(JsonValueKind.Null, credits.GetProperty(k).GetProperty("credit").ValueKind));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{id}/credits", UriKind.Relative), new { chat = -1 }));
+        Assert.Null(app.Gateway.Budgets.GetValueOrDefault(email));
+    }
+
+    [Fact]
+    public async Task API_access_is_on_for_everyone_and_an_admin_takes_it_and_gives_it_back()
+    {
+        var admin = await Admin();
+        var (id, password, key, email) = await CreatePersonAsync(admin);
+        var person = await Browser().SignedInAsync(email, password);
+        Assert.False((await person.JsonAsync(await person.GetAsync("/api/account/keys"))).GetProperty("apiOff").GetBoolean());
+
+        // Taken: the keys are blocked at the gateway, none is shown or made, and the guardrail refuses them.
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{id}/api", UriKind.Relative), new { on = false }));
+        Assert.All(app.Gateway.KeysOf(email), k => Assert.True(k.Blocked));
+        var keys = await person.JsonAsync(await person.GetAsync("/api/account/keys"));
+        Assert.True(keys.GetProperty("apiOff").GetBoolean());
+        Assert.Equal(0, keys.GetProperty("keys").GetArrayLength());
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await person.PostAsync("/api/account/keys/rotate"));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync($"/api/admin/people/{id}/key"));
+        var verdict = await GroupCreditTests.GuardrailAsync(app.Factory, email, "hello");
+        Assert.Equal("BLOCKED", verdict.GetProperty("action").GetString());
+        Assert.Contains("API access is off", verdict.GetProperty("blocked_reason").GetString(), StringComparison.Ordinal);
+        Assert.True((await admin.JsonAsync(await admin.GetAsync($"/api/admin/people/{id}"))).GetProperty("person").GetProperty("apiOff").GetBoolean());
+        // The chat goes on: it is not an API key.
+        var chat = (await person.JsonAsync(await person.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+        await StatusAssert.Is(HttpStatusCode.OK, await person.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "still here?" }));
+
+        // Given back: the keys work again.
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{id}/api", UriKind.Relative), new { on = true }));
+        Assert.All(app.Gateway.KeysOf(email), k => Assert.False(k.Blocked));
+        Assert.Equal("NONE", (await GroupCreditTests.GuardrailAsync(app.Factory, email, "hello")).GetProperty("action").GetString());
+        Assert.Contains(key, app.Gateway.KeysOf(email).Select(k => k.Secret));
+        var audit = await (await admin.GetAsync("/api/admin/audit?take=1000")).Content.ReadAsStringAsync();
+        Assert.Contains("person.api_off", audit, StringComparison.Ordinal);
+        Assert.Contains("person.api_on", audit, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -231,8 +272,9 @@ public sealed class IdentityTests(AppFixture app)
             Assert.False(string.IsNullOrEmpty(body.GetProperty("password").GetString()));
             Assert.Equal(JsonValueKind.Null, body.GetProperty("apiKey").ValueKind);
             Assert.Contains("gateway", body.GetProperty("warning").GetString(), StringComparison.Ordinal);
+            // The list needs no gateway: the credits are the app's, the spend the request log's.
             var list = await admin.JsonAsync(await admin.GetAsync("/api/admin/people"));
-            Assert.Contains("missing", list.GetProperty("warning").GetString(), StringComparison.Ordinal);
+            Assert.Equal(JsonValueKind.Null, list.GetProperty("warning").ValueKind);
         }
         finally
         {

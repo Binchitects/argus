@@ -268,6 +268,12 @@ public static class VoiceEndpoints
     /// <summary>A text read aloud in a voice, in the person's name: the MP3 passed on as the speech server writes it.</summary>
     public static async Task<IResult> ReadAloudAsync(HttpContext http, GatewayChat gateway, OfferedVoice? voice, string text, double speed, string email, CancellationToken ct)
     {
+        // Speech counts to the person's speech credit.
+        var me = await http.RequestServices.GetRequiredService<UserManager<AppUser>>().FindByEmailAsync(email);
+        if (me is not null && await http.RequestServices.GetRequiredService<Gateway.Credit>().RefusalAsync(me, Llm.Core.Access.CreditKind.Speech, ct) is { } spent)
+        {
+            return AuthEndpoints.Problem(403, "credit", spent);
+        }
         if (voice is null)
         {
             return AuthEndpoints.Problem(503, "no_speech", "The gateway has no text to speech model (the audio module).");

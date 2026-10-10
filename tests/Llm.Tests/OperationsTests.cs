@@ -19,17 +19,20 @@ public sealed class OperationsTests(AppFixture app)
     {
         var admin = await Admin();
         var name = "ov" + Guid.NewGuid().ToString("N")[..8];
-        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test", budget = 1 }));
-        // Spent in the chat: LiteLLM books it to the end user, not the internal user its keys count for.
-        await app.SpendAsync($"{name}@example.test", 1.5m);
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test", credits = new { chat = 1 } }));
+        // Spent in the chat this month: LiteLLM books it to the end user, not the internal user its keys count for.
+        await app.SpendAsync($"{name}@example.test", 1.5m, DateTimeOffset.UtcNow);
         var o = await admin.JsonAsync(await admin.GetAsync("/api/admin/overview"));
         Assert.True(o.GetProperty("people").GetInt32() >= 2);
         Assert.True(o.GetProperty("admins").GetInt32() >= 1);
         Assert.Contains(name, o.GetProperty("overCredit").EnumerateArray().Select(x => x.GetString()));
-        // Everything in the gateway's log: the seeded requests (1.0012) and this one at least.
-        Assert.True(o.GetProperty("spend").GetDecimal() >= 2.5012m, o.GetProperty("spend").ToString());
+        // Everything in the gateway's log this month: this one at least.
+        Assert.True(o.GetProperty("spend").GetDecimal() >= 1.5m, o.GetProperty("spend").ToString());
         var people = (await admin.JsonAsync(await admin.GetAsync("/api/admin/people"))).GetProperty("people").EnumerateArray();
-        Assert.Equal(1.5m, people.Single(p => p.GetProperty("userName").GetString() == name).GetProperty("spend").GetDecimal());
+        var row = people.Single(p => p.GetProperty("userName").GetString() == name);
+        Assert.Equal(1.5m, row.GetProperty("spend").GetDecimal());
+        Assert.Equal(1.5m, row.GetProperty("credits").GetProperty("chat").GetProperty("spent").GetDecimal());
+        Assert.Equal(["chat"], row.GetProperty("overCredit").EnumerateArray().Select(k => k.GetString()));
         Assert.Contains($"{name}@example.test", await (await admin.GetAsync("/api/admin/people.csv")).Content.ReadAsStringAsync(), StringComparison.Ordinal);
         Assert.True(o.GetProperty("index").GetProperty("configured").GetBoolean());
         Assert.Equal(1, o.GetProperty("index").GetProperty("summary").GetProperty("repos").GetInt32());
@@ -154,7 +157,8 @@ public sealed class OperationsTests(AppFixture app)
         Assert.Equal("text/csv", res.Content.Headers.ContentType?.MediaType);
         Assert.StartsWith("attachment; filename=\"people-", res.Content.Headers.ContentDisposition?.ToString() ?? res.Headers.GetValues("Content-Disposition").Single(), StringComparison.Ordinal);
         var csv = await res.Content.ReadAsStringAsync();
-        Assert.StartsWith("username,display_name,email,role,source,disabled,spend,budget,credit_left", csv, StringComparison.Ordinal);
+        Assert.StartsWith("username,display_name,email,role,source,disabled,api_access,spend_this_month,chat_spend,chat_credit,api_spend,api_credit,"
+            + "pictures_spend,pictures_credit,video_spend,video_credit,speech_spend,speech_credit\n", csv, StringComparison.Ordinal);
         Assert.Contains("\"'=HYPERLINK(\"\"http://evil\"\")\"", csv, StringComparison.Ordinal);
     }
 

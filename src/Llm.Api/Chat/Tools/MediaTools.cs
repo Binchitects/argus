@@ -128,7 +128,7 @@ public static partial class Voices
 /// <summary>Short videos from the stack's video server (Wan2.2 TI2V 5B), kept as the person's files.</summary>
 /// <remarks>The video server is not behind the gateway: each clip is booked in the gateway's request log by the app, at its price per second.</remarks>
 public sealed partial class VideoTool(IHttpClientFactory http, Operations.Modules modules, AppDbContext db, Safeguards.Safeguards safeguards, MediaControl media,
-    Gateway.PriceBook prices, Gateway.SpendLog spendLog, ChatKey chatKey, Storage.StorageQuotas quotas) : IChatTool
+    Gateway.PriceBook prices, Gateway.SpendLog spendLog, ChatKey chatKey, Storage.StorageQuotas quotas, Gateway.Credit credit) : IChatTool
 {
     public const string Client = "videogen";
     private const int Fps = 16;
@@ -163,6 +163,10 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
             if (await quotas.ToolRefusalAsync(context.User.Id, "video", token) is { } full)
             {
                 return new ToolResult(full, IsError: true);
+            }
+            if (await credit.RefusalAsync(context.User, Llm.Core.Access.CreditKind.Video, token) is { } spent)
+            {
+                return new ToolResult($"No video was made. Tell the person: {spent}", IsError: true);
             }
             if (await safeguards.TakeImageAsync(context.User.Id, token) is { } limit)
             {
@@ -250,7 +254,8 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
 }
 
 /// <summary>A text read aloud into a sound file, by the gateway's text to speech, in the person's voice for its language.</summary>
-public sealed class SpeechTool(ChatModels models, GatewayChat gateway, AppDbContext db, VoiceCatalog voices, Gateway.PriceBook prices, Storage.StorageQuotas quotas) : IChatTool
+public sealed class SpeechTool(ChatModels models, GatewayChat gateway, AppDbContext db, VoiceCatalog voices, Gateway.PriceBook prices, Storage.StorageQuotas quotas,
+    Gateway.Credit credit) : IChatTool
 {
     public string Id => "speech";
     public string Title => "Speech";
@@ -274,6 +279,10 @@ public sealed class SpeechTool(ChatModels models, GatewayChat gateway, AppDbCont
             if (text.Length == 0)
             {
                 return new ToolResult("Give the words to say in 'text'.", IsError: true);
+            }
+            if (await credit.RefusalAsync(context.User, Llm.Core.Access.CreditKind.Speech, token) is { } spent)
+            {
+                return new ToolResult($"No sound file was made. Tell the person: {spent}", IsError: true);
             }
             if (await quotas.ToolRefusalAsync(context.User.Id, "sound file", token) is { } full)
             {

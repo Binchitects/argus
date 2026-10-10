@@ -12,7 +12,7 @@ import { api, errorMessage } from '@/lib/api'
 import { money } from '@/lib/format'
 import { maxRequests, maxTokens, parseLimit } from '@/lib/rate-limits'
 import { noPolicies, type GroupDetail, type GroupPolicies } from './groups-api'
-import { parseCredit } from './people-api'
+import { creditKinds, parseCredit, type CreditKind, type Credits } from './people-api'
 
 /** Radix's Select takes no empty value: this one stands for "the company's setting". */
 const company = 'company'
@@ -44,7 +44,9 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
   const queryClient = useQueryClient()
   const p = group.policies ?? noPolicies
   const [days, setDays] = useState(p.retentionDays === null ? '' : String(p.retentionDays))
-  const [credit, setCredit] = useState(p.credit === null ? '' : String(p.credit))
+  const [credits, setCredits] = useState<Record<CreditKind, string>>(
+    () => Object.fromEntries(creditKinds.map(({ kind }) => [kind, p.credits[kind] === null ? '' : String(p.credits[kind])])) as Record<CreditKind, string>,
+  )
   const [perMember, setPerMember] = useState(p.creditPerMember ? 'member' : 'shared')
   const [costCentre, setCostCentre] = useState(p.costCentre ?? '')
   const [requests, setRequests] = useState(p.requestsPerMinute === null || p.requestsPerMinute === undefined ? '' : String(p.requestsPerMinute))
@@ -59,7 +61,7 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
   const save = useMutation({
     mutationFn: (body: GroupPolicies) => api(`/api/admin/groups/${group.id}/policies`, { method: 'PUT', body }),
     onSuccess: async () => {
-      toast.success('Policies saved', { description: 'Credit reaches the gateway within a minute.' })
+      toast.success('Policies saved', { description: 'They hold at once.' })
       await queryClient.invalidateQueries({ queryKey: ['admin', 'groups'] })
     },
     onError: (e) => setError(errorMessage(e)),
@@ -70,16 +72,17 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
     const d = days.trim()
     const retention = d === '' ? null : Number(d)
     if (retention !== null && !(Number.isInteger(retention) && retention >= 1 && retention <= 36500)) return setError('Keep chats a whole number of days, 1 to 36,500, or empty.')
-    const c = parseCredit(credit)
-    if (c === 'invalid') return setError('Credit is a number of dollars, or empty for no group limit.')
+    const c = Object.fromEntries(creditKinds.map(({ kind }) => [kind, parseCredit(credits[kind])]))
+    if (Object.values(c).includes('invalid')) return setError('Each credit is a number of dollars, or empty for no group limit of that kind.')
+    const limited = Object.values(c).some((v) => v !== null)
     const r = parseLimit(requests, maxRequests)
     const t = parseLimit(tokens, maxTokens)
     if (r === 'invalid' || t === 'invalid')
       return setError(`Limits are whole numbers: requests 0 to ${maxRequests.toLocaleString('en-US')}, tokens 0 to ${maxTokens.toLocaleString('en-US')} a minute. 0: no limit; empty: the company's setting.`)
     save.mutate({
       retentionDays: retention,
-      credit: c,
-      creditPerMember: c !== null && perMember === 'member',
+      credits: c as Credits,
+      creditPerMember: limited && perMember === 'member',
       costCentre: costCentre.trim() || null,
       secretScanning: pick('secretScanning') as GroupPolicies['secretScanning'],
       redactPii: pick('redactPii') as GroupPolicies['redactPii'],
@@ -105,13 +108,28 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
           <Field label="Cost centre" hint="Its spend is charged to it in the monthly chargeback report.">
             <Input value={costCentre} onChange={(e) => setCostCentre(e.target.value)} maxLength={100} placeholder="none" />
           </Field>
-          <Field label="Credit a month ($)" hint="Across the chat and API keys, from the first of the month (UTC). Empty: no group limit.">
-            <Input inputMode="decimal" value={credit} onChange={(e) => setCredit(e.target.value)} placeholder="no limit" />
-          </Field>
+          <fieldset className="grid gap-2 sm:col-span-2">
+            <legend className="mb-1 text-sm font-medium">Credits a month ($)</legend>
+            <p className="text-xs text-muted-foreground">One per kind, each held to what the members spent on it from the first of the month (UTC). Empty: no group limit of that kind.</p>
+            <div className="grid gap-3 sm:grid-cols-5">
+              {creditKinds.map(({ kind, label, hint }) => (
+                <Field key={kind} label={label} hint={group.spentByKind ? `${money(group.spentByKind[kind])} spent` : undefined}>
+                  <Input
+                    inputMode="decimal"
+                    aria-label={`${label} credit a month ($)`}
+                    title={hint}
+                    value={credits[kind]}
+                    onChange={(e) => setCredits((v) => ({ ...v, [kind]: e.target.value }))}
+                    placeholder="no limit"
+                  />
+                </Field>
+              ))}
+            </div>
+          </fieldset>
           <div className="grid content-start gap-2">
-            <span className="text-sm font-medium">The credit is</span>
+            <span className="text-sm font-medium">The credits are</span>
             <Segmented
-              label="The credit is"
+              label="The credits are"
               value={perMember}
               onChange={setPerMember}
               options={[
@@ -121,8 +139,7 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
             />
             {spent !== undefined && spent !== null && (
               <p className="text-xs text-muted-foreground">
-                Spent this month: {money(spent)}
-                {p.credit !== null && !p.creditPerMember ? ` of ${money(p.credit)}` : ''}
+                Spent this month, every kind together: {money(spent)}
               </p>
             )}
           </div>

@@ -92,11 +92,11 @@ describe('shell', () => {
   it('a 401 on any call means the session ended: back to sign-in', async () => {
     let expired = false
     fakeApi(member, {
-      'GET /api/account/keys': () => (expired ? { status: 401, json: { status: 'unauthorized' } } : { json: { keys: [], spend: 0, budget: null } }),
+      'GET /api/account/keys': () => (expired ? { status: 401, json: { status: 'unauthorized' } } : { json: { apiOff: false, keys: [], spend: 0, apiSpend: 0, apiCredit: null, standing: [] } }),
       'GET /api/auth/me': () => ({ json: member }),
     })
     const { router, client } = renderApp('/')
-    await screen.findByText('Your credit')
+    await screen.findByText('Your credit this month')
     expired = true
     await client.invalidateQueries({ queryKey: ['account', 'keys'] })
     await waitFor(() => expect(router.state.location.pathname).toBe('/login'))

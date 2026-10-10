@@ -12,9 +12,9 @@ router_settings:
 
 litellm_settings:
   drop_params: true
-  # A new person's credit, per period. Each person's own is set under People.
-  max_internal_user_budget: 50
-  internal_user_budget_duration: 1mo
+  # No budget here: each person's and each group's credits (one per kind: the chat,
+  # API keys, pictures, video, speech) are the app's, and it checks them before each
+  # request (the guardrail below, and before each chat answer).
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
@@ -27,7 +27,7 @@ general_settings:
 
 # Before each request the gateway asks the app (http://app:8080, inside the network):
 # secrets, blocked words, the model's check and personal data (Settings → Safeguards,
-# and each group's own), and the credit, one over the chat and API keys, groups' too;
+# and each group's own), API access and the credit of the request's kind, groups' too;
 # then room in the engine for a model not loaded, so the engine never unloads the big
 # one for it. The app answers within milliseconds (at the engine's limit, it may wait up
 # to a minute for an idle model to make room); the chat's own requests pass at once.

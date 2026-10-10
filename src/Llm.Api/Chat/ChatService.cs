@@ -326,7 +326,7 @@ public sealed partial class ChatService(
                 ["messages"] = messages.DeepClone(),
                 ["stream"] = true,
                 ["stream_options"] = new JsonObject { ["include_usage"] = true },
-                // Enforcement: the end-user budget binds on this field (the header only attributes).
+                // The spend is the person's by this field (the header only attributes): their chat credit counts it.
                 ["user"] = email,
             };
             if (conversation.Temperature is { } temperature)

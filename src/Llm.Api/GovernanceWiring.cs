@@ -13,6 +13,7 @@ public static class GovernanceWiring
         services.AddSingleton<Gateway.CreditBook>();
         services.AddScoped<Gateway.Credit>();
         services.AddScoped<Gateway.GroupTeams>();
+        services.AddScoped<Gateway.CreditMove>();
         services.Configure<Gateway.RateLimitOptions>(config.GetSection("Gateway"));
         services.AddScoped<Gateway.RateLimits>();
         services.AddSingleton<Gateway.ModelCalls>();

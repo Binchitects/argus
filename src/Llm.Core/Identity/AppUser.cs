@@ -58,6 +58,20 @@ public sealed class AppUser : IdentityUser<Guid>
     public int? RequestsPerMinute { get; set; }
     /// <summary>Tokens a minute each of their API keys may use at the gateway, their own; null: their groups' or the company's, 0: no limit.</summary>
     public int? TokensPerMinute { get; set; }
+
+    /// <summary>What they may spend in a calendar month on the chat's answers; null: no limit of their own (Credits).</summary>
+    public decimal? ChatCredit { get; set; }
+    /// <summary>... on their API keys' text requests (coding agents, IDEs, scripts).</summary>
+    public decimal? ApiCredit { get; set; }
+    /// <summary>... on pictures made, in the chat or with a key.</summary>
+    public decimal? PictureCredit { get; set; }
+    /// <summary>... on videos made.</summary>
+    public decimal? VideoCredit { get; set; }
+    /// <summary>... on speech: read aloud, and sound turned into text.</summary>
+    public decimal? SpeechCredit { get; set; }
+
+    /// <summary>An admin took their API access away: their keys are blocked, none is shown or made, and the gateway refuses them.</summary>
+    public bool ApiOff { get; set; }
 }
 
 public sealed class AppRole : IdentityRole<Guid>

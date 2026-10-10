@@ -953,7 +953,7 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
                     + "loaded by an admin, or used by everyone). Choose another model, or ask an admin to raise Models loaded at once.",
             };
         }
-        // One credit over the chat and API keys, and the groups' credit.
-        return await credit.RefusalAsync(user, ct);
+        // The chat's credit, the person's and their groups'.
+        return await credit.RefusalAsync(user, Llm.Core.Access.CreditKind.Chat, ct);
     }
 }

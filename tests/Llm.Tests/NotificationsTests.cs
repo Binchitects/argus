@@ -20,25 +20,25 @@ public sealed class NotificationsTests(AppFixture app)
         var admin = await Admin();
         var name = "cr" + Guid.NewGuid().ToString("N")[..8];
         var email = $"{name}@example.test";
-        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email, budget = 1 }));
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email, credits = new { chat = 1 } }));
         var person = await new TestBrowser(app.Factory).SignedInAsync(name, made.GetProperty("password").GetString()!);
         var watch = app.Factory.Services.GetRequiredService<NewsWatch>();
 
-        await app.SpendAsync(email, 0.85m);
+        await app.SpendAsync(email, 0.85m, DateTimeOffset.UtcNow);
         await watch.CheckCreditAsync(CancellationToken.None);
         await watch.CheckCreditAsync(CancellationToken.None);
         var news = Assert.Single(await NewsAsync(person));
         Assert.Equal("usage", news.GetProperty("kind").GetString());
-        Assert.Equal("85% of your credit is used", news.GetProperty("title").GetString());
+        Assert.Equal("85% of your chat credit is used", news.GetProperty("title").GetString());
         Assert.Contains("$0.85 of $1.00", news.GetProperty("body").GetString(), StringComparison.Ordinal);
 
-        await app.SpendAsync(email, 0.2m);
+        await app.SpendAsync(email, 0.2m, DateTimeOffset.UtcNow);
         await watch.CheckCreditAsync(CancellationToken.None);
         await watch.CheckCreditAsync(CancellationToken.None);
         var all = await NewsAsync(person);
         Assert.Equal(2, all.Count);
-        Assert.Equal("Your credit is used up", all[0].GetProperty("title").GetString());
-        Assert.Single(await NewsAsync(admin), n => n.GetProperty("title").GetString() == $"{name} has used up their credit");
+        Assert.Equal("Your chat credit is used up", all[0].GetProperty("title").GetString());
+        Assert.Single(await NewsAsync(admin), n => n.GetProperty("title").GetString() == $"{name} has used up their chat credit");
 
         // Cleared: gone from the bell, one or all, and news said once is not said again.
         await StatusAssert.Is(System.Net.HttpStatusCode.NoContent, await person.Http.DeleteAsync(new Uri($"/api/notifications/{all[1].GetProperty("id").GetString()}", UriKind.Relative)));
@@ -115,29 +115,29 @@ public sealed class NotificationsTests(AppFixture app)
 
         var name = "nm" + Guid.NewGuid().ToString("N")[..8];
         var email = $"{name}@example.test";
-        await admin.PostAsync("/api/admin/people", new { userName = name, email, budget = 1 });
+        await admin.PostAsync("/api/admin/people", new { userName = name, email, credits = new { chat = 1 } });
 
         // 80%: the person, by email too, once; the admins' webhook hears nothing of it.
-        await app.SpendAsync(email, 0.85m);
+        await app.SpendAsync(email, 0.85m, DateTimeOffset.UtcNow);
         await watch.CheckCreditAsync(CancellationToken.None);
         await watch.CheckCreditAsync(CancellationToken.None);
         var mail = Assert.Single(smtp.Received);
         Assert.Contains(email, mail.To[0], StringComparison.Ordinal);
-        Assert.Contains("You have spent $0.85 of $1.00.", BodyOf(mail.Data), StringComparison.Ordinal);
+        Assert.Contains("You have spent $0.85 of $1.00 this month.", BodyOf(mail.Data), StringComparison.Ordinal);
         Assert.Contains($"Open it: https://{AppFixture.Domain}/", BodyOf(mail.Data), StringComparison.Ordinal);
         Assert.Empty(Posts());
 
         // Used up: the person and the admin by email, and the webhook, once.
-        await app.SpendAsync(email, 0.2m);
+        await app.SpendAsync(email, 0.2m, DateTimeOffset.UtcNow);
         await watch.CheckCreditAsync(CancellationToken.None);
         await watch.CheckCreditAsync(CancellationToken.None);
         Assert.Equal(3, smtp.Received.Count);
-        Assert.Single(smtp.Received, m => m.To[0].Contains("admin@llm.test", StringComparison.Ordinal) && BodyOf(m.Data).Contains("Their chat and API keys are refused", StringComparison.Ordinal));
+        Assert.Single(smtp.Received, m => m.To[0].Contains("admin@llm.test", StringComparison.Ordinal) && BodyOf(m.Data).Contains("The chat's answers are refused until you add credit", StringComparison.Ordinal));
         var post = JsonDocument.Parse(Assert.Single(Posts()).Body).RootElement;
-        Assert.Equal($"{name} has used up their credit", post.GetProperty("title").GetString());
+        Assert.Equal($"{name} has used up their chat credit", post.GetProperty("title").GetString());
         Assert.Equal("usage", post.GetProperty("kind").GetString());
         Assert.Equal($"https://{AppFixture.Domain}/admin/people", post.GetProperty("url").GetString());
-        Assert.StartsWith($"{name} has used up their credit\n\n$1.05 of $1.00.", post.GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.StartsWith($"{name} has used up their chat credit\n\n$1.05 of $1.00 this month.", post.GetProperty("text").GetString(), StringComparison.Ordinal);
 
         // An alert that starts firing: each admin by email and the webhook, once.
         var started = DateTimeOffset.UtcNow.ToString("O");

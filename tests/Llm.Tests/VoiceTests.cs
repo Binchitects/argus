@@ -129,6 +129,32 @@ public sealed class VoiceTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Read_aloud_and_Talk_count_to_the_speech_credit_and_stop_when_it_is_used_up()
+    {
+        await using var s = NewApp();
+        var (b, _, email) = await PersonAsync(s.App);
+        var admin = await new TestBrowser(s.App).SignedInAsync("admin", AppFixture.AdminPassword);
+        var id = (await admin.JsonAsync(await admin.GetAsync("/api/admin/people"))).GetProperty("people").EnumerateArray()
+            .Single(p => p.GetProperty("email").GetString() == email).GetProperty("id").GetGuid();
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{id}/credits", UriKind.Relative), new { speech = 0.5 }));
+        await StatusAssert.Is(HttpStatusCode.OK, await b.PostAsync("/api/chat/speech", new { text = "Under the credit." }));
+
+        // Speech made this month, whichever way: the credit is used up, and the next is refused with why.
+        await app.SpendAsync(email, 0.5m, DateTimeOffset.UtcNow, apiKey: true, model: MediaModels.TextToSpeech, callType: "aspeech");
+        // The checks read the month's spend again after Credit:Refresh (30 s): now, here.
+        s.App.Services.GetRequiredService<CreditBook>().Forget();
+        var refused = await b.PostAsync("/api/chat/speech", new { text = "Over it." });
+        await StatusAssert.Is(HttpStatusCode.Forbidden, refused);
+        Assert.Contains("You have used all your speech credit for this month ($0.50)", (await b.JsonAsync(refused)).GetProperty("error").GetString(), StringComparison.Ordinal);
+        using var form = new MultipartFormDataContent { { new ByteArrayContent([1, 2, 3]) { Headers = { ContentType = new("audio/webm") } }, "file", "talk.webm" } };
+        var talk = await b.Http.PostAsync(new Uri("/api/chat/transcribe", UriKind.Relative), form);
+        await StatusAssert.Is(HttpStatusCode.Forbidden, talk);
+        // The chat's answers have their own credit: they go on.
+        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+        await StatusAssert.Is(HttpStatusCode.OK, await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "Still answering?" }));
+    }
+
+    [Fact]
     public async Task A_persons_choices_are_saved_and_read_aloud_and_Talk_use_them_until_they_go_back_to_the_companys()
     {
         await using var s = NewApp();

@@ -6,15 +6,18 @@ import { toCsv } from './audit-csv'
 import { blockChanges } from './model-switch'
 import type { Person } from './people-api'
 
+const credits = (chat: number, credit: number | null): Person['credits'] => ({
+  chat: { spent: chat, credit }, api: { spent: 0, credit: null }, pictures: { spent: 0, credit: null }, video: { spent: 0, credit: null }, speech: { spent: 0, credit: null },
+})
 const person = (over: Partial<Person>): Person => ({
   id: 'p1', userName: 'grace', displayName: 'Grace Hopper', email: 'grace@example.test', isAdmin: false, source: 'local',
   disabled: false, disabledReason: null, twoFactorEnabled: false, lockedOut: false, lastSignInAt: '2026-09-20T10:00:00Z',
-  createdAt: '2026-01-01T00:00:00Z', spend: 3, budget: 10, ...over,
+  createdAt: '2026-01-01T00:00:00Z', spend: 3, credits: credits(3, 10), overCredit: [], apiOff: false, ...over,
 })
 const people = [
   person({}),
-  person({ id: 'p2', userName: 'alan', displayName: 'Alan Turing', email: 'alan@example.test', spend: 12, budget: 10 }),
-  person({ id: 'a1', userName: 'admin', displayName: 'Ada Admin', email: 'admin@example.test', isAdmin: true, budget: null }),
+  person({ id: 'p2', userName: 'alan', displayName: 'Alan Turing', email: 'alan@example.test', spend: 12, credits: credits(12, 10), overCredit: ['chat'] }),
+  person({ id: 'a1', userName: 'admin', displayName: 'Ada Admin', email: 'admin@example.test', isAdmin: true, credits: credits(0, null) }),
 ]
 
 describe('people', () => {
@@ -91,10 +94,12 @@ describe('people', () => {
     expect(await within(dialog).findByText(/Lower-case letters/)).toBeInTheDocument()
     await userEvent.clear(within(dialog).getByLabelText('Username'))
     await userEvent.type(within(dialog).getByLabelText('Username'), 'kate')
-    await userEvent.type(within(dialog).getByLabelText('Credit ($)'), '25')
+    await userEvent.type(within(dialog).getByLabelText('API credit ($ a month)'), '25')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Add person' }))
     expect(await within(dialog).findByText('Person added')).toBeInTheDocument()
-    expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/people')?.body).toEqual({ userName: 'kate', email: 'kate@example.test', displayName: null, admin: false, budget: 25 })
+    expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/people')?.body).toEqual({
+      userName: 'kate', email: 'kate@example.test', displayName: null, admin: false, credits: { chat: null, api: 25 },
+    })
     await userEvent.click(within(dialog).getByRole('button', { name: 'Show Password' }))
     expect(within(dialog).getByLabelText('Password')).toHaveTextContent('generated-pass-123')
   })
@@ -116,16 +121,33 @@ describe('people', () => {
     expect(calls.some((c) => c.method === 'DELETE')).toBe(true)
   })
 
-  it('credit is set from the person page', async () => {
+  it('credits are set kind by kind from the person page, beside the tightest group credit', async () => {
+    const standing = [{ kind: 'pictures', spent: 0, credit: null, group: 'Data science', groupLeft: 4 }]
     const calls = fakeApi(admin, {
-      'GET /api/admin/people/p1': () => ({ json: { person: people[0], keys: [{ alias: 'grace', preview: 'sk-...1234', spend: 3, blocked: false, createdAt: null }], groups: [{ id: 'g1', name: 'Data science', directory: false }], directoryGroups: [], warning: null } }),
-      'PUT /api/admin/people/p1/budget': () => ({ status: 204 }),
+      'GET /api/admin/people/p1': () => ({
+        json: { person: people[0], standing, keys: [{ alias: 'grace', preview: 'sk-...1234', spend: 3, blocked: false, createdAt: null }], groups: [{ id: 'g1', name: 'Data science', directory: false }], directoryGroups: [], warning: null },
+      }),
+      'PUT /api/admin/people/p1/credits': () => ({ status: 204 }),
     })
     renderApp('/admin/people/p1')
-    const credit = await screen.findByLabelText('Credit ($)')
-    await userEvent.clear(credit)
-    await userEvent.click(screen.getByRole('button', { name: 'Set credit' }))
-    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ budget: null }))
+    const chat = await screen.findByLabelText('Chat credit ($)')
+    expect(chat).toHaveValue('10')
+    expect(screen.getByText('Data science: $4.00 left this month')).toBeInTheDocument()
+    await userEvent.clear(chat)
+    await userEvent.type(screen.getByLabelText('Video credit ($)'), '2.5')
+    await userEvent.click(screen.getByRole('button', { name: 'Set credits' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ chat: null, api: null, pictures: null, video: 2.5, speech: null }))
+  })
+
+  it('API access is taken from the person page after a confirmation, and their key card says so', async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/people/p1': () => ({ json: { person: people[0], standing: null, keys: [], groups: [], directoryGroups: [], warning: null } }),
+      'PUT /api/admin/people/p1/api': () => ({ json: { warning: null } }),
+    })
+    renderApp('/admin/people/p1')
+    await userEvent.click(await screen.findByRole('switch', { name: /API access/ }))
+    await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Take API access' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ on: false }))
   })
 
   it('rate limits show what applies and where from, and their own are set from the person page', async () => {

@@ -6,8 +6,8 @@ for everyone, as are **Connect your tools** (each person's API key and the
 setups for their tools) and the **Leaderboard** (the models as people voted
 for them in the chat's Compare, unless an admin keeps it to the admins).
 
-People are a table with filters, bulk actions (credit, disable, enable, sign
-out) and a page each. The audit log has filters, paging and CSV export. The
+People are a table with filters, bulk actions (a credit of one kind, disable,
+enable, sign out) and a page each. The audit log has filters, paging and CSV export. The
 Settings page edits everything ([settings.md](settings.md)), and the Model page
 has **Switch to this model**.
 
@@ -23,9 +23,9 @@ heading, and has a box above it that keeps the rows holding what is typed.
 
 | Page | What it is for |
 |---|---|
-| **Overview** | Services up, people and admins, total spend, who is at or past their credit, the code index's health, and the certificate the site serves. When the index is stale it says how many repositories, which ones, and *why* when the last run's exit code tells (GitLab unreachable, a token that cannot list every repository, ctags missing). The certificate (from Traefik's metrics in Prometheus) shows the days until it expires and who issued it (your own, or Let's Encrypt); within 30 days it says what to do, and it says so when Traefik serves its own default (browsers warn). |
-| **People** | Add, search, and per person: credit, rate limits for their API keys, a new API key, password and 2FA resets, admin role, disable, sign out everywhere, legal hold, an export of their data, delete. With the company directory on, **Move to the directory** moves the local accounts selected to directory sign-in, keeping everything of theirs ([authentication.md](authentication.md#moving-local-accounts-to-the-directory)). **Export CSV** downloads everyone with spend and credit left. |
-| **Groups** | App groups (the people you add), directory groups (whoever the company directory or the identity provider's groups claim puts in them, by name or DN) and SCIM groups (made and filled by the identity provider; their name and members are changed there). Tools and models are given to groups. Per group: how long members' chats are kept, a credit a month (shared or each member's), a cost centre, which safeguards apply, and the requests and tokens a minute each member's API key may use. A group's **priority in the answers' line** (-10 to 10, 0 for everyone) decides who goes first when the model is busy: higher first, and within one priority the line stays fair (fewest answers running, then served longest ago). Someone in several groups takes the highest. A change is audited. Below the list, the monthly **Chargeback** report. See [Retention, legal hold and exports](#retention-legal-hold-and-exports), [Credit for groups](#credit-for-groups) and [Rate limits for API keys](#rate-limits-for-api-keys). |
+| **Overview** | Services up, people and admins, this month's spend, who is at or past a credit of their own, the code index's health, and the certificate the site serves. When the index is stale it says how many repositories, which ones, and *why* when the last run's exit code tells (GitLab unreachable, a token that cannot list every repository, ctags missing). The certificate (from Traefik's metrics in Prometheus) shows the days until it expires and who issued it (your own, or Let's Encrypt); within 30 days it says what to do, and it says so when Traefik serves its own default (browsers warn). |
+| **People** | Add, search, and per person: credits (one per kind), API access, rate limits for their API keys, a new API key, password and 2FA resets, admin role, disable, sign out everywhere, legal hold, an export of their data, delete. With the company directory on, **Move to the directory** moves the local accounts selected to directory sign-in, keeping everything of theirs ([authentication.md](authentication.md#moving-local-accounts-to-the-directory)). **Export CSV** downloads everyone with this month's spend and credit of each kind, and whether they have API access. |
+| **Groups** | App groups (the people you add), directory groups (whoever the company directory or the identity provider's groups claim puts in them, by name or DN) and SCIM groups (made and filled by the identity provider; their name and members are changed there). Tools and models are given to groups. Per group: how long members' chats are kept, credits a month, one per kind (shared or each member's), a cost centre, which safeguards apply, and the requests and tokens a minute each member's API key may use. A group's **priority in the answers' line** (-10 to 10, 0 for everyone) decides who goes first when the model is busy: higher first, and within one priority the line stays fair (fewest answers running, then served longest ago). Someone in several groups takes the highest. A change is audited. Below the list, the monthly **Chargeback** report. See [Retention, legal hold and exports](#retention-legal-hold-and-exports), [Credits](#credits) and [Rate limits for API keys](#rate-limits-for-api-keys). |
 | **Tools** | What the chat's model may call: Argus, Python (the sandbox), the web (off until you turn it on and allow sites), image generation, the calculator, date and time, reading long files in parts, the canvas (documents and code beside the chat, changed by the model part by part), questions for the person (the model asks with choices instead of guessing), sub-agents (the model splits a task into parts done side by side), memory (the model remembers what each person asks it to; off for everyone under **Settings → Chat → Memory**, and nobody but the person sees their memories), **Decide (Laya)** (typed questions about a text answered with probabilities by the Laya decision model on the CPU; offered only while the `laya` module runs and has a checkpoint loaded, and otherwise says why: [chat.md](chat.md#decide-laya)), **Deep research** (a plan, sub-agents that search the web, and a report with its sources: it runs only through this tool: only those who may use it see it in the chat's **Tools**; on in a chat, the model starts one when asked, and **Ask before each run** has the chat ask the person first. As installed, and after an upgrade from v5.2.0 or earlier, it is on for everyone, on in new chats and asks first, so everyone keeps it until you change that; the deep research a day per person is under **Settings → Safeguards**: [chat.md](chat.md#what-it-does)), and the MCP servers and APIs you add. An **API** is added by its OpenAPI 3 document (JSON or YAML, pasted or fetched from its address): each operation becomes a function, its parameters and JSON body the arguments, and a call that changes something (POST, PUT, PATCH, DELETE) always asks the person first. **Read it** lists the operations before you add it. Per tool: on or off, who may use it (everyone, admins, or chosen groups), on in new chats, ask before each call. An MCP server is tested before it is added; its key is stored encrypted and never shown. **Its certificate (https)**, per server or API: **Check the certificate** (the default: the CAs the app's system trusts), **Trust this CA** (a CA's certificate in PEM, pasted or from a file: a company CA, its issuing CA alone, or a self-signed server's own certificate; the chain must lead to it, each certificate up to it within its dates, and the name must still match; a server that does not send its issuing CA needs it given too, with the root in one bundle, or alone), or **Do not check** (any certificate is accepted; the form and the tool's card warn). When **Test** or **Read it** meets a certificate it does not trust, it says why (self-signed, issued by a CA it does not trust, for another name, not meant for a server, expired or not yet valid, it or a CA in its chain), who issued it, for which names, its dates and fingerprint, and offers both choices there; **Read it** checks the API's address too, even when its document was pasted. A secure connection that fails for another reason (no https at that address, a server that speaks only an old TLS version, no cipher in common) says so instead, as the chat does: no certificate choice helps there. The choice applies to everything sent to that server (its tools listed and called, long calls, an API's document fetched from its address, its calls, and a plugin's OAuth token address on the same server), never to anything else: with **Trust this CA** or **Do not check**, a redirect is followed only on the same host, and one to another host is not (the test or the call ends with its `HTTP 3xx`), so nothing is sent there; each change is audited (`tool.server_tls`, the CA by name and fingerprint). A server whose tools run long can have its own **Longest call** (up to 24 hours; otherwise **Settings → Chat → Longest tool call**, an hour). The same choices decide what [Arena MCP](mcp.md) serves each person's own agent (`mcp.call` in the audit log). |
 | **Knowledge** | Company knowledge the chat searches: GitLab projects or groups (their wikis and issues, read by each project's members), Confluence spaces and SharePoint or OneDrive sites and libraries (read by whom Confluence or SharePoint lets read, and the groups you choose where they cannot tell), folders mounted under `/knowledge`, and websites (read by the groups you choose). Confluence and SharePoint take an account's token or an app's secret, stored encrypted, and have **Test connection**. Per source: the last sync's state and errors, documents and passages, who may read it and what is mirrored, **Sync now**, its documents, **Settings**, remove. Needs the embedder. See [knowledge.md](knowledge.md). |
 | **Storage** | What takes room and where: the disks (the host's, and the folders the app mounts), each database and its largest tables, the chat's files by kind and by person, the model library and what uses each model, Argus's index and packs, backups, logs and metrics, how each grew, and how long each is kept. The chat's files to find, download and delete; clean-ups that show what would go first; each person's room for files. See [Storage](#storage) below. |
@@ -566,22 +566,53 @@ their files take of their room) and so are the picture, video and speech tools
 results still go, as the answer needs them. Your account shows each person what
 their files take of their room.
 
-### Credit for groups
+### Credits
 
-A group's **credit a month** (Admin → Groups → a group → Policies) is shared by
-its members, or **each member's**. It counts everything: the chat, API keys,
-agents, from the first of the month (UTC). A person's own credit (People) counts
-the same way: the chat and their keys together, one credit. Before each chat
-answer the app checks the person's spend this month against their credit and
-each of their groups'; for API keys the gateway asks the app before each
-request (its guardrail, below) and refuses with the same sentence.
+Credits are one per kind, so each can be held on its own:
 
-Each group with a credit is also a team at the gateway (`group-...`): the credit
-per month, its members, and their keys in it, so the gateway itself holds keys
-to it. A key is in one team: a person in several groups has theirs in the one
-with the least credit (the app holds them to all of them). The teams follow
-group changes within a minute, and every ten minutes. A team no group needs is
-removed only once no key is in it (LiteLLM deletes a team's keys with it).
+| kind | what counts to it |
+|---|---|
+| **Chat** | the chat's answers (titles, the safeguards' check and summaries too) |
+| **API keys** | text requests with a person's API key: coding agents, IDEs, scripts |
+| **Pictures** | pictures made, in the chat or with a key |
+| **Video** | videos made |
+| **Speech** | read aloud, Talk, voice messages and sound files turned into text, and speech with a key |
+
+Each is a calendar month's spend (UTC) as the gateway's request log puts it to
+the person, by the same rule as the usage dashboards. A person has a credit of
+each kind (Admin → People → a person → **Credits this month**; empty: no limit
+of their own), and so may each of their groups (Admin → Groups → a group →
+Policies), **shared** by the members or **each member's**. Before each chat
+answer the app checks the chat credit, and before each picture, video or speech
+it makes, that kind's; for an API key's request the gateway asks the app first
+(its guardrail, below), which checks the kind of the request's model (a picture
+model's request is a picture). Past any credit of that kind, the person's or a
+group's, it is refused with the reason ("You have used all your API credit for
+this month ($20.00)"). The other kinds go on. A person hears once a month at 80%
+of a credit of their own and when it is used up, and the admins when it is used
+up (Notifications). A credit of $0 allows none of that kind; it is not listed as
+used up. A person new since v5.5 has no limit of any kind until an admin sets
+one. The person's page
+shows each kind's spend against their credit and the tightest group's credit
+left; their home page shows the same. People → **Set credit** sets one kind for
+everyone selected, leaving their other credits as they were.
+
+The gateway holds no budget: the credits are the app's. On the first start of
+v5.5, each person's credit at the gateway (one over the chat and API keys)
+became their credit of every kind (unless they had credits already), a group's
+one credit its credit of every kind, and the gateway's budgets and the teams
+older versions made for groups (`group-...`) were cleared. The gateway is kept
+holding none (every ten minutes): a `config/litellm.yaml` changed here that
+still has `max_internal_user_budget` would otherwise give new people a budget of
+its own; take that line out on upgrade.
+
+**API access** is on for everyone; an admin takes it on the person's page (the
+**API access** switch, after a confirmation). Off, their keys are blocked at the
+gateway and refused by the guardrail, none is shown to them or made (by them or
+an admin), and Arena's MCP endpoint, Argus and speech with a key refuse them;
+the chat stays theirs. Given back, their keys work again (one is made if they had
+none). A block the gateway could not take at once is taken at the next check,
+within ten minutes, and so is a disabled person's.
 
 **Cost centre** is a label per group. **Chargeback** (below the groups list):
 spend per group and per cost centre, month by month, and the people in no group;
@@ -591,7 +622,7 @@ in a cost centre.
 **The gateway's guardrail.** `config/litellm.yaml` has LiteLLM's generic
 guardrail API call the app (`http://app:8080/internal/guardrail`, with the
 gateway's master key) before each request. The app answers in milliseconds:
-the credit, and the safeguards ([chat.md](chat.md#safeguards)) for API keys,
+API access and the credit of the request's kind, and the safeguards ([chat.md](chat.md#safeguards)) for API keys,
 then room in the engine for a model that is not loaded (see **Loaded on
 request** above: at the limit, the request may wait up to a minute for an idle
 model to make room, or is refused with the reason); the chat's own requests
@@ -753,9 +784,8 @@ the host for anyone who reaches it.
 and first characters into every screenshot. A secret can be replaced, never
 read back.
 
-**Prices** are below ([Prices](#prices)); a new person's credit is in
-`config/litellm.yaml`, each person's own under People, and a group's under
-Groups.
+**Prices** are below ([Prices](#prices)); each person's credits are under People,
+and a group's under Groups ([Credits](#credits)).
 
 ### Prices
 

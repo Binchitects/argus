@@ -57,7 +57,18 @@ export function fakeApi(me: Me | null, routes: Record<string, Handler> = {}) {
       current = null
       return { status: 204 }
     },
-    'GET /api/account/keys': () => ({ json: { keys: [], spend: 1.5, budget: 10 } }),
+    'GET /api/account/keys': () => ({
+      json: {
+        apiOff: false, keys: [], spend: 1.5, apiSpend: 0.5, apiCredit: 10,
+        standing: [
+          { kind: 'chat', spent: 1, credit: 10, group: null, groupLeft: null },
+          { kind: 'api', spent: 0.5, credit: 10, group: null, groupLeft: null },
+          { kind: 'pictures', spent: 0, credit: null, group: 'Design', groupLeft: 3 },
+          { kind: 'video', spent: 0, credit: null, group: null, groupLeft: null },
+          { kind: 'speech', spent: 0, credit: null, group: null, groupLeft: null },
+        ],
+      },
+    }),
     'GET /api/admin/overview': () => ({ json: { people: 3, admins: 1, spend: 4.2, overCredit: [], services: [{ name: 'gateway', purpose: '', ok: true, detail: '' }], model: 'Test-Model' } }),
     ...routes,
   }

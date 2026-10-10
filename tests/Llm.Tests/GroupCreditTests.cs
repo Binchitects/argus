@@ -7,21 +7,27 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
 
-/// <summary>Groups' credit (shared or per member) and one credit over the chat and API keys, held at the gateway and by the app; cost centres and chargeback.</summary>
+/// <summary>
+/// Credits, one per kind (the chat's answers, API keys' text requests, pictures, video, speech), a person's own and their
+/// groups' (shared or per member), each held by the app to this month's spend of its kind; the gateway holds no budget.
+/// Cost centres and chargeback.
+/// </summary>
 [Collection(nameof(AppCollection))]
 public sealed class GroupCreditTests(AppFixture app)
 {
     /// <summary>March 2024: the spend these tests book is out of every other test's range.</summary>
     private static readonly DateTimeOffset Now = new(2024, 3, 15, 12, 0, 0, TimeSpan.Zero);
 
+    private const string Picture = Llm.Api.Models.MediaModels.ImageModel;
+
     private WebApplicationFactory<Program> NewApp(FakeGateway gateway) =>
         app.Create(app.ConnectionStringFor("credit_" + Guid.NewGuid().ToString("N")[..8]), gateway, new Dictionary<string, string?> { ["Credit:Refresh"] = "00:00:00" },
             s => s.AddSingleton<TimeProvider>(new MovableClock(Now)));
 
-    private static async Task<(TestBrowser Browser, Guid Id, string Email)> PersonAsync(WebApplicationFactory<Program> f, TestBrowser admin, decimal? budget = null)
+    private static async Task<(TestBrowser Browser, Guid Id, string Email)> PersonAsync(WebApplicationFactory<Program> f, TestBrowser admin, object? credits = null)
     {
         var name = "cr" + Guid.NewGuid().ToString("N")[..8];
-        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test", budget }));
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test", credits }));
         return (await new TestBrowser(f).SignedInAsync(name, made.GetProperty("password").GetString()!), made.GetProperty("id").GetGuid(), $"{name}@example.test");
     }
 
@@ -48,7 +54,11 @@ public sealed class GroupCreditTests(AppFixture app)
     }
 
     /// <summary>What the gateway's guardrail is told for an API key's request, as LiteLLM posts it.</summary>
-    public static async Task<JsonElement> GuardrailAsync(WebApplicationFactory<Program> f, string? email, params string[] texts)
+    public static async Task<JsonElement> GuardrailAsync(WebApplicationFactory<Program> f, string? email, params string[] texts) =>
+        await GuardrailForAsync(f, email, "Qwen3.8-Flash-Next", texts);
+
+    /// <summary>The guardrail's verdict on an API key's request to <paramref name="model"/>.</summary>
+    public static async Task<JsonElement> GuardrailForAsync(WebApplicationFactory<Program> f, string? email, string model, params string[] texts)
     {
         var b = new TestBrowser(f);
         using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(Llm.Api.Safeguards.GuardrailEndpoints.Path, UriKind.Relative))
@@ -59,7 +69,7 @@ public sealed class GroupCreditTests(AppFixture app)
                 texts,
                 structured_messages = texts.Select(t => new { role = "user", content = t }),
                 request_data = new { user_api_key_user_id = email, user_api_key_alias = "app-person", user_api_key_hash = "hash" },
-                model = "Qwen3.8-Flash-Next",
+                model,
             }),
         };
         req.Headers.Add("x-api-key", "sk-master-for-tests");
@@ -68,104 +78,120 @@ public sealed class GroupCreditTests(AppFixture app)
         return await b.JsonAsync(res);
     }
 
-    private static async Task SyncTeamsAsync(WebApplicationFactory<Program> f)
-    {
-        await using var scope = f.Services.CreateAsyncScope();
-        await scope.ServiceProvider.GetRequiredService<GroupTeams>().SyncAsync();
-    }
-
     [Fact]
-    public async Task A_groups_shared_credit_stops_its_members_in_the_chat_and_through_the_API()
+    public async Task A_groups_shared_chat_credit_stops_its_members_answers_and_its_API_credit_their_keys_each_on_its_own()
     {
         var gateway = new FakeGateway();
         await using var f = NewApp(gateway);
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var (ann, annId, annEmail) = await PersonAsync(f, admin);
         var (_, benId, benEmail) = await PersonAsync(f, admin);
-        var group = await GroupAsync(admin, new { credit = 5, costCentre = "CC-42" }, annId, benId);
-
-        // At the gateway: a team holding the credit a month, its members, and their keys in it.
-        await SyncTeamsAsync(f);
-        var (team, duration) = gateway.Teams[GroupTeams.TeamId(group)];
-        Assert.Equal(5m, team.Budget);
-        Assert.Null(team.MemberBudget);
-        Assert.Equal("1mo", duration);
-        Assert.Equal(new[] { annEmail, benEmail }.Order(), team.Members.Order());
-        Assert.All(gateway.KeysOf(annEmail).Concat(gateway.KeysOf(benEmail)), k => Assert.Equal(team.Id, k.TeamId));
+        var group = await GroupAsync(admin, new { credits = new { chat = 5, api = 3 }, costCentre = "CC-42" }, annId, benId);
 
         Assert.StartsWith("Answer to:", await AskAsync(ann, "What is new?"), StringComparison.Ordinal);
         Assert.Equal("NONE", (await GuardrailAsync(f, benEmail, "hello")).GetProperty("action").GetString());
 
-        // Ann's chat and Ben's key together reach the group's credit; last month's spend does not count.
+        // Ann's and Ben's chats together reach the group's chat credit; last month's spend does not count, nor the keys'.
         await app.SpendAsync(annEmail, 3m, Now.AddDays(-5));
-        await app.SpendAsync(benEmail, 2.5m, Now.AddDays(-3), apiKey: true);
-        await app.SpendAsync(benEmail, 100m, Now.AddMonths(-1), apiKey: true);
+        await app.SpendAsync(benEmail, 2.5m, Now.AddDays(-3));
+        await app.SpendAsync(benEmail, 100m, Now.AddMonths(-1));
+        await app.SpendAsync(benEmail, 1m, Now.AddDays(-3), apiKey: true);
         var refused = await AskAsync(ann, "And now?");
         Assert.StartsWith("refused: ", refused, StringComparison.Ordinal);
-        Assert.Contains("has used its credit for this month ($5.00", refused, StringComparison.Ordinal);
-        var api = await GuardrailAsync(f, benEmail, "hello again");
+        Assert.Contains("has used its chat credit for this month ($5.00, shared by its members)", refused, StringComparison.Ordinal);
+        // The keys have their own credit: under it, they go on.
+        Assert.Equal("NONE", (await GuardrailAsync(f, benEmail, "hello again")).GetProperty("action").GetString());
+        await app.SpendAsync(annEmail, 2.5m, Now.AddDays(-1), apiKey: true);
+        var api = await GuardrailAsync(f, benEmail, "and again");
         Assert.Equal("BLOCKED", api.GetProperty("action").GetString());
-        Assert.Contains("has used its credit for this month", api.GetProperty("blocked_reason").GetString(), StringComparison.Ordinal);
+        Assert.Contains("has used its API credit for this month ($3.00", api.GetProperty("blocked_reason").GetString(), StringComparison.Ordinal);
 
         var detail = await admin.JsonAsync(await admin.GetAsync($"/api/admin/groups/{group}"));
-        Assert.Equal(5.5m, detail.GetProperty("spentThisMonth").GetDecimal());
+        Assert.Equal(9m, detail.GetProperty("spentThisMonth").GetDecimal());
+        Assert.Equal(5.5m, detail.GetProperty("spentByKind").GetProperty("chat").GetDecimal());
+        Assert.Equal(3.5m, detail.GetProperty("spentByKind").GetProperty("api").GetDecimal());
+        Assert.Equal(5m, detail.GetProperty("policies").GetProperty("credits").GetProperty("chat").GetDecimal());
+        Assert.Equal(JsonValueKind.Null, detail.GetProperty("policies").GetProperty("credits").GetProperty("pictures").ValueKind);
         Assert.Equal("CC-42", detail.GetProperty("policies").GetProperty("costCentre").GetString());
+        // The gateway holds no budget: no team for the group.
+        Assert.Empty(gateway.Teams);
     }
 
     [Fact]
-    public async Task Credit_per_member_holds_each_member_and_a_persons_own_credit_counts_the_chat_and_keys_together()
+    public async Task Each_kind_holds_on_its_own_a_members_credit_and_a_persons_own()
     {
         var gateway = new FakeGateway();
         await using var f = NewApp(gateway);
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var (ann, annId, annEmail) = await PersonAsync(f, admin);
         var (ben, benId, benEmail) = await PersonAsync(f, admin);
-        var group = await GroupAsync(admin, new { credit = 2, creditPerMember = true }, annId, benId);
-        await SyncTeamsAsync(f);
-        Assert.Equal(2m, gateway.Teams[GroupTeams.TeamId(group)].Team.MemberBudget);
-        Assert.Null(gateway.Teams[GroupTeams.TeamId(group)].Team.Budget);
+        await GroupAsync(admin, new { credits = new { chat = 2, pictures = 1 }, creditPerMember = true }, annId, benId);
 
-        await app.SpendAsync(annEmail, 1.5m, Now.AddDays(-1));
-        await app.SpendAsync(annEmail, 1m, Now.AddDays(-1), apiKey: true);
+        await app.SpendAsync(annEmail, 2.5m, Now.AddDays(-1));
         await app.SpendAsync(benEmail, 0.5m, Now.AddDays(-1));
-        Assert.Contains("your credit as a member of", await AskAsync(ann, "Am I out?"), StringComparison.Ordinal);
-        Assert.Equal("BLOCKED", (await GuardrailAsync(f, annEmail, "x")).GetProperty("action").GetString());
+        Assert.Contains("your chat credit as a member of", await AskAsync(ann, "Am I out?"), StringComparison.Ordinal);
         Assert.StartsWith("Answer to:", await AskAsync(ben, "Am I out?"), StringComparison.Ordinal);
-        Assert.Equal("NONE", (await GuardrailAsync(f, benEmail, "x")).GetProperty("action").GetString());
+        // Ann's text requests by key have no credit of the group: they go on.
+        Assert.Equal("NONE", (await GuardrailAsync(f, annEmail, "x")).GetProperty("action").GetString());
+        // Pictures count to the picture credit, whichever way they are made.
+        Assert.Equal("NONE", (await GuardrailForAsync(f, annEmail, Picture, "a cat")).GetProperty("action").GetString());
+        await app.SpendAsync(annEmail, 1m, Now.AddDays(-1), apiKey: true, model: Picture, callType: "aimage_generation");
+        var picture = await GuardrailForAsync(f, annEmail, Picture, "another cat");
+        Assert.Equal("BLOCKED", picture.GetProperty("action").GetString());
+        Assert.Contains("your picture credit as a member of", picture.GetProperty("blocked_reason").GetString(), StringComparison.Ordinal);
+        Assert.Equal("NONE", (await GuardrailForAsync(f, benEmail, Picture, "a dog")).GetProperty("action").GetString());
 
-        // A person's own credit: 2 in the chat and 1.5 by key are over 3, though each path alone is under it.
-        var (cy, _, cyEmail) = await PersonAsync(f, admin, budget: 3);
+        // A person's own credits: 2 in the chat leaves the chat under 3; 1.5 by key is over the API's 1, which leaves the chat be.
+        var (cy, cyId, cyEmail) = await PersonAsync(f, admin, new { chat = 3, api = 1 });
         await app.SpendAsync(cyEmail, 2m, Now.AddDays(-2));
-        Assert.StartsWith("Answer to:", await AskAsync(cy, "Still in?"), StringComparison.Ordinal);
         await app.SpendAsync(cyEmail, 1.5m, Now.AddDays(-1), apiKey: true);
-        var refused = await AskAsync(cy, "Still in?");
-        Assert.Contains("You have used all your credit for this month ($3.00, the chat and your API keys together)", refused, StringComparison.Ordinal);
-        Assert.Equal("BLOCKED", (await GuardrailAsync(f, cyEmail, "x")).GetProperty("action").GetString());
+        Assert.StartsWith("Answer to:", await AskAsync(cy, "Still in?"), StringComparison.Ordinal);
+        var key = await GuardrailAsync(f, cyEmail, "x");
+        Assert.Equal("BLOCKED", key.GetProperty("action").GetString());
+        Assert.Contains("You have used all your API credit for this month ($1.00)", key.GetProperty("blocked_reason").GetString(), StringComparison.Ordinal);
+        await app.SpendAsync(cyEmail, 1m, Now.AddDays(-1));
+        Assert.Contains("You have used all your chat credit for this month ($3.00)", await AskAsync(cy, "Still in?"), StringComparison.Ordinal);
+
+        // The person's page: each kind's spend and credit, the tightest group's, and what is used up.
+        var page = await admin.JsonAsync(await admin.GetAsync($"/api/admin/people/{cyId}"));
+        var credits = page.GetProperty("person").GetProperty("credits");
+        Assert.Equal(3m, credits.GetProperty("chat").GetProperty("spent").GetDecimal());
+        Assert.Equal(3m, credits.GetProperty("chat").GetProperty("credit").GetDecimal());
+        Assert.Equal(JsonValueKind.Null, credits.GetProperty("video").GetProperty("credit").ValueKind);
+        Assert.Equal(["chat", "api"], page.GetProperty("person").GetProperty("overCredit").EnumerateArray().Select(k => k.GetString()));
+        var annPage = await admin.JsonAsync(await admin.GetAsync($"/api/admin/people/{annId}"));
+        var annPictures = annPage.GetProperty("standing").EnumerateArray().Single(s => s.GetProperty("kind").GetString() == "pictures");
+        Assert.Equal(0m, annPictures.GetProperty("groupLeft").GetDecimal());
+
+        // Credits changed by an admin hold at once; a negative one is refused.
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{cyId}/credits", UriKind.Relative), new { chat = 10, api = (decimal?)null }));
+        Assert.StartsWith("Answer to:", await AskAsync(cy, "Back?"), StringComparison.Ordinal);
+        Assert.Equal("NONE", (await GuardrailAsync(f, cyEmail, "x")).GetProperty("action").GetString());
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{cyId}/credits", UriKind.Relative), new { video = -1 }));
+        Assert.Contains("chat $10.00; API no limit", await (await admin.GetAsync("/api/admin/audit?take=1000")).Content.ReadAsStringAsync(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task Removing_a_groups_credit_takes_its_keys_out_of_its_team_before_the_team_goes()
+    public async Task The_teams_an_older_version_made_at_the_gateway_go_once_their_keys_are_out_of_them()
     {
         var gateway = new FakeGateway();
         await using var f = NewApp(gateway);
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var (_, annId, annEmail) = await PersonAsync(f, admin);
-        var tight = await GroupAsync(admin, new { credit = 1 }, annId);
-        var loose = await GroupAsync(admin, new { credit = 50 }, annId);
-        await SyncTeamsAsync(f);
-        // The least credit has the key.
-        Assert.Equal(GroupTeams.TeamId(tight), gateway.KeysOf(annEmail).Single().TeamId);
-
-        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/groups/{tight}/policies", UriKind.Relative), new { credit = (decimal?)null }));
-        await SyncTeamsAsync(f);
-        Assert.Equal(GroupTeams.TeamId(loose), gateway.KeysOf(annEmail).Single().TeamId);
-        Assert.False(gateway.Teams.ContainsKey(GroupTeams.TeamId(tight)));
-        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.DeleteAsync(new Uri($"/api/admin/groups/{loose}", UriKind.Relative)));
-        await SyncTeamsAsync(f);
+        var group = await GroupAsync(admin, new { credits = new { chat = 1 } }, annId);
+        // As v5.4 left it: a team holding the group's credit, Ann's key in it.
+        var team = GroupTeams.TeamId(group);
+        gateway.Teams[team] = (new GatewayTeam(team, "old", 1m, null, [annEmail]), "1mo");
+        await using (var scope = f.Services.CreateAsyncScope())
+        {
+            var key = Assert.Single(await scope.ServiceProvider.GetRequiredService<ILiteLlm>().KeysAsync(annEmail));
+            await scope.ServiceProvider.GetRequiredService<ILiteLlm>().SetKeyTeamAsync(key.Token, team);
+            Assert.Equal(2, await scope.ServiceProvider.GetRequiredService<GroupTeams>().SyncAsync());
+        }
         // The key survives its team (the gateway deletes a team's keys with it).
         Assert.Null(gateway.KeysOf(annEmail).Single().TeamId);
         Assert.Empty(gateway.Teams);
-        Assert.Contains("credit $1.00 shared", await (await admin.GetAsync("/api/admin/audit?take=1000")).Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Contains("credit chat $1.00; API no limit; picture no limit; video no limit; speech no limit, shared", await (await admin.GetAsync("/api/admin/audit?take=1000")).Content.ReadAsStringAsync(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -176,7 +202,7 @@ public sealed class GroupCreditTests(AppFixture app)
         var (_, annId, annEmail) = await PersonAsync(f, admin);
         var (_, benId, benEmail) = await PersonAsync(f, admin);
         var (_, _, cyEmail) = await PersonAsync(f, admin);
-        var data = await GroupAsync(admin, new { costCentre = "CC-42", credit = 100 }, annId, benId);
+        var data = await GroupAsync(admin, new { costCentre = "CC-42", credits = new { chat = 60, api = 40 } }, annId, benId);
         // Ann is in two groups of one cost centre: the cost centre counts her once.
         await GroupAsync(admin, new { costCentre = "CC-42" }, annId);
         await app.SpendAsync(annEmail, 1m, new DateTimeOffset(2024, 2, 10, 0, 0, 0, TimeSpan.Zero));

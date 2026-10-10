@@ -14,8 +14,8 @@ namespace Llm.Api.Safeguards;
 /// The gateway's guardrail: LiteLLM's generic guardrail API (deploy/config/litellm.yaml) posts
 /// each request's texts and its key's owner here before sending it, and this answers NONE,
 /// BLOCKED with the reason the client sees, or GUARDRAIL_INTERVENED with the texts masked. API
-/// keys so get the chat's checks (Safeguards.CheckApiAsync), the credit (one credit over the
-/// chat and keys, and the groups' credit), and room in the engine for a model that is not loaded
+/// keys so get the chat's checks (Safeguards.CheckApiAsync), API access, the credit of the
+/// request's kind (the person's and their groups'), and room in the engine for a model that is not loaded
 /// as the chat's requests get it (EngineRoute), so the engine never unloads the big model
 /// everyone is on for them. The chat's own requests pass: the chat checked them, and made room.
 /// Only inside the network (Traefik routes no /internal path) and with the gateway's master key.
@@ -65,7 +65,12 @@ public static partial class GuardrailEndpoints
         {
             return Answer(new ApiVerdict("BLOCKED", "This account is disabled."));
         }
-        if (user is not null && await credit.RefusalAsync(user, http.RequestAborted) is { } refusal)
+        if (user is { ApiOff: true })
+        {
+            return Answer(new ApiVerdict("BLOCKED", "Your API access is off. Ask an admin to turn it on (Admin → People)."));
+        }
+        // The credit of what the request makes: a picture, a video, speech, or else an API key's text request.
+        if (user is not null && await credit.RefusalAsync(user, CreditKinds.OfModel(Str(body, "model")), http.RequestAborted) is { } refusal)
         {
             var logger = logs.CreateLogger(nameof(GuardrailEndpoints));
             LogRefused(logger, user.UserName ?? "?", "credit");

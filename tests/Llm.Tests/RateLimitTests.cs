@@ -717,7 +717,9 @@ public sealed class RateLimitTests(AppFixture app)
         var user = await db.Users.AsNoTracking().SingleAsync(u => u.UserName == "old");
         var group = await db.Groups.AsNoTracking().SingleAsync(g => g.Name == "Old group");
         Assert.Equal(("old@example.test", (int?)null, (int?)null), (user.Email, user.RequestsPerMinute, user.TokensPerMinute));
-        Assert.Equal((5m, (int?)null, (int?)null), (group.Credit, group.RequestsPerMinute, group.TokensPerMinute));
+        Assert.Equal((5m, (int?)null, (int?)null), (group.ChatCredit, group.RequestsPerMinute, group.TokensPerMinute));
+        // Its one credit became its credit of every kind.
+        Assert.Equal([5m, 5m, 5m, 5m, 5m], Llm.Core.Access.Credits.Kinds.Select(k => Llm.Core.Access.Credits.Of(group, k)));
         // Nothing set anywhere, and the company's default is none: no limit.
         Assert.Equal(new RateLimit(null, "none"), RateLimits.Resolve(user.RequestsPerMinute, [(group.Name, group.RequestsPerMinute)], new RateLimitOptions().RequestsPerMinute));
         Assert.Equal(new RateLimit(null, "none"), RateLimits.Resolve(user.TokensPerMinute, [(group.Name, group.TokensPerMinute)], new RateLimitOptions().TokensPerMinute));

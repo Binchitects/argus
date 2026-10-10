@@ -255,7 +255,7 @@ public sealed class TimeTool(TimeProvider clock) : IChatTool
 
 /// <summary>Pictures from the gateway's image model, kept as the person's files.</summary>
 public sealed partial class ImageTool(ChatModels models, GatewayChat gateway, AppDbContext db, Safeguards.Safeguards safeguards, Models.MediaControl media,
-    Gateway.PriceBook prices, Storage.StorageQuotas quotas) : IChatTool
+    Gateway.PriceBook prices, Storage.StorageQuotas quotas, Gateway.Credit credit) : IChatTool
 {
     public static readonly string[] Sizes = ["1024x1024", "1024x768", "768x1024", "768x768", "512x512"];
 
@@ -291,6 +291,10 @@ public sealed partial class ImageTool(ChatModels models, GatewayChat gateway, Ap
                 if (await quotas.ToolRefusalAsync(context.User.Id, "picture", token) is { } full)
                 {
                     return new ToolResult(full, IsError: true);
+                }
+                if (await credit.RefusalAsync(context.User, Llm.Core.Access.CreditKind.Pictures, token) is { } spent)
+                {
+                    return new ToolResult($"No picture was made. Tell the person: {spent}", IsError: true);
                 }
                 if (await safeguards.TakeImageAsync(context.User.Id, token) is { } limit)
                 {

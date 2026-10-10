@@ -1,3 +1,4 @@
+using Llm.Core.Access;
 using System.Security.Claims;
 using Llm.Api.Gateway;
 using Llm.Api.Identity;
@@ -25,8 +26,27 @@ public static class AdminEndpoints
             WithPerson(id, people, async u => Results.Ok(await people.ResetPasswordAsync(u))));
         admin.MapPost("/people/{id:guid}/key", (Guid id, PeopleService people) =>
             WithPerson(id, people, async u => Results.Ok(await people.RotateKeyAsync(u))));
-        admin.MapPut("/people/{id:guid}/budget", (Guid id, BudgetRequest body, PeopleService people) =>
-            WithPerson(id, people, async u => { await people.SetBudgetAsync(u, body.Budget); return Results.NoContent(); }));
+        admin.MapPut("/people/{id:guid}/credits", (Guid id, CreditsRequest body, PeopleService people) =>
+            WithPerson(id, people, async u => { await people.SetCreditsAsync(u, body); return Results.NoContent(); }));
+        // One kind's credit (the people list sets one kind for many at once).
+        admin.MapPut("/people/{id:guid}/credits/{kind}", (Guid id, string kind, CreditRequest body, PeopleService people) =>
+            Credits.Parse(kind) is not { } k
+                ? Task.FromResult(AuthEndpoints.Problem(404, "kind", "The kinds are chat, api, pictures, video and speech."))
+                : WithPerson(id, people, async u =>
+                {
+                    var credits = CreditsRequest.Of(u);
+                    await people.SetCreditsAsync(u, k switch
+                    {
+                        CreditKind.Chat => credits with { Chat = body.Credit },
+                        CreditKind.Api => credits with { Api = body.Credit },
+                        CreditKind.Pictures => credits with { Pictures = body.Credit },
+                        CreditKind.Video => credits with { Video = body.Credit },
+                        _ => credits with { Speech = body.Credit },
+                    });
+                    return Results.NoContent();
+                }));
+        admin.MapPut("/people/{id:guid}/api", (Guid id, ApiAccessRequest body, PeopleService people) =>
+            WithPerson(id, people, async u => Results.Ok(new { warning = await people.SetApiAccessAsync(u, body.On) })));
         admin.MapPut("/people/{id:guid}/limits", (Guid id, LimitsRequest body, PeopleService people, Models.KeyAccessWatcher keys) =>
             WithPerson(id, people, async u =>
             {
@@ -104,27 +124,17 @@ public static class AdminEndpoints
     private static async Task<IResult> ListAsync(AppDbContext db, UserManager<AppUser> users, Ledger ledger)
     {
         var admins = (await users.GetUsersInRoleAsync(Roles.Admin)).Select(u => u.Id).ToHashSet();
-        IReadOnlyDictionary<string, GatewayUser> standing;
-        string? warning = null;
-        try
-        {
-            var spending = await ledger.ReadAsync();
-            (standing, warning) = (spending.People, spending.Problem);
-        }
-        catch (GatewayException ex)
-        {
-            standing = new Dictionary<string, GatewayUser>();
-            warning = $"Spend and credit are missing: {ex.Message}";
-        }
+        var spending = await ledger.ReadAsync();
+        var warning = spending.Problem;
         var people = await db.Users.AsNoTracking().OrderBy(u => u.UserName).ToListAsync();
         return Results.Ok(new
         {
             warning,
-            people = people.Select(u => Row(u, admins.Contains(u.Id), standing.GetValueOrDefault(u.Email ?? ""))),
+            people = people.Select(u => Row(u, admins.Contains(u.Id), spending)),
         });
     }
 
-    private static object Row(AppUser u, bool admin, GatewayUser? g) => new
+    private static object Row(AppUser u, bool admin, Spending spending) => new
     {
         id = u.Id,
         userName = u.UserName,
@@ -138,17 +148,26 @@ public static class AdminEndpoints
         lockedOut = u.LockoutEnd > DateTimeOffset.UtcNow,
         lastSignInAt = u.LastSignInAt,
         createdAt = u.CreatedAt,
-        spend = g?.Spend,
-        budget = g?.Budget,
+        // This month's spend, every kind together, and kind by kind with the person's own credit of each.
+        spend = spending.Month is null ? (decimal?)null : spending.Of(u.Email),
+        credits = spending.Kinds(u),
+        overCredit = spending.Over(u).Select(Credits.Name),
+        apiOff = u.ApiOff,
         legalHoldSince = u.LegalHoldSince,
         legalHoldReason = u.LegalHoldReason,
+    };
+
+    /// <summary>A kind's standing for the pages.</summary>
+    internal static object Standing(CreditStanding s) => new
+    {
+        kind = Credits.Name(s.Kind), spent = s.Spent, credit = s.Credit, group = s.Group, groupLeft = s.GroupLeft,
     };
 
     private static async Task<IResult> CreateAsync(CreatePersonRequest body, PeopleService people)
     {
         try
         {
-            var (user, secrets) = await people.CreateAsync(new NewPerson(body.UserName ?? "", body.Email ?? "", body.DisplayName, body.Admin, body.Budget));
+            var (user, secrets) = await people.CreateAsync(new NewPerson(body.UserName ?? "", body.Email ?? "", body.DisplayName, body.Admin, body.Credits));
             return Results.Created($"/api/admin/people/{user.Id}", new { id = user.Id, secrets.Password, secrets.ApiKey, secrets.Warning });
         }
         catch (PeopleException ex)
@@ -158,16 +177,15 @@ public static class AdminEndpoints
     }
 
     private static Task<IResult> GetAsync(Guid id, PeopleService people, UserManager<AppUser> users, ILiteLlm gateway, Ledger ledger, Access.AccessService access, AppDbContext db,
-        RateLimits rateLimits, Models.KeyAccess keyAccess) =>
+        RateLimits rateLimits, Models.KeyAccess keyAccess, Credit credit) =>
         WithPerson(id, people, async u =>
         {
             IReadOnlyList<GatewayKey> keys = [];
-            GatewayUser? standing = null;
-            string? warning = null;
+            var spending = await ledger.ReadAsync();
+            var warning = spending.Problem;
             try
             {
                 keys = await gateway.KeysAsync(u.Email!);
-                (await ledger.ReadAsync()).People.TryGetValue(u.Email!, out standing);
             }
             catch (GatewayException ex)
             {
@@ -178,7 +196,9 @@ public static class AdminEndpoints
                 .Select(g => new { g.Id, g.Name, directory = g.Directory != null }).ToListAsync();
             return Results.Ok(new
             {
-                person = Row(u, await users.IsInRoleAsync(u, Roles.Admin), standing),
+                person = Row(u, await users.IsInRoleAsync(u, Roles.Admin), spending),
+                // Kind by kind, with the tightest of their groups' credits.
+                standing = (await credit.StandingAsync(u))?.Select(Standing),
                 groups,
                 directoryGroups = u.DirectoryGroups,
                 keys = keys.Select(k => new { alias = k.Alias, preview = k.Preview, spend = k.Spend, blocked = k.Blocked, createdAt = k.CreatedAt }),

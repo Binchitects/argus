@@ -9,8 +9,8 @@ namespace Llm.Api.Chat;
 /// The chat's own gateway key (alias "chat"), made once and kept encrypted in the
 /// app's database. Not the master key: master-key traffic is what the usage
 /// dashboard lists as unaccounted, and the key that answers chat should be able
-/// to do nothing else. Each request still names its person in `user`, which is
-/// where the per-person budget binds.
+/// to do nothing else. Each request still names its person in `user`: its spend is
+/// theirs, and counts to their credits (the app's, checked before each answer).
 /// </summary>
 public sealed class ChatKey(IServiceScopeFactory scopes, IDataProtectionProvider protection) : IDisposable
 {

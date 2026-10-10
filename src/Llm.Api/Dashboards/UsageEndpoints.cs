@@ -25,6 +25,22 @@ public static class UsageEndpoints
 
     public const string From = """ from "LiteLLM_SpendLogs" s left join "LiteLLM_VerificationToken" v on v.token = s.api_key """;
 
+    /// <summary>The key a request came with, by its alias ("chat" for the chat's own).</summary>
+    public const string KeyAlias = """coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)')""";
+
+    /// <summary>
+    /// What a request's spend counts to (Llm.Core.Access.CreditKind, by name): the pictures, videos and speech made, by their
+    /// model or the kind of call, whichever way they came; else the chat's answers (its own key) or an API key's text request.
+    /// </summary>
+    public static readonly string CreditKind = $"""
+        (case when {Model} = '{Models.MediaModels.ImageModel}' or s.call_type in ('image_generation', 'aimage_generation', 'image_edit', 'aimage_edit') then 'pictures'
+              when {Model} = '{Models.MediaModels.VideoModel}' or s.call_type in ('video_generation', 'avideo_generation') then 'video'
+              when {Model} in ({string.Join(", ", Models.MediaModels.Speech.Select(m => $"'{m.Name}'"))})
+                   or s.call_type in ('speech', 'aspeech', 'transcription', 'atranscription') then 'speech'
+              when {KeyAlias} = '{Chat.ChatKey.Alias}' then 'chat'
+              else 'api' end)
+        """;
+
     public static void MapUsage(this IEndpointRouteBuilder app) =>
         app.MapGet("/api/usage/me", MeAsync).RequireAuthorization();
 

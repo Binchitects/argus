@@ -9,9 +9,13 @@ import { api, type Me } from '@/lib/api'
 import { money } from '@/lib/format'
 
 interface Keys {
+  /** This month, every kind together. */
   spend: number
-  budget: number | null
+  /** Kind by kind: spent this month, their own credit, and the tightest of their groups'. */
+  standing: { kind: 'chat' | 'api' | 'pictures' | 'video' | 'speech'; spent: number; credit: number | null; group: string | null; groupLeft: number | null }[] | null
 }
+
+const kindLabel = { chat: 'Chat', api: 'API keys', pictures: 'Pictures', video: 'Video', speech: 'Speech' } as const
 
 interface Overview {
   people: number
@@ -46,16 +50,32 @@ export function HomePage() {
       </div>
       <Card>
         <CardHeader>
-          <CardTitle>Your credit</CardTitle>
-          <CardDescription>Everything you spend through the chat and your API key.</CardDescription>
+          <CardTitle>Your credit this month</CardTitle>
+          <CardDescription>One per kind: the chat&apos;s answers, your API keys&apos; requests, pictures, video and speech.</CardDescription>
         </CardHeader>
         <CardContent>
           {keys.isPending ? (
             <Skeleton className="h-8 w-48" />
-          ) : keys.data ? (
-            <p className="text-2xl font-semibold tabular-nums">
-              {money(keys.data.spend)} <span className="text-base font-normal text-muted-foreground">of {keys.data.budget === null ? 'no limit' : money(keys.data.budget)}</span>
-            </p>
+          ) : keys.data?.standing ? (
+            <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              {keys.data.standing.map((s) => {
+                // What binds first: their own credit or their group's.
+                const left = [s.credit === null ? null : Math.max(0, s.credit - s.spent), s.groupLeft].filter((v): v is number => v !== null)
+                const least = left.length ? Math.min(...left) : null
+                return (
+                  <li key={s.kind} className="grid gap-0.5 rounded-lg border px-3 py-2">
+                    <span className="text-sm text-muted-foreground">{kindLabel[s.kind]}</span>
+                    <span className="text-lg font-semibold tabular-nums">
+                      {money(s.spent)} <span className="text-sm font-normal text-muted-foreground">{s.credit === null ? '' : `of ${money(s.credit)}`}</span>
+                    </span>
+                    <span className={least === 0 ? 'text-xs font-medium text-destructive-ink' : 'text-xs text-muted-foreground'}>
+                      {least === null ? 'no limit' : least === 0 ? 'used up' : `${money(least)} left`}
+                      {s.group && s.groupLeft !== null && least === s.groupLeft ? ` (${s.group})` : ''}
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
           ) : (
             <p className="text-muted-foreground">Not available right now.</p>
           )}
@@ -116,7 +136,7 @@ function AdminSummary() {
             <Stat label="People">
               {d.people} <span className="text-sm font-normal text-muted-foreground">({d.admins} admin{d.admins === 1 ? '' : 's'})</span>
             </Stat>
-            <Stat label="Total spend">{money(d.spend)}</Stat>
+            <Stat label="Spend this month">{money(d.spend)}</Stat>
             <Stat label="Over credit">{d.overCredit.length}</Stat>
           </dl>
         )}

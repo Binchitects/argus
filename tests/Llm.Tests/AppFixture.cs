@@ -101,18 +101,20 @@ public sealed class AppFixture : IAsyncLifetime
 
     /// <summary>
     /// A request at the gateway at a time of the test's choosing: the chat's (booked to the end user)
-    /// or an API key's (booked to the key's person), as LiteLLM books them.
+    /// or an API key's (booked to the key's person), as LiteLLM books them, to a model and a kind of call.
     /// </summary>
-    public async Task SpendAsync(string email, decimal spend, DateTimeOffset at, bool apiKey = false)
+    public async Task SpendAsync(string email, decimal spend, DateTimeOffset at, bool apiKey = false, string model = "qwen", string callType = "acompletion")
     {
         await using var conn = new Npgsql.NpgsqlConnection(ConnectionStringFor("litellm_test" + _run));
         await conn.OpenAsync();
         await using var insert = new Npgsql.NpgsqlCommand("""
             insert into "LiteLLM_SpendLogs" (request_id, call_type, api_key, spend, total_tokens, prompt_tokens, completion_tokens,
               "startTime", "endTime", model, "user", metadata, end_user)
-            values (@id, 'acompletion', @key, @spend, 10, 9, 1, @at, @at, 'qwen', '', @metadata::jsonb, @endUser)
+            values (@id, @callType, @key, @spend, 10, 9, 1, @at, @at, @model, '', @metadata::jsonb, @endUser)
             """, conn);
         insert.Parameters.AddWithValue("id", Guid.NewGuid().ToString());
+        insert.Parameters.AddWithValue("callType", callType);
+        insert.Parameters.AddWithValue("model", model);
         insert.Parameters.AddWithValue("key", apiKey ? "hash-key-" + email : "hash-chat");
         insert.Parameters.AddWithValue("spend", (double)spend);
         insert.Parameters.AddWithValue("at", DateTime.SpecifyKind(at.UtcDateTime, DateTimeKind.Unspecified));

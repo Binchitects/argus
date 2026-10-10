@@ -1,4 +1,5 @@
 import { api } from '@/lib/api'
+import type { CreditKind, Credits } from './people-api'
 
 export interface GroupSummary {
   id: string
@@ -13,7 +14,8 @@ export interface GroupSummary {
   members: number
   createdAt: string
   retentionDays?: number | null
-  credit?: number | null
+  /** What the group may spend a month, kind by kind; null: no group limit of that kind. */
+  credits?: Credits
   creditPerMember?: boolean
   costCentre?: string | null
   requestsPerMinute?: number | null
@@ -26,14 +28,16 @@ export interface GroupMember {
   displayName: string
   email: string
   isDisabled: boolean
-  /** Spent this month, over the chat and API keys; null when the gateway's log cannot be read. */
+  /** Spent this month, every kind together; null when the gateway's log cannot be read. */
   spend?: number | null
+  /** ... kind by kind. */
+  spent?: Record<CreditKind, number> | null
 }
 
 /** A group's own retention, credit, safeguards and API keys' rate limits; null keeps the company's setting. */
 export interface GroupPolicies {
   retentionDays: number | null
-  credit: number | null
+  credits: Credits
   creditPerMember: boolean
   costCentre: string | null
   secretScanning: 'refuse' | 'mask' | 'off' | null
@@ -47,7 +51,7 @@ export interface GroupPolicies {
 
 export const noPolicies: GroupPolicies = {
   retentionDays: null,
-  credit: null,
+  credits: { chat: null, api: null, pictures: null, video: null, speech: null },
   creditPerMember: false,
   costCentre: null,
   secretScanning: null,
@@ -63,6 +67,8 @@ export interface GroupDetail extends Omit<GroupSummary, 'members'> {
   policies?: GroupPolicies
   /** The members' spend this month, together. */
   spentThisMonth?: number | null
+  /** ... kind by kind. */
+  spentByKind?: Record<CreditKind, number> | null
 }
 
 /** A group's spend in a month, a cost centre's (each person once), or the people in no group. */

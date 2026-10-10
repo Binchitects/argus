@@ -14,7 +14,7 @@ public sealed class MediaException(string message) : Exception(message);
 /// an MP3 (mono, 16 kHz), a video as up to eight frames and its sound track. A model that hears gets
 /// the sound itself; one that does not gets a transcript (speech to text at the gateway), made once.
 /// </summary>
-public sealed partial class Media(SandboxClient sandbox, AppDbContext db, GatewayChat gateway, ChatModels models, VoiceCatalog voices)
+public sealed partial class Media(SandboxClient sandbox, AppDbContext db, GatewayChat gateway, ChatModels models, VoiceCatalog voices, Gateway.Credit credit)
 {
     public const int MaxFrames = 8;
 
@@ -160,7 +160,13 @@ public sealed partial class Media(SandboxClient sandbox, AppDbContext db, Gatewa
         }
         var model = await models.OfModeAsync("audio_transcription", Models.MediaModels.SpeechToText, ct)
             ?? throw new MediaException("The gateway has no speech to text model (the audio module).");
-        var person = a.FileName.StartsWith(VoiceMessage, StringComparison.Ordinal) ? await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == a.UserId, ct) : null;
+        var owner = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == a.UserId, ct);
+        // Sound turned into text counts to its owner's speech credit.
+        if (owner is not null && await credit.RefusalAsync(owner, Llm.Core.Access.CreditKind.Speech, ct) is { } spent)
+        {
+            throw new MediaException(spent);
+        }
+        var person = a.FileName.StartsWith(VoiceMessage, StringComparison.Ordinal) ? owner : null;
         var text = (await gateway.TranscribeAsync(model.Name, sound, "sound.mp3", email, ct, language: person is null ? null : await voices.LanguageOfAsync(person, ct))).Trim();
         await db.ChatAttachments.Where(x => x.Id == a.Id).ExecuteUpdateAsync(x => x.SetProperty(y => y.Text, text.Length == 0 ? " " : text), ct);
         a.Text = text.Length == 0 ? " " : text;

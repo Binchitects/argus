@@ -5,7 +5,7 @@ Everything a person does with the stack, done for real, as two people.
 acceptance.py proves the stack is wired: routes answer, discovery documents
 exist, datasources are healthy. It does not prove the things people actually
 do work -- that someone an admin creates in the app can sign in, that their
-key reaches the model, that a budget really stops them, that a rotated key
+key reaches the model, that a credit really stops them (and API access off), that a rotated key
 really dies, that a non-admin cannot reach the admin area or the metrics,
 that the dashboards, logs and alerts answer the admin and nobody else, that a
 chat in the app is billed to the person who typed it.
@@ -227,7 +227,7 @@ def main():
     rec("admin", "the Overview reaches the gateway, Prometheus, Alertmanager and Loki", code == 200 and not down,
         f"down: {down}" if down else (f"after {attempt * 5} s" if attempt else ""))
 
-    code, made = admin.app("POST", "/api/admin/people", {"userName": who, "email": email, "budget": 5})
+    code, made = admin.app("POST", "/api/admin/people", {"userName": who, "email": email, "credits": {"chat": 5, "api": 5}})
     pw, key, pid = made.get("password") or "", made.get("apiKey") or "", made.get("id")
     rec("admin", "create person returns a password and an API key", bool(pw and key), f"HTTP {code} {made.get('warning') or ''}")
     code, again = admin.app("GET", f"/api/admin/people/{pid}")
@@ -240,8 +240,8 @@ def main():
     person = Browser()
     rec("person", "the new person signs in with the shown password", person.login(who, pw))
     code, own = person.app("GET", "/api/account/keys")
-    rec("person", "the app shows them their own key and credit", code == 200 and len(own.get("keys", [])) == 1 and own.get("budget") == 5,
-        f"HTTP {code}")
+    rec("person", "the app shows them their own key and credits", code == 200 and len(own.get("keys", [])) == 1 and own.get("apiCredit") == 5
+        and own.get("apiOff") is False, f"HTTP {code}")
     code, me = person.app("GET", "/api/auth/me")
     rec("person", "the app knows them as a member", me.get("isAdmin") is False, f"HTTP {code}")
     code = person.app("GET", "/api/admin/people")[0]
@@ -252,7 +252,8 @@ def main():
         rec("person", f"GET {path} is refused", code == 403, f"HTTP {code}")
     for method, path, body in (("POST", "/api/admin/people", {"userName": "x" + who, "email": "x" + email}),
                                ("POST", f"/api/admin/people/{pid}/key", {}),
-                               ("PUT", f"/api/admin/people/{pid}/budget", {"budget": 1000}),
+                               ("PUT", f"/api/admin/people/{pid}/credits", {"chat": 1000, "api": 1000}),
+                               ("PUT", f"/api/admin/people/{pid}/api", {"on": True}),
                                ("PATCH", f"/api/admin/people/{pid}", {"admin": True}),
                                ("POST", "/api/admin/argus/index", {"branches": []})):
         code = person.app(method, path, body)[0]
@@ -397,26 +398,26 @@ def main():
     rec("usage", "the app's chat is billed to the person, under its own key (not the master key)", bool(rows_chat),
         f"{len(rows_chat)} rows with key alias 'chat' and end_user={email}")
 
-    # ----------------------------------------------------------------- budget
-    print("\n6. Credit limits bind")
-    admin.app("PUT", f"/api/admin/people/{pid}/budget", {"budget": 0})
+    # ----------------------------------------------------------------- credits
+    print("\n6. Credit limits bind, kind by kind, and API access")
+    admin.app("PUT", f"/api/admin/people/{pid}/credits", {"chat": 0, "api": 0})
     code_key = None
     for _ in range(30):
         code_key, body = chat(key, max_tokens=64)
         if code_key != 200:
             break
         time.sleep(4)
-    rec("budget", "at credit 0 the person's key is refused", code_key in (400, 401, 403, 429),
+    rec("budget", "at API credit 0 the person's key is refused", code_key in (400, 401, 403, 429),
         f"HTTP {code_key}: {body[:90] if code_key != 200 else 'still answering'}")
-    # The chat path's limit is cached by the gateway for about a minute.
+    # The app reads the month's spend again within half a minute.
     chat_result = "not tried"
     for _ in range(25):
         chat_result, _ = app_chat(person)
         if chat_result != "answered":
             break
         time.sleep(6)
-    rec("budget", "at credit 0 the app's chat is refused, and says why", "credit" in chat_result, chat_result[:90])
-    admin.app("PUT", f"/api/admin/people/{pid}/budget", {"budget": 5})
+    rec("budget", "at chat credit 0 the app's chat is refused, and says why", "credit" in chat_result, chat_result[:90])
+    admin.app("PUT", f"/api/admin/people/{pid}/credits", {"chat": 5, "api": 5})
     code_back = None
     for _ in range(30):
         code_back, _ = chat(key, max_tokens=64)
@@ -430,6 +431,17 @@ def main():
             break
         time.sleep(6)
     rec("budget", "raising the credit again restores the app's chat", chat_result == "answered", chat_result[:90])
+    admin.app("PUT", f"/api/admin/people/{pid}/api", {"on": False})
+    code_off, body = chat(key, max_tokens=64)
+    rec("budget", "without API access the person's key is refused", code_off in (400, 401, 403), f"HTTP {code_off}: {body[:90]}")
+    admin.app("PUT", f"/api/admin/people/{pid}/api", {"on": True})
+    code_on = None
+    for _ in range(10):
+        code_on, _ = chat(key, max_tokens=64)
+        if code_on == 200:
+            break
+        time.sleep(3)
+    rec("budget", "API access given back, the key answers again", code_on == 200, f"HTTP {code_on}")
 
     # --------------------------------------------------------------- rotation
     print("\n7. Key rotation and password resets")

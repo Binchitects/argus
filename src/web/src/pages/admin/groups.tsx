@@ -17,6 +17,7 @@ import { Field } from '@/components/ui/field'
 import { Input, Textarea } from '@/components/ui/input'
 import { api, errorMessage } from '@/lib/api'
 import { money } from '@/lib/format'
+import { creditKinds } from './people-api'
 import { ChargebackCard } from './chargeback'
 import { directoryGroupsQuery, groupsQuery, type GroupSummary } from './groups-api'
 
@@ -60,15 +61,17 @@ const columns: ColumnDef<GroupSummary>[] = [
   },
   {
     id: 'credit',
-    header: 'Credit a month',
-    accessorFn: (g) => g.credit ?? '',
-    cell: ({ row: { original: g } }) =>
-      g.credit === null || g.credit === undefined ? null : (
+    header: 'Credits a month',
+    accessorFn: (g) => creditKinds.filter((k) => g.credits?.[k.kind] != null).length,
+    cell: ({ row: { original: g } }) => {
+      const set = creditKinds.filter((k) => g.credits?.[k.kind] != null)
+      return set.length === 0 ? null : (
         <span className="tabular-nums">
-          {money(g.credit)} {g.creditPerMember ? 'each' : 'shared'}
+          {set.map((k) => `${k.label} ${money(g.credits![k.kind]!)}`).join(' · ')} {g.creditPerMember ? 'each' : 'shared'}
           {g.costCentre && <span className="ml-1.5 text-xs text-muted-foreground">{g.costCentre}</span>}
         </span>
-      ),
+      )
+    },
   },
   {
     id: 'retention',
