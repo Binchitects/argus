@@ -4,6 +4,7 @@ import architecture from '@docs/architecture.md?raw'
 import argusBackup from '@docs/argus/backup-and-restore.md?raw'
 import argusBranches from '@docs/argus/branches.md?raw'
 import argusClients from '@docs/argus/clients.md?raw'
+import argusGraph from '@docs/argus/graph.md?raw'
 import argusPacks from '@docs/argus/knowledge-packs.md?raw'
 import argusOverview from '@docs/argus/overview.md?raw'
 import argusPgvector from '@docs/argus/pgvector-backend.md?raw'
@@ -77,6 +78,7 @@ export const manualGroups: ManualGroup[] = [
     title: 'Argus, the code index',
     docs: [
       doc('argus/overview.md', 'What Argus does', 'What it gives an agent, keeping the index current, knowledge packs.', 'everyone', argusOverview),
+      doc('argus/graph.md', 'How repositories are linked', 'How sure each link is, its layers and evidence, and what the graph tools walk.', 'everyone', argusGraph),
       doc('argus/clients.md', 'Connecting an MCP client', 'Argus from any MCP client.', 'everyone', argusClients),
       doc('argus/README.md', 'Argus in the platform', 'Per-person access, choosing what is indexed, private CAs, the audit stream.', 'admins', argus),
       doc('argus/knowledge-packs.md', 'Knowledge packs', 'Building and publishing packs.', 'admins', argusPacks),
