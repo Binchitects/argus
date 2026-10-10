@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, FileText, FoldVertical, GitFork, Pencil, RefreshCw, Square, Telescope, Timer } from 'lucide-react'
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, FileCode2, FileText, FoldVertical, GitFork, Pencil, RefreshCw, Square, Telescope, Timer } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -13,6 +13,7 @@ import { attachmentUrl } from './api'
 import { ImageViewer } from './image-viewer'
 import { asViewerImages } from './viewer-images'
 import type { Notice, ToolRunning } from './live'
+import { parseRef, useFileRefs } from './file-refs'
 import { Markdown } from './markdown'
 import { answerUsage, seconds, waitingText } from './format'
 import { NoticeLine, Thinking, ToolCard } from './parts'
@@ -88,6 +89,39 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 }
 
 /** A question; onEdit absent: read-only (a shared chat). */
+/** What went with a question in Code Arena's IDE (files, lines chosen in the editor): each opens there. */
+function QuestionFiles({ files }: { files: string[] }) {
+  const refs = useFileRefs()
+  return (
+    <ul aria-label="Sent with it" className="flex max-w-[85%] flex-wrap justify-end gap-1.5">
+      {files.map((f) => {
+        const ref = parseRef(f)
+        const path = ref && refs?.known(ref.path)
+        return (
+          <li key={f} className="min-w-0">
+            {ref && path ? (
+              <button
+                type="button"
+                onClick={() => refs?.open({ ...ref, path })}
+                className="inline-flex max-w-full items-center gap-1 rounded-full border bg-card px-2 py-0.5 font-mono text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-none"
+                aria-label={`Open ${f} in the editor`}
+              >
+                <FileCode2 className="size-3 shrink-0" aria-hidden="true" />
+                <span className="truncate">{f}</span>
+              </button>
+            ) : (
+              <span className="inline-flex max-w-full items-center gap-1 rounded-full border bg-card px-2 py-0.5 font-mono text-xs text-muted-foreground">
+                <FileCode2 className="size-3 shrink-0" aria-hidden="true" />
+                <span className="truncate">{f}</span>
+              </span>
+            )}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
 export function QuestionTurn({ m, siblings, busy, onSwitch, onEdit }: { m: Message; siblings: Message[]; busy: boolean; onSwitch: (id: string) => void; onEdit?: (m: Message, text: string) => void }) {
   const [editing, setEditing] = useState<string | null>(null)
   const [viewing, setViewing] = useState<number | null>(null)
@@ -124,7 +158,10 @@ export function QuestionTurn({ m, siblings, busy, onSwitch, onEdit }: { m: Messa
       )}
       {images.length > 0 && <ImageViewer images={asViewerImages(images)} index={viewing} onIndex={setViewing} />}
       {editing === null ? (
-        m.content && <div dir="auto" className="max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[0.9375rem] leading-relaxed whitespace-pre-wrap text-secondary-foreground">{m.content}</div>
+        <>
+          {m.content && <div dir="auto" className="max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[0.9375rem] leading-relaxed whitespace-pre-wrap text-secondary-foreground">{m.content}</div>}
+          {m.files && m.files.length > 0 && <QuestionFiles files={m.files} />}
+        </>
       ) : (
         <form
           className="grid w-full max-w-[85%] gap-2"

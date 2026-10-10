@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Cloud, CloudUpload, FolderGit2, GitBranch, History, ListChecks, LoaderCircle, MessageSquarePlus, Monitor, Moon, PanelRightClose, ScrollText, ShieldCheck, Square, SquareTerminal, Sun, TestTubeDiagonal } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Cloud, CloudUpload, FileCode2, FolderGit2, GitBranch, History, ListChecks, LoaderCircle, MessageSquarePlus, Monitor, Moon, PanelRightClose, ScrollText, ShieldCheck, Square, SquareTerminal, Sun, TestTubeDiagonal, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -51,6 +51,7 @@ import {
   type WebChatSummary,
   webChatsQuery,
 } from './api'
+import { chatBridge, pieceLabel, type Piece } from './bridge'
 import { CodeAnswer } from './answer'
 import { PartHelp } from './help'
 import { changesQuery, savePreferences } from './ide-api'
@@ -319,6 +320,7 @@ export function Thread({
   config,
   onOpenList,
   onHide,
+  onShow,
   onEvent,
   onTurnEnd,
 }: {
@@ -326,11 +328,18 @@ export function Thread({
   config: ChatConfig
   onOpenList: () => void
   onHide?: () => void
+  /** The chat is asked for (the editor sent lines to it): it shows, if hidden. */
+  onShow?: () => void
   onEvent?: (e: CodeEvent) => void
   onTurnEnd?: () => void
 }) {
   const queryClient = useQueryClient()
   const session = useQuery(sessionQuery)
+  // Lines of the folder's files to go with the next message (from the editor: Add to chat), and a nudge to the box.
+  const [pieces, setPieces] = useState<Piece[]>([])
+  const [focusBox, setFocusBox] = useState(0)
+  // A file named in the box from the Explorer (Add to chat).
+  const [inserted, setInserted] = useState<{ text: string; n: number } | null>(null)
   // A code block named for a file of the folder (in a summary) opens it in the editor.
   const refs = useFileRefs()
   const openNamed = (name: string) => {
@@ -444,36 +453,19 @@ export function Thread({
   }, [state.synced, queryClient])
 
   /** While an answer is written: the message waits in the queue and runs when the answer ends. */
-  const queue = async (text: string): Promise<boolean> => {
+  const queue = async (text: string, context?: Piece[]): Promise<boolean> => {
     if (text === '/compact' || text === '/clear' || text === '/new') {
       toast.error(`Wait for the answer, or stop it, to run ${text}.`)
       return false
     }
     try {
-      await queueMessage(text)
+      await queueMessage(text, context)
       toast.success('Queued: it is sent when this answer ends.')
       await queryClient.invalidateQueries({ queryKey: stateQuery.queryKey })
       return true
     } catch (e) {
       toast.error(errorMessage(e))
       return false
-    }
-  }
-
-  const send = async (text: string): Promise<boolean> => {
-    if (text === '/compact') return compact()
-    if (text === '/clear' || text === '/new') {
-      await newSession().catch((e) => toast.error(errorMessage(e)))
-      await refresh()
-      return true
-    }
-    const localId = newLocalId()
-    try {
-      return await run('/api/messages', { text }, { ...view, ...withQuestion(view, localId, path.at(-1)?.id ?? null, text, []) }, localId, undefined, true)
-    } catch (e) {
-      // An answer started meanwhile that this page had not seen yet (a command ended, another tab): the message waits for it.
-      if (e instanceof ApiError && e.status === 'busy') return queue(text)
-      throw e
     }
   }
 
@@ -492,6 +484,56 @@ export function Thread({
     else if (said) toast.success(said)
     return true
   }
+
+  /** Sends a message, with the lines chosen in the editor (those above the box, or `context` when given: a question from the editor). */
+  const send = async (text: string, context?: Piece[]): Promise<boolean> => {
+    if (text === '/compact') return compact()
+    if (text === '/clear' || text === '/new') {
+      await newSession().catch((e) => toast.error(errorMessage(e)))
+      await refresh()
+      return true
+    }
+    const going = context ?? pieces
+    if (!context) setPieces([])
+    const localId = newLocalId()
+    const asked = withQuestion(view, localId, path.at(-1)?.id ?? null, text, [])
+    const start = { ...view, ...asked, messages: asked.messages.map((m) => (m.id === localId && going.length > 0 ? { ...m, files: going.map(pieceLabel) } : m)) }
+    try {
+      const sent = await run('/api/messages', { text, ...(going.length > 0 && { context: going }) }, start, localId, undefined, true)
+      if (!sent && !context) setPieces((now) => (now.length > 0 ? now : going))
+      return sent
+    } catch (e) {
+      // An answer started meanwhile that this page had not seen yet (a command ended, another tab): the message waits for it.
+      if (e instanceof ApiError && e.status === 'busy') return queue(text, going)
+      throw e
+    }
+  }
+
+  // The editor's lines: kept above the box for the next message (Add to chat), or asked about at once (Explain, Fix, Complete).
+  const ask = useRef<(text: string, context: Piece[]) => void>(() => undefined)
+  useEffect(() => {
+    ask.current = (text, context) => void (streaming ? queue(text, context) : send(text, context))
+  })
+  useEffect(() => {
+    chatBridge.current = {
+      attach: (piece) => {
+        setPieces((now) => (now.some((p) => pieceLabel(p) === pieceLabel(piece)) ? now : [...now, piece].slice(-8)))
+        setFocusBox((n) => n + 1)
+        onShow?.()
+      },
+      ask: (text, context) => {
+        onShow?.()
+        ask.current(text, context)
+      },
+      mention: (path) => {
+        setInserted((now) => ({ text: path.includes(' ') ? `@"${path}"` : `@${path}`, n: (now?.n ?? 0) + 1 }))
+        onShow?.()
+      },
+    }
+    return () => {
+      chatBridge.current = null
+    }
+  }, [onShow])
 
   const decide = async (callId: string, answer: 'allow' | 'always' | 'deny') => {
     setLive((s) => (s ? { ...s, waiting: (s.waiting ?? []).filter((w) => w !== callId) } : s))
@@ -515,8 +557,16 @@ export function Thread({
   const composer = (big: boolean) => (
     <Composer
       streaming={streaming}
-      onSend={send}
-      onQueue={queue}
+      onSend={(text) => send(text)}
+      onQueue={(text) => {
+        const going = pieces
+        setPieces([])
+        return queue(text, going)
+      }}
+      pieces={pieces}
+      onRemovePiece={(p) => setPieces((now) => now.filter((x) => x !== p))}
+      focusSignal={focusBox}
+      inserted={inserted}
       queued={state.queued ?? []}
       onClearQueue={() => void clearQueue().then(() => queryClient.invalidateQueries({ queryKey: stateQuery.queryKey }))}
       onStop={stop}
@@ -745,6 +795,10 @@ function Composer({
   streaming,
   onSend,
   onQueue,
+  pieces,
+  onRemovePiece,
+  focusSignal,
+  inserted,
   queued,
   onClearQueue,
   onStop,
@@ -757,6 +811,13 @@ function Composer({
   onSend: (text: string) => Promise<boolean>
   /** While an answer is written: the message waits and runs when it ends. */
   onQueue: (text: string) => Promise<boolean>
+  /** Lines of the folder's files that go with the next message (Add to chat in the editor). */
+  pieces: Piece[]
+  onRemovePiece: (p: Piece) => void
+  /** Changes when lines were added: the box takes the focus. */
+  focusSignal: number
+  /** Text to add to what is typed (an @path from the Explorer): each time its number changes. */
+  inserted: { text: string; n: number } | null
   queued: string[]
   onClearQueue: () => void
   onStop: () => void
@@ -769,6 +830,18 @@ function Composer({
   const area = useRef<HTMLTextAreaElement>(null)
   const recall = useRecall({ area, setText, source: history })
   useEffect(() => {
+    if (focusSignal > 0) area.current?.focus()
+  }, [focusSignal])
+  // Added to what is typed as it comes (once each), then the box takes the focus.
+  const [seenInsert, setSeenInsert] = useState(0)
+  if (inserted && inserted.n !== seenInsert) {
+    setSeenInsert(inserted.n)
+    setText((now) => `${now.trimEnd()}${now.trim() ? ' ' : ''}${inserted.text} `)
+  }
+  useEffect(() => {
+    if (inserted) area.current?.focus()
+  }, [inserted])
+  useEffect(() => {
     const el = area.current
     if (!el) return
     el.style.height = 'auto'
@@ -776,10 +849,11 @@ function Composer({
     if (text) el.style.height = `${Math.min(el.scrollHeight, 280)}px`
   }, [text])
   // While an answer is written the box still takes the next message: it is queued, and sent when the answer ends.
-  const canSend = text.trim().length > 0
+  const canSend = text.trim().length > 0 || pieces.length > 0
   const submit = async () => {
     if (!canSend) return
-    const sent = text.trim()
+    // Lines alone: asked about as they are.
+    const sent = text.trim() || 'Look at these lines.'
     setText('')
     recall.reset()
     if (!(await (streaming ? onQueue(sent) : onSend(sent)))) setText((now) => now || sent)
@@ -814,6 +888,27 @@ function Composer({
         void submit()
       }}
     >
+      {pieces.length > 0 && (
+        <ul aria-label="Sent with the message" className="flex flex-wrap gap-1.5 px-3 pt-2.5">
+          {pieces.map((p) => (
+            <li key={pieceLabel(p)} className="inline-flex max-w-full items-center gap-1 rounded-full border bg-muted/50 py-0.5 pr-0.5 pl-2 font-mono text-xs">
+              <FileCode2 className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <span className="truncate" title={pieceLabel(p)}>
+                {pieceLabel(p)}
+              </span>
+              {p.text !== undefined && <span className="text-muted-foreground">(unsaved)</span>}
+              <button
+                type="button"
+                onClick={() => onRemovePiece(p)}
+                className="rounded-full p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-none"
+                aria-label={`Leave out ${pieceLabel(p)}`}
+              >
+                <X className="size-3" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <textarea
         ref={area}
         dir="auto"

@@ -236,6 +236,8 @@ function Workbench({ state, config, lost, saved }: { state: CodeState; config: C
   const queryClient = useQueryClient()
   const { refresh, setQuickOpen, save, openDiff } = useEditor()
   const [layout, change] = useLayout(saved)
+  // The editor sent lines to the chat: it shows, if hidden.
+  const showChat = useCallback(() => change({ chatOpen: true }), [change])
   const [about, setAbout] = useState(false)
   const openHelp = useOpenHelp()
   // Bumped to put the focus in the search box or the terminal.
@@ -372,6 +374,7 @@ function Workbench({ state, config, lost, saved }: { state: CodeState; config: C
               config={config}
               onOpenList={() => show('chat')}
               onHide={() => change({ chatOpen: false })}
+              onShow={showChat}
               onEvent={onEvent}
               onTurnEnd={onTurnEnd}
             />

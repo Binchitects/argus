@@ -123,6 +123,10 @@ internal interface IAgentEvents
     /// <summary>The history was replaced by a summary (compaction).</summary>
     void Compacted(string notice);
     void Notice(string text);
+    /// <summary>What went with the person's message (@files, the lines chosen in the IDE's editor): path, or path:first-last.</summary>
+    void Attached(IReadOnlyList<string> files)
+    {
+    }
 }
 
 /// <summary>
@@ -225,7 +229,8 @@ internal sealed class Agent
     /// carries on from what is there (a command that ended while nobody was asking: <see cref="ContinueAsync"/>).
     /// </summary>
     /// <param name="takeIn">Whether the web chat's news is taken in first (<see cref="BeforeTurn"/>); the IDE takes it in itself.</param>
-    public async Task<string> RunAsync(string? input, Spend turn, CancellationToken ct, bool takeIn = true)
+    /// <param name="pieces">Lines chosen in the IDE's editor, sent with the message.</param>
+    public async Task<string> RunAsync(string? input, Spend turn, CancellationToken ct, bool takeIn = true, IReadOnlyList<Mentions.Piece>? pieces = null)
     {
         if (input is not null)
         {
@@ -248,10 +253,11 @@ internal sealed class Agent
             // @path: the file goes with the message.
             if (input is not null)
             {
-                var (expanded, files) = Mentions.Expand(input, Context.Workspace);
+                var (expanded, files) = Mentions.Expand(input, Context.Workspace, pieces);
                 if (files.Count > 0)
                 {
                     Ui.Info($"With the message: {string.Join(", ", files)}.");
+                    Events?.Attached(files);
                     input = expanded;
                 }
             }

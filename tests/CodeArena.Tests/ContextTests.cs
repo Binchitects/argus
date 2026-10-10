@@ -69,13 +69,41 @@ public sealed class ContextTests : IDisposable
         var ws = new Workspace(project);
         var (text, files) = Mentions.Expand("Look at @src/a.cs and @\"my notes.txt\", mail me@example.com, @Override, @src, @bin.dat, @../outside.txt", ws);
         Assert.Equal(["src/a.cs", "my notes.txt", "src", "bin.dat"], files);
-        Assert.Contains("<file path=\"src/a.cs\">\nclass A {}\n</file>", text);
+        Assert.Contains("<file path=\"src/a.cs\">\n     1\tclass A {}\n</file>", text);
         Assert.Contains("<folder path=\"src\">\na.cs\n</folder>", text);
         Assert.Contains("(binary, 8 bytes: not shown)", text);
         Assert.StartsWith("Look at @src/a.cs and", text);
         var plain = Mentions.Expand("nothing here", ws);
         Assert.Equal("nothing here", plain.Text);
         Assert.Empty(plain.Files);
+        // What was typed, and what went with it, apart again.
+        Assert.Equal("Look at @src/a.cs and @\"my notes.txt\", mail me@example.com, @Override, @src, @bin.dat, @../outside.txt", Mentions.Typed(text));
+        Assert.Equal(["src/a.cs", "my notes.txt", "src", "bin.dat"], Mentions.Attached(text));
+        Assert.Equal("nothing here", Mentions.Typed("nothing here"));
+    }
+
+    [Fact]
+    public void Lines_of_a_file_go_with_the_message_numbered_with_a_few_around_them_and_the_editors_lines_too()
+    {
+        var lines = string.Join('\n', Enumerable.Range(1, 40).Select(n => $"line {n}")) + "\n";
+        var project = Project(("src/big.cs", lines));
+        var ws = new Workspace(project);
+        var (text, files) = Mentions.Expand("Why @src/big.cs:12-14 and @src/big.cs#L39-L99?", ws);
+        Assert.Equal(["src/big.cs:12-14", "src/big.cs:39-40"], files);
+        Assert.Contains("<file path=\"src/big.cs\" lines=\"12-14\">\n     9\tline 9\n", text);
+        Assert.Contains("    17\tline 17\n</file>", text);
+        Assert.DoesNotContain("    18\t", text);
+        Assert.Contains("<file path=\"src/big.cs\" lines=\"39-40\">\n    36\tline 36\n", text);
+        Assert.Equal(["src/big.cs:12-14", "src/big.cs:39-40"], Mentions.Attached(text));
+
+        // Chosen in the editor: from the disk, or the editor's own text when it is not saved.
+        var (picked, from) = Mentions.Expand("Explain this", ws, [new Mentions.Piece("src/big.cs", 3, 4, null), new Mentions.Piece("src/big.cs", 7, 8, "changed 7\nchanged 8"), new Mentions.Piece("../x", 1, 1, null)]);
+        Assert.Equal(["src/big.cs:3-4", "src/big.cs:7-8"], from);
+        Assert.StartsWith("Explain this" + Mentions.Marker, picked);
+        Assert.Contains("<selection path=\"src/big.cs\" lines=\"3-4\">\n     3\tline 3\n     4\tline 4\n</selection>", picked);
+        Assert.Contains("<selection path=\"src/big.cs\" lines=\"7-8\" unsaved=\"true\">\n     7\tchanged 7\n     8\tchanged 8\n</selection>", picked);
+        Assert.EndsWith(Mentions.End, picked);
+        Assert.Equal("Explain this", Mentions.Typed(picked));
     }
 
     [Fact]

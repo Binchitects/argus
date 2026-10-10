@@ -743,7 +743,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
 
     private async Task MessageAsync(HttpRequest req, HttpResponse res, CancellationToken ct)
     {
-        var text = req.Json()?.Str("text")?.Trim();
+        var body = req.Json();
+        var text = body?.Str("text")?.Trim();
+        var pieces = Pieces(body);
         if (string.IsNullOrEmpty(text))
         {
             await res.ErrorAsync(400, "invalid", "Write a message first.", ct);
@@ -757,7 +759,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         }
         // Kept for ↑, here and in the terminal: the folder's history.
         _rt.History.Add(text);
-        job.Running = Task.Run(() => RunTurnAsync(job, text));
+        job.Running = Task.Run(() => RunTurnAsync(job, text, pieces));
         await StreamAsync(job, res, ct);
     }
 
@@ -770,13 +772,24 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     /// <summary>Set as code-arena web shuts down: nothing new starts.</summary>
     private bool _closing;
 
-    /// <summary>Messages sent while an answer is written: each runs, in order, once the one before it ends.</summary>
-    private readonly List<string> _queued = [];
+    /// <summary>Messages sent while an answer is written (with the lines chosen in the editor): each runs, in order, once the one before it ends.</summary>
+    private readonly List<(string Text, IReadOnlyList<Mentions.Piece>? Pieces)> _queued = [];
+
+    /// <summary>
+    /// The lines chosen in the editor that go with a message: <c>context</c>, each <c>{path, startLine, endLine, text?}</c>
+    /// (text: the editor's, when not saved), at most <see cref="Mentions.MaxPieces"/>.
+    /// </summary>
+    private static List<Mentions.Piece>? Pieces(JsonObject? body) =>
+        body?["context"] is JsonArray all && all.Count > 0
+            ? [.. all.OfType<JsonObject>().Take(Mentions.MaxPieces).Where(p => p.Str("path") is { Length: > 0 })
+                .Select(p => new Mentions.Piece(p.Str("path")!, p.Int("startLine") ?? 1, p.Int("endLine") ?? p.Int("startLine") ?? 1, p.Str("text")))]
+            : null;
 
     /// <summary>POST /api/queue: a message for after the answer being written (now, when none is).</summary>
     private async Task QueueAsync(HttpRequest req, HttpResponse res, CancellationToken ct)
     {
-        var text = req.Json()?.Str("text")?.Trim();
+        var body = req.Json();
+        var text = body?.Str("text")?.Trim();
         if (string.IsNullOrEmpty(text))
         {
             await res.ErrorAsync(400, "invalid", "Write a message first.", ct);
@@ -786,7 +799,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         int place;
         lock (_gate)
         {
-            _queued.Add(text);
+            _queued.Add((text, Pieces(body)));
             place = _queued.Count;
         }
         StartNext();
@@ -800,6 +813,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     private void StartNext()
     {
         string? text = null;
+        IReadOnlyList<Mentions.Piece>? pieces = null;
         Job? job;
         lock (_gate)
         {
@@ -809,7 +823,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             }
             if (_queued.Count > 0)
             {
-                text = _queued[0];
+                (text, pieces) = _queued[0];
                 _queued.RemoveAt(0);
             }
             else if (_rt.Jobs.Follow().Count == 0)
@@ -819,7 +833,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             job = _job = new Job("answer");
             _turns++;
         }
-        job.Running = Task.Run(() => RunTurnAsync(job, text));
+        job.Running = Task.Run(() => RunTurnAsync(job, text, pieces));
     }
 
     /// <summary>A new job when none runs; null when one does.</summary>
@@ -837,7 +851,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     }
 
     /// <summary>A turn as a job: the person's message, or (null) the model carrying on after commands that ended.</summary>
-    private async Task RunTurnAsync(Job job, string? text)
+    private async Task RunTurnAsync(Job job, string? text, IReadOnlyList<Mentions.Piece>? pieces = null)
     {
         var turn = new Spend();
         _rt.Turn = turn;
@@ -861,7 +875,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             {
                 text = _rt.Prepare(text);
                 job.Emit(new JsonObject { ["type"] = "question", ["id"] = $"m{count}", ["parentId"] = count == 0 ? null : $"m{count - 1}", ["text"] = text });
-                await _rt.Agent.RunAsync(text, turn, job.Stop.Token, takeIn: false);
+                await _rt.Agent.RunAsync(text, turn, job.Stop.Token, takeIn: false, pieces);
             }
             else
             {
@@ -1231,6 +1245,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
 
     void IAgentEvents.Notice(string text) => Emit(new JsonObject { ["type"] = "notice", ["kind"] = "warning", ["text"] = text });
 
+    void IAgentEvents.Attached(IReadOnlyList<string> files) =>
+        Emit(new JsonObject { ["type"] = "attached", ["id"] = $"m{_rt.Agent.Messages.Count}", ["files"] = new JsonArray([.. files.Select(f => (JsonNode)f)]) });
+
     // ------------------------------------------------- commands with no time limit
 
     private void JobStarted(CommandJob job) =>
@@ -1300,7 +1317,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     {
         lock (_gate)
         {
-            return [.. _queued];
+            return [.. _queued.Select(q => q.Text)];
         }
     }
 
@@ -1476,6 +1493,7 @@ internal static partial class History
             string? toolName = null;
             string? callId = null;
             string? summary = null;
+            List<string>? attached = null;
             if (role == "assistant")
             {
                 if (content.EndsWith(StoppedMark, StringComparison.Ordinal))
@@ -1506,6 +1524,12 @@ internal static partial class History
                 var start = content.IndexOf("\n\n", StringComparison.Ordinal);
                 summary = start < 0 ? content : content[(start + 2)..];
             }
+            else if (role == "user")
+            {
+                // What was typed; what went with it (@files, the lines chosen in the editor) listed apart.
+                attached = Mentions.Attached(content);
+                content = Mentions.Typed(content);
+            }
             var answer = data.Answers.TryGetValue(i, out var a) ? a : default;
             list.Add(new JsonObject
             {
@@ -1529,6 +1553,7 @@ internal static partial class History
                 ["createdAt"] = "",
                 ["noAccess"] = false,
                 ["summary"] = summary,
+                ["files"] = attached is { Count: > 0 } ? new JsonArray([.. attached.Select(f => (JsonNode)f)]) : null,
             });
         }
         return list;

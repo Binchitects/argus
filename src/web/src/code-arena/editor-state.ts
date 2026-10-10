@@ -1,5 +1,6 @@
 import type * as Monaco from 'monaco-editor'
 import { createContext, use } from 'react'
+import type { Piece } from './bridge'
 
 // The editor's shared parts: Monaco's loader, the tabs' shape, the context the
 // panels reach the editor through, and quick open's ranking.
@@ -79,6 +80,11 @@ export interface EditorApi {
   removed: (path: string) => void
   accept: (path?: string) => Promise<void>
   revert: (path: string) => Promise<void>
+  /**
+   * The lines chosen in the file shown (the cursor's line when none are), with the editor's text when the file has
+   * unsaved changes; null: no file is shown.
+   */
+  selection: () => Piece | null
   quickOpen: boolean
   setQuickOpen: (open: boolean) => void
   bindEditor: (el: HTMLDivElement | null) => void

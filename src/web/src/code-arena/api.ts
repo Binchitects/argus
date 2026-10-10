@@ -1,6 +1,7 @@
 import { api } from '@/lib/api'
 import { blank, reduce, type LiveState } from '@/pages/chat/live'
 import type { ChatEvent, Message } from '@/pages/chat/types'
+import type { Piece } from './bridge'
 
 /** What code-arena web says of itself: the folder, the model, the mode, the session open now. */
 export interface CodeState {
@@ -135,6 +136,8 @@ export type CodeEvent =
   | { type: 'job'; job: number; command: string; running: true; status: string; background?: boolean }
   | { type: 'job_output'; job: number; text: string }
   | { type: 'job_end'; job: number; running: false; status: string; exitCode: number | null; stopped: boolean }
+  /** What went with the question (@files, the lines chosen in the editor): path, or path:first-last. */
+  | { type: 'attached'; id: string; files: string[] }
 
 export const stateQuery = {
   queryKey: ['code', 'state'] as const,
@@ -177,7 +180,7 @@ export const openWebChat = (id: string) => api<CodeSession>('/api/sessions/web',
 export const sendAllSessions = () => api<{ sent: number; failed: string[] }>('/api/sessions/send-all', { body: {} })
 export const stopTurn = () => api('/api/stop', { body: {} })
 /** A message for after the answer being written (at once when none is). */
-export const queueMessage = (text: string) => api<{ queued: number }>('/api/queue', { body: { text } })
+export const queueMessage = (text: string, context?: Piece[]) => api<{ queued: number }>('/api/queue', { body: { text, ...(context?.length && { context }) } })
 // A body, so it goes as JSON: code-arena web refuses any other call that changes something.
 export const clearQueue = () => api('/api/queue', { method: 'DELETE', body: {} })
 export const answerApproval = (id: string, answer: 'allow' | 'always' | 'deny') => api('/api/approvals', { body: { id, answer } })
@@ -232,6 +235,11 @@ export function reduceCode(state: CodeLive, e: CodeEvent, localId: string | null
       if (localId === null && q.text != null && !state.messages.some((m) => m.id === q.id))
         return reduce({ ...state, messages: [...state.messages, { ...blank(q.id, 'user', q.parentId), content: q.text }] }, e, localId) as CodeLive
       return reduce(state, e, localId) as CodeLive
+    }
+    case 'attached': {
+      // The question, as the page shows it: the one it sent (its own id until the server's comes), or the server's.
+      const question = state.messages.find((m) => m.id === e.id) ?? (localId ? state.messages.find((m) => m.id === localId) : undefined)
+      return question ? { ...state, messages: state.messages.map((m) => (m === question ? { ...m, files: e.files } : m)) } : state
     }
     case 'reset':
       return { ...state, messages: e.messages, diffs: e.diffs, leaf: e.messages.at(-1)?.id ?? null, current: null, compacting: false }

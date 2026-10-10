@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, ChevronsDownUp, Copy, FilePlus, Folder, FolderOpen, FolderPlus, GitCompareArrows, Pencil, RefreshCw, Trash2 } from 'lucide-react'
+import { ChevronRight, ChevronsDownUp, Copy, FilePlus, Folder, FolderOpen, FolderPlus, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, Trash2 } from 'lucide-react'
 import { ContextMenu } from 'radix-ui'
 import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useConfirm } from '@/components/ui/confirm'
@@ -13,6 +13,7 @@ import { useEditor } from './editor-state'
 import { FileIcon } from './file-icon'
 import { PartHelp } from './help'
 import { changesQuery, createEntry, deleteEntry, folderQuery, join, nameOf, parentOf, renameEntry, within, type Change, type Entry } from './ide-api'
+import { chatBridge } from './bridge'
 
 /** A row's place in the tree, for keys and the context menu. */
 interface Target {
@@ -219,6 +220,9 @@ export function Explorer({ project, onOpenChanges }: { project: string; onOpenCh
                     <GitCompareArrows /> The agent&apos;s changes
                   </ContextMenu.Item>
                 )}
+                <ContextMenu.Item className={menuItem} onSelect={() => chatBridge.current?.mention(at.path)}>
+                  <MessageSquarePlus /> Add to chat
+                </ContextMenu.Item>
                 <ContextMenu.Item className={menuItem} onSelect={() => void navigator.clipboard?.writeText(at.path).catch(() => undefined)}>
                   <Copy /> Copy path
                 </ContextMenu.Item>

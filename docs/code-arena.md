@@ -277,10 +277,30 @@ shell's history, emacs, nano).
 | Ctrl+Shift+F (⌘⇧F) | search |
 | Ctrl+Shift+E (⌘⇧E) | the Explorer |
 | Ctrl+` | show or hide the terminals |
+| Ctrl+L (⌘L) | in the editor: the lines chosen (or the cursor's) go with the next message |
 
 Everything the page needs (Monaco and its language workers, xterm.js, the
 fonts) is built into the program; nothing is fetched from anywhere else.
 Monaco loads with the first file opened, xterm.js with the first terminal.
+
+### Ask about code from the editor
+
+Lines of a file go to the agent from the editor itself:
+
+- **Add to chat** (Ctrl+L, or the editor's right-click menu): the lines chosen,
+  or the cursor's line, wait above the chat's box as a chip (× leaves them out)
+  and go with the next message; the box takes the focus. A file with unsaved
+  changes sends the editor's text, marked unsaved. The Explorer's right-click
+  **Add to chat** names the whole file in the box (`@path`).
+- **Explain this**, **Fix this** and **Complete this** (the right-click menu,
+  and F1): asked at once about those lines (queued while an answer is
+  written). Fix says the problems the editor marks there; Complete asks for
+  what is missing (a function's body, a TODO) to be written with `edit_file`.
+- On a line with a problem marked, the light bulb offers **Fix with Code
+  Arena**.
+
+The model gets them numbered, after the message, as `<selection path lines>`
+(with `unsaved="true"` for the editor's text); at most eight a message.
 
 ### Files in answers
 
@@ -385,7 +405,8 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/sessions/send-all` | sends Arena what it lacks of this folder's sessions: `{sent, failed}` (`failed`: why, per session) |
 | `POST /api/servers/retry` `{name}` | tries that MCP server again now (every one not connected without `name`); the state |
 | `POST /api/jobs/stop` `{id}` | stops a command run with no time limit; 404 for no such job |
-| `POST /api/queue` `{text}` | a message for after the answer being written (runs at once when none is); 202 `{queued}` (its place). `/api/messages` while an answer is written is 409 `busy` |
+| `POST /api/messages` `{text, context}` | a message, answered as a stream of events; `context`: lines chosen in the editor, `[{path, startLine, endLine, text}]` (`text`: the editor's, when unsaved; eight at most). The stream's `{"type":"attached", id, files}` lists what went with the question |
+| `POST /api/queue` `{text, context}` | a message for after the answer being written (runs at once when none is), with its lines; 202 `{queued}` (its place). `/api/messages` while an answer is written is 409 `busy` |
 | `DELETE /api/queue` | drops the queued messages; 204 |
 | `GET /api/files?path=DIR` | a folder's entries, folders first: `{path, entries: [{name, path, kind, size, link}]}` |
 | `GET /api/files/all` | every file, for quick open: `{files, truncated}` (50,000 at most) |
@@ -664,10 +685,14 @@ hold every word searched for. `/search WORDS` does the same for the person.
 first of `ARENA.md`, `AGENTS.md`, `CLAUDE.md` and `QWEN.md` counts, so a
 project written for another agent is read as it is.
 
-**@files.** `@src/parser.cs` in a message sends the file with it (a folder
-sends its list; `@"a b.txt"` for a name with spaces); up to 60,000 characters
-a file and 150,000 a message, cut in the middle beyond. Anything that is not a
-file the tools may read (an email address, `@Override`) stays as typed.
+**@files.** `@src/parser.cs` in a message sends the file with it, its lines
+numbered as `read_file` numbers them (a folder sends its list; `@"a b.txt"`
+for a name with spaces); `@src/parser.cs:40-60` (or `#L40-L60`) sends those
+lines with three around them. Up to 60,000 characters a file and 150,000 a
+message, cut in the middle beyond. Anything that is not a file the tools may
+read (an email address, `@Override`) stays as typed. What goes with a message
+comes after what was typed: the IDE shows the question as typed, with a chip
+for each file or lines that went with it (a click opens them).
 
 **Checkpoints.** Each turn leaves a checkpoint while Code Arena runs (the last
 50): how long the conversation was, and what each file the turn's tools wrote

@@ -78,6 +78,14 @@ export const tasks: HelpTask[] = [
     title: 'Keep or undo what the agent changed',
     steps: ['Press **Agent changes** in the activity bar.', 'Click a file: it opens as it was before and as it is now.', 'Press **Accept** to keep it or **Revert** to put it back; **Accept all** keeps every change.'],
   },
+  {
+    title: 'Ask about code in the editor',
+    steps: [
+      `Choose the lines (or put the cursor on one) and press ${modKey}+L: they go with your next message.`,
+      'Or right-click them: **Explain this**, **Fix this** or **Complete this** asks at once.',
+      'On a line with a problem, the light bulb offers **Fix with Code Arena**.',
+    ],
+  },
   { title: 'Open a file fast', steps: [`Press ${modKey}+P.`, 'Type a few letters of its path.', 'Press Enter.'] },
   { title: 'Run a command yourself', steps: ['Press Ctrl+` or **Terminal** in the activity bar.', 'Type in the shell; **+** opens another one.'] },
   {
@@ -105,6 +113,7 @@ export const keys: [keys: string, what: string][] = [
   [`${modKey}+Shift+F`, 'Search the files'],
   [`${modKey}+Shift+E`, 'The Explorer'],
   ['Ctrl+`', 'Show or hide the terminal'],
+  [`${modKey}+L`, 'In the editor: the lines chosen go with the next message'],
   ['↑ / ↓', 'In the chat\'s box: what you sent before in this folder (the terminal\'s too); Esc goes back to what you were typing'],
 ]
 

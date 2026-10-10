@@ -114,6 +114,47 @@ public sealed partial class WebTests : IDisposable
     }
 
     [Fact]
+    public async Task Lines_chosen_in_the_editor_reach_the_model_with_the_message_and_the_page_shows_what_was_typed()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        h.Write("src/app.ts", "const a = 1\nconst b = 2\nconst c = 3\n");
+        _gateway.Answer = req => Reply.Say("Seen.");
+        await using var web = await WebRun.StartAsync(h);
+
+        var context = new JsonArray(new JsonObject { ["path"] = "src/app.ts", ["startLine"] = 2, ["endLine"] = 3 },
+            new JsonObject { ["path"] = "src/app.ts", ["startLine"] = 1, ["endLine"] = 1, ["text"] = "const a = 9" });
+        using (var stream = await web.StreamAsync(HttpMethod.Post, "/api/messages", new JsonObject { ["text"] = "Why these? @src/app.ts:3", ["context"] = context }))
+        {
+            var events = await stream.RestAsync();
+            var attached = events.Single(e => e["type"]!.GetValue<string>() == "attached");
+            Assert.Equal("m0", attached["id"]!.GetValue<string>());
+            Assert.Equal(["src/app.ts:2-3", "src/app.ts:1", "src/app.ts:3"], attached["files"]!.AsArray().Select(f => f!.GetValue<string>()));
+        }
+        var asked = _gateway.Requests[^1]["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.GetValue<string>();
+        Assert.StartsWith("Why these? @src/app.ts:3" + Mentions.Marker, asked);
+        Assert.Contains("<selection path=\"src/app.ts\" lines=\"2-3\">\n     2\tconst b = 2\n     3\tconst c = 3\n</selection>", asked);
+        Assert.Contains("<selection path=\"src/app.ts\" lines=\"1-1\" unsaved=\"true\">\n     1\tconst a = 9\n</selection>", asked);
+        Assert.Contains("<file path=\"src/app.ts\" lines=\"3-3\">", asked);
+
+        // Read back: the question as typed, and what went with it apart.
+        var question = (await web.GetJsonAsync("/api/session"))["messages"]!.AsArray()[0]!;
+        Assert.Equal("Why these? @src/app.ts:3", question["content"]!.GetValue<string>());
+        Assert.Equal(["src/app.ts:2-3", "src/app.ts:1", "src/app.ts:3"], question["files"]!.AsArray().Select(f => f!.GetValue<string>()));
+
+        // Queued, a message keeps its lines until it runs.
+        Assert.Equal(HttpStatusCode.Accepted, (await web.PostAsync("/api/queue", new JsonObject { ["text"] = "And this?", ["context"] = new JsonArray(new JsonObject { ["path"] = "src/app.ts", ["startLine"] = 1, ["endLine"] = 1 }) })).StatusCode);
+        var until = DateTime.UtcNow.AddSeconds(30);
+        while (!_gateway.Requests.Any(r => r["messages"]!.ToJsonString().Contains("And this?", StringComparison.Ordinal)))
+        {
+            Assert.True(DateTime.UtcNow < until, "The queued message never reached the model.");
+            await Task.Delay(50);
+        }
+        var queued = _gateway.Requests.Last(r => r["messages"]!.ToJsonString().Contains("And this?", StringComparison.Ordinal))["messages"]!.AsArray()
+            .Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.GetValue<string>();
+        Assert.Contains("<selection path=\"src/app.ts\" lines=\"1-1\">\n     1\tconst a = 1\n</selection>", queued);
+    }
+
+    [Fact]
     public async Task A_turn_streams_its_thinking_text_tool_calls_and_tokens_as_events_and_is_saved()
     {
         using var h = new Harness(_gateway, _mcp);

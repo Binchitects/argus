@@ -89,7 +89,7 @@ public sealed class ParityTests : IDisposable
         var asked = LastUser();
         Assert.StartsWith("I ran `echo from-the-shell` (exit 0):", asked);
         Assert.Contains("what now? see @notes.txt", asked);
-        Assert.Contains("<file path=\"notes.txt\">\nthe notes' text\n</file>", asked);
+        Assert.Contains("<file path=\"notes.txt\">\n     1\tthe notes' text\n</file>", asked);
     }
 
     [Fact]

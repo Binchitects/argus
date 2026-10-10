@@ -69,6 +69,8 @@ export interface Message {
   /** declined: a tool call the person did not allow. */
   status: 'complete' | 'stopped' | 'failed' | 'declined'
   error: string | null
+  /** Code Arena's IDE: what went with a question (the folder's files, lines chosen in the editor), as path or path:first-last. */
+  files?: string[] | null
   model: string | null
   promptTokens: number | null
   cachedTokens: number | null

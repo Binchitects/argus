@@ -9,6 +9,7 @@ import type { ChatConfig, Message } from '@/pages/chat/types'
 import { fakeApi, type Handler } from '@/test/utils'
 import type { CodeState } from './api'
 import { App } from './app'
+import { asks } from './bridge'
 import { rankFiles } from './editor-state'
 import { parts, regions, tasks } from './help-text'
 import type { Change, Entry, Preferences, TerminalInfo } from './ide-api'
@@ -118,6 +119,15 @@ const fakes = vi.hoisted(() => {
       this.cursor.push(f)
       return { dispose() {} }
     }
+    /** The editor's own actions (its right-click menu, F1): by id, run as the person would. */
+    actions = new Map<string, { label: string; keybindings?: number[]; run: () => void }>()
+    addAction(a: { id: string; label: string; keybindings?: number[]; run: () => void }) {
+      this.actions.set(a.id, a)
+      return { dispose() {} }
+    }
+    getSelection() {
+      return this.selection
+    }
     dispose() {}
   }
   class DiffEditor {
@@ -219,6 +229,10 @@ const fakes = vi.hoisted(() => {
     terminals: [] as Terminal[],
     sockets: [] as Socket[],
     themes: [] as string[],
+    /** What the editor marks (a language's problems), by the file's address. */
+    markers: new Map<string, { severity: number; startLineNumber: number; startColumn: number; endLineNumber: number; message: string }[]>(),
+    commands: new Map<string, (...args: unknown[]) => void>(),
+    codeActions: [] as { provideCodeActions: (...args: unknown[]) => unknown }[],
   }
 })
 
@@ -232,10 +246,22 @@ vi.mock('monaco-editor', () => ({
       m.language = language
     },
     setTheme: (t: string) => fakes.themes.push(t),
+    getModelMarkers: ({ resource }: { resource: InstanceType<typeof fakes.Uri> }) => fakes.markers.get(resource.toString()) ?? [],
+    registerCommand: (id: string, run: (...args: unknown[]) => void) => {
+      fakes.commands.set(id, run)
+      return { dispose() {} }
+    },
     defineTheme: () => undefined,
     remeasureFonts: () => undefined,
   },
+  KeyMod: { CtrlCmd: 2048 },
+  KeyCode: { KeyL: 42 },
+  MarkerSeverity: { Hint: 1, Info: 2, Warning: 4, Error: 8 },
   languages: {
+    registerCodeActionProvider: (_: string, provider: { provideCodeActions: (...args: unknown[]) => unknown }) => {
+      fakes.codeActions.push(provider)
+      return { dispose() {} }
+    },
     getLanguages: () => [
       { id: 'typescript', extensions: ['.ts', '.tsx'], aliases: ['TypeScript'] },
       { id: 'markdown', extensions: ['.md'], aliases: ['Markdown'] },
@@ -1063,6 +1089,7 @@ describe('Code Arena, the IDE', () => {
     const said = (id: string, role: Message['role'], parentId: string | null, over: Partial<Message> = {}): Message => ({ ...blank(id, role, parentId), ...over })
     const edit = { id: 'c1', function: { name: 'edit_file', arguments: '{"path":"src/app.ts","old_string":"1","new_string":"2"}' } }
     const read = { id: 'c2', function: { name: 'read_file', arguments: '{"path":"src/lib/cart.ts","offset":4}' } }
+    const grep = { id: 'c3', function: { name: 'grep', arguments: '{"pattern":"total"}' } }
     const session = {
       id: 's1',
       busy: false,
@@ -1071,10 +1098,11 @@ describe('Code Arena, the IDE', () => {
       },
       messages: [
         said('m0', 'user', null, { content: 'Where is the total?' }),
-        said('m1', 'assistant', 'm0', { toolCalls: [edit, read], model: 'model-a' }),
+        said('m1', 'assistant', 'm0', { toolCalls: [edit, read, grep], model: 'model-a' }),
         said('m3', 'tool', 'm1', { content: 'Edited src/app.ts (lines 2-3).', toolCallId: 'c1', toolName: 'edit_file' }),
         said('m4', 'tool', 'm3', { content: 'export {}', toolCallId: 'c2', toolName: 'read_file' }),
-        said('m5', 'assistant', 'm4', {
+        said('m6', 'tool', 'm4', { content: 'src/app.ts:2:console.log(total)', toolCallId: 'c3', toolName: 'grep' }),
+        said('m5', 'assistant', 'm6', {
           model: 'model-a',
           content: 'It is in `src/app.ts:2-3`, used by src/lib/cart.ts, as [the readme](README.md#L1) says; `nope.ts:3` and [elsewhere](docs/none.md) are not here.',
         }),
@@ -1109,9 +1137,89 @@ describe('Code Arena, the IDE', () => {
     await userEvent.click(within(answer).getByRole('button', { name: 'Open src/lib/cart.ts:4 in the editor' }))
     await waitFor(() => expect(within(tabs()).getByRole('tab', { name: 'cart.ts' })).toHaveAttribute('aria-selected', 'true'))
     await waitFor(() => expect(editor().selection?.startLineNumber).toBe(4))
+    // A path in a tool's output opens too (grep's rows).
+    const cards = within(answer).getAllByRole('button', { expanded: false })
+    await userEvent.click(cards.find((b) => /grep|search/i.test(b.textContent ?? ''))!)
+    await userEvent.click(await within(answer).findByRole('link', { name: 'src/app.ts:2' }))
+    await waitFor(() => expect(editor().selection).toEqual({ startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 1 }))
+
     // The edit's chip opens at the lines its result says.
     await userEvent.click(within(answer).getByRole('button', { name: 'Open src/app.ts:2-3 in the editor' }))
     await waitFor(() => expect(editor().selection).toEqual({ startLineNumber: 2, startColumn: 1, endLineNumber: 4, endColumn: 1 }))
+  })
+
+  it('sends lines from the editor with a message, and asks it to explain, fix or complete them', async () => {
+    let asked = false
+    const { calls } = backend({
+      // The session saved: the question as typed, and what went with it.
+      'GET /api/session': () => ({
+        json: {
+          id: 's1', busy: false, diffs: {},
+          messages: asked ? [{ ...blank('m0', 'user', null), content: 'Why this?', files: ['src/app.ts:1-2'] }, { ...blank('m1', 'assistant', 'm0'), content: 'Done.' }] : [],
+        },
+      }),
+      'POST /api/messages': () => ({
+        events: [
+          { type: 'question', id: 'm0', parentId: null },
+          { type: 'attached', id: 'm0', files: ['src/app.ts:1-2'] },
+          { type: 'assistant', id: 'm1', parentId: 'm0', model: 'model-a' },
+          { type: 'content', text: 'Done.' },
+        ],
+      }),
+    })
+    renderIde()
+    await openApp()
+    const ed = editor()
+    const sent = () => calls.filter((c) => c.method === 'POST' && c.path === '/api/messages').map((c) => c.body as { text: string; context?: unknown[] })
+
+    // Add to chat (Ctrl+L): the lines chosen wait above the box, and go with the next message.
+    ed.setSelection({ startLineNumber: 1, startColumn: 1, endLineNumber: 3, endColumn: 1 })
+    act(() => ed.actions.get('arena.addToChat')!.run())
+    expect(ed.actions.get('arena.addToChat')!.keybindings).toEqual([2048 | 42])
+    const box = screen.getByRole('textbox', { name: 'Message' })
+    expect(await within(screen.getByRole('list', { name: 'Sent with the message' })).findByText('src/app.ts:1-2')).toBeInTheDocument()
+    await waitFor(() => expect(box).toHaveFocus())
+    asked = true
+    await userEvent.type(box, 'Why this?{Enter}')
+    await waitFor(() => expect(sent()).toHaveLength(1))
+    expect(sent()[0]).toEqual({ text: 'Why this?', context: [{ path: 'src/app.ts', startLine: 1, endLine: 2 }] })
+    expect(screen.queryByRole('list', { name: 'Sent with the message' })).not.toBeInTheDocument()
+    // The question lists what went with it; each opens in the editor.
+    expect(await screen.findByRole('button', { name: 'Open src/app.ts:1-2 in the editor' })).toBeInTheDocument()
+
+    // Explain this: asked at once, about the line the cursor is on; unsaved, the editor's text goes.
+    ed.model!.setValue('const total = 3\nconsole.log(total)\n')
+    ed.setSelection({ startLineNumber: 2, startColumn: 4, endLineNumber: 2, endColumn: 4 })
+    act(() => ed.actions.get('arena.explain')!.run())
+    await waitFor(() => expect(sent()).toHaveLength(2))
+    expect(sent()[1]).toEqual({ text: asks.explain, context: [{ path: 'src/app.ts', startLine: 2, endLine: 2, text: 'console.log(total)' }] })
+
+    // Fix this: with the problems the editor marks there.
+    await screen.findByRole('button', { name: 'Send' })
+    fakes.markers.set('file:///src/app.ts', [{ severity: 8, startLineNumber: 1, startColumn: 15, endLineNumber: 1, message: "';' expected." }])
+    ed.setSelection({ startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 })
+    act(() => ed.actions.get('arena.fix')!.run())
+    await waitFor(() => expect(sent()).toHaveLength(3))
+    expect(sent()[2]!.text).toBe("Fix the problems in this code: 1:15 ';' expected.")
+    expect(ed.actions.get('arena.complete')!.label).toBe('Code Arena: Complete this')
+
+    // The light bulb on a marked line: Fix with Code Arena.
+    const [provider] = fakes.codeActions
+    const offered = provider!.provideCodeActions({ uri: new fakes.Uri('file', '/src/app.ts') }, { startLineNumber: 1, endLineNumber: 1 }, { markers: fakes.markers.get('file:///src/app.ts') }) as {
+      actions: { title: string; command: { id: string; arguments: unknown[] } }[]
+    }
+    expect(offered.actions.map((a) => a.title)).toEqual(['Fix with Code Arena'])
+    await screen.findByRole('button', { name: 'Send' })
+    act(() => fakes.commands.get(offered.actions[0]!.command.id)!(null, ...offered.actions[0]!.command.arguments))
+    await waitFor(() => expect(sent()).toHaveLength(4))
+    expect(sent()[3]!.context).toEqual([{ path: 'src/app.ts', startLine: 1, endLine: 1 }])
+
+    // The Explorer's Add to chat names the whole file in the box.
+    await screen.findByRole('button', { name: 'Send' })
+    const row = screen.getByRole('treeitem', { name: 'app.ts, changed by the agent' })
+    await userEvent.pointer({ keys: '[MouseRight]', target: row })
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Add to chat' }))
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('@src/app.ts '))
   })
 
   it('does not search the files again at the end of each turn', async () => {

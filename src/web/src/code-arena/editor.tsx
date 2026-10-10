@@ -12,6 +12,7 @@ import { toast } from '@/components/ui/toaster'
 import { ApiError, errorMessage } from '@/lib/api'
 import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
+import { asks, chatBridge, type Piece } from './bridge'
 import { EditorContext, loadMonaco, modKey, rankFiles, useEditor, type DiffModels, type EditorApi, type FileModel, type MonacoModule, type Reveal, type Tab, type Unsaved } from './editor-state'
 import { acceptChange, allFilesQuery, changesQuery, changeTexts, nameOf, readFile, revertChange, within, writeFile, type Change } from './ide-api'
 
@@ -23,6 +24,67 @@ const diffId = (path: string) => `diff:${path}`
  * version the file was read at, so a file changed on disk since is not
  * overwritten without asking.
  */
+/** The problems the editor marks in these lines of a file (its language's, a check's), as "line:column message". */
+function problemsIn(m: MonacoModule, piece: Piece): string[] {
+  return m.monaco.editor
+    .getModelMarkers({ resource: m.fileUri(piece.path) })
+    .filter((k) => k.severity >= m.monaco.MarkerSeverity.Warning && k.startLineNumber <= piece.endLine && k.endLineNumber >= piece.startLine)
+    .map((k) => `${k.startLineNumber}:${k.startColumn} ${k.message.split('\n')[0]!.replace(/\.$/, '')}`)
+}
+
+let codeActions = false
+
+/**
+ * The editor's ways to the agent: Add to chat (Ctrl+L: the lines chosen go with the next message), and Explain, Fix and
+ * Complete (asked at once), in its right-click menu and F1; and, on a line with a problem marked, "Fix with Code Arena"
+ * in the light bulb.
+ */
+function askAboutCode(m: MonacoModule, ed: Monaco.editor.IStandaloneCodeEditor, selection: () => Piece | null) {
+  const { KeyMod, KeyCode } = m.monaco
+  const ask = (text: (p: Piece) => string) => () => {
+    const piece = selection()
+    if (piece) chatBridge.current?.ask(text(piece), [piece])
+  }
+  ed.addAction({
+    id: 'arena.addToChat',
+    label: 'Code Arena: Add to chat',
+    contextMenuGroupId: '9_arena',
+    contextMenuOrder: 1,
+    keybindings: [KeyMod.CtrlCmd | KeyCode.KeyL],
+    run: () => {
+      const piece = selection()
+      if (piece) chatBridge.current?.attach(piece)
+    },
+  })
+  ed.addAction({ id: 'arena.explain', label: 'Code Arena: Explain this', contextMenuGroupId: '9_arena', contextMenuOrder: 2, run: ask(() => asks.explain) })
+  ed.addAction({ id: 'arena.fix', label: 'Code Arena: Fix this', contextMenuGroupId: '9_arena', contextMenuOrder: 3, run: ask((p) => asks.fix(problemsIn(m, p))) })
+  ed.addAction({ id: 'arena.complete', label: 'Code Arena: Complete this', contextMenuGroupId: '9_arena', contextMenuOrder: 4, run: ask(() => asks.complete) })
+  if (codeActions) return
+  codeActions = true
+  m.monaco.editor.registerCommand('arena.fixProblems', (_: unknown, path: string, line: number, endLine: number, problems: string[]) =>
+    chatBridge.current?.ask(asks.fix(problems), [{ path, startLine: line, endLine }]),
+  )
+  m.monaco.languages.registerCodeActionProvider('*', {
+    provideCodeActions: (model, range, context) => {
+      const path = m.pathOf(model.uri)
+      const marked = context.markers.filter((k) => k.severity >= m.monaco.MarkerSeverity.Warning)
+      if (!path || marked.length === 0) return { actions: [], dispose: () => undefined }
+      const problems = marked.map((k) => `${k.startLineNumber}:${k.startColumn} ${k.message.split('\n')[0]!.replace(/\.$/, '')}`)
+      return {
+        actions: [
+          {
+            title: 'Fix with Code Arena',
+            kind: 'quickfix',
+            diagnostics: marked,
+            command: { id: 'arena.fixProblems', title: 'Fix with Code Arena', arguments: [path, range.startLineNumber, range.endLineNumber, problems] },
+          },
+        ],
+        dispose: () => undefined,
+      }
+    },
+  })
+}
+
 export function EditorProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
@@ -330,6 +392,21 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       old.dispose()
     }
 
+    const selection = (): Piece | null => {
+      const ed = editor.current
+      const tab = tabsRef.current.find((t) => t.id === activeRef.current)
+      const model = ed?.getModel()
+      if (!ed || !model || tab?.kind !== 'file' || files.current.get(tab.path)?.model !== model) return null
+      const s = ed.getSelection()
+      const start = s?.startLineNumber ?? ed.getPosition()?.lineNumber ?? 1
+      // A selection that ends at a line's start leaves that line out, as an editor's does.
+      const end = s && s.endLineNumber > s.startLineNumber && s.endColumn === 1 ? s.endLineNumber - 1 : (s?.endLineNumber ?? start)
+      const piece: Piece = { path: tab.path, startLine: start, endLine: end }
+      if (!tab.dirty) return piece
+      const lines = model.getValue().split('\n').slice(start - 1, end)
+      return { ...piece, text: lines.join('\n') }
+    }
+
     // A tab with unsaved changes stays: its text is the person's, and saving makes the file again.
     const removed = (path: string) => drop(tabsRef.current.filter((t) => within(t.path, path) && !t.dirty).map((t) => t.id))
 
@@ -368,7 +445,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       diffHost.current = el
     }
 
-    return { open, openDiff, activate: (id: string) => activate(id), close, save, refresh, moved, removed, accept, revert, bindEditor, bindDiff }
+    return { open, openDiff, activate: (id: string) => activate(id), close, save, refresh, moved, removed, accept, revert, selection, bindEditor, bindDiff }
   }, [confirm, queryClient])
 
   const active = tabs.find((t) => t.id === activeId) ?? null
@@ -405,6 +482,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
           fixedOverflowWidgets: true,
         })
         ed.onDidChangeCursorPosition((e) => setCursor({ line: e.position.lineNumber, column: e.position.column }))
+        askAboutCode(m, ed, actions.selection)
         editor.current = ed
       }
       const ed = editor.current
@@ -450,7 +528,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       if (diffEditor.current.getModel()?.modified !== d.modified) diffEditor.current.setModel(d)
       setCursor(null)
     }
-  }, [shown, revealed])
+  }, [shown, revealed, actions.selection])
 
   // Leaving with unsaved changes asks first.
   const anyDirty = tabs.some((t) => t.dirty)
