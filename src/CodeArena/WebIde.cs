@@ -126,6 +126,15 @@ internal sealed partial class WebApp
                     await res.JsonAsync(200, await Task.Run(() => _files.Search(q, ct), ct), ct);
                     return true;
                 }
+                case ("POST", "/api/replace"):
+                {
+                    var body = Body(req);
+                    var q = new SearchQuery(body.Str("q") ?? "", body.Bool("regex") == true, body.Bool("case") == true, body.Bool("word") == true, body.Str("include"), body.Str("exclude"));
+                    var paths = body["paths"] is JsonArray only ? only.Select(p => p is JsonValue v && v.TryGetValue<string>(out var s) ? s : null).OfType<string>().ToHashSet(StringComparer.Ordinal) : null;
+                    var replacement = body.Str("replacement") ?? "";
+                    await res.JsonAsync(200, await Task.Run(() => _files.Replace(q, replacement, paths, ct), ct), ct);
+                    return true;
+                }
                 case ("GET", "/api/changes"):
                     await res.JsonAsync(200, _changes.List(), ct);
                     return true;

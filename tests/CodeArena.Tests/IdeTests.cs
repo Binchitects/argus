@@ -209,6 +209,19 @@ public sealed class IdeTests : IDisposable
             ("GET", "/api/terminals/socket?id=1", null),
             ("GET", "/api/preferences", null),
             ("POST", "/api/preferences", new() { ["theme"] = "dark" }),
+            ("POST", "/api/replace", new() { ["q"] = "in", ["replacement"] = "out" }),
+            ("POST", "/api/complete", new() { ["path"] = "inside.txt", ["prefix"] = "i", ["suffix"] = "" }),
+            ("GET", "/api/problems", null),
+            ("POST", "/api/problems/run", new()),
+            ("GET", "/api/git/status", null),
+            ("GET", "/api/git/diff?path=inside.txt", null),
+            ("GET", "/api/git/log", null),
+            ("GET", "/api/git/branches", null),
+            ("POST", "/api/git/stage", new() { ["paths"] = new JsonArray("inside.txt") }),
+            ("POST", "/api/git/unstage", new() { ["paths"] = new JsonArray("inside.txt") }),
+            ("POST", "/api/git/discard", new() { ["paths"] = new JsonArray("inside.txt") }),
+            ("POST", "/api/git/commit", new() { ["message"] = "x" }),
+            ("POST", "/api/git/switch", new() { ["branch"] = "main" }),
         ];
         using var anonymous = WebRun.Client(web.Port, token: null);
         var wrong = new List<string>();
@@ -323,6 +336,17 @@ public sealed class IdeTests : IDisposable
         Assert.Equal(["docs/guide.md:1:5"], Hits(await web.GetJsonAsync("/api/search?q=value&include=" + Uri.EscapeDataString("*.md"))));
         Assert.Equal(["src/app.ts:1:7", "src/app.ts:2:5", "src/app.ts:2:14"], Hits(await web.GetJsonAsync("/api/search?q=value&exclude=docs")));
         Assert.Equal(HttpStatusCode.BadRequest, (await web.Http.GetAsync("/api/search?q=(&regex=1")).StatusCode);
+
+        // Replaced as found: a pattern's groups, the files' line endings kept; in one file only when asked.
+        h.Write("src/crlf.ts", "let value = 1;\r\nvalue++;\r\n");
+        var one = JsonNode.Parse(await (await web.PostAsync("/api/replace", new JsonObject { ["q"] = "value", ["case"] = true, ["word"] = true, ["replacement"] = "$total", ["paths"] = new JsonArray("src/crlf.ts") })).Content.ReadAsStringAsync())!;
+        Assert.Equal(2, one["count"]!.GetValue<int>());
+        Assert.Equal("let $total = 1;\r\n$total++;\r\n", File.ReadAllText(Path.Combine(h.Work, "src", "crlf.ts")));
+        Assert.Equal("let value2 = value;", File.ReadAllLines(Path.Combine(h.Work, "src", "app.ts"))[1]);
+        var grouped = JsonNode.Parse(await (await web.PostAsync("/api/replace", new JsonObject { ["q"] = @"val(ue)(\d)", ["regex"] = true, ["replacement"] = "v$2$1" })).Content.ReadAsStringAsync())!;
+        Assert.Equal("src/app.ts", grouped["files"]![0]!["path"]!.GetValue<string>());
+        Assert.Equal("let v2ue = value;", File.ReadAllLines(Path.Combine(h.Work, "src", "app.ts"))[1]);
+        File.Delete(Path.Combine(h.Work, "src", "crlf.ts"));
         Assert.Equal(HttpStatusCode.BadRequest, (await web.Http.GetAsync("/api/search?q=")).StatusCode);
         // A glob not valid (as one is while it is typed) is said back, not a failure of the server.
         foreach (var glob in new[] { "src/{a,b", "[]", "[z-a]" })

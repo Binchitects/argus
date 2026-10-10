@@ -1434,6 +1434,25 @@ describe('Code Arena, the IDE', () => {
     expect(within(panel).getByRole('list', { name: 'Commits' })).toHaveTextContent('First')
   })
 
+  it('replaces what the search finds, in one file or in all of them after asking', async () => {
+    const { calls } = backend({ 'POST /api/replace': () => ({ json: { files: [{ path: 'src/app.ts', replaced: 2, version: 'v2' }], count: 2, truncated: false } }) })
+    renderIde()
+    await userEvent.click(await screen.findByRole('button', { name: 'Search' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Search' }), 'total')
+    await screen.findByRole('list', { name: 'Search results' })
+    await userEvent.click(screen.getByRole('button', { name: 'Replace' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Replace with' }), 'sum')
+    await userEvent.click(await screen.findByRole('button', { name: 'Replace in src/app.ts' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/replace')?.body).toEqual({ q: 'total', case: false, word: false, regex: false, include: '', exclude: '', replacement: 'sum', paths: ['src/app.ts'] }))
+    expect(await screen.findByText('Replaced 2 in 1 file.')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Replace all' }))
+    const ask = await screen.findByRole('alertdialog')
+    await userEvent.click(within(ask).getByRole('button', { name: 'Replace all' }))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/replace')).toHaveLength(2))
+    expect(calls.filter((c) => c.path === '/api/replace')[1]!.body).not.toHaveProperty('paths')
+  })
+
   it('does not search the files again at the end of each turn', async () => {
     const { calls } = backend({ 'POST /api/messages': () => answerOnly() })
     renderIde()

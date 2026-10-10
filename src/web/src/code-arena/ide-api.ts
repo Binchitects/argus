@@ -107,6 +107,10 @@ export const terminalsQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => api<TerminalInfo[]>('/api/terminals', { signal }),
 }
 
+/** Replaces what a search finds (in these files only, when given): how many in each file. */
+export const replaceAll = (o: SearchOptions, replacement: string, paths?: string[]) =>
+  api<{ files: { path: string; replaced: number; version: string }[]; count: number; truncated: boolean }>('/api/replace', { body: { ...o, replacement, ...(paths && { paths }) } })
+
 export const searchQuery = (o: SearchOptions) => {
   const params = new URLSearchParams({ q: o.q })
   if (o.case) params.set('case', '1')

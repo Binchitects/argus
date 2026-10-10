@@ -1,14 +1,16 @@
-import { useQuery } from '@tanstack/react-query'
-import { CaseSensitive, ChevronRight, Regex, WholeWord } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { CaseSensitive, ChevronRight, Regex, Replace, ReplaceAll, WholeWord } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useConfirm } from '@/components/ui/confirm'
 import { Spinner } from '@/components/ui/spinner'
+import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
 import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useEditor } from './editor-state'
 import { FileIcon } from './file-icon'
 import { PartHelp } from './help'
-import { nameOf, parentOf, searchQuery, type SearchMatch, type SearchOptions } from './ide-api'
+import { nameOf, parentOf, replaceAll, searchQuery, type SearchMatch, type SearchOptions } from './ide-api'
 
 /** A value that settles: the last one given, once it has not changed for `ms`. */
 function useSettled(value: string, ms: number): string {
@@ -58,7 +60,8 @@ function Preview({ m }: { m: SearchMatch }) {
 /**
  * Text search across the working directory's files (git's list, so
  * .gitignore holds): case, whole word and regular expressions, files to
- * include and leave out. A result opens its file at the match.
+ * include and leave out. A result opens its file at the match. With Replace
+ * shown, what it finds is replaced in one file or in all of them.
  */
 export function SearchPanel({ focusKey }: { focusKey: number }) {
   const editor = useEditor()
@@ -71,6 +74,30 @@ export function SearchPanel({ focusKey }: { focusKey: number }) {
   const results = useQuery({ ...searchQuery(asked), enabled: asked.q.length > 0, staleTime: 5_000 })
   const set = (key: keyof typeof options) => (on: boolean) => setOptions((o) => ({ ...o, [key]: on }))
   const box = useRef<HTMLInputElement>(null)
+  const queryClient = useQueryClient()
+  const confirm = useConfirm()
+  const [replacing, setReplacing] = useState(false)
+  const [replacement, setReplacement] = useState('')
+  /** Replaces in these files (all of them without), after asking for all; the tabs and the search show the files as they are now. */
+  const replace = async (paths?: string[]) => {
+    const n = paths ? (data?.files.find((f) => f.path === paths[0])?.matches.length ?? 0) : (data?.count ?? 0)
+    if (!paths) {
+      const ok = await confirm({
+        title: `Replace ${n} ${n === 1 ? 'result' : 'results'} in ${data?.files.length ?? 0} files?`,
+        description: `"${asked.q}" becomes "${replacement}". Files with unsaved changes in the editor keep them: saving one then asks first.`,
+        confirm: 'Replace all',
+      })
+      if (!ok) return
+    }
+    try {
+      const done = await replaceAll(asked, replacement, paths)
+      toast.success(`Replaced ${done.count} in ${done.files.length} ${done.files.length === 1 ? 'file' : 'files'}${done.truncated ? ' (the first results only: search again for the rest)' : ''}.`)
+      await Promise.all(done.files.map((f) => editor.refresh(f.path)))
+      for (const queryKey of [['code', 'search'], ['code', 'git'], ['code', 'files']]) void queryClient.invalidateQueries({ queryKey })
+    } catch (e) {
+      toast.error(errorMessage(e))
+    }
+  }
   // Ctrl+Shift+F (or the activity bar) puts the focus in the search box.
   useEffect(() => {
     if (focusKey > 0) box.current?.focus()
@@ -109,6 +136,27 @@ export function SearchPanel({ focusKey }: { focusKey: number }) {
           <Toggle label="Use regular expression" on={options.regex} onChange={set('regex')}>
             <Regex />
           </Toggle>
+        </div>
+        <div className="flex items-center gap-1">
+          <Toggle label={replacing ? 'Hide Replace' : 'Replace'} on={replacing} onChange={setReplacing}>
+            <Replace />
+          </Toggle>
+          {replacing && (
+            <>
+              <input value={replacement} onChange={(e) => setReplacement(e.target.value)} placeholder={options.regex ? 'Replace ($1 for a group)' : 'Replace'} aria-label="Replace with" className={field} />
+              <Tooltip content="Replace all">
+                <button
+                  type="button"
+                  aria-label="Replace all"
+                  disabled={!data?.count}
+                  onClick={() => void replace()}
+                  className="grid size-6 shrink-0 place-items-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 [&_svg]:size-4"
+                >
+                  <ReplaceAll />
+                </button>
+              </Tooltip>
+            </>
+          )}
         </div>
         <label className="grid gap-0.5 text-[0.6875rem] text-muted-foreground">
           files to include
@@ -159,6 +207,16 @@ export function SearchPanel({ focusKey }: { focusKey: number }) {
                     <span className="min-w-0 truncate text-xs text-muted-foreground">{parentOf(f.path)}</span>
                     <span className="ml-auto shrink-0 rounded-full bg-muted px-1.5 text-[0.6875rem] text-muted-foreground tabular-nums">{f.matches.length}</span>
                   </button>
+                  {replacing && (
+                    <button
+                      type="button"
+                      onClick={() => void replace([f.path])}
+                      className="ml-9 text-[0.6875rem] text-primary-ink hover:underline"
+                      aria-label={`Replace in ${f.path}`}
+                    >
+                      Replace in this file
+                    </button>
+                  )}
                   {open && (
                     <ul>
                       {f.matches.map((m) => (

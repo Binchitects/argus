@@ -283,24 +283,7 @@ internal sealed class IdeFiles(Workspace workspace)
     /// </summary>
     public JsonObject Search(SearchQuery q, CancellationToken ct)
     {
-        if (string.IsNullOrEmpty(q.Text))
-        {
-            throw new IdeError(400, "invalid", "Write what to search for.");
-        }
-        Regex pattern;
-        try
-        {
-            var source = q.Regex ? q.Text : Regex.Escape(q.Text);
-            if (q.Word)
-            {
-                source = $@"\b(?:{source})\b";
-            }
-            pattern = new Regex(source, RegexOptions.CultureInvariant | (q.Case ? RegexOptions.None : RegexOptions.IgnoreCase), TimeSpan.FromSeconds(1));
-        }
-        catch (ArgumentException e)
-        {
-            throw new IdeError(400, "invalid", $"That is not a regular expression: {e.Message}");
-        }
+        var pattern = Pattern(q);
         var include = Globs(q.Include);
         var exclude = Globs(q.Exclude);
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -381,6 +364,77 @@ internal sealed class IdeFiles(Workspace workspace)
             throw new IdeError(400, "invalid", "The pattern takes too long to match: make it simpler.");
         }
         return new JsonObject { ["files"] = results, ["count"] = count, ["truncated"] = truncated };
+    }
+
+    /// <summary>What the search panel asks for as a pattern: the text (escaped, unless a regular expression), as a whole word, with case or not.</summary>
+    private static Regex Pattern(SearchQuery q)
+    {
+        if (string.IsNullOrEmpty(q.Text))
+        {
+            throw new IdeError(400, "invalid", "Write what to search for.");
+        }
+        try
+        {
+            var source = q.Regex ? q.Text : Regex.Escape(q.Text);
+            if (q.Word)
+            {
+                source = $@"\b(?:{source})\b";
+            }
+            return new Regex(source, RegexOptions.CultureInvariant | (q.Case ? RegexOptions.None : RegexOptions.IgnoreCase), TimeSpan.FromSeconds(1));
+        }
+        catch (ArgumentException e)
+        {
+            throw new IdeError(400, "invalid", $"That is not a regular expression: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Replaces what the search finds, line by line as it finds it, in the files it finds it in (only <paramref name="paths"/>
+    /// when given): $1 and the like stand for a regular expression's groups; a plain text's replacement is taken as written.
+    /// The files keep their line endings and byte order mark. What changed, per file.
+    /// </summary>
+    public JsonObject Replace(SearchQuery q, string replacement, IReadOnlyCollection<string>? paths, CancellationToken ct)
+    {
+        var pattern = Pattern(q);
+        var with = q.Regex ? replacement : replacement.Replace("$", "$$", StringComparison.Ordinal);
+        var found = Search(q, ct);
+        var changed = new JsonArray();
+        var total = 0;
+        foreach (var file in (found["files"] as JsonArray ?? []).OfType<JsonObject>())
+        {
+            var relative = file.Str("path")!;
+            if (paths is not null && !paths.Contains(relative))
+            {
+                continue;
+            }
+            var full = Resolve(relative);
+            var (text, bom) = Files.ReadText(full);
+            var count = 0;
+            var lines = text.Split('\n');
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var cr = lines[i].EndsWith('\r');
+                var line = cr ? lines[i][..^1] : lines[i];
+                var after = pattern.Replace(line, m =>
+                {
+                    if (m.Length == 0)
+                    {
+                        return m.Value;
+                    }
+                    count++;
+                    return m.Result(with);
+                });
+                lines[i] = cr ? after + "\r" : after;
+            }
+            if (count == 0)
+            {
+                continue;
+            }
+            Files.WriteText(full, string.Join('\n', lines), bom);
+            total += count;
+            changed.Add(new JsonObject { ["path"] = relative, ["replaced"] = count, ["version"] = Version(full) });
+        }
+        return new JsonObject { ["files"] = changed, ["count"] = total, ["truncated"] = found.Bool("truncated") == true };
     }
 
     /// <summary>"src/**/*.ts, docs": globs, a name alone matching at any depth, a folder matching what is in it. One not valid is refused (400).</summary>

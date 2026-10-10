@@ -234,7 +234,10 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   Agent changes also has **Accept all**.
 - **search**: text across the files git sees (`.gitignore` holds), with match
   case, whole word, regular expression, and files to include or exclude; a
-  result opens the file at the match. **Ctrl+P** opens any file by a few
+  result opens the file at the match. **Replace** replaces what it finds, in
+  one file or in all of them (it asks first; `$1` stands for a regular
+  expression's group; the files keep their line endings; a file with unsaved
+  changes in the editor keeps them, and saving it then asks). **Ctrl+P** opens any file by a few
   letters of its path (`app:12` opens it at line 12; `:12` goes to line 12 of
   the file shown, as the line in the status bar does). **Ctrl+Shift+P** runs
   any command by name: the workbench's (save, search, show or hide a part,
@@ -467,6 +470,7 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/sessions/send-all` | sends Arena what it lacks of this folder's sessions: `{sent, failed}` (`failed`: why, per session) |
 | `POST /api/servers/retry` `{name}` | tries that MCP server again now (every one not connected without `name`); the state |
 | `POST /api/jobs/stop` `{id}` | stops a command run with no time limit; 404 for no such job |
+| `POST /api/replace` `{q, case, word, regex, include, exclude, replacement, paths}` | replaces what that search finds (in `paths` only, when given): `{files: [{path, replaced, version}], count, truncated}` |
 | `GET /api/git/status` | `{repository, branch, ahead, behind, files: [{path, staged, changed, from}]}` (`staged`, `changed`: git's letters M, A, D, R, `?` untracked; null: none) |
 | `GET /api/git/diff?path=FILE` | `{path, original, modified}`: at the last commit (null: new) and now (null: deleted) |
 | `POST /api/git/stage`, `/api/git/unstage`, `/api/git/discard` `{paths}` | the status after; 409 `git` with what git said |
