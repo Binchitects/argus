@@ -131,6 +131,10 @@ public sealed class FakeGateway : FakeServer
     /// <summary>The requests answered with a stream that never says anything.</summary>
     public Func<JsonObject, bool> Silent { get; set; } = _ => false;
     public TaskCompletionSource FirstRequest { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    /// <summary>Text completions (/v1/completions): what each asked, how they are answered, and a status to refuse them with (0: none).</summary>
+    public List<JsonObject> TextRequests { get; } = [];
+    public Func<JsonObject, string> TextAnswer { get; set; } = _ => "a + b;";
+    public int TextStatus { get; set; }
 
     public string Url => BaseUrl;
 
@@ -172,6 +176,25 @@ public sealed class FakeGateway : FakeServer
                     ["model_name"] = m,
                     ["model_info"] = new JsonObject { ["max_input_tokens"] = Context, ["supports_function_calling"] = true, ["supports_reasoning"] = true, ["mode"] = "chat" },
                 })]),
+            });
+            return;
+        }
+        if (path == "/v1/completions")
+        {
+            var asked = JsonNode.Parse(body)!.AsObject();
+            lock (_requests)
+            {
+                TextRequests.Add(asked);
+            }
+            if (TextStatus != 0)
+            {
+                await WriteJson(ctx, new JsonObject { ["error"] = new JsonObject { ["message"] = "Limit type: requests. Current limit: 2" } }, TextStatus);
+                return;
+            }
+            await WriteJson(ctx, new JsonObject
+            {
+                ["choices"] = new JsonArray(new JsonObject { ["text"] = TextAnswer(asked), ["finish_reason"] = "stop" }),
+                ["usage"] = new JsonObject { ["prompt_tokens"] = 40, ["completion_tokens"] = 8 },
             });
             return;
         }

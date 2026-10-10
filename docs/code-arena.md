@@ -313,6 +313,24 @@ Lines of a file go to the agent from the editor itself:
 The model gets them numbered, after the message, as `<selection path lines>`
 (with `unsaved="true"` for the editor's text); at most eight a message.
 
+### Code completion
+
+As you type in the editor, Code Arena asks the model for what comes next at
+the cursor (a pause of 300 ms first) and shows it as grey text: **Tab** takes
+it, **Esc** or typing on leaves it. It sends the code before the cursor and
+after it (6,000 and 2,000 characters at most) with the file's path, as the
+model's fill-in-the-middle prompt, in a request of its own: never part of the
+conversation. Its tokens count to the session's, and to your API credit like
+the agent's. It waits while the agent works (the key's requests at once are
+the agent's then), and after the key's limit for a minute it rests half a
+minute. **Complete** in the status bar turns it off or on (kept for every
+run); `"completion": false` in `config.json` turns it off for good.
+
+It uses the session's model, or `"completionModel"`; a small coder model kept
+loaded answers fastest. `"completionTemplate"` names the model family's
+fill-in-the-middle tokens: `qwen` (the default), `deepseek`, `codellama` or
+`starcoder`.
+
 ### Files in answers
 
 In the IDE the agent cites code as `path:line` or `path:start-end`, and a file
@@ -416,6 +434,7 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/sessions/send-all` | sends Arena what it lacks of this folder's sessions: `{sent, failed}` (`failed`: why, per session) |
 | `POST /api/servers/retry` `{name}` | tries that MCP server again now (every one not connected without `name`); the state |
 | `POST /api/jobs/stop` `{id}` | stops a command run with no time limit; 404 for no such job |
+| `POST /api/complete` `{path, prefix, suffix}` | code completion at the editor's cursor: `{text}`; 404 `off` when the config turns it off, 409 `busy` while an answer is written, 429 `limited` at the key's limit |
 | `POST /api/messages` `{text, context}` | a message, answered as a stream of events; `context`: lines chosen in the editor, `[{path, startLine, endLine, text}]` (`text`: the editor's, when unsaved; eight at most). The stream's `{"type":"attached", id, files}` lists what went with the question |
 | `POST /api/queue` `{text, context}` | a message for after the answer being written (runs at once when none is), with its lines; 202 `{queued}` (its place). `/api/messages` while an answer is written is 409 `busy` |
 | `DELETE /api/queue` | drops the queued messages; 204 |
@@ -856,7 +875,7 @@ The rest of the file: `"model"`, `"thinking"`, `"mode"`, `"context"`,
 `"shell"` (the agent's `run_shell`), `"terminalShell"` (the IDE's terminals),
 `"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"argusTools": false`
 (no Argus MCP), `"argusUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
-`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"sandbox"`,
+`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"sandbox"`,
 `"sandboxNetwork"`, `"sandboxWritable"`, `"permissions"`. `ARENA_ARGUS_URL` in the environment gives Argus's address
 for one run.
 

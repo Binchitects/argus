@@ -126,6 +126,13 @@ internal sealed class Config
     public bool SyncChats { get; set; } = true;
     /// <summary>Each turn's changes are committed under Code Arena's name (in a git repository): on unless false.</summary>
     public bool AutoCommit { get; set; } = true;
+    /// <summary>
+    /// Code completion in the IDE's editor (the rest of a line or a few, as grey text to take with Tab): its model (null:
+    /// the session's), and how its prompt marks the code around the cursor (the model's fill-in-the-middle tokens); false: none.
+    /// </summary>
+    public bool Completion { get; set; } = true;
+    public string? CompletionModel { get; set; }
+    public string CompletionTemplate { get; set; } = "qwen";
     /// <summary>The author name of Code Arena's commits (default: Code Arena).</summary>
     public string? CommitName { get; set; }
     /// <summary>The author email of Code Arena's commits (default: code-arena@ the Arena's host).</summary>
@@ -202,6 +209,9 @@ internal sealed class Config
         config.Shell = raw.Str("shell");
         config.TerminalShell = raw.Str("terminalShell");
         config.AutoCommit = raw.Bool("autoCommit") ?? true;
+        config.Completion = raw.Bool("completion") ?? true;
+        config.CompletionModel = raw.Str("completionModel");
+        config.CompletionTemplate = raw.Str("completionTemplate") is { } template && Completions.Templates.ContainsKey(template) ? template : "qwen";
         config.SyncChats = raw.Bool("syncChats") ?? true;
         config.Sandbox = raw.Str("sandbox");
         if (config.Sandbox is { } sandbox && sandbox.Trim().ToLowerInvariant() is not ("auto" or "on" or "off"))
@@ -318,6 +328,9 @@ internal sealed class Config
         Set("shell", Shell);
         Set("terminalShell", TerminalShell);
         Set("autoCommit", AutoCommit ? null : false);
+        Set("completion", Completion ? null : false);
+        Set("completionModel", CompletionModel);
+        Set("completionTemplate", CompletionTemplate == "qwen" ? null : CompletionTemplate);
         Set("syncChats", SyncChats ? null : false);
         Set("sandbox", Sandbox);
         Set("sandboxNetwork", SandboxNetwork ? null : false);

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bot, ExternalLink, Gauge, GitBranch, GitCompareArrows, Info, LoaderCircle, Plug, RotateCw, ShieldCheck, SquareTerminal, Unplug } from 'lucide-react'
+import { Bot, ExternalLink, Gauge, GitBranch, GitCompareArrows, Info, LoaderCircle, Plug, RotateCw, ShieldCheck, Sparkles, SquareTerminal, Unplug } from 'lucide-react'
 import { useState, type ComponentProps, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -36,7 +36,24 @@ const serversSaid = (servers: ServerStatus[]) => servers.map((s) => `${s.title} 
  * the model on the right, with the About box (the version, the licence and the
  * source, which the AGPL offers to everyone who uses it).
  */
-export function StatusBar({ state, onChanges, onTerminal, onChat, onAbout }: { state: CodeState; onChanges: () => void; onTerminal: () => void; onChat: () => void; onAbout: () => void }) {
+export function StatusBar({
+  state,
+  onChanges,
+  onTerminal,
+  onChat,
+  onAbout,
+  completing,
+  onCompleting,
+}: {
+  state: CodeState
+  onChanges: () => void
+  onTerminal: () => void
+  onChat: () => void
+  onAbout: () => void
+  /** Code completion in the editor, as the person set it (code-arena's config may have it off: then it is not shown). */
+  completing: boolean
+  onCompleting: (on: boolean) => void
+}) {
   const { active, cursor, setQuickOpen } = useEditor()
   const changes = useQuery(changesQuery)
   const count = changes.data?.length ?? 0
@@ -100,6 +117,17 @@ export function StatusBar({ state, onChanges, onTerminal, onChat, onAbout }: { s
       <Item onClick={onChat} title="How much runs without asking: change it in the chat" aria-label={`Agent mode ${modeLabels[state.mode]}`} className={cn(state.mode === 'yolo' && 'bg-destructive text-destructive-foreground')}>
         <ShieldCheck aria-hidden="true" /> {modeLabels[state.mode]}
       </Item>
+      {state.completion && (
+        <Item
+          onClick={() => onCompleting(!completing)}
+          aria-pressed={completing}
+          aria-label={`Code completion ${!completing ? 'off' : state.busy ? 'waiting for the agent' : 'on'}`}
+          title={completing ? `Code completion from ${state.completion.model}${state.busy ? ': it waits while the agent works' : ''}. Click to turn it off.` : 'Code completion is off. Click to turn it on.'}
+        >
+          <Sparkles aria-hidden="true" className={cn(!completing && 'opacity-50', completing && state.busy && 'animate-pulse')} />
+          <span className="hidden lg:inline">{completing ? 'Complete' : 'Complete off'}</span>
+        </Item>
+      )}
       <Item onClick={onChat} title="The agent's model: change it in the chat" aria-label={`Agent model ${state.model}`} className="max-w-[40%]">
         <Bot aria-hidden="true" /> <span className="truncate">{state.model}</span>
       </Item>

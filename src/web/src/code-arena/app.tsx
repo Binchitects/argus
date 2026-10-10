@@ -13,6 +13,7 @@ import type { ChatConfig } from '@/pages/chat/types'
 import { stateQuery, type CodeEvent, type CodeState } from './api'
 import { ChangesPanel } from './changes'
 import { Sessions, ThemeMenu, Thread } from './chat'
+import { completion } from './completion'
 import { CommandPalette, type PaletteCommand } from './palette'
 import { EditorArea, EditorProvider } from './editor'
 import { CodeRefsProvider } from './refs'
@@ -87,7 +88,7 @@ export function App() {
     <EditorProvider>
       <HelpProvider manual={state.data.manual}>
         <CodeRefsProvider folder={state.data.folder}>
-          <Workbench state={state.data} config={config.data} lost={state.error ?? config.error} saved={preferences.data?.layout} />
+          <Workbench state={state.data} config={config.data} lost={state.error ?? config.error} saved={preferences.data?.layout} completingSaved={preferences.data?.completion !== false} />
         </CodeRefsProvider>
       </HelpProvider>
     </EditorProvider>
@@ -235,10 +236,28 @@ function ActivityButton({ label, keys, pressed, badge, onClick, children }: { la
   )
 }
 
-function Workbench({ state, config, lost, saved }: { state: CodeState; config: ChatConfig; lost: unknown; saved: Record<string, unknown> | undefined }) {
+function Workbench({
+  state,
+  config,
+  lost,
+  saved,
+  completingSaved,
+}: {
+  state: CodeState
+  config: ChatConfig
+  lost: unknown
+  saved: Record<string, unknown> | undefined
+  completingSaved: boolean
+}) {
   const queryClient = useQueryClient()
   const { refresh, setQuickOpen, save, openDiff, accept, editorCommands, runAction, active } = useEditor()
   const [palette, setPalette] = useState(false)
+  // Code completion: the person's choice (kept with the layout), and not while the agent is working.
+  const [completing, setCompleting] = useState(completingSaved)
+  useEffect(() => {
+    const on = !!state.completion && completing && !state.busy
+    completion.wanted = () => on
+  }, [state.completion, state.busy, completing])
   const [layout, change] = useLayout(saved)
   // The editor sent lines to the chat: it shows, if hidden.
   const showChat = useCallback(() => change({ chatOpen: true }), [change])
@@ -416,6 +435,11 @@ function Workbench({ state, config, lost, saved }: { state: CodeState; config: C
         onTerminal={togglePanel}
         onChat={() => change({ chatOpen: true })}
         onAbout={() => setAbout(true)}
+        completing={completing}
+        onCompleting={(on) => {
+          setCompleting(on)
+          void savePreferences({ completion: on }).catch(() => undefined)
+        }}
       />
       <About open={about} onOpenChange={setAbout} state={state} />
       {palette && <CommandPalette open={palette} onOpenChange={setPalette} commands={commands()} />}

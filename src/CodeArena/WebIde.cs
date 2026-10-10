@@ -41,6 +41,9 @@ internal sealed partial class WebApp
                 case ("GET", "/api/files"):
                     await res.JsonAsync(200, _files.List(Query(req, "path")), ct);
                     return true;
+                case ("POST", "/api/complete"):
+                    await CompleteAsync(Body(req), res, ct);
+                    return true;
                 case ("GET", "/api/files/all"):
                     await res.JsonAsync(200, await Task.Run(() => _files.All(ct), ct), ct);
                     return true;
@@ -261,6 +264,41 @@ internal sealed partial class WebApp
                     terminal.Resize(json.Int("cols") ?? terminal.Cols, json.Int("rows") ?? terminal.Rows);
                     break;
             }
+        }
+    }
+
+    private Completions? _completions;
+
+    /// <summary>
+    /// Code completion at the editor's cursor: {path, prefix, suffix} (the code before and after it) to {text}. 404
+    /// <c>off</c> when the config turns it off; 409 <c>busy</c> while an answer is written (the key's requests at once are
+    /// the agent's then); the gateway's refusals as 429 or 502, not tried again (the person types on).
+    /// </summary>
+    private async Task CompleteAsync(JsonObject body, HttpResponse res, CancellationToken ct)
+    {
+        if (!_rt.Config.Completion)
+        {
+            throw new IdeError(404, "off", "Code completion is off (\"completion\": false in config.json).");
+        }
+        if (Busy())
+        {
+            throw new IdeError(409, "busy", "The agent is working: code completion waits for it.");
+        }
+        var path = body.Str("path") ?? "";
+        var prefix = body.Str("prefix") ?? "";
+        var suffix = body.Str("suffix") ?? "";
+        _completions ??= new Completions(_rt);
+        try
+        {
+            await res.JsonAsync(200, new JsonObject { ["text"] = await _completions.CompleteAsync(path, prefix, suffix, ct) }, ct);
+        }
+        catch (GatewayException e)
+        {
+            throw new IdeError(e.Status == 429 ? 429 : 502, e.Status == 429 ? "limited" : "gateway", e.Message);
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            throw new IdeError(504, "slow", $"No completion: {Fmt.OneLine(e.Message, 200)}");
         }
     }
 }

@@ -493,6 +493,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             // Whether sessions are kept with chats in Arena here (the side bar lists them), and this one's chat (null: none yet).
             ["arenaChats"] = _rt.Config.SyncChats && _rt.Config.Url is { Length: > 0 },
             ["chat"] = _rt.Sync?.Conversation,
+            // Code completion in the editor: its model; null when the config turns it off.
+            ["completion"] = _rt.Config.Completion ? new JsonObject { ["model"] = _rt.Config.CompletionModel ?? _rt.Model.Name } : null,
             ["queued"] = new JsonArray([.. Queued().Select(q => (JsonNode)q)]),
             ["arenaTools"] = _rt.ArenaConnected,
             ["tools"] = new JsonObject

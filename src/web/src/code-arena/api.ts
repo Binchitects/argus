@@ -44,6 +44,8 @@ export interface CodeState {
   arenaChats?: boolean
   /** The chat in Arena this session is kept in step with (null: none yet): the state is read often, for the web's news. */
   chat?: string | null
+  /** Code completion in the editor, from this model; null: off in code-arena's config. */
+  completion?: { model: string } | null
   arenaTools: boolean
   tools: { local: number; servers: { name: string; count: number }[] }
 }

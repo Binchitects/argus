@@ -385,6 +385,25 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
         return new TokenUsage(o.Long("prompt_tokens") ?? 0, cached, o.Long("completion_tokens") ?? 0);
     }
 
+    /// <summary>
+    /// A plain text completion (/v1/completions): what follows a prompt, as code completion in the editor asks for it.
+    /// Not tried again: the person types on, and the next asks anew.
+    /// </summary>
+    public async Task<(string Text, TokenUsage? Usage)> TextCompleteAsync(JsonObject body, CancellationToken ct)
+    {
+        using var req = Request(HttpMethod.Post, "/v1/completions");
+        req.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
+        using var res = await Send(req, ct);
+        var text = await res.Content.ReadAsStringAsync(ct);
+        if (!res.IsSuccessStatusCode)
+        {
+            throw Failure(res.StatusCode, text);
+        }
+        var o = Json.ParseObject(text);
+        var usage = o?["usage"] is JsonObject u ? new TokenUsage(u.Long("prompt_tokens") ?? 0, u["prompt_tokens_details"].Long("cached_tokens") ?? 0, u.Long("completion_tokens") ?? 0) : null;
+        return ((o?["choices"] as JsonArray)?.FirstOrDefault().Str("text") ?? "", usage);
+    }
+
     private HttpRequestMessage Request(HttpMethod method, string path)
     {
         var req = new HttpRequestMessage(method, BaseUrl + path);

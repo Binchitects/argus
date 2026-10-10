@@ -141,6 +141,8 @@ export const revertChange = (path: string) => api<Change[]>('/api/changes/revert
 export interface Preferences {
   layout?: Record<string, unknown>
   theme?: unknown
+  /** Code completion in the editor: false when the person turned it off. */
+  completion?: unknown
 }
 
 /** Read once, when the page opens. */
@@ -152,6 +154,9 @@ export const preferencesQuery = {
 
 /** Keeps these keys (the others stay as they were); keepalive when the page is closing. */
 export const savePreferences = (change: Preferences, keepalive = false) => api<Preferences>('/api/preferences', { body: change, keepalive })
+
+/** Code completion at the editor's cursor: what goes there (empty: nothing). */
+export const completeCode = (body: { path: string; prefix: string; suffix: string }, signal: AbortSignal) => api<{ text: string }>('/api/complete', { body, signal })
 
 export const openTerminal = (cols: number, rows: number) => api<TerminalInfo>('/api/terminals', { body: { cols, rows } })
 export const closeTerminal = (id: string) => api('/api/terminals/close', { body: { id } })

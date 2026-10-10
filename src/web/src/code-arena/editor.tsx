@@ -13,6 +13,7 @@ import { ApiError, errorMessage } from '@/lib/api'
 import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { asks, chatBridge, type Piece } from './bridge'
+import { installCompletions } from './completion'
 import { EditorContext, loadMonaco, modKey, rankFiles, useEditor, type DiffModels, type EditorApi, type FileModel, type MonacoModule, type Reveal, type Tab, type Unsaved } from './editor-state'
 import { acceptChange, allFilesQuery, changesQuery, changeTexts, nameOf, readFile, revertChange, within, writeFile, type Change } from './ide-api'
 
@@ -498,9 +499,12 @@ export function EditorProvider({ children }: { children: ReactNode }) {
           guides: { bracketPairs: true },
           padding: { top: 6 },
           fixedOverflowWidgets: true,
+          // Code completion as grey text: Tab takes it (completion.ts).
+          inlineSuggest: { enabled: true },
         })
         ed.onDidChangeCursorPosition((e) => setCursor({ line: e.position.lineNumber, column: e.position.column }))
         askAboutCode(m, ed, actions.selection)
+        installCompletions(m)
         editor.current = ed
       }
       const ed = editor.current

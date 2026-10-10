@@ -70,6 +70,14 @@ const fakes = vi.hoisted(() => {
       this.listeners.push(f)
       return { dispose() {} }
     }
+    getValueLength() {
+      return this.value.length
+    }
+    /** The offset of a line and column (from 1), as Monaco's. */
+    getOffsetAt(p: { lineNumber: number; column: number }) {
+      const lines = this.value.split('\n')
+      return lines.slice(0, p.lineNumber - 1).reduce((n, l) => n + l.length + 1, 0) + p.column - 1
+    }
     getFullModelRange() {
       return { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 }
     }
@@ -248,6 +256,7 @@ const fakes = vi.hoisted(() => {
     markers: new Map<string, { severity: number; startLineNumber: number; startColumn: number; endLineNumber: number; message: string }[]>(),
     commands: new Map<string, (...args: unknown[]) => void>(),
     codeActions: [] as { provideCodeActions: (...args: unknown[]) => unknown }[],
+    inline: [] as { provideInlineCompletions: (...args: unknown[]) => Promise<{ items: { insertText: string }[] }> }[],
   }
 })
 
@@ -269,10 +278,26 @@ vi.mock('monaco-editor', () => ({
     defineTheme: () => undefined,
     remeasureFonts: () => undefined,
   },
+  Range: class {
+    startLineNumber: number
+    startColumn: number
+    endLineNumber: number
+    endColumn: number
+    constructor(startLineNumber: number, startColumn: number, endLineNumber: number, endColumn: number) {
+      this.startLineNumber = startLineNumber
+      this.startColumn = startColumn
+      this.endLineNumber = endLineNumber
+      this.endColumn = endColumn
+    }
+  },
   KeyMod: { CtrlCmd: 2048 },
   KeyCode: { KeyL: 42 },
   MarkerSeverity: { Hint: 1, Info: 2, Warning: 4, Error: 8 },
   languages: {
+    registerInlineCompletionsProvider: (_: unknown, provider: (typeof fakes.inline)[number]) => {
+      fakes.inline.push(provider)
+      return { dispose() {} }
+    },
     registerCodeActionProvider: (_: string, provider: { provideCodeActions: (...args: unknown[]) => unknown }) => {
       fakes.codeActions.push(provider)
       return { dispose() {} }
@@ -1290,6 +1315,31 @@ describe('Code Arena, the IDE', () => {
     expect(await within(tabs()).findByRole('tab', { name: 'cart.ts' })).toHaveAttribute('aria-selected', 'true')
     t.links[0]!.provideLinks(2, (l) => (links = l))
     expect(links).toBeUndefined()
+  })
+
+  it('completes code at the cursor as grey text, and the status bar turns it off', async () => {
+    const { calls } = backend({
+      'GET /api/state': () => ({ json: { ...state, completion: { model: 'model-a' } } }),
+      'POST /api/complete': () => ({ json: { text: '+ 1' } }),
+    })
+    renderIde()
+    await openApp()
+    expect(editor().options.inlineSuggest).toEqual({ enabled: true })
+    const [provider] = fakes.inline
+    const token = () => ({ isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) })
+    const model = editor().model!
+    // After a pause in the typing: the code before the cursor and after it go; the answer comes back to insert there.
+    const got = await provider!.provideInlineCompletions(model, { lineNumber: 1, column: 16 }, {}, token())
+    expect(got.items.map((i) => i.insertText)).toEqual(['+ 1'])
+    expect(calls.find((c) => c.path === '/api/complete')?.body).toEqual({ path: 'src/app.ts', prefix: 'const total = 1', suffix: '\nconsole.log(total)\n' })
+
+    // Turned off in the status bar: nothing is asked, and the choice is kept.
+    const toggle = screen.getByRole('button', { name: 'Code completion on' })
+    await userEvent.click(toggle)
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/preferences' && c.method === 'POST')?.body).toEqual({ completion: false }))
+    const asked = calls.filter((c) => c.path === '/api/complete').length
+    expect((await provider!.provideInlineCompletions(model, { lineNumber: 2, column: 1 }, {}, token())).items).toEqual([])
+    expect(calls.filter((c) => c.path === '/api/complete')).toHaveLength(asked)
   })
 
   it('does not search the files again at the end of each turn', async () => {
