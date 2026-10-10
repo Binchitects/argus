@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bot, ExternalLink, Gauge, GitBranch, GitCompareArrows, Info, LoaderCircle, Plug, RotateCw, ShieldCheck, Sparkles, SquareTerminal, Unplug } from 'lucide-react'
+import { Bot, CircleAlert, ExternalLink, Gauge, GitBranch, GitCompareArrows, Info, LoaderCircle, Plug, RotateCw, ShieldCheck, Sparkles, SquareTerminal, TriangleAlert, Unplug } from 'lucide-react'
 import { useState, type ComponentProps, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -11,7 +11,7 @@ import { formatValue } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { changeSettings, compaction, modeLabels, retryServers, stateQuery, type CodeState, type ServerStatus } from './api'
 import { useEditor } from './editor-state'
-import { changesQuery } from './ide-api'
+import { changesQuery, problemsQuery } from './ide-api'
 
 function Item({ className, ...props }: ComponentProps<'button'>) {
   return (
@@ -39,6 +39,7 @@ const serversSaid = (servers: ServerStatus[]) => servers.map((s) => `${s.title} 
 export function StatusBar({
   state,
   onChanges,
+  onProblems,
   onTerminal,
   onChat,
   onAbout,
@@ -47,6 +48,7 @@ export function StatusBar({
 }: {
   state: CodeState
   onChanges: () => void
+  onProblems: () => void
   onTerminal: () => void
   onChat: () => void
   onAbout: () => void
@@ -56,6 +58,10 @@ export function StatusBar({
 }) {
   const { active, cursor, setQuickOpen } = useEditor()
   const changes = useQuery(changesQuery)
+  const check = useQuery(problemsQuery).data
+  const problems = check?.ran ? check.problems : null
+  const errors = problems?.filter((p) => p.severity === 'error').length ?? 0
+  const warnings = problems?.filter((p) => p.severity === 'warning').length ?? 0
   const count = changes.data?.length ?? 0
   const [dialog, setDialog] = useState<'context' | 'servers' | null>(null)
   const running = state.jobs.filter((j) => j.running).length
@@ -74,6 +80,12 @@ export function StatusBar({
       <Item onClick={onChanges} aria-label={`Agent changes: ${count} ${count === 1 ? 'file' : 'files'}`} title="The files the agent changed">
         <GitCompareArrows aria-hidden="true" /> {count}
       </Item>
+      {problems && (
+        <Item onClick={onProblems} aria-label={`Problems: ${errors} ${errors === 1 ? 'error' : 'errors'}, ${warnings} ${warnings === 1 ? 'warning' : 'warnings'}`} title="The check's problems">
+          <CircleAlert aria-hidden="true" /> {errors}
+          <TriangleAlert aria-hidden="true" /> {warnings}
+        </Item>
+      )}
       <Item onClick={onTerminal} aria-label="Show or hide the terminal" title="Terminal (Ctrl+`)">
         <SquareTerminal aria-hidden="true" />
       </Item>

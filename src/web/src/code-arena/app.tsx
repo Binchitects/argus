@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, CircleHelp, Files, GitCompareArrows, Info, MessagesSquare, Search, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, CircleAlert, CircleHelp, Files, GitCompareArrows, Info, MessagesSquare, Search, SquareTerminal, type LucideIcon } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -15,13 +15,14 @@ import { ChangesPanel } from './changes'
 import { Sessions, ThemeMenu, Thread } from './chat'
 import { completion } from './completion'
 import { CommandPalette, type PaletteCommand } from './palette'
+import { ProblemsPanel } from './problems'
 import { EditorArea, EditorProvider } from './editor'
 import { CodeRefsProvider } from './refs'
 import { modKey, onMac, useEditor } from './editor-state'
 import { Explorer } from './explorer'
 import { HelpProvider } from './help'
 import { useOpenHelp } from './help-context'
-import { changesQuery, folderQuery, parentOf, preferencesQuery, savePreferences, type Preferences } from './ide-api'
+import { changesQuery, folderQuery, parentOf, preferencesQuery, problemsQuery, savePreferences, type Preferences } from './ide-api'
 import { SearchPanel } from './search'
 import { Splitter } from './splitter'
 import { About, StatusBar } from './status-bar'
@@ -144,7 +145,7 @@ function Unreachable({ error }: { error: unknown }) {
   )
 }
 
-type View = 'explorer' | 'search' | 'changes' | 'chat'
+type View = 'explorer' | 'search' | 'changes' | 'problems' | 'chat'
 
 /** Where the panels are and how large: the person's own, kept by code-arena for every run. */
 interface Layout {
@@ -166,7 +167,7 @@ function layoutOf(saved: Record<string, unknown> | undefined): Layout {
   const layout = { ...defaults }
   if (!saved) return layout
   const view = saved.view
-  if (view === 'explorer' || view === 'search' || view === 'changes' || view === 'chat') layout.view = view
+  if (view === 'explorer' || view === 'search' || view === 'changes' || view === 'problems' || view === 'chat') layout.view = view
   for (const k of ['side', 'chat', 'panel'] as const) {
     const size = saved[k]
     if (typeof size === 'number' && Number.isFinite(size)) layout[k] = Math.round(Math.min(bounds[k][1], Math.max(bounds[k][0], size)))
@@ -209,6 +210,7 @@ const views: { id: View; label: string; icon: LucideIcon; keys?: string }[] = [
   { id: 'explorer', label: 'Explorer', icon: Files, keys: `${modKey}+Shift+E` },
   { id: 'search', label: 'Search', icon: Search, keys: `${modKey}+Shift+F` },
   { id: 'changes', label: 'Agent changes', icon: GitCompareArrows },
+  { id: 'problems', label: 'Problems', icon: CircleAlert },
   { id: 'chat', label: 'Chat', icon: MessagesSquare },
 ]
 
@@ -250,7 +252,7 @@ function Workbench({
   completingSaved: boolean
 }) {
   const queryClient = useQueryClient()
-  const { refresh, setQuickOpen, save, openDiff, accept, editorCommands, runAction, active } = useEditor()
+  const { refresh, setQuickOpen, save, openDiff, accept, editorCommands, runAction, showProblems, active } = useEditor()
   const [palette, setPalette] = useState(false)
   // Code completion: the person's choice (kept with the layout), and not while the agent is working.
   const [completing, setCompleting] = useState(completingSaved)
@@ -329,6 +331,12 @@ function Workbench({
   const onTurnEnd = useCallback(() => void refresh(), [refresh])
 
   const count = changes.data?.length ?? 0
+  // The check's problems: marked in the editor's files, counted on the activity bar and the status bar.
+  const problems = useQuery(problemsQuery).data?.problems
+  const errors = problems?.filter((p) => p.severity === 'error').length ?? 0
+  useEffect(() => {
+    if (problems) showProblems(problems)
+  }, [problems, showProblems])
   const maxPanel = Math.min(bounds.panel[1], Math.max(160, height - 220))
   const { setPreference } = useTheme()
   // Ctrl+Shift+P: the workbench's commands, then the editor's (while a file is shown).
@@ -341,6 +349,7 @@ function Workbench({
       { id: 'search', label: 'Search the files', keys: `${modKey}+Shift+F`, run: () => show('search') },
       { id: 'explorer', label: 'Show the Explorer', keys: `${modKey}+Shift+E`, run: () => show('explorer') },
       { id: 'changes', label: "Show the agent's changes", run: () => show('changes') },
+      { id: 'problems', label: 'Show the problems', run: () => show('problems') },
       count > 0 && { id: 'accept-all', label: "Accept all the agent's changes", run: () => void accept() },
       { id: 'sessions', label: 'Show the chat sessions', run: () => show('chat') },
       { id: 'chat', label: layout.chatOpen ? 'Hide the chat' : 'Show the chat', run: () => change({ chatOpen: !layout.chatOpen }) },
@@ -362,7 +371,7 @@ function Workbench({
       <div className="flex min-h-0 flex-1">
         <nav aria-label="Activity bar" className="flex w-12 shrink-0 flex-col border-r bg-sidebar">
           {views.map((v) => (
-            <ActivityButton key={v.id} label={v.label} keys={v.keys} pressed={layout.sideOpen && layout.view === v.id} badge={v.id === 'changes' ? count : undefined} onClick={() => show(v.id, true)}>
+            <ActivityButton key={v.id} label={v.label} keys={v.keys} pressed={layout.sideOpen && layout.view === v.id} badge={v.id === 'changes' ? count : v.id === 'problems' ? errors : undefined} onClick={() => show(v.id, true)}>
               <v.icon aria-hidden="true" />
             </ActivityButton>
           ))}
@@ -390,6 +399,9 @@ function Workbench({
           </div>
           <div hidden={layout.view !== 'changes'} className="h-full">
             <ChangesPanel />
+          </div>
+          <div hidden={layout.view !== 'problems'} className="h-full">
+            <ProblemsPanel />
           </div>
           <div hidden={layout.view !== 'chat'} className="h-full">
             <Sessions state={state} />
@@ -432,6 +444,7 @@ function Workbench({
       <StatusBar
         state={state}
         onChanges={() => show('changes')}
+        onProblems={() => show('problems')}
         onTerminal={togglePanel}
         onChat={() => change({ chatOpen: true })}
         onAbout={() => setAbout(true)}

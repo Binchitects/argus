@@ -8,7 +8,7 @@ import { modKey } from './editor-state'
  */
 
 /** The parts of the workbench. */
-export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status'
+export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status'
 
 export interface PartHelp extends HelpPart {
   /** Where the manual's Code Arena page (docs/code-arena.md) tells the rest: one of its headings. */
@@ -37,6 +37,11 @@ export const parts: Record<Part, PartHelp> = {
     name: 'Agent changes',
     text: 'The files the agent changed in this run that you have not kept or put back yet. Each opens as it was before the agent and as it is now. **Accept** keeps a change, **Revert** puts the file back, **Accept all** keeps them all.',
     manual: 'the-ide',
+  },
+  problems: {
+    name: 'Problems',
+    text: "The errors and warnings of the project's own check (its build, type check or linter): **Run check** runs it. Each opens the file at its line, where the editor marks it too; **Fix** asks the agent to fix it.",
+    manual: 'problems',
   },
   sessions: {
     name: 'Sessions',
@@ -128,6 +133,7 @@ export const regions: Record<string, Part> = {
   Search: 'search',
   'Search the files': 'search',
   'Agent changes': 'changes',
+  Problems: 'problems',
   Sessions: 'sessions',
   Editor: 'editor',
   Terminal: 'terminal',

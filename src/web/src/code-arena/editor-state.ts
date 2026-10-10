@@ -1,6 +1,7 @@
 import type * as Monaco from 'monaco-editor'
 import { createContext, use } from 'react'
 import type { Piece } from './bridge'
+import type { CheckProblem } from './ide-api'
 
 // The editor's shared parts: Monaco's loader, the tabs' shape, the context the
 // panels reach the editor through, and quick open's ranking.
@@ -89,6 +90,8 @@ export interface EditorApi {
   editorCommands: () => { id: string; label: string }[]
   /** Runs an editor command on the file shown. */
   runAction: (id: string) => void
+  /** The check's problems, marked in the files (open now, and opened later). */
+  showProblems: (problems: CheckProblem[]) => void
   quickOpen: boolean
   /** Opens quick open (with this typed already: ":" goes to a line), or closes it. */
   setQuickOpen: (open: boolean, typed?: string) => void

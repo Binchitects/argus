@@ -73,6 +73,15 @@ const fakes = vi.hoisted(() => {
     getValueLength() {
       return this.value.length
     }
+    getLineCount() {
+      return this.value.split('\n').length
+    }
+    getLineMaxColumn(line: number) {
+      return (this.value.split('\n')[line - 1] ?? '').length + 1
+    }
+    getWordAtPosition() {
+      return null
+    }
     /** The offset of a line and column (from 1), as Monaco's. */
     getOffsetAt(p: { lineNumber: number; column: number }) {
       const lines = this.value.split('\n')
@@ -255,6 +264,8 @@ const fakes = vi.hoisted(() => {
     /** What the editor marks (a language's problems), by the file's address. */
     markers: new Map<string, { severity: number; startLineNumber: number; startColumn: number; endLineNumber: number; message: string }[]>(),
     commands: new Map<string, (...args: unknown[]) => void>(),
+    /** The markers the page set, by owner and the file's address. */
+    marked: new Map<string, { startLineNumber: number; message: string }[]>(),
     codeActions: [] as { provideCodeActions: (...args: unknown[]) => unknown }[],
     inline: [] as { provideInlineCompletions: (...args: unknown[]) => Promise<{ items: { insertText: string }[] }> }[],
   }
@@ -271,6 +282,8 @@ vi.mock('monaco-editor', () => ({
     },
     setTheme: (t: string) => fakes.themes.push(t),
     getModelMarkers: ({ resource }: { resource: InstanceType<typeof fakes.Uri> }) => fakes.markers.get(resource.toString()) ?? [],
+    setModelMarkers: (model: InstanceType<typeof fakes.Model>, owner: string, markers: { startLineNumber: number; message: string }[]) =>
+      fakes.marked.set(`${owner}:${model.uri?.toString()}`, markers),
     registerCommand: (id: string, run: (...args: unknown[]) => void) => {
       fakes.commands.set(id, run)
       return { dispose() {} }
@@ -519,7 +532,7 @@ describe('Code Arena, the IDE', () => {
     const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
     // The agent's changes are counted on their button.
     expect(await within(bar).findByRole('button', { name: 'Agent changes (1)' })).toBeInTheDocument()
-    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Agent changes (1)', 'Chat', 'Terminal', 'Theme', 'Help', 'About Code Arena'])
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Agent changes (1)', 'Problems', 'Chat', 'Terminal', 'Theme', 'Help', 'About Code Arena'])
     expect(within(bar).getByRole('button', { name: 'Explorer' })).toHaveAttribute('aria-pressed', 'true')
     expect(await screen.findByRole('tree', { name: 'Files' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'No file is open' })).toBeInTheDocument()
@@ -1342,6 +1355,41 @@ describe('Code Arena, the IDE', () => {
     expect(calls.filter((c) => c.path === '/api/complete')).toHaveLength(asked)
   })
 
+  it("runs the project's check, lists its problems by file, marks them in the editor and asks the agent to fix one", async () => {
+    let ran = false
+    const problem = { path: 'src/app.ts', line: 2, column: 9, severity: 'error', code: 'TS2304', message: "Cannot find name 'totl'." }
+    const check = () => ({ command: 'npx --no-install tsc --noEmit', running: false, ran: ran ? '2026-10-11T10:00:00Z' : null, exitCode: ran ? 2 : null, said: null, problems: ran ? [problem] : [] })
+    const { calls } = backend({
+      'GET /api/problems': () => ({ json: check() }),
+      'POST /api/problems/run': () => {
+        ran = true
+        return { json: check() }
+      },
+      'POST /api/messages': () => answerOnly(),
+    })
+    renderIde()
+    await openApp()
+    await userEvent.click(screen.getByRole('button', { name: 'Problems' }))
+    const panel = await screen.findByRole('complementary', { name: 'Problems' })
+    expect(await within(panel).findByText(/Run the check/)).toBeInTheDocument()
+
+    await userEvent.click(within(panel).getByRole('button', { name: 'Run check' }))
+    const list = await within(panel).findByRole('list', { name: 'Problems in src/app.ts' })
+    expect(within(list).getByText(/Cannot find name 'totl'/)).toBeInTheDocument()
+    expect(within(screen.getByRole('contentinfo', { name: 'Status bar' })).getByRole('button', { name: 'Problems: 1 error, 0 warnings' })).toBeInTheDocument()
+    // Marked in the file open.
+    await waitFor(() => expect(fakes.marked.get('check:file:///src/app.ts')?.map((m) => [m.startLineNumber, m.message])).toEqual([[2, "Cannot find name 'totl'."]]))
+
+    // A problem opens its file at its line; Fix asks the agent, with the line.
+    await userEvent.click(within(list).getByRole('button', { name: /Cannot find name 'totl'/ }))
+    await waitFor(() => expect(editor().selection).toEqual({ startLineNumber: 2, startColumn: 9, endLineNumber: 2, endColumn: 9 }))
+    await userEvent.click(within(list).getByRole('button', { name: 'Fix src/app.ts:2' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/messages')?.body).toEqual({
+      text: "Fix the problems in this code: 2:9 TS2304 Cannot find name 'totl'.",
+      context: [{ path: 'src/app.ts', startLine: 2, endLine: 2 }],
+    }))
+  })
+
   it('does not search the files again at the end of each turn', async () => {
     const { calls } = backend({ 'POST /api/messages': () => answerOnly() })
     renderIde()
@@ -1419,7 +1467,7 @@ describe('Code Arena, the help', () => {
     await screen.findByRole('tree', { name: 'Files' })
     const seen = new Set(regionsShown())
     // Every view of the side bar, and the terminal panel, drawn once.
-    for (const name of ['Search', 'Agent changes (1)', 'Chat']) {
+    for (const name of ['Search', 'Agent changes (1)', 'Problems', 'Chat']) {
       await userEvent.click(within(bar).getByRole('button', { name }))
       for (const r of regionsShown()) seen.add(r)
     }

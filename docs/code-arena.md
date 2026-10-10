@@ -198,7 +198,8 @@ it. On another machine over SSH: `code-arena --port 8765 --no-open` there,
 The page is laid out as VS Code is, in Argus Arena's design system:
 
 - **activity bar** (the left edge): Explorer, Search, Agent changes (with a
-  count of the files) and Chat switch the side bar; the one shown hides it.
+  count of the files), Problems (with a count of the errors) and Chat switch
+  the side bar; the one shown hides it.
   At its foot: the terminal panel, the theme (light, dark or the system's),
   Help and About.
 - **help**: Help in the activity bar opens the IDE's help over the page:
@@ -312,6 +313,23 @@ Lines of a file go to the agent from the editor itself:
 
 The model gets them numbered, after the message, as `<selection path lines>`
 (with `unsaved="true"` for the editor's text); at most eight a message.
+
+### Problems
+
+**Problems** in the activity bar runs the project's own check and lists the
+errors and warnings it printed, by file: **Run check** runs it (in the folder,
+as your terminals run, with no sandbox; five minutes at most). Each problem
+opens its file at its line, where the editor marks it too (as the editor's
+own problems, with **Fix with Code Arena** in the light bulb), and **Fix**
+beside it asks the agent to fix it. The status bar counts the errors and
+warnings; the activity bar the errors.
+
+The check is `"checkCommand"` in `config.json`, else the first found by the
+project's files: `dotnet build` (a solution or project), `tsc --noEmit`
+(tsconfig.json), `npm run lint` (a `lint` script), `cargo check`, `go vet`,
+`ruff check`. Its output is read in the common forms: `path(line,col): error
+CODE: message` (MSBuild, tsc) and `path:line:col: error: message` (gcc, clang,
+go, cargo, ruff, eslint's unix format); only the folder's files count.
 
 ### Code completion
 
@@ -434,6 +452,8 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/sessions/send-all` | sends Arena what it lacks of this folder's sessions: `{sent, failed}` (`failed`: why, per session) |
 | `POST /api/servers/retry` `{name}` | tries that MCP server again now (every one not connected without `name`); the state |
 | `POST /api/jobs/stop` `{id}` | stops a command run with no time limit; 404 for no such job |
+| `GET /api/problems` | the check's last run: `{command, running, ran, exitCode, said, problems: [{path, line, column, severity, code, message}]}` (`ran` null before the first; `command` null when none is found) |
+| `POST /api/problems/run` | runs the check (waits for the one running) and answers as above; 404 `no_check` when none is found |
 | `POST /api/complete` `{path, prefix, suffix}` | code completion at the editor's cursor: `{text}`; 404 `off` when the config turns it off, 409 `busy` while an answer is written, 429 `limited` at the key's limit |
 | `POST /api/messages` `{text, context}` | a message, answered as a stream of events; `context`: lines chosen in the editor, `[{path, startLine, endLine, text}]` (`text`: the editor's, when unsaved; eight at most). The stream's `{"type":"attached", id, files}` lists what went with the question |
 | `POST /api/queue` `{text, context}` | a message for after the answer being written (runs at once when none is), with its lines; 202 `{queued}` (its place). `/api/messages` while an answer is written is 409 `busy` |
@@ -875,7 +895,7 @@ The rest of the file: `"model"`, `"thinking"`, `"mode"`, `"context"`,
 `"shell"` (the agent's `run_shell`), `"terminalShell"` (the IDE's terminals),
 `"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"argusTools": false`
 (no Argus MCP), `"argusUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
-`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"sandbox"`,
+`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"checkCommand"`, `"sandbox"`,
 `"sandboxNetwork"`, `"sandboxWritable"`, `"permissions"`. `ARENA_ARGUS_URL` in the environment gives Argus's address
 for one run.
 

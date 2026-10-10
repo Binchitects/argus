@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils'
 import { asks, chatBridge, type Piece } from './bridge'
 import { installCompletions } from './completion'
 import { EditorContext, loadMonaco, modKey, rankFiles, useEditor, type DiffModels, type EditorApi, type FileModel, type MonacoModule, type Reveal, type Tab, type Unsaved } from './editor-state'
-import { acceptChange, allFilesQuery, changesQuery, changeTexts, nameOf, readFile, revertChange, within, writeFile, type Change } from './ide-api'
+import { acceptChange, allFilesQuery, changesQuery, changeTexts, nameOf, readFile, revertChange, within, writeFile, type Change, type CheckProblem } from './ide-api'
 
 const diffId = (path: string) => `diff:${path}`
 
@@ -86,6 +86,31 @@ function askAboutCode(m: MonacoModule, ed: Monaco.editor.IStandaloneCodeEditor, 
   })
 }
 
+/** The check's problems in a file, as the editor marks them (the word they start at, else to the line's end). */
+function markProblems(m: MonacoModule, model: Monaco.editor.ITextModel, problems: CheckProblem[]) {
+  const severity = { error: m.monaco.MarkerSeverity.Error, warning: m.monaco.MarkerSeverity.Warning, info: m.monaco.MarkerSeverity.Info }
+  const lines = model.getLineCount()
+  m.monaco.editor.setModelMarkers(
+    model,
+    'check',
+    problems
+      .filter((p) => p.line <= lines)
+      .map((p) => {
+        const word = model.getWordAtPosition({ lineNumber: p.line, column: p.column })
+        return {
+          startLineNumber: p.line,
+          startColumn: word?.startColumn ?? p.column,
+          endLineNumber: p.line,
+          endColumn: word?.endColumn ?? model.getLineMaxColumn(p.line),
+          message: p.message,
+          severity: severity[p.severity],
+          code: p.code ?? undefined,
+          source: 'check',
+        }
+      }),
+  )
+}
+
 export function EditorProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
@@ -108,6 +133,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   const activeRef = useRef<string | null>(null)
   const themeRef = useRef(resolved)
   const mon = useRef<MonacoModule | null>(null)
+  const problemsOf = useRef<CheckProblem[]>([])
   const files = useRef(new Map<string, FileModel>())
   const diffs = useRef(new Map<string, DiffModels>())
   const codeHost = useRef<HTMLDivElement | null>(null)
@@ -203,6 +229,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         const f: FileModel = { path: tab.path, model, version: file.version, savedAlt: model.getAlternativeVersionId(), view: null }
         model.onDidChangeContent(() => markDirty(f))
         files.current.set(tab.path, f)
+        markProblems(m, model, problemsOf.current.filter((p) => p.path === tab.path))
         update(tab.id, { status: 'ready', language: language.name })
       } catch (e) {
         const tab = mine()
@@ -398,6 +425,14 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       old.dispose()
     }
 
+    /** The check's problems: marked in the files open now, and in those opened later. */
+    const showProblems = (problems: CheckProblem[]) => {
+      problemsOf.current = problems
+      const m = mon.current
+      if (!m) return
+      for (const f of files.current.values()) markProblems(m, f.model, problems.filter((p) => p.path === f.path))
+    }
+
     const selection = (): Piece | null => {
       const ed = editor.current
       const tab = tabsRef.current.find((t) => t.id === activeRef.current)
@@ -464,7 +499,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       diffHost.current = el
     }
 
-    return { open, openDiff, activate: (id: string) => activate(id), close, save, refresh, moved, removed, accept, revert, selection, editorCommands, runAction, bindEditor, bindDiff }
+    return { open, openDiff, activate: (id: string) => activate(id), close, save, refresh, moved, removed, accept, revert, selection, editorCommands, runAction, showProblems, bindEditor, bindDiff }
   }, [confirm, queryClient])
 
   const active = tabs.find((t) => t.id === activeId) ?? null

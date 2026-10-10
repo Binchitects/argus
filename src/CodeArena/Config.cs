@@ -131,6 +131,8 @@ internal sealed class Config
     /// the session's), and how its prompt marks the code around the cursor (the model's fill-in-the-middle tokens); false: none.
     /// </summary>
     public bool Completion { get; set; } = true;
+    /// <summary>The project's check for the IDE's Problems (a build, a type check or a linter); null: found by the project's files.</summary>
+    public string? CheckCommand { get; set; }
     public string? CompletionModel { get; set; }
     public string CompletionTemplate { get; set; } = "qwen";
     /// <summary>The author name of Code Arena's commits (default: Code Arena).</summary>
@@ -211,6 +213,7 @@ internal sealed class Config
         config.AutoCommit = raw.Bool("autoCommit") ?? true;
         config.Completion = raw.Bool("completion") ?? true;
         config.CompletionModel = raw.Str("completionModel");
+        config.CheckCommand = raw.Str("checkCommand");
         config.CompletionTemplate = raw.Str("completionTemplate") is { } template && Completions.Templates.ContainsKey(template) ? template : "qwen";
         config.SyncChats = raw.Bool("syncChats") ?? true;
         config.Sandbox = raw.Str("sandbox");
@@ -330,6 +333,7 @@ internal sealed class Config
         Set("autoCommit", AutoCommit ? null : false);
         Set("completion", Completion ? null : false);
         Set("completionModel", CompletionModel);
+        Set("checkCommand", CheckCommand);
         Set("completionTemplate", CompletionTemplate == "qwen" ? null : CompletionTemplate);
         Set("syncChats", SyncChats ? null : false);
         Set("sandbox", Sandbox);

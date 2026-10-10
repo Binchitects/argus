@@ -31,3 +31,7 @@ export const asks = {
     problems.length > 0 ? `Fix the problems in this code: ${problems.join('; ')}.` : 'Find the bugs in this code and fix them.',
   complete: "Complete this code: write what is missing (a function's body, a TODO) with edit_file, keeping its signature and the file's style.",
 }
+
+/** How a problem the check found reads to the agent: line:column, its code and message. */
+export const problemText = (p: { line: number; column: number; code: string | null; message: string }) =>
+  `${p.line}:${p.column} ${p.code ? `${p.code} ` : ''}${p.message.replace(/\.$/, '')}`

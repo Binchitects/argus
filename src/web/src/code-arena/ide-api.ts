@@ -155,6 +155,35 @@ export const preferencesQuery = {
 /** Keeps these keys (the others stay as they were); keepalive when the page is closing. */
 export const savePreferences = (change: Preferences, keepalive = false) => api<Preferences>('/api/preferences', { body: change, keepalive })
 
+/** A problem the project's check found: a file of the folder, its line and column (from 1), how bad, its code and what it says. */
+export interface CheckProblem {
+  path: string
+  line: number
+  column: number
+  severity: 'error' | 'warning' | 'info'
+  code: string | null
+  message: string
+}
+
+/** The check's last run: its command (or the one it would run), whether one runs now, when, its exit code, and what it found. */
+export interface CheckRun {
+  command: string | null
+  running: boolean
+  ran: string | null
+  exitCode: number | null
+  /** What it printed, when it failed and nothing in it could be read as a problem. */
+  said: string | null
+  problems: CheckProblem[]
+}
+
+export const problemsQuery = {
+  queryKey: ['code', 'problems'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<CheckRun>('/api/problems', { signal }),
+}
+
+/** Runs the project's check (waits for the one running, when one is); what it found. */
+export const runCheck = () => api<CheckRun>('/api/problems/run', { body: {} })
+
 /** Code completion at the editor's cursor: what goes there (empty: nothing). */
 export const completeCode = (body: { path: string; prefix: string; suffix: string }, signal: AbortSignal) => api<{ text: string }>('/api/complete', { body, signal })
 

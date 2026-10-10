@@ -22,12 +22,14 @@ internal sealed partial class WebApp
     private AgentChanges _changes = null!;
     private Terminals _terminals = null!;
     private PagePreferences _preferences = null!;
+    private Problems _problems = null!;
 
     private void StartIde()
     {
         _files = new IdeFiles(_rt.Workspace);
         _changes = new AgentChanges(_rt.Workspace);
         _terminals = new Terminals(_rt.Workspace, _rt.Config, _rt.Env.Env);
+        _problems = new Problems(_rt.Workspace, _rt.Config);
         _preferences = new PagePreferences(Path.Combine(_rt.Env.Paths.DataDir, PagePreferences.FileName));
     }
 
@@ -43,6 +45,12 @@ internal sealed partial class WebApp
                     return true;
                 case ("POST", "/api/complete"):
                     await CompleteAsync(Body(req), res, ct);
+                    return true;
+                case ("GET", "/api/problems"):
+                    await res.JsonAsync(200, ProblemsJson(_problems.Last), ct);
+                    return true;
+                case ("POST", "/api/problems/run"):
+                    await res.JsonAsync(200, ProblemsJson(await _problems.RunAsync()), ct);
                     return true;
                 case ("GET", "/api/files/all"):
                     await res.JsonAsync(200, await Task.Run(() => _files.All(ct), ct), ct);
@@ -266,6 +274,20 @@ internal sealed partial class WebApp
             }
         }
     }
+
+    /// <summary>The check's last run as the page shows it: its command (or the one it would run), how it ended, and the problems.</summary>
+    private JsonObject ProblemsJson(CheckRun? run) => new()
+    {
+        ["command"] = run?.Command ?? _problems.Command(),
+        ["running"] = _problems.Running,
+        ["ran"] = run?.Started.ToString("o"),
+        ["exitCode"] = run?.ExitCode,
+        ["said"] = run?.Said,
+        ["problems"] = new JsonArray([.. (run?.Found ?? []).Select(p => (JsonNode)new JsonObject
+        {
+            ["path"] = p.Path, ["line"] = p.Line, ["column"] = p.Column, ["severity"] = p.Severity, ["code"] = p.Code, ["message"] = p.Message,
+        })]),
+    };
 
     private Completions? _completions;
 
