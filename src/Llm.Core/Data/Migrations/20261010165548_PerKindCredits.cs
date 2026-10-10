@@ -10,10 +10,13 @@ namespace Llm.Core.Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.RenameColumn(
-                name: "Credit",
+            // Columns are only added: the release before reads groups."Credit" still, so it can run on this database
+            // until the backup taken before the upgrade is restored.
+            migrationBuilder.AddColumn<decimal>(
+                name: "VideoCredit",
                 table: "groups",
-                newName: "VideoCredit");
+                type: "numeric",
+                nullable: true);
 
             migrationBuilder.AddColumn<decimal>(
                 name: "ApiCredit",
@@ -41,7 +44,7 @@ namespace Llm.Core.Data.Migrations
 
             // A group's one credit (over the chat and API keys) becomes its credit of every kind.
             migrationBuilder.Sql("""
-                update groups set "ChatCredit" = "VideoCredit", "ApiCredit" = "VideoCredit", "PictureCredit" = "VideoCredit", "SpeechCredit" = "VideoCredit"
+                update groups set "ChatCredit" = "Credit", "ApiCredit" = "Credit", "PictureCredit" = "Credit", "SpeechCredit" = "Credit", "VideoCredit" = "Credit"
                 """);
 
             migrationBuilder.AddColumn<decimal>(
@@ -125,10 +128,9 @@ namespace Llm.Core.Data.Migrations
                 name: "VideoCredit",
                 table: "AspNetUsers");
 
-            migrationBuilder.RenameColumn(
+            migrationBuilder.DropColumn(
                 name: "VideoCredit",
-                table: "groups",
-                newName: "Credit");
+                table: "groups");
         }
     }
 }

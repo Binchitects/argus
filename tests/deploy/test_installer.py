@@ -108,7 +108,8 @@ class Release:
 
     def env(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         env = {k: v for k, v in os.environ.items() if not k.startswith(("COMPOSE_", "FAKE_"))}
-        env.update({"PATH": f"{self.s.bin}:{env.get('PATH', '/usr/bin:/bin')}", "FAKE_LOG": str(self.s.log), "TMPDIR": str(self.s.dir)})
+        env.update({"PATH": f"{self.s.bin}:{env.get('PATH', '/usr/bin:/bin')}", "FAKE_LOG": str(self.s.log), "TMPDIR": str(self.s.dir),
+                    "XDG_RUNTIME_DIR": str(self.s.runtime)})
         env.update(self.s.env)
         env.update(extra or {})
         return env

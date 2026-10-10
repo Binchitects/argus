@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import socket
 import stat
 import subprocess
 import tempfile
@@ -74,6 +75,11 @@ class Sandbox:
             gpu.chmod(0o755)
         self.log = self.dir / "engine.log"
         self.log.touch()
+        # Rootless Podman's socket, as a user who started it has one: never this host's (it may be off).
+        self.runtime = Path(tempfile.mkdtemp(prefix="xdg-"))
+        (self.runtime / "podman").mkdir()
+        self.podman_socket = socket.socket(socket.AF_UNIX)
+        self.podman_socket.bind(str(self.runtime / "podman" / "podman.sock"))
         self.env: dict[str, str] = {}
 
     def write(self, rel: str, text: str, base: Path | None = None) -> Path:
@@ -84,7 +90,8 @@ class Sandbox:
 
     def run(self, script: str, *args: str, cwd: Path | None = None, extra: dict[str, str] | None = None) -> subprocess.CompletedProcess:
         env = {k: v for k, v in os.environ.items() if not k.startswith(("COMPOSE_", "FAKE_"))}
-        env.update({"PATH": f"{self.bin}:{env.get('PATH', '/usr/bin:/bin')}", "FAKE_LOG": str(self.log), "TMPDIR": str(self.dir)})
+        env.update({"PATH": f"{self.bin}:{env.get('PATH', '/usr/bin:/bin')}", "FAKE_LOG": str(self.log), "TMPDIR": str(self.dir),
+                    "XDG_RUNTIME_DIR": str(self.runtime)})
         env.update(self.env)
         env.update(extra or {})
         path = self.deploy / "scripts" / script
@@ -94,7 +101,8 @@ class Sandbox:
     def bash(self, code: str, extra: dict[str, str] | None = None) -> subprocess.CompletedProcess:
         """Runs code with test-project.sh sourced, TP_ROOT set to the sandbox's deploy/."""
         env = {k: v for k, v in os.environ.items() if not k.startswith(("COMPOSE_", "FAKE_"))}
-        env.update({"PATH": f"{self.bin}:{env.get('PATH', '/usr/bin:/bin')}", "FAKE_LOG": str(self.log), "TMPDIR": str(self.dir)})
+        env.update({"PATH": f"{self.bin}:{env.get('PATH', '/usr/bin:/bin')}", "FAKE_LOG": str(self.log), "TMPDIR": str(self.dir),
+                    "XDG_RUNTIME_DIR": str(self.runtime)})
         env.update(self.env)
         env.update(extra or {})
         prelude = f'TP_ROOT="{self.deploy}"; . "{self.deploy}/scripts/test-project.sh"\n'
@@ -109,4 +117,6 @@ class Sandbox:
         return any(c[i:i + n] == list(words) for c in self.calls() for i in range(len(c)))
 
     def cleanup(self) -> None:
+        self.podman_socket.close()
+        shutil.rmtree(self.runtime, ignore_errors=True)
         shutil.rmtree(self.dir, ignore_errors=True)

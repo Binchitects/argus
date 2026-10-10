@@ -189,7 +189,9 @@ public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFacto
         }
 
         HttpResponseMessage res;
-        // A dropped connection (the gateway restarting, a new deployment settling) is tried again, twice, a little apart.
+        // A dropped connection (the gateway restarting, a new deployment settling) is tried again for about half a minute:
+        // the gateway takes 10-20 s to start after an upgrade or a restart.
+        int[] waits = [1, 2, 4, 8, 15];
         for (var attempt = 1; ; attempt++)
         {
             using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(path, UriKind.Relative)) { Content = content() };
@@ -203,9 +205,9 @@ public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFacto
                 res = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
                 break;
             }
-            catch (HttpRequestException) when (attempt < 3)
+            catch (HttpRequestException) when (attempt <= waits.Length)
             {
-                await Task.Delay(TimeSpan.FromSeconds(attempt), ct);
+                await Task.Delay(TimeSpan.FromSeconds(waits[attempt - 1]), ct);
             }
             catch (HttpRequestException ex)
             {

@@ -230,7 +230,7 @@ def main() -> int:
             verify("after the upgrade")
             said = ask(c, chat_id, "And what was the code word again? Reply with it only.")
             check("the old chat goes on, with what it said before", "MAPLE-17" in said.upper(), said[-120:])
-            for path in ("/api/projects", "/api/notifications", "/api/admin/config"):
+            for path in ("/api/assistants", "/api/notifications", "/api/admin/config"):
                 status, _ = c.call(path)
                 check(f"new in this version: GET {path}", status == 200, str(status))
             logs = subprocess.run(["docker", "logs", "app"], capture_output=True, text=True).stdout + subprocess.run(["docker", "logs", "app"], capture_output=True, text=True).stderr
@@ -247,7 +247,7 @@ def main() -> int:
             verify("after down and up")
         else:
             check(f"it is {version}", bool(info) and info.get("version") == version, json.dumps(info))
-            for path in ("/api/projects", "/api/notifications", "/api/admin/config", "/api/admin/overview"):
+            for path in ("/api/assistants", "/api/notifications", "/api/admin/config", "/api/admin/overview"):
                 status, _ = c.call(path)
                 check(f"GET {path}", status == 200, str(status))
     finally:
