@@ -801,7 +801,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         int place;
         lock (_gate)
         {
-            _queued.Add((text, Pieces(body)));
+            // The lines as they are now: when it runs, the file may have changed.
+            _queued.Add((text, Pieces(body)?.Select(p => p.Taken(_rt.Workspace)).ToList()));
             place = _queued.Count;
         }
         StartNext();

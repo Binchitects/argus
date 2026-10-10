@@ -120,7 +120,7 @@ export const tasks: HelpTask[] = [
 export const keys: [keys: string, what: string][] = [
   [`${modKey}+S`, 'Save the file'],
   [`${modKey}+P`, 'Open a file by its name (:12 goes to a line)'],
-  [`${modKey}+Shift+P`, 'Run a command by its name'],
+  [`${modKey}+Shift+P or F1`, 'Run a command by its name'],
   [`${modKey}+Shift+F`, 'Search the files'],
   [`${modKey}+Shift+E`, 'The Explorer'],
   [`${modKey}+Shift+G`, 'Source control'],

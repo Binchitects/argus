@@ -15,7 +15,20 @@ export const Markdown = memo(function Markdown({ text, onOpenFile, onPreview, li
   const refs = use(FileRefs)
   const box = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
-    if (refs && box.current) tagRefs(box.current, refs)
+    const el = box.current
+    if (!refs || !el) return
+    tagRefs(el, refs)
+    // A part drawn again by itself (a table sorted or filtered) gets its links again.
+    let soon = 0
+    const watch = new MutationObserver(() => {
+      cancelAnimationFrame(soon)
+      soon = requestAnimationFrame(() => tagRefs(el, refs))
+    })
+    watch.observe(el, { childList: true, subtree: true })
+    return () => {
+      cancelAnimationFrame(soon)
+      watch.disconnect()
+    }
   }, [blocks, refs])
   // One listener for every citation in it (they are tagged in its HTML, not drawn by React).
   useLayoutEffect(() => {

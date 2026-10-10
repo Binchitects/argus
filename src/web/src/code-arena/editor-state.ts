@@ -90,7 +90,9 @@ export interface EditorApi {
    * The lines chosen in the file shown (the cursor's line when none are), with the editor's text when the file has
    * unsaved changes; null: no file is shown.
    */
-  selection: () => Piece | null
+  selection: (withText?: boolean) => Piece | null
+  /** Lines of a file as the editor has them: with its text while it has unsaved changes. */
+  pieceOf: (path: string, startLine: number, endLine: number) => Piece
   /** The editor's own commands (Monaco's, and Code Arena's in it): their ids and names; none while no file is shown. */
   editorCommands: () => { id: string; label: string }[]
   /** Runs an editor command on the file shown. */

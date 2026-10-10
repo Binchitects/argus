@@ -56,17 +56,40 @@ internal sealed class Completions(Runtime rt)
     /// </summary>
     public async Task<string> CompleteAsync(string path, string prefix, string suffix, CancellationToken ct)
     {
+        // One at a time: the next asked (the person typed on) ends the one before, here and at the gateway.
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
         limit.CancelAfter(Limit);
-        var (text, usage) = await _gateway.TextCompleteAsync(Request(rt.Config.CompletionTemplate, Model, path, prefix, suffix), limit.Token);
-        if (usage is not null)
+        var previous = Interlocked.Exchange(ref _current, limit);
+        try
         {
-            rt.Total.Add(usage, rt.Model.Info);
+            previous?.Cancel();
         }
-        return Tidy(text, suffix);
+        catch (ObjectDisposedException)
+        {
+            // Over already.
+        }
+        try
+        {
+            var (text, usage) = await _gateway.TextCompleteAsync(Request(rt.Config.CompletionTemplate, Model, path, prefix, suffix), limit.Token);
+            if (usage is not null)
+            {
+                // At the completion model's prices, when the gateway lists them.
+                rt.Total.Add(usage, rt.Models.FirstOrDefault(m => m.Id == Model) ?? rt.Model.Info);
+            }
+            return Tidy(text, suffix);
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _current, null, limit);
+        }
     }
 
-    /// <summary>The text without blank lines at its end, nor the start of the code after the cursor written again at its end.</summary>
+    private CancellationTokenSource? _current;
+
+    /// <summary>
+    /// The text without blank lines at its end, nor the start of the code after the cursor written again at its end: only
+    /// what the text closes more than it opens (a ")" the code after the cursor has already), never a bracket of its own.
+    /// </summary>
     public static string Tidy(string text, string suffix)
     {
         text = text.TrimEnd();
@@ -74,11 +97,26 @@ internal sealed class Completions(Runtime rt)
         // The model often ends with what already follows (a ")" or "}" closing the line): not twice.
         for (var n = Math.Min(text.Length, Math.Min(next.Length, 40)); n > 0; n--)
         {
-            if (text.EndsWith(next[..n], StringComparison.Ordinal) && next[..n].Trim().Length > 0)
+            var overlap = next[..n];
+            if (text.EndsWith(overlap, StringComparison.Ordinal) && overlap.Trim().Length > 0 && Unopened(text, overlap))
             {
                 return text[..^n].TrimEnd();
             }
         }
         return text;
+    }
+
+    /// <summary>Whether each bracket the overlap closes is one the text closes more often than it opens (written twice, not its own).</summary>
+    private static bool Unopened(string text, string overlap)
+    {
+        foreach (var (open, close) in new[] { ('(', ')'), ('[', ']'), ('{', '}') })
+        {
+            var closes = overlap.Count(c => c == close);
+            if (closes > 0 && text.Count(c => c == close) - text.Count(c => c == open) < closes)
+            {
+                return false;
+            }
+        }
+        return true;
     }
 }

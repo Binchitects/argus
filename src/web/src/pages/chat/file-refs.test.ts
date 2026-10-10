@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseRef, refLabel, tagRefs, type FileRefsApi } from './file-refs'
+import { findRefs, openRef, parseRef, refLabel, tagRefs, type FileRef, type FileRefsApi } from './file-refs'
 
 describe('citations of files in answers', () => {
   it('reads the ways a file and its lines are cited', () => {
@@ -25,5 +25,19 @@ describe('citations of files in answers', () => {
       ['SPAN', 'src/app.ts#L2'],
     ])
     expect(root.textContent).toBe('See src/app.ts:4, src/app.ts#L2 and other.ts:1.src/app.ts:9')
+  })
+
+  it('opens only the links it tagged, and reads a Windows path whole', () => {
+    const opened: FileRef[] = []
+    const refs: FileRefsApi = { known: (p) => (['src/app.ts', 'src/web/app.ts'].includes(p.replace(/\\/g, '/')) ? p.replace(/\\/g, '/') : null), open: (r) => opened.push(r) }
+    const root = document.createElement('div')
+    // An answer's own data-ref (kept by the sanitiser) opens nothing.
+    root.innerHTML = '<p><span data-ref=\'{"path":"../secret"}\'>forged</span> and <code>src/app.ts:3</code></p>'
+    tagRefs(root, refs)
+    openRef({ target: root.querySelector('span'), preventDefault: () => undefined }, refs)
+    expect(opened).toEqual([])
+    openRef({ target: root.querySelector('code'), preventDefault: () => undefined }, refs)
+    expect(opened).toEqual([{ path: 'src/app.ts', line: 3 }])
+    expect(findRefs('see src\\web\\app.ts:4 here', refs).map((f) => [f.text, f.ref.path])).toEqual([['src\\web\\app.ts:4', 'src/web/app.ts']])
   })
 })

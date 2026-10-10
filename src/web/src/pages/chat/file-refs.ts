@@ -54,7 +54,7 @@ export function parseRef(text: string): FileRef | null {
 export const refLabel = (r: FileRef) => r.path + (r.line ? `:${r.line}${r.end && r.end !== r.line ? `-${r.end}` : ''}` : '')
 
 /** A citation in running text: a path with an extension (or a folder in it), with its lines or not. */
-const inText = /(?<![\w/.@-])((?:[\w.-]+\/)+[\w.-]+|[\w-][\w.-]*\.[A-Za-z][A-Za-z0-9]{0,7})(?::\d+(?:-\d+|:\d+)?|#L\d+(?:-L?\d+)?|\(\d+(?:,\d+)?\))?(?![\w/])/g
+const inText = /(?<![\w/\\.@-])((?:[\w.-]+[/\\])+[\w.-]+|[\w-][\w.-]*\.[A-Za-z][A-Za-z0-9]{0,7})(?::\d+(?:-\d+|:\d+)?|#L\d+(?:-L?\d+)?|\(\d+(?:,\d+)?\))?(?![\w/\\])/g
 
 /** The citations of the folder's files in a text (a terminal's line, an answer's text): where each starts, as written, and its place. */
 export function findRefs(text: string, refs: FileRefsApi): { at: number; text: string; ref: FileRef }[] {
@@ -64,8 +64,12 @@ export function findRefs(text: string, refs: FileRefsApi): { at: number; text: s
   })
 }
 
+/** The places of the links tagged here: only these open (an answer's HTML may carry a data-ref of its own). */
+const tagged = new WeakMap<Element, FileRef>()
+
 /** Marks an element as a link to the place cited. */
 function mark(el: HTMLElement, ref: FileRef) {
+  tagged.set(el, ref)
   el.dataset.ref = JSON.stringify(ref)
   el.classList.add('md-ref')
   el.setAttribute('role', 'link')
@@ -132,5 +136,7 @@ export function openRef(e: { target: EventTarget | null; preventDefault: () => v
   const el = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-ref], a[data-local]') : null
   if (!el) return
   e.preventDefault()
-  if (el.dataset.ref) refs.open(JSON.parse(el.dataset.ref) as FileRef)
+  const ref = tagged.get(el)
+  const path = ref && refs.known(ref.path)
+  if (ref && path) refs.open({ ...ref, path })
 }

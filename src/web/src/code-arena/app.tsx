@@ -305,7 +305,8 @@ function Workbench({
       let handled = true
       if (ctrl && !e.shiftKey && !e.altKey && key === 's') void save()
       else if (ctrl && !e.shiftKey && !e.altKey && key === 'p') setQuickOpen(true)
-      else if (ctrl && e.shiftKey && !e.altKey && key === 'p') setPalette(true)
+      // F1 too: Firefox keeps Ctrl+Shift+P for a private window.
+      else if ((ctrl && e.shiftKey && !e.altKey && key === 'p') || (e.key === 'F1' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey)) setPalette(true)
       else if (ctrl && e.shiftKey && key === 'f') show('search')
       else if (ctrl && e.shiftKey && key === 'e') show('explorer')
       else if (ctrl && e.shiftKey && key === 'g') show('git')

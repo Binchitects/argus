@@ -248,11 +248,20 @@ function XtermView({ terminal, active, focusKey, onSize, onExit }: { terminal: T
     t.registerLinkProvider({
       provideLinks: (y, done) => {
         const r = refsNow.current
-        const line = t.buffer.active.getLine(y - 1)?.translateToString(true) ?? ''
+        const row = t.buffer.active.getLine(y - 1)
+        const line = row?.translateToString(true) ?? ''
         const found = r ? findRefs(line, r) : []
+        // The text's places as the terminal's columns: a wide character (CJK, an emoji) takes two.
+        const cells: number[] = []
+        for (let x = 0; row?.getCell && x < row.length; x++) {
+          const cell = row.getCell(x)
+          if (!cell || cell.getWidth() === 0) continue
+          for (let i = 0; i < cell.getChars().length; i++) cells.push(x)
+        }
+        const column = (at: number) => (cells.length > at ? cells[at]! : at) + 1
         done(
           found.length > 0
-            ? found.map((h) => ({ range: { start: { x: h.at + 1, y }, end: { x: h.at + h.text.length, y } }, text: h.text, activate: () => r?.open(h.ref) }))
+            ? found.map((h) => ({ range: { start: { x: column(h.at), y }, end: { x: column(h.at + h.text.length - 1), y } }, text: h.text, activate: () => r?.open(h.ref) }))
             : undefined,
         )
       },

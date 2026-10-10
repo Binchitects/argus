@@ -93,60 +93,39 @@ internal sealed partial class Problems(Workspace workspace, Config config)
         }
     }
 
+    /// <summary>The most of a check's output read: its start and its end, beyond it (a noisy linter).</summary>
+    public const int MaxOutput = 4_000_000;
+
     private async Task<CheckRun> RunCommandAsync(string command)
     {
         var started = DateTimeOffset.Now;
+        // cmd.exe takes the command as written, quotes and all; sh as its -c argument.
         var psi = OperatingSystem.IsWindows()
-            ? new ProcessStartInfo("cmd.exe") { ArgumentList = { "/d", "/s", "/c", command } }
+            ? new ProcessStartInfo("cmd.exe") { Arguments = $"/d /s /c \"{command}\"" }
             : new ProcessStartInfo("/bin/sh") { ArgumentList = { "-c", command } };
         psi.WorkingDirectory = workspace.Root;
-        psi.UseShellExecute = false;
-        psi.RedirectStandardOutput = true;
-        psi.RedirectStandardError = true;
-        psi.RedirectStandardInput = true;
-        psi.StandardOutputEncoding = Encoding.UTF8;
-        psi.StandardErrorEncoding = Encoding.UTF8;
-        // Plain output, the person's key kept out.
+        // Plain output.
         psi.Environment["NO_COLOR"] = "1";
         psi.Environment["TERM"] = "dumb";
         psi.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
-        psi.Environment.Remove("ARENA_API_KEY");
-        Process process;
+        Proc.Result result;
         try
         {
-            process = Process.Start(psi) ?? throw new InvalidOperationException("it did not start");
+            // Proc stops it at the limit, and does not wait for a child it left holding the output open.
+            result = await Proc.RunAsync(psi, Limit, CancellationToken.None, MaxOutput);
         }
-        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException)
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or ToolError)
         {
             return new CheckRun(command, started, null, $"It could not be run: {e.Message}", []);
         }
-        using (process)
+        if (result.TimedOut)
         {
-            process.StandardInput.Close();
-            var output = process.StandardOutput.ReadToEndAsync();
-            var error = process.StandardError.ReadToEndAsync();
-            using var limit = new CancellationTokenSource(Limit);
-            try
-            {
-                await process.WaitForExitAsync(limit.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                try
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-                catch (InvalidOperationException)
-                {
-                    // Ended meanwhile.
-                }
-                return new CheckRun(command, started, null, $"It did not end within {Limit.TotalMinutes:0} minutes: stopped.", []);
-            }
-            var text = await output + "\n" + await error;
-            var found = Read(text);
-            var said = found.Count == 0 && process.ExitCode != 0 ? Fmt.OneLine(text.Trim(), 400) : null;
-            return new CheckRun(command, started, process.ExitCode, said, found);
+            return new CheckRun(command, started, null, $"It did not end within {Limit.TotalMinutes:0} minutes: stopped.", Read(result.Output));
         }
+        var found = Read(result.Output);
+        var exit = result.ExitCode < 0 ? (int?)null : result.ExitCode;
+        var said = found.Count == 0 && exit != 0 ? Fmt.OneLine(result.Output.Trim(), 400) : null;
+        return new CheckRun(command, started, exit, said, found);
     }
 
     // path(line,col): error CODE: message [project]  (MSBuild, tsc --pretty false)
@@ -174,26 +153,32 @@ internal sealed partial class Problems(Workspace workspace, Config config)
             {
                 continue;
             }
+            var code = m.Groups["code"].Success ? m.Groups["code"].Value : m.Groups["code2"].Success ? m.Groups["code2"].Value : null;
+            var message = m.Groups["msg"].Value;
             var sev = m.Groups["sev"].Value switch
             {
                 "error" or "fatal error" => "error",
                 "warning" => "warning",
                 "note" or "info" => "info",
-                // A linter's line with a code and no word: a warning.
-                _ => "warning",
+                // No word: ESLint's unix form says it in brackets; a linter's rule code (ruff's F401) is a warning; the rest
+                // (go vet, Go's compiler) are errors.
+                _ when message.Contains("[Error/", StringComparison.Ordinal) => "error",
+                _ when message.Contains("[Warning/", StringComparison.Ordinal) => "warning",
+                _ when m.Groups["code2"].Success => "warning",
+                _ => "error",
             };
-            var code = m.Groups["code"].Success ? m.Groups["code"].Value : m.Groups["code2"].Success ? m.Groups["code2"].Value : null;
-            var p = new Problem(path, int.Parse(m.Groups["line"].Value), int.Parse(m.Groups["col"].Value), sev, code, m.Groups["msg"].Value);
+            if (!int.TryParse(m.Groups["line"].Value, out var lineNo) || !int.TryParse(m.Groups["col"].Value, out var column) || lineNo < 1)
+            {
+                continue;
+            }
+            var p = new Problem(path, lineNo, Math.Max(1, column), sev, code, message);
             if (seen.Add($"{p.Path}:{p.Line}:{p.Column}:{p.Code}:{p.Message}"))
             {
                 found.Add(p);
             }
-            if (found.Count >= Most)
-            {
-                break;
-            }
         }
-        return [.. found.OrderBy(p => p.Severity switch { "error" => 0, "warning" => 1, _ => 2 }).ThenBy(p => p.Path, StringComparer.Ordinal).ThenBy(p => p.Line)];
+        // The most kept are the worst: errors first.
+        return [.. found.OrderBy(p => p.Severity switch { "error" => 0, "warning" => 1, _ => 2 }).ThenBy(p => p.Path, StringComparer.Ordinal).ThenBy(p => p.Line).Take(Most)];
     }
 
     /// <summary>A path a check printed, as the folder's (relative, with "/"); null: not a file of the folder.</summary>

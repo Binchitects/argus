@@ -34,6 +34,10 @@ public sealed class CompletionTests : IDisposable
         // What already follows the cursor is not written twice; blank lines at the end go.
         Assert.Equal("a + b", Completions.Tidy("a + b)\n\n", ")\n"));
         Assert.Equal("total += x", Completions.Tidy("total += x\n", "\n    return total"));
+        // A bracket the completion opens and closes itself stays.
+        Assert.Equal("JSON.stringify(obj)", Completions.Tidy("JSON.stringify(obj)", ")\n"));
+        Assert.Equal("a[0]", Completions.Tidy("a[0]", "]"));
+        Assert.Equal("a && (b || c)", Completions.Tidy("a && (b || c)", ") {"));
     }
 
     [Fact]

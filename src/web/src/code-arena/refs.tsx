@@ -20,8 +20,9 @@ export function CodeRefsProvider({ folder, children }: { folder: string; childre
         if (path.startsWith(root)) path = path.slice(root.length)
         path = path.replace(/^(\.\/)+/, '')
         if (!path || path.startsWith('/') || /^[a-z]:/i.test(path) || path.split('/').includes('..')) return null
-        // Past the list's end (a very big folder), a path with a file's name is taken at its word: opening it says if it is not there.
-        return files.has(path) || (all.data?.truncated && /\.\w+$/.test(path)) ? path : null
+        // Past the list's end (a very big folder), a path in a folder with a file's name is taken at its word (opening it says
+        // if it is not there); a bare word with a dot (Node.js) is not.
+        return files.has(path) || (all.data?.truncated && path.includes('/') && /\.\w+$/.test(path)) ? path : null
       },
       open: (ref) => void open(ref.path, ref.line ? { line: ref.line, column: ref.column, endLine: ref.end } : undefined),
     }

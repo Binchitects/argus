@@ -183,6 +183,8 @@ export interface CheckRun {
 export const problemsQuery = {
   queryKey: ['code', 'problems'] as const,
   queryFn: ({ signal }: { signal: AbortSignal }) => api<CheckRun>('/api/problems', { signal }),
+  // A check running (started from another page, or before this one opened): read again until it is done.
+  refetchInterval: (q: { state: { data?: CheckRun } }) => (q.state.data?.running ? 2000 : false),
 }
 
 /** Runs the project's check (waits for the one running, when one is); what it found. */

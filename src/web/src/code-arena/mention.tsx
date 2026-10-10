@@ -17,7 +17,9 @@ export function useFileMention({ area, text, setText }: { area: RefObject<HTMLTe
   const [caret, setCaret] = useState(0)
   const [chosen, setChosen] = useState(0)
   const [dismissed, setDismissed] = useState<string | null>(null)
-  const query = typing(text, caret)
+  // Offered only for what the person types: a message brought back with ↑ that ends in @path keeps ↑ and Enter for itself.
+  const [typed, setTyped] = useState<string | null>(null)
+  const query = typed === text ? typing(text, caret) : null
   const all = useQuery({ ...allFilesQuery, enabled: query !== null })
   const files = query === null || dismissed === text ? [] : rankFiles(all.data?.files ?? [], query, 8)
   const open = files.length > 0
@@ -30,6 +32,7 @@ export function useFileMention({ area, text, setText }: { area: RefObject<HTMLTe
     const put = `@${path.includes(' ') ? `"${path}"` : path} `
     const next = text.slice(0, start) + put + text.slice(end)
     setText(next)
+    setTyped(null)
     setChosen(0)
     requestAnimationFrame(() => {
       el?.focus()
@@ -40,11 +43,14 @@ export function useFileMention({ area, text, setText }: { area: RefObject<HTMLTe
 
   return {
     open,
-    /** The box's caret moved, or its text changed. */
-    onCaret: () => {
-      setCaret(area.current?.selectionStart ?? 0)
+    /** The person typed in the box: what it holds now is theirs (the files are offered for an @ in it). */
+    onTyped: (now: string) => {
+      setTyped(now)
+      setCaret(area.current?.selectionStart ?? now.length)
       setChosen(0)
     },
+    /** The box's caret moved. */
+    onCaret: () => setCaret(area.current?.selectionStart ?? 0),
     /** Keys while the files are offered: true when one was used here. */
     onKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => {
       if (!open) return false

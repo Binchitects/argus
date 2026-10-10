@@ -239,8 +239,9 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   expression's group; the files keep their line endings; a file with unsaved
   changes in the editor keeps them, and saving it then asks). **Ctrl+P** opens any file by a few
   letters of its path (`app:12` opens it at line 12; `:12` goes to line 12 of
-  the file shown, as the line in the status bar does). **Ctrl+Shift+P** runs
-  any command by name: the workbench's (save, search, show or hide a part,
+  the file shown, as the line in the status bar does). **Ctrl+Shift+P** (or
+  **F1**: Firefox keeps Ctrl+Shift+P for a private window) runs any command by
+  name: the workbench's (save, search, show or hide a part,
   accept the agent's changes, the theme, help) and the editor's (Monaco's own,
   and Code Arena's: Add to chat, Explain, Fix, Complete).
 - **terminals**: a panel under the editor (Ctrl+`), one tab per shell (bash 1,
@@ -285,7 +286,7 @@ shell's history, emacs, nano).
 |---|---|
 | Ctrl+S (⌘S) | save the file |
 | Ctrl+P (⌘P) | open a file by name (`:12` goes to a line) |
-| Ctrl+Shift+P (⌘⇧P) | run a command by name |
+| Ctrl+Shift+P (⌘⇧P), F1 | run a command by name |
 | Ctrl+Shift+F (⌘⇧F) | search |
 | Ctrl+Shift+E (⌘⇧E) | the Explorer |
 | Ctrl+Shift+G (⌘⇧G) | source control |
@@ -306,7 +307,9 @@ Lines of a file go to the agent from the editor itself:
   sends them with the message.
 - **Add to chat** (Ctrl+L, or the editor's right-click menu): the lines chosen,
   or the cursor's line, wait above the chat's box as a chip (× leaves them out)
-  and go with the next message; the box takes the focus. A file with unsaved
+  and go with the next message, as they are when it goes; the box takes the
+  focus. A message queued while an answer is written takes them as they are
+  when it is queued. A file with unsaved
   changes sends the editor's text, marked unsaved. The Explorer's right-click
   **Add to chat** names the whole file in the box (`@path`).
 - **Explain this**, **Fix this** and **Complete this** (the right-click menu,
@@ -347,7 +350,11 @@ project's files: `dotnet build` (a solution or project), `tsc --noEmit`
 (tsconfig.json), `npm run lint` (a `lint` script), `cargo check`, `go vet`,
 `ruff check`. Its output is read in the common forms: `path(line,col): error
 CODE: message` (MSBuild, tsc) and `path:line:col: error: message` (gcc, clang,
-go, cargo, ruff, eslint's unix format); only the folder's files count.
+go, cargo, ruff, eslint's unix format); only the folder's files count. A line
+with no word for how bad it is counts as an error (go vet, Go's compiler),
+but a linter's rule code (ruff's `F401`) or ESLint's `[Warning/…]` as a
+warning. The worst 2,000 are kept; a check that leaves something running in
+the background is not waited for.
 
 ### Code completion
 

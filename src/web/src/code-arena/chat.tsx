@@ -340,8 +340,9 @@ export function Thread({
   // Lines of the folder's files to go with the next message (from the editor: Add to chat), and a nudge to the box.
   const [pieces, setPieces] = useState<Piece[]>([])
   const [focusBox, setFocusBox] = useState(0)
-  // A file named in the box from the Explorer (Add to chat).
-  const [inserted, setInserted] = useState<{ text: string; n: number } | null>(null)
+  // What is typed in the box: here, so it stays when the box moves (the first message moves it under the thread).
+  const [draft, setDraft] = useState('')
+  const { pieceOf } = useEditor()
   // A code block named for a file of the folder (in a summary) opens it in the editor.
   const refs = useFileRefs()
   const openNamed = (name: string) => {
@@ -495,14 +496,15 @@ export function Thread({
       await refresh()
       return true
     }
-    const going = context ?? pieces
+    // The lines kept above the box, as the editor has them now (changed since they were added, they go as they are now).
+    const going = context ?? pieces.map((p) => pieceOf(p.path, p.startLine, p.endLine))
     if (!context) setPieces([])
     const localId = newLocalId()
     const asked = withQuestion(view, localId, path.at(-1)?.id ?? null, text, [])
     const start = { ...view, ...asked, messages: asked.messages.map((m) => (m.id === localId && going.length > 0 ? { ...m, files: going.map(pieceLabel) } : m)) }
     try {
       const sent = await run('/api/messages', { text, ...(going.length > 0 && { context: going }) }, start, localId, undefined, true)
-      if (!sent && !context) setPieces((now) => (now.length > 0 ? now : going))
+      if (!sent && !context) setPieces((now) => (now.length > 0 ? now : pieces))
       return sent
     } catch (e) {
       // An answer started meanwhile that this page had not seen yet (a command ended, another tab): the message waits for it.
@@ -519,7 +521,8 @@ export function Thread({
   useEffect(() => {
     chatBridge.current = {
       attach: (piece) => {
-        setPieces((now) => (now.some((p) => pieceLabel(p) === pieceLabel(piece)) ? now : [...now, piece].slice(-8)))
+        // The same lines again: as they are now.
+        setPieces((now) => [...now.filter((p) => pieceLabel(p) !== pieceLabel(piece)), piece].slice(-8))
         setFocusBox((n) => n + 1)
         onShow?.()
       },
@@ -528,7 +531,9 @@ export function Thread({
         ask.current(text, context)
       },
       mention: (path) => {
-        setInserted((now) => ({ text: path.includes(' ') ? `@"${path}"` : `@${path}`, n: (now?.n ?? 0) + 1 }))
+        const at = path.includes(' ') ? `@"${path}"` : `@${path}`
+        setDraft((now) => `${now.trimEnd()}${now.trim() ? ' ' : ''}${at} `)
+        setFocusBox((n) => n + 1)
         onShow?.()
       },
     }
@@ -560,16 +565,22 @@ export function Thread({
     <Composer
       streaming={streaming}
       onSend={(text) => send(text)}
-      onQueue={(text) => {
-        const going = pieces
+      onQueue={async (text) => {
+        const kept = pieces
         setPieces([])
-        return queue(text, going)
+        const queued = await queue(
+          text,
+          kept.map((p) => pieceOf(p.path, p.startLine, p.endLine)),
+        )
+        if (!queued) setPieces((now) => (now.length > 0 ? now : kept))
+        return queued
       }}
       pieces={pieces}
       onRemovePiece={(p) => setPieces((now) => now.filter((x) => x !== p))}
       onAddPiece={(p) => setPieces((now) => [...now, p].slice(-8))}
       focusSignal={focusBox}
-      inserted={inserted}
+      text={draft}
+      setText={setDraft}
       queued={state.queued ?? []}
       onClearQueue={() => void clearQueue().then(() => queryClient.invalidateQueries({ queryKey: stateQuery.queryKey }))}
       onStop={stop}
@@ -802,7 +813,8 @@ function Composer({
   onRemovePiece,
   onAddPiece,
   focusSignal,
-  inserted,
+  text,
+  setText,
   queued,
   onClearQueue,
   onStop,
@@ -821,8 +833,9 @@ function Composer({
   onAddPiece: (p: Piece) => void
   /** Changes when lines were added: the box takes the focus. */
   focusSignal: number
-  /** Text to add to what is typed (an @path from the Explorer): each time its number changes. */
-  inserted: { text: string; n: number } | null
+  /** What is typed: the thread's, so it stays when the box moves. */
+  text: string
+  setText: (text: string | ((now: string) => string)) => void
   queued: string[]
   onClearQueue: () => void
   onStop: () => void
@@ -831,26 +844,16 @@ function Composer({
   context: ReactNode
   history: RecallSource
 }) {
-  const [text, setText] = useState('')
   const area = useRef<HTMLTextAreaElement>(null)
   const recall = useRecall({ area, setText, source: history })
   const mention = useFileMention({ area, text, setText })
   // The file shown in the editor, and the lines chosen there: a click sends them with the message.
   const { active, selection, cursor } = useEditor()
-  const here = active?.kind === 'file' && active.status === 'ready' ? selection() : null
+  const here = active?.kind === 'file' && active.status === 'ready' ? selection(false) : null
   void cursor
   useEffect(() => {
     if (focusSignal > 0) area.current?.focus()
   }, [focusSignal])
-  // Added to what is typed as it comes (once each), then the box takes the focus.
-  const [seenInsert, setSeenInsert] = useState(0)
-  if (inserted && inserted.n !== seenInsert) {
-    setSeenInsert(inserted.n)
-    setText((now) => `${now.trimEnd()}${now.trim() ? ' ' : ''}${inserted.text} `)
-  }
-  useEffect(() => {
-    if (inserted) area.current?.focus()
-  }, [inserted])
   useEffect(() => {
     const el = area.current
     if (!el) return
@@ -863,10 +866,11 @@ function Composer({
   const submit = async () => {
     if (!canSend) return
     // Lines alone: asked about as they are.
-    const sent = text.trim() || 'Look at these lines.'
+    const typed = text.trim()
+    const sent = typed || 'Look at these lines.'
     setText('')
     recall.reset()
-    if (!(await (streaming ? onQueue(sent) : onSend(sent)))) setText((now) => now || sent)
+    if (!(await (streaming ? onQueue(sent) : onSend(sent)))) setText((now) => now || typed)
     area.current?.focus()
   }
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -942,7 +946,7 @@ function Composer({
         value={text}
         onChange={(e) => {
           setText(e.target.value)
-          mention.onCaret()
+          mention.onTyped(e.target.value)
         }}
         onSelect={mention.onCaret}
         onKeyDown={onKey}

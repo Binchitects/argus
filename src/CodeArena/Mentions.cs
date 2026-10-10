@@ -28,8 +28,34 @@ internal static partial class Mentions
     public const string Marker = "\n\n<attached>";
     public const string End = "\n</attached>";
 
-    /// <summary>Lines of a file chosen in the IDE's editor: the first and last (from 1), and the editor's text when it is not saved.</summary>
-    public sealed record Piece(string Path, int StartLine, int EndLine, string? Text);
+    /// <summary>
+    /// Lines of a file chosen in the IDE's editor: the first and last (from 1), and their text: the editor's when it is not
+    /// saved (<paramref name="Unsaved"/>), else the file's as it was when the message was sent (null: read when it goes).
+    /// </summary>
+    public sealed record Piece(string Path, int StartLine, int EndLine, string? Text, bool Unsaved = true)
+    {
+        /// <summary>
+        /// The piece with its lines as the file has them now (a message queued: what was chosen, not what the file holds when
+        /// it runs); as it is when its text is the editor's, or the file cannot be read.
+        /// </summary>
+        public Piece Taken(Workspace workspace)
+        {
+            if (Text is not null || StartLine < 1 || EndLine < StartLine)
+            {
+                return this;
+            }
+            try
+            {
+                var all = Lines(File.ReadAllText(workspace.Resolve(Path)));
+                var last = Math.Min(EndLine, all.Length);
+                return StartLine > last ? this : this with { Text = string.Join('\n', all[(StartLine - 1)..last]), EndLine = last, Unsaved = false };
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or ToolError)
+            {
+                return this;
+            }
+        }
+    }
 
     // @ at the start or after a space or bracket; the path runs to the next space (quoted: "@a b.txt" in quotes).
     [GeneratedRegex("""(?<=^|[\s(\[{])@(?:"(?<q>[^"]+)"|(?<p>[^\s"'`)\]},;]+))""")]
@@ -46,7 +72,10 @@ internal static partial class Mentions
     /// <summary>What the person typed of a message (what went with it left out).</summary>
     public static string Typed(string content) => content.IndexOf(Marker, StringComparison.Ordinal) is var at and >= 0 ? content[..at] : content;
 
-    /// <summary>What went with a message: each file, folder or selection as path, or path:first-last.</summary>
+    /// <summary>
+    /// What went with a message: each file, folder or selection as path, or path:first-last. Read block by block (a block
+    /// is skipped to its end), so text inside an attached file that looks like a block is not one.
+    /// </summary>
     public static List<string> Attached(string content)
     {
         var at = content.IndexOf(Marker, StringComparison.Ordinal);
@@ -54,7 +83,31 @@ internal static partial class Mentions
         {
             return [];
         }
-        return [.. Block().Matches(content, at).Select(m => m.Groups["lines"].Success ? Label(m.Groups["path"].Value, m.Groups["lines"].Value) : m.Groups["path"].Value).Distinct()];
+        var found = new List<string>();
+        var from = at + Marker.Length;
+        while (Block().Match(content, from) is { Success: true } m && m.Index == from + 1 && content[from] == '\n')
+        {
+            var label = m.Groups["lines"].Success ? Label(m.Groups["path"].Value, m.Groups["lines"].Value) : m.Groups["path"].Value;
+            if (!found.Contains(label))
+            {
+                found.Add(label);
+            }
+            var close = $"\n</{m.Groups["kind"].Value}>";
+            var end = content.IndexOf(close, m.Index, StringComparison.Ordinal);
+            // A binary file's block closes on its own line.
+            var inline = content.IndexOf($"</{m.Groups["kind"].Value}>", m.Index, StringComparison.Ordinal);
+            if (inline >= 0 && (end < 0 || inline < end) && content.IndexOf('\n', m.Index) is var nl && (nl < 0 || inline < nl))
+            {
+                from = inline + m.Groups["kind"].Value.Length + 3;
+                continue;
+            }
+            if (end < 0)
+            {
+                break;
+            }
+            from = end + close.Length;
+        }
+        return found;
     }
 
     /// <summary>Lines of a file as the person reads them: path:first-last, path:line for one.</summary>
@@ -89,16 +142,16 @@ internal static partial class Mentions
             (int First, int Last)? lines = null;
             if (!m.Groups["q"].Success && Range().Match(path) is { Success: true } r && Exists(workspace, path[..r.Index]))
             {
-                var a = int.Parse(r.Groups["a"].Value);
-                var b = r.Groups["b"].Success ? int.Parse(r.Groups["b"].Value) : a;
+                var a = int.TryParse(r.Groups["a"].Value, out var first) ? first : int.MaxValue;
+                var b = r.Groups["b"].Success ? int.TryParse(r.Groups["b"].Value, out var last) ? last : int.MaxValue : a;
                 lines = (Math.Max(1, Math.Min(a, b)), Math.Max(a, b));
                 path = path[..r.Index];
             }
-            var label = lines is { } l ? $"{path}:{l.First}-{l.Last}" : path;
-            if (path.Length == 0 || files.Contains(label))
+            if (path.Length == 0 || (lines is null && files.Contains(path)))
             {
                 continue;
             }
+            var label = path;
             string full;
             try
             {
@@ -146,6 +199,10 @@ internal static partial class Mentions
                 text = Numbered(all, Math.Max(1, first - Around), Math.Min(all.Length, last + Around));
                 attr = $" lines=\"{first}-{last}\"";
                 label = Label(path, $"{first}-{last}");
+                if (files.Contains(label))
+                {
+                    continue;
+                }
             }
             else
             {
@@ -215,7 +272,7 @@ internal static partial class Mentions
         {
             numbered = numbered[..MaxChars] + "\n… (cut: read_file reads the rest) …";
         }
-        var unsaved = piece.Text is null ? "" : " unsaved=\"true\"";
+        var unsaved = piece.Text is not null && piece.Unsaved ? " unsaved=\"true\"" : "";
         return ($"\n<selection path=\"{piece.Path}\" lines=\"{first}-{end}\"{unsaved}>\n{numbered}\n</selection>", Label(piece.Path, $"{first}-{end}"));
     }
 
@@ -231,7 +288,7 @@ internal static partial class Mentions
         }
     }
 
-    private static string[] Lines(string text)
+    internal static string[] Lines(string text)
     {
         var lines = text.Replace("\r\n", "\n").Split('\n');
         return text.EndsWith('\n') ? lines[..^1] : lines;

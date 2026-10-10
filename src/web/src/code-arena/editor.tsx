@@ -36,6 +36,9 @@ function problemsIn(m: MonacoModule, piece: Piece): string[] {
 
 let codeActions = false
 
+/** The editor's lines of a file (its unsaved text with them), for the light bulb's command, which every editor shares. */
+const linesOf: { current: ((path: string, startLine: number, endLine: number) => Piece) | null } = { current: null }
+
 /**
  * The editor's ways to the agent: Add to chat (Ctrl+L: the lines chosen go with the next message), and Explain, Fix and
  * Complete (asked at once), in its right-click menu and F1; and, on a line with a problem marked, "Fix with Code Arena"
@@ -64,7 +67,7 @@ function askAboutCode(m: MonacoModule, ed: Monaco.editor.IStandaloneCodeEditor, 
   if (codeActions) return
   codeActions = true
   m.monaco.editor.registerCommand('arena.fixProblems', (_: unknown, path: string, line: number, endLine: number, problems: string[]) =>
-    chatBridge.current?.ask(asks.fix(problems), [{ path, startLine: line, endLine }]),
+    chatBridge.current?.ask(asks.fix(problems), [linesOf.current?.(path, line, endLine) ?? { path, startLine: line, endLine }]),
   )
   m.monaco.languages.registerCodeActionProvider('*', {
     provideCodeActions: (model, range, context) => {
@@ -95,12 +98,13 @@ function markProblems(m: MonacoModule, model: Monaco.editor.ITextModel, problems
     model,
     'check',
     problems
-      .filter((p) => p.line <= lines)
+      .filter((p) => p.line >= 1 && p.line <= lines)
       .map((p) => {
-        const word = model.getWordAtPosition({ lineNumber: p.line, column: p.column })
+        const column = Math.min(Math.max(1, p.column), model.getLineMaxColumn(p.line))
+        const word = model.getWordAtPosition({ lineNumber: p.line, column })
         return {
           startLineNumber: p.line,
-          startColumn: word?.startColumn ?? p.column,
+          startColumn: word?.startColumn ?? column,
           endLineNumber: p.line,
           endColumn: word?.endColumn ?? model.getLineMaxColumn(p.line),
           message: p.message,
@@ -440,7 +444,21 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       for (const f of files.current.values()) markProblems(m, f.model, problems.filter((p) => p.path === f.path))
     }
 
-    const selection = (): Piece | null => {
+    /**
+     * Lines of a file as the editor has them: its text with them while it has unsaved changes (the disk's are not those),
+     * else none (the file's own lines are read when they go).
+     */
+    const pieceOf = (path: string, startLine: number, endLine: number): Piece => {
+      const tab = tabsRef.current.find((t) => t.kind === 'file' && t.path === path)
+      const model = files.current.get(path)?.model
+      if (!tab?.dirty || !model || model.isDisposed()) return { path, startLine, endLine }
+      const last = Math.min(endLine, model.getLineCount())
+      const text = startLine > last ? '' : model.getValueInRange({ startLineNumber: startLine, startColumn: 1, endLineNumber: last, endColumn: model.getLineMaxColumn(last) })
+      return { path, startLine, endLine: last, text }
+    }
+
+    /** The lines chosen in the file shown (the cursor's when none are); with their text only when asked (it copies them). */
+    const selection = (withText = true): Piece | null => {
       const ed = editor.current
       const tab = tabsRef.current.find((t) => t.id === activeRef.current)
       const model = ed?.getModel()
@@ -449,10 +467,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       const start = s?.startLineNumber ?? ed.getPosition()?.lineNumber ?? 1
       // A selection that ends at a line's start leaves that line out, as an editor's does.
       const end = s && s.endLineNumber > s.startLineNumber && s.endColumn === 1 ? s.endLineNumber - 1 : (s?.endLineNumber ?? start)
-      const piece: Piece = { path: tab.path, startLine: start, endLine: end }
-      if (!tab.dirty) return piece
-      const lines = model.getValue().split('\n').slice(start - 1, end)
-      return { ...piece, text: lines.join('\n') }
+      return withText ? pieceOf(tab.path, start, end) : { path: tab.path, startLine: start, endLine: end }
     }
 
     const shownEditor = () => {
@@ -506,7 +521,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       diffHost.current = el
     }
 
-    return { open, openDiff, activate: (id: string) => activate(id), close, save, refresh, moved, removed, accept, revert, selection, editorCommands, runAction, showProblems, bindEditor, bindDiff }
+    return { open, openDiff, activate: (id: string) => activate(id), close, save, refresh, moved, removed, accept, revert, selection, pieceOf, editorCommands, runAction, showProblems, bindEditor, bindDiff }
   }, [confirm, queryClient])
 
   const active = tabs.find((t) => t.id === activeId) ?? null
@@ -545,6 +560,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
           inlineSuggest: { enabled: true },
         })
         ed.onDidChangeCursorPosition((e) => setCursor({ line: e.position.lineNumber, column: e.position.column }))
+        linesOf.current = actions.pieceOf
         askAboutCode(m, ed, actions.selection)
         installCompletions(m)
         editor.current = ed
@@ -592,7 +608,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       if (diffEditor.current.getModel()?.modified !== d.modified) diffEditor.current.setModel(d)
       setCursor(null)
     }
-  }, [shown, revealed, actions.selection])
+  }, [shown, revealed, actions.selection, actions.pieceOf])
 
   // Leaving with unsaved changes asks first.
   const anyDirty = tabs.some((t) => t.dirty)

@@ -76,6 +76,13 @@ const fakes = vi.hoisted(() => {
     getLineCount() {
       return this.value.split('\n').length
     }
+    getValueInRange(r: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }) {
+      const lines = this.value.split('\n').slice(r.startLineNumber - 1, r.endLineNumber)
+      if (lines.length === 0) return ''
+      lines[lines.length - 1] = lines[lines.length - 1]!.slice(0, r.endColumn - 1)
+      lines[0] = lines[0]!.slice(r.startColumn - 1)
+      return lines.join('\n')
+    }
     getLineMaxColumn(line: number) {
       return (this.value.split('\n')[line - 1] ?? '').length + 1
     }
@@ -1265,7 +1272,8 @@ describe('Code Arena, the IDE', () => {
     await screen.findByRole('button', { name: 'Send' })
     act(() => fakes.commands.get(offered.actions[0]!.command.id)!(null, ...offered.actions[0]!.command.arguments))
     await waitFor(() => expect(sent()).toHaveLength(4))
-    expect(sent()[3]!.context).toEqual([{ path: 'src/app.ts', startLine: 1, endLine: 1 }])
+    // The file has unsaved changes: the editor's line goes, not the disk's.
+    expect(sent()[3]!.context).toEqual([{ path: 'src/app.ts', startLine: 1, endLine: 1, text: 'const total = 3' }])
 
     // The Explorer's Add to chat names the whole file in the box.
     await screen.findByRole('button', { name: 'Send' })
@@ -1358,7 +1366,9 @@ describe('Code Arena, the IDE', () => {
   it("runs the project's check, lists its problems by file, marks them in the editor and asks the agent to fix one", async () => {
     let ran = false
     const problem = { path: 'src/app.ts', line: 2, column: 9, severity: 'error', code: 'TS2304', message: "Cannot find name 'totl'." }
-    const check = () => ({ command: 'npx --no-install tsc --noEmit', running: false, ran: ran ? '2026-10-11T10:00:00Z' : null, exitCode: ran ? 2 : null, said: null, problems: ran ? [problem] : [] })
+    // A line the file does not have (0, or past its end) is not marked, and breaks nothing.
+    const nowhere = { path: 'src/app.ts', line: 0, column: 0, severity: 'warning', code: null, message: 'Somewhere.' }
+    const check = () => ({ command: 'npx --no-install tsc --noEmit', running: false, ran: ran ? '2026-10-11T10:00:00Z' : null, exitCode: ran ? 2 : null, said: null, problems: ran ? [problem, nowhere] : [] })
     const { calls } = backend({
       'GET /api/problems': () => ({ json: check() }),
       'POST /api/problems/run': () => {
@@ -1376,7 +1386,7 @@ describe('Code Arena, the IDE', () => {
     await userEvent.click(within(panel).getByRole('button', { name: 'Run check' }))
     const list = await within(panel).findByRole('list', { name: 'Problems in src/app.ts' })
     expect(within(list).getByText(/Cannot find name 'totl'/)).toBeInTheDocument()
-    expect(within(screen.getByRole('contentinfo', { name: 'Status bar' })).getByRole('button', { name: 'Problems: 1 error, 0 warnings' })).toBeInTheDocument()
+    expect(within(screen.getByRole('contentinfo', { name: 'Status bar' })).getByRole('button', { name: 'Problems: 1 error, 1 warning' })).toBeInTheDocument()
     // Marked in the file open.
     await waitFor(() => expect(fakes.marked.get('check:file:///src/app.ts')?.map((m) => [m.startLineNumber, m.message])).toEqual([[2, "Cannot find name 'totl'."]]))
 
