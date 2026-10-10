@@ -347,6 +347,16 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             case ("POST", "/api/messages"):
                 await MessageAsync(req, res, ct);
                 return;
+            case ("POST", "/api/queue"):
+                await QueueAsync(req, res, ct);
+                return;
+            case ("DELETE", "/api/queue"):
+                lock (_gate)
+                {
+                    _queued.Clear();
+                }
+                await res.NoContentAsync(ct);
+                return;
             case ("POST", "/api/approvals"):
                 await ApproveAsync(req, res, ct);
                 return;
@@ -456,13 +466,18 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             })]),
             ["jobs"] = new JsonArray([.. _rt.Jobs.All.Select(j => (JsonNode)new JsonObject
             {
-                ["id"] = j.Id, ["command"] = j.Command, ["running"] = j.Running, ["status"] = j.Status(),
+                ["id"] = j.Id, ["command"] = j.Command, ["running"] = j.Running, ["status"] = j.Status(), ["background"] = j.Background,
+                // The end of its output: a job outlives the turn that started it, and no turn's stream carries it then.
+                ["output"] = j.Running ? j.Tail(StateOutput) : null,
             })]),
             ["thinking"] = _rt.Model.Thinking,
             ["mode"] = _rt.Permissions.Mode.Name(),
             ["modes"] = new JsonArray([.. Modes.Names.Select(n => (JsonNode)new JsonObject { ["name"] = n, ["description"] = Modes.Parse(n)!.Value.Describe() })]),
             ["session"] = _rt.Session.Id,
             ["busy"] = Current() is not null,
+            // Which answer runs, or ran last: the page attaches to each new one.
+            ["turn"] = Volatile.Read(ref _turns),
+            ["queued"] = new JsonArray([.. Queued().Select(q => (JsonNode)q)]),
             ["arenaTools"] = _rt.ArenaConnected,
             ["tools"] = new JsonObject
             {
@@ -536,6 +551,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["messages"] = History.Messages(data),
             ["diffs"] = diffs,
             ["busy"] = Current() is not null,
+            // Which answer runs, or ran last: the page attaches to each new one.
+            ["turn"] = Volatile.Read(ref _turns),
             ["usage"] = new JsonObject { ["prompt"] = data.Prompt, ["cached"] = data.Cached, ["completion"] = data.Completion },
         };
     }
@@ -550,21 +567,74 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         }
         if (Begin("answer") is not { } job)
         {
-            await res.ErrorAsync(409, "busy", "An answer is being written: wait for it, or stop it.", ct);
+            await res.ErrorAsync(409, "busy", "An answer is being written: queue this one (it runs when the answer ends), or stop the answer.", ct);
             return;
         }
         // Kept for ↑, here and in the terminal: the folder's history.
         _rt.History.Add(text);
-        text = _rt.Prepare(text);
-        // What the web chat added comes in first, so this question's place is its place.
-        if (_rt.Sync is { } sync)
-        {
-            _rt.Agent.TakeIn(await sync.TakeInAsync(ct));
-        }
-        var count = _rt.Agent.Messages.Count;
-        job.Emit(new JsonObject { ["type"] = "question", ["id"] = $"m{count}", ["parentId"] = count == 0 ? null : $"m{count - 1}" });
         job.Running = Task.Run(() => RunTurnAsync(job, text));
         await StreamAsync(job, res, ct);
+    }
+
+    /// <summary>How much of a running job's output the state carries (the page shows the last 200 lines).</summary>
+    private const int StateOutput = 16 * 1024;
+
+    /// <summary>How many answers and compactions have started (the state's <c>turn</c>).</summary>
+    private int _turns;
+
+    /// <summary>Set as code-arena web shuts down: nothing new starts.</summary>
+    private bool _closing;
+
+    /// <summary>Messages sent while an answer is written: each runs, in order, once the one before it ends.</summary>
+    private readonly List<string> _queued = [];
+
+    /// <summary>POST /api/queue: a message for after the answer being written (now, when none is).</summary>
+    private async Task QueueAsync(HttpRequest req, HttpResponse res, CancellationToken ct)
+    {
+        var text = req.Json()?.Str("text")?.Trim();
+        if (string.IsNullOrEmpty(text))
+        {
+            await res.ErrorAsync(400, "invalid", "Write a message first.", ct);
+            return;
+        }
+        _rt.History.Add(text);
+        int place;
+        lock (_gate)
+        {
+            _queued.Add(text);
+            place = _queued.Count;
+        }
+        StartNext();
+        await res.JsonAsync(202, new JsonObject { ["queued"] = place }, ct);
+    }
+
+    /// <summary>
+    /// When nothing runs: the next queued message, else a turn that carries on from commands that ended while nobody
+    /// asked. Its events go to whoever watches (the page attaches through /api/turn when the state says busy).
+    /// </summary>
+    private void StartNext()
+    {
+        string? text = null;
+        Job? job;
+        lock (_gate)
+        {
+            if (_job is not null || _closing)
+            {
+                return;
+            }
+            if (_queued.Count > 0)
+            {
+                text = _queued[0];
+                _queued.RemoveAt(0);
+            }
+            else if (_rt.Jobs.Follow().Count == 0)
+            {
+                return;
+            }
+            job = _job = new Job("answer");
+            _turns++;
+        }
+        job.Running = Task.Run(() => RunTurnAsync(job, text));
     }
 
     /// <summary>A new job when none runs; null when one does.</summary>
@@ -576,18 +646,43 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             {
                 return null;
             }
+            _turns++;
             return _job = new Job(kind);
         }
     }
 
-    private async Task RunTurnAsync(Job job, string text)
+    /// <summary>A turn as a job: the person's message, or (null) the model carrying on after commands that ended.</summary>
+    private async Task RunTurnAsync(Job job, string? text)
     {
         var turn = new Spend();
         _rt.Turn = turn;
         _answerId = null;
         try
         {
-            await _rt.Agent.RunAsync(text, turn, job.Stop.Token);
+            // What the web chat added comes in first (inside the job, so Stop ends it and nothing it does leaves the IDE busy),
+            // then the question takes its place after it.
+            if (_rt.Sync is { } sync)
+            {
+                var takeIn = sync.TakeInAsync(job.Stop.Token);
+                if (await Task.WhenAny(takeIn, Task.Delay(TimeSpan.FromSeconds(1))) != takeIn)
+                {
+                    // Said only when it is slow (Arena busy or far away): Stop ends the wait.
+                    job.Emit(new JsonObject { ["type"] = "notice", ["text"] = "Reading the web chat…" });
+                }
+                _rt.Agent.TakeIn(await takeIn);
+            }
+            var count = _rt.Agent.Messages.Count;
+            if (text is not null)
+            {
+                text = _rt.Prepare(text);
+                job.Emit(new JsonObject { ["type"] = "question", ["id"] = $"m{count}", ["parentId"] = count == 0 ? null : $"m{count - 1}", ["text"] = text });
+                await _rt.Agent.RunAsync(text, turn, job.Stop.Token, takeIn: false);
+            }
+            else
+            {
+                job.Emit(new JsonObject { ["type"] = "notice", ["text"] = "A command ended: the model carries on from it." });
+                await _rt.Agent.ContinueAsync(turn, job.Stop.Token, takeIn: false);
+            }
         }
         catch (OperationCanceledException) when (job.Stop.IsCancellationRequested)
         {
@@ -611,6 +706,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 ["id"] = _answerId,
                 ["usage"] = new JsonObject { ["prompt"] = turn.Prompt, ["cached"] = turn.Cached, ["completion"] = turn.Completion, ["requests"] = turn.Requests },
             });
+            // The next queued message runs, after a stopped turn too (a turn stuck on a slow model is stopped to get on with
+            // it); the page's Clear drops the queue first.
+            StartNext();
         }
     }
 
@@ -658,6 +756,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             finally
             {
                 End(job, new JsonObject { ["type"] = "done", ["id"] = null });
+                // What was queued meanwhile, or a command that ended meanwhile, goes on now.
+                StartNext();
             }
         });
         await StreamAsync(job, res, ct);
@@ -947,7 +1047,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     // ------------------------------------------------- commands with no time limit
 
     private void JobStarted(CommandJob job) =>
-        Emit(new JsonObject { ["type"] = "job", ["job"] = job.Id, ["command"] = job.Command, ["running"] = true, ["status"] = job.Status() });
+        Emit(new JsonObject { ["type"] = "job", ["job"] = job.Id, ["command"] = job.Command, ["running"] = true, ["status"] = job.Status(), ["background"] = job.Background });
 
     /// <summary>
     /// A job's output, gathered for a quarter of a second at a time: the page gets a few events a second, not one per
@@ -1002,10 +1102,27 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         {
             ["type"] = "job_end", ["job"] = job.Id, ["running"] = false, ["status"] = job.Status(), ["exitCode"] = job.ExitCode, ["stopped"] = job.StoppedBy is not null,
         });
+        // A command that ended while no answer is written: the model carries on from it.
+        if (!job.Background)
+        {
+            StartNext();
+        }
+    }
+
+    private List<string> Queued()
+    {
+        lock (_gate)
+        {
+            return [.. _queued];
+        }
     }
 
     public async ValueTask DisposeAsync()
     {
+        lock (_gate)
+        {
+            _closing = true;
+        }
         if (Current() is { } job)
         {
             await job.Stop.CancelAsync();

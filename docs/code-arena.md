@@ -116,7 +116,12 @@ a search. Each turn ends with its tokens and the share read from the cache
 (`12.4k in (81% cached) · 310 out · 3 requests`) and how full the model's
 window is (`context 18.2k / 131k (14%), compacts at 80%`). **Ctrl+C** stops the turn and
 keeps what was said; at the prompt it clears what is typed, and on an empty
-prompt twice leaves. **Ctrl+Z** at the prompt stops code-arena, as in a shell:
+prompt twice leaves. What is typed while a turn runs is kept: a line ended with
+Enter is sent as the next message when the turn ends, and a line begun waits in
+the prompt. A question (`Allow edit_file?`) reads only what is typed after it is
+asked; a message typed there instead of `y`, `n` or `a` is a no, and is kept as
+the next message. Ctrl+C at a question stops the turn, and what was typed
+meanwhile comes back in the prompt, to send, change or clear. **Ctrl+Z** at the prompt stops code-arena, as in a shell:
 `fg` brings it back, with what you were typing (not on Windows). A line ending
 in `\` goes on to the next.
 
@@ -240,8 +245,12 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   the agent runs with no time limit shows above the box while it runs: the
   end of its output as it comes, how it ended, and **Stop**. **↑** in its box brings back this session's messages, then
   what this folder sent before (in the terminal too), as in Arena's chat;
-  **↓** and **Esc** go back to what you were typing. The Chat activity lists
-  this folder's sessions.
+  **↓** and **Esc** go back to what you were typing. A message sent while an
+  answer is written is **queued** (Enter, or **Queue**): it shows above the box
+  and runs once the answer ends, each in its turn: **Stop** stops the answer
+  and the next queued message runs, and **Clear** drops the queue. A command with no time limit
+  that ends while nothing runs starts a turn of its own, which the page shows as
+  any other. The Chat activity lists this folder's sessions.
 - **status bar**: the git branch, the agent's changes, the terminal and the
   number of commands running with no time limit on the left; the cursor's
   line and column, the file's language, the MCP servers (connected of all:
@@ -354,9 +363,11 @@ status (403 `outside` for a path outside the folder).
 
 | call | what it does |
 |---|---|
-| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `context` (the window), `contextUsed` (about how much of it is in use), `compactAt` and `compactTarget` (percent); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status}]`) |
+| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it is in use), `compactAt` and `compactTarget` (percent); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output) |
 | `POST /api/servers/retry` `{name}` | tries that MCP server again now (every one not connected without `name`); the state |
 | `POST /api/jobs/stop` `{id}` | stops a command run with no time limit; 404 for no such job |
+| `POST /api/queue` `{text}` | a message for after the answer being written (runs at once when none is); 202 `{queued}` (its place). `/api/messages` while an answer is written is 409 `busy` |
+| `DELETE /api/queue` | drops the queued messages; 204 |
 | `GET /api/files?path=DIR` | a folder's entries, folders first: `{path, entries: [{name, path, kind, size, link}]}` |
 | `GET /api/files/all` | every file, for quick open: `{files, truncated}` (50,000 at most) |
 | `GET /api/file?path=FILE` | `{path, size, version, text}`; `text` is null with `binary` or `tooLarge` (over 5 MB) |
@@ -524,41 +535,45 @@ said. `"arenaTools": false` and `"argusTools": false` in
 `config.json` turn them off. `code-arena login` tries both and says what it
 found.
 
-### Commands with no time limit
+### Commands with no time limit, and in the background
 
 A command that takes longer than `run_shell`'s limit (a full build, a long
-test suite, an install, a migration) runs with `no_time_limit`: in the
-background, with a watcher that shows its output as it comes (in the terminal
+test suite, an install, a migration) runs with `no_time_limit`: as a job of
+its own, with a watcher that shows its output as it comes (in the terminal
 under its job number, `│1 …`; in the IDE above the chat's box), however long
 it takes. In the terminal its lines never break into a question waiting for the
-person's answer or into the middle of the model's line: they wait, and follow. The model gets a job number at once and can go on with other work,
-or wait with `command_output`; the turn does not end while one it started
-runs, and when one ends the model is told, as a `command_output` result, its
-exit code and the end of its output (the last 8,000 characters; the last
-256 KB are kept for `command_output`). Several run at once. A time limit given
-with it does not apply. When the turn fails while one runs (the gateway or
-the model's server down), the command is not stopped: the turn says so and
-keeps watching it until it ends, and the model is told how it ended with the
-person's next message.
+person's answer or into the middle of the model's line: they wait, and follow.
+The model gets a job number at once and goes on with other work, or ends its
+answer: **the turn does not wait for the job**, so the prompt is free and the
+person can type their next message meanwhile. When the job ends, the model is
+told its exit code and the end of its output (the last 8,000 characters; the
+last 256 KB are kept for `command_output`) and **carries on from there in a
+turn of its own** (`job 1 ended: the model carries on`), at the prompt or in the
+IDE, once no other turn runs. `command_output` reads a job's latest output, and
+with `wait` waits for it to end, ten minutes at most. Several run at once. A time
+limit given with it does not apply. When a turn fails while one runs (the
+gateway or the model's server down), the command is not stopped.
 
-Only the person stops one: **Ctrl+C** in the terminal stops the turn and the
-commands it started. While the turn waits for them, Ctrl+C stops the turn
-and them. Where the terminal reads plain lines (a pipe, `TERM=dumb`), it still
-reads what the person types meanwhile: `/jobs` lists them and `/jobs stop N`
-stops one (the model is told how it ended and the turn goes on), and anything
-else is taken as the next message when the turn ends (not if they stop it).
-At an interactive prompt, whose line editor reads the keys itself, what to say
-next is typed once the turn ends, and `/jobs` then lists the commands. **Stop** in the
-IDE stops the turn or one command (a command running that no turn on the page shows, after
-a reload, is listed from the session's state with its **Stop**), and the
-model's `stop_command` asks the person first in every mode, every time: it
-offers no **always**. Ordinary commands keep their limit (120 s by default, at
-most 600).
+A server or a watcher that never ends by itself (`npm run dev`, `dotnet watch`,
+a database) runs with `background`: the model gets its first output after a few
+seconds (where it listens, or why it failed), and it runs until stopped. Its end
+starts no turn, and stopping a turn does not stop it.
 
-Running a command with no time limit asks where commands ask: in `ask` and
-`auto-edit` the question says "with no time limit", and **always** said to
-`npm test` does not cover `npm test` with no time limit (nor the other way
-round), so the person agrees to each kind of wait. `yolo` runs it without
+Only the person stops a command with no time limit: **Ctrl+C** in the terminal
+(or **Stop** in the IDE) stops the turn and the commands that turn started with
+no time limit; those in the background run on. `/jobs` lists the jobs, running
+or ended, and `/jobs stop N` stops one (the model is told how it ended). **Stop**
+next to a command in the IDE stops that one (a command running that no turn on
+the page shows, after a reload, is listed from the session's state with its
+**Stop**), and the model's `stop_command` asks the person first in every mode,
+every time: it offers no **always**. Ordinary commands keep their limit (120 s
+by default, at most 600).
+
+Running a command with no time limit, or in the background, asks where
+commands ask: in `ask` and `auto-edit` the question says "with no time limit"
+or "in the background", and **always** said to `npm test` does not cover
+`npm test` with no time limit or in the background (nor the other way round),
+so the person agrees to each kind of wait. `yolo` runs it without
 asking, as it runs every command: it is watched, shown, and stopped with
 Ctrl+C or Stop, so nothing runs out of the person's sight. Laya still looks at
 the command first (above). `-p` cannot ask, so outside `yolo` it is refused
@@ -699,7 +714,8 @@ in the chat list it has a terminal mark, and its page says it is a Code Arena
 session and which folder it runs in. It can be continued on the web, where the
 chat's own tools answer (the files and commands stay on the machine Code Arena
 runs on); what was added there comes into the session at its next turn here,
-before the question, so the model hears it. `/web` lists your chats in Arena
+before the question, so the model hears it (a turn waits a few seconds at most
+for Arena to say: when it is slow, the web's news comes in at the turn after). `/web` lists your chats in Arena
 and `/web N` (or `code-arena chat --web N`) continues one here in a new
 session: its messages come in, and what this session adds goes back to it.
 
@@ -728,7 +744,10 @@ stopped or fails leaves its changes uncommitted, and the next turn that ends
 commits them. Nothing is committed during a merge, rebase, cherry-pick or
 revert. The repository's hooks run as for any commit; one that refuses, or one
 that waits more than two minutes, leaves the changes uncommitted, and the turn
-says why.
+says why; after two seconds the turn says it is committing, and Ctrl+C or
+**Stop** skips the commit (git is told to stop, so it removes its lock). A turn
+whose commands with no time limit still run leaves its changes uncommitted
+until they end: the turn that carries on then commits them.
 
 `"autoCommit": false` in `config.json` turns the turn's commits off;
 `"commitName"` and `"commitEmail"` change the author (Code Arena,
@@ -815,8 +834,11 @@ hold.
 Code Arena carries on by itself where it can. A gateway that does not answer
 (502, 503, 504, a lost connection: the Arena restarting, a model loading) is
 tried again five times over about a minute and a half, and the session says so
-each time. An answer that does not start within 15 minutes (a long prompt is
-read first), or that stops for 3 minutes, is given up and asked again. When
+each time. An answer that has not started after a minute says so (the engine
+busy with others, or reading a long prompt; Ctrl+C or **Stop** ends the wait).
+One that does not start within 15 minutes, or that stops for 3 minutes, is
+given up and asked once more; a second such stall ends the turn with the
+reason, and the next message is sent as usual. When
 the connection drops after part of an answer arrived (a stream that ends
 without its end counts too), that part is kept and the model is asked to carry
 on from where it stopped, up to three times a turn.

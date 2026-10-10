@@ -704,9 +704,16 @@ internal static partial class Cli
         try
         {
             answer = await rt.Agent.RunAsync(prompt, turn, linked.Token);
+            // Nobody types a next message here.
+            answer = await rt.FinishJobsAsync(turn, linked.Token) ?? answer;
         }
         catch (OperationCanceledException) when (linked.IsCancellationRequested)
         {
+            // What it was waiting for stops with it.
+            foreach (var job in rt.Jobs.Waiting)
+            {
+                job.Stop("by the person");
+            }
             error = "Stopped.";
             code = 130;
         }

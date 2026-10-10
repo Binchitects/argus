@@ -13,8 +13,11 @@ internal sealed class Repl(Runtime rt)
         ? new LineEditor(keys, rt.Ui.Out, () => rt.History.Entries()) { Interrupted = rt.Env.Cancel.Press }
         : null;
 
-    // What the person typed while a turn waited for its commands: taken when it ends.
+    // What the person typed while a turn ran (whole lines, and a line begun): taken when it ends.
     private readonly Queue<string> _typed = new();
+    private string _ahead = "";
+    // The running turn's token: a question waiting for its answer ends when the turn is stopped.
+    private CancellationToken? _turnStop;
 
     private Ui Ui => rt.Ui;
 
@@ -31,7 +34,7 @@ internal sealed class Repl(Runtime rt)
         ("/context", "how full the model's window is"),
         ("/cost", "tokens spent, and how full the window is"),
         ("/mcp [retry]", "Arena's, Argus's and your MCP servers: connected or not; retry tries now"),
-        ("/jobs [stop N]", "the commands run with no time limit; stop N stops job N (also while a turn waits for them)"),
+        ("/jobs [stop N]", "the commands run with no time limit or in the background; stop N stops job N"),
         ("/clear", "start a new session (this one stays saved)"),
         ("/resume [id]", "switch to a saved session"),
         ("/web [N]", "your chats in Arena; /web N continues one here (what is added goes back to it)"),
@@ -48,11 +51,23 @@ internal sealed class Repl(Runtime rt)
     public async Task<int> RunAsync(string? first, CancellationToken ct)
     {
         Banner();
-        if (Ui.CanAsk)
+        if (_editor is not null)
         {
-            // While a turn waits for its commands, the person can still type: /jobs stop N stops one of them.
-            rt.Agent.Listen = ListenAsync;
+            // A command's output while the person types goes above the prompt, which is drawn again under it.
+            Ui.Interject = _editor.Interject;
+            // A question's answer is read by the prompt's own editor, never by a second reader of the same keys: what was
+            // typed while the model worked stays for the next message, and Ctrl+C at the question stops the turn.
+            Ui.AnswerReader = prompt =>
+            {
+                KeepTypedAhead();
+                return _editor.Read(prompt, Ui.Dim("… "), wake: () => _turnStop?.IsCancellationRequested == true, answer: true);
+            };
         }
+        Ui.NotAnAnswer = text =>
+        {
+            _typed.Enqueue(text);
+            Ui.Info($"Not an answer, so a no: \"{Fmt.OneLine(text, 60)}\" is kept as your next message.");
+        };
         var pending = first;
         while (!ct.IsCancellationRequested)
         {
@@ -83,12 +98,24 @@ internal sealed class Repl(Runtime rt)
                 input = pending;
             }
             pending = null;
+            if (input == LineEditor.Woken)
+            {
+                // A command with no time limit ended while nobody was typing: the model carries on from it.
+                await TurnAsync(null, ct);
+                continue;
+            }
             if (input is null)
             {
                 // A read cut short by Ctrl+C (Windows) is not the end of input. The line editor reads Ctrl+C itself.
                 if (_editor is null && DateTime.UtcNow - rt.Env.Cancel.LastPress < TimeSpan.FromSeconds(1))
                 {
                     continue;
+                }
+                if (_editor is null && (rt.Jobs.Waiting.Count > 0 || rt.Jobs.HasNews))
+                {
+                    // The end of piped input: nobody types next, so the commands still running are waited for, and the
+                    // model carries on from each, before the session ends.
+                    await FinishAsync(ct);
                 }
                 break;
             }
@@ -183,12 +210,14 @@ internal sealed class Repl(Runtime rt)
         Ui.Line();
         if (_editor is not null)
         {
-            return _editor.Read(Ui.Cyan("› "), Ui.Dim("… "));
+            var ahead = _ahead;
+            _ahead = "";
+            return _editor.Read(Ui.Cyan("› "), Ui.Dim("… "), wake: () => rt.Jobs.HasNews, initial: ahead);
         }
-        var line = Ui.ReadLine(Ui.Cyan("› "));
-        if (line is null)
+        var line = Ui.ReadLine(Ui.Cyan("› "), () => rt.Jobs.HasNews);
+        if (line is null or LineEditor.Woken)
         {
-            return null;
+            return line;
         }
         var sb = new StringBuilder();
         while (line.EndsWith('\\'))
@@ -228,8 +257,93 @@ internal sealed class Repl(Runtime rt)
         }
     }
 
-    private async Task TurnAsync(string input, CancellationToken ct)
+    /// <summary>
+    /// The keys typed while the model worked and no one read them: each whole line kept as a next message (said so), a
+    /// line begun kept for the next prompt. A question then reads only what is typed after it is asked.
+    /// </summary>
+    private void KeepTypedAhead()
     {
+        if (rt.Env.Keys is not { } keys)
+        {
+            return;
+        }
+        var line = new StringBuilder(_ahead);
+        while (keys.KeyAvailable && keys.ReadKey() is { } key)
+        {
+            if (key.Key == ConsoleKey.Enter || key.KeyChar is '\r' or '\n')
+            {
+                if (line.Length > 0 && line[^1] == '\\')
+                {
+                    // A line ended with \ goes on to the next, as at the prompt.
+                    line.Length--;
+                    line.Append('\n');
+                    continue;
+                }
+                if (line.ToString().Trim() is { Length: > 0 } text)
+                {
+                    _typed.Enqueue(text);
+                    Ui.Info($"Taken when this turn ends: {Fmt.OneLine(text, 60)}");
+                }
+                line.Clear();
+            }
+            else if (key.Key == ConsoleKey.Backspace)
+            {
+                if (line.Length > 0)
+                {
+                    line.Length--;
+                }
+            }
+            else if (!char.IsControl(key.KeyChar))
+            {
+                line.Append(key.KeyChar);
+            }
+        }
+        _ahead = line.ToString();
+    }
+
+    /// <summary>The commands with no time limit waited for at the end of input, as a turn (Ctrl+C stops them and it).</summary>
+    private async Task FinishAsync(CancellationToken ct)
+    {
+        var turn = new Spend();
+        rt.Turn = turn;
+        using var key = rt.Env.Cancel.BeginTurn();
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, key.Token);
+        try
+        {
+            await rt.FinishJobsAsync(turn, linked.Token);
+        }
+        catch (OperationCanceledException) when (linked.IsCancellationRequested)
+        {
+            foreach (var job in rt.Jobs.Waiting)
+            {
+                job.Stop("by the person");
+            }
+            Ui.Warn("Stopped.");
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            Ui.Error(e.Message);
+        }
+        finally
+        {
+            rt.Env.Cancel.EndTurn();
+            rt.Turn = null;
+        }
+    }
+
+    /// <summary>A turn: the person's message, or (null) the model carrying on after a command that ended.</summary>
+    private async Task TurnAsync(string? input, CancellationToken ct)
+    {
+        if (input is null)
+        {
+            var ended = rt.Jobs.Follow().Select(j => $"job {j.Id}").ToList();
+            if (ended.Count == 0)
+            {
+                return;
+            }
+            Ui.Line();
+            Ui.Info($"{string.Join(", ", ended)} ended: the model carries on from {(ended.Count == 1 ? "it" : "them")}.");
+        }
         if (_ran.Count > 0)
         {
             input = string.Join("\n\n", _ran) + "\n\n" + input;
@@ -239,6 +353,7 @@ internal sealed class Repl(Runtime rt)
         rt.Turn = turn;
         using var key = rt.Env.Cancel.BeginTurn();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, key.Token);
+        _turnStop = linked.Token;
         try
         {
             await rt.Agent.RunAsync(input, turn, linked.Token);
@@ -248,17 +363,32 @@ internal sealed class Repl(Runtime rt)
             Ui.Warn("Stopped.");
             if (_typed.Count > 0)
             {
-                // Stopping the turn stops what was typed for after it too: it may no longer apply.
-                Ui.Info($"Not sent, as the turn was stopped: {string.Join(" · ", _typed.Select(t => Fmt.OneLine(t, 60)))}");
+                // What was typed for after the turn may no longer apply: it waits in the prompt, to send, change or clear.
+                var kept = string.Join("\n", _typed.Append(_ahead).Where(t => t.Length > 0));
                 _typed.Clear();
+                if (_editor is not null)
+                {
+                    _ahead = kept;
+                    Ui.Info("What you typed meanwhile is back in the prompt: Enter sends it.");
+                }
+                else
+                {
+                    Ui.Info($"Not sent, as the turn was stopped: {Fmt.OneLine(kept, 120)}");
+                }
             }
         }
         catch (Exception e) when (e is GatewayException or HttpRequestException or IOException)
         {
             Ui.Error(e.Message);
         }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            // Whatever goes wrong in a turn ends that turn, never the conversation.
+            Ui.Error($"The turn failed: {e.Message}");
+        }
         finally
         {
+            _turnStop = null;
             rt.Env.Cancel.EndTurn();
             rt.Turn = null;
         }
@@ -266,62 +396,6 @@ internal sealed class Repl(Runtime rt)
         {
             Ui.Info(turn.Describe(Ui) + " · " + ContextUse());
         }
-    }
-
-    /// <summary>
-    /// What the person types while the turn waits for its commands with no time limit, until
-    /// <paramref name="wait"/> is done: /jobs lists them and /jobs stop N stops one; anything else
-    /// is kept and taken when the turn ends, as if typed then. A line being typed as the wait ends
-    /// goes to whatever reads next (the prompt, or a question).
-    /// </summary>
-    private async Task ListenAsync(Task wait)
-    {
-        if (_editor is not null)
-        {
-            // The prompt's line editor reads the terminal key by key: a line read in the background meanwhile would
-            // take the keys meant for the prompt once the wait ends. Here the wait is only watched: Ctrl+C stops the
-            // turn and its commands, and what to say next is typed once it ends.
-            Ui.Info("Waiting for the commands with no time limit: Ctrl+C stops them and the turn.");
-            await wait;
-            return;
-        }
-        var lines = new StringBuilder();
-        while (!wait.IsCompleted)
-        {
-            var read = Ui.NextLineAsync();
-            if (await Task.WhenAny(wait, read) != read)
-            {
-                break;
-            }
-            if (Ui.Take(read) is not { } line)
-            {
-                // The end of input (or Ctrl+C, on Windows): only the wait is left.
-                break;
-            }
-            if (line.EndsWith('\\'))
-            {
-                lines.Append(line[..^1]).Append('\n');
-                continue;
-            }
-            var text = lines.Append(line).ToString().Trim();
-            lines.Clear();
-            if (text.Length == 0)
-            {
-                continue;
-            }
-            if (text.Equals("/jobs", StringComparison.OrdinalIgnoreCase) || text.StartsWith("/jobs ", StringComparison.OrdinalIgnoreCase))
-            {
-                await JobsAsync(text[5..].Trim());
-                continue;
-            }
-            _typed.Enqueue(text);
-            Ui.Info($"Taken when this turn ends: {Fmt.OneLine(text, 60)} (while it waits, /jobs and /jobs stop N work)");
-        }
-        if (lines.ToString().Trim() is { Length: > 0 } unfinished)
-        {
-            _typed.Enqueue(unfinished);
-        }
-        await wait;
     }
 
     /// <summary>/jobs: the commands with no time limit and how each is; /jobs stop N stops one.</summary>

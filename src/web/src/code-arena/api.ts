@@ -1,5 +1,5 @@
 import { api } from '@/lib/api'
-import { reduce, type LiveState } from '@/pages/chat/live'
+import { blank, reduce, type LiveState } from '@/pages/chat/live'
 import type { ChatEvent, Message } from '@/pages/chat/types'
 
 /** What code-arena web says of itself: the folder, the model, the mode, the session open now. */
@@ -33,6 +33,10 @@ export interface CodeState {
   session: string
   /** A turn is running (the page watches it from its start). */
   busy: boolean
+  /** Messages sent while an answer was written: each runs, in order, when the one before it ends. */
+  queued: string[]
+  /** The number of the answer (or compaction) running or last run: a new one is attached to when it differs. */
+  turn?: number
   arenaTools: boolean
   tools: { local: number; servers: { name: string; count: number }[] }
 }
@@ -61,6 +65,10 @@ export interface JobSummary {
   running: boolean
   /** "running for 2m 10s", "exit code 0 after 3m 12s", "stopped (by the person, in the IDE) after 41s". */
   status: string
+  /** A server or a watcher, run until stopped (never waited for). */
+  background?: boolean
+  /** The end of its output while it runs (it outlives the turn that started it); null once it ended. */
+  output?: string | null
 }
 
 /** When the session compacts itself, as code-arena bounds it. */
@@ -104,7 +112,7 @@ export type CodeEvent =
   | (Extract<ChatEvent, { type: 'tool_result' }> & { diff?: FileDiff })
   | (Extract<ChatEvent, { type: 'approval' }> & { always?: string; risk?: string })
   | { type: 'reset'; messages: Message[]; diffs: Record<string, FileDiff> }
-  | { type: 'job'; job: number; command: string; running: true; status: string }
+  | { type: 'job'; job: number; command: string; running: true; status: string; background?: boolean }
   | { type: 'job_output'; job: number; text: string }
   | { type: 'job_end'; job: number; running: false; status: string; exitCode: number | null; stopped: boolean }
 
@@ -137,6 +145,10 @@ export const stopJob = (id: number) => api('/api/jobs/stop', { body: { id } })
 export const newSession = () => api<CodeSession>('/api/sessions/new', { body: {} })
 export const resumeSession = (id: string) => api<CodeSession>('/api/sessions/resume', { body: { id } })
 export const stopTurn = () => api('/api/stop', { body: {} })
+/** A message for after the answer being written (at once when none is). */
+export const queueMessage = (text: string) => api<{ queued: number }>('/api/queue', { body: { text } })
+// A body, so it goes as JSON: code-arena web refuses any other call that changes something.
+export const clearQueue = () => api('/api/queue', { method: 'DELETE', body: {} })
 export const answerApproval = (id: string, answer: 'allow' | 'always' | 'deny') => api('/api/approvals', { body: { id, answer } })
 
 /** A command with no time limit as the page watches it: the end of its output, and how it ended. */
@@ -147,8 +159,10 @@ export interface LiveJob {
   status: string
   output: string
   failed: boolean
-  /** Running, but no turn on this page streams it: known from the state, with its Stop. */
+  /** Running, but no turn on this page streams it: known from the state (read every second), with its Stop. */
   unwatched?: boolean
+  /** A server or a watcher, run until stopped. */
+  background?: boolean
 }
 
 /** The output a page keeps of each command: the end of it (the agent reads the rest with command_output). */
@@ -181,6 +195,13 @@ const withJob = (jobs: LiveJob[], id: number, change: (j: LiveJob) => LiveJob, a
 /** One event folded in: Arena's reducer, and Code Arena's own fields around it. */
 export function reduceCode(state: CodeLive, e: CodeEvent, localId: string | null): CodeLive {
   switch (e.type) {
+    case 'question': {
+      // A turn this page did not start (a queued message, another tab): its question comes with its text.
+      const q = e as { id: string; parentId: string | null; text?: string }
+      if (localId === null && q.text != null && !state.messages.some((m) => m.id === q.id))
+        return reduce({ ...state, messages: [...state.messages, { ...blank(q.id, 'user', q.parentId), content: q.text }] }, e, localId) as CodeLive
+      return reduce(state, e, localId) as CodeLive
+    }
     case 'reset':
       return { ...state, messages: e.messages, diffs: e.diffs, leaf: e.messages.at(-1)?.id ?? null, current: null, compacting: false }
     case 'approval':
@@ -192,7 +213,10 @@ export function reduceCode(state: CodeLive, e: CodeEvent, localId: string | null
     case 'tool_result':
       return { ...(reduce(state, e, localId) as CodeLive), diffs: e.diff ? { ...state.diffs, [e.messageId]: e.diff } : state.diffs }
     case 'job':
-      return { ...state, jobs: withJob(state.jobs, e.job, (j) => j, { id: e.job, command: e.command, running: true, status: e.status, output: '', failed: false }) }
+      return {
+        ...state,
+        jobs: withJob(state.jobs, e.job, (j) => j, { id: e.job, command: e.command, running: true, status: e.status, output: '', failed: false, background: e.background }),
+      }
     case 'job_output':
       return { ...state, jobs: withJob(state.jobs, e.job, (j) => ({ ...j, output: (j.output + e.text).slice(-keptOutput) })) }
     case 'job_end':

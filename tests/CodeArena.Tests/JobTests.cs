@@ -5,7 +5,10 @@ using System.Text.Json.Nodes;
 
 namespace CodeArena.Tests;
 
-/// <summary>Commands with no time limit: run in the background, watched to their end, stopped only by the person.</summary>
+/// <summary>
+/// Commands with no time limit: run on their own, watched to their end, stopped only by the person. A turn does not wait for
+/// them: the model carries on from each end in a turn of its own (a one-shot run waits, as nobody types next).
+/// </summary>
 public sealed class JobTests : IDisposable
 {
     private readonly FakeGateway _gateway = new();
@@ -18,6 +21,16 @@ public sealed class JobTests : IDisposable
         psi.ArgumentList.Add("-c");
         psi.ArgumentList.Add(script);
         return psi;
+    }
+
+    private static async Task UntilAsync(Func<Task<bool>> condition, string what, int seconds = 15)
+    {
+        var clock = Stopwatch.StartNew();
+        while (!await condition())
+        {
+            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(seconds), $"Not within {seconds} s: {what}");
+            await Task.Delay(100);
+        }
     }
 
     private static async Task Until(Func<bool> condition, string what, int seconds = 15)
@@ -179,17 +192,16 @@ public sealed class JobTests : IDisposable
             return;
         }
         using var h = new Harness(_gateway, _mcp, c => c["mode"] = "yolo");
-        _gateway.Answer = req => FakeGateway.HasToolResults(req)
-            ? Reply.Say("Waiting for the server test.")
-            : Reply.Call(("run_shell", """{"command":"echo up; sleep 300","no_time_limit":true}"""));
+        _gateway.Answer = _ => Reply.Call(("run_shell", """{"command":"echo up; sleep 300","no_time_limit":true}"""));
+        // The model is slow to answer after the command started: the turn still runs when the person presses Ctrl+C.
+        _gateway.Silent = FakeGateway.HasToolResults;
         var output = new StringWriter();
         var env = new CliEnv { In = new StringReader(""), Out = TextWriter.Synchronized(output), Err = TextWriter.Synchronized(output), Env = _ => null, Cwd = h.Work, Paths = h.Paths };
         var ui = new Ui(env.In, env.Out, env.Err, false, false);
         await using var rt = await Runtime.StartAsync(new Options(), env, ui, CancellationToken.None);
         using var key = env.Cancel.BeginTurn();
         var turn = rt.Agent.RunAsync("run the long test", new Spend(), key.Token);
-        await Until(() => rt.Jobs.All.Count == 1 && rt.Jobs.All[0].Length > 0 && _gateway.Requests.Count == 2, "the job ran and the turn waits for it");
-        await Task.Delay(300);
+        await Until(() => rt.Jobs.All.Count == 1 && rt.Jobs.All[0].Length > 0 && _gateway.Requests.Count == 2, "the job ran and the model is asked again");
         Assert.False(turn.IsCompleted);
 
         Assert.True(env.Cancel.Press());
@@ -200,9 +212,50 @@ public sealed class JobTests : IDisposable
         env.Cancel.EndTurn();
 
         // The next turn is not told of it again: the person stopped it themselves.
+        _gateway.Silent = _ => false;
         _gateway.Answer = _ => Reply.Say("ok");
         Assert.Equal("ok", await rt.Agent.RunAsync("next", new Spend(), CancellationToken.None));
         Assert.DoesNotContain("has ended", FakeGateway.Last(_gateway.Requests[^1]));
+    }
+
+    [Fact]
+    public async Task A_turn_ends_when_the_model_answers_and_a_command_in_the_background_outlives_a_stopped_turn()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        using var h = new Harness(_gateway, _mcp, c => c["mode"] = "yolo");
+        _gateway.Answer = req => FakeGateway.HasToolResults(req)
+            ? Reply.Say("The build runs and the server is up.")
+            : Reply.Call(
+                ("run_shell", """{"command":"echo building; sleep 300","no_time_limit":true}"""),
+                ("run_shell", """{"command":"echo listening on 5173; sleep 300","background":true}"""));
+        var output = new StringWriter();
+        var env = new CliEnv { In = new StringReader(""), Out = TextWriter.Synchronized(output), Err = TextWriter.Synchronized(output), Env = _ => null, Cwd = h.Work, Paths = h.Paths };
+        var ui = new Ui(env.In, env.Out, env.Err, false, false);
+        await using var rt = await Runtime.StartAsync(new Options(), env, ui, CancellationToken.None);
+
+        // The turn is over as soon as the model has answered: both commands run on.
+        var answer = await rt.Agent.RunAsync("build and serve", new Spend(), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Equal("The build runs and the server is up.", answer);
+        Assert.Equal(2, rt.Jobs.Running.Count);
+        var server = rt.Jobs.Find(2)!;
+        Assert.True(server.Background);
+        // The model got the server's first words with the call's result.
+        Assert.Contains(_gateway.Requests[^1]["messages"]!.AsArray(), m => m!["role"]!.GetValue<string>() == "tool" && m["content"]!.GetValue<string>().Contains("listening on 5173", StringComparison.Ordinal));
+
+        // A stopped turn stops what it started with no time limit, not what runs in the background.
+        _gateway.Silent = _ => true;
+        using var key = env.Cancel.BeginTurn();
+        var next = rt.Agent.RunAsync("run the tests too", new Spend(), key.Token);
+        await Until(() => _gateway.Requests.Count == 3, "the next turn asks the model");
+        env.Cancel.Press();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => next.WaitAsync(TimeSpan.FromSeconds(10)));
+        env.Cancel.EndTurn();
+        Assert.True(rt.Jobs.Find(1)!.Running, "the build was started by an earlier turn");
+        Assert.True(server.Running);
+        rt.Jobs.StopAll("the test");
     }
 
     [Fact]
@@ -278,7 +331,7 @@ public sealed class JobTests : IDisposable
     }
 
     [Fact]
-    public async Task The_IDE_streams_a_jobs_output_and_its_Stop_ends_it()
+    public async Task The_IDE_shows_a_jobs_output_after_the_turn_its_Stop_ends_it_and_the_model_carries_on()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -296,23 +349,30 @@ public sealed class JobTests : IDisposable
         var started = await stream.UntilAsync("job");
         Assert.Equal(1, started["job"]!.GetValue<int>());
         Assert.Equal("echo first line; sleep 300", started["command"]!.GetValue<string>());
-        var output = await stream.UntilAsync("job_output");
-        Assert.Equal("first line\n", output["text"]!.GetValue<string>());
+        // The turn ends once the model has answered; the command runs on.
+        var first = await stream.RestAsync();
+        Assert.Contains("Watching the tests.", string.Concat(first.Where(e => e["type"]!.GetValue<string>() == "content").Select(e => e["text"]!.GetValue<string>())));
+        Assert.Equal("done", first[^1]["type"]!.GetValue<string>());
+
+        // Its output comes with the state, for as long as it runs.
+        await UntilAsync(async () => (await web.GetJsonAsync("/api/state"))["jobs"]![0]!["output"]?.GetValue<string>() == "first line\n", "the state carries its output");
         var state = await web.GetJsonAsync("/api/state");
         Assert.True(state["jobs"]![0]!["running"]!.GetValue<bool>());
+        Assert.False(state["busy"]!.GetValue<bool>());
 
         Assert.Equal(HttpStatusCode.NoContent, (await web.PostAsync("/api/jobs/stop", new JsonObject { ["id"] = 1 })).StatusCode);
-        var end = await stream.UntilAsync("job_end");
-        Assert.True(end["stopped"]!.GetValue<bool>());
-        Assert.StartsWith("stopped (by the person, in the IDE) after", end["status"]!.GetValue<string>());
-        var events = await stream.RestAsync();
-        Assert.Contains(events, e => e["type"]!.GetValue<string>() == "tool_call" && e["name"]!.GetValue<string>() == "command_output");
-        Assert.Contains("Told: [Code Arena: job 1 has ended.", string.Concat(events.Where(e => e["type"]!.GetValue<string>() == "content").Select(e => e["text"]!.GetValue<string>())));
+        // Its end is news: the model carries on from it in a turn of its own, saved in the session.
+        await UntilAsync(async () => (await web.GetJsonAsync("/api/session")).ToJsonString().Contains("Told: [Code Arena: job 1 has ended.", StringComparison.Ordinal),
+            "the model carried on from its end");
+        var session = (await web.GetJsonAsync("/api/session")).ToJsonString();
+        Assert.Contains("command_output", session);
+        Assert.Contains("stopped (by the person, in the IDE)", session);
+        await UntilAsync(async () => !(await web.GetJsonAsync("/api/state"))["busy"]!.GetValue<bool>(), "the turn ended");
         Assert.Equal(HttpStatusCode.NotFound, (await web.PostAsync("/api/jobs/stop", new JsonObject { ["id"] = 9 })).StatusCode);
     }
 
     [Fact]
-    public async Task A_turn_that_fails_still_waits_for_its_commands_and_the_next_turn_tells_the_model_how_they_ended()
+    public async Task A_turn_that_fails_leaves_its_commands_running_and_the_next_turn_tells_the_model_how_they_ended()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -326,21 +386,20 @@ public sealed class JobTests : IDisposable
         var env = new CliEnv { In = new StringReader(""), Out = TextWriter.Synchronized(output), Err = TextWriter.Synchronized(output), Env = _ => null, Cwd = h.Work, Paths = h.Paths };
         var ui = new Ui(env.In, env.Out, env.Err, false, false);
         await using var rt = await Runtime.StartAsync(new Options(), env, ui, CancellationToken.None);
+        rt.Gateway.RetryWaits = [];
 
-        var clock = Stopwatch.StartNew();
         var failed = await Assert.ThrowsAsync<GatewayException>(() => rt.Agent.RunAsync("build it", new Spend(), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30)));
         Assert.Contains("restarting", failed.Message);
-        // The error came out when the build had ended, on its own: the failed request did not stop it.
+        // The failed request did not stop the build: it runs to its end on its own.
         var job = Assert.Single(rt.Jobs.All);
-        Assert.False(job.Running);
+        await job.Done.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Null(job.StoppedBy);
         Assert.Equal(0, job.ExitCode);
-        Assert.True(clock.Elapsed > TimeSpan.FromSeconds(1.2), $"the turn ended after {clock.Elapsed}");
         var said = output.ToString();
         Assert.Contains("The model cannot carry on: ", said);
-        Assert.Contains("The commands still running are watched until they end (Ctrl+C or Stop ends them)", said);
-        Assert.Contains("│1 built ok", said);
-        Assert.Contains("job 1 ended: exit code 0", said);
+        Assert.Contains("the model hears how each ended when it does, or with your next message", said);
+        await Until(() => output.ToString().Contains("job 1 ended: exit code 0", StringComparison.Ordinal), "its end is shown");
+        Assert.Contains("│1 built ok", output.ToString());
 
         // The next turn tells the model how it ended, first thing.
         _gateway.Failure = _ => 0;
@@ -349,40 +408,53 @@ public sealed class JobTests : IDisposable
     }
 
     [Fact]
-    public async Task While_a_turn_waits_for_its_commands_the_terminal_takes_jobs_stop_for_one_of_them()
+    public async Task In_a_terminal_read_by_lines_jobs_stop_ends_one_and_the_model_carries_on_from_each_end()
     {
         if (OperatingSystem.IsWindows())
         {
             return;
         }
         using var h = new Harness(_gateway, _mcp, c => c["mode"] = "yolo");
-        // The model starts a build and a test server with no time limit, and waits for both.
+        // The model starts a build and a test server with no time limit, answers, and hears of each as it ends.
         _gateway.Answer = req => FakeGateway.Last(req) switch
         {
             var last when last.Contains("job 1 has ended", StringComparison.Ordinal) => Reply.Say("Build done."),
             var last when last.Contains("job 2 has ended", StringComparison.Ordinal) => Reply.Say("The server is stopped; the build goes on."),
-            _ when FakeGateway.HasToolResults(req) => Reply.Say("Both run; I wait for them."),
+            "what now?" => Reply.Say("Nothing runs now."),
+            _ when FakeGateway.HasToolResults(req) => Reply.Say("Both run."),
             _ => Reply.Call(
-                ("run_shell", """{"command":"echo building; sleep 2; echo built","no_time_limit":true}"""),
+                ("run_shell", """{"command":"echo building; sleep 3; echo built","no_time_limit":true}"""),
                 ("run_shell", """{"command":"echo up; sleep 300","no_time_limit":true}""")),
         };
-
-        // Typed while the turn waits: the list, one stopped, and something for after the turn.
-        Assert.Equal(0, await h.Run("build and serve\n/jobs\n/jobs stop 2\n/jobs stop 9\nwhat now?\n/exit\n", "chat").WaitAsync(TimeSpan.FromSeconds(60)));
-
-        Assert.Contains("Waiting for job 1 (echo building; sleep 2; echo built), job 2 (echo up; sleep 300) to end: no time limit. /jobs stop N stops one, Ctrl+C stops the turn and them.", h.Out);
-        Assert.Matches(@"job 1  echo building; sleep 2; echo built  running for \d+s", h.Out);
-        Assert.Matches(@"job 2  echo up; sleep 300  running for \d+s", h.Out);
-        Assert.Contains("There is no job 9: /jobs lists them.", h.Out);
-        Assert.Matches(@"job 2 ended: stopped \(by the person, with /jobs stop\) after \d+s", h.Out);
-        Assert.Contains("Taken when this turn ends: what now? (while it waits, /jobs and /jobs stop N work)", h.Out);
-        // The model was told within the turn that job 2 was stopped, went on waiting for the build, then heard how it ended.
-        var told = _gateway.Requests.Select(FakeGateway.Last).ToList();
-        Assert.Contains(told, t => t.Contains("job 2 has ended", StringComparison.Ordinal) && t.Contains("stopped (by the person, with /jobs stop)", StringComparison.Ordinal));
-        Assert.Contains(told, t => t.Contains("job 1 has ended", StringComparison.Ordinal) && t.Contains("exit code 0", StringComparison.Ordinal) && t.Contains("built", StringComparison.Ordinal));
-        Assert.True(h.Out.IndexOf("Build done.", StringComparison.Ordinal) < h.Out.IndexOf("› what now?", StringComparison.Ordinal), h.Out);
-        // What was typed meanwhile was the next message, after the turn.
-        Assert.Equal("what now?", told[^1]);
+        // Plain lines (a pipe, TERM=dumb): read as they are typed, no line editor.
+        var terminal = new SharedTerminal();
+        var screen = new LockedWriter();
+        var env = new CliEnv { In = terminal, Out = screen, Err = screen, Env = k => h.Env.GetValueOrDefault(k), Cwd = h.Work, Paths = h.Paths, InTerminal = true };
+        var run = Task.Run(() => Cli.RunAsync(["chat"], env));
+        string Said() => screen.ToString();
+        try
+        {
+            terminal.Type("build and serve\n");
+            await Until(() => Said().Contains("Both run.", StringComparison.Ordinal), "the turn ended once the model answered");
+            terminal.Type("/jobs\n/jobs stop 2\n/jobs stop 9\n");
+            await Until(() => Said().Contains("The server is stopped; the build goes on.", StringComparison.Ordinal), "the model carried on from job 2's end");
+            Assert.Matches(@"job 1  echo building; sleep 3; echo built  running for \d+s", Said());
+            Assert.Matches(@"job 2  echo up; sleep 300  running for \d+s", Said());
+            Assert.Contains("There is no job 9: /jobs lists them.", Said());
+            Assert.Matches(@"job 2 ended: stopped \(by the person, with /jobs stop\) after \d+s", Said());
+            Assert.Contains("job 2 ended: the model carries on from it.", Said());
+            await Until(() => Said().Contains("Build done.", StringComparison.Ordinal), "the model carried on from the build's end", seconds: 20);
+            terminal.Type("what now?\n");
+            await Until(() => Said().Contains("Nothing runs now.", StringComparison.Ordinal), "the next message was answered");
+            var told = _gateway.Requests.Select(FakeGateway.Last).ToList();
+            Assert.Contains(told, t => t.Contains("job 2 has ended", StringComparison.Ordinal) && t.Contains("stopped (by the person, with /jobs stop)", StringComparison.Ordinal));
+            Assert.Contains(told, t => t.Contains("job 1 has ended", StringComparison.Ordinal) && t.Contains("exit code 0", StringComparison.Ordinal) && t.Contains("built", StringComparison.Ordinal));
+        }
+        finally
+        {
+            terminal.End();
+            await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(10)));
+        }
     }
 
     [Fact]
@@ -466,7 +538,7 @@ public sealed class JobTests : IDisposable
     }
 
     [Fact]
-    public async Task In_the_IDE_a_turn_that_fails_keeps_watching_its_commands_with_their_Stop()
+    public async Task In_the_IDE_a_turn_that_fails_leaves_its_commands_running_with_their_Stop()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -480,19 +552,19 @@ public sealed class JobTests : IDisposable
         await stream.UntilAsync("job");
         var notice = await stream.UntilAsync("notice");
         Assert.StartsWith("The model cannot carry on: ", notice["text"]!.GetValue<string>());
-
-        // The turn is not over: the command runs, watched, and the page has its Stop.
-        var state = await web.GetJsonAsync("/api/state");
-        Assert.True(state["busy"]!.GetValue<bool>());
-        Assert.True(state["jobs"]![0]!["running"]!.GetValue<bool>());
-        Assert.Equal(HttpStatusCode.NoContent, (await web.PostAsync("/api/jobs/stop", new JsonObject { ["id"] = 1 })).StatusCode);
-        var end = await stream.UntilAsync("job_end");
-        Assert.StartsWith("stopped (by the person, in the IDE) after", end["status"]!.GetValue<string>());
-        // Then the error, and the turn's end.
         var rest = await stream.RestAsync();
         Assert.Contains("restarting", rest.Single(e => e["type"]!.GetValue<string>() == "error")["message"]!.GetValue<string>());
         Assert.Equal("done", rest[^1]["type"]!.GetValue<string>());
-        Assert.False((await web.GetJsonAsync("/api/state"))["busy"]!.GetValue<bool>());
+
+        // The turn is over and the command runs on, listed in the state with its output, and the page has its Stop.
+        var state = await web.GetJsonAsync("/api/state");
+        Assert.False(state["busy"]!.GetValue<bool>());
+        Assert.True(state["jobs"]![0]!["running"]!.GetValue<bool>());
+        Assert.Equal(HttpStatusCode.NoContent, (await web.PostAsync("/api/jobs/stop", new JsonObject { ["id"] = 1 })).StatusCode);
+        await UntilAsync(async () => (await web.GetJsonAsync("/api/state"))["jobs"]![0]!["status"]!.GetValue<string>().StartsWith("stopped (by the person, in the IDE) after", StringComparison.Ordinal),
+            "it stopped");
+        // Its end starts a turn of its own (which fails too, the gateway still down), once: the page is not left busy.
+        await UntilAsync(async () => !(await web.GetJsonAsync("/api/state"))["busy"]!.GetValue<bool>(), "no turn runs");
     }
 
     [Fact]
@@ -506,9 +578,9 @@ public sealed class JobTests : IDisposable
         await using var web = await WebRun.StartAsync(h);
         // 400 KB over a few seconds (past the 256 KB the page once stopped at), a last line, then it runs on.
         const string command = "i=0; while [ $i -lt 40 ]; do head -c 10000 /dev/zero | tr '\\0' x; echo; i=$((i+1)); sleep 0.05; done; echo the last line; sleep 300";
-        _gateway.Answer = req => FakeGateway.HasToolResults(req)
-            ? Reply.Say("Watching the build.")
-            : Reply.Call(("run_shell", new JsonObject { ["command"] = command, ["no_time_limit"] = true }.ToJsonString()));
+        _gateway.Answer = _ => Reply.Call(("run_shell", new JsonObject { ["command"] = command, ["no_time_limit"] = true }.ToJsonString()));
+        // The model is slow to answer after starting it: the turn runs meanwhile, and its stream carries the output.
+        _gateway.Silent = FakeGateway.HasToolResults;
         using var stream = await web.SendAsync("build");
         var streamed = new StringBuilder();
         while (!streamed.ToString().Contains("the last line\n", StringComparison.Ordinal))
@@ -526,6 +598,7 @@ public sealed class JobTests : IDisposable
 
         Assert.Equal(HttpStatusCode.NoContent, (await web.PostAsync("/api/jobs/stop", new JsonObject { ["id"] = 1 })).StatusCode);
         await stream.UntilAsync("job_end");
+        Assert.Equal(HttpStatusCode.NoContent, (await web.PostAsync("/api/stop", new JsonObject())).StatusCode);
         await stream.RestAsync();
     }
 

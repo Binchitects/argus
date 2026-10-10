@@ -107,28 +107,30 @@ internal static class LocalTools
             Name = "run_shell",
             Kind = ToolKind.Shell,
             Description = $"Run a shell command in the working directory ({ShellName(shell)}) and get its output (stdout and stderr together) and exit code. Each call starts fresh: cd does not carry over. Default timeout 120 s, at most 600. " +
-                          "A command that may take longer (a full build, a long test suite, an install, a migration) runs with no_time_limit: in the background, its output shown to the person, until it ends however long that takes; you are told when it ends, with its exit code and the end of its output. " +
-                          "Use no_time_limit only for what has to finish; never for a server or a watcher that does not end by itself. Not for reading or searching files: use read_file, grep and glob.",
+                          "A command that may take longer (a full build, a long test suite, an install, a migration) runs with no_time_limit: as a job of its own, its output shown to the person, until it ends however long that takes. Your turn does not wait for it: when it ends you are told, with its exit code and the end of its output, and you carry on from there. " +
+                          "A server or a watcher that does not end by itself (npm run dev, dotnet watch, a database) runs with background: you get its first output after a few seconds, and it runs until stopped. Not for reading or searching files: use read_file, grep and glob.",
             Parameters = Schema("""
                 {"type":"object","properties":{
                   "command":{"type":"string"},
                   "timeout_seconds":{"type":"integer","description":"Stop it after this long (default 120, at most 600). Not with no_time_limit."},
-                  "no_time_limit":{"type":"boolean","description":"Run it in the background with no time limit, watched until it ends. The person approves this first (except in yolo mode), and only they can stop it. You get a job number at once: go on with other work, or call command_output with wait to wait for it."},
+                  "no_time_limit":{"type":"boolean","description":"Run it as a job with no time limit, watched until it ends. The person approves this first (except in yolo mode). You get a job number at once; your turn may end meanwhile: when the job ends you are told and carry on. command_output reads its latest output."},
+                  "background":{"type":"boolean","description":"A server or a watcher that runs until stopped: started as a job, its first output returned after a few seconds, never waited for. stop_command stops it."},
                   "description":{"type":"string","description":"What it does, in a few words, for the person."}},
                  "required":["command"]}
                 """),
-            Summary = a => (a.Bool("no_time_limit") == true ? "(no time limit) " : "") + (a.Str("command") ?? ""),
+            Summary = a => (a.Bool("background") == true ? "(background) " : a.Bool("no_time_limit") == true ? "(no time limit) " : "") + (a.Str("command") ?? ""),
             Run = RunShell,
         },
         new()
         {
             Name = "command_output",
             Kind = ToolKind.Read,
-            Description = "The state and the latest output of a command started with no_time_limit (by its job number). wait: true waits until it ends, however long; the person can stop the wait.",
+            Description = "The state and the latest output of a job (a command started with no_time_limit or in the background), by its number. wait: true waits until it ends, at most wait_seconds (default 600); it says when it still runs.",
             Parameters = Schema("""
                 {"type":"object","properties":{
                   "job":{"type":"integer","description":"The job number run_shell gave."},
-                  "wait":{"type":"boolean","description":"Wait until it ends (default: answer now)."}},
+                  "wait":{"type":"boolean","description":"Wait until it ends (default: answer now)."},
+                  "wait_seconds":{"type":"integer","description":"The longest to wait (default and at most 600)."}},
                  "required":["job"]}
                 """),
             Summary = a => $"job {a.Int("job")}" + (a.Bool("wait") == true ? " (waiting for it to end)" : ""),
@@ -556,18 +558,40 @@ internal static class LocalTools
     private static async Task<ToolResult> RunShell(JsonObject a, ToolContext c, CancellationToken ct)
     {
         var command = Required(a, "command");
+        if (a.Bool("background") == true)
+        {
+            if (c.Jobs is not { } jobs)
+            {
+                throw new ToolError("Commands in the background run only in the main conversation.");
+            }
+            var job = jobs.Start(command, ShellCommand(command, c), background: true, turn: c.Turn);
+            // Its first words (a server saying where it listens, or why it failed), then it runs on.
+            await Task.WhenAny(job.Done, Task.Delay(TimeSpan.FromSeconds(5), ct));
+            var first = job.Length > 0 ? job.Tail(4_000) : "No output yet.";
+            if (!job.Running)
+            {
+                // Its end is told here: not again as news.
+                job.Reported = true;
+            }
+            return new ToolResult(job.Running
+                ? $"Started in the background as job {job.Id}; it runs until stopped (stop_command, or the person). Its output so far:\n{first}"
+                : $"Job {job.Id} ended already: {job.Status()}.\n{first}", !job.Running && job.ExitCode != 0)
+            {
+                Display = c.Ui.Dim(job.Running ? $"job {job.Id} running in the background · /jobs stop {job.Id} stops it" : $"job {job.Id}: {job.Status()}"),
+            };
+        }
         if (a.Bool("no_time_limit") == true)
         {
             if (c.Jobs is not { } jobs)
             {
                 throw new ToolError("Commands with no time limit run only in the main conversation.");
             }
-            var job = jobs.Start(command, ShellCommand(command, c));
-            return new ToolResult($"Started as job {job.Id}, with no time limit: it runs in the background and the person sees its output as it comes. " +
-                                  "You are told when it ends, with its exit code and the end of its output; the turn does not end before. " +
-                                  $"Meanwhile go on with other work, or call command_output with job {job.Id} (wait: true to wait for it).")
+            var job = jobs.Start(command, ShellCommand(command, c), background: false, turn: c.Turn);
+            return new ToolResult($"Started as job {job.Id}, with no time limit: it runs on its own and the person sees its output as it comes. " +
+                                  "Your turn does not wait for it: when it ends you are told, with its exit code and the end of its output, and you carry on from there. " +
+                                  $"Meanwhile go on with other work, or end your answer; command_output with job {job.Id} reads its latest output.")
             {
-                Display = c.Ui.Dim($"job {job.Id} started, no time limit · Ctrl+C stops it"),
+                Display = c.Ui.Dim($"job {job.Id} started, no time limit · /jobs stop {job.Id} stops it"),
             };
         }
         var timeout = TimeSpan.FromSeconds(Math.Clamp(a.Int("timeout_seconds") ?? 120, 1, 600));
@@ -586,8 +610,11 @@ internal static class LocalTools
         var job = Job(a, c);
         if (a.Bool("wait") == true && job.Running)
         {
-            // No time limit: the person's Ctrl+C or Stop ends the wait (and the turn).
-            await job.Done.WaitAsync(ct);
+            // At most ten minutes, so no turn waits for ever on a server (half a minute by default for one in the background,
+            // which runs until stopped); Ctrl+C or Stop ends it sooner.
+            var most = TimeSpan.FromSeconds(Math.Clamp(a.Int("wait_seconds") ?? (job.Background ? 30 : 600), 1, 600));
+            await Task.WhenAny(job.Done, Task.Delay(most, ct));
+            ct.ThrowIfCancellationRequested();
         }
         if (!job.Running)
         {

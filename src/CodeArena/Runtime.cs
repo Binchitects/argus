@@ -53,6 +53,34 @@ internal sealed partial class Runtime : IAsyncDisposable
     public Spend? Turn { get; set; }
     /// <summary>The commands running with no time limit, and those that ended.</summary>
     public CommandJobs Jobs { get; } = new();
+
+    /// <summary>
+    /// Nobody types a next message (a one-shot run, the end of piped input): the commands with no time limit the model
+    /// started are waited for, and it carries on from each as it ends, until none runs (or it carried on as often as it may
+    /// with no message). The last answer it gave, or null.
+    /// </summary>
+    public async Task<string?> FinishJobsAsync(Spend turn, CancellationToken ct)
+    {
+        string? answer = null;
+        while (Jobs.Waiting.Count > 0 || Jobs.HasNews)
+        {
+            if (Jobs.HasNews)
+            {
+                Jobs.Follow();
+                var next = await Agent.ContinueAsync(turn, ct);
+                if (Agent.FollowUpsSpent)
+                {
+                    break;
+                }
+                answer = next;
+                continue;
+            }
+            var waiting = Jobs.Waiting;
+            Ui.Info($"Waiting for {string.Join(", ", waiting.Select(j => $"job {j.Id} ({Fmt.OneLine(j.Command, 60)})"))} to end: no time limit, Ctrl+C stops {(waiting.Count == 1 ? "it" : "them")}.");
+            await Jobs.WaitAnyAsync(ct);
+        }
+        return answer;
+    }
     /// <summary>When the session compacts itself.</summary>
     public Compaction Compaction { get; } = new();
     /// <summary>The session's MCP servers: Arena's, Argus's and the person's own, each connected in the background.</summary>
@@ -147,6 +175,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         }
         // The terminal watches the commands with no time limit: their output as it comes, and how they ended.
         var printer = new JobPrinter(Ui);
+        Jobs.Session = () => Session?.Id;
         Jobs.Started += printer.Started;
         Jobs.Output += printer.Output;
         Jobs.Ended += printer.Ended;

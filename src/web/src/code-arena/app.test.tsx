@@ -9,7 +9,7 @@ import { fromSession, keptOutput, reduceCode, type CodeSession, type CodeState, 
 import { App } from './app'
 
 const state = (over: Partial<CodeState> = {}): CodeState => ({
-  name: 'Code Arena', version: '5.0.0', license: 'AGPL-3.0-only', source: 'https://github.com/Binchitects/argus', manual: 'https://llm.test/help/code-arena', folder: '/home/ada/shop', project: 'shop', branch: 'main', model: 'model-a', context: 32768, contextUsed: 4200, compactAt: 80, compactTarget: 25, servers: [], jobs: [], thinking: null, mode: 'ask',
+  name: 'Code Arena', version: '5.0.0', license: 'AGPL-3.0-only', source: 'https://github.com/Binchitects/argus', manual: 'https://llm.test/help/code-arena', folder: '/home/ada/shop', project: 'shop', branch: 'main', model: 'model-a', context: 32768, contextUsed: 4200, compactAt: 80, compactTarget: 25, servers: [], jobs: [], queued: [], thinking: null, mode: 'ask',
   modes: [
     { name: 'ask', description: 'edits and commands ask first' },
     { name: 'auto-edit', description: 'file edits run without asking; commands ask' },
@@ -166,6 +166,44 @@ describe('Code Arena in the browser', () => {
     expect(calls.some((c) => c.method === 'POST' && c.path === '/api/stop')).toBe(true)
     end()
     expect(await screen.findByRole('button', { name: 'Send' })).toBeInTheDocument()
+  })
+
+  it('queues a message typed while an answer is written, shows it above the box, and clears the queue', async () => {
+    let end!: () => void
+    const over = new Promise<void>((r) => (end = r))
+    const { calls, now } = backend({
+      extra: {
+        'POST /api/messages': () => {
+          now.state = { ...now.state, busy: true }
+          return { events: turn.slice(0, 4), until: over }
+        },
+        'POST /api/queue': (body) => {
+          now.state = { ...now.state, queued: [...now.state.queued, (body as { text: string }).text] }
+          return { status: 202, json: { queued: now.state.queued.length } }
+        },
+        'DELETE /api/queue': () => {
+          now.state = { ...now.state, queued: [] }
+          return { json: now.state }
+        },
+      },
+    })
+    renderCode()
+    await ask('Change two to 2')
+    expect(await screen.findByRole('button', { name: 'Stop' })).toBeInTheDocument()
+
+    // The box still takes the next message while the answer is written: it is queued, not refused.
+    await ask('Then run the tests')
+    expect(calls.find((c) => c.method === 'POST' && c.path === '/api/queue')?.body).toEqual({ text: 'Then run the tests' })
+    const queued = await screen.findByRole('region', { name: 'Queued messages' })
+    expect(within(queued).getByText('Then run the tests')).toBeInTheDocument()
+    expect(calls.filter((c) => c.method === 'POST' && c.path === '/api/messages')).toHaveLength(1)
+
+    await userEvent.click(within(queued).getByRole('button', { name: 'Clear' }))
+    // Sent as JSON (code-arena web refuses any other call that changes something).
+    expect(calls.find((c) => c.method === 'DELETE' && c.path === '/api/queue')?.body).toEqual({})
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Queued messages' })).not.toBeInTheDocument())
+    now.state = { ...now.state, busy: false }
+    end()
   })
 
   it('offers no "Always" for stopping a command: the person is asked each time', async () => {
@@ -337,9 +375,9 @@ describe('Code Arena in the browser', () => {
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Commands with no time limit' })).not.toBeInTheDocument())
   })
 
-  it('shows a command still running that no turn here watches, from the state, with its Stop', async () => {
+  it('shows a command still running that no turn here watches, its output from the state, with its Stop', async () => {
     const { calls, now } = backend({
-      state: { jobs: [{ id: 3, command: 'npm run build', running: true, status: 'running for 2m 10s' }] },
+      state: { jobs: [{ id: 3, command: 'npm run build', running: true, status: 'running for 2m 10s', output: 'compiling 41 of 90\n' }] },
       extra: {
         'POST /api/jobs/stop': () => {
           now.state = { ...now.state, jobs: [{ id: 3, command: 'npm run build', running: false, status: 'stopped (by the person, in the IDE) after 2m 12s' }] }
@@ -350,11 +388,19 @@ describe('Code Arena in the browser', () => {
     renderCode()
     const jobs = await screen.findByRole('region', { name: 'Commands with no time limit' })
     expect(within(jobs).getByText('npm run build')).toBeInTheDocument()
-    expect(within(jobs).getByLabelText('Output of job 3')).toHaveTextContent('Its output is not streamed here: the agent reads it with command_output.')
+    expect(within(jobs).getByLabelText('Output of job 3')).toHaveTextContent('compiling 41 of 90')
     await userEvent.click(within(jobs).getByRole('button', { name: 'Stop job 3' }))
     expect(calls.find((c) => c.path === '/api/jobs/stop')?.body).toEqual({ id: 3 })
     // The state read again: it has ended, and its box goes.
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Commands with no time limit' })).not.toBeInTheDocument())
+  })
+
+  it('shows the question of a turn it did not start (a queued message), and a job in the background as such', () => {
+    let live = fromSession({ id: 's2', messages: [msg('m0', 'user', { content: 'first' }), msg('m1', 'assistant', { content: 'done' })], diffs: {}, busy: true })
+    live = reduceCode(live, { type: 'question', id: 'm2', parentId: 'm1', text: 'then run the tests' } as never, null)
+    expect(live.messages.at(-1)).toMatchObject({ id: 'm2', role: 'user', content: 'then run the tests', parentId: 'm1' })
+    live = reduceCode(live, { type: 'job', job: 4, command: 'npm run dev', running: true, status: 'running for 0s', background: true }, null)
+    expect(live.jobs[0]).toMatchObject({ id: 4, background: true })
   })
 
   it("keeps the end of a command's output, and how it ended", () => {

@@ -99,9 +99,17 @@ internal sealed class Ui(TextReader input, TextWriter output, TextWriter error, 
                 _held.Enqueue(text);
                 return;
             }
+            // At the prompt: written above what the person is typing, which is drawn again under it.
+            if (_spinner is null && Interject?.Invoke(text) == true)
+            {
+                return;
+            }
             PrintBackgroundLocked(text);
         }
     }
+
+    /// <summary>Writes a line above the prompt being edited (the line editor's); false when none is (<see cref="Background"/>).</summary>
+    public Func<string, bool>? Interject { get; set; }
 
     private void PrintBackgroundLocked(string text)
     {
@@ -201,7 +209,14 @@ internal sealed class Ui(TextReader input, TextWriter output, TextWriter error, 
     }
 
     /// <summary>A line the person types; null at the end of input. A line typed while a turn waited and not taken yet comes first.</summary>
-    public string? ReadLine(string prompt)
+    public string? ReadLine(string prompt) => ReadLine(prompt, null);
+
+    /// <summary>
+    /// A line, as <see cref="ReadLine(string)"/>; <paramref name="wake"/>, asked while none comes, ends the wait with
+    /// <see cref="LineEditor.Woken"/> when it says so (a command ended: a turn carries on from it). The line being read
+    /// meanwhile is the next one read.
+    /// </summary>
+    public string? ReadLine(string prompt, Func<bool>? wake)
     {
         Task<string?>? reading;
         lock (_gate)
@@ -217,7 +232,19 @@ internal sealed class Ui(TextReader input, TextWriter output, TextWriter error, 
             Progress.Flush();
             reading = _reading;
         }
-        return reading is null ? In.ReadLine() : Take(reading);
+        if (wake is null)
+        {
+            return reading is null ? In.ReadLine() : Take(reading);
+        }
+        var read = reading ?? NextLineAsync();
+        while (!read.Wait(TimeSpan.FromMilliseconds(50)))
+        {
+            if (wake())
+            {
+                return LineEditor.Woken;
+            }
+        }
+        return Take(read);
     }
 
     /// <summary>
@@ -249,6 +276,15 @@ internal sealed class Ui(TextReader input, TextWriter output, TextWriter error, 
     /// <summary>A secret (the API key): not echoed on a terminal.</summary>
     public string? ReadSecret(string prompt) => SecretReader is not null ? SecretReader(prompt) : ReadLine(prompt);
 
+    /// <summary>
+    /// Reads a question's answer in place of <see cref="ReadLine"/>: the terminal's line editor (so what was typed while the
+    /// model worked stays for the next message, and Ctrl+C at the question stops the turn); null for no answer.
+    /// </summary>
+    public Func<string, string?>? AnswerReader { get; set; }
+
+    /// <summary>Told of a line given at a question that is not an answer: it is the person's next message, not lost.</summary>
+    public Action<string>? NotAnAnswer { get; set; }
+
     /// <summary>Asks to allow an action: yes, no, or always (for this session) where <paramref name="always"/> says what it covers. No one there to ask is a no.</summary>
     public Approval Ask(string question, string? always)
     {
@@ -265,15 +301,23 @@ internal sealed class Ui(TextReader input, TextWriter output, TextWriter error, 
         {
             while (true)
             {
-                var answer = ReadLine($"{Yellow("?")} {question} {Dim(always is null ? "[y]es, [n]o" : $"[y]es, [n]o, [a]lways {always}")} › ")?.Trim().ToLowerInvariant();
+                var prompt = $"{Yellow("?")} {question} {Dim(always is null ? "[y]es, [n]o" : $"[y]es, [n]o, [a]lways {always}")} › ";
+                var typed = AnswerReader is { } reader ? ReadAnswer(reader, prompt) : ReadLine(prompt);
+                var answer = typed?.Trim().TrimEnd('.', '!').ToLowerInvariant();
                 switch (answer)
                 {
-                    case null or "" or "n" or "no":
+                    case null or "" or "n" or "no" or "nope" or "nah":
                         return Approval.No;
-                    case "y" or "yes":
+                    case "y" or "yes" or "yeah" or "yep" or "ok" or "okay" or "sure":
                         return Approval.Yes;
                     case "a" or "always" when always is not null:
                         return Approval.Always;
+                }
+                if (NotAnAnswer is { } keep && typed!.Trim().Length > 1)
+                {
+                    // A message meant for the model, not an answer: kept as the next one, and this question is a no.
+                    keep(typed.Trim());
+                    return Approval.No;
                 }
             }
         }
@@ -285,6 +329,28 @@ internal sealed class Ui(TextReader input, TextWriter output, TextWriter error, 
                 PrintHeldLocked();
             }
         }
+    }
+
+    /// <summary>
+    /// The answer read by the line editor, with nothing printed in the background meanwhile. The question is a line of its
+    /// own (the terminal wraps it), and the editor's prompt a short one under it: one wider than the screen would be drawn
+    /// again at every key.
+    /// </summary>
+    private string? ReadAnswer(Func<string, string?> reader, string prompt)
+    {
+        lock (_gate)
+        {
+            StopSpinnerLocked();
+            if (_midLine)
+            {
+                Out.WriteLine();
+                _midLine = false;
+            }
+            PrintHeldLocked();
+            Out.WriteLine(prompt.TrimEnd().TrimEnd('›').TrimEnd());
+            Out.Flush();
+        }
+        return reader(Yellow("› "));
     }
 
     /// <summary>Braille frames on stderr, redrawn every 100 ms with the seconds waited.</summary>

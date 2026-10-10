@@ -60,8 +60,11 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
     /// <summary>The waits before each new try of a request the gateway could not take (it restarts, a model loads): about a minute and a half.</summary>
     public TimeSpan[] RetryWaits { get; set; } = [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(45)];
 
-    /// <summary>Told before each new try: what failed, the wait, which try.</summary>
+    /// <summary>Told before each new try: what failed, the wait, which try; and when an answer is slow to start.</summary>
     public Action<string>? Retrying { get; set; }
+
+    /// <summary>When the person is told that the answer has not started yet.</summary>
+    public TimeSpan SlowNotice { get; set; } = TimeSpan.FromSeconds(60);
 
     public string BaseUrl { get; } = baseUrl.TrimEnd('/');
 
@@ -142,13 +145,15 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
         request["stream_options"] = new JsonObject { ["include_usage"] = true };
         var shown = false;
         var guard = new GuardSink(sink, () => shown = true);
+        var stalls = 0;
         for (var attempt = 0; ; attempt++)
         {
             try
             {
                 return await StreamOnceAsync(request, guard, ct);
             }
-            catch (Exception e) when (!shown && attempt < RetryWaits.Length && !ct.IsCancellationRequested && Retryable(e))
+            // An answer that never started is asked once more, not five times: each such try waits the whole first wait.
+            catch (Exception e) when (!shown && attempt < RetryWaits.Length && !ct.IsCancellationRequested && Retryable(e) && (e is not StreamStalledException || stalls++ < 1))
             {
                 var wait = RetryWaits[attempt];
                 Retrying?.Invoke($"The gateway did not answer ({Fmt.OneLine(e.Message, 120)}): trying again in {wait.TotalSeconds:0} s ({attempt + 2} of {RetryWaits.Length + 1}).");
@@ -186,6 +191,15 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
         // A watchdog: no answer at all for too long (not even its headers), or the stream quiet for too long, is a stalled one.
         using var quiet = CancellationTokenSource.CreateLinkedTokenSource(ct);
         quiet.CancelAfter(FirstEventWait);
+        // The person is told when the answer is slow to start (the engine busy with others, or reading a long prompt).
+        var talking = false;
+        using var slow = new Timer(_ =>
+        {
+            if (!Volatile.Read(ref talking))
+            {
+                Retrying?.Invoke($"The model has not started answering for {SlowNotice.TotalSeconds:0} s (the engine may be busy, or reading a long prompt): Ctrl+C or Stop ends the wait.");
+            }
+        }, null, SlowNotice, Timeout.InfiniteTimeSpan);
         HttpResponseMessage started;
         try
         {
@@ -228,6 +242,7 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
         {
             await foreach (var ev in Sse.ReadAsync(stream, quiet.Token))
             {
+                Volatile.Write(ref talking, true);
                 quiet.CancelAfter(EventWait);
                 if (Event(ev.Data))
                 {

@@ -66,6 +66,8 @@ internal sealed class ToolContext
     public required Ui Ui { get; init; }
     /// <summary>The shell for run_shell, when the config names one.</summary>
     public string? Shell { get; init; }
+    /// <summary>The turn running now (counted from 1): a stopped turn stops the jobs it started.</summary>
+    public int Turn { get; set; }
     /// <summary>The commands run with no time limit; null where none may run (a sub-agent).</summary>
     public CommandJobs? Jobs { get; init; }
     public List<TodoItem> Todos { get; set; } = [];
@@ -169,8 +171,12 @@ internal sealed class Permissions(Ui ui, Mode mode)
         {
             return $"Plan mode is read-only: {tool.Name} is not allowed. Finish the plan; the person switches the mode (/mode) to carry it out.";
         }
-        // A command with no time limit asks where commands ask (ask, auto-edit); yolo runs it, watched, and the person can stop it.
-        var unlimited = tool.Kind == ToolKind.Shell && args.Bool("no_time_limit") == true;
+        // A command with no time limit, or in the background, asks where commands ask (ask, auto-edit); yolo runs it, watched,
+        // and the person can stop it. Each kind of wait is agreed to on its own.
+        var how = tool.Kind != ToolKind.Shell ? null
+            : args.Bool("background") == true ? ("background", "in the background")
+            : args.Bool("no_time_limit") == true ? ("unlimited", "with no time limit")
+            : ((string, string)?)null;
         var ask = tool.AlwaysAsks || tool.Kind switch
         {
             ToolKind.Read or ToolKind.Agent => false,
@@ -198,12 +204,12 @@ internal sealed class Permissions(Ui ui, Mode mode)
         var (key, always) = tool.AlwaysAsks ? ("", null) : tool.Kind switch
         {
             ToolKind.Edit => ("edit", "for file edits"),
-            ToolKind.Shell when !tool.AlwaysAsks && CommandPrefix(args.Str("command")) is { Length: > 0 } prefix => unlimited
-                ? ("shell-unlimited:" + prefix, $"for `{prefix} …` with no time limit")
+            ToolKind.Shell when !tool.AlwaysAsks && CommandPrefix(args.Str("command")) is { Length: > 0 } prefix => how is { } h
+                ? ($"shell-{h.Item1}:" + prefix, $"for `{prefix} …` {h.Item2}")
                 : ("shell:" + prefix, $"for `{prefix} …`"),
             _ => ("tool:" + tool.Name, $"for {tool.Name}"),
         };
-        var label = unlimited ? $"{tool.Name} with no time limit" : tool.Name;
+        var label = how is { } kind ? $"{tool.Name} {kind.Item2}" : tool.Name;
         // "Always" covers the commands Laya finds as it found this one: said to an unflagged one, not one it flags or could
         // not read all of; said to a flagged one, the next flagged one; said to one it could not read all of, the next such.
         var remembered = risk?.Risky == true ? "laya:" + key : risk?.Unread is not null ? "unread:" + key : key;

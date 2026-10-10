@@ -23,6 +23,8 @@ import { CompactedMark, QuestionTurn } from '@/pages/chat/turns'
 import type { ChatConfig } from '@/pages/chat/types'
 import {
   answerApproval,
+  clearQueue,
+  queueMessage,
   changeSettings,
   fromSession,
   historyQuery,
@@ -228,6 +230,8 @@ export function Thread({
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const watching = useRef(false)
+  // Each run's number: the one that ends leaves the view to a later one.
+  const runs = useRef(0)
   const scroller = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
 
@@ -245,7 +249,9 @@ export function Thread({
   // The commands the turn watches, and any still running that no turn here watches (each with its Stop).
   const jobs = [
     ...view.jobs,
-    ...state.jobs.filter((j) => j.running && !view.jobs.some((v) => v.id === j.id)).map((j): LiveJob => ({ ...j, output: '', failed: false, unwatched: true })),
+    ...state.jobs
+      .filter((j) => j.running && !view.jobs.some((v) => v.id === j.id))
+      .map((j): LiveJob => ({ ...j, output: j.output ?? '', failed: false, unwatched: true })),
   ]
 
   useEffect(() => {
@@ -265,13 +271,15 @@ export function Thread({
 
   /** Streams a turn (or a compaction, or the turn running when the page opened) into the thread, then reads the saved session. */
   const run = useCallback(
-    async (path: string, body: object | null, start: CodeLive, localId: string | null, watch?: (e: CodeEvent) => void): Promise<boolean> => {
+    async (path: string, body: object | null, start: CodeLive, localId: string | null, watch?: (e: CodeEvent) => void, busyThrows = false): Promise<boolean> => {
       watching.current = true
+      const mine = ++runs.current
       setLive(start)
       setStreaming(true)
       setError(null)
       setAtBottom(true)
       let received = false
+      let busy: unknown = null
       try {
         await streamChat(
           path,
@@ -286,25 +294,51 @@ export function Thread({
           new AbortController().signal,
         )
       } catch (err) {
-        setError(err instanceof ApiError ? err.message : received ? 'The answer was interrupted: is code-arena web still running?' : 'The message did not reach code-arena web. It is back in the box below.')
-        setLive((s) => (s ? { ...s, ...stopped(s) } : s))
+        if (busyThrows && !received && err instanceof ApiError && err.status === 'busy') busy = err
+        else {
+          setError(err instanceof ApiError ? err.message : received ? 'The answer was interrupted: is code-arena web still running?' : 'The message did not reach code-arena web. It is back in the box below.')
+          setLive((s) => (s ? { ...s, ...stopped(s) } : s))
+        }
       } finally {
-        await refresh()
-        setStreaming(false)
-        setLive(null)
+        // Not watching any more before the state is read again: a turn the server goes on to (the queue, a command that
+        // ended) is then attached to at once, and this one's end leaves that one's view alone.
         watching.current = false
+        await refresh()
+        if (runs.current === mine) {
+          setStreaming(false)
+          setLive(null)
+        }
         onTurnEnd?.()
       }
+      if (busy) throw busy
       return received
     },
     [refresh, onEvent, onTurnEnd],
   )
 
-  // A turn running when the page opened (it was reloaded, or another tab asked): watched from its start.
+  // A turn running that this page did not start (it was reloaded, another tab asked, a queued message, or a command that
+  // ended and the model carries on): watched from its start, once the session it adds to is read.
   useEffect(() => {
-    if (!session.data?.busy || watching.current) return
+    if (!session.data || !(session.data.busy || state.busy) || watching.current) return
     void run('/api/turn', null, fromSession(session.data), null)
-  }, [session.data, run])
+  }, [session.data, state.busy, state.turn, run])
+
+  /** While an answer is written: the message waits in the queue and runs when the answer ends. */
+  const queue = async (text: string): Promise<boolean> => {
+    if (text === '/compact' || text === '/clear' || text === '/new') {
+      toast.error(`Wait for the answer, or stop it, to run ${text}.`)
+      return false
+    }
+    try {
+      await queueMessage(text)
+      toast.success('Queued: it is sent when this answer ends.')
+      await queryClient.invalidateQueries({ queryKey: stateQuery.queryKey })
+      return true
+    } catch (e) {
+      toast.error(errorMessage(e))
+      return false
+    }
+  }
 
   const send = async (text: string): Promise<boolean> => {
     if (text === '/compact') return compact()
@@ -314,7 +348,13 @@ export function Thread({
       return true
     }
     const localId = newLocalId()
-    return run('/api/messages', { text }, { ...view, ...withQuestion(view, localId, path.at(-1)?.id ?? null, text, []) }, localId)
+    try {
+      return await run('/api/messages', { text }, { ...view, ...withQuestion(view, localId, path.at(-1)?.id ?? null, text, []) }, localId, undefined, true)
+    } catch (e) {
+      // An answer started meanwhile that this page had not seen yet (a command ended, another tab): the message waits for it.
+      if (e instanceof ApiError && e.status === 'busy') return queue(text)
+      throw e
+    }
   }
 
   const compact = async (): Promise<boolean> => {
@@ -356,6 +396,9 @@ export function Thread({
     <Composer
       streaming={streaming}
       onSend={send}
+      onQueue={queue}
+      queued={state.queued ?? []}
+      onClearQueue={() => void clearQueue().then(() => queryClient.invalidateQueries({ queryKey: stateQuery.queryKey }))}
       onStop={stop}
       big={big}
       mode={<ModePicker state={state} onChange={(mode) => void settings({ mode })} />}
@@ -499,9 +542,10 @@ function useFolderHistory(): Older {
 }
 
 /**
- * The commands the agent runs with no time limit in this turn: the end of each
- * one's output as it comes, how it ended, and Stop. The turn waits for them;
- * the agent is told how each ended.
+ * The commands the agent runs with no time limit, or in the background: the end
+ * of each one's output as it comes (from the turn's stream, else from the state,
+ * read every second), how it ended, and Stop. The turn does not wait for them:
+ * when one with no time limit ends, the agent is told and carries on.
  */
 function Jobs({ jobs, onStopped }: { jobs: LiveJob[]; onStopped: () => void }) {
   return (
@@ -553,7 +597,9 @@ function JobBox({ job, onStopped }: { job: LiveJob; onStopped: () => void }) {
           <span className="shrink-0 text-xs text-muted-foreground">job {job.id}</span>
           <span className="truncate font-mono text-xs">{job.command}</span>
         </button>
-        <span className={cn('shrink-0 text-xs', job.failed ? 'text-destructive-ink' : 'text-muted-foreground')}>{job.running ? 'running, no time limit' : job.status}</span>
+        <span className={cn('shrink-0 text-xs', job.failed ? 'text-destructive-ink' : 'text-muted-foreground')}>
+          {job.running ? (job.background ? 'running in the background' : 'running, no time limit') : job.status}
+        </span>
         {job.running && (
           <Button size="sm" variant="outline" className="h-7 shrink-0" onClick={() => void stop()} disabled={stopping} aria-label={`Stop job ${job.id}`}>
             <Square className="fill-current" /> {stopping ? 'Stopping…' : 'Stop'}
@@ -562,7 +608,7 @@ function JobBox({ job, onStopped }: { job: LiveJob; onStopped: () => void }) {
       </div>
       {open && (
         <pre ref={out} aria-label={`Output of job ${job.id}`} className="max-h-48 overflow-auto border-t bg-muted/40 px-3 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all">
-          {job.unwatched ? 'Its output is not streamed here: the agent reads it with command_output.' : text || 'No output yet.'}
+          {text || 'No output yet.'}
         </pre>
       )}
     </div>
@@ -578,6 +624,9 @@ function JobBox({ job, onStopped }: { job: LiveJob; onStopped: () => void }) {
 function Composer({
   streaming,
   onSend,
+  onQueue,
+  queued,
+  onClearQueue,
   onStop,
   big,
   mode,
@@ -586,6 +635,10 @@ function Composer({
 }: {
   streaming: boolean
   onSend: (text: string) => Promise<boolean>
+  /** While an answer is written: the message waits and runs when it ends. */
+  onQueue: (text: string) => Promise<boolean>
+  queued: string[]
+  onClearQueue: () => void
   onStop: () => void
   big: boolean
   mode: ReactNode
@@ -602,13 +655,14 @@ function Composer({
     // Empty: its rows say how tall (the placeholder is not measured, which a page still laying out can make tall).
     if (text) el.style.height = `${Math.min(el.scrollHeight, 280)}px`
   }, [text])
-  const canSend = !streaming && text.trim().length > 0
+  // While an answer is written the box still takes the next message: it is queued, and sent when the answer ends.
+  const canSend = text.trim().length > 0
   const submit = async () => {
     if (!canSend) return
     const sent = text.trim()
     setText('')
     recall.reset()
-    if (!(await onSend(sent))) setText((now) => now || sent)
+    if (!(await (streaming ? onQueue(sent) : onSend(sent)))) setText((now) => now || sent)
     area.current?.focus()
   }
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -619,6 +673,20 @@ function Composer({
     }
   }
   return (
+    <>
+    {queued.length > 0 && (
+      <section aria-label="Queued messages" className="mb-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+        <span>Sent when the answer ends:</span>
+        {queued.map((q, i) => (
+          <span key={i} className="max-w-60 truncate rounded-full border bg-muted/50 px-2 py-0.5 text-foreground" title={q}>
+            {q}
+          </span>
+        ))}
+        <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={onClearQueue}>
+          Clear
+        </Button>
+      </section>
+    )}
     <form
       className={cn('relative rounded-2xl border bg-card shadow-sm transition-shadow focus-within:border-primary/50 focus-within:shadow-md', big && 'shadow-md')}
       onSubmit={(e) => {
@@ -633,7 +701,7 @@ function Composer({
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKey}
-        placeholder={streaming ? 'Code Arena is working… (Stop to interrupt)' : 'Ask Code Arena to read, change or run something'}
+        placeholder={streaming ? 'Code Arena is working… type the next message: it is sent when this answer ends' : 'Ask Code Arena to read, change or run something'}
         aria-label="Message"
         autoFocus
         className={cn('block max-h-72 w-full resize-none bg-transparent px-4 pt-3 text-[0.9375rem] leading-relaxed outline-none placeholder:text-muted-foreground', big && 'min-h-20')}
@@ -645,17 +713,19 @@ function Composer({
         </span>
         <span className="ml-auto" />
         {context}
-        {streaming ? (
+        {streaming && (
           <Button type="button" size="icon-sm" variant="secondary" className="animate-pop rounded-full" onClick={onStop} aria-label="Stop">
             <Square className="fill-current" />
           </Button>
-        ) : (
-          <Button type="submit" size="icon-sm" className="animate-pop rounded-full" disabled={!canSend} aria-label="Send">
+        )}
+        {(!streaming || canSend) && (
+          <Button type="submit" size="icon-sm" className="animate-pop rounded-full" disabled={!canSend} aria-label={streaming ? 'Queue' : 'Send'}>
             <ArrowUp />
           </Button>
         )}
       </div>
     </form>
+    </>
   )
 }
 

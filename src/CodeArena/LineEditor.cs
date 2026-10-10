@@ -13,6 +13,9 @@ internal interface IKeyboard
     /// <summary>A key is waiting already: typed keys come one at a time, a paste all at once.</summary>
     bool KeyAvailable { get; }
 
+    /// <summary>Waits up to <paramref name="wait"/> for a key: true when one can be read now without waiting (or input has ended).</summary>
+    bool WaitForKey(TimeSpan wait);
+
     /// <summary>The terminal's width, in columns.</summary>
     int Width { get; }
 
@@ -66,24 +69,49 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
     /// <summary>Ctrl+C on an empty prompt: true to read on (a hint was given), false to leave.</summary>
     public Func<bool>? Interrupted { get; init; }
 
-    /// <summary>A message, or null at the end of input (Ctrl+D on an empty prompt, or a Ctrl+C that leaves).</summary>
-    public string? Read(string prompt, string more)
+    /// <summary>How often <c>wake</c> is asked while no key comes.</summary>
+    private static readonly TimeSpan WakeEvery = TimeSpan.FromMilliseconds(50);
+
+    /// <summary>What <see cref="Read"/> returns when <c>wake</c> said so while nothing was typed.</summary>
+    public const string Woken = "\u0000woken";
+
+    /// <summary>
+    /// A message, or null at the end of input (Ctrl+D on an empty prompt, or a Ctrl+C that leaves). <paramref name="initial"/>:
+    /// text typed already (while a turn ran), there to edit. <paramref name="wake"/>, asked while no key waits: true ends the
+    /// read with <see cref="Woken"/> when nothing is typed (a job ended: a turn carries on from it), or with null when
+    /// <paramref name="answer"/> (a question's answer, read with no history: the turn was stopped meanwhile).
+    /// </summary>
+    public string? Read(string prompt, string more, Func<bool>? wake = null, string initial = "", bool answer = false)
     {
         _prompt = prompt;
         _more = more;
         _text.Clear();
-        _caret = 0;
+        _text.Append(initial);
+        _caret = _text.Length;
         Fresh();
         // The same text twice is stepped through once, where it was sent last.
-        _entries = [.. history().Reverse().Distinct().Reverse()];
+        _entries = answer ? [] : [.. history().Reverse().Distinct().Reverse()];
         _at = _entries.Count;
         _draft = "";
         IDisposable? capture = keys.CaptureCtrlC();
         try
         {
-            Render();
+            lock (_drawing)
+            {
+                Render();
+                _reading = true;
+            }
             while (true)
             {
+                // Woken while no key comes: nobody typing (or, for an answer, whatever was typed).
+                while (wake is not null && !keys.WaitForKey(WakeEvery))
+                {
+                    if ((answer || _text.Length == 0) && wake())
+                    {
+                        Finish();
+                        return answer ? null : Woken;
+                    }
+                }
                 if (keys.ReadKey() is not { } key)
                 {
                     Finish();
@@ -99,7 +127,8 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
                         return null;
                     case Outcome.Interrupt:
                         Finish();
-                        if (Interrupted?.Invoke() != true)
+                        // At a question, Ctrl+C is no, and it stops the turn (the handler does that): the read ends.
+                        if (Interrupted?.Invoke() != true || answer)
                         {
                             return null;
                         }
@@ -127,6 +156,10 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
         }
         finally
         {
+            lock (_drawing)
+            {
+                _reading = false;
+            }
             capture?.Dispose();
         }
     }
@@ -227,8 +260,11 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
             case 'w':
                 return DeleteBefore(WordStart(_caret));
             case 'l':
-                output.Write("\e[H\e[2J");
-                Fresh();
+                lock (_drawing)
+                {
+                    output.Write("\e[H\e[2J");
+                    Fresh();
+                }
                 return Outcome.Render;
             case 'c':
                 if (_text.Length == 0)
@@ -371,6 +407,39 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
         return i;
     }
 
+    /// <summary>Held while the prompt is drawn: lines written above it from another thread wait (<see cref="Interject"/>).</summary>
+    private readonly object _drawing = new();
+
+    /// <summary>A prompt is being edited (<see cref="Read"/>): what is written meanwhile goes above it.</summary>
+    private bool _reading;
+
+    /// <summary>
+    /// Writes <paramref name="lines"/> above the prompt being edited (a command's output, from another thread): the prompt
+    /// is cleared, the lines written, and the prompt drawn again under them as it was. False when no prompt is being edited:
+    /// the caller writes them itself.
+    /// </summary>
+    public bool Interject(string lines)
+    {
+        lock (_drawing)
+        {
+            if (!_reading)
+            {
+                return false;
+            }
+            var sb = new StringBuilder();
+            var up = Math.Min(_cursorRow, Math.Max(1, keys.Height) - 1);
+            if (up > 0)
+            {
+                sb.Append($"\e[{up}A");
+            }
+            sb.Append("\r\e[J").Append(lines.TrimEnd('\n').Replace("\n", "\r\n", StringComparison.Ordinal)).Append("\r\n");
+            output.Write(sb.ToString());
+            Fresh();
+            Render();
+            return true;
+        }
+    }
+
     /// <summary>Nothing of this prompt drawn yet: it starts on the row the cursor is on.</summary>
     private void Fresh()
     {
@@ -385,6 +454,14 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
     /// </summary>
     private void Render()
     {
+        lock (_drawing)
+        {
+            RenderLocked();
+        }
+    }
+
+    private void RenderLocked()
+    {
         var rows = Layout(Math.Max(10, keys.Width), out var caretRow, out var caretCol);
         var shown = Math.Min(rows.Count, Math.Max(1, keys.Height));
         _top = Math.Clamp(Math.Clamp(_top, caretRow - shown + 1, caretRow), 0, rows.Count - shown);
@@ -393,6 +470,15 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
 
     /// <summary>The whole text drawn, the cursor under it: what follows starts on a new line.</summary>
     private void Finish()
+    {
+        lock (_drawing)
+        {
+            _reading = false;
+            FinishLocked();
+        }
+    }
+
+    private void FinishLocked()
     {
         _caret = _text.Length;
         var rows = Layout(Math.Max(10, keys.Width), out var caretRow, out var caretCol);

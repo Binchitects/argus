@@ -113,6 +113,30 @@ internal static class ConsoleSetup
             }
         }
 
+        public bool WaitForKey(TimeSpan wait)
+        {
+            var until = DateTime.UtcNow + wait;
+            while (true)
+            {
+                try
+                {
+                    if (Console.KeyAvailable)
+                    {
+                        return true;
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    return true; // no longer a terminal: the read says so
+                }
+                if (DateTime.UtcNow >= until)
+                {
+                    return false;
+                }
+                Thread.Sleep(10);
+            }
+        }
+
         public int Width
         {
             get

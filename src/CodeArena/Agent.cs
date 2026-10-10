@@ -147,6 +147,14 @@ internal sealed class Agent
     public int MaxSteps { get; init; } = 200;
     /// <summary>How often one turn carries on after a connection dropped mid-answer before it stops.</summary>
     public const int MaxInterruptions = 3;
+
+    /// <summary>How many turns in a row the model may carry on from commands that ended, with no message from the person in between.</summary>
+    public const int MaxFollowUps = 20;
+
+    private int _followUps;
+
+    /// <summary>The model carried on <see cref="MaxFollowUps"/> times with no message from the person: it waits for one.</summary>
+    public bool FollowUpsSpent => _followUps > MaxFollowUps;
     public List<JsonObject> Messages { get; private set; } = [];
     /// <summary>The answer's text streams to the terminal (the main agent, not in a quiet run).</summary>
     public bool Stream { get; init; } = true;
@@ -154,11 +162,6 @@ internal sealed class Agent
     public IAgentEvents? Events { get; set; }
     /// <summary>When the history is compacted, and to what.</summary>
     public Compaction Compaction { get; init; } = new();
-    /// <summary>
-    /// The terminal's: what the person types while the turn waits for its commands with no time limit
-    /// (<c>/jobs stop N</c>), until the wait it is given is done; null shows a spinner instead.
-    /// </summary>
-    public Func<Task, Task>? Listen { get; set; }
     /// <summary>What the web chat added since the last turn, taken in as a turn starts (the main conversation only).</summary>
     public Func<CancellationToken, Task<IReadOnlyList<JsonObject>>>? BeforeTurn { get; set; }
     /// <summary>A checkpoint before each turn (/rewind); null: none kept (a sub-agent).</summary>
@@ -177,6 +180,8 @@ internal sealed class Agent
         Messages = [.. messages];
         _knownTokens = 0;
         _knownCount = 0;
+        _compactedAt = 0;
+        _followUps = 0;
     }
 
     public void Clear() => Load([]);
@@ -204,57 +209,64 @@ internal sealed class Agent
 
     /// <summary>
     /// One turn: the person's message in, the final answer out. Cancelling stops it and keeps the history valid.
-    /// It never ends while a command it started with no time limit runs: those the person stops (Ctrl+C, Stop)
-    /// stop with it; when it fails (the gateway down), it still waits for them, watched, before the error comes out.
+    /// It ends when the model answers: a command started with no time limit, or in the background, keeps running
+    /// (listed, stoppable), and the model hears how it ended at the next step or turn. Ctrl+C or Stop also stops
+    /// the commands this turn started with no time limit; those in the background run on. With no input, the turn
+    /// carries on from what is there (a command that ended while nobody was asking: <see cref="ContinueAsync"/>).
     /// </summary>
-    public async Task<string> RunAsync(string input, Spend turn, CancellationToken ct)
+    /// <param name="takeIn">Whether the web chat's news is taken in first (<see cref="BeforeTurn"/>); the IDE takes it in itself.</param>
+    public async Task<string> RunAsync(string? input, Spend turn, CancellationToken ct, bool takeIn = true)
     {
-        if (BeforeTurn is { } takeIn && Depth == 0)
+        if (input is not null)
         {
-            TakeIn(await takeIn(ct));
+            _followUps = 0;
         }
-        var asked = input;
+        else if (Depth == 0 && ++_followUps > MaxFollowUps)
+        {
+            // The model carried on from command after command with nobody there: it waits for the person now (the commands'
+            // ends are told with their next message).
+            Warn($"The model carried on {MaxFollowUps} times in a row from commands that ended, with no message from you: it waits for yours now.");
+            return "";
+        }
+        if (takeIn && BeforeTurn is { } news && Depth == 0)
+        {
+            TakeIn(await news(ct));
+        }
+        var asked = input ?? "Carry on after the commands that ended";
         if (Depth == 0)
         {
             // @path: the file goes with the message.
-            var (expanded, files) = Mentions.Expand(input, Context.Workspace);
-            if (files.Count > 0)
+            if (input is not null)
             {
-                Ui.Info($"With the message: {string.Join(", ", files)}.");
-                input = expanded;
+                var (expanded, files) = Mentions.Expand(input, Context.Workspace);
+                if (files.Count > 0)
+                {
+                    Ui.Info($"With the message: {string.Join(", ", files)}.");
+                    input = expanded;
+                }
             }
             Checkpoints?.Begin(Messages.Count, asked);
+            Context.Turn++;
         }
         var before = await SnapshotAsync(ct);
         var done = false;
         try
         {
             var answer = await TurnAsync(input, turn, ct);
-            // Out of steps with a command still running: the turn ends when it does (the model hears of it next turn).
-            await WaitForAllJobsAsync(ct);
             done = true;
-            await CommitAsync(before, asked);
+            await CommitAsync(before, asked, ct);
             return answer;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested && Context.Jobs is { } jobs)
         {
-            await StopJobsAsync(jobs);
+            await StopJobsAsync(jobs, Context.Turn);
             throw;
         }
-        catch (Exception e) when (Context.Jobs is { Running.Count: > 0 } jobs)
+        catch (Exception e) when (Context.Jobs is { Running.Count: > 0 })
         {
             // Only the person stops a command with no time limit: a failed request to the model does not.
-            Warn($"The model cannot carry on: {Fmt.OneLine(e.Message, 300)} The commands still running are watched until they end " +
-                 "(Ctrl+C or Stop ends them); the model hears how they ended with your next message.");
-            try
-            {
-                await WaitForAllJobsAsync(ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                await StopJobsAsync(jobs);
-                throw;
-            }
+            Warn($"The model cannot carry on: {Fmt.OneLine(e.Message, 300)} The commands still running go on (/jobs lists them, /jobs stop N stops one); " +
+                 "the model hears how each ended when it does, or with your next message.");
             throw;
         }
         finally
@@ -265,6 +277,9 @@ internal sealed class Agent
             }
         }
     }
+
+    /// <summary>A turn of no new message: the model carries on from the commands that ended while nobody asked (their ends are its news).</summary>
+    public Task<string> ContinueAsync(Spend turn, CancellationToken ct, bool takeIn = true) => RunAsync(null, turn, ct, takeIn);
 
     /// <summary>The repository as the turn begins, the files earlier turns left uncommitted counted as the harness's; null: no commits.</summary>
     private async Task<TurnCommits.Snapshot?> SnapshotAsync(CancellationToken ct)
@@ -277,16 +292,32 @@ internal sealed class Agent
         return snapshot with { Dirty = dirty };
     }
 
-    /// <summary>Commits what the turn changed under Code Arena's name, and says so; a turn that did not end keeps its files for the next.</summary>
-    private async Task CommitAsync(TurnCommits.Snapshot? before, string input)
+    /// <summary>
+    /// Commits what the turn changed under Code Arena's name, and says so; a turn that did not end keeps its files for the next.
+    /// The repository's hooks run as for any commit: after two seconds the person is told, and Ctrl+C or Stop skips the commit.
+    /// </summary>
+    private async Task CommitAsync(TurnCommits.Snapshot? before, string input, CancellationToken ct)
     {
         if (before is null || CommitAs is null)
         {
             return;
         }
+        if (Depth == 0 && Context.Jobs?.Running.Any(j => !j.Background && j.Turn == Context.Turn) == true)
+        {
+            // A command the turn started still writes (a build, an install): its files are not taken half done. The turn
+            // that carries on once it ends commits them.
+            await KeepUncommittedAsync(before);
+            return;
+        }
         try
         {
-            if (await TurnCommits.CommitAsync(before, input, CommitAs, Model.Name, Session?.Id, CancellationToken.None) is { } commit)
+            var committing = TurnCommits.CommitAsync(before, input, CommitAs, Model.Name, Session?.Id, ct);
+            if (await Task.WhenAny(committing, Task.Delay(TimeSpan.FromSeconds(2), CancellationToken.None)) != committing)
+            {
+                Ui.Info("Committing the turn's changes (the repository's hooks run)… Ctrl+C or Stop skips it.");
+                Events?.Notice("Committing the turn's changes (the repository's hooks run)… Stop skips it.");
+            }
+            if (await committing is { } commit)
             {
                 if (commit.Hash is not null)
                 {
@@ -301,7 +332,12 @@ internal sealed class Agent
                 Events?.Notice(text);
             }
         }
-        catch (Exception e) when (e is IOException or InvalidOperationException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            Warn("The commit was skipped: the turn's changes stay uncommitted, and the next turn that ends commits them.");
+            await KeepUncommittedAsync(before);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
         {
             Warn($"The turn's changes are not committed: {Fmt.OneLine(e.Message, 200)}");
         }
@@ -319,34 +355,31 @@ internal sealed class Agent
         }
     }
 
-    /// <summary>The person stopped the turn: the commands it ran with no time limit stop with it, and their ends are said before the turn's.</summary>
-    private static async Task StopJobsAsync(CommandJobs jobs)
+    /// <summary>
+    /// The person stopped the turn: the commands it started with no time limit stop with it (those in the background run on),
+    /// and their ends are said before the turn's.
+    /// </summary>
+    private static async Task StopJobsAsync(CommandJobs jobs, int turn)
     {
-        var running = jobs.Running;
-        jobs.StopAll("by the person");
+        var running = jobs.Running.Where(j => j.Turn == turn && !j.Background).ToList();
+        foreach (var job in running)
+        {
+            job.Stop("by the person");
+        }
         // A stopped command ends in a moment (its output read to the end): the watchers hear of it while the turn is still theirs.
         await Task.WhenAny(Task.WhenAll(running.Select(j => j.Done)), Task.Delay(TimeSpan.FromSeconds(5)));
-        foreach (var job in jobs.All)
+        foreach (var job in running)
         {
             job.Reported = true;
         }
     }
 
-    /// <summary>
-    /// Until no command with no time limit runs (only the person's Ctrl+C or Stop ends the wait); the model
-    /// hears how they ended at the next turn's start.
-    /// </summary>
-    private async Task WaitForAllJobsAsync(CancellationToken ct)
+    private async Task<string> TurnAsync(string? input, Spend turn, CancellationToken ct)
     {
-        while (Context.Jobs?.Running is { Count: > 0 } running)
+        if (input is not null)
         {
-            await WaitingAsync(running, Task.WhenAll(running.Select(j => j.Done)).WaitAsync(ct));
+            Add(new JsonObject { ["role"] = "user", ["content"] = input });
         }
-    }
-
-    private async Task<string> TurnAsync(string input, Spend turn, CancellationToken ct)
-    {
-        Add(new JsonObject { ["role"] = "user", ["content"] = input });
         var last = "";
         var interrupted = 0;
         for (var step = 0; step < MaxSteps; step++)
@@ -414,11 +447,8 @@ internal sealed class Agent
                 {
                     Warn("The answer was cut at the model's output limit.");
                 }
-                // A command it started with no time limit still runs: the turn waits for it, however long, then the model carries on.
-                if (Context.Jobs is { } jobs && jobs.Running.Count > 0)
-                {
-                    await WaitForJobsAsync(jobs, ct);
-                }
+                // A command still running goes on without the turn: the model hears how it ended next time, and a
+                // command that ends while nobody asks starts a turn of its own (ContinueAsync).
                 if (ReportJobs())
                 {
                     continue;
@@ -429,32 +459,6 @@ internal sealed class Agent
         }
         Warn($"Stopped after {MaxSteps} steps.");
         return last;
-    }
-
-    /// <summary>Until one of the running commands ends: no time limit, only the person's Ctrl+C or Stop ends the wait.</summary>
-    private Task WaitForJobsAsync(CommandJobs jobs, CancellationToken ct) => WaitingAsync(jobs.Running, jobs.WaitAnyAsync(ct));
-
-    /// <summary>Says which commands the turn waits for, and shows it waiting (or listens to the person), until <paramref name="wait"/> is done.</summary>
-    private async Task WaitingAsync(IReadOnlyList<CommandJob> running, Task wait)
-    {
-        var what = string.Join(", ", running.Select(j => $"job {j.Id} ({Fmt.OneLine(j.Command, 40)})"));
-        if (Listen is { } listen)
-        {
-            // No spinner: it would draw over what the person types.
-            Ui.Info($"Waiting for {what} to end: no time limit. /jobs stop N stops one, Ctrl+C stops the turn and {(running.Count == 1 ? "it" : "them")}.");
-            await listen(wait);
-            return;
-        }
-        Ui.Info($"Waiting for {what} to end: no time limit, Ctrl+C stops {(running.Count == 1 ? "it" : "them")}.");
-        Ui.StartSpinner($"Waiting for {(running.Count == 1 ? $"job {running[0].Id}" : $"{running.Count} jobs")}");
-        try
-        {
-            await wait;
-        }
-        finally
-        {
-            Ui.StopSpinner();
-        }
     }
 
     /// <summary>
@@ -669,16 +673,33 @@ internal sealed class Agent
         Ui.Line(string.Join('\n', lines.Skip(1).Select(l => indent + "  " + l).Prepend(indent + Ui.Dim("⎿ ") + first)));
     }
 
-    /// <summary>Compacts when the next request would pass the threshold (80% of the window unless the person chose otherwise).</summary>
+    /// <summary>
+    /// Compacts when the next request would pass the threshold (80% of the window unless the person chose otherwise). After a
+    /// compaction that could not bring it under (the turn alone is that big), not again until it grows by a tenth of the window.
+    /// </summary>
     public async Task<bool> MaybeCompactAsync(CancellationToken ct)
     {
-        if (Messages.Count < 3 || Estimate() < Model.Context * Compaction.At / 100.0)
+        var at = Model.Context * Compaction.At / 100.0;
+        // Never later than 95% of the window, whatever a compaction before could not bring it under.
+        if (Messages.Count < 3 || Estimate() < Math.Min(Math.Max(at, _compactedAt + Model.Context / 10.0), Model.Context * 0.95))
         {
             return false;
         }
+        Events?.Notice("Compacting the conversation to fit the model's window…");
         await CompactAsync(force: false, ct);
+        var now = Estimate();
+        _compactedAt = now >= at ? now : 0;
         return true;
     }
+
+    /// <summary>The size a compaction left the conversation at when it stayed over the threshold (0: it got under).</summary>
+    private long _compactedAt;
+
+    /// <summary>The summary a compaction puts first, and the model's answer to it.</summary>
+    private const string SummaryHead = "[The conversation so far, summarized to fit the model's window]";
+
+    private static bool IsSummary(List<JsonObject> older) =>
+        older.Count == 2 && older[0].Str("content")?.StartsWith(SummaryHead, StringComparison.Ordinal) == true;
 
     /// <summary>Tokens the next request will hold: the last count the gateway gave, plus what was added since (about 3.5 characters a token).</summary>
     public long Estimate()
@@ -727,6 +748,17 @@ internal sealed class Agent
         }
         var older = Messages.Take(Math.Max(keepFrom, 0)).ToList();
         var kept = Messages.Skip(Math.Max(keepFrom, 0)).ToList();
+        if (!force && IsSummary(older))
+        {
+            // Only the last summary is older: summarizing it again would only lose more. The long results are cut instead.
+            Shrink(kept);
+            Messages = [.. older, .. kept];
+            Session?.Compacted(Messages);
+            _knownTokens = 0;
+            _knownCount = 0;
+            Events?.Compacted("Long tool results were cut to fit the model's window.");
+            return;
+        }
         if (older.Count < 2)
         {
             Shrink(kept);
@@ -749,7 +781,7 @@ internal sealed class Agent
         }
         Messages =
         [
-            new JsonObject { ["role"] = "user", ["content"] = "[The conversation so far, summarized to fit the model's window]\n\n" + summary },
+            new JsonObject { ["role"] = "user", ["content"] = SummaryHead + "\n\n" + summary },
             new JsonObject { ["role"] = "assistant", ["content"] = "Understood: I have the summary and carry on from there." },
             .. kept,
         ];

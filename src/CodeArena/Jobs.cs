@@ -40,14 +40,27 @@ internal sealed class CommandJob
     public long Length { get; private set; }
     /// <summary>The model has been told it ended.</summary>
     public bool Reported { get; set; }
+    /// <summary>A server or a watcher (run_shell's background): never waited for, and its end starts no turn.</summary>
+    public bool Background { get; init; }
+    /// <summary>The turn that started it (a stopped turn stops its own jobs with no time limit).</summary>
+    public int Turn { get; init; }
+    /// <summary>The session that started it: only that session's model hears how it ended.</summary>
+    public string? Session { get; init; }
+    /// <summary>A turn was started to carry on from its end (once: a turn that fails does not start another).</summary>
+    public bool Followed { get; set; }
 
     /// <summary>Told each piece of output as it comes (on the reading thread), then the end.</summary>
     public Action<CommandJob, string>? Output { get; set; }
     public Action<CommandJob>? Finished { get; set; }
 
-    /// <summary>Starts the command: its stdin closed, stdout and stderr read together.</summary>
-    public static CommandJob Start(int id, string command, ProcessStartInfo psi, Action<CommandJob, string>? output, Action<CommandJob>? finished)
+    /// <summary>
+    /// Starts the command: its stdin closed, stdout and stderr read together, in a process group of its own (so the
+    /// terminal's Ctrl+C reaches Code Arena, which stops what it should, and not every job at once).
+    /// </summary>
+    public static CommandJob Start(int id, string command, ProcessStartInfo psi, Action<CommandJob, string>? output, Action<CommandJob>? finished,
+        bool background = false, int turn = 0, string? session = null)
     {
+        psi = Detached(psi);
         psi.RedirectStandardOutput = true;
         psi.RedirectStandardError = true;
         psi.RedirectStandardInput = true;
@@ -57,9 +70,45 @@ internal sealed class CommandJob
         Proc.Prepare(psi);
         var process = Process.Start(psi) ?? throw new ToolError($"Could not start {psi.FileName}.");
         process.StandardInput.Close();
-        var job = new CommandJob(id, command, process) { Output = output, Finished = finished };
+        var job = new CommandJob(id, command, process) { Output = output, Finished = finished, Background = background, Turn = turn, Session = session };
         _ = job.WatchAsync();
         return job;
+    }
+
+    /// <summary>
+    /// The command in a session of its own where the system can (setsid on Linux, a process group of its own through perl
+    /// on macOS); as it is elsewhere, and when it runs in the sandbox, which makes its own session.
+    /// </summary>
+    private static ProcessStartInfo Detached(ProcessStartInfo psi)
+    {
+        if (OperatingSystem.IsWindows() || Path.GetFileName(psi.FileName) == "bwrap")
+        {
+            return psi;
+        }
+        string[] setsid = ["/usr/bin/setsid", "/bin/setsid"];
+        string[] prefix = OperatingSystem.IsLinux()
+            ? setsid.FirstOrDefault(File.Exists) is { } found ? [found] : []
+            : File.Exists("/usr/bin/perl") ? ["/usr/bin/perl", "-e", "setpgrp(0, 0); exec { $ARGV[0] } @ARGV or die \"$ARGV[0]: $!\\n\"", "--"] : [];
+        if (prefix.Length == 0)
+        {
+            return psi;
+        }
+        var detached = new ProcessStartInfo(prefix[0]) { WorkingDirectory = psi.WorkingDirectory, UseShellExecute = false };
+        foreach (var a in prefix.Skip(1).Append(psi.FileName).Concat(psi.ArgumentList))
+        {
+            detached.ArgumentList.Add(a);
+        }
+        if (psi.ArgumentList.Count == 0 && psi.Arguments.Length > 0)
+        {
+            // Arguments given as one line (not on Unix shells here): left as they are.
+            return psi;
+        }
+        detached.Environment.Clear();
+        foreach (var (k, v) in psi.Environment)
+        {
+            detached.Environment[k] = v;
+        }
+        return detached;
     }
 
     private async Task WatchAsync()
@@ -242,8 +291,9 @@ internal sealed class JobPrinter(Ui ui)
 }
 
 /// <summary>
-/// The session's commands with no time limit: several run at once. A turn does not end while one
-/// it started runs; when the turn is stopped, they are stopped with it.
+/// The session's jobs (commands with no time limit, and in the background): several run at once. A turn
+/// does not wait for them; when a turn is stopped, the jobs it started with no time limit stop with it.
+/// One that ends while nobody asks is news for the model (<see cref="HasNews"/>), so a turn carries on from it.
 /// </summary>
 internal sealed class CommandJobs
 {
@@ -257,7 +307,10 @@ internal sealed class CommandJobs
     public Action<CommandJob>? Started { get; set; }
     public Action<CommandJob>? Ended { get; set; }
 
-    public CommandJob Start(string command, ProcessStartInfo psi)
+    /// <summary>The session now (the runtime's): a job another session started is not news to this one.</summary>
+    public Func<string?>? Session { get; set; }
+
+    public CommandJob Start(string command, ProcessStartInfo psi, bool background = false, int turn = 0)
     {
         int id;
         lock (_gate)
@@ -268,7 +321,7 @@ internal sealed class CommandJobs
         {
             Ended?.Invoke(j);
             Signal();
-        });
+        }, background, turn, Session?.Invoke());
         lock (_gate)
         {
             _all.Add(job);
@@ -290,14 +343,17 @@ internal sealed class CommandJobs
 
     public IReadOnlyList<CommandJob> Running => [.. All.Where(j => j.Running)];
 
+    /// <summary>The commands with no time limit this session started that still run (those in the background excepted).</summary>
+    public IReadOnlyList<CommandJob> Waiting => [.. All.Where(j => j.Running && !j.Background && Here(j))];
+
     public CommandJob? Find(int id) => All.FirstOrDefault(j => j.Id == id);
 
-    /// <summary>The jobs that ended and the model was not yet told of, now marked as told.</summary>
+    /// <summary>The jobs of this session that ended and the model was not yet told of, now marked as told.</summary>
     public List<CommandJob> TakeEnded()
     {
         lock (_gate)
         {
-            var ended = _all.Where(j => !j.Running && !j.Reported).ToList();
+            var ended = _all.Where(j => !j.Running && !j.Reported && Here(j)).ToList();
             foreach (var j in ended)
             {
                 j.Reported = true;
@@ -306,13 +362,50 @@ internal sealed class CommandJobs
         }
     }
 
-    /// <summary>Waits until a job ends (no time limit); the token is the turn's.</summary>
+    /// <summary>
+    /// A job with no time limit (not one in the background) ended, the model was not told yet, and no turn was started for
+    /// it: a turn should carry on from it.
+    /// </summary>
+    public bool HasNews
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _all.Any(News);
+            }
+        }
+    }
+
+    /// <summary>The jobs a turn now carries on from (<see cref="HasNews"/>), marked so no other turn starts for them.</summary>
+    public List<CommandJob> Follow()
+    {
+        lock (_gate)
+        {
+            var news = _all.Where(News).ToList();
+            foreach (var j in news)
+            {
+                j.Followed = true;
+            }
+            return news;
+        }
+    }
+
+    private bool News(CommandJob j) => !j.Running && !j.Reported && !j.Background && !j.Followed && Here(j);
+
+    /// <summary>Started in the session now (a job from before /clear or /resume is listed, and its end told to no model).</summary>
+    private bool Here(CommandJob j) => Session is null || j.Session == Session();
+
+    /// <summary>
+    /// Waits until a job with no time limit ends that the model was not told of (at once when one has, or none runs); those in
+    /// the background are not waited for.
+    /// </summary>
     public async Task WaitAnyAsync(CancellationToken ct)
     {
         Task changed;
         lock (_gate)
         {
-            if (_all.Any(j => !j.Running && !j.Reported) || !_all.Any(j => j.Running))
+            if (_all.Any(News) || !_all.Any(j => j.Running && !j.Background && Here(j)))
             {
                 return;
             }

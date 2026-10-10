@@ -40,6 +40,15 @@ internal sealed class ChatSync : IAsyncDisposable
     /// <summary>The most messages one request sends.</summary>
     public const int Batch = 200;
 
+    /// <summary>The longest one request to Arena may take: a slow or half-open connection never holds a turn.</summary>
+    public static readonly TimeSpan RequestLimit = TimeSpan.FromSeconds(20);
+
+    /// <summary>How long a turn's start waits for a send under way before it goes on without the web's news (it comes next turn).</summary>
+    public static readonly TimeSpan TakeInWait = TimeSpan.FromSeconds(3);
+
+    /// <summary>How long a turn's start waits for Arena to start saying what the web chat added (all of it then has <see cref="RequestLimit"/>).</summary>
+    public static readonly TimeSpan TakeInLimit = TimeSpan.FromSeconds(5);
+
     private ChatSync(HttpClient http, string arenaUrl, string key, SessionStore store, string place, Func<string> model, Action<bool, string> notice, SessionData? data)
     {
         _http = http;
@@ -159,9 +168,9 @@ internal sealed class ChatSync : IAsyncDisposable
             {
                 return;
             }
-            catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException or System.Text.Json.JsonException)
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
             {
-                // Arena out of reach, or restarting: again in a while, longer each time (at most a minute).
+                // Arena out of reach, or restarting (or the session's file not writable): again in a while, longer each time (at most a minute).
                 wait = wait == TimeSpan.Zero ? TimeSpan.FromSeconds(2) : TimeSpan.FromSeconds(Math.Min(60, wait.TotalSeconds * 2));
                 Problem($"Arena cannot be reached ({Fmt.OneLine(e.Message, 120)}): the session is sent when it can be");
             }
@@ -308,20 +317,47 @@ internal sealed class ChatSync : IAsyncDisposable
                 return [];
             }
         }
-        await _busy.WaitAsync(ct);
+        // A send under way (Arena slow to answer) never holds the turn: past a few seconds the turn goes on, and the web's news comes next turn.
+        if (!await _busy.WaitAsync(TakeInWait, ct))
+        {
+            // Not read, which says nothing of whether the web added anything: the sends go on as they were.
+            _notice(false, "The web chat is not read now (Arena is slow to answer): what was added there comes in at the next turn.");
+            return [];
+        }
         try
         {
             (HttpStatusCode Status, JsonObject? Body) read;
             try
             {
-                read = await SendAsync(HttpMethod.Get, $"/api/code-arena/chats/{conversation}?after={after}", null, ct);
+                // A turn's start waits a few seconds at most: what the web added comes in at the next turn otherwise.
+                read = await SendAsync(HttpMethod.Get, $"/api/code-arena/chats/{conversation}?after={after}", null, ct, TakeInLimit);
             }
             catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException or System.Text.Json.JsonException && !ct.IsCancellationRequested)
             {
                 Problem($"Arena cannot be reached ({Fmt.OneLine(e.Message, 120)}): what was added on the web comes later");
                 return [];
             }
-            if (read.Status != HttpStatusCode.OK)
+            try
+            {
+                return Take(read, after);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // The session's file cannot be written: the web's news is not taken in now (it is still there next turn).
+                Problem($"the session's file cannot be written ({Fmt.OneLine(e.Message, 120)})");
+                return [];
+            }
+        }
+        finally
+        {
+            _busy.Release();
+        }
+    }
+
+    /// <summary>What a read of the web chat brought: written into the session, the model's own messages known and left out.</summary>
+    private List<JsonObject> Take((HttpStatusCode Status, JsonObject? Body) read, int after)
+    {
+        if (read.Status != HttpStatusCode.OK)
             {
                 if (read.Status == HttpStatusCode.Conflict)
                 {
@@ -336,28 +372,49 @@ internal sealed class ChatSync : IAsyncDisposable
             var taken = new List<JsonObject>();
             lock (_gate)
             {
-                foreach (var m in (read.Body?["messages"] as JsonArray ?? []).OfType<JsonObject>())
+                var done = 0;
+                try
                 {
-                    // One of this session's own, sent before its count was written here (a lost answer, a stop): not taken in twice.
-                    if (Own(m.Str("ref")) is { } index)
+                    foreach (var m in (read.Body?["messages"] as JsonArray ?? []).OfType<JsonObject>())
                     {
-                        _pushed = Math.Max(_pushed, Math.Min(index + 1, _local.Count));
-                        continue;
+                        // One of this session's own, sent before its count was written here (a lost answer, a stop): not taken in twice.
+                        if (Own(m.Str("ref")) is { } index)
+                        {
+                            _pushed = Math.Max(_pushed, Math.Min(index + 1, _local.Count));
+                            done++;
+                            continue;
+                        }
+                        var message = In(m);
+                        _store.Remote(message);
+                        taken.Add(message);
+                        done++;
                     }
-                    var message = In(m);
-                    _store.Remote(message);
-                    taken.Add(message);
                 }
-                _server = (int)(read.Body?.Long("count") ?? after + taken.Count);
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    // Those written so far are this session's now: the next read goes on after them, not again from the start.
+                    _server = after + done;
+                    TrySync();
+                    throw;
+                }
+                _server = (int)(read.Body?.Long("count") ?? after + done);
                 _behind = false;
                 _store.Sync(_conversation, _server, _pushed);
             }
-            Wake();
-            return taken;
-        }
-        finally
+        Wake();
+        return taken;
+    }
+
+    /// <summary>The counts written to the session, when its file can be written.</summary>
+    private void TrySync()
+    {
+        try
         {
-            _busy.Release();
+            _store.Sync(_conversation, _server, _pushed);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Written with the next that can be.
         }
     }
 
@@ -369,8 +426,10 @@ internal sealed class ChatSync : IAsyncDisposable
     public static async Task<List<WebChat>> ListAsync(Config config, HttpClient http, CancellationToken ct)
     {
         using var req = Request(HttpMethod.Get, config.Url!.TrimEnd('/') + "/api/code-arena/chats?limit=30", config.ApiKey!, null);
-        using var res = await http.SendAsync(req, ct);
-        var body = Json.ParseObject(await res.Content.ReadAsStringAsync(ct));
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        limit.CancelAfter(RequestLimit);
+        using var res = await http.SendAsync(req, limit.Token);
+        var body = Json.ParseObject(await res.Content.ReadAsStringAsync(limit.Token));
         if (!res.IsSuccessStatusCode)
         {
             throw new HttpRequestException(body?.Str("error") ?? $"Arena answered HTTP {(int)res.StatusCode}");
@@ -460,11 +519,18 @@ internal sealed class ChatSync : IAsyncDisposable
         return o;
     }
 
-    private async Task<(HttpStatusCode Status, JsonObject? Body)> SendAsync(HttpMethod method, string path, JsonObject? body, CancellationToken ct)
+    /// <param name="answerWithin">How long Arena has to start answering (its headers), when shorter than the request's limit:
+    /// a long answer then has the whole limit to arrive.</param>
+    private async Task<(HttpStatusCode Status, JsonObject? Body)> SendAsync(HttpMethod method, string path, JsonObject? body, CancellationToken ct, TimeSpan? answerWithin = null)
     {
         using var req = Request(method, _base + path, _key, body);
-        using var res = await _http.SendAsync(req, ct);
-        var text = await res.Content.ReadAsStringAsync(ct);
+        // A deadline of its own: Arena slow to answer, or a connection gone half-open, is retried later rather than waited on.
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        limit.CancelAfter(RequestLimit);
+        using var headers = CancellationTokenSource.CreateLinkedTokenSource(limit.Token);
+        headers.CancelAfter(answerWithin ?? RequestLimit);
+        using var res = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, headers.Token);
+        var text = await res.Content.ReadAsStringAsync(limit.Token);
         return (res.StatusCode, text.Length > 0 && text.TrimStart().StartsWith('{') ? Json.ParseObject(text) : null);
     }
 

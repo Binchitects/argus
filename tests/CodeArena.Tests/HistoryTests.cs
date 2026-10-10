@@ -22,6 +22,9 @@ internal sealed class ScriptedKeys : IKeyboard
     public int Captured { get; private set; }
     public Action? Suspend { get; set; }
 
+    /// <summary>Every key is there from the start, and the end after them: a read never waits.</summary>
+    public bool WaitForKey(TimeSpan wait) => true;
+
     public ConsoleKeyInfo? ReadKey()
     {
         if (!_keys.TryDequeue(out var next))
