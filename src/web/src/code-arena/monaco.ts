@@ -32,8 +32,19 @@ self.MonacoEnvironment = {
 
 // One file at a time, without the project's packages: the imports it cannot
 // see would be errors everywhere. Syntax errors and completions stay.
-for (const defaults of [monaco.typescript.typescriptDefaults, monaco.typescript.javascriptDefaults]) {
+// A model's address is its file's (fileUri): .tsx and .jsx are read with JSX, as the project's compiler reads them.
+const ts = monaco.typescript
+for (const defaults of [ts.typescriptDefaults, ts.javascriptDefaults]) {
   defaults.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: false })
+  defaults.setCompilerOptions({
+    ...defaults.getCompilerOptions(),
+    jsx: ts.JsxEmit.ReactJSX,
+    allowJs: true,
+    allowNonTsExtensions: true,
+    target: ts.ScriptTarget.ESNext,
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeJs,
+  })
 }
 
 // Argus Arena's colours (src/styles/index.css, as sRGB: Monaco takes hex).
@@ -88,6 +99,16 @@ monaco.editor.defineTheme('arena-dark', {
 void document.fonts?.ready.then(() => monaco.editor.remeasureFonts())
 
 export { monaco }
+
+/** A file's model's address: its path in the folder, so the language services know what it is (.tsx: with JSX). */
+export const fileUri = (path: string) => monaco.Uri.file('/' + path)
+
+let sides = 0
+/** A side of the agent's change to a file: an address of its own each time, never a file's. */
+export const diffUri = (side: 'before' | 'after', path: string) => monaco.Uri.from({ scheme: `agent-${side}`, path: '/' + path, query: String(++sides) })
+
+/** The path of a file's model (fileUri); null for any other model. */
+export const pathOf = (uri: monaco.Uri) => (uri.scheme === 'file' ? uri.path.slice(1) : null)
 
 export const themeOf = (resolved: 'light' | 'dark') => (resolved === 'dark' ? 'arena-dark' : 'arena-light')
 

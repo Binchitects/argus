@@ -15,15 +15,32 @@ import type { Change, Entry, Preferences, TerminalInfo } from './ide-api'
 // Monaco, xterm.js and the terminal's socket, as fakes that remember what the page did with them.
 const fakes = vi.hoisted(() => {
   let alt = 0
+  class Uri {
+    scheme: string
+    path: string
+    query: string
+    constructor(scheme: string, path: string, query = '') {
+      this.scheme = scheme
+      this.path = path
+      this.query = query
+    }
+    toString() {
+      return `${this.scheme}://${this.path}${this.query ? `?${this.query}` : ''}`
+    }
+  }
   class Model {
     value: string
     language: string
+    uri: Uri | undefined
     alt = ++alt
     disposed = false
     listeners: (() => void)[] = []
-    constructor(value: string, language: string) {
+    constructor(value: string, language: string, uri?: Uri) {
+      // As Monaco's: one model at an address.
+      if (uri && fakes.models.some((m) => !m.disposed && m.uri?.toString() === uri.toString())) throw new Error(`Cannot add model because it already exists: ${uri}`)
       this.value = value
       this.language = language
+      this.uri = uri
       fakes.models.push(this)
     }
     /** As Monaco's: a model disposed of throws when read. */
@@ -189,6 +206,7 @@ const fakes = vi.hoisted(() => {
     }
   }
   return {
+    Uri,
     Model,
     Editor,
     DiffEditor,
@@ -207,7 +225,8 @@ vi.mock('monaco-editor', () => ({
   editor: {
     create: (host: HTMLElement, options: Record<string, unknown>) => new fakes.Editor(host, options),
     createDiffEditor: () => new fakes.DiffEditor(),
-    createModel: (value: string, language: string) => new fakes.Model(value, language),
+    createModel: (value: string, language: string, uri?: InstanceType<typeof fakes.Uri>) => new fakes.Model(value, language, uri),
+    getModel: (uri: InstanceType<typeof fakes.Uri>) => fakes.models.find((m) => !m.disposed && m.uri?.toString() === uri.toString()) ?? null,
     setModelLanguage: (m: { language: string }, language: string) => {
       m.language = language
     },
@@ -222,7 +241,18 @@ vi.mock('monaco-editor', () => ({
       { id: 'dockerfile', extensions: ['.dockerfile'], filenames: ['Dockerfile'], aliases: ['Dockerfile'] },
     ],
   },
-  typescript: { typescriptDefaults: { setDiagnosticsOptions: () => undefined }, javascriptDefaults: { setDiagnosticsOptions: () => undefined } },
+  Uri: {
+    file: (path: string) => new fakes.Uri('file', path),
+    from: (c: { scheme: string; path: string; query?: string }) => new fakes.Uri(c.scheme, c.path, c.query),
+  },
+  typescript: {
+    typescriptDefaults: { setDiagnosticsOptions: () => undefined, getCompilerOptions: () => ({}), setCompilerOptions: () => undefined },
+    javascriptDefaults: { setDiagnosticsOptions: () => undefined, getCompilerOptions: () => ({}), setCompilerOptions: () => undefined },
+    JsxEmit: { ReactJSX: 4 },
+    ScriptTarget: { ESNext: 99 },
+    ModuleKind: { ESNext: 99 },
+    ModuleResolutionKind: { NodeJs: 2 },
+  },
 }))
 vi.mock('@xterm/xterm', () => ({ Terminal: fakes.Terminal }))
 vi.mock('@xterm/addon-fit', () => ({
@@ -493,6 +523,11 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() => expect(calls.find((c) => c.path === '/api/files/rename')?.body).toEqual({ from: 'src/app.ts', to: 'src/main.ts' }))
     expect(await within(tabs()).findByRole('tab', { name: 'main.ts' })).toBeInTheDocument()
     expect(within(tabs()).queryByRole('tab', { name: 'app.ts' })).not.toBeInTheDocument()
+    // Its model is at the file's new address now, with its text: the language services read it as that file.
+    const moved = fakes.models.filter((m) => !m.disposed && m.uri?.toString() === 'file:///src/main.ts')
+    expect(moved).toHaveLength(1)
+    expect(moved[0]!.getValue()).toBe('const total = 1\nconsole.log(total)\n')
+    expect(fakes.models.filter((m) => m.uri?.toString() === 'file:///src/app.ts').every((m) => m.disposed)).toBe(true)
 
     // Delete asks first.
     const readme = screen.getByRole('treeitem', { name: 'README.md' })

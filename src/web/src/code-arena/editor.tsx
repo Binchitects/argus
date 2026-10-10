@@ -131,7 +131,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
           return
         }
         const language = m.languageOf(tab.path)
-        const model = m.monaco.editor.createModel(file.text, language.id)
+        const model = m.monaco.editor.createModel(file.text, language.id, m.fileUri(tab.path))
         const f: FileModel = { path: tab.path, model, version: file.version, savedAlt: model.getAlternativeVersionId(), view: null }
         model.onDidChangeContent(() => markDirty(f))
         files.current.set(tab.path, f)
@@ -152,7 +152,10 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         there.original.setValue(texts.original ?? '')
         there.modified.setValue(texts.modified ?? '')
       } else {
-        diffs.current.set(path, { original: m.monaco.editor.createModel(texts.original ?? '', language.id), modified: m.monaco.editor.createModel(texts.modified ?? '', language.id) })
+        diffs.current.set(path, {
+          original: m.monaco.editor.createModel(texts.original ?? '', language.id, m.diffUri('before', path)),
+          modified: m.monaco.editor.createModel(texts.modified ?? '', language.id, m.diffUri('after', path)),
+        })
       }
       return language.name
     }
@@ -281,7 +284,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         files.current.delete(p)
         f.path = rename(p)
         files.current.set(f.path, f)
-        if (m) m.monaco.editor.setModelLanguage(f.model, m.languageOf(f.path).id)
+        if (m) readdress(m, f)
       }
       for (const [p, d] of [...diffs.current]) {
         if (!within(p, from)) continue
@@ -300,6 +303,31 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       )
       const a = activeRef.current
       if (a && ids.has(a)) activate(ids.get(a)!)
+    }
+
+    /**
+     * A file renamed: its model again at its new address (an address does not change), with its text, whether it is
+     * unsaved, and where it was scrolled to. Its undo history stays with the old one.
+     */
+    const readdress = (m: MonacoModule, f: FileModel) => {
+      const old = f.model
+      const uri = m.fileUri(f.path)
+      if (m.monaco.editor.getModel(uri)) {
+        m.monaco.editor.setModelLanguage(old, m.languageOf(f.path).id)
+        return
+      }
+      const unsaved = old.getAlternativeVersionId() !== f.savedAlt
+      const model = m.monaco.editor.createModel(old.getValue(), m.languageOf(f.path).id, uri)
+      f.model = model
+      f.savedAlt = unsaved ? -1 : model.getAlternativeVersionId()
+      model.onDidChangeContent(() => markDirty(f))
+      const ed = editor.current
+      if (ed?.getModel() === old) {
+        const view = ed.saveViewState()
+        ed.setModel(model)
+        if (view) ed.restoreViewState(view)
+      }
+      old.dispose()
     }
 
     // A tab with unsaved changes stays: its text is the person's, and saving makes the file again.
