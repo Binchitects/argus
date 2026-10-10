@@ -26,6 +26,8 @@ public static class Filters
     {
         ["package.json"] = "npm", ["go.mod"] = "gomod", ["pom.xml"] = "maven", ["Cargo.toml"] = "cargo", [".gitmodules"] = "gitmodules",
         ["packages.config"] = "nugetconfig", ["Dockerfile"] = "dockerfile", ["Containerfile"] = "dockerfile", ["build.gradle.kts"] = "gradle",
+        ["tsconfig.json"] = "tsconfig", ["tsconfig.base.json"] = "tsconfig", ["jsconfig.json"] = "tsconfig",
+        ["Directory.Packages.props"] = "msbuild", ["Directory.Build.props"] = "msbuild",
     };
 
     public static readonly HashSet<string> HeaderExtensions = new(StringComparer.Ordinal) { ".h", ".hpp", ".hxx", ".inl" };

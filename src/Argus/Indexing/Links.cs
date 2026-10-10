@@ -20,7 +20,7 @@ public static partial class Links
     /// <summary>The languages that are manifests, not code: their declarations are read, no symbols.</summary>
     public static readonly HashSet<string> ManifestLangs = new(StringComparer.Ordinal)
     {
-        "msbuild", "npm", "gomod", "maven", "gradle", "cargo", "toml", "yaml", "gitmodules", "dockerfile", "ini", "nugetconfig",
+        "msbuild", "npm", "gomod", "maven", "gradle", "cargo", "toml", "yaml", "gitmodules", "dockerfile", "ini", "nugetconfig", "tsconfig",
     };
 
     public static List<Decl> Extract(string path, string? lang, string content)
@@ -34,15 +34,27 @@ public static partial class Links
                 case "msbuild": MsBuild(name, content, output); break;
                 case "nugetconfig": Matches(PackagesConfig(), content, "nuget", output, lower: true); break;
                 case "npm": PackageJson(content, output); break;
+                case "tsconfig": TsConfig(content, output); break;
                 case "gomod": GoMod(content, output); break;
                 case "maven": Pom(content, output); break;
-                case "gradle": Matches(GradleDep(), content, "maven", output, lower: true, join: m => $"{m.Groups["g"].Value}:{m.Groups["a"].Value}"); break;
+                case "gradle":
+                    Matches(GradleDep(), content, "maven", output, lower: true, join: m => $"{m.Groups["g"].Value}:{m.Groups["a"].Value}");
+                    Matches(GradleMapDep(), content, "maven", output, lower: true, join: m => $"{m.Groups["g"].Value}:{m.Groups["a"].Value}");
+                    break;
+                case "toml" when name == "libs.versions.toml": GradleCatalog(content, output); break;
                 case "cargo": Cargo(content, output); break;
                 case "toml" when name == "pyproject.toml": PyProject(content, output); break;
                 case "ini" when name == "setup.cfg": SetupCfg(content, output); break;
                 case "text" when IsRequirements(path, name): Requirements(content, output); break;
-                case "gitmodules": Matches(SubmoduleUrl(), content, "repo", output, lower: true, join: m => RepoPathOf(m.Groups["url"].Value)); break;
-                case "yaml": Yaml(name, content, output); break;
+                case "gitmodules":
+                    // A relative URL (../core/protos.git) is the estate's own, from this repository's path (Graph resolves it).
+                    Matches(SubmoduleUrl(), content, "repo", output, lower: true,
+                        join: m => m.Groups["url"].Value.StartsWith("../", StringComparison.Ordinal) || m.Groups["url"].Value.StartsWith("./", StringComparison.Ordinal)
+                            ? "rel:" + m.Groups["url"].Value.Trim('"', '\'').Replace(".git", "", StringComparison.Ordinal).TrimEnd('/')
+                            : RepoPathOf(m.Groups["url"].Value));
+                    break;
+                // CI's own files: .gitlab-ci.yml, and what it includes from .gitlab/ (.gitlab/ci/build.yml).
+                case "yaml": Yaml(name, content, output, isCi: path.StartsWith(".gitlab/", StringComparison.Ordinal) || path.Contains("/.gitlab/", StringComparison.Ordinal)); break;
                 case "dockerfile": Matches(DockerFrom(), content, "image", output, lower: true, join: m => ImagePath(m.Groups["image"].Value)); break;
                 case "csharp": CSharp(Blank(content, Code.CSharp), output); break;
                 case "python": Python(path, Blank(content, Code.Python), output); break;
@@ -178,10 +190,23 @@ public static partial class Links
     static void MsBuild(string fileName, string content, List<Decl> output)
     {
         Matches(PackageReference(), content, "nuget", output, lower: true);
+        // <ProjectReference Include="../../core/src/Core.csproj" />: the project it names, as a package of its name.
+        foreach (Match m in ProjectReference().Matches(content))
+        {
+            var file = m.Groups["path"].Value.Replace('\\', '/');
+            var stem = file[(file.LastIndexOf('/') + 1)..];
+            if (stem.Contains('.')) stem = stem[..stem.LastIndexOf('.')];
+            if (stem.Length > 0 && !stem.Contains('$')) output.Add(new Decl(Uses, "nuget", stem.ToLowerInvariant(), LineAt(content, m.Index)));
+        }
+        // <Using Include="Acme.Core" />: a global using, as a .cs file's.
+        foreach (Match m in MsBuildUsing().Matches(content))
+            output.Add(new Decl(Uses, m.Groups["static"].Success || m.Groups["alias"].Success ? "cs-type" : "cs", m.Groups["name"].Value, LineAt(content, m.Index)));
         if (!fileName.EndsWith("proj", StringComparison.OrdinalIgnoreCase)) return;
-        // The package it makes: its PackageId, else its assembly's name, else the project file's.
+        // The package it makes: its PackageId, else its assembly's name, else the project file's ($(MSBuildProjectName) is it).
+        var stemName = fileName[..fileName.LastIndexOf('.')];
         var id = PackageId().Match(content) is { Success: true } p ? p : AssemblyName().Match(content);
-        var name = id.Success ? id.Groups["name"].Value : fileName[..fileName.LastIndexOf('.')];
+        var name = (id.Success ? id.Groups["name"].Value : stemName).Replace("$(MSBuildProjectName)", stemName, StringComparison.Ordinal)
+            .Replace("$(AssemblyName)", AssemblyName().Match(content) is { Success: true } a ? a.Groups["name"].Value : stemName, StringComparison.Ordinal);
         if (!name.Contains("$(", StringComparison.Ordinal))
             output.Add(new Decl(Provides, "nuget", name.ToLowerInvariant(), id.Success ? LineAt(content, id.Index) : 1));
     }
@@ -240,6 +265,19 @@ public static partial class Links
         }
     }
 
+    /// <summary>A tsconfig's path aliases (compilerOptions.paths): imports of these are the repository's own code, not a package.</summary>
+    static void TsConfig(string content, List<Decl> output)
+    {
+        using var doc = JsonDocument.Parse(content, new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
+        if (doc.RootElement.ValueKind != JsonValueKind.Object || !doc.RootElement.TryGetProperty("compilerOptions", out var options)
+            || options.ValueKind != JsonValueKind.Object || !options.TryGetProperty("paths", out var paths) || paths.ValueKind != JsonValueKind.Object) return;
+        foreach (var alias in paths.EnumerateObject())
+        {
+            var name = alias.Name.EndsWith("/*", StringComparison.Ordinal) ? alias.Name[..^2] : alias.Name;
+            if (name.Length > 0 && name != "*") output.Add(new Decl(Provides, "ts-alias", name.ToLowerInvariant(), Line(content, $"\"{alias.Name}\"")));
+        }
+    }
+
     static long Line(string content, string text) => content.IndexOf(text, StringComparison.Ordinal) is var i and >= 0 ? LineAt(content, i) : 1;
 
     static void JavaScript(string content, List<Decl> output)
@@ -294,12 +332,27 @@ public static partial class Links
         var lines = content.Split('\n');
         for (var i = 0; i < lines.Length; i++)
         {
-            var line = lines[i].Split('#')[0].Trim();
+            var line = lines[i].Trim();
+            // -e (editable) and --editable carry a URL or a path; other options are skipped.
+            if (line.StartsWith("-e ", StringComparison.Ordinal) || line.StartsWith("--editable", StringComparison.Ordinal))
+                line = line[(line.IndexOf(' ') + 1)..].Trim();
+            // A URL's #egg= is not a comment.
+            if (!line.Contains("://", StringComparison.Ordinal)) line = line.Split('#')[0].Trim();
             if (line.Length == 0 || line.StartsWith('-')) continue;
+            // PEP 508: name @ url: the distribution, and the repository it comes from.
+            if (Pep508Url().Match(line) is { Success: true } at)
+            {
+                output.Add(new Decl(Uses, "pypi", PyName(at.Groups["name"].Value), i + 1));
+                line = at.Groups["url"].Value;
+            }
             // git+https://gitlab.example.com/group/lib.git@v1#egg=lib: the repository itself.
             if (line.StartsWith("git+", StringComparison.Ordinal) || line.Contains("://", StringComparison.Ordinal))
             {
-                if (RepoPathOf(line.Split('@', '#')[0].Replace("git+", "", StringComparison.Ordinal)) is { Length: > 0 } repo)
+                // The revision after the path (@v1) and the fragment (#egg=) go; an @ in the host part (git@host) stays.
+                var url = line.Replace("git+", "", StringComparison.Ordinal).Split('#')[0];
+                var lastSlash = url.LastIndexOf('/');
+                if (lastSlash >= 0 && url.IndexOf('@', lastSlash) is var rev and > 0) url = url[..rev];
+                if (RepoPathOf(url) is { Length: > 0 } repo)
                     output.Add(new Decl(Uses, "repo", repo.ToLowerInvariant(), i + 1));
                 continue;
             }
@@ -307,6 +360,9 @@ public static partial class Links
                 output.Add(new Decl(Uses, "pypi", PyName(m.Groups["name"].Value), i + 1));
         }
     }
+
+    [GeneratedRegex(@"^(?<name>[A-Za-z0-9][\w.-]*)(?:\[[^\]]*\])?\s*@\s*(?<url>\S+)")]
+    private static partial Regex Pep508Url();
 
     static void Python(string path, string content, List<Decl> output)
     {
@@ -366,11 +422,33 @@ public static partial class Links
             : PomParentGroup().Match(content) is { Success: true } pg ? pg.Groups["v"].Value : "";
         if (PomArtifact().Match(own) is { Success: true } a && group.Length > 0)
             output.Add(new Decl(Provides, "maven", $"{group}:{a.Groups["v"].Value}".ToLowerInvariant(), LineAt(content, a.Index)));
+        // Its parent is a use too (corporate parents carry the build).
+        if (PomParent().Match(content) is { Success: true } parent
+            && PomGroup().Match(parent.Value) is { Success: true } pgroup && PomArtifact().Match(parent.Value) is { Success: true } part)
+            output.Add(new Decl(Uses, "maven", $"{pgroup.Groups["v"].Value}:{part.Groups["v"].Value}".ToLowerInvariant(), LineAt(content, parent.Index)));
         // A <dependencyManagement> entry only pins a version, and build plugins are tools: neither is a use.
         var used = PomManaged().Replace(content, m => new string('\n', m.Value.Count(c => c == '\n')));
-        foreach (Match d in PomDependency().Matches(used))
-            output.Add(new Decl(Uses, "maven", $"{d.Groups["g"].Value}:{d.Groups["a"].Value}".ToLowerInvariant(), LineAt(content, d.Index)));
+        foreach (Match d in PomDependencyBlock().Matches(used))
+        {
+            // groupId and artifactId in either order; ${project.groupId} is the project's own.
+            if (PomGroup().Match(d.Value) is not { Success: true } dg || PomArtifact().Match(d.Value) is not { Success: true } da) continue;
+            var depGroup = dg.Groups["v"].Value.Replace("${project.groupId}", group, StringComparison.Ordinal).Replace("${project.parent.groupId}", group, StringComparison.Ordinal);
+            if (depGroup.Contains("${", StringComparison.Ordinal)) continue;
+            output.Add(new Decl(Uses, "maven", $"{depGroup}:{da.Groups["v"].Value}".ToLowerInvariant(), LineAt(content, d.Index)));
+        }
     }
+
+    /// <summary>A Gradle version catalog's libraries: what the build's libs.x references name.</summary>
+    static void GradleCatalog(string content, List<Decl> output)
+    {
+        var libraries = TomlSection().Match(content);
+        if (!libraries.Success) return;
+        foreach (Match m in CatalogEntry().Matches(libraries.Groups["body"].Value))
+            output.Add(new Decl(Uses, "maven", $"{m.Groups["g"].Value}:{m.Groups["a"].Value}".ToLowerInvariant(), LineAt(content, libraries.Groups["body"].Index + m.Index)));
+    }
+
+    [GeneratedRegex(@"^\[libraries\]\s*\n(?<body>(?:(?!\[).*\n?)*)", RegexOptions.Multiline)]
+    private static partial Regex TomlSection();
 
     static void Java(string content, List<Decl> output)
     {
@@ -389,8 +467,13 @@ public static partial class Links
         if (CargoPackage().Match(content) is { Success: true } p && TomlName().Match(p.Groups["body"].Value) is { Success: true } n)
             output.Add(new Decl(Provides, "cargo", n.Groups["name"].Value.ToLowerInvariant().Replace('_', '-'), LineAt(content, p.Index)));
         foreach (Match section in CargoDependencies().Matches(content))
-            foreach (Match d in TomlKey().Matches(section.Groups["body"].Value))
-                output.Add(new Decl(Uses, "cargo", d.Groups["name"].Value.ToLowerInvariant().Replace('_', '-'), LineAt(content, section.Index)));
+            foreach (var line in section.Groups["body"].Value.Split('\n'))
+                if (TomlKey().Match(line) is { Success: true } d)
+                {
+                    // codec = { package = "acme-codec" }: the package is acme-codec, whatever the code calls it.
+                    var name = CargoRename().Match(line) is { Success: true } r ? r.Groups["name"].Value : d.Groups["name"].Value;
+                    output.Add(new Decl(Uses, "cargo", name.ToLowerInvariant().Replace('_', '-'), LineAt(content, section.Index)));
+                }
     }
 
     static void Proto(string path, string content, List<Decl> output)
@@ -402,10 +485,14 @@ public static partial class Links
 
     // --- Repositories by path: submodules, CI, images ------------------------------------
 
-    static void Yaml(string fileName, string content, List<Decl> output)
+    static void Yaml(string fileName, string content, List<Decl> output, bool isCi = false)
     {
-        if (fileName.EndsWith("gitlab-ci.yml", StringComparison.OrdinalIgnoreCase) || fileName.EndsWith("gitlab-ci.yaml", StringComparison.OrdinalIgnoreCase))
+        if (fileName.EndsWith("gitlab-ci.yml", StringComparison.OrdinalIgnoreCase) || fileName.EndsWith("gitlab-ci.yaml", StringComparison.OrdinalIgnoreCase) || isCi)
+        {
             Matches(CiProject(), content, "repo", output, lower: true, join: m => m.Groups["name"].Value.Trim('\'', '"', '/'));
+            // A CI/CD component: host/group/project/component@version is its project's.
+            Matches(CiComponent(), content, "repo", output, lower: true, join: m => m.Groups["project"].Value);
+        }
         // compose files, Kubernetes manifests, Helm values: image: group/name:tag and repository: group/name. A chart's
         // repository: is where its dependencies' charts come from, not an image.
         if (fileName is "Chart.yaml" or "Chart.lock" or "requirements.yaml") return;
@@ -448,6 +535,10 @@ public static partial class Links
 
     [GeneratedRegex(@"<PackageReference\b[^>]*?\sInclude\s*=\s*""(?<name>[^""$]+)""", RegexOptions.IgnoreCase)]
     private static partial Regex PackageReference();
+    [GeneratedRegex(@"<ProjectReference\b[^>]*?\sInclude\s*=\s*""(?<path>[^""]+)""", RegexOptions.IgnoreCase)]
+    private static partial Regex ProjectReference();
+    [GeneratedRegex(@"<Using\b(?=[^>]*\sInclude\s*=\s*""(?<name>[A-Za-z_][\w.]*)"")(?:(?=[^>]*\s(?<static>Static)\s*=\s*""true"")|(?=[^>]*\s(?<alias>Alias)\s*=))?", RegexOptions.IgnoreCase)]
+    private static partial Regex MsBuildUsing();
     [GeneratedRegex("""<PackageId>\s*(?<name>[^<\s]+)\s*</PackageId>""", RegexOptions.IgnoreCase)]
     private static partial Regex PackageId();
     [GeneratedRegex("""<AssemblyName>\s*(?<name>[^<\s]+)\s*</AssemblyName>""", RegexOptions.IgnoreCase)]
@@ -480,7 +571,7 @@ public static partial class Links
     private static partial Regex IniName();
     [GeneratedRegex(@"^\s*install_requires\s*=\s*\n(?<body>(?:[ \t]+\S.*\n?)*)", RegexOptions.Multiline)]
     private static partial Regex IniInstallRequires();
-    [GeneratedRegex(@"^(?:from\s+(?<from>[\w.]+)\s+import|import\s+(?<import>[\w.]+(?:\s+as\s+\w+)?(?:\s*,\s*[\w.]+(?:\s+as\s+\w+)?)*))", RegexOptions.Multiline)]
+    [GeneratedRegex(@"^[ \t]*(?:from\s+(?<from>[\w.]+)\s+import|import\s+(?<import>[\w.]+(?:\s+as\s+\w+)?(?:\s*,\s*[\w.]+(?:\s+as\s+\w+)?)*))", RegexOptions.Multiline)]
     private static partial Regex PyImport();
     [GeneratedRegex("""\bname\s*=\s*['"](?<name>[^'"]+)['"]""")]
     private static partial Regex SetupPyName();
@@ -499,6 +590,10 @@ public static partial class Links
     private static partial Regex GoReplace();
     [GeneratedRegex(@"<(?<tag>parent|dependencies|dependencyManagement|build|profiles|plugins)>[\s\S]*?</\k<tag>>")]
     private static partial Regex PomSections();
+    [GeneratedRegex(@"<dependency>[\s\S]*?</dependency>")]
+    private static partial Regex PomDependencyBlock();
+    [GeneratedRegex(@"<parent>[\s\S]*?</parent>")]
+    private static partial Regex PomParent();
     [GeneratedRegex(@"<(?<tag>dependencyManagement|build|plugins)>[\s\S]*?</\k<tag>>")]
     private static partial Regex PomManaged();
     [GeneratedRegex(@"<groupId>\s*(?<v>[^<\s]+)\s*</groupId>")]
@@ -509,16 +604,22 @@ public static partial class Links
     private static partial Regex PomArtifact();
     [GeneratedRegex(@"<dependency>\s*(?:<!--[\s\S]*?-->\s*)*<groupId>\s*(?<g>[^<\s]+)\s*</groupId>\s*<artifactId>\s*(?<a>[^<\s]+)\s*</artifactId>")]
     private static partial Regex PomDependency();
-    [GeneratedRegex("""\b(?:implementation|api|compile|compileOnly|runtimeOnly|testImplementation)\s*\(?\s*['"](?<g>[\w.\-]+):(?<a>[\w.\-]+)(?::[^'"]*)?['"]""")]
+    [GeneratedRegex("""\b(?:implementation|api|compile|compileOnly|runtimeOnly|testImplementation|testRuntimeOnly|testCompileOnly|annotationProcessor|kapt|ksp|classpath)\s*\(?\s*(?:(?:enforcedPlatform|platform)\s*\(\s*)?['"](?<g>[\w.\-]+):(?<a>[\w.\-]+)(?::[^'"]*)?['"]""")]
     private static partial Regex GradleDep();
+    [GeneratedRegex("""\bgroup\s*:\s*['"](?<g>[\w.\-]+)['"]\s*,\s*name\s*:\s*['"](?<a>[\w.\-]+)['"]""")]
+    private static partial Regex GradleMapDep();
+    [GeneratedRegex("""(?:module\s*=\s*|^\s*[\w.\-]+\s*=\s*)['"](?<g>[\w.\-]+):(?<a>[\w.\-]+)(?::[^'"]*)?['"]""", RegexOptions.Multiline)]
+    private static partial Regex CatalogEntry();
     [GeneratedRegex(@"^\s*package\s+(?<name>[a-z_][\w.]*)\s*;?", RegexOptions.Multiline)]
     private static partial Regex JavaPackage();
     [GeneratedRegex(@"^\s*import\s+(?:static\s+)?(?<name>[a-z_][\w.]*)(?:\.\*)?\s*;?", RegexOptions.Multiline)]
     private static partial Regex JavaImport();
     [GeneratedRegex(@"^\[package\]\s*\n(?<body>(?:(?!\[).*\n?)*)", RegexOptions.Multiline)]
     private static partial Regex CargoPackage();
-    [GeneratedRegex(@"^\[(?:dev-|build-)?dependencies\]\s*\n(?<body>(?:(?!\[).*\n?)*)", RegexOptions.Multiline)]
+    [GeneratedRegex(@"^\[(?:workspace\.|target\.[^\]]+\.)?(?:dev-|build-)?dependencies\]\s*\n(?<body>(?:(?!\[).*\n?)*)", RegexOptions.Multiline)]
     private static partial Regex CargoDependencies();
+    [GeneratedRegex(@"\bpackage\s*=\s*""(?<name>[^""]+)""")]
+    private static partial Regex CargoRename();
     [GeneratedRegex(@"^\s*(?:pub\s+)?(?:use|extern\s+crate)\s+(?<crate>[a-z_][a-z0-9_]*)", RegexOptions.Multiline)]
     private static partial Regex RustUse();
     [GeneratedRegex(@"^\s*import\s+(?:public\s+|weak\s+)?""(?<name>[^""]+\.proto)""", RegexOptions.Multiline)]
@@ -527,6 +628,8 @@ public static partial class Links
     private static partial Regex SubmoduleUrl();
     [GeneratedRegex(@"^\s*-?\s*project\s*:\s*(?<name>['""]?[\w.\-/]+['""]?)\s*$", RegexOptions.Multiline)]
     private static partial Regex CiProject();
+    [GeneratedRegex(@"^\s*-?\s*component\s*:\s*['""]?[\w.\-]+\.[a-z]{2,}(?::\d+)?/(?<project>[\w.\-/]+)/[\w.\-]+@[\w.\-$]+['""]?\s*$", RegexOptions.Multiline)]
+    private static partial Regex CiComponent();
     /// <summary>image: x, repository: x, and the extended forms (image:\n  name: x; kustomize's newName: x).</summary>
     [GeneratedRegex(@"^\s*-?\s*(?:image|repository|newName)\s*:\s*['""]?(?<image>[\w.\-/:@${}]+)['""]?\s*$|^\s*image\s*:\s*\n\s+name\s*:\s*['""]?(?<image>[\w.\-/:@${}]+)['""]?\s*$", RegexOptions.Multiline)]
     private static partial Regex YamlImage();

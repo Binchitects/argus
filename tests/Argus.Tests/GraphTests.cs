@@ -32,7 +32,7 @@ public sealed class GraphTests(Xunit.Abstractions.ITestOutputHelper output)
             Decls("go.mod", "module gitlab.acme.test/platform/auth\n\nrequire (\n\tgitlab.acme.test/core/log v1.2.0\n)\n"));
         Assert.Equal([("uses", "go", "gitlab.acme.test/core/log/level"), ("uses", "go", "github.com/pkg/errors")],
             Decls("main.go", "package main\n\nimport (\n\t\"fmt\"\n\tlv \"gitlab.acme.test/core/log/level\"\n\t\"github.com/pkg/errors\"\n)\n"));
-        Assert.Equal([("provides", "maven", "com.acme:payments"), ("uses", "maven", "com.acme:core")],
+        Assert.Equal([("provides", "maven", "com.acme:payments"), ("uses", "maven", "com.acme:parent"), ("uses", "maven", "com.acme:core")],
             Decls("pom.xml", "<project><parent><groupId>com.acme</groupId><artifactId>parent</artifactId></parent><artifactId>payments</artifactId><dependencies><dependency><groupId>com.acme</groupId><artifactId>core</artifactId></dependency></dependencies></project>"));
         Assert.Equal([("provides", "java", "com.acme.payments"), ("uses", "java", "com.acme.core.Money")],
             Decls("src/main/java/Pay.java", "package com.acme.payments;\n\nimport com.acme.core.Money;\n"));
@@ -323,6 +323,49 @@ public sealed class GraphTests(Xunit.Abstractions.ITestOutputHelper output)
         Graph.RebuildLinks(ix.Conn);
         Assert.Equal(new HashSet<(string, string)> { ("deploy/prod", "shop/payments"), ("deploy/prod", "team/billing-api") }, Pairs(ix));
         _ = (api, mirror, flat);
+    }
+
+    [Fact]
+    public void Each_ecosystems_own_conventions_are_read()
+    {
+        // .NET: ProjectReference, <Using>, a PackageId of $(MSBuildProjectName).
+        Assert.Equal([("uses", "nuget", "core"), ("uses", "cs", "Acme.Core"), ("provides", "nuget", "acme.api")],
+            Decls("src/Acme.Api.csproj", "<Project><PropertyGroup><PackageId>$(MSBuildProjectName)</PackageId></PropertyGroup><ItemGroup><ProjectReference Include=\"..\\..\\core\\src\\Core.csproj\" /><Using Include=\"Acme.Core\" /></ItemGroup></Project>"));
+        // Maven: the parent, ${project.groupId}, artifactId before groupId.
+        Assert.Equal([("provides", "maven", "com.acme:api"), ("uses", "maven", "com.acme:corp-parent"), ("uses", "maven", "com.acme:core"), ("uses", "maven", "com.acme:money")],
+            Decls("pom.xml", "<project><parent><groupId>com.acme</groupId><artifactId>corp-parent</artifactId></parent><groupId>com.acme</groupId><artifactId>api</artifactId><dependencies><dependency><groupId>${project.groupId}</groupId><artifactId>core</artifactId></dependency><dependency><artifactId>money</artifactId><groupId>com.acme</groupId></dependency></dependencies></project>"));
+        // Gradle: platform(), the map notation, a version catalog.
+        Assert.Equal([("uses", "maven", "com.acme:bom"), ("uses", "maven", "com.acme:core")],
+            Decls("build.gradle", "dependencies {\n  implementation(platform(\"com.acme:bom:1\"))\n  ksp group: 'com.acme', name: 'core'\n}\n"));
+        Assert.Equal([("uses", "maven", "com.acme:money")], Decls("gradle/libs.versions.toml", "[versions]\nx = \"1\"\n[libraries]\nacme-money = { module = \"com.acme:money\", version.ref = \"x\" }\n"));
+        // Python: -e and PEP 508 URLs, git+ssh; an import inside a try block.
+        Assert.Equal([("uses", "repo", "core/lib"), ("uses", "pypi", "acme-core"), ("uses", "repo", "core/acme-core"), ("uses", "repo", "core/x")],
+            Decls("requirements.txt", "-e git+https://gitlab.acme.test/core/lib.git#egg=lib\nacme-core @ git+https://gitlab.acme.test/core/acme-core.git@v1\ngit+ssh://git@gitlab.acme.test/core/x.git\n"));
+        Assert.Contains(("uses", "py", "acme_core"), Decls("app.py", "try:\n    import acme_core\nexcept ImportError:\n    pass\n"));
+        // Rust: workspace dependencies and a renamed package.
+        Assert.Equal([("uses", "cargo", "acme-codec"), ("uses", "cargo", "acme-time")],
+            Decls("Cargo.toml", "[workspace.dependencies]\ncodec = { package = \"acme-codec\", version = \"1\" }\nacme_time = \"2\"\n"));
+        // GitLab CI: files under .gitlab/, and components.
+        Assert.Equal([("uses", "repo", "devops/templates"), ("uses", "repo", "devops/components")],
+            Decls(".gitlab/ci/build.yml", "include:\n  - project: devops/templates\n  - component: gitlab.acme.test/devops/components/dotnet@1.0\n"));
+    }
+
+    [Fact]
+    public void A_relative_submodule_is_the_estates_own_and_a_path_alias_is_no_package()
+    {
+        using var ix = new TestIndex();
+        var auth = ix.Repo(1, "platform/auth");
+        var protos = ix.Repo(2, "platform/core/protos");
+        var shop = ix.Repo(3, "web/shop");
+        var ui = ix.Repo(4, "design/ui");
+        Index(ix,
+            (auth, ".gitmodules", "[submodule \"protos\"]\n  path = protos\n  url = ../core/protos.git\n"),
+            (shop, "tsconfig.base.json", "{ \"compilerOptions\": { \"paths\": { \"@acme/ui\": [\"libs/ui/src/index.ts\"] } } }"),
+            (shop, "apps/web/main.ts", "import { Button } from '@acme/ui';\n"),
+            (ui, "package.json", "{\"name\": \"@acme/ui\"}"));
+        Graph.RebuildLinks(ix.Conn);
+        Assert.Equal(new HashSet<(string, string)> { ("platform/auth", "platform/core/protos") }, Pairs(ix));
+        _ = (protos, ui);
     }
 
     [Fact]

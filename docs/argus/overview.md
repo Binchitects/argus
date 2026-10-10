@@ -53,15 +53,15 @@ the index already holds, ecosystem by ecosystem, with no build run:
 
 | What | Provided by | Used by |
 |---|---|---|
-| .NET | a project's `PackageId` (else its assembly's or file's name); a file's `namespace` | `PackageReference`, `packages.config`; `using` |
-| JavaScript, TypeScript | `package.json`'s `name` | its dependencies; `import`, `require` |
+| .NET | a project's `PackageId` (`$(MSBuildProjectName)` read as its name; else its assembly's or file's name); a file's `namespace`, nested ones whole | `PackageReference` (in any attribute order; not `Update`), `ProjectReference`, `packages.config`, `Directory.Packages.props`; `using`, `global using`, `<Using Include>` |
+| JavaScript, TypeScript | `package.json`'s `name` | its dependencies; `import`, `require` (not a tsconfig `paths` alias: that is the repository's own code) |
 | Python | `pyproject.toml`, `setup.cfg`, `setup.py`'s name; every module, named from its import root (the top of its chain of `__init__.py` folders, under `src/`, `python/` or any other), and a top-level module by its name | requirements files, `pyproject.toml`, `setup.py`; `import`, `from` (a bare top-level name, as `config`, links only to a repository whose distribution is a declared dependency) |
 | Go | `go.mod`'s `module` | its `require`s; `import` (the longest module path that starts it) |
-| Java, Kotlin | `pom.xml`'s group and artifact; a file's `package` | `<dependency>`, Gradle's `implementation` and the rest; `import` |
-| Rust | `Cargo.toml`'s `[package]` name | its dependencies; `use` |
+| Java, Kotlin | `pom.xml`'s group and artifact; a file's `package` | `<dependency>` (its fields in any order, `${project.groupId}` read), the `<parent>`, Gradle's `implementation`, `ksp`, `kapt` and the rest, `platform()`, the map form, a version catalog's `[libraries]`; `import` |
+| Rust | `Cargo.toml`'s `[package]` name | its dependencies (workspace and target ones too; a renamed one by its `package`); `use` |
 | Protocol Buffers | each `.proto` file, by its path | `import "x.proto"` |
 | C, C++ | headers | `#include` (resolved file by file, as before) |
-| The repository itself | its path | a submodule's URL, a GitLab CI `project:` include or trigger, a `git+https://...` requirement, an image built from it (`FROM`, `image:`, `image: name:`, `repository:`, kustomize's `newName:`; a GitLab sub-image `group/project/api` is its project's; a private registry's flat name, as ECR's `…amazonaws.com/billing-api`, the one repository with that name; a mirror's longer path is not the image) |
+| The repository itself | its path | a submodule's URL (a relative one, `../core/protos.git`, from the repository's own path), a GitLab CI `project:` include, trigger or need, or a CI/CD `component:` (in `.gitlab-ci.yml` and the files under `.gitlab/`), a `-e`, `name @ url` or `git+ssh://` requirement, a `git+https://...` requirement, an image built from it (`FROM`, `image:`, `image: name:`, `repository:`, kustomize's `newName:`; a GitLab sub-image `group/project/api` is its project's; a private registry's flat name, as ECR's `…amazonaws.com/billing-api`, the one repository with that name; a mirror's longer path is not the image) |
 
 A use resolves to the one repository that provides its name. A C# `using`
 and a Java or Kotlin `import` name a namespace or a package exactly (an

@@ -108,6 +108,18 @@ public static partial class Graph
 
     sealed record RepoRow(long Id, long GitlabId, string Path, bool Default);
 
+    /// <summary>A path relative to a repository's own (as git reads a relative submodule URL against the repository's remote).</summary>
+    static string Relative(string repoPath, string relative)
+    {
+        var parts = repoPath.Split('/').ToList();
+        foreach (var step in relative.Split('/'))
+        {
+            if (step == "..") { if (parts.Count > 0) parts.RemoveAt(parts.Count - 1); }
+            else if (step is not ("." or "")) parts.Add(step);
+        }
+        return string.Join('/', parts).ToLowerInvariant();
+    }
+
     /// <summary>
     /// Rebuilds repo_links from what files declare (file_decls) and from resolved #includes (repo_deps): each use resolved
     /// to the one repository that provides its name. A repository's own name stays inside it; a name two repositories
@@ -127,6 +139,7 @@ public static partial class Graph
         var provides = new Dictionary<string, Dictionary<string, HashSet<long>>>(StringComparer.Ordinal);
         var protoFiles = new List<(string Path, long Project)>();
         var pyFiles = new Dictionary<long, List<string>>();
+        var aliases = new Dictionary<long, HashSet<string>>();
         // A repository's own packages (its PackageIds): a .NET root of its own (Microsoft's own estate) is its to provide.
         var nugetRoots = Sql.Query(conn, "SELECT DISTINCT repo_id, name FROM file_decls WHERE role = 'provides' AND kind = 'nuget'")
             .Select(r => (r.Long("repo_id"), r.Str("name").Split('.')[0])).ToHashSet();
@@ -145,6 +158,13 @@ public static partial class Graph
                 if (kind == "proto")
                 {
                     protoFiles.Add((name, repo.GitlabId));
+                    continue;
+                }
+                if (kind == "ts-alias")
+                {
+                    // A path alias is the repository's own code under a package's name: never another's to provide.
+                    if (!aliases.TryGetValue(repo.Id, out var own)) aliases[repo.Id] = own = new(StringComparer.Ordinal);
+                    own.Add(name);
                     continue;
                 }
                 if (kind == "py-file")
@@ -193,7 +213,9 @@ public static partial class Graph
                 var fileId = reader.GetInt64(1);
                 var kind = reader.GetString(2);
                 var name = reader.GetString(3);
-                var (state, project, matched) = Resolve(kind, name, from, provides, protoFiles, byPath);
+                var (state, project, matched) = kind == "npm" && aliases.TryGetValue(from.Id, out var own) && own.Contains(name)
+                    ? ("internal", from.GitlabId, name)
+                    : Resolve(kind, name, from, provides, protoFiles, byPath);
                 if (state == "resolved" && kind == "py" && !matched.Contains('.')
                     && !(pypiUses.TryGetValue(from.Id, out var declared) && pypiOf.TryGetValue(project, out var offered) && declared.Overlaps(offered)))
                     state = "unconfirmed";
@@ -242,7 +264,11 @@ public static partial class Graph
         switch (kind)
         {
             case "repo":
-                return byPath.TryGetValue(name, out var repo) ? Decide([repo.GitlabId], name) : ("external", 0, "");
+            {
+                // A relative submodule URL is from this repository's own path (platform/auth + ../core/protos is platform/core/protos).
+                var path = name.StartsWith("rel:", StringComparison.Ordinal) ? Relative(from.Path, name[4..]) : name;
+                return byPath.TryGetValue(path, out var repo) ? Decide([repo.GitlabId], path) : ("external", 0, "");
+            }
             case "image":
             {
                 if (name.StartsWith("*/", StringComparison.Ordinal))
