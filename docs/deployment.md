@@ -586,8 +586,8 @@ bundle maker says so loudly.
 Copy the `.run` and its `.sha256` to the host, then:
 
 ```bash
-sha256sum -c argus-arena-5.5.0-offline.run.sha256
-sudo sh argus-arena-5.5.0-offline.run install --dir /srv/arena
+sha256sum -c argus-arena-5.5.1-offline.run.sha256
+sudo sh argus-arena-5.5.1-offline.run install --dir /srv/arena
 ```
 
 It checks the bundle and the host first: 4 CPU cores and 16 GB of memory,
@@ -635,8 +635,8 @@ on the terminal and never in the log: it is `ADMIN_PASSWORD` in `.env` (0600).
 #### Upgrade from 5.2.0
 
 ```bash
-sh argus-arena-5.5.0-offline.run upgrade --dir /srv/arena --dry-run   # the plan: each file, each new .env key
-sh argus-arena-5.5.0-offline.run upgrade --dir /srv/arena
+sh argus-arena-5.5.1-offline.run upgrade --dir /srv/arena --dry-run   # the plan: each file, each new .env key
+sh argus-arena-5.5.1-offline.run upgrade --dir /srv/arena
 ```
 
 It upgrades an installation of 5.2.0 or newer, whether this installer made it

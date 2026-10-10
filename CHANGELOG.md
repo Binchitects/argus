@@ -12,6 +12,16 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v5.5.1 (2026-10-11)
+
+### :bug: Bugs fixed
+
+- An upgrade to v5.5 keeps the groups' old credit column, so v5.4.0 still
+  runs on the upgraded database until the backup is restored (it failed to
+  list groups); a database already upgraded to v5.5.0 is not changed
+- A chat waits about half a minute for a model gateway that is starting,
+  after an upgrade or a restart, instead of failing after 3 seconds
+
 ## v5.5.0 (2026-10-11)
 
 ### :rocket: Epics and highlights
