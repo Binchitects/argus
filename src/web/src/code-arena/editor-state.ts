@@ -85,8 +85,16 @@ export interface EditorApi {
    * unsaved changes; null: no file is shown.
    */
   selection: () => Piece | null
+  /** The editor's own commands (Monaco's, and Code Arena's in it): their ids and names; none while no file is shown. */
+  editorCommands: () => { id: string; label: string }[]
+  /** Runs an editor command on the file shown. */
+  runAction: (id: string) => void
   quickOpen: boolean
-  setQuickOpen: (open: boolean) => void
+  /** Opens quick open (with this typed already: ":" goes to a line), or closes it. */
+  setQuickOpen: (open: boolean, typed?: string) => void
+  /** What is typed in quick open. */
+  quickText: string
+  setQuickText: (typed: string) => void
   bindEditor: (el: HTMLDivElement | null) => void
   bindDiff: (el: HTMLDivElement | null) => void
 }

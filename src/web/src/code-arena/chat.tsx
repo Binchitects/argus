@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Cloud, CloudUpload, FileCode2, FolderGit2, GitBranch, History, ListChecks, LoaderCircle, MessageSquarePlus, Monitor, Moon, PanelRightClose, ScrollText, ShieldCheck, Square, SquareTerminal, Sun, TestTubeDiagonal, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Cloud, CloudUpload, FileCode2, FolderGit2, GitBranch, History, ListChecks, LoaderCircle, MessageSquarePlus, Monitor, Moon, PanelRightClose, ScrollText, ShieldCheck, Square, SquareTerminal, Sun, TestTubeDiagonal, Plus, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -52,6 +52,8 @@ import {
   webChatsQuery,
 } from './api'
 import { chatBridge, pieceLabel, type Piece } from './bridge'
+import { useEditor } from './editor-state'
+import { useFileMention } from './mention'
 import { CodeAnswer } from './answer'
 import { PartHelp } from './help'
 import { changesQuery, savePreferences } from './ide-api'
@@ -565,6 +567,7 @@ export function Thread({
       }}
       pieces={pieces}
       onRemovePiece={(p) => setPieces((now) => now.filter((x) => x !== p))}
+      onAddPiece={(p) => setPieces((now) => [...now, p].slice(-8))}
       focusSignal={focusBox}
       inserted={inserted}
       queued={state.queued ?? []}
@@ -797,6 +800,7 @@ function Composer({
   onQueue,
   pieces,
   onRemovePiece,
+  onAddPiece,
   focusSignal,
   inserted,
   queued,
@@ -814,6 +818,7 @@ function Composer({
   /** Lines of the folder's files that go with the next message (Add to chat in the editor). */
   pieces: Piece[]
   onRemovePiece: (p: Piece) => void
+  onAddPiece: (p: Piece) => void
   /** Changes when lines were added: the box takes the focus. */
   focusSignal: number
   /** Text to add to what is typed (an @path from the Explorer): each time its number changes. */
@@ -829,6 +834,11 @@ function Composer({
   const [text, setText] = useState('')
   const area = useRef<HTMLTextAreaElement>(null)
   const recall = useRecall({ area, setText, source: history })
+  const mention = useFileMention({ area, text, setText })
+  // The file shown in the editor, and the lines chosen there: a click sends them with the message.
+  const { active, selection, cursor } = useEditor()
+  const here = active?.kind === 'file' && active.status === 'ready' ? selection() : null
+  void cursor
   useEffect(() => {
     if (focusSignal > 0) area.current?.focus()
   }, [focusSignal])
@@ -860,6 +870,7 @@ function Composer({
     area.current?.focus()
   }
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mention.onKeyDown(e)) return
     if (recall.onKeyDown(e)) return
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
@@ -888,7 +899,8 @@ function Composer({
         void submit()
       }}
     >
-      {pieces.length > 0 && (
+      {mention.list}
+      {(pieces.length > 0 || (here && !pieces.some((p) => pieceLabel(p) === pieceLabel(here)))) && (
         <ul aria-label="Sent with the message" className="flex flex-wrap gap-1.5 px-3 pt-2.5">
           {pieces.map((p) => (
             <li key={pieceLabel(p)} className="inline-flex max-w-full items-center gap-1 rounded-full border bg-muted/50 py-0.5 pr-0.5 pl-2 font-mono text-xs">
@@ -907,6 +919,20 @@ function Composer({
               </button>
             </li>
           ))}
+          {here && !pieces.some((p) => pieceLabel(p) === pieceLabel(here)) && (
+            <li className="inline-flex max-w-full">
+              <button
+                type="button"
+                onClick={() => onAddPiece(here)}
+                className="inline-flex max-w-full items-center gap-1 rounded-full border border-dashed px-2 py-0.5 font-mono text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-none"
+                aria-label={`Send ${pieceLabel(here)} with the message`}
+                title="From the editor: the lines chosen there, or the cursor's"
+              >
+                <Plus className="size-3 shrink-0" aria-hidden="true" />
+                <span className="truncate">{pieceLabel(here)}</span>
+              </button>
+            </li>
+          )}
         </ul>
       )}
       <textarea
@@ -914,8 +940,15 @@ function Composer({
         dir="auto"
         rows={big ? 3 : 1}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value)
+          mention.onCaret()
+        }}
+        onSelect={mention.onCaret}
         onKeyDown={onKey}
+        aria-controls={mention.open ? 'mention-files' : undefined}
+        aria-activedescendant={mention.activeId}
+        aria-autocomplete="list"
         placeholder={streaming ? 'Code Arena is working… type the next message: it is sent when this answer ends' : 'Ask Code Arena to read, change or run something'}
         aria-label="Message"
         autoFocus

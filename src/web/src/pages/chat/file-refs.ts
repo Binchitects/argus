@@ -56,6 +56,14 @@ export const refLabel = (r: FileRef) => r.path + (r.line ? `:${r.line}${r.end &&
 /** A citation in running text: a path with an extension (or a folder in it), with its lines or not. */
 const inText = /(?<![\w/.@-])((?:[\w.-]+\/)+[\w.-]+|[\w-][\w.-]*\.[A-Za-z][A-Za-z0-9]{0,7})(?::\d+(?:-\d+|:\d+)?|#L\d+(?:-L?\d+)?|\(\d+(?:,\d+)?\))?(?![\w/])/g
 
+/** The citations of the folder's files in a text (a terminal's line, an answer's text): where each starts, as written, and its place. */
+export function findRefs(text: string, refs: FileRefsApi): { at: number; text: string; ref: FileRef }[] {
+  return [...text.matchAll(inText)].flatMap((m) => {
+    const ref = resolve(m[0], refs)
+    return ref ? [{ at: m.index, text: m[0], ref }] : []
+  })
+}
+
 /** Marks an element as a link to the place cited. */
 function mark(el: HTMLElement, ref: FileRef) {
   el.dataset.ref = JSON.stringify(ref)
@@ -102,10 +110,7 @@ export function tagRefs(root: HTMLElement, refs: FileRefsApi) {
   while (walker.nextNode()) texts.push(walker.currentNode as Text)
   for (const node of texts) {
     const value = node.nodeValue ?? ''
-    const found = [...value.matchAll(inText)].flatMap((m) => {
-      const ref = resolve(m[0], refs)
-      return ref ? [{ at: m.index, text: m[0], ref }] : []
-    })
+    const found = findRefs(value, refs)
     if (found.length === 0) continue
     const parts = document.createDocumentFragment()
     let from = 0

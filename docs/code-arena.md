@@ -233,9 +233,15 @@ The page is laid out as VS Code is, in Argus Arena's design system:
 - **search**: text across the files git sees (`.gitignore` holds), with match
   case, whole word, regular expression, and files to include or exclude; a
   result opens the file at the match. **Ctrl+P** opens any file by a few
-  letters of its path.
+  letters of its path (`app:12` opens it at line 12; `:12` goes to line 12 of
+  the file shown, as the line in the status bar does). **Ctrl+Shift+P** runs
+  any command by name: the workbench's (save, search, show or hide a part,
+  accept the agent's changes, the theme, help) and the editor's (Monaco's own,
+  and Code Arena's: Add to chat, Explain, Fix, Complete).
 - **terminals**: a panel under the editor (Ctrl+`), one tab per shell (bash 1,
-  bash 2, …), + for another; drag its top edge to resize it. Shown with none,
+  bash 2, …), + for another; drag its top edge to resize it. A path of the
+  folder's in a terminal's output (a compiler's `src/app.ts:12:5`) is a link
+  that opens the file there. Shown with none,
   it opens one; closing the last one hides it. A page reloaded attaches to the
   ones still running, with their screens (below).
 - **chat**: the agent's chat on the right: the model and thinking pickers,
@@ -273,7 +279,8 @@ shell's history, emacs, nano).
 | keys | |
 |---|---|
 | Ctrl+S (⌘S) | save the file |
-| Ctrl+P (⌘P) | open a file by name |
+| Ctrl+P (⌘P) | open a file by name (`:12` goes to a line) |
+| Ctrl+Shift+P (⌘⇧P) | run a command by name |
 | Ctrl+Shift+F (⌘⇧F) | search |
 | Ctrl+Shift+E (⌘⇧E) | the Explorer |
 | Ctrl+` | show or hide the terminals |
@@ -287,6 +294,10 @@ Monaco loads with the first file opened, xterm.js with the first terminal.
 
 Lines of a file go to the agent from the editor itself:
 
+- In the chat's box, **@** offers the folder's files, best first: ↑ and ↓
+  choose, Enter or Tab puts `@path` in the box. Above the box, a dashed chip
+  offers the lines the editor shows (those chosen, or the cursor's): a click
+  sends them with the message.
 - **Add to chat** (Ctrl+L, or the editor's right-click menu): the lines chosen,
   or the cursor's line, wait above the chat's box as a chip (× leaves them out)
   and go with the next message; the box takes the focus. A file with unsaved

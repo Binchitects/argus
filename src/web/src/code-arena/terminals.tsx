@@ -11,6 +11,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { ApiError, errorMessage } from '@/lib/api'
 import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
+import { findRefs, useFileRefs } from '@/pages/chat/file-refs'
 import { PartHelp } from './help'
 import { closeTerminal, openTerminal, terminalSocketUrl, terminalsQuery, type TerminalInfo } from './ide-api'
 
@@ -220,6 +221,12 @@ function XtermView({ terminal, active, focusKey, onSize, onExit }: { terminal: T
   useEffect(() => {
     events.current = { onSize, onExit }
   }, [onSize, onExit])
+  // A path of the folder's in the output (a compiler's file:line, a test's) opens in the editor, at its line.
+  const refs = useFileRefs()
+  const refsNow = useRef(refs)
+  useEffect(() => {
+    refsNow.current = refs
+  }, [refs])
   useEffect(() => {
     theme.current = resolved
     if (term.current) term.current.options.theme = themes[resolved]
@@ -238,6 +245,18 @@ function XtermView({ terminal, active, focusKey, onSize, onExit }: { terminal: T
     })
     const f = new FitAddon()
     t.loadAddon(f)
+    t.registerLinkProvider({
+      provideLinks: (y, done) => {
+        const r = refsNow.current
+        const line = t.buffer.active.getLine(y - 1)?.translateToString(true) ?? ''
+        const found = r ? findRefs(line, r) : []
+        done(
+          found.length > 0
+            ? found.map((h) => ({ range: { start: { x: h.at + 1, y }, end: { x: h.at + h.text.length, y } }, text: h.text, activate: () => r?.open(h.ref) }))
+            : undefined,
+        )
+      },
+    })
     t.open(el)
     term.current = t
     fit.current = f

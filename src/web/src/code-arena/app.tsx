@@ -13,6 +13,7 @@ import type { ChatConfig } from '@/pages/chat/types'
 import { stateQuery, type CodeEvent, type CodeState } from './api'
 import { ChangesPanel } from './changes'
 import { Sessions, ThemeMenu, Thread } from './chat'
+import { CommandPalette, type PaletteCommand } from './palette'
 import { EditorArea, EditorProvider } from './editor'
 import { CodeRefsProvider } from './refs'
 import { modKey, onMac, useEditor } from './editor-state'
@@ -85,7 +86,9 @@ export function App() {
   return (
     <EditorProvider>
       <HelpProvider manual={state.data.manual}>
-        <Workbench state={state.data} config={config.data} lost={state.error ?? config.error} saved={preferences.data?.layout} />
+        <CodeRefsProvider folder={state.data.folder}>
+          <Workbench state={state.data} config={config.data} lost={state.error ?? config.error} saved={preferences.data?.layout} />
+        </CodeRefsProvider>
       </HelpProvider>
     </EditorProvider>
   )
@@ -234,7 +237,8 @@ function ActivityButton({ label, keys, pressed, badge, onClick, children }: { la
 
 function Workbench({ state, config, lost, saved }: { state: CodeState; config: ChatConfig; lost: unknown; saved: Record<string, unknown> | undefined }) {
   const queryClient = useQueryClient()
-  const { refresh, setQuickOpen, save, openDiff } = useEditor()
+  const { refresh, setQuickOpen, save, openDiff, accept, editorCommands, runAction, active } = useEditor()
+  const [palette, setPalette] = useState(false)
   const [layout, change] = useLayout(saved)
   // The editor sent lines to the chat: it shows, if hidden.
   const showChat = useCallback(() => change({ chatOpen: true }), [change])
@@ -278,6 +282,7 @@ function Workbench({ state, config, lost, saved }: { state: CodeState; config: C
       let handled = true
       if (ctrl && !e.shiftKey && !e.altKey && key === 's') void save()
       else if (ctrl && !e.shiftKey && !e.altKey && key === 'p') setQuickOpen(true)
+      else if (ctrl && e.shiftKey && !e.altKey && key === 'p') setPalette(true)
       else if (ctrl && e.shiftKey && key === 'f') show('search')
       else if (ctrl && e.shiftKey && key === 'e') show('explorer')
       else if (e.ctrlKey && !e.shiftKey && e.code === 'Backquote') togglePanel()
@@ -306,6 +311,32 @@ function Workbench({ state, config, lost, saved }: { state: CodeState; config: C
 
   const count = changes.data?.length ?? 0
   const maxPanel = Math.min(bounds.panel[1], Math.max(160, height - 220))
+  const { setPreference } = useTheme()
+  // Ctrl+Shift+P: the workbench's commands, then the editor's (while a file is shown).
+  const commands = (): PaletteCommand[] => {
+    const file = active?.kind === 'file' && active.status === 'ready'
+    const workbench: (PaletteCommand | false)[] = [
+      { id: 'quick-open', label: 'Go to file', keys: `${modKey}+P`, run: () => setQuickOpen(true) },
+      file && { id: 'go-to-line', label: 'Go to line', run: () => setQuickOpen(true, ':') },
+      file && { id: 'save', label: 'Save the file', keys: `${modKey}+S`, run: () => void save() },
+      { id: 'search', label: 'Search the files', keys: `${modKey}+Shift+F`, run: () => show('search') },
+      { id: 'explorer', label: 'Show the Explorer', keys: `${modKey}+Shift+E`, run: () => show('explorer') },
+      { id: 'changes', label: "Show the agent's changes", run: () => show('changes') },
+      count > 0 && { id: 'accept-all', label: "Accept all the agent's changes", run: () => void accept() },
+      { id: 'sessions', label: 'Show the chat sessions', run: () => show('chat') },
+      { id: 'chat', label: layout.chatOpen ? 'Hide the chat' : 'Show the chat', run: () => change({ chatOpen: !layout.chatOpen }) },
+      { id: 'side', label: layout.sideOpen ? 'Hide the side bar' : 'Show the side bar', run: () => change({ sideOpen: !layout.sideOpen }) },
+      { id: 'terminal', label: layout.panelOpen ? 'Hide the terminal' : 'Show the terminal', keys: 'Ctrl+`', run: togglePanel },
+      { id: 'theme-light', label: 'Theme: light', run: () => setPreference('light') },
+      { id: 'theme-dark', label: 'Theme: dark', run: () => setPreference('dark') },
+      { id: 'theme-system', label: "Theme: the system's", run: () => setPreference('system') },
+      { id: 'help', label: 'Help', run: () => openHelp?.() },
+      { id: 'about', label: 'About Code Arena', run: () => setAbout(true) },
+    ]
+    const own = new Set(['arena.addToChat', 'arena.explain', 'arena.fix', 'arena.complete'])
+    const editor = editorCommands().map((c): PaletteCommand => ({ id: `editor:${c.id}`, label: own.has(c.id) ? c.label : `Editor: ${c.label}`, keys: c.id === 'arena.addToChat' ? `${modKey}+L` : undefined, run: () => runAction(c.id) }))
+    return [...workbench.filter((c): c is PaletteCommand => !!c), ...editor.sort((a, b) => Number(!a.label.startsWith('Code Arena')) - Number(!b.label.startsWith('Code Arena')) || a.label.localeCompare(b.label))]
+  }
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
       {!!lost && <Unreachable error={lost} />}
@@ -367,18 +398,16 @@ function Workbench({ state, config, lost, saved }: { state: CodeState; config: C
 
         {layout.chatOpen && <Splitter label="Resize the chat" orientation="vertical" value={layout.chat} min={bounds.chat[0]} max={bounds.chat[1]} grow={-1} onChange={(chat) => change({ chat })} />}
         <aside hidden={!layout.chatOpen} aria-label="Agent" style={{ width: layout.chat }} className="min-h-0 shrink-0">
-          <CodeRefsProvider folder={state.folder}>
-            <Thread
-              key={state.session}
-              state={state}
-              config={config}
-              onOpenList={() => show('chat')}
-              onHide={() => change({ chatOpen: false })}
-              onShow={showChat}
-              onEvent={onEvent}
-              onTurnEnd={onTurnEnd}
-            />
-          </CodeRefsProvider>
+          <Thread
+            key={state.session}
+            state={state}
+            config={config}
+            onOpenList={() => show('chat')}
+            onHide={() => change({ chatOpen: false })}
+            onShow={showChat}
+            onEvent={onEvent}
+            onTurnEnd={onTurnEnd}
+          />
         </aside>
       </div>
       <StatusBar
@@ -389,6 +418,7 @@ function Workbench({ state, config, lost, saved }: { state: CodeState; config: C
         onAbout={() => setAbout(true)}
       />
       <About open={about} onOpenChange={setAbout} state={state} />
+      {palette && <CommandPalette open={palette} onOpenChange={setPalette} commands={commands()} />}
     </div>
   )
 }

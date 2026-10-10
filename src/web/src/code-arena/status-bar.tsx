@@ -37,7 +37,7 @@ const serversSaid = (servers: ServerStatus[]) => servers.map((s) => `${s.title} 
  * source, which the AGPL offers to everyone who uses it).
  */
 export function StatusBar({ state, onChanges, onTerminal, onChat, onAbout }: { state: CodeState; onChanges: () => void; onTerminal: () => void; onChat: () => void; onAbout: () => void }) {
-  const { active, cursor } = useEditor()
+  const { active, cursor, setQuickOpen } = useEditor()
   const changes = useQuery(changesQuery)
   const count = changes.data?.length ?? 0
   const [dialog, setDialog] = useState<'context' | 'servers' | null>(null)
@@ -67,9 +67,9 @@ export function StatusBar({ state, onChanges, onTerminal, onChat, onAbout }: { s
       )}
       <span className="flex-1" />
       {active?.kind === 'file' && active.status === 'ready' && cursor && (
-        <span className="flex items-center px-2 tabular-nums" aria-label={`Line ${cursor.line}, column ${cursor.column}`}>
+        <Item className="tabular-nums" aria-label={`Line ${cursor.line}, column ${cursor.column}: go to a line`} title="Go to a line" onClick={() => setQuickOpen(true, ':')}>
           Ln {cursor.line}, Col {cursor.column}
-        </span>
+        </Item>
       )}
       {active?.status === 'ready' && active.language && (
         <span className="hidden items-center px-2 sm:flex" title="The file's language">

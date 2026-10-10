@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, FileCode2, FileDiff, FileText, GitCompareArrows, Undo2, X } from 'lucide-react'
 import type * as Monaco from 'monaco-editor'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { CommandDialog, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { useConfirm } from '@/components/ui/confirm'
@@ -92,7 +92,12 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   const [tabs, setTabs] = useState<Tab[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [cursor, setCursor] = useState<{ line: number; column: number } | null>(null)
-  const [quickOpen, setQuickOpen] = useState(false)
+  const [quickOpen, showQuickOpen] = useState(false)
+  const [quickText, setQuickText] = useState('')
+  const setQuickOpen = useCallback((open: boolean, typed = '') => {
+    setQuickText(typed)
+    showQuickOpen(open)
+  }, [])
   const [unsaved, setUnsaved] = useState<{ path: string; answer: (a: Unsaved) => void } | null>(null)
   // Each open(…, at) moves the cursor, also in the tab shown already.
   const [revealed, setRevealed] = useState(0)
@@ -407,6 +412,19 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       return { ...piece, text: lines.join('\n') }
     }
 
+    const shownEditor = () => {
+      const tab = tabsRef.current.find((t) => t.id === activeRef.current)
+      return tab?.kind === 'file' && tab.status === 'ready' ? editor.current : null
+    }
+    const editorCommands = () =>
+      (shownEditor()?.getSupportedActions() ?? []).filter((a) => a.label).map((a) => ({ id: a.id, label: a.label }))
+    const runAction = (id: string) => {
+      const ed = shownEditor()
+      if (!ed) return
+      ed.focus()
+      void ed.getAction(id)?.run()
+    }
+
     // A tab with unsaved changes stays: its text is the person's, and saving makes the file again.
     const removed = (path: string) => drop(tabsRef.current.filter((t) => within(t.path, path) && !t.dirty).map((t) => t.id))
 
@@ -445,7 +463,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       diffHost.current = el
     }
 
-    return { open, openDiff, activate: (id: string) => activate(id), close, save, refresh, moved, removed, accept, revert, selection, bindEditor, bindDiff }
+    return { open, openDiff, activate: (id: string) => activate(id), close, save, refresh, moved, removed, accept, revert, selection, editorCommands, runAction, bindEditor, bindDiff }
   }, [confirm, queryClient])
 
   const active = tabs.find((t) => t.id === activeId) ?? null
@@ -553,7 +571,10 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const value = useMemo<EditorApi>(() => ({ ...actions, tabs, active, cursor, quickOpen, setQuickOpen }), [actions, tabs, active, cursor, quickOpen])
+  const value = useMemo<EditorApi>(
+    () => ({ ...actions, tabs, active, cursor, quickOpen, setQuickOpen, quickText, setQuickText }),
+    [actions, tabs, active, cursor, quickOpen, setQuickOpen, quickText],
+  )
   return (
     <EditorContext value={value}>
       {children}
@@ -590,11 +611,16 @@ function UnsavedDialog({ path, onAnswer }: { path: string | null; onAnswer: (a: 
 
 /** Ctrl+P: any file of the working directory by a few letters of its path. */
 function QuickOpen() {
-  const { quickOpen, setQuickOpen, open, tabs } = useEditor()
-  const [typed, setTyped] = useState('')
+  const { quickOpen, setQuickOpen, open, tabs, active, quickText: typed, setQuickText: setTyped } = useEditor()
   const all = useQuery({ ...allFilesQuery, enabled: quickOpen, staleTime: 10_000 })
   const recent = [...tabs].reverse().filter((t) => t.kind === 'file').map((t) => t.path)
-  const shown = typed.trim() ? rankFiles(all.data?.files ?? [], typed) : [...new Set([...recent, ...(all.data?.files ?? [])])].slice(0, 50)
+  // :12 goes to line 12 of the file shown; app.ts:12 opens the file found at line 12.
+  const at = /^(.*?):(\d+)(?::(\d+))?$/.exec(typed.trim())
+  const name = at ? at[1]! : typed
+  const line = at ? Number(at[2]) : undefined
+  const column = at?.[3] ? Number(at[3]) : undefined
+  const here = at && !name.trim() && active?.kind === 'file' ? active.path : null
+  const shown = here ? [here] : name.trim() ? rankFiles(all.data?.files ?? [], name) : [...new Set([...recent, ...(all.data?.files ?? [])])].slice(0, 50)
   return (
     <CommandDialog
       open={quickOpen}
@@ -603,10 +629,10 @@ function QuickOpen() {
         if (!o) setTyped('')
       }}
       title="Go to file"
-      description="Type a few letters of a file's path"
+      description="Type a few letters of a file's path, and :line to go to a line"
       shouldFilter={false}
     >
-      <CommandInput value={typed} onValueChange={setTyped} placeholder="Go to file: type a few letters of its path" aria-label="File to open" />
+      <CommandInput value={typed} onValueChange={setTyped} placeholder="Go to file: a few letters of its path (:12 for a line)" aria-label="File to open" />
       <CommandList>
         {all.isPending && <p className="py-6 text-center text-sm text-muted-foreground">Listing the files…</p>}
         {all.error && <p className="py-6 text-center text-sm text-muted-foreground">{errorMessage(all.error)}</p>}
@@ -618,12 +644,15 @@ function QuickOpen() {
             onSelect={() => {
               setQuickOpen(false)
               setTyped('')
-              void open(path)
+              void open(path, line ? { line, column } : undefined)
             }}
           >
             <FileText aria-hidden="true" />
-            <span className="truncate font-medium">{nameOf(path)}</span>
-            <span className="min-w-0 truncate text-xs text-muted-foreground">{path}</span>
+            <span className="truncate font-medium">{here ? `Go to line ${line}` : nameOf(path)}</span>
+            <span className="min-w-0 truncate text-xs text-muted-foreground">
+              {path}
+              {line ? `:${line}` : ''}
+            </span>
           </CommandItem>
         ))}
         {all.data?.truncated && <p className="px-2 py-1.5 text-xs text-muted-foreground">The folder has more files than are listed here.</p>}

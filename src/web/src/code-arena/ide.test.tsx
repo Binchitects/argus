@@ -128,6 +128,13 @@ const fakes = vi.hoisted(() => {
     getSelection() {
       return this.selection
     }
+    getSupportedActions() {
+      return [...this.actions.entries()].map(([id, a]) => ({ id, label: a.label }))
+    }
+    getAction(id: string) {
+      const a = this.actions.get(id)
+      return a ? { run: async () => a.run() } : null
+    }
     dispose() {}
   }
   class DiffEditor {
@@ -158,6 +165,14 @@ const fakes = vi.hoisted(() => {
     loadAddon(addon: { activate: (t: Terminal) => void }) {
       addon.activate(this)
     }
+    /** What it shows, line by line (from 0), for its links. */
+    lines: string[] = []
+    links: { provideLinks: (y: number, done: (links: { text: string; activate: () => void }[] | undefined) => void) => void }[] = []
+    registerLinkProvider(p: Terminal['links'][number]) {
+      this.links.push(p)
+      return { dispose() {} }
+    }
+    buffer = { active: { getLine: (y: number) => ({ translateToString: () => this.lines[y] ?? '' }) } }
     open() {}
     write(d: string | Uint8Array) {
       this.written.push(d)
@@ -514,7 +529,7 @@ describe('Code Arena, the IDE', () => {
     expect(within(tabs()).getByRole('tab', { name: 'app.ts' })).toHaveAttribute('aria-selected', 'true')
     const status = screen.getByRole('contentinfo', { name: 'Status bar' })
     expect(within(status).getByText('TypeScript')).toBeInTheDocument()
-    expect(within(status).getByLabelText('Line 1, column 1')).toBeInTheDocument()
+    expect(within(status).getByLabelText('Line 1, column 1: go to a line')).toBeInTheDocument()
 
     // The arrow keys move in the tree; Left closes a folder.
     const row = within(tree).getByRole('treeitem', { name: 'app.ts, changed by the agent' })
@@ -663,7 +678,7 @@ describe('Code Arena, the IDE', () => {
     await userEvent.click(within(results).getByRole('button', { name: 'src/app.ts, line 2, column 13: console.log(total)' }))
     await waitFor(() => expect(editor().selection).toEqual({ startLineNumber: 2, startColumn: 13, endLineNumber: 2, endColumn: 18 }))
     expect(editor().revealed).toBe(2)
-    expect(within(screen.getByRole('contentinfo', { name: 'Status bar' })).getByLabelText('Line 2, column 13')).toBeInTheDocument()
+    expect(within(screen.getByRole('contentinfo', { name: 'Status bar' })).getByLabelText('Line 2, column 13: go to a line')).toBeInTheDocument()
   })
 
   it('opens terminals on the server, each on its socket: keys, output, the size, several tabs, closing', async () => {
@@ -1046,7 +1061,7 @@ describe('Code Arena, the IDE', () => {
     expect(screen.queryByPlaceholderText('Go to file: type a few letters of its path')).not.toBeInTheDocument()
 
     await userEvent.keyboard('{Meta>}p{/Meta}')
-    expect(await screen.findByPlaceholderText('Go to file: type a few letters of its path')).toBeInTheDocument()
+    expect(await screen.findByPlaceholderText('Go to file: a few letters of its path (:12 for a line)')).toBeInTheDocument()
   })
 
   it('opens a terminal each time the panel is shown with none: after the last one closed too', async () => {
@@ -1183,7 +1198,7 @@ describe('Code Arena, the IDE', () => {
     await userEvent.type(box, 'Why this?{Enter}')
     await waitFor(() => expect(sent()).toHaveLength(1))
     expect(sent()[0]).toEqual({ text: 'Why this?', context: [{ path: 'src/app.ts', startLine: 1, endLine: 2 }] })
-    expect(screen.queryByRole('list', { name: 'Sent with the message' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Leave out src/app.ts:1-2' })).not.toBeInTheDocument()
     // The question lists what went with it; each opens in the editor.
     expect(await screen.findByRole('button', { name: 'Open src/app.ts:1-2 in the editor' })).toBeInTheDocument()
 
@@ -1220,6 +1235,61 @@ describe('Code Arena, the IDE', () => {
     await userEvent.pointer({ keys: '[MouseRight]', target: row })
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Add to chat' }))
     await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('@src/app.ts '))
+
+    // @ offers the folder's files, best first; Enter puts the one chosen in the box.
+    const message = screen.getByRole('textbox', { name: 'Message' })
+    await userEvent.clear(message)
+    await userEvent.type(message, 'look at @cart')
+    const picker = await screen.findByRole('listbox', { name: 'Files to send with the message' })
+    expect(within(picker).getAllByRole('option').map((o) => o.textContent)).toEqual(['src/lib/cart.ts'])
+    await userEvent.keyboard('{Enter}')
+    expect(message).toHaveValue('look at @src/lib/cart.ts ')
+    expect(screen.queryByRole('listbox', { name: 'Files to send with the message' })).not.toBeInTheDocument()
+
+    // The lines the editor shows are a click away from the message.
+    ed.setSelection({ startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 1 })
+    act(() => ed.cursor.forEach((f) => f({ position: { lineNumber: 2, column: 1 } })))
+    await userEvent.click(await screen.findByRole('button', { name: /^Send src\/app.ts:2 with the message$/ }))
+    expect(screen.getByRole('button', { name: 'Leave out src/app.ts:2' })).toBeInTheDocument()
+  })
+
+  it('runs any command by name, goes to a line, and opens a path:line a terminal shows', async () => {
+    backend()
+    renderIde()
+    await openApp()
+
+    // Ctrl+Shift+P: the workbench's commands and the editor's, narrowed by what is typed.
+    await userEvent.keyboard('{Control>}{Shift>}p{/Shift}{/Control}')
+    const palette = await screen.findByRole('dialog', { name: 'Commands' })
+    const command = within(palette).getByPlaceholderText('Run a command: type a few words of it')
+    await userEvent.type(command, 'code arena')
+    expect(within(palette).getAllByRole('option').map((o) => o.textContent)).toEqual(
+      expect.arrayContaining(['Code Arena: Add to chatCtrl+L', 'Code Arena: Explain this', 'Code Arena: Fix this', 'Code Arena: Complete this']),
+    )
+    await userEvent.clear(command)
+    await userEvent.type(command, 'show the terminal')
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(fakes.terminals.length).toBeGreaterThan(0))
+
+    // The line in the status bar: Go to line, with ":" typed; :2 goes there.
+    await userEvent.click(screen.getByRole('button', { name: /^Line \d+, column \d+: go to a line$/ }))
+    const quick = await screen.findByRole('dialog', { name: 'Go to file' })
+    const typed = within(quick).getByPlaceholderText('Go to file: a few letters of its path (:12 for a line)')
+    expect(typed).toHaveValue(':')
+    await userEvent.type(typed, '2')
+    await userEvent.click(await within(quick).findByRole('option', { name: /Go to line 2/ }))
+    await waitFor(() => expect(editor().selection).toEqual({ startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 1 }))
+
+    // A compiler's path:line:column in a terminal opens the file there; a path that is not the folder's is no link.
+    const t = fakes.terminals.at(-1)!
+    t.lines = ['src/lib/cart.ts:1:8 - error TS1005', 'see /etc/hosts:2']
+    let links: { text: string; activate: () => void }[] | undefined
+    t.links[0]!.provideLinks(1, (l) => (links = l))
+    expect(links?.map((l) => l.text)).toEqual(['src/lib/cart.ts:1:8'])
+    act(() => links![0]!.activate())
+    expect(await within(tabs()).findByRole('tab', { name: 'cart.ts' })).toHaveAttribute('aria-selected', 'true')
+    t.links[0]!.provideLinks(2, (l) => (links = l))
+    expect(links).toBeUndefined()
   })
 
   it('does not search the files again at the end of each turn', async () => {
@@ -1244,7 +1314,7 @@ describe('Code Arena, the IDE', () => {
     renderIde()
     await screen.findByRole('tree', { name: 'Files' })
     await userEvent.keyboard('{Control>}p{/Control}')
-    const box = await screen.findByPlaceholderText('Go to file: type a few letters of its path')
+    const box = await screen.findByPlaceholderText('Go to file: a few letters of its path (:12 for a line)')
     await userEvent.type(box, 'lcart')
     expect(await screen.findByRole('option', { name: /cart\.ts/ })).toBeInTheDocument()
     await userEvent.keyboard('{Enter}')
