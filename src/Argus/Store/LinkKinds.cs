@@ -56,9 +56,9 @@ public static class LinkKinds
     /// function's package); prefix (a module in a package); top (a one-segment module name); module (a Go import's
     /// module); suffix (a .proto found by the end of its path); registry, sub (a sub-image), flat (a private registry's
     /// bare name); include (a header found file by file); settled:* (a name several repositories provide, chosen by what
-    /// else the user has: a package reference, the same file's other uses, its other links).
+    /// else the user has: a package reference, the same file's other uses, its other links), from how its name matched.
     /// </summary>
-    public static double Prior(string kind, string how)
+    public static double Prior(string kind, string how, string? settled = null)
     {
         var prior = kind switch
         {
@@ -79,7 +79,7 @@ public static class LinkKinds
                 _ => 0.85,
             },
         };
-        return how switch
+        return settled switch
         {
             "settled:manifest" => prior * 0.95,
             "settled:file" => prior * 0.80,

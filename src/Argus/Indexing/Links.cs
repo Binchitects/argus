@@ -86,7 +86,8 @@ public static partial class Links
                 case "gradle":
                     Matches(GradleDep(), content, "maven", output, lower: true, join: m => $"{m.Groups["g"].Value}:{m.Groups["a"].Value}",
                         scope: m => m.Groups["conf"].Value.StartsWith("test", StringComparison.Ordinal) ? "test" : "main");
-                    Matches(GradleMapDep(), content, "maven", output, lower: true, join: m => $"{m.Groups["g"].Value}:{m.Groups["a"].Value}");
+                    Matches(GradleMapDep(), content, "maven", output, lower: true, join: m => $"{m.Groups["g"].Value}:{m.Groups["a"].Value}",
+                        scope: m => m.Groups["conf"].Value.StartsWith("test", StringComparison.Ordinal) ? "test" : "main");
                     break;
                 case "toml" when name == "libs.versions.toml": GradleCatalog(content, output); break;
                 case "cargo": Cargo(content, output); break;
@@ -117,13 +118,15 @@ public static partial class Links
             // A file this cannot read declares nothing: the rest of the estate is still linked.
         }
         // A test's file, a test project's manifest: its uses are the tests'; a sample's or generated file provides for nobody.
-        var test = IsTestPath(path) || (lang == "msbuild" && (name.Contains(".Test", StringComparison.OrdinalIgnoreCase)
+        var stem = name.Contains('.') ? name[..name.LastIndexOf('.')] : name;
+        var last = stem[(stem.LastIndexOf('.') + 1)..];
+        var test = IsTestPath(path) || (lang == "msbuild" && (last.EndsWith("Tests", StringComparison.Ordinal) || last.EndsWith("Test", StringComparison.Ordinal)
             || content.Contains("<IsTestProject>true", StringComparison.OrdinalIgnoreCase)));
         var origin = IsSamplePath(path) ? "sample" : lang is not null && ManifestLangs.Contains(lang) ? "manifest" : IsGenerated(content) ? "generated" : "source";
         return [.. output.Where(d => d.Name.Length is > 0 and <= 300)
             .Select(d => d with { Scope = test ? "test" : d.Scope, Origin = d.Origin == "source" ? origin : d.Origin })
-            // One row per name per file: its first line.
-            .GroupBy(d => (d.Role, d.Kind, d.Name, d.Form)).Select(g => g.MinBy(d => d.Line))];
+            // One row per name per file: the product's own if any is, at its first line.
+            .GroupBy(d => (d.Role, d.Kind, d.Name, d.Form)).Select(g => g.MinBy(d => (d.Scope != "main", d.Line)))];
     }
 
     [ThreadStatic] static string? _linesOf;
@@ -461,7 +464,8 @@ public static partial class Links
 
     static void Yaml(string fileName, string content, List<Decl> output, bool isCi = false)
     {
-        if (fileName.EndsWith("gitlab-ci.yml", StringComparison.OrdinalIgnoreCase) || fileName.EndsWith("gitlab-ci.yaml", StringComparison.OrdinalIgnoreCase) || isCi)
+        isCi = isCi || fileName.EndsWith("gitlab-ci.yml", StringComparison.OrdinalIgnoreCase) || fileName.EndsWith("gitlab-ci.yaml", StringComparison.OrdinalIgnoreCase);
+        if (isCi)
         {
             Matches(CiProject(), content, "repo", output, lower: true, join: m => m.Groups["name"].Value.Trim('\'', '"', '/'), form: "ci");
             // A CI/CD component: host/group/project/component@version is its project's.
@@ -580,7 +584,7 @@ public static partial class Links
     private static partial Regex PomDependency();
     [GeneratedRegex("""\b(?<conf>implementation|api|compile|compileOnly|runtimeOnly|testImplementation|testRuntimeOnly|testCompileOnly|annotationProcessor|kapt|ksp|classpath)\s*\(?\s*(?:(?:enforcedPlatform|platform)\s*\(\s*)?['"](?<g>[\w.\-]+):(?<a>[\w.\-]+)(?::[^'"]*)?['"]""")]
     private static partial Regex GradleDep();
-    [GeneratedRegex("""\bgroup\s*:\s*['"](?<g>[\w.\-]+)['"]\s*,\s*name\s*:\s*['"](?<a>[\w.\-]+)['"]""")]
+    [GeneratedRegex("""(?:\b(?<conf>\w+)\s*\(?\s*)?\bgroup\s*:\s*['"](?<g>[\w.\-]+)['"]\s*,\s*name\s*:\s*['"](?<a>[\w.\-]+)['"]""")]
     private static partial Regex GradleMapDep();
     [GeneratedRegex("""(?:module\s*=\s*|^\s*[\w.\-]+\s*=\s*)['"](?<g>[\w.\-]+):(?<a>[\w.\-]+)(?::[^'"]*)?['"]""", RegexOptions.Multiline)]
     private static partial Regex CatalogEntry();

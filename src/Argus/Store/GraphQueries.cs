@@ -123,7 +123,10 @@ public static class GraphQueries
                 if (l.Str("scope") == "test" && !filter.IncludeTests) continue;
                 // Only the repositories the caller may read are named among a name's providers.
                 var candidates = (evidence?["candidates"] as JsonArray ?? []).Select(n => n?.ToString() ?? "").Where(readable.Contains).ToList();
-                estatePossible.Add(new Possible(from, to, l.Str("kind"), l.Str("name"), l.Double("confidence"), tier, evidence?["why"]?.ToString(), candidates));
+                var why = tier == "candidate"
+                    ? $"{l.Str("name")} is provided by {candidates.Count} repositories you may read; nothing the user has settles which"
+                    : evidence?["why"]?.ToString();
+                estatePossible.Add(new Possible(from, to, l.Str("kind"), l.Str("name"), l.Double("confidence"), tier, why, candidates));
                 continue;
             }
             if (!edges.TryGetValue((from, to), out var edge) || !filter.Layers.Contains(l.Str("layer")) || l.Str("scope") == "test" && !filter.IncludeTests) continue;
@@ -493,6 +496,8 @@ public static class GraphQueries
             var estate = Load(allowed, conn, pass);
             if (Find(estate, from, out var fromNote) is not { } a) return new JsonObject { ["error"] = $"No repository {from} that you may read." };
             if (Find(estate, to, out var toNote) is not { } b) return new JsonObject { ["error"] = $"No repository {to} that you may read." };
+            if (a.Id == b.Id)
+                return new JsonObject { ["from"] = estate.Name(a.Id), ["to"] = estate.Name(b.Id), ["paths"] = new JsonArray(), ["note"] = $"{from} and {to} are the same repository." };
             foreach (var (start, end, direction) in new[] { (a.Id, b.Id, "uses"), (b.Id, a.Id, "used_by") })
             {
                 var paths = Surest(estate, start, end, 3);
@@ -653,6 +658,9 @@ public static class GraphQueries
 
     public const int MostReferencesPerRepo = 8, MostReferencesInChanged = 10;
 
+    /// <summary>The languages of code (not of manifests), as SQL.</summary>
+    const string CodeLangs = "'csharp', 'java', 'kotlin', 'go', 'c', 'cpp', 'typescript', 'javascript', 'rust', 'proto', 'python'";
+
     /// <summary>
     /// The lines that name a symbol: in the changed repository, and in each direct dependent only in the files that use
     /// it (whose imports resolved to it, what they #include of it and what includes those, up to three steps; every C#
@@ -678,55 +686,71 @@ public static class GraphQueries
                 notSearched.Add(new JsonObject { ["repo"] = estate.Name(id), ["why"] = $"it reaches the change through {estate.Name(via)}; none of its files uses it directly" });
                 continue;
             }
-            var before = category.Count;
-            var files = Sql.Query(conn,
+            var edge = estate.Edges[(id, changed)];
+            var found = new List<long>();
+            void Found(long file, string tier)
+            {
+                Mark(file, tier);
+                found.Add(file);
+            }
+            var linked = Sql.Query(conn,
                     "SELECT DISTINCT l.file_id, f.path FROM file_links l JOIN files f ON f.id = l.file_id WHERE f.repo_id = ? AND l.to_repo_id = ?", id, changed)
                 .Where(f => tests || !Links.IsTestPath(f.Str("path"))).Select(f => f.Long("file_id")).ToList();
-            foreach (var f in files) Mark(f, "import");
-            // A global using: every C# file of the repository sees the namespace.
-            if (files.Count > 0 && Sql.Scalar(conn, $"SELECT COUNT(*) FROM file_decls WHERE role = 'uses' AND form = 'global' AND file_id IN ({string.Join(",", files)})") is long global && global > 0)
+            foreach (var f in linked) Found(f, "import");
+            // A global using of the change's namespace: every C# file of the repository sees it.
+            if (linked.Count > 0 && Sql.Scalar(conn,
+                    "SELECT COUNT(*) FROM file_decls d JOIN file_links l ON l.file_id = d.file_id AND l.to_repo_id = ? AND l.kind IN ('cs', 'cs-type')" +
+                    " AND (l.name = d.name OR (d.kind = 'cs-type' AND substr(d.name, 1, length(l.name) + 1) = l.name || '.'))" +
+                    $" WHERE d.role = 'uses' AND d.form = 'global' AND d.kind IN ('cs', 'cs-type') AND d.file_id IN ({string.Join(",", linked)})", changed) is long global && global > 0)
             {
                 foreach (var f in Sql.Query(conn, "SELECT id, path FROM files WHERE repo_id = ? AND lang = 'csharp'", id).Where(f => tests || !Links.IsTestPath(f.Str("path"))))
-                    Mark(f.Long("id"), "import");
+                    Found(f.Long("id"), "import");
             }
             // What it #includes of the change, and what includes those (three steps).
             var included = Sql.Query(conn,
-                    "SELECT DISTINCT i.file_id FROM includes i JOIN files t ON t.id = i.resolved_file_id WHERE i.repo_id = ? AND t.repo_id = ? AND i.resolution = 'resolved'", id, changed)
-                .Select(r => r.Long("file_id")).ToList();
-            foreach (var f in included) Mark(f, "import");
+                    "SELECT DISTINCT i.file_id, f.path FROM includes i JOIN files t ON t.id = i.resolved_file_id JOIN files f ON f.id = i.file_id" +
+                    " WHERE i.repo_id = ? AND t.repo_id = ? AND i.resolution = 'resolved'", id, changed)
+                .Where(r => tests || !Links.IsTestPath(r.Str("path"))).Select(r => r.Long("file_id")).ToList();
+            foreach (var f in included) Found(f, "import");
             var frontier = included;
             for (var step = 0; step < 3 && frontier.Count > 0; step++)
             {
                 frontier = Sql.Query(conn,
-                        $"SELECT DISTINCT file_id FROM includes WHERE repo_id = ? AND resolution = 'resolved' AND resolved_file_id IN ({string.Join(",", frontier)})", id)
-                    .Select(r => r.Long("file_id")).Where(f => !category.ContainsKey(f)).ToList();
-                foreach (var f in frontier) Mark(f, "include");
+                        "SELECT DISTINCT i.file_id, f.path FROM includes i JOIN files f ON f.id = i.file_id" +
+                        $" WHERE i.repo_id = ? AND i.resolution = 'resolved' AND i.resolved_file_id IN ({string.Join(",", frontier)})", id)
+                    .Where(r => tests || !Links.IsTestPath(r.Str("path"))).Select(r => r.Long("file_id")).Where(f => !category.ContainsKey(f)).ToList();
+                foreach (var f in frontier) Found(f, "include");
             }
-            var edge = estate.Edges[(id, changed)];
-            if (category.Count == before)
+            // Code that names the change (not only a manifest that references its package): else the files of the package's languages.
+            var code = found.Count > 0 && Sql.Scalar(conn, $"SELECT COUNT(*) FROM files WHERE id IN ({string.Join(",", found)}) AND lang IN ({CodeLangs})") is long n && n > 0;
+            if (!code)
             {
-                // Only a package (or a submodule) says it uses the change: the files of its languages.
                 var langs = edge.Ways.SelectMany(w => PackageLangs(w.Kind)).Distinct().ToList();
                 if (langs.Count > 0)
                 {
                     foreach (var f in Sql.Query(conn, $"SELECT id, path FROM files WHERE repo_id = ? AND lang IN ({string.Join(",", langs.Select(l => $"'{l}'"))})", id)
                                  .Where(f => tests || !Links.IsTestPath(f.Str("path"))))
-                        Mark(f.Long("id"), "package");
+                        Found(f.Long("id"), "package");
                 }
+                code = found.Count > 0 && Sql.Scalar(conn, $"SELECT COUNT(*) FROM files WHERE id IN ({string.Join(",", found)}) AND lang IN ({CodeLangs})") is long m && m > 0;
             }
-            if (category.Count == before)
+            if (!code)
                 notSearched.Add(new JsonObject
                 {
                     ["repo"] = estate.Name(id),
-                    ["why"] = $"it is linked by {string.Join(", ", edge.Ways.Select(w => w.Kind).Distinct())}: none of its files names the change's code",
+                    ["why"] = $"it is linked by {string.Join(", ", edge.Ways.Select(w => w.Kind).Distinct())}: none of its code names the change's",
                 });
         }
 
         var (hits, skipped) = Queries.ReferencesInFiles(conn, category.Keys, name);
         var imports = new HashSet<(long, long)>();
         var importFiles = category.Where(c => c.Value == "import").Select(c => c.Key).ToList();
+        // An import line is one whose name resolved to the change (the name itself, or one under the name matched).
         foreach (var chunk in importFiles.Chunk(500))
-            foreach (var d in Sql.Query(conn, $"SELECT file_id, line FROM file_decls WHERE role = 'uses' AND file_id IN ({string.Join(",", chunk)})"))
+            foreach (var d in Sql.Query(conn,
+                         "SELECT DISTINCT d.file_id, d.line FROM file_decls d JOIN file_links l ON l.file_id = d.file_id AND l.to_repo_id = ?" +
+                         " WHERE d.role = 'uses' AND (d.name = l.name OR substr(d.name, 1, length(l.name) + 1) IN (l.name || '.', l.name || '/'))" +
+                         $" AND d.file_id IN ({string.Join(",", chunk)})", changed))
                 imports.Add((d.Long("file_id"), d.Long("line")));
         var depthOf = reached.ToDictionary(r => r.Id, r => (r.Depth, Through: estate.Name(r.Via)));
         string TierOf(Queries.Hit h)
@@ -769,7 +793,7 @@ public static class GraphQueries
         result["comments_skipped"] = skipped;
         result["not_searched"] = notSearched;
         if (definitions.Count == 0)
-            result["note"] = $"{estate.Name(changed)} defines no symbol {name} that the index found: the lines are by name only.";
+            result["note"] = (result["note"] is { } earlier ? earlier + " " : "") + $"{estate.Name(changed)} defines no symbol {name} that the index found: the lines are by name only.";
     }
 
     /// <summary>A repository's links for overview: whom it uses and who uses it, with how, surest first.</summary>

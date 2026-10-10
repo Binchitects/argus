@@ -154,19 +154,8 @@ public static partial class Graph
     /// candidate of each, never walked. repo_edges sums each pair per layer (the noisy-OR of its kinds), and file_links says
     /// which files make each link. Returns the counts by state, kept for index_status too.
     /// </summary>
-    public static Dictionary<string, long> RebuildLinks(SqliteConnection conn, bool force = false)
+    public static Dictionary<string, long> RebuildLinks(SqliteConnection conn)
     {
-        // Nothing declared, resolved or vendored changed since the last rebuild: its links stand.
-        var stamp = string.Join("|",
-            Sql.Scalar(conn, "SELECT COUNT(*) || ':' || COALESCE(MAX(id), 0) FROM file_decls"),
-            Sql.Scalar(conn, "SELECT COUNT(*) || ':' || COALESCE(SUM(weight), 0) FROM repo_deps"),
-            Sql.Scalar(conn, "SELECT COUNT(*) FROM files WHERE is_vendored != 0"),
-            Sql.Scalar(conn, "SELECT COALESCE(group_concat(id || ':' || branch || ':' || default_branch || ':' || path_with_namespace, ','), '') FROM repos"));
-        if (!force && Sql.One(conn, "SELECT value FROM argus_meta WHERE key = 'graph_stamp'") is { } known && known.Str("value") == stamp
-            && Sql.One(conn, "SELECT value FROM argus_meta WHERE key = 'graph_stats'") is { } saved
-            && JsonNode.Parse(saved.Str("value")) is JsonObject kept)
-            return kept.ToDictionary(kv => kv.Key, kv => kv.Value?.GetValue<long>() ?? 0);
-
         var repos = Sql.Query(conn, "SELECT id, gitlab_id, lower(path_with_namespace) AS path, branch, default_branch FROM repos ORDER BY id")
             .Select(r => new RepoRow(r.Long("id"), r.Long("gitlab_id"), r.Str("path"), r.Str("branch") == r.Str("default_branch")))
             .ToList();
@@ -180,6 +169,8 @@ public static partial class Graph
         var provides = new Dictionary<string, Dictionary<string, HashSet<long>>>(StringComparer.Ordinal);
         var providedAt = new Dictionary<(string Kind, string Name, long Project), (string Path, long Line)>();
         var protoFiles = new List<(string Path, long Project)>();
+        var generated = new List<(string Kind, string Name, long Project, string Path, long Line)>();
+        var generatedPy = new HashSet<string>(StringComparer.Ordinal);
         var pyFiles = new Dictionary<long, List<string>>();
         var aliases = new Dictionary<long, HashSet<string>>();
         // A repository's own packages (its PackageIds): a .NET root of its own (Microsoft's own estate) is its to provide.
@@ -209,8 +200,15 @@ public static partial class Graph
                     own.Add(name);
                     continue;
                 }
-                // A vendored copy, a test's file, a fixture or a sample, generated code: the library is elsewhere.
-                if (reader.GetInt64(4) != 0 || NotAProvider(path) || reader.GetString(6) == "test" || reader.GetString(7) is "sample" or "generated") continue;
+                // A vendored copy, a test's file, a fixture or a sample: the library is elsewhere.
+                if (reader.GetInt64(4) != 0 || NotAProvider(path) || reader.GetString(6) == "test" || reader.GetString(7) == "sample") continue;
+                if (reader.GetString(7) == "generated" && kind != "proto")
+                {
+                    // Generated code provides a name only when no hand-written file does (its source is the provider).
+                    if (kind == "py-file") generatedPy.Add(name);
+                    generated.Add((kind, name, repo.GitlabId, path, reader.GetInt64(5)));
+                    continue;
+                }
                 if (kind == "cs" && ForeignCsRoots.Contains(name.Split('.')[0]) && !nugetRoots.Contains((repo.Id, name.Split('.')[0].ToLowerInvariant()))) continue;
                 if (kind == "proto")
                 {
@@ -227,12 +225,23 @@ public static partial class Graph
                 Provide(kind, name, repo.GitlabId, path, reader.GetInt64(5));
             }
         }
-        // Python modules, named from each repository's import roots.
+        // Python modules, named from each repository's import roots (its generated files' among them, as generated).
+        foreach (var g in generated.Where(g => g.Kind == "py-file"))
+        {
+            if (!pyFiles.TryGetValue(g.Project, out var list)) pyFiles[g.Project] = list = [];
+            list.Add(g.Name);
+        }
+        generated.RemoveAll(g => g.Kind == "py-file");
         foreach (var (project, files) in pyFiles)
         {
             foreach (var (module, file) in PythonModulesAt(files))
-                Provide("py", module, project, file, 1);
+            {
+                if (generatedPy.Contains(file)) generated.Add(("py", module, project, file, 1));
+                else Provide("py", module, project, file, 1);
+            }
         }
+        foreach (var g in generated.Where(g => !(provides.TryGetValue(g.Kind, out var names) && names.ContainsKey(g.Name))).ToList())
+            Provide(g.Kind, g.Name, g.Project, g.Path, g.Line);
         // A top-level module name alone (config, utils) links only to a repository the user declares a dependency on.
         var pypiUses = Sql.Query(conn, "SELECT DISTINCT repo_id, name FROM file_decls WHERE role = 'uses' AND kind = 'pypi'")
             .GroupBy(r => r.Long("repo_id")).ToDictionary(g => g.Key, g => g.Select(r => r.Str("name")).ToHashSet(StringComparer.Ordinal));
@@ -255,12 +264,13 @@ public static partial class Graph
 
         // A name several provide that nothing settled is a candidate of each, kept apart: it is never walked.
         var candidateEvidence = new Dictionary<(long From, long To, string Kind, string Name), Evidence>();
-        Evidence Add(RepoRow from, long to, string declKind, string form, string matched, string how, int providers, bool candidate = false)
+        Evidence Add(RepoRow from, long to, string declKind, string form, string matched, string how, int providers, bool candidate = false, string? settled = null)
         {
             var (kind, layer) = LinkKinds.Of(declKind, form);
             var key = (from.Id, defaultRow[to], kind, matched);
             var store = candidate ? candidateEvidence : evidence;
-            var prior = LinkKinds.Prior(kind, how);
+            var prior = LinkKinds.Prior(kind, how, settled);
+            how = settled ?? how;
             if (!store.TryGetValue(key, out var ev))
             {
                 store[key] = ev = new Evidence { DeclKind = declKind, Layer = layer, How = how, Providers = providers, Prior = prior, Candidate = candidate };
@@ -295,9 +305,18 @@ public static partial class Graph
                     match = kind == "npm" && aliases.TryGetValue(from.Id, out var own) && own.Contains(name)
                         ? new Match("internal", [from.GitlabId], name, "exact")
                         : Resolve(kind, name, from, provides, protoFiles, byPath);
-                    if (match.State == "resolved" && kind == "py" && !match.Matched.Contains('.')
-                        && !(pypiUses.TryGetValue(from.Id, out var declared) && pypiOf.TryGetValue(match.Projects.First(), out var offered) && declared.Overlaps(offered)))
-                        match = match with { State = "unconfirmed" };
+                    if (match.State is "resolved" or "ambiguous" && kind == "py" && !match.Matched.Contains('.'))
+                    {
+                        // A bare top-level name links only to a repository whose distribution the user declares.
+                        var confirmed = match.Projects.Where(p => pypiUses.TryGetValue(from.Id, out var declared)
+                            && pypiOf.TryGetValue(p, out var offered) && declared.Overlaps(offered)).ToHashSet();
+                        match = confirmed.Count switch
+                        {
+                            0 => match with { State = "unconfirmed" },
+                            1 => match with { State = "resolved", Projects = confirmed },
+                            _ => match with { Projects = confirmed },
+                        };
+                    }
                     memo[(kind, name, from.Id)] = match;
                 }
                 Count(match.State);
@@ -365,7 +384,7 @@ public static partial class Graph
                 unsettled.Add((p, candidates));
                 continue;
             }
-            Add(p.From, settled.To, p.DeclKind, p.Form, p.Match.Matched, settled.How, p.Match.Projects.Count).Use(p.FileId, p.Path, p.Line, p.Scope);
+            Add(p.From, settled.To, p.DeclKind, p.Form, p.Match.Matched, p.Match.How, p.Match.Projects.Count, settled: settled.How).Use(p.FileId, p.Path, p.Line, p.Scope);
             var name = (p.From.Id, LinkKinds.Of(p.DeclKind, p.Form).Kind, p.Match.Matched);
             if (!settledNames.TryGetValue(name, out var to)) settledNames[name] = to = [];
             to.Add(settled.To);
@@ -384,6 +403,8 @@ public static partial class Graph
             Count("candidate");
             foreach (var to in candidates)
             {
+                // A provider another of its files settled the name to already has the surer link.
+                if (evidence.ContainsKey((p.From.Id, defaultRow[to], kind, p.Match.Matched))) continue;
                 var ev = Add(p.From, to, p.DeclKind, p.Form, p.Match.Matched, p.Match.How, p.Match.Projects.Count, candidate: true);
                 ev.Candidates = [.. p.Match.Projects.Where(pathOfProject.ContainsKey).Select(x => pathOfProject[x]).Order(StringComparer.Ordinal)];
                 ev.Use(p.FileId, p.Path, p.Line, p.Scope);
@@ -400,7 +421,7 @@ public static partial class Graph
             new object?[12]))
         using (var fileLink = Sql.Command(conn, "INSERT OR IGNORE INTO file_links (file_id, to_repo_id, kind, name, confidence) VALUES (?, ?, ?, ?, ?)", new object?[5]))
         {
-            foreach (var ((from, to, kind, name), ev) in evidence.Concat(candidateEvidence))
+            foreach (var ((from, to, kind, name), ev) in evidence.Concat(candidateEvidence.Where(c => !evidence.ContainsKey(c.Key))))
             {
                 // A name several provide: a candidate (prior / k). Else its prior, less for a code link one file makes.
                 var main = ev.MainFiles.Count > 0;
@@ -409,10 +430,11 @@ public static partial class Graph
                     ? ev.Prior / Math.Max(2, ev.Providers)
                     : Math.Min(0.999, ev.Prior * (LinkKinds.FromCode(kind) && kind != "include" && files.Count == 1 ? LinkKinds.OneFile : 1));
                 var tier = ev.Candidate ? "candidate" : LinkKinds.Tier(confidence);
+                // No count of the providers: a reader may not see them all (GraphQueries says how many it may).
                 var why = ev.Why ?? (ev.Candidate
-                    ? $"{name} is provided by {ev.Providers} repositories; nothing the user has settles which"
+                    ? $"{name} is provided by several repositories; nothing the user has settles which"
                     : ev.How.StartsWith("settled:", StringComparison.Ordinal)
-                        ? $"{name} is provided by {ev.Providers} repositories; {ev.How[8..] switch { "manifest" => "a package or submodule of this one", "file" => "the same file's other uses", _ => "the user's other links" }} settles it"
+                        ? $"{name} is provided by several repositories; {ev.How[8..] switch { "manifest" => "a package or submodule of this one", "file" => "the same file's other uses", "name" => "the same name in its other files", _ => "the user's other links" }} settles it"
                         : $"{ev.MainFiles.Count + ev.TestFiles.Count} file(s) use {name}");
                 var json = new JsonObject
                 {
@@ -460,7 +482,6 @@ public static partial class Graph
             "SELECT COUNT(*) FROM (SELECT DISTINCT from_repo_id, to_repo_id FROM repo_edges WHERE confidence >= ? AND layer <> 'history')", LinkKinds.Walked) ?? 0L);
         Sql.Exec(conn, "INSERT OR REPLACE INTO argus_meta (key, value) VALUES ('graph_stats', ?)",
             new JsonObject(stats.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))).ToJsonString());
-        Sql.Exec(conn, "INSERT OR REPLACE INTO argus_meta (key, value) VALUES ('graph_stamp', ?)", stamp);
         tx.Commit();
         return stats;
     }

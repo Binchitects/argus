@@ -50,6 +50,8 @@ public sealed class LayaTests(AppFixture app, ITestOutputHelper output) : IDispo
         if (leads)
         {
             settings["Replicas:Enabled"] = "false";
+            // The installer chose to have the default models downloaded (DEFAULT_MODELS=download): Laya's are among them.
+            settings["Engine:DefaultModels"] = "download";
         }
         if (real is not null)
         {

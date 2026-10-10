@@ -641,12 +641,12 @@ public static class Queries
                 case "cs":
                     asks.Add(("kind = 'cs' AND name = ?", [name], null));
                     // using static A.B.Type; using X = A.B.Type.
-                    asks.Add(("kind = 'cs-type' AND (name = ? OR name LIKE ? ESCAPE '\\')", [name, Like(name) + ".%"],
+                    asks.Add(("kind = 'cs-type' AND (name = ? OR (name >= ? AND name < ?))", [name, .. Under(name + ".")],
                         n => n == name || !n[(name.Length + 1)..].Contains('.')));
                     break;
                 case "java":
                     asks.Add(("kind = 'java-package' AND name = ?", [name], null));
-                    asks.Add(("kind = 'java' AND (name = ? OR name LIKE ? ESCAPE '\\' OR name LIKE ? ESCAPE '\\')", [$"{name}.{stem}", Like($"{name}.{stem}") + ".%", Like(name) + ".%"],
+                    asks.Add(("kind = 'java' AND (name >= ? AND name < ?)", [.. Under(name + ".")],
                         // The type, its nested types, or (Kotlin) a top-level function one segment past the package.
                         n => n == $"{name}.{stem}" || n.StartsWith($"{name}.{stem}.", StringComparison.Ordinal)
                              || lang == "kotlin" && n[(name.Length + 1)..] is var rest && !rest.Contains('.') && rest.Length > 0 && char.IsLower(rest[0])));
@@ -661,7 +661,7 @@ public static class Queries
             var pyFiles = Sql.Query(conn, "SELECT name FROM file_decls WHERE repo_id = ? AND role = 'provides' AND kind = 'py-file'", repo).Select(r => r.Str("name")).ToList();
             foreach (var (module, _) in Graph.PythonModulesAt(pyFiles).Where(m => m.File == path))
             {
-                asks.Add(("kind = 'py' AND (name = ? OR name LIKE ? ESCAPE '\\')", [module, Like(module) + ".%"], null));
+                asks.Add(("kind = 'py' AND (name = ? OR (name >= ? AND name < ?))", [module, .. Under(module + ".")], null));
                 // from package import module
                 if (module.LastIndexOf('.') is var dot and > 0) asks.Add(("kind = 'py' AND name = ?", [module[..dot]], null));
             }
@@ -685,7 +685,7 @@ public static class Queries
             var package = Sql.Query(conn, "SELECT d.name, f.path FROM file_decls d JOIN files f ON f.id = d.file_id WHERE d.repo_id = ? AND d.role = 'provides' AND d.kind = 'npm'", repo)
                 .Select(r => (Name: r.Str("name"), Dir: r.Str("path").Contains('/') ? r.Str("path")[..r.Str("path").LastIndexOf('/')] : ""))
                 .Where(m => m.Dir == "" || path.StartsWith(m.Dir + "/", StringComparison.Ordinal)).OrderByDescending(m => m.Dir.Length).FirstOrDefault();
-            if (package.Name is { } npm) asks.Add(("kind = 'npm' AND (name = ? OR name LIKE ? ESCAPE '\\')", [npm, Like(npm) + "/%"], null));
+            if (package.Name is { } npm) asks.Add(("kind = 'npm' AND (name = ? OR (name >= ? AND name < ?))", [npm, .. Under(npm + "/")], null));
         }
         foreach (var (where, args, keep) in asks)
         {
@@ -697,8 +697,8 @@ public static class Queries
         }
     }
 
-    /// <summary>A LIKE pattern's literal text, its wildcards escaped.</summary>
-    static string Like(string text) => text.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
+    /// <summary>The names under a prefix as an index range: from the prefix to the prefix with its last character one higher.</summary>
+    static object?[] Under(string prefix) => [prefix, prefix[..^1] + (char)(prefix[^1] + 1)];
 
     // --- branches -----------------------------------------------------------------
 
