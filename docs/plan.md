@@ -1047,38 +1047,35 @@ sub-agents too, and cap the big model's own tool rounds in research.
   machine; a manual and help on every page.
 - Every package was reviewed adversarially and repaired before merging.
 
-## Next (after v5.3.0)
+## v5.4.0 — Code Arena with the web, as able as other agents, and Argus across the estate (2026-10-10)
 
-1. **The model that seems stuck, and the gaps between tool calls** *(M)*: an
-   answer that never starts while the UI says the model is not loaded although
-   it is; the waits between a tool's result and the next round. Measure on the
-   live stack with the new per-model line and slot table, then fix.
-2. **A session cache in RAM** *(M)*: when GPU memory is short and several
-   people have long chats, save a chat's slot (llama.cpp's slot save and
-   restore, to RAM) when it leaves its slot and restore it when it returns;
-   size it from the host's free RAM, which is mostly unused today.
-3. **Existing accounts to the directory** *(S)*: switch people already here to
-   LDAP sign-in, keeping their account, email, chats and keys; only the
-   password check moves.
-4. **Every table sorts and filters** *(M)*: one table component across the app
-   and Argus's own.
-5. **The offline installer** *(M)*: one file per release with every image and
-   the deploy files; install, upgrade from v5.2.0 with a backup and automatic
-   rollback, repair, remove, status and verify.
-6. Carried over: the packs in the bucket (the maintainer), real platforms
-   (Slack, Teams, SAML IdP, Confluence, SharePoint, Helm on a cluster), Code
-   Arena's terminals on a real Mac and Windows, Laya's routing quality.
+Asked on 2026-10-06, 2026-10-09 and 2026-10-10, done one item at a time by
+one agent, each committed and pushed when its tests passed:
 
-## v5.4 plan (asked 2026-10-06 and 2026-10-09)
-
-- **Code Arena's chats sync with the web chat**, both ways: a session started
-  in Code Arena shows in the person's chat list and can be continued there,
-  and a web chat can be continued in Code Arena (local tools only on the
-  person's machine).
-- **Code Arena does all that Claude Code, Qwen Code, Hermes Agent and a
-  DeepSeek coding harness do**, from a feature-by-feature comparison first.
-- **A local sandbox** for the commands Code Arena runs, so they cannot harm
-  the person's system, and **advanced memory and context management**.
+- **The model that seemed stuck**: an admin's Load lost in an engine restart
+  is sent again. **The gaps between tool calls**: lighter thinking between
+  rounds, 8-9.5 s to 4.7 s a round, measured live.
+- **A session cache in RAM**: measured first, llama.cpp's own RAM cache
+  already brings back chats that lost their slot (six long chats over four
+  slots: 57-63% of each prompt from the cache, about all there is); the
+  setting sizes it, and the dashboard tells RAM used by programs from the
+  page cache that holds the models.
+- **Existing accounts to the directory**, keeping everything of theirs.
+- **Every table sorts and filters**, in the app, in chat answers and in Argus.
+- **The offline installer**: install, upgrade from v5.2.0 with a backup and
+  rollback, repair, remove, status, verify; proved on Docker and rootless
+  Podman with fake engines.
+- **Code Arena**: its own commits under its own name; its sessions and the
+  web chat kept in step both ways; the features below, from the comparison;
+  reliability through a restarting gateway, a stalled stream and a dropped
+  connection; a sandbox for its commands, proved on this host (the project
+  writable, home read-only, `~/.ssh` and Docker's socket hidden, a private
+  `/tmp`, the network on or off).
+- **Argus across 200 repositories that affect each other** (asked for v5.5,
+  done here): links from packages, imports, namespaces, modules, #includes,
+  submodules, CI includes and images in nine ecosystems; `system_map`,
+  `dependency_path`, `change_impact`; on a generated estate of 200
+  repositories its 469 links found exactly, resolved in 28 ms.
 
 ### Code Arena compared (2026-10-10)
 
@@ -1114,9 +1111,17 @@ Code Arena had when v5.4 began. "v5.4" marks what this release adds.
 | Hooks around tool calls | Claude Code | not in v5.4: the permission rules and the sandbox cover what hooks are mostly used for |
 | A plugin marketplace, output styles, a status line | Claude Code, dsh (plugins) | not planned: MCP servers, commands and skills are the extension points |
 
-## v5.5 plan (asked 2026-10-07)
+## Next (after v5.4.0)
 
-- **Argus across 200 repositories that affect each other**: a dependency graph
-  across repositories, symbols resolved across them, impact of a change, and
-  answers about any part of the whole system, measured on a 200-repository
-  test estate.
+1. **Argus on the real estate**: the reader reads every repository again once
+   after the upgrade; then measure the links found on the company's 200
+   repositories against what their owners know, and add the conventions it
+   misses (a service's HTTP or gRPC client named by address, generated code).
+2. **What each repository is for**, written once per repository by the model
+   from its README, layout and key symbols, for `system_map` and `overview`.
+3. **Code Arena**: a sandbox on Windows; a watchdog for an MCP call that never
+   ends; the IDE's page showing the sandbox and the sync's state.
+4. Carried over: the packs in the bucket (the maintainer), real platforms
+   (Slack, Teams, SAML IdP, Confluence, SharePoint, Helm on a cluster), Code
+   Arena's terminals on a real Mac and Windows, Laya's routing quality, deep
+   research under six minutes.

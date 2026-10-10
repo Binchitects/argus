@@ -12,6 +12,86 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v5.4.0 (2026-10-10)
+
+### :rocket: Epics and highlights
+
+- **Code Arena and the web chat stay in step, both ways**: every Code Arena
+  session is a chat in Arena too (marked with its folder in the chat list),
+  continued on the web with the chat's own tools; what was added there comes
+  into the session at its next turn. `/web` lists your chats and continues one
+  in Code Arena. Messages go in the background and again until Arena has them,
+  each known by its place so one sent twice is kept once
+- **Code Arena does what other coding agents do**, from a feature-by-feature
+  comparison with Claude Code, Qwen Code, Hermes Agent and DeepSeek Harness
+  (docs/plan.md): memory it keeps and you edit (`remember`, `/memory`), search
+  of earlier sessions, AGENTS.md, CLAUDE.md and QWEN.md read as instructions,
+  `@file` and `!command`, checkpoints and `/rewind`, your own and the
+  project's commands, sub-agents and skills (from `.arena/`, `.claude/`,
+  `.qwen/`), kept allow and deny rules, and **a sandbox for its commands**
+  (bubblewrap on Linux, sandbox-exec on macOS): secrets and Docker's socket out
+  of reach, writes only in the workspace, the build caches and a /tmp of its
+  own; checked on a real host
+- **Argus across a whole estate**: repositories are linked by everything they
+  use of each other (packages, imports, namespaces, modules, #includes,
+  submodules, CI includes, images) in .NET, JavaScript and TypeScript, Python,
+  Go, Java and Kotlin, Rust, Protocol Buffers and C/C++; `system_map` (hubs,
+  layers, cycles, groups, every link), `dependency_path` (how one repository
+  reaches another, with the evidence) and `change_impact` (what a change
+  reaches, and a symbol's uses only where they depend on it). On a generated
+  estate of 200 repositories, its 469 links were found exactly
+- **An offline installer**: one file per release with every image and the
+  deploy files; install, upgrade from v5.2.0 with a backup and rollback,
+  repair, remove, status and verify, on Docker or rootless Podman
+
+### :sparkles: New features & Enhancements
+
+- **Code Arena commits its own work**: each turn's changes are committed with
+  Code Arena as the author and you as the committer (your work in progress is
+  left alone); a commit the model runs is Code Arena's too
+- **Code Arena carries on** through a restarting gateway (five tries over
+  about a minute and a half, each said), a stalled stream (given up and asked
+  again) and a connection dropped mid-answer (what came is kept, the model
+  carries on from it)
+- **Local accounts move to the company directory** from Admin → People
+  (**Move to the directory**): only the password check moves; the account,
+  its chats, keys, spend, email, sessions and two-step sign-in stay
+- **Every table sorts and filters**: any column by a click, a search box
+  above it, across the app (Usage, dashboards' tables, Storage, Leaderboard,
+  Quality, tool results), the tables in chat answers, and Argus's pages
+- **RAM for chats that lost their slot**: Settings → Model sizes the engine's
+  RAM cache per model (8 GB); the model card says it. Six long chats taking
+  turns over four slots read 57-63% of each prompt from the cache
+- **Tool rounds wait less**: the thinking between tool calls is lighter
+  (Settings → Model, `low` as installed): 8-9.5 s to 4.7 s a round, measured
+- **The engine's RAM kept for the model** (`ENGINE_RAM_PROTECT`), for a model
+  larger than RAM and the GPU, which reads its weights from disk
+- Deep research runs only as a tool (the chat's Tools menu): no button in the
+  message box
+- The Resources dashboard says memory used by programs apart from the page
+  cache that holds the models' files
+
+### :bug: Bugs fixed
+
+- An admin's Load lost in an engine restart is sent again (it ends an earlier
+  Unload), so a model no longer stays unloaded while the page waits
+- Code Arena's prompt keeps its keys after a wait on long commands
+- A headline number shrinks with its card instead of being cut
+- Code Arena: an answer cut by a connection closed cleanly mid-stream was
+  taken as finished
+
+### :boom: Breaking changes & Deprecations
+
+- Argus reads every repository again once after the upgrade (its reader's
+  contract moved to 4: Go, Java, Kotlin, Rust and .proto files and manifests
+  are indexed now)
+- Argus serves 20 tools (`system_map`, `dependency_path`, `change_impact` are
+  new); `repo_map` describes links by kind, names and an example, not by
+  #include weight only
+- Code Arena commits each turn's changes by default (`"autoCommit": false`
+  turns it off), keeps sessions in step with Arena (`"syncChats": false`), and
+  runs commands in a sandbox where the system has one (`"sandbox": "off"`)
+
 ## v5.3.0 (2026-10-10)
 
 ### :rocket: Epics and highlights
