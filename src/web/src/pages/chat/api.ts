@@ -28,8 +28,9 @@ export const listQuery = (search: string, archived = false) => ({
     if (archived) q.set('archived', 'true')
     return api<ConversationSummary[]>(`/api/chat/conversations${q.size ? `?${q}` : ''}`, { signal })
   },
-  // A chat answering on its own (its page was closed) shows so until it is done.
-  refetchInterval: (q: { state: { data?: ConversationSummary[] } }) => (q.state.data?.some((c) => c.answering) ? 4000 : false),
+  // A chat answering on its own (its page was closed) shows so until it is done; chats made or changed elsewhere (another
+  // device, Code Arena) come within half a minute.
+  refetchInterval: (q: { state: { data?: ConversationSummary[] } }) => (q.state.data?.some((c) => c.answering) ? 4000 : 30_000),
 })
 
 /** Forks a chat up to a message (default: the end of the branch on screen); the new chat's id and title. */
@@ -59,6 +60,16 @@ export const cancelQueued = (id: string, queuedId: string) => api(`/api/chat/con
 export const sendQueuedNow = (id: string, queuedId: string) => api<QueueState>(`/api/chat/conversations/${id}/queue/${queuedId}/now`, { body: {} })
 
 export const archiveChat = (id: string, archived: boolean) => api(`/api/chat/conversations/${id}`, { method: 'PATCH', body: { archived } })
+
+/**
+ * Where a chat stands, asked every few seconds while it is open: when its stamp changes, something changed elsewhere (in
+ * another tab or device, or Code Arena added to its session) and the chat is read again.
+ */
+export const stampQuery = (id: string) => ({
+  queryKey: ['chat', 'stamp', id] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ stamp: string; answering: boolean }>(`/api/chat/conversations/${id}/stamp`, { signal }),
+  refetchInterval: 4000,
+})
 
 export const conversationQuery = (id: string) => ({
   queryKey: ['chat', 'conversation', id] as const,

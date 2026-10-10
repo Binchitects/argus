@@ -186,8 +186,11 @@ internal sealed class Agent
 
     public void Clear() => Load([]);
 
-    /// <summary>Messages the person added in the web chat: the model hears them (the session has them written already).</summary>
-    public void TakeIn(IReadOnlyList<JsonObject> messages)
+    /// <summary>
+    /// Messages the person added in the web chat: the model hears them (the session has them written already). Said with
+    /// <paramref name="say"/> (the terminal's prompt: above what is being typed), else as a line of its own.
+    /// </summary>
+    public void TakeIn(IReadOnlyList<JsonObject> messages, Action<string>? say = null)
     {
         if (messages.Count == 0)
         {
@@ -197,7 +200,14 @@ internal sealed class Agent
         var question = messages.LastOrDefault(m => m.Str("role") == "user")?.Str("content");
         var text = $"Taken in from the web chat: {messages.Count} message{(messages.Count == 1 ? "" : "s")}" +
                    (question is { Length: > 0 } ? $", the last question \"{Fmt.OneLine(question, 80)}\"." : ".");
-        Ui.Info(text);
+        if (say is null)
+        {
+            Ui.Info(text);
+        }
+        else
+        {
+            say(text);
+        }
         Events?.Notice(text);
     }
 

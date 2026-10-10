@@ -10,7 +10,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, ApiError, errorMessage, infoQuery, type Me } from '@/lib/api'
 import { useMedia } from '@/lib/use-media'
 import { cn } from '@/lib/utils'
-import { archiveChat, assistantQuery, cancelQueued, chatModel, configQuery, conversationQuery, forkChat, hurryChat, queueMessage, sendQueuedNow, stopChat, streamChat } from './api'
+import { archiveChat, assistantQuery, cancelQueued, chatModel, configQuery, conversationQuery, forkChat, hurryChat, queueMessage, sendQueuedNow, stampQuery, stopChat, streamChat } from './api'
 import { AssistantIcon } from './assistant-icon'
 import { Composer } from './composer'
 import { contextOf } from './context'
@@ -332,12 +332,14 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
    */
   /** Which run is current: a run that ended tidies up only while no newer one has started. */
   const runs = useRef(0)
-  /** An answer was watched here already: the chat's own "answering" is not watched again. */
-  const attached = useRef(false)
+  /**
+   * The chat's last message when an answer watched here ended (or was attached to): the chat still saying "answering"
+   * there is not watched again; an answer started elsewhere since (another tab or device) is at a new one, and is.
+   */
+  const watched = useRef<string | null | undefined>(undefined)
   const run = useCallback(
     async (conversationId: string, endpoint: string, body: object | null, start: LiveState, localId: string | null, watch?: (e: ChatEvent) => void): Promise<boolean> => {
       const me = ++runs.current
-      attached.current = true
       setLive(start)
       setStreaming(true)
       streamingIn.current = conversationId
@@ -374,6 +376,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
         if (!wasStopped)
           setError(err instanceof ApiError ? err.message : received ? 'The answer was interrupted.' : 'The message did not reach the server. It is back in the box below: send it again.')
       } finally {
+        watched.current = liveRef.current?.leaf ?? watched.current
         setStreaming(false)
         abort.current = null
         if (wasStopped) setLive((s) => (s ? stopped(s) : s))
@@ -421,10 +424,23 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     [],
   )
 
+  // What changed elsewhere (another tab or device, or Code Arena keeping its session in step): read again within seconds,
+  // an answer started there watched as it is written. Not while an answer streams here (the stream says it all, and the
+  // chat is read again when it ends), nor while a branch switched to here is saved (it would read the one before).
+  const stamp = useQuery({ ...stampQuery(id ?? ''), enabled: !!id && !streaming }).data?.stamp
+  const seenStamp = useRef<{ id?: string; stamp?: string }>({})
+  const switching = useRef(0)
+  useEffect(() => {
+    if (!id || !stamp || switching.current > 0) return
+    const seen = seenStamp.current
+    seenStamp.current = { id, stamp }
+    if (seen.id === id && seen.stamp !== stamp && !abort.current) void queryClient.invalidateQueries({ queryKey: conversationQuery(id).queryKey })
+  }, [id, stamp, queryClient])
+
   // A chat answering already (its page was closed, or another tab asked): watch the answer from its start.
   useEffect(() => {
-    if (!id || !data?.answering || attached.current || abort.current) return
-    attached.current = true
+    if (!id || !data?.answering || abort.current || data.currentLeafId === watched.current) return
+    watched.current = data.currentLeafId
     void run(id, 'stream', null, { messages: data.messages, leaf: data.currentLeafId, notices: [], title: null, thinkingSince: null }, null)
   }, [id, data, run])
 
@@ -654,8 +670,15 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   const switchTo = async (messageId: string) => {
     if (!id || streaming) return
     const leaf = tree.leafBelow(messageId)
-    queryClient.setQueryData<Conversation>(conversationQuery(id).queryKey, (c) => (c ? { ...c, currentLeafId: leaf } : c))
-    await api(`/api/chat/conversations/${id}/leaf`, { method: 'PUT', body: { messageId } }).catch((e) => toast.error(errorMessage(e)))
+    switching.current++
+    try {
+      // A read under way would put the branch before back.
+      await queryClient.cancelQueries({ queryKey: conversationQuery(id).queryKey })
+      queryClient.setQueryData<Conversation>(conversationQuery(id).queryKey, (c) => (c ? { ...c, currentLeafId: leaf } : c))
+      await api(`/api/chat/conversations/${id}/leaf`, { method: 'PUT', body: { messageId } }).catch((e) => toast.error(errorMessage(e)))
+    } finally {
+      switching.current--
+    }
   }
 
   // Opened at a message (a search result): onto its branch, then to it, marked for a moment.

@@ -387,7 +387,11 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
 - **History.** Chats are grouped by date and can be searched. A
   [Code Arena](code-arena.md#chats-in-arena) session is a chat here too, with
   a terminal mark and its folder: continued here, what is added goes back to
-  the session (and what the session adds comes here). The first
+  the session (and what the session adds comes here, within seconds while
+  its page is open). An open chat changed elsewhere (another tab or device:
+  its messages, branch, title, queue or settings) is read again within
+  seconds too, an answer started there is watched as it is written, and the
+  list takes in new chats within half a minute. The first
   question becomes the title and the browser tab's name; with a model for
   small steps, it writes a short title from the question while the answer is
   written (a title you gave meanwhile stays). Long titles are cut

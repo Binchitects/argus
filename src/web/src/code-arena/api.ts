@@ -37,6 +37,12 @@ export interface CodeState {
   queued: string[]
   /** The number of the answer (or compaction) running or last run: a new one is attached to when it differs. */
   turn?: number
+  /** How many times the web chat's news came in while nothing ran: the session is read again when it changes. */
+  synced?: number
+  /** Sessions are kept with chats in Arena here: the side bar lists the person's chats there. */
+  arenaChats?: boolean
+  /** The chat in Arena this session is kept in step with (null: none yet): the state is read often, for the web's news. */
+  chat?: string | null
   arenaTools: boolean
   tools: { local: number; servers: { name: string; count: number }[] }
 }
@@ -82,6 +88,20 @@ export interface SessionSummary {
   title: string
   updatedAt: string
   messages: number
+  /** The chat in Arena it is kept in step with; null: none. */
+  chat?: string | null
+}
+
+/** A chat of the person's in Arena, to continue here: with this folder's session kept in step with it, if one is. */
+export interface WebChatSummary {
+  id: string
+  title: string
+  /** "code-arena": a Code Arena session's chat, in `place`. */
+  origin: string | null
+  place: string | null
+  updatedAt: string
+  messages: number
+  session: string | null
 }
 
 /** An edit as the page draws it: [op, old line, new line, text] with op ' ', '-', '+' or '⋮' (lines left out); 0: no number. */
@@ -126,6 +146,13 @@ export const sessionsQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => api<SessionSummary[]>('/api/sessions', { signal }),
 }
 
+/** The person's chats in Arena (asked of Arena when the side bar's list of them opens). */
+export const webChatsQuery = {
+  queryKey: ['code', 'web-chats'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<WebChatSummary[]>('/api/sessions/web', { signal }),
+  staleTime: 15_000,
+}
+
 export const sessionQuery = {
   queryKey: ['code', 'session'] as const,
   queryFn: ({ signal }: { signal: AbortSignal }) => api<CodeSession>('/api/session', { signal }),
@@ -144,6 +171,10 @@ export const retryServers = (name?: string) => api<CodeState>('/api/servers/retr
 export const stopJob = (id: number) => api('/api/jobs/stop', { body: { id } })
 export const newSession = () => api<CodeSession>('/api/sessions/new', { body: {} })
 export const resumeSession = (id: string) => api<CodeSession>('/api/sessions/resume', { body: { id } })
+/** Continues a chat from Arena here: in this folder's session kept with it, else a new one with its history. */
+export const openWebChat = (id: string) => api<CodeSession>('/api/sessions/web', { body: { id } })
+/** Sends Arena each session of this folder it never had: how many went, and what kept the others back. */
+export const sendAllSessions = () => api<{ sent: number; failed: string[] }>('/api/sessions/send-all', { body: {} })
 export const stopTurn = () => api('/api/stop', { body: {} })
 /** A message for after the answer being written (at once when none is). */
 export const queueMessage = (text: string) => api<{ queued: number }>('/api/queue', { body: { text } })

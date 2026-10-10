@@ -76,6 +76,7 @@ public static partial class ChatEndpoints
         g.MapPost("/conversations/{id:guid}/stop", StopAsync);
         g.MapPost("/conversations/{id:guid}/hurry", HurryAsync);
         g.MapGet("/conversations/{id:guid}/summary", SummaryAsync);
+        g.MapGet("/conversations/{id:guid}/stamp", StampAsync);
         g.MapPost("/conversations/{id:guid}/compact", CompactAsync);
         g.MapPut("/conversations/{id:guid}/leaf", LeafAsync);
         g.MapPost("/conversations/{id:guid}/fork", ForkAsync);
@@ -733,6 +734,26 @@ public static partial class ChatEndpoints
         {
             return AuthEndpoints.Problem(503, "summary", $"The chat could not be summarized: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Where the chat stands, cheaply: an open page asks every few seconds and reloads the chat when it changed elsewhere
+    /// (in another tab or device, or by Code Arena keeping its session in step). The stamp changes with the branch on
+    /// screen, the chat's last change, its title, its line of queued messages and its settings.
+    /// </summary>
+    private static async Task<IResult> StampAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        var c = await db.Conversations.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && x.UserId == me.Id, ct);
+        if (c is null)
+        {
+            return Results.NotFound();
+        }
+        var queued = await db.QueuedMessages.CountAsync(q => q.ConversationId == id, ct);
+        // The chat's settings too (they change without a message): its model, thinking, tools, instructions, assistant, archive.
+        var settings = string.Join("\u001f", c.Model, c.Thinking, c.Tools is null ? null : string.Join(",", c.Tools), c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens, c.AssistantId, c.ArchivedAt?.UtcTicks);
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(settings)))[..16];
+        return Results.Ok(new { stamp = $"{c.CurrentLeafId}|{c.UpdatedAt.UtcTicks}|{c.Title}|{queued}|{hash}", answering = jobs.IsAnswering(id) });
     }
 
     /// <summary>"Answer now": the answer being written stops thinking and answers with what it has.</summary>

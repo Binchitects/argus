@@ -46,6 +46,25 @@ internal sealed partial class Runtime : IAsyncDisposable
     public Sandbox Sandbox { get; private set; } = Sandbox.None;
     /// <summary>The session kept in step with its chat in Arena; null when chats are not synced.</summary>
     public ChatSync? Sync { get; private set; }
+
+    private Action? _webNews;
+
+    /// <summary>
+    /// Told when the web chat has news while the session is kept with it (asked every few seconds): the terminal's
+    /// prompt and the IDE take it in at once when nothing runs. Null (a one-shot run): it comes at the next turn.
+    /// </summary>
+    public Action? WebNews
+    {
+        get => _webNews;
+        set
+        {
+            _webNews = value;
+            if (Sync is not null)
+            {
+                Sync.OnNews = value;
+            }
+        }
+    }
     /// <summary>What was sent in this folder, in the terminal and the IDE's chat alike.</summary>
     public InputHistory History { get; private set; } = null!;
     public Spend Total { get; } = new();
@@ -334,15 +353,23 @@ internal sealed partial class Runtime : IAsyncDisposable
             Notice(warn, text);
             Agent?.Events?.Notice(text);
         }, data);
+        if (Sync is not null)
+        {
+            Sync.OnNews = _webNews;
+        }
         if (previous is not null)
         {
             _ = previous.DisposeAsync().AsTask();
         }
     }
 
+    /// <summary>The chats last listed (/web): /web N continues the Nth of them.</summary>
+    private List<WebChat>? _webList;
+
     /// <summary>
-    /// Continues a chat from Arena in a new session here: by its id, or its number in the list (empty: the list). Its messages
-    /// come in now; what this session adds goes back to it.
+    /// Continues a chat from Arena here: by its id, or its number in the list last shown. Empty: the 30 newest are
+    /// listed; "all": every one; other words: those whose title has them. Its messages come in now; what this session
+    /// adds goes back to it.
     /// </summary>
     public async Task<string?> ContinueWebChatAsync(string which, CancellationToken ct)
     {
@@ -350,30 +377,176 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             return "Chats are not kept with Arena here (\"syncChats\": false in config.json, or no Arena address).";
         }
+        which = which.Trim();
+        var number = int.TryParse(which, out var n) ? n : 0;
+        var id = Guid.TryParse(which, out _) ? which : null;
         List<WebChat> chats;
-        try
+        if (number > 0 && _webList is { } shown)
         {
-            chats = await ChatSync.ListAsync(Config, Http, ct);
-        }
-        catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
-        {
-            return $"Arena's chats cannot be read now: {Fmt.OneLine(e.Message, 200)}";
-        }
-        var chat = int.TryParse(which, out var n) && n >= 1 && n <= chats.Count ? chats[n - 1] : chats.FirstOrDefault(c => c.Id.Equals(which.Trim(), StringComparison.OrdinalIgnoreCase));
-        if (chat is null)
-        {
-            for (var i = 0; i < chats.Count; i++)
+            // A number is in the list last shown: past its end, there is no such chat (not another list's).
+            if (number > shown.Count)
             {
-                var c = chats[i];
-                Ui.Line($"{i + 1,3}. {c.Updated.ToLocalTime():yyyy-MM-dd HH:mm}  {c.Title}  {Ui.Dim($"{c.Messages} messages{(c.Origin == ChatSyncOrigin ? $" · Code Arena in {c.Place}" : "")} · {c.Id}")}");
+                return $"There is no chat {which}: the list is above.";
             }
-            return chats.Count == 0 ? "You have no chats in Arena yet." : which.Length == 0 ? "/web N continues one here (or code-arena --web N)." : $"There is no chat {which}: the list is above.";
+            chats = shown;
         }
-        NewSession();
-        Sync?.Link(chat.Id);
+        else
+        {
+            try
+            {
+                chats = await ChatSync.ListAsync(Config, Http, ct, which.Length == 0 || number > 0 ? 30 : ChatSync.MostListed);
+            }
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+            {
+                return $"Arena's chats cannot be read now: {Fmt.OneLine(e.Message, 200)}";
+            }
+        }
+        var chat = number >= 1 && number <= chats.Count ? chats[number - 1] : chats.FirstOrDefault(c => c.Id.Equals(which, StringComparison.OrdinalIgnoreCase));
+        if (chat is not null || id is not null)
+        {
+            // An id not among the newest: continued all the same, when Arena has it.
+            try
+            {
+                return await OpenWebChatAsync(chat?.Id ?? id!, ct);
+            }
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+            {
+                return $"Arena cannot say now whether it has that chat: {Fmt.OneLine(e.Message, 200)}";
+            }
+        }
+        if (which.Length > 0 && number == 0 && !which.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            var words = which.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            chats = [.. chats.Where(c => words.All(w => c.Title.Contains(w, StringComparison.OrdinalIgnoreCase) || (c.Place?.Contains(w, StringComparison.OrdinalIgnoreCase) ?? false)))];
+            if (chats.Count == 0)
+            {
+                return $"No chat in Arena has \"{which}\" in its title.";
+            }
+        }
+        _webList = chats;
+        var linked = SessionStore.List(Env.Paths.SessionsDir, Workspace.Root, 1000).Where(s => s.Conversation is not null)
+            .GroupBy(s => s.Conversation!, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < chats.Count; i++)
+        {
+            var c = chats[i];
+            var where = c.Origin == ChatSyncOrigin ? $" · Code Arena in {c.Place}" : "";
+            var here = linked.TryGetValue(c.Id, out var session) ? $" · session {session} here" : "";
+            Ui.Line($"{i + 1,3}. {c.Updated.ToLocalTime():yyyy-MM-dd HH:mm}  {c.Title}  {Ui.Dim($"{c.Messages} messages{where}{here} · {c.Id}")}");
+        }
+        if (chats.Count == 0)
+        {
+            return "You have no chats in Arena yet.";
+        }
+        var more = which.Length == 0 && chats.Count == 30 ? " /web all lists every one, /web WORDS those with the words in their title." : "";
+        return number > 0 ? $"There is no chat {which}: the list is above." : $"/web N continues one here (or code-arena --web ID).{more}";
+    }
+
+    /// <summary>
+    /// A chat in Arena, here: the session of this folder kept in step with it when there is one, with what was added on
+    /// the web since; else a new session that is, with the chat's history. An empty session left for it is not kept.
+    /// Why it was not opened (Arena has no such chat of the person's: the session stays as it was); null: opened. Throws
+    /// when Arena cannot say whether it has the chat.
+    /// </summary>
+    public async Task<string?> OpenWebChatAsync(string chat, CancellationToken ct)
+    {
+        if (!string.Equals(Sync?.Conversation, chat, StringComparison.OrdinalIgnoreCase))
+        {
+            var file = SessionStore.Linked(Env.Paths.SessionsDir, chat, Workspace.Root);
+            if (file is null && !await ChatSync.ExistsAsync(Config, Http, chat, ct))
+            {
+                return $"Arena has no chat {chat} of yours (deleted, or the id is mistyped).";
+            }
+            var empty = Agent.Messages.Count == 0 ? Session.File : null;
+            if (file is not null)
+            {
+                Resume(file);
+            }
+            else
+            {
+                NewSession();
+                Sync?.Link(chat);
+            }
+            if (empty is not null && empty != Session.File)
+            {
+                TryDelete(empty);
+            }
+        }
         var taken = Sync is null ? [] : await Sync.TakeInAsync(ct);
         Agent.TakeIn(taken);
         return null;
+    }
+
+    /// <summary>
+    /// Sends to Arena what it lacks of each saved session of this folder: those never sent (made with "syncChats" off, or
+    /// before it was kept), and those sent in part. Each becomes a chat there, as the session open now is, the oldest
+    /// first (Arena lists them as they came); one whose chat was deleted there stays as it is. The sessions keep their
+    /// place here (newest first, --continue). How many were sent, and what kept the others back.
+    /// </summary>
+    public async Task<(int Sent, List<string> Failed)> SendAllAsync(Action<string>? progress, CancellationToken ct)
+    {
+        var failed = new List<string>();
+        var sent = 0;
+        if (!Config.SyncChats || Config.Url is not { Length: > 0 } || Config.ApiKey is not { Length: > 0 })
+        {
+            failed.Add("Chats are not kept with Arena here (\"syncChats\": false in config.json, or no Arena address or key).");
+            return (0, failed);
+        }
+        var waiting = SessionStore.List(Env.Paths.SessionsDir, Workspace.Root, 10_000).Where(s => s.Unsent && s.File != Session.File).Reverse().ToList();
+        for (var i = 0; i < waiting.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var s = waiting[i];
+            progress?.Invoke($"{i + 1}/{waiting.Count} {s.Preview}");
+            var written = File.GetLastWriteTimeUtc(s.File);
+            var data = SessionStore.Load(s.File);
+            var sync = ChatSync.Start(Config, Http, SessionStore.Open(s.File), data.Cwd ?? Workspace.Root, () => data.Model ?? Model.Name, (_, _) => { }, data,
+                new DateTimeOffset(written, TimeSpan.Zero));
+            if (sync is null)
+            {
+                break;
+            }
+            string? trouble;
+            await using (sync)
+            {
+                // Its chat is made, then its messages go 200 at a time, tried again while Arena is out of reach.
+                await sync.FlushAsync(TimeSpan.FromSeconds(60), patient: true);
+                trouble = sync.InStep ? null : sync.Trouble ?? "Arena did not take it all within a minute";
+            }
+            try
+            {
+                // Its place among this folder's sessions stays where it was.
+                File.SetLastWriteTimeUtc(s.File, written);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // Listed as just changed: nothing else.
+            }
+            if (trouble is null)
+            {
+                sent++;
+                continue;
+            }
+            failed.Add($"{s.Id}: {trouble}");
+            if (sync.Trouble is not null && i < waiting.Count - 1)
+            {
+                // Arena out of reach, or refusing: the rest wait for the next /sync all.
+                failed.Add($"{waiting.Count - i - 1} more not tried: /sync all again later.");
+                break;
+            }
+        }
+        return (sent, failed);
+    }
+
+    private static void TryDelete(string file)
+    {
+        try
+        {
+            File.Delete(file);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Left behind: an empty session is not listed anyway.
+        }
     }
 
     private const string ChatSyncOrigin = "code-arena";

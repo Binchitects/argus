@@ -34,7 +34,8 @@ const TerminalPanel = lazy(() => import('./terminals'))
  * web on 127.0.0.1, behind the key in the address it printed.
  */
 export function App() {
-  // Read again every 30 seconds; every 5 while an MCP server is connecting or down (the status bar says when it connects).
+  // Read again every 30 seconds; every 5 while an MCP server is connecting or down (the status bar says when it connects),
+  // or while the session is kept with a chat in Arena (what the web adds shows within seconds).
   const state = useQuery({
     ...stateQuery,
     // Every second while a command with no time limit runs (its output comes from here once the turn that started it has
@@ -45,7 +46,7 @@ export function App() {
         ? 1_000
         : (q.state.data?.queued?.length ?? 0) > 0 || q.state.data?.busy || q.state.data?.jobs.some((j) => j.running)
           ? 2_000
-          : q.state.data?.servers.some((s) => s.state === 'connecting' || s.state === 'failed')
+          : q.state.data?.chat || q.state.data?.servers.some((s) => s.state === 'connecting' || s.state === 'failed')
             ? 5_000
             : 30_000,
   })

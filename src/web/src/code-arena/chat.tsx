@@ -1,8 +1,9 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, ChevronDown, FolderGit2, GitBranch, History, ListChecks, LoaderCircle, MessageSquarePlus, Monitor, Moon, PanelRightClose, ScrollText, ShieldCheck, Square, Sun, TestTubeDiagonal } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Cloud, CloudUpload, FolderGit2, GitBranch, History, ListChecks, LoaderCircle, MessageSquarePlus, Monitor, Moon, PanelRightClose, ScrollText, ShieldCheck, Square, SquareTerminal, Sun, TestTubeDiagonal } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -31,8 +32,10 @@ import {
   inOrder,
   modeLabels,
   newSession,
+  openWebChat,
   reduceCode,
   resumeSession,
+  sendAllSessions,
   sessionQuery,
   sessionsQuery,
   stateQuery,
@@ -44,6 +47,8 @@ import {
   type LiveJob,
   type Mode,
   type SessionSummary,
+  type WebChatSummary,
+  webChatsQuery,
 } from './api'
 import { CodeAnswer } from './answer'
 import { PartHelp } from './help'
@@ -56,19 +61,111 @@ import { changesQuery, savePreferences } from './ide-api'
 let localCount = 0
 const newLocalId = () => `local-${Date.now()}-${++localCount}`
 
+/** How many of the person's chats in Arena the side bar shows at once: words narrow it to the rest. */
+const shownChats = 200
+
+/**
+ * The person's chats in Arena, below this folder's sessions (those kept with one of them are listed there): one
+ * continues here in a new session with its history, kept in step with it both ways. And the folder's sessions Arena never
+ * had (made with the sync off) go to it at a click.
+ */
+function ArenaChats({ state, open, opening }: { state: CodeState; open: (go: () => Promise<unknown>, which: string) => Promise<void>; opening: string | null }) {
+  const queryClient = useQueryClient()
+  const [shown, setShown] = useState(false)
+  const [filter, setFilter] = useState('')
+  const [sending, setSending] = useState(false)
+  const list = useQuery({ ...webChatsQuery, enabled: shown })
+  // Those kept with a session listed above are there, as that session; one kept with an older session is here.
+  const listed = new Set(useQuery(sessionsQuery).data?.map((s) => s.id))
+  const words = filter.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  const matching = (list.data ?? []).filter(
+    (c: WebChatSummary) => !(c.session && listed.has(c.session)) && words.every((w) => c.title.toLowerCase().includes(w) || (c.place ?? '').toLowerCase().includes(w)),
+  )
+  const sendAll = async () => {
+    setSending(true)
+    try {
+      const r = await sendAllSessions()
+      if (r.sent > 0) toast.success(`Sent to Arena: ${r.sent} ${r.sent === 1 ? 'session' : 'sessions'}.`)
+      else if (r.failed.length === 0) toast.success('Arena has every session of this folder already.')
+      for (const why of r.failed) toast.error(why)
+      await Promise.all([queryClient.invalidateQueries({ queryKey: sessionsQuery.queryKey }), queryClient.invalidateQueries({ queryKey: webChatsQuery.queryKey })])
+    } catch (e) {
+      toast.error(errorMessage(e))
+    } finally {
+      setSending(false)
+    }
+  }
+  return (
+    <div className="mb-3 min-w-0 border-t border-sidebar-border pt-2">
+      <button
+        type="button"
+        aria-expanded={shown}
+        onClick={() => setShown(!shown)}
+        className="flex w-full items-center gap-1 rounded-md px-2 pb-1 text-[0.6875rem] font-semibold tracking-wider text-muted-foreground uppercase outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring"
+      >
+        {shown ? <ChevronDown className="size-3.5" aria-hidden="true" /> : <ChevronRight className="size-3.5" aria-hidden="true" />} Chats in Arena
+      </button>
+      {shown && (
+        <div className="grid min-w-0 gap-1.5">
+          <Input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Find a chat" aria-label="Find a chat in Arena" className="h-8 text-sm" />
+          {list.isPending && Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="mx-1 h-7" />)}
+          {list.error && <p className="px-2 text-xs text-destructive">{errorMessage(list.error)}</p>}
+          {list.data && matching.length === 0 && (
+            <p className="px-2 py-1 text-xs text-muted-foreground">
+              {words.length > 0 ? 'No other chat in Arena has those words in its title or folder.' : 'No other chat in Arena: those kept with a session here are listed above.'}
+            </p>
+          )}
+          <ul className="flex min-w-0 flex-col gap-0.5" aria-label="Chats in Arena">
+            {matching.slice(0, shownChats).map((c) => (
+              <li key={c.id} className="min-w-0">
+                <button
+                  type="button"
+                  onClick={() => void open(() => openWebChat(c.id), c.id)}
+                  disabled={state.busy || opening !== null}
+                  aria-busy={opening === c.id}
+                  title={`${c.title} · ${c.messages} messages${c.origin === 'code-arena' && c.place ? ` · Code Arena in ${c.place}` : ''}`}
+                  className="block w-full truncate rounded-md px-2 py-1.5 text-left text-sm text-foreground/85 transition-colors duration-150 outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring disabled:opacity-60"
+                >
+                  {c.origin === 'code-arena' && (
+                    <>
+                      <SquareTerminal className="mr-1.5 inline size-3.5 align-[-2px] text-muted-foreground" aria-hidden="true" />
+                      <span className="sr-only">Code Arena: </span>
+                    </>
+                  )}
+                  <bdi>{c.title}</bdi>
+                  {opening === c.id && <LoaderCircle className="ml-1.5 inline size-3.5 animate-spin align-[-2px]" aria-label="Opening" />}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {matching.length > shownChats && <p className="px-2 text-xs text-muted-foreground">{matching.length - shownChats} more: find one by its title.</p>}
+          <Button variant="ghost" size="sm" className="justify-start" onClick={() => void sendAll()} disabled={sending}>
+            {sending ? <LoaderCircle className="animate-spin" /> : <CloudUpload />} Send the other sessions here
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** This folder's saved sessions, newest first, by when; one opens with its history. */
 export function Sessions({ state, onNavigate }: { state: CodeState; onNavigate?: () => void }) {
   const queryClient = useQueryClient()
   const list = useQuery(sessionsQuery)
   const groups = new Map<string, SessionSummary[]>()
   for (const s of list.data ?? []) groups.set(bucket(s.updatedAt), [...(groups.get(bucket(s.updatedAt)) ?? []), s])
-  const open = async (go: () => Promise<unknown>) => {
+  // What is being opened (a session, a chat from Arena): nothing else opens meanwhile.
+  const [opening, setOpening] = useState<string | null>(null)
+  const open = async (go: () => Promise<unknown>, which = 'session') => {
+    setOpening(which)
     try {
       await go()
       onNavigate?.()
       await Promise.all([queryClient.invalidateQueries({ queryKey: ['code'] })])
     } catch (e) {
       toast.error(errorMessage(e))
+    } finally {
+      setOpening(null)
     }
   }
   return (
@@ -84,7 +181,7 @@ export function Sessions({ state, onNavigate }: { state: CodeState; onNavigate?:
         <PartHelp part="sessions" className="ml-auto" />
       </div>
       <div className="grid gap-2 p-3">
-        <Button onClick={() => void open(newSession)} className="justify-start" disabled={state.busy}>
+        <Button onClick={() => void open(newSession)} className="justify-start" disabled={state.busy || opening !== null}>
           <MessageSquarePlus /> New session
         </Button>
       </div>
@@ -101,8 +198,8 @@ export function Sessions({ state, onNavigate }: { state: CodeState; onNavigate?:
                   <li key={s.id} className="min-w-0 animate-enter">
                     <button
                       type="button"
-                      onClick={() => !active && void open(() => resumeSession(s.id))}
-                      disabled={state.busy && !active}
+                      onClick={() => !active && void open(() => resumeSession(s.id), s.id)}
+                      disabled={(state.busy || opening !== null) && !active}
                       aria-current={active ? 'page' : undefined}
                       title={`${s.title} · ${s.messages} messages · ${s.id}`}
                       className={cn(
@@ -117,6 +214,12 @@ export function Sessions({ state, onNavigate }: { state: CodeState; onNavigate?:
                         </>
                       )}
                       <bdi>{s.title}</bdi>
+                      {s.chat && (
+                        <>
+                          <Cloud className="ml-1.5 inline size-3 align-[-1px] text-muted-foreground" aria-hidden="true" />
+                          <span className="sr-only"> (kept in step with its chat in Arena)</span>
+                        </>
+                      )}
                     </button>
                   </li>
                 )
@@ -124,6 +227,7 @@ export function Sessions({ state, onNavigate }: { state: CodeState; onNavigate?:
             </ul>
           </div>
         ))}
+        {state.arenaChats && <ArenaChats state={state} open={open} opening={opening} />}
       </div>
       <div className="grid gap-0.5 border-t border-sidebar-border px-4 py-2 text-[0.6875rem] text-muted-foreground">
         <span className="flex min-w-0 items-center gap-1.5" title={state.folder}>
@@ -322,6 +426,15 @@ export function Thread({
     if (!session.data || !(session.data.busy || state.busy) || watching.current) return
     void run('/api/turn', null, fromSession(session.data), null)
   }, [session.data, state.busy, state.turn, run])
+
+  // What the web chat added while nothing ran here (code-arena took it in): the thread and the list read it again.
+  const seenSynced = useRef(state.synced)
+  useEffect(() => {
+    if (state.synced === seenSynced.current) return
+    seenSynced.current = state.synced
+    if (watching.current) return
+    for (const queryKey of [sessionQuery.queryKey, sessionsQuery.queryKey]) void queryClient.invalidateQueries({ queryKey })
+  }, [state.synced, queryClient])
 
   /** While an answer is written: the message waits in the queue and runs when the answer ends. */
   const queue = async (text: string): Promise<boolean> => {

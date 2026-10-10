@@ -11,8 +11,10 @@ internal sealed record WebChat(string Id, string Title, string? Origin, string? 
 /// <summary>
 /// The session kept in step with a chat in Arena (/api/code-arena), both ways: each message the session adds is sent
 /// in the background, in order, again until Arena has it (a lost connection, Arena restarting); what the person added
-/// in the web chat comes in at the next turn's start. Arena counts the chat's messages: a send that does not follow on
-/// from its count is refused with what this end lacks, which is taken in first.
+/// in the web chat comes in at the next turn's start, and while the session waits (the terminal's prompt, the IDE)
+/// within seconds: the web chat is asked every <see cref="WatchEvery"/> (<see cref="OnNews"/>). Arena counts the
+/// chat's messages: a send that does not follow on from its count is refused with what this end lacks, which is taken
+/// in first.
 /// </summary>
 internal sealed class ChatSync : IAsyncDisposable
 {
@@ -29,12 +31,17 @@ internal sealed class ChatSync : IAsyncDisposable
     private readonly SemaphoreSlim _busy = new(1, 1);
     private readonly CancellationTokenSource _stop = new();
     private readonly Task _loop;
+    private readonly Task _watch;
     private string? _conversation;
+    /// <summary>The web chat's branch as last read in step with <see cref="_server"/>: asked with it, Arena says only "unchanged".</summary>
+    private string? _stamp;
     private int _server;
     private int _pushed;
     private bool _unlinked;
     /// <summary>Arena has messages this end has not taken in: sending waits for the next turn's start.</summary>
     private bool _behind;
+    /// <summary>"The web chat is answering" was said: not again until a read gets through.</summary>
+    private bool _answeringSaid;
     private string? _problem;
 
     /// <summary>The most messages one request sends.</summary>
@@ -49,7 +56,16 @@ internal sealed class ChatSync : IAsyncDisposable
     /// <summary>How long a turn's start waits for Arena to start saying what the web chat added (all of it then has <see cref="RequestLimit"/>).</summary>
     public static readonly TimeSpan TakeInLimit = TimeSpan.FromSeconds(5);
 
-    private ChatSync(HttpClient http, string arenaUrl, string key, SessionStore store, string place, Func<string> model, Action<bool, string> notice, SessionData? data)
+    /// <summary>How often the web chat is asked, while someone listens (<see cref="OnNews"/>), whether it has messages this end lacks.</summary>
+    public static TimeSpan WatchEvery { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Told when the web chat has messages this session has not taken in, asked every <see cref="WatchEvery"/>: the
+    /// terminal at its prompt, or the IDE with nothing running, takes them in then. Null: nobody listens (a one-shot run),
+    /// and the web chat is not asked; its news comes at the next turn's start.
+    /// </summary>
+    public Action? OnNews { get; set; }
+    private ChatSync(HttpClient http, string arenaUrl, string key, SessionStore store, string place, Func<string> model, Action<bool, string> notice, SessionData? data, DateTimeOffset? written)
     {
         _http = http;
         _base = arenaUrl.TrimEnd('/');
@@ -64,20 +80,25 @@ internal sealed class ChatSync : IAsyncDisposable
             _unlinked = data.Unlinked;
             _server = data.ServerCount;
             _pushed = Math.Min(data.Pushed, data.Local.Count);
-            _local.AddRange(data.Local.Select(m => (m, data.Model ?? model(), DateTimeOffset.UtcNow)));
+            _local.AddRange(data.Local.Select(m => (m, data.Model ?? model(), written ?? DateTimeOffset.UtcNow)));
         }
         store.Added += Added;
         _loop = Task.Run(LoopAsync);
+        _watch = Task.Run(WatchAsync);
         if (_pushed < _local.Count)
         {
             Wake();
         }
     }
 
-    /// <summary>Keeps this session in step with its chat in Arena (made at its first message); null when there is no Arena to keep it with.</summary>
-    public static ChatSync? Start(Config config, HttpClient http, SessionStore store, string place, Func<string> model, Action<bool, string> notice, SessionData? data = null) =>
+    /// <summary>
+    /// Keeps this session in step with its chat in Arena (made at its first message); null when there is no Arena to keep
+    /// it with. <paramref name="written"/>: when the messages read back were written, as Arena is told (now when not given).
+    /// </summary>
+    public static ChatSync? Start(Config config, HttpClient http, SessionStore store, string place, Func<string> model, Action<bool, string> notice,
+        SessionData? data = null, DateTimeOffset? written = null) =>
         config.SyncChats && config.Url is { Length: > 0 } url && config.ApiKey is { Length: > 0 } key
-            ? new ChatSync(http, url, key, store, place, model, notice, data)
+            ? new ChatSync(http, url, key, store, place, model, notice, data, written)
             : null;
 
     /// <summary>The Arena chat this session is kept with, once made.</summary>
@@ -115,6 +136,7 @@ internal sealed class ChatSync : IAsyncDisposable
         {
             _conversation = conversation;
             _server = 0;
+            _stamp = null;
             _behind = true;
             _store.Sync(_conversation, _server, _pushed);
         }
@@ -227,6 +249,7 @@ internal sealed class ChatSync : IAsyncDisposable
                     lock (_gate)
                     {
                         _server = (int)(sent.Body?.Long("count") ?? after + batch.Count);
+                        _stamp = sent.Body?.Str("stamp");
                         _pushed += batch.Count;
                         _problem = null;
                         _store.Sync(_conversation, _server, _pushed);
@@ -243,6 +266,7 @@ internal sealed class ChatSync : IAsyncDisposable
                             // Only this session's own, which Arena had though its answer was lost: carry on after them.
                             _pushed = Math.Max(_pushed, Math.Min(theirs.Max(m => Own(m.Str("ref"))!.Value) + 1, _local.Count));
                             _server = (int)(sent.Body?.Long("count") ?? after + theirs.Count);
+                            _stamp = null;
                             _store.Sync(_conversation, _server, _pushed);
                             continue;
                         }
@@ -306,13 +330,9 @@ internal sealed class ChatSync : IAsyncDisposable
     /// </summary>
     public async Task<IReadOnlyList<JsonObject>> TakeInAsync(CancellationToken ct)
     {
-        string? conversation;
-        int after;
         lock (_gate)
         {
-            conversation = _conversation;
-            after = _server;
-            if (conversation is null || _unlinked)
+            if (_conversation is null || _unlinked)
             {
                 return [];
             }
@@ -326,11 +346,26 @@ internal sealed class ChatSync : IAsyncDisposable
         }
         try
         {
+            string? conversation;
+            int after;
+            string? stamp;
+            // Read where this end stands only now, past any send or take-in that was under way: what they took is not read twice.
+            lock (_gate)
+            {
+                conversation = _conversation;
+                after = _server;
+                // Known to have news: read all of it.
+                stamp = _behind ? null : _stamp;
+                if (conversation is null || _unlinked)
+                {
+                    return [];
+                }
+            }
             (HttpStatusCode Status, JsonObject? Body) read;
             try
             {
                 // A turn's start waits a few seconds at most: what the web added comes in at the next turn otherwise.
-                read = await SendAsync(HttpMethod.Get, $"/api/code-arena/chats/{conversation}?after={after}", null, ct, TakeInLimit);
+                read = await SendAsync(HttpMethod.Get, ReadPath(conversation, after, stamp), null, ct, TakeInLimit);
             }
             catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException or System.Text.Json.JsonException && !ct.IsCancellationRequested)
             {
@@ -354,6 +389,110 @@ internal sealed class ChatSync : IAsyncDisposable
         }
     }
 
+    /// <summary>The web chat's messages after <paramref name="after"/>; with a stamp, only "unchanged" when nothing moved since it.</summary>
+    private static string ReadPath(string conversation, int after, string? stamp) =>
+        $"/api/code-arena/chats/{conversation}?after={after}" + (stamp is null ? "" : $"&stamp={Uri.EscapeDataString(stamp)}");
+
+    /// <summary>Asks the web chat every <see cref="WatchEvery"/> whether it has news, while someone listens, and tells them.</summary>
+    private async Task WatchAsync()
+    {
+        while (!_stop.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(WatchEvery, _stop.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            if (OnNews is null)
+            {
+                continue;
+            }
+            bool news;
+            try
+            {
+                news = await LookAsync(_stop.Token);
+            }
+            catch (OperationCanceledException) when (_stop.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+            {
+                // Arena out of reach: asked again in a while (the sends say so when they fail).
+                continue;
+            }
+            if (news)
+            {
+                OnNews?.Invoke();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether the web chat has messages this end has not taken in: asked of Arena without taking them in (that is the
+    /// listener's to do, between turns). False while this end is busy with Arena (a send, a take-in): asked next time.
+    /// </summary>
+    internal async Task<bool> LookAsync(CancellationToken ct)
+    {
+        if (!await _busy.WaitAsync(0, ct))
+        {
+            return false;
+        }
+        try
+        {
+            string conversation;
+            int after;
+            string? stamp;
+            lock (_gate)
+            {
+                if (_conversation is null || _unlinked)
+                {
+                    return false;
+                }
+                conversation = _conversation;
+                after = _server;
+                // Known to have news: asked only whether it can be read now (not while the web chat answers).
+                stamp = _behind ? null : _stamp;
+            }
+            var read = await SendAsync(HttpMethod.Get, ReadPath(conversation, after, stamp), null, ct, TakeInLimit);
+            if (read.Status == HttpStatusCode.NotFound && read.Body?.Str("status") == "gone")
+            {
+                Refused(read);
+                return false;
+            }
+            // Answering on the web (its messages come when it ends), or refused: asked again next time.
+            if (read.Status != HttpStatusCode.OK || read.Body?.Bool("unchanged") == true)
+            {
+                return false;
+            }
+            var count = (int)(read.Body?.Long("count") ?? after);
+            var messages = (read.Body?["messages"] as JsonArray ?? []).Count;
+            lock (_gate)
+            {
+                if (_conversation != conversation || _server != after)
+                {
+                    return false;
+                }
+                if (count == after && messages == 0 && !_behind)
+                {
+                    // Nothing new as of this branch: the next asks need not read the chat while it stays so.
+                    _stamp = read.Body?.Str("stamp");
+                    return false;
+                }
+                // Sends wait for it to be taken in (Arena would refuse them as behind).
+                _behind = true;
+                return true;
+            }
+        }
+        finally
+        {
+            _busy.Release();
+        }
+    }
+
     /// <summary>What a read of the web chat brought: written into the session, the model's own messages known and left out.</summary>
     private List<JsonObject> Take((HttpStatusCode Status, JsonObject? Body) read, int after)
     {
@@ -361,12 +500,31 @@ internal sealed class ChatSync : IAsyncDisposable
             {
                 if (read.Status == HttpStatusCode.Conflict)
                 {
-                    _notice(false, "The web chat is answering: what it adds comes in at the next turn.");
+                    bool fresh;
+                    lock (_gate)
+                    {
+                        fresh = !_answeringSaid;
+                        _answeringSaid = true;
+                    }
+                    if (fresh)
+                    {
+                        _notice(false, "The web chat is answering: what it adds comes in when the answer ends.");
+                    }
                 }
                 else
                 {
                     Refused(read);
                 }
+                return [];
+            }
+            if (read.Body?.Bool("unchanged") == true)
+            {
+                lock (_gate)
+                {
+                    _behind = false;
+                    _answeringSaid = false;
+                }
+                Wake();
                 return [];
             }
             var taken = new List<JsonObject>();
@@ -398,7 +556,9 @@ internal sealed class ChatSync : IAsyncDisposable
                     throw;
                 }
                 _server = (int)(read.Body?.Long("count") ?? after + done);
+                _stamp = read.Body?.Str("stamp");
                 _behind = false;
+                _answeringSaid = false;
                 _store.Sync(_conversation, _server, _pushed);
             }
         Wake();
@@ -422,38 +582,104 @@ internal sealed class ChatSync : IAsyncDisposable
     private int? Own(string? reference) =>
         reference is { } r && r.StartsWith(_store.Id + ":", StringComparison.Ordinal) && int.TryParse(r.AsSpan(_store.Id.Length + 1), out var index) ? index : null;
 
-    /// <summary>The person's recent chats in Arena, newest first, to continue one here.</summary>
-    public static async Task<List<WebChat>> ListAsync(Config config, HttpClient http, CancellationToken ct)
+    /// <summary>How many chats in Arena are listed at most (/web all, the IDE): the newest.</summary>
+    public const int MostListed = 5000;
+
+    /// <summary>
+    /// The person's chats in Arena, newest first, to continue one here: the newest <paramref name="most"/>, read a page
+    /// of 200 at a time.
+    /// </summary>
+    public static async Task<List<WebChat>> ListAsync(Config config, HttpClient http, CancellationToken ct, int most = 30)
     {
-        using var req = Request(HttpMethod.Get, config.Url!.TrimEnd('/') + "/api/code-arena/chats?limit=30", config.ApiKey!, null);
-        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        limit.CancelAfter(RequestLimit);
-        using var res = await http.SendAsync(req, limit.Token);
-        var body = Json.ParseObject(await res.Content.ReadAsStringAsync(limit.Token));
-        if (!res.IsSuccessStatusCode)
+        var chats = new List<WebChat>();
+        string? before = null;
+        while (chats.Count < most)
         {
-            throw new HttpRequestException(body?.Str("error") ?? $"Arena answered HTTP {(int)res.StatusCode}");
+            var url = config.Url!.TrimEnd('/') + $"/api/code-arena/chats?limit={Math.Min(200, most - chats.Count)}" + (before is null ? "" : $"&before={Uri.EscapeDataString(before)}");
+            using var req = Request(HttpMethod.Get, url, config.ApiKey!, null);
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            limit.CancelAfter(RequestLimit);
+            using var res = await http.SendAsync(req, limit.Token);
+            var body = Json.ParseObject(await res.Content.ReadAsStringAsync(limit.Token));
+            if (!res.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException(body?.Str("error") ?? $"Arena answered HTTP {(int)res.StatusCode}");
+            }
+            var page = (body?["chats"] as JsonArray ?? []).OfType<JsonObject>().ToList();
+            chats.AddRange(page.Select(c => new WebChat(
+                c.Str("id") ?? "", c.Str("title") ?? "", c.Str("origin"), c.Str("originPlace"),
+                DateTimeOffset.TryParse(c.Str("updatedAt"), out var at) ? at : DateTimeOffset.MinValue, (int)(c.Long("messages") ?? 0))));
+            // The next page: those changed before the last one listed (exactly as Arena wrote its time).
+            if (body?.Bool("more") != true || page.Count == 0 || page[^1].Str("updatedAt") is not { } last)
+            {
+                break;
+            }
+            before = last;
         }
-        return [.. (body?["chats"] as JsonArray ?? []).OfType<JsonObject>().Select(c => new WebChat(
-            c.Str("id") ?? "", c.Str("title") ?? "", c.Str("origin"), c.Str("originPlace"),
-            DateTimeOffset.TryParse(c.Str("updatedAt"), out var at) ? at : DateTimeOffset.MinValue, (int)(c.Long("messages") ?? 0)))];
+        return chats;
     }
 
-    /// <summary>Waits a little for what is still being sent (the session is closing).</summary>
-    public async Task FlushAsync(TimeSpan most)
+    /// <summary>Arena has every message of this session (it was sent, or there was none to send).</summary>
+    public bool InStep
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return !_unlinked && _conversation is not null && _pushed >= _local.Count;
+            }
+        }
+    }
+
+    /// <summary>What stopped the sends (Arena out of reach, a refusal); null: nothing.</summary>
+    public string? Trouble
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _problem;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Waits a little for what is still being sent (the session is closing): not past a problem, unless
+    /// <paramref name="patient"/> (/sync all), when the sends are tried again until <paramref name="most"/> is up.
+    /// </summary>
+    public async Task FlushAsync(TimeSpan most, bool patient = false)
     {
         var until = DateTime.UtcNow + most;
         while (DateTime.UtcNow < until)
         {
             lock (_gate)
             {
-                if (_unlinked || _behind || _pushed >= _local.Count || _problem is not null)
+                if (_unlinked || _behind || _pushed >= _local.Count || (_problem is not null && !patient))
                 {
                     return;
                 }
             }
             await Task.Delay(100);
         }
+    }
+
+    /// <summary>
+    /// Whether Arena has this chat of the person's (before a session is made for it): false when it has not (deleted,
+    /// someone else's, a mistyped id). Throws when Arena cannot say.
+    /// </summary>
+    public static async Task<bool> ExistsAsync(Config config, HttpClient http, string conversation, CancellationToken ct)
+    {
+        using var req = Request(HttpMethod.Get, config.Url!.TrimEnd('/') + $"/api/code-arena/chats/{Uri.EscapeDataString(conversation)}?after={int.MaxValue}", config.ApiKey!, null);
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        limit.CancelAfter(RequestLimit);
+        using var res = await http.SendAsync(req, limit.Token);
+        var body = Json.ParseObject(await res.Content.ReadAsStringAsync(limit.Token));
+        return res.StatusCode switch
+        {
+            HttpStatusCode.OK or HttpStatusCode.Conflict => true,
+            HttpStatusCode.NotFound when body?.Str("status") == "gone" => false,
+            _ => throw new HttpRequestException(body?.Str("error") ?? $"Arena answered HTTP {(int)res.StatusCode}"),
+        };
     }
 
     public async ValueTask DisposeAsync()
@@ -463,7 +689,7 @@ internal sealed class ChatSync : IAsyncDisposable
         await _stop.CancelAsync();
         try
         {
-            await _loop;
+            await Task.WhenAll(_loop, _watch);
         }
         catch (OperationCanceledException)
         {

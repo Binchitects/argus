@@ -525,6 +525,58 @@ describe('chat', () => {
     expect(calls.some((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/stop')).toBe(true)
   })
 
+  it('a chat changed elsewhere (another tab, or Code Arena keeping its session in step) is read again within seconds', async () => {
+    const question = msg('q1', null, 'user', { content: 'Fix the parser' })
+    const answer = msg('a1', 'q1', 'assistant', { content: 'Fixed it.' })
+    let stamp = 'one'
+    const calls = backend({
+      extra: {
+        'GET /api/chat/conversations/c1': () => ({
+          json: conversation({ origin: 'code-arena', messages: stamp === 'one' ? [question] : [question, answer], currentLeafId: stamp === 'one' ? 'q1' : 'a1' }),
+        }),
+        'GET /api/chat/conversations/c1/stamp': () => ({ json: { stamp, answering: false } }),
+      },
+    })
+    renderApp('/chat/c1')
+    expect(await screen.findByText('Fix the parser')).toBeInTheDocument()
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/chat/conversations/c1/stamp')).toBe(true))
+    stamp = 'two'
+    expect(await screen.findByText('Fixed it.', {}, { timeout: 8000 })).toBeInTheDocument()
+  }, 15_000)
+
+  it('an answer started in another tab, after one asked here, is watched as it is written', async () => {
+    const q2 = msg('q2', 'a1', 'user', { content: 'asked in the other tab' })
+    let phase: 'new' | 'asked' | 'elsewhere' = 'new'
+    backend({
+      start: conversation({ messages: [], currentLeafId: null }),
+      extra: {
+        'POST /api/chat/conversations/c1/messages': () => {
+          phase = 'asked'
+          return { events: answer }
+        },
+        'GET /api/chat/conversations/c1': () => ({
+          json:
+            phase === 'new'
+              ? conversation()
+              : phase === 'asked'
+                ? conversation({ messages: answered, currentLeafId: 'a1' })
+                : conversation({ messages: [...answered, q2], currentLeafId: 'q2', answering: true }),
+        }),
+        'GET /api/chat/conversations/c1/stamp': () => ({ json: { stamp: phase, answering: phase === 'elsewhere' } }),
+        'GET /api/chat/conversations/c1/stream': () =>
+          phase === 'elsewhere'
+            ? { events: [{ type: 'question', id: 'q2', parentId: 'a1' }, { type: 'assistant', id: 'a2', parentId: 'q2', model: 'Main-Model' }, { type: 'content', text: 'written for the other tab' }], hang: true }
+            : { status: 204 },
+      },
+    })
+    renderApp('/chat/c1')
+    await ask('hello there')
+    expect(await screen.findByText(/Here is code/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument())
+    phase = 'elsewhere'
+    expect(await screen.findByText('written for the other tab', {}, { timeout: 8000 })).toBeInTheDocument()
+  }, 15_000)
+
   it('/compact summarizes the chat; the page marks where, and shows the summary on demand', async () => {
     const summary = 'The person said hello; the assistant wrote hello.py.'
     let compacted = false

@@ -527,6 +527,27 @@ public sealed class FakeChats
         public string? Place { get; init; }
         public string Title { get; set; } = "New chat";
         public List<JsonObject> Messages { get; } = [];
+        /// <summary>When it last changed: the list is newest first, a page at a time before a time.</summary>
+        public DateTimeOffset Updated { get; set; } = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>Reads of a chat that brought its messages, and those answered only "unchanged" (asked with its stamp).</summary>
+    public int FullReads { get; private set; }
+    public int UnchangedReads { get; private set; }
+
+    /// <summary>The branch as one word, as Arena gives it: here its length (messages are only ever added).</summary>
+    private static string Stamp(Chat c) => $"n{c.Messages.Count}";
+
+    private int _made;
+
+    /// <summary>Adds to a chat as the web does, while Code Arena may be reading it.</summary>
+    public void Append(Chat chat, params JsonObject[] messages)
+    {
+        lock (_gate)
+        {
+            chat.Messages.AddRange(messages);
+            chat.Updated = DateTimeOffset.UtcNow;
+        }
     }
 
     public List<Chat> All { get; } = [];
@@ -537,13 +558,14 @@ public sealed class FakeChats
 
     public Chat Add(string title, params JsonObject[] messages)
     {
-        var chat = new Chat { Id = Guid.NewGuid().ToString(), Title = title };
-        chat.Messages.AddRange(messages);
         lock (_gate)
         {
+            // Each a moment after the one before: the newest is the last added.
+            var chat = new Chat { Id = Guid.NewGuid().ToString(), Title = title, Updated = DateTimeOffset.UtcNow.AddTicks(++_made * 10) };
+            chat.Messages.AddRange(messages);
             All.Add(chat);
+            return chat;
         }
-        return chat;
     }
 
     public Chat? Find(string id)
@@ -569,18 +591,25 @@ public sealed class FakeChats
         {
             if (parts is ["chats"] && method == "GET")
             {
-                reply = new JsonObject { ["chats"] = new JsonArray([.. All.AsEnumerable().Reverse().Select(c => (JsonNode)new JsonObject
+                var limit = int.TryParse(ctx.Request.QueryString["limit"], out var l) ? Math.Clamp(l, 1, 200) : 30;
+                var before = DateTimeOffset.TryParse(ctx.Request.QueryString["before"], out var b) ? b : (DateTimeOffset?)null;
+                var page = All.OrderByDescending(c => c.Updated).Where(c => before is null || c.Updated < before).Take(limit + 1).ToList();
+                reply = new JsonObject
                 {
-                    ["id"] = c.Id, ["title"] = c.Title, ["origin"] = c.Ref is null ? null : "code-arena", ["originPlace"] = c.Place,
-                    ["updatedAt"] = DateTimeOffset.UtcNow.ToString("o"), ["messages"] = c.Messages.Count,
-                })]) };
+                    ["chats"] = new JsonArray([.. page.Take(limit).Select(c => (JsonNode)new JsonObject
+                    {
+                        ["id"] = c.Id, ["title"] = c.Title, ["origin"] = c.Ref is null ? null : "code-arena", ["originPlace"] = c.Place,
+                        ["updatedAt"] = c.Updated.ToString("o"), ["messages"] = c.Messages.Count,
+                    })]),
+                    ["more"] = page.Count > limit,
+                };
             }
             else if (parts is ["chats"] && method == "POST")
             {
                 var b = JsonNode.Parse(body)!.AsObject();
                 var reference = b["ref"]?.GetValue<string>();
                 var known = All.FirstOrDefault(c => c.Ref is not null && c.Ref == reference);
-                var chat = known ?? new Chat { Id = Guid.NewGuid().ToString(), Ref = reference, Place = b["place"]?.GetValue<string>() };
+                var chat = known ?? new Chat { Id = Guid.NewGuid().ToString(), Ref = reference, Place = b["place"]?.GetValue<string>(), Updated = DateTimeOffset.UtcNow.AddTicks(++_made * 10) };
                 if (known is null)
                 {
                     All.Add(chat);
@@ -599,7 +628,16 @@ public sealed class FakeChats
             {
                 var c = All.First(x => x.Id == id3);
                 var after = int.TryParse(ctx.Request.QueryString["after"], out var a) ? a : 0;
-                reply = new JsonObject { ["id"] = c.Id, ["count"] = c.Messages.Count, ["messages"] = new JsonArray([.. c.Messages.Skip(after).Select(m => (JsonNode)m.DeepClone())]) };
+                if (ctx.Request.QueryString["stamp"] is { } stamp && stamp == Stamp(c))
+                {
+                    UnchangedReads++;
+                    reply = new JsonObject { ["unchanged"] = true, ["stamp"] = stamp };
+                }
+                else
+                {
+                    FullReads++;
+                    reply = new JsonObject { ["id"] = c.Id, ["count"] = c.Messages.Count, ["stamp"] = Stamp(c), ["messages"] = new JsonArray([.. c.Messages.Skip(after).Select(m => (JsonNode)m.DeepClone())]) };
+                }
             }
             else if (parts is ["chats", var id4, "messages"] && method == "POST")
             {
@@ -617,7 +655,8 @@ public sealed class FakeChats
                     {
                         c.Title = first["content"]!.ToString().Split('\n')[0];
                     }
-                    reply = new JsonObject { ["count"] = c.Messages.Count };
+                    c.Updated = DateTimeOffset.UtcNow;
+                    reply = new JsonObject { ["count"] = c.Messages.Count, ["stamp"] = Stamp(c) };
                 }
             }
             else

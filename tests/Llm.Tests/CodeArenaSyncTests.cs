@@ -115,4 +115,67 @@ public sealed class CodeArenaSyncTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.BadRequest,
             await CodeArena(f, key).PostAsJsonAsync($"/api/code-arena/chats/{id}/messages", new { after = 0, messages = new[] { new { role = "system", content = "x" } } }));
     }
+    [Fact]
+    public async Task A_stamp_says_unchanged_until_either_side_adds_and_the_list_comes_a_page_at_a_time()
+    {
+        await using var f = NewApp();
+        var (web, key) = await PersonAsync(f);
+        var arena = CodeArena(f, key);
+        var id = (await Json(await arena.PostAsJsonAsync("/api/code-arena/chats", new { @ref = "stamp-1", place = "/w" }))).GetProperty("id").GetGuid();
+        var sent = await Json(await arena.PostAsJsonAsync($"/api/code-arena/chats/{id}/messages", new
+        {
+            after = 0, messages = new object[] { new { role = "user", content = "Hello" }, new { role = "assistant", content = "Hi", model = "m" } },
+        }));
+        var stamp = sent.GetProperty("stamp").GetString()!;
+
+        // Code Arena asks while it waits: nothing moved, so the chat is not read.
+        var quiet = await Json(await arena.GetAsync($"/api/code-arena/chats/{id}?after=2&stamp={stamp}"));
+        Assert.True(quiet.GetProperty("unchanged").GetBoolean());
+        Assert.False(quiet.TryGetProperty("messages", out _));
+
+        // The web page asks too: its stamp is the same until something changes.
+        var page = (await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{id}/stamp"))).GetProperty("stamp").GetString();
+        Assert.Equal(page, (await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{id}/stamp"))).GetProperty("stamp").GetString());
+
+        // The person writes on the web: Code Arena's stamp is out of date, and the read brings the question and its answer.
+        Assert.Contains("\"done\"", await (await web.PostAsync($"/api/chat/conversations/{id}/messages", new { content = "From the web" })).Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        var news = await Json(await arena.GetAsync($"/api/code-arena/chats/{id}?after=2&stamp={stamp}"));
+        Assert.False(news.TryGetProperty("unchanged", out _));
+        Assert.Equal(4, news.GetProperty("count").GetInt32());
+        Assert.Equal("From the web", news.GetProperty("messages")[0].GetProperty("content").GetString());
+        Assert.NotEqual(stamp, news.GetProperty("stamp").GetString());
+        Assert.NotEqual(page, (await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{id}/stamp"))).GetProperty("stamp").GetString());
+
+        // A setting changed elsewhere (archived, here) changes it too: the page reads the chat again.
+        var settled = (await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{id}/stamp"))).GetProperty("stamp").GetString();
+        await StatusAssert.Is(HttpStatusCode.NoContent, await web.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{id}", UriKind.Relative), new { archived = true }));
+        Assert.NotEqual(settled, (await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{id}/stamp"))).GetProperty("stamp").GetString());
+        await StatusAssert.Is(HttpStatusCode.NoContent, await web.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{id}", UriKind.Relative), new { archived = false }));
+
+        // Someone else's chat has no stamp for them.
+        var (other, _) = await PersonAsync(f);
+        await StatusAssert.Is(HttpStatusCode.NotFound, await other.GetAsync($"/api/chat/conversations/{id}/stamp"));
+
+        // Every chat listed, a page at a time, newest first: each page goes on from the last one's time.
+        for (var i = 0; i < 4; i++)
+        {
+            await arena.PostAsJsonAsync("/api/code-arena/chats", new { @ref = $"page-{i}" });
+        }
+        var seen = new List<Guid>();
+        string? before = null;
+        while (true)
+        {
+            var listed = await Json(await arena.GetAsync("/api/code-arena/chats?limit=2" + (before is null ? "" : $"&before={Uri.EscapeDataString(before)}")));
+            var rows = listed.GetProperty("chats").EnumerateArray().ToList();
+            seen.AddRange(rows.Select(r => r.GetProperty("id").GetGuid()));
+            if (!listed.GetProperty("more").GetBoolean())
+            {
+                break;
+            }
+            before = rows[^1].GetProperty("updatedAt").GetString();
+        }
+        Assert.Equal(5, seen.Count);
+        Assert.Equal(5, seen.Distinct().Count());
+        Assert.Contains(id, seen);
+    }
 }

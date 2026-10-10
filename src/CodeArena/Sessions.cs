@@ -2,8 +2,17 @@ using System.Text.Json.Nodes;
 
 namespace CodeArena;
 
-/// <summary>A saved session as it is listed: which, where, when, and how it began.</summary>
-internal sealed record SessionSummary(string Id, string File, string? Cwd, DateTime Updated, string Preview, int Messages);
+/// <summary>
+/// A saved session as it is listed: which, where, when, how it began, the chat in Arena it is kept in step with (null:
+/// none), whether it ever was (false: it was never sent to Arena; true with no chat: its chat was deleted there), and
+/// how many of the messages it added itself Arena has of how many there are.
+/// </summary>
+internal sealed record SessionSummary(string Id, string File, string? Cwd, DateTime Updated, string Preview, int Messages, string? Conversation = null, bool Synced = false,
+    int Pushed = 0, int Local = 0)
+{
+    /// <summary>Arena lacks some of it: never sent, or sent in part (its chat not deleted there).</summary>
+    public bool Unsent => Local > 0 && (!Synced || (Conversation is not null && Pushed < Local));
+}
 
 /// <summary>A saved session read back: its messages (after the last compaction), model, to-do list and tokens.</summary>
 internal sealed class SessionData
@@ -170,6 +179,10 @@ internal sealed class SessionStore
         foreach (var file in new DirectoryInfo(dir).EnumerateFiles("*.jsonl").OrderByDescending(f => f.LastWriteTimeUtc))
         {
             string? sessionCwd = null;
+            string? conversation = null;
+            var synced = false;
+            var pushed = 0;
+            var local = 0;
             var preview = "";
             var messages = 0;
             foreach (var line in System.IO.File.ReadLines(file.FullName))
@@ -179,16 +192,26 @@ internal sealed class SessionStore
                 {
                     sessionCwd = entry.Str("cwd");
                 }
+                else if (entry.Str("type") == "sync")
+                {
+                    conversation = entry.Str("conversation");
+                    synced = true;
+                    pushed = (int)(entry.Long("pushed") ?? 0);
+                }
                 else if (entry.Str("type") == "message")
                 {
                     messages++;
+                    if (entry.Str("from") != "web")
+                    {
+                        local++;
+                    }
                     if (preview.Length == 0 && entry?["message"].Str("role") == "user")
                     {
                         preview = Fmt.OneLine(entry["message"].Str("content"), 70);
                     }
                 }
             }
-            if (cwd is not null && !string.Equals(sessionCwd, cwd, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            if (cwd is not null && (sessionCwd is null || !SameFolder(sessionCwd, cwd)))
             {
                 continue;
             }
@@ -196,13 +219,49 @@ internal sealed class SessionStore
             {
                 continue;
             }
-            found.Add(new SessionSummary(Path.GetFileNameWithoutExtension(file.Name), file.FullName, sessionCwd, file.LastWriteTime, preview, messages));
+            found.Add(new SessionSummary(Path.GetFileNameWithoutExtension(file.Name), file.FullName, sessionCwd, file.LastWriteTime, preview, messages, conversation, synced, pushed, local));
             if (found.Count >= max)
             {
                 break;
             }
         }
         return found;
+    }
+
+    private static bool SameFolder(string a, string b) =>
+        string.Equals(a, b, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+    /// <summary>
+    /// The session of this folder kept in step with a chat in Arena (the newest when several are), so the chat goes on in
+    /// it rather than in a new one each time; null: none.
+    /// </summary>
+    public static string? Linked(string dir, string conversation, string cwd)
+    {
+        if (!Directory.Exists(dir))
+        {
+            return null;
+        }
+        foreach (var file in new DirectoryInfo(dir).EnumerateFiles("*.jsonl").OrderByDescending(f => f.LastWriteTimeUtc))
+        {
+            string? linked = null;
+            string? sessionCwd = null;
+            foreach (var line in System.IO.File.ReadLines(file.FullName))
+            {
+                if (sessionCwd is null && line.Contains("\"session\"", StringComparison.Ordinal) && Json.ParseObject(line) is { } head && head.Str("type") == "session")
+                {
+                    sessionCwd = head.Str("cwd");
+                }
+                else if (line.Contains("\"sync\"", StringComparison.Ordinal) && Json.ParseObject(line) is { } entry && entry.Str("type") == "sync")
+                {
+                    linked = entry.Str("conversation");
+                }
+            }
+            if (string.Equals(linked, conversation, StringComparison.OrdinalIgnoreCase) && sessionCwd is not null && SameFolder(sessionCwd, cwd))
+            {
+                return file.FullName;
+            }
+        }
+        return null;
     }
 
     /// <summary>A session by its id, or the start of one.</summary>

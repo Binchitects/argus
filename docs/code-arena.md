@@ -166,8 +166,8 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/jobs [stop N]` | the commands run with no time limit, running or ended; `stop N` stops job N |
 | `/clear` | a new session (the last stays saved) |
 | `/resume [id]` | switch to a saved session |
-| `/web [N]` | your chats in Arena, newest first; `/web N` (or its id) continues one in a new session here |
-| `/sync` | where this session stands with its chat in Arena |
+| `/web [N\|all\|WORDS]` | your chats in Arena, newest first (the 30 newest; `all`: the 5,000 newest; `WORDS`: those of them with the words in their title or folder); `/web N` (a number in the list last shown, or a chat's id) continues one here |
+| `/sync [all]` | where this session stands with its chat in Arena; `all` sends what Arena lacks of this folder's sessions |
 | `/memory [add\|forget]` | what it remembers (below); `add TEXT` for this project, `add --all TEXT` for every project, `forget N` |
 | `/rewind [N] [code\|chat]` | the turns kept; `/rewind N` goes back to before turn N (below) |
 | `/search WORDS` | earlier sessions in this folder that said these words |
@@ -363,7 +363,11 @@ status (403 `outside` for a path outside the folder).
 
 | call | what it does |
 |---|---|
-| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it is in use), `compactAt` and `compactTarget` (percent); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output) |
+| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it is in use), `compactAt` and `compactTarget` (percent); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`) |
+| `GET /api/sessions` | this folder's sessions, newest first: `[{id, title, updatedAt, messages, chat}]` (`chat`: the chat in Arena it is kept with) |
+| `GET /api/sessions/web` | the person's chats in Arena (the 5,000 newest): `[{id, title, origin, place, updatedAt, messages, session}]` (`session`: this folder's session kept with it); 409 `off` without the sync, 503 `arena` when Arena cannot say |
+| `POST /api/sessions/web` `{id}` | continues that chat here (in the session kept with it, else a new one with its messages); the session; 404 `gone` when Arena has no such chat of the person's, 409 `busy` while an answer is written, 503 `arena` when Arena cannot say |
+| `POST /api/sessions/send-all` | sends Arena what it lacks of this folder's sessions: `{sent, failed}` (`failed`: why, per session) |
 | `POST /api/servers/retry` `{name}` | tries that MCP server again now (every one not connected without `name`); the state |
 | `POST /api/jobs/stop` `{id}` | stops a command run with no time limit; 404 for no such job |
 | `POST /api/queue` `{text}` | a message for after the answer being written (runs at once when none is); 202 `{queued}` (its place). `/api/messages` while an answer is written is 409 `busy` |
@@ -713,11 +717,26 @@ Each session is a chat in Arena too, kept in step both ways with your API key:
 in the chat list it has a terminal mark, and its page says it is a Code Arena
 session and which folder it runs in. It can be continued on the web, where the
 chat's own tools answer (the files and commands stay on the machine Code Arena
-runs on); what was added there comes into the session at its next turn here,
-before the question, so the model hears it (a turn waits a few seconds at most
-for Arena to say: when it is slow, the web's news comes in at the turn after). `/web` lists your chats in Arena
-and `/web N` (or `code-arena chat --web N`) continues one here in a new
-session: its messages come in, and what this session adds goes back to it.
+runs on). What was added there comes into the session within seconds while the
+session waits (the terminal's prompt says so above what is being typed; the
+IDE's thread shows it), and otherwise at its next turn here, before the
+question, so the model hears it (a turn waits a few seconds at most for Arena
+to say: when it is slow, the web's news comes in at the turn after; while the
+web chat is answering, its messages come when the answer ends). The terminal
+and the IDE ask Arena every 5 seconds with the chat's stamp (its last message):
+a chat that did not change is not read again. What a session adds
+shows on the web page of its chat within seconds too, and new chats come into
+the web's list within half a minute.
+
+`/web` lists your 30 newest chats in Arena, `/web all` the 5,000 newest (read
+200 at a time) and `/web WORDS` those of them with the words in their title or
+folder; `/web N` (a number in the list last shown, or `code-arena chat --web
+N`, or a chat's id) continues one here: in this folder's session already kept
+with it, with what was added since, else in a new session with its messages.
+An id Arena has no chat of yours for is said so, and the session stays as it
+is. What this session adds goes back to it. In the IDE, the
+side bar's **Chats in Arena** lists them (with a box to find one), below this
+folder's sessions; a session kept with a chat has a cloud mark.
 
 Messages are sent in the background as they are added, in order, and again
 until Arena has them: a session goes on while Arena is out of reach, and what
@@ -725,7 +744,12 @@ it missed is sent when Arena answers (at the latest when the session is next
 opened). Each message carries its place in the session, so one sent twice
 (its answer lost) is never kept twice. A chat deleted in Arena ends the sync
 for that session, which goes on here. `/sync` says where the session stands.
-`"syncChats": false` in `config.json` keeps sessions on this machine only.
+`"syncChats": false` in `config.json` keeps sessions on this machine only;
+`/sync all` (the IDE's **Send the other sessions here**) later sends Arena what
+it lacks of this folder's sessions (those it never had, and those sent in
+part), the oldest first, each keeping its place in the list here; one whose
+chat was deleted there stays as it is. When Arena cannot be reached it stops,
+and says how many are left for the next `/sync all`.
 
 ## Its commits
 

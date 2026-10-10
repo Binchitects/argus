@@ -18,6 +18,8 @@ internal sealed class Repl(Runtime rt)
     private string _ahead = "";
     // The running turn's token: a question waiting for its answer ends when the turn is stopped.
     private CancellationToken? _turnStop;
+    // Free only while the prompt waits for the person: the web chat's news is taken in then, and never into a turn or a command.
+    private readonly SemaphoreSlim _atPrompt = new(0, 1);
 
     private Ui Ui => rt.Ui;
 
@@ -37,14 +39,14 @@ internal sealed class Repl(Runtime rt)
         ("/jobs [stop N]", "the commands run with no time limit or in the background; stop N stops job N"),
         ("/clear", "start a new session (this one stays saved)"),
         ("/resume [id]", "switch to a saved session"),
-        ("/web [N]", "your chats in Arena; /web N continues one here (what is added goes back to it)"),
+        ("/web [N|all|WORDS]", "your chats in Arena (all, or those with WORDS in the title); /web N continues one here, kept in step both ways"),
         ("/memory [add|forget]", "what it remembers; add TEXT (this project), add --all TEXT (every project), forget N"),
         ("/rewind [N] [code|chat]", "the turns kept; /rewind N goes back to before turn N (its files and the conversation)"),
         ("/search WORDS", "earlier sessions in this folder that said these words"),
         ("/permissions [allow|deny|remove RULE]", "kept rules, e.g. run_shell(npm test*), edit_file, read_file(.env*)"),
         ("/sandbox", "what commands in the sandbox may do"),
         ("/commands", "your own and the project's commands, sub-agents and skills"),
-        ("/sync", "where this session stands with its chat in Arena"),
+        ("/sync [all]", "where this session stands with its chat in Arena; all sends this folder's sessions Arena never had"),
         ("/exit", "leave (also Ctrl+D, or Ctrl+C twice)"),
     ];
 
@@ -68,6 +70,8 @@ internal sealed class Repl(Runtime rt)
             _typed.Enqueue(text);
             Ui.Info($"Not an answer, so a no: \"{Fmt.OneLine(text, 60)}\" is kept as your next message.");
         };
+        // What the person adds in the web chat while the prompt waits comes in at once, said above it.
+        rt.WebNews = () => _ = TakeInWhileWaitingAsync(ct);
         var pending = first;
         while (!ct.IsCancellationRequested)
         {
@@ -83,12 +87,15 @@ internal sealed class Repl(Runtime rt)
             {
                 // What the servers say while the person types waits for the line: it would break into what they write.
                 rt.AtPrompt = true;
+                _atPrompt.Release();
                 try
                 {
                     input = ReadInput();
                 }
                 finally
                 {
+                    // The web chat's news being taken in ends first: the line goes after it.
+                    await _atPrompt.WaitAsync(CancellationToken.None);
                     rt.AtPrompt = false;
                 }
                 rt.SayLater();
@@ -152,6 +159,30 @@ internal sealed class Repl(Runtime rt)
         }
         Ui.Info($"Saved as {rt.Session.Id}: code-arena chat --resume {rt.Session.Id}");
         return 0;
+    }
+
+    /// <summary>The web chat's news, taken in while the prompt waits (not while a turn or a command runs: it comes then at the next turn).</summary>
+    private async Task TakeInWhileWaitingAsync(CancellationToken ct)
+    {
+        if (!await _atPrompt.WaitAsync(0, CancellationToken.None))
+        {
+            return;
+        }
+        try
+        {
+            if (rt.Sync is { } sync && !ct.IsCancellationRequested)
+            {
+                rt.Agent.TakeIn(await sync.TakeInAsync(ct), text => Ui.Background(Ui.Dim(text)));
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Leaving.
+        }
+        finally
+        {
+            _atPrompt.Release();
+        }
     }
 
     private void Banner()
@@ -640,6 +671,26 @@ internal sealed class Repl(Runtime rt)
                 break;
             case "/commands":
                 ExtensionsCommand();
+                break;
+            case "/sync" when arg.Equals("all", StringComparison.OrdinalIgnoreCase):
+                Ui.StartSpinner("Sending this folder's sessions to Arena");
+                List<string> failed;
+                int sent;
+                try
+                {
+                    (sent, failed) = await rt.SendAllAsync(null, ct);
+                }
+                finally
+                {
+                    Ui.StopSpinner();
+                }
+                Ui.Line(sent == 0 && failed.Count == 0
+                    ? "Arena has every session of this folder already."
+                    : $"Sent to Arena: {sent} session{(sent == 1 ? "" : "s")}.");
+                foreach (var why in failed)
+                {
+                    Ui.Warn(why);
+                }
                 break;
             case "/sync":
                 Ui.Line(rt.Sync?.Describe() ?? "Sessions are not kept with Arena here (\"syncChats\": false in config.json, or no Arena address).");

@@ -132,6 +132,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         rt.Jobs.Started += app.JobStarted;
         rt.Jobs.Output += app.JobOutput;
         rt.Jobs.Ended += app.JobEnded;
+        rt.WebNews = app.WebNews;
         app._server.OnError = e => rt.Ui.Error($"The web interface: {e.Message}");
         app._server.Start(app.HandleAsync);
         return app;
@@ -403,6 +404,16 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             case ("POST", "/api/sessions/new"):
                 await SwitchAsync(res, null, ct);
                 return;
+            case ("GET", "/api/sessions/web"):
+                await WebChatsAsync(res, ct);
+                return;
+            case ("POST", "/api/sessions/web"):
+                await OpenWebChatAsync(req.Json()?.Str("id") ?? "", res, ct);
+                return;
+            case ("POST", "/api/sessions/send-all"):
+                var (sent, failed) = await _rt.SendAllAsync(null, ct);
+                await res.JsonAsync(200, new JsonObject { ["sent"] = sent, ["failed"] = new JsonArray([.. failed.Select(f => (JsonNode)f)]) }, ct);
+                return;
             case ("POST", "/api/sessions/resume"):
                 var id = req.Json()?.Str("id") ?? "";
                 if (!SessionId().IsMatch(id) || SessionStore.Find(_rt.Env.Paths.SessionsDir, id) is not { } file)
@@ -474,9 +485,14 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["mode"] = _rt.Permissions.Mode.Name(),
             ["modes"] = new JsonArray([.. Modes.Names.Select(n => (JsonNode)new JsonObject { ["name"] = n, ["description"] = Modes.Parse(n)!.Value.Describe() })]),
             ["session"] = _rt.Session.Id,
-            ["busy"] = Current() is not null,
+            ["busy"] = Busy(),
             // Which answer runs, or ran last: the page attaches to each new one.
             ["turn"] = Volatile.Read(ref _turns),
+            // How many times the web chat's news came in while nothing ran: the page reads the session again when it changes.
+            ["synced"] = Volatile.Read(ref _synced),
+            // Whether sessions are kept with chats in Arena here (the side bar lists them), and this one's chat (null: none yet).
+            ["arenaChats"] = _rt.Config.SyncChats && _rt.Config.Url is { Length: > 0 },
+            ["chat"] = _rt.Sync?.Conversation,
             ["queued"] = new JsonArray([.. Queued().Select(q => (JsonNode)q)]),
             ["arenaTools"] = _rt.ArenaConnected,
             ["tools"] = new JsonObject
@@ -514,14 +530,182 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         ["imageTypes"] = new JsonArray(),
     };
 
-    /// <summary>This folder's saved sessions, newest first.</summary>
+    /// <summary>This folder's saved sessions, newest first, each with the chat in Arena it is kept in step with.</summary>
     private JsonArray Sessions() => new([.. SessionStore.List(_rt.Env.Paths.SessionsDir, _rt.Workspace.Root, 200).Select(s => (JsonNode)new JsonObject
     {
         ["id"] = s.Id,
         ["title"] = s.Preview.Length > 0 ? s.Preview : "(no question)",
         ["updatedAt"] = new DateTimeOffset(s.Updated).ToString("o"),
         ["messages"] = s.Messages,
+        ["chat"] = s.Conversation,
     })]);
+
+    /// <summary>
+    /// The person's chats in Arena (the newest <see cref="ChatSync.MostListed"/>), to continue one here: each with the
+    /// session of this folder kept in step with it, if one is.
+    /// </summary>
+    private async Task WebChatsAsync(HttpResponse res, CancellationToken ct)
+    {
+        if (!_rt.Config.SyncChats || _rt.Config.Url is not { Length: > 0 } || _rt.Config.ApiKey is not { Length: > 0 })
+        {
+            await res.ErrorAsync(409, "off", "Chats are not kept with Arena here (\"syncChats\": false in config.json, or no Arena address or key).", ct);
+            return;
+        }
+        List<WebChat> chats;
+        try
+        {
+            chats = await ChatSync.ListAsync(_rt.Config, _rt.Http, ct, ChatSync.MostListed);
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            await res.ErrorAsync(503, "arena", $"Arena's chats cannot be read now: {Fmt.OneLine(e.Message, 200)}", ct);
+            return;
+        }
+        var here = SessionStore.List(_rt.Env.Paths.SessionsDir, _rt.Workspace.Root, 1000).Where(s => s.Conversation is not null)
+            .GroupBy(s => s.Conversation!, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+        await res.JsonAsync(200, new JsonArray([.. chats.Select(c => (JsonNode)new JsonObject
+        {
+            ["id"] = c.Id,
+            ["title"] = c.Title,
+            ["origin"] = c.Origin,
+            ["place"] = c.Place,
+            ["updatedAt"] = c.Updated.ToString("o"),
+            ["messages"] = c.Messages,
+            ["session"] = here.TryGetValue(c.Id, out var session) ? session : null,
+        })]), ct);
+    }
+
+    /// <summary>A chat in Arena, here (<see cref="Runtime.OpenWebChatAsync"/>): not while a turn runs.</summary>
+    private async Task OpenWebChatAsync(string id, HttpResponse res, CancellationToken ct)
+    {
+        if (!Guid.TryParse(id, out _))
+        {
+            await res.ErrorAsync(400, "invalid", "That is not a chat's id.", ct);
+            return;
+        }
+        if (!_rt.Config.SyncChats || _rt.Config.Url is not { Length: > 0 })
+        {
+            await res.ErrorAsync(409, "off", "Chats are not kept with Arena here (\"syncChats\": false in config.json, or no Arena address).", ct);
+            return;
+        }
+        await SettleAsync(ct);
+        Job? job;
+        lock (_gate)
+        {
+            job = _job is null && !_closing ? _job = new Job(SyncKind) : null;
+        }
+        if (job is null)
+        {
+            await res.ErrorAsync(409, "busy", "Stop the answer first, or wait for it.", ct);
+            return;
+        }
+        // Inside the job: a message, a switch or a compaction asked meanwhile waits for it (SettleAsync).
+        string? refused = null;
+        string? trouble = null;
+        job.Running = Task.Run(async () =>
+        {
+            try
+            {
+                refused = await _rt.OpenWebChatAsync(id, job.Stop.Token);
+                if (refused is null)
+                {
+                    Interlocked.Increment(ref _synced);
+                }
+            }
+            catch (OperationCanceledException) when (job.Stop.IsCancellationRequested)
+            {
+                // Stopped: the session switched to is open, without the web's news (it comes at the next turn).
+            }
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
+            {
+                trouble = $"Arena cannot say now whether it has that chat: {Fmt.OneLine(e.Message, 200)}";
+            }
+            finally
+            {
+                End(job, new JsonObject { ["type"] = "done", ["id"] = null });
+                StartNext();
+            }
+        });
+        await job.Running;
+        if (refused is not null)
+        {
+            await res.ErrorAsync(404, "gone", refused, ct);
+            return;
+        }
+        if (trouble is not null)
+        {
+            await res.ErrorAsync(503, "arena", trouble, ct);
+            return;
+        }
+        await res.JsonAsync(200, SessionJson(), ct);
+    }
+
+    /// <summary>A job that only takes in the web chat's news (or opens a chat from it): the page does not show it as busy.</summary>
+    private const string SyncKind = "sync";
+
+    /// <summary>How many times the web chat's news came in while nothing ran (the state's <c>synced</c>).</summary>
+    private int _synced;
+
+    /// <summary>An answer or a compaction runs (taking in the web chat's news does not count: it is over in a moment).</summary>
+    private bool Busy() => Current() is { Kind: not SyncKind };
+
+    /// <summary>
+    /// The web chat has news (<see cref="Runtime.WebNews"/>): taken in now when nothing runs, as a short job of its own so
+    /// no turn starts meanwhile; else at the next turn's start. The page reads the session again (the state's <c>synced</c>).
+    /// </summary>
+    private void WebNews()
+    {
+        Job job;
+        lock (_gate)
+        {
+            if (_job is not null || _closing || _rt.Sync is null)
+            {
+                return;
+            }
+            job = _job = new Job(SyncKind);
+        }
+        job.Running = Task.Run(async () =>
+        {
+            try
+            {
+                if (_rt.Sync is { } sync)
+                {
+                    var taken = await sync.TakeInAsync(job.Stop.Token);
+                    _rt.Agent.TakeIn(taken);
+                    if (taken.Count > 0)
+                    {
+                        Interlocked.Increment(ref _synced);
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (job.Stop.IsCancellationRequested)
+            {
+                // Stopped: it comes at the next turn.
+            }
+            catch (Exception e)
+            {
+                _rt.Ui.Error($"Taking in the web chat's news failed: {e.Message}");
+            }
+            finally
+            {
+                End(job, new JsonObject { ["type"] = "done", ["id"] = null });
+                // A message sent meanwhile (queued: this ran) goes now.
+                StartNext();
+            }
+        });
+    }
+
+    /// <summary>Waits for the web chat's news being taken in (a moment), so what comes next finds nothing running.</summary>
+    private async Task SettleAsync(CancellationToken ct)
+    {
+        // Asked again while it runs: its task is set a moment after the job is.
+        var until = DateTime.UtcNow + ChatSync.RequestLimit;
+        while (Current() is { Kind: SyncKind } sync && DateTime.UtcNow < until)
+        {
+            await Task.WhenAny(sync.Running, Task.Delay(50, ct));
+            ct.ThrowIfCancellationRequested();
+        }
+    }
 
     /// <summary>
     /// What was sent in this folder, newest first, the terminal's and the page's alike, without the commands only
@@ -550,7 +734,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["id"] = _rt.Session.Id,
             ["messages"] = History.Messages(data),
             ["diffs"] = diffs,
-            ["busy"] = Current() is not null,
+            ["busy"] = Busy(),
             // Which answer runs, or ran last: the page attaches to each new one.
             ["turn"] = Volatile.Read(ref _turns),
             ["usage"] = new JsonObject { ["prompt"] = data.Prompt, ["cached"] = data.Cached, ["completion"] = data.Completion },
@@ -565,6 +749,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             await res.ErrorAsync(400, "invalid", "Write a message first.", ct);
             return;
         }
+        await SettleAsync(ct);
         if (Begin("answer") is not { } job)
         {
             await res.ErrorAsync(409, "busy", "An answer is being written: queue this one (it runs when the answer ends), or stop the answer.", ct);
@@ -733,6 +918,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             await res.ErrorAsync(409, "empty", "Nothing to compact yet.", ct);
             return;
         }
+        await SettleAsync(ct);
         if (Begin("compact") is not { } job)
         {
             await res.ErrorAsync(409, "busy", "Compact when the answer is done.", ct);
@@ -893,6 +1079,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     /// <summary>A new session (file null), or a saved one: not while a turn runs. An empty session is not kept.</summary>
     private async Task SwitchAsync(HttpResponse res, string? file, CancellationToken ct)
     {
+        await SettleAsync(ct);
         bool idle;
         lock (_gate)
         {
@@ -1131,6 +1318,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         await _terminals.DisposeAsync();
         await _server.DisposeAsync();
         _rt.Agent.Events = null;
+        _rt.WebNews = null;
         _rt.Permissions.Asker = null;
         _rt.Jobs.Started -= JobStarted;
         _rt.Jobs.Output -= JobOutput;

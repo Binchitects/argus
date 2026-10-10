@@ -313,6 +313,59 @@ describe('Code Arena in the browser', () => {
     await waitFor(() => expect(within(list).getByRole('button', { name: 'First question' })).toHaveAttribute('aria-current', 'page'))
   })
 
+  it("lists Arena's chats below the sessions, opens one, sends the sessions Arena lacks, and reads the session again when the web adds to it", async () => {
+    const at = new Date().toISOString()
+    const opened: CodeSession = {
+      id: 's3', diffs: {}, busy: false,
+      messages: [msg('m0', 'user', { content: 'Plan the release' }), msg('m1', 'assistant', { content: 'Step one: freeze.', model: 'model-a' })],
+    }
+    const { calls, now } = backend({
+      state: { arenaChats: true, synced: 0 },
+      extra: {
+        'GET /api/sessions': () => ({ json: [{ ...sessions[0]!, chat: 'c-linked' }, sessions[1]!] }),
+        'GET /api/sessions/web': () => ({
+          json: [
+            { id: 'c-linked', title: 'Fix the build', origin: 'code-arena', place: '/home/ada/shop', updatedAt: at, messages: 4, session: 's2' },
+            { id: 'c-web', title: 'Plan the release', origin: null, place: null, updatedAt: at, messages: 2, session: null },
+            { id: 'c-other', title: 'Refactor the parser', origin: 'code-arena', place: '/home/ada/parser', updatedAt: at, messages: 9, session: null },
+          ],
+        }),
+        'POST /api/sessions/web': () => {
+          now.state = { ...now.state, session: 's3', chat: 'c-web' }
+          now.session = opened
+          return { json: opened }
+        },
+        'POST /api/sessions/send-all': () => ({ json: { sent: 2, failed: [] } }),
+      },
+    })
+    renderCode()
+    await userEvent.click(await screen.findByRole('button', { name: 'Chat' }))
+    const list = await screen.findByRole('navigation', { name: 'Sessions' })
+    // The session kept with its chat in Arena says so.
+    expect(await within(list).findByRole('button', { name: /^Fix the build\s*\(kept in step with its chat in Arena\)$/ })).toBeInTheDocument()
+
+    // Arena's other chats, on asking: the one kept with a session here is listed above, as that session.
+    await userEvent.click(within(list).getByRole('button', { name: 'Chats in Arena' }))
+    const arena = await within(list).findByRole('list', { name: 'Chats in Arena' })
+    await waitFor(() => expect(within(arena).getAllByRole('button').map((b) => b.textContent)).toEqual(['Plan the release', 'Code Arena: Refactor the parser']))
+    await userEvent.type(within(list).getByRole('textbox', { name: 'Find a chat in Arena' }), 'parser')
+    expect(within(arena).getAllByRole('button').map((b) => b.textContent)).toEqual(['Code Arena: Refactor the parser'])
+    await userEvent.clear(within(list).getByRole('textbox', { name: 'Find a chat in Arena' }))
+
+    await userEvent.click(within(arena).getByRole('button', { name: 'Plan the release' }))
+    expect(calls.find((c) => c.method === 'POST' && c.path === '/api/sessions/web')?.body).toEqual({ id: 'c-web' })
+    expect(await screen.findByText('Step one: freeze.')).toBeInTheDocument()
+
+    await userEvent.click(within(list).getByRole('button', { name: /Send the other sessions here/ }))
+    expect(await screen.findByText('Sent to Arena: 2 sessions.')).toBeInTheDocument()
+
+    // The web adds to the chat while nothing runs: code-arena takes it in, and the thread reads the session again.
+    now.session = { ...opened, messages: [...opened.messages, msg('m2', 'user', { content: 'asked on the web' }), msg('m3', 'assistant', { content: 'answered on the web', model: 'model-a' })] }
+    now.state = { ...now.state, synced: 1 }
+    expect(await screen.findByText('answered on the web', {}, { timeout: 8000 })).toBeInTheDocument()
+    expect(calls.filter((c) => c.path === '/api/session').length).toBeGreaterThan(1)
+  }, 15_000)
+
   it("brings back with ↑ this session's messages, then what this folder sent before, and comes back to the draft", async () => {
     const session: CodeSession = { id: 's2', messages: [msg('m0', 'user', { content: 'Run the tests' }), msg('m1', 'assistant', { content: 'They pass.', model: 'model-a' })], diffs: {}, busy: false }
     const { calls } = backend({ session, extra: { 'GET /api/history': () => ({ json: [{ text: 'Run the tests' }, { text: 'Fix the build\nand say why' }] }) } })

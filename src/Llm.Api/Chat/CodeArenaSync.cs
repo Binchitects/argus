@@ -63,19 +63,24 @@ public static class CodeArenaSync
         }
     }
 
-    /// <summary>The person's recent chats, to continue one in Code Arena: newest first.</summary>
-    private static async Task<IResult> ListAsync(HttpContext http, McpPeople people, AppDbContext db, int limit = 30)
+    /// <summary>
+    /// The person's chats, newest first, to list beside Code Arena's own sessions and continue one there: a page of
+    /// <paramref name="limit"/> (200 at most), those changed before <paramref name="before"/> (the last one's UpdatedAt) for
+    /// the next page; <c>more</c> says whether there is one.
+    /// </summary>
+    private static async Task<IResult> ListAsync(HttpContext http, McpPeople people, AppDbContext db, int limit = 30, DateTimeOffset? before = null)
     {
         var (me, refusal) = await CallerAsync(http, people);
         if (me is null)
         {
             return refusal!;
         }
-        var chats = await db.Conversations.AsNoTracking().Where(c => c.UserId == me.Id && c.ArchivedAt == null)
-            .OrderByDescending(c => c.UpdatedAt).Take(Math.Clamp(limit, 1, 200))
+        var take = Math.Clamp(limit, 1, 200);
+        var chats = await db.Conversations.AsNoTracking().Where(c => c.UserId == me.Id && c.ArchivedAt == null && (before == null || c.UpdatedAt < before))
+            .OrderByDescending(c => c.UpdatedAt).Take(take + 1)
             .Select(c => new { c.Id, c.Title, c.Origin, c.OriginRef, c.OriginPlace, c.Model, c.UpdatedAt, messages = c.Messages.Count })
             .ToListAsync(http.RequestAborted);
-        return Results.Ok(new { chats });
+        return Results.Ok(new { chats = chats.Take(take), more = chats.Count > take });
     }
 
     /// <summary>The chat for a Code Arena session: made the first time, the same one after (by the session's id).</summary>
@@ -105,8 +110,13 @@ public static class CodeArenaSync
         return Results.Ok(new { id = c.Id, created = true });
     }
 
-    /// <summary>The chat's messages after the first <paramref name="after"/> on the branch on screen, and their count.</summary>
-    private static async Task<IResult> ReadAsync(Guid id, HttpContext http, McpPeople people, AppDbContext db, AnswerJobs jobs, int after = 0)
+    /// <summary>
+    /// The chat's messages after the first <paramref name="after"/> on the branch on screen, their count, and its stamp
+    /// (the branch's last message). Given the stamp of a read that brought nothing new, and the branch has not moved
+    /// since, it says only that (<c>unchanged</c>): Code Arena asks every few seconds while it waits, and a long chat is
+    /// not read each time.
+    /// </summary>
+    private static async Task<IResult> ReadAsync(Guid id, HttpContext http, McpPeople people, AppDbContext db, AnswerJobs jobs, int after = 0, string? stamp = null)
     {
         var (me, refusal) = await CallerAsync(http, people);
         if (me is null)
@@ -121,10 +131,14 @@ public static class CodeArenaSync
         {
             return AuthEndpoints.Problem(409, "answering", "The chat is answering on the web: its messages come when the answer ends.");
         }
+        if (stamp is not null && stamp == Stamp(c.CurrentLeafId))
+        {
+            return Results.Ok(new { unchanged = true, stamp });
+        }
         var path = await BranchAsync(db, c, http.RequestAborted);
         return Results.Ok(new
         {
-            c.Id, c.Title, c.Model, c.Origin, c.OriginPlace, count = path.Count,
+            c.Id, c.Title, c.Model, c.Origin, c.OriginPlace, count = path.Count, stamp = Stamp(c.CurrentLeafId),
             messages = path.Skip(Math.Max(0, after)).Select(Out),
         });
     }
@@ -199,8 +213,11 @@ public static class CodeArenaSync
             }
             await db.SaveChangesAsync(ct);
         }
-        return Results.Ok(new { count = path.Count + messages.Count });
+        return Results.Ok(new { count = path.Count + messages.Count, stamp = Stamp(c.CurrentLeafId) });
     }
+
+    /// <summary>The branch on screen as one word: any message added to the chat, or another branch shown, changes it.</summary>
+    private static string Stamp(Guid? leaf) => leaf?.ToString("N") ?? "empty";
 
     /// <summary>The branch on screen, as the model sees it: questions, answers with words or calls, and the calls' results.</summary>
     internal static async Task<List<ChatMessage>> BranchAsync(AppDbContext db, Conversation c, CancellationToken ct)
