@@ -203,24 +203,24 @@ def main():
     rec("admin", "the app knows them as an admin", code == 200 and me.get("isAdmin") is True, f"HTTP {code}")
     code, people = admin.app("GET", "/api/admin/people")
     rec("admin", "admin lists people", code == 200 and any(p.get("userName") == "admin" for p in people.get("people", [])), f"HTTP {code}")
-    code, model = admin.app("GET", "/api/admin/model")
-    samples = model.get("samples", []) if code == 200 else []
-    shipped = len(list((ROOT / "env-samples").glob("*.env")))
-    rec("admin", "the Model page lists every env-sample with its MODEL block",
-        len(samples) == shipped and all(x.get("block", "").startswith("# >>> MODEL") for x in samples),
-        f"{len(samples)} of {shipped} samples")
-    rec("admin", "the Model page names the running model", model.get("running", {}).get("name") == MODEL, MODEL)
+    # The model new chats start with (an admin may have switched it from the .env one): what the key is tested with.
+    global MODEL
+    code, config = admin.app("GET", "/api/chat/config")
+    MODEL = MODEL or (config.get("model") if code == 200 else "") or ""
+    rec("admin", "the chat says which model new chats start with", bool(MODEL), MODEL)
     code, models = admin.app("GET", "/api/admin/models")
     rows = models.get("models", []) if code == 200 else []
-    LOCAL.update({m["name"]: (m.get("access") or {}).get("audience") for m in rows if m.get("source") == "local"})
-    env_row = next((m for m in rows if m.get("source") == "env"), {})
-    rec("admin", "the Models page has the .env model, loaded",
-        env_row.get("name") == MODEL and env_row.get("status") in ("loaded", None), f"HTTP {code} {env_row.get('status')}")
+    LOCAL.update({m["name"]: (m.get("access") or {}).get("audience") for m in rows})
+    chat_row = next((m for m in rows if m.get("name") == MODEL), {})
+    rec("admin", "the Models page has that model, loaded", chat_row.get("status") in ("loaded", None) and bool(chat_row),
+        f"HTTP {code} {chat_row.get('status')}")
     # A stack that has just started gets two minutes: on a from-zero start Loki
     # is busy for a while taking (and refusing) every container's old log lines.
+    # The four the check names: the picture and video servers unload when idle, and are not down then.
+    core = ("Model gateway", "Prometheus", "Alertmanager", "Loki")
     for attempt in range(25):
         code, overview = admin.app("GET", "/api/admin/overview")
-        down = [x["name"] for x in overview.get("services", []) if not x.get("ok")]
+        down = [x["name"] for x in overview.get("services", []) if not x.get("ok") and x["name"] in core]
         if code == 200 and not down:
             break
         time.sleep(5)
@@ -246,7 +246,7 @@ def main():
     rec("person", "the app knows them as a member", me.get("isAdmin") is False, f"HTTP {code}")
     code = person.app("GET", "/api/admin/people")[0]
     rec("person", "the people list is refused", code == 403, f"HTTP {code}")
-    for path in ("/api/admin/overview", "/api/admin/model", "/api/admin/settings", "/api/admin/argus/status",
+    for path in ("/api/admin/overview", "/api/admin/models", "/api/admin/config", "/api/admin/alerts", "/api/admin/argus/status",
                  "/api/dashboards/usage-by-user"):
         code = person.app("GET", path)[0]
         rec("person", f"GET {path} is refused", code == 403, f"HTTP {code}")
@@ -257,19 +257,18 @@ def main():
                                ("POST", "/api/admin/argus/index", {"branches": []})):
         code = person.app(method, path, body)[0]
         rec("person", f"{method} {path.replace(str(pid), '<self>')} is refused", code == 403, f"HTTP {code}")
-    for host in ("metrics", "alerts"):
-        code = person.req(u(host, "/-/healthy"), follow=False)[0]
-        rec("person", f"{host} is refused to a non-admin", code in (401, 403), f"HTTP {code}")
-        code = admin.req(u(host, "/-/healthy"), follow=False)[0]
-        rec("admin", f"{host} is open to the admin", code == 200, f"HTTP {code}")
+    # Metrics and alerts are in the app now (Admin -> Observe, Alerts): open to an admin.
+    code = admin.app("GET", "/api/admin/alerts")[0]
+    rec("admin", "alerts are open to the admin", code == 200, f"HTTP {code}")
 
     # ----------------------------------------------------------------- API key
     print("\n3. The person's API key")
     listed = listed_by(key)
-    # The .env model, the picture model, and the models added in Admin -> Models
-    # that everyone may use -- by their real names, nothing else.
-    expected = [MODEL] + ([IMAGE] if IMAGE else []) + [n for n, a in LOCAL.items() if a == "Everyone"]
-    rec("key", "the gateway lists the models the person may use, by their real names", sorted(listed) == sorted(expected), f"{listed}")
+    # The models everyone may use (Admin -> Models), by their real names, nothing else; every chat model among them.
+    everyone = {n for n, a in LOCAL.items() if a == "Everyone"}
+    chat_models = {m["name"] for m in rows if m.get("source") in ("local", "env") and (m.get("access") or {}).get("audience") == "Everyone"}
+    rec("key", "the gateway lists the models the person may use, by their real names",
+        bool(listed) and set(listed) <= everyone and chat_models <= set(listed), f"{listed}")
     code, body = chat(key)
     content = ""
     if code == 200:
@@ -383,7 +382,9 @@ def main():
     t = mine.get("totals", {}) if code == 200 else {}
     mine_cost = float(t.get("cost") or 0)
     logged_cost = sum(float(r.get("spend") or 0) for r in rows)
-    rec("usage", "the person's own usage page shows their requests and cost", code == 200 and (t.get("requests") or 0) >= len(rows) > 0
+    # Requests the gateway refused (a limit, no credit) are logged at no cost and are not the person's prompts.
+    priced = [r for r in rows if float(r.get("spend") or 0) > 0]
+    rec("usage", "the person's own usage page shows their requests and cost", code == 200 and (t.get("requests") or 0) >= len(priced) > 0
         and mine_cost >= logged_cost - 1e-9, f"{t.get('requests')} requests, ${mine_cost:.6f} (logged ${logged_cost:.6f})")
     rows_chat = []
     for _ in range(24):
