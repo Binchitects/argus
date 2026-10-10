@@ -285,6 +285,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             Model = () => Model.Name,
             Shell = Config.Shell,
             ArenaUrl = Config.Url,
+            Ide = o.Ide,
             ServerInstructions = () => Volatile.Read(ref _instructions),
             HasArenaTools = () => ArenaConnected,
             Memory = () => _memory,

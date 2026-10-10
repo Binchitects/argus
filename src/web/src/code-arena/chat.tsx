@@ -14,6 +14,7 @@ import { useTheme, type ThemePreference } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { configQuery, streamChat } from '@/pages/chat/api'
 import { contextOf } from '@/pages/chat/context'
+import { useFileRefs } from '@/pages/chat/file-refs'
 import { ContextGauge } from '@/pages/chat/context-gauge'
 import { answerNews, bucket } from '@/pages/chat/format'
 import { ModelPicker, ThinkingPicker } from '@/pages/chat/header'
@@ -330,6 +331,12 @@ export function Thread({
 }) {
   const queryClient = useQueryClient()
   const session = useQuery(sessionQuery)
+  // A code block named for a file of the folder (in a summary) opens it in the editor.
+  const refs = useFileRefs()
+  const openNamed = (name: string) => {
+    const path = refs?.known(name)
+    if (path) refs?.open({ path })
+  }
   const [live, setLive] = useState<CodeLive | null>(null)
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -588,7 +595,7 @@ export function Thread({
                 {turns.map((t, i) => {
                   const isLive = answering && i === lastTurn
                   // The older conversation, summarized to fit the model's window: shown folded, as the chat shows a compaction.
-                  if (t.question?.summary) return <CompactedMark key={t.question.id} summary={t.question.summary} onOpenFile={() => undefined} />
+                  if (t.question?.summary) return <CompactedMark key={t.question.id} summary={t.question.summary} onOpenFile={openNamed} />
                   return (
                     <div key={t.question?.id ?? t.answer[0]?.id ?? i} className="grid gap-4">
                       {t.question && <QuestionTurn m={t.question} siblings={[t.question]} busy={streaming} onSwitch={() => undefined} />}

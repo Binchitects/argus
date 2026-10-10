@@ -1,9 +1,10 @@
 import { Check, ChevronDown, Code2, Copy, Download, PanelRightOpen, Play, Workflow, WrapText } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { use, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { previewLabels, type PreviewKind } from '@/preview/kind'
+import { FileRefs } from './file-refs'
 import { extensionFor, highlight } from './highlight'
 import { InlineDiagram } from './live-preview'
 
@@ -43,6 +44,8 @@ export function CodeBlock({
   const diagram = drawable && (view ?? 'diagram') === 'diagram'
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
+  // In Code Arena's IDE, a block named for a file of the folder opens it in the editor.
+  const refs = use(FileRefs)
   const text = code.replace(/\n$/, '')
   const lines = text.split('\n')
   const long = lines.length > COLLAPSE_OVER
@@ -94,7 +97,13 @@ export function CodeBlock({
               </Button>
             </Tooltip>
           )}
-          {onOpen && name && (
+          {refs && name && refs.known(name) ? (
+            <Tooltip content="Open in the editor">
+              <Button variant="ghost" size="icon-sm" className="size-7" onClick={() => refs.open({ path: refs.known(name)! })} aria-label={`Open ${name} in the editor`}>
+                <PanelRightOpen />
+              </Button>
+            </Tooltip>
+          ) : onOpen && name && (
             <Tooltip content="Open in the Files panel">
               <Button variant="ghost" size="icon-sm" className="size-7" onClick={() => onOpen(name)} aria-label={`Open ${name} in the Files panel`}>
                 <PanelRightOpen />

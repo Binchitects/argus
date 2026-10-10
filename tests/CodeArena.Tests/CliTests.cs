@@ -178,6 +178,15 @@ public sealed class CliTests : IDisposable
             Assert.Contains("Run make test before finishing.", prompt);
             Assert.Contains("I prefer short answers.", prompt);
             Assert.Contains("Model: model-a", prompt);
+            Assert.Contains("in the person's terminal", prompt);
+            Assert.Contains("Refer to code as path:line.", prompt);
+
+            // In the IDE: its page renders Markdown, and files cited in backticks open in the editor.
+            var ide = SystemPrompt.Build(new SystemPrompt.Inputs { Workspace = inputs.Workspace, Paths = inputs.Paths, Mode = inputs.Mode, Model = inputs.Model, Ide = true });
+            Assert.Contains("in the person's IDE", ide);
+            Assert.Contains("`relative/path:line`", ide);
+            Assert.Contains("<selection>", ide);
+            Assert.DoesNotContain("the terminal shows your text", ide);
         }
         finally
         {

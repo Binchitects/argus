@@ -32,6 +32,8 @@ internal sealed class Options
     /// <summary>The IDE: the port (null: a free one), and whether to leave the browser closed.</summary>
     public int? Port { get; set; }
     public bool NoOpen { get; set; }
+    /// <summary>The agent answers in the IDE's page (Markdown, links to files), not in this terminal.</summary>
+    public bool Ide { get; set; }
 }
 
 /// <summary>What the program runs with: its streams, environment, folder and paths. Tests make their own.</summary>
@@ -504,6 +506,7 @@ internal static partial class Cli
         try
         {
             Runtime rt;
+            o.Ide = true;
             try
             {
                 rt = await Runtime.StartAsync(o, env, ui, linked.Token);

@@ -14,6 +14,7 @@ import { stateQuery, type CodeEvent, type CodeState } from './api'
 import { ChangesPanel } from './changes'
 import { Sessions, ThemeMenu, Thread } from './chat'
 import { EditorArea, EditorProvider } from './editor'
+import { CodeRefsProvider } from './refs'
 import { modKey, onMac, useEditor } from './editor-state'
 import { Explorer } from './explorer'
 import { HelpProvider } from './help'
@@ -364,15 +365,17 @@ function Workbench({ state, config, lost, saved }: { state: CodeState; config: C
 
         {layout.chatOpen && <Splitter label="Resize the chat" orientation="vertical" value={layout.chat} min={bounds.chat[0]} max={bounds.chat[1]} grow={-1} onChange={(chat) => change({ chat })} />}
         <aside hidden={!layout.chatOpen} aria-label="Agent" style={{ width: layout.chat }} className="min-h-0 shrink-0">
-          <Thread
-            key={state.session}
-            state={state}
-            config={config}
-            onOpenList={() => show('chat')}
-            onHide={() => change({ chatOpen: false })}
-            onEvent={onEvent}
-            onTurnEnd={onTurnEnd}
-          />
+          <CodeRefsProvider folder={state.folder}>
+            <Thread
+              key={state.session}
+              state={state}
+              config={config}
+              onOpenList={() => show('chat')}
+              onHide={() => change({ chatOpen: false })}
+              onEvent={onEvent}
+              onTurnEnd={onTurnEnd}
+            />
+          </CodeRefsProvider>
         </aside>
       </div>
       <StatusBar

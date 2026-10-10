@@ -420,7 +420,12 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       if (r && r.id === tab.id) {
         reveal.current = null
         const column = r.at.column ?? 1
-        ed.setSelection({ startLineNumber: r.at.line, startColumn: column, endLineNumber: r.at.line, endColumn: column + (r.at.length ?? 0) })
+        if (r.at.endLine && r.at.endLine > r.at.line) {
+          // Lines cited: selected whole, the first of them in view.
+          ed.setSelection({ startLineNumber: r.at.line, startColumn: 1, endLineNumber: r.at.endLine + 1, endColumn: 1 })
+        } else {
+          ed.setSelection({ startLineNumber: r.at.line, startColumn: column, endLineNumber: r.at.line, endColumn: column + (r.at.length ?? 0) })
+        }
         ed.revealLineInCenter(r.at.line)
       }
       const position = ed.getPosition()

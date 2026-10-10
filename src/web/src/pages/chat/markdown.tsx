@@ -1,7 +1,8 @@
 import 'katex/dist/katex.min.css'
-import { memo, useMemo } from 'react'
+import { memo, use, useLayoutEffect, useMemo, useRef } from 'react'
 import { AnswerTable } from './answer-table'
 import { CodeBlock } from './code-block'
+import { FileRefs, openRef, tagRefs } from './file-refs'
 import { toBlocks } from './markdown-blocks'
 
 /**
@@ -10,8 +11,27 @@ import { toBlocks } from './markdown-blocks'
  */
 export const Markdown = memo(function Markdown({ text, onOpenFile, onPreview, live }: { text: string; onOpenFile?: (name: string) => void; onPreview?: (code: string) => void; live?: boolean }) {
   const blocks = useMemo(() => toBlocks(text), [text])
+  // In Code Arena's IDE, the folder's files cited are links that open in its editor.
+  const refs = use(FileRefs)
+  const box = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (refs && box.current) tagRefs(box.current, refs)
+  }, [blocks, refs])
+  // One listener for every citation in it (they are tagged in its HTML, not drawn by React).
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!refs || !el) return
+    const click = (e: MouseEvent) => openRef(e, refs)
+    const key = (e: KeyboardEvent) => e.key === 'Enter' && openRef(e, refs)
+    el.addEventListener('click', click)
+    el.addEventListener('keydown', key)
+    return () => {
+      el.removeEventListener('click', click)
+      el.removeEventListener('keydown', key)
+    }
+  }, [refs])
   return (
-    <div className="md">
+    <div ref={box} className="md">
       {blocks.map((b, i) =>
         b.kind === 'code' ? (
           <CodeBlock key={i} code={b.code} lang={b.lang} name={b.name} onOpen={onOpenFile} preview={b.preview} onPreview={onPreview && b.preview ? () => onPreview(b.code) : undefined} draw={!live || i < blocks.length - 1} />

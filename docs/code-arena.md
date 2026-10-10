@@ -282,6 +282,19 @@ Everything the page needs (Monaco and its language workers, xterm.js, the
 fonts) is built into the program; nothing is fetched from anywhere else.
 Monaco loads with the first file opened, xterm.js with the first terminal.
 
+### Files in answers
+
+In the IDE the agent cites code as `path:line` or `path:start-end`, and a file
+of the folder it cites opens in the editor at those lines (selected), with a
+click or Enter: in backticks, in its text (`src/app.ts`, `src/app.ts:12`,
+`src/app.ts#L12-L30`, `Program.cs(44,13)`), or as a relative link. A path that
+is no file of the folder stays text, and a link to it goes nowhere. Under a
+tool's card, `read_file`, `edit_file` and `write_file` have a chip that opens
+their file (where it read from, or the first line changed); an edit's diff
+opens it from its path, and at any line from that line's number. A code block
+named for a file of the folder (```` ```ts:src/app.ts ````) opens it from its
+header.
+
 It is the same agent as in the terminal, not a copy: the same tools, modes,
 sessions (the same files: `code-arena chat --resume` opens a session started
 in the browser, and the other way round), ARENA.md and MCP servers. A page

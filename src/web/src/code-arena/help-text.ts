@@ -55,7 +55,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   chat: {
     name: 'Chat with the agent',
-    text: 'Ask for an answer or a change. The model and its thinking are at the top; each tool the agent uses is a card, with the diff under each edit. A command it runs with no time limit shows above the box with its output and **Stop**; the turn waits for it. **Stop** under the box ends a turn. The mode under the box says what runs without asking: **Ask**, **Auto-edit**, **Plan** or **Yolo**.',
+    text: 'Ask for an answer or a change. The model and its thinking are at the top; each tool the agent uses is a card, with the diff under each edit. A file it cites (`src/app.ts:12`), the path and line numbers of a diff, and the chip under the card of a tool that read or edited a file open it in the editor at those lines. A command it runs with no time limit shows above the box with its output and **Stop**; the turn waits for it. **Stop** under the box ends a turn. The mode under the box says what runs without asking: **Ask**, **Auto-edit**, **Plan** or **Yolo**.',
     manual: 'modes',
   },
   status: {

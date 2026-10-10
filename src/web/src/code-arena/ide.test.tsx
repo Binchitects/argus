@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import codeArenaDoc from '@docs/code-arena.md?raw'
 import { makeQueryClient, Providers } from '@/app/providers'
 import { manualDocs, parseDoc } from '@/help/manual'
-import type { ChatConfig } from '@/pages/chat/types'
+import { blank } from '@/pages/chat/live'
+import type { ChatConfig, Message } from '@/pages/chat/types'
 import { fakeApi, type Handler } from '@/test/utils'
 import type { CodeState } from './api'
 import { App } from './app'
@@ -1056,6 +1057,59 @@ describe('Code Arena, the IDE', () => {
     await act(() => new Promise((wait) => setTimeout(wait, 20)))
     expect(opened()).toHaveLength(1)
     expect(within(panel).getAllByRole('tab')).toHaveLength(1)
+  })
+
+  it("opens the folder's files an answer cites in the editor, at the lines cited; anything else stays text", async () => {
+    const said = (id: string, role: Message['role'], parentId: string | null, over: Partial<Message> = {}): Message => ({ ...blank(id, role, parentId), ...over })
+    const edit = { id: 'c1', function: { name: 'edit_file', arguments: '{"path":"src/app.ts","old_string":"1","new_string":"2"}' } }
+    const read = { id: 'c2', function: { name: 'read_file', arguments: '{"path":"src/lib/cart.ts","offset":4}' } }
+    const session = {
+      id: 's1',
+      busy: false,
+      diffs: {
+        m3: { path: 'src/app.ts', added: 1, removed: 1, more: 0, created: false, lines: [[' ', 1, 1, 'a'], ['-', 2, 0, 'const total = 1'], ['+', 0, 2, 'const total = 2']] },
+      },
+      messages: [
+        said('m0', 'user', null, { content: 'Where is the total?' }),
+        said('m1', 'assistant', 'm0', { toolCalls: [edit, read], model: 'model-a' }),
+        said('m3', 'tool', 'm1', { content: 'Edited src/app.ts.', toolCallId: 'c1', toolName: 'edit_file' }),
+        said('m4', 'tool', 'm3', { content: 'export {}', toolCallId: 'c2', toolName: 'read_file' }),
+        said('m5', 'assistant', 'm4', {
+          model: 'model-a',
+          content: 'It is in `src/app.ts:2-3`, used by src/lib/cart.ts, as [the readme](README.md#L1) says; `nope.ts:3` and [elsewhere](docs/none.md) are not here.',
+        }),
+      ],
+    }
+    backend({ 'GET /api/session': () => ({ json: session }) })
+    renderIde()
+    const answer = await screen.findByRole('region', { name: 'Answer' })
+
+    // Inline code: the file opens with the lines cited selected.
+    await userEvent.click(await within(answer).findByRole('link', { name: 'src/app.ts:2-3' }))
+    expect(await within(tabs()).findByRole('tab', { name: 'app.ts' })).toHaveAttribute('aria-selected', 'true')
+    await waitFor(() => expect(editor().selection).toEqual({ startLineNumber: 2, startColumn: 1, endLineNumber: 4, endColumn: 1 }))
+    expect(editor().revealed).toBe(2)
+
+    // A path in the text, and a relative link with its line.
+    await userEvent.click(within(answer).getByRole('link', { name: 'src/lib/cart.ts' }))
+    expect(await within(tabs()).findByRole('tab', { name: 'cart.ts' })).toHaveAttribute('aria-selected', 'true')
+    await userEvent.click(within(answer).getByRole('link', { name: 'the readme' }))
+    expect(await within(tabs()).findByRole('tab', { name: 'README.md' })).toHaveAttribute('aria-selected', 'true')
+
+    // What is no file of the folder stays text, and a link to it goes nowhere.
+    expect(within(answer).getByText('nope.ts:3')).not.toHaveAttribute('data-ref')
+    const elsewhere = within(answer).getByText('elsewhere')
+    expect(elsewhere).not.toHaveAttribute('data-ref')
+    await userEvent.click(elsewhere)
+    expect(window.location.pathname).not.toContain('docs/none.md')
+
+    // The edit's file opens at its first changed line, from its diff's path and its line numbers; read_file's at the line read.
+    await userEvent.click(within(answer).getByRole('button', { name: 'Open src/app.ts at line 2' }))
+    await waitFor(() => expect(editor().selection).toEqual({ startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 1 }))
+    await userEvent.click(within(answer).getByRole('button', { name: 'Open src/lib/cart.ts:4 in the editor' }))
+    await waitFor(() => expect(within(tabs()).getByRole('tab', { name: 'cart.ts' })).toHaveAttribute('aria-selected', 'true'))
+    await waitFor(() => expect(editor().selection?.startLineNumber).toBe(4))
+    expect(within(answer).getByRole('button', { name: 'Open src/app.ts:2 in the editor' })).toBeInTheDocument()
   })
 
   it('does not search the files again at the end of each turn', async () => {

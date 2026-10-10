@@ -19,11 +19,13 @@ export const onMac = () => typeof navigator !== 'undefined' && /Mac|iPhone|iPad/
 /** The editor's modifier key, as its tooltips and the welcome name it. */
 export const modKey = onMac() ? '⌘' : 'Ctrl'
 
-/** Where to put the cursor in a file opened: a line, and a column and the length to select there. */
+/** Where to put the cursor in a file opened: a line, and a column and the length to select there, or the lines to select to. */
 export interface Reveal {
   line: number
   column?: number
   length?: number
+  /** The last line of the lines cited: they are selected whole. */
+  endLine?: number
 }
 
 /** An editor tab: a file, or the agent's changes to one (before and now, side by side). */

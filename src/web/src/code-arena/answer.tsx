@@ -1,4 +1,4 @@
-import { Check, Copy, FileDiff as FileDiffIcon, ShieldQuestion, Square } from 'lucide-react'
+import { Check, Copy, FileDiff as FileDiffIcon, FileSymlink, ShieldQuestion, Square } from 'lucide-react'
 import { useState } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -6,20 +6,41 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { formatValue, money } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { answerUsage, seconds, toolTitle } from '@/pages/chat/format'
+import { refLabel, useFileRefs, type FileRef } from '@/pages/chat/file-refs'
 import type { Notice, ToolRunning } from '@/pages/chat/live'
 import { Markdown } from '@/pages/chat/markdown'
 import { NoticeLine, Thinking, ToolCard } from '@/pages/chat/parts'
 import type { ChatConfig, Message } from '@/pages/chat/types'
 import type { FileDiff } from './api'
 
-/** An edit: the file's changed lines with three around them, numbered when the file was read whole (a live edit). */
+/** The first line an edit changed, in the file as it is now; null: not known (an edit of a session read back). */
+const firstChanged = (diff: FileDiff) => diff.lines.find(([op, , b]) => op === '+' && b > 0)?.[2] ?? diff.lines.find(([, , b]) => b > 0)?.[2] ?? null
+
+/**
+ * An edit: the file's changed lines with three around them, numbered when the file was read whole (a live edit). In the
+ * IDE, its path opens the file at the first line changed, and each line's number opens it there.
+ */
 export function DiffView({ diff }: { diff: FileDiff }) {
   const numbered = diff.lines.some(([, a, b]) => a > 0 || b > 0)
+  const refs = useFileRefs()
+  const path = refs?.known(diff.path) ?? null
+  const first = firstChanged(diff)
   return (
     <figure className="my-2 overflow-hidden rounded-lg border bg-card text-xs" aria-label={`Changes to ${diff.path}`}>
       <figcaption className="flex min-w-0 items-center gap-2 border-b px-3 py-1.5">
         <FileDiffIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span className="min-w-0 truncate font-mono font-medium">{diff.path}</span>
+        {refs && path ? (
+          <button
+            type="button"
+            className="min-w-0 truncate rounded-sm font-mono font-medium hover:underline focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-none"
+            onClick={() => refs.open({ path, ...(first && { line: first }) })}
+            title={`Open ${path}${first ? `:${first}` : ''} in the editor`}
+          >
+            {diff.path}
+          </button>
+        ) : (
+          <span className="min-w-0 truncate font-mono font-medium">{diff.path}</span>
+        )}
         {diff.created && <span className="text-muted-foreground">new file</span>}
         <span className="ml-auto shrink-0 font-mono tabular-nums">
           <span className="text-success">+{diff.added}</span> <span className="text-destructive-ink">−{diff.removed}</span>
@@ -38,7 +59,17 @@ export function DiffView({ diff }: { diff: FileDiff }) {
               ) : (
                 <tr key={i} className={cn(op === '-' && 'bg-destructive/10', op === '+' && 'bg-success/10')}>
                   {numbered && <td className="w-px px-2 text-right text-muted-foreground select-none tabular-nums">{a || ''}</td>}
-                  {numbered && <td className="w-px px-2 text-right text-muted-foreground select-none tabular-nums">{b || ''}</td>}
+                  {numbered && (
+                    <td className="w-px px-2 text-right text-muted-foreground select-none tabular-nums">
+                      {refs && path && b > 0 ? (
+                        <button type="button" className="tabular-nums hover:text-foreground hover:underline" onClick={() => refs.open({ path, line: b })} aria-label={`Open ${path} at line ${b}`}>
+                          {b}
+                        </button>
+                      ) : (
+                        b || ''
+                      )}
+                    </td>
+                  )}
                   <td className={cn('w-px pl-2 select-none', op === '-' ? 'text-destructive-ink' : op === '+' ? 'text-success' : 'text-muted-foreground')}>
                     <span aria-hidden="true">{op === ' ' ? '' : op === '-' ? '−' : '+'}</span>
                     <span className="sr-only">{op === '-' ? 'Removed:' : op === '+' ? 'Added:' : ''}</span>
@@ -80,6 +111,39 @@ export function Approval({ name, always, risk, onDecide }: { name: string; alway
         Allow
       </Button>
     </div>
+  )
+}
+
+/** Where a tool's call on a file of the folder opens: read_file at the line it read from, an edit at the first line it changed. */
+function placeOf(name: string, args: string, diff: FileDiff | undefined): Omit<FileRef, 'path'> & { path: string | null } {
+  let a: { path?: unknown; offset?: unknown } = {}
+  try {
+    a = JSON.parse(args) as typeof a
+  } catch {
+    // Arguments still being written.
+  }
+  const path = typeof a.path === 'string' && ['read_file', 'edit_file', 'write_file'].includes(name) ? a.path : null
+  const line = name === 'read_file' ? (typeof a.offset === 'number' && a.offset > 1 ? a.offset : undefined) : diff ? (firstChanged(diff) ?? undefined) : undefined
+  return { path, ...(line && { line }) }
+}
+
+/** A chip under a tool's card in the IDE: opens the file it read or changed, there. */
+function OpenFile({ name, args, diff }: { name: string; args: string; diff: FileDiff | undefined }) {
+  const refs = useFileRefs()
+  const place = placeOf(name, args, diff)
+  const path = refs && place.path ? refs.known(place.path) : null
+  if (!refs || !path) return null
+  const ref = { ...place, path }
+  return (
+    <button
+      type="button"
+      onClick={() => refs.open(ref)}
+      className="mt-1 mb-1 inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-none"
+      aria-label={`Open ${refLabel(ref)} in the editor`}
+    >
+      <FileSymlink className="size-3.5 shrink-0" aria-hidden="true" />
+      <span className="truncate">{refLabel(ref)}</span>
+    </button>
   )
 }
 
@@ -173,6 +237,7 @@ export function CodeAnswer({
               return (
                 <div key={t.id}>
                   <ToolCard call={t} result={result} live={live} waiting={asking} progress={calls?.[t.id]} />
+                  {result && result.status === 'complete' && !result.error && <OpenFile name={t.function.name} args={t.function.arguments} diff={diff} />}
                   {diff && <DiffView diff={diff} />}
                   {asking && <Approval name={t.function.name} always={always[t.id]} risk={risks?.[t.id]} onDecide={(answer) => onDecide(t.id, answer)} />}
                 </div>

@@ -365,6 +365,21 @@
     text-decoration: underline;
     text-underline-offset: 3px;
   }
+  /* A file of the folder cited (Code Arena's IDE): opens in the editor. */
+  .md .md-ref {
+    cursor: pointer;
+    color: var(--primary-ink);
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+  }
+  .md .md-ref:hover {
+    text-decoration-style: solid;
+  }
+  .md .md-ref:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+    border-radius: 0.2rem;
+  }
   .md blockquote {
     border-inline-start: 3px solid var(--border);
     padding-inline-start: 1em;
