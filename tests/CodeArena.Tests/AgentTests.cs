@@ -115,7 +115,7 @@ public sealed class AgentTests : IDisposable
         Assert.Equal("old\n", File.ReadAllText(file));
 
         Assert.Equal(0, await h.Run("", "-p", "change it", "--mode", "auto-edit"));
-        Assert.Equal("Result: Edited a.txt.", h.Out.Trim());
+        Assert.Equal("Result: Edited a.txt (line 1).", h.Out.Trim());
         Assert.Equal("new\n", File.ReadAllText(file));
     }
 

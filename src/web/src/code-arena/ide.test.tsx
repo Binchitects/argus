@@ -1072,7 +1072,7 @@ describe('Code Arena, the IDE', () => {
       messages: [
         said('m0', 'user', null, { content: 'Where is the total?' }),
         said('m1', 'assistant', 'm0', { toolCalls: [edit, read], model: 'model-a' }),
-        said('m3', 'tool', 'm1', { content: 'Edited src/app.ts.', toolCallId: 'c1', toolName: 'edit_file' }),
+        said('m3', 'tool', 'm1', { content: 'Edited src/app.ts (lines 2-3).', toolCallId: 'c1', toolName: 'edit_file' }),
         said('m4', 'tool', 'm3', { content: 'export {}', toolCallId: 'c2', toolName: 'read_file' }),
         said('m5', 'assistant', 'm4', {
           model: 'model-a',
@@ -1109,7 +1109,9 @@ describe('Code Arena, the IDE', () => {
     await userEvent.click(within(answer).getByRole('button', { name: 'Open src/lib/cart.ts:4 in the editor' }))
     await waitFor(() => expect(within(tabs()).getByRole('tab', { name: 'cart.ts' })).toHaveAttribute('aria-selected', 'true'))
     await waitFor(() => expect(editor().selection?.startLineNumber).toBe(4))
-    expect(within(answer).getByRole('button', { name: 'Open src/app.ts:2 in the editor' })).toBeInTheDocument()
+    // The edit's chip opens at the lines its result says.
+    await userEvent.click(within(answer).getByRole('button', { name: 'Open src/app.ts:2-3 in the editor' }))
+    await waitFor(() => expect(editor().selection).toEqual({ startLineNumber: 2, startColumn: 1, endLineNumber: 4, endColumn: 1 }))
   })
 
   it('does not search the files again at the end of each turn', async () => {

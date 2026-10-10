@@ -344,6 +344,8 @@ internal static class LocalTools
             throw new ToolError($"old_string appears {count} times in {show}. Include more of the lines around it so it is unique, or set replace_all to change all {count}.");
         }
         string updated;
+        // One replacement: the lines it is on now (the model reads them back from there; the IDE opens the file there).
+        var lines = "";
         if (all)
         {
             updated = text.Replace(oldText, newText, StringComparison.Ordinal);
@@ -352,10 +354,13 @@ internal static class LocalTools
         {
             var at = text.IndexOf(oldText, StringComparison.Ordinal);
             updated = string.Concat(text.AsSpan(0, at), newText, text.AsSpan(at + oldText.Length));
+            var first = text.AsSpan(0, at).Count('\n') + 1;
+            var last = first + newText.TrimEnd('\n').AsSpan().Count('\n');
+            lines = last > first ? $" (lines {first}-{last})" : $" (line {first})";
         }
         c.BeforeWrite?.Invoke(path);
         Files.WriteText(path, updated, bom);
-        return Task.FromResult(new ToolResult(count == 1 ? $"Edited {show}." : $"Edited {show}: {count} replacements.") { Display = Diff.Render(text, updated, c.Ui), Change = new FileChange(show, text, updated) });
+        return Task.FromResult(new ToolResult(count == 1 ? $"Edited {show}{lines}." : $"Edited {show}: {count} replacements.") { Display = Diff.Render(text, updated, c.Ui), Change = new FileChange(show, text, updated) });
     }
 
     internal static int Occurrences(string text, string part)

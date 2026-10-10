@@ -290,8 +290,10 @@ click or Enter: in backticks, in its text (`src/app.ts`, `src/app.ts:12`,
 `src/app.ts#L12-L30`, `Program.cs(44,13)`), or as a relative link. A path that
 is no file of the folder stays text, and a link to it goes nowhere. Under a
 tool's card, `read_file`, `edit_file` and `write_file` have a chip that opens
-their file (where it read from, or the first line changed); an edit's diff
-opens it from its path, and at any line from that line's number. A code block
+their file (where it read from, or the lines changed: `edit_file` says them,
+"Edited src/app.ts (lines 12-14)."); an edit's diff opens it from its path,
+and at any line from that line's number. The paths in a tool's output
+(`grep`'s `path:line:` rows, `glob`'s list) open the same way. A code block
 named for a file of the folder (```` ```ts:src/app.ts ````) opens it from its
 header.
 

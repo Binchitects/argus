@@ -114,8 +114,11 @@ export function Approval({ name, always, risk, onDecide }: { name: string; alway
   )
 }
 
-/** Where a tool's call on a file of the folder opens: read_file at the line it read from, an edit at the first line it changed. */
-function placeOf(name: string, args: string, diff: FileDiff | undefined): Omit<FileRef, 'path'> & { path: string | null } {
+/**
+ * Where a tool's call on a file of the folder opens: read_file at the line it read from, an edit at the lines it changed
+ * (its result says them: "Edited src/app.ts (lines 12-14).", a diff of a session read back has no numbers).
+ */
+function placeOf(name: string, args: string, diff: FileDiff | undefined, said: string): Omit<FileRef, 'path'> & { path: string | null } {
   let a: { path?: unknown; offset?: unknown } = {}
   try {
     a = JSON.parse(args) as typeof a
@@ -123,14 +126,17 @@ function placeOf(name: string, args: string, diff: FileDiff | undefined): Omit<F
     // Arguments still being written.
   }
   const path = typeof a.path === 'string' && ['read_file', 'edit_file', 'write_file'].includes(name) ? a.path : null
-  const line = name === 'read_file' ? (typeof a.offset === 'number' && a.offset > 1 ? a.offset : undefined) : diff ? (firstChanged(diff) ?? undefined) : undefined
-  return { path, ...(line && { line }) }
+  const lines = /\(lines? (\d+)(?:-(\d+))?\)/.exec(said)
+  const line =
+    name === 'read_file' ? (typeof a.offset === 'number' && a.offset > 1 ? a.offset : undefined) : lines ? Number(lines[1]) : diff ? (firstChanged(diff) ?? undefined) : undefined
+  const end = name !== 'read_file' && lines?.[2] ? Number(lines[2]) : undefined
+  return { path, ...(line && { line }), ...(end && { end }) }
 }
 
 /** A chip under a tool's card in the IDE: opens the file it read or changed, there. */
-function OpenFile({ name, args, diff }: { name: string; args: string; diff: FileDiff | undefined }) {
+function OpenFile({ name, args, diff, said }: { name: string; args: string; diff: FileDiff | undefined; said: string }) {
   const refs = useFileRefs()
-  const place = placeOf(name, args, diff)
+  const place = placeOf(name, args, diff, said)
   const path = refs && place.path ? refs.known(place.path) : null
   if (!refs || !path) return null
   const ref = { ...place, path }
@@ -237,7 +243,7 @@ export function CodeAnswer({
               return (
                 <div key={t.id}>
                   <ToolCard call={t} result={result} live={live} waiting={asking} progress={calls?.[t.id]} />
-                  {result && result.status === 'complete' && !result.error && <OpenFile name={t.function.name} args={t.function.arguments} diff={diff} />}
+                  {result && result.status === 'complete' && !result.error && <OpenFile name={t.function.name} args={t.function.arguments} diff={diff} said={result.content} />}
                   {diff && <DiffView diff={diff} />}
                   {asking && <Approval name={t.function.name} always={always[t.id]} risk={risks?.[t.id]} onDecide={(answer) => onDecide(t.id, answer)} />}
                 </div>

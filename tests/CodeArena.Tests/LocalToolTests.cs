@@ -50,6 +50,10 @@ public sealed class LocalToolTests : IDisposable
         var same = await Assert.ThrowsAsync<ToolError>(() => Run("edit_file", Args(new { path = "a.txt", old_string = "y = 1", new_string = "y = 1" }), Context()));
         Assert.Contains("the same", same.Message);
 
+        var one = await Run("edit_file", Args(new { path = "a.txt", old_string = "y = 1\n", new_string = "y = 2\ny = 3\n" }), Context());
+        Assert.Equal("Edited a.txt (lines 2-3).", one.Text);
+        await Run("edit_file", Args(new { path = "a.txt", old_string = "y = 2\ny = 3\n", new_string = "y = 1\n" }), Context());
+
         var all = await Run("edit_file", Args(new { path = "a.txt", old_string = "x = 1", new_string = "x = 2", replace_all = true }), Context());
         Assert.Equal("Edited a.txt: 2 replacements.", all.Text);
         Assert.Equal("x = 2\ny = 1\nx = 2\n", File.ReadAllText(file));
