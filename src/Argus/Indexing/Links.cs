@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Argus.Util;
 
 namespace Argus.Indexing;
 
@@ -102,11 +103,11 @@ public static partial class Links
                 // CI's own files: .gitlab-ci.yml, and what it includes from .gitlab/ (.gitlab/ci/build.yml).
                 case "yaml": Yaml(name, content, output, isCi: path.StartsWith(".gitlab/", StringComparison.Ordinal) || path.Contains("/.gitlab/", StringComparison.Ordinal)); break;
                 case "dockerfile": Matches(DockerFrom(), content, "image", output, lower: true, join: m => ImagePath(m.Groups["image"].Value), form: "base"); break;
-                case "csharp": CSharp(Blank(content, Code.CSharp), output); break;
-                case "python": Python(path, Blank(content, Code.Python), output); break;
+                case "csharp": CSharp(CodeText.Blank("csharp", content), output); break;
+                case "python": Python(path, CodeText.Blank("python", content), output); break;
                 case "typescript" or "javascript": JavaScript(content, output); break;
-                case "go": Go(Blank(content, Code.Go), output); break;
-                case "java" or "kotlin": Java(Blank(content, Code.Java), output); break;
+                case "go": Go(CodeText.Blank("go", content, keepStrings: true), output); break;
+                case "java" or "kotlin": Java(CodeText.Blank(lang, content), output); break;
                 case "rust": Matches(RustUse(), content, "cargo", output, lower: true, join: m => m.Groups["crate"].Value.Replace('_', '-')); break;
                 case "proto": Proto(path, content, output); break;
             }
@@ -123,92 +124,6 @@ public static partial class Links
             .Select(d => d with { Scope = test ? "test" : d.Scope, Origin = d.Origin == "source" ? origin : d.Origin })
             // One row per name per file: its first line.
             .GroupBy(d => (d.Role, d.Kind, d.Name, d.Form)).Select(g => g.MinBy(d => d.Line))];
-    }
-
-    /// <summary>A language's comments and strings, as Blank reads them.</summary>
-    enum Code { CSharp, Java, Go, Python }
-
-    /// <summary>
-    /// The text with its comments and string literals blanked (spaces; line breaks kept, so lines stay where they are): code
-    /// inside a string (an analyzer's test, a generator's template, a docstring) declares nothing. Go's quoted strings stay
-    /// (its imports are strings); its raw strings go.
-    /// </summary>
-    static string Blank(string text, Code code)
-    {
-        var b = new System.Text.StringBuilder(text.Length);
-        var i = 0;
-        void Skip(int to)
-        {
-            for (; i < to && i < text.Length; i++) b.Append(text[i] == '\n' ? '\n' : ' ');
-        }
-        while (i < text.Length)
-        {
-            var c = text[i];
-            var next = i + 1 < text.Length ? text[i + 1] : '\0';
-            if (code != Code.Python && c == '/' && next == '/')
-            {
-                Skip(text.IndexOf('\n', i) is var nl and >= 0 ? nl : text.Length);
-            }
-            else if (code != Code.Python && c == '/' && next == '*')
-            {
-                Skip(text.IndexOf("*/", i + 2, StringComparison.Ordinal) is var end and >= 0 ? end + 2 : text.Length);
-            }
-            else if (code == Code.Python && c == '#')
-            {
-                Skip(text.IndexOf('\n', i) is var nl and >= 0 ? nl : text.Length);
-            }
-            else if (code is Code.Python or Code.CSharp or Code.Java && (text.AsSpan(i).StartsWith("\"\"\"") || (code == Code.Python && text.AsSpan(i).StartsWith("\'\'\'"))))
-            {
-                // Triple quotes: Python's, C#'s raw strings (three or more), Java's and Kotlin's text blocks.
-                var quote = text[i];
-                var run = 0;
-                while (i + run < text.Length && text[i + run] == quote) run++;
-                var close = new string(quote, code == Code.CSharp ? run : 3);
-                Skip(text.IndexOf(close, i + run, StringComparison.Ordinal) is var end and >= 0 ? end + close.Length : text.Length);
-            }
-            else if (code == Code.CSharp && (c == '@' || c == '$') && (next == '"' || (next is '@' or '$' && i + 2 < text.Length && text[i + 2] == '"')))
-            {
-                // Verbatim (@"…", "" inside) or interpolated strings.
-                var verbatim = c == '@' || next == '@';
-                var start = text.IndexOf('"', i) + 1;
-                var j = start;
-                while (j < text.Length)
-                {
-                    if (verbatim && text[j] == '"' && j + 1 < text.Length && text[j + 1] == '"') j += 2;
-                    else if (!verbatim && text[j] == '\\') j += 2;
-                    else if (text[j] == '"') break;
-                    else j++;
-                }
-                Skip(Math.Min(text.Length, j + 1));
-            }
-            else if ((c == '"' && code != Code.Go) || (c == '\'' && code is Code.Python))
-            {
-                var j = i + 1;
-                while (j < text.Length && text[j] != c && text[j] != '\n') j += text[j] == '\\' ? 2 : 1;
-                Skip(Math.Min(text.Length, j + 1));
-            }
-            else if (c == '\'' && code is Code.CSharp or Code.Java && i + 2 < text.Length)
-            {
-                // A character literal: 'x', '\n', '\''.
-                var end = text[i + 1] == '\\' ? text.IndexOf('\'', i + 3) : i + 2;
-                if (end > i && end < text.Length && text[end] == '\'' && end - i <= 8) Skip(end + 1);
-                else
-                {
-                    b.Append(c);
-                    i++;
-                }
-            }
-            else if (c == '`' && code == Code.Go)
-            {
-                Skip(text.IndexOf('`', i + 1) is var end and >= 0 ? end + 1 : text.Length);
-            }
-            else
-            {
-                b.Append(c);
-                i++;
-            }
-        }
-        return b.ToString();
     }
 
     [ThreadStatic] static string? _linesOf;
@@ -254,7 +169,7 @@ public static partial class Links
         }
         // <Using Include="Acme.Core" />: a global using, as a .cs file's.
         foreach (Match m in MsBuildUsing().Matches(content))
-            output.Add(new Decl(Uses, m.Groups["static"].Success || m.Groups["alias"].Success ? "cs-type" : "cs", m.Groups["name"].Value, LineAt(content, m.Index)));
+            output.Add(new Decl(Uses, m.Groups["static"].Success || m.Groups["alias"].Success ? "cs-type" : "cs", m.Groups["name"].Value, LineAt(content, m.Index), Form: "global"));
         if (!fileName.EndsWith("proj", StringComparison.OrdinalIgnoreCase)) return;
         // The package it makes: its PackageId, else its assembly's name, else the project file's ($(MSBuildProjectName) is it).
         var stemName = fileName[..fileName.LastIndexOf('.')];
@@ -299,7 +214,8 @@ public static partial class Links
             }
         }
         foreach (Match m in CsUsing().Matches(content))
-            output.Add(new Decl(Uses, m.Groups["static"].Success || m.Groups["alias"].Success ? "cs-type" : "cs", m.Groups["name"].Value, LineAt(content, m.Index)));
+            output.Add(new Decl(Uses, m.Groups["static"].Success || m.Groups["alias"].Success ? "cs-type" : "cs", m.Groups["name"].Value, LineAt(content, m.Index),
+                Form: m.Groups["global"].Success ? "global" : ""));
     }
 
     // --- JavaScript and TypeScript ----------------------------------------------------
@@ -606,7 +522,7 @@ public static partial class Links
     /// <summary>A namespace's start (its name, and { or ; after it), or a brace: what nests one namespace in another.</summary>
     [GeneratedRegex(@"\bnamespace\s+(?<ns>[A-Za-z_][\w.]*)\s*(?<end>[{;])|[{}]")]
     private static partial Regex CsToken();
-    [GeneratedRegex(@"^\s*(?:global\s+)?using\s+(?:(?<static>static)\s+)?(?:(?<alias>\w+)\s*=\s*)?(?:global::)?(?<name>[A-Za-z_][\w.]*)\s*;", RegexOptions.Multiline)]
+    [GeneratedRegex(@"^\s*(?<global>global\s+)?using\s+(?:(?<static>static)\s+)?(?:(?<alias>\w+)\s*=\s*)?(?:global::)?(?<name>[A-Za-z_][\w.]*)\s*;", RegexOptions.Multiline)]
     private static partial Regex CsUsing();
     [GeneratedRegex("""(?:\bimport\s+(?:[\w*{}\s,]+\s+from\s+)?|\bexport\s+[\w*{}\s,]+\s+from\s+|\brequire\s*\(\s*|\bimport\s*\(\s*)['"](?<spec>[^'"\s]+)['"]""")]
     private static partial Regex JsImport();

@@ -578,4 +578,99 @@ public sealed class GraphTests(Xunit.Abstractions.ITestOutputHelper output)
         // A repository the caller may not read is neither shown nor walked through.
         Assert.Equal(0, GraphQueries.ChangeImpact([lib, stranger], ix.Conn, "core/money")["dependents"]!.GetValue<int>());
     }
+
+    [Fact]
+    public void A_change_is_searched_for_only_in_the_files_that_use_it_and_each_line_says_how_sure()
+    {
+        using var ix = new TestIndex();
+        void Ts(long repo, string path, string content, bool symbol = false)
+        {
+            var lang = path.EndsWith(".json", StringComparison.Ordinal) ? "npm" : path.StartsWith("Dockerfile", StringComparison.Ordinal) ? "dockerfile" : "typescript";
+            var file = ix.File(repo, path, content, lang);
+            Writes.ReplaceDecls(ix.Conn, repo, file, Links.Extract(path, lang, content));
+            if (symbol) ix.Symbol(repo, file, "roundCents", line: content.Split('\n').ToList().FindIndex(l => l.Contains("function roundCents")) + 1);
+        }
+        var lib = ix.Repo(1, "core/money");
+        Ts(lib, "package.json", "{\"name\": \"@acme/money\"}");
+        Ts(lib, "src/round.ts", "export function roundCents(x) {}\n", symbol: true);
+        Ts(lib, "src/total.ts", "import { roundCents } from './round';\nroundCents(3);\n");
+        var shop = ix.Repo(2, "web/shop");
+        Ts(shop, "package.json", "{\"name\": \"@acme/shop\", \"dependencies\": {\"@acme/money\": \"1\"}}");
+        Ts(shop, "src/cart.ts", "import { roundCents } from '@acme/money';\nroundCents(1);\n");
+        Ts(shop, "src/legacy.ts", "roundCents(2);\n");
+        Ts(shop, "src/notes.ts", "import { other } from '@acme/money';\n// roundCents is going away\nconst s = \"roundCents\";\n");
+        Ts(shop, "src/shadow.ts", "import { other } from '@acme/money';\nfunction roundCents() {}\nroundCents();\n", symbol: true);
+        // Its branch has the same files: a branch is never a dependent, so nothing is counted twice.
+        var feature = ix.Repo(2, "web/shop", branch: "feature/x");
+        Ts(feature, "src/cart.ts", "import { roundCents } from '@acme/money';\nroundCents(1);\n");
+        var many = ix.Repo(3, "aaa/first");
+        Ts(many, "package.json", "{\"name\": \"@acme/first\", \"dependencies\": {\"@acme/money\": \"1\"}}");
+        for (var i = 0; i < 31; i++) Ts(many, $"src/f{i:00}.ts", "import { roundCents } from '@acme/money';\n");
+        var portal = ix.Repo(4, "web/portal");
+        Ts(portal, "Dockerfile", "FROM registry.acme.test/core/money:1\n");
+        ix.File(portal, "src/x.ts", "roundCents(1);\n", "typescript");
+        var stranger = ix.Repo(5, "games/arcade");
+        ix.File(stranger, "src/score.ts", "function roundCents() {}\n", "typescript");
+        Graph.RebuildLinks(ix.Conn);
+
+        var impact = GraphQueries.ChangeImpact([lib, shop, feature, many, portal, stranger], ix.Conn, "core/money", "roundCents");
+        var refs = impact["references"]!.AsArray().Select(r => ($"{r!["repo"]}/{r["path"]}:{r["line"]}", r["tier"]!.ToString())).ToList();
+        // The library first (its definition, then its own use), then each dependent's import lines before its uses; shadowed last.
+        Assert.Equal(("core/money/src/round.ts:1", "definition"), refs[0]);
+        Assert.Equal(("core/money/src/total.ts:2", "use"), refs.Single(r => r.Item1 == "core/money/src/total.ts:2"));
+        var shopRefs = refs.Where(r => r.Item1.StartsWith("web/shop/", StringComparison.Ordinal)).ToList();
+        Assert.Equal([("web/shop/src/cart.ts:1", "import"), ("web/shop/src/cart.ts:2", "use"), ("web/shop/src/shadow.ts:2", "shadowed"), ("web/shop/src/shadow.ts:3", "shadowed")], shopRefs);
+        // legacy.ts does not import it; notes.ts names it in a comment and a string only; the stranger and the portal's code are not searched.
+        Assert.Equal(2, impact["comments_skipped"]!.GetValue<int>());
+        Assert.DoesNotContain(refs, r => r.Item1.Contains("legacy") || r.Item1.StartsWith("games/", StringComparison.Ordinal) || r.Item1.StartsWith("web/portal", StringComparison.Ordinal));
+        Assert.Contains(impact["not_searched"]!.AsArray(), n => n!["repo"]!.ToString() == "web/portal" && n["why"]!.ToString().Contains("image"));
+        // Eight lines a repository, but every one counted.
+        Assert.Equal(8, refs.Count(r => r.Item1.StartsWith("aaa/first/", StringComparison.Ordinal)));
+        Assert.Equal(31, impact["references_by_repo"]!["aaa/first"]!.GetValue<int>());
+        Assert.True(impact["references_truncated"]!.GetValue<bool>());
+        Assert.Equal(32L, impact["files_searched"]!["aaa/first"]!.GetValue<long>());
+    }
+
+    [Fact]
+    public void Impact_of_follows_namespaces_types_modules_packages_and_protos_not_only_headers()
+    {
+        using var ix = new TestIndex();
+        var lib = ix.Repo(1, "core/money");
+        var shop = ix.Repo(2, "web/shop");
+        var shopBranch = ix.Repo(2, "web/shop", branch: "feature/x");
+        var other = ix.Repo(3, "data/jobs");
+        Index(ix,
+            (lib, "src/Round.cs", "namespace Acme.Money;\npublic static class Round {}"),
+            (lib, "src/main/java/com/acme/money/Cents.java", "package com.acme.money;\npublic class Cents {}"),
+            (lib, "src/main/java/com/acme/money/Other.java", "package com.acme.money;\npublic class Other {}"),
+            (lib, "protos/money.proto", "syntax = \"proto3\";"),
+            (lib, "acme/__init__.py", ""),
+            (lib, "acme/money/__init__.py", ""),
+            (lib, "acme/money/round.py", "def round_cents(x): pass\n"),
+            (lib, "go.mod", "module gitlab.acme.test/core/money\n"),
+            (lib, "round/round.go", "package round\n"),
+            (shop, "Cart.cs", "using Acme.Money;\nnamespace Shop.Cart;\nclass Cart {}"),
+            (shop, "Checkout.cs", "using Shop.Cart;\nclass Checkout {}"),
+            (shop, "Sub.cs", "using Acme.Money.Rounding;\nclass Sub {}"),
+            (shop, "Pay.java", "import com.acme.money.Cents;\nclass Pay {}"),
+            (shop, "Elsewhere.java", "import com.acme.money.Other;\nclass Elsewhere {}"),
+            (shop, "pay.proto", "import \"money.proto\";"),
+            (shopBranch, "Cart.cs", "using Acme.Money;\nclass Cart {}"),
+            (other, "job.py", "from acme.money.round import round_cents\n"),
+            (other, "main.go", "package main\nimport \"gitlab.acme.test/core/money/round\"\n"));
+        var all = new List<long> { lib, shop, shopBranch, other };
+        string[] Affected(string path) =>
+        [
+            .. Queries.ImpactOf(all, ix.Conn, lib, path)["by_repo"]!.AsObject()
+                .SelectMany(r => r.Value!.AsArray().Select(f => $"{r.Key}/{f!["path"]}@{f["depth"]}")).Order(StringComparer.Ordinal),
+        ];
+        // A namespace's users, and theirs; not a sub-namespace's, nor a branch's copy.
+        Assert.Equal(["web/shop/Cart.cs@1", "web/shop/Checkout.cs@2"], Affected("src/Round.cs"));
+        // A Java type's importers, not the package's other types'.
+        Assert.Equal(["web/shop/Pay.java@1"], Affected("src/main/java/com/acme/money/Cents.java"));
+        Assert.Equal(["web/shop/pay.proto@1"], Affected("protos/money.proto"));
+        Assert.Equal(["data/jobs/job.py@1"], Affected("acme/money/round.py"));
+        Assert.Equal(["data/jobs/main.go@1"], Affected("round/round.go"));
+        Assert.Equal("cs Acme.Money", Queries.ImpactOf(all, ix.Conn, lib, "src/Round.cs")["by_repo"]!["web/shop"]![0]!["via"]!.ToString());
+    }
 }

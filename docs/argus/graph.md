@@ -118,7 +118,22 @@ What each answers:
   product of its steps) and its weakest step. When nothing at the asked
   confidence joins the two, weaker chains are returned with `weak: true`.
 - `change_impact` lists dependents by depth, each reached through its surest
-  parent, surest first, and `possible_dependents` from candidates.
+  parent, surest first, and `possible_dependents` from candidates. With a
+  symbol, it searches only the files that use the changed repository: those
+  whose imports resolved to it (`file_links`), what `#include`s it and what
+  includes those (three steps), every C# file under a global using, and the
+  files of a package's languages when only a package reference says so. Each
+  line has a tier, surest first: definition, import, use, include, package,
+  shadowed (its file defines the same name, likely its own). Comments and
+  strings are skipped and counted. At most 8 lines a repository (10 for the
+  changed one) and 60 in all are shown; `references_by_repo` counts them
+  all. Dependents linked by no code (an image, a CI include) and dependents
+  further away are listed in `not_searched`.
+- `impact_of` follows a file's users beyond `#include`: the imports of what
+  it declares (its C# namespace, a `using static` of its types, its Java type,
+  a Kotlin function, its Python module or the package it is imported from,
+  its Go package, its `.proto`, its npm package), file by file, in its own
+  repository and the others' default branches. Each file says `via`.
 
 Links are made between default branches. A branch's row (`path@branch`) is
 answered by its default branch's, and the result's `note` says so.

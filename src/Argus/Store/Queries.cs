@@ -247,11 +247,10 @@ public static class Queries
                 fileRows = [];
             }
 
+            var definitions = Definitions(conn, fileRows.Select(f => f.Long("file_id")).ToList(), name);
             foreach (var frow in fileRows)
             {
-                var defLines = new HashSet<long>(
-                    Sql.Query(conn, "SELECT line FROM symbols WHERE file_id = ? AND name = ?", frow["file_id"], name)
-                        .Select(r => r.Long("line")));
+                var defLines = definitions.GetValueOrDefault(frow.Long("file_id")) ?? [];
                 var lines = PyStr.SplitLines(frow.Str("content"));
                 for (int i = 0; i < lines.Count; i++)
                 {
@@ -273,6 +272,73 @@ public static class Queries
             .ThenBy(r => r.Path, StringComparer.Ordinal)
             .ThenBy(r => r.Line)
             .Take(limit).Select(r => r.Row).ToList();
+    }
+
+    /// <summary>The lines each file defines a symbol of this name at, in one query per chunk of files.</summary>
+    static Dictionary<long, HashSet<long>> Definitions(SqliteConnection conn, List<long> fileIds, string name)
+    {
+        var lines = new Dictionary<long, HashSet<long>>();
+        foreach (var chunk in Chunks(fileIds, 1))
+        {
+            foreach (var r in Sql.QueryList(conn, $"SELECT file_id, line FROM symbols WHERE name = ? AND file_id IN ({Sql.Marks(chunk.Count)})",
+                         new object?[] { name }.Concat(chunk.Cast<object?>()).ToArray()))
+            {
+                if (!lines.TryGetValue(r.Long("file_id"), out var set)) lines[r.Long("file_id")] = set = [];
+                set.Add(r.Long("line"));
+            }
+        }
+        return lines;
+    }
+
+    /// <summary>A line that names a symbol: its file, repository, path, line, text, and whether the file defines it there.</summary>
+    public sealed record Hit(long FileId, long RepoId, string Repo, string Path, long Line, string Context, bool Definition, bool FileDefines);
+
+    /// <summary>
+    /// The lines of these files that name a symbol in code, not in a comment or a string (those are counted as skipped).
+    /// The full-text index finds the files; each is read with its comments and strings blanked.
+    /// </summary>
+    public static (List<Hit> Hits, int Skipped) ReferencesInFiles(SqliteConnection conn, IReadOnlyCollection<long> fileIds, string name)
+    {
+        var hits = new List<Hit>();
+        var skipped = 0;
+        if (fileIds.Count == 0 || string.IsNullOrWhiteSpace(name)) return (hits, 0);
+        var pattern = new Regex(@"\b" + Regex.Escape(name) + @"\b", RegexOptions.CultureInvariant);
+        var ftsQuery = "\"" + name.Replace("\"", "\"\"") + "\"";
+        foreach (var chunk in Chunks([.. fileIds.Distinct()], 1))
+        {
+            List<Row> rows;
+            try
+            {
+                rows = Sql.QueryList(conn,
+                    "SELECT f.id AS file_id, f.repo_id, r.path_with_namespace AS repo, f.path, f.lang, f.content" +
+                    "  FROM files_fts JOIN files f ON f.id = files_fts.rowid JOIN repos r ON r.id = f.repo_id" +
+                    $" WHERE files_fts MATCH ? AND f.id IN ({Sql.Marks(chunk.Count)})",
+                    new object?[] { ftsQuery }.Concat(chunk.Cast<object?>()).ToArray());
+            }
+            catch (SqliteException)
+            {
+                rows = [];
+            }
+            var definitions = Definitions(conn, rows.Select(f => f.Long("file_id")).ToList(), name);
+            foreach (var row in rows)
+            {
+                var content = row.Str("content");
+                var lines = PyStr.SplitLines(content);
+                var code = CodeText.Reads(row.StrOrNull("lang")) ? PyStr.SplitLines(CodeText.Blank(row.StrOrNull("lang"), content)) : lines;
+                var defines = definitions.GetValueOrDefault(row.Long("file_id")) ?? [];
+                for (var i = 0; i < lines.Count; i++)
+                {
+                    if (!pattern.IsMatch(lines[i])) continue;
+                    if (i >= code.Count || !pattern.IsMatch(code[i]))
+                    {
+                        skipped++;
+                        continue;
+                    }
+                    hits.Add(new Hit(row.Long("file_id"), row.Long("repo_id"), row.Str("repo"), row.Str("path"), i + 1, lines[i], defines.Contains(i + 1), defines.Count > 0));
+                }
+            }
+        }
+        return (hits, skipped);
     }
 
     // --- which_repo ---------------------------------------------------------------
@@ -488,7 +554,12 @@ public static class Queries
     public const int DefaultImpactDepth = 3;
     public const int DefaultImpactLimit = 200;
 
-    /// <summary>Files affected by changing one file, transitively, traversing only allowed repos.</summary>
+    /// <summary>
+    /// Files affected by changing one file, transitively, traversing only allowed repos: what #includes it, and what
+    /// imports what it declares (its C# namespace, its Java package and type, its Python module, its Go package, its
+    /// .proto, its npm package), in its own repository and in the default branches of the others. Each file says the
+    /// depth it was reached at and how (via).
+    /// </summary>
     public static JsonObject ImpactOf(IReadOnlyList<long> allowed, SqliteConnection conn, long repoId, string path,
         long maxDepth = DefaultImpactDepth, int limit = DefaultImpactLimit)
     {
@@ -497,40 +568,47 @@ public static class Queries
         var target = Sql.One(conn, "SELECT id, path FROM files WHERE repo_id = ? AND path = ?", repoId, path);
         if (target is null) return [];
         long depth = Math.Max(1, Math.Min(maxDepth, 10));
+        var allowedSet = ids.ToHashSet();
+        // Imports are read in the file's own repository and the other projects' default branches (links are made there).
+        var gitlab = Sql.Query(conn, "SELECT id, gitlab_id, branch = default_branch AS is_default FROM repos")
+            .ToDictionary(r => r.Long("id"), r => (Project: r.Long("gitlab_id"), Default: r.Long("is_default") != 0));
+        var ownProject = gitlab[repoId].Project;
+        bool Reads(long repo) => allowedSet.Contains(repo) && (repo == repoId || gitlab.TryGetValue(repo, out var g) && g.Default && g.Project != ownProject);
 
-        var rows = Sql.Query(conn, """
-            WITH RECURSIVE
-            allowed(repo_id) AS (SELECT value FROM json_each(?)),
-            reached(file_id, depth) AS (
-                SELECT i.file_id, 1
-                  FROM includes i
-                  JOIN allowed a ON a.repo_id = i.repo_id
-                 WHERE i.resolved_file_id = ? AND i.resolution = 'resolved'
-                UNION
-                SELECT i.file_id, r.depth + 1
-                  FROM includes i
-                  JOIN reached r ON i.resolved_file_id = r.file_id
-                  JOIN allowed a ON a.repo_id = i.repo_id
-                 WHERE i.resolution = 'resolved' AND r.depth < ?
-            )
-            SELECT f.path, p.path_with_namespace, p.id AS repo_id, MIN(r.depth) AS depth
-              FROM reached r
-              JOIN files f ON f.id = r.file_id
-              JOIN repos p ON p.id = f.repo_id
-             GROUP BY r.file_id
-             ORDER BY depth, p.path_with_namespace, f.path
-             LIMIT ?
-            """, "[" + string.Join(", ", ids) + "]", target["id"], depth, (long)limit + 1);
+        var reached = new Dictionary<long, (long Depth, string Via)>();
+        var frontier = new List<long> { target.Long("id") };
+        var seen = new HashSet<long> { target.Long("id") };
+        for (var level = 1; level <= depth && frontier.Count > 0 && reached.Count <= limit; level++)
+        {
+            var next = new List<long>();
+            void Reach(long file, string via)
+            {
+                if (!seen.Add(file)) return;
+                reached[file] = (level, via);
+                next.Add(file);
+            }
+            foreach (var file in frontier)
+            {
+                foreach (var i in Sql.Query(conn, "SELECT file_id, repo_id, raw FROM includes WHERE resolved_file_id = ? AND resolution = 'resolved'", file))
+                    if (allowedSet.Contains(i.Long("repo_id"))) Reach(i.Long("file_id"), "#include " + i.Str("raw"));
+                foreach (var (importer, importing, via) in Importers(conn, file))
+                    if (Reads(importer)) Reach(importing, via);
+            }
+            frontier = next;
+        }
 
+        var rows = reached.Count == 0 ? [] : reached.Keys.Chunk(500).SelectMany(chunk => Sql.Query(conn,
+                $"SELECT f.id, f.path, p.path_with_namespace FROM files f JOIN repos p ON p.id = f.repo_id WHERE f.id IN ({string.Join(",", chunk)})"))
+            .Select(r => (Id: r.Long("id"), Path: r.Str("path"), Repo: r.Str("path_with_namespace"), reached[r.Long("id")].Depth, reached[r.Long("id")].Via))
+            .OrderBy(r => r.Depth).ThenBy(r => r.Repo, StringComparer.Ordinal).ThenBy(r => r.Path, StringComparer.Ordinal).ToList();
         bool truncated = rows.Count > limit;
         rows = rows.Take(limit).ToList();
 
         var byRepo = new JsonObject();
         foreach (var row in rows)
         {
-            var key = row.Str("path_with_namespace");
-            if (byRepo[key] is not JsonArray arr) byRepo[key] = arr = [];
-            arr.Add(new JsonObject { ["path"] = row.Str("path"), ["depth"] = row.Long("depth") });
+            if (byRepo[row.Repo] is not JsonArray arr) byRepo[row.Repo] = arr = [];
+            arr.Add(new JsonObject { ["path"] = row.Path, ["depth"] = row.Depth, ["via"] = row.Via });
         }
         return new JsonObject
         {
@@ -542,6 +620,85 @@ public static class Queries
             ["by_repo"] = byRepo,
         };
     }
+
+    /// <summary>
+    /// The files that import what one file declares, each with its repository and how it imports it: the uses (file_decls)
+    /// that name the file's C# namespace, its Java type or package, its Python module (or the package it is imported
+    /// from), its Go package, its .proto or its npm package.
+    /// </summary>
+    static IEnumerable<(long Repo, long File, string Via)> Importers(SqliteConnection conn, long fileId)
+    {
+        var file = Sql.One(conn, "SELECT repo_id, path, lang FROM files WHERE id = ?", fileId);
+        if (file is null) yield break;
+        var (repo, path, lang) = (file.Long("repo_id"), file.Str("path"), file.StrOrNull("lang"));
+        var provides = Sql.Query(conn, "SELECT kind, name FROM file_decls WHERE file_id = ? AND role = 'provides'", fileId).Select(r => (Kind: r.Str("kind"), Name: r.Str("name"))).ToList();
+        var asks = new List<(string Sql, object?[] Args, Func<string, bool>? Keep)>();
+        var stem = System.IO.Path.GetFileNameWithoutExtension(path);
+        foreach (var (kind, name) in provides)
+        {
+            switch (kind)
+            {
+                case "cs":
+                    asks.Add(("kind = 'cs' AND name = ?", [name], null));
+                    // using static A.B.Type; using X = A.B.Type.
+                    asks.Add(("kind = 'cs-type' AND (name = ? OR name LIKE ? ESCAPE '\\')", [name, Like(name) + ".%"],
+                        n => n == name || !n[(name.Length + 1)..].Contains('.')));
+                    break;
+                case "java":
+                    asks.Add(("kind = 'java-package' AND name = ?", [name], null));
+                    asks.Add(("kind = 'java' AND (name = ? OR name LIKE ? ESCAPE '\\' OR name LIKE ? ESCAPE '\\')", [$"{name}.{stem}", Like($"{name}.{stem}") + ".%", Like(name) + ".%"],
+                        // The type, its nested types, or (Kotlin) a top-level function one segment past the package.
+                        n => n == $"{name}.{stem}" || n.StartsWith($"{name}.{stem}.", StringComparison.Ordinal)
+                             || lang == "kotlin" && n[(name.Length + 1)..] is var rest && !rest.Contains('.') && rest.Length > 0 && char.IsLower(rest[0])));
+                    break;
+                case "proto":
+                    asks.Add(("kind = 'proto' AND (name = ? OR ? LIKE '%/' || name)", [name, name], null));
+                    break;
+            }
+        }
+        if (lang == "python")
+        {
+            var pyFiles = Sql.Query(conn, "SELECT name FROM file_decls WHERE repo_id = ? AND role = 'provides' AND kind = 'py-file'", repo).Select(r => r.Str("name")).ToList();
+            foreach (var (module, _) in Graph.PythonModulesAt(pyFiles).Where(m => m.File == path))
+            {
+                asks.Add(("kind = 'py' AND (name = ? OR name LIKE ? ESCAPE '\\')", [module, Like(module) + ".%"], null));
+                // from package import module
+                if (module.LastIndexOf('.') is var dot and > 0) asks.Add(("kind = 'py' AND name = ?", [module[..dot]], null));
+            }
+        }
+        if (lang == "go")
+        {
+            // The module whose go.mod is nearest above it, and the package its folder is.
+            var dir = path.Contains('/') ? path[..path.LastIndexOf('/')] : "";
+            var module = Sql.Query(conn, "SELECT d.name, f.path FROM file_decls d JOIN files f ON f.id = d.file_id WHERE d.repo_id = ? AND d.role = 'provides' AND d.kind = 'go'", repo)
+                .Select(r => (Name: r.Str("name"), Dir: r.Str("path").Contains('/') ? r.Str("path")[..r.Str("path").LastIndexOf('/')] : ""))
+                .Where(m => m.Dir == "" || dir == m.Dir || dir.StartsWith(m.Dir + "/", StringComparison.Ordinal)).OrderByDescending(m => m.Dir.Length).FirstOrDefault();
+            if (module.Name is { } goModule)
+            {
+                var package = dir.Length > module.Dir.Length ? goModule + "/" + dir[(module.Dir.Length == 0 ? 0 : module.Dir.Length + 1)..] : goModule;
+                asks.Add(("kind = 'go' AND name = ?", [package], null));
+            }
+        }
+        if (lang is "typescript" or "javascript")
+        {
+            // The npm package of the nearest package.json above it.
+            var package = Sql.Query(conn, "SELECT d.name, f.path FROM file_decls d JOIN files f ON f.id = d.file_id WHERE d.repo_id = ? AND d.role = 'provides' AND d.kind = 'npm'", repo)
+                .Select(r => (Name: r.Str("name"), Dir: r.Str("path").Contains('/') ? r.Str("path")[..r.Str("path").LastIndexOf('/')] : ""))
+                .Where(m => m.Dir == "" || path.StartsWith(m.Dir + "/", StringComparison.Ordinal)).OrderByDescending(m => m.Dir.Length).FirstOrDefault();
+            if (package.Name is { } npm) asks.Add(("kind = 'npm' AND (name = ? OR name LIKE ? ESCAPE '\\')", [npm, Like(npm) + "/%"], null));
+        }
+        foreach (var (where, args, keep) in asks)
+        {
+            foreach (var u in Sql.Query(conn, $"SELECT DISTINCT repo_id, file_id, kind, name FROM file_decls WHERE role = 'uses' AND {where}", args))
+            {
+                if (u.Long("file_id") == fileId || keep is not null && !keep(u.Str("name"))) continue;
+                yield return (u.Long("repo_id"), u.Long("file_id"), $"{u.Str("kind")} {u.Str("name")}");
+            }
+        }
+    }
+
+    /// <summary>A LIKE pattern's literal text, its wildcards escaped.</summary>
+    static string Like(string text) => text.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
     // --- branches -----------------------------------------------------------------
 

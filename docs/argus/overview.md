@@ -28,7 +28,7 @@ the stack.
 | `system_map` | *"How is the whole system put together?"* — its hubs, layers, cycles and groups (of what each is built from), and every link between repositories, one line each with its confidence |
 | `dependency_path` | *"How does this repo affect that one?"* — the surest chains of dependencies between them, each step with what makes it, how sure and where |
 | `change_impact` | *"What does changing this library reach?"* — every repository that depends on it, by depth and how sure; with a symbol, the lines that use it there (and not in unrelated repos of the same name) |
-| `repo_map` · `impact_of` | *"What breaks if I change this?"* — a repository's links both ways (and further with depth); a header's includers, file by file |
+| `repo_map` · `impact_of` | *"What breaks if I change this?"* — a repository's links both ways (and further with depth); a file's includers and importers, file by file |
 | `code_contracts` | Every in-house symbol a file references, with its definition |
 | `get_file` · `index_status` | Access-checked fetch; per-repo freshness, one row per branch |
 | `overview` | *"What is this repository?"* — its README, its layout, its key symbols. The one to call first in a codebase you have never seen |

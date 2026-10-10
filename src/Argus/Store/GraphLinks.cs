@@ -55,7 +55,7 @@ public static partial class Graph
     public static IEnumerable<string> PythonModules(IReadOnlyCollection<string> files) => PythonModulesAt(files).Select(m => m.Module);
 
     /// <summary>Each Python module a repository's files make, with the file that makes it.</summary>
-    static IEnumerable<(string Module, string File)> PythonModulesAt(IReadOnlyCollection<string> files)
+    public static IEnumerable<(string Module, string File)> PythonModulesAt(IReadOnlyCollection<string> files)
     {
         var packages = files.Where(f => f.EndsWith("/__init__.py", StringComparison.Ordinal) || f == "__init__.py")
             .Select(f => f.Contains('/') ? f[..f.LastIndexOf('/')] : "").ToHashSet(StringComparer.Ordinal);

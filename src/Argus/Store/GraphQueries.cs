@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json.Nodes;
+using Argus.Indexing;
 using Argus.Util;
 using Microsoft.Data.Sqlite;
 
@@ -631,33 +632,144 @@ public static class GraphQueries
             ["possible_dependents"] = new JsonArray([.. possible.Take(MostPossible).Select(p => (JsonNode)PossibleJson(estate, p, uses: false))]),
             ["filter"] = estate.Filter.ToJson(),
         };
-        if (symbol is { Length: > 0 } name)
-        {
-            var scope = reached.Select(r => r.Id).Append(changed.Id).ToList();
-            var definitions = Queries.FindSymbol([changed.Id], conn, name);
-            var via = reached.ToDictionary(r => estate.Name(r.Id), r => (r.Depth, Through: estate.Name(r.Via)));
-            var refs = Queries.FindReferences(scope, conn, name, MostReferences + 1);
-            result["symbol"] = name;
-            result["defined"] = new JsonArray([.. definitions.Select(d => (JsonNode)new JsonObject
-            {
-                ["path"] = d.Str("path"), ["line"] = d.LongOrNull("line"), ["kind"] = d.StrOrNull("kind"), ["signature"] = d.StrOrNull("signature"),
-            })]);
-            result["references"] = new JsonArray([.. refs.Take(MostReferences).Select(r =>
-            {
-                var repoName = r["repo"]!.GetValue<string>();
-                var copy = (JsonObject)r.DeepClone();
-                if (via.TryGetValue(repoName, out var how))
-                {
-                    copy["depth"] = how.Depth;
-                    copy["through"] = how.Through;
-                }
-                return (JsonNode)copy;
-            })]);
-            result["references_truncated"] = refs.Count > MostReferences;
-            if (definitions.Count == 0)
-                result["note"] = $"{estate.Name(changed.Id)} defines no symbol {name} that the index found: the lines are by name only.";
-        }
+        if (symbol is { Length: > 0 } name) References(estate, conn, changed.Id, reached, name, result);
         return result;
+    }
+
+    /// <summary>How sure a line is to use the changed symbol, surest first.</summary>
+    static readonly string[] Tiers = ["definition", "import", "use", "include", "package", "shadowed"];
+
+    /// <summary>The languages a package of each ecosystem is used from.</summary>
+    static string[] PackageLangs(string kind) => kind switch
+    {
+        "package:nuget" => ["csharp"],
+        "package:npm" => ["typescript", "javascript"],
+        "package:pypi" => ["python"],
+        "package:maven" => ["java", "kotlin"],
+        "package:cargo" => ["rust"],
+        "package:git" or "repository" => ["csharp", "typescript", "javascript", "python", "java", "kotlin", "go", "rust", "c", "cpp", "proto"],
+        _ => [],
+    };
+
+    public const int MostReferencesPerRepo = 8, MostReferencesInChanged = 10;
+
+    /// <summary>
+    /// The lines that name a symbol: in the changed repository, and in each direct dependent only in the files that use
+    /// it (whose imports resolved to it, what they #include of it and what includes those, up to three steps; every C#
+    /// file under a global using; a package's languages when only the package says so). A line is a definition, an import,
+    /// a use, an include's, a package's, or shadowed (its file defines a symbol of that name: likely its own). Comments
+    /// and strings are skipped and counted. What a dependent links to through no code (an image, a CI include) and
+    /// dependents further away are listed as not searched.
+    /// </summary>
+    static void References(Estate estate, SqliteConnection conn, long changed, List<(long Id, int Depth, long Via, double Confidence)> reached, string name, JsonObject result)
+    {
+        var category = new Dictionary<long, string>();
+        void Mark(long file, string tier)
+        {
+            if (!category.TryGetValue(file, out var known) || Array.IndexOf(Tiers, tier) < Array.IndexOf(Tiers, known)) category[file] = tier;
+        }
+        var tests = estate.Filter.IncludeTests;
+        var notSearched = new JsonArray();
+        foreach (var f in Sql.Query(conn, "SELECT id FROM files WHERE repo_id = ?", changed)) Mark(f.Long("id"), "use");
+        foreach (var (id, depth, via, _) in reached.OrderBy(r => r.Depth).ThenBy(r => estate.Name(r.Id), StringComparer.Ordinal))
+        {
+            if (depth > 1)
+            {
+                notSearched.Add(new JsonObject { ["repo"] = estate.Name(id), ["why"] = $"it reaches the change through {estate.Name(via)}; none of its files uses it directly" });
+                continue;
+            }
+            var before = category.Count;
+            var files = Sql.Query(conn,
+                    "SELECT DISTINCT l.file_id, f.path FROM file_links l JOIN files f ON f.id = l.file_id WHERE f.repo_id = ? AND l.to_repo_id = ?", id, changed)
+                .Where(f => tests || !Links.IsTestPath(f.Str("path"))).Select(f => f.Long("file_id")).ToList();
+            foreach (var f in files) Mark(f, "import");
+            // A global using: every C# file of the repository sees the namespace.
+            if (files.Count > 0 && Sql.Scalar(conn, $"SELECT COUNT(*) FROM file_decls WHERE role = 'uses' AND form = 'global' AND file_id IN ({string.Join(",", files)})") is long global && global > 0)
+            {
+                foreach (var f in Sql.Query(conn, "SELECT id, path FROM files WHERE repo_id = ? AND lang = 'csharp'", id).Where(f => tests || !Links.IsTestPath(f.Str("path"))))
+                    Mark(f.Long("id"), "import");
+            }
+            // What it #includes of the change, and what includes those (three steps).
+            var included = Sql.Query(conn,
+                    "SELECT DISTINCT i.file_id FROM includes i JOIN files t ON t.id = i.resolved_file_id WHERE i.repo_id = ? AND t.repo_id = ? AND i.resolution = 'resolved'", id, changed)
+                .Select(r => r.Long("file_id")).ToList();
+            foreach (var f in included) Mark(f, "import");
+            var frontier = included;
+            for (var step = 0; step < 3 && frontier.Count > 0; step++)
+            {
+                frontier = Sql.Query(conn,
+                        $"SELECT DISTINCT file_id FROM includes WHERE repo_id = ? AND resolution = 'resolved' AND resolved_file_id IN ({string.Join(",", frontier)})", id)
+                    .Select(r => r.Long("file_id")).Where(f => !category.ContainsKey(f)).ToList();
+                foreach (var f in frontier) Mark(f, "include");
+            }
+            var edge = estate.Edges[(id, changed)];
+            if (category.Count == before)
+            {
+                // Only a package (or a submodule) says it uses the change: the files of its languages.
+                var langs = edge.Ways.SelectMany(w => PackageLangs(w.Kind)).Distinct().ToList();
+                if (langs.Count > 0)
+                {
+                    foreach (var f in Sql.Query(conn, $"SELECT id, path FROM files WHERE repo_id = ? AND lang IN ({string.Join(",", langs.Select(l => $"'{l}'"))})", id)
+                                 .Where(f => tests || !Links.IsTestPath(f.Str("path"))))
+                        Mark(f.Long("id"), "package");
+                }
+            }
+            if (category.Count == before)
+                notSearched.Add(new JsonObject
+                {
+                    ["repo"] = estate.Name(id),
+                    ["why"] = $"it is linked by {string.Join(", ", edge.Ways.Select(w => w.Kind).Distinct())}: none of its files names the change's code",
+                });
+        }
+
+        var (hits, skipped) = Queries.ReferencesInFiles(conn, category.Keys, name);
+        var imports = new HashSet<(long, long)>();
+        var importFiles = category.Where(c => c.Value == "import").Select(c => c.Key).ToList();
+        foreach (var chunk in importFiles.Chunk(500))
+            foreach (var d in Sql.Query(conn, $"SELECT file_id, line FROM file_decls WHERE role = 'uses' AND file_id IN ({string.Join(",", chunk)})"))
+                imports.Add((d.Long("file_id"), d.Long("line")));
+        var depthOf = reached.ToDictionary(r => r.Id, r => (r.Depth, Through: estate.Name(r.Via)));
+        string TierOf(Queries.Hit h)
+        {
+            if (h.RepoId == changed) return h.Definition ? "definition" : "use";
+            if (h.FileDefines) return "shadowed";
+            return category[h.FileId] switch
+            {
+                "import" => imports.Contains((h.FileId, h.Line)) ? "import" : "use",
+                var tier => tier,
+            };
+        }
+        var ranked = hits.Select(h => (Hit: h, Tier: TierOf(h), Depth: h.RepoId == changed ? 0 : depthOf.GetValueOrDefault(h.RepoId).Depth))
+            .OrderBy(r => r.Depth).ThenBy(r => Array.IndexOf(Tiers, r.Tier)).ThenBy(r => r.Hit.Repo, StringComparer.Ordinal)
+            .ThenBy(r => r.Hit.Path, StringComparer.Ordinal).ThenBy(r => r.Hit.Line).ToList();
+        var shown = new List<JsonNode>();
+        foreach (var repo in ranked.GroupBy(r => r.Hit.RepoId))
+        {
+            var most = repo.Key == changed ? MostReferencesInChanged : MostReferencesPerRepo;
+            shown.AddRange(repo.Take(most).Select(r => (JsonNode)new JsonObject
+            {
+                ["repo"] = r.Hit.Repo, ["path"] = r.Hit.Path, ["line"] = r.Hit.Line, ["context"] = r.Hit.Context, ["tier"] = r.Tier,
+                ["is_definition"] = r.Hit.Definition, ["depth"] = r.Depth,
+                ["through"] = r.Depth > 0 ? depthOf[r.Hit.RepoId].Through : null,
+            }));
+        }
+        var definitions = Queries.FindSymbol([changed], conn, name);
+        result["symbol"] = name;
+        result["defined"] = new JsonArray([.. definitions.Select(d => (JsonNode)new JsonObject
+        {
+            ["path"] = d.Str("path"), ["line"] = d.LongOrNull("line"), ["kind"] = d.StrOrNull("kind"), ["signature"] = d.StrOrNull("signature"),
+        })]);
+        result["references"] = new JsonArray([.. shown.Take(MostReferences)]);
+        result["references_truncated"] = ranked.Count > Math.Min(shown.Count, MostReferences);
+        result["references_by_repo"] = new JsonObject(ranked.GroupBy(r => r.Hit.Repo).OrderBy(g => g.Key, StringComparer.Ordinal)
+            .Select(g => KeyValuePair.Create(g.Key, (JsonNode?)g.Count())));
+        result["files_searched"] = new JsonObject(category.Keys.Chunk(500)
+            .SelectMany(chunk => Sql.Query(conn, $"SELECT r.path_with_namespace AS repo, COUNT(*) AS n FROM files f JOIN repos r ON r.id = f.repo_id WHERE f.id IN ({string.Join(",", chunk)}) GROUP BY r.id"))
+            .GroupBy(r => r.Str("repo")).OrderBy(g => g.Key, StringComparer.Ordinal).Select(g => KeyValuePair.Create(g.Key, (JsonNode?)g.Sum(r => r.Long("n")))));
+        result["comments_skipped"] = skipped;
+        result["not_searched"] = notSearched;
+        if (definitions.Count == 0)
+            result["note"] = $"{estate.Name(changed)} defines no symbol {name} that the index found: the lines are by name only.";
     }
 
     /// <summary>A repository's links for overview: whom it uses and who uses it, with how, surest first.</summary>
