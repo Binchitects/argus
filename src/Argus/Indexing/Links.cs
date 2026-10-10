@@ -23,9 +23,6 @@ public static partial class Links
         "msbuild", "npm", "gomod", "maven", "gradle", "cargo", "toml", "yaml", "gitmodules", "dockerfile", "ini", "nugetconfig",
     };
 
-    /// <summary>Folders whose Python packages are never a library of the estate's own (each repository has them).</summary>
-    static readonly HashSet<string> GenericModules = new(StringComparer.Ordinal) { "tests", "test", "docs", "examples", "scripts", "tools", "setup", "conftest", "src", "lib" };
-
     public static List<Decl> Extract(string path, string? lang, string content)
     {
         var output = new List<Decl>();
@@ -313,11 +310,10 @@ public static partial class Links
 
     static void Python(string path, string content, List<Decl> output)
     {
-        // The module a package file provides: its dotted path, from the first folder (leaving out src/ and lib/).
-        var parts = path.Split('/').ToList();
-        if (parts.Count > 1 && parts[0] is "src" or "lib") parts.RemoveAt(0);
-        if (parts.Count > 1 && parts[^1] == "__init__.py" && !GenericModules.Contains(parts[0]))
-            output.Add(new Decl(Provides, "py", string.Join('.', parts[..^1]), 1));
+        // The module a file is: named from its import root, which only the repository's other files tell (the top of the
+        // chain of package folders); resolved with them (Graph.PythonModules).
+        if (path.EndsWith(".py", StringComparison.Ordinal))
+            output.Add(new Decl(Provides, "py-file", path, 1));
         foreach (Match m in PyImport().Matches(content))
         {
             var module = m.Groups["from"].Success ? m.Groups["from"].Value : m.Groups["import"].Value;

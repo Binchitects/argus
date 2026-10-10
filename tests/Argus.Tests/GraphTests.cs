@@ -26,7 +26,7 @@ public sealed class GraphTests(Xunit.Abstractions.ITestOutputHelper output)
             Decls("pyproject.toml", "[project]\nname = \"acme_data.tools\"\ndependencies = [\"acme-core>=1.0\", \"requests\"]\n"));
         Assert.Equal([("uses", "pypi", "acme-core"), ("uses", "repo", "data/loader")],
             Decls("requirements.txt", "acme_core==1.2  # ours\n-r base.txt\ngit+https://gitlab.acme.test/data/loader.git@v1#egg=loader\n"));
-        Assert.Equal([("provides", "py", "acme_data"), ("uses", "py", "acme_core.money"), ("uses", "py", "os")],
+        Assert.Equal([("provides", "py-file", "src/acme_data/__init__.py"), ("uses", "py", "acme_core.money"), ("uses", "py", "os")],
             Decls("src/acme_data/__init__.py", "from acme_core.money import Money\nimport os\nfrom . import local\n"));
         Assert.Equal([("provides", "go", "gitlab.acme.test/platform/auth"), ("uses", "go", "gitlab.acme.test/core/log")],
             Decls("go.mod", "module gitlab.acme.test/platform/auth\n\nrequire (\n\tgitlab.acme.test/core/log v1.2.0\n)\n"));
@@ -287,6 +287,27 @@ public sealed class GraphTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.All(pairs, p => Assert.Equal("lib/money", p.Item2));
         var names = Argus.Util.Sql.Query(ix.Conn, "SELECT DISTINCT kind, name FROM repo_links").Select(r => (r.Str("kind"), r.Str("name"))).ToHashSet();
         Assert.Equal(new HashSet<(string, string)> { ("import:csharp", "Acme.Money.Rounding"), ("import:java", "com.acme.money") }, names);
+    }
+
+    [Fact]
+    public void A_python_module_is_named_from_its_import_root_and_a_bare_name_needs_a_declared_dependency()
+    {
+        Assert.Equal(["acme.money", "acme.money.round", "acme.money.tax", "cli", "tool"],
+            Graph.PythonModules(["python/acme/__init__.py", "python/acme/money/__init__.py", "python/acme/money/round.py", "packages/x/acme/money/tax.py",
+                "python/acme/money/tax.py", "cli.py", "src/tool.py", "tests/test_round.py", "setup.py"]).Where(m => m != "acme").Distinct().Order());
+        using var ix = new TestIndex();
+        var lib = ix.Repo(1, "lib/money");
+        var app = ix.Repo(2, "apps/shop");
+        var other = ix.Repo(3, "apps/stats");
+        Index(ix,
+            (lib, "python/acme/__init__.py", ""), (lib, "python/acme/money/__init__.py", ""), (lib, "config.py", ""),
+            (lib, "pyproject.toml", "[project]\nname = \"acme-money\"\n"),
+            (app, "shop.py", "from acme.money import round\nimport config\n"), (app, "requirements.txt", "acme-money\n"),
+            (other, "stats.py", "import config\n"));
+        var stats = Graph.RebuildLinks(ix.Conn);
+        // Nested under python/, the package is acme.money; a bare config links only where acme-money is declared.
+        Assert.Equal(new HashSet<(string, string)> { ("apps/shop", "lib/money") }, Pairs(ix));
+        Assert.Equal(1, stats["unconfirmed"]);
     }
 
     [Fact]

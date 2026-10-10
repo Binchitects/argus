@@ -55,7 +55,7 @@ the index already holds, ecosystem by ecosystem, with no build run:
 |---|---|---|
 | .NET | a project's `PackageId` (else its assembly's or file's name); a file's `namespace` | `PackageReference`, `packages.config`; `using` |
 | JavaScript, TypeScript | `package.json`'s `name` | its dependencies; `import`, `require` |
-| Python | `pyproject.toml`, `setup.cfg`, `setup.py`'s name; a package folder (`__init__.py`) | requirements files, `pyproject.toml`, `setup.py`; `import`, `from` |
+| Python | `pyproject.toml`, `setup.cfg`, `setup.py`'s name; every module, named from its import root (the top of its chain of `__init__.py` folders, under `src/`, `python/` or any other), and a top-level module by its name | requirements files, `pyproject.toml`, `setup.py`; `import`, `from` (a bare top-level name, as `config`, links only to a repository whose distribution is a declared dependency) |
 | Go | `go.mod`'s `module` | its `require`s; `import` (the longest module path that starts it) |
 | Java, Kotlin | `pom.xml`'s group and artifact; a file's `package` | `<dependency>`, Gradle's `implementation` and the rest; `import` |
 | Rust | `Cargo.toml`'s `[package]` name | its dependencies; `use` |

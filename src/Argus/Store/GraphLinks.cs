@@ -55,6 +55,43 @@ public static partial class Graph
         "zipfile", "zipimport", "zlib", "zoneinfo",
     };
 
+    /// <summary>Folders whose Python modules are never a library of the estate's own (every repository has them).</summary>
+    static readonly HashSet<string> GenericModules = new(StringComparer.Ordinal) { "tests", "test", "docs", "examples", "scripts", "tools", "setup", "conftest" };
+
+    /// <summary>
+    /// The Python modules a repository's files are, by their dotted names: a package's (a folder with __init__.py) from the
+    /// top of its chain of package folders (python/acme/money/__init__.py is acme.money), each module in it under it
+    /// (acme.money.round), and a module beside no package at the repository's top (or in src/, lib/, python/) by its name.
+    /// </summary>
+    public static IEnumerable<string> PythonModules(IReadOnlyCollection<string> files)
+    {
+        var packages = files.Where(f => f.EndsWith("/__init__.py", StringComparison.Ordinal) || f == "__init__.py")
+            .Select(f => f.Contains('/') ? f[..f.LastIndexOf('/')] : "").ToHashSet(StringComparer.Ordinal);
+        string? Dotted(string dir)
+        {
+            if (!packages.Contains(dir) || dir.Length == 0) return null;
+            var root = dir;
+            while (root.Contains('/') && packages.Contains(root[..root.LastIndexOf('/')])) root = root[..root.LastIndexOf('/')];
+            var top = root.Contains('/') ? root[..(root.LastIndexOf('/') + 1)] : "";
+            var name = dir[top.Length..].Replace('/', '.');
+            return GenericModules.Contains(name.Split('.')[0]) ? null : name;
+        }
+        foreach (var f in files)
+        {
+            var slash = f.LastIndexOf('/');
+            var dir = slash < 0 ? "" : f[..slash];
+            var stem = Path.GetFileNameWithoutExtension(f);
+            if (Dotted(dir) is { } package)
+            {
+                yield return stem == "__init__" ? package : package + "." + stem;
+            }
+            else if (stem != "__init__" && dir is "" or "src" or "lib" or "python" && !GenericModules.Contains(stem) && stem is not ("setup" or "conftest" or "manage" or "main"))
+            {
+                yield return stem;
+            }
+        }
+    }
+
     /// <summary>Folders whose files declare nothing for the estate: tests, fixtures, examples, samples and templates are not what others build against.</summary>
     static bool NotAProvider(string path)
     {
@@ -89,6 +126,7 @@ public static partial class Graph
         // What each project provides, by kind and name (names of the default branch only).
         var provides = new Dictionary<string, Dictionary<string, HashSet<long>>>(StringComparer.Ordinal);
         var protoFiles = new List<(string Path, long Project)>();
+        var pyFiles = new Dictionary<long, List<string>>();
         // A repository's own packages (its PackageIds): a .NET root of its own (Microsoft's own estate) is its to provide.
         var nugetRoots = Sql.Query(conn, "SELECT DISTINCT repo_id, name FROM file_decls WHERE role = 'provides' AND kind = 'nuget'")
             .Select(r => (r.Long("repo_id"), r.Str("name").Split('.')[0])).ToHashSet();
@@ -109,11 +147,37 @@ public static partial class Graph
                     protoFiles.Add((name, repo.GitlabId));
                     continue;
                 }
+                if (kind == "py-file")
+                {
+                    if (!pyFiles.TryGetValue(repo.GitlabId, out var list)) pyFiles[repo.GitlabId] = list = [];
+                    list.Add(name);
+                    continue;
+                }
                 if (!provides.TryGetValue(kind, out var names)) provides[kind] = names = new(StringComparer.Ordinal);
                 if (!names.TryGetValue(name, out var projects)) names[name] = projects = [];
                 projects.Add(repo.GitlabId);
             }
         }
+
+        // Python modules, named from each repository's import roots.
+        if (!provides.TryGetValue("py", out var pyNames)) provides["py"] = pyNames = new(StringComparer.Ordinal);
+        foreach (var (project, files) in pyFiles)
+            foreach (var module in PythonModules(files))
+            {
+                if (!pyNames.TryGetValue(module, out var projects)) pyNames[module] = projects = [];
+                projects.Add(project);
+            }
+        // A top-level module name alone (config, utils) links only to a repository the user declares a dependency on.
+        var pypiUses = Sql.Query(conn, "SELECT DISTINCT repo_id, name FROM file_decls WHERE role = 'uses' AND kind = 'pypi'")
+            .GroupBy(r => r.Long("repo_id")).ToDictionary(g => g.Key, g => g.Select(r => r.Str("name")).ToHashSet(StringComparer.Ordinal));
+        var pypiOf = new Dictionary<long, HashSet<string>>();
+        if (provides.TryGetValue("pypi", out var distributions))
+            foreach (var (dist, projects) in distributions)
+                foreach (var project in projects)
+                {
+                    if (!pypiOf.TryGetValue(project, out var set)) pypiOf[project] = set = new(StringComparer.Ordinal);
+                    set.Add(dist);
+                }
 
         var stats = new Dictionary<string, long>(StringComparer.Ordinal);
         void Count(string state) => stats[state] = stats.GetValueOrDefault(state) + 1;
@@ -130,6 +194,9 @@ public static partial class Graph
                 var kind = reader.GetString(2);
                 var name = reader.GetString(3);
                 var (state, project, matched) = Resolve(kind, name, from, provides, protoFiles, byPath);
+                if (state == "resolved" && kind == "py" && !matched.Contains('.')
+                    && !(pypiUses.TryGetValue(from.Id, out var declared) && pypiOf.TryGetValue(project, out var offered) && declared.Overlaps(offered)))
+                    state = "unconfirmed";
                 Count(state);
                 if (state != "resolved" || !defaultRow.TryGetValue(project, out var to) || project == from.GitlabId) continue;
                 var key = (from.Id, to, LinkKind(kind), matched);
