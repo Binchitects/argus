@@ -33,6 +33,8 @@ public static class ToolRuntime
         public string Str(string name) => Values[name]!.GetValue<string>();
         public string? OptStr(string name) => Values.TryGetValue(name, out var v) && v is not null ? v.GetValue<string>() : null;
         public long Int(string name) => Values[name]!.GetValue<long>();
+        public double? OptDouble(string name) => Values.TryGetValue(name, out var v) && v is not null ? v.GetValue<double>() : null;
+        public bool Bool(string name) => Values.TryGetValue(name, out var v) && v is not null && v.GetValue<bool>();
     }
 
     /// <summary>Validate <paramref name="arguments"/> against <paramref name="spec"/>'s input schema.</summary>
@@ -80,6 +82,14 @@ public static class ToolRuntime
                     if (CoerceInt(value) is { } n) values[name] = JsonValue.Create(n);
                     else errors.Add(TypeError(name, type, value));
                     break;
+                case "number":
+                    if (CoerceFloat(value) is { } f) values[name] = JsonValue.Create(f);
+                    else errors.Add(TypeError(name, type, value));
+                    break;
+                case "boolean":
+                    if (CoerceBool(value) is { } b) values[name] = JsonValue.Create(b);
+                    else errors.Add(TypeError(name, type, value));
+                    break;
                 default:
                     values[name] = value.DeepClone();
                     break;
@@ -112,6 +122,42 @@ public static class ToolRuntime
         }
     }
 
+    /// <summary>pydantic's lax float: a number, a bool, or a string of a number.</summary>
+    static double? CoerceFloat(JsonNode value)
+    {
+        if (value is not JsonValue v) return null;
+        return v.GetValueKind() switch
+        {
+            JsonValueKind.Number => v.GetValue<JsonElement>().GetDouble(),
+            JsonValueKind.String => double.TryParse(PyStr.Strip(v.GetValue<string>()).Replace("_", ""), NumberStyles.Float, CultureInfo.InvariantCulture, out var p) ? p : null,
+            JsonValueKind.True => 1,
+            JsonValueKind.False => 0,
+            _ => null,
+        };
+    }
+
+    /// <summary>pydantic's lax bool: a bool, 0 or 1, or a string such as yes, no, on, off, true, false, 1, 0.</summary>
+    static bool? CoerceBool(JsonNode value)
+    {
+        if (value is not JsonValue v) return null;
+        switch (v.GetValueKind())
+        {
+            case JsonValueKind.True: return true;
+            case JsonValueKind.False: return false;
+            case JsonValueKind.Number:
+                var d = v.GetValue<JsonElement>().GetDouble();
+                return d == 1 ? true : d == 0 ? false : null;
+            case JsonValueKind.String:
+                return PyStr.Strip(v.GetValue<string>()).ToLowerInvariant() switch
+                {
+                    "1" or "on" or "t" or "true" or "y" or "yes" => true,
+                    "0" or "off" or "f" or "false" or "n" or "no" => false,
+                    _ => null,
+                };
+            default: return null;
+        }
+    }
+
     static string PyType(JsonNode? v) => v switch
     {
         null => "NoneType",
@@ -133,6 +179,14 @@ public static class ToolRuntime
             $"{name}\n  Input should be a valid integer, unable to parse string as an integer [type=int_parsing, input_value={PyRepr(value)}, input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/int_parsing",
         "integer" =>
             $"{name}\n  Input should be a valid integer [type=int_type, input_value={PyRepr(value)}, input_type={PyType(value)}]\n    For further information visit https://errors.pydantic.dev/2.13/v/int_type",
+        "number" when value is JsonValue v && v.GetValueKind() == JsonValueKind.String =>
+            $"{name}\n  Input should be a valid number, unable to parse string as a number [type=float_parsing, input_value={PyRepr(value)}, input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/float_parsing",
+        "number" =>
+            $"{name}\n  Input should be a valid number [type=float_type, input_value={PyRepr(value)}, input_type={PyType(value)}]\n    For further information visit https://errors.pydantic.dev/2.13/v/float_type",
+        "boolean" when value is JsonValue v && v.GetValueKind() is JsonValueKind.String or JsonValueKind.Number =>
+            $"{name}\n  Input should be a valid boolean, unable to interpret input [type=bool_parsing, input_value={PyRepr(value)}, input_type={PyType(value)}]\n    For further information visit https://errors.pydantic.dev/2.13/v/bool_parsing",
+        "boolean" =>
+            $"{name}\n  Input should be a valid boolean [type=bool_type, input_value={PyRepr(value)}, input_type={PyType(value)}]\n    For further information visit https://errors.pydantic.dev/2.13/v/bool_type",
         _ =>
             $"{name}\n  Input should be a valid string [type=string_type, input_value={PyRepr(value)}, input_type={PyType(value)}]\n    For further information visit https://errors.pydantic.dev/2.13/v/string_type",
     };

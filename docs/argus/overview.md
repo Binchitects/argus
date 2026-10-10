@@ -25,9 +25,9 @@ the stack.
 | `search_code` | Lexical search over millions of lines |
 | `semantic_search` | *"Where do we handle retry backoff for uploads?"* — when the question has no identifier in it |
 | `which_repo` | *"Which repo do I change for X?"* — from a description, a symbol, a stack trace, or a diff |
-| `system_map` | *"How is the whole system put together?"* — its hubs, layers, cycles and groups, and every link between repositories, one line each |
-| `dependency_path` | *"How does this repo affect that one?"* — the chains of dependencies between them, each step with what makes it and where |
-| `change_impact` | *"What does changing this library reach?"* — every repository that depends on it, by depth; with a symbol, the lines that use it there (and not in unrelated repos of the same name) |
+| `system_map` | *"How is the whole system put together?"* — its hubs, layers, cycles and groups (of what each is built from), and every link between repositories, one line each with its confidence |
+| `dependency_path` | *"How does this repo affect that one?"* — the surest chains of dependencies between them, each step with what makes it, how sure and where |
+| `change_impact` | *"What does changing this library reach?"* — every repository that depends on it, by depth and how sure; with a symbol, the lines that use it there (and not in unrelated repos of the same name) |
 | `repo_map` · `impact_of` | *"What breaks if I change this?"* — a repository's links both ways (and further with depth); a header's includers, file by file |
 | `code_contracts` | Every in-house symbol a file references, with its definition |
 | `get_file` · `index_status` | Access-checked fetch; per-repo freshness, one row per branch |

@@ -51,6 +51,8 @@ public sealed class GraphTests(Xunit.Abstractions.ITestOutputHelper output)
     {
         public readonly List<(string Path, string Lang)> Repos = [];
         public readonly HashSet<(string From, string To)> Expected = [];
+        /// <summary>The expected links made by a CI include alone: not what a repository is built from.</summary>
+        public readonly HashSet<(string From, string To)> Ci = [];
         public readonly Dictionary<string, long> Ids = new(StringComparer.Ordinal);
     }
 
@@ -136,7 +138,7 @@ public sealed class GraphTests(Xunit.Abstractions.ITestOutputHelper output)
                     case "ops":
                         switch (random.Next(3))
                         {
-                            case 0: manifest.Add($"ci:{dep}"); break;
+                            case 0: manifest.Add($"ci:{dep}"); estate.Ci.Add((path, dep)); break;
                             case 1: manifest.Add($"image:{dep}"); break;
                             default: manifest.Add($"sub:{dep}"); break;
                         }
@@ -146,7 +148,8 @@ public sealed class GraphTests(Xunit.Abstractions.ITestOutputHelper output)
             switch (lang)
             {
                 case "csharp":
-                    files[path].Add(($"src/{name}.Tests.csproj", $"<Project><ItemGroup>{string.Join("", manifest)}<PackageReference Include=\"Newtonsoft.Json\" /></ItemGroup></Project>"));
+                    files[path][0] = ($"src/{name}.csproj", $"<Project><PropertyGroup><PackageId>Acme.{name}</PackageId></PropertyGroup><ItemGroup>{string.Join("", manifest)}</ItemGroup></Project>");
+                    files[path].Add(($"tests/{name}.Tests.csproj", "<Project><ItemGroup><PackageReference Include=\"Newtonsoft.Json\" /><PackageReference Include=\"xunit\" /></ItemGroup></Project>"));
                     files[path].Add(("src/Use.cs", string.Join("\n", code.Append("using System.Linq;")) + "\n"));
                     break;
                 case "go":
@@ -224,6 +227,12 @@ public sealed class GraphTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.True(stats["external"] > 0);
         Assert.True(stats["internal"] >= 40);
         Assert.Equal(0, stats.GetValueOrDefault("ambiguous"));
+        Assert.Equal(0, stats.GetValueOrDefault("candidate"));
+        // Each is made by a package, a submodule, a CI include, an image or many files' imports: strong.
+        var weaker = Argus.Util.Sql.Query(ix.Conn,
+            "SELECT a.path_with_namespace AS f, b.path_with_namespace AS t, MAX(e.confidence) AS c FROM repo_edges e JOIN repos a ON a.id = e.from_repo_id" +
+            " JOIN repos b ON b.id = e.to_repo_id WHERE e.scope = 'main' GROUP BY e.from_repo_id, e.to_repo_id HAVING MAX(e.confidence) < 0.85").Select(r => $"{r.Str("f")} -> {r.Str("t")} {r.Double("c")}").ToList();
+        Assert.True(weaker.Count == 0, $"not strong {weaker.Count}: {string.Join(", ", weaker.Take(5))}");
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10), $"took {clock.Elapsed}");
         output.WriteLine($"200 repositories, {estate.Expected.Count} links expected and found; resolved in {clock.ElapsedMilliseconds} ms; " +
                          string.Join(", ", stats.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key} {kv.Value}")));
@@ -530,7 +539,8 @@ public sealed class GraphTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.Equal(200, map["repos"]!.GetValue<int>());
         Assert.Equal(estate.Expected.Count, map["links"]!.GetValue<int>());
         var top = map["hubs"]![0]!;
-        var mostUsed = estate.Expected.GroupBy(e => e.To).Max(g => g.Count());
+        // Hubs are of what each is built from: a CI template every pipeline includes is not one.
+        var mostUsed = estate.Expected.Except(estate.Ci).GroupBy(e => e.To).Max(g => g.Count());
         Assert.Equal(mostUsed, top["used_by"]!.GetValue<int>());
         Assert.StartsWith("The ", top["what"]!.GetValue<string>());
         Assert.Equal(0, map["layers"]![0]!["layer"]!.GetValue<int>());

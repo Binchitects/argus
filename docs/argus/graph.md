@@ -87,3 +87,42 @@ Each link keeps:
 
 A query walks `repo_edges` of scope `main`, every layer but history, at 0.5
 or more.
+
+## Asking the graph
+
+`repo_map`, `system_map`, `dependency_path` and `change_impact` take three
+optional arguments:
+
+- `min_confidence`: the least confidence a pair must have to be walked; 0.5
+  by default (likely and strong), 0.85 for strong links only, 0 for all.
+- `layers`: which layers to walk, as a list of `build`, `ci`, `deploy`,
+  `runtime`, `declared`, `history`, `test` (the same as `include_tests`) or
+  `all`. Every layer but history by default.
+- `include_tests`: walk links that only tests make, too.
+
+What each answers:
+
+- `repo_map` gives each linked repository its confidence (the product of the
+  links on its way), its tier and layers, and each kind with its names,
+  files, how its name matched and up to three uses. `possible` lists what is
+  not walked: candidates (with the readable repositories that provide the
+  name) and weak links.
+- `system_map` finds hubs, layers and cycles from build links only, unless
+  `layers` is given: a CI template that every pipeline includes is not a
+  foundation of the code. Hubs are ranked by how many repositories build on
+  them, then by the sum of those links' confidence. `hidden_links` counts the
+  pairs that the filter leaves out.
+- `dependency_path` returns the surest chains, not the shortest: it ranks a
+  chain by the sum of −ln(confidence) of its steps, plus 0.05 a step, and
+  returns up to three (Yen's algorithm). Each chain has its confidence (the
+  product of its steps) and its weakest step. When nothing at the asked
+  confidence joins the two, weaker chains are returned with `weak: true`.
+- `change_impact` lists dependents by depth, each reached through its surest
+  parent, surest first, and `possible_dependents` from candidates.
+
+Links are made between default branches. A branch's row (`path@branch`) is
+answered by its default branch's, and the result's `note` says so.
+For a plain-language description, `which_repo` leans away from a repository
+that many readable repositories build on (counted from likely and strong
+build links of their own code): a new feature rarely belongs in a shared
+library.

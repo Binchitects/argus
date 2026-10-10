@@ -270,20 +270,20 @@ public sealed class Tools
     public JsonNode Overview(Identity identity, string? repo) =>
         RunReadonly(conn => (JsonNode)Queries.RepoOverview(identity.AllowedRepoIds, conn, repo));
 
-    public JsonNode RepoMap(Identity identity, long repoId, long depth) => RunReadonly(conn =>
+    public JsonNode RepoMap(Identity identity, long repoId, long depth, GraphQueries.GraphFilter? filter = null) => RunReadonly(conn =>
     {
         RaiseIfRepoDenied(conn, identity, repoId);
-        return (JsonNode)GraphQueries.RepoMap(identity.AllowedRepoIds, conn, repoId, (int)Math.Clamp(depth, 1, 6));
+        return (JsonNode)GraphQueries.RepoMap(identity.AllowedRepoIds, conn, repoId, (int)Math.Clamp(depth, 1, 6), filter);
     });
 
-    public JsonNode SystemMap(Identity identity, string? focus, long depth, string? group) =>
-        RunReadonly(conn => (JsonNode)GraphQueries.SystemMap(identity.AllowedRepoIds, conn, focus, (int)Math.Clamp(depth, 1, 6), group));
+    public JsonNode SystemMap(Identity identity, string? focus, long depth, string? group, GraphQueries.GraphFilter? filter = null) =>
+        RunReadonly(conn => (JsonNode)GraphQueries.SystemMap(identity.AllowedRepoIds, conn, focus, (int)Math.Clamp(depth, 1, 6), group, filter));
 
-    public JsonNode DependencyPath(Identity identity, string from, string to) =>
-        RunReadonly(conn => (JsonNode)GraphQueries.DependencyPath(identity.AllowedRepoIds, conn, from, to));
+    public JsonNode DependencyPath(Identity identity, string from, string to, GraphQueries.GraphFilter? filter = null) =>
+        RunReadonly(conn => (JsonNode)GraphQueries.DependencyPath(identity.AllowedRepoIds, conn, from, to, filter));
 
-    public JsonNode ChangeImpact(Identity identity, string repo, string? symbol, long depth) =>
-        RunReadonly(conn => (JsonNode)GraphQueries.ChangeImpact(identity.AllowedRepoIds, conn, repo, symbol, (int)Math.Clamp(depth, 1, 8)));
+    public JsonNode ChangeImpact(Identity identity, string repo, string? symbol, long depth, GraphQueries.GraphFilter? filter = null) =>
+        RunReadonly(conn => (JsonNode)GraphQueries.ChangeImpact(identity.AllowedRepoIds, conn, repo, symbol, (int)Math.Clamp(depth, 1, 8), filter));
 
     public JsonNode WhichRepo(Identity identity, string description, string? branch) => RunReadonly(conn =>
     {
@@ -403,6 +403,19 @@ public sealed class Tools
     // --- dispatch -------------------------------------------------------------------------
 
     /// <summary>Run one validated call. <paramref name="identity"/> is null only for the documentation tools.</summary>
+    /// <summary>The graph tools' filter, from min_confidence, layers and include_tests.</summary>
+    static GraphQueries.GraphFilter Filter(ToolRuntime.Args a) =>
+        GraphQueries.GraphFilter.Parse(a.OptDouble("min_confidence"), a.OptStr("layers"), a.Bool("include_tests"));
+
+    /// <summary>A graph tool's audited arguments, with its filter's when given.</summary>
+    static JsonObject Graphed(ToolRuntime.Args a, JsonObject args)
+    {
+        args["min_confidence"] = a.OptDouble("min_confidence");
+        args["layers"] = a.OptStr("layers");
+        args["include_tests"] = a.Bool("include_tests");
+        return args;
+    }
+
     public JsonNode? Dispatch(string tool, ToolRuntime.Args a, Func<Identity> identity)
     {
         switch (tool)
@@ -440,13 +453,14 @@ public sealed class Tools
                 () => GetFile(who, a.Int("repo_id"), a.Str("path"))),
             "index_status" => WithAudit(who, tool, [], () => IndexStatus(who)),
             "overview" => WithAudit(who, tool, new JsonObject { ["repo"] = a.OptStr("repo") }, () => Overview(who, a.OptStr("repo"))),
-            "repo_map" => WithAudit(who, tool, new JsonObject { ["repo_id"] = a.Int("repo_id"), ["depth"] = a.Int("depth") }, () => RepoMap(who, a.Int("repo_id"), a.Int("depth"))),
-            "system_map" => WithAudit(who, tool, new JsonObject { ["focus"] = a.OptStr("focus"), ["depth"] = a.Int("depth"), ["group"] = a.OptStr("group") },
-                () => SystemMap(who, a.OptStr("focus"), a.Int("depth"), a.OptStr("group"))),
-            "dependency_path" => WithAudit(who, tool, new JsonObject { ["from"] = a.Str("from"), ["to"] = a.Str("to") },
-                () => DependencyPath(who, a.Str("from"), a.Str("to"))),
-            "change_impact" => WithAudit(who, tool, new JsonObject { ["repo"] = a.Str("repo"), ["symbol"] = a.OptStr("symbol"), ["depth"] = a.Int("depth") },
-                () => ChangeImpact(who, a.Str("repo"), a.OptStr("symbol"), a.Int("depth"))),
+            "repo_map" => WithAudit(who, tool, Graphed(a, new JsonObject { ["repo_id"] = a.Int("repo_id"), ["depth"] = a.Int("depth") }),
+                () => RepoMap(who, a.Int("repo_id"), a.Int("depth"), Filter(a))),
+            "system_map" => WithAudit(who, tool, Graphed(a, new JsonObject { ["focus"] = a.OptStr("focus"), ["depth"] = a.Int("depth"), ["group"] = a.OptStr("group") }),
+                () => SystemMap(who, a.OptStr("focus"), a.Int("depth"), a.OptStr("group"), Filter(a))),
+            "dependency_path" => WithAudit(who, tool, Graphed(a, new JsonObject { ["from"] = a.Str("from"), ["to"] = a.Str("to") }),
+                () => DependencyPath(who, a.Str("from"), a.Str("to"), Filter(a))),
+            "change_impact" => WithAudit(who, tool, Graphed(a, new JsonObject { ["repo"] = a.Str("repo"), ["symbol"] = a.OptStr("symbol"), ["depth"] = a.Int("depth") }),
+                () => ChangeImpact(who, a.Str("repo"), a.OptStr("symbol"), a.Int("depth"), Filter(a))),
             "which_repo" => WithAudit(who, tool,
                 new JsonObject { ["description"] = PyStr.Prefix(a.Str("description"), 200), ["branch"] = a.OptStr("branch") },
                 () => WhichRepo(who, a.Str("description"), a.OptStr("branch"))),

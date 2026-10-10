@@ -455,20 +455,28 @@ public static class Queries
     }
 
     /// <summary>In-degree counting only edges whose BOTH endpoints are in the allowlist.</summary>
+    /// <summary>
+    /// How many readable repositories build on each one (likely or strong build links of their own code), counted at its
+    /// default branch and given to its branches' rows too.
+    /// </summary>
     static Dictionary<long, long> InDegree(SqliteConnection conn, List<long> allowed)
     {
         var counts = new Dictionary<long, long>();
         if (allowed.Count == 0) return counts;
-        var chunks = Chunks(allowed, SqliteMaxVars / 2);
-        foreach (var from in chunks)
-            foreach (var to in chunks)
-                foreach (var row in Sql.QueryList(conn,
-                             "SELECT to_repo_id, COUNT(*) AS n FROM repo_deps" +
-                             $" WHERE from_repo_id IN ({Sql.Marks(from.Count)})" +
-                             $"   AND to_repo_id IN ({Sql.Marks(to.Count)})" +
-                             " GROUP BY to_repo_id",
-                             from.Concat(to).Cast<object?>().ToArray()))
-                    counts[row.Long("to_repo_id")] = counts.GetValueOrDefault(row.Long("to_repo_id"), 0) + row.Long("n");
+        var readable = allowed.ToHashSet();
+        var project = new Dictionary<long, long>();
+        foreach (var r in Sql.Query(conn, "SELECT id, gitlab_id FROM repos")) project[r.Long("id")] = r.Long("gitlab_id");
+        var dependents = new Dictionary<long, HashSet<long>>();
+        foreach (var e in Sql.Query(conn, "SELECT from_repo_id, to_repo_id FROM repo_edges WHERE layer = 'build' AND scope = 'main' AND confidence >= ?", LinkKinds.Walked))
+        {
+            if (!readable.Contains(e.Long("from_repo_id")) || !project.TryGetValue(e.Long("to_repo_id"), out var to)) continue;
+            if (!dependents.TryGetValue(to, out var set)) dependents[to] = set = [];
+            set.Add(e.Long("from_repo_id"));
+        }
+        foreach (var id in allowed)
+        {
+            if (project.TryGetValue(id, out var p) && dependents.TryGetValue(p, out var set)) counts[id] = set.Count;
+        }
         return counts;
     }
 
