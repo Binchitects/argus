@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { Me } from '@/lib/api'
 import { admin, fakeApi, member, renderApp } from '@/test/utils'
+import { blank } from './live'
 import type { AssistantSummary, ChatConfig, Conversation } from './types'
 
 const config: ChatConfig = {
@@ -53,6 +54,22 @@ async function openList(me: Me = member, path = '/chat') {
 }
 
 describe('chat list', () => {
+  it('a Code Arena session shows as such in the list and on its page, with its folder', async () => {
+    const session = { id: 'ca1', title: 'Fix the parser', updatedAt: daysAgo(0), origin: 'code-arena', originPlace: '/home/pat/parser' }
+    fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config }),
+      'GET /api/chat/conversations': () => ({ json: [...chats, session] }),
+      'GET /api/chat/conversations/ca1': () => ({
+        json: { ...planChat, ...session, currentLeafId: 'a1', messages: [{ ...blank('q1', 'user', null), content: 'Fix the parser' }, { ...blank('a1', 'assistant', 'q1'), content: 'Fixed.', status: 'complete' }] },
+      }),
+      'GET /api/assistants': () => ({ json: [] }),
+    })
+    renderApp('/chat/ca1')
+    const list = await screen.findByRole('navigation', { name: 'Chats' })
+    expect(await within(list).findByRole('link', { name: /^Code Arena:\s*Fix the parser$/ })).toBeInTheDocument()
+    expect((await screen.findByText(/A Code Arena session/, { selector: 'span' })).closest('p')).toHaveTextContent('A Code Arena session in /home/pat/parser, kept in step with it both ways.')
+  })
+
   it('folds a group under its heading from the keyboard, counting what it hides', async () => {
     const list = await openList()
     const today = within(list).getByRole('button', { name: 'Today' })

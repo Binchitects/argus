@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Archive, ArchiveRestore, ArrowLeft, ChevronRight, GitFork, LayoutGrid, MessageSquarePlus, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowLeft, ChevronRight, GitFork, LayoutGrid, MessageSquarePlus, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, SquareTerminal, Trash2 } from 'lucide-react'
 import { useId, useState, type ReactNode } from 'react'
 import { Link, NavLink } from 'react-router'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -186,6 +186,12 @@ function ChatItem({ chat, active, archived, onNavigate }: { chat: ConversationSu
           <>
             <span className="mr-1.5 inline-block size-1.5 animate-pulse rounded-full bg-primary align-middle" aria-hidden="true" />
             <span className="sr-only">Answering: </span>
+          </>
+        )}
+        {chat.origin === 'code-arena' && (
+          <>
+            <SquareTerminal className="mr-1.5 inline size-3.5 align-[-2px] text-muted-foreground" aria-hidden="true" />
+            <span className="sr-only">Code Arena: </span>
           </>
         )}
         <bdi>{chat.title}</bdi>

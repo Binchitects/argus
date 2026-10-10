@@ -34,6 +34,8 @@ internal sealed class Repl(Runtime rt)
         ("/jobs [stop N]", "the commands run with no time limit; stop N stops job N (also while a turn waits for them)"),
         ("/clear", "start a new session (this one stays saved)"),
         ("/resume [id]", "switch to a saved session"),
+        ("/web [N]", "your chats in Arena; /web N continues one here (what is added goes back to it)"),
+        ("/sync", "where this session stands with its chat in Arena"),
         ("/exit", "leave (also Ctrl+D, or Ctrl+C twice)"),
     ];
 
@@ -491,6 +493,19 @@ internal sealed class Repl(Runtime rt)
                 var previous = rt.Session.Id;
                 rt.NewSession();
                 Ui.Line($"A new session. The last one is saved as {previous}.");
+                break;
+            case "/web":
+                if (await rt.ContinueWebChatAsync(arg, ct) is { } said)
+                {
+                    Ui.Info(said);
+                }
+                else
+                {
+                    Ui.Line($"Continuing the chat from Arena in session {rt.Session.Id}: {rt.Agent.Messages.Count} messages.");
+                }
+                break;
+            case "/sync":
+                Ui.Line(rt.Sync?.Describe() ?? "Sessions are not kept with Arena here (\"syncChats\": false in config.json, or no Arena address).");
                 break;
             case "/resume":
                 var id = arg.Length > 0 ? arg : Cli.PickSession(rt.Env, Ui, rt.Workspace.Root);

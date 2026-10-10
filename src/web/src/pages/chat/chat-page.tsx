@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Archive, ArrowDown, Code2, FileUp, GitFork, Lightbulb, Lock, MessageSquare, Search, Sparkles } from 'lucide-react'
+import { Archive, ArrowDown, Code2, FileUp, GitFork, Lightbulb, Lock, MessageSquare, Search, Sparkles, SquareTerminal } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
@@ -857,6 +857,15 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                           Go on without it
                         </Button>
                       </output>
+                    )}
+                    {data?.origin === 'code-arena' && (
+                      <p className="-mb-2 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                        <SquareTerminal className="size-3.5 shrink-0" aria-hidden="true" />
+                        <span className="min-w-0">
+                          A Code Arena session{data.originPlace ? <> in <code className="font-mono">{data.originPlace}</code></> : null}, kept in step with it both ways. Its files and commands are on that
+                          machine: here the chat's own tools answer.
+                        </span>
+                      </p>
                     )}
                     {data?.forkedFrom && (
                       <p className="-mb-2 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">

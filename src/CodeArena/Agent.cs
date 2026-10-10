@@ -157,6 +157,8 @@ internal sealed class Agent
     /// (<c>/jobs stop N</c>), until the wait it is given is done; null shows a spinner instead.
     /// </summary>
     public Func<Task, Task>? Listen { get; set; }
+    /// <summary>What the web chat added since the last turn, taken in as a turn starts (the main conversation only).</summary>
+    public Func<CancellationToken, Task<IReadOnlyList<JsonObject>>>? BeforeTurn { get; set; }
     /// <summary>Commits each turn's changes under this name (the main conversation only); null: no commits.</summary>
     public CommitIdentity? CommitAs { get; set; }
     /// <summary>The files turns changed but did not commit (stopped or failed), with their content then: still the harness's next turn.</summary>
@@ -175,6 +177,21 @@ internal sealed class Agent
 
     public void Clear() => Load([]);
 
+    /// <summary>Messages the person added in the web chat: the model hears them (the session has them written already).</summary>
+    public void TakeIn(IReadOnlyList<JsonObject> messages)
+    {
+        if (messages.Count == 0)
+        {
+            return;
+        }
+        Messages.AddRange(messages);
+        var question = messages.LastOrDefault(m => m.Str("role") == "user")?.Str("content");
+        var text = $"Taken in from the web chat: {messages.Count} message{(messages.Count == 1 ? "" : "s")}" +
+                   (question is { Length: > 0 } ? $", the last question \"{Fmt.OneLine(question, 80)}\"." : ".");
+        Ui.Info(text);
+        Events?.Notice(text);
+    }
+
     private void Add(JsonObject message)
     {
         Messages.Add(message);
@@ -188,6 +205,10 @@ internal sealed class Agent
     /// </summary>
     public async Task<string> RunAsync(string input, Spend turn, CancellationToken ct)
     {
+        if (BeforeTurn is { } takeIn && Depth == 0)
+        {
+            TakeIn(await takeIn(ct));
+        }
         var before = await SnapshotAsync(ct);
         var done = false;
         try

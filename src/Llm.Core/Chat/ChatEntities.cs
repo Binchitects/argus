@@ -39,6 +39,12 @@ public sealed class Conversation
     public Guid? AssistantId { get; set; }
     /// <summary>Deleted by its owner while on legal hold: hidden from them, kept until the hold ends.</summary>
     public DateTimeOffset? DeletedAt { get; set; }
+    /// <summary>Where the chat began when not here: "code-arena" (a Code Arena session, kept in step with it both ways).</summary>
+    public string? Origin { get; set; }
+    /// <summary>The origin's own id for it (the Code Arena session's).</summary>
+    public string? OriginRef { get; set; }
+    /// <summary>Where it runs there: the Code Arena session's folder.</summary>
+    public string? OriginPlace { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<ChatMessage> Messages { get; set; } = [];
@@ -110,6 +116,8 @@ public sealed class ChatMessage
     /// person still sees them); a branch that does not pass here is not affected.
     /// </summary>
     public string? Summary { get; set; }
+    /// <summary>For a message from Code Arena: its place there (session:index), so a message sent twice is known as one.</summary>
+    public string? SyncRef { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 

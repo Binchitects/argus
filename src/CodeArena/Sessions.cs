@@ -18,6 +18,16 @@ internal sealed class SessionData
     public long Completion { get; set; }
     /// <summary>Each answer's (by its place in Messages) model and tokens, for the web interface.</summary>
     public Dictionary<int, (string? Model, TokenUsage? Usage)> Answers { get; } = [];
+    /// <summary>The chat in Arena this session is kept in step with; null: none yet (or it was deleted there).</summary>
+    public string? Conversation { get; set; }
+    /// <summary>The Arena chat's messages as last seen in step with it.</summary>
+    public int ServerCount { get; set; }
+    /// <summary>How many of <see cref="Local"/> Arena has.</summary>
+    public int Pushed { get; set; }
+    /// <summary>The chat in Arena was deleted: the session is no longer kept in step.</summary>
+    public bool Unlinked { get; set; }
+    /// <summary>Every message this session added itself (not those taken in from the web), compactions aside, in order.</summary>
+    public List<JsonObject> Local { get; } = [];
 }
 
 /// <summary>
@@ -54,7 +64,21 @@ internal sealed class SessionStore
     /// <summary>Carries on writing to a saved session.</summary>
     public static SessionStore Open(string file) => new(Path.GetFileNameWithoutExtension(file), file);
 
-    public void Message(JsonObject message) => Write(new JsonObject { ["type"] = "message", ["message"] = message.Clone() });
+    public void Message(JsonObject message)
+    {
+        Write(new JsonObject { ["type"] = "message", ["message"] = message.Clone() });
+        Added?.Invoke(message);
+    }
+
+    /// <summary>Told of each message the session adds (the chat in Arena is sent it).</summary>
+    public event Action<JsonObject>? Added;
+
+    /// <summary>A message the person added in Arena's web chat, taken into this session.</summary>
+    public void Remote(JsonObject message) => Write(new JsonObject { ["type"] = "message", ["message"] = message.Clone(), ["from"] = "web" });
+
+    /// <summary>Where the session stands with its chat in Arena: which chat (null: none any more), its count, how many of ours it has.</summary>
+    public void Sync(string? conversation, int server, int pushed) =>
+        Write(new JsonObject { ["type"] = "sync", ["conversation"] = conversation, ["server"] = server, ["pushed"] = pushed });
 
     public void Compacted(IEnumerable<JsonObject> messages) =>
         Write(new JsonObject { ["type"] = "compact", ["messages"] = new JsonArray([.. messages.Select(m => (JsonNode)m.Clone())]) });
@@ -101,6 +125,16 @@ internal sealed class SessionStore
                     }
                     pending = null;
                     data.Messages.Add(m.Clone());
+                    if (entry.Str("from") != "web")
+                    {
+                        data.Local.Add(m.Clone());
+                    }
+                    break;
+                case "sync":
+                    data.Conversation = entry.Str("conversation");
+                    data.Unlinked = data.Conversation is null;
+                    data.ServerCount = (int)(entry.Long("server") ?? 0);
+                    data.Pushed = (int)(entry.Long("pushed") ?? 0);
                     break;
                 case "compact" when entry["messages"] is JsonArray all:
                     data.Messages.Clear();

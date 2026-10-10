@@ -384,7 +384,10 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   (numbers as numbers, then the other way, then back to the answer's order),
   and one of more than eight rows has a box that keeps the rows holding what
   is typed.
-- **History.** Chats are grouped by date and can be searched. The first
+- **History.** Chats are grouped by date and can be searched. A
+  [Code Arena](code-arena.md#chats-in-arena) session is a chat here too, with
+  a terminal mark and its folder: continued here, what is added goes back to
+  the session (and what the session adds comes here). The first
   question becomes the title and the browser tab's name; with a model for
   small steps, it writes a short title from the question while the answer is
   written (a title you gave meanwhile stays). Long titles are cut

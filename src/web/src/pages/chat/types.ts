@@ -180,6 +180,10 @@ export interface ConversationSummary {
   /** An answer is being written (it goes on when the page closes): the page watches it again. */
   answering?: boolean
   assistantId?: string | null
+  /** "code-arena": a Code Arena session, kept in step with it both ways. */
+  origin?: string | null
+  /** Where it runs there: the session's folder. */
+  originPlace?: string | null
 }
 
 export type Reach = 'Private' | 'Groups' | 'Company'

@@ -88,6 +88,10 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(c => c.LoadedTools).HasDefaultValueSql("'{}'::text[]");
             e.Property(c => c.Model).HasMaxLength(200);
             e.Property(c => c.SystemPrompt).HasMaxLength(20000);
+            e.Property(c => c.Origin).HasMaxLength(32);
+            e.Property(c => c.OriginRef).HasMaxLength(128);
+            e.Property(c => c.OriginPlace).HasMaxLength(1000);
+            e.HasIndex(c => new { c.UserId, c.Origin, c.OriginRef });
             e.HasIndex(c => new { c.UserId, c.UpdatedAt });
             e.HasOne<AppUser>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasMany(c => c.Messages).WithOne().HasForeignKey(m => m.ConversationId).OnDelete(DeleteBehavior.Cascade);
@@ -105,6 +109,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(m => m.ToolCallId).HasMaxLength(200);
             e.Property(m => m.ToolName).HasMaxLength(200);
             e.Property(m => m.Model).HasMaxLength(200);
+            e.Property(m => m.SyncRef).HasMaxLength(160);
             e.HasIndex(m => new { m.ConversationId, m.Sequence }).IsUnique();
             e.HasIndex(m => new { m.ConversationId, m.ParentId });
             // Admin → Traces: the slowest answers of a time range.

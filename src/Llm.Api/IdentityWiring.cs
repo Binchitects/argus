@@ -454,6 +454,7 @@ public static class IdentityWiring
         Operations.OperationsEndpoints.MapOperations(app);
         Settings.SettingsEndpoints.MapSettings(app);
         Chat.ChatEndpoints.MapChat(app);
+        Chat.CodeArenaSync.MapCodeArenaSync(app);
         Chat.AssistantEndpoints.MapAssistants(app);
         Chat.ShareEndpoints.MapShares(app);
         Access.SharingEndpoints.MapSharing(app);

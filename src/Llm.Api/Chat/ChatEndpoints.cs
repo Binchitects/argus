@@ -143,8 +143,8 @@ public static partial class ChatEndpoints
         {
             query = query.Where(c => EF.Functions.ILike(c.Title, "%" + q.Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal) + "%"));
         }
-        var list = await query.OrderByDescending(c => c.UpdatedAt).Take(300).Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.AssistantId }).ToListAsync();
-        return Results.Ok(list.Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.AssistantId, answering = jobs.IsAnswering(c.Id) }));
+        var list = await query.OrderByDescending(c => c.UpdatedAt).Take(300).Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.AssistantId, c.Origin, c.OriginPlace }).ToListAsync();
+        return Results.Ok(list.Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.AssistantId, c.Origin, c.OriginPlace, answering = jobs.IsAnswering(c.Id) }));
     }
 
     private static async Task<IResult> CreateAsync(NewConversation body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> chat, ChatModels models,
@@ -334,6 +334,7 @@ public static partial class ChatEndpoints
         {
             c.Id, c.Title, c.Thinking, tools, useArgus = tools.Contains("argus"), c.Model, c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens,
             c.CurrentLeafId, c.ArchivedAt, forkedFrom, assistant, c.CreatedAt, c.UpdatedAt, answering, messages, arenas = arenas ?? Array.Empty<object>(), queued = queued ?? [],
+            c.Origin, c.OriginPlace,
         };
 
     private static async Task<IResult> UpdateAsync(Guid id, ConversationChange body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> chat, ChatModels models,

@@ -113,6 +113,8 @@ internal sealed class Config
     /// <summary>Directories the tools may use besides the working directory.</summary>
     public List<string> AllowedPaths { get; set; } = [];
     public List<McpServerConfig> McpServers { get; set; } = [];
+    /// <summary>Sessions are kept in step with chats in Arena (both ways): on unless false.</summary>
+    public bool SyncChats { get; set; } = true;
     /// <summary>Each turn's changes are committed under Code Arena's name (in a git repository): on unless false.</summary>
     public bool AutoCommit { get; set; } = true;
     /// <summary>The author name of Code Arena's commits (default: Code Arena).</summary>
@@ -191,6 +193,7 @@ internal sealed class Config
         config.Shell = raw.Str("shell");
         config.TerminalShell = raw.Str("terminalShell");
         config.AutoCommit = raw.Bool("autoCommit") ?? true;
+        config.SyncChats = raw.Bool("syncChats") ?? true;
         config.CommitName = raw.Str("commitName");
         config.CommitEmail = raw.Str("commitEmail");
         config.AllowedPaths = raw["allowedPaths"] is JsonArray paths ? [.. paths.Select(p => p?.ToString() ?? "").Where(p => p.Length > 0)] : [];
@@ -296,6 +299,7 @@ internal sealed class Config
         Set("shell", Shell);
         Set("terminalShell", TerminalShell);
         Set("autoCommit", AutoCommit ? null : false);
+        Set("syncChats", SyncChats ? null : false);
         Set("commitName", CommitName);
         Set("commitEmail", CommitEmail);
         PrivateFiles.WriteAllText(file, raw.ToJsonString(Json.Indented) + "\n");

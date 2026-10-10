@@ -84,6 +84,9 @@ public abstract class FakeServer : IDisposable
 
     protected abstract Task HandleAsync(HttpListenerContext ctx, string body, CancellationToken ct);
 
+    /// <summary>Arena's chats as Code Arena keeps them in step (/api/code-arena), held in memory.</summary>
+    public FakeChats Chats { get; } = new();
+
     protected static async Task WriteJson(HttpListenerContext ctx, JsonNode json, int status = 200)
     {
         ctx.Response.StatusCode = status;
@@ -146,6 +149,11 @@ public sealed class FakeGateway : FakeServer
             return;
         }
         var path = ctx.Request.Url!.AbsolutePath;
+        if (path.StartsWith("/api/code-arena/", StringComparison.Ordinal))
+        {
+            await Chats.HandleAsync(ctx, body);
+            return;
+        }
         if (path == "/v1/models")
         {
             await WriteJson(ctx, new JsonObject { ["data"] = new JsonArray([.. Models.Select(m => (JsonNode)new JsonObject { ["id"] = m, ["object"] = "model" })]) });
@@ -283,6 +291,11 @@ public sealed class FakeMcp : FakeServer
 
     protected override async Task HandleAsync(HttpListenerContext ctx, string body, CancellationToken ct)
     {
+        if (!Missing && ctx.Request.Url!.AbsolutePath.StartsWith("/api/code-arena/", StringComparison.Ordinal) && ctx.Request.Headers["Authorization"] == "Bearer " + FakeGateway.Key)
+        {
+            await Chats.HandleAsync(ctx, body);
+            return;
+        }
         if (Missing || ctx.Request.Url!.AbsolutePath != "/mcp")
         {
             ctx.Response.StatusCode = 404;
@@ -481,4 +494,121 @@ internal static class Special
 
     [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]
     private static extern int mkfifo([System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPUTF8Str)] string path, uint mode);
+}
+
+/// <summary>Arena's side of Code Arena's chats (/api/code-arena): chats by id, each a list of messages, counted as Arena counts them.</summary>
+public sealed class FakeChats
+{
+    private readonly object _gate = new();
+
+    public sealed class Chat
+    {
+        public required string Id { get; init; }
+        public string? Ref { get; init; }
+        public string? Place { get; init; }
+        public string Title { get; set; } = "New chat";
+        public List<JsonObject> Messages { get; } = [];
+    }
+
+    public List<Chat> All { get; } = [];
+    /// <summary>Not 0: every request answered with this status (Arena down: 503; an Arena without the sync: 404).</summary>
+    public int Status { get; set; }
+    /// <summary>The chats answering on the web: reads and sends get 409.</summary>
+    public HashSet<string> Answering { get; } = [];
+
+    public Chat Add(string title, params JsonObject[] messages)
+    {
+        var chat = new Chat { Id = Guid.NewGuid().ToString(), Title = title };
+        chat.Messages.AddRange(messages);
+        lock (_gate)
+        {
+            All.Add(chat);
+        }
+        return chat;
+    }
+
+    public Chat? Find(string id)
+    {
+        lock (_gate)
+        {
+            return All.FirstOrDefault(c => c.Id == id);
+        }
+    }
+
+    internal async Task HandleAsync(HttpListenerContext ctx, string body)
+    {
+        if (Status != 0)
+        {
+            ctx.Response.StatusCode = Status;
+            return;
+        }
+        var parts = ctx.Request.Url!.AbsolutePath["/api/code-arena/".Length..].Split('/');
+        var method = ctx.Request.HttpMethod;
+        JsonNode reply;
+        var status = 200;
+        lock (_gate)
+        {
+            if (parts is ["chats"] && method == "GET")
+            {
+                reply = new JsonObject { ["chats"] = new JsonArray([.. All.AsEnumerable().Reverse().Select(c => (JsonNode)new JsonObject
+                {
+                    ["id"] = c.Id, ["title"] = c.Title, ["origin"] = c.Ref is null ? null : "code-arena", ["originPlace"] = c.Place,
+                    ["updatedAt"] = DateTimeOffset.UtcNow.ToString("o"), ["messages"] = c.Messages.Count,
+                })]) };
+            }
+            else if (parts is ["chats"] && method == "POST")
+            {
+                var b = JsonNode.Parse(body)!.AsObject();
+                var reference = b["ref"]?.GetValue<string>();
+                var known = All.FirstOrDefault(c => c.Ref is not null && c.Ref == reference);
+                var chat = known ?? new Chat { Id = Guid.NewGuid().ToString(), Ref = reference, Place = b["place"]?.GetValue<string>() };
+                if (known is null)
+                {
+                    All.Add(chat);
+                }
+                reply = new JsonObject { ["id"] = chat.Id, ["created"] = known is null };
+            }
+            else if (parts is ["chats", var id, ..] && All.FirstOrDefault(c => c.Id == id) is not { } chat)
+            {
+                (reply, status) = (new JsonObject { ["status"] = "gone", ["error"] = "That chat is not there any more: it was deleted." }, 404);
+            }
+            else if (parts is ["chats", var id2, ..] && Answering.Contains(id2))
+            {
+                (reply, status) = (new JsonObject { ["status"] = "answering", ["error"] = "The chat is answering on the web." }, 409);
+            }
+            else if (parts is ["chats", var id3] && method == "GET")
+            {
+                var c = All.First(x => x.Id == id3);
+                var after = int.TryParse(ctx.Request.QueryString["after"], out var a) ? a : 0;
+                reply = new JsonObject { ["id"] = c.Id, ["count"] = c.Messages.Count, ["messages"] = new JsonArray([.. c.Messages.Skip(after).Select(m => (JsonNode)m.DeepClone())]) };
+            }
+            else if (parts is ["chats", var id4, "messages"] && method == "POST")
+            {
+                var c = All.First(x => x.Id == id4);
+                var b = JsonNode.Parse(body)!.AsObject();
+                var after = b["after"]!.GetValue<int>();
+                if (after != c.Messages.Count)
+                {
+                    (reply, status) = (new JsonObject { ["status"] = "behind", ["count"] = c.Messages.Count, ["messages"] = new JsonArray([.. c.Messages.Skip(after).Select(m => (JsonNode)m.DeepClone())]) }, 409);
+                }
+                else
+                {
+                    c.Messages.AddRange(b["messages"]!.AsArray().OfType<JsonObject>().Select(m => m.DeepClone().AsObject()));
+                    if (c.Title == "New chat" && c.Messages.FirstOrDefault(m => m["role"]?.GetValue<string>() == "user") is { } first)
+                    {
+                        c.Title = first["content"]!.ToString().Split('\n')[0];
+                    }
+                    reply = new JsonObject { ["count"] = c.Messages.Count };
+                }
+            }
+            else
+            {
+                (reply, status) = (new JsonObject { ["error"] = "no such thing" }, 404);
+            }
+        }
+        ctx.Response.StatusCode = status;
+        ctx.Response.ContentType = "application/json";
+        var bytes = Encoding.UTF8.GetBytes(reply.ToJsonString());
+        await ctx.Response.OutputStream.WriteAsync(bytes);
+    }
 }

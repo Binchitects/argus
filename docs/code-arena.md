@@ -100,6 +100,7 @@ code-arena -p "list the TODOs in src/"  # answer once, print the answer, exit
 git diff | code-arena -p - --output json
 code-arena chat --continue          # carry on with this folder's last session
 code-arena chat --resume            # choose a saved session (or --resume <id>)
+code-arena chat --web               # your chats in Arena; --web N (or its id) continues one here
 code-arena --version                # the version, the licence and the source
 ```
 
@@ -160,6 +161,8 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/jobs [stop N]` | the commands run with no time limit, running or ended; `stop N` stops job N |
 | `/clear` | a new session (the last stays saved) |
 | `/resume [id]` | switch to a saved session |
+| `/web [N]` | your chats in Arena, newest first; `/web N` (or its id) continues one in a new session here |
+| `/sync` | where this session stands with its chat in Arena |
 | `/exit` | leave (also Ctrl+D) |
 
 ## The IDE
@@ -600,6 +603,25 @@ target down with it), so a compaction does not start the next one. The use of
 the window shows after each turn in the terminal (`/context` at any time) and
 in the IDE's status bar.
 
+## Chats in Arena
+
+Each session is a chat in Arena too, kept in step both ways with your API key:
+in the chat list it has a terminal mark, and its page says it is a Code Arena
+session and which folder it runs in. It can be continued on the web, where the
+chat's own tools answer (the files and commands stay on the machine Code Arena
+runs on); what was added there comes into the session at its next turn here,
+before the question, so the model hears it. `/web` lists your chats in Arena
+and `/web N` (or `code-arena chat --web N`) continues one here in a new
+session: its messages come in, and what this session adds goes back to it.
+
+Messages are sent in the background as they are added, in order, and again
+until Arena has them: a session goes on while Arena is out of reach, and what
+it missed is sent when Arena answers (at the latest when the session is next
+opened). Each message carries its place in the session, so one sent twice
+(its answer lost) is never kept twice. A chat deleted in Arena ends the sync
+for that session, which goes on here. `/sync` says where the session stands.
+`"syncChats": false` in `config.json` keeps sessions on this machine only.
+
 ## Its commits
 
 In a git repository, each turn that ends commits the files it changed, with
@@ -651,7 +673,7 @@ The rest of the file: `"model"`, `"thinking"`, `"mode"`, `"context"`,
 `"shell"` (the agent's `run_shell`), `"terminalShell"` (the IDE's terminals),
 `"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"argusTools": false`
 (no Argus MCP), `"argusUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
-`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"commitName"`, `"commitEmail"`. `ARENA_ARGUS_URL` in the environment gives Argus's address
+`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"commitName"`, `"commitEmail"`, `"syncChats"`. `ARENA_ARGUS_URL` in the environment gives Argus's address
 for one run.
 
 ## Building it (admins)

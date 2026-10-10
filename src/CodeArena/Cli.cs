@@ -16,6 +16,8 @@ internal sealed class Options
     public bool Continue { get; set; }
     public bool Resume { get; set; }
     public string? ResumeId { get; set; }
+    /// <summary>A chat in Arena to continue here (its id, or its number in the list --web prints).</summary>
+    public string? WebChat { get; set; }
     public string? Model { get; set; }
     public string? Mode { get; set; }
     public string? Thinking { get; set; }
@@ -98,6 +100,7 @@ internal static partial class Cli
           -p, --print [prompt]       one-shot, for scripts; --output json for a JSON answer
           -c, --continue             carry on with this folder's last session
           -r, --resume [id]          pick a saved session (or give its id)
+              --web [N|id]           your chats in Arena; with N or an id, continue that one here
           -m, --model NAME           the model (see code-arena models)
               --mode MODE            ask (default), auto-edit, plan or yolo
               --thinking LEVEL       off, low, medium, high, xhigh, or default
@@ -194,6 +197,9 @@ internal static partial class Cli
                     {
                         o.ResumeId = args[++i];
                     }
+                    break;
+                case "--web":
+                    o.WebChat = NextIsValue() ? args[++i] : "";
                     break;
                 case "-m" or "--model":
                     o.Model = Value();

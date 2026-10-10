@@ -35,6 +35,8 @@ internal sealed partial class Runtime : IAsyncDisposable
     public Agent Agent { get; private set; } = null!;
     public Workspace Workspace { get; private set; } = null!;
     public SessionStore Session { get; private set; } = null!;
+    /// <summary>The session kept in step with its chat in Arena; null when chats are not synced.</summary>
+    public ChatSync? Sync { get; private set; }
     /// <summary>What was sent in this folder, in the terminal and the IDE's chat alike.</summary>
     public InputHistory History { get; private set; } = null!;
     public Spend Total { get; } = new();
@@ -242,7 +244,66 @@ internal sealed partial class Runtime : IAsyncDisposable
         }
         Agent.Session = Session;
         Context.TodosChanged = todos => Session.Todos(todos);
+        Agent.BeforeTurn = ct => Sync?.TakeInAsync(ct) ?? Task.FromResult<IReadOnlyList<System.Text.Json.Nodes.JsonObject>>([]);
+        StartSync(resumed);
+        if (o.WebChat is { } web && await ContinueWebChatAsync(web, ct) is { } said)
+        {
+            Ui.Info(said);
+        }
     }
+
+    /// <summary>Keeps the session now in use in step with its chat in Arena (the last one's sync ends, sending what it still has).</summary>
+    private void StartSync(SessionData? data)
+    {
+        var previous = Sync;
+        Sync = ChatSync.Start(Config, Http, Session, Workspace.Root, () => Model.Name, (warn, text) =>
+        {
+            Notice(warn, text);
+            Agent?.Events?.Notice(text);
+        }, data);
+        if (previous is not null)
+        {
+            _ = previous.DisposeAsync().AsTask();
+        }
+    }
+
+    /// <summary>
+    /// Continues a chat from Arena in a new session here: by its id, or its number in the list (empty: the list). Its messages
+    /// come in now; what this session adds goes back to it.
+    /// </summary>
+    public async Task<string?> ContinueWebChatAsync(string which, CancellationToken ct)
+    {
+        if (!Config.SyncChats || Config.Url is not { Length: > 0 })
+        {
+            return "Chats are not kept with Arena here (\"syncChats\": false in config.json, or no Arena address).";
+        }
+        List<WebChat> chats;
+        try
+        {
+            chats = await ChatSync.ListAsync(Config, Http, ct);
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            return $"Arena's chats cannot be read now: {Fmt.OneLine(e.Message, 200)}";
+        }
+        var chat = int.TryParse(which, out var n) && n >= 1 && n <= chats.Count ? chats[n - 1] : chats.FirstOrDefault(c => c.Id.Equals(which.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (chat is null)
+        {
+            for (var i = 0; i < chats.Count; i++)
+            {
+                var c = chats[i];
+                Ui.Line($"{i + 1,3}. {c.Updated.ToLocalTime():yyyy-MM-dd HH:mm}  {c.Title}  {Ui.Dim($"{c.Messages} messages{(c.Origin == ChatSyncOrigin ? $" · Code Arena in {c.Place}" : "")} · {c.Id}")}");
+            }
+            return chats.Count == 0 ? "You have no chats in Arena yet." : which.Length == 0 ? "/web N continues one here (or code-arena --web N)." : $"There is no chat {which}: the list is above.";
+        }
+        NewSession();
+        Sync?.Link(chat.Id);
+        var taken = Sync is null ? [] : await Sync.TakeInAsync(ct);
+        Agent.TakeIn(taken);
+        return null;
+    }
+
+    private const string ChatSyncOrigin = "code-arena";
 
     /// <summary>
     /// The session's servers, each in the background: Arena's MCP endpoint and Argus's (with the
@@ -449,6 +510,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         Agent.Clear();
         Context.Todos = [];
         Context.TodosChanged = todos => Session.Todos(todos);
+        StartSync(null);
     }
 
     /// <summary>Switches to a saved session (/resume).</summary>
@@ -464,6 +526,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             Model.Info = info;
         }
+        StartSync(data);
     }
 
     public void SwitchModel(ModelInfo info)
@@ -582,6 +645,11 @@ internal sealed partial class Runtime : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         Jobs.StopAll("code-arena stopped");
+        if (Sync is not null)
+        {
+            // What is still to send goes now, for a few seconds at most; the rest goes when the session is next opened.
+            await Sync.DisposeAsync();
+        }
         foreach (var link in _links)
         {
             await link.DisposeAsync();
