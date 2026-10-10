@@ -311,6 +311,21 @@ public sealed class GraphTests(Xunit.Abstractions.ITestOutputHelper output)
     }
 
     [Fact]
+    public void Images_link_to_the_project_they_are_built_from_sub_images_and_private_registries_too_mirrors_not()
+    {
+        using var ix = new TestIndex();
+        var api = ix.Repo(1, "shop/payments");
+        var mirror = ix.Repo(2, "mirrors/library/nginx");
+        var flat = ix.Repo(3, "team/billing-api");
+        var user = ix.Repo(4, "deploy/prod");
+        Index(ix, (user, "docker-compose.yml",
+            "services:\n  a:\n    image: registry.gitlab.acme.io/shop/payments/api:1.2\n  b:\n    image: library/nginx:1\n  c:\n    image: 123456789.dkr.ecr.eu-west-1.amazonaws.com/billing-api:3\n"));
+        Graph.RebuildLinks(ix.Conn);
+        Assert.Equal(new HashSet<(string, string)> { ("deploy/prod", "shop/payments"), ("deploy/prod", "team/billing-api") }, Pairs(ix));
+        _ = (api, mirror, flat);
+    }
+
+    [Fact]
     public void Only_real_uses_count_imports_in_code_not_strings_direct_requirements_not_pinned_or_indirect_ones()
     {
         // Go: a quoted module path in code is not an import; an aliased or dot import is.

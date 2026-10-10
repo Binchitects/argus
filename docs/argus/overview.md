@@ -61,7 +61,7 @@ the index already holds, ecosystem by ecosystem, with no build run:
 | Rust | `Cargo.toml`'s `[package]` name | its dependencies; `use` |
 | Protocol Buffers | each `.proto` file, by its path | `import "x.proto"` |
 | C, C++ | headers | `#include` (resolved file by file, as before) |
-| The repository itself | its path | a submodule's URL, a GitLab CI `project:` include or trigger, a `git+https://...` requirement, an image built from it (`FROM`, `image:`, `repository:`) |
+| The repository itself | its path | a submodule's URL, a GitLab CI `project:` include or trigger, a `git+https://...` requirement, an image built from it (`FROM`, `image:`, `image: name:`, `repository:`, kustomize's `newName:`; a GitLab sub-image `group/project/api` is its project's; a private registry's flat name, as ECR's `…amazonaws.com/billing-api`, the one repository with that name; a mirror's longer path is not the image) |
 
 A use resolves to the one repository that provides its name. A C# `using`
 and a Java or Kotlin `import` name a namespace or a package exactly (an

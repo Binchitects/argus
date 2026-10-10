@@ -245,9 +245,22 @@ public static partial class Graph
                 return byPath.TryGetValue(name, out var repo) ? Decide([repo.GitlabId], name) : ("external", 0, "");
             case "image":
             {
-                // group/app, or an image under a registry's own group (registry/team/group/app).
-                var hits = byPath.Values.Where(r => r.Path == name || name.EndsWith("/" + r.Path, StringComparison.Ordinal) || r.Path.EndsWith("/" + name, StringComparison.Ordinal))
+                if (name.StartsWith("*/", StringComparison.Ordinal))
+                {
+                    // A private registry's flat name: the repository with that name, when only one has it.
+                    var flat = name[2..];
+                    return Decide(byPath.Values.Where(r => r.Path.EndsWith("/" + flat, StringComparison.Ordinal)).Select(r => r.GitlabId).ToHashSet(), name);
+                }
+                // group/app; an image under a registry's own group (registry/team/group/app); a project's sub-image as GitLab's
+                // registry names them (group/app/api). A longer repository path is not one: a mirror of the image is not it.
+                var hits = byPath.Values.Where(r => r.Path == name || name.EndsWith("/" + r.Path, StringComparison.Ordinal) || name.StartsWith(r.Path + "/", StringComparison.Ordinal))
                     .Select(r => r.GitlabId).ToHashSet();
+                // The project itself rather than a group above it that is also a project.
+                if (hits.Count > 1)
+                {
+                    var longest = byPath.Values.Where(r => hits.Contains(r.GitlabId)).MaxBy(r => r.Path.Length)!;
+                    if (name == longest.Path || name.StartsWith(longest.Path + "/", StringComparison.Ordinal)) hits = [longest.GitlabId];
+                }
                 return Decide(hits, name);
             }
             case "proto":

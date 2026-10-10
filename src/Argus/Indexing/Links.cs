@@ -438,7 +438,9 @@ public static partial class Links
         var last = parts[^1];
         var colon = last.LastIndexOf(':');
         if (colon > 0) parts[^1] = last[..colon];
-        // One part is a public image's name (nginx, python): never this estate's.
+        // One part is a public image's name (nginx, python): never this estate's; but in a private registry (ECR, ACR,
+        // Artifact Registry) a flat name is a repository's own, matched by the repository's name (*/name).
+        if (parts.Count == 1 && i.Split('/')[0] is var host && PrivateRegistry().IsMatch(host)) return "*/" + parts[0];
         return parts.Count >= 2 ? string.Join('/', parts) : "";
     }
 
@@ -528,6 +530,8 @@ public static partial class Links
     /// <summary>image: x, repository: x, and the extended forms (image:\n  name: x; kustomize's newName: x).</summary>
     [GeneratedRegex(@"^\s*-?\s*(?:image|repository|newName)\s*:\s*['""]?(?<image>[\w.\-/:@${}]+)['""]?\s*$|^\s*image\s*:\s*\n\s+name\s*:\s*['""]?(?<image>[\w.\-/:@${}]+)['""]?\s*$", RegexOptions.Multiline)]
     private static partial Regex YamlImage();
+    [GeneratedRegex(@"\.dkr\.ecr\.|\.azurecr\.io$|-docker\.pkg\.dev$|^gcr\.io$|\.gcr\.io$", RegexOptions.IgnoreCase)]
+    private static partial Regex PrivateRegistry();
     [GeneratedRegex(@"^\s*FROM\s+(?:--platform=\S+\s+)?(?<image>\S+)", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
     private static partial Regex DockerFrom();
 }
