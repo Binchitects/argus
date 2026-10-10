@@ -14,10 +14,11 @@ import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { asks, chatBridge, type Piece } from './bridge'
 import { installCompletions } from './completion'
-import { EditorContext, loadMonaco, modKey, rankFiles, useEditor, type DiffModels, type EditorApi, type FileModel, type MonacoModule, type Reveal, type Tab, type Unsaved } from './editor-state'
-import { acceptChange, allFilesQuery, changesQuery, changeTexts, nameOf, readFile, revertChange, within, writeFile, type Change, type CheckProblem } from './ide-api'
+import { EditorContext, loadMonaco, modKey, rankFiles, useEditor, type DiffModels, type DiffSource, type EditorApi, type FileModel, type MonacoModule, type Reveal, type Tab, type Unsaved } from './editor-state'
+import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitTexts, nameOf, readFile, revertChange, within, writeFile, type Change, type CheckProblem } from './ide-api'
 
-const diffId = (path: string) => `diff:${path}`
+/** A diff's tab: the agent's changes to a file ("diff:"), or the file's since the last commit ("git:"). */
+const diffId = (path: string, source: DiffSource = 'agent') => `${source === 'git' ? 'git' : 'diff'}:${path}`
 
 /**
  * The editor's state: the open tabs, a Monaco model per file, one code editor
@@ -179,12 +180,12 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         f.model.dispose()
         files.current.delete(tab.path)
       } else {
-        const d = diffs.current.get(tab.path)
+        const d = diffs.current.get(tab.id)
         if (!d) return
         if (diffEditor.current?.getModel()?.modified === d.modified) diffEditor.current.setModel(null)
         d.original.dispose()
         d.modified.dispose()
-        diffs.current.delete(tab.path)
+        diffs.current.delete(tab.id)
       }
     }
 
@@ -237,17 +238,18 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    /** The agent's change to a file, before and now: new models, or the ones there with the texts of now. */
-    const loadDiff = async (path: string) => {
-      const [texts, m] = await Promise.all([changeTexts(path), loadMonaco()])
+    /** A file's change, before and now (the agent's, or since the last commit): new models, or the ones there with the texts of now. */
+    const loadDiff = async (path: string, source: DiffSource = 'agent') => {
+      const [texts, m] = await Promise.all([source === 'git' ? gitTexts(path) : changeTexts(path), loadMonaco()])
       mon.current = m
       const language = m.languageOf(path)
-      const there = diffs.current.get(path)
+      const id = diffId(path, source)
+      const there = diffs.current.get(id)
       if (there) {
         there.original.setValue(texts.original ?? '')
         there.modified.setValue(texts.modified ?? '')
       } else {
-        diffs.current.set(path, {
+        diffs.current.set(id, {
           original: m.monaco.editor.createModel(texts.original ?? '', language.id, m.diffUri('before', path)),
           modified: m.monaco.editor.createModel(texts.modified ?? '', language.id, m.diffUri('after', path)),
         })
@@ -255,17 +257,19 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       return language.name
     }
 
-    const openDiff = async (path: string) => {
-      const id = diffId(path)
+    const openDiff = async (path: string, source: DiffSource = 'agent') => {
+      const id = diffId(path, source)
       if (has(id)) {
         activate(id)
+        // Shown again: as the file is now.
+        if (source === 'git') void loadDiff(path, source).catch(() => undefined)
         return
       }
-      add({ id, kind: 'diff', path, status: 'loading', dirty: false })
+      add({ id, kind: 'diff', source, path, status: 'loading', dirty: false })
       try {
-        const language = await loadDiff(path)
+        const language = await loadDiff(path, source)
         if (has(id)) update(id, { status: 'ready', language })
-        else dispose({ id, kind: 'diff', path, status: 'ready', dirty: false })
+        else dispose({ id, kind: 'diff', source, path, status: 'ready', dirty: false })
       } catch (e) {
         if (has(id)) update(id, { status: 'error', message: errorMessage(e) })
       }
@@ -303,6 +307,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       f.savedAlt = alt
       markDirty(f)
       void queryClient.invalidateQueries({ queryKey: changesQuery.queryKey })
+      // What git sees changed since the last commit, with it.
+      void queryClient.invalidateQueries({ queryKey: ['code', 'git', 'status'] })
       return true
     }
 
@@ -328,7 +334,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     const refreshTab = async (t: Tab) => {
       if (t.kind === 'diff') {
         try {
-          await loadDiff(t.path)
+          await loadDiff(t.path, t.source)
           // Closed while it loaded: its models go too.
           if (!has(t.id)) dispose(t)
         } catch {
@@ -381,17 +387,18 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         files.current.set(f.path, f)
         if (m) readdress(m, f)
       }
-      for (const [p, d] of [...diffs.current]) {
-        if (!within(p, from)) continue
-        diffs.current.delete(p)
-        diffs.current.set(rename(p), d)
+      for (const t of tabsRef.current) {
+        const d = t.kind === 'diff' ? diffs.current.get(t.id) : undefined
+        if (!d || !within(t.path, from)) continue
+        diffs.current.delete(t.id)
+        diffs.current.set(diffId(rename(t.path), t.source), d)
       }
       const ids = new Map<string, string>()
       commit(
         tabsRef.current.map((t) => {
           if (!within(t.path, from)) return t
           const path = rename(t.path)
-          const id = t.kind === 'file' ? path : diffId(path)
+          const id = t.kind === 'file' ? path : diffId(path, t.source)
           ids.set(t.id, id)
           return { ...t, id, path, language: m && t.status === 'ready' ? m.languageOf(path).name : t.language }
         }),
@@ -467,7 +474,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     const accept = async (path?: string) => {
       try {
         queryClient.setQueryData(changesQuery.queryKey, await acceptChange(path))
-        drop(tabsRef.current.filter((t) => t.kind === 'diff' && (path === undefined || t.path === path)).map((t) => t.id))
+        drop(tabsRef.current.filter((t) => t.kind === 'diff' && t.source !== 'git' && (path === undefined || t.path === path)).map((t) => t.id))
       } catch (e) {
         toast.error(errorMessage(e))
       }
@@ -484,7 +491,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       if (!ok) return
       try {
         queryClient.setQueryData(changesQuery.queryKey, await revertChange(path))
-        drop(tabsRef.current.filter((t) => t.kind === 'diff' && t.path === path).map((t) => t.id))
+        drop(tabsRef.current.filter((t) => t.kind === 'diff' && t.source !== 'git' && t.path === path).map((t) => t.id))
         await refresh(path)
         void queryClient.invalidateQueries({ queryKey: ['code', 'files'] })
       } catch (e) {
@@ -567,7 +574,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       setCursor(position ? { line: position.lineNumber, column: position.column } : { line: 1, column: 1 })
       ed.focus()
     } else {
-      const d = diffs.current.get(tab.path)
+      const d = diffs.current.get(tab.id)
       if (!d || !diffHost.current) return
       if (!diffEditor.current) {
         diffEditor.current = m.monaco.editor.createDiffEditor(diffHost.current, {
@@ -705,7 +712,7 @@ export function EditorArea() {
   const ed = useEditor()
   const { tabs, active, bindEditor, bindDiff } = ed
   const changes = useQuery(changesQuery)
-  const change = active?.kind === 'diff' ? changes.data?.find((c) => c.path === active.path) : undefined
+  const change = active?.kind === 'diff' && active.source !== 'git' ? changes.data?.find((c) => c.path === active.path) : undefined
   const showsFile = active?.kind === 'file' && active.status === 'ready'
   const showsDiff = active?.kind === 'diff' && active.status === 'ready'
   return (
@@ -729,14 +736,14 @@ export function EditorArea() {
                   role="tab"
                   aria-selected={selected}
                   aria-controls="editor-panel"
-                  title={t.kind === 'diff' ? `${t.path}: the agent's changes` : t.path}
+                  title={t.kind === 'diff' ? `${t.path}: ${t.source === 'git' ? 'its changes since the last commit' : "the agent's changes"}` : t.path}
                   onClick={() => ed.activate(t.id)}
                   onAuxClick={(e) => e.button === 1 && void ed.close(t.id)}
                   className="flex h-full max-w-56 items-center gap-1.5 pr-1 pl-3 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                 >
                   {t.kind === 'diff' ? <GitCompareArrows className="size-3.5 shrink-0 text-primary" aria-hidden="true" /> : <FileCode2 className="size-3.5 shrink-0" aria-hidden="true" />}
                   <span className="truncate">{name}</span>
-                  {t.kind === 'diff' && <span className="text-xs text-muted-foreground">changes</span>}
+                  {t.kind === 'diff' && <span className="text-xs text-muted-foreground">{t.source === 'git' ? 'since commit' : 'changes'}</span>}
                   {t.dirty && <span className="sr-only">, not saved</span>}
                 </button>
                 <button
@@ -765,7 +772,18 @@ export function EditorArea() {
           <span className="min-w-0 truncate font-mono" title={active.path}>
             {active.path.split('/').join(' › ')}
           </span>
-          {active.kind === 'diff' && (
+          {active.kind === 'diff' && active.source === 'git' && (
+            <>
+              <span className="hidden shrink-0 rounded-sm bg-primary/10 px-1.5 py-0.5 text-primary-ink lg:inline" title="At the last commit, and now">
+                since the last commit
+              </span>
+              <span className="ml-auto" />
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => void ed.open(active.path)}>
+                <FileText /> Open file
+              </Button>
+            </>
+          )}
+          {active.kind === 'diff' && active.source !== 'git' && (
             <>
               <span className="hidden shrink-0 rounded-sm bg-primary/10 px-1.5 py-0.5 text-primary-ink lg:inline" title="Before the agent, and now">
                 the agent&apos;s changes

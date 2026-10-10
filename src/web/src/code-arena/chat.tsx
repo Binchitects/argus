@@ -387,7 +387,7 @@ export function Thread({
    * it is: it would read every file again after each answer.
    */
   const refresh = useCallback(async () => {
-    for (const queryKey of [changesQuery.queryKey, ['code', 'files'], sessionsQuery.queryKey, historyQuery.queryKey]) void queryClient.invalidateQueries({ queryKey })
+    for (const queryKey of [changesQuery.queryKey, ['code', 'files'], ['code', 'git'], sessionsQuery.queryKey, historyQuery.queryKey]) void queryClient.invalidateQueries({ queryKey })
     await Promise.all([queryClient.invalidateQueries({ queryKey: stateQuery.queryKey }), queryClient.invalidateQueries({ queryKey: sessionQuery.queryKey })])
   }, [queryClient])
 

@@ -184,6 +184,51 @@ export const problemsQuery = {
 /** Runs the project's check (waits for the one running, when one is); what it found. */
 export const runCheck = () => api<CheckRun>('/api/problems/run', { body: {} })
 
+/** A file changed since the last commit: in the index (staged) and in the folder (not), as git's letters (M, A, D, R; ? untracked). */
+export interface GitFile {
+  path: string
+  staged: string | null
+  changed: string | null
+  /** A rename's old path. */
+  from: string | null
+}
+
+export interface GitStatus {
+  /** False: the folder is in no git repository. */
+  repository: boolean
+  branch?: string | null
+  ahead?: number | null
+  behind?: number | null
+  files?: GitFile[]
+}
+
+export interface GitCommit {
+  hash: string
+  subject: string
+  author: string
+  at: string
+}
+
+export const gitStatusQuery = {
+  queryKey: ['code', 'git', 'status'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<GitStatus>('/api/git/status', { signal }),
+}
+export const gitLogQuery = {
+  queryKey: ['code', 'git', 'log'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<GitCommit[]>('/api/git/log', { signal }),
+}
+export const gitBranchesQuery = {
+  queryKey: ['code', 'git', 'branches'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ name: string; current: boolean }[]>('/api/git/branches', { signal }),
+}
+/** A file at the last commit (null: new) and now (null: deleted), for its diff tab. */
+export const gitTexts = (path: string) => api<Omit<ChangeTexts, 'version'>>(`/api/git/diff?path=${at(path)}`)
+export const gitStage = (paths: string[]) => api<GitStatus>('/api/git/stage', { body: { paths } })
+export const gitUnstage = (paths: string[]) => api<GitStatus>('/api/git/unstage', { body: { paths } })
+export const gitDiscard = (paths: string[]) => api<GitStatus>('/api/git/discard', { body: { paths } })
+export const gitCommit = (message: string, all: boolean) => api<{ hash: string; status: GitStatus }>('/api/git/commit', { body: { message, all } })
+export const gitSwitch = (branch: string) => api<GitStatus>('/api/git/switch', { body: { branch } })
+
 /** Code completion at the editor's cursor: what goes there (empty: nothing). */
 export const completeCode = (body: { path: string; prefix: string; suffix: string }, signal: AbortSignal) => api<{ text: string }>('/api/complete', { body, signal })
 

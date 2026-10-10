@@ -40,6 +40,7 @@ export function StatusBar({
   state,
   onChanges,
   onProblems,
+  onBranch,
   onTerminal,
   onChat,
   onAbout,
@@ -49,6 +50,7 @@ export function StatusBar({
   state: CodeState
   onChanges: () => void
   onProblems: () => void
+  onBranch: () => void
   onTerminal: () => void
   onChat: () => void
   onAbout: () => void
@@ -71,11 +73,10 @@ export function StatusBar({
   return (
     <footer aria-label="Status bar" className="flex h-6 shrink-0 items-stretch overflow-hidden bg-primary text-[0.75rem] text-primary-foreground">
       {state.branch && (
-        <span className="flex min-w-0 items-center gap-1 px-2" title={`Git branch ${state.branch}`}>
+        <Item onClick={onBranch} className="min-w-0" title={`Git branch ${state.branch}: source control`} aria-label={`Branch ${state.branch}: source control`}>
           <GitBranch className="size-3.5 shrink-0" aria-hidden="true" />
-          <span className="sr-only">Branch</span>
           <span className="truncate">{state.branch}</span>
-        </span>
+        </Item>
       )}
       <Item onClick={onChanges} aria-label={`Agent changes: ${count} ${count === 1 ? 'file' : 'files'}`} title="The files the agent changed">
         <GitCompareArrows aria-hidden="true" /> {count}

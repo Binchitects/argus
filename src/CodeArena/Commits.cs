@@ -265,7 +265,7 @@ internal static class TurnCommits
         }
     }
 
-    private static async Task<(int Code, string Output)> GitAsync(string dir, IReadOnlyList<string> args, CancellationToken ct, string? input = null, CommitIdentity? author = null)
+    internal static async Task<(int Code, string Output)> GitAsync(string dir, IReadOnlyList<string> args, CancellationToken ct, string? input = null, CommitIdentity? author = null)
     {
         var psi = new ProcessStartInfo("git")
         {

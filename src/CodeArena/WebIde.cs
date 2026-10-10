@@ -23,6 +23,7 @@ internal sealed partial class WebApp
     private Terminals _terminals = null!;
     private PagePreferences _preferences = null!;
     private Problems _problems = null!;
+    private IdeGit _git = null!;
 
     private void StartIde()
     {
@@ -30,6 +31,7 @@ internal sealed partial class WebApp
         _changes = new AgentChanges(_rt.Workspace);
         _terminals = new Terminals(_rt.Workspace, _rt.Config, _rt.Env.Env);
         _problems = new Problems(_rt.Workspace, _rt.Config);
+        _git = new IdeGit(_rt.Workspace);
         _preferences = new PagePreferences(Path.Combine(_rt.Env.Paths.DataDir, PagePreferences.FileName));
     }
 
@@ -45,6 +47,38 @@ internal sealed partial class WebApp
                     return true;
                 case ("POST", "/api/complete"):
                     await CompleteAsync(Body(req), res, ct);
+                    return true;
+                case ("GET", "/api/git/status"):
+                    await res.JsonAsync(200, await _git.StatusAsync(ct), ct);
+                    return true;
+                case ("GET", "/api/git/diff"):
+                    await res.JsonAsync(200, await _git.TextsAsync(Query(req, "path"), ct), ct);
+                    return true;
+                case ("GET", "/api/git/log"):
+                    await res.JsonAsync(200, await _git.LogAsync(ct), ct);
+                    return true;
+                case ("GET", "/api/git/branches"):
+                    await res.JsonAsync(200, await _git.BranchesAsync(ct), ct);
+                    return true;
+                case ("POST", "/api/git/stage"):
+                    await _git.StageAsync(Body(req), ct);
+                    await res.JsonAsync(200, await _git.StatusAsync(ct), ct);
+                    return true;
+                case ("POST", "/api/git/unstage"):
+                    await _git.UnstageAsync(Body(req), ct);
+                    await res.JsonAsync(200, await _git.StatusAsync(ct), ct);
+                    return true;
+                case ("POST", "/api/git/discard"):
+                    await _git.DiscardAsync(Body(req), ct);
+                    await res.JsonAsync(200, await _git.StatusAsync(ct), ct);
+                    return true;
+                case ("POST", "/api/git/commit"):
+                    var hash = await _git.CommitAsync(Body(req), ct);
+                    await res.JsonAsync(200, new JsonObject { ["hash"] = hash, ["status"] = await _git.StatusAsync(ct) }, ct);
+                    return true;
+                case ("POST", "/api/git/switch"):
+                    await _git.SwitchAsync(Body(req), ct);
+                    await res.JsonAsync(200, await _git.StatusAsync(ct), ct);
                     return true;
                 case ("GET", "/api/problems"):
                     await res.JsonAsync(200, ProblemsJson(_problems.Last), ct);

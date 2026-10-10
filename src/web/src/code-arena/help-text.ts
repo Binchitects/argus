@@ -8,7 +8,7 @@ import { modKey } from './editor-state'
  */
 
 /** The parts of the workbench. */
-export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status'
+export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'git' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status'
 
 export interface PartHelp extends HelpPart {
   /** Where the manual's Code Arena page (docs/code-arena.md) tells the rest: one of its headings. */
@@ -42,6 +42,11 @@ export const parts: Record<Part, PartHelp> = {
     name: 'Problems',
     text: "The errors and warnings of the project's own check (its build, type check or linter): **Run check** runs it. Each opens the file at its line, where the editor marks it too; **Fix** asks the agent to fix it.",
     manual: 'problems',
+  },
+  git: {
+    name: 'Source control',
+    text: "The folder's git: what changed since the last commit, **staged** for the next commit or not. A file opens as the last commit has it and as it is now; **+** stages it, **−** unstages it, **↺** puts it back. Write the message and **Commit** (all of it when nothing is staged); switch the branch below, and see the last commits.",
+    manual: 'source-control',
   },
   sessions: {
     name: 'Sessions',
@@ -118,6 +123,7 @@ export const keys: [keys: string, what: string][] = [
   [`${modKey}+Shift+P`, 'Run a command by its name'],
   [`${modKey}+Shift+F`, 'Search the files'],
   [`${modKey}+Shift+E`, 'The Explorer'],
+  [`${modKey}+Shift+G`, 'Source control'],
   ['Ctrl+`', 'Show or hide the terminal'],
   [`${modKey}+L`, 'In the editor: the lines chosen go with the next message'],
   ['↑ / ↓', 'In the chat\'s box: what you sent before in this folder (the terminal\'s too); Esc goes back to what you were typing'],
@@ -134,6 +140,7 @@ export const regions: Record<string, Part> = {
   'Search the files': 'search',
   'Agent changes': 'changes',
   Problems: 'problems',
+  'Source control': 'git',
   Sessions: 'sessions',
   Editor: 'editor',
   Terminal: 'terminal',

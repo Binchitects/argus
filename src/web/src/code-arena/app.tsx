@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, CircleAlert, CircleHelp, Files, GitCompareArrows, Info, MessagesSquare, Search, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, CircleAlert, CircleHelp, Files, GitBranch, GitCompareArrows, Info, MessagesSquare, Search, SquareTerminal, type LucideIcon } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -16,13 +16,14 @@ import { Sessions, ThemeMenu, Thread } from './chat'
 import { completion } from './completion'
 import { CommandPalette, type PaletteCommand } from './palette'
 import { ProblemsPanel } from './problems'
+import { SourceControlPanel } from './scm'
 import { EditorArea, EditorProvider } from './editor'
 import { CodeRefsProvider } from './refs'
 import { modKey, onMac, useEditor } from './editor-state'
 import { Explorer } from './explorer'
 import { HelpProvider } from './help'
 import { useOpenHelp } from './help-context'
-import { changesQuery, folderQuery, parentOf, preferencesQuery, problemsQuery, savePreferences, type Preferences } from './ide-api'
+import { changesQuery, folderQuery, gitStatusQuery, parentOf, preferencesQuery, problemsQuery, savePreferences, type Preferences } from './ide-api'
 import { SearchPanel } from './search'
 import { Splitter } from './splitter'
 import { About, StatusBar } from './status-bar'
@@ -145,7 +146,7 @@ function Unreachable({ error }: { error: unknown }) {
   )
 }
 
-type View = 'explorer' | 'search' | 'changes' | 'problems' | 'chat'
+type View = 'explorer' | 'search' | 'git' | 'changes' | 'problems' | 'chat'
 
 /** Where the panels are and how large: the person's own, kept by code-arena for every run. */
 interface Layout {
@@ -167,7 +168,7 @@ function layoutOf(saved: Record<string, unknown> | undefined): Layout {
   const layout = { ...defaults }
   if (!saved) return layout
   const view = saved.view
-  if (view === 'explorer' || view === 'search' || view === 'changes' || view === 'problems' || view === 'chat') layout.view = view
+  if (view === 'explorer' || view === 'search' || view === 'git' || view === 'changes' || view === 'problems' || view === 'chat') layout.view = view
   for (const k of ['side', 'chat', 'panel'] as const) {
     const size = saved[k]
     if (typeof size === 'number' && Number.isFinite(size)) layout[k] = Math.round(Math.min(bounds[k][1], Math.max(bounds[k][0], size)))
@@ -209,6 +210,7 @@ function useLayout(saved: Record<string, unknown> | undefined) {
 const views: { id: View; label: string; icon: LucideIcon; keys?: string }[] = [
   { id: 'explorer', label: 'Explorer', icon: Files, keys: `${modKey}+Shift+E` },
   { id: 'search', label: 'Search', icon: Search, keys: `${modKey}+Shift+F` },
+  { id: 'git', label: 'Source control', icon: GitBranch, keys: `${modKey}+Shift+G` },
   { id: 'changes', label: 'Agent changes', icon: GitCompareArrows },
   { id: 'problems', label: 'Problems', icon: CircleAlert },
   { id: 'chat', label: 'Chat', icon: MessagesSquare },
@@ -306,6 +308,7 @@ function Workbench({
       else if (ctrl && e.shiftKey && !e.altKey && key === 'p') setPalette(true)
       else if (ctrl && e.shiftKey && key === 'f') show('search')
       else if (ctrl && e.shiftKey && key === 'e') show('explorer')
+      else if (ctrl && e.shiftKey && key === 'g') show('git')
       else if (e.ctrlKey && !e.shiftKey && e.code === 'Backquote') togglePanel()
       else handled = false
       if (handled) {
@@ -334,6 +337,7 @@ function Workbench({
   // The check's problems: marked in the editor's files, counted on the activity bar and the status bar.
   const problems = useQuery(problemsQuery).data?.problems
   const errors = problems?.filter((p) => p.severity === 'error').length ?? 0
+  const gitCount = useQuery(gitStatusQuery).data?.files?.length ?? 0
   useEffect(() => {
     if (problems) showProblems(problems)
   }, [problems, showProblems])
@@ -350,6 +354,7 @@ function Workbench({
       { id: 'explorer', label: 'Show the Explorer', keys: `${modKey}+Shift+E`, run: () => show('explorer') },
       { id: 'changes', label: "Show the agent's changes", run: () => show('changes') },
       { id: 'problems', label: 'Show the problems', run: () => show('problems') },
+      { id: 'git', label: 'Show source control (git)', keys: `${modKey}+Shift+G`, run: () => show('git') },
       count > 0 && { id: 'accept-all', label: "Accept all the agent's changes", run: () => void accept() },
       { id: 'sessions', label: 'Show the chat sessions', run: () => show('chat') },
       { id: 'chat', label: layout.chatOpen ? 'Hide the chat' : 'Show the chat', run: () => change({ chatOpen: !layout.chatOpen }) },
@@ -371,7 +376,7 @@ function Workbench({
       <div className="flex min-h-0 flex-1">
         <nav aria-label="Activity bar" className="flex w-12 shrink-0 flex-col border-r bg-sidebar">
           {views.map((v) => (
-            <ActivityButton key={v.id} label={v.label} keys={v.keys} pressed={layout.sideOpen && layout.view === v.id} badge={v.id === 'changes' ? count : v.id === 'problems' ? errors : undefined} onClick={() => show(v.id, true)}>
+            <ActivityButton key={v.id} label={v.label} keys={v.keys} pressed={layout.sideOpen && layout.view === v.id} badge={v.id === 'changes' ? count : v.id === 'problems' ? errors : v.id === 'git' ? gitCount : undefined} onClick={() => show(v.id, true)}>
               <v.icon aria-hidden="true" />
             </ActivityButton>
           ))}
@@ -396,6 +401,9 @@ function Workbench({
           </div>
           <div hidden={layout.view !== 'search'} className="h-full">
             <SearchPanel focusKey={searchFocus} />
+          </div>
+          <div hidden={layout.view !== 'git'} className="h-full">
+            <SourceControlPanel />
           </div>
           <div hidden={layout.view !== 'changes'} className="h-full">
             <ChangesPanel />
@@ -445,6 +453,7 @@ function Workbench({
         state={state}
         onChanges={() => show('changes')}
         onProblems={() => show('problems')}
+        onBranch={() => show('git')}
         onTerminal={togglePanel}
         onChat={() => change({ chatOpen: true })}
         onAbout={() => setAbout(true)}

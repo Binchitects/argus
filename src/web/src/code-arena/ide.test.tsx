@@ -532,7 +532,7 @@ describe('Code Arena, the IDE', () => {
     const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
     // The agent's changes are counted on their button.
     expect(await within(bar).findByRole('button', { name: 'Agent changes (1)' })).toBeInTheDocument()
-    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Agent changes (1)', 'Problems', 'Chat', 'Terminal', 'Theme', 'Help', 'About Code Arena'])
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Agent changes (1)', 'Problems', 'Chat', 'Terminal', 'Theme', 'Help', 'About Code Arena'])
     expect(within(bar).getByRole('button', { name: 'Explorer' })).toHaveAttribute('aria-pressed', 'true')
     expect(await screen.findByRole('tree', { name: 'Files' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'No file is open' })).toBeInTheDocument()
@@ -1390,6 +1390,50 @@ describe('Code Arena, the IDE', () => {
     }))
   })
 
+  it('lists what changed since the last commit, opens a file as it was and is, stages, discards and commits', async () => {
+    let status = { repository: true, branch: 'main', ahead: 1, behind: 0, files: [{ path: 'src/app.ts', staged: null as string | null, changed: 'M' as string | null, from: null }, { path: 'notes.txt', staged: null, changed: '?', from: null }] }
+    const { calls } = backend({
+      'GET /api/git/status': () => ({ json: status }),
+      'GET /api/git/log': () => ({ json: [{ hash: 'abc1234', subject: 'First', author: 'Pat', at: '2026-10-11T09:00:00Z' }] }),
+      'GET /api/git/branches': () => ({ json: [{ name: 'main', current: true }, { name: 'feature', current: false }] }),
+      'GET /api/git/diff': () => ({ json: { path: 'src/app.ts', original: 'const total = 0\n', modified: 'const total = 1\n' } }),
+      'POST /api/git/stage': () => {
+        status = { ...status, files: [{ ...status.files[0]!, staged: 'M', changed: null }, status.files[1]!] }
+        return { json: status }
+      },
+      'POST /api/git/discard': () => {
+        status = { ...status, files: [status.files[0]!] }
+        return { json: status }
+      },
+      'POST /api/git/commit': () => {
+        status = { ...status, files: [] }
+        return { json: { hash: 'def5678', status } }
+      },
+    })
+    renderIde()
+    await userEvent.keyboard('{Control>}{Shift>}g{/Shift}{/Control}')
+    const panel = await screen.findByRole('complementary', { name: 'Source control' })
+    const changes = await within(panel).findByRole('list', { name: 'Changed files' })
+    expect(within(changes).getAllByRole('listitem')).toHaveLength(2)
+
+    // A file opens as the last commit has it, and now.
+    await userEvent.click(within(changes).getByRole('button', { name: /^app\.ts/ }))
+    expect(await within(tabs()).findByRole('tab', { name: /app\.ts.*since commit/ })).toHaveAttribute('aria-selected', 'true')
+    await waitFor(() => expect(fakes.diffEditors[0]?.getModel()?.original.getValue()).toBe('const total = 0\n'))
+
+    await userEvent.click(within(changes).getByRole('button', { name: 'Stage src/app.ts' }))
+    expect(await within(panel).findByRole('list', { name: 'Staged files' })).toHaveTextContent('app.ts')
+    await userEvent.click(within(panel).getByRole('button', { name: 'Discard notes.txt' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Discard' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/git/discard')?.body).toEqual({ paths: ['notes.txt'] }))
+
+    await userEvent.type(within(panel).getByRole('textbox', { name: 'Commit message' }), 'Total is one')
+    await userEvent.click(within(panel).getByRole('button', { name: 'Commit 1 staged' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/git/commit')?.body).toEqual({ message: 'Total is one', all: false }))
+    expect(await within(panel).findByText('Nothing changed since the last commit.')).toBeInTheDocument()
+    expect(within(panel).getByRole('list', { name: 'Commits' })).toHaveTextContent('First')
+  })
+
   it('does not search the files again at the end of each turn', async () => {
     const { calls } = backend({ 'POST /api/messages': () => answerOnly() })
     renderIde()
@@ -1467,7 +1511,7 @@ describe('Code Arena, the help', () => {
     await screen.findByRole('tree', { name: 'Files' })
     const seen = new Set(regionsShown())
     // Every view of the side bar, and the terminal panel, drawn once.
-    for (const name of ['Search', 'Agent changes (1)', 'Problems', 'Chat']) {
+    for (const name of ['Search', 'Source control', 'Agent changes (1)', 'Problems', 'Chat']) {
       await userEvent.click(within(bar).getByRole('button', { name }))
       for (const r of regionsShown()) seen.add(r)
     }

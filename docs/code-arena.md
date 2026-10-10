@@ -197,7 +197,8 @@ it. On another machine over SSH: `code-arena --port 8765 --no-open` there,
 
 The page is laid out as VS Code is, in Argus Arena's design system:
 
-- **activity bar** (the left edge): Explorer, Search, Agent changes (with a
+- **activity bar** (the left edge): Explorer, Search, Source control (with a
+  count of the files changed since the last commit), Agent changes (with a
   count of the files), Problems (with a count of the errors) and Chat switch
   the side bar; the one shown hides it.
   At its foot: the terminal panel, the theme (light, dark or the system's),
@@ -284,6 +285,7 @@ shell's history, emacs, nano).
 | Ctrl+Shift+P (⌘⇧P) | run a command by name |
 | Ctrl+Shift+F (⌘⇧F) | search |
 | Ctrl+Shift+E (⌘⇧E) | the Explorer |
+| Ctrl+Shift+G (⌘⇧G) | source control |
 | Ctrl+` | show or hide the terminals |
 | Ctrl+L (⌘L) | in the editor: the lines chosen (or the cursor's) go with the next message |
 
@@ -313,6 +315,19 @@ Lines of a file go to the agent from the editor itself:
 
 The model gets them numbered, after the message, as `<selection path lines>`
 (with `unsaved="true"` for the editor's text); at most eight a message.
+
+### Source control
+
+**Source control** in the activity bar (Ctrl+Shift+G, or the branch in the
+status bar) is the folder's git as you work it, beside the agent's own turn
+commits: what changed since the last commit, **Staged** (in the next commit)
+and **Changes** (not yet). A file opens as a diff tab, as the last commit has
+it and as it is now; **+** stages it, **−** unstages it, **↺** puts it back as
+the index has it (a file git does not know is deleted; it asks first). Write
+the message and **Commit** (Ctrl+Enter): what is staged, or all of it when
+nothing is. Your own git name and email commit. Below: the branch, to switch
+to another, how far it is ahead of and behind its upstream, and the last
+commits. A repository bigger than the folder shows the folder's files only.
 
 ### Problems
 
@@ -452,6 +467,11 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/sessions/send-all` | sends Arena what it lacks of this folder's sessions: `{sent, failed}` (`failed`: why, per session) |
 | `POST /api/servers/retry` `{name}` | tries that MCP server again now (every one not connected without `name`); the state |
 | `POST /api/jobs/stop` `{id}` | stops a command run with no time limit; 404 for no such job |
+| `GET /api/git/status` | `{repository, branch, ahead, behind, files: [{path, staged, changed, from}]}` (`staged`, `changed`: git's letters M, A, D, R, `?` untracked; null: none) |
+| `GET /api/git/diff?path=FILE` | `{path, original, modified}`: at the last commit (null: new) and now (null: deleted) |
+| `POST /api/git/stage`, `/api/git/unstage`, `/api/git/discard` `{paths}` | the status after; 409 `git` with what git said |
+| `POST /api/git/commit` `{message, all}` | commits what is staged (all of it first, with `all`): `{hash, status}`; 409 `nothing` when nothing is staged |
+| `GET /api/git/log`, `GET /api/git/branches`, `POST /api/git/switch` `{branch}` | the last 30 commits `[{hash, subject, author, at}]`; the branches `[{name, current}]`; switches |
 | `GET /api/problems` | the check's last run: `{command, running, ran, exitCode, said, problems: [{path, line, column, severity, code, message}]}` (`ran` null before the first; `command` null when none is found) |
 | `POST /api/problems/run` | runs the check (waits for the one running) and answers as above; 404 `no_check` when none is found |
 | `POST /api/complete` `{path, prefix, suffix}` | code completion at the editor's cursor: `{text}`; 404 `off` when the config turns it off, 409 `busy` while an answer is written, 429 `limited` at the key's limit |

@@ -31,10 +31,15 @@ export interface Reveal {
 }
 
 /** An editor tab: a file, or the agent's changes to one (before and now, side by side). */
+/** What a diff tab compares: the agent's changes to a file, or the file's since the last commit. */
+export type DiffSource = 'agent' | 'git'
+
 export interface Tab {
-  /** The path for a file; "diff:" and the path for the agent's changes. */
+  /** The path for a file; "diff:" and the path for the agent's changes, "git:" and the path for those since the last commit. */
   id: string
   kind: 'file' | 'diff'
+  /** A diff's: what it compares (the agent's changes when not said). */
+  source?: DiffSource
   path: string
   status: 'loading' | 'ready' | 'binary' | 'tooLarge' | 'error'
   message?: string
@@ -68,7 +73,7 @@ export interface EditorApi {
   /** The cursor in the file shown, 1-based. */
   cursor: { line: number; column: number } | null
   open: (path: string, at?: Reveal) => Promise<void>
-  openDiff: (path: string) => Promise<void>
+  openDiff: (path: string, source?: DiffSource) => Promise<void>
   activate: (id: string) => void
   /** Asks first when the file has unsaved changes; false when the person kept it open. */
   close: (id: string) => Promise<boolean>
