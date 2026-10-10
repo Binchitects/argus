@@ -21,6 +21,12 @@ internal static class SystemPrompt
         public Func<IReadOnlyList<(string Server, string Text)>> ServerInstructions { get; init; } = () => [];
         /// <summary>Whether Arena's tools are connected at the moment (they connect in the background).</summary>
         public Func<bool> HasArenaTools { get; init; } = () => false;
+        /// <summary>What the agent remembers, as the session started (kept so the prompt stays the same through it).</summary>
+        public Func<string> Memory { get; init; } = () => "";
+        /// <summary>The person's and the project's own sub-agents (name and what each is for).</summary>
+        public Func<IReadOnlyList<(string Name, string Description)>> Agents { get; init; } = () => [];
+        /// <summary>The skills it may load (name and what each is for).</summary>
+        public Func<IReadOnlyList<(string Name, string Description)>> Skills { get; init; } = () => [];
     }
 
     /// <summary>The main agent's prompt; a sub-agent's (subAgent) says it reports back and only reads.</summary>
@@ -52,6 +58,7 @@ internal static class SystemPrompt
             - Change files with edit_file (an exact, unique old_string); write_file for new files or whole rewrites. Keep to the code's existing style, and change only what the task needs.
             - Check your work when you can (build, tests, linters, with run_shell) and say what you ran and what you could not check.
             - For work of several steps, keep a to-do list with todo_write. Hand self-contained research that would fill your context to a sub-agent (task).
+            - Keep what a later session should know with remember (how to build and test the project, its conventions, the person's preferences); search_sessions finds what was said before.
             - Calls that do not depend on each other can go out together: they run at once.
             - Answer briefly and plainly: the terminal shows your text as it is (light Markdown is fine). Refer to code as path:line.
             - Never print, log or commit secrets (keys, tokens, passwords), and do not read files that only hold them unless the person asks.
@@ -73,6 +80,23 @@ internal static class SystemPrompt
         foreach (var (title, text) in Instructions(x.Paths, root, git))
         {
             sb.Append($"\n# {title}\n\n{text.Trim()}\n");
+        }
+        sb.Append(x.Memory());
+        if (x.Agents() is { Count: > 0 } agents)
+        {
+            sb.Append("\n# Sub-agents of the person's and the project's own\n\nGive task their name (agent) for their kind of task:\n");
+            foreach (var (name, description) in agents)
+            {
+                sb.Append($"- {name}: {Fmt.OneLine(description, 300)}\n");
+            }
+        }
+        if (x.Skills() is { Count: > 0 } skills)
+        {
+            sb.Append("\n# Skills\n\nLoad one with the skill tool when the task is what it is for (its instructions, and the files beside them):\n");
+            foreach (var (name, description) in skills)
+            {
+                sb.Append($"- {name}: {Fmt.OneLine(description, 300)}\n");
+            }
         }
         foreach (var (server, text) in x.ServerInstructions().Where(s => s.Text.Trim().Length > 0))
         {
@@ -100,23 +124,42 @@ internal static class SystemPrompt
         sb.Append($"- Model: {x.Model()}\n");
     }
 
-    /// <summary>ARENA.md: the person's own (config folder), the repository's root, and the working directory when it is below the root.</summary>
+    /// <summary>The instruction files read in a folder, the first there of these: Code Arena's own, then those other agents read.</summary>
+    public static readonly string[] InstructionFiles = ["ARENA.md", "AGENTS.md", "CLAUDE.md", "QWEN.md"];
+
+    /// <summary>
+    /// The person's own ARENA.md (config folder), then the project's at the repository's root and the working directory's when
+    /// it is below the root: in each folder the first of ARENA.md, AGENTS.md, CLAUDE.md and QWEN.md (a project written for
+    /// another agent is read as it is).
+    /// </summary>
     public static List<(string Title, string Text)> Instructions(AppPaths paths, string root, string? gitRoot)
     {
         var found = new List<(string, string)>();
-        void Add(string file, string title)
+        bool Add(string file, string title)
         {
             if (File.Exists(file) && File.ReadAllText(file) is { Length: > 0 } text && text.Trim().Length > 0)
             {
                 found.Add((title, Cut(text)));
+                return true;
+            }
+            return false;
+        }
+        void First(string dir, string title)
+        {
+            foreach (var name in InstructionFiles)
+            {
+                if (Add(Path.Combine(dir, name), $"{title} ({name})"))
+                {
+                    return;
+                }
             }
         }
         Add(paths.UserInstructions, "The person's instructions (ARENA.md in their config folder)");
         var top = gitRoot ?? root;
-        Add(Path.Combine(top, "ARENA.md"), "Project instructions (ARENA.md)");
+        First(top, "Project instructions");
         if (!string.Equals(Path.GetFullPath(top), root, StringComparison.Ordinal))
         {
-            Add(Path.Combine(root, "ARENA.md"), "Instructions for this folder (ARENA.md)");
+            First(root, "Instructions for this folder");
         }
         return found;
     }

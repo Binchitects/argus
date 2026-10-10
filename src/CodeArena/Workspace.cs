@@ -185,9 +185,12 @@ internal sealed class Workspace
         return relative == "." ? "." : OperatingSystem.IsWindows() ? relative.Replace('\\', '/') : relative;
     }
 
-    private static string Home(string path) =>
+    private static string Home(string path) => HomePath(path, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+
+    /// <summary>~ and ~/... in the home folder given; any other path as it is.</summary>
+    public static string HomePath(string path, string home) =>
         path == "~" || path.StartsWith("~/", StringComparison.Ordinal) || path.StartsWith("~\\", StringComparison.Ordinal)
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path.Length > 2 ? path[2..] : "")
+            ? Path.Combine(home, path.Length > 2 ? path[2..] : "")
             : path;
 }
 

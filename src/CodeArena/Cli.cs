@@ -95,6 +95,7 @@ internal static partial class Cli
           code-arena login                  sign in: the Arena's address and your API key
           code-arena logout                 forget the API key
           code-arena models                 the models you may use
+          code-arena sandbox [command]      what the agent's commands may do here; with a command, run it as they run
 
         Options:
           -p, --print [prompt]       one-shot, for scripts; --output json for a JSON answer
@@ -122,6 +123,10 @@ internal static partial class Cli
 
     public static async Task<int> RunAsync(string[] args, CliEnv env, CancellationToken ct = default)
     {
+        if (args is ["sandbox", .. var rest])
+        {
+            return await SandboxAsync(rest, env, ct);
+        }
         Options o;
         try
         {
@@ -620,6 +625,48 @@ internal static partial class Cli
         await using (rt)
         {
             return o.Print ? await OneShotAsync(rt, o.Prompt!, o.Output == "json", ct) : await new Repl(rt).RunAsync(o.Prompt, ct);
+        }
+    }
+
+    /// <summary>code-arena sandbox [command]: the sandbox the agent's commands get in this folder, and a command run in it.</summary>
+    private static async Task<int> SandboxAsync(string[] command, CliEnv env, CancellationToken ct)
+    {
+        Config config;
+        try
+        {
+            config = Config.Load(env.Paths.ConfigFile);
+        }
+        catch (InvalidOperationException e)
+        {
+            env.Err.WriteLine($"code-arena: {e.Message}");
+            return 1;
+        }
+        Sandbox sandbox;
+        try
+        {
+            sandbox = Sandbox.Choose(config, new Workspace(env.Cwd, config.AllowedPaths), env.Paths, env.Env, $"check-{Environment.ProcessId}");
+        }
+        catch (Runtime.StartException e)
+        {
+            env.Err.WriteLine($"code-arena: {e.Message}");
+            return 1;
+        }
+        env.Out.WriteLine(sandbox.Describe());
+        if (command.Length == 0)
+        {
+            return 0;
+        }
+        try
+        {
+            var ui = new Ui(TextReader.Null, env.Out, env.Err, false, false);
+            var context = new ToolContext { Workspace = new Workspace(env.Cwd, config.AllowedPaths), Ui = ui, Shell = config.Shell, Sandbox = sandbox };
+            var result = await Proc.RunAsync(LocalTools.ShellCommand(string.Join(' ', command), context), TimeSpan.FromMinutes(10), ct);
+            env.Out.Write(result.Output);
+            return result.ExitCode;
+        }
+        finally
+        {
+            sandbox.Clean();
         }
     }
 

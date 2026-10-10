@@ -69,10 +69,19 @@ internal sealed class ToolContext
     /// <summary>The commands run with no time limit; null where none may run (a sub-agent).</summary>
     public CommandJobs? Jobs { get; init; }
     public List<TodoItem> Todos { get; set; } = [];
-    /// <summary>Runs a sub-agent (description, prompt) and returns its report.</summary>
-    public Func<string, string, CancellationToken, Task<string>>? SubAgent { get; set; }
+    /// <summary>Runs a sub-agent (description, prompt, which of the person's own if any) and returns its report.</summary>
+    public Func<string, string, string?, CancellationToken, Task<string>>? SubAgent { get; set; }
     /// <summary>Called when the to-do list changes, so the session keeps it.</summary>
     public Action<List<TodoItem>>? TodosChanged { get; set; }
+    /// <summary>What the agent remembers (the remember tool); null: not kept here.</summary>
+    public MemoryStore? Memory { get; init; }
+    /// <summary>The sandbox the commands run in (none: as the person).</summary>
+    public Sandbox Sandbox { get; init; } = Sandbox.None;
+    /// <summary>The saved sessions' folder (search_sessions), and this session's id (left out of the search).</summary>
+    public string? SessionsDir { get; init; }
+    public Func<string>? SessionId { get; set; }
+    /// <summary>Told before a tool writes a file (its full path): the turn's checkpoint keeps what it held.</summary>
+    public Action<string>? BeforeWrite { get; set; }
 }
 
 /// <summary>One line of the to-do list.</summary>
@@ -145,9 +154,17 @@ internal sealed class Permissions(Ui ui, Mode mode)
     /// <summary>The longest a command waits for <see cref="GuardReady"/>: Arena's handshake time, so no command waits for ever.</summary>
     public TimeSpan GuardWait { get; set; } = McpClient.Handshake;
 
+    /// <summary>The kept rules (the person's allow and deny, the project's deny), and the folder their paths are seen from.</summary>
+    public PermissionRules Rules { get; set; } = new();
+    public Workspace? Workspace { get; set; }
+
     /// <summary>Null when the call may run; otherwise why not, for the model.</summary>
     public async Task<string?> CheckAsync(ToolDef tool, JsonObject args, CancellationToken ct, string? callId = null)
     {
+        if (Workspace is { } ws && Rules.Denied(tool, args, ws) is { } denied)
+        {
+            return $"A rule refuses this call ({denied}): find another way, or ask the person.";
+        }
         if (Mode == Mode.Plan && !tool.ReadOnly && tool.Kind != ToolKind.Agent)
         {
             return $"Plan mode is read-only: {tool.Name} is not allowed. Finish the plan; the person switches the mode (/mode) to carry it out.";
@@ -169,6 +186,10 @@ internal sealed class Permissions(Ui ui, Mode mode)
         // A command Laya flags asks whatever the mode; its probabilities show whenever a command asks.
         var risk = tool.Kind == ToolKind.Shell && !tool.AlwaysAsks && Guard is { } guard ? await guard.AssessAsync(args.Str("command"), ct) : null;
         var flagged = risk?.High == true;
+        if (ask && !flagged && Workspace is { } here && Rules.Allowed(tool, args, here) is not null)
+        {
+            ask = false;
+        }
         if (!ask && !flagged)
         {
             return null;

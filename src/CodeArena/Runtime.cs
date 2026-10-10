@@ -35,6 +35,15 @@ internal sealed partial class Runtime : IAsyncDisposable
     public Agent Agent { get; private set; } = null!;
     public Workspace Workspace { get; private set; } = null!;
     public SessionStore Session { get; private set; } = null!;
+    /// <summary>The person's and the project's own commands, sub-agents and skills.</summary>
+    public Extensions Extensions { get; private set; } = new();
+    /// <summary>What the agent remembers; the prompt has it as the session started.</summary>
+    public MemoryStore Memory { get; private set; } = null!;
+    private string _memory = "";
+    /// <summary>A checkpoint before each turn, for /rewind.</summary>
+    public Checkpoints Checkpoints { get; } = new();
+    /// <summary>The sandbox the agent's commands run in.</summary>
+    public Sandbox Sandbox { get; private set; } = Sandbox.None;
     /// <summary>The session kept in step with its chat in Arena; null when chats are not synced.</summary>
     public ChatSync? Sync { get; private set; }
     /// <summary>What was sent in this folder, in the terminal and the IDE's chat alike.</summary>
@@ -116,6 +125,21 @@ internal sealed partial class Runtime : IAsyncDisposable
             throw new StartException($"Compaction: {wrong} (--compact-at, --compact-to, or compactAt and compactTarget in {Env.Paths.ConfigFile})");
         }
         Permissions = new Permissions(Ui, mode ?? Mode.Ask);
+        var project = SystemPrompt.GitRoot(Workspace.Root) ?? Workspace.Root;
+        Permissions.Rules = PermissionRules.Of(Config, project);
+        Permissions.Workspace = Workspace;
+        Memory = new MemoryStore(Env.Paths, project);
+        _memory = Memory.ForPrompt();
+        Extensions = Extensions.Load(Env.Paths, project);
+        foreach (var problem in Extensions.Problems)
+        {
+            Ui.Warn(problem);
+        }
+        Sandbox = Sandbox.Choose(Config, Workspace, Env.Paths, Env.Env, $"{DateTime.Now:yyyyMMdd-HHmmss}-{Environment.ProcessId}");
+        if (Sandbox.Kind == Sandbox.Kinds.Off && Sandbox.Why is { } noSandbox)
+        {
+            Ui.Info($"Commands run without a sandbox here: {noSandbox}.");
+        }
         // The terminal watches the commands with no time limit: their output as it comes, and how they ended.
         var printer = new JobPrinter(Ui);
         Jobs.Started += printer.Started;
@@ -123,6 +147,12 @@ internal sealed partial class Runtime : IAsyncDisposable
         Jobs.Ended += printer.Ended;
         var tools = LocalTools.All(Config.Shell);
         tools.Add(LocalTools.SubAgentTool());
+        tools.Add(MemoryStore.RememberTool());
+        tools.Add(SessionSearch.Tool());
+        if (Extensions.Skills.Count > 0)
+        {
+            tools.Add(Extensions.SkillTool());
+        }
         Tools = new ToolBox(tools);
 
         // The servers connect in the background; the session starts when the gateway has said which models there are.
@@ -204,14 +234,22 @@ internal sealed partial class Runtime : IAsyncDisposable
             ArenaUrl = Config.Url,
             ServerInstructions = () => Volatile.Read(ref _instructions),
             HasArenaTools = () => ArenaConnected,
+            Memory = () => _memory,
+            Skills = () => [.. Extensions.Skills.Select(s => (s.Name, s.Description))],
+            Agents = () => [.. Extensions.Agents.Select(a => (a.Name, a.Description))],
         };
-        Context = new ToolContext { Workspace = Workspace, Ui = Ui, Shell = Config.Shell, Jobs = Jobs };
+        Context = new ToolContext
+        {
+            Workspace = Workspace, Ui = Ui, Shell = Config.Shell, Jobs = Jobs, Memory = Memory, SessionsDir = Env.Paths.SessionsDir, Sandbox = Sandbox,
+            BeforeWrite = Checkpoints.BeforeWrite,
+        };
         // Whatever the agent commits is by Code Arena (its author), the person staying the committer.
         var harness = CommitIdentity.From(Config);
         Proc.Author = harness;
         Agent = new Agent
         {
             CommitAs = Config.AutoCommit ? harness : null,
+            Checkpoints = Checkpoints,
             Gateway = Gateway,
             Tools = Tools,
             Permissions = Permissions,
@@ -223,7 +261,8 @@ internal sealed partial class Runtime : IAsyncDisposable
             Stream = !Ui.Quiet,
             Compaction = Compaction,
         };
-        Context.SubAgent = (description, prompt, token) => RunSubAgentAsync(inputs, description, prompt, token);
+        Context.SubAgent = (description, prompt, agent, token) => RunSubAgentAsync(inputs, description, prompt, agent, token);
+        Context.SessionId = () => Session.Id;
 
         if (resumed is not null && resumedFile is not null)
         {
@@ -304,6 +343,78 @@ internal sealed partial class Runtime : IAsyncDisposable
     }
 
     private const string ChatSyncOrigin = "code-arena";
+
+    /// <summary>/permissions allow, deny or remove a rule: kept in config.json, in force at once.</summary>
+    public string KeepRule(string verb, string rule)
+    {
+        var rules = Permissions.Rules;
+        rules.Allow.Remove(rule);
+        rules.Deny.Remove(rule);
+        if (verb == "allow")
+        {
+            rules.Allow.Add(rule);
+        }
+        else if (verb == "deny")
+        {
+            rules.Deny.Add(rule);
+        }
+        try
+        {
+            var config = Config.Load(Env.Paths.ConfigFile);
+            config.Allow = [.. rules.Allow];
+            config.Deny = [.. rules.Deny];
+            config.Save(Env.Paths.ConfigFile);
+        }
+        catch (Exception e) when (e is IOException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            return $"In force for this session, but not kept: {e.Message}";
+        }
+        return verb == "remove" ? $"Removed {rule}." : $"{(verb == "allow" ? "Allowed without asking" : "Never allowed")}: {rule}. Kept in config.json.";
+    }
+
+    /// <summary>What is sent for what was typed: a command of the person's or the project's own (/name args) is its prompt.</summary>
+    public string Prepare(string input) => Extensions.Expand(input) ?? input;
+
+    /// <summary>
+    /// Back to before turn <paramref name="number"/> of the checkpoints: the files its tools (and later turns' tools) wrote as
+    /// they were, and the conversation as it was; what it says. The files put back are committed as Code Arena's when turns are.
+    /// </summary>
+    public async Task<string> RewindAsync(int number, bool files, bool chat, CancellationToken ct)
+    {
+        var turns = Checkpoints.Turns;
+        if (number < 1 || number > turns.Count)
+        {
+            return turns.Count == 0 ? "No turn to go back to yet (checkpoints are kept while Code Arena runs)." : $"There is no turn {number}: /rewind lists them (1 to {turns.Count}).";
+        }
+        var subject = turns[number - 1].Input;
+        var before = files && Agent.CommitAs is not null ? await TurnCommits.TakeAsync(Workspace.Root, ct) : null;
+        var (messages, restored, lost) = Checkpoints.Rewind(number, files);
+        if (chat)
+        {
+            Agent.Load([.. Agent.Messages.Take(messages)]);
+            // The session file reads back as it is now; the chat in Arena keeps what was said.
+            Session.Compacted(Agent.Messages);
+        }
+        var said = new List<string>
+        {
+            $"Back to before \"{Fmt.OneLine(subject, 60)}\"" + (chat ? $": the conversation has {Agent.Messages.Count} messages" : ": the conversation stays") +
+            (files ? $", {restored.Count} file{(restored.Count == 1 ? "" : "s")} put back" : ", the files stay") + ".",
+        };
+        if (lost.Count > 0)
+        {
+            said.Add($"Not put back: {string.Join(", ", lost.Take(5))}.");
+        }
+        if (files)
+        {
+            said.Add("What commands changed is not put back: git has it (git status, git diff).");
+        }
+        if (before is not null && restored.Count > 0 && Agent.CommitAs is { } who
+            && await TurnCommits.CommitAsync(before, $"Rewind: back to before \"{Fmt.OneLine(subject, 50)}\"", who, Model.Name, Session.Id, ct) is { } commit)
+        {
+            said.Add(commit.Describe());
+        }
+        return string.Join('\n', said);
+    }
 
     /// <summary>
     /// The session's servers, each in the background: Arena's MCP endpoint and Argus's (with the
@@ -505,6 +616,7 @@ internal sealed partial class Runtime : IAsyncDisposable
     /// <summary>A new, empty session (/clear): the same tools and model.</summary>
     public void NewSession()
     {
+        _memory = Memory.ForPrompt();
         Session = SessionStore.Create(Env.Paths.SessionsDir, Workspace.Root, Model.Name);
         Agent.Session = Session;
         Agent.Clear();
@@ -517,6 +629,7 @@ internal sealed partial class Runtime : IAsyncDisposable
     public void Resume(string file)
     {
         var data = SessionStore.Load(file);
+        _memory = Memory.ForPrompt();
         Session = SessionStore.Open(file);
         Agent.Session = Session;
         Agent.Load(data.Messages);
@@ -575,17 +688,29 @@ internal sealed partial class Runtime : IAsyncDisposable
         return link.Describe() + (link.State == LinkState.Failed && link.Error is { } error ? $" ({Fmt.OneLine(error, 120)})" : "");
     }
 
-    private async Task<string> RunSubAgentAsync(SystemPrompt.Inputs inputs, string description, string prompt, CancellationToken ct)
+    private async Task<string> RunSubAgentAsync(SystemPrompt.Inputs inputs, string description, string prompt, string? agent, CancellationToken ct)
     {
+        CustomAgent? own = null;
+        if (agent is { Length: > 0 } && (own = Extensions.Agents.FirstOrDefault(a => string.Equals(a.Name, agent, StringComparison.OrdinalIgnoreCase))) is null)
+        {
+            throw new ToolError($"There is no sub-agent {agent}{(Extensions.Agents.Count > 0 ? $": yours are {string.Join(", ", Extensions.Agents.Select(a => a.Name))}" : "")}.");
+        }
+        var tools = Tools.ForSubAgent();
+        if (own is { Tools.Count: > 0 })
+        {
+            // Its own list narrows the reading tools; it never adds one that changes something.
+            tools = new ToolBox(tools.All.Where(t => own.Tools.Any(n => PermissionRules.Glob(n, t.Name))));
+        }
+        var model = own?.Model is { } name && Models.FirstOrDefault(m => m.Id == name) is { } info ? new ModelState { Info = info, Thinking = Model.Thinking, ContextOverride = Config.Context } : Model;
         var sub = new Agent
         {
             Gateway = Gateway,
-            Tools = Tools.ForSubAgent(),
+            Tools = tools,
             Permissions = Permissions,
-            Context = new ToolContext { Workspace = Workspace, Ui = Ui, Shell = Config.Shell },
+            Context = new ToolContext { Workspace = Workspace, Ui = Ui, Shell = Config.Shell, Sandbox = Sandbox },
             Ui = Ui,
-            Model = Model,
-            SystemPrompt = () => SystemPrompt.Build(inputs, subAgent: true),
+            Model = model,
+            SystemPrompt = () => own is null ? SystemPrompt.Build(inputs, subAgent: true) : own.Prompt + "\n\n" + SystemPrompt.Build(inputs, subAgent: true),
             Total = Total,
             Depth = 1,
             Stream = false,
@@ -645,6 +770,7 @@ internal sealed partial class Runtime : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         Jobs.StopAll("code-arena stopped");
+        Sandbox.Clean();
         if (Sync is not null)
         {
             // What is still to send goes now, for a few seconds at most; the rest goes when the session is next opened.

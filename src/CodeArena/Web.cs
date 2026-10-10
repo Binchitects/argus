@@ -555,6 +555,12 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         }
         // Kept for ↑, here and in the terminal: the folder's history.
         _rt.History.Add(text);
+        text = _rt.Prepare(text);
+        // What the web chat added comes in first, so this question's place is its place.
+        if (_rt.Sync is { } sync)
+        {
+            _rt.Agent.TakeIn(await sync.TakeInAsync(ct));
+        }
         var count = _rt.Agent.Messages.Count;
         job.Emit(new JsonObject { ["type"] = "question", ["id"] = $"m{count}", ["parentId"] = count == 0 ? null : $"m{count - 1}" });
         job.Running = Task.Run(() => RunTurnAsync(job, text));

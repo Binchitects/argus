@@ -1080,6 +1080,40 @@ sub-agents too, and cap the big model's own tool rounds in research.
 - **A local sandbox** for the commands Code Arena runs, so they cannot harm
   the person's system, and **advanced memory and context management**.
 
+### Code Arena compared (2026-10-10)
+
+What Claude Code, Qwen Code, Hermes Agent (Nous Research) and DeepSeek
+Harness (`dsh`, a developer preview: its own pages say little beyond a local
+web UI, a headless profile, a plan, and plugins for everything) do, and what
+Code Arena had when v5.4 began. "v5.4" marks what this release adds.
+
+| Feature | Others | Code Arena |
+|---|---|---|
+| Agent loop: read, write, edit, grep, glob, shell, git | all | had |
+| An IDE or web UI beside the terminal | Claude Code (IDEs, desktop), Qwen Code (IDE companion), Hermes (desktop), dsh (web) | had (the IDE in the browser) |
+| One-shot, headless, JSON | Claude Code, Qwen Code, dsh | had (`-p`, `--output json`) |
+| Modes: ask, edits allowed, plan, everything | Claude Code, Qwen Code | had |
+| Rules kept for next time: allow or deny a tool or command pattern | Claude Code, Qwen Code | v5.4 |
+| A sandbox for commands | Claude Code (bubblewrap, Seatbelt), Qwen Code (Docker, Podman, Seatbelt), Hermes (Docker, SSH, cloud) | v5.4 |
+| Checkpoints: rewind the conversation and the files | Claude Code (`/rewind`), Qwen Code (`/restore`) | v5.4 |
+| Memory the agent writes, and the person reads and edits | Claude Code (CLAUDE.md, `#`), Qwen Code (`save_memory`), Hermes (agent-curated memory) | v5.4 |
+| Search across past sessions | Hermes (full-text, summarized), Claude Code (the resume picker) | v5.4 |
+| Instruction files of other agents (AGENTS.md, CLAUDE.md) | Qwen Code, Hermes | v5.4 |
+| `@file` in a prompt, `!command` straight to the shell | Claude Code, Qwen Code | v5.4 |
+| Custom slash commands | Claude Code, Qwen Code | v5.4 |
+| Custom sub-agents (their prompt, tools and model) | Claude Code, Qwen Code | v5.4 |
+| Skills, loaded when needed | Claude Code, Hermes (agentskills.io) | v5.4 |
+| MCP servers | all | had |
+| Compaction of a long session | all | had (threshold and target) |
+| A to-do list or plan | Claude Code, Qwen Code, dsh | had |
+| Commands that run on (no time limit, watched) | Claude Code | had |
+| Web search and pages | Claude Code, Qwen Code, Hermes | had (Arena MCP) |
+| Sessions synced with a web chat | Claude Code (claude.ai) | v5.4 |
+| Its own commits told apart from the person's | Claude Code (a co-author trailer) | v5.4 (Code Arena as the author) |
+| Scheduled runs, chat platforms (Slack, Teams...) | Hermes | Arena has them (scheduled tasks, bots) |
+| Hooks around tool calls | Claude Code | not in v5.4: the permission rules and the sandbox cover what hooks are mostly used for |
+| A plugin marketplace, output styles, a status line | Claude Code, dsh (plugins) | not planned: MCP servers, commands and skills are the extension points |
+
 ## v5.5 plan (asked 2026-10-07)
 
 - **Argus across 200 repositories that affect each other**: a dependency graph

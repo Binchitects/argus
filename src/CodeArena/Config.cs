@@ -113,6 +113,15 @@ internal sealed class Config
     /// <summary>Directories the tools may use besides the working directory.</summary>
     public List<string> AllowedPaths { get; set; } = [];
     public List<McpServerConfig> McpServers { get; set; } = [];
+    /// <summary>The sandbox for the agent's commands: "auto" (null: one when the system has it), "on" (refuse to start without), "off".</summary>
+    public string? Sandbox { get; set; }
+    /// <summary>Whether commands in the sandbox may use the network (on unless false).</summary>
+    public bool SandboxNetwork { get; set; } = true;
+    /// <summary>Folders commands in the sandbox may write besides the working directory and the build caches.</summary>
+    public List<string> SandboxWritable { get; set; } = [];
+    /// <summary>Kept rules for tool calls: run without asking, or never (Rules.cs).</summary>
+    public List<string> Allow { get; set; } = [];
+    public List<string> Deny { get; set; } = [];
     /// <summary>Sessions are kept in step with chats in Arena (both ways): on unless false.</summary>
     public bool SyncChats { get; set; } = true;
     /// <summary>Each turn's changes are committed under Code Arena's name (in a git repository): on unless false.</summary>
@@ -194,6 +203,16 @@ internal sealed class Config
         config.TerminalShell = raw.Str("terminalShell");
         config.AutoCommit = raw.Bool("autoCommit") ?? true;
         config.SyncChats = raw.Bool("syncChats") ?? true;
+        config.Sandbox = raw.Str("sandbox");
+        if (config.Sandbox is { } sandbox && sandbox.Trim().ToLowerInvariant() is not ("auto" or "on" or "off"))
+        {
+            throw new InvalidOperationException($"\"sandbox\" in {file} is \"auto\", \"on\" or \"off\".");
+        }
+        config.SandboxNetwork = raw.Bool("sandboxNetwork") ?? true;
+        config.SandboxWritable = raw["sandboxWritable"] is JsonArray writable ? [.. writable.Select(p => p?.ToString() ?? "").Where(p => p.Length > 0)] : [];
+        var permissions = PermissionRules.From(raw["permissions"], null);
+        config.Allow = permissions.Allow;
+        config.Deny = permissions.Deny;
         config.CommitName = raw.Str("commitName");
         config.CommitEmail = raw.Str("commitEmail");
         config.AllowedPaths = raw["allowedPaths"] is JsonArray paths ? [.. paths.Select(p => p?.ToString() ?? "").Where(p => p.Length > 0)] : [];
@@ -300,6 +319,13 @@ internal sealed class Config
         Set("terminalShell", TerminalShell);
         Set("autoCommit", AutoCommit ? null : false);
         Set("syncChats", SyncChats ? null : false);
+        Set("sandbox", Sandbox);
+        Set("sandboxNetwork", SandboxNetwork ? null : false);
+        Set("permissions", Allow.Count + Deny.Count == 0 ? null : new JsonObject
+        {
+            ["allow"] = new JsonArray([.. Allow.Select(r => (JsonNode)r)]),
+            ["deny"] = new JsonArray([.. Deny.Select(r => (JsonNode)r)]),
+        });
         Set("commitName", CommitName);
         Set("commitEmail", CommitEmail);
         PrivateFiles.WriteAllText(file, raw.ToJsonString(Json.Indented) + "\n");

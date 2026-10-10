@@ -163,6 +163,14 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/resume [id]` | switch to a saved session |
 | `/web [N]` | your chats in Arena, newest first; `/web N` (or its id) continues one in a new session here |
 | `/sync` | where this session stands with its chat in Arena |
+| `/memory [add\|forget]` | what it remembers (below); `add TEXT` for this project, `add --all TEXT` for every project, `forget N` |
+| `/rewind [N] [code\|chat]` | the turns kept; `/rewind N` goes back to before turn N (below) |
+| `/search WORDS` | earlier sessions in this folder that said these words |
+| `/permissions [allow\|deny\|remove RULE]` | kept rules (below) |
+| `/sandbox` | what commands in the sandbox may do |
+| `/commands` | your own and the project's commands, sub-agents and skills |
+| `!command` | run a command yourself (in the sandbox); its output goes with your next message |
+| `/NAME [args]` | a command of your own or the project's (below) |
 | `/exit` | leave (also Ctrl+D) |
 
 ## The IDE
@@ -603,6 +611,87 @@ target down with it), so a compaction does not start the next one. The use of
 the window shows after each turn in the terminal (`/context` at any time) and
 in the IDE's status bar.
 
+## What it remembers, and what came before
+
+**Memory.** The model keeps what a later session should know with its
+`remember` tool: how to build and test the project, its conventions, a
+decision, or (for every project) the person's preferences. Each memory is a
+line of a plain Markdown file: the project's in the data folder (by the
+project's path: on this machine only, never in the repository), the person's
+`memory.md` in the config folder. A session's prompt carries both as it starts.
+`/memory` lists them with their files; `/memory add` and `/memory forget N`
+change them, and the files can be edited by hand.
+
+**Earlier sessions.** The model's `search_sessions` tool finds what was said
+in this folder's earlier sessions (every folder's when asked): messages that
+hold every word searched for. `/search WORDS` does the same for the person.
+
+**Instructions of other agents.** In each folder read for instructions, the
+first of `ARENA.md`, `AGENTS.md`, `CLAUDE.md` and `QWEN.md` counts, so a
+project written for another agent is read as it is.
+
+**@files.** `@src/parser.cs` in a message sends the file with it (a folder
+sends its list; `@"a b.txt"` for a name with spaces); up to 60,000 characters
+a file and 150,000 a message, cut in the middle beyond. Anything that is not a
+file the tools may read (an email address, `@Override`) stays as typed.
+
+**Checkpoints.** Each turn leaves a checkpoint while Code Arena runs (the last
+50): how long the conversation was, and what each file the turn's tools wrote
+held before. `/rewind` lists them; `/rewind N` goes back to before turn N: the
+files put back (a file a turn made is removed) and the conversation cut there;
+`/rewind N code` puts back only the files, `/rewind N chat` only cuts the
+conversation. What commands changed is not put back (git has it). With the
+turn's commits on, the files put back are committed as Code Arena's
+("Rewind: back to before ..."). The chat in Arena keeps what was said.
+
+## Your own commands, sub-agents and skills
+
+Markdown files, the project's under `.arena/` at its root and the person's in
+the config folder (the project's win over the person's of the same name);
+those written for Claude Code (`.claude/`) and Qwen Code (`.qwen/`) are read
+too. `/commands` lists what was found.
+
+- **Commands**: `commands/NAME.md` is `/NAME` (`commands/git/commit.md` is
+  `/git:commit`). The file is the prompt sent: `$ARGUMENTS` is what was typed
+  after the command, `$1`, `$2` its words; a prompt with neither gets what was
+  typed after it. Front matter (`---` lines) may give a `description` and an
+  `argument-hint`. In the IDE's chat too.
+- **Sub-agents**: `agents/NAME.md`, its front matter's `name`, `description`,
+  `tools` (which of the reading tools it may use) and `model`; the file is its
+  instructions. The model hands it a task by name (`task` with `agent`). Like
+  every sub-agent it reads only: it cannot edit files or run commands.
+- **Skills**: `skills/NAME/SKILL.md` (agentskills.io's format: `name` and
+  `description` in its front matter). The prompt lists each skill's name and
+  what it is for; the model loads one with its `skill` tool when the task needs
+  it, and the files beside it one by one.
+
+## Kept rules and the sandbox
+
+**Rules.** `/permissions allow RULE` lets calls run without asking, `deny RULE`
+refuses them whatever the mode; both are kept in `config.json` (`"permissions":
+{"allow": [...], "deny": [...]}`). A rule is a tool's name, with a pattern in
+brackets matched against its command or path (`*` is anything):
+`run_shell(npm test*)`, `edit_file`, `read_file(.env*)`, `mcp__tickets__*`. A
+command is matched whole and part by part, so `run_shell(rm *)` refuses
+`make && rm -rf build` too. A project's `.arena/settings.json` may deny (the
+same shape) but never allow: a repository someone cloned cannot let itself run
+commands unasked. A command Laya flags still asks.
+
+**Sandbox.** The agent's commands (`run_shell`, those with no time limit, and
+`!command`) run in a sandbox: bubblewrap on Linux, `sandbox-exec` on macOS.
+They read everything but what holds secrets (`~/.ssh`, `~/.gnupg`, cloud and
+Kubernetes credentials, `.netrc`, `.npmrc`, browsers' profiles, Code Arena's
+own config and sessions), which they cannot see; they write only in the
+working directory, the folders allowed besides it, the build tools' caches
+(`~/.cache`, `~/.npm`, `~/.nuget`, ...) and a `/tmp` of their own; Docker's and
+Podman's sockets are out of reach. `"sandbox"` in `config.json`: `"auto"` (as
+installed: a sandbox when the system has one, else commands run as you and the
+session says why), `"on"` (refuse to start without one), `"off"`.
+`"sandboxNetwork": false` takes the network away from commands;
+`"sandboxWritable": [...]` adds folders they may write. Windows has no sandbox
+Code Arena can use. The IDE's terminals are the person's own: no sandbox.
+`/sandbox` says what applies.
+
 ## Chats in Arena
 
 Each session is a chat in Arena too, kept in step both ways with your API key:
@@ -673,7 +762,8 @@ The rest of the file: `"model"`, `"thinking"`, `"mode"`, `"context"`,
 `"shell"` (the agent's `run_shell`), `"terminalShell"` (the IDE's terminals),
 `"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"argusTools": false`
 (no Argus MCP), `"argusUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
-`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"commitName"`, `"commitEmail"`, `"syncChats"`. `ARENA_ARGUS_URL` in the environment gives Argus's address
+`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"sandbox"`,
+`"sandboxNetwork"`, `"sandboxWritable"`, `"permissions"`. `ARENA_ARGUS_URL` in the environment gives Argus's address
 for one run.
 
 ## Building it (admins)

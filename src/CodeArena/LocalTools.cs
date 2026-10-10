@@ -183,7 +183,8 @@ internal static class LocalTools
         Parameters = Schema("""
             {"type":"object","properties":{
               "description":{"type":"string","description":"Three to five words for the person."},
-              "prompt":{"type":"string","description":"The full task: the sub-agent knows nothing of this conversation."}},
+              "prompt":{"type":"string","description":"The full task: the sub-agent knows nothing of this conversation."},
+              "agent":{"type":"string","description":"One of the person's or the project's own sub-agents (listed in your instructions), for its kind of task; leave out for the general one."}},
              "required":["description","prompt"]}
             """),
         Summary = a => a.Str("description") ?? "",
@@ -194,7 +195,7 @@ internal static class LocalTools
             {
                 throw new ToolError("Sub-agents cannot start sub-agents.");
             }
-            var report = await c.SubAgent(a.Str("description") ?? "task", prompt, ct);
+            var report = await c.SubAgent(a.Str("description") ?? "task", prompt, a.Str("agent"), ct);
             return new ToolResult(report) { Display = Fmt.OneLine(report, 160) };
         },
     };
@@ -276,6 +277,7 @@ internal static class LocalTools
         {
             (before, bom) = Files.ReadText(path);
         }
+        c.BeforeWrite?.Invoke(path);
         Files.WriteText(path, content, bom);
         var lines = Diff.Lines(content).Length;
         var display = before is null
@@ -305,6 +307,7 @@ internal static class LocalTools
             {
                 throw new ToolError($"{show} does not exist. To create it, give an empty old_string (or use write_file).");
             }
+            c.BeforeWrite?.Invoke(path);
             Files.WriteText(path, newText, false);
             return Task.FromResult(new ToolResult($"Created {show}.") { Display = c.Ui.Green($"new file, {Diff.Lines(newText).Length} lines"), Change = new FileChange(show, null, newText) });
         }
@@ -315,6 +318,7 @@ internal static class LocalTools
             {
                 throw new ToolError($"old_string is empty but {show} is not: give the exact text to replace.");
             }
+            c.BeforeWrite?.Invoke(path);
             Files.WriteText(path, newText, bom);
             return Task.FromResult(new ToolResult($"Wrote {show}.") { Display = Diff.Render(text, newText, c.Ui), Change = new FileChange(show, text, newText) });
         }
@@ -347,6 +351,7 @@ internal static class LocalTools
             var at = text.IndexOf(oldText, StringComparison.Ordinal);
             updated = string.Concat(text.AsSpan(0, at), newText, text.AsSpan(at + oldText.Length));
         }
+        c.BeforeWrite?.Invoke(path);
         Files.WriteText(path, updated, bom);
         return Task.FromResult(new ToolResult(count == 1 ? $"Edited {show}." : $"Edited {show}: {count} replacements.") { Display = Diff.Render(text, updated, c.Ui), Change = new FileChange(show, text, updated) });
     }
@@ -526,7 +531,7 @@ internal static class LocalTools
     }
 
     /// <summary>The shell running one command in the working directory.</summary>
-    private static ProcessStartInfo ShellCommand(string command, ToolContext c)
+    internal static ProcessStartInfo ShellCommand(string command, ToolContext c)
     {
         var shell = ShellName(c.Shell);
         var psi = new ProcessStartInfo(shell) { WorkingDirectory = c.Workspace.Root };
@@ -545,7 +550,7 @@ internal static class LocalTools
             }
             psi.ArgumentList.Add(command);
         }
-        return psi;
+        return c.Sandbox.Wrap(psi);
     }
 
     private static async Task<ToolResult> RunShell(JsonObject a, ToolContext c, CancellationToken ct)

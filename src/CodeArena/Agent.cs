@@ -159,6 +159,8 @@ internal sealed class Agent
     public Func<Task, Task>? Listen { get; set; }
     /// <summary>What the web chat added since the last turn, taken in as a turn starts (the main conversation only).</summary>
     public Func<CancellationToken, Task<IReadOnlyList<JsonObject>>>? BeforeTurn { get; set; }
+    /// <summary>A checkpoint before each turn (/rewind); null: none kept (a sub-agent).</summary>
+    public Checkpoints? Checkpoints { get; set; }
     /// <summary>Commits each turn's changes under this name (the main conversation only); null: no commits.</summary>
     public CommitIdentity? CommitAs { get; set; }
     /// <summary>The files turns changed but did not commit (stopped or failed), with their content then: still the harness's next turn.</summary>
@@ -209,6 +211,18 @@ internal sealed class Agent
         {
             TakeIn(await takeIn(ct));
         }
+        var asked = input;
+        if (Depth == 0)
+        {
+            // @path: the file goes with the message.
+            var (expanded, files) = Mentions.Expand(input, Context.Workspace);
+            if (files.Count > 0)
+            {
+                Ui.Info($"With the message: {string.Join(", ", files)}.");
+                input = expanded;
+            }
+            Checkpoints?.Begin(Messages.Count, asked);
+        }
         var before = await SnapshotAsync(ct);
         var done = false;
         try
@@ -217,7 +231,7 @@ internal sealed class Agent
             // Out of steps with a command still running: the turn ends when it does (the model hears of it next turn).
             await WaitForAllJobsAsync(ct);
             done = true;
-            await CommitAsync(before, input);
+            await CommitAsync(before, asked);
             return answer;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested && Context.Jobs is { } jobs)

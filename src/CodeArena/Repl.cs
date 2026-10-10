@@ -35,6 +35,12 @@ internal sealed class Repl(Runtime rt)
         ("/clear", "start a new session (this one stays saved)"),
         ("/resume [id]", "switch to a saved session"),
         ("/web [N]", "your chats in Arena; /web N continues one here (what is added goes back to it)"),
+        ("/memory [add|forget]", "what it remembers; add TEXT (this project), add --all TEXT (every project), forget N"),
+        ("/rewind [N] [code|chat]", "the turns kept; /rewind N goes back to before turn N (its files and the conversation)"),
+        ("/search WORDS", "earlier sessions in this folder that said these words"),
+        ("/permissions [allow|deny|remove RULE]", "kept rules, e.g. run_shell(npm test*), edit_file, read_file(.env*)"),
+        ("/sandbox", "what commands in the sandbox may do"),
+        ("/commands", "your own and the project's commands, sub-agents and skills"),
         ("/sync", "where this session stands with its chat in Arena"),
         ("/exit", "leave (also Ctrl+D, or Ctrl+C twice)"),
     ];
@@ -95,6 +101,11 @@ internal sealed class Repl(Runtime rt)
             if (rt.Env.InTerminal && !Leaves(input))
             {
                 rt.History.Add(input);
+            }
+            if (input.StartsWith('!') && input.Length > 1)
+            {
+                await ShellAsync(input[1..].Trim(), ct);
+                continue;
             }
             if (input.StartsWith('/'))
             {
@@ -188,8 +199,42 @@ internal sealed class Repl(Runtime rt)
         return sb.Append(line).ToString();
     }
 
+    /// <summary>What the person ran with !: it goes with their next message, so the model sees it.</summary>
+    private readonly List<string> _ran = [];
+
+    /// <summary>!command: run as the agent's commands run (in the sandbox), shown, and kept for the next message.</summary>
+    private async Task ShellAsync(string command, CancellationToken ct)
+    {
+        using var key = rt.Env.Cancel.BeginTurn();
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, key.Token);
+        try
+        {
+            var result = await Proc.RunAsync(LocalTools.ShellCommand(command, rt.Context), TimeSpan.FromMinutes(10), linked.Token);
+            Ui.Line(result.Output.TrimEnd());
+            Ui.Info(result.TimedOut ? "Stopped after 10 minutes." : $"Exit {result.ExitCode}. It goes with your next message.");
+            _ran.Add($"I ran `{command}` (exit {(result.TimedOut ? "-, stopped after 10 minutes" : result.ExitCode)}):\n```\n{result.Output.TrimEnd()}\n```");
+        }
+        catch (OperationCanceledException) when (linked.IsCancellationRequested)
+        {
+            Ui.Warn("Stopped.");
+        }
+        catch (ToolError e)
+        {
+            Ui.Error(e.Message);
+        }
+        finally
+        {
+            rt.Env.Cancel.EndTurn();
+        }
+    }
+
     private async Task TurnAsync(string input, CancellationToken ct)
     {
+        if (_ran.Count > 0)
+        {
+            input = string.Join("\n\n", _ran) + "\n\n" + input;
+            _ran.Clear();
+        }
         var turn = new Spend();
         rt.Turn = turn;
         using var key = rt.Env.Cancel.BeginTurn();
@@ -504,6 +549,24 @@ internal sealed class Repl(Runtime rt)
                     Ui.Line($"Continuing the chat from Arena in session {rt.Session.Id}: {rt.Agent.Messages.Count} messages.");
                 }
                 break;
+            case "/memory":
+                MemoryCommand(arg);
+                break;
+            case "/rewind":
+                await RewindCommandAsync(arg, ct);
+                break;
+            case "/search":
+                SearchCommand(arg);
+                break;
+            case "/permissions":
+                PermissionsCommand(arg);
+                break;
+            case "/sandbox":
+                Ui.Line(rt.Sandbox.Describe());
+                break;
+            case "/commands":
+                ExtensionsCommand();
+                break;
             case "/sync":
                 Ui.Line(rt.Sync?.Describe() ?? "Sessions are not kept with Arena here (\"syncChats\": false in config.json, or no Arena address).");
                 break;
@@ -524,10 +587,119 @@ internal sealed class Repl(Runtime rt)
                 }
                 break;
             default:
-                Ui.Error($"There is no command {name}: /help lists them.");
+                if (rt.Extensions.Expand(input) is { } prompt)
+                {
+                    await TurnAsync(prompt, ct);
+                    break;
+                }
+                Ui.Error($"There is no command {name}: /help lists them (and /commands your own).");
                 break;
         }
         return true;
+    }
+
+    private void MemoryCommand(string arg)
+    {
+        var words = arg.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        if (words is ["add", var rest])
+        {
+            var person = rest.StartsWith("--all ", StringComparison.Ordinal);
+            var text = person ? rest[6..].Trim() : rest.Trim();
+            Ui.Line(rt.Memory.Add(person, text) ? $"Remembered {(person ? "for every project" : "for this project")}: it is in the next sessions' prompt." : "Already remembered.");
+            return;
+        }
+        if (words is ["forget", var which])
+        {
+            var person = which.StartsWith("--all ", StringComparison.Ordinal);
+            var n = int.TryParse(person ? which[6..] : which, out var k) ? k : 0;
+            Ui.Line(rt.Memory.Forget(person, n) is { } gone ? $"Forgotten: {gone}" : $"There is no memory {which}: /memory lists them.");
+            return;
+        }
+        foreach (var (person, title) in new[] { (false, "This project"), (true, "Every project (/memory add --all, forget --all N)") })
+        {
+            var all = rt.Memory.Read(person);
+            Ui.Line(Ui.Bold(title) + Ui.Dim($"  {rt.Memory.FileOf(person)}"));
+            Ui.Line(all.Count == 0 ? Ui.Dim("  (nothing yet)") : string.Join('\n', all.Select((m, i) => $"  {i + 1,2}. {m}")));
+        }
+        Ui.Info("The model keeps memories with remember; /memory add TEXT adds one, /memory forget N forgets one. The files are plain Markdown to edit.");
+    }
+
+    private async Task RewindCommandAsync(string arg, CancellationToken ct)
+    {
+        var words = arg.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var turns = rt.Checkpoints.Turns;
+        if (words.Length == 0 || !int.TryParse(words[0], out var n))
+        {
+            if (turns.Count == 0)
+            {
+                Ui.Info("No turn kept yet: each turn leaves a checkpoint while Code Arena runs.");
+                return;
+            }
+            for (var i = 0; i < turns.Count; i++)
+            {
+                Ui.Line($"  {i + 1,2}. {turns[i].At:HH:mm}  {Fmt.OneLine(turns[i].Input, 70)}  {Ui.Dim($"{turns[i].Before.Count} files")}");
+            }
+            Ui.Info("/rewind N goes back to before turn N: the files its tools and later turns' wrote, and the conversation. /rewind N code: only the files; /rewind N chat: only the conversation.");
+            return;
+        }
+        var only = words.Length > 1 ? words[1].ToLowerInvariant() : null;
+        Ui.Line(await rt.RewindAsync(n, files: only is null or "code", chat: only is null or "chat", ct));
+    }
+
+    private void SearchCommand(string arg)
+    {
+        if (arg.Length == 0)
+        {
+            Ui.Error("Give the words: /search parser timeout");
+            return;
+        }
+        var hits = SessionSearch.Find(rt.Env.Paths.SessionsDir, arg, rt.Workspace.Root, null);
+        Ui.Line(hits.Count == 0 ? "No session in this folder said all of that." : string.Join('\n', hits.Select(h => $"  {h.When:yyyy-MM-dd HH:mm}  {Ui.Dim(h.Session)}  {h.Role}: {h.Snippet}")));
+        if (hits.Count > 0)
+        {
+            Ui.Info("/resume ID opens one.");
+        }
+    }
+
+    private void PermissionsCommand(string arg)
+    {
+        var words = arg.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        var rules = rt.Permissions.Rules;
+        if (words is [var verb, var rule] && verb is "allow" or "deny" or "remove")
+        {
+            rule = rule.Trim();
+            if (verb != "remove" && !PermissionRules.Valid(rule))
+            {
+                Ui.Error("A rule is a tool's name, with a pattern in brackets if any: run_shell(npm test*), edit_file, read_file(.env*), mcp__tickets__*.");
+                return;
+            }
+            var said = rt.KeepRule(verb, rule);
+            Ui.Line(said);
+            return;
+        }
+        Ui.Line(Ui.Bold("Allowed without asking") + (rules.Allow.Count == 0 ? Ui.Dim("  (none)") : "\n" + string.Join('\n', rules.Allow.Select(r => "  " + r))));
+        Ui.Line(Ui.Bold("Never") + (rules.Deny.Count + rules.ProjectDeny.Count == 0 ? Ui.Dim("  (none)") : "\n" + string.Join('\n', rules.Deny.Select(r => "  " + r).Concat(rules.ProjectDeny.Select(r => "  " + r + Ui.Dim("  (the project's .arena/settings.json)"))))));
+        Ui.Info("/permissions allow RULE, deny RULE or remove RULE: kept in config.json. A command Laya flags still asks.");
+    }
+
+    private void ExtensionsCommand()
+    {
+        var x = rt.Extensions;
+        Ui.Line(Ui.Bold("Commands") + (x.Commands.Count == 0 ? Ui.Dim("  (none: .arena/commands/NAME.md, or in your config folder)") : ""));
+        foreach (var c in x.Commands)
+        {
+            Ui.Line($"  /{c.Name}{(c.ArgumentHint is { } hint ? " " + hint : "")}  {Ui.Dim(c.Description)}");
+        }
+        Ui.Line(Ui.Bold("Sub-agents") + (x.Agents.Count == 0 ? Ui.Dim("  (none: .arena/agents/NAME.md)") : ""));
+        foreach (var a in x.Agents)
+        {
+            Ui.Line($"  {a.Name}  {Ui.Dim(a.Description)}");
+        }
+        Ui.Line(Ui.Bold("Skills") + (x.Skills.Count == 0 ? Ui.Dim("  (none: .arena/skills/NAME/SKILL.md)") : ""));
+        foreach (var s in x.Skills)
+        {
+            Ui.Line($"  {s.Name}  {Ui.Dim(s.Description)}");
+        }
     }
 
     /// <summary>/compact-at: shows when the session compacts; "70" sets the threshold, "70 30" what is kept too, "default" both back.</summary>
