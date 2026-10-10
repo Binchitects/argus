@@ -737,7 +737,7 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
     }
 
     [Fact]
-    public void A_model_told_to_unload_counts_as_unloaded_at_once_until_the_engine_has_stopped_it()
+    public void A_model_told_to_unload_counts_as_unloading_at_once_until_the_engine_has_stopped_it()
     {
         var clock = new SteppedClock(DateTimeOffset.UtcNow);
         var state = new EngineState(clock);
@@ -746,23 +746,24 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         state.Set(Spare("loaded"), before);
         Assert.Equal(clock.Now, state.LoadedSince("spare"));
 
-        // Told to unload: unloaded at once, though the watcher's list said loaded a moment ago, though a list asked before
+        // Told to unload: unloading at once, though the watcher's list said loaded a moment ago, though a list asked before
         // says loaded (or unloaded), and though the engine lists it loaded while it stops.
         clock.Now += TimeSpan.FromSeconds(1);
         state.Unloading("spare");
-        Assert.Equal("unloaded", state.StatusOf("spare"));
+        Assert.Equal("unloading", state.StatusOf("spare"));
         state.Set(Spare("loaded"), before);
-        Assert.Equal("unloaded", state.StatusOf("spare"));
+        Assert.Equal("unloading", state.StatusOf("spare"));
         state.Set(Spare("unloaded"), before);
         clock.Now += TimeSpan.FromSeconds(1);
         state.Set(Spare("loaded"), state.Asking());
-        Assert.Equal("unloaded", state.StatusOf("spare"));
-        Assert.Equal("unloaded", state.Seen(Spare("loaded"), state.Asking()).Single(m => m.Name == "spare").Status);
+        Assert.Equal("unloading", state.StatusOf("spare"));
+        Assert.Equal("unloading", state.Seen(Spare("loaded"), state.Asking()).Single(m => m.Name == "spare").Status);
         Assert.Null(state.LoadedSince("spare"));
         Assert.Equal("loaded", state.StatusOf("big"));
 
         // Stopped: what the engine says goes again, and loaded once more it is loaded, seen from then.
         state.Set(Spare("unloaded"), state.Asking());
+        Assert.Equal("unloaded", state.StatusOf("spare"));
         clock.Now += TimeSpan.FromSeconds(1);
         state.Set(Spare("loaded"), state.Asking());
         Assert.Equal("loaded", state.StatusOf("spare"));
@@ -786,7 +787,7 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         state.Unloading("spare");
         clock.Now += TimeSpan.FromSeconds(29);
         state.Set(Spare("loaded"), state.Asking());
-        Assert.Equal("unloaded", state.StatusOf("spare"));
+        Assert.Equal("unloading", state.StatusOf("spare"));
         clock.Now += TimeSpan.FromSeconds(2);
         state.Set(Spare("loaded"), state.Asking());
         Assert.Equal("loaded", state.StatusOf("spare"));
@@ -1278,7 +1279,7 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         await EventuallyAsync(() => state.Spare.Count == 0, "the watcher holds tiny-b");
         verdict = await GuardAsync(f, "tiny-a").WaitAsync(TimeSpan.FromSeconds(20));
         Assert.Equal("BLOCKED", verdict.GetProperty("action").GetString());
-        Assert.StartsWith("tiny-a cannot be loaded now: each place in the engine is taken by, or kept for, a model kept loaded or used by everyone",
+        Assert.StartsWith($"tiny-a cannot be loaded now: each place in the engine is taken by, or kept for, {Big}, tiny-b (kept loaded, loaded by an admin, or used by everyone)",
             verdict.GetProperty("blocked_reason").GetString(), StringComparison.Ordinal);
         Assert.Single(app.Engine.Calls, c => c.Path == "/models/unload");
         Assert.Equal("loaded", app.Engine.StatusOf(Big));
@@ -1392,11 +1393,11 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         Assert.Equal(1, app.Engine.CallsTo("/models/unload", "tiny-a"));
         await engine.LoadAsync("tiny-b");
         app.Engine.BusySlots["tiny-b"] = [0];
-        // tiny-a is unloaded at once, not at the watcher's next look, and stays so while the engine still lists it loaded.
-        Assert.Equal("unloaded", state.StatusOf("tiny-a"));
+        // tiny-a is unloading at once, not at the watcher's next look, and stays so while the engine still lists it loaded.
+        Assert.Equal("unloading", state.StatusOf("tiny-a"));
         f.Services.GetRequiredService<EngineWatcher>().Wake();
         await EventuallyAsync(() => state.Spare.SequenceEqual(["tiny-b"]), "the watcher sees tiny-b loaded, and tiny-a not");
-        Assert.Equal("unloaded", state.StatusOf("tiny-a"));
+        Assert.Equal("unloading", state.StatusOf("tiny-a"));
         Assert.Equal("loaded", app.Engine.StatusOf("tiny-a"));
 
         // A's next step a moment later, through the gateway or in the chat: it waits for room (tiny-b answers B), and is never
@@ -1428,13 +1429,13 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         app.Engine.Stop();
         Assert.Equal("loaded", app.Engine.StatusOf(Big));
 
-        // An admin's Unload too: unloaded at once, though the engine lists it loaded until it has stopped.
+        // An admin's Unload too: unloading at once, though the engine lists it loaded until it has stopped.
         f.Services.GetRequiredService<EngineWatcher>().Wake();
         await EventuallyAsync(() => state.Spare.SequenceEqual(["tiny-a"]), "the watcher sees tiny-a loaded");
         await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-a/unload"));
-        Assert.Equal("unloaded", state.StatusOf("tiny-a"));
+        Assert.Equal("unloading", state.StatusOf("tiny-a"));
         await EventuallyAsync(() => state.Spare.Count == 0, "the watcher looked again");
-        Assert.Equal("unloaded", state.StatusOf("tiny-a"));
+        Assert.Equal("unloading", state.StatusOf("tiny-a"));
         Assert.Equal("loaded", app.Engine.StatusOf("tiny-a"));
     }
 
@@ -1465,16 +1466,23 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => sent);
         Assert.Equal("NONE", (await waiting.WaitAsync(TimeSpan.FromSeconds(20))).GetProperty("action").GetString());
         Assert.Equal("unloaded", app.Engine.StatusOf("tiny-a"));
+        // That request reaches the engine, which loads tiny-b for it; it ends, and tiny-b is idle a while later.
+        await f.Services.GetRequiredService<EngineClient>().LoadAsync("tiny-b");
+        f.Services.GetRequiredService<EngineWatcher>().Wake();
+        await EventuallyAsync(() => state.Spare.SequenceEqual(["tiny-b"]), "the watcher sees tiny-b loaded");
+        clock.Now += EngineRoute.Starting + TimeSpan.FromSeconds(1);
 
-        // An agent's request for tiny-a, loaded again, passes the guardrail; the engine has not started on it yet (its slots are
-        // idle). Another's request for tiny-b in the same moment waits, until A's has had the time to reach the engine.
+        // An admin loads tiny-a again: the idle tiny-b makes room for it. An agent's request for tiny-a then passes the
+        // guardrail; the engine has not started on it yet (its slots are idle). Another's request for tiny-b in the same
+        // moment waits, until A's has had the time to reach the engine.
         await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-a/load"));
+        Assert.Equal(1, app.Engine.CallsTo("/models/unload", "tiny-b"));
         await EventuallyAsync(() => state.Spare.SequenceEqual(["tiny-a"]), "the watcher sees tiny-a loaded again");
         Assert.Equal("NONE", (await GuardAsync(f, "tiny-a")).GetProperty("action").GetString());
         waiting = GuardAsync(f, "tiny-b");
         await LookedAsync(3, "the request for tiny-b waits for room");
         Assert.False(waiting.IsCompleted);
-        Assert.Equal(1, app.Engine.CallsTo("/models/unload"));
+        Assert.Equal(1, app.Engine.CallsTo("/models/unload", "tiny-a"));
         // By then the engine would say its slot is busy; it says idle: A's request has ended, and tiny-a makes room.
         clock.Now += EngineRoute.Starting;
         Assert.Equal("NONE", (await waiting.WaitAsync(TimeSpan.FromSeconds(20))).GetProperty("action").GetString());
@@ -1515,7 +1523,7 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         clock.Now += EngineRoute.Starting;
         Assert.Equal("NONE", (await waiting.WaitAsync(TimeSpan.FromSeconds(20))).GetProperty("action").GetString());
         Assert.Equal(1, app.Engine.CallsTo("/models/unload", "tiny-a"));
-        await EventuallyAsync(() => stateB.StatusOf("tiny-a") == "unloaded", "the other replica hears tiny-a unloaded");
+        await EventuallyAsync(() => stateB.StatusOf("tiny-a") == "unloading", "the other replica hears tiny-a unloading");
         Assert.Equal("loaded", app.Engine.StatusOf("tiny-a"));
     }
 

@@ -5,9 +5,11 @@
 #   /presets/keep  the models kept loaded, one a line (loaded at start)
 #   /presets/max   how many may be loaded at once, those kept included (2)
 #
-# Presets are read only when llama-server starts, so a change to the list
-# restarts it here. When a place is left beside the kept models, any other
-# model loads when a request asks for it; when every place is kept, none does.
+# Presets are read only when llama-server starts, so a change to the list (or
+# to max) restarts it here; keeping or unloading a model does not. A model that
+# is not loaded loads when a request asks for it: the app makes room for it
+# first (it unloads an idle model that may make room), so the engine never
+# chooses for itself which model goes.
 set -u
 key="${ENGINE_KEY:?set ENGINE_KEY in .env}"
 models=/presets/models.ini
@@ -19,7 +21,6 @@ kept() {
   [ -f "$keep" ] || return 0
   while IFS= read -r m; do [ -n "$m" ] && grep -qxF "[$m]" "$models" && echo "$m"; done < "$keep"
 }
-autoload() { if [ "$(kept | wc -l)" -lt "$(max)" ]; then echo --models-autoload; else echo --no-models-autoload; fi; }
 
 until [ -f "$models" ]; do echo "router: waiting for the app's model list"; sleep 10; done
 
@@ -27,9 +28,8 @@ pid=
 trap 'if [ -n "$pid" ]; then kill -TERM "$pid" 2>/dev/null; wait "$pid"; fi; exit 0' TERM INT
 while true; do
   seen=$(stamp)
-  mode=$(autoload)
-  echo "router: $(grep -c '^\[' "$models") model(s), up to $(max) at once; kept loaded: $(kept | tr '\n' ' ')($mode)"
-  /app/llama-server --models-preset "$models" --models-max "$(max)" "$mode" --host 0.0.0.0 --port 8080 --api-key "$key" &
+  echo "router: $(grep -c '^\[' "$models") model(s), up to $(max) at once; kept loaded: $(kept | tr '\n' ' ')"
+  /app/llama-server --models-preset "$models" --models-max "$(max)" --models-autoload --host 0.0.0.0 --port 8080 --api-key "$key" &
   pid=$!
   (
     for _ in $(seq 1 120); do curl -fs -o /dev/null --max-time 2 http://localhost:8080/health && break; sleep 1; done
@@ -47,7 +47,7 @@ while true; do
   ) &
   while kill -0 "$pid" 2>/dev/null; do
     sleep 5
-    if [ "$(stamp)" != "$seen" ] || [ "$(autoload)" != "$mode" ]; then
+    if [ "$(stamp)" != "$seen" ]; then
       echo "router: the model list changed; restarting llama-server"
       kill -TERM "$pid" 2>/dev/null
       wait "$pid"

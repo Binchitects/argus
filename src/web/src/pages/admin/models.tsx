@@ -13,7 +13,7 @@ import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
-import { api, errorMessage } from '@/lib/api'
+import { api, ApiError, errorMessage } from '@/lib/api'
 import { money } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { AccessPicker, type AccessRule } from './access-picker'
@@ -30,9 +30,16 @@ interface ModelRow extends SavedModel {
   server?: string
   remote?: string
   mode: string
-  /** failed: its last load exited with an error (the engine's log says why); missing: the engine does not list it (yet);
-   * waiting: a media model whose files are being fetched; off: its server does not run. */
-  status: 'loaded' | 'loading' | 'unloaded' | 'failed' | 'missing' | 'waiting' | 'off' | null
+  /** unloading: told to unload, and not stopped yet; failed: its last load exited with an error (the engine's log says why);
+   * missing: the engine does not list it (yet); waiting: a media model whose files are being fetched; off: its server does not run. */
+  status: 'loaded' | 'loading' | 'unloading' | 'unloaded' | 'failed' | 'missing' | 'waiting' | 'off' | null
+  /** Loading or unloading: why ("loaded by ada", "for a chat or an API request", "making room for X", "kept loaded"), and since when. */
+  why?: string | null
+  since?: string | null
+  /** Loaded by an admin in place of a model that never makes room: it never makes room either, until unloaded. */
+  instead?: boolean
+  /** How often lately the engine unloaded it by its own choice, to load another. */
+  evicted?: number
   /** A media model: on (at the gateway, in the chat's tools) or off. */
   enabled?: boolean
   vision: boolean
@@ -82,6 +89,7 @@ interface ModelsView {
     onRequest: boolean
     loaded: string[]
     loading: string[]
+    unloading: string[]
     gpus: { index: number; name: string; total: number }[]
     plan: Plan | null
   }
@@ -95,8 +103,8 @@ export function ModelsPage() {
   const models = useQuery({
     queryKey: ['admin', 'models'],
     queryFn: ({ signal }) => api<ModelsView>('/api/admin/models', { signal }),
-    // Faster while a model loads, so the page shows it the moment it is ready.
-    refetchInterval: (q) => (q.state.data?.engine.loading.length ? 3000 : 15000),
+    // Faster while a model loads or unloads (an engine model or a picture, video or speech one), so the page shows it the moment it is done.
+    refetchInterval: (q) => (q.state.data?.models.some((m) => m.status === 'loading' || m.status === 'unloading') ? 2000 : 15000),
   })
   const [editing, setEditing] = useState<ModelRow | 'new' | { preset: string } | null>(null)
   const [hf, setHf] = useState(false)
@@ -220,7 +228,15 @@ function EngineSummary({ engine }: { engine: ModelsView['engine'] }) {
   )
 }
 
-function Status({ status }: { status: ModelRow['status'] }) {
+/** "for 40 s", "for 3 min": how long it has been loading or unloading. */
+function forHowLong(since: string | null | undefined): string | null {
+  if (!since) return null
+  const s = Math.max(0, Math.round((Date.now() - new Date(since).getTime()) / 1000))
+  return s < 90 ? `for ${s} s` : `for ${Math.round(s / 60)} min`
+}
+
+function Status({ status, why, since }: { status: ModelRow['status']; why?: string | null; since?: string | null }) {
+  const reason = [why, forHowLong(since)].filter(Boolean).join(', ')
   if (status === 'loaded')
     return (
       <span className="flex items-center gap-1.5 text-sm font-medium text-success-ink">
@@ -229,8 +245,20 @@ function Status({ status }: { status: ModelRow['status'] }) {
     )
   if (status === 'loading')
     return (
-      <span className="flex items-center gap-1.5 text-sm text-warning-ink">
-        <Loader2 className="size-4 animate-spin" aria-hidden="true" /> Loading…
+      <span className="flex flex-col items-end text-sm text-warning-ink">
+        <span className="flex items-center gap-1.5">
+          <Loader2 className="size-4 animate-spin" aria-hidden="true" /> Loading…
+        </span>
+        {reason && <span className="text-xs text-muted-foreground">{reason}</span>}
+      </span>
+    )
+  if (status === 'unloading')
+    return (
+      <span className="flex flex-col items-end text-sm text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <Loader2 className="size-4 animate-spin" aria-hidden="true" /> Unloading…
+        </span>
+        {reason && <span className="text-xs">{reason}</span>}
       </span>
     )
   if (status === 'failed')
@@ -267,10 +295,34 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
     },
     onError: (e) => toast.error(errorMessage(e)),
   })
-  const act = useMutation({
-    mutationFn: (what: 'load' | 'unload') => api(`/api/admin/models/${encodeURIComponent(m.name)}/${what}`, { body: {} }),
-    onSuccess: (_, what) => {
-      toast.success(what === 'load' ? `Loading ${m.name}` : `${m.name} unloaded`, what === 'load' ? { description: 'It answers once it is loaded: seconds for a small model, minutes for a large one.' } : undefined)
+  // Load and Unload apart, so only the button pressed shows that it works.
+  const load = useMutation({
+    mutationFn: (instead: boolean) => api(`/api/admin/models/${encodeURIComponent(m.name)}/load${instead ? '?instead=true' : ''}`, { body: {} }),
+    onSuccess: () => {
+      toast.success(`Loading ${m.name}`, { description: 'It answers once it is loaded: seconds for a small model, minutes for a large one.' })
+      onChanged()
+    },
+    onError: async (e) => {
+      // Every place is held by models that never make room: the admin may load it instead of one that is not kept.
+      const holding = e instanceof ApiError && e.status === 'held' ? (e.data as { holding?: string[] } | undefined)?.holding : undefined
+      if (holding?.length) {
+        if (
+          await confirm({
+            title: `Load ${m.name} instead of ${holding[0]}?`,
+            description: `${e.message} ${holding[0]} unloads, and ${m.name} keeps its place until you unload it (chats on ${holding[0]} are told it is not loaded meanwhile).`,
+            confirm: `Load instead of ${holding[0]}`,
+          })
+        )
+          load.mutate(true)
+        return
+      }
+      toast.error(errorMessage(e))
+    },
+  })
+  const unload = useMutation({
+    mutationFn: () => api(`/api/admin/models/${encodeURIComponent(m.name)}/unload`, { body: {} }),
+    onSuccess: () => {
+      toast.success(`Unloading ${m.name}`, { description: 'It stops in a few seconds: one answering is stopped within ten.' })
       onChanged()
     },
     onError: (e) => toast.error(errorMessage(e)),
@@ -327,6 +379,11 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
                 <Clock /> Kept by working hours
               </Badge>
             )}
+            {m.instead && (
+              <Badge variant="outline" title="Loaded by an admin in place of a model that never makes room: it keeps its place until unloaded">
+                <Pin /> Holds its place
+              </Badge>
+            )}
             {m.vision && (
               <Badge variant="outline">
                 <Eye /> Sees images
@@ -348,7 +405,7 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
           {priceLine(m) && <p className="mt-1 text-xs text-muted-foreground tabular-nums">{priceLine(m)}</p>}
           {m.cache && <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{cacheLine(m.cache)}</p>}
         </div>
-        <Status status={m.status} />
+        <Status status={m.status} why={m.why} since={m.since} />
       </CardHeader>
       <CardContent className="grid gap-4">
         {m.source === 'local' && m.atGateway === false && <Alert variant="warning">Not at the gateway yet: it is added again within a minute.</Alert>}
@@ -361,14 +418,30 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
             say why.
           </Alert>
         )}
-        {m.status === 'failed' && (
+        {(m.evicted ?? 0) >= 2 && (
+          <Alert variant="warning" title="The engine keeps unloading it">
+            The engine unloaded it {m.evicted} times lately, by its own choice, to load another: it holds fewer models at once than Models loaded at once ({engine.max})
+            says (its --models-max, or too little GPU memory for them together). It is loaded again after a wait, not at once, so two models do not push each
+            other out for ever. Lower Models loaded at once under Settings, or keep fewer models loaded.
+          </Alert>
+        )}
+        {m.status === 'failed' && media && (
+          <Alert variant="destructive" title="Its server did not answer">
+            It has not answered for ten minutes since it was turned on, and is still tried. Its server's log says why:{' '}
+            <Link to={`/admin/logs?container=${m.server}&level=warn`} className="font-medium underline underline-offset-2">
+              its warnings and errors
+            </Link>
+            ; too little GPU memory left beside the chat models is the usual cause.
+          </Alert>
+        )}
+        {m.status === 'failed' && !media && (
           <Alert variant="destructive" title="The engine could not load it">
             Its log says why:{' '}
             <Link to="/admin/logs?container=llamacpp&level=warn" className="font-medium underline underline-offset-2">
               the engine's warnings and errors
             </Link>
             , or <code className="text-xs">docker compose logs llamacpp</code> on the host. An incomplete download, a file this llama.cpp cannot read, or too
-            little GPU memory are the usual causes; a model stopped while it still loaded, to make room for another, ends this way too, with nothing wrong.
+            little GPU memory are the usual causes.
             It is tried again by itself after a minute, then after 2, 4, 8, 16 and at most 30 minutes (kept loaded, by the app; else at the next question for
             it){m.retryAt ? `: next from ${new Date(m.retryAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}. Loading it tries at once.
           </Alert>
@@ -406,8 +479,8 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
           {onEngine && m.status !== 'loaded' && (
             <Button
               size="sm"
-              loading={act.isPending}
-              disabled={m.status === 'loading' || !canLoad}
+              loading={load.isPending}
+              disabled={m.status === 'loading' || m.status === 'unloading' || !canLoad}
               title={canLoad ? undefined : 'Every place in the engine keeps a model loaded'}
               onClick={async () => {
                 const full = !media && engine.loaded.length + engine.loading.length >= engine.max
@@ -417,12 +490,12 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
                     description: media
                       ? 'It loads on its own server, beside the chat models. A model not kept loaded unloads again after ten minutes unused.'
                       : full
-                      ? 'The engine is full: the model used least recently unloads to make room (a kept one, or the one new chats use, comes back after). Answers wait until this one is loaded: seconds for a small model, minutes for a large one.'
+                      ? 'The engine is full: an idle model that may make room unloads first (never one kept loaded, nor the one new chats use, unless you say so). Answers wait until this one is loaded: seconds for a small model, minutes for a large one.'
                       : 'It loads beside the models loaded now. Answers wait until it is loaded: seconds for a small model, minutes for a large one.',
                     confirm: 'Load',
                   })
                 )
-                  act.mutate('load')
+                  load.mutate(false)
               }}
             >
               <Power /> Load
@@ -432,13 +505,13 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
             <Button
               size="sm"
               variant="outline"
-              loading={act.isPending}
+              loading={unload.isPending}
               onClick={async () => {
                 const description = m.kept
                   ? 'It stops being kept loaded, too. Chats that use it wait for it to load again when asked for.'
                   : 'Chats that use it wait for it to load again when asked for.'
                 if (await confirm({ title: `Unload ${m.name}?`, description, confirm: 'Unload', destructive: true }))
-                  act.mutate('unload')
+                  unload.mutate()
               }}
             >
               <PowerOff /> Unload

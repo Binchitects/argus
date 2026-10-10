@@ -312,7 +312,13 @@ All of them are under **Admin → Models**, with the same controls:
 - **Picture, video and speech models**: on or off (off, they leave the gateway
   and the chat's tools), kept loaded or loaded when asked for (and unloaded
   after ten minutes unused), loaded and unloaded by hand. The picture and video
-  servers run while the app's control file says so (`services/sd-serve.sh`).
+  servers run while the app's control file says so (`services/sd-serve.sh`,
+  which reads it every 3 seconds): a picture asked for just as its server is
+  turned off for being unused turns it on again and waits for it, rather than
+  start on a server about to stop. One that has not answered ten minutes after
+  it was turned on reads **Could not load** (it is still tried; its log says
+  why, often too little GPU memory beside the chat models), and one unloaded
+  as meant is idle on the Overview, not down.
   The video server decodes on the GPU when it has 13 GB free as it loads
   (`VAE_GPU_MB`, with `VAE_GPU_FLAGS`: a 12 GB budget, the weights in RAM until
   needed), and on the CPU, slower, while the chat model holds the GPU (a 9-frame

@@ -82,26 +82,38 @@ would be with them.
   requests until they end (side requests too), and an API key's for 10
   seconds after the gateway let it through, or after the model loaded for it
   (by then the engine says its slot is busy). A model the app unloads (to make
-  room, or an admin's **Unload**) counts as unloaded at once, on every replica,
-  though the engine lists it as loaded until it has stopped: a request for it
-  a moment later waits for room like any other, instead of reaching an engine
-  that would load it by unloading the model used least recently.
+  room, or an admin's **Unload**) reads **Unloading…** at once, on every replica,
+  though the engine lists it as loaded until it has stopped (within 10 seconds:
+  one still answering then is killed, which reads **Not loaded**, not **Could not
+  load**). It still takes its place meanwhile, and a request for it, or for a
+  model that needs its place, waits until it has stopped (15 seconds at most),
+  instead of reaching an engine that would load it by unloading the model used
+  least recently. Each **Loading…** and **Unloading…** says why and for how long:
+  loaded by an admin (by name), for a chat or an API request, kept loaded, the
+  model new chats use, making room for another, working hours.
   The app never leaves the choice to the engine, which would unload the model
   used least recently, whichever it is. An API key's request (a coding agent,
   an IDE) gets room the same way: the gateway asks the app before sending it
   (its guardrail), and the app makes room, or the request waits, or it is
   refused with the reason. A place made for a model is its own until the
   engine loads it, so two requests at once for two models take two places.
-  Should the engine still unload a model by its own choice (an admin's
-  **Load** at the limit, or a request let through while the app is down,
-  with the guardrail's `fail_open`), a kept one comes back, and so does the
-  one new chats use, once a model that may make room has been idle for a
-  minute (so an agent pausing between its requests is not pushed out for
-  it). After an admin's **Unload**, it stays unloaded. In the chat such a
-  model reads **Loads when asked**.
+  The app's own loads (a kept model back, the one new chats use, the model for
+  small steps) make room the same way. Should the engine still unload a model
+  by its own choice (a request let through while the app is down, with the
+  guardrail's `fail_open`), a kept one comes back, and so does the one new chats
+  use, once a model that may make room has been idle for a minute (so an agent
+  pausing between its requests is not pushed out for it). One the engine pushes
+  out twice within ten minutes waits before it comes back (1, 2, 4… minutes),
+  and its card says why: the engine holds fewer models than **Models loaded at
+  once** says (its `--models-max`, or too little GPU memory for them together),
+  and two models would otherwise push each other out for ever. After an admin's
+  **Unload**, it stays unloaded. In the chat such a model reads **Loads when
+  asked**, and asked for with no place left, the chat says an admin unloaded it
+  and which models hold the places.
   When every place is kept, no other model loads on request, and the chat says
-  so. A change of the kept list that flips this restarts llama-server (the kept
-  models load again, one after another).
+  so, naming the models that hold them. Keeping or unloading a model never
+  restarts llama-server (it always loads what a request asks for, the app having
+  made room); only a changed model list or **Models loaded at once** does.
 - **Two models at once** (the default). Someone who picks a small model gets it
   loaded beside the big one, instead of unloading the big one for everyone:
   each model has its own line in the chat, so both answer at once. llama.cpp
@@ -131,13 +143,10 @@ would be with them.
   cached prompts are lost), and a model asked for while the other still loads
   can be stopped mid-load and read **Could not load**. With a model kept loaded
   and one at a time, no other model loads at all. Raise it to 2 or more.
-- **Could not load** is not always a broken file. To make room, the engine
-  tells the model to stop; one told so while it still loads goes on loading
-  and answering, and the engine kills it 10 seconds later and marks it failed.
-  This is what happened to SmolLM2 in a load test with one model at a time:
-  the questions waiting for the big model had the engine stop SmolLM2 the
-  moment it started for its own questions; it answered them, and was killed
-  and marked failed. The app tries a model that failed again after a minute,
+- **Could not load** is a load that failed. A model the app stopped (to make
+  room, or an admin's **Unload**) that the engine had to kill, as it still
+  loaded or answered 10 seconds later, reads **Not loaded**: the engine marks
+  it failed, but nothing is wrong with it. The app tries a model that failed again after a minute,
   then after 2, 4, 8, 16 and at most 30 minutes, once each time: a kept one
   is loaded again by the app, any other by the next question asked of it, in
   the chat or with an API key (the questions of the next half minute go too,
@@ -194,9 +203,16 @@ would be with them.
   for gated repositories, `HF_TOKEN` of an account that accepted their terms.
   A download is refused when the disk would keep less than 2 GB free.
 - **Load** loads a model now, beside the kept ones (refused when every place is
-  kept). **Unload** unloads it, and stops keeping it. Answers wait while a
-  model loads: seconds when its weights are in the page cache, minutes from
-  disk.
+  kept). At the limit the app makes room for it, as for a request: an idle model
+  that may make room unloads first, and is waited for until it has stopped. When
+  every place is held by models that never make room and some are not kept (the
+  model new chats use, the one for small steps), the page asks to **Load
+  instead of** one of them: that one unloads, and the loaded one keeps its place
+  (**Holds its place**) until an admin unloads it or loads another instead; the
+  one it replaced comes back then. **Unload** unloads it, and stops keeping it.
+  Load and Unload each show only on their own button that they work. Answers
+  wait while a model loads: seconds when its weights are in the page cache,
+  minutes from disk.
 - **GPUs.** With two or more GPUs, a model's form asks which it runs on: all of
   them (llama.cpp splits it by layer), or some (`device = CUDA0,...` in its
   preset). The engine numbers GPUs as `nvidia-smi` does
@@ -370,9 +386,11 @@ seconds to read instead of 428.
 
 An admin's **Load** is followed up: should the engine lose it (it restarts
 when the models' settings change, and a load sent meanwhile is never done),
-the app asks again until the model loads, for ten minutes. A **Load** also
-ends an earlier **Unload**, so the model new chats use loads again by itself
-afterwards.
+the app asks again until the model loads, for ten minutes, making room as for
+any load. It ends when the model loads or fails to load, and a later admin's
+**Load** of another model ends it too (the last word is the admin's). A
+**Load** also ends an earlier **Unload**, so the model new chats use loads
+again by itself afterwards.
 
 **Chats that lose their slot** to another wait in RAM (llama.cpp's prompt
 cache, with their checkpoints) and come back from there: measured with six long

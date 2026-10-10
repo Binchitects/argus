@@ -25,6 +25,15 @@ public sealed partial class MediaControl : BackgroundService
     private const string ForgetTopic = "media:forget";
     private const string WakeTopic = "media:wake";
     private static readonly TimeSpan Idle = TimeSpan.FromMinutes(10);
+
+    /// <summary>A server that has not answered this long after it was turned on has failed to load (Admin → Models says so).</summary>
+    private static readonly TimeSpan LoadLimit = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// How long a server must have been wanted on before its answer counts: services/sd-serve.sh reads the control file every
+    /// 3 seconds, so for a moment after "off" was written and "on" again it may still stop the one that answers.
+    /// </summary>
+    private static readonly TimeSpan OnSettle = TimeSpan.FromSeconds(4);
     private readonly IServiceScopeFactory scopes;
     private readonly Modules modules;
     private readonly IHttpClientFactory http;
@@ -59,11 +68,12 @@ public sealed partial class MediaControl : BackgroundService
         });
     }
 
-    /// <summary>Asked for now (loaded, or used): here, and on the replica that leads.</summary>
+    /// <summary>Asked for now (loaded, or used): here, and on the replica that leads; the control file is written at once.</summary>
     private void Asked(string name)
     {
         _asked[name] = clock.GetUtcNow();
         replicas.Tell(AskedTopic, name);
+        WakeHere();
     }
 
     private void WakeHere()
@@ -88,11 +98,21 @@ public sealed partial class MediaControl : BackgroundService
 
     public sealed record State(bool Enabled, bool Kept);
 
-    /// <summary>What a model is doing: loaded, loading, unloaded, waiting (for its files), or off (its server does not run).</summary>
+    /// <summary>
+    /// What a model is doing: loaded, loading, unloading (its server still answers as it stops), unloaded, failed (its server
+    /// did not answer within ten minutes of being turned on; it is still tried), waiting (for its files), or off (its server
+    /// does not run).
+    /// </summary>
     public sealed record Status(Model Model, State State, string Now);
 
     private readonly ConcurrentDictionary<string, DateTimeOffset> _asked = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> _now = new(StringComparer.Ordinal);
+
+    /// <summary>Each picture and video server's control file as last written: "on" since when (Environment.TickCount64), or off (absent).</summary>
+    private readonly ConcurrentDictionary<string, long> _onSince = new(StringComparer.Ordinal);
+
+    /// <summary>Since when each model has been loading (by the app's clock): past <see cref="LoadLimit"/> it has failed.</summary>
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _loadingSince = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _wake = new(0);
 
     public async Task<IReadOnlyList<Status>> ListAsync(CancellationToken ct)
@@ -174,16 +194,18 @@ public sealed partial class MediaControl : BackgroundService
             return null;
         }
         Asked(name);
-        if (model.Id is not null || await UpAsync(model, ct))
+        if (model.Id is not null || (On(model.Server) && await UpAsync(model, ct)))
         {
             return null;
         }
+        // Off, or turned off a moment ago (ten minutes unused): its server answering now may be on its way out. On again first,
+        // and its answer counts once the script has read that.
         Load(name);
         var until = clock.GetUtcNow() + TimeSpan.FromMinutes(5);
         while (clock.GetUtcNow() < until)
         {
-            await Task.Delay(TimeSpan.FromSeconds(3), ct);
-            if (await UpAsync(model, ct))
+            await Task.Delay(TimeSpan.FromSeconds(1), ct);
+            if (On(model.Server) && await UpAsync(model, ct))
             {
                 _now[name] = "loaded";
                 return null;
@@ -227,9 +249,9 @@ public sealed partial class MediaControl : BackgroundService
         var now = clock.GetUtcNow();
         foreach (var (name, at) in _asked)
         {
-            if (now - at > Idle && !states[name].Kept)
+            // Only that ask: one made meanwhile (a picture asked for at this moment) keeps it loaded.
+            if (now - at > Idle && !states[name].Kept && _asked.TryRemove(new KeyValuePair<string, DateTimeOffset>(name, at)))
             {
-                _asked.TryRemove(name, out _);
                 LogIdle(logger, name);
             }
         }
@@ -249,9 +271,22 @@ public sealed partial class MediaControl : BackgroundService
                 {
                     Write(m.Server, want ? "on\n" : "off\n");
                 }
+                if (want)
+                {
+                    _onSince.TryAdd(m.Server, Environment.TickCount64);
+                }
+                else
+                {
+                    _onSince.TryRemove(m.Server, out _);
+                }
                 var files = MediaModels.Servers.First(x => x.Server == m.Server).Files;
                 var ready = files.All(f => File.Exists(Path.Combine(engine.Value.LibraryDir, f.Dir, f.Name)));
-                _now[m.Name] = !ready ? "waiting" : await UpAsync(m, ct) ? "loaded" : want ? "loading" : "unloaded";
+                var up = ready && await UpAsync(m, ct);
+                _now[m.Name] = !ready ? "waiting" : up ? (want ? "loaded" : "unloading") : want ? Loading(m.Name, now) : "unloaded";
+                if (up || !want || !ready)
+                {
+                    _loadingSince.TryRemove(m.Name, out _);
+                }
                 continue;
             }
             speechLoaded ??= await SpeechLoadedAsync(ct);
@@ -269,6 +304,24 @@ public sealed partial class MediaControl : BackgroundService
             }
             _now[m.Name] = loaded ? "loaded" : "unloaded";
         }
+    }
+
+    /// <summary>Whether a server's control file has said "on" long enough for its answer to count (<see cref="OnSettle"/>).</summary>
+    private bool On(string server) => _onSince.TryGetValue(server, out var since) && Environment.TickCount64 - since >= OnSettle.TotalMilliseconds;
+
+    /// <summary>"loading", or "failed" once it has loaded for longer than <see cref="LoadLimit"/> (it is still tried: its script starts it again).</summary>
+    private string Loading(string name, DateTimeOffset now)
+    {
+        var since = _loadingSince.GetOrAdd(name, now);
+        if (now - since < LoadLimit)
+        {
+            return "loading";
+        }
+        if (_now.GetValueOrDefault(name) != "failed")
+        {
+            LogNotLoaded(logger, name, (int)LoadLimit.TotalMinutes);
+        }
+        return "failed";
     }
 
     private async Task<Dictionary<string, State>> StatesAsync(CancellationToken ct)
@@ -338,6 +391,9 @@ public sealed partial class MediaControl : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Media models: {Model} unused for ten minutes, unloading")]
     private static partial void LogIdle(ILogger logger, string model);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Media models: {Model}'s server has not answered for {Minutes} minutes since it was turned on (its log says why: often no GPU memory left beside the chat models); it is still tried")]
+    private static partial void LogNotLoaded(ILogger logger, string model, int minutes);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Media models: cannot write {Path}: {Error}")]
     private static partial void LogControl(ILogger logger, string path, string error);

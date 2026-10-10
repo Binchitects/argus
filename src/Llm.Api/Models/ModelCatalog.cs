@@ -52,6 +52,22 @@ public sealed class EngineState(TimeProvider clock)
     /// <summary>Since when each loaded model has been seen loaded, as the engine said (<see cref="LoadedSince"/>).</summary>
     private readonly ConcurrentDictionary<string, DateTimeOffset> _loaded = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// The models the app stopped, and when: the router kills one that does not stop within 10 seconds (it was answering)
+    /// and lists it failed, which is not a failed load. For <see cref="Stopping"/> after the app told it to unload, until
+    /// it loads again, failed counts as unloaded.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _stopped = new(StringComparer.Ordinal);
+
+    /// <summary>Why each model loads or unloads, and since when (<see cref="Reason"/>).</summary>
+    private readonly ConcurrentDictionary<string, (string Why, DateTimeOffset Since)> _why = new(StringComparer.Ordinal);
+
+    /// <summary>The models the engine unloaded by its own choice (to load another), how often lately, and when last (<see cref="MayReload"/>).</summary>
+    private readonly ConcurrentDictionary<string, (int Count, DateTimeOffset At)> _evicted = new(StringComparer.Ordinal);
+
+    /// <summary>An eviction older than this is forgotten.</summary>
+    private static readonly TimeSpan EvictionsFor = TimeSpan.FromMinutes(10);
+
     public sealed record Snapshot(IReadOnlyList<EngineModel> Models, string? Error, DateTimeOffset? At);
 
     /// <summary>
@@ -82,6 +98,9 @@ public sealed class EngineState(TimeProvider clock)
     /// </summary>
     public string? Default { get; set; }
 
+    /// <summary>The model for small steps (Settings → Model), as the watcher last worked it out; null: none of the engine's.</summary>
+    public string? Small { get; set; }
+
     /// <summary>An admin unloaded it (Admin → Models): it is not loaded again by itself until it loads once more.</summary>
     public void Dropped(string model) => _dropped[model] = true;
 
@@ -102,6 +121,25 @@ public sealed class EngineState(TimeProvider clock)
     /// <summary>An admin unloaded it: an earlier Load of theirs is no longer followed up.</summary>
     public void Forget(string model) => _asked.TryRemove(model, out _);
 
+    /// <summary>
+    /// The models an admin loaded in place of one that never makes room (Load instead: the model new chats use, the one for
+    /// small steps, another loaded so), and when: they never make room either (<see cref="Held"/>, before the model new chats
+    /// use), until an admin unloads one, loads another in its place, or it fails to load.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _instead = new(StringComparer.Ordinal);
+
+    /// <summary>An admin loaded <paramref name="model"/> in place of a model that never makes room.</summary>
+    public void Instead(string model) => _instead[model] = clock.GetUtcNow();
+
+    /// <summary><paramref name="model"/> is no longer held for an admin (unloaded, or another took its place).</summary>
+    public void Release(string model) => _instead.TryRemove(model, out _);
+
+    /// <summary>The models an admin loaded in place of others (<see cref="Instead"/>), the oldest first.</summary>
+    public IReadOnlyList<string> LoadedInstead => [.. _instead.OrderBy(i => i.Value).Select(i => i.Key)];
+
+    /// <summary>The models whose admin's Load is still followed up (<see cref="StillAsked"/>).</summary>
+    public IReadOnlyList<string> StillAskedModels() => [.. _asked.Keys.Where(StillAsked)];
+
     /// <summary>Whether an admin's Load of it is still being followed up: asked within <see cref="AskedFor"/>, not loaded since.</summary>
     public bool StillAsked(string model) => _asked.TryGetValue(model, out var at) && clock.GetUtcNow() - at < AskedFor;
 
@@ -115,23 +153,29 @@ public sealed class EngineState(TimeProvider clock)
     /// again its list said loaded, and the engine says loaded until the model has stopped: a request for it let through
     /// meanwhile would reach an engine without it, which loads it by unloading the model used least recently.
     /// </summary>
-    public void Unloading(string model)
+    public void Unloading(string model, string? why = null)
     {
         _stopping[model] = clock.GetTimestamp();
+        _stopped[model] = clock.GetUtcNow();
+        if (why is not null)
+        {
+            _why[model] = (why, clock.GetUtcNow());
+        }
         lock (_stopping)
         {
-            _now = _now with { Models = [.. _now.Models.Select(m => m.Name == model && m.Status == "loaded" ? m with { Status = "unloaded" } : m)] };
+            _now = _now with { Models = [.. _now.Models.Select(m => m.Name == model && m.Status == "loaded" ? m with { Status = "unloading" } : m)] };
         }
     }
 
     /// <summary>The app did not unload <paramref name="model"/> after all (it was asked for meanwhile, or the engine refused): loaded, as before.</summary>
     public void NotUnloading(string model)
     {
+        _stopped.TryRemove(model, out _);
         if (_stopping.TryRemove(model, out _))
         {
             lock (_stopping)
             {
-                _now = _now with { Models = [.. _now.Models.Select(m => m.Name == model && m.Status == "unloaded" ? m with { Status = "loaded" } : m)] };
+                _now = _now with { Models = [.. _now.Models.Select(m => m.Name == model && m.Status == "unloading" ? m with { Status = "loaded" } : m)] };
             }
         }
     }
@@ -139,19 +183,44 @@ public sealed class EngineState(TimeProvider clock)
     /// <summary>
     /// <paramref name="model"/> loads: a request for it was let through, or an admin loaded it. What the engine says of it
     /// goes again (though the app told it to unload a moment ago), and it is seen loaded from when the engine says so.
+    /// <paramref name="why"/>: for the page ("for a chat or an API request", "loaded by an admin", "kept loaded").
     /// </summary>
-    public void Loading(string model)
+    public void Loading(string model, string? why = null)
     {
         _stopping.TryRemove(model, out _);
+        _stopped.TryRemove(model, out _);
         _loaded.TryRemove(model, out _);
+        if (why is not null)
+        {
+            _why[model] = (why, clock.GetUtcNow());
+        }
     }
+
+    /// <summary>Why <paramref name="model"/> loads or unloads now, and since when; null when nothing was recorded.</summary>
+    public (string Why, DateTimeOffset Since)? Reason(string model) => _why.TryGetValue(model, out var r) ? r : null;
 
     /// <summary>
     /// What the engine said (asked at <paramref name="asked"/>, from <see cref="Asking"/>), with the models the app told to
-    /// unload shown unloaded while it still lists them loaded (<see cref="Unloading"/>).
+    /// unload shown unloading while it still lists them loaded (<see cref="Unloading"/>), and unloaded, not failed, when the
+    /// router killed one that did not stop in time.
     /// </summary>
     public IReadOnlyList<EngineModel> Seen(IReadOnlyList<EngineModel> models, long asked) =>
-        _stopping.IsEmpty ? models : [.. models.Select(m => Stopped(m, asked) ? m : m with { Status = "unloaded" })];
+        _stopping.IsEmpty && _stopped.IsEmpty ? models : [.. models.Select(m => Stopped(m, asked) ? Killed(m) : m with { Status = "unloading" })];
+
+    /// <summary>A model listed failed shortly after the app told it to unload: killed as it did not stop in time, so unloaded.</summary>
+    private EngineModel Killed(EngineModel m)
+    {
+        if (!_stopped.TryGetValue(m.Name, out var at))
+        {
+            return m;
+        }
+        if (m.Status is "loaded" or "loading" || clock.GetUtcNow() - at >= Stopping)
+        {
+            _stopped.TryRemove(new KeyValuePair<string, DateTimeOffset>(m.Name, at));
+            return m;
+        }
+        return m.Status == "failed" ? m with { Status = "unloaded" } : m;
+    }
 
     /// <summary>Whether what the engine said of <paramref name="m"/> goes: it was not told to unload, or no longer lists it loaded.</summary>
     private bool Stopped(EngineModel m, long asked)
@@ -180,8 +249,14 @@ public sealed class EngineState(TimeProvider clock)
     {
         var models = Seen(engine, asked);
         var now = clock.GetUtcNow();
+        Evictions(_now.Models, models, now);
         foreach (var m in models)
         {
+            if (m.Status is "loaded" or "unloaded" or "failed" && _why.TryGetValue(m.Name, out var why) && now - why.Since >= Settle)
+            {
+                // Loaded or stopped: the reason was for the way there.
+                _why.TryRemove(new KeyValuePair<string, (string, DateTimeOffset)>(m.Name, why));
+            }
             if (m.Status == "loaded")
             {
                 _loaded.TryAdd(m.Name, now);
@@ -194,9 +269,15 @@ public sealed class EngineState(TimeProvider clock)
             {
                 _dropped.TryRemove(m.Name, out _);
             }
-            if (m.Status == "loaded")
+            if (m.Status is "loaded" or "failed")
             {
+                // An admin's Load ended, either way: a failed one waits for its next try (MayRetry), not followed up again.
                 _asked.TryRemove(m.Name, out _);
+            }
+            if (m.Status == "failed")
+            {
+                // Not loaded, so it holds no place for the admin who loaded it instead of another.
+                _instead.TryRemove(m.Name, out _);
             }
             if (m.Status == "failed")
             {
@@ -218,10 +299,38 @@ public sealed class EngineState(TimeProvider clock)
         }
         lock (_stopping)
         {
-            // One told to unload since it was looked at above counts as unloaded too.
-            _now = new Snapshot([.. models.Select(m => m.Status == "loaded" && _stopping.ContainsKey(m.Name) ? m with { Status = "unloaded" } : m)], null, now);
+            // One told to unload since it was looked at above counts as unloading too.
+            _now = new Snapshot([.. models.Select(m => m.Status == "loaded" && _stopping.ContainsKey(m.Name) ? m with { Status = "unloading" } : m)], null, now);
         }
     }
+
+    /// <summary>
+    /// The models the engine unloaded by its own choice since it was last looked at: loaded then, unloaded now, not told to by
+    /// the app, while another is loaded or loading (all of them gone at once is a restart, not a choice).
+    /// </summary>
+    private void Evictions(IReadOnlyList<EngineModel> before, IReadOnlyList<EngineModel> now, DateTimeOffset at)
+    {
+        if (!now.Any(m => m.Status is "loaded" or "loading"))
+        {
+            return;
+        }
+        foreach (var m in now.Where(m => m.Status == "unloaded" && !_stopped.ContainsKey(m.Name) && before.Any(b => b.Name == m.Name && b.Status == "loaded")))
+        {
+            _evicted.AddOrUpdate(m.Name, _ => (1, at), (_, e) => (at - e.At >= EvictionsFor ? 1 : e.Count + 1, at));
+        }
+    }
+
+    /// <summary>
+    /// Whether the watcher may load <paramref name="model"/> again: the engine unloaded it by its own choice fewer than twice
+    /// lately, or the wait after the last time is over (1, 2, 4… minutes, as for a failed load). Twice means the engine holds
+    /// fewer models than the app thinks (its limit is lower than Models loaded at once), and two models would push each
+    /// other out for ever.
+    /// </summary>
+    public bool MayReload(string model) =>
+        !_evicted.TryGetValue(model, out var e) || e.Count < 2 || clock.GetUtcNow() - e.At >= Wait(e.Count - 1);
+
+    /// <summary>How many times lately the engine unloaded <paramref name="model"/> by its own choice.</summary>
+    public int Evicted(string model) => _evicted.TryGetValue(model, out var e) && clock.GetUtcNow() - e.At < EvictionsFor ? e.Count : 0;
 
     /// <summary>
     /// Whether a model the router marked failed is tried again now (the watcher loads a kept one then). Failed is
@@ -267,7 +376,10 @@ public sealed class EngineState(TimeProvider clock)
 
     public void Fail(string error) => _now = _now with { Error = error, At = clock.GetUtcNow() };
 
-    /// <summary>"loaded", "loading", "unloaded", "failed" (its last load ended in an error), or null when the engine does not have that model.</summary>
+    /// <summary>
+    /// "loaded", "loading", "unloading" (the app told it to unload and the engine has not stopped it yet), "unloaded", "failed"
+    /// (its last load ended in an error), or null when the engine does not have that model.
+    /// </summary>
     public string? StatusOf(string model) => _now.Models.FirstOrDefault(m => m.Name == model)?.Status;
 }
 
@@ -767,7 +879,7 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
     /// makes room: EngineRoute). One that failed to load does too once its wait is over (EngineState.MayAsk).
     /// </summary>
     public bool OnRequest(string model, IReadOnlySet<string> onEngine) =>
-        onEngine.Contains(model) && !Loaded(model, onEngine) && (engine.StatusOf(model) is "unloaded" or "loading" || engine.MayAsk(model))
+        onEngine.Contains(model) && !Loaded(model, onEngine) && (engine.StatusOf(model) is "unloaded" or "loading" or "unloading" || engine.MayAsk(model))
         && ((engine.Held.Contains(model) && !engine.WasDropped(model)) || PlaceLeft);
 
     /// <summary>
@@ -775,8 +887,11 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
     /// loaded, the one new chats use, the one for small steps while it keeps one), loaded or kept for them until they load
     /// again, are fewer than it holds at once. One an admin unloaded gives its place up until it loads again.
     /// </summary>
-    public bool PlaceLeft =>
-        catalog.Kept().Concat(engine.Held.Where(h => !engine.WasDropped(h))).Distinct(StringComparer.Ordinal).Count() < options.Value.ModelsMax;
+    public bool PlaceLeft => Holders.Count < options.Value.ModelsMax;
+
+    /// <summary>The models whose places are taken or kept for them: kept loaded, the one new chats use, the one for small steps, loaded instead of one.</summary>
+    private List<string> Holders =>
+        [.. catalog.Kept().Concat(engine.Held.Where(h => !engine.WasDropped(h))).Distinct(StringComparer.Ordinal)];
 
     /// <summary>Whether a model can answer: loaded, or loaded on request.</summary>
     public bool Ready(string model, IReadOnlySet<string> onEngine) => Loaded(model, onEngine) || OnRequest(model, onEngine);
@@ -827,12 +942,16 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
         var onEngine = await OnEngineAsync(ct);
         if (onEngine.Contains(model) && engine.Now is { Error: null, At: not null } && !Ready(model, onEngine))
         {
-            return engine.StatusOf(model) == "loading"
-                ? $"{model} is loading. Try again in a minute, or choose another model."
-                : engine.StatusOf(model) == "failed"
-                    ? $"{model} could not be loaded just now. Choose another model, or try again in a few minutes; an admin can see why under Admin → Models."
-                    : $"{model} is not loaded right now, and the engine has no place for it: each place is taken by, or kept for, a model kept loaded or used "
-                      + "by everyone (the model new chats use, the one for small steps). Choose another model, or ask an admin to raise Models loaded at once.";
+            var holders = string.Join(", ", Holders.Where(h => h != model));
+            return engine.StatusOf(model) switch
+            {
+                "loading" => $"{model} is loading. Try again in a minute, or choose another model.",
+                "failed" => $"{model} could not be loaded just now. Choose another model, or try again in a few minutes; an admin can see why under Admin → Models.",
+                _ when engine.WasDropped(model) => $"{model} was unloaded by an admin (Admin → Models), and the engine has no place for it now: each place is taken by, "
+                    + $"or kept for, {holders}. Choose another model, or ask an admin to load it.",
+                _ => $"{model} is not loaded right now, and the engine has no place for it: each place is taken by, or kept for, {holders} (kept loaded, "
+                    + "loaded by an admin, or used by everyone). Choose another model, or ask an admin to raise Models loaded at once.",
+            };
         }
         // One credit over the chat and API keys, and the groups' credit.
         return await credit.RefusalAsync(user, ct);

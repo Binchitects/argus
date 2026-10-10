@@ -47,6 +47,12 @@ public sealed partial class EngineRoute
     public static readonly TimeSpan RoomWait = TimeSpan.FromMinutes(1);
 
     /// <summary>
+    /// How long a request, or an admin's Load, waits for a model the app told to unload to stop: the router stops one within
+    /// 10 seconds (it kills one that is still answering then).
+    /// </summary>
+    public static readonly TimeSpan StopWait = TimeSpan.FromSeconds(15);
+
+    /// <summary>
     /// How long a model must have been seen idle before it makes room for one the watcher loads again (the model new
     /// chats use): an API key's agent, idle a moment between two of its requests, is not pushed out for it.
     /// </summary>
@@ -229,9 +235,9 @@ public sealed partial class EngineRoute
     /// The engine was told to unload <paramref name="model"/> (an admin's Unload, working hours that ended): it counts as
     /// unloaded at once, on every replica, until the engine has stopped it (<see cref="EngineState.Unloading"/>).
     /// </summary>
-    public void Unloaded(string model)
+    public void Unloaded(string model, string? why = null)
     {
-        engine.Unloading(model);
+        engine.Unloading(model, why);
         replicas.Tell(UnloadingTopic, model);
     }
 
@@ -373,11 +379,35 @@ public sealed partial class EngineRoute
     private async Task RoomAsync(string model, CancellationToken ct)
     {
         // Whether the engine is full is asked of it below.
-        if (engine.Now is not { Error: null, At: not null } || await StatusAsync(model, ct) is not ("unloaded" or "failed"))
+        if (engine.Now is not { Error: null, At: not null })
         {
             return;
         }
+        // The minute's wait for room counts from the request: a stop waited for first is part of it.
         var until = clock.GetUtcNow() + RoomWait;
+        var status = await StatusAsync(model, ct);
+        // Told to unload a moment ago and still stopping: a request now would reach a model on its way out (the engine
+        // answers it with an error, or kills it under the answer). It is let through once it has stopped, to load again;
+        // the engine is asked each time (real time: the stop is the engine's).
+        var stopping = System.Diagnostics.Stopwatch.StartNew();
+        while (status == "unloading" && stopping.Elapsed < StopWait)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(500), ct);
+            try
+            {
+                var asked = engine.Asking();
+                status = engine.Seen(await client.ModelsAsync(ct), asked).FirstOrDefault(m => m.Name == model)?.Status;
+            }
+            catch (EngineException)
+            {
+                // The request says why itself.
+                return;
+            }
+        }
+        if (status is not ("unloaded" or "failed" or "unloading"))
+        {
+            return;
+        }
         while (true)
         {
             var room = await LookAsync(model, TimeSpan.Zero, ct);
@@ -388,8 +418,9 @@ public sealed partial class EngineRoute
             if (room == Room.None)
             {
                 LogFull(logger, model);
-                throw new ChatGatewayException($"{model} cannot be loaded now: each place in the engine is taken by, or kept for, a model kept loaded or used by "
-                    + "everyone (the model new chats use, the one for small steps). Choose a model that is loaded, or ask an admin to raise Models loaded at once.", 503) { NotLoaded = true };
+                throw new ChatGatewayException($"{model} cannot be loaded now: each place in the engine is taken by, or kept for, "
+                    + $"{string.Join(", ", engine.Held.Where(h => h != model))} (kept loaded, loaded by an admin, or used by everyone). "
+                    + "Choose a model that is loaded, or ask an admin to raise Models loaded at once.", 503) { NotLoaded = true };
             }
             if (clock.GetUtcNow() >= until)
             {
@@ -423,7 +454,8 @@ public sealed partial class EngineRoute
         var models = engine.Now.Models;
         bool Up(string name) => models.FirstOrDefault(m => m.Name == name)?.Status is "loaded" or "loading";
         var held = engine.Held;
-        var up = models.Count(m => m.Status is "loaded" or "loading" && m.Name != model);
+        // A model still stopping takes its place until it has stopped.
+        var up = models.Count(m => m.Status is "loaded" or "loading" or "unloading" && m.Name != model);
         var reserved = held.Count(h => h != model && !Up(h) && !engine.WasDropped(h) && models.Any(m => m.Name == h));
         var coming = _coming.Count(c => c.Key != model && now - c.Value < OnItsWay && !Up(c.Key) && !held.Contains(c.Key));
         return up + reserved + coming < options.Value.ModelsMax;
@@ -463,7 +495,9 @@ public sealed partial class EngineRoute
         }
         var held = engine.Held;
         var coming = _coming.Keys.Count(k => k != model && !held.Contains(k));
-        var others = models.Where(m => m.Status is "loaded" or "loading" && m.Name != model).ToList();
+        // A model still stopping takes its place until it has stopped: a request let through meanwhile would have the engine
+        // unload another to load it.
+        var others = models.Where(m => m.Status is "loaded" or "loading" or "unloading" && m.Name != model).ToList();
         // The places of the models that never make room: taken, or kept for them while they are not loaded (each loads again:
         // the watcher's, or the next small step's), unless an admin unloaded it. The others share what is left.
         var heldUp = others.Count(m => held.Contains(m.Name));
@@ -500,7 +534,7 @@ public sealed partial class EngineRoute
                 continue;
             }
             // Unloaded from now on for every request; one that came for it meanwhile keeps it.
-            engine.Unloading(spare);
+            engine.Unloading(spare, $"making room for {model}");
             Interlocked.MemoryBarrier();
             if (InUse(spare))
             {
@@ -534,11 +568,166 @@ public sealed partial class EngineRoute
         return Room.Busy;
     }
 
+    /// <summary>
+    /// What an admin's Load found: a place (<see cref="Refusal"/> null), or why not. <see cref="Holding"/>: the models whose
+    /// places it would take (Load instead), when every place is held by models that never make room and some are not kept;
+    /// <see cref="Replaced"/>: the one it took.
+    /// </summary>
+    public sealed record AdminRoom(string? Refusal, IReadOnlyList<string> Holding, string? Replaced = null);
+
+    /// <summary>How long an admin's Load waits for room to be made (each model unloaded for it to stop).</summary>
+    private static readonly TimeSpan AdminWait = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Room for <paramref name="model"/>, which an admin loads, made by the app (never by the engine's own choice of the model
+    /// used least recently, which may be the one everyone is on, and the watcher would load that one back): a free place, or
+    /// one an idle model that may make room leaves (each waited for until it has stopped). When every place is held by models
+    /// that never make room, <paramref name="instead"/> takes the place of one that is not <paramref name="kept"/> (one loaded
+    /// instead before, then the model for small steps, then the model new chats use), else the admin is told which hold them.
+    /// </summary>
+    public async Task<AdminRoom> RoomForAdminAsync(string model, IReadOnlyCollection<string> kept, bool instead, CancellationToken ct)
+    {
+        // Real time: an admin waits for it, whatever the app's clock says.
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        string? replaced = null;
+        var replacedWasInstead = false;
+        // The admin's word is the last: earlier Loads of other models the engine has not loaded yet (lost as it restarted)
+        // are not followed up any more, nor do they hold a place on their way.
+        foreach (var other in engine.StillAskedModels().Where(m => m != model && !kept.Contains(m)))
+        {
+            engine.Forget(other);
+            _coming.TryRemove(other, out _);
+        }
+        while (true)
+        {
+            IReadOnlyList<EngineModel> models;
+            try
+            {
+                var asked = engine.Asking();
+                models = engine.Seen(await client.ModelsAsync(ct), asked);
+            }
+            catch (EngineException)
+            {
+                // The Load itself says why.
+                return new AdminRoom(null, [], replaced);
+            }
+            bool Up(string name) => models.FirstOrDefault(m => m.Name == name)?.Status is "loaded" or "loading";
+            if (Up(model))
+            {
+                return new AdminRoom(null, [], replaced);
+            }
+            var now = clock.GetUtcNow();
+            // A place given to a model whose request has reached the engine (it loaded) or never came is free again.
+            foreach (var (name, at) in _coming.Where(c => c.Key != model && (now - c.Value >= OnItsWay || Up(c.Key))))
+            {
+                _coming.TryRemove(new KeyValuePair<string, DateTimeOffset>(name, at));
+            }
+            // The places of the models that never make room (the one the admin's model takes excepted): taken, or kept for them.
+            // The kept ones as they are now (a Keep just changed is not in the watcher's list yet), and the roles it worked out.
+            var held = kept.Concat(engine.LoadedInstead).Concat(engine.Held.Where(h => h == engine.Default || h == engine.Small))
+                .Where(h => h != model && h != replaced).Distinct(StringComparer.Ordinal).ToList();
+            var others = models.Where(m => m.Status is "loaded" or "loading" or "unloading" && m.Name != model).ToList();
+            var reserved = held.Count(h => !Up(h) && !engine.WasDropped(h) && models.Any(m => m.Name == h && m.Status != "unloading"));
+            var coming = _coming.Count(c => c.Key != model && now - c.Value < OnItsWay && !Up(c.Key) && !held.Contains(c.Key));
+            if (others.Count + reserved + coming < options.Value.ModelsMax)
+            {
+                Coming(model, "loaded by an admin");
+                return new AdminRoom(null, [], replaced);
+            }
+            if (waited.Elapsed >= AdminWait)
+            {
+                if (replacedWasInstead)
+                {
+                    engine.Instead(replaced!);
+                }
+                return new AdminRoom($"No place was made for {model} in time: {string.Join(", ", others.Select(o => $"{o.Name} ({o.Status})"))} " +
+                    "are answering or stopping. Try again in a moment.", []);
+            }
+            if (others.Any(o => o.Status == "unloading") || (coming > 0 && others.Count + reserved < options.Value.ModelsMax))
+            {
+                // A model stopping leaves its place in a moment; a request let through for another takes its place in a moment.
+                await Task.Delay(TimeSpan.FromMilliseconds(500), ct);
+                continue;
+            }
+            var loaded = others.Where(m => m.Status == "loaded").Select(m => m.Name).ToList();
+            // Those that may make room: not held (the one replaced is not any more), the smallest first (the watcher's order; one it
+            // has not placed yet, last).
+            var spares = engine.Spare.Where(n => loaded.Contains(n) && !held.Contains(n))
+                .Concat(loaded.Where(n => !held.Contains(n) && !engine.Spare.Contains(n))).ToList();
+            if (replaced is not null && loaded.Contains(replaced) && !spares.Contains(replaced))
+            {
+                spares.Insert(0, replaced);
+            }
+            if (spares.Count == 0)
+            {
+                // Every place is held: by models kept loaded, the model new chats use, the one for small steps, or ones an
+                // admin loaded instead of another. One that is not kept gives its place up, when the admin says so.
+                var replaceable = engine.LoadedInstead.Where(h => h != model && !kept.Contains(h))
+                    .Concat(held.Where(h => !kept.Contains(h)).Reverse()).Distinct(StringComparer.Ordinal).ToList();
+                if (replaced is not null || replaceable.Count == 0)
+                {
+                    return new AdminRoom($"Every place in the engine ({options.Value.ModelsMax}) is kept for a model kept loaded ({string.Join(", ", kept)}). " +
+                        "Stop keeping one, or raise \"Models loaded at once\" under Settings.", []);
+                }
+                if (!instead)
+                {
+                    return new AdminRoom($"Every place in the engine is held by a model that never makes room ({string.Join(", ", held)}). " +
+                        $"Load {model} instead of {replaceable[0]}, or stop keeping a model.", replaceable);
+                }
+                replaced = replaceable[0];
+                replacedWasInstead = engine.LoadedInstead.Contains(replaced);
+                engine.Release(replaced);
+                // The place is the admin's model's from now on: the watcher does not load the replaced one back meanwhile.
+                _coming[model] = clock.GetUtcNow();
+                continue;
+            }
+            string? idle = null;
+            foreach (var spare in spares)
+            {
+                if (await IdleAsync(spare, ct))
+                {
+                    idle = spare;
+                    break;
+                }
+            }
+            if (idle is null)
+            {
+                // Those that may make room are all answering: a moment, for one to be done.
+                await Task.Delay(TimeSpan.FromSeconds(1), ct);
+                continue;
+            }
+            engine.Unloading(idle, $"making room for {model}, loaded by an admin");
+            Interlocked.MemoryBarrier();
+            if (InUse(idle))
+            {
+                engine.NotUnloading(idle);
+                await Task.Delay(TimeSpan.FromMilliseconds(500), ct);
+                continue;
+            }
+            LogRoom(logger, idle, model);
+            try
+            {
+                await client.UnloadAsync(idle, ct);
+            }
+            catch (EngineException ex)
+            {
+                engine.NotUnloading(idle);
+                LogRoomFailed(logger, idle, ex.Message);
+                if (replacedWasInstead)
+                {
+                    engine.Instead(replaced!);
+                }
+                return new AdminRoom($"{idle} could not be unloaded to make room: {ex.Message}", []);
+            }
+            replicas.Tell(UnloadingTopic, idle);
+        }
+    }
+
     /// <summary>A place was found or made for <paramref name="model"/>: its own until the engine loads it, and loaded from now on, though the app told it to unload a moment ago.</summary>
-    private void Coming(string model)
+    private void Coming(string model, string why = "for a chat or an API request")
     {
         _coming[model] = clock.GetUtcNow();
-        engine.Loading(model);
+        engine.Loading(model, why);
     }
 
     /// <summary>

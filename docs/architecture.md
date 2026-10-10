@@ -94,12 +94,16 @@ loaded, not the one new chats use and not the one for small steps while it
 keeps a place (`EngineRoute`); with none idle, the request waits a minute, then
 says the engine is full rather than have it unload the big model. Idle means
 no request on its way to it either (the app's until they end, an API key's for
-10 seconds after it was let through), and a model the app unloads counts as
-unloaded at once, on every replica, though the engine lists it loaded until it
-has stopped (`EngineState`). An API key's request gets room the same way: the
-gateway asks the app before sending it (its guardrail). The watcher loads the
-model new chats use again should the engine unload it by its own choice, and
-the model for small steps in its place (or in the one it shares, once free).
+10 seconds after it was let through), and a model the app unloads is
+unloading at once, on every replica, though the engine lists it loaded until it
+has stopped (`EngineState`): it keeps its place until then, and a request that
+needs it waits for the stop. An API key's request, an admin's Load and the
+watcher's own loads get room the same way (the gateway asks the app first, by its
+guardrail), so llama.cpp, which always loads what a request asks for, never
+chooses for itself which model goes. The watcher loads the model new chats use
+again should the engine unload it by its own choice, and the model for small
+steps in its place (or in the one it shares, once free); one the engine pushes
+out twice in ten minutes waits before it comes back.
 
 **Sound and video in.** On upload the app has the sandbox's ffmpeg make an MP3
 of a sound, and a video's frames and sound track. A model that hears gets the

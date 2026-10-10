@@ -47,8 +47,8 @@ public static class OperationsEndpoints
     {
         var g = app.MapGroup("/api/admin").RequireAuthorization(AdminEndpoints.Policy);
         g.MapGet("/overview", OverviewAsync);
-        g.MapGet("/services", async (IHttpClientFactory f, IOptions<StackOptions> s, IOptions<ArgusOptions> a, IOptions<Dashboards.DashboardOptions> d) =>
-            Results.Ok(await ProbeAllAsync(f, s.Value, a.Value, d.Value)));
+        g.MapGet("/services", async (IHttpClientFactory f, IOptions<StackOptions> s, IOptions<ArgusOptions> a, IOptions<Dashboards.DashboardOptions> d, Models.MediaControl media,
+            CancellationToken ct) => Results.Ok(await ProbeAllAsync(f, s.Value, a.Value, d.Value, media, ct)));
         g.MapGet("/people.csv", PeopleCsvAsync);
 
         var argus = g.MapGroup("/argus");
@@ -274,7 +274,7 @@ public static class OperationsEndpoints
     private static async Task<IResult> OverviewAsync(AppDbContext db, UserManager<AppUser> users, Ledger ledger, ArgusAdmin argus,
         IHttpClientFactory factory, IOptions<StackOptions> stack, IOptions<ArgusOptions> argusOptions, IOptions<Dashboards.DashboardOptions> dashboards, Chat.ChatModels models,
         Dashboards.PromDatasource prom, TimeProvider clock, Replicas replicas, Storage.StorageDisks disks, IOptionsMonitor<Storage.StorageOptions> storage,
-        CancellationToken ct)
+        Models.MediaControl media, CancellationToken ct)
     {
         var people = await db.Users.AsNoTracking().Where(u => !u.IsDisabled).ToListAsync(ct);
         var admins = (await users.GetUsersInRoleAsync(Roles.Admin)).Count(u => !u.IsDisabled);
@@ -293,7 +293,7 @@ public static class OperationsEndpoints
         var mine = people.Select(p => (p, g: standing.GetValueOrDefault(p.Email ?? ""))).ToList();
         var over = mine.Where(x => x.g is { Budget: > 0 } g && g.Spend >= g.Budget).Select(x => x.p.UserName).ToList();
 
-        var probes = ProbeAllAsync(factory, stack.Value, argusOptions.Value, dashboards.Value);
+        var probes = ProbeAllAsync(factory, stack.Value, argusOptions.Value, dashboards.Value, media, ct);
         var certificate = Certificates.ReadAsync(prom, stack.Value, clock.GetUtcNow(), ct);
         var space = disks.ListAsync(ct);
         JsonNode? index = null;
@@ -345,7 +345,12 @@ public static class OperationsEndpoints
         };
     }
 
-    public static async Task<IReadOnlyList<Probe>> ProbeAllAsync(IHttpClientFactory factory, StackOptions s, ArgusOptions a, Dashboards.DashboardOptions d)
+    /// <summary>
+    /// Each service's probe. The picture and video servers run only while their model is loaded (MediaControl): one whose
+    /// model is unloaded, as meant (idle ten minutes, or never asked for), is idle, not down.
+    /// </summary>
+    public static async Task<IReadOnlyList<Probe>> ProbeAllAsync(IHttpClientFactory factory, StackOptions s, ArgusOptions a, Dashboards.DashboardOptions d,
+        Models.MediaControl? media = null, CancellationToken ct = default)
     {
         var http = factory.CreateClient("probe");
         var checks = new List<Task<Probe>>
@@ -364,7 +369,16 @@ public static class OperationsEndpoints
         {
             checks.Add(ProbeAsync(http, "Argus", "the code index", a.Url.TrimEnd('/') + "/healthz"));
         }
-        return await Task.WhenAll(checks);
+        var probes = await Task.WhenAll(checks);
+        if (media is null)
+        {
+            return probes;
+        }
+        // The picture and video servers, one model each (the speech server's several models run in one that always does).
+        var now = (await media.ListAsync(ct)).Where(x => x.Model.Id is null).ToDictionary(x => x.Model.Server, x => x.Now, StringComparer.Ordinal);
+        return [.. probes.Select(p => !p.Ok && (p.Name switch { "Pictures" => now.GetValueOrDefault("imagegen"), "Video" => now.GetValueOrDefault("videogen"), _ => null }) is "unloaded" or "off"
+            ? p with { Ok = true, Detail = "idle: its model is not loaded (it loads when asked for)" }
+            : p)];
     }
 
     /// <summary>Is something answering, and how fast. An HTTP error below 500 is still an answer.</summary>

@@ -120,8 +120,17 @@ public sealed partial class EngineWatcher : BackgroundService
                     foreach (var gone in was.Kept.Where(k => !kept.Contains(k) && Status(k) == "loaded"))
                     {
                         LogHoursUnload(logger, gone, hours.Window?.Name ?? "the pinned models");
-                        await engine.UnloadAsync(gone, stoppingToken);
-                        route.Unloaded(gone);
+                        // Unloading for every request before the engine is told.
+                        route.Unloaded(gone, hours.Window is { } w ? $"working hours \"{w.Name}\" do not keep it" : "working hours ended");
+                        try
+                        {
+                            await engine.UnloadAsync(gone, stoppingToken);
+                        }
+                        catch (EngineException)
+                        {
+                            state.NotUnloading(gone);
+                            throw;
+                        }
                     }
                     chatModels.Forget();
                 }
@@ -129,55 +138,53 @@ public sealed partial class EngineWatcher : BackgroundService
                 // The model new chats use, and those that never make room for another (EngineRoute).
                 var small = scope.ServiceProvider.GetRequiredService<SmallModel>().Name;
                 var usual = await UsualAsync(scope.ServiceProvider, hours.Window?.DefaultModel, small, Status, stoppingToken);
-                var held = Held(kept, usual, small, options.Value.ModelsMax, Status);
+                var held = Held(kept, usual, small, options.Value.ModelsMax, Status, state.LoadedInstead);
                 state.Default = usual;
+                state.Small = small;
                 var names = models.Where(m => m.Status == "loaded").Select(m => m.Name).ToList();
                 // What each model serves at once: its line's places, and the slots conversations keep; and which may make room.
                 await CapacityAsync(scope.ServiceProvider, true, names, held, stoppingToken);
                 if (lead && !loading)
                 {
-                    // One at a time: a load at the engine's limit first unloads the model used least recently,
-                    // which may be a kept one that sat idle; it comes back on a later round.
-                    // One that failed is tried again once its wait is over: the router also marks failed a model it
-                    // had to kill while it was being stopped, which is not broken (EngineState.MayRetry).
-                    if ((kept.FirstOrDefault(k => Status(k) == "unloaded") ?? kept.FirstOrDefault(state.MayRetry)
-                        ?? models.FirstOrDefault(m => m.Status == "unloaded" && state.StillAsked(m.Name))?.Name) is { } next)
+                    // One at a time, each through the app's room-making (an idle model that may make room unloads first), never
+                    // by the engine's own choice of the model used least recently, which may be another that never makes room.
+                    // One that failed is tried again once its wait is over: the router also marks failed a model it had to
+                    // kill while it was being stopped, which is not broken (EngineState.MayRetry). One the engine keeps
+                    // unloading by its own choice to load another waits too (EngineState.MayReload): it holds fewer models
+                    // than Models loaded at once says, and two would push each other out for ever.
+                    var keptNext = kept.FirstOrDefault(k => Status(k) == "unloaded" && Reload(k)) ?? kept.FirstOrDefault(state.MayRetry);
+                    var askedNext = models.FirstOrDefault(m => m.Status == "unloaded" && state.StillAsked(m.Name) && Reload(m.Name))?.Name;
+                    if (keptNext is { } next)
                     {
-                        LogLoading(logger, next);
-                        if (Status(next) == "failed")
+                        if (await route.RoomForAsync(next, TimeSpan.Zero, stoppingToken))
                         {
-                            state.Tried(next);
+                            LogLoading(logger, next);
+                            loading = await LoadAsync(next, "kept loaded", stoppingToken);
                         }
-                        await engine.LoadAsync(next, stoppingToken);
-                        loading = true;
                     }
-                    else if (options.Value.ModelsMax >= 2 && usual is { } back && !state.WasDropped(back) && (Status(back) == "unloaded" || state.MayRetry(back))
+                    else if (askedNext is { } asked2 && await route.RoomForAsync(asked2, TimeSpan.Zero, stoppingToken))
+                    {
+                        // An admin's Load the engine lost (it restarted under it).
+                        LogAsked(logger, asked2);
+                        loading = await LoadAsync(asked2, "loaded by an admin, again after the engine restarted", stoppingToken);
+                    }
+                    else if (options.Value.ModelsMax >= 2 && usual is { } back && held.Contains(back) && !state.WasDropped(back)
+                        && ((Status(back) == "unloaded" && Reload(back)) || state.MayRetry(back))
                         && await route.RoomForAsync(back, EngineRoute.Quiet, stoppingToken))
                     {
-                        // The model new chats use, unloaded by the engine to load another (an admin's Load at the limit, a request
-                        // that did not ask the app first): back, in a place left free or made by a model that may make room, idle
-                        // a minute (never by the engine's own choice).
+                        // The model new chats use, unloaded by the engine to load another (a request that did not ask the app
+                        // first): back, in a place left free or made by a model that may make room, idle a minute.
                         LogBack(logger, back);
-                        if (Status(back) == "failed")
-                        {
-                            state.Tried(back);
-                        }
-                        await engine.LoadAsync(back, stoppingToken);
-                        loading = true;
+                        loading = await LoadAsync(back, "the model new chats use", stoppingToken);
                     }
                     else if (options.Value.ModelsMax >= 2 && small is { } helper && helper != usual && !state.WasDropped(helper)
-                        && (Status(helper) == "unloaded" || state.MayRetry(helper))
+                        && ((Status(helper) == "unloaded" && Reload(helper)) || state.MayRetry(helper))
                         && await route.RoomForAsync(helper, held.Contains(helper) ? EngineRoute.Quiet : SmallQuiet, stoppingToken))
                     {
                         // The model for small steps: in the place kept for it, or, when it shares the last place with the models
                         // loaded on request, in that place while it is free, or once the model there has been idle a while.
                         LogSmall(logger, helper);
-                        if (Status(helper) == "failed")
-                        {
-                            state.Tried(helper);
-                        }
-                        await engine.LoadAsync(helper, stoppingToken);
-                        loading = true;
+                        loading = await LoadAsync(helper, "the model for small steps", stoppingToken);
                     }
                     else if (kept.Count > 0 && kept.All(k => Status(k) == "failed") && !models.Any(m => m.Status == "loaded"))
                     {
@@ -233,6 +240,51 @@ public sealed partial class EngineWatcher : BackgroundService
         }
     }
 
+    /// <summary>Whether the watcher may load <paramref name="model"/> again now (EngineState.MayReload), said once when it may not.</summary>
+    private bool Reload(string model)
+    {
+        if (state.MayReload(model))
+        {
+            _flapping.Remove(model);
+            return true;
+        }
+        if (_flapping.Add(model))
+        {
+            LogFlapping(logger, model, state.Evicted(model), options.Value.ModelsMax);
+        }
+        return false;
+    }
+
+    /// <summary>The models <see cref="Reload"/> said wait.</summary>
+    private readonly HashSet<string> _flapping = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Has the engine load <paramref name="model"/> (why: for Admin → Models): true when it does. The router answering that it
+    /// runs it already is no failure; any other refusal is logged and tried again later, without marking the engine down.
+    /// </summary>
+    private async Task<bool> LoadAsync(string model, string why, CancellationToken ct)
+    {
+        if (state.StatusOf(model) == "failed")
+        {
+            state.Tried(model);
+        }
+        state.Loading(model, why);
+        try
+        {
+            await engine.LoadAsync(model, ct);
+        }
+        catch (EngineException ex) when (ex.Message.Contains("already", StringComparison.OrdinalIgnoreCase))
+        {
+            // Loaded or loading already: what it was asked for.
+        }
+        catch (EngineException ex) when (!ex.Message.StartsWith("The engine is not reachable", StringComparison.Ordinal))
+        {
+            LogLoadRefused(logger, model, ex.Message);
+            return false;
+        }
+        return true;
+    }
+
     /// <summary>
     /// What each chat model serves at once, for the answers' lines (AnswerGate) and the engine's slots
     /// (SlotTable): a model of this engine alone, its parallel slots; a model with copies on other GPU
@@ -273,18 +325,22 @@ public sealed partial class EngineWatcher : BackgroundService
 
     /// <summary>
     /// The models that never make room for another (EngineState.Held), at most as many as the engine holds: those
-    /// <paramref name="kept"/> loaded, then the one new chats use (<paramref name="usual"/>), each the engine's own
+    /// <paramref name="kept"/> loaded, those an admin loaded <paramref name="instead"/> of one of these, then the one new
+    /// chats use (<paramref name="usual"/>), each the engine's own
     /// (<paramref name="status"/> knows it); then the model for small steps (<paramref name="small"/>), only while a
     /// place is left beside it for the others: else it shares that place with them, making room once idle, and comes
     /// back to it once free (or once the model there has been idle a while). With one model at a time, only the kept.
     /// </summary>
-    public static IReadOnlyList<string> Held(IReadOnlyList<string> kept, string? usual, string? small, int max, Func<string, string?> status)
+    public static IReadOnlyList<string> Held(IReadOnlyList<string> kept, string? usual, string? small, int max, Func<string, string?> status,
+        IReadOnlyList<string>? instead = null)
     {
+        // An admin's Load in place of one of them comes before the model new chats use and the one for small steps.
+        var first = kept.Concat((instead ?? []).Where(n => status(n) is not null)).Distinct(StringComparer.Ordinal).ToList();
         if (max < 2)
         {
-            return [.. kept.Take(max)];
+            return [.. first.Take(max)];
         }
-        var held = kept.Concat(new[] { usual }.OfType<string>().Where(n => status(n) is not null)).Distinct(StringComparer.Ordinal).Take(max).ToList();
+        var held = first.Concat(new[] { usual }.OfType<string>().Where(n => status(n) is not null)).Distinct(StringComparer.Ordinal).Take(max).ToList();
         if (small is not null && status(small) is not null && !held.Contains(small) && held.Count + 1 < max)
         {
             held.Add(small);
@@ -392,6 +448,15 @@ public sealed partial class EngineWatcher : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Engine: loading {Model} again, the model for small steps")]
     private static partial void LogSmall(ILogger logger, string model);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Engine: loading {Model} again, an admin's Load the engine lost")]
+    private static partial void LogAsked(ILogger logger, string model);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Engine: the engine refused to load {Model}: {Reason}")]
+    private static partial void LogLoadRefused(ILogger logger, string model, string reason);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Engine: the engine unloaded {Model} by its own choice {Count} times lately, to load another: it holds fewer than the {Max} models at once the app was told (check --models-max and the GPU memory); it waits before it is loaded again")]
+    private static partial void LogFlapping(ILogger logger, string model, int count, int max);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Engine: {Model} failed to load (the engine's log says why); load another from Admin -> Models")]
     private static partial void LogNothing(ILogger logger, string model);

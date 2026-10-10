@@ -80,6 +80,10 @@ public static class ModelEndpoints
             : new { Audience = Audience.Everyone, groups = Enumerable.Empty<object>() };
         GatewayModel? At(string name) => atGateway.FirstOrDefault(m => m.Name == name);
         var now = state.Now;
+        // Why a model is on its way in or out: what the app recorded, else (the router's own loads at its start) kept loaded.
+        string? Why(string name) => state.StatusOf(name) is "loading" or "unloading"
+            ? state.Reason(name)?.Why ?? (catalog.Kept().Contains(name) && state.StatusOf(name) == "loading" ? "kept loaded" : null)
+            : null;
         var hoursNow = hours.Now;
         // Kept now (the working hours' in force, else the pinned), and the pinned ones (each model's switch).
         var kept = e.Enabled ? catalog.Kept() : [];
@@ -97,6 +101,12 @@ public static class ModelEndpoints
                 status = state.StatusOf(m.Name) ?? (now is { Error: null, At: not null } ? "missing" : null), kept = pinned.Contains(m.Name), keptNow = kept.Contains(m.Name), m.Devices,
                 // Failed to load: when it is tried again.
                 retryAt = state.NextTry(m.Name),
+                // Loading or unloading: why (an admin, a request, kept loaded, making room for another), and since when.
+                why = Why(m.Name), since = state.Reason(m.Name)?.Since,
+                // Loaded by an admin in place of a model that never makes room: it never makes room either until unloaded.
+                instead = state.LoadedInstead.Contains(m.Name),
+                // The engine unloaded it by its own choice this often lately (it holds fewer models than the app thinks).
+                evicted = state.Evicted(m.Name),
                 file = m.File, m.Projector, context = m.Context, m.MaxOutput, m.Placement, m.GpuLayers, m.CpuMoe, m.KvType, m.Parallel, m.Ubatch,
                 m.Mtp, m.DraftHead, m.DraftMax, m.Yarn, m.Temperature, m.TopP, m.TopK, m.MinP, m.PresencePenalty,
                 m.ExtraPreset, m.Thinking, m.Tools, m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, price = Price(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok),
@@ -142,6 +152,7 @@ public static class ModelEndpoints
                 onRequest = e.Enabled && policy.PlaceLeft,
                 loaded = now.Models.Where(m => m.Status == "loaded").Select(m => m.Name),
                 loading = now.Models.Where(m => m.Status == "loading").Select(m => m.Name),
+                unloading = now.Models.Where(m => m.Status == "unloading").Select(m => m.Name),
                 gpus = hw?.Devices?.Select(g => new { g.Index, g.Name, g.Total }) ?? [],
                 plan = e.Enabled ? Plan(kept, local, e, library, hw) : null,
             },
@@ -267,11 +278,13 @@ public static class ModelEndpoints
     }
 
     /// <summary>
-    /// Loads a model now, beside the kept ones: at the engine's limit, the one used least recently unloads (a kept one,
-    /// or the one new chats use, comes back, and then this one may make room for it).
+    /// Loads a model now, beside the kept ones. At the engine's limit the app makes room (never the engine, whose choice of
+    /// the model used least recently may be the one everyone is on, which the watcher would then load back): an idle model
+    /// that may make room unloads first. When every place is held by models that never make room, the admin is told which,
+    /// and <c>?instead=true</c> loads it in place of one that is not kept (it then never makes room either, until unloaded).
     /// </summary>
-    private static async Task<IResult> LoadAsync(string name, EngineClient engine, EngineState state, ModelCatalog catalog, EngineWatcher watcher,
-        ChatModels chatModels, IOptions<EngineOptions> options, MediaControl media, Audit audit, CancellationToken ct)
+    private static async Task<IResult> LoadAsync(string name, bool? instead, HttpContext http, EngineClient engine, EngineState state, EngineRoute route, ModelCatalog catalog,
+        EngineWatcher watcher, ChatModels chatModels, IOptions<EngineOptions> options, MediaControl media, Audit audit, CancellationToken ct)
     {
         if (MediaControl.Find(name) is not null)
         {
@@ -292,29 +305,41 @@ public static class ModelEndpoints
         {
             return AuthEndpoints.Problem(409, "full", FullMessage(kept.Count, options.Value.ModelsMax));
         }
+        var room = await route.RoomForAdminAsync(name, kept, instead == true, ct);
+        if (room.Refusal is { } refusal)
+        {
+            return room.Holding.Count > 0
+                ? Results.Json(new { status = "held", error = refusal, holding = room.Holding }, statusCode: 409)
+                : AuthEndpoints.Problem(409, "full", refusal);
+        }
         if (state.StatusOf(name) == "failed")
         {
             // A try of a model that failed to load: should it fail again, the next try by itself waits longer.
             state.Tried(name);
         }
+        var by = http.User.Identity?.Name is { Length: > 0 } who ? $"loaded by {who}" : "loaded by an admin";
         try
         {
             // Loaded again, though the app told it to unload a moment ago; followed up should the engine lose it.
-            state.Loading(name);
+            state.Loading(name, room.Replaced is { } r ? $"{by} instead of {r}" : by);
             state.Asked(name);
+            if (room.Replaced is not null)
+            {
+                state.Instead(name);
+            }
             await engine.LoadAsync(name, ct);
         }
-        catch (EngineException ex)
+        catch (EngineException ex) when (!ex.Message.Contains("already", StringComparison.OrdinalIgnoreCase))
         {
             return AuthEndpoints.Problem(503, "engine", ex.Message);
         }
         chatModels.Forget();
         watcher.Wake();
-        await audit.WriteAsync("model.load", name);
+        await audit.WriteAsync("model.load", room.Replaced is { } replaced ? $"{name} (instead of {replaced})" : name);
         return Results.Accepted();
     }
 
-    private static async Task<IResult> UnloadAsync(string name, EngineClient engine, EngineState state, EngineRoute route, ModelCatalog catalog, EngineWatcher watcher,
+    private static async Task<IResult> UnloadAsync(string name, HttpContext http, EngineClient engine, EngineState state, EngineRoute route, ModelCatalog catalog, EngineWatcher watcher,
         ChatModels chatModels, ModelHoursState hours, MediaControl media, Audit audit, CancellationToken ct)
     {
         if (MediaControl.Find(name) is not null)
@@ -338,15 +363,18 @@ public static class ModelEndpoints
             {
                 catalog.SetKept(catalog.Pinned().Where(k => k != name));
             }
-            // Nor loaded again by the app as the model new chats use, nor as an admin's Load being followed up.
+            // Nor loaded again by the app as the model new chats use, nor as an admin's Load being followed up, nor held for one.
             state.Dropped(name);
             state.Forget(name);
+            state.Release(name);
+            // Unloading at once for every request (before the engine is told: a request let through meanwhile would reach a
+            // model on its way out), though the engine lists it loaded until it has stopped.
+            route.Unloaded(name, http.User.Identity?.Name is { Length: > 0 } who ? $"unloaded by {who}" : "unloaded by an admin");
             await engine.UnloadAsync(name, ct);
-            // Unloaded at once for every request, though the engine lists it loaded until it has stopped.
-            route.Unloaded(name);
         }
         catch (EngineException ex)
         {
+            state.NotUnloading(name);
             return AuthEndpoints.Problem(503, "engine", ex.Message);
         }
         chatModels.Forget();
