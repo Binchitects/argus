@@ -45,8 +45,24 @@ internal sealed class GatewayException(string message, int? status = null, bool 
 }
 
 /// <summary>The gateway's OpenAI-compatible API, with the person's key.</summary>
+/// <summary>The gateway's stream went quiet for too long: the engine stopped, or the connection did without saying so.</summary>
+internal sealed class StreamStalledException(string message) : IOException(message);
+
 internal sealed partial class GatewayClient(HttpClient http, string baseUrl, string key)
 {
+    /// <summary>The finish reason of an answer cut short by a lost connection after part of it arrived (what arrived is kept).</summary>
+    public const string Interrupted = "interrupted";
+
+    /// <summary>How long the stream may stay quiet before its first event (a long prompt is read first) and between two.</summary>
+    public TimeSpan FirstEventWait { get; set; } = TimeSpan.FromMinutes(15);
+    public TimeSpan EventWait { get; set; } = TimeSpan.FromMinutes(3);
+
+    /// <summary>The waits before each new try of a request the gateway could not take (it restarts, a model loads): about a minute and a half.</summary>
+    public TimeSpan[] RetryWaits { get; set; } = [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(45)];
+
+    /// <summary>Told before each new try: what failed, the wait, which try.</summary>
+    public Action<string>? Retrying { get; set; }
+
     public string BaseUrl { get; } = baseUrl.TrimEnd('/');
 
     /// <summary>The ids /v1/models lists for this key.</summary>
@@ -132,9 +148,11 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
             {
                 return await StreamOnceAsync(request, guard, ct);
             }
-            catch (Exception e) when (!shown && attempt < 2 && !ct.IsCancellationRequested && Retryable(e))
+            catch (Exception e) when (!shown && attempt < RetryWaits.Length && !ct.IsCancellationRequested && Retryable(e))
             {
-                await Task.Delay(TimeSpan.FromSeconds(attempt == 0 ? 2 : 5), ct);
+                var wait = RetryWaits[attempt];
+                Retrying?.Invoke($"The gateway did not answer ({Fmt.OneLine(e.Message, 120)}): trying again in {wait.TotalSeconds:0} s ({attempt + 2} of {RetryWaits.Length + 1}).");
+                await Task.Delay(wait, ct);
             }
         }
     }
@@ -165,7 +183,19 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
         using var req = Request(HttpMethod.Post, "/v1/chat/completions");
         req.Content = new StringContent(Json.Line(request), Encoding.UTF8, "application/json");
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
-        using var res = await Send(req, ct);
+        // A watchdog: no answer at all for too long (not even its headers), or the stream quiet for too long, is a stalled one.
+        using var quiet = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        quiet.CancelAfter(FirstEventWait);
+        HttpResponseMessage started;
+        try
+        {
+            started = await Send(req, quiet.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new StreamStalledException($"the answer did not start (nothing for {FirstEventWait.TotalMinutes:0.#} minutes)");
+        }
+        using var res = started;
         if (!res.IsSuccessStatusCode)
         {
             throw Failure(res.StatusCode, await res.Content.ReadAsStringAsync(ct));
@@ -191,17 +221,48 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
         var pieces = new SortedDictionary<int, ToolCallPieces>();
         TokenUsage? usage = null;
         string? finish = null;
+        var said = false;
+        var ended = false;
         await using var stream = await res.Content.ReadAsStreamAsync(ct);
-        await foreach (var ev in Sse.ReadAsync(stream, ct))
+        try
         {
-            if (ev.Data == "[DONE]")
+            await foreach (var ev in Sse.ReadAsync(stream, quiet.Token))
             {
-                break;
+                quiet.CancelAfter(EventWait);
+                if (Event(ev.Data))
+                {
+                    ended = true;
+                    break;
+                }
             }
-            var chunk = Json.ParseObject(ev.Data);
+            // A connection closed without the stream's end (no [DONE], no finish reason): cut short, not finished.
+            if (!ended && finish is null)
+            {
+                throw new IOException("the connection closed before the answer's end");
+            }
+        }
+        catch (Exception e) when (!ct.IsCancellationRequested && (e is OperationCanceledException || Retryable(e)))
+        {
+            var why = e is OperationCanceledException ? new StreamStalledException($"the answer stopped coming (nothing for {(said ? EventWait : FirstEventWait).TotalMinutes:0.#} minutes)") : e;
+            if (!said)
+            {
+                throw why;
+            }
+            // Part of the answer reached the person: it is kept, and the agent asks for the rest (its unfinished calls are dropped).
+            return new Completion(Assistant(text.ToString(), null), usage, Interrupted);
+        }
+
+        // One event of the stream; true at its end.
+        bool Event(string data)
+        {
+            if (data == "[DONE]")
+            {
+                return true;
+            }
+            var chunk = Json.ParseObject(data);
             if (chunk is null)
             {
-                continue;
+                return false;
             }
             if (chunk["error"] is JsonObject error)
             {
@@ -214,16 +275,18 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
             var choice = First(chunk["choices"]);
             if (choice is null)
             {
-                continue;
+                return false;
             }
             finish = choice.Str("finish_reason") ?? finish;
             var delta = choice["delta"];
             if ((delta.Str("reasoning_content") ?? delta.Str("reasoning")) is { Length: > 0 } reasoning)
             {
+                said = true;
                 sink.Reasoning(reasoning);
             }
             if (delta.Str("content") is { Length: > 0 } content)
             {
+                said = true;
                 text.Append(content);
                 sink.Text(content);
             }
@@ -241,6 +304,7 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
                     p.Arguments.Append(call["function"].Str("arguments"));
                 }
             }
+            return false;
         }
         JsonArray? toolCalls = null;
         if (pieces.Count > 0)

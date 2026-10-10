@@ -126,6 +126,10 @@ public sealed class FakeGateway : FakeServer
     public Func<JsonObject, int> Failure { get; set; } = _ => 0;
     /// <summary>Holds each answer until the request is cancelled (to test Ctrl+C).</summary>
     public bool Hang { get; set; }
+    /// <summary>The requests whose answer stops after half its text, the connection dropped.</summary>
+    public Func<JsonObject, bool> Drop { get; set; } = _ => false;
+    /// <summary>The requests answered with a stream that never says anything.</summary>
+    public Func<JsonObject, bool> Silent { get; set; } = _ => false;
     public TaskCompletionSource FirstRequest { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public string Url => BaseUrl;
@@ -194,9 +198,24 @@ public sealed class FakeGateway : FakeServer
             await WriteEvent(ctx, Chunk(new JsonObject { ["content"] = "Let me think" }));
             await Task.Delay(Timeout.Infinite, ct);
         }
+        if (Silent(request))
+        {
+            ctx.Response.ContentType = "text/event-stream";
+            ctx.Response.SendChunked = true;
+            await ctx.Response.OutputStream.FlushAsync(ct);
+            await Task.Delay(Timeout.Infinite, ct);
+        }
         var reply = Answer(request);
         ctx.Response.ContentType = "text/event-stream";
         ctx.Response.SendChunked = true;
+        if (Drop(request))
+        {
+            await WriteEvent(ctx, Chunk(new JsonObject { ["role"] = "assistant", ["content"] = reply.Text[..(reply.Text.Length / 2)] }));
+            // Time for the client to read it: a reset drops what it has not read yet.
+            await Task.Delay(300, ct);
+            ctx.Response.Abort();
+            return;
+        }
         if (reply.Reasoning is { } reasoning)
         {
             await WriteEvent(ctx, Chunk(new JsonObject { ["reasoning_content"] = reasoning }));

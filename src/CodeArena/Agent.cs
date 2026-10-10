@@ -145,6 +145,8 @@ internal sealed class Agent
     /// <summary>0 for the main agent, 1 for a sub-agent (indented, not streamed).</summary>
     public int Depth { get; init; }
     public int MaxSteps { get; init; } = 200;
+    /// <summary>How often one turn carries on after a connection dropped mid-answer before it stops.</summary>
+    public const int MaxInterruptions = 3;
     public List<JsonObject> Messages { get; private set; } = [];
     /// <summary>The answer's text streams to the terminal (the main agent, not in a quiet run).</summary>
     public bool Stream { get; init; } = true;
@@ -346,6 +348,7 @@ internal sealed class Agent
     {
         Add(new JsonObject { ["role"] = "user", ["content"] = input });
         var last = "";
+        var interrupted = 0;
         for (var step = 0; step < MaxSteps; step++)
         {
             await MaybeCompactAsync(ct);
@@ -381,6 +384,26 @@ internal sealed class Agent
                 }
                 Session?.Usage(usage);
                 _knownTokens = usage.Prompt + usage.Completion;
+            }
+            if (answer.FinishReason == GatewayClient.Interrupted)
+            {
+                // The connection dropped mid-answer: what came is kept (when it said anything), and the model carries on from it.
+                if (++interrupted > MaxInterruptions)
+                {
+                    Warn($"The connection dropped mid-answer {interrupted} times in this turn: stopping here. Send a message to carry on.");
+                    if (answer.Text.Length > 0)
+                    {
+                        Add(answer.Message);
+                    }
+                    return answer.Text;
+                }
+                Warn("The connection dropped while the model was answering: it carries on from where it stopped.");
+                if (answer.Text.Length > 0)
+                {
+                    Add(answer.Message);
+                    Add(new JsonObject { ["role"] = "user", ["content"] = "(The connection dropped while you were answering: your answer so far is above. Carry on from where it stopped, without repeating it.)" });
+                }
+                continue;
             }
             Add(answer.Message);
             _knownCount = Messages.Count;

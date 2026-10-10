@@ -812,6 +812,16 @@ hold.
 
 ## When something is wrong
 
+Code Arena carries on by itself where it can. A gateway that does not answer
+(502, 503, 504, a lost connection: the Arena restarting, a model loading) is
+tried again five times over about a minute and a half, and the session says so
+each time. An answer that does not start within 15 minutes (a long prompt is
+read first), or that stops for 3 minutes, is given up and asked again. When
+the connection drops after part of an answer arrived (a stream that ends
+without its end counts too), that part is kept and the model is asked to carry
+on from where it stopped, up to three times a turn.
+
+
 - **"The certificate of … is not trusted"**: the Arena's certificate comes
   from a CA the machine does not know. Give the CA's file with `--ca` (above).
 - **"The name in … does not resolve" / "did not answer in time"**: check the
@@ -828,8 +838,8 @@ hold.
   prompt and the answer it asks for before it runs, so a request bigger than
   the limit is refused every minute: `/compact` makes the conversation smaller,
   or ask an admin to raise the limit. **"… requests at once"**: more answers at
-  once than your key may have (sub-agents count). Code Arena tries again twice,
-  a few seconds apart, before it says so.
+  once than your key may have (sub-agents count). Code Arena tries again (as
+  above) before it says so.
 - **"… has no OpenAI API (404)"**: the gateway is not at `gateway.DOMAIN`. Give
   it: `code-arena login --gateway https://…`.
 - **"Arena's tools are not available here"**: this Arena has no MCP endpoint

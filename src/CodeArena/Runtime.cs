@@ -99,6 +99,11 @@ internal sealed partial class Runtime : IAsyncDisposable
             throw new StartException(e.Message);
         }
         var rt = new Runtime(config, ui, env, http, new GatewayClient(http, config.GatewayUrl, config.ApiKey));
+        rt.Gateway.Retrying = said =>
+        {
+            rt.Notice(true, said);
+            rt.Agent?.Events?.Notice(said);
+        };
         try
         {
             await rt.InitAsync(o, ct);
@@ -586,7 +591,7 @@ internal sealed partial class Runtime : IAsyncDisposable
     /// <summary>The terminal is waiting for the person to type: what servers say waits for the next line (<see cref="SayLater"/>).</summary>
     public bool AtPrompt { get; set; }
 
-    private void Notice(bool warn, string text)
+    internal void Notice(bool warn, string text)
     {
         if (AtPrompt)
         {
