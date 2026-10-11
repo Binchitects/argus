@@ -77,8 +77,9 @@ case "$BACKUP_DIR" in /*) ;; *) BACKUP_DIR="$ROOT/${BACKUP_DIR#./}" ;; esac
 COPY_DIR="$(env_get BACKUP_COPY_DIR)"
 case "$COPY_DIR" in ""|/*) ;; *) COPY_DIR="$ROOT/${COPY_DIR#./}" ;; esac
 
-# Named volumes that are caches or models, not state.
-SKIP_VOLUMES=" audio acme sandbox postgres "
+# Named volumes that are caches or models, not state; media-status is what the picture and video
+# servers say they do now (rewritten every 2 seconds, in memory).
+SKIP_VOLUMES=" audio acme sandbox postgres media-status "
 LOG_VOLUMES=" loki prometheus alertmanager "
 
 ACTION=backup; FROM=""; WITH_CONFIG=0; VERIFY_DIR=""; YES=0
@@ -348,11 +349,13 @@ fi
 # ---- 3. volumes -------------------------------------------------------------------
 say "==> volumes"
 SNAPSHOT_PY='
-import os, sqlite3, sys, tarfile, tempfile
+import os, sqlite3, stat, sys, tarfile, tempfile
 src, out = "/src", sys.argv[1]
 companions = ("-wal", "-shm", "-journal")
 def is_sqlite(p):
+    # Only a regular file is opened: a pipe (the log of a server) would wait for ever for a writer.
     try:
+        if not stat.S_ISREG(os.lstat(p).st_mode): return False
         with open(p, "rb") as fh: return fh.read(16) == b"SQLite format 3\x00"
     except OSError: return False
 n_sql = 0

@@ -166,3 +166,39 @@ class ComposeMountTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SnapshotTests(unittest.TestCase):
+    """The volume snapshot backup.sh runs in a helper container: SQLite databases copied consistently, anything else as it is."""
+
+    def test_A_pipe_in_a_volume_is_kept_as_a_pipe_and_never_opened(self):
+        import re
+        import sqlite3
+        import subprocess
+        import sys
+        import tarfile
+        import tempfile
+        from pathlib import Path
+
+        script = (Path(__file__).resolve().parents[2] / "deploy" / "scripts" / "backup.sh").read_text()
+        code = re.search(r"SNAPSHOT_PY='\n(.*?)\n'", script, re.S).group(1)
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "src"
+            src.mkdir()
+            db = sqlite3.connect(src / "index.db")
+            db.execute("create table t (x)")
+            db.execute("insert into t values (1)")
+            db.commit()
+            db.close()
+            os.mkfifo(src / "imagegen.fifo")
+            (src / "imagegen.json").write_text("{}")
+            out = Path(d) / "out.tar.gz"
+            # A pipe opened for reading waits for a writer: before the fix, this never ended.
+            r = subprocess.run([sys.executable, "-c", code.replace('"/src"', repr(str(src))), str(out)], capture_output=True, text=True, timeout=30)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(r.stdout.strip(), "1")
+            with tarfile.open(out) as tar:
+                names = {m.name: m for m in tar.getmembers()}
+            self.assertTrue(names["imagegen.fifo"].isfifo())
+            self.assertIn("index.db", names)
+            self.assertIn("imagegen.json", names)
