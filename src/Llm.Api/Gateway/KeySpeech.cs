@@ -45,8 +45,27 @@ public static class KeySpeech
         }
         HttpContent? content = null;
         long? length = request.ContentLength;
-        // Only a person's request is changed: who it is comes first, from the key alone, and anyone else's goes on as it came.
-        if (HttpMethods.IsPost(request.Method) && await PersonAsync(request.Headers.Authorization.ToString(), gateway, db, ct) is { } person)
+        var picture = request.Path.Value?.EndsWith("/images/generations", StringComparison.Ordinal) == true;
+        if (HttpMethods.IsPost(request.Method) && picture && request.ContentLength is > 0 and <= MostRead)
+        {
+            var body = await ReadAsync(request, ct);
+            if (body is null)
+            {
+                http.Response.StatusCode = StatusCodes.Status400BadRequest;
+                return;
+            }
+            // A picture model of this stack's, whoever's key it is: loaded first (a few minutes the first time), or the caller told why not.
+            if (SpokenBy(body) is { } model && media.Find(model) is { Mode: Llm.Core.Models.MediaModes.Image } && await media.ReadyAsync(model, ct) is { } notReady)
+            {
+                http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                await http.Response.WriteAsJsonAsync(new { error = new { message = notReady, type = "model_not_ready", code = "503" } }, ct);
+                return;
+            }
+            content = new ByteArrayContent(body);
+            length = body.Length;
+        }
+        // Only a person's speech is changed: who it is comes first, from the key alone, and anyone else's goes on as it came.
+        else if (HttpMethods.IsPost(request.Method) && !picture && await PersonAsync(request.Headers.Authorization.ToString(), gateway, db, ct) is { } person)
         {
             if (request.Path.Value?.EndsWith("/transcriptions", StringComparison.Ordinal) == true)
             {
@@ -57,24 +76,6 @@ public static class KeySpeech
                     content = form;
                     length += added;
                 }
-            }
-            else if (request.Path.Value?.EndsWith("/images/generations", StringComparison.Ordinal) == true && request.ContentLength is > 0 and <= MostRead)
-            {
-                var body = await ReadAsync(request, ct);
-                if (body is null)
-                {
-                    http.Response.StatusCode = StatusCodes.Status400BadRequest;
-                    return;
-                }
-                // A picture model of this stack's: loaded first (a few minutes the first time), or the caller told why not.
-                if (SpokenBy(body) is { } model && media.Find(model) is { Mode: Llm.Core.Models.MediaModes.Image } && await media.ReadyAsync(model, ct) is { } notReady)
-                {
-                    http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-                    await http.Response.WriteAsJsonAsync(new { error = new { message = notReady, type = "model_not_ready", code = "503" } }, ct);
-                    return;
-                }
-                content = new ByteArrayContent(body);
-                length = body.Length;
             }
             else if (request.ContentLength is > 0 and <= MostRead)
             {
