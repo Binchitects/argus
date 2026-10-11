@@ -125,13 +125,15 @@ public static partial class Voices
     private static partial Regex Space();
 }
 
-/// <summary>Short videos from the stack's video server (Wan2.2 TI2V 5B), kept as the person's files.</summary>
+/// <summary>Short videos from the stack's video server (its video model, Admin -> Models), kept as the person's files.</summary>
 /// <remarks>The video server is not behind the gateway: each clip is booked in the gateway's request log by the app, at its price per second.</remarks>
 public sealed partial class VideoTool(IHttpClientFactory http, Operations.Modules modules, AppDbContext db, Safeguards.Safeguards safeguards, MediaControl media,
     Gateway.PriceBook prices, Gateway.SpendLog spendLog, ChatKey chatKey, Storage.StorageQuotas quotas, Gateway.Credit credit) : IChatTool
 {
     public const string Client = "videogen";
-    private const int Fps = 16;
+
+    /// <summary>The video model a clip is made with: the first one (Admin -> Models).</summary>
+    private MediaControl.Model? Model => media.All.FirstOrDefault(m => m.Mode == Llm.Core.Models.MediaModes.Video);
 
     public string Id => "video";
     public string Title => "Video generation";
@@ -140,7 +142,7 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
 
     public async Task<string?> UnavailableAsync(CancellationToken ct) =>
         !await modules.HasAsync("videogen", ct) ? "The video server does not run here (the videogen module)."
-        : !(await media.StateAsync(MediaModels.VideoModel, ct)).Enabled ? "The video model is turned off (Admin -> Models)." : null;
+        : !media.All.Any(m => m.Mode == Llm.Core.Models.MediaModes.Video) ? "There is no video model (Admin -> Models)." : null;
 
     public Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct) => Task.FromResult<IToolRun>(new LocalRun(
         [Schema.Function("generate_video", "Makes a short video clip (1 to 5 seconds, no sound) from a description and shows it to the person. " +
@@ -159,7 +161,12 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
             {
                 return new ToolResult("Say what the clip shows in 'prompt'.", IsError: true);
             }
-            var seconds = Math.Clamp(args["seconds"] is JsonValue v && v.TryGetValue<int>(out var n) ? n : 3, 1, 5);
+            if (Model is not { } model)
+            {
+                return new ToolResult("There is no video model (Admin -> Models).", IsError: true);
+            }
+            var longest = Math.Max(1, model.Row.MaxSeconds ?? 5);
+            var seconds = Math.Clamp(args["seconds"] is JsonValue v && v.TryGetValue<int>(out var n) ? n : Math.Min(3, longest), 1, longest);
             if (await quotas.ToolRefusalAsync(context.User.Id, "video", token) is { } full)
             {
                 return new ToolResult(full, IsError: true);
@@ -173,7 +180,7 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
                 return new ToolResult(limit, IsError: true);
             }
             // Loaded when it is not: a few minutes the first time.
-            if (await media.ReadyAsync(MediaModels.VideoModel, token) is { } notReady)
+            if (await media.ReadyAsync(model.Name, token) is { } notReady)
             {
                 return new ToolResult(notReady, IsError: true);
             }
@@ -182,15 +189,15 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
             var started = DateTimeOffset.UtcNow;
             try
             {
-                (video, type) = await GenerateAsync(prompt, seconds, token);
-                media.Touch(MediaModels.VideoModel);
+                (video, type) = await GenerateAsync(model, prompt, seconds, token);
+                media.Touch(model.Name);
             }
             catch (Exception ex) when (ex is HttpRequestException or VideoException or System.Text.Json.JsonException)
             {
                 return new ToolResult($"The video could not be made: {ex.Message}", IsError: true);
             }
-            var cost = prices.Video(seconds);
-            await spendLog.BookVideoAsync(context.Email, Gateway.AnswerCache.HashOf(await chatKey.GetAsync(token)), seconds, cost, started, DateTimeOffset.UtcNow, token);
+            var cost = (model.Row.UnitPrice ?? prices.Defaults.PerVideoSecond) * seconds;
+            await spendLog.BookVideoAsync(context.Email, Gateway.AnswerCache.HashOf(await chatKey.GetAsync(token)), model.Name, seconds, cost, started, DateTimeOffset.UtcNow, token);
             var file = new ChatAttachment
             {
                 UserId = context.User.Id, FileName = Path.ChangeExtension(ImageTool.FileName(prompt), type == "video/webm" ? ".webm" : ".avi"),
@@ -200,25 +207,28 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
             await db.SaveChangesAsync(token);
             return new ToolResult(new JsonObject
             {
-                ["shown_to_the_person"] = true, ["file"] = file.FileName, ["seconds"] = seconds, ["model"] = MediaModels.VideoModel,
+                ["shown_to_the_person"] = true, ["file"] = file.FileName, ["seconds"] = seconds, ["model"] = model.Name,
             }.ToJsonString(Mcp.Plain), Files: [file]) { Cost = cost };
         }));
 
     private sealed class VideoException(string message) : Exception(message);
 
     /// <summary>One clip: a job at the server, asked about every few seconds until it is done (or the answer stops, which cancels it).</summary>
-    private async Task<(byte[] Video, string Type)> GenerateAsync(string prompt, int seconds, CancellationToken ct)
+    private async Task<(byte[] Video, string Type)> GenerateAsync(MediaControl.Model model, string prompt, int seconds, CancellationToken ct)
     {
         var client = http.CreateClient(Client);
+        var m = model.Row;
+        var fps = m.Fps ?? 16;
         // Wan takes 4n + 1 frames.
-        var frames = seconds * Fps / 4 * 4 + 1;
+        var frames = seconds * fps / 4 * 4 + 1;
         var body = new JsonObject
         {
-            ["prompt"] = prompt, ["negative_prompt"] = "blurry, distorted, low quality, watermark, text", ["width"] = 640, ["height"] = 352, ["seed"] = -1,
-            ["video_frames"] = frames, ["fps"] = Fps, ["output_format"] = "webm",
+            ["prompt"] = prompt, ["negative_prompt"] = m.NegativePrompt ?? "blurry, distorted, low quality, watermark, text", ["width"] = m.Width ?? 640,
+            ["height"] = m.Height ?? 352, ["seed"] = -1, ["video_frames"] = frames, ["fps"] = fps, ["output_format"] = "webm",
             ["sample_params"] = new JsonObject
             {
-                ["sample_method"] = "euler", ["sample_steps"] = 20, ["flow_shift"] = 5.0, ["guidance"] = new JsonObject { ["txt_cfg"] = 5.0 },
+                ["sample_method"] = m.Sampler ?? "euler", ["sample_steps"] = m.Steps ?? 20, ["flow_shift"] = m.FlowShift ?? 5.0,
+                ["guidance"] = new JsonObject { ["txt_cfg"] = m.CfgScale ?? 5.0 },
             },
         };
         using var submitted = await client.PostAsJsonAsync(MediaModels.VideoUrl + "/sdcpp/v1/vid_gen", body, ct);
@@ -233,7 +243,7 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
             {
                 await Task.Delay(TimeSpan.FromSeconds(3), ct);
                 // In use while it works: not unloaded as idle under a long job.
-                media.Touch(MediaModels.VideoModel);
+                media.Touch(model.Name);
                 var now = await client.GetFromJsonAsync<JsonObject>(MediaModels.VideoUrl + poll, ct);
                 switch (now?["status"]?.GetValue<string>())
                 {

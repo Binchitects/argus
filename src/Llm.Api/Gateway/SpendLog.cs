@@ -32,7 +32,7 @@ public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfig
     /// with its length kept so its cost can be worked out again. A log that cannot be written is logged and
     /// left: the clip is made, and its cost is still in the chat.
     /// </summary>
-    public async Task BookVideoAsync(string email, string chatKeyHash, double seconds, decimal cost, DateTimeOffset start, DateTimeOffset end, CancellationToken ct)
+    public async Task BookVideoAsync(string email, string chatKeyHash, string model, double seconds, decimal cost, DateTimeOffset start, DateTimeOffset end, CancellationToken ct)
     {
         try
         {
@@ -49,7 +49,7 @@ public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfig
             insert.Parameters.AddWithValue("spend", (double)cost);
             insert.Parameters.AddWithValue("start", DateTime.SpecifyKind(start.UtcDateTime, DateTimeKind.Unspecified));
             insert.Parameters.AddWithValue("end", DateTime.SpecifyKind(end.UtcDateTime, DateTimeKind.Unspecified));
-            insert.Parameters.AddWithValue("model", Models.MediaModels.VideoModel);
+            insert.Parameters.AddWithValue("model", model);
             insert.Parameters.AddWithValue("base", Models.MediaModels.VideoUrl);
             insert.Parameters.AddWithValue("metadata", new JsonObject
             {

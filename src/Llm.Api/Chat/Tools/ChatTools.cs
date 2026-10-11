@@ -301,7 +301,7 @@ public sealed partial class ImageTool(ChatModels models, GatewayChat gateway, Ap
                     return new ToolResult(limit, IsError: true);
                 }
                 // Loaded when it is not (a model not kept loaded unloads when unused).
-                if (Models.MediaControl.Find(model.Name) is not null && await media.ReadyAsync(model.Name, token) is { } notReady)
+                if (media.Find(model.Name) is not null && await media.ReadyAsync(model.Name, token) is { } notReady)
                 {
                     return new ToolResult(notReady, IsError: true);
                 }

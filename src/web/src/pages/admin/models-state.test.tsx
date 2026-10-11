@@ -22,7 +22,7 @@ function view(tiny: Row, image: Row = { status: 'unloaded' }) {
     models: [
       { name: 'Big-Model', source: 'local', mode: 'chat', status: 'loaded', file: 'big/Big.gguf', vision: false, access: everyone, kept: true, keptNow: true },
       { name: 'tiny-b', source: 'local', mode: 'chat', file: 'tiny/Tiny.gguf', vision: false, access: everyone, kept: false, keptNow: false, ...tiny },
-      { name: 'FLUX.2-klein-4B', source: 'media', mode: 'image_generation', server: 'imagegen', enabled: true, kept: false, keptNow: false, vision: false, access: everyone, ...image },
+      { name: 'FLUX.2-klein-4B', source: 'media', mode: 'image_generation', server: 'imagegen', kept: false, keptNow: false, vision: false, access: everyone, ...image },
     ],
   }
 }
@@ -98,6 +98,25 @@ describe('admin models: loading and unloading', () => {
     await screen.findByRole('heading', { name: /FLUX/ })
     expect(within(card('FLUX.2-klein-4B')).getByText('Its server refused its settings')).toBeInTheDocument()
     expect(within(card('FLUX.2-klein-4B')).getByText(/not tried again until it is changed or loaded by hand/)).toBeInTheDocument()
+  })
+
+  it('removes a picture model as a chat model is, its files kept', async () => {
+    let removed = false
+    fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: removed ? { ...view({ status: 'unloaded' }), models: view({ status: 'unloaded' }).models.slice(0, 2) } : view({ status: 'unloaded' }) }),
+      'DELETE /api/admin/models/FLUX.2-klein-4B': () => {
+        removed = true
+        return { json: { restarting: false, warning: null } }
+      },
+    })
+    renderApp('/admin/models')
+    await screen.findByRole('heading', { name: /FLUX/ })
+    expect(within(card('FLUX.2-klein-4B')).queryByText('On')).not.toBeInTheDocument()
+    await userEvent.click(within(card('FLUX.2-klein-4B')).getByRole('button', { name: /Remove/ }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(within(dialog).getByText(/Its files stay in the library/)).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(screen.queryByRole('heading', { name: /FLUX/ })).not.toBeInTheDocument())
   })
 
   it('says why a model loads: a request asked for it after an Unload', async () => {

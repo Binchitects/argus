@@ -189,7 +189,7 @@ public sealed class PersonalSpeech(VoiceChoices mine, SpeechOptions company, Spe
 /// down), the last answer stays, or the voices chosen are believed.
 /// </summary>
 public sealed partial class VoiceCatalog(IHttpClientFactory http, Operations.Modules modules, ChatModels models, IOptionsMonitor<SpeechOptions> options,
-    TimeProvider clock, ILogger<VoiceCatalog> logger) : Settings.ISettingWarning, IDisposable
+    TimeProvider clock, ILogger<VoiceCatalog> logger, MediaControl media) : Settings.ISettingWarning, IDisposable
 {
     public const string Client = "voices";
     public const double Slowest = 0.5;
@@ -218,10 +218,8 @@ public sealed partial class VoiceCatalog(IHttpClientFactory http, Operations.Mod
         /// Not asked again yet: for ten minutes after an answer that lists every one of the server's text to speech
         /// models the gateway serves (<paramref name="speaking"/>), else for a minute.
         /// </summary>
-        public bool Fresh(DateTimeOffset now, IReadOnlySet<string> speaking) =>
-            now - At < (Answered && Heard is { } h && speaking.All(m => !Ours(m) || h.Voices.Any(v => v.Model == m)) ? VoiceCatalog.Fresh : Retry);
-
-        private static bool Ours(string model) => MediaModels.Speech.Any(s => s.Name == model && s.Mode == "audio_speech");
+        public bool Fresh(DateTimeOffset now, IReadOnlySet<string> speaking, HashSet<string> ours) =>
+            now - At < (Answered && Heard is { } h && speaking.All(m => !ours.Contains(m) || h.Voices.Any(v => v.Model == m)) ? VoiceCatalog.Fresh : Retry);
     }
 
     /// <summary>What the speech models at the gateway offer now.</summary>
@@ -267,7 +265,7 @@ public sealed partial class VoiceCatalog(IHttpClientFactory http, Operations.Mod
 
     private async Task<Heard?> HeardAsync(IReadOnlySet<string> speaking, CancellationToken ct)
     {
-        if (_asked is var known && known.Fresh(clock.GetUtcNow(), speaking))
+        if (_asked is var known && known.Fresh(clock.GetUtcNow(), speaking, Speaking()))
         {
             return known.Heard;
         }
@@ -275,7 +273,7 @@ public sealed partial class VoiceCatalog(IHttpClientFactory http, Operations.Mod
         try
         {
             var now = clock.GetUtcNow();
-            if (_asked.Fresh(now, speaking))
+            if (_asked.Fresh(now, speaking, Speaking()))
             {
                 return _asked.Heard;
             }
@@ -302,6 +300,9 @@ public sealed partial class VoiceCatalog(IHttpClientFactory http, Operations.Mod
         }
     }
 
+    /// <summary>The text to speech models the app runs (Admin -> Models).</summary>
+    private HashSet<string> Speaking() => [.. media.All.Where(m => m.Mode == Llm.Core.Models.MediaModes.Speech).Select(m => m.Name)];
+
     /// <summary>The speech server's models (those the app runs), their voices, and the languages its speech to text knows.</summary>
     private async Task<Heard> AskAsync(CancellationToken ct)
     {
@@ -310,27 +311,31 @@ public sealed partial class VoiceCatalog(IHttpClientFactory http, Operations.Mod
         foreach (var m in Data(await client.GetFromJsonAsync<JsonObject>($"{MediaModels.AudioUrl}/v1/models?task=text-to-speech", ct)))
         {
             var id = Str(m, "id");
-            if (MediaModels.Speech.Where(s => s.Id == id && s.Mode == "audio_speech").Select(s => s.Name).FirstOrDefault() is not { } model)
+            if (media.All.FirstOrDefault(s => s.Id == id && s.Mode == Llm.Core.Models.MediaModes.Speech) is not { } row)
             {
                 continue;
             }
+            var model = row.Name;
+            // The voices it offers, when its row names some.
+            var offered = row.Row.Voices;
             var modelLanguage = (m["language"] as JsonArray)?.FirstOrDefault() is JsonValue l && l.TryGetValue<string>(out var ml) ? ml : null;
             foreach (var v in (m["voices"] as JsonArray ?? []).OfType<JsonObject>())
             {
                 var accent = (Str(v, "language") ?? modelLanguage ?? "").ToLowerInvariant().Replace('_', '-');
-                if (Str(v, "name") is { } name && SpeechOptions.IsVoice($"{model}/{name}") && Base(accent) is { } language)
+                if (Str(v, "name") is { } name && (offered.Count == 0 || offered.Contains(name)) && SpeechOptions.IsVoice($"{model}/{name}") && Base(accent) is { } language)
                 {
                     voices.Add(new OfferedVoice($"{model}/{name}", model, name, language, accent, Str(v, "gender")));
                 }
             }
         }
-        var whisper = MediaModels.Speech.First(s => s.Mode == "audio_transcription").Id;
+        var hears = media.All.Where(s => s.Mode == Llm.Core.Models.MediaModes.Transcription).Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
         var hearing = Data(await client.GetFromJsonAsync<JsonObject>($"{MediaModels.AudioUrl}/v1/models?task=automatic-speech-recognition", ct))
-            .FirstOrDefault(m => Str(m, "id") == whisper);
+            .FirstOrDefault(m => hears.Contains(Str(m, "id")));
         List<string> languages = [.. (hearing?["language"] as JsonArray ?? []).Select(x => x is JsonValue s && s.TryGetValue<string>(out var code) ? Base(code) : null)
             .OfType<string>().Distinct()];
         // In the app's order of the models; each model's voices as the server lists them.
-        return new Heard([.. voices.OrderBy(v => MediaModels.Speech.Select(s => s.Name).ToList().IndexOf(v.Model))], languages.Count > 0 ? languages : WhisperLanguages);
+        var order = media.All.Select(s => s.Name).ToList();
+        return new Heard([.. voices.OrderBy(v => order.IndexOf(v.Model))], languages.Count > 0 ? languages : WhisperLanguages);
     }
 
     private static IEnumerable<JsonObject> Data(JsonObject? list) => (list?["data"] as JsonArray ?? []).OfType<JsonObject>();

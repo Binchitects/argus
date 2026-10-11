@@ -2049,6 +2049,125 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("local_models", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Models.MediaModel", b =>
+                {
+                    b.Property<string>("Name")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<double?>("CfgScale")
+                        .HasColumnType("double precision");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DefaultVoice")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ExtraArgs")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<bool>("FlashAttention")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<double?>("FlowShift")
+                        .HasColumnType("double precision");
+
+                    b.Property<int?>("Fps")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("Gpu")
+                        .HasColumnType("integer");
+
+                    b.Property<double?>("Guidance")
+                        .HasColumnType("double precision");
+
+                    b.Property<int?>("Height")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("IdleMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Kept")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Language")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int?>("MaxSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal?>("MaxVramGb")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<string>("NegativePrompt")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<bool>("OffloadToCpu")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Sampler")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Scheduler")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("SpeechId")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<double?>("Speed")
+                        .HasColumnType("double precision");
+
+                    b.Property<int?>("Steps")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal?>("UnitPrice")
+                        .HasColumnType("numeric");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Vae")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasDefaultValue("gpu");
+
+                    b.Property<decimal?>("VaeGpuGb")
+                        .HasColumnType("numeric");
+
+                    b.Property<bool>("VaeTiling")
+                        .HasColumnType("boolean");
+
+                    b.PrimitiveCollection<List<string>>("Voices")
+                        .IsRequired()
+                        .HasColumnType("text[]");
+
+                    b.Property<int?>("Width")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Name");
+
+                    b.HasIndex("Mode");
+
+                    b.ToTable("media_models", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Models.ModelAccess", b =>
                 {
                     b.Property<string>("Model")
@@ -2845,6 +2964,36 @@ namespace Llm.Core.Data.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Models.MediaModel", b =>
+                {
+                    b.OwnsMany("Llm.Core.Models.MediaModelFile", "Files", b1 =>
+                        {
+                            b1.Property<string>("MediaModelName");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd();
+
+                            b1.Property<string>("Path")
+                                .IsRequired();
+
+                            b1.Property<string>("Role")
+                                .IsRequired();
+
+                            b1.HasKey("MediaModelName", "__synthesizedOrdinal");
+
+                            b1.ToTable("media_models");
+
+                            b1
+                                .ToJson("Files")
+                                .HasColumnType("jsonb");
+
+                            b1.WithOwner()
+                                .HasForeignKey("MediaModelName");
+                        });
+
+                    b.Navigation("Files");
                 });
 
             modelBuilder.Entity("Llm.Core.Models.ModelDownload", b =>

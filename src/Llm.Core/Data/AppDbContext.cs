@@ -33,6 +33,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<McpServer> McpServers => Set<McpServer>();
     public DbSet<PersonCredential> PersonCredentials => Set<PersonCredential>();
     public DbSet<LocalModel> LocalModels => Set<LocalModel>();
+    public DbSet<MediaModel> MediaModels => Set<MediaModel>();
     public DbSet<RemoteServer> RemoteServers => Set<RemoteServer>();
     public DbSet<ModelWindow> ModelWindows => Set<ModelWindow>();
     public DbSet<ModelDownload> ModelDownloads => Set<ModelDownload>();
@@ -258,6 +259,25 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(m => m.DraftHead).HasMaxLength(1000);
             e.Property(m => m.DraftMax).HasDefaultValue(3);
             e.Property(m => m.ExtraPreset).HasMaxLength(4000);
+        });
+        builder.Entity<MediaModel>(e =>
+        {
+            e.ToTable("media_models");
+            e.HasKey(m => m.Name);
+            e.Property(m => m.Name).HasMaxLength(100);
+            e.Property(m => m.Mode).HasMaxLength(30);
+            e.HasIndex(m => m.Mode);
+            e.OwnsMany(m => m.Files, f => f.ToJson());
+            e.Property(m => m.SpeechId).HasMaxLength(300);
+            e.Property(m => m.Sampler).HasMaxLength(50);
+            e.Property(m => m.Scheduler).HasMaxLength(50);
+            e.Property(m => m.NegativePrompt).HasMaxLength(2000);
+            e.Property(m => m.DefaultVoice).HasMaxLength(100);
+            e.Property(m => m.Language).HasMaxLength(20);
+            e.Property(m => m.Vae).HasMaxLength(10).HasDefaultValue("gpu");
+            e.Property(m => m.FlashAttention).HasDefaultValue(true);
+            e.Property(m => m.ExtraArgs).HasMaxLength(4000);
+            e.Ignore(m => m.Server);
         });
         builder.Entity<RemoteServer>(e =>
         {

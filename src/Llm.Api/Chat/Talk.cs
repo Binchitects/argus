@@ -23,7 +23,8 @@ public static class Talk
     public const int MaxBytes = 10 * 1024 * 1024;
 
     /// <summary>What was said in a recording from the browser, written down by the gateway's speech to text in the person's name, in the language they speak when they chose one.</summary>
-    public static async Task<IResult> TranscribeAsync(HttpRequest request, ClaimsPrincipal p, UserManager<AppUser> users, GatewayChat gateway, ChatModels models, VoiceCatalog voices)
+    public static async Task<IResult> TranscribeAsync(HttpRequest request, ClaimsPrincipal p, UserManager<AppUser> users, GatewayChat gateway, ChatModels models, VoiceCatalog voices,
+        MediaControl media)
     {
         var ct = request.HttpContext.RequestAborted;
         var me = (await users.GetUserAsync(p))!;
@@ -49,7 +50,7 @@ public static class Talk
         {
             return AuthEndpoints.Problem(413, "too_large", "That recording is too long: say it in shorter parts.");
         }
-        if (await models.OfModeAsync("audio_transcription", MediaModels.SpeechToText, ct) is not { } model)
+        if (await models.OfModeAsync("audio_transcription", media.All.FirstOrDefault(m => m.Mode == Llm.Core.Models.MediaModes.Transcription)?.Name, ct) is not { } model)
         {
             return AuthEndpoints.Problem(503, "no_transcription", "The gateway has no speech to text model (the audio module).");
         }

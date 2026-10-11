@@ -126,6 +126,7 @@ describe('admin models', () => {
     })
     renderApp('/admin/models')
     await userEvent.click(await screen.findByRole('button', { name: 'Add a model' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'A chat model' }))
     const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
     await userEvent.click(within(dialog).getByRole('combobox', { name: 'Model file' }))
     // Files that are not language models are there, for what they are, and cannot be chosen.
@@ -182,6 +183,7 @@ describe('admin models', () => {
     })
     renderApp('/admin/models')
     await userEvent.click(await screen.findByRole('button', { name: 'Add a model' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'A chat model' }))
     const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
     const choose = async (name: RegExp) => {
       await userEvent.click(within(dialog).getByRole('combobox', { name: 'Model file' }))
@@ -236,6 +238,7 @@ describe('admin models', () => {
     })
     renderApp('/admin/models')
     await userEvent.click(await screen.findByRole('button', { name: 'Add a model' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'A chat model' }))
     const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
     await userEvent.click(within(dialog).getByRole('combobox', { name: 'Model file' }))
     await userEvent.click(await screen.findByRole('option', { name: /Qwen-27B-Q4_K_M\.gguf/ }))
@@ -355,7 +358,11 @@ describe('admin models', () => {
     fakeApi(admin, { 'GET /api/admin/models': () => ({ json: { ...view({ enabled: false, kept: [], loaded: [], plan: null }), models: view().models.slice(2) } }) })
     renderApp('/admin/models')
     expect(await screen.findByText(/needs the llama.cpp engine/)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Add a model' })).not.toBeInTheDocument()
+    // Picture, video and speech models are added without it; a chat model is not.
+    await userEvent.click(screen.getByRole('button', { name: 'Add a model' }))
+    expect(screen.queryByRole('menuitem', { name: 'A chat model' })).not.toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'A pictures model' })).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
     expect(screen.getByRole('combobox', { name: 'Who may use it' })).toBeInTheDocument()
   })
 

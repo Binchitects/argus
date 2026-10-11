@@ -27,7 +27,6 @@ public sealed record ModelAccessRequest(Audience Audience, Guid[]? Groups);
 public sealed record KeepRequest(bool Keep);
 
 /// <summary>A picture, video or speech model on (at the gateway, in the chat's tools) or off.</summary>
-public sealed record EnabledRequest(bool Enabled);
 
 /// <summary>
 /// Admin → Models: every model at the gateway; for the engine's, which to keep
@@ -40,6 +39,7 @@ public static class ModelEndpoints
     {
         var g = app.MapGroup("/api/admin/models").RequireAuthorization(AdminEndpoints.Policy);
         g.MapGet("", ListAsync);
+        MediaModelEndpoints.Map(g);
         g.MapGet("/library", LibraryAsync);
         g.MapPost("/advice", AdviceAsync);
         g.MapPost("", AddAsync);
@@ -48,7 +48,6 @@ public static class ModelEndpoints
         g.MapPost("/{name}/load", LoadAsync);
         g.MapPost("/{name}/unload", UnloadAsync);
         g.MapPut("/{name}/keep", KeepAsync);
-        g.MapPut("/{name}/enabled", EnabledAsync);
         g.MapPut("/{name}/access", AccessAsync);
     }
 
@@ -63,12 +62,12 @@ public static class ModelEndpoints
             var p = TokenPrice.Of(input, cached, output, defaults);
             return new { p.Input, cachedInput = p.CachedInput, p.Output, own = new { input = input is not null, cachedInput = cached is not null, output = output is not null } };
         }
-        object MediaPrice(string name) => PriceBook.UnitOf(name) switch
+        object MediaPrice(MediaControl.Model m) => m.Mode switch
         {
-            "image" => new { unit = "picture", amount = defaults.PerImage },
-            "second" => new { unit = "second of video", amount = defaults.PerVideoSecond },
-            "minute" => new { unit = "minute of sound", amount = defaults.PerAudioMinute },
-            _ => new { unit = "1,000 characters", amount = defaults.PerThousandCharacters },
+            MediaModes.Image => new { unit = "picture", amount = m.Row.UnitPrice ?? defaults.PerImage, own = m.Row.UnitPrice is not null },
+            MediaModes.Video => new { unit = "second of video", amount = m.Row.UnitPrice ?? defaults.PerVideoSecond, own = m.Row.UnitPrice is not null },
+            MediaModes.Transcription => new { unit = "minute of sound", amount = m.Row.UnitPrice ?? defaults.PerAudioMinute, own = m.Row.UnitPrice is not null },
+            _ => new { unit = "1,000 characters", amount = m.Row.UnitPrice ?? defaults.PerThousandCharacters, own = m.Row.UnitPrice is not null },
         };
         var files = e.Enabled ? library.List().ToDictionary(f => f.File.Path, f => f.Profile, StringComparer.Ordinal) : [];
         var local = await db.LocalModels.AsNoTracking().OrderBy(m => m.Name).ToListAsync(ct);
@@ -133,14 +132,23 @@ public static class ModelEndpoints
         {
             rows.Add(new
             {
-                name = x.Model.Name, source = "media", mode = x.Model.Mode, server = x.Model.Server, status = x.Now, enabled = x.State.Enabled, kept = x.State.Kept,
+                name = x.Model.Name, source = "media", mode = x.Model.Mode, server = x.Model.Server, status = x.Now, kept = x.Kept,
                 why = x.Why, since = x.Since, retryAt = x.Failure?.RetryAt,
                 failure = x.Failure is { } f ? new { kind = f.Class, detail = f.Detail, tries = f.Count, since = f.Since } : null,
-                keptNow = x.State.Kept, vision = false, atGateway = At(x.Model.Name) is not null, access = Access(x.Model.Name),
-                unitPrice = MediaPrice(x.Model.Name),
+                keptNow = x.Kept, vision = false, atGateway = At(x.Model.Name) is not null, access = Access(x.Model.Name),
+                unitPrice = MediaPrice(x.Model), idleMinutes = x.Model.Row.IdleMinutes,
+                files = x.Model.Row.Files.Select(f => new { role = f.Role, path = f.Path, present = File.Exists(Path.Combine(engine.Value.LibraryDir, f.Path)) }),
+                speechId = x.Model.Id,
+                settings = new
+                {
+                    x.Model.Row.Steps, x.Model.Row.CfgScale, x.Model.Row.Guidance, x.Model.Row.FlowShift, x.Model.Row.Sampler, x.Model.Row.Scheduler,
+                    x.Model.Row.NegativePrompt, x.Model.Row.Width, x.Model.Row.Height, x.Model.Row.Fps, x.Model.Row.MaxSeconds, x.Model.Row.Voices,
+                    x.Model.Row.DefaultVoice, x.Model.Row.Speed, x.Model.Row.Language, x.Model.Row.Gpu, x.Model.Row.MaxVramGb, x.Model.Row.Vae,
+                    x.Model.Row.VaeGpuGb, x.Model.Row.OffloadToCpu, x.Model.Row.VaeTiling, x.Model.Row.FlashAttention, x.Model.Row.ExtraArgs,
+                },
             });
         }
-        foreach (var m in atGateway.Where(m => local.All(l => l.Name != m.Name) && !onServers.Contains(m.Name) && MediaControl.Find(m.Name) is null))
+        foreach (var m in atGateway.Where(m => local.All(l => l.Name != m.Name) && !onServers.Contains(m.Name) && media.Find(m.Name) is null))
         {
             rows.Add(new { name = m.Name, source = "gateway", mode = m.Mode, status = (string?)null, context = m.Context, vision = m.Vision, access = Access(m.Name) });
         }
@@ -239,8 +247,27 @@ public static class ModelEndpoints
     }
 
     private static async Task<IResult> RemoveAsync(string name, AppDbContext db, ModelCatalog catalog, IOptions<EngineOptions> engine, EngineWatcher watcher,
-        Audit audit, CancellationToken ct)
+        MediaControl media, Audit audit, CancellationToken ct)
     {
+        // A picture, video or speech model: unloaded, then gone (its files stay in the library, as a chat model's).
+        if (await db.MediaModels.SingleOrDefaultAsync(m => m.Name == name, ct) is { } row)
+        {
+            await media.UnloadAsync(name, ct);
+            db.MediaModels.Remove(row);
+            await db.ModelAccess.Where(a => a.Model == name).ExecuteDeleteAsync(ct);
+            await db.SaveChangesAsync(ct);
+            await media.ChangedAsync(ct);
+            try
+            {
+                await catalog.SyncGatewayAsync(ct);
+            }
+            catch (GatewayException)
+            {
+                // In step within a minute (the engine watcher).
+            }
+            await audit.WriteAsync("model.remove", name);
+            return Results.Ok(new { restarting = false, warning = (string?)null });
+        }
         if (await db.LocalModels.SingleOrDefaultAsync(m => m.Name == name, ct) is not { } model)
         {
             return Results.NotFound();
@@ -288,12 +315,8 @@ public static class ModelEndpoints
     private static async Task<IResult> LoadAsync(string name, bool? instead, HttpContext http, EngineClient engine, EngineState state, EngineRoute route, ModelCatalog catalog,
         EngineWatcher watcher, ChatModels chatModels, IOptions<EngineOptions> options, MediaControl media, Audit audit, CancellationToken ct)
     {
-        if (MediaControl.Find(name) is not null)
+        if (media.Find(name) is not null)
         {
-            if (!(await media.StateAsync(name, ct)).Enabled)
-            {
-                return AuthEndpoints.Problem(409, "off", $"{name} is turned off: turn it on first.");
-            }
             media.Load(name);
             await audit.WriteAsync("model.load", name);
             return Results.Accepted();
@@ -344,7 +367,7 @@ public static class ModelEndpoints
     private static async Task<IResult> UnloadAsync(string name, HttpContext http, EngineClient engine, EngineState state, EngineRoute route, ModelCatalog catalog, EngineWatcher watcher,
         ChatModels chatModels, ModelHoursState hours, MediaControl media, Audit audit, CancellationToken ct)
     {
-        if (MediaControl.Find(name) is not null)
+        if (media.Find(name) is not null)
         {
             await media.UnloadAsync(name, ct);
             await audit.WriteAsync("model.unload", name);
@@ -394,9 +417,9 @@ public static class ModelEndpoints
         ModelLibrary library, HardwareProbe hardware, EngineWatcher watcher, ChatModels chatModels, IOptions<EngineOptions> options, MediaControl media, Audit audit,
         CancellationToken ct)
     {
-        if (MediaControl.Find(name) is not null)
+        if (media.Find(name) is not null)
         {
-            await media.SetAsync(name, kept: body.Keep, ct: ct);
+            await media.SetKeptAsync(name, body.Keep, ct);
             await audit.WriteAsync(body.Keep ? "model.keep" : "model.unkeep", name);
             return Results.Ok(new { kept = body.Keep, warning = (string?)null });
         }
@@ -450,30 +473,6 @@ public static class ModelEndpoints
         return ModelAdvisor.PlanKept(models, entries, hw);
     }
 
-    /// <summary>A picture, video or speech model on or off: off, it leaves the gateway and the chat's tools, and unloads.</summary>
-    private static async Task<IResult> EnabledAsync(string name, EnabledRequest body, MediaControl media, ModelCatalog catalog, Audit audit, CancellationToken ct)
-    {
-        if (MediaControl.Find(name) is null)
-        {
-            return AuthEndpoints.Problem(404, "unknown", $"{name} is not a picture, video or speech model.");
-        }
-        await media.SetAsync(name, enabled: body.Enabled, ct: ct);
-        if (!body.Enabled)
-        {
-            await media.UnloadAsync(name, ct);
-        }
-        try
-        {
-            await catalog.SyncGatewayAsync(ct);
-        }
-        catch (GatewayException)
-        {
-            // In step within a minute (the engine watcher).
-        }
-        await audit.WriteAsync(body.Enabled ? "model.enable" : "model.disable", name);
-        return Results.NoContent();
-    }
-
     /// <summary>Whether the engine has the model: its last answer, or a fresh one when that did not know it.</summary>
     private static async Task<bool> KnownAsync(string name, EngineClient engine, EngineState state, CancellationToken ct)
     {
@@ -496,7 +495,7 @@ public static class ModelEndpoints
     private static async Task<IResult> AccessAsync(string name, ModelAccessRequest body, AppDbContext db, ChatModels gatewayModels, IOptions<EngineOptions> engine,
         KeyAccessWatcher keys, Audit audit, CancellationToken ct)
     {
-        var known = (await gatewayModels.AllAsync(ct)).Any(m => m.Name == name) || MediaControl.Find(name) is not null || await db.LocalModels.AnyAsync(m => m.Name == name, ct);
+        var known = (await gatewayModels.AllAsync(ct)).Any(m => m.Name == name) || await db.MediaModels.AnyAsync(m => m.Name == name, ct) || await db.LocalModels.AnyAsync(m => m.Name == name, ct);
         if (!known)
         {
             return Results.NotFound();

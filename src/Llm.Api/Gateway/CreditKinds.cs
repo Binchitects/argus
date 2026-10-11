@@ -7,7 +7,7 @@ namespace Llm.Api.Gateway;
 public static class CreditKinds
 {
     /// <summary>A picture, video or speech model's kind; any other model's request with an API key is an API request.</summary>
-    public static CreditKind OfModel(string? model) => (model is null ? null : MediaControl.Find(model)?.Mode) switch
+    public static CreditKind OfModel(string? model, MediaControl media) => (model is null ? null : media.Find(model)?.Mode) switch
     {
         "image_generation" => CreditKind.Pictures,
         "video_generation" => CreditKind.Video,

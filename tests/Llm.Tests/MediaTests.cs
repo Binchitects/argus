@@ -142,7 +142,7 @@ public sealed class MediaTests(AppFixture app)
     }
 
     [Fact]
-    public async Task Picture_video_and_speech_models_are_turned_on_and_off_and_kept_like_the_chat_models()
+    public async Task Picture_video_and_speech_models_are_kept_loaded_and_removed_like_the_chat_models()
     {
         var (f, _, sandbox) = await NewAppAsync();
         await using var _f = f;
@@ -159,14 +159,13 @@ public sealed class MediaTests(AppFixture app)
         Assert.Equal("off", rows["Wan2.2-TI2V-5B"].GetProperty("status").GetString());
 
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/models/Wan2.2-TI2V-5B/keep", UriKind.Relative), new { keep = true }));
-        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/models/FLUX.2-klein-4B/enabled", UriKind.Relative), new { enabled = false }));
+        // Who may use it is set like any model's; on and off is gone: removing it is how.
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/models/kokoro/access", UriKind.Relative), new { audience = "Everyone", groups = Array.Empty<Guid>() }));
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.DeleteAsync(new Uri("/api/admin/models/FLUX.2-klein-4B", UriKind.Relative)));
         rows = await MediaAsync();
         Assert.True(rows["Wan2.2-TI2V-5B"].GetProperty("kept").GetBoolean());
-        Assert.False(rows["FLUX.2-klein-4B"].GetProperty("enabled").GetBoolean());
-        // Off, it does not load; and who may use it is set like any model's.
-        await StatusAssert.Is(HttpStatusCode.Conflict, await admin.PostAsync("/api/admin/models/FLUX.2-klein-4B/load", new { }));
-        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/models/kokoro/access", UriKind.Relative), new { audience = "Everyone", groups = Array.Empty<Guid>() }));
-        await StatusAssert.Is(HttpStatusCode.NotFound, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/models/no-such/enabled", UriKind.Relative), new { enabled = true }));
+        Assert.False(rows.ContainsKey("FLUX.2-klein-4B"));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await admin.PostAsync("/api/admin/models/FLUX.2-klein-4B/load", new { }));
     }
 
     [Fact]

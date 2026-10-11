@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Text;
+using Llm.Core.Models;
 
 namespace Llm.Api.Models;
 
@@ -22,6 +24,73 @@ public static class SdArgs
         ["clip_l"] = "--clip_l", ["clip_g"] = "--clip_g", ["clip_vision"] = "--clip_vision", ["vae"] = "--vae", ["taesd"] = "--taesd",
         ["high_noise"] = "--high-noise-diffusion-model",
     };
+
+    private static string N(double v) => v.ToString(CultureInfo.InvariantCulture);
+    private static string N(decimal v) => v.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// How a picture or video model's row runs: its files by role, its GPU budget, flash attention, tiling, its defaults
+    /// (steps, CFG, guidance, flow shift, sampler, scheduler), then its own options; decoding where its row says ("auto": on
+    /// the GPU with a budget of <see cref="MediaModel.VaeGpuGb"/> and its weights in RAM when that much (and 1 GB more) is
+    /// free as it loads, else on the CPU).
+    /// </summary>
+    public static SdModel Of(MediaModel m)
+    {
+        var args = new List<string>();
+        if (m.MaxVramGb is { } vram)
+        {
+            args.AddRange(["--max-vram", N(vram)]);
+        }
+        if (m.OffloadToCpu)
+        {
+            args.Add("--offload-to-cpu");
+        }
+        if (m.FlashAttention)
+        {
+            args.Add("--diffusion-fa");
+        }
+        if (m.VaeTiling)
+        {
+            args.Add("--vae-tiling");
+        }
+        if (m.Vae == "cpu")
+        {
+            args.Add("--vae-on-cpu");
+        }
+        if (m.Steps is { } steps)
+        {
+            args.AddRange(["--steps", steps.ToString(CultureInfo.InvariantCulture)]);
+        }
+        if (m.CfgScale is { } cfg)
+        {
+            args.AddRange(["--cfg-scale", N(cfg)]);
+        }
+        if (m.Guidance is { } guidance)
+        {
+            args.AddRange(["--guidance", N(guidance)]);
+        }
+        if (m.FlowShift is { } shift)
+        {
+            args.AddRange(["--flow-shift", N(shift)]);
+        }
+        if (m.Sampler is { Length: > 0 } sampler)
+        {
+            args.AddRange(["--sampling-method", sampler]);
+        }
+        if (m.Scheduler is { Length: > 0 } scheduler)
+        {
+            args.AddRange(["--scheduler", scheduler]);
+        }
+        foreach (var line in (m.ExtraArgs ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var space = line.IndexOf(' ');
+            args.AddRange(space < 0 ? [line] : [line[..space], line[(space + 1)..].Trim()]);
+        }
+        var files = m.Files.Select(f => new MediaFile(f.Role, f.Path)).ToList();
+        return m.Vae == "auto" && m.VaeGpuGb is { } gb
+            ? new SdModel(m.Name, m.Server, files, args, VaeGpuMb: (int)(gb * 1024) + 1024, VaeGpuArgs: ["--max-vram", N(gb), "--offload-to-cpu"], VaeCpuArgs: ["--vae-on-cpu"])
+            : new SdModel(m.Name, m.Server, files, args);
+    }
 
     /// <summary>The control file: running <paramref name="model"/> (generation <paramref name="gen"/>) when <paramref name="want"/>, else stopped.</summary>
     public static string Conf(SdModel model, long gen, bool want, int? gpu = null)

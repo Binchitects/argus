@@ -1,31 +1,37 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Llm.Api.Operations;
 using Llm.Core.Data;
+using Llm.Core.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Models;
 
 /// <summary>
-/// The picture, video and speech models, managed as the engine's are: on or off, kept loaded or not,
-/// loaded and unloaded by hand, and who may use them (the models' access rules). The picture and video
-/// servers run the model, files and flags their control file names (services/sd-serve.sh reads it, and
-/// says what it does in its status file); the speech server
-/// loads and unloads its models through its own API (its own unloading is off). One not kept loaded loads
-/// when asked for or used, and unloads after ten minutes unused. With several replicas, the one that leads writes the control
-/// files and loads the speech models; a model asked for on another is told to it.
+/// The picture, video and speech models (rows of media_models), managed as the engine's are: kept loaded
+/// or not, loaded and unloaded by hand, and who may use them (the models' access rules). Each picture and
+/// video server runs one model at a time: the one kept loaded, else the one asked for last; the app writes
+/// its model, files and flags in the server's control file (services/sd-serve.sh reads it, and says what
+/// it does in its status file). The speech server loads and unloads its models through its own API (its
+/// own unloading is off). One not kept loaded loads when asked for or used, and unloads after its idle
+/// minutes (ten by default). With several replicas, the one that leads writes the control files and
+/// loads the speech models; a model asked for on another is told to it.
 /// </summary>
 public sealed partial class MediaControl : BackgroundService
 {
     public const string Client = "media";
-    private const string SettingPrefix = "media.";
     private const string AskedTopic = "media:asked";
+    private const string ChangedTopic = "media:changed";
     private const string ForgetTopic = "media:forget";
     private const string WakeTopic = "media:wake";
-    private static readonly TimeSpan Idle = TimeSpan.FromMinutes(10);
+    private const int IdleMinutes = 10;
+
+    /// <summary>The picture and video servers, each running one model at a time.</summary>
+    public static readonly IReadOnlyList<string> FileServers = ["imagegen", "videogen"];
 
     /// <summary>A server that has not answered this long after it was turned on has failed to load (Admin → Models says so).</summary>
     private static readonly TimeSpan LoadLimit = TimeSpan.FromMinutes(10);
@@ -67,6 +73,20 @@ public sealed partial class MediaControl : BackgroundService
             WakeHere();
             return true;
         });
+        replicas.On(ChangedTopic, _ =>
+        {
+            _models = null;
+            WakeHere();
+            return true;
+        });
+    }
+
+    /// <summary>A model added, changed or removed: read again here and on every replica.</summary>
+    public async Task ChangedAsync(CancellationToken ct)
+    {
+        await RefreshAsync(ct);
+        replicas.Tell(ChangedTopic);
+        WakeHere();
     }
 
     /// <summary>Asked for now (loaded, or used): here, and on the replica that leads; the control file is written at once.</summary>
@@ -77,6 +97,9 @@ public sealed partial class MediaControl : BackgroundService
         WakeHere();
     }
 
+    /// <summary>Looks at every model again now.</summary>
+    public void Wake() => WakeHere();
+
     private void WakeHere()
     {
         if (_wake.CurrentCount == 0)
@@ -85,26 +108,39 @@ public sealed partial class MediaControl : BackgroundService
         }
     }
 
-    /// <summary>A media model: what it does, the server it runs on, and its id there (the speech server's).</summary>
-    public sealed record Model(string Name, string Mode, string Server, string? Id, bool KeptByDefault);
+    /// <summary>A media model: what it does, the server it runs on, its id there (the speech server's), and its row.</summary>
+    public sealed record Model(string Name, string Mode, string Server, string? Id, MediaModel Row);
 
-    public static readonly IReadOnlyList<Model> All =
-    [
-        new(MediaModels.ImageModel, "image_generation", "imagegen", null, true),
-        new(MediaModels.VideoModel, "video_generation", "videogen", null, false),
-        .. MediaModels.Speech.Select(s => new Model(s.Name, s.Mode, "audio", s.Id, s.Mode == "audio_transcription")),
-    ];
+    private volatile IReadOnlyList<Model>? _models;
 
-    public static Model? Find(string name) => All.FirstOrDefault(m => m.Name == name);
+    /// <summary>Every picture, video and speech model, as last read.</summary>
+    public IReadOnlyList<Model> All => _models ?? LoadNow();
 
-    public sealed record State(bool Enabled, bool Kept);
+    public Model? Find(string name) => All.FirstOrDefault(m => m.Name == name);
+
+    private static IReadOnlyList<Model> Of(IEnumerable<MediaModel> rows) =>
+        [.. rows.OrderBy(r => r.Name, StringComparer.Ordinal).Select(r => new Model(r.Name, r.Mode, r.Server, r.SpeechId, r))];
+
+    private IReadOnlyList<Model> LoadNow()
+    {
+        using var scope = scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return _models = Of(db.MediaModels.AsNoTracking().ToList());
+    }
+
+    public async Task RefreshAsync(CancellationToken ct)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        _models = Of(await db.MediaModels.AsNoTracking().ToListAsync(ct));
+    }
 
     /// <summary>
     /// What a model is doing: loaded, loading, unloading (its server still answers as it stops), unloaded, failed (its server
     /// did not answer within ten minutes of being turned on; it is still tried), waiting (for its files), or off (its server
     /// does not run).
     /// </summary>
-    public sealed record Status(Model Model, State State, string Now, string? Why = null, DateTimeOffset? Since = null, MediaFailure? Failure = null);
+    public sealed record Status(Model Model, bool Kept, string Now, string? Why = null, DateTimeOffset? Since = null, MediaFailure? Failure = null);
 
     /// <summary>Why each model loads or unloads, and since when (Admin -> Models says so, as for chat models).</summary>
     private readonly ConcurrentDictionary<string, (string Why, DateTimeOffset Since)> _why = new(StringComparer.Ordinal);
@@ -149,36 +185,38 @@ public sealed partial class MediaControl : BackgroundService
 
     public async Task<IReadOnlyList<Status>> ListAsync(CancellationToken ct)
     {
-        var states = await StatesAsync(ct);
+        await RefreshAsync(ct);
         return [.. All.Select(m =>
         {
             var now = _now.GetValueOrDefault(m.Name, "unloaded");
             var why = now is "loading" or "unloading" or "loaded" or "failed" ? _why.GetValueOrDefault(m.Name) : default;
-            return new Status(m, states[m.Name], now, why.Why, why.Why is null ? null : why.Since, _failures.GetValueOrDefault(m.Name));
+            return new Status(m, m.Row.Kept, now, why.Why, why.Why is null ? null : why.Since, _failures.GetValueOrDefault(m.Name));
         })];
     }
 
-    public async Task<State> StateAsync(string name, CancellationToken ct) => (await StatesAsync(ct))[name];
-
-    public async Task SetAsync(string name, bool? enabled = null, bool? kept = null, CancellationToken ct = default)
+    /// <summary>Kept loaded or not (at most one of a picture or video server's models is: keeping one stops keeping the others).</summary>
+    public async Task SetKeptAsync(string name, bool kept, CancellationToken ct = default)
     {
-        var now = await StateAsync(name, ct);
-        var next = new State(enabled ?? now.Enabled, kept ?? now.Kept);
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var key = SettingPrefix + name;
-        var value = JsonSerializer.Serialize(next);
-        if (await db.Settings.SingleOrDefaultAsync(s => s.Key == key, ct) is { } row)
+        if (await db.MediaModels.SingleOrDefaultAsync(m => m.Name == name, ct) is not { } row)
         {
-            (row.Value, row.UpdatedAt) = (value, clock.GetUtcNow());
+            return;
         }
-        else
+        row.Kept = kept;
+        row.UpdatedAt = clock.GetUtcNow();
+        if (kept && FileServers.Contains(row.Server))
         {
-            db.Settings.Add(new Setting { Key = key, Value = value });
+            foreach (var other in await db.MediaModels.Where(m => m.Name != name && m.Kept).ToListAsync(ct))
+            {
+                if (other.Server == row.Server)
+                {
+                    other.Kept = false;
+                }
+            }
         }
         await db.SaveChangesAsync(ct);
-        WakeHere();
-        replicas.Tell(WakeTopic);
+        await ChangedAsync(ct);
     }
 
     /// <summary>Loads it now; one not kept loaded unloads again after ten minutes unused.</summary>
@@ -195,6 +233,16 @@ public sealed partial class MediaControl : BackgroundService
         WakeHere();
     }
 
+    /// <summary>Changed by an admin: whatever failed before is tried again at once, with its new settings.</summary>
+    public void Forgive(string name)
+    {
+        if (_failures.TryRemove(name, out _) && Find(name) is { Id: null } m)
+        {
+            _gen[m.Server] = Gen(m.Server) + 1;
+        }
+        WakeHere();
+    }
+
     /// <summary>Unloads it now (and stops keeping it loaded, as with the engine's models).</summary>
     public async Task UnloadAsync(string name, CancellationToken ct)
     {
@@ -202,13 +250,20 @@ public sealed partial class MediaControl : BackgroundService
         _failures.TryRemove(name, out _);
         _asked.TryRemove(name, out _);
         replicas.Tell(ForgetTopic, name);
-        if ((await StateAsync(name, ct)).Kept)
+        if (Find(name) is { Row.Kept: true })
         {
-            await SetAsync(name, kept: false, ct: ct);
+            await SetKeptAsync(name, false, ct);
         }
         if (Find(name) is { Id: { } id })
         {
-            using var _ = await http.CreateClient(Client).DeleteAsync($"{MediaModels.AudioUrl}/api/ps/{id}", ct);
+            try
+            {
+                using var _ = await http.CreateClient(Client).DeleteAsync($"{MediaModels.AudioUrl}/api/ps/{id}", ct);
+            }
+            catch (HttpRequestException)
+            {
+                // The speech server is down: it has nothing loaded then.
+            }
         }
         WakeHere();
     }
@@ -237,10 +292,9 @@ public sealed partial class MediaControl : BackgroundService
     /// </summary>
     public async Task<string?> ReadyAsync(string name, CancellationToken ct)
     {
-        var model = Find(name)!;
-        if (!(await StateAsync(name, ct)).Enabled)
+        if (Find(name) is not { } model)
         {
-            return $"{name} is turned off (Admin -> Models).";
+            return $"There is no picture, video or speech model named {name} (Admin -> Models).";
         }
         // Not this stack's server: the gateway answers for it from wherever it is, or says why not.
         if (!await modules.HasAsync(model.Server, ct))
@@ -248,7 +302,7 @@ public sealed partial class MediaControl : BackgroundService
             return null;
         }
         Asked(name);
-        if (model.Id is not null || (On(model.Server) && await UpAsync(model, ct)))
+        if (model.Id is not null || (On(model) && await UpAsync(model, ct)))
         {
             return null;
         }
@@ -266,7 +320,7 @@ public sealed partial class MediaControl : BackgroundService
         while (clock.GetUtcNow() < until)
         {
             await Task.Delay(TimeSpan.FromSeconds(1), ct);
-            if (On(model.Server) && await UpAsync(model, ct))
+            if (On(model) && await UpAsync(model, ct))
             {
                 _now[name] = "loaded";
                 return null;
@@ -310,92 +364,42 @@ public sealed partial class MediaControl : BackgroundService
     private async Task TickAsync(CancellationToken ct)
     {
         var lead = replicas.IsLeader;
-        var states = await StatesAsync(ct);
+        await RefreshAsync(ct);
+        var models = All;
         var now = clock.GetUtcNow();
         foreach (var (name, at) in _asked)
         {
+            var model = models.FirstOrDefault(m => m.Name == name);
+            var idle = TimeSpan.FromMinutes(model?.Row.IdleMinutes ?? IdleMinutes);
             // Only that ask: one made meanwhile (a picture asked for at this moment) keeps it loaded.
-            if (now - at > Idle && !states[name].Kept && _asked.TryRemove(new KeyValuePair<string, DateTimeOffset>(name, at)))
+            if ((model is null || now - at > idle && !model.Row.Kept) && _asked.TryRemove(new KeyValuePair<string, DateTimeOffset>(name, at)))
             {
-                Because(name, "unused for ten minutes");
-                LogIdle(logger, name);
+                if (model is not null)
+                {
+                    Because(name, $"unused for {idle.TotalMinutes:0} minutes");
+                    LogIdle(logger, name, (int)idle.TotalMinutes);
+                }
             }
         }
-        IReadOnlyList<string>? speechLoaded = null;
-        foreach (var m in All)
+        foreach (var server in FileServers)
         {
-            var s = states[m.Name];
-            var want = s.Enabled && (s.Kept || _asked.ContainsKey(m.Name));
+            await ServerAsync(server, [.. models.Where(m => m.Server == server)], lead, now, ct);
+        }
+        IReadOnlyList<string>? speechLoaded = null;
+        foreach (var m in models.Where(x => x.Id is not null))
+        {
+            var want = m.Row.Kept || _asked.ContainsKey(m.Name);
             if (!await modules.HasAsync(m.Server, ct))
             {
                 _now[m.Name] = "off";
                 continue;
             }
-            if (m.Id is null)
-            {
-                var recipe = MediaRecipes.Of(m.Name)!;
-                var status = StatusOf(m.Server);
-                var gen = Gen(m.Server).ToString(System.Globalization.CultureInfo.InvariantCulture);
-                if (want && !_why.ContainsKey(m.Name) || want && _why.GetValueOrDefault(m.Name).Why is "unused for ten minutes" or "unloaded by an admin")
-                {
-                    Because(m.Name, s.Kept ? "kept loaded" : "for a request");
-                }
-                if (status is { Phase: "running" } && status.Gen == gen && (!_running.TryGetValue(m.Server, out var r) || r.Gen != gen))
-                {
-                    _running[m.Server] = (gen, now);
-                }
-                // Its server exited while wanted (no GPU memory, flags it refused, a crash): why, once for this generation.
-                if (want && status is { Phase: "exited" } && status.Gen == gen && _failures.GetValueOrDefault(m.Name)?.Gen != gen)
-                {
-                    var ran = _running.TryGetValue(m.Server, out var since) && since.Gen == gen ? (now - since.Since).TotalSeconds : 0;
-                    var (kind, detail) = MediaFailure.Classify(LogTail(m.Server), status.Exit, ran);
-                    Failed(m.Name, kind, detail, gen, now);
-                }
-                // Tried again after its wait (1, 2, 4… minutes), as a new generation; flags it refused, not until it is changed or loaded.
-                if (want && _failures.TryGetValue(m.Name, out var failed) && failed.Gen == gen && failed.RetryAt is { } retry && now >= retry)
-                {
-                    LogRetry(logger, m.Name, failed.Class, failed.Count);
-                    _gen[m.Server] = Gen(m.Server) + 1;
-                    gen = Gen(m.Server).ToString(System.Globalization.CultureInfo.InvariantCulture);
-                    _loadingSince.TryRemove(m.Name, out _);
-                }
-                // While it waits to be tried again, its server is off.
-                var holding = _failures.GetValueOrDefault(m.Name)?.Gen == gen;
-                if (lead)
-                {
-                    Write(m.Server, SdArgs.Conf(recipe, Gen(m.Server), want && !holding));
-                }
-                if (want && !holding)
-                {
-                    _onSince.TryAdd(m.Server, Environment.TickCount64);
-                }
-                else
-                {
-                    _onSince.TryRemove(m.Server, out _);
-                }
-                var ready = status is not null ? status.Phase != "waiting" : recipe.Files.All(f => File.Exists(Path.Combine(engine.Value.LibraryDir, f.Path)));
-                var up = ready && !holding && (status is null || status.Phase is "running" or "stopping") && await UpAsync(m, ct);
-                if (up && want)
-                {
-                    _failures.TryRemove(m.Name, out _);
-                }
-                _now[m.Name] = !ready ? "waiting"
-                    : holding ? "failed"
-                    : status is { Phase: "stopping" } ? "unloading"
-                    : up ? (want ? "loaded" : "unloading")
-                    : want ? Loading(m.Name, now, gen) : "unloaded";
-                if (up || !want || !ready || holding)
-                {
-                    _loadingSince.TryRemove(m.Name, out _);
-                }
-                continue;
-            }
             speechLoaded ??= await SpeechLoadedAsync(ct);
-            var loaded = speechLoaded.Contains(m.Id);
+            var loaded = speechLoaded.Contains(m.Id!);
             // The replica that leads loads and unloads; the others only read what the speech server has.
             if (want)
             {
-                Because(m.Name, s.Kept ? "kept loaded" : "for a request");
+                Because(m.Name, m.Row.Kept ? "kept loaded" : "for a request");
             }
             var waiting = _failures.TryGetValue(m.Name, out var refused) && refused.RetryAt is { } next && now < next;
             if (lead && want && !loaded && !waiting)
@@ -414,7 +418,7 @@ public sealed partial class MediaControl : BackgroundService
             }
             else if (lead && !want && loaded)
             {
-                // Turned off, or unused for ten minutes and not kept loaded: the speech server keeps it until told (its TTL is off).
+                // Unused for its idle minutes and not kept loaded: the speech server keeps it until told (its TTL is off).
                 using var _ = await http.CreateClient(Client).DeleteAsync($"{MediaModels.AudioUrl}/api/ps/{m.Id}", ct);
                 loaded = false;
             }
@@ -422,22 +426,145 @@ public sealed partial class MediaControl : BackgroundService
         }
     }
 
-    /// <summary>
-    /// Whether a server's answer counts: its status says it runs the generation the app wrote last; or, before its first
-    /// status, its control file has said "on" long enough (<see cref="OnSettle"/>).
-    /// </summary>
-    private bool On(string server)
+    /// <summary>The model a picture or video server runs, and what each of its models is doing.</summary>
+    private async Task ServerAsync(string server, IReadOnlyList<Model> rows, bool lead, DateTimeOffset now, CancellationToken ct)
     {
-        if (StatusOf(server) is { } status)
+        if (!await modules.HasAsync(server, ct))
         {
-            return status.Phase == "running" && status.Gen == Gen(server).ToString(System.Globalization.CultureInfo.InvariantCulture)
-                && _onSince.ContainsKey(server);
+            foreach (var x in rows)
+            {
+                _now[x.Name] = "off";
+            }
+            return;
         }
-        return _onSince.TryGetValue(server, out var since) && Environment.TickCount64 - since >= OnSettle.TotalMilliseconds;
+        // The one kept loaded, else the one asked for last; else none (the server is off, its last model named).
+        var wanted = rows.FirstOrDefault(x => x.Row.Kept)
+            ?? rows.Where(x => _asked.ContainsKey(x.Name)).OrderByDescending(x => _asked.GetValueOrDefault(x.Name)).FirstOrDefault();
+        var target = wanted ?? rows.FirstOrDefault(x => x.Name == _target.GetValueOrDefault(server)) ?? (rows.Count > 0 ? rows[0] : null);
+        if (target is null)
+        {
+            if (lead)
+            {
+                Write(server, $"gen={Gen(server).ToString(CultureInfo.InvariantCulture)}\nwant=off\n");
+            }
+            return;
+        }
+        _target[server] = target.Name;
+        var want = wanted is not null;
+        var m = target;
+        var sd = SdArgs.Of(m.Row);
+        // Another model, or its settings changed: a new generation, which its script starts.
+        var body = SdArgs.Conf(sd, 0, true).Split('\n', 3)[2];
+        var was = _body.GetOrAdd(server, s => Body(s) ?? body);
+        if (was != body)
+        {
+            _gen[server] = Gen(server) + 1;
+            _body[server] = body;
+            _loadingSince.TryRemove(m.Name, out _);
+        }
+        var status = StatusOf(server);
+        var gen = Gen(server).ToString(CultureInfo.InvariantCulture);
+        if (want && (!_why.ContainsKey(m.Name) || _why.GetValueOrDefault(m.Name).Why.StartsWith("unused", StringComparison.Ordinal)
+            || _why.GetValueOrDefault(m.Name).Why == "unloaded by an admin"))
+        {
+            Because(m.Name, m.Row.Kept ? "kept loaded" : "for a request");
+        }
+        if (status is { Phase: "running" } && status.Gen == gen && (!_running.TryGetValue(server, out var r) || r.Gen != gen))
+        {
+            _running[server] = (gen, now);
+        }
+        // Its server exited while wanted (no GPU memory, flags it refused, a crash): why, once for this generation.
+        if (want && status is { Phase: "exited" } && status.Gen == gen && _failures.GetValueOrDefault(m.Name)?.Gen != gen)
+        {
+            var ran = _running.TryGetValue(server, out var since) && since.Gen == gen ? (now - since.Since).TotalSeconds : 0;
+            var (kind, detail) = MediaFailure.Classify(LogTail(server), status.Exit, ran);
+            Failed(m.Name, kind, detail, gen, now);
+        }
+        // Tried again after its wait (1, 2, 4… minutes), as a new generation; flags it refused, not until it is changed or loaded.
+        if (want && _failures.TryGetValue(m.Name, out var failed) && failed.Gen == gen && failed.RetryAt is { } retry && now >= retry)
+        {
+            LogRetry(logger, m.Name, failed.Class, failed.Count);
+            _gen[server] = Gen(server) + 1;
+            gen = Gen(server).ToString(CultureInfo.InvariantCulture);
+            _loadingSince.TryRemove(m.Name, out _);
+        }
+        // While it waits to be tried again, its server is off.
+        var holding = _failures.GetValueOrDefault(m.Name)?.Gen == gen;
+        if (lead)
+        {
+            Write(server, SdArgs.Conf(sd, Gen(server), want && !holding));
+        }
+        if (want && !holding)
+        {
+            _onSince.TryAdd(server, Environment.TickCount64);
+        }
+        else
+        {
+            _onSince.TryRemove(server, out _);
+        }
+        var ready = status is not null ? status.Phase != "waiting" : sd.Files.All(f => File.Exists(Path.Combine(engine.Value.LibraryDir, f.Path)));
+        var up = ready && !holding && (status is null || status.Phase is "running" or "stopping") && await UpAsync(m, ct);
+        if (up && want)
+        {
+            _failures.TryRemove(m.Name, out _);
+        }
+        _now[m.Name] = !ready ? "waiting"
+            : holding ? "failed"
+            : status is { Phase: "stopping" } ? "unloading"
+            : up ? (want ? "loaded" : "unloading")
+            : want ? Loading(m.Name, now, gen) : "unloaded";
+        if (up || !want || !ready || holding)
+        {
+            _loadingSince.TryRemove(m.Name, out _);
+        }
+        // Its other models: not running (waiting, when their files are not all there).
+        foreach (var other in rows.Where(o => o.Name != m.Name))
+        {
+            _now[other.Name] = SdArgs.Of(other.Row).Files.All(f => File.Exists(Path.Combine(engine.Value.LibraryDir, f.Path))) ? "unloaded" : "waiting";
+            _loadingSince.TryRemove(other.Name, out _);
+        }
+    }
+
+    /// <summary>The model each picture and video server runs (or ran last), and its control file without its generation and want.</summary>
+    private readonly ConcurrentDictionary<string, string> _target = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> _body = new(StringComparer.Ordinal);
+
+    /// <summary>The control file on disk without its generation and want (what the last run wrote), or null.</summary>
+    private string? Body(string server)
+    {
+        try
+        {
+            var path = Path.Combine(engine.Value.ConfigDir, server + ".conf");
+            return File.Exists(path)
+                ? string.Concat(File.ReadAllLines(path).Where(l => !l.StartsWith("gen=", StringComparison.Ordinal) && !l.StartsWith("want=", StringComparison.Ordinal)).Select(l => l + "\n"))
+                : null;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Whether a server's answer counts as this model's: its status says it runs this model, at the generation the app
+    /// wrote last; or, before its first status, its control file has named it on long enough (<see cref="OnSettle"/>).
+    /// </summary>
+    private bool On(Model model)
+    {
+        if (_target.GetValueOrDefault(model.Server) != model.Name)
+        {
+            return false;
+        }
+        if (StatusOf(model.Server) is { } status)
+        {
+            return status.Phase == "running" && status.Model == model.Name && status.Gen == Gen(model.Server).ToString(CultureInfo.InvariantCulture)
+                && _onSince.ContainsKey(model.Server);
+        }
+        return _onSince.TryGetValue(model.Server, out var since) && Environment.TickCount64 - since >= OnSettle.TotalMilliseconds;
     }
 
     /// <summary>What a picture or video server says it does (services/sd-serve.sh's status file).</summary>
-    public sealed record ServerStatus(string Gen, string Phase, DateTimeOffset Since, DateTimeOffset At, long? FreeMb, int? Exit, IReadOnlyList<string> Missing, string Vae);
+    public sealed record ServerStatus(string Gen, string Phase, DateTimeOffset Since, DateTimeOffset At, long? FreeMb, int? Exit, IReadOnlyList<string> Missing, string Vae, string Model);
 
     /// <summary>Its status, when it wrote one in the last 15 s (null: none, or its script has stopped).</summary>
     public ServerStatus? StatusOf(string server)
@@ -458,7 +585,7 @@ public sealed partial class MediaControl : BackgroundService
                 DateTimeOffset.FromUnixTimeSeconds(j["since"]?.GetValue<long>() ?? 0), at,
                 j["free_mb"] is JsonValue f && f.TryGetValue<long>(out var mb) ? mb : null,
                 j["exit"] is JsonValue e && e.TryGetValue<int>(out var code) ? code : null,
-                [.. (j["missing"] as JsonArray ?? []).Select(x => x?.ToString() ?? "")], j["vae"]?.ToString() ?? "");
+                [.. (j["missing"] as JsonArray ?? []).Select(x => x?.ToString() ?? "")], j["vae"]?.ToString() ?? "", j["model"]?.ToString() ?? "");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or FormatException or InvalidOperationException)
         {
@@ -525,14 +652,6 @@ public sealed partial class MediaControl : BackgroundService
         }
     }
 
-    private async Task<Dictionary<string, State>> StatesAsync(CancellationToken ct)
-    {
-        await using var scope = scopes.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var rows = await db.Settings.AsNoTracking().Where(s => s.Key.StartsWith(SettingPrefix)).ToDictionaryAsync(s => s.Key[SettingPrefix.Length..], s => s.Value, ct);
-        return All.ToDictionary(m => m.Name, m => rows.TryGetValue(m.Name, out var v) && JsonSerializer.Deserialize<State>(v) is { } s ? s : new State(true, m.KeptByDefault));
-    }
-
     private async Task<bool> UpAsync(Model m, CancellationToken ct)
     {
         try
@@ -592,8 +711,8 @@ public sealed partial class MediaControl : BackgroundService
     [LoggerMessage(Level = LogLevel.Warning, Message = "Media models: {Error}")]
     private static partial void LogFailed(ILogger logger, string error);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Media models: {Model} unused for ten minutes, unloading")]
-    private static partial void LogIdle(ILogger logger, string model);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Media models: {Model} unused for {Minutes} minutes, unloading")]
+    private static partial void LogIdle(ILogger logger, string model, int minutes);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Media models: {Model}'s server has not answered for {Minutes} minutes since it was turned on (its log says why: often no GPU memory left beside the chat models); it is still tried")]
     private static partial void LogNotLoaded(ILogger logger, string model, int minutes);

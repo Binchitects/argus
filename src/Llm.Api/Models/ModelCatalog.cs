@@ -709,22 +709,23 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// <summary>The picture and speech models turned on, while their servers run: people's keys reach them too.</summary>
     private async Task MediaAsync(Dictionary<string, (string Name, JsonObject Params, JsonObject Info)> wanted, PriceOptions defaults, CancellationToken ct)
     {
-        void Add(string name, string model, string url, JsonObject info)
+        void Add(string name, string model, string url, JsonObject info, decimal? own)
         {
             var litellm = new JsonObject { ["model"] = model, ["api_base"] = url + "/v1", ["api_key"] = "none" };
-            MediaPrices(litellm, info["mode"]!.GetValue<string>(), defaults);
+            MediaPrices(litellm, info["mode"]!.GetValue<string>(), defaults, own);
             wanted[Fingerprint("media", name, model, url, info.ToJsonString(), litellm.ToJsonString())] = (name, litellm, info);
         }
-        var on = (await media.ListAsync(ct)).Where(x => x.State.Enabled).Select(x => x.Model.Name).ToHashSet(StringComparer.Ordinal);
-        if (on.Contains(MediaModels.ImageModel) && await modules.HasAsync("imagegen", ct))
+        await media.RefreshAsync(ct);
+        foreach (var m in media.All)
         {
-            Add(MediaModels.ImageModel, "openai/sd-cpp-local", MediaModels.ImageUrl, new JsonObject { ["mode"] = "image_generation" });
-        }
-        if (await modules.HasAsync("audio", ct))
-        {
-            foreach (var (name, id, mode) in MediaModels.Speech.Where(s => on.Contains(s.Name)))
+            // Each picture model under its own name (its server runs the one asked for); videos are made by the app, not the gateway.
+            if (m.Mode == MediaModes.Image && await modules.HasAsync("imagegen", ct))
             {
-                Add(name, "openai/" + id, MediaModels.AudioUrl, new JsonObject { ["mode"] = mode });
+                Add(m.Name, "openai/sd-cpp-local", MediaModels.ImageUrl, new JsonObject { ["mode"] = m.Mode }, m.Row.UnitPrice);
+            }
+            else if (m.Id is not null && await modules.HasAsync("audio", ct))
+            {
+                Add(m.Name, "openai/" + m.Id, MediaModels.AudioUrl, new JsonObject { ["mode"] = m.Mode }, m.Row.UnitPrice);
             }
         }
     }
@@ -735,20 +736,20 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// LiteLLM prices a request by its deployment's own entry only when that entry has a token
     /// or per-second price (LiteLLM 1.100, cost_calculator._select_model_name_for_cost_calc).
     /// </summary>
-    private static void MediaPrices(JsonObject litellm, string mode, PriceOptions p)
+    private static void MediaPrices(JsonObject litellm, string mode, PriceOptions p, decimal? own)
     {
         switch (mode)
         {
             case "image_generation":
-                litellm["input_cost_per_image"] = p.PerImage;
+                litellm["input_cost_per_image"] = own ?? p.PerImage;
                 litellm["input_cost_per_token"] = 0m;
                 litellm["output_cost_per_token"] = 0m;
                 break;
             case "audio_transcription":
-                litellm["input_cost_per_second"] = p.PerAudioMinute / 60m;
+                litellm["input_cost_per_second"] = (own ?? p.PerAudioMinute) / 60m;
                 break;
             case "audio_speech":
-                litellm["input_cost_per_character"] = p.PerThousandCharacters / 1000m;
+                litellm["input_cost_per_character"] = (own ?? p.PerThousandCharacters) / 1000m;
                 litellm["input_cost_per_token"] = 0m;
                 litellm["output_cost_per_token"] = 0m;
                 break;

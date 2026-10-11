@@ -11,12 +11,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useConfirm } from '@/components/ui/confirm'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, ApiError, errorMessage } from '@/lib/api'
 import { money } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { AccessPicker, type AccessRule } from './access-picker'
+import { MediaModelForm, type SavedMediaModel } from './media-model-form'
+import { mediaModeLabel, type MediaMode } from './media-modes'
 import { ModelForm, type SavedModel } from './model-form'
 import { WorkingHours } from './model-hours'
 import { DefaultModelsCard } from './default-models'
@@ -41,8 +44,14 @@ interface ModelRow extends SavedModel {
   instead?: boolean
   /** How often lately the engine unloaded it by its own choice, to load another. */
   evicted?: number
-  /** A media model: on (at the gateway, in the chat's tools) or off. */
-  enabled?: boolean
+  /** A media model: unloaded after this many minutes unused (null: 10). */
+  idleMinutes?: number | null
+  /** A picture or video model's files, by role, and whether each is in the library. */
+  files?: { role: string; path: string; present: boolean }[]
+  /** A speech model's id at the speech server. */
+  speechId?: string | null
+  /** A media model's own settings (Admin -> Models -> Edit). */
+  settings?: SavedMediaModel['settings']
   vision: boolean
   atGateway?: boolean
   access: AccessRule
@@ -58,8 +67,8 @@ interface ModelRow extends SavedModel {
   kept?: boolean
   /** Kept loaded now: pinned, or by the working hours in force. */
   keptNow?: boolean
-  /** A picture, video or speech model's price (Settings → Prices). */
-  unitPrice?: { unit: string; amount: number }
+  /** A picture, video or speech model's price: its own, else Settings → Prices. */
+  unitPrice?: { unit: string; amount: number; own?: boolean }
 }
 
 /** What a media model's failure to load was, said plainly. */
@@ -84,7 +93,7 @@ function failureTitle(kind: string | undefined): string {
 
 /** "$0.20 in · $0.02 cached · $0.80 out per 1M tokens (the defaults)", or a media model's "$0.01 per picture". */
 function priceLine(m: Pick<ModelRow, 'price' | 'unitPrice'>): string | null {
-  if (m.unitPrice) return `${money(m.unitPrice.amount)} per ${m.unitPrice.unit} (Settings → Prices)`
+  if (m.unitPrice) return `${money(m.unitPrice.amount)} per ${m.unitPrice.unit}${m.unitPrice.own ? '' : ' (Settings → Prices)'}`
   const p = m.price
   if (!p) return null
   const own = p.own.input || p.own.cachedInput || p.own.output
@@ -130,6 +139,7 @@ export function ModelsPage() {
     refetchInterval: (q) => (q.state.data?.models.some((m) => m.status === 'loading' || m.status === 'unloading') ? 2000 : 15000),
   })
   const [editing, setEditing] = useState<ModelRow | 'new' | { preset: string } | null>(null)
+  const [media, setMedia] = useState<SavedMediaModel | { mode: MediaMode } | null>(null)
   const [hf, setHf] = useState(false)
   if (models.isPending) return <PageSkeleton />
   if (models.error) return <QueryError error={models.error} retry={() => models.refetch()} />
@@ -146,11 +156,21 @@ export function ModelsPage() {
                 <Search /> Find on Hugging Face
               </Button>
             )}
-            {engine.enabled && (
-              <Button onClick={() => setEditing('new')}>
-                <Plus /> Add a model
-              </Button>
-            )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button>
+                  <Plus /> Add a model
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {engine.enabled && <DropdownMenuItem onSelect={() => setEditing('new')}>A chat model</DropdownMenuItem>}
+                {(Object.keys(mediaModeLabel) as MediaMode[]).map((mode) => (
+                  <DropdownMenuItem key={mode} onSelect={() => setMedia({ mode })}>
+                    {`A ${mediaModeLabel[mode].toLowerCase()} model`}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </>
         }
       />
@@ -182,7 +202,7 @@ export function ModelsPage() {
             model={m}
             engine={engine}
             small={m.name === small?.name && (m.mode ?? 'chat') === 'chat'}
-            onEdit={() => setEditing(m)}
+            onEdit={() => (m.source === 'media' ? setMedia(m as SavedMediaModel) : setEditing(m))}
             onChanged={() => queryClient.invalidateQueries({ queryKey: ['admin', 'models'] })}
           />
         ))}
@@ -196,6 +216,19 @@ export function ModelsPage() {
               file={editing !== 'new' && 'preset' in editing ? editing.preset : undefined}
               gpus={engine.gpus}
               onClose={() => setEditing(null)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={media !== null} onOpenChange={(o) => !o && setMedia(null)}>
+        <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-3xl">
+          {media !== null && (
+            <MediaModelForm
+              key={'name' in media ? media.name : `new:${media.mode}`}
+              saved={'name' in media ? media : null}
+              mode={'name' in media ? undefined : media.mode}
+              gpus={engine.gpus}
+              onClose={() => setMedia(null)}
             />
           )}
         </DialogContent>
@@ -370,15 +403,7 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
   const kind = mediaKinds[m.mode]
   const Icon = kind?.icon ?? Boxes
   // Loading one more needs a place beside the kept models, unless this is one of them. A media model has its own server.
-  const canLoad = media ? m.enabled !== false && m.status !== 'waiting' : m.keptNow === true || engine.kept.length < engine.max
-  const enable = useMutation({
-    mutationFn: (on: boolean) => api(`/api/admin/models/${encodeURIComponent(m.name)}/enabled`, { method: 'PUT', body: { enabled: on } }),
-    onSuccess: (_, on) => {
-      toast.success(on ? `${m.name} is on` : `${m.name} is off`, { description: on ? 'At the gateway and in the chat’s tools.' : 'Unloaded, and gone from the gateway and the chat’s tools.' })
-      onChanged()
-    },
-    onError: (e) => toast.error(errorMessage(e)),
-  })
+  const canLoad = media ? m.status !== 'waiting' : m.keptNow === true || engine.kept.length < engine.max
   return (
     <Card className={cn(m.status === 'loaded' && 'border-success/40')}>
       <CardHeader className="flex flex-row flex-wrap items-start gap-3">
@@ -392,7 +417,6 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
               {m.source === 'local' ? 'Added here' : m.source === 'remote' ? `On ${m.server}` : media ? 'This stack' : 'Gateway'}
             </Badge>
             {kind && <Badge variant="outline">{kind.label}</Badge>}
-            {media && m.enabled === false && <Badge variant="secondary">Off</Badge>}
             {m.kept && (
               <Badge variant="outline">
                 <Pin /> Kept loaded
@@ -477,18 +501,7 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
             it){m.retryAt ? `: next from ${new Date(m.retryAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}. Loading it tries at once.
           </Alert>
         )}
-        {media && (
-          <Label className="flex items-start gap-3 font-normal">
-            <Switch checked={m.enabled !== false} disabled={enable.isPending} onCheckedChange={(on) => enable.mutate(on)} aria-describedby={`on-${m.name}`} />
-            <span className="grid gap-0.5">
-              <span className="font-medium">On</span>
-              <span id={`on-${m.name}`} className="text-xs text-muted-foreground">
-                {m.enabled !== false ? 'At the gateway for API keys, and in the chat’s tools.' : 'Off: not at the gateway, not in the chat.'}
-              </span>
-            </span>
-          </Label>
-        )}
-        {onEngine && (!media || m.enabled !== false) && (
+        {onEngine && (
           <Label className="flex items-start gap-3 font-normal">
             <Switch checked={m.kept === true} disabled={keep.isPending} onCheckedChange={(on) => keep.mutate(on)} aria-describedby={`keep-${m.name}`} />
             <span className="grid gap-0.5">
@@ -497,7 +510,7 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
                 {m.kept
                   ? 'Loaded at start, and again whenever it is not.'
                   : media
-                    ? 'Otherwise it loads when someone asks for it, and unloads after ten minutes unused.'
+                    ? `Otherwise it loads when someone asks for it, and unloads after ${m.idleMinutes ?? 10} minutes unused.${m.mode === 'image_generation' || m.mode === 'video_generation' ? ' Its server runs one model at a time: keeping this one stops keeping the others.' : ''}`
                     : engine.onRequest
                       ? 'Otherwise it loads when someone asks for it.'
                       : 'Otherwise it loads only when an admin loads it.'}
@@ -519,7 +532,7 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
                   await confirm({
                     title: `Load ${m.name}?`,
                     description: media
-                      ? 'It loads on its own server, beside the chat models. A model not kept loaded unloads again after ten minutes unused.'
+                      ? `It loads on its own server, beside the chat models${m.mode === 'image_generation' || m.mode === 'video_generation' ? ', in place of the model it runs now' : ''}. A model not kept loaded unloads again after ${m.idleMinutes ?? 10} minutes unused.`
                       : full
                       ? 'The engine is full: an idle model that may make room unloads first (never one kept loaded, nor the one new chats use, unless you say so). Answers wait until this one is loaded: seconds for a small model, minutes for a large one.'
                       : 'It loads beside the models loaded now. Answers wait until it is loaded: seconds for a small model, minutes for a large one.',
@@ -546,6 +559,24 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
               }}
             >
               <PowerOff /> Unload
+            </Button>
+          )}
+          {media && (
+            <Button size="sm" variant="outline" onClick={onEdit}>
+              <Pencil /> Edit
+            </Button>
+          )}
+          {media && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-destructive-ink"
+              onClick={async () => {
+                const description = `It is unloaded and removed from the gateway and the chat’s tools${m.kept ? ', and stops being kept loaded' : ''}. Its files stay in the library.`
+                if (await confirm({ title: `Remove ${m.name}?`, description, confirm: 'Remove', destructive: true })) remove.mutate()
+              }}
+            >
+              <Trash2 /> Remove
             </Button>
           )}
           {m.source === 'local' && (

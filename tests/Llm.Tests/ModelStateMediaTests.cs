@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using Llm.Api.Models;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
@@ -99,7 +100,7 @@ public sealed class ModelStateMediaTests(AppFixture app)
             {
                 throw new TimeoutException($"Not within {Deadline.TotalSeconds} s: {what} (control file: {s.File}, status: {await s.StatusAsync()})");
             }
-            await s.Media.SetAsync(Image);
+            s.Media.Wake();
             await Task.Delay(200);
         }
     }
@@ -113,7 +114,7 @@ public sealed class ModelStateMediaTests(AppFixture app)
     {
         await using var s = await NewAsync();
         // Not kept loaded: it loads when asked for, and unloads after ten minutes unused.
-        await s.Media.SetAsync(Image, kept: false);
+        await s.Media.SetKeptAsync(Image, false);
         s.Media.Load(Image);
         await UntilFileAsync(s, "on", "the app turns the picture server on");
         s.Server.Up = true; // sd-serve.sh started it, and it answers
@@ -164,7 +165,7 @@ public sealed class ModelStateMediaTests(AppFixture app)
 
         // A day later, after a round of the media loop.
         s.Clock.Now += TimeSpan.FromDays(1);
-        await s.Media.SetAsync(Image);
+        s.Media.Wake();
         await Task.Delay(1500);
         var status = await s.StatusAsync();
 
@@ -177,7 +178,7 @@ public sealed class ModelStateMediaTests(AppFixture app)
     {
         await using var s = await NewAsync();
         // Not kept loaded and not asked for: unloaded, as meant (its container runs; sd-server does not, so nothing listens on :1234).
-        await s.Media.SetAsync(Image, kept: false);
+        await s.Media.SetKeptAsync(Image, false);
         await UntilFileAsync(s, "off", "the app turns the picture server off");
         await UntilStatusAsync(s, "unloaded", "Admin -> Models says Not loaded");
 
@@ -238,7 +239,7 @@ public sealed class ModelStateMediaTests(AppFixture app)
             while (!done())
             {
                 Assert.True(DateTime.UtcNow < until, $"Not within {Deadline.TotalSeconds} s: {what} (calls: {string.Join(", ", speech.Calls)})");
-                await media.SetAsync(MediaModels.TextToSpeech);
+                media.Wake();
                 await Task.Delay(200);
             }
         }
@@ -252,7 +253,7 @@ public sealed class ModelStateMediaTests(AppFixture app)
         clock.Now += TimeSpan.FromMinutes(9);
         media.Touch(MediaModels.TextToSpeech);
         clock.Now += TimeSpan.FromMinutes(9);
-        await media.SetAsync(MediaModels.TextToSpeech);
+        media.Wake();
         await Task.Delay(500);
         Assert.True(speech.Loaded.ContainsKey(kokoro), "used nine minutes ago: still loaded");
 
@@ -279,7 +280,7 @@ public sealed class ModelStateMediaTests(AppFixture app)
     public async Task The_control_file_names_the_model_its_files_and_flags_and_a_server_that_exits_is_started_again_after_a_while()
     {
         await using var s = await NewAsync();
-        await s.Media.SetAsync(Image, kept: true);
+        await s.Media.SetKeptAsync(Image, true);
         await UntilFileAsync(s, "on", "the app turns the picture server on");
         var text = await File.ReadAllTextAsync(s.Control);
         Assert.Contains($"model={Image}", text);
@@ -335,5 +336,34 @@ public sealed class ModelStateMediaTests(AppFixture app)
         Assert.Equal(at + TimeSpan.FromMinutes(4), new MediaFailure("gpu-memory", "", 3, at, "1").RetryAt);
         Assert.Equal(at + TimeSpan.FromMinutes(30), new MediaFailure("timeout", "", 9, at, "1").RetryAt);
         Assert.Null(new MediaFailure("bad-options", "", 1, at, "1").RetryAt);
+    }
+
+    [Fact]
+    public async Task A_server_runs_one_of_its_models_at_a_time_the_kept_one_and_switching_starts_a_new_generation()
+    {
+        await using var s = await NewAsync();
+        await s.Media.SetKeptAsync(Image, true);
+        await UntilFileAsync(s, "on", "FLUX runs");
+        var gen = Conf(s, "gen");
+        // A second picture model from the same files, at 8 steps.
+        using (var scope = s.App.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            var flux = await db.MediaModels.AsNoTracking().SingleAsync(m => m.Name == Image);
+            db.MediaModels.Add(new Llm.Core.Models.MediaModel
+            {
+                Name = "FLUX-8", Mode = flux.Mode, Files = [.. flux.Files.Select(f => new Llm.Core.Models.MediaModelFile { Role = f.Role, Path = f.Path })],
+                MaxVramGb = flux.MaxVramGb, FlashAttention = true, Steps = 8, CfgScale = 1.0,
+            });
+            await db.SaveChangesAsync();
+        }
+        await s.Media.ChangedAsync(CancellationToken.None);
+        await s.Media.SetKeptAsync("FLUX-8", true);
+        // One kept a server: FLUX is not any more, and the control file names FLUX-8, a new generation its script starts.
+        await UntilAsync(s, () => Task.FromResult(Conf(s, "model") == "FLUX-8"), "the server runs FLUX-8");
+        Assert.NotEqual(gen, Conf(s, "gen"));
+        Assert.Contains("arg=--steps\narg=8\n", await File.ReadAllTextAsync(s.Control));
+        Assert.False(s.Media.Find(Image)!.Row.Kept);
+        Assert.Equal("unloaded", (await s.Media.ListAsync(CancellationToken.None)).Single(x => x.Model.Name == Image).Now);
     }
 }

@@ -141,13 +141,4 @@ public sealed class PriceBook(AppDbContext db, IOptionsMonitor<PriceOptions> opt
         }
     }
 
-    /// <summary>The unit a picture, video or speech model is priced by, or null for a chat model.</summary>
-    public static string? UnitOf(string model) => model switch
-    {
-        MediaModels.ImageModel => "image",
-        MediaModels.VideoModel => "second",
-        MediaModels.SpeechToText => "minute",
-        MediaModels.TextToSpeech or MediaModels.TextToSpeechPersian => "characters",
-        _ => null,
-    };
 }

@@ -70,7 +70,7 @@ public static partial class GuardrailEndpoints
             return Answer(new ApiVerdict("BLOCKED", "Your API access is off. Ask an admin to turn it on (Admin → People)."));
         }
         // The credit of what the request makes: a picture, a video, speech, or else an API key's text request.
-        if (user is not null && await credit.RefusalAsync(user, CreditKinds.OfModel(Str(body, "model")), http.RequestAborted) is { } refusal)
+        if (user is not null && await credit.RefusalAsync(user, CreditKinds.OfModel(Str(body, "model"), http.RequestServices.GetRequiredService<Models.MediaControl>()), http.RequestAborted) is { } refusal)
         {
             var logger = logs.CreateLogger(nameof(GuardrailEndpoints));
             LogRefused(logger, user.UserName ?? "?", "credit");

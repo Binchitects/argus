@@ -14,7 +14,8 @@ public sealed class MediaException(string message) : Exception(message);
 /// an MP3 (mono, 16 kHz), a video as up to eight frames and its sound track. A model that hears gets
 /// the sound itself; one that does not gets a transcript (speech to text at the gateway), made once.
 /// </summary>
-public sealed partial class Media(SandboxClient sandbox, AppDbContext db, GatewayChat gateway, ChatModels models, VoiceCatalog voices, Gateway.Credit credit)
+public sealed partial class Media(SandboxClient sandbox, AppDbContext db, GatewayChat gateway, ChatModels models, VoiceCatalog voices, Gateway.Credit credit,
+    Models.MediaControl media)
 {
     public const int MaxFrames = 8;
 
@@ -158,7 +159,7 @@ public sealed partial class Media(SandboxClient sandbox, AppDbContext db, Gatewa
         {
             return "";
         }
-        var model = await models.OfModeAsync("audio_transcription", Models.MediaModels.SpeechToText, ct)
+        var model = await models.OfModeAsync("audio_transcription", media.All.FirstOrDefault(m => m.Mode == Llm.Core.Models.MediaModes.Transcription)?.Name, ct)
             ?? throw new MediaException("The gateway has no speech to text model (the audio module).");
         var owner = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == a.UserId, ct);
         // Sound turned into text counts to its owner's speech credit.

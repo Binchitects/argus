@@ -658,7 +658,7 @@ function GpuPicker({ gpus, value, onChange, error }: { gpus: { index: number; na
   )
 }
 
-function Section({ title, description, children }: { title: string; description?: ReactNode; children: ReactNode }) {
+export function Section({ title, description, children }: { title: string; description?: ReactNode; children: ReactNode }) {
   return (
     <fieldset className="grid min-w-0 gap-4 rounded-lg border p-4">
       <legend className="px-1 text-sm font-medium">{title}</legend>
