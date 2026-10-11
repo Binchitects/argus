@@ -102,6 +102,42 @@ public sealed class FramingTests
     }
 
     [Fact]
+    public async Task Text_that_is_not_UTF_8_and_half_of_a_surrogate_pair_are_read_as_a_replacement_character()
+    {
+        // As Python's json writes what it could not decode (debugpy, a program's output), and a byte that is not UTF-8.
+        var json = Encoding.ASCII.GetBytes("""{"low":"\udc80","high":"\ud800x","end":"a\ud83d","pair":"PAIR","text":"\\udc80","raw":"x?y"}""".Replace("PAIR", "\\" + "ud83d" + "\\" + "udc1b", StringComparison.Ordinal));
+        json[Array.LastIndexOf(json, (byte)'?')] = 0xFF;
+        var frame = Encoding.ASCII.GetBytes($"Content-Length: {json.Length}\r\n\r\n").Concat(json).ToArray();
+        var message = (await new FrameReader(new Chunks(frame, Frame("""{"seq":2}""")), Cap).ReadAsync(default))!;
+
+        Assert.Equal("�", message["low"]!.GetValue<string>());
+        Assert.Equal("�x", message["high"]!.GetValue<string>());
+        Assert.Equal("a�", message["end"]!.GetValue<string>());
+        Assert.Equal("🐛", message["pair"]!.GetValue<string>());
+        // An escaped backslash before a u is text, not an escape.
+        Assert.Equal("\\udc80", message["text"]!.GetValue<string>());
+        Assert.Equal("x�y", message["raw"]!.GetValue<string>());
+        // It can be passed on.
+        Assert.Equal(message.ToJsonString(), JsonNode.Parse(CodeArena.Json.Line(message))!.ToJsonString());
+    }
+
+    [Fact]
+    public async Task A_message_is_written_whole_even_when_its_writer_gives_up_and_one_still_waiting_is_not_written()
+    {
+        using var slow = new SlowStream();
+        using var writer = new FrameWriter(slow);
+        using var giveUp = new CancellationTokenSource();
+        var first = writer.WriteAsync(new JsonObject { ["seq"] = 1 }, giveUp.Token);
+        var second = writer.WriteAsync(new JsonObject { ["seq"] = 2 }, giveUp.Token);
+        await slow.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await giveUp.CancelAsync();
+
+        await first;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => second);
+        Assert.Equal("Content-Length: 9\r\n\r\n{\"seq\":1}", Encoding.UTF8.GetString(slow.Written.ToArray()));
+    }
+
+    [Fact]
     public async Task Messages_written_at_once_from_many_callers_come_out_whole_one_after_another()
     {
         using var pipe = new MemoryStream();
@@ -119,6 +155,48 @@ public sealed class FramingTests
         }
         Assert.Equal(Enumerable.Range(1, 200), seen.Order());
         Assert.Equal("Content-Length: 9\r\n\r\n{\"seq\":1}", Encoding.UTF8.GetString(FrameWriter.Encode(new JsonObject { ["seq"] = 1 })));
+    }
+
+    /// <summary>A stream that writes half of what it is given, waits (as long as the write may), then the rest.</summary>
+    private sealed class SlowStream : Stream
+    {
+        public MemoryStream Written { get; } = new();
+
+        /// <summary>Done when the first write has begun.</summary>
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
+        {
+            var half = buffer.Length / 2;
+            Written.Write(buffer.Span[..half]);
+            Started.TrySetResult();
+            await Task.Delay(300, ct);
+            Written.Write(buffer.Span[half..]);
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                Written.Dispose();
+            }
+            base.Dispose(disposing);
+        }
     }
 
     /// <summary>A stream whose reads return these chunks, one per read, then the end.</summary>

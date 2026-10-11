@@ -74,7 +74,39 @@ public sealed class StdioChildTests
         await Assert.ThrowsAsync<IOException>(() => StdioChild.ConnectAsync(StdioChild.FreePort(), TimeSpan.FromSeconds(5), default));
     }
 
-    private static bool Alive(int pid) => File.Exists($"/proc/{pid}/stat") && !File.ReadAllText($"/proc/{pid}/stat").Split(')')[1].TrimStart().StartsWith('Z');
+    [Fact]
+    public async Task A_child_that_was_to_listen_is_killed_when_the_wait_for_it_is_given_up()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+        var pidFile = Path.Combine(Path.GetTempPath(), $"code-arena-listener-{Guid.NewGuid():N}");
+        using var giveUp = new CancellationTokenSource();
+        var starting = StdioChild.StartListeningAsync("/bin/sh", ["-c", $"echo $$ > {pidFile}; exec sleep 600"], Path.GetTempPath(), null, StdioChild.FreePort(), TimeSpan.FromSeconds(30), giveUp.Token);
+        await Until(() => File.Exists(pidFile) && File.ReadAllText(pidFile).Trim().Length > 0);
+        var pid = int.Parse(File.ReadAllText(pidFile).Trim(), System.Globalization.CultureInfo.InvariantCulture);
+        File.Delete(pidFile);
+        // Given up while it waits between two tries, as it mostly does.
+        await Task.Delay(250);
+        await giveUp.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => starting);
+        await Until(() => !Alive(pid));
+    }
+
+    /// <summary>Whether a process runs (a zombie, ended but not yet waited for, does not).</summary>
+    internal static bool Alive(int pid)
+    {
+        try
+        {
+            return !File.ReadAllText($"/proc/{pid}/stat").Split(')')[1].TrimStart().StartsWith('Z');
+        }
+        catch (IOException)
+        {
+            // Gone, even while it was being read.
+            return false;
+        }
+    }
 
     private static async Task Until(Func<bool> condition)
     {

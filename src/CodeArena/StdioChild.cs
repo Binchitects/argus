@@ -98,7 +98,8 @@ internal sealed class StdioChild : IAsyncDisposable
                     throw new IOException(With(why, said.All()));
                 }
             }
-            await Task.Delay(100, ct);
+            // Not cancelled here: the next connect is, and the program is killed there.
+            await Task.Delay(100, CancellationToken.None);
         }
     }
 
@@ -112,9 +113,10 @@ internal sealed class StdioChild : IAsyncDisposable
             limit.CancelAfter(wait);
             await tcp.ConnectAsync(IPAddress.Loopback, port, limit.Token);
         }
-        catch (Exception e) when (e is SocketException or OperationCanceledException && !ct.IsCancellationRequested)
+        catch (Exception e) when (e is SocketException or OperationCanceledException)
         {
             tcp.Dispose();
+            ct.ThrowIfCancellationRequested();
             throw new IOException($"Nothing answers on 127.0.0.1:{port}: {e.Message}", e);
         }
         var stream = tcp.GetStream();
