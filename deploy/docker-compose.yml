@@ -98,6 +98,7 @@ services:
     volumes:
       - ${MODELS_DIR:-./models}:/library
       - engine:/engine-config
+      - media-status:/media-status:ro
       - directory:/directory
       - sandbox:/sandbox
       # scripts/backup.sh's backups, for Admin -> Storage: their sizes and how each ended.
@@ -219,27 +220,19 @@ services:
     # A GitLab on this machine.
     extra_hosts: ["host.docker.internal:host-gateway"]
 
-  # Pictures: FLUX.2 klein. The app fetches the files into MODELS_DIR/image, and
-  # loads and unloads it (Admin -> Models).
+  # Pictures and video (stable-diffusion.cpp): each runs the model the app names in its
+  # control file (Admin -> Models: load, unload, keep loaded, the model's settings), and
+  # says what it does in its status file (services/sd-serve.sh).
   imagegen:
     <<: [*service, *gpu]
     image: ghcr.io/leejet/stable-diffusion.cpp@sha256:1aee2217d5e20ddfb19dfcbca21db3cbe1dcb0ae3b9bc4151773e503dca8aede
     container_name: imagegen
     user: "65534:65534"
     read_only: true
-    environment:
-      CUDA_DEVICE_ORDER: PCI_BUS_ID
-      NAME: imagegen
-      FILES: flux-2-klein-4b-Q4_0.gguf Qwen3-4B-Q4_K_M.gguf flux2-vae.safetensors
-    volumes: ["${MODELS_DIR:-./models}:/models", "engine:/control:ro", "./services/sd-serve.sh:/sd-serve.sh:ro"]
-    working_dir: /models/image/flux2-klein-4b
+    environment: { CUDA_DEVICE_ORDER: PCI_BUS_ID, NAME: imagegen }
+    volumes: ["${MODELS_DIR:-./models}:/models:ro", "engine:/control:ro", "media-status:/status", "./services/sd-serve.sh:/sd-serve.sh:ro"]
     entrypoint: [/bin/sh, /sd-serve.sh]
-    command: >
-      --listen-ip 0.0.0.0 --listen-port 1234 --diffusion-model flux-2-klein-4b-Q4_0.gguf
-      --llm Qwen3-4B-Q4_K_M.gguf --vae flux2-vae.safetensors --max-vram 2 --diffusion-fa --cfg-scale 1.0 --steps 4
 
-  # Video: Wan2.2 TI2V 5B. The app fetches the files into MODELS_DIR/video, and
-  # loads and unloads it (Admin -> Models).
   videogen:
     <<: [*service, *gpu]
     image: ghcr.io/leejet/stable-diffusion.cpp@sha256:1aee2217d5e20ddfb19dfcbca21db3cbe1dcb0ae3b9bc4151773e503dca8aede
@@ -247,22 +240,9 @@ services:
     user: "65534:65534"
     read_only: true
     tmpfs: [/tmp]
-    environment:
-      CUDA_DEVICE_ORDER: PCI_BUS_ID
-      NAME: videogen
-      FILES: Wan2.2-TI2V-5B-Q4_K_M.gguf umt5-xxl-encoder-Q4_K_M.gguf wan2.2_vae.safetensors
-      # Decode on the GPU when it has this much free (MB) as the server loads, with a
-      # 12 GB budget then (the decode alone needs about 11) and the weights in RAM until
-      # each is needed. Less free, and it decodes on the CPU within its usual 3 GB.
-      VAE_GPU_MB: "13312"
-      VAE_GPU_FLAGS: "--max-vram 12 --offload-to-cpu"
-    volumes: ["${MODELS_DIR:-./models}:/models", "engine:/control:ro", "./services/sd-serve.sh:/sd-serve.sh:ro"]
-    working_dir: /models/video/wan2.2-ti2v-5b
+    environment: { CUDA_DEVICE_ORDER: PCI_BUS_ID, NAME: videogen }
+    volumes: ["${MODELS_DIR:-./models}:/models:ro", "engine:/control:ro", "media-status:/status", "./services/sd-serve.sh:/sd-serve.sh:ro"]
     entrypoint: [/bin/sh, /sd-serve.sh]
-    command: >
-      --listen-ip 0.0.0.0 --listen-port 1234 --diffusion-model Wan2.2-TI2V-5B-Q4_K_M.gguf
-      --t5xxl umt5-xxl-encoder-Q4_K_M.gguf --vae wan2.2_vae.safetensors --max-vram 3 --diffusion-fa
-      --vae-tiling --cfg-scale 5.0 --flow-shift 5.0 --sampling-method euler
 
   # Speech to text and text to speech. It fetches its models itself.
   audio:
@@ -414,3 +394,6 @@ volumes:
   alertmanager:
   loki:
   power-limits:
+  # What the picture and video servers say they do (services/sd-serve.sh), every 2 s: kept in memory, theirs to write.
+  media-status:
+    driver_opts: { type: tmpfs, device: tmpfs, o: "uid=65534,gid=65534,mode=0755,size=64m" }

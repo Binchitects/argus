@@ -12,7 +12,8 @@ namespace Llm.Api.Models;
 /// <summary>
 /// The picture, video and speech models, managed as the engine's are: on or off, kept loaded or not,
 /// loaded and unloaded by hand, and who may use them (the models' access rules). The picture and video
-/// servers run while their control file says "on" (services/sd-serve.sh reads it); the speech server
+/// servers run the model, files and flags their control file names (services/sd-serve.sh reads it, and
+/// says what it does in its status file); the speech server
 /// loads and unloads its models through its own API (its own unloading is off). One not kept loaded loads
 /// when asked for or used, and unloads after ten minutes unused. With several replicas, the one that leads writes the control
 /// files and loads the speech models; a model asked for on another is told to it.
@@ -276,9 +277,18 @@ public sealed partial class MediaControl : BackgroundService
             }
             if (m.Id is null)
             {
+                var recipe = MediaRecipes.Of(m.Name)!;
+                var status = StatusOf(m.Server);
+                // Wanted, and its server exited (it crashed, or its flags are wrong): started again after a while, never at once.
+                if (want && status is { Phase: "exited" } && status.Gen == Gen(m.Server).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    && now - status.Since >= Retry)
+                {
+                    LogExited(logger, m.Name, status.Exit);
+                    _gen[m.Server] = Gen(m.Server) + 1;
+                }
                 if (lead)
                 {
-                    Write(m.Server, want ? "on\n" : "off\n");
+                    Write(m.Server, SdArgs.Conf(recipe, Gen(m.Server), want));
                 }
                 if (want)
                 {
@@ -288,10 +298,12 @@ public sealed partial class MediaControl : BackgroundService
                 {
                     _onSince.TryRemove(m.Server, out _);
                 }
-                var files = MediaModels.Servers.First(x => x.Server == m.Server).Files;
-                var ready = files.All(f => File.Exists(Path.Combine(engine.Value.LibraryDir, f.Dir, f.Name)));
-                var up = ready && await UpAsync(m, ct);
-                _now[m.Name] = !ready ? "waiting" : up ? (want ? "loaded" : "unloading") : want ? Loading(m.Name, now) : "unloaded";
+                var ready = status is not null ? status.Phase != "waiting" : recipe.Files.All(f => File.Exists(Path.Combine(engine.Value.LibraryDir, f.Path)));
+                var up = ready && (status is null || status.Phase is "running" or "stopping") && await UpAsync(m, ct);
+                _now[m.Name] = !ready ? "waiting"
+                    : status is { Phase: "stopping" } ? "unloading"
+                    : up ? (want ? "loaded" : "unloading")
+                    : want ? Loading(m.Name, now) : "unloaded";
                 if (up || !want || !ready)
                 {
                     _loadingSince.TryRemove(m.Name, out _);
@@ -316,8 +328,69 @@ public sealed partial class MediaControl : BackgroundService
         }
     }
 
-    /// <summary>Whether a server's control file has said "on" long enough for its answer to count (<see cref="OnSettle"/>).</summary>
-    private bool On(string server) => _onSince.TryGetValue(server, out var since) && Environment.TickCount64 - since >= OnSettle.TotalMilliseconds;
+    /// <summary>
+    /// Whether a server's answer counts: its status says it runs the generation the app wrote last; or, before its first
+    /// status, its control file has said "on" long enough (<see cref="OnSettle"/>).
+    /// </summary>
+    private bool On(string server)
+    {
+        if (StatusOf(server) is { } status)
+        {
+            return status.Phase == "running" && status.Gen == Gen(server).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                && _onSince.ContainsKey(server);
+        }
+        return _onSince.TryGetValue(server, out var since) && Environment.TickCount64 - since >= OnSettle.TotalMilliseconds;
+    }
+
+    /// <summary>How long a server that exited while wanted waits before it is started again.</summary>
+    private static readonly TimeSpan Retry = TimeSpan.FromSeconds(30);
+
+    /// <summary>What a picture or video server says it does (services/sd-serve.sh's status file).</summary>
+    public sealed record ServerStatus(string Gen, string Phase, DateTimeOffset Since, DateTimeOffset At, long? FreeMb, int? Exit, IReadOnlyList<string> Missing, string Vae);
+
+    /// <summary>Its status, when it wrote one in the last 15 s (null: none, or its script has stopped).</summary>
+    public ServerStatus? StatusOf(string server)
+    {
+        var path = Path.Combine(engine.Value.MediaStatusDir, server + ".json");
+        try
+        {
+            if (!File.Exists(path) || JsonNode.Parse(File.ReadAllText(path)) is not JsonObject j)
+            {
+                return null;
+            }
+            var at = DateTimeOffset.FromUnixTimeSeconds(j["at"]?.GetValue<long>() ?? 0);
+            if (DateTimeOffset.UtcNow - at > TimeSpan.FromSeconds(15))
+            {
+                return null;
+            }
+            return new ServerStatus(j["gen"]?.ToString() ?? "", j["phase"]?.ToString() ?? "off",
+                DateTimeOffset.FromUnixTimeSeconds(j["since"]?.GetValue<long>() ?? 0), at,
+                j["free_mb"] is JsonValue f && f.TryGetValue<long>(out var mb) ? mb : null,
+                j["exit"] is JsonValue e && e.TryGetValue<int>(out var code) ? code : null,
+                [.. (j["missing"] as JsonArray ?? []).Select(x => x?.ToString() ?? "")], j["vae"]?.ToString() ?? "");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or FormatException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The generation of a server's control file: raised to start it again; carried on from the file the last run wrote.</summary>
+    private long Gen(string server) => _gen.GetOrAdd(server, s =>
+    {
+        try
+        {
+            var path = Path.Combine(engine.Value.ConfigDir, s + ".conf");
+            var line = File.Exists(path) ? File.ReadLines(path).FirstOrDefault(l => l.StartsWith("gen=", StringComparison.Ordinal)) : null;
+            return line is not null && long.TryParse(line[4..], out var g) ? g : 1;
+        }
+        catch (IOException)
+        {
+            return 1;
+        }
+    });
+
+    private readonly ConcurrentDictionary<string, long> _gen = new(StringComparer.Ordinal);
 
     /// <summary>"loading", or "failed" once it has loaded for longer than <see cref="LoadLimit"/> (it is still tried: its script starts it again).</summary>
     private string Loading(string name, DateTimeOffset now)
@@ -373,7 +446,7 @@ public sealed partial class MediaControl : BackgroundService
     /// <summary>The control file a server's script reads, only when it changes.</summary>
     private void Write(string server, string text)
     {
-        var path = Path.Combine(engine.Value.ConfigDir, server);
+        var path = Path.Combine(engine.Value.ConfigDir, server + ".conf");
         try
         {
             if (File.Exists(path) && File.ReadAllText(path) == text)
@@ -381,6 +454,8 @@ public sealed partial class MediaControl : BackgroundService
                 return;
             }
             Directory.CreateDirectory(engine.Value.ConfigDir);
+            // Before v5.6 the file said only "on" or "off".
+            File.Delete(Path.Combine(engine.Value.ConfigDir, server));
             File.WriteAllText(path + ".tmp", text);
             File.Move(path + ".tmp", path, overwrite: true);
         }
@@ -404,6 +479,9 @@ public sealed partial class MediaControl : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Media models: {Model}'s server has not answered for {Minutes} minutes since it was turned on (its log says why: often no GPU memory left beside the chat models); it is still tried")]
     private static partial void LogNotLoaded(ILogger logger, string model, int minutes);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Media models: {Model}'s server exited (code {Exit}); starting it again")]
+    private static partial void LogExited(ILogger logger, string model, int? exit);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Media models: cannot write {Path}: {Error}")]
     private static partial void LogControl(ILogger logger, string path, string error);

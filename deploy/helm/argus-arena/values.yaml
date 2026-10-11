@@ -157,6 +157,8 @@ persistence:
   sharedAccessMode: ReadWriteMany
   models: { size: 500Gi, existingClaim: "" }
   engine: { size: 1Gi }
+  # What the picture and video servers say they do (their status files), read by the app.
+  mediaStatus: { size: 64Mi }
   directory: { size: 1Gi }
   sandbox: { size: 10Gi }
 

@@ -1,53 +1,110 @@
 #!/bin/sh
-# A picture or video server (stable-diffusion.cpp) that runs while the app says so:
-# /control/$NAME holds "on" or "off" (Admin -> Models: load, unload, keep loaded).
-# It waits for its model files ($FILES, in the working directory); the app fetches them.
+# A picture or video server (stable-diffusion.cpp) running the model the app names.
 #
-# VAE_GPU_MB (the video server's): the free GPU memory, in MB, that decoding on the
-# GPU needs. Each time the server loads, it decodes there when the GPU has that much
-# free, and on the CPU (--vae-on-cpu: slower) when the chat model holds the rest.
-# VAE_GPU_FLAGS: the server's flags while it decodes there (a larger GPU budget, and
-# its weights kept in RAM until needed), given after its own: the last one counts.
+# The app writes /control/$NAME.conf, read line by line and never run:
+#   want=on|off   whether the server runs
+#   gen=N         raised by the app to start it again (a new model, new settings, a retry)
+#   model=NAME    what it runs (for the log and the status)
+#   gpu=N         the GPU it runs on (as nvidia-smi numbers them; empty: every GPU it sees)
+#   file=PATH     each file it needs, in the library (it waits for them)
+#   arg=VALUE     each of the server's arguments, in order (paths in the library)
+#   vae_gpu_mb=N  decode on the GPU when it has this much free as the server loads, with
+#   vae_gpu_arg=  these arguments then, and these (vae_cpu_arg=) when it decodes on the CPU
+#
+# Every 2 s it writes /status/$NAME.json: the gen it runs, its phase (off, waiting for its
+# files, running, exited, stopping), since when, the GPU's free memory, how it exited, the
+# files it lacks and where it decodes; the server's output goes to /status/$NAME.log too.
+# It never starts a server again on its own: the app raises gen.
 set -u
-pid=
-want() { [ "$(cat "/control/$NAME" 2>/dev/null)" = on ]; }
-ready() { for f in $FILES; do [ -f "$f" ] || return 1; done; }
+conf=/control/$NAME.conf out=/status/$NAME server=${SD_SERVER:-/sd-server} tick=${SD_SERVE_TICK:-2}
+pid= ran= phase=off since=$(date +%s) code=null missing= free=null vae=
 
-# The free memory of the GPU the server uses (the first, as CUDA numbers them), in MB; empty when unknown.
-gpu_free_mb() { nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | head -n 1 | tr -dc 0-9; }
+get() { sed -n "s/^$1=//p" "$conf" 2>/dev/null | head -n 1; }
+to() { phase=$1; since=$(date +%s); }
 
-# Sets $vae (the server's VAE flag, or nothing) and $where (for the log).
-place_vae() {
-  vae= where=
-  [ -n "${VAE_GPU_MB:-}" ] || return 0
-  free=$(gpu_free_mb)
-  if [ -n "$free" ] && [ "$free" -ge "$VAE_GPU_MB" ]; then
-    where=" (decoding on the GPU: $free MB free)"
-    vae=${VAE_GPU_FLAGS:-}
-  else
-    vae=--vae-on-cpu
-    where=" (decoding on the CPU: ${free:-unknown} MB free of the $VAE_GPU_MB it needs)"
-  fi
+# The free memory of the GPU it runs on, in MB; null when it cannot be read.
+read_free() {
+  free=$(nvidia-smi --id="${1:-0}" --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | head -n 1 | tr -dc 0-9)
+  free=${free:-null}
 }
 
-# Its test sources it for the functions alone.
+report() {
+  printf '{"gen":"%s","phase":"%s","since":%s,"at":%s,"free_mb":%s,"exit":%s,"missing":[%s],"vae":"%s","model":"%s"}\n' \
+    "$ran" "$phase" "$since" "$(date +%s)" "$free" "$code" "$missing" "$vae" "$(get model)" > "$out.json.tmp" && mv -f "$out.json.tmp" "$out.json"
+}
+
+stop() {
+  [ -n "$pid" ] || return 0
+  to stopping
+  report
+  kill "$pid" 2>/dev/null
+  i=0
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 15 ]; do sleep 1; i=$((i + 1)); done
+  kill -9 "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
+  pid=
+  to off
+}
+
+start() {
+  missing=
+  while IFS= read -r l; do
+    case $l in file=*) [ -f "/models/${l#file=}" ] || missing="$missing${missing:+,}\"${l#file=}\"" ;; esac
+  done < "$conf"
+  if [ -n "$missing" ]; then
+    [ "$phase" = waiting ] || to waiting
+    return
+  fi
+  set -- --listen-ip 0.0.0.0 --listen-port 1234
+  while IFS= read -r l; do case $l in arg=*) set -- "$@" "${l#arg=}" ;; esac; done < "$conf"
+  # Where it decodes: on the GPU when it has room now, else on the CPU.
+  vae= need=$(get vae_gpu_mb) extra=
+  if [ -n "$need" ]; then
+    if [ "$free" != null ] && [ "$free" -ge "$need" ]; then vae=gpu extra=vae_gpu_arg; else vae=cpu extra=vae_cpu_arg; fi
+    while IFS= read -r l; do case $l in "$extra"=*) set -- "$@" "${l#"$extra"=}" ;; esac; done < "$conf"
+  fi
+  rm -f "$out.fifo"
+  mkfifo "$out.fifo"
+  : > "$out.log"
+  tee -a "$out.log" < "$out.fifo" &
+  echo "$NAME: loading $(get model)${vae:+ (decoding on the ${vae}: $free MB free)}"
+  gpu=$(get gpu)
+  if [ -n "$gpu" ]; then
+    (cd /models && CUDA_VISIBLE_DEVICES=$gpu exec "$server" "$@") > "$out.fifo" 2>&1 &
+  else
+    (cd /models && exec "$server" "$@") > "$out.fifo" 2>&1 &
+  fi
+  pid=$! code=null
+  to running
+}
+
+# Its tests source it for the functions alone.
 [ -z "${SD_SERVE_LIB:-}" ] || return 0
 
-trap '[ -z "$pid" ] || kill "$pid" 2>/dev/null; exit 0' TERM INT
+trap 'stop; report; exit 0' TERM INT
 while true; do
-  if want && ready; then
-    if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
-      place_vae
-      echo "$NAME: loading$where"
-      # $vae unquoted: its flags, or none at all.
-      /sd-server "$@" $vae &
-      pid=$!
-    fi
-  elif [ -n "$pid" ]; then
-    echo "$NAME: unloading"
-    kill "$pid" 2>/dev/null
-    wait "$pid" 2>/dev/null
+  read_free "$(get gpu)"
+  if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+    wait "$pid"
+    code=$?
     pid=
+    to exited
   fi
-  sleep 3
+  gen=$(get gen)
+  if [ "$(get want)" = on ]; then
+    if [ "$gen" != "$ran" ]; then
+      stop
+      ran=$gen
+      start
+    elif [ "$phase" = waiting ]; then
+      start
+    fi
+  else
+    stop
+    [ "$phase" = off ] || to off
+  fi
+  # tee appends, so the log is trimmed in place.
+  if [ -f "$out.log" ] && [ "$(wc -c < "$out.log")" -ge 1048576 ]; then t=$(tail -c 65536 "$out.log"); printf '%s\n' "$t" > "$out.log"; fi
+  report
+  sleep "$tick"
 done

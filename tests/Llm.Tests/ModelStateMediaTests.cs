@@ -37,7 +37,9 @@ public sealed class ModelStateMediaTests(AppFixture app)
         : IAsyncDisposable
     {
         /// <summary>What the control file says now ("on", "off", or none yet).</summary>
-        public string File => System.IO.File.Exists(Control) ? System.IO.File.ReadAllText(Control).Trim() : "(none)";
+        public string File => System.IO.File.Exists(Control)
+            ? System.IO.File.ReadLines(Control).FirstOrDefault(l => l.StartsWith("want=", StringComparison.Ordinal))?[5..] ?? "(no want)"
+            : "(none)";
 
         /// <summary>The status Admin -> Models shows for the picture model.</summary>
         public async Task<string> StatusAsync() => (await Media.ListAsync(CancellationToken.None)).Single(s => s.Model.Name == Image).Now;
@@ -73,6 +75,7 @@ public sealed class ModelStateMediaTests(AppFixture app)
             {
                 ["Modules:imagegen"] = "true",
                 ["Engine:ConfigDir"] = config,
+                ["Engine:MediaStatusDir"] = Path.Combine(dir.FullName, "status"),
                 ["Engine:LibraryDir"] = library,
                 ["Replicas:Enabled"] = "false",
             },
@@ -83,7 +86,7 @@ public sealed class ModelStateMediaTests(AppFixture app)
                 s.AddHttpClient("probe").ConfigurePrimaryHttpMessageHandler(() => server);
             });
         var media = f.Services.GetRequiredService<MediaControl>();
-        return new Setup(f, media, server, clock, Path.Combine(config, "imagegen"), dir);
+        return new Setup(f, media, server, clock, Path.Combine(config, "imagegen.conf"), dir);
     }
 
     /// <summary>Until <paramref name="done"/>, waking the app's media loop each time (a save of the same state wakes it); 30 s at most.</summary>
@@ -258,5 +261,53 @@ public sealed class ModelStateMediaTests(AppFixture app)
         await Until(() => !speech.Loaded.ContainsKey(kokoro), "kokoro, unused for eleven minutes, is unloaded");
         Assert.True(speech.Loaded.ContainsKey(whisper));
         Assert.Contains($"DELETE {kokoro}", speech.Calls);
+    }
+
+    /// <summary>What services/sd-serve.sh would write: the generation it runs, its phase, since when (by the app's clock).</summary>
+    private static async Task StatusAsync(Setup s, string gen, string phase, DateTimeOffset since, string missing = "", int? exit = null)
+    {
+        var dir = Path.Combine(s.Dir.FullName, "status");
+        Directory.CreateDirectory(dir);
+        var json = $$"""{"gen":"{{gen}}","phase":"{{phase}}","since":{{since.ToUnixTimeSeconds()}},"at":{{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}},"free_mb":2600,"exit":{{(exit?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null")}},"missing":[{{missing}}],"vae":"","model":"{{Image}}"}""";
+        await File.WriteAllTextAsync(Path.Combine(dir, "imagegen.json"), json);
+    }
+
+    private static string Conf(Setup s, string key) =>
+        File.ReadLines(s.Control).FirstOrDefault(l => l.StartsWith(key + "=", StringComparison.Ordinal))?[(key.Length + 1)..] ?? "";
+
+    [Fact]
+    public async Task The_control_file_names_the_model_its_files_and_flags_and_a_server_that_exits_is_started_again_after_a_while()
+    {
+        await using var s = await NewAsync();
+        await s.Media.SetAsync(Image, kept: true);
+        await UntilFileAsync(s, "on", "the app turns the picture server on");
+        var text = await File.ReadAllTextAsync(s.Control);
+        Assert.Contains($"model={Image}", text);
+        Assert.Contains("file=image/flux2-klein-4b/flux-2-klein-4b-Q4_0.gguf", text);
+        Assert.Contains("arg=--diffusion-model\narg=image/flux2-klein-4b/flux-2-klein-4b-Q4_0.gguf\n", text);
+        Assert.Contains("arg=--steps\narg=4\n", text);
+        var gen = Conf(s, "gen");
+
+        // Its script says it waits for files: Admin -> Models says so.
+        await StatusAsync(s, gen, "waiting", s.Clock.Now, "\"image/flux2-klein-4b/flux2-vae.safetensors\"");
+        await UntilStatusAsync(s, "waiting", "the page says it waits for its files");
+
+        // It ran and exited a moment ago: not started again yet.
+        await StatusAsync(s, gen, "exited", s.Clock.Now, exit: 139);
+        await s.Media.SetAsync(Image);
+        await Task.Delay(500);
+        Assert.Equal(gen, Conf(s, "gen"));
+        // Half a minute on: a new generation, which its script starts.
+        s.Clock.Now += TimeSpan.FromSeconds(31);
+        await UntilAsync(s, () => Task.FromResult(Conf(s, "gen") != gen), "the app raises gen to start it again");
+        var next = Conf(s, "gen");
+        await StatusAsync(s, next, "running", s.Clock.Now);
+        s.Server.Up = true;
+        await UntilStatusAsync(s, "loaded", "it answers: Loaded");
+
+        // The old generation answering does not count as this one ready.
+        await StatusAsync(s, gen, "running", s.Clock.Now);
+        await UntilStatusAsync(s, "loaded", "still loaded");
+        Assert.NotNull(await s.Media.ReadyAsync(Image, new CancellationTokenSource(TimeSpan.FromSeconds(3)).Token).ContinueWith(t => t.IsCanceled ? "waited" : t.Result));
     }
 }

@@ -99,12 +99,8 @@ spec:
   ports: [{ name: http, port: 8080, targetPort: http }]
 ---
 {{- end }}
-{{- /* Pictures and video (stable-diffusion.cpp): each runs while the app's control file says "on". */}}
-{{- $media := list
-  (dict "name" "imagegen" "on" .Values.imagegen "dir" "image/flux2-klein-4b" "files" "flux-2-klein-4b-Q4_0.gguf Qwen3-4B-Q4_K_M.gguf flux2-vae.safetensors"
-    "args" "--listen-ip 0.0.0.0 --listen-port 1234 --diffusion-model flux-2-klein-4b-Q4_0.gguf --llm Qwen3-4B-Q4_K_M.gguf --vae flux2-vae.safetensors --max-vram 2 --diffusion-fa --cfg-scale 1.0 --steps 4")
-  (dict "name" "videogen" "on" .Values.videogen "dir" "video/wan2.2-ti2v-5b" "files" "Wan2.2-TI2V-5B-Q4_K_M.gguf umt5-xxl-encoder-Q4_K_M.gguf wan2.2_vae.safetensors"
-    "args" "--listen-ip 0.0.0.0 --listen-port 1234 --diffusion-model Wan2.2-TI2V-5B-Q4_K_M.gguf --t5xxl umt5-xxl-encoder-Q4_K_M.gguf --vae wan2.2_vae.safetensors --max-vram 3 --diffusion-fa --vae-tiling --cfg-scale 5.0 --flow-shift 5.0 --sampling-method euler") }}
+{{- /* Pictures and video (stable-diffusion.cpp): each runs the model the app names in its control file (sd-serve.sh). */}}
+{{- $media := list (dict "name" "imagegen" "on" .Values.imagegen) (dict "name" "videogen" "on" .Values.videogen) }}
 {{- range $media }}
 {{- if .on.enabled }}
 apiVersion: apps/v1
@@ -134,29 +130,23 @@ spec:
           image: {{ include "arena.image" (dict "root" $ "image" $.Values.images.sdcpp) }}
           imagePullPolicy: {{ $.Values.images.pullPolicy }}
           command: [/bin/sh, /sd-serve.sh]
-          args: {{- toJson (splitList " " .args) | nindent 12 }}
-          workingDir: /models/{{ .dir }}
           ports: [{ name: http, containerPort: 1234 }]
           env:
             - { name: NAME, value: {{ .name }} }
-            - { name: FILES, value: {{ .files | quote }} }
             - { name: CUDA_DEVICE_ORDER, value: PCI_BUS_ID }
-            {{- if eq .name "videogen" }}
-            {{- /* Decodes on the GPU when it has room as it loads (sd-serve.sh), else on the CPU. */}}
-            - { name: VAE_GPU_MB, value: "13312" }
-            - { name: VAE_GPU_FLAGS, value: "--max-vram 12 --offload-to-cpu" }
-            {{- end }}
           resources: { limits: { nvidia.com/gpu: {{ .on.gpus }} } }
           securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false }
           volumeMounts:
             - { name: config, mountPath: /sd-serve.sh, subPath: sd-serve.sh }
             - { name: models, mountPath: /models, readOnly: true }
             - { name: engine, mountPath: /control, readOnly: true }
+            - { name: status, mountPath: /status }
             - { name: tmp, mountPath: /tmp }
       volumes:
         - { name: config, configMap: { name: arena-config, defaultMode: 0555 } }
         {{- include "arena.claim" (list "models" (include "arena.modelsClaim" $)) | nindent 8 }}
         {{- include "arena.claim" (list "engine" "arena-engine") | nindent 8 }}
+        {{- include "arena.claim" (list "status" "arena-media-status") | nindent 8 }}
         - { name: tmp, emptyDir: {} }
 ---
 apiVersion: v1

@@ -23,6 +23,8 @@ public sealed class EngineOptions
     public string? DefaultModels { get; set; }
     /// <summary>Where the app writes the engine's presets, the models to keep loaded, how many at once, and Prometheus's targets.</summary>
     public string ConfigDir { get; set; } = "/engine-config";
+    /// <summary>Where the picture and video servers say what they do (services/sd-serve.sh's status files; read only).</summary>
+    public string MediaStatusDir { get; set; } = "/media-status";
     /// <summary>The model library as the app sees it (MODELS_DIR, writable: downloads land there).</summary>
     public string LibraryDir { get; set; } = "/library";
     /// <summary>The same library inside the engine container.</summary>

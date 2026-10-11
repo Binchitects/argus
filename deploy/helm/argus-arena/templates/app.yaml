@@ -59,6 +59,7 @@ spec:
             - { name: tmp, mountPath: /tmp }
             - { name: models, mountPath: /library }
             - { name: engine, mountPath: /engine-config }
+            - { name: media-status, mountPath: /media-status, readOnly: true }
             - { name: directory, mountPath: /directory }
             - { name: sandbox, mountPath: /sandbox }
             {{- if and (not .Values.postgresql.enabled) .Values.externalDatabase.caSecret }}
@@ -68,6 +69,7 @@ spec:
         - { name: tmp, emptyDir: {} }
         {{- include "arena.claim" (list "models" (include "arena.modelsClaim" .)) | nindent 8 }}
         {{- include "arena.claim" (list "engine" "arena-engine") | nindent 8 }}
+        {{- include "arena.claim" (list "media-status" "arena-media-status") | nindent 8 }}
         {{- include "arena.claim" (list "directory" "arena-directory") | nindent 8 }}
         {{- include "arena.claim" (list "sandbox" "arena-sandbox") | nindent 8 }}
         {{- if and (not .Values.postgresql.enabled) .Values.externalDatabase.caSecret }}
