@@ -659,7 +659,19 @@ status (403 `outside` for a path outside the folder).
 | `GET /api/git/log?path=FILE&limit=N` | with `path`: the commits that changed the file, newest first, followed across renames: `[{hash, subject, author, at, status, pathAt, from}]` (`status`: git's letter A, M, D, R, C, null for a merge; `pathAt`: its name in that commit; `from`: its name before a rename; either null when outside the folder); 400 `folder` for a folder |
 | `GET /api/git/commit?hash=REV` | `{hash, parents, subject, author, at, files: [{path, status, from}], truncated}` (full hashes; the folder's files changed against the first parent, all `A` in a root commit; 2,000 at most); 404 `no_revision` |
 | `POST /api/git/stage-text` `{path, text}` | stages exactly `text` as the file's (the file in the folder left as it is; the index's mode kept, 100644 for a new file; the file's byte-order mark kept; a file in conflict is settled); the status after; 409 `not_text` for a link or a submodule, 400 `folder` |
-| `GET /api/problems` | the check's last run: `{command, running, ran, exitCode, said, problems: [{path, line, column, severity, code, message}]}` (`ran` null before the first; `command` null when none is found) |
+| `GET /api/problems` | the check's last run: `{command, running, ran, exitCode, said, problems: [{path, line, column, severity, code, message, source}]}` (`ran` null before the first; `command` null when none is found; `source`: `check`, or `task:` and the label for what a task's problem matcher found, listed after the check's) |
+| `GET /api/tasks` | `{tasks: [{label, source, group, isDefault, command, detail, dependsOn, background, terminal, running}], errors: [{file, line, message}], trusted, buildConfiguration}`: `.vscode/tasks.json`'s (`source` `workspace`), then the detected ones of other labels (`detected`); `group` `build`, `test` or null; `command` as written (null: it only waits for others); `terminal` its terminal while kept, `running` while its program runs |
+| `POST /api/tasks/run` `{label}` or `{group}`, with `{context, inputs, cols, rows}` | runs it (a group's default, else its only task) after what it waits for, and answers once its own terminal is open: `{task, terminal, terminals}` (`terminal` null for a task that only waits for others; `terminals` every one the run opened, in order); 404 `not_found`; 409 `pick` `{tasks}` (several in the group, none the default), `untrusted` `{commands}`, `needs_input` `{inputs}`, `running` `{terminal}`, `task_failed` `{task, exitCode, terminal}` (what it waited for failed), `too_many`; 400 `bad_config` `{file, line}` (`circle` too for tasks that wait for each other), `no_program` |
+| `POST /api/tasks/stop` `{terminal}` | ends a task's program (SIGHUP, SIGKILL 3 s later); its terminal once it ended (5 s at most); 404 for no such task's terminal |
+| `GET /api/run/configs` | `{configurations: [{name, type, request, source, program, command, preLaunchTask, supported, reason, hidden, configuration}], compounds: [{name, configurations, preLaunchTask, stopAll}], errors: [{file, line, message}], trusted, buildConfiguration}`: `.vscode/launch.json`'s (`source` `launch`), then the detected ones of other names (`detected`, with `configuration`: what Add Configuration writes); `command` what a run runs, as written; `supported` false with `reason` when it runs only with its debugger |
+| `POST /api/run/start` `{name, noDebug, context: {file, lineNumber, selectedText, settings}, inputs: {id: value}, cols, rows}` | with `noDebug`: runs it without debugging: its `preLaunchTask` first (waited for, or until ready), its program in a terminal of kind `run` (used again by its next run), its `postDebugTask` once it ended: `{terminal, configuration, command}` (`configuration` with everything filled in); 404 `not_found`; 409 `untrusted` `{commands}`, `needs_input` `{inputs: [{id, type, description, default, options: [{label, value}], password}]}`, `running` `{terminal}` (null while its preLaunchTask runs), `task_failed` `{task, exitCode, terminal}`, `too_many`; 400 `bad_config` `{file, line}` (a variable not known, `${command:…}`, a type that runs only with its debugger, a missing envFile), `no_program`; 403 `outside` for a `context.file` outside the folder |
+| `POST /api/run/stop` `{terminal}` | ends a run's program; its terminal once it ended (5 s at most); 404 for no such run's terminal |
+| `POST /api/debug/start` `{configuration}` | starts the debug adapter for a launch configuration whose variables are already filled in (`debugServer: N` reaches one already listening on 127.0.0.1:N): `{id, name, adapter, adapterId, configuration, notes, root, rootReal, pathStyle}`. `adapter` is the adapter's id (`gdb`, `lldb-dap`, `netcoredbg`, `debugpy`, `dlv`, `js-debug`); `adapterId` is the type to send as initialize's `adapterID`; `configuration` is the configuration in the adapter's words, for the page's `launch` or `attach` as its `request` says (cppdbg's `miDebuggerServerAddress` becomes an `attach`); `notes` say what was changed or left out; `rootReal` is `root` with links resolved; `pathStyle` is `posix` or `win`. 409 `untrusted` until the folder is trusted, 409 `no_adapter` `{adapter, install}` when that adapter is not here (`install`: how to get it), 409 `adapter_failed` when it does not start (with the last lines it wrote), 409 `too_many` past eight, 400 `unsupported` for a type no adapter here takes (why, in `error`), 400 `bad_config` (also for a `debugServer` that is no port) |
+| `GET /api/debug/sessions` | `[{id, name, adapter, type, state}]` (`state`: `starting`, `running`, `stopped` or `ended`); an ended one stays listed until it is stopped (the 8 newest) |
+| `GET /api/debug/socket?id=ID` | the session's WebSocket: DAP messages as JSON text, one per message, both ways (below); 404 for no such session |
+| `POST /api/debug/stop` `{id}` | a launch: `terminate` when the adapter has it, then `disconnect` with `terminateDebuggee`; an attach: `disconnect` alone, the program let go. Whatever is left 3 s later is killed with every process it started, and the session is forgotten; 204, 404 for no such session |
+| `GET /api/debug/source?id=ID&path=P` | one of the session's source files. In the folder (an absolute or a relative path), as `/api/file` reads it, with `readOnly: false`. Outside the folder only when the session's adapter named that path (a stack frame, a breakpoint, its loaded sources), and never Code Arena's own config or data files, without `version`, with `readOnly: true`. Anything else is 403 `outside` |
+| `GET /api/debug/adapters` | `[{id, name, types, found, path, version, reason, install}]`: the six adapters as found here (`types`: the launch.json types each serves; `path`: the program, or `127.0.0.1:N`; `reason`: why it is not found or will not do; `install`: how to get it, when it is missing) |
 | `POST /api/problems/run` | runs the check (waits for the one running) and answers as above; 404 `no_check` when none is found |
 | `POST /api/complete` `{path, prefix, suffix}` | code completion at the editor's cursor: `{text}`; 404 `off` when the config turns it off, 409 `busy` while an answer is written, 429 `limited` at the key's limit |
 | `POST /api/messages` `{text, context}` | a message, answered as a stream of events; `context`: lines chosen in the editor, `[{path, startLine, endLine, text}]` (`text`: the editor's, when unsaved; eight at most). The stream's `{"type":"attached", id, files}` lists what went with the question |
@@ -677,8 +689,8 @@ status (403 `outside` for a path outside the folder).
 | `GET /api/changes/diff?path=FILE` | `{path, original, modified, version}` (`original` null: the agent made it) |
 | `POST /api/changes/accept` `{path, before}` | keeps the change (all of them without `path`); with `before` (a text), part of it: that text becomes the file's before the agent (equal to the file now, or empty for a file gone since: all of it); the list left |
 | `POST /api/changes/revert` `{path}` | puts the file back; the list left |
-| `GET /api/terminals` | `[{id, title, pid, cols, rows, exitCode}]` |
-| `POST /api/terminals` `{cols, rows}` | opens one; 409 `too_many` past ten |
+| `GET /api/terminals` | `[{id, kind, title, pid, cols, rows, exitCode}]` (`kind`: `shell`, `task`, `run` or `debuggee`; `title`: the shell's name, a task's label or a configuration's name) |
+| `POST /api/terminals` `{cols, rows}` | opens the person's shell; 409 `too_many` past sixteen running |
 | `POST /api/terminals/close` `{id}` | ends its shell and forgets it |
 | `GET /api/terminals/socket?id=ID` | the terminal's WebSocket |
 | `GET /api/history` | what this folder sent, newest first, each text once (500 at most): `[{text}]`, without the terminal's own commands (`/help`, `/model`, …; `/compact` and `/clear` stay) |
@@ -692,6 +704,29 @@ status (403 `outside` for a path outside the folder).
 | `GET /api/workspace/state` | what this computer keeps for this folder (in the data folder, never in the project): `trust` (`trusted`, `restricted`, missing: not asked), `buildConfiguration`, and the page's own keys (breakpoints, watch, the run configuration chosen) |
 | `POST /api/workspace/state` `{key: value}` | merges these keys (`null` forgets one); 400 for `trust`, or a `buildConfiguration` other than `Debug` or `Release`; 413 past 1 MB |
 | `POST /api/workspace/trust` `{trusted}` | trusts the folder (`true`), keeps it restricted (`false`) or forgets the choice (missing); the state |
+
+On a debug session's WebSocket the server first sends
+`{"type":"event","event":"codeArena.snapshot","seq":0,"body":{id, name, adapter, type, state, error, configuration, capabilities, stopped, threads, exitCode}}`
+(`capabilities`: the adapter's answer to `initialize`; `stopped`: the last
+`stopped` event's body while the program is stopped; `threads`: the threads
+still alive), then the last 256 KB of `output` events, then each message from
+the adapter: a response goes only to the page that sent the request, with that
+page's own `seq` as its `request_seq`, and an event to every page.
+`{"type":"event","event":"codeArena.state","seq":0,"body":{state, error}}`
+comes each time the state changes (`error`: why the adapter ended, with the
+last lines it wrote). When an adapter ends without `exited` and `terminated`,
+the server sends them for it (`exitCode` -1), answers each request still
+waiting with `success: false`, and closes the socket. The page drives the
+protocol: `initialize`, then `launch` or `attach` with the start's
+`configuration` without waiting for its answer (gdb answers it after
+`configurationDone`), then, on `initialized`, its breakpoints and
+`configurationDone`. A `cancel`'s and a `progressStart`'s `requestId` are the
+page's own numbers. A request from the adapter (`runInTerminal`,
+`startDebugging`) goes to every page, and the first answer reaches the
+adapter; the page answers each, with `success: false` when it cannot. A page
+sends 1 MB per message at most, an adapter 32 MB; a page that falls 10,000
+messages or 64 MB behind is let go (its socket closes; it reattaches to get
+the snapshot).
 
 On the terminal's WebSocket, the server sends the output kept so far, then
 the output as it comes, as binary messages (the terminal's bytes), and
