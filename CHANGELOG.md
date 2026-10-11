@@ -12,6 +12,15 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v5.6.1 (2026-10-11)
+
+### :bug: Bugs fixed
+
+- A backup ended no more on v5.6.0: it opened the picture and video servers'
+  log pipe in their status volume and waited for ever. That volume (rewritten
+  every 2 seconds) is no longer backed up, and a volume's snapshot opens only
+  regular files
+
 ## v5.6.0 (2026-10-11)
 
 ### :rocket: Epics and highlights
