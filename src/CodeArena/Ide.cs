@@ -552,8 +552,12 @@ internal sealed class AgentChanges(Workspace workspace)
         return new JsonObject { ["path"] = workspace.Show(full), ["original"] = before, ["modified"] = Current(full), ["version"] = IdeFiles.Version(full) };
     }
 
-    /// <summary>Keeps the agent's change: it is no longer offered to revert. All of them when no file is given.</summary>
-    public void Accept(string? full)
+    /// <summary>
+    /// Keeps the agent's change: it is no longer offered to revert. All of them when no file is given. With
+    /// <paramref name="before"/>, part of it (some of its changes, as a compare's Accept Change does): that text becomes
+    /// the file's before the agent, so what is left to accept or revert is from it to now; the file's text now keeps all of it.
+    /// </summary>
+    public void Accept(string? full, string? before = null)
     {
         lock (_gate)
         {
@@ -561,9 +565,17 @@ internal sealed class AgentChanges(Workspace workspace)
             {
                 _before.Clear();
             }
-            else if (!_before.Remove(full))
+            else if (!_before.ContainsKey(full))
             {
                 throw new IdeError(404, "not_found", $"The agent has not changed {workspace.Show(full)} in this run (or it was accepted).");
+            }
+            else if (before is null || before == Current(full))
+            {
+                _before.Remove(full);
+            }
+            else
+            {
+                _before[full] = before;
             }
         }
     }

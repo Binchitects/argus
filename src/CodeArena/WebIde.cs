@@ -74,6 +74,17 @@ internal sealed partial class WebApp
                     await _git.StageAsync(Body(req), ct);
                     await res.JsonAsync(200, await _git.StatusAsync(ct), ct);
                     return true;
+                case ("POST", "/api/git/stage-text"):
+                {
+                    var body = Body(req);
+                    if (body["text"] is not JsonValue value || !value.TryGetValue<string>(out var text))
+                    {
+                        throw new IdeError(400, "invalid", "Send the text to stage.");
+                    }
+                    await _git.StageTextAsync(body.Str("path") is { Length: > 0 } path ? _files.Resolve(path) : null, text, ct);
+                    await res.JsonAsync(200, await _git.StatusAsync(ct), ct);
+                    return true;
+                }
                 case ("POST", "/api/git/unstage"):
                     await _git.UnstageAsync(Body(req), ct);
                     await res.JsonAsync(200, await _git.StatusAsync(ct), ct);
@@ -153,8 +164,14 @@ internal sealed partial class WebApp
                     return true;
                 case ("POST", "/api/changes/accept"):
                 {
-                    var path = Body(req).Str("path");
-                    _changes.Accept(path is null ? null : _files.Resolve(path));
+                    var body = Body(req);
+                    var path = body.Str("path");
+                    var before = body.Str("before");
+                    if (before is not null && path is null)
+                    {
+                        throw new IdeError(400, "invalid", "Say which file's change is accepted in part.");
+                    }
+                    _changes.Accept(path is null ? null : _files.Resolve(path), before);
                     await res.JsonAsync(200, _changes.List(), ct);
                     return true;
                 }

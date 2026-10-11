@@ -151,6 +151,47 @@ internal sealed partial class IdeGit(Workspace workspace)
     public async Task StageAsync(JsonObject body, CancellationToken ct) =>
         Check(await Git(workspace.Root, ["--literal-pathspecs", "add", "-A", "--", .. Paths(body)], ct), "staged");
 
+    /// <summary>
+    /// Stages exactly this text as the file's (part of its changes, as a compare's Stage Change does), the working tree
+    /// left as it is: hashed as <c>git add</c> would (the file's clean filters apply, and its byte-order mark is kept),
+    /// with the mode the index has (100755 stays executable; a new file is 100644). A link or a submodule is refused.
+    /// </summary>
+    public async Task StageTextAsync(string? full, string text, CancellationToken ct)
+    {
+        var root = await RequireRootAsync(ct);
+        var name = await InRepoAsync(full, ct);
+        var file = full!;
+        if (Directory.Exists(file))
+        {
+            throw new IdeError(400, "folder", $"{workspace.Show(file)} is a folder.");
+        }
+        var (listed, entry) = await Git(root, ["--literal-pathspecs", "ls-files", "-s", "-z", "--", name], ct);
+        Check((listed, entry), "staged");
+        // "<mode> <object> <stage>\t<path>"; the first one when it is in conflict.
+        var mode = entry.Length > 0 ? entry.Split(' ')[0] : "100644";
+        if (mode is not ("100644" or "100755"))
+        {
+            throw new IdeError(409, "not_text", $"git keeps {workspace.Show(file)} as a link or a submodule: stage it whole.");
+        }
+        var (hashed, said) = await Git(root, ["hash-object", "-w", "--stdin", $"--path={name}"], ct, Bom(file) ? (char)0xFEFF + text : text);
+        Check((hashed, said), "staged");
+        // What git said after the hash (a line-ending warning) is not part of it.
+        var hash = said.Split('\n')[0].Trim();
+        Check(await Git(root, ["update-index", "--add", "--cacheinfo", $"{mode},{hash},{name}"], ct), "staged");
+    }
+
+    /// <summary>Whether the file in the folder begins with a UTF-8 byte-order mark (which the editor's text leaves out).</summary>
+    private static bool Bom(string full)
+    {
+        if (!File.Exists(full) || !Files.Regular(full))
+        {
+            return false;
+        }
+        Span<byte> start = stackalloc byte[3];
+        using var file = File.OpenRead(full);
+        return file.ReadAtLeast(start, 3, throwOnEndOfStream: false) == 3 && start is [0xEF, 0xBB, 0xBF];
+    }
+
     /// <summary>Takes files out of what the next commit has (their changes stay in the folder).</summary>
     public async Task UnstageAsync(JsonObject body, CancellationToken ct)
     {

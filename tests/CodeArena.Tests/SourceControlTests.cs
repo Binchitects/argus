@@ -70,6 +70,13 @@ public sealed class SourceControlTests : IDisposable
 
     private static string? Text(JsonNode shown) => shown["text"]?.GetValue<string>();
 
+    private static async Task<JsonNode> Json(HttpResponseMessage response)
+    {
+        var text = await response.Content.ReadAsStringAsync();
+        Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode}: {text}");
+        return JsonNode.Parse(text)!;
+    }
+
     private static Dictionary<string, (string? Staged, string? Changed)> Files(JsonNode status) =>
         status["files"]!.AsArray().ToDictionary(f => f!["path"]!.GetValue<string>(), f => (f!["staged"]?.GetValue<string>(), f["changed"]?.GetValue<string>()));
 
@@ -139,6 +146,7 @@ public sealed class SourceControlTests : IDisposable
         Assert.Equal(HttpStatusCode.NotFound, (await Get(web, "/api/git/show", ("path", "a.txt"), ("rev", "HEAD"))).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await Get(web, "/api/git/commit", ("hash", "HEAD"))).StatusCode);
         Assert.Empty((await web.GetJsonAsync("/api/git/log?path=a.txt")).AsArray());
+        Assert.Equal(HttpStatusCode.NotFound, (await web.PostAsync("/api/git/stage-text", new JsonObject { ["path"] = "a.txt", ["text"] = "b\n" })).StatusCode);
     }
 
     [Fact]
@@ -280,6 +288,89 @@ public sealed class SourceControlTests : IDisposable
     }
 
     [Fact]
+    public async Task Staging_a_text_changes_the_index_only_and_keeps_the_files_mode()
+    {
+        using var h = new Harness(_gateway, _mcp, c => c["autoCommit"] = false);
+        Init(h.Work);
+        h.Write("app.ts", "one\ntwo\nthree\n");
+        var script = h.Write("run.sh", "#!/bin/sh\necho one\n");
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(script, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+        File.WriteAllBytes(Path.Combine(h.Work, "bom.txt"), [0xEF, 0xBB, 0xBF, (byte)'x', (byte)'\n']);
+        h.Write("src/a.ts", "a\n");
+        File.CreateSymbolicLink(Path.Combine(h.Work, "link.ts"), "app.ts");
+        Git(h.Work, "add", "-A");
+        Git(h.Work, "update-index", "--chmod=+x", "run.sh");
+        Git(h.Work, "commit", "-q", "-m", "Start");
+        h.Write("app.ts", "ONE\ntwo\nTHREE\n");
+        h.Write("run.sh", "#!/bin/sh\necho two\n");
+        File.WriteAllBytes(Path.Combine(h.Work, "bom.txt"), [0xEF, 0xBB, 0xBF, (byte)'y', (byte)'\n']);
+        h.Write("new.ts", "first\nsecond\n");
+        await using var web = await WebRun.StartAsync(h);
+        Task<HttpResponseMessage> StageText(JsonObject body) => web.PostAsync("/api/git/stage-text", body);
+        async Task<Dictionary<string, (string? Staged, string? Changed)>> Staged(string path, string text) =>
+            Files(await Json(await StageText(new JsonObject { ["path"] = path, ["text"] = text })));
+
+        // One of the two changes staged: the index has it, the file keeps both.
+        Assert.Equal(("M", "M"), (await Staged("app.ts", "ONE\ntwo\nthree\n"))["app.ts"]);
+        Assert.Equal("ONE\ntwo\nthree\n", Text(await Show(web, "app.ts", ":")));
+        Assert.Equal("ONE\ntwo\nTHREE\n", File.ReadAllText(Path.Combine(h.Work, "app.ts")));
+        // Unstaged again: the index has HEAD's text.
+        Assert.Equal(((string?)null, "M"), (await Staged("app.ts", "one\ntwo\nthree\n"))["app.ts"]);
+
+        // An executable stays one, a new file is 100644, and a byte-order mark stays.
+        Assert.Equal(("M", (string?)null), (await Staged("run.sh", "#!/bin/sh\necho two\n"))["run.sh"]);
+        Assert.StartsWith("100755 ", GitOut(h.Work, "ls-files", "-s", "run.sh"));
+        Assert.Equal(("A", "M"), (await Staged("new.ts", "first\n"))["new.ts"]);
+        Assert.StartsWith("100644 ", GitOut(h.Work, "ls-files", "-s", "new.ts"));
+        Assert.Equal("first\nsecond\n", File.ReadAllText(Path.Combine(h.Work, "new.ts")));
+        Assert.Equal(("M", (string?)null), (await Staged("bom.txt", "y\n"))["bom.txt"]);
+
+        // Outside the folder, no text, a folder, a link.
+        Assert.Equal(HttpStatusCode.Forbidden, (await StageText(new JsonObject { ["path"] = "../x.txt", ["text"] = "x" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await StageText(new JsonObject { ["path"] = "app.ts" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await StageText(new JsonObject { ["text"] = "x" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await StageText(new JsonObject { ["path"] = "src", ["text"] = "x" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await StageText(new JsonObject { ["path"] = "link.ts", ["text"] = "x" })).StatusCode);
+        Assert.StartsWith("120000 ", GitOut(h.Work, "ls-files", "-s", "link.ts"));
+    }
+
+    [Fact]
+    public async Task Part_of_an_agents_change_is_accepted_and_the_rest_stays_to_accept_or_revert()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        var a = h.Write("a.txt", "one\ntwo\nthree\n");
+        var b = h.Write("b.txt", "four\n");
+        _gateway.Answer = req => FakeGateway.Last(req) switch
+        {
+            "change them" => Reply.Call(("write_file", """{"path":"a.txt","content":"ONE\ntwo\nTHREE\n"}"""), ("write_file", """{"path":"b.txt","content":"FOUR\n"}""")),
+            _ => Reply.Say("?"),
+        };
+        await using var web = await WebRun.StartAsync(h, "--mode", "auto-edit");
+        await (await web.SendAsync("change them")).RestAsync();
+        string Listed(JsonNode changes) => string.Join(", ", changes.AsArray().Select(c => $"{c!["path"]} +{c["added"]} -{c["removed"]}"));
+        Assert.Equal("a.txt +2 -2, b.txt +1 -1", Listed(await web.GetJsonAsync("/api/changes")));
+
+        // The first line's change accepted: the third's is left, against the text with the first.
+        var left = await Json(await web.PostAsync("/api/changes/accept", new JsonObject { ["path"] = "a.txt", ["before"] = "ONE\ntwo\nthree\n" }));
+        Assert.Equal("a.txt +1 -1, b.txt +1 -1", Listed(left));
+        var diff = await web.GetJsonAsync("/api/changes/diff?path=a.txt");
+        Assert.Equal(("ONE\ntwo\nthree\n", "ONE\ntwo\nTHREE\n"), (diff["original"]!.GetValue<string>(), diff["modified"]!.GetValue<string>()));
+        // Reverting the rest keeps the part accepted.
+        await Json(await web.PostAsync("/api/changes/revert", new JsonObject { ["path"] = "a.txt" }));
+        Assert.Equal("ONE\ntwo\nthree\n", File.ReadAllText(a));
+
+        // Accepting up to the text the file has now accepts all of it.
+        Assert.Empty((await Json(await web.PostAsync("/api/changes/accept", new JsonObject { ["path"] = "b.txt", ["before"] = "FOUR\n" }))).AsArray());
+        Assert.Equal("FOUR\n", File.ReadAllText(b));
+        Assert.Equal(HttpStatusCode.NotFound, (await web.PostAsync("/api/changes/accept", new JsonObject { ["path"] = "b.txt", ["before"] = "x" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/changes/accept", new JsonObject { ["before"] = "x" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await web.PostAsync("/api/changes/accept", new JsonObject { ["path"] = "../x.txt", ["before"] = "x" })).StatusCode);
+    }
+
+    [Fact]
     public async Task The_compare_calls_take_only_this_runs_key_from_its_own_page()
     {
         using var h = new Harness(_gateway, _mcp, c => c["autoCommit"] = false);
@@ -292,6 +383,8 @@ public sealed class SourceControlTests : IDisposable
             ("GET", "/api/git/show?path=inside.txt&rev=HEAD", null),
             ("GET", "/api/git/log?path=inside.txt", null),
             ("GET", "/api/git/commit?hash=HEAD", null),
+            ("POST", "/api/git/stage-text", new() { ["path"] = "inside.txt", ["text"] = "owned" }),
+            ("POST", "/api/changes/accept", new() { ["path"] = "inside.txt", ["before"] = "owned" }),
         ];
         using var anonymous = WebRun.Client(web.Port, token: null);
         var wrong = new List<string>();
@@ -320,5 +413,7 @@ public sealed class SourceControlTests : IDisposable
             }
         }
         Assert.Empty(wrong);
+        // None of it happened.
+        Assert.Equal("in\n", Text(await Show(web, "inside.txt", ":")));
     }
 }
