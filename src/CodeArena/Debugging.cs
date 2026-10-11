@@ -10,23 +10,50 @@ internal sealed class DebugAdapterMissing(string adapter, string reason) : Excep
     public string Adapter { get; } = adapter;
 }
 
-/// <summary>A page attached to a debug session: what the session sends it, in order.</summary>
-internal sealed class DebugPage
+/// <summary>
+/// A page attached to a debug session: what the session sends it, in order. A page that falls too far behind (in
+/// messages or in bytes) is let go, and its socket closes: what waits for it is held in this program's memory.
+/// </summary>
+internal sealed class DebugPage(long maxBytes = DebugPage.MaxBytes)
 {
-    /// <summary>The messages that may wait for a page; one that falls further behind is let go (its socket closes).</summary>
+    /// <summary>The messages that may wait for a page.</summary>
     public const int Waiting = 10_000;
 
+    /// <summary>The bytes that may wait for a page: twice the largest message an adapter sends.</summary>
+    public const long MaxBytes = 2L * DebugSession.MaxAdapterMessage;
+
+    private long _bytes;
+
     public Channel<SocketMessage> Out { get; } = Channel.CreateBounded<SocketMessage>(new BoundedChannelOptions(Waiting) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
+
+    /// <summary>Queues a message for the page; false when it has fallen too far behind for it.</summary>
+    public bool TryWrite(SocketMessage message)
+    {
+        if (Interlocked.Add(ref _bytes, message.Data.Length) <= maxBytes && Out.Writer.TryWrite(message))
+        {
+            return true;
+        }
+        Interlocked.Add(ref _bytes, -message.Data.Length);
+        return false;
+    }
+
+    /// <summary>A message taken off the queue to be sent: it waits no more.</summary>
+    public SocketMessage Taken(SocketMessage message)
+    {
+        Interlocked.Add(ref _bytes, -message.Data.Length);
+        return message;
+    }
 }
 
 /// <summary>
 /// One debug session: a debug adapter (its process, or a connection to one) relayed to any number of pages. The page
 /// speaks the Debug Adapter Protocol itself (initialize, launch, breakpoints, configurationDone); the session numbers
-/// every message to the adapter itself, so each response goes back only to the page that asked, with that page's own
-/// number restored, and each event goes to every page. It keeps what a page that attaches later needs (the last stop,
-/// the threads, the last 256 KB of output), says where it is with its own codeArena.state events (starting, running,
-/// stopped, ended), and when the adapter ends without saying so, says it for it (exited, terminated). It records the
-/// source files the adapter named, the only files outside the folder a page may read through it.
+/// every message to the adapter itself, in the order written, so each response goes back only to the page that asked,
+/// with that page's own number restored (and so does the request a cancel or a progressStart names), and each event
+/// goes to every page. It keeps what a page that attaches later needs (the last stop, the threads, the last 256 KB of
+/// output), says where it is with its own codeArena.state events (starting, running, stopped, ended), and when the
+/// adapter ends without saying so, says it for it (exited, terminated). It records the source files the adapter named,
+/// the only files outside the folder a page may read through it.
 /// </summary>
 internal sealed class DebugSession : IAsyncDisposable
 {
@@ -61,6 +88,7 @@ internal sealed class DebugSession : IAsyncDisposable
     private readonly TaskCompletionSource _terminated = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private long _seq;
+    private long _stops;
     private int _outputBytes;
     private JsonObject? _capabilities;
     private JsonObject? _stopped;
@@ -71,8 +99,11 @@ internal sealed class DebugSession : IAsyncDisposable
     private bool _over;
     private string? _error;
 
-    /// <summary>Who asked the adapter something: a page (with its own number for it), or the session itself.</summary>
-    private sealed record Asked(DebugPage? Page, long PageSeq, string Command, TaskCompletionSource<JsonObject?>? Own);
+    /// <summary>
+    /// Who asked the adapter something: a page (with its own number for it), or the session itself; and how many times
+    /// the program had stopped then (a step answered after the stop it led to does not mean running).
+    /// </summary>
+    private sealed record Asked(DebugPage? Page, long PageSeq, string Command, TaskCompletionSource<JsonObject?>? Own, long Stops);
 
     public DebugSession(string id, DebugLaunch launch, StdioChild adapter)
     {
@@ -143,38 +174,64 @@ internal sealed class DebugSession : IAsyncDisposable
     /// <summary>What a page sent: a request for the adapter, or its answer to one of the adapter's own requests. Anything else is passed over.</summary>
     public async ValueTask FromPageAsync(DebugPage page, SocketMessage message, CancellationToken ct)
     {
-        if (!message.Text || CodeArena.Json.ParseObject(Encoding.UTF8.GetString(message.Data)) is not { } m)
+        if (!message.Text || CodeArena.Json.ParseObject(Encoding.UTF8.GetString(FrameReader.Repair(message.Data))) is not { } m || m.Str("type") is not ("request" or "response"))
         {
             return;
         }
-        lock (_gate)
+        await WriteAsync(() =>
         {
-            switch (m.Str("type"))
+            lock (_gate)
             {
-                case "request" when _over:
-                    Send(page, SocketMessage.Of(Failed(m.Long("seq") ?? 0, m.Str("command"), "The debug session has ended.")));
-                    return;
-                case "request":
-                    var seq = ++_seq;
-                    _asked[seq] = new Asked(page, m.Long("seq") ?? 0, m.Str("command") ?? "", null);
-                    m["seq"] = seq;
-                    break;
-                case "response" when _reverse.Remove(m.Long("request_seq") ?? -1):
-                    m["seq"] = ++_seq;
-                    break;
-                default:
-                    return;
+                return Numbered(page, m);
+            }
+        }, ct);
+    }
+
+    /// <summary>A page's message with the session's number for it, as the adapter takes it; null when it is not for the adapter.</summary>
+    private JsonObject? Numbered(DebugPage page, JsonObject m)
+    {
+        if (m.Str("type") == "response")
+        {
+            if (!_reverse.Remove(m.Long("request_seq") ?? -1))
+            {
+                return null;
+            }
+            m["seq"] = ++_seq;
+            return m;
+        }
+        if (_over)
+        {
+            Send(page, SocketMessage.Of(Failed(m.Long("seq") ?? 0, m.Str("command"), "The debug session has ended.")));
+            return null;
+        }
+        var command = m.Str("command") ?? "";
+        if (command == "cancel" && m["arguments"] is JsonObject arguments && arguments["requestId"] is not null)
+        {
+            // The request given up on, by the number the adapter knows it by; one of another page's is not this page's to cancel.
+            var theirs = arguments.Long("requestId");
+            if (_asked.FirstOrDefault(a => a.Value.Page == page && a.Value.PageSeq == theirs) is { Value: not null } asked)
+            {
+                arguments["requestId"] = asked.Key;
+            }
+            else
+            {
+                arguments.Remove("requestId");
             }
         }
-        await WriteAsync(m, ct);
+        var seq = ++_seq;
+        _asked[seq] = new Asked(page, m.Long("seq") ?? 0, command, null, _stops);
+        m["seq"] = seq;
+        return m;
     }
 
     /// <summary>
     /// Ends the session: terminate (when the adapter has it), else disconnect with the program; whatever has not ended
-    /// 3 s later is killed, the adapter and every process it started.
+    /// 3 s later is killed, the adapter and every process it started. A program attached to is not the session's: it
+    /// is let go, not ended (as VS Code's Disconnect does).
     /// </summary>
     public async Task StopAsync()
     {
+        var launched = Launch.Configuration.Str("request") != "attach";
         bool terminate;
         lock (_gate)
         {
@@ -183,7 +240,7 @@ internal sealed class DebugSession : IAsyncDisposable
                 return;
             }
             _stopping = true;
-            terminate = _capabilities.Bool("supportsTerminateRequest") == true && !_sawTerminated;
+            terminate = launched && _capabilities.Bool("supportsTerminateRequest") == true && !_sawTerminated;
         }
         var clock = System.Diagnostics.Stopwatch.StartNew();
         if (terminate)
@@ -194,7 +251,7 @@ internal sealed class DebugSession : IAsyncDisposable
         }
         if (!_ended.Task.IsCompleted)
         {
-            _ = AskAsync("disconnect", new JsonObject { ["terminateDebuggee"] = true });
+            _ = AskAsync("disconnect", new JsonObject { ["terminateDebuggee"] = launched });
             if (StopWait - clock.Elapsed is { Ticks: > 0 } left)
             {
                 await Task.WhenAny(_ended.Task, Task.Delay(left));
@@ -208,29 +265,36 @@ internal sealed class DebugSession : IAsyncDisposable
     private async Task<JsonObject?> AskAsync(string command, JsonObject arguments)
     {
         var own = new TaskCompletionSource<JsonObject?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        long seq;
-        lock (_gate)
+        var sent = await WriteAsync(() =>
         {
-            if (_over)
+            lock (_gate)
             {
-                return null;
+                if (_over)
+                {
+                    return null;
+                }
+                var seq = ++_seq;
+                _asked[seq] = new Asked(null, 0, command, own, _stops);
+                return new JsonObject { ["seq"] = seq, ["type"] = "request", ["command"] = command, ["arguments"] = arguments };
             }
-            seq = ++_seq;
-            _asked[seq] = new Asked(null, 0, command, own);
-        }
-        await WriteAsync(new JsonObject { ["seq"] = seq, ["type"] = "request", ["command"] = command, ["arguments"] = arguments }, CancellationToken.None);
-        return await own.Task;
+        }, CancellationToken.None);
+        return sent ? await own.Task : null;
     }
 
-    private async Task WriteAsync(JsonObject message, CancellationToken ct)
+    /// <summary>
+    /// Writes to the adapter what <paramref name="next"/> makes when it is this message's turn, so that the adapter
+    /// gets the session's numbers in order; false when it made none, or the adapter is gone.
+    /// </summary>
+    private async Task<bool> WriteAsync(Func<JsonObject?> next, CancellationToken ct)
     {
         try
         {
-            await _writer.WriteAsync(message, ct);
+            return await _writer.WriteAsync(next, ct);
         }
         catch (Exception e) when (e is IOException or ObjectDisposedException)
         {
             // The adapter is gone: its reader ends the session, and answers what was asked.
+            return false;
         }
     }
 
@@ -243,7 +307,14 @@ internal sealed class DebugSession : IAsyncDisposable
             {
                 if (Take(message) is { } reply)
                 {
-                    await WriteAsync(reply, CancellationToken.None);
+                    await WriteAsync(() =>
+                    {
+                        lock (_gate)
+                        {
+                            reply["seq"] = ++_seq;
+                        }
+                        return reply;
+                    }, CancellationToken.None);
                 }
             }
         }
@@ -251,9 +322,14 @@ internal sealed class DebugSession : IAsyncDisposable
         {
             error = $"The debug adapter sent what is not the Debug Adapter Protocol: {e.Message}";
         }
-        catch (Exception e) when (e is IOException or ObjectDisposedException or InvalidOperationException)
+        catch (Exception e) when (e is IOException or ObjectDisposedException)
         {
             // Its end closed.
+        }
+        catch (Exception e)
+        {
+            // Whatever it was, the pages hear that the session ended rather than wait on it.
+            error = $"A message from the debug adapter could not be passed on: {e.Message}";
         }
         await EndAsync(error);
     }
@@ -272,10 +348,10 @@ internal sealed class DebugSession : IAsyncDisposable
                     Happen(message);
                     return null;
                 case "request" when _pages.Count == 0:
-                    // A reverse request (runInTerminal, startDebugging) with no page to answer it.
+                    // A reverse request (runInTerminal, startDebugging) with no page to answer it; numbered as it is written.
                     return new JsonObject
                     {
-                        ["seq"] = ++_seq, ["type"] = "response", ["request_seq"] = message.Long("seq"), ["command"] = message.Str("command"),
+                        ["seq"] = 0, ["type"] = "response", ["request_seq"] = message.Long("seq"), ["command"] = message.Str("command"),
                         ["success"] = false, ["message"] = "No page of Code Arena's is open to answer it.",
                     };
                 case "request":
@@ -319,7 +395,7 @@ internal sealed class DebugSession : IAsyncDisposable
         {
             SetState("running");
         }
-        else if (ok && Resumes.Contains(asked.Command) && State != "ended")
+        else if (ok && Resumes.Contains(asked.Command) && asked.Stops == _stops && State != "ended")
         {
             _stopped = null;
             SetState("running");
@@ -330,6 +406,11 @@ internal sealed class DebugSession : IAsyncDisposable
     {
         var body = message["body"] as JsonObject;
         Name(body, 0);
+        if (message.Str("event") == "progressStart" && body?["requestId"] is not null)
+        {
+            Progress(message, body);
+            return;
+        }
         var sent = SocketMessage.Of(message);
         Broadcast(sent);
         switch (message.Str("event"))
@@ -338,6 +419,7 @@ internal sealed class DebugSession : IAsyncDisposable
                 Keep(sent);
                 break;
             case "stopped":
+                _stops++;
                 _stopped = body?.Clone();
                 SetState("stopped");
                 break;
@@ -364,6 +446,30 @@ internal sealed class DebugSession : IAsyncDisposable
                 _terminated.TrySetResult();
                 SetState("ended");
                 break;
+        }
+    }
+
+    /// <summary>
+    /// A progressStart tied to a request: the page that sent it gets its own number for it; the others get the progress
+    /// without one, as none of theirs is meant.
+    /// </summary>
+    private void Progress(JsonObject message, JsonObject body)
+    {
+        var asked = _asked.GetValueOrDefault(body.Long("requestId") ?? -1);
+        body.Remove("requestId");
+        var others = SocketMessage.Of(message);
+        foreach (var page in _pages.ToList())
+        {
+            if (asked?.Page == page)
+            {
+                body["requestId"] = asked.PageSeq;
+                Send(page, SocketMessage.Of(message));
+                body.Remove("requestId");
+            }
+            else
+            {
+                Send(page, others);
+            }
         }
     }
 
@@ -483,7 +589,7 @@ internal sealed class DebugSession : IAsyncDisposable
     /// <summary>To one page; one that has fallen too far behind is let go.</summary>
     private void Send(DebugPage page, SocketMessage message)
     {
-        if (!page.Out.Writer.TryWrite(message))
+        if (!page.TryWrite(message))
         {
             page.Out.Writer.TryComplete();
             _pages.Remove(page);
@@ -560,8 +666,8 @@ internal sealed class DebugSession : IAsyncDisposable
 
 /// <summary>
 /// The IDE's debug sessions: each a debug adapter started for one launch configuration (or reached at the port its
-/// "debugServer" names), run in the working directory, at most 8 at once. Started by the person, as their terminals
-/// are: no sandbox.
+/// "debugServer" names), run in the working directory, at most 8 at once, and none until the folder is trusted.
+/// Started by the person, as their terminals are: no sandbox.
 /// </summary>
 internal sealed class DebugSessions(Workspace workspace, DebugAdapters adapters, Func<bool> trusted) : IAsyncDisposable
 {
@@ -595,17 +701,26 @@ internal sealed class DebugSessions(Workspace workspace, DebugAdapters adapters,
 
     /// <summary>
     /// Starts the adapter for a launch configuration (variables already filled in). Throws IdeError (400 for a
-    /// configuration no adapter here takes, 409 <c>too_many</c>, 409 <c>adapter_failed</c>) or
-    /// <see cref="DebugAdapterMissing"/>.
+    /// configuration no adapter here takes, 409 <c>untrusted</c> in a folder not trusted, 409 <c>too_many</c>, 409
+    /// <c>adapter_failed</c>) or <see cref="DebugAdapterMissing"/>.
     /// </summary>
     public async Task<DebugSession> StartAsync(JsonObject configuration, CancellationToken ct)
     {
-        var launch = DebugAdapters.Translate(configuration, workspace.Root, trusted());
+        var trust = trusted();
+        var launch = DebugAdapters.Translate(configuration, workspace.Root, trust);
+        int? server = configuration["debugServer"] is not { } given ? null
+            : Json.Number(given) is { } n and > 0 and < 65536 ? (int)n
+            : throw new IdeError(400, "bad_config", "\"debugServer\" is the port (1 to 65535) of a debug adapter listening on 127.0.0.1.");
+        if (!trust)
+        {
+            // As in VS Code's Restricted Mode: a debug session runs the folder's programs, as its configuration says.
+            throw new IdeError(409, "untrusted", "Debugging runs this folder's programs: trust the folder first.");
+        }
         TooMany();
         StdioChild adapter;
         try
         {
-            adapter = configuration.Int("debugServer") is { } port
+            adapter = server is { } port
                 ? await StdioChild.ConnectAsync(port, ConnectWait, ct)
                 : await OpenAsync(await AdapterAsync(launch, ct), ct);
         }
@@ -613,22 +728,26 @@ internal sealed class DebugSessions(Workspace workspace, DebugAdapters adapters,
         {
             throw new IdeError(409, "adapter_failed", e.Message);
         }
+        DebugSession? session = null;
+        List<DebugSession> dropped = [];
         lock (_gate)
         {
             if (_all.Count(s => !s.Ended.IsCompleted) < Max)
             {
                 // Ended sessions are kept for a page to see how they ended, the 8 newest.
-                foreach (var old in _all.Where(s => s.Ended.IsCompleted).SkipLast(Max - 1).ToList())
-                {
-                    _all.Remove(old);
-                }
-                var session = new DebugSession((++_next).ToString(System.Globalization.CultureInfo.InvariantCulture), launch, adapter);
+                dropped = [.. _all.Where(s => s.Ended.IsCompleted).SkipLast(Max - 1)];
+                _all.RemoveAll(dropped.Contains);
+                session = new DebugSession((++_next).ToString(System.Globalization.CultureInfo.InvariantCulture), launch, adapter);
                 _all.Add(session);
-                return session;
             }
         }
-        await adapter.DisposeAsync();
-        throw TooManyError();
+        await Task.WhenAll(dropped.Select(s => s.DisposeAsync().AsTask()));
+        if (session is null)
+        {
+            await adapter.DisposeAsync();
+            throw TooManyError();
+        }
+        return session;
     }
 
     private void TooMany()
@@ -649,10 +768,12 @@ internal sealed class DebugSessions(Workspace workspace, DebugAdapters adapters,
     {
         if (launch.Program is { } own)
         {
-            var program = Path.GetFullPath(own, workspace.Root);
-            return File.Exists(program)
+            // A name alone is looked for on PATH, as cppdbg does (else "gdb" would be a program in the folder); a path is the folder's.
+            var named = Path.IsPathRooted(own) || own.Contains('/') || own.Contains('\\');
+            var program = named ? Path.GetFullPath(own, workspace.Root) : adapters.Locate(own);
+            return program is not null && File.Exists(program)
                 ? new DebugAdapter(DebugAdapters.Kind("gdb")!, program, ["-q", "-i", "dap"], new Dictionary<string, string?>(), null, program, null)
-                : throw new DebugAdapterMissing(launch.AdapterId, $"{own} (the configuration's miDebuggerPath) is not there.");
+                : throw new DebugAdapterMissing(launch.AdapterId, $"{own} (the configuration's miDebuggerPath) is not {(named ? "there" : "on PATH")}.");
         }
         var (found, reason) = await adapters.FindAsync(launch.AdapterId, ct);
         return found ?? throw new DebugAdapterMissing(launch.AdapterId, reason ?? "It is not installed.");

@@ -122,7 +122,7 @@ internal sealed partial class DebugAdapters(Config config, string dataDir, Func<
             }
             if (Locate(own.Command[0]) is not { } program)
             {
-                return (null, $"{own.Command[0]} (\"debugAdapters\" in config.json) is not there.");
+                return (null, $"{own.Command[0]} (\"debugAdapters\" in config.json) is not there: give its full path, or a name on PATH.");
             }
             return await CheckedAsync(new Candidate(kind, program, [.. own.Command.Skip(1)], Empty), ct, given: true);
         }
@@ -238,13 +238,15 @@ internal sealed partial class DebugAdapters(Config config, string dataDir, Func<
 
     private static string Exe(string name) => OperatingSystem.IsWindows() ? name + ".exe" : name;
 
-    /// <summary>A program as a full path: as given when it has a folder, else found on PATH.</summary>
-    private string? Locate(string program)
+    /// <summary>
+    /// A program as a full path: as given when it is one, else found on PATH. A relative path is none: it would
+    /// depend on the folder Code Arena was started in.
+    /// </summary>
+    public string? Locate(string program)
     {
         if (Path.IsPathRooted(program) || program.Contains('/') || program.Contains('\\'))
         {
-            var full = Path.GetFullPath(program);
-            return File.Exists(full) ? full : null;
+            return Path.IsPathFullyQualified(program) && File.Exists(program) ? Path.GetFullPath(program) : null;
         }
         return OnPath(program) ?? (OperatingSystem.IsWindows() ? OnPath(Exe(program)) : null);
     }
@@ -449,7 +451,10 @@ internal sealed partial class DebugAdapters(Config config, string dataDir, Func<
         }
         if (c.Str("miDebuggerServerAddress") is { } remote)
         {
+            // cppdbg reaches a gdbserver from a launch; gdb's own adapter does it by attaching (a launch would run the program here).
+            gdb["request"] = "attach";
             gdb["target"] = remote;
+            notes.Add($"miDebuggerServerAddress: the session attaches to the gdbserver at {remote}.");
         }
         return gdb;
     }

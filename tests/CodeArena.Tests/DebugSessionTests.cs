@@ -18,12 +18,20 @@ public sealed class DebugSessionTests : IDisposable
 
     private static readonly JsonObject Launch = new() { ["name"] = "fake", ["type"] = "gdb", ["request"] = "launch", ["program"] = "/bin/true", ["preLaunchTask"] = "build" };
 
+    /// <summary>Trusts the folder (a debug session runs only in one), then starts a session.</summary>
     private static async Task<JsonObject> StartAsync(WebRun web, JsonObject? configuration = null)
     {
+        await TrustAsync(web);
         var response = await web.PostAsync("/api/debug/start", new JsonObject { ["configuration"] = (configuration ?? Launch).DeepClone() });
         var text = await response.Content.ReadAsStringAsync();
         Assert.True(response.IsSuccessStatusCode, $"{(int)response.StatusCode}: {text}");
         return JsonNode.Parse(text)!.AsObject();
+    }
+
+    internal static async Task TrustAsync(WebRun web)
+    {
+        using var trusted = await web.PostAsync("/api/workspace/trust", new JsonObject { ["trusted"] = true });
+        Assert.Equal(HttpStatusCode.OK, trusted.StatusCode);
     }
 
     [Fact]
@@ -170,6 +178,20 @@ public sealed class DebugSessionTests : IDisposable
     }
 
     [Fact]
+    public async Task Stopping_a_session_attached_to_a_program_lets_the_program_go()
+    {
+        using var h = Fake();
+        await using var web = await WebRun.StartAsync(h);
+        var id = (await StartAsync(web, new JsonObject { ["name"] = "service", ["type"] = "gdb", ["request"] = "attach", ["pid"] = 4242 }))["id"]!.GetValue<string>();
+        using var page = await DebugSocket.ConnectAsync(web, id);
+        await page.RequestAsync("initialize");
+
+        Assert.Equal(HttpStatusCode.NoContent, (await web.PostAsync("/api/debug/stop", new JsonObject { ["id"] = id })).StatusCode);
+        Assert.Equal(["initialize", "disconnect"], _adapter.Commands);
+        Assert.False(_adapter.Received.Last()["arguments"]!["terminateDebuggee"]!.GetValue<bool>());
+    }
+
+    [Fact]
     public async Task Stopping_an_adapter_that_never_answers_kills_it_and_all_it_started()
     {
         if (!OperatingSystem.IsLinux())
@@ -190,10 +212,10 @@ public sealed class DebugSessionTests : IDisposable
         }
         var sleeper = int.Parse(File.ReadAllText(pidFile).Trim(), System.Globalization.CultureInfo.InvariantCulture);
         File.Delete(pidFile);
-        Assert.True(File.Exists($"/proc/{sleeper}/stat"));
+        Assert.True(StdioChildTests.Alive(sleeper));
 
         Assert.Equal(HttpStatusCode.NoContent, (await web.PostAsync("/api/debug/stop", new JsonObject { ["id"] = id })).StatusCode);
-        for (var waited = 0; File.Exists($"/proc/{sleeper}/stat") && !File.ReadAllText($"/proc/{sleeper}/stat").Split(')')[1].TrimStart().StartsWith('Z'); waited += 50)
+        for (var waited = 0; StdioChildTests.Alive(sleeper); waited += 50)
         {
             Assert.True(waited < 10_000, "What the adapter started still runs.");
             await Task.Delay(50);
@@ -232,6 +254,18 @@ public sealed class DebugSessionTests : IDisposable
         Assert.Equal("main.c", inside["path"]!.GetValue<string>());
         Assert.False(inside["readOnly"]!.GetValue<bool>());
         Assert.Equal("main.c", (await web.GetJsonAsync(Source("main.c")))["path"]!.GetValue<string>());
+
+        // Code Arena's own files, its config.json with the key, are never shown, even named, even through a link.
+        var link = Path.Combine(h.Root, "settings.json");
+        File.CreateSymbolicLink(link, h.Paths.ConfigFile);
+        _adapter.Loaded.AddRange([h.Paths.ConfigFile, link]);
+        Assert.Equal(2, (await page.RequestAsync("loadedSources"))["body"]!["sources"]!.AsArray().Count);
+        foreach (var own in new[] { h.Paths.ConfigFile, link })
+        {
+            using var refused = await web.Http.GetAsync(Source(own));
+            Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+            Assert.Contains("Code Arena's own", await refused.Content.ReadAsStringAsync());
+        }
         Assert.Equal(HttpStatusCode.NotFound, (await web.Http.GetAsync($"/api/debug/source?id=99&path={Uri.EscapeDataString(outside)}")).StatusCode);
     }
 
@@ -240,6 +274,14 @@ public sealed class DebugSessionTests : IDisposable
     {
         using var h = Fake();
         await using var web = await WebRun.StartAsync(h);
+        // Nothing runs before the folder is trusted, as in VS Code's Restricted Mode; what is wrong with a configuration is said first.
+        var untrusted = await web.PostAsync("/api/debug/start", new JsonObject { ["configuration"] = Launch.DeepClone() });
+        Assert.Equal(HttpStatusCode.Conflict, untrusted.StatusCode);
+        Assert.Equal("untrusted", JsonNode.Parse(await untrusted.Content.ReadAsStringAsync())!["status"]!.GetValue<string>());
+        Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/debug/start", new JsonObject { ["configuration"] = new JsonObject { ["type"] = "cppvsdbg", ["request"] = "launch" } })).StatusCode);
+        Assert.Empty((await web.GetJsonAsync("/api/debug/sessions")).AsArray());
+        await TrustAsync(web);
+
         // No PATH here: nothing is found but what config.json names.
         var missing = await web.PostAsync("/api/debug/start", new JsonObject { ["configuration"] = new JsonObject { ["type"] = "go", ["request"] = "launch", ["program"] = "." } });
         Assert.Equal(HttpStatusCode.Conflict, missing.StatusCode);
@@ -252,8 +294,17 @@ public sealed class DebugSessionTests : IDisposable
         Assert.Equal(HttpStatusCode.BadRequest, windows.StatusCode);
         Assert.Contains("Visual Studio", await windows.Content.ReadAsStringAsync());
         Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/debug/start", new JsonObject())).StatusCode);
+        foreach (var port in new JsonNode[] { 0, 70_000, "x" })
+        {
+            var badPort = Launch.DeepClone().AsObject();
+            badPort["debugServer"] = port;
+            using var refused = await web.PostAsync("/api/debug/start", new JsonObject { ["configuration"] = badPort });
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+            Assert.Contains("bad_config", await refused.Content.ReadAsStringAsync());
+        }
+        Assert.Empty(_adapter.Received);
 
-        var adapters = (await web.GetJsonAsync("/api/debug/adapters")).AsArray();
+        var adapters =(await web.GetJsonAsync("/api/debug/adapters")).AsArray();
         Assert.Equal(["gdb", "lldb-dap", "netcoredbg", "debugpy", "dlv", "js-debug"], adapters.Select(a => a!["id"]!.GetValue<string>()));
         var gdb = adapters[0]!;
         Assert.True(gdb["found"]!.GetValue<bool>());
@@ -262,6 +313,104 @@ public sealed class DebugSessionTests : IDisposable
         Assert.False(dlv["found"]!.GetValue<bool>());
         Assert.NotNull(dlv["reason"]);
         Assert.NotNull(dlv["install"]);
+    }
+
+    [Fact]
+    public async Task A_cancel_and_a_progress_name_the_request_by_the_number_of_the_page_that_sent_it()
+    {
+        using var h = Fake();
+        await using var web = await WebRun.StartAsync(h);
+        var id = (await StartAsync(web))["id"]!.GetValue<string>();
+        using var a = await DebugSocket.ConnectAsync(web, id);
+        using var b = await DebugSocket.ConnectAsync(web, id);
+        await a.RequestAsync("initialize");
+        await b.RequestAsync("threads");
+        // a's 2 is the adapter's 3.
+        var slow = await a.SendAsync("slow");
+        Assert.Equal(2, slow);
+        Assert.Equal(slow, (await a.EventAsync("progressStart"))["body"]!["requestId"]!.GetValue<int>());
+        Assert.Null((await b.EventAsync("progressStart"))["body"]!["requestId"]);
+
+        // b has no request 2 waiting: its cancel names none (it would have been a's).
+        await b.RequestAsync("cancel", new JsonObject { ["requestId"] = 2 });
+        Assert.Null(_adapter.Received.Last()["arguments"]!["requestId"]);
+        Assert.DoesNotContain(a.Seen, m => DebugSocket.Is(m, "response") && m["command"]!.GetValue<string>() == "slow");
+
+        await a.RequestAsync("cancel", new JsonObject { ["requestId"] = slow });
+        var cancelled = await a.UntilAsync(m => DebugSocket.Is(m, "response") && m["command"]!.GetValue<string>() == "slow", "the slow request's answer");
+        Assert.Equal(slow, cancelled["request_seq"]!.GetValue<int>());
+        Assert.False(cancelled["success"]!.GetValue<bool>());
+        // What the adapter got is numbered in the order it got it.
+        var seqs = _adapter.Received.Select(r => r["seq"]!.GetValue<long>()).ToList();
+        Assert.Equal(seqs.Order(), seqs);
+        Assert.Equal(seqs.Count, seqs.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task A_step_answered_after_the_stop_it_led_to_leaves_the_session_stopped()
+    {
+        using var h = Fake();
+        await using var web = await WebRun.StartAsync(h);
+        var id = (await StartAsync(web))["id"]!.GetValue<string>();
+        using var page = await DebugSocket.ConnectAsync(web, id);
+        await page.RequestAsync("initialize");
+        await page.RequestAsync("configurationDone");
+        await page.EventAsync("stopped");
+
+        await page.RequestAsync("next", new JsonObject { ["threadId"] = 1 });
+        await page.EventAsync("stopped", e => e["body"]!["reason"]!.GetValue<string>() == "step");
+        // One more round trip: what came after the step's answer has come too.
+        await page.RequestAsync("threads");
+        Assert.Equal("stopped", (await web.GetJsonAsync("/api/debug/sessions"))[0]!["state"]!.GetValue<string>());
+        var last = page.Seen.Last(m => m["event"]?.GetValue<string>() == "codeArena.state");
+        Assert.Equal("stopped", last["body"]!["state"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void A_page_that_falls_too_far_behind_in_bytes_is_let_go()
+    {
+        var page = new DebugPage(maxBytes: 100);
+        var sixty = new SocketMessage(new byte[60], Text: true);
+        Assert.True(page.TryWrite(sixty));
+        Assert.False(page.TryWrite(sixty));
+        Assert.True(page.Out.Reader.TryRead(out var first));
+        page.Taken(first);
+        Assert.True(page.TryWrite(sixty));
+    }
+
+    [Fact]
+    public async Task A_gdb_named_by_its_name_alone_is_the_one_on_PATH_not_a_program_in_the_folder()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        using var h = Fake();
+        var marker = Path.Combine(h.Root, "which-gdb");
+        void Script(string path, string says)
+        {
+            File.WriteAllText(path, $"#!/bin/sh\necho {says} > '{marker}'\nexec sleep 600\n");
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+        var bin = Directory.CreateDirectory(Path.Combine(h.Root, "bin")).FullName;
+        Script(Path.Combine(bin, "my-gdb"), "path");
+        Script(Path.Combine(h.Work, "my-gdb"), "folder");
+        h.Env["PATH"] = bin;
+        await using var web = await WebRun.StartAsync(h);
+        JsonObject Cppdbg(string gdb) => new() { ["type"] = "cppdbg", ["request"] = "launch", ["program"] = "/bin/true", ["MIMode"] = "gdb", ["miDebuggerPath"] = gdb };
+
+        var id = (await StartAsync(web, Cppdbg("my-gdb")))["id"]!.GetValue<string>();
+        for (var waited = 0; !File.Exists(marker) || File.ReadAllText(marker).Trim().Length == 0; waited += 50)
+        {
+            Assert.True(waited < 10_000, "The gdb named did not start.");
+            await Task.Delay(50);
+        }
+        Assert.Equal("path", File.ReadAllText(marker).Trim());
+        Assert.Equal(HttpStatusCode.NoContent, (await web.PostAsync("/api/debug/stop", new JsonObject { ["id"] = id })).StatusCode);
+
+        using var missing = await web.PostAsync("/api/debug/start", new JsonObject { ["configuration"] = Cppdbg("no-such-gdb") });
+        Assert.Equal(HttpStatusCode.Conflict, missing.StatusCode);
+        Assert.Contains("not on PATH", await missing.Content.ReadAsStringAsync());
     }
 
     [Fact]

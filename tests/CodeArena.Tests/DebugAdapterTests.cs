@@ -70,6 +70,11 @@ public sealed class DebugAdapterTests : IDisposable
         Assert.Contains("\"debugAdapters\".\"gdb\"", (await Adapters(broken, bin).FindAsync("gdb", default)).Reason);
         var gone = Configured(new JsonObject { ["gdb"] = new JsonObject { ["command"] = new JsonArray(Path.Combine(_dir, "no-such-gdb")) } });
         Assert.Contains("is not there", (await Adapters(gone, bin).FindAsync("gdb", default)).Reason);
+        // A relative path would be found from wherever Code Arena was started: a full path or a name on PATH.
+        var relative = Configured(new JsonObject { ["gdb"] = new JsonObject { ["command"] = new JsonArray(Path.GetRelativePath(Environment.CurrentDirectory, named)) } });
+        Assert.Contains("full path", (await Adapters(relative, bin).FindAsync("gdb", default)).Reason);
+        var byName = Configured(new JsonObject { ["gdb"] = new JsonObject { ["command"] = new JsonArray("gdb", "-i", "dap") } });
+        Assert.Equal(onPath, (await Adapters(byName, bin).FindAsync("gdb", default)).Found!.Path);
     }
 
     [Fact]
@@ -137,6 +142,12 @@ public sealed class DebugAdapterTests : IDisposable
         var attach = DebugAdapters.Translate(new JsonObject { ["type"] = "cppdbg", ["request"] = "attach", ["program"] = "/w/app", ["processId"] = "4242", ["MIMode"] = "gdb" }, "/w", false);
         Assert.Equal(4242, attach.Configuration["pid"]!.GetValue<long>());
         Assert.Null(attach.Configuration["cwd"]);
+
+        // A gdbserver: cppdbg launches to reach it, gdb's adapter attaches (a launch would run the program here).
+        var remote = DebugAdapters.Translate(new JsonObject { ["type"] = "cppdbg", ["request"] = "launch", ["program"] = "/w/app", ["MIMode"] = "gdb", ["miDebuggerServerAddress"] = "board:2345" }, "/w", false);
+        Assert.Equal("attach", remote.Configuration["request"]!.GetValue<string>());
+        Assert.Equal("board:2345", remote.Configuration["target"]!.GetValue<string>());
+        Assert.Contains(remote.Notes, n => n.Contains("gdbserver", StringComparison.Ordinal));
     }
 
     [Fact]

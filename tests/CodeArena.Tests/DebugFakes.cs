@@ -40,6 +40,12 @@ internal sealed class FakeAdapter : IDisposable
     /// <summary>The source its stack trace names.</summary>
     public string StackPath { get; set; } = "/nowhere/main.c";
 
+    /// <summary>The sources its loadedSources names.</summary>
+    public List<string> Loaded { get; } = [];
+
+    // A "slow" request not answered until it is cancelled.
+    private JsonNode? _slow;
+
     public IEnumerable<string> Commands => Received.Select(r => r["command"]!.GetValue<string>());
 
     private async Task AcceptAsync()
@@ -123,6 +129,30 @@ internal sealed class FakeAdapter : IDisposable
                 break;
             case "evaluate":
                 await Respond(new() { ["result"] = "=" + args!["expression"]!.GetValue<string>(), ["variablesReference"] = 0 });
+                break;
+            case "next":
+                // A quick step: the stop it led to comes before its answer.
+                await Event("stopped", new() { ["reason"] = "step", ["threadId"] = 1, ["allThreadsStopped"] = true });
+                await Respond();
+                break;
+            case "loadedSources":
+                await Respond(new() { ["sources"] = new JsonArray([.. Loaded.Select(p => (JsonNode)new JsonObject { ["name"] = Path.GetFileName(p), ["path"] = p })]) });
+                break;
+            case "slow":
+                _slow = m["seq"]!.DeepClone();
+                await Event("progressStart", new() { ["progressId"] = "p1", ["title"] = "slow", ["requestId"] = _slow.DeepClone() });
+                break;
+            case "cancel":
+                if (_slow is not null && args?["requestId"] is { } id && id.GetValue<long>() == _slow.GetValue<long>())
+                {
+                    await writer.WriteAsync(new JsonObject
+                    {
+                        ["seq"] = Interlocked.Increment(ref _seq), ["type"] = "response", ["request_seq"] = _slow.DeepClone(),
+                        ["command"] = "slow", ["success"] = false, ["message"] = "cancelled",
+                    }, default);
+                    _slow = null;
+                }
+                await Respond();
                 break;
             case "spam":
                 await Respond();

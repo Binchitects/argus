@@ -75,6 +75,7 @@ public sealed class GdbDebugTests : IDisposable
         await cc.WaitForExitAsync();
         Assert.Equal(0, cc.ExitCode);
         await using var web = await WebRun.StartAsync(h);
+        await DebugSessionTests.TrustAsync(web);
 
         var started = await Json(await web.PostAsync("/api/debug/start", new JsonObject
         {

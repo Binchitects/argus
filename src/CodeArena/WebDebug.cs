@@ -5,8 +5,8 @@ namespace CodeArena;
 /// <summary>
 /// The IDE's debugger calls: a debug session started for a launch configuration the page resolved, its WebSocket (the
 /// Debug Adapter Protocol, which the page speaks itself), stopping it, the source files it names outside the folder,
-/// and the debug adapters found on this computer. Behind this run's key, as the terminals are: a debugger runs the
-/// person's programs.
+/// and the debug adapters found on this computer. Behind this run's key, as the terminals are, and only in a trusted
+/// folder: a debugger runs the folder's programs.
 /// </summary>
 internal sealed partial class WebApp
 {
@@ -25,7 +25,7 @@ internal sealed partial class WebApp
     /// <summary>
     /// {configuration} to {id, name, adapter, adapterId, configuration, notes, root, rootReal, pathStyle}: the
     /// configuration in the adapter's words, for the page's launch request. 409 <c>no_adapter</c> {adapter, install}
-    /// when the adapter it needs is not here.
+    /// when the adapter it needs is not here, 409 <c>untrusted</c> until the folder is trusted.
     /// </summary>
     private async Task DebugStartAsync(JsonObject body, HttpResponse res, CancellationToken ct)
     {
@@ -83,7 +83,7 @@ internal sealed partial class WebApp
         var (first, page) = session.Attach();
         try
         {
-            await SocketRelay.RunAsync(socket, first, page.Out.Reader, m => m, (m, token) => session.FromPageAsync(page, m, token), MaxDebugMessage, "The debug session ended.", ct);
+            await SocketRelay.RunAsync(socket, first, page.Out.Reader, m => page.Taken(m), (m, token) => session.FromPageAsync(page, m, token), MaxDebugMessage, "The debug session ended.", ct);
         }
         finally
         {
@@ -93,7 +93,8 @@ internal sealed partial class WebApp
 
     /// <summary>
     /// A source file of a debug session: one in the folder (an absolute path inside it, or a relative one) as the file
-    /// calls read it, or one outside that the session's adapter named (read-only). Anything else is 403 <c>outside</c>.
+    /// calls read it, or one outside that the session's adapter named (read-only), but never Code Arena's own (its
+    /// config.json holds the key; a program's debug information can name any file). Anything else is 403 <c>outside</c>.
     /// </summary>
     private JsonObject DebugSource(string? id, string? path)
     {
@@ -118,6 +119,11 @@ internal sealed partial class WebApp
         if (!session.Named(full))
         {
             throw new IdeError(403, "outside", $"{path} is outside the folder Code Arena works in ({_rt.Workspace.Root}), and this debug session's adapter has not named it.");
+        }
+        var leads = Workspace.Physical(full) ?? full;
+        if (new[] { _rt.Env.Paths.ConfigDir, _rt.Env.Paths.DataDir }.Any(own => Workspace.Within(full, own) || Workspace.Within(leads, Workspace.Physical(own) ?? own)))
+        {
+            throw new IdeError(403, "outside", $"{path} is one of Code Arena's own files: a debug session does not show it.");
         }
         var named = _files.ReadFull(full);
         named.Remove("version");
