@@ -12,6 +12,49 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v5.6.0 (2026-10-11)
+
+### :rocket: Epics and highlights
+
+- **Picture, video and speech models are managed like chat models**: Admin →
+  Models adds one (its files from the library by role, or a model the speech
+  server has), edits its settings (steps, CFG, guidance, flow shift, sampler,
+  scheduler, size, negative prompt, frames a second, longest clip; the GPU, a
+  budget, where it decodes and more of stable-diffusion.cpp's own options; a
+  speech model's language, voices, default voice and speed), its own price
+  and how long it stays loaded unused, loads, unloads, keeps loaded and
+  removes it. Each server runs the model kept loaded, else the one asked for
+  last, and several picture models can share one server
+- **Loaded when asked for, everywhere**: the chat's tools, Talk, read aloud,
+  voice messages and API keys (a key's picture loads its model first, as the
+  chat's do); the app unloads models unused for their idle minutes, speech
+  models too (the speech server's own unloading is off)
+- **Found like chat models**: Find on Hugging Face searches text-to-image and
+  text-to-video repositories and downloads the files picked, and lists the
+  speech server's registry, whose models it asks the speech server to fetch
+- **Fail and recover like chat models**: a model whose server exits says why
+  (too little GPU memory, settings it refused, a missing file, a crash, no
+  answer in time) and is tried again after 1, 2, 4… 30 minutes; Load tries at
+  once
+
+### :sparkles: New features & Enhancements
+
+- Settings → Model names the picture, video and speech to text models the
+  chat uses; the tools pick only among those a person may use, and the chat's
+  model may name another picture model the person asks for
+- The picture and video servers report what they do every 2 seconds (the
+  model and generation they run, their phase, the GPU's free memory, how they
+  exited, the files they lack, where they decode)
+
+### :boom: Breaking changes & Deprecations
+
+- A picture, video or speech model has no On switch: removing it is how (the
+  upgrade leaves out any that was off, and keeps whether each was kept loaded)
+- The picture and video servers read `<server>.conf` and write to a new
+  `media-status` volume; their model flags left `docker-compose.yml` and the
+  chart for the app's model settings
+- Usage counts a request to its credit by its kind of call only
+
 ## v5.5.1 (2026-10-11)
 
 ### :bug: Bugs fixed

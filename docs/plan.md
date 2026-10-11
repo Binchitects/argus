@@ -1136,9 +1136,38 @@ and pushed when its tests passed:
 - **A richer IDE**: citations to lines, edits' lines, ask about code,
   completion, palette, Problems, Source control, replace.
 
-## Next (after v5.5.0)
+## v5.6.0 — Picture, video and speech models managed like chat models (2026-10-11)
 
-1. **Argus at run time**: what the build does not show. Service names to
+Asked on 2026-10-11, while v5.5.1 went live: "I want to be able to load and
+unload and remove and config model of video/image and audio as same as LLMs
+… I want setup them and set credit and other configs and dynamic loading".
+Done one commit at a time, each checked on the live stack:
+
+- The speech server leaves unloading to the app; installs that download can
+  fetch speech models.
+- The picture and video servers take their model and flags from a control
+  file and report what they do.
+- States and failures like the engine's: classes, backoff, why and since.
+- Models as rows: add, edit, remove, their settings, price and idle time; one
+  model per server at a time, switching by generation.
+- Finding them: Hugging Face by pipeline, picked files; the speech registry.
+- An API key's picture loads its model first.
+- Settings name the chat's picture, video and speech to text models; the
+  tools respect each model's access rule.
+
+Left for later (its design is in the session's plan): one GPU plan for the
+chat and picture models together (the chat engine's fit target leaving room
+for a picture model beside it; a video model making room by unloading idle
+chat models and giving it back), leases that keep a model from switching
+under a running job, and a model menu in the chat's tools.
+
+## Next (after v5.6.0)
+
+1. **One GPU plan for chat, picture and video models**: the chat engine's fit
+   target leaves room for a picture model kept beside it; a video model makes
+   room by unloading idle chat models and gives it back; a model never
+   switches under a running job (leases); a model menu in the chat's tools.
+2. **Argus at run time**: what the build does not show. Service names to
    hosts (Kubernetes, Helm, compose, environment, Spring and .NET config, CI's
    helm and kubectl), gRPC (a .proto's services and options, server and client
    markers, generated code), topics and queues (Kafka, RabbitMQ, NATS, SQS and
@@ -1146,20 +1175,20 @@ and pushed when its tests passed:
    generated clients, shared databases and tables, Backstage catalog files and
    Pact contracts as declared links. Each as its own layer, with its
    confidence, settled and shown like the build links.
-2. **Argus's remaining precision work**: a .proto by its import root and the
+3. **Argus's remaining precision work**: a .proto by its import root and the
    well-known ones left out; an image by its registry host; vendored copies and
    ambiguous #includes as evidence; more file types (lock files skipped,
    .mjs/.cts, CMake's FetchContent, Terraform modules); GitLab CI and deploy
    files read as YAML; co-change from the mirrors' history (never walked,
    shown as hidden coupling).
-3. **Argus on the real estate**: measure the links on the company's 200
+4. **Argus on the real estate**: measure the links on the company's 200
    repositories against what their owners know (`argus graph-eval`), and
    calibrate the priors.
-4. **What each repository is for**, written once per repository by the model
+5. **What each repository is for**, written once per repository by the model
    from its README, layout and key symbols, for `system_map` and `overview`.
-5. **Code Arena**: a sandbox on Windows; a watchdog for an MCP call that never
+6. **Code Arena**: a sandbox on Windows; a watchdog for an MCP call that never
    ends; the IDE's page showing the sandbox and the sync's state.
-6. Carried over: the packs in the bucket (the maintainer), real platforms
+7. Carried over: the packs in the bucket (the maintainer), real platforms
    (Slack, Teams, SAML IdP, Confluence, SharePoint, Helm on a cluster), Code
    Arena's terminals on a real Mac and Windows, Laya's routing quality, deep
    research under six minutes.
