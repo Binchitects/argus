@@ -240,8 +240,10 @@ export const formattersQuery = (path: string, language?: string) => ({
   staleTime: 10_000,
 })
 
-export const formatText = (body: { path: string; text: string; formatter?: string; range?: { start: number; end: number }; options?: { tabSize: number; insertSpaces: boolean }; language?: string }, signal?: AbortSignal) =>
-  api<{ text: string; formatter: string }>('/api/format', { body, signal })
+export const formatText = (
+  body: { path: string; text: string; formatter?: string; range?: { start: number; end: number }; options?: { tabSize: number; insertSpaces: boolean; prettier?: Record<string, unknown> }; language?: string },
+  signal?: AbortSignal,
+) => api<{ text: string; formatter: string; source: string }>('/api/format', { body, signal })
 
 /** A problem the project's check found: a file of the folder, its line and column (from 1), how bad, its code and what it says. */
 export interface CheckProblem {

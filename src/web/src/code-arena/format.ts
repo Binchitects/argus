@@ -91,7 +91,10 @@ export async function formatModel(model: Monaco.editor.ITextModel, path: string,
   const range = opts.range
     ? { start: model.getOffsetAt({ lineNumber: opts.range.startLineNumber, column: opts.range.startColumn }), end: model.getOffsetAt({ lineNumber: opts.range.endLineNumber, column: opts.range.endColumn }) }
     : undefined
-  const done = await formatText({ path, text, formatter, range, language, options: { tabSize: options.tabSize, insertSpaces: options.insertSpaces } }, opts.signal)
+  // VS Code's prettier.* settings, as prettier-vscode passes them (a project's own config file wins over them).
+  const all = context.settings(language)
+  const prettier = Object.fromEntries(Object.entries(all).filter(([k]) => k.startsWith('prettier.')).map(([k, v]) => [k.slice(9), v]))
+  const done = await formatText({ path, text, formatter, range, language, options: { tabSize: options.tabSize, insertSpaces: options.insertSpaces, ...(Object.keys(prettier).length ? { prettier } : {}) } }, opts.signal)
   if (model.isDisposed() || model.getVersionId() !== version) return null
   const edit = minimalEdit(text, done.text)
   if (edit) {

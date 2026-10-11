@@ -386,6 +386,82 @@ Everything the page needs (Monaco and its language workers, xterm.js, the
 fonts) is built into the program; nothing is fetched from anywhere else.
 Monaco loads with the first file opened, xterm.js with the first terminal.
 
+### Formatting
+
+**Shift+Alt+F** (Ctrl+Shift+I on Linux) formats the file, **Ctrl+K Ctrl+F** the
+lines chosen, **Format Document With…** picks the formatter (and **Configure
+Default Formatter…** sets `editor.defaultFormatter` for the language; VS
+Code's extension ids, `esbenp.prettier-vscode`, mean the same). The status
+bar names the file's formatter. `editor.formatOnSave` formats as the file is
+saved, within `codeArena.formatOnSaveTimeout` (past it, or failing, the file
+is saved as it is, and a message says why); **Save without Formatting**
+(Ctrl+K Ctrl+Shift+S) skips it; `editor.formatOnPaste` formats what is pasted.
+VS Code's `prettier.*` settings (`printWidth`, `semi`, `singleQuote`…) go to
+Prettier as flags; a project's own Prettier config wins over them. A language
+with no formatter of the project's keeps the editor's own (TypeScript, JSON,
+CSS, HTML).
+
+Code Arena formats the editor's text, saved or not, with the project's own
+tools, which code-arena runs:
+
+- **Prettier:** the nearest one in `node_modules`, looking from the file's
+  folder up to the folder Code Arena works in; without one, a Prettier
+  installed for every project (on PATH, or in npm's global folder). It runs as
+  `node` and its script.
+- **Python:** `ruff format`, then `black`, from the project's `.venv` or
+  `venv`, else from PATH (black first where `pyproject.toml` configures black
+  and not ruff).
+- **Go and Rust:** `gofmt`, and `rustfmt` with the edition of the nearest
+  `Cargo.toml`.
+- **C, C++, Objective-C, Java and Protobuf:** `clang-format`.
+- **C# and VB:** `dotnet format whitespace`, on a copy in a temporary folder
+  that holds the `.editorconfig` files from the root down (whole files only;
+  the file itself is never touched).
+
+Prettier, ruff, black and clang-format also format a selection. Formatters are
+found by their files, never by running them, and what was found is kept ten
+seconds per folder.
+
+A formatter that lives in the folder (a project's `node_modules` or `.venv`,
+or a config formatter whose program is there) runs only once you **trust the
+folder**, as VS Code asks: the first time one would run, Code Arena asks
+(**Manage Workspace Trust** asks again); the choice is kept on this computer,
+never in the project. Until then the global one runs instead, and a global
+Prettier runs without the project's config (a Prettier config can be
+JavaScript or load plugins). Until the folder is trusted, rustfmt runs outside
+it (rustup would otherwise use the toolchain the folder's
+`rust-toolchain.toml` names), with the nearest `rustfmt.toml`; `dotnet format`
+always runs on its copy, so the folder's `global.json` cannot choose the SDK.
+A file's name reaches each tool as one argument (`--stdin-filepath=…`), so a
+file named like a flag stays a name. Where the system has a sandbox
+(bubblewrap, sandbox-exec), each formatter runs in it: it can read the folder
+but not write it, has a `/tmp` of its own and no network, cannot see what
+holds secrets, and never gets your API key. Without a sandbox (Windows, or
+`"sandbox": "off"`), formatters run as you, as Problems does. Four run at once
+at most, ten seconds each (thirty for dotnet format); one that runs longer is
+stopped, with anything it started.
+
+`"formatters"` in `config.json` adds your own, or replaces a built-in when it
+uses the built-in's name:
+
+```json
+"formatters": {
+  "stylua": {"command": ["stylua", "--indent-width", "${tabSize}", "--stdin-filepath", "${file}", "-"], "languages": ["lua"]},
+  "biome": {"command": ["biome", "format", "--stdin-file-path=${relativeFile}"], "languages": ["typescript", "*.jsonc"], "timeout": 5}
+}
+```
+
+The text goes to the command's input and the formatted text comes from its
+output. `languages` are Monaco's language ids or file patterns (`*.lua`); an
+entry named after a built-in (`prettier`, `ruff`, `black`, `gofmt`, `rustfmt`,
+`clang-format`, `dotnet-format`) takes that built-in's languages when it lists
+none. `${file}`, `${relativeFile}`, `${fileDirname}`, `${workspaceFolder}`,
+`${tabSize}` and `${insertSpaces}` are filled in; with `"range": true` it
+formats a selection too (`${rangeStart}` and `${rangeEnd}`, offsets, and
+`${startLine}` and `${endLine}`); `"timeout"` is in seconds, 1 to 600. Only
+`config.json` names commands: a project cannot add one. Your own formatters
+come first, so the first one that can run is the default.
+
 ### Ask about code from the editor
 
 Lines of a file go to the agent from the editor itself:
@@ -571,7 +647,11 @@ status (403 `outside` for a path outside the folder).
 | `GET /api/git/diff?path=FILE` | `{path, original, modified}`: at the last commit (null: new) and now (null: deleted) |
 | `POST /api/git/stage`, `/api/git/unstage`, `/api/git/discard` `{paths}` | the status after; 409 `git` with what git said |
 | `POST /api/git/commit` `{message, all}` | commits what is staged (all of it first, with `all`): `{hash, status}`; 409 `nothing` when nothing is staged |
-| `GET /api/git/log`, `GET /api/git/branches`, `POST /api/git/switch` `{branch}` | the last 30 commits `[{hash, subject, author, at}]`; the branches `[{name, current}]`; switches |
+| `GET /api/git/log`, `GET /api/git/branches`, `POST /api/git/switch` `{branch}` | the last 30 commits `[{hash, subject, author, at}]` (`limit` for another number, 1 to 1,000); the branches `[{name, current}]`; switches |
+| `GET /api/git/show?path=FILE&rev=REV` | the file as `rev` has it: `HEAD` (the default), `:` (the index) or a commit-ish (a hash, a branch, a tag, `main~2`): `{path, rev, commit, exists, size, text, binary, tooLarge}` (`commit`: the full hash, null for the index; `exists` false when the file is not there, at HEAD before the first commit, and in the index while the file is in conflict; `text` null with `binary` (a NUL byte, or not UTF-8) or `tooLarge` (over 5 MB)); 400 for a revision that starts with `-` or has a space or `:` in it, and for a file name with a line break; 404 `no_revision` for a revision git does not know |
+| `GET /api/git/log?path=FILE&limit=N` | with `path`: the commits that changed the file, newest first, followed across renames: `[{hash, subject, author, at, status, pathAt, from}]` (`status`: git's letter A, M, D, R, C, null for a merge; `pathAt`: its name in that commit; `from`: its name before a rename; either null when outside the folder); 400 `folder` for a folder |
+| `GET /api/git/commit?hash=REV` | `{hash, parents, subject, author, at, files: [{path, status, from}], truncated}` (full hashes; the folder's files changed against the first parent, all `A` in a root commit; 2,000 at most); 404 `no_revision` |
+| `POST /api/git/stage-text` `{path, text}` | stages exactly `text` as the file's (the file in the folder left as it is; the index's mode kept, 100644 for a new file; the file's byte-order mark kept; a file in conflict is settled); the status after; 409 `not_text` for a link or a submodule, 400 `folder` |
 | `GET /api/problems` | the check's last run: `{command, running, ran, exitCode, said, problems: [{path, line, column, severity, code, message}]}` (`ran` null before the first; `command` null when none is found) |
 | `POST /api/problems/run` | runs the check (waits for the one running) and answers as above; 404 `no_check` when none is found |
 | `POST /api/complete` `{path, prefix, suffix}` | code completion at the editor's cursor: `{text}`; 404 `off` when the config turns it off, 409 `busy` while an answer is written, 429 `limited` at the key's limit |
@@ -588,7 +668,7 @@ status (403 `outside` for a path outside the folder).
 | `GET /api/search?q=…&regex=1&case=1&word=1&include=…&exclude=…` | `{files: [{path, matches: [{line, column, length, preview, start}]}], count, truncated}` (2,000 matches, 20 s at most) |
 | `GET /api/changes` | the agent's changed files: `[{path, created, deleted, added, removed}]` |
 | `GET /api/changes/diff?path=FILE` | `{path, original, modified, version}` (`original` null: the agent made it) |
-| `POST /api/changes/accept` `{path}` | keeps the change (all of them without `path`); the list left |
+| `POST /api/changes/accept` `{path, before}` | keeps the change (all of them without `path`); with `before` (a text), part of it: that text becomes the file's before the agent (equal to the file now, or empty for a file gone since: all of it); the list left |
 | `POST /api/changes/revert` `{path}` | puts the file back; the list left |
 | `GET /api/terminals` | `[{id, title, pid, cols, rows, exitCode}]` |
 | `POST /api/terminals` `{cols, rows}` | opens one; 409 `too_many` past ten |
@@ -597,6 +677,8 @@ status (403 `outside` for a path outside the folder).
 | `GET /api/history` | what this folder sent, newest first, each text once (500 at most): `[{text}]`, without the terminal's own commands (`/help`, `/model`, …; `/compact` and `/clear` stay) |
 | `GET /api/preferences` | the page's own preferences (`layout`, `paletteRecent`), as it saved them; `{}` at first |
 | `POST /api/preferences` `{key: value}` | keeps these keys, merged over the others (`null` forgets one); 413 `too_large` past 16 KB |
+| `GET /api/formatters?path=FILE&language=ID` | the file's formatters, in order: `{language, formatters: [{id, name, version, source, available, reason, hint, range, path}], default}`. `language` is Monaco's id, from the file's name or as sent. `source` is `project` (in the folder: runs only once it is trusted), `global` or `config`. A formatter that cannot run has `reason` `trust`, `missing` or `node` (Prettier without node on PATH), and `hint` (what to install, or "trust this folder"). `path` is the program, or Prettier's script, that would run. `default` is the first available one (null: none). A global formatter is listed only while the folder's own with the same `id` cannot run. 400 for a folder, 403 `outside` |
+| `POST /api/format` `{path, text, formatter, range: {start, end}, options: {tabSize, insertSpaces, prettier}, language}` | the text through the formatter `formatter` (an `id` from the list; the default without it): `{text, formatter, source}` (`formatter` the `id` that ran, `source` where it came from), always the whole text, even for a range (`start` and `end` are UTF-16 offsets). Errors: 422 `format_failed` `{error, line, column}` (the first 20 lines the tool said, colours removed; `line` and `column` when it named them); 422 `no_range` for a whole-file formatter; 504 `timeout` (10 s, 30 s for dotnet format, or a config entry's `timeout`); 413 `too_large` past 5 MB; 403 `not_trusted` for the folder's own formatter before the folder is trusted; 404 `no_formatter` (none for the language, not installed, or no such `id`); 400 for a bad range or a missing `text`. `options.prettier` takes VS Code's `prettier.*` settings (`printWidth`, `tabWidth`, `useTabs`, `semi`, `singleQuote`, `jsxSingleQuote`, `trailingComma`, `bracketSpacing`, `bracketSameLine`, `arrowParens`, `endOfLine`, `proseWrap`, `quoteProps`, `singleAttributePerLine`, `htmlWhitespaceSensitivity`, `embeddedLanguageFormatting`, `vueIndentScriptAndStyle`) as flags; a project's config file wins over them |
 | `GET /api/user-files?name=settings.json` (or `keybindings.json`) | the person's own file in the config folder: `{name, text, version, exists}` (`text` empty, `version` `none` before the first save); 400 for any other name |
 | `POST /api/user-files` `{name, text, version}` | saves it as sent (comments kept; readable by the person alone); 409 `changed` when it changed since `version`, 413 `too_large` past 1 MB |
 | `GET /api/user-files/vscode?name=…` | VS Code's own copy on this computer (Code, then Insiders, then VSCodium): `{name, text, from}`; 404 when there is none |
