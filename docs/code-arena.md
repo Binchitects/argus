@@ -201,8 +201,8 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   count of the files changed since the last commit), Agent changes (with a
   count of the files), Problems (with a count of the errors) and Chat switch
   the side bar; the one shown hides it.
-  At its foot: the terminal panel, the theme (light, dark or the system's),
-  Help and About.
+  At its foot: the terminal panel, the theme (light, dark or the system's:
+  kept in the person's `settings.json`, below), Help and About.
 - **help**: Help in the activity bar opens the IDE's help over the page:
   what each part does, the common tasks step by step and the keys, with a
   link to this page of the manual in the Arena signed in to
@@ -215,8 +215,9 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   keys move through the tree. The files the agent changed are marked, and so
   are the folders they are in. A file deleted with unsaved changes keeps its
   tab (the question says so): saving it makes the file again.
-- **editor**: tabs with Monaco, highlighting by the file's name, the theme
-  following the page's. A dot marks unsaved changes and **Ctrl+S** saves. A
+- **editor**: tabs with Monaco, highlighting by the file's name (or
+  `files.associations`), set up by the settings (below). A dot marks unsaved
+  changes and **Ctrl+S** saves (**Ctrl+K S** saves them all). A
   file changed on disk since it was opened is not written over unseen: saving
   asks first. Closing a tab with unsaved changes asks Save, Don't save or
   Cancel; leaving the page with any warns. A binary file, or one over 5 MB,
@@ -241,9 +242,12 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   letters of its path (`app:12` opens it at line 12; `:12` goes to line 12 of
   the file shown, as the line in the status bar does). **Ctrl+Shift+P** (or
   **F1**: Firefox keeps Ctrl+Shift+P for a private window) runs any command by
-  name: the workbench's (save, search, show or hide a part,
-  accept the agent's changes, the theme, help) and the editor's (Monaco's own,
-  and Code Arena's: Add to chat, Explain, Fix, Complete).
+  name, as VS Code's palette: "Category: Title" with its key, the ones run
+  lately first, a few words of the title (or of the command's id) narrowing
+  them: the workbench's (save, close and reopen tabs, go back and forward,
+  show or hide a part, the colour theme, the language mode, settings and
+  keyboard shortcuts, help) and the editor's (Monaco's own, and Code Arena's:
+  Add to chat, Explain, Fix, Complete).
 - **terminals**: a panel under the editor (Ctrl+`), one tab per shell (bash 1,
   bash 2, …), + for another; drag its top edge to resize it. A path of the
   folder's in a terminal's output (a compiler's `src/app.ts:12:5`) is a link
@@ -264,8 +268,12 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   that ends while nothing runs starts a turn of its own, which the page shows as
   any other. The Chat activity lists this folder's sessions.
 - **status bar**: the git branch, the agent's changes, the terminal and the
-  number of commands running with no time limit on the left; the cursor's
-  line and column, the file's language, the MCP servers (connected of all:
+  number of commands running with no time limit on the left (and, after the
+  first key of a chord, that it waits for the second); the cursor's line and
+  column, the file's indentation (**Spaces: 4**: indent with spaces or tabs,
+  detect it, or convert the file), its line endings (**LF** or **CRLF**) and
+  its language (another one, or **Configure '…' language based settings**),
+  the MCP servers (connected of all:
   **MCP servers** lists them, why one is not connected and when it is tried
   next, with **Try again**), how full the model's window is (tokens used /
   the model's: **Context** sets when the session compacts and what it keeps,
@@ -274,24 +282,76 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   right.
 
 The side bar, the chat and the terminal panel are resized by dragging their
-edges (or with the arrow keys on the edge). Their sizes, which are shown and
-the theme are kept by code-arena, in `ide.json` in its data folder: every run
-opens as the last one was left, in any project and whatever its port (a
-browser keeps a page's own storage per port, and each run takes a new one).
-The keys work wherever the focus is, the terminal too. On macOS they are ⌘:
-Ctrl+S, Ctrl+P and the others stay the terminal's and the editor's there (a
-shell's history, emacs, nano).
+edges (or with the arrow keys on the edge). Their sizes and which are shown
+are kept by code-arena, in `ide.json` in its data folder, with the palette's
+recent commands: every run opens as the last one was left, in any project and
+whatever its port (a browser keeps a page's own storage per port, and each
+run takes a new one).
+
+### Settings and keyboard shortcuts
+
+Code Arena reads VS Code's own files, under VS Code's names, so a person's
+VS Code settings mean the same here:
+
+- **settings.json**: the person's, in code-arena's config folder (beside
+  `config.json`; **Preferences: Open User Settings (JSON)**), for every
+  project; the project's `.vscode/settings.json` (**Preferences: Open
+  Workspace Settings (JSON)**) over it; and, over both, a language's own
+  (`"[python]": {"editor.tabSize": 4}`, in either). Comments and trailing
+  commas are allowed; the editor checks the file against what Code Arena
+  reads, with each setting's description. A value of the wrong kind is not
+  taken. The person's own settings (the terminal's keys) are not taken from a
+  project's file.
+- What they set: the editor (font, size, line height, ligatures, tab size and
+  spaces, detecting the file's indentation, word wrap, rulers, line numbers,
+  whitespace, the cursor, the minimap, sticky scroll, bracket colours and
+  guides, folding, suggestions, inline completion, hovers…), saving
+  (`files.autoSave` after a delay, when the focus or the window leaves;
+  `files.trimTrailingWhitespace`, `files.insertFinalNewline`,
+  `files.trimFinalNewlines`, steps Undo takes back, never for a save after a
+  delay; `files.associations`), compares (`diffEditor.*`), the terminals
+  (font, cursor, scrollback, the keys they let through), the colour theme
+  (`workbench.colorTheme`, or `window.autoDetectColorScheme` with the
+  preferred light and dark ones: **Ctrl+K Ctrl+T**) and Code Arena's code
+  completion (`codeArena.inlineCompletion.enabled`, the status bar's
+  **Complete**). They apply as the file is saved. Where Code Arena's default
+  is not VS Code's, the description says so.
+- **keybindings.json**: the person's, beside it (**Preferences: Open Keyboard
+  Shortcuts**, **Ctrl+K Ctrl+S**): VS Code's rules, `{"key": "ctrl+shift+e",
+  "command": "workbench.action.togglePanel", "when": "editorIsOpen"}`, over
+  VS Code's own keys for the commands Code Arena has (by VS Code's command
+  ids); the last rule that matches wins, `"-command"` takes a default key
+  away, a key may be two chords (`ctrl+k ctrl+t`) and `when` reads VS Code's
+  context keys (`editorIsOpen`, `inputFocus`, `terminalFocus`,
+  `sideBarVisible`, `resourceLangId == python`…). The editor has the same
+  keys, its own (Monaco's: Ctrl+D, Alt+↑, Ctrl+K Ctrl+C…) under theirs, and a
+  rule may rebind one of the editor's commands too (`editor.action.…`).
+
+In a terminal the keys go to the shell, but those of the commands that skip
+it (the palette, quick open, the panels and views, the debugger's), and the
+first key of a chord (Ctrl+K: `terminal.integrated.allowChords` false gives it
+to the shell); `terminal.integrated.commandsToSkipShell` adds one
+(`"-command"` gives its key back). On macOS the keys are ⌘: Ctrl+S, Ctrl+P and
+the others stay the terminal's and the editor's there. A browser tab keeps
+Ctrl+W, Ctrl+T, Ctrl+Tab and Ctrl+PageUp/PageDown for itself: their commands
+have a second key (Ctrl+Alt+W closes the tab, Ctrl+Alt+Shift+T reopens it,
+Ctrl+Alt+PageUp/PageDown move between tabs).
 
 | keys | |
 |---|---|
-| Ctrl+S (⌘S) | save the file |
-| Ctrl+P (⌘P) | open a file by name (`:12` goes to a line) |
-| Ctrl+Shift+P (⌘⇧P), F1 | run a command by name |
-| Ctrl+Shift+F (⌘⇧F) | search |
-| Ctrl+Shift+E (⌘⇧E) | the Explorer |
-| Ctrl+Shift+G (⌘⇧G) | source control |
-| Ctrl+` | show or hide the terminals |
-| Ctrl+L (⌘L) | in the editor: the lines chosen (or the cursor's) go with the next message |
+| Ctrl+Shift+P, F1 | run a command by name |
+| Ctrl+P | open a file by name (`:12` goes to a line); Ctrl+G goes to a line |
+| Ctrl+S, Ctrl+K S | save the file, save them all |
+| Ctrl+Alt+W, Ctrl+K Ctrl+W, Ctrl+K U | close the tab, all the tabs, the saved ones |
+| Ctrl+Alt+Shift+T | reopen the tab closed last |
+| Alt+1 … Alt+9, Ctrl+Alt+PageUp/PageDown | a tab by its place, the next or the one before |
+| Ctrl+Alt+- , Ctrl+Shift+- (Alt+← and Alt+→ on Windows) | back and forward through the tabs shown |
+| Ctrl+B, Ctrl+J, Ctrl+Alt+B | the side bar, the panel, the chat |
+| Ctrl+Shift+E, Ctrl+Shift+F, Ctrl+Shift+H, Ctrl+Shift+G, Ctrl+Shift+M | Explorer, search, replace, source control, problems |
+| Ctrl+`, Ctrl+Shift+` | show or hide the terminals, a new one |
+| Ctrl+, , Ctrl+K Ctrl+S, Ctrl+K Ctrl+T | settings, keyboard shortcuts, colour theme |
+| Ctrl+K M, Alt+Z, Ctrl+K P | the language mode, word wrap, copy the file's path |
+| Ctrl+L | in the editor: the lines chosen (or the cursor's) go with the next message |
 
 Everything the page needs (Monaco and its language workers, xterm.js, the
 fonts) is built into the program; nothing is fetched from anywhere else.
@@ -506,7 +566,7 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/terminals/close` `{id}` | ends its shell and forgets it |
 | `GET /api/terminals/socket?id=ID` | the terminal's WebSocket |
 | `GET /api/history` | what this folder sent, newest first, each text once (500 at most): `[{text}]`, without the terminal's own commands (`/help`, `/model`, …; `/compact` and `/clear` stay) |
-| `GET /api/preferences` | the page's own preferences (`layout`, `theme`), as it saved them; `{}` at first |
+| `GET /api/preferences` | the page's own preferences (`layout`, `paletteRecent`), as it saved them; `{}` at first |
 | `POST /api/preferences` `{key: value}` | keeps these keys, merged over the others (`null` forgets one); 413 `too_large` past 16 KB |
 | `GET /api/user-files?name=settings.json` (or `keybindings.json`) | the person's own file in the config folder: `{name, text, version, exists}` (`text` empty, `version` `none` before the first save); 400 for any other name |
 | `POST /api/user-files` `{name, text, version}` | saves it as sent (comments kept; readable by the person alone); 409 `changed` when it changed since `version`, 413 `too_large` past 1 MB |

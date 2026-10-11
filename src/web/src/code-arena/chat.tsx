@@ -56,7 +56,9 @@ import { useEditor } from './editor-state'
 import { useFileMention } from './mention'
 import { CodeAnswer } from './answer'
 import { PartHelp } from './help'
-import { changesQuery, savePreferences } from './ide-api'
+import { changesQuery } from './ide-api'
+import { useSettings } from './settings'
+import { themeNamed } from './settings-schema'
 
 // The agent's chat, in the IDE's side panel: the folder's sessions (the side
 // bar's Chat view), the thread, the composer, the model and the mode.
@@ -250,10 +252,18 @@ export function Sessions({ state, onNavigate }: { state: CodeState; onNavigate?:
 
 /** Light, dark, or the system's; kept by code-arena, so the next run (on another port) opens in it too. */
 export function ThemeMenu({ side = 'bottom', align = 'end' }: { side?: 'right' | 'bottom' | 'top'; align?: 'start' | 'end' }) {
-  const { preference, resolved, setPreference: setTheme } = useTheme()
+  const { resolved } = useTheme()
+  const settings = useSettings()
+  const auto = settings.get<boolean>('window.autoDetectColorScheme')
+  const preference: ThemePreference = auto ? 'system' : themeNamed(settings.get<string>('workbench.colorTheme')).kind
+  // Kept in the person's settings.json, as VS Code keeps it: "workbench.colorTheme" and "window.autoDetectColorScheme".
   const setPreference = (theme: ThemePreference) => {
-    setTheme(theme)
-    void savePreferences({ theme }).catch(() => undefined)
+    const write = async () => {
+      if (theme === 'system') return settings.update('window.autoDetectColorScheme', true)
+      await settings.update('workbench.colorTheme', settings.get<string>(theme === 'dark' ? 'workbench.preferredDarkColorTheme' : 'workbench.preferredLightColorTheme'))
+      if (auto) await settings.update('window.autoDetectColorScheme', false)
+    }
+    void write().catch((e: unknown) => toast.error(errorMessage(e)))
   }
   return (
     <DropdownMenu>

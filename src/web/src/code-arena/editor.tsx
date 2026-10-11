@@ -10,12 +10,19 @@ import { Kbd } from '@/components/ui/kbd'
 import { Spinner } from '@/components/ui/spinner'
 import { toast } from '@/components/ui/toaster'
 import { ApiError, errorMessage } from '@/lib/api'
-import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { asks, chatBridge, type Piece } from './bridge'
+import { allCommands, onCommandsChange, runCommand } from './commands'
 import { installCompletions } from './completion'
-import { EditorContext, loadMonaco, modKey, rankFiles, useEditor, type DiffModels, type DiffSource, type EditorApi, type FileModel, type MonacoModule, type Reveal, type Tab, type Unsaved } from './editor-state'
-import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitTexts, nameOf, readFile, revertChange, within, writeFile, type Change, type CheckProblem } from './ide-api'
+import { EditorContext, loadMonaco, rankFiles, useEditor, type DiffModels, type DiffSource, type EditorApi, type FileModel, type MonacoModule, type Reveal, type SaveReason, type Tab, type Unsaved } from './editor-state'
+import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitTexts, nameOf, readFile, revertChange, userFileQuery, within, writeFile, writeUserFile, type Change, type CheckProblem, type OpenedFile, type Saved, type UserFileName } from './ide-api'
+import { keymap, useKeyFor } from './keyboard'
+import { monacoKeybinding } from './keys'
+import { saveParticipants } from './save-participants'
+import { useSettings, workspaceSettingsPath } from './settings'
+import { settingsSchema } from './settings-schema'
+import { useMonacoTheme } from './theme'
+import { diffOptionsOf, editorOptionsOf, isUserFile } from './editor-options'
 
 /** A diff's tab: the agent's changes to a file ("diff:"), or the file's since the last commit ("git:"). */
 const diffId = (path: string, source: DiffSource = 'agent') => `${source === 'git' ? 'git' : 'diff'}:${path}`
@@ -45,25 +52,23 @@ const linesOf: { current: ((path: string, startLine: number, endLine: number) =>
  * in the light bulb.
  */
 function askAboutCode(m: MonacoModule, ed: Monaco.editor.IStandaloneCodeEditor, selection: () => Piece | null) {
-  const { KeyMod, KeyCode } = m.monaco
   const ask = (text: (p: Piece) => string) => () => {
     const piece = selection()
     if (piece) chatBridge.current?.ask(text(piece), [piece])
   }
   ed.addAction({
-    id: 'arena.addToChat',
+    id: 'codeArena.addToChat',
     label: 'Code Arena: Add to chat',
     contextMenuGroupId: '9_arena',
     contextMenuOrder: 1,
-    keybindings: [KeyMod.CtrlCmd | KeyCode.KeyL],
     run: () => {
       const piece = selection()
       if (piece) chatBridge.current?.attach(piece)
     },
   })
-  ed.addAction({ id: 'arena.explain', label: 'Code Arena: Explain this', contextMenuGroupId: '9_arena', contextMenuOrder: 2, run: ask(() => asks.explain) })
-  ed.addAction({ id: 'arena.fix', label: 'Code Arena: Fix this', contextMenuGroupId: '9_arena', contextMenuOrder: 3, run: ask((p) => asks.fix(problemsIn(m, p))) })
-  ed.addAction({ id: 'arena.complete', label: 'Code Arena: Complete this', contextMenuGroupId: '9_arena', contextMenuOrder: 4, run: ask(() => asks.complete) })
+  ed.addAction({ id: 'codeArena.explain', label: 'Code Arena: Explain this', contextMenuGroupId: '9_arena', contextMenuOrder: 2, run: ask(() => asks.explain) })
+  ed.addAction({ id: 'codeArena.fix', label: 'Code Arena: Fix this', contextMenuGroupId: '9_arena', contextMenuOrder: 3, run: ask((p) => asks.fix(problemsIn(m, p))) })
+  ed.addAction({ id: 'codeArena.complete', label: 'Code Arena: Complete this', contextMenuGroupId: '9_arena', contextMenuOrder: 4, run: ask(() => asks.complete) })
   if (codeActions) return
   codeActions = true
   m.monaco.editor.registerCommand('arena.fixProblems', (_: unknown, path: string, line: number, endLine: number, problems: string[]) =>
@@ -116,10 +121,87 @@ function markProblems(m: MonacoModule, model: Monaco.editor.ITextModel, problems
   )
 }
 
+async function readAny(path: string): Promise<OpenedFile> {
+  if (!isUserFile(path)) return readFile(path)
+  const f = await userFileQuery(path.slice(5) as UserFileName).queryFn({ signal: new AbortController().signal })
+  return { path, size: f.text.length, version: f.version, text: f.text }
+}
+
+async function writeAny(path: string, text: string, version: string | null): Promise<Saved> {
+  if (!isUserFile(path)) return writeFile(path, text, version)
+  const saved = await writeUserFile(path.slice(5) as UserFileName, text, version)
+  return { path, version: saved.version, size: text.length }
+}
+
+let keymapInstalled = false
+
+/**
+ * Monaco is given the workbench's keymap (the defaults and keybindings.json) and its commands, so the keys work alike in
+ * the editor; F1 opens the workbench's palette, not Monaco's own. Given again whenever either changes.
+ */
+function installKeymap(m: MonacoModule) {
+  if (keymapInstalled) return
+  keymapInstalled = true
+  let rules: { dispose(): void } | null = null
+  const commands = new Map<string, { dispose(): void }>()
+  let queued = false
+  const sync = () => {
+    queued = false
+    for (const c of allCommands()) {
+      if (!commands.has(c.id) && !c.id.startsWith('editor.')) commands.set(c.id, m.monaco.editor.registerCommand(c.id, (_: unknown, args: unknown) => void runCommand(c.id, args)))
+    }
+    rules?.dispose()
+    const list = keymap.rules
+      .filter((r) => r.source !== 'default' || !r.command.startsWith('editor.'))
+      .map((r) => ({ keybinding: monacoKeybinding(r.chords, m.monaco), command: r.command, commandArgs: r.args, when: r.whenText }))
+      .filter((r): r is { keybinding: number; command: string; commandArgs: unknown; when: string | undefined } => r.keybinding !== null)
+    rules = m.monaco.editor.addKeybindingRules([{ keybinding: m.monaco.KeyCode.F1, command: '-editor.action.quickCommand' }, ...list])
+    m.schemas([
+      { uri: 'code-arena://schemas/settings.json', fileMatch: ['User/settings.json', '.vscode/settings.json'], schema: settingsSchema() },
+      {
+        uri: 'code-arena://schemas/keybindings.json',
+        fileMatch: ['User/keybindings.json'],
+        schema: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['key', 'command'],
+            properties: {
+              key: { type: 'string', description: 'The key or keys, as VS Code writes them: "ctrl+shift+p", "ctrl+k ctrl+s".' },
+              command: { anyOf: [{ type: 'string', enum: allCommands().map((c) => c.id), enumDescriptions: allCommands().map((c) => (c.category ? `${c.category}: ${c.title}` : c.title)) }, { type: 'string' }], description: 'The command; "-command" takes away its default key.' },
+              when: { type: 'string', description: 'When the key applies: context keys, !, &&, ||, ==, =~.' },
+              args: { description: 'What the command is given.' },
+            },
+          },
+        },
+      },
+    ])
+  }
+  const later = () => {
+    if (queued) return
+    queued = true
+    queueMicrotask(sync)
+  }
+  keymap.subscribe(later)
+  onCommandsChange(later)
+  sync()
+}
+
+/** A model's indentation from the settings: the file's own when "editor.detectIndentation" is on. */
+function indentModel(model: Monaco.editor.ITextModel, v: Record<string, unknown>) {
+  const tabSize = v['editor.tabSize'] as number
+  const insertSpaces = v['editor.insertSpaces'] as boolean
+  model.updateOptions({ tabSize, insertSpaces, trimAutoWhitespace: v['editor.trimAutoWhitespace'] as boolean })
+  if (v['editor.detectIndentation']) model.detectIndentation(insertSpaces, tabSize)
+}
+
 export function EditorProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
-  const { resolved } = useTheme()
+  const monacoTheme = useMonacoTheme()
+  const settings = useSettings()
+  const settingsRef = useRef(settings)
+  settingsRef.current = settings
   const [tabs, setTabs] = useState<Tab[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [cursor, setCursor] = useState<{ line: number; column: number } | null>(null)
@@ -136,7 +218,13 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   // The tabs and the active one as they are now (the state renders them; the actions read these).
   const tabsRef = useRef<Tab[]>([])
   const activeRef = useRef<string | null>(null)
-  const themeRef = useRef(resolved)
+  const themeRef = useRef(monacoTheme)
+  // Alt+Z: word wrap toggled for this editor, over the settings (null: as they say).
+  const wrapOverride = useRef<string | null>(null)
+  const closed = useRef<string[]>([])
+  const history = useRef<{ entries: string[]; at: number }>({ entries: [], at: -1 })
+  const autoSaves = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const autoSavePaused = useRef(new Set<string>())
   const mon = useRef<MonacoModule | null>(null)
   const problemsOf = useRef<CheckProblem[]>([])
   const files = useRef(new Map<string, FileModel>())
@@ -152,7 +240,13 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       tabsRef.current = next
       setTabs(next)
     }
-    const activate = (id: string | null) => {
+    const activate = (id: string | null, fromHistory = false) => {
+      if (id && id !== activeRef.current && !fromHistory) {
+        // Back and forward go through the tabs shown, in order (what came after the place gone back to is dropped).
+        const h = history.current
+        h.entries = [...h.entries.slice(0, h.at + 1).filter((e) => e !== id), id].slice(-50)
+        h.at = h.entries.length - 1
+      }
       activeRef.current = id
       setActiveId(id)
       if (!id) setCursor(null)
@@ -164,6 +258,20 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       const dirty = f.model.getAlternativeVersionId() !== f.savedAlt
       if (tabsRef.current.some((t) => t.kind === 'file' && t.path === f.path && t.dirty !== dirty)) {
         commit(tabsRef.current.map((t) => (t.kind === 'file' && t.path === f.path ? { ...t, dirty } : t)))
+      }
+      // "files.autoSave": "afterDelay" saves a while after the last change.
+      const timer = autoSaves.current.get(f.path)
+      if (timer) clearTimeout(timer)
+      autoSaves.current.delete(f.path)
+      const all = settingsRef.current.all()
+      if (dirty && all['files.autoSave'] === 'afterDelay' && !autoSavePaused.current.has(f.path)) {
+        autoSaves.current.set(
+          f.path,
+          setTimeout(() => {
+            autoSaves.current.delete(f.path)
+            void save(f.path, 'auto')
+          }, all['files.autoSaveDelay'] as number),
+        )
       }
     }
 
@@ -178,6 +286,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     /** Forgets a tab's models. */
     const dispose = (tab: Tab) => {
       if (tab.kind === 'file') {
+        closed.current = [...closed.current.filter((p) => p !== tab.path), tab.path].slice(-20)
         const f = files.current.get(tab.path)
         if (!f) return
         if (editor.current?.getModel() === f.model) editor.current.setModel(null)
@@ -221,21 +330,23 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       // This open's tab as it is now: none when it was closed meanwhile (one opened again has a load of its own), renamed perhaps.
       const mine = () => tabsRef.current.find((t) => t.load === load)
       try {
-        const [file, m] = await Promise.all([readFile(path), loadMonaco()])
+        const [file, m] = await Promise.all([readAny(path), loadMonaco()])
         mon.current = m
+        installKeymap(m)
         const tab = mine()
         if (!tab) return
         if (file.text === null) {
           update(tab.id, { status: file.binary ? 'binary' : 'tooLarge' })
           return
         }
-        const language = m.languageOf(tab.path)
+        const language = m.languageOf(tab.path, settingsRef.current.get('files.associations'))
         const model = m.monaco.editor.createModel(file.text, language.id, m.fileUri(tab.path))
+        indentModel(model, settingsRef.current.all(language.id))
         const f: FileModel = { path: tab.path, model, version: file.version, savedAlt: model.getAlternativeVersionId(), view: null }
         model.onDidChangeContent(() => markDirty(f))
         files.current.set(tab.path, f)
         markProblems(m, model, problemsOf.current.filter((p) => p.path === tab.path))
-        update(tab.id, { status: 'ready', language: language.name })
+        update(tab.id, { status: 'ready', language: language.name, languageId: language.id })
       } catch (e) {
         const tab = mine()
         if (tab) update(tab.id, { status: 'error', message: errorMessage(e) })
@@ -246,6 +357,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     const loadDiff = async (path: string, source: DiffSource = 'agent') => {
       const [texts, m] = await Promise.all([source === 'git' ? gitTexts(path) : changeTexts(path), loadMonaco()])
       mon.current = m
+      installKeymap(m)
       const language = m.languageOf(path)
       const id = diffId(path, source)
       const there = diffs.current.get(id)
@@ -279,18 +391,42 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    const save = async (id?: string): Promise<boolean> => {
+    /**
+     * Saves a file: first the save's steps for its language (trim trailing whitespace, format, the final newline…) as
+     * edits Undo takes back; not for a save "afterDelay" makes as the person types. A file changed on disk asks before it
+     * is written over (an auto save waits instead, and says so).
+     */
+    async function save(id?: string, reason: SaveReason = 'explicit'): Promise<boolean> {
       const tab = tabsRef.current.find((t) => t.id === (id ?? activeRef.current))
       const f = tab?.kind === 'file' ? files.current.get(tab.path) : undefined
-      if (!f) return false
+      if (!f || f.model.isDisposed()) return false
+      if (reason !== 'auto') {
+        const m = mon.current
+        const v = settingsRef.current.all(f.model.getLanguageId?.() ?? tab?.languageId)
+        for (const step of saveParticipants) {
+          if (!m || f.model.isDisposed()) break
+          try {
+            await step({ monaco: m.monaco, model: f.model, path: f.path, settings: v, reason })
+          } catch (e) {
+            toast.error(`Saved without ${step.what ?? 'a step'}: ${errorMessage(e)}`)
+          }
+        }
+      }
+      if (reason !== 'explicit' && f.model.getAlternativeVersionId() === f.savedAlt) return true
       const text = f.model.getValue()
       const alt = f.model.getAlternativeVersionId()
       let saved
       try {
-        saved = await writeFile(f.path, text, f.version)
+        saved = await writeAny(f.path, text, f.version)
       } catch (e) {
         if (!(e instanceof ApiError && e.http === 409 && e.status === 'changed')) {
           toast.error(errorMessage(e))
+          return false
+        }
+        if (reason !== 'explicit') {
+          // Not written over unseen: auto save stops for this file until it is saved by hand.
+          autoSavePaused.current.add(f.path)
+          toast.error(`${nameOf(f.path)} changed on disk: it is not saved automatically until you save it yourself.`)
           return false
         }
         const overwrite = await confirm({
@@ -301,7 +437,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         })
         if (!overwrite) return false
         try {
-          saved = await writeFile(f.path, text, null)
+          saved = await writeAny(f.path, text, null)
         } catch (e2) {
           toast.error(errorMessage(e2))
           return false
@@ -309,7 +445,11 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       }
       f.version = saved.version
       f.savedAlt = alt
+      autoSavePaused.current.delete(f.path)
       markDirty(f)
+      // The settings files apply as they are saved.
+      if (f.path === 'user:settings.json' || f.path === workspaceSettingsPath) void settingsRef.current.reload()
+      if (f.path === 'user:keybindings.json') void queryClient.invalidateQueries({ queryKey: userFileQuery('keybindings.json').queryKey })
       void queryClient.invalidateQueries({ queryKey: changesQuery.queryKey })
       // What git sees changed since the last commit, with it.
       void queryClient.invalidateQueries({ queryKey: ['code', 'git', 'status'] })
@@ -352,7 +492,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       const at = { alt: f.savedAlt, version: f.version }
       let file
       try {
-        file = await readFile(t.path)
+        file = await readAny(t.path)
       } catch (e) {
         // Gone (a change reverted, a file deleted by a command): a tab with nothing unsaved goes too.
         if (e instanceof ApiError && e.http === 404 && unchanged(t, f, at)) drop([t.id])
@@ -404,7 +544,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
           const path = rename(t.path)
           const id = t.kind === 'file' ? path : diffId(path, t.source)
           ids.set(t.id, id)
-          return { ...t, id, path, language: m && t.status === 'ready' ? m.languageOf(path).name : t.language }
+          const language = m && t.status === 'ready' ? m.languageOf(path, settingsRef.current.get('files.associations')) : null
+          return { ...t, id, path, language: language?.name ?? t.language, languageId: language?.id ?? t.languageId }
         }),
       )
       const a = activeRef.current
@@ -418,12 +559,13 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     const readdress = (m: MonacoModule, f: FileModel) => {
       const old = f.model
       const uri = m.fileUri(f.path)
+      const assoc = settingsRef.current.get<Record<string, string>>('files.associations')
       if (m.monaco.editor.getModel(uri)) {
-        m.monaco.editor.setModelLanguage(old, m.languageOf(f.path).id)
+        m.monaco.editor.setModelLanguage(old, m.languageOf(f.path, assoc).id)
         return
       }
       const unsaved = old.getAlternativeVersionId() !== f.savedAlt
-      const model = m.monaco.editor.createModel(old.getValue(), m.languageOf(f.path).id, uri)
+      const model = m.monaco.editor.createModel(old.getValue(), m.languageOf(f.path, assoc).id, uri)
       f.model = model
       f.savedAlt = unsaved ? -1 : model.getAlternativeVersionId()
       model.onDidChangeContent(() => markDirty(f))
@@ -514,6 +656,89 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    const saveAll = async () => {
+      for (const t of tabsRef.current.filter((x) => x.dirty)) await save(t.id)
+    }
+
+    /** Closes tabs, asking for each with unsaved changes; stops at the first the person keeps. */
+    const closeMany = async (ids: string[]) => {
+      for (const id of ids) if (!(await close(id))) return false
+      return true
+    }
+
+    const reopenClosed = async () => {
+      const path = closed.current.pop()
+      if (path) await open(path)
+    }
+
+    /** The next tab (1) or the one before (-1), round. */
+    const cycle = (delta: number) => {
+      const ts = tabsRef.current
+      if (ts.length === 0) return
+      const at = ts.findIndex((t) => t.id === activeRef.current)
+      activate(ts[(at + delta + ts.length) % ts.length]!.id)
+    }
+
+    const activateIndex = (index: number) => {
+      const t = index < 0 ? tabsRef.current.at(-1) : tabsRef.current[index]
+      if (t) activate(t.id)
+    }
+
+    /** Back or forward through the tabs shown; one closed since is skipped. */
+    const navigate = (delta: -1 | 1) => {
+      const h = history.current
+      for (let at = h.at + delta; at >= 0 && at < h.entries.length; at += delta) {
+        const id = h.entries[at]!
+        if (has(id)) {
+          h.at = at
+          activate(id, true)
+          return
+        }
+      }
+    }
+
+    const focusEditor = () => {
+      const tab = tabsRef.current.find((t) => t.id === activeRef.current)
+      if (tab?.kind === 'file') editor.current?.focus()
+      else diffEditor.current?.getModifiedEditor?.().focus()
+    }
+
+    const toggleWordWrap = () => {
+      const ed = editor.current
+      if (!ed) return
+      const now = wrapOverride.current ?? (settingsRef.current.get<string>('editor.wordWrap', tabsRef.current.find((t) => t.id === activeRef.current)?.languageId) ?? 'off')
+      wrapOverride.current = now === 'off' ? 'on' : 'off'
+      ed.updateOptions({ wordWrap: wrapOverride.current as 'on' | 'off' })
+    }
+
+    /** The languages Monaco knows, for the language picker. */
+    const languages = () => mon.current?.monaco.languages.getLanguages().map((l) => ({ id: l.id, name: l.aliases?.[0] ?? l.id, extensions: l.extensions ?? [] })) ?? []
+
+    /** The file shown read as another language (until it closes). */
+    const setLanguage = (id: string) => {
+      const tab = tabsRef.current.find((t) => t.id === activeRef.current)
+      const f = tab?.kind === 'file' ? files.current.get(tab.path) : undefined
+      const m = mon.current
+      if (!tab || !f || !m) return
+      m.monaco.editor.setModelLanguage(f.model, id)
+      const l = m.monaco.languages.getLanguages().find((x) => x.id === id)
+      indentModel(f.model, settingsRef.current.all(id))
+      update(tab.id, { languageId: id, language: l?.aliases?.[0] ?? id })
+    }
+
+    /** The model of the file shown, for the status bar's indentation and line endings. */
+    const activeModel = () => {
+      const tab = tabsRef.current.find((t) => t.id === activeRef.current)
+      return tab?.kind === 'file' ? (files.current.get(tab.path)?.model ?? null) : null
+    }
+
+    /** Saves the files with unsaved changes when the focus leaves the editor or the window ("files.autoSave"). */
+    const autoSaveOn = async (event: 'focus' | 'window') => {
+      const mode = settingsRef.current.get('files.autoSave')
+      if (!((mode === 'onFocusChange' && event === 'focus') || (mode === 'onWindowChange' && event === 'window') || (mode === 'onFocusChange' && event === 'window'))) return
+      for (const t of tabsRef.current.filter((x) => x.dirty && x.kind === 'file' && !autoSavePaused.current.has(x.path))) await save(t.id, event)
+    }
+
     const bindEditor = (el: HTMLDivElement | null) => {
       codeHost.current = el
     }
@@ -521,24 +746,50 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       diffHost.current = el
     }
 
-    return { open, openDiff, activate: (id: string) => activate(id), close, save, refresh, moved, removed, accept, revert, selection, pieceOf, editorCommands, runAction, showProblems, bindEditor, bindDiff }
+    return {
+      open, openDiff, activate: (id: string) => activate(id), close, save: (id?: string) => save(id), refresh, moved, removed, accept, revert, selection, pieceOf, editorCommands, runAction, showProblems, bindEditor, bindDiff,
+      saveAll, closeMany, reopenClosed, cycle, activateIndex, navigate, focusEditor, toggleWordWrap, languages, setLanguage, activeModel, autoSaveOn,
+      saveWith: save,
+    }
   }, [confirm, queryClient])
 
   const active = tabs.find((t) => t.id === activeId) ?? null
   const shown = active && active.status === 'ready' ? active.id : null
 
-  // The editor's theme follows the page's, light or dark, as it changes.
+  // The editor's theme follows the settings' (and, with "window.autoDetectColorScheme", the system's light or dark).
   useEffect(() => {
-    themeRef.current = resolved
-    mon.current?.monaco.editor.setTheme(mon.current.themeOf(resolved))
-  }, [resolved])
+    themeRef.current = monacoTheme
+    mon.current?.monaco.editor.setTheme(monacoTheme)
+  }, [monacoTheme])
+
+  // The settings into the editors as they change: the file shown's language's, and each file's indentation.
+  const activeLanguage = active?.languageId
+  useEffect(() => {
+    const m = mon.current
+    if (!m) return
+    editor.current?.updateOptions(editorOptionsOf(settings.all(activeLanguage), wrapOverride.current ?? undefined))
+    diffEditor.current?.updateOptions(diffOptionsOf(settings.all()))
+    for (const f of files.current.values()) if (!f.model.isDisposed()) indentModel(f.model, settings.all(f.model.getLanguageId?.()))
+  }, [settings, activeLanguage])
+
+  // The settings page or a command wrote a settings file: its tab shows it (when nothing in it is unsaved).
+  useEffect(() => {
+    const on = (e: Event) => void actions.refresh((e as CustomEvent<string>).detail === 'user' ? 'user:settings.json' : workspaceSettingsPath)
+    window.addEventListener('code-arena:settings-written', on)
+    const blur = () => void actions.autoSaveOn('window')
+    window.addEventListener('blur', blur)
+    return () => {
+      window.removeEventListener('code-arena:settings-written', on)
+      window.removeEventListener('blur', blur)
+    }
+  }, [actions])
 
   // The active tab into its editor, made the first time it is needed.
   useEffect(() => {
     const m = mon.current
     const tab = tabsRef.current.find((t) => t.id === shown)
     if (!tab || !m) return
-    const theme = m.themeOf(themeRef.current)
+    const theme = themeRef.current
     if (tab.kind === 'file') {
       const f = files.current.get(tab.path)
       if (!f || !codeHost.current) return
@@ -547,21 +798,16 @@ export function EditorProvider({ children }: { children: ReactNode }) {
           model: null,
           theme,
           automaticLayout: true,
-          ...m.editorFont,
-          fontLigatures: true,
-          minimap: { enabled: true, renderCharacters: false },
-          scrollBeyondLastLine: false,
-          smoothScrolling: true,
-          bracketPairColorization: { enabled: true },
-          guides: { bracketPairs: true },
+          ...editorOptionsOf(settingsRef.current.all(tab.languageId)),
           padding: { top: 6 },
           fixedOverflowWidgets: true,
-          // Code completion as grey text: Tab takes it (completion.ts).
-          inlineSuggest: { enabled: true },
         })
+        ed.createContextKey?.('editorIsOpen', true)
         ed.onDidChangeCursorPosition((e) => setCursor({ line: e.position.lineNumber, column: e.position.column }))
+        ed.onDidBlurEditorText?.(() => void actions.autoSaveOn('focus'))
         linesOf.current = actions.pieceOf
         askAboutCode(m, ed, actions.selection)
+        keymap.setEditorCommands(ed.getSupportedActions().map((a) => a.id))
         installCompletions(m)
         editor.current = ed
       }
@@ -596,19 +842,21 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         diffEditor.current = m.monaco.editor.createDiffEditor(diffHost.current, {
           theme,
           automaticLayout: true,
-          ...m.editorFont,
+          ...diffOptionsOf(settingsRef.current.all()),
           readOnly: true,
           originalEditable: false,
-          renderSideBySide: true,
           useInlineViewWhenSpaceIsLimited: true,
-          scrollBeyondLastLine: false,
           fixedOverflowWidgets: true,
         })
+        for (const side of [diffEditor.current.getOriginalEditor?.(), diffEditor.current.getModifiedEditor?.()]) {
+          side?.createContextKey('editorIsOpen', true)
+          side?.createContextKey('textCompareEditorVisible', true)
+        }
       }
       if (diffEditor.current.getModel()?.modified !== d.modified) diffEditor.current.setModel(d)
       setCursor(null)
     }
-  }, [shown, revealed, actions.selection, actions.pieceOf])
+  }, [shown, revealed, actions])
 
   // Leaving with unsaved changes asks first.
   const anyDirty = tabs.some((t) => t.dirty)
@@ -737,7 +985,7 @@ export function EditorArea() {
         <div role="tablist" aria-label="Open files" className="flex h-9 shrink-0 overflow-x-auto overflow-y-hidden border-b bg-sidebar [scrollbar-width:thin]">
           {tabs.map((t) => {
             const selected = t.id === active?.id
-            const name = nameOf(t.path)
+            const name = isUserFile(t.path) ? t.path.slice(5) : nameOf(t.path)
             return (
               <div
                 key={t.id}
@@ -752,13 +1000,14 @@ export function EditorArea() {
                   role="tab"
                   aria-selected={selected}
                   aria-controls="editor-panel"
-                  title={t.kind === 'diff' ? `${t.path}: ${t.source === 'git' ? 'its changes since the last commit' : "the agent's changes"}` : t.path}
+                  title={t.kind === 'diff' ? `${t.path}: ${t.source === 'git' ? 'its changes since the last commit' : "the agent's changes"}` : isUserFile(t.path) ? `Your ${t.path.slice(5)} (every project)` : t.path}
                   onClick={() => ed.activate(t.id)}
                   onAuxClick={(e) => e.button === 1 && void ed.close(t.id)}
                   className="flex h-full max-w-56 items-center gap-1.5 pr-1 pl-3 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                 >
                   {t.kind === 'diff' ? <GitCompareArrows className="size-3.5 shrink-0 text-primary" aria-hidden="true" /> : <FileCode2 className="size-3.5 shrink-0" aria-hidden="true" />}
                   <span className="truncate">{name}</span>
+                  {isUserFile(t.path) && <span className="text-xs text-muted-foreground">User</span>}
                   {t.kind === 'diff' && <span className="text-xs text-muted-foreground">{t.source === 'git' ? 'since commit' : 'changes'}</span>}
                   {t.dirty && <span className="sr-only">, not saved</span>}
                 </button>
@@ -786,7 +1035,7 @@ export function EditorArea() {
       {active && (
         <div className="flex h-8 shrink-0 items-center gap-2 border-b px-3 text-xs text-muted-foreground">
           <span className="min-w-0 truncate font-mono" title={active.path}>
-            {active.path.split('/').join(' › ')}
+            {isUserFile(active.path) ? `User › ${active.path.slice(5)}` : active.path.split('/').join(' › ')}
           </span>
           {active.kind === 'diff' && active.source === 'git' && (
             <>
@@ -852,11 +1101,12 @@ export function EditorArea() {
 }
 
 function Welcome() {
-  const keys: [string, string][] = [
-    [`${modKey}+P`, 'Go to a file'],
-    [`${modKey}+S`, 'Save'],
-    [`${modKey}+Shift+F`, 'Search the files'],
-    ['Ctrl+`', 'Show or hide the terminal'],
+  const keys: [string | undefined, string][] = [
+    [useKeyFor('workbench.action.quickOpen'), 'Go to a file'],
+    [useKeyFor('workbench.action.showCommands'), 'Show all commands'],
+    [useKeyFor('workbench.action.findInFiles'), 'Search the files'],
+    [useKeyFor('workbench.action.terminal.toggleTerminal'), 'Show or hide the terminal'],
+    [useKeyFor('workbench.action.openSettings'), 'Settings'],
   ]
   return (
     <div className="absolute inset-0 grid place-items-center overflow-auto p-6">
@@ -869,7 +1119,7 @@ function Welcome() {
           <p className="mt-1 text-sm text-muted-foreground">Open one from the Explorer, or ask the agent in the chat: what it changes shows under Agent changes.</p>
         </div>
         <dl className="grid w-full grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 text-left text-sm">
-          {keys.map(([k, what]) => (
+          {keys.filter((k): k is [string, string] => !!k[0]).map(([k, what]) => (
             <div key={k} className="contents">
               <dt className="justify-self-end">
                 <Kbd>{k}</Kbd>

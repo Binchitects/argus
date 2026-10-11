@@ -95,13 +95,22 @@ monaco.editor.defineTheme('arena-dark', {
   },
 })
 
+// VS Code's JSON files: comments and trailing commas allowed, and settings.json and keybindings.json checked against what
+// Code Arena reads (schemas() sets them again as commands come and go).
+monaco.json.jsonDefaults.setDiagnosticsOptions({ validate: true, allowComments: true, trailingCommas: 'ignore', enableSchemaRequest: false, schemas: [] })
+
+/** The schemas the settings files are checked with: settings.json's, keybindings.json's (by command id), and more given. */
+export function schemas(list: { uri: string; fileMatch: string[]; schema: unknown }[]) {
+  monaco.json.jsonDefaults.setDiagnosticsOptions({ validate: true, allowComments: true, trailingCommas: 'ignore', enableSchemaRequest: false, schemas: list })
+}
+
 // The editor's font is the app's mono font: measured again once it has loaded.
 void document.fonts?.ready.then(() => monaco.editor.remeasureFonts())
 
 export { monaco }
 
-/** A file's model's address: its path in the folder, so the language services know what it is (.tsx: with JSX). */
-export const fileUri = (path: string) => monaco.Uri.file('/' + path)
+/** A file's model's address: its path in the folder, so the language services know what it is (.tsx: with JSX); the person's own settings files (user:settings.json) where VS Code keeps them. */
+export const fileUri = (path: string) => (path.startsWith('user:') ? monaco.Uri.from({ scheme: 'vscode-userdata', path: `/User/${path.slice(5)}` }) : monaco.Uri.file('/' + path))
 
 let sides = 0
 /** A side of the agent's change to a file: an address of its own each time, never a file's. */
@@ -110,13 +119,19 @@ export const diffUri = (side: 'before' | 'after', path: string) => monaco.Uri.fr
 /** The path of a file's model (fileUri); null for any other model. */
 export const pathOf = (uri: monaco.Uri) => (uri.scheme === 'file' ? uri.path.slice(1) : null)
 
-export const themeOf = (resolved: 'light' | 'dark') => (resolved === 'dark' ? 'arena-dark' : 'arena-light')
 
 /** A file's language by its name: a name Monaco knows (Dockerfile), else its longest known extension (.d.ts before .ts). */
-export function languageOf(path: string): { id: string; name: string } {
+export function languageOf(path: string, associations: Record<string, string> = {}): { id: string; name: string } {
   const name = path.slice(path.lastIndexOf('/') + 1).toLowerCase()
+  const languages = monaco.languages.getLanguages()
+  // "files.associations": a name or a pattern (*.inc, **/build/*.txt) to a language id.
+  for (const [pattern, id] of Object.entries(associations)) {
+    const re = new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*\//g, '(?:.*/)?').replace(/\*/g, '[^/]*').replace(/\?/g, '.')}$`, 'i')
+    const l = languages.find((x) => x.id === id)
+    if (l && (re.test(pattern.includes('/') ? path : name))) return { id: l.id, name: l.aliases?.[0] ?? l.id }
+  }
   let best: { id: string; name: string; length: number } | null = null
-  for (const l of monaco.languages.getLanguages()) {
+  for (const l of languages) {
     const label = l.aliases?.[0] ?? l.id
     if (l.filenames?.some((f) => f.toLowerCase() === name)) return { id: l.id, name: label }
     for (const ext of l.extensions ?? []) {

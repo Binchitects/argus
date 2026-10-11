@@ -12,6 +12,8 @@ import { cn } from '@/lib/utils'
 import { changeSettings, compaction, modeLabels, retryServers, stateQuery, type CodeState, type ServerStatus } from './api'
 import { useEditor } from './editor-state'
 import { changesQuery, problemsQuery } from './ide-api'
+import { useKeyFor, useKeymap } from './keyboard'
+import { LanguageStatus } from './language-status'
 
 function Item({ className, ...props }: ComponentProps<'button'>) {
   return (
@@ -59,6 +61,8 @@ export function StatusBar({
   onCompleting: (on: boolean) => void
 }) {
   const { active, cursor, setQuickOpen } = useEditor()
+  const keyStatus = useKeymap().status
+  const terminalKey = useKeyFor('workbench.action.terminal.toggleTerminal')
   const changes = useQuery(changesQuery)
   const check = useQuery(problemsQuery).data
   const problems = check?.ran ? check.problems : null
@@ -87,7 +91,7 @@ export function StatusBar({
           <TriangleAlert aria-hidden="true" /> {warnings}
         </Item>
       )}
-      <Item onClick={onTerminal} aria-label="Show or hide the terminal" title="Terminal (Ctrl+`)">
+      <Item onClick={onTerminal} aria-label="Show or hide the terminal" title={terminalKey ? `Terminal (${terminalKey})` : 'Terminal'}>
         <SquareTerminal aria-hidden="true" />
       </Item>
       {running > 0 && (
@@ -95,17 +99,25 @@ export function StatusBar({
           <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> {running}
         </Item>
       )}
+      {keyStatus && (
+        <output className="flex min-w-0 items-center truncate px-2">{keyStatus}</output>
+      )}
       <span className="flex-1" />
       {active?.kind === 'file' && active.status === 'ready' && cursor && (
         <Item className="tabular-nums" aria-label={`Line ${cursor.line}, column ${cursor.column}: go to a line`} title="Go to a line" onClick={() => setQuickOpen(true, ':')}>
           Ln {cursor.line}, Col {cursor.column}
         </Item>
       )}
-      {active?.status === 'ready' && active.language && (
-        <span className="hidden items-center px-2 sm:flex" title="The file's language">
-          <span className="sr-only">Language: </span>
-          {active.language}
-        </span>
+      {active?.kind === 'file' ? (
+        <LanguageStatus />
+      ) : (
+        active?.status === 'ready' &&
+        active.language && (
+          <span className="hidden items-center px-2 sm:flex" title="The file's language">
+            <span className="sr-only">Language: </span>
+            {active.language}
+          </span>
+        )
       )}
       {state.servers.length > 0 && (
         <Item onClick={() => setDialog('servers')} aria-label={`MCP servers: ${serversSaid(state.servers)}`} title="The MCP servers: Arena's, Argus's and your own" className={cn(down && 'bg-warning text-black')}>

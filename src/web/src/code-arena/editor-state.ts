@@ -48,7 +48,12 @@ export interface Tab {
   dirty: boolean
   /** The language's name, for the status bar. */
   language?: string
+  /** The language's id (Monaco's, VS Code's: typescript, python…), for its settings. */
+  languageId?: string
 }
+
+/** Why a file is saved: by the person (Ctrl+S, the menu), or by "files.autoSave" (after a delay, the focus or the window leaving). */
+export type SaveReason = 'explicit' | 'auto' | 'focus' | 'window'
 
 export interface FileModel {
   path: string
@@ -107,6 +112,32 @@ export interface EditorApi {
   setQuickText: (typed: string) => void
   bindEditor: (el: HTMLDivElement | null) => void
   bindDiff: (el: HTMLDivElement | null) => void
+  /** Saves every tab with unsaved changes. */
+  saveAll: () => Promise<void>
+  /** Saves for a reason: an automatic save skips the save's steps, and does not ask before overwriting. */
+  saveWith: (id?: string, reason?: SaveReason) => Promise<boolean>
+  /** Closes these tabs, asking for each with unsaved changes; false when the person kept one. */
+  closeMany: (ids: string[]) => Promise<boolean>
+  /** Opens the file closed last again. */
+  reopenClosed: () => Promise<void>
+  /** Shows the next tab (1) or the one before (-1). */
+  cycle: (delta: number) => void
+  /** Shows the tab at an index (-1: the last). */
+  activateIndex: (index: number) => void
+  /** Back (-1) or forward (1) through the tabs shown. */
+  navigate: (delta: -1 | 1) => void
+  /** Puts the focus in the editor shown. */
+  focusEditor: () => void
+  /** Alt+Z: word wrap on or off in this editor. */
+  toggleWordWrap: () => void
+  /** The languages the editor knows. */
+  languages: () => { id: string; name: string; extensions: string[] }[]
+  /** Reads the file shown as another language. */
+  setLanguage: (id: string) => void
+  /** The model of the file shown. */
+  activeModel: () => Monaco.editor.ITextModel | null
+  /** Saves as "files.autoSave" says when the focus leaves the editor or the window. */
+  autoSaveOn: (event: 'focus' | 'window') => Promise<void>
 }
 
 export const EditorContext = createContext<EditorApi | null>(null)

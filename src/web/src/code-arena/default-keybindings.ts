@@ -1,0 +1,65 @@
+import type { RuleJson } from './keys'
+
+/**
+ * VS Code's own keys for the commands Code Arena has, under VS Code's command ids (so a keybindings.json brought over
+ * from VS Code means the same here). A key is Windows' and Linux's; macOS's is the same with Ctrl as ⌘ unless `mac`
+ * says otherwise. The editor's own keys (Ctrl+F, Ctrl+D, Alt+↑, the Ctrl+K Ctrl+C chords…) stay Monaco's.
+ *
+ * The browser keeps a few keys for itself in a tab (Ctrl+W, Ctrl+T, Ctrl+Tab, Ctrl+PageUp/PageDown): those commands
+ * have a second key that reaches the page.
+ */
+export const defaultKeybindings: RuleJson[] = [
+  { key: 'ctrl+shift+p', command: 'workbench.action.showCommands' },
+  { key: 'f1', command: 'workbench.action.showCommands' },
+  { key: 'ctrl+p', command: 'workbench.action.quickOpen' },
+  { key: 'ctrl+e', command: 'workbench.action.quickOpen', mac: 'cmd+e' },
+  { key: 'ctrl+g', command: 'workbench.action.gotoLine', mac: 'ctrl+g' },
+  { key: 'ctrl+shift+o', command: 'workbench.action.gotoSymbol', when: 'editorIsOpen' },
+  { key: 'ctrl+,', command: 'workbench.action.openSettings' },
+  { key: 'ctrl+k ctrl+s', command: 'workbench.action.openGlobalKeybindings' },
+  { key: 'ctrl+k ctrl+t', command: 'workbench.action.selectTheme' },
+  { key: 'ctrl+b', command: 'workbench.action.toggleSidebarVisibility' },
+  { key: 'ctrl+j', command: 'workbench.action.togglePanel' },
+  { key: 'ctrl+alt+b', command: 'workbench.action.toggleAuxiliaryBar', mac: 'alt+cmd+b' },
+  { key: 'ctrl+alt+i', command: 'workbench.action.chat.open', mac: 'ctrl+cmd+i' },
+  { key: 'ctrl+shift+f', command: 'workbench.action.findInFiles' },
+  { key: 'ctrl+shift+h', command: 'workbench.action.replaceInFiles' },
+  { key: 'ctrl+shift+e', command: 'workbench.view.explorer' },
+  { key: 'ctrl+shift+g', command: 'workbench.view.scm', mac: 'ctrl+shift+g' },
+  { key: 'ctrl+shift+m', command: 'workbench.actions.view.problems' },
+  { key: 'ctrl+`', command: 'workbench.action.terminal.toggleTerminal', mac: 'ctrl+`' },
+  { key: 'ctrl+shift+`', command: 'workbench.action.terminal.new', mac: 'ctrl+shift+`' },
+  { key: 'ctrl+0', command: 'workbench.action.focusSideBar' },
+  { key: 'ctrl+1', command: 'workbench.action.focusFirstEditorGroup' },
+  { key: 'ctrl+s', command: 'workbench.action.files.save' },
+  { key: 'ctrl+k s', command: 'workbench.action.files.saveAll', mac: 'alt+cmd+s' },
+  { key: 'ctrl+n', command: 'workbench.action.files.newUntitledFile' },
+  { key: 'ctrl+w', command: 'workbench.action.closeActiveEditor', when: 'editorIsOpen' },
+  { key: 'ctrl+f4', command: 'workbench.action.closeActiveEditor', when: 'editorIsOpen', mac: 'cmd+f4' },
+  { key: 'ctrl+alt+w', command: 'workbench.action.closeActiveEditor', when: 'editorIsOpen', mac: 'ctrl+w' },
+  { key: 'ctrl+k ctrl+w', command: 'workbench.action.closeAllEditors' },
+  { key: 'ctrl+k u', command: 'workbench.action.closeUnmodifiedEditors' },
+  { key: 'ctrl+shift+t', command: 'workbench.action.reopenClosedEditor' },
+  { key: 'ctrl+alt+shift+t', command: 'workbench.action.reopenClosedEditor', mac: 'ctrl+shift+t' },
+  { key: 'ctrl+pagedown', command: 'workbench.action.nextEditor', mac: 'alt+cmd+right' },
+  { key: 'ctrl+pageup', command: 'workbench.action.previousEditor', mac: 'alt+cmd+left' },
+  { key: 'ctrl+alt+pagedown', command: 'workbench.action.nextEditor', mac: 'shift+cmd+]' },
+  { key: 'ctrl+alt+pageup', command: 'workbench.action.previousEditor', mac: 'shift+cmd+[' },
+  ...Array.from({ length: 9 }, (_, i): RuleJson => ({ key: `alt+${i + 1}`, command: `workbench.action.openEditorAtIndex${i + 1}`, mac: `ctrl+${i + 1}` })),
+  { key: 'alt+left', command: 'workbench.action.navigateBack', linux: 'ctrl+alt+-', mac: 'ctrl+-' },
+  { key: 'alt+right', command: 'workbench.action.navigateForward', linux: 'ctrl+shift+-', mac: 'ctrl+shift+-' },
+  { key: 'ctrl+k p', command: 'workbench.action.files.copyPathOfActiveFile', when: 'editorIsOpen' },
+  { key: 'ctrl+k ctrl+shift+c', command: 'copyRelativeFilePath', when: 'editorIsOpen', mac: 'cmd+k alt+cmd+c' },
+  { key: 'ctrl+k m', command: 'workbench.action.editor.changeLanguageMode', when: 'editorIsOpen' },
+  { key: 'alt+z', command: 'editor.action.toggleWordWrap', when: 'editorIsOpen' },
+  { key: 'ctrl+k d', command: 'workbench.files.action.compareWithSaved', when: 'editorIsOpen' },
+  { key: 'ctrl+k c', command: 'workbench.files.action.compareWithClipboard', when: 'editorIsOpen' },
+  { key: 'alt+f5', command: 'workbench.action.compareEditor.nextChange', when: 'textCompareEditorVisible' },
+  { key: 'shift+alt+f5', command: 'workbench.action.compareEditor.previousChange', when: 'textCompareEditorVisible' },
+  { key: 'f2', command: 'renameFile', when: 'filesExplorerFocus && !inputFocus', mac: 'enter' },
+  { key: 'delete', command: 'deleteFile', when: 'filesExplorerFocus && !inputFocus', mac: 'cmd+backspace' },
+  { key: 'ctrl+l', command: 'codeArena.addToChat', when: 'editorTextFocus' },
+  { key: 'ctrl+k ctrl+shift+s', command: 'workbench.action.files.saveWithoutFormatting' },
+  { key: 'shift+alt+f', command: 'editor.action.formatDocument', when: 'editorTextFocus && !editorReadonly', linux: 'ctrl+shift+i' },
+  { key: 'ctrl+k ctrl+f', command: 'editor.action.formatSelection', when: 'editorHasSelection && editorTextFocus && !editorReadonly' },
+]

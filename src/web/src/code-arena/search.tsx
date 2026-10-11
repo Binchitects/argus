@@ -63,7 +63,7 @@ function Preview({ m }: { m: SearchMatch }) {
  * include and leave out. A result opens its file at the match. With Replace
  * shown, what it finds is replaced in one file or in all of them.
  */
-export function SearchPanel({ focusKey }: { focusKey: number }) {
+export function SearchPanel({ focusKey, replaceKey = 0 }: { focusKey: number; replaceKey?: number }) {
   const editor = useEditor()
   const [text, setText] = useState('')
   const [options, setOptions] = useState({ case: false, word: false, regex: false })
@@ -102,6 +102,12 @@ export function SearchPanel({ focusKey }: { focusKey: number }) {
   useEffect(() => {
     if (focusKey > 0) box.current?.focus()
   }, [focusKey])
+  // "Replace in Files" (Ctrl+Shift+H): the replace box shows.
+  const [replaceAsked, setReplaceAsked] = useState(replaceKey)
+  if (replaceKey !== replaceAsked) {
+    setReplaceAsked(replaceKey)
+    setReplacing(true)
+  }
 
   const data = results.data
   return (

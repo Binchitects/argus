@@ -112,19 +112,39 @@ export const tasks: HelpTask[] = [
     steps: ['While it runs, its output shows above the chat\'s box.', 'Press **Stop** beside it: the agent is told it ended.'],
   },
   {
+    title: 'Change a setting, as in VS Code',
+    steps: [
+      `Press ${modKey}+, (or run **Preferences: Open User Settings (JSON)**): your settings.json, for every project.`,
+      'Type a setting\'s name: the editor suggests them, with what each does. `"[python]": { … }` sets them for one language.',
+      'Save: it applies at once. The project\'s own are in .vscode/settings.json (**Preferences: Open Workspace Settings (JSON)**).',
+    ],
+  },
+  {
+    title: 'Change a keyboard shortcut',
+    steps: [
+      `Press ${modKey}+K ${modKey}+S: your keybindings.json.`,
+      'Add `{ "key": "ctrl+shift+e", "command": "workbench.action.togglePanel" }`; `"-command"` takes a key away. Commands have VS Code\'s ids (the palette lists them).',
+      'Save: it applies at once, in the editor too.',
+    ],
+  },
+  {
     title: "Use Arena's and Argus's tools",
     steps: ['They connect by themselves once you are signed in: the plug in the status bar counts those connected.', 'Click it to see why one is not, and press **Try again**.'],
   },
 ]
 
 export const keys: [keys: string, what: string][] = [
-  [`${modKey}+S`, 'Save the file'],
+  [`${modKey}+S, ${modKey}+K S`, 'Save the file, save them all'],
   [`${modKey}+P`, 'Open a file by its name (:12 goes to a line)'],
   [`${modKey}+Shift+P or F1`, 'Run a command by its name'],
   [`${modKey}+Shift+F`, 'Search the files'],
   [`${modKey}+Shift+E`, 'The Explorer'],
   [`${modKey}+Shift+G`, 'Source control'],
   ['Ctrl+`', 'Show or hide the terminal'],
+  [`${modKey}+B, ${modKey}+J`, 'Show or hide the side bar, the panel'],
+  [`${modKey}+,`, 'Settings (settings.json, as VS Code\'s)'],
+  [`${modKey}+K ${modKey}+S`, 'Keyboard shortcuts (keybindings.json, as VS Code\'s)'],
+  [`${modKey}+K ${modKey}+T`, 'The colour theme'],
   [`${modKey}+L`, 'In the editor: the lines chosen go with the next message'],
   ['↑ / ↓', 'In the chat\'s box: what you sent before in this folder (the terminal\'s too); Esc goes back to what you were typing'],
 ]

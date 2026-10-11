@@ -95,13 +95,34 @@ const fakes = vi.hoisted(() => {
       return lines.slice(0, p.lineNumber - 1).reduce((n, l) => n + l.length + 1, 0) + p.column - 1
     }
     getFullModelRange() {
-      return { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 }
+      const lines = this.value.split('\n')
+      return { startLineNumber: 1, startColumn: 1, endLineNumber: lines.length, endColumn: lines.at(-1)!.length + 1 }
     }
-    pushEditOperations(_: unknown, ops: { text: string }[]) {
-      this.setValue(ops[0]!.text)
+    /** As Monaco's: the edits applied at their ranges, the last first. */
+    pushEditOperations(_: unknown, ops: { range: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }; text: string }[]) {
+      let value = this.value
+      const at = (line: number, column: number) => this.getOffsetAt({ lineNumber: line, column })
+      for (const op of [...ops].sort((a, b) => at(b.range.startLineNumber, b.range.startColumn) - at(a.range.startLineNumber, a.range.startColumn))) {
+        value = value.slice(0, at(op.range.startLineNumber, op.range.startColumn)) + op.text + value.slice(at(op.range.endLineNumber, op.range.endColumn))
+      }
+      this.setValue(value)
       return null
     }
     pushStackElement() {}
+    options: Record<string, unknown> = {}
+    updateOptions(o: Record<string, unknown>) {
+      Object.assign(this.options, o)
+    }
+    detectIndentation() {}
+    getLanguageId() {
+      return this.language
+    }
+    getLineContent(line: number) {
+      return this.value.split('\n')[line - 1] ?? ''
+    }
+    getEOL() {
+      return '\n'
+    }
     dispose() {
       this.disposed = true
     }
@@ -143,6 +164,14 @@ const fakes = vi.hoisted(() => {
       this.cursor.push(f)
       return { dispose() {} }
     }
+    onDidBlurEditorText() {
+      return { dispose() {} }
+    }
+    contextKeys: Record<string, unknown> = {}
+    createContextKey(key: string, value: unknown) {
+      this.contextKeys[key] = value
+      return { set: (v: unknown) => (this.contextKeys[key] = v), get: () => this.contextKeys[key], reset() {} }
+    }
     /** The editor's own actions (its right-click menu, F1): by id, run as the person would. */
     actions = new Map<string, { label: string; keybindings?: number[]; run: () => void }>()
     addAction(a: { id: string; label: string; keybindings?: number[]; run: () => void }) {
@@ -163,8 +192,20 @@ const fakes = vi.hoisted(() => {
   }
   class DiffEditor {
     model: { original: Model; modified: Model } | null = null
-    constructor() {
+    options: Record<string, unknown>
+    constructor(_host: HTMLElement, options: Record<string, unknown> = {}) {
+      this.options = { ...options }
       fakes.diffEditors.push(this)
+    }
+    updateOptions(o: Record<string, unknown>) {
+      Object.assign(this.options, o)
+    }
+    side = { createContextKey: () => ({ set() {}, get() {}, reset() {} }), focus() {} }
+    getOriginalEditor() {
+      return this.side
+    }
+    getModifiedEditor() {
+      return this.side
     }
     setModel(m: DiffEditor['model']) {
       this.model = m
@@ -268,6 +309,9 @@ const fakes = vi.hoisted(() => {
     terminals: [] as Terminal[],
     sockets: [] as Socket[],
     themes: [] as string[],
+    /** The keybinding rules the page gave Monaco, the last given last. */
+    keybindingRules: [] as { keybinding: number; command: string; when?: string }[][],
+    jsonOptions: [] as { schemas?: { fileMatch: string[] }[] }[],
     /** What the editor marks (a language's problems), by the file's address. */
     markers: new Map<string, { severity: number; startLineNumber: number; startColumn: number; endLineNumber: number; message: string }[]>(),
     commands: new Map<string, (...args: unknown[]) => void>(),
@@ -281,7 +325,11 @@ const fakes = vi.hoisted(() => {
 vi.mock('monaco-editor', () => ({
   editor: {
     create: (host: HTMLElement, options: Record<string, unknown>) => new fakes.Editor(host, options),
-    createDiffEditor: () => new fakes.DiffEditor(),
+    createDiffEditor: (host: HTMLElement, options: Record<string, unknown>) => new fakes.DiffEditor(host, options),
+    addKeybindingRules: (rules: { keybinding: number; command: string; when?: string }[]) => {
+      fakes.keybindingRules.push(rules)
+      return { dispose() {} }
+    },
     createModel: (value: string, language: string, uri?: InstanceType<typeof fakes.Uri>) => new fakes.Model(value, language, uri),
     getModel: (uri: InstanceType<typeof fakes.Uri>) => fakes.models.find((m) => !m.disposed && m.uri?.toString() === uri.toString()) ?? null,
     setModelLanguage: (m: { language: string }, language: string) => {
@@ -310,8 +358,9 @@ vi.mock('monaco-editor', () => ({
       this.endColumn = endColumn
     }
   },
-  KeyMod: { CtrlCmd: 2048 },
-  KeyCode: { KeyL: 42 },
+  KeyMod: { CtrlCmd: 2048, Shift: 1024, Alt: 512, WinCtrl: 256, chord: (a: number, b: number) => (a | (b << 16)) >>> 0 },
+  KeyCode: { F1: 59, F2: 60, F5: 63, KeyB: 32, KeyK: 41, KeyL: 42, KeyP: 46, KeyS: 49, Backquote: 92, Delete: 20, Enter: 3 },
+  json: { jsonDefaults: { setDiagnosticsOptions: (o: { schemas?: { fileMatch: string[] }[] }) => fakes.jsonOptions.push(o) } },
   MarkerSeverity: { Hint: 1, Info: 2, Warning: 4, Error: 8 },
   languages: {
     registerInlineCompletionsProvider: (_: unknown, provider: (typeof fakes.inline)[number]) => {
@@ -358,7 +407,7 @@ vi.mock('@xterm/addon-fit', () => ({
 
 beforeEach(() => {
   vi.stubGlobal('WebSocket', fakes.Socket)
-  for (const list of [fakes.models, fakes.editors, fakes.diffEditors, fakes.terminals, fakes.sockets, fakes.themes]) list.length = 0
+  for (const list of [fakes.models, fakes.editors, fakes.diffEditors, fakes.terminals, fakes.sockets, fakes.themes, fakes.keybindingRules]) list.length = 0
 })
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -381,8 +430,8 @@ const config: ChatConfig = {
   auto: null, presets: [], defaultThinking: null, argus: false, tools: [], gitlabUrl: null, maxUploadBytes: 0, imageTypes: [],
 }
 
-/** code-arena web with a small folder: src/app.ts (changed by the agent), src/lib/, README.md; the page's preferences as an earlier run left them. */
-function backend(extra: Record<string, Handler> = {}, preferences: Preferences = {}) {
+/** code-arena web with a small folder: src/app.ts (changed by the agent), src/lib/, README.md; the page's preferences as an earlier run left them, and the person's settings.json and keybindings.json. */
+function backend(extra: Record<string, Handler> = {}, preferences: Preferences = {}, user: Record<string, string> = {}) {
   const disk: Record<string, { text: string; version: string }> = {
     'src/app.ts': { text: 'const total = 1\nconsole.log(total)\n', version: 'v1' },
     'README.md': { text: '# Shop\n', version: 'r1' },
@@ -398,7 +447,7 @@ function backend(extra: Record<string, Handler> = {}, preferences: Preferences =
     ],
     'src/lib': [],
   }
-  const now = { changes: [{ path: 'src/app.ts', created: false, deleted: false, added: 1, removed: 1 }] as Change[], terminals: [] as TerminalInfo[], next: 1, preferences }
+  const now = { changes: [{ path: 'src/app.ts', created: false, deleted: false, added: 1, removed: 1 }] as Change[], terminals: [] as TerminalInfo[], next: 1, preferences, user: { ...user }, userVersions: {} as Record<string, number> }
   const calls = fakeApi(null, {
     'GET /api/state': () => ({ json: state }),
     'GET /api/chat/config': () => ({ json: config }),
@@ -465,6 +514,17 @@ function backend(extra: Record<string, Handler> = {}, preferences: Preferences =
     'POST /api/terminals/close': (body) => {
       now.terminals = now.terminals.filter((t) => t.id !== (body as { id: string }).id)
       return { status: 204 }
+    },
+    'GET /api/user-files': (_, __, url) => {
+      const name = url.searchParams.get('name')!
+      return { json: { name, text: now.user[name] ?? '', version: `u${now.userVersions[name] ?? 0}`, exists: name in now.user } }
+    },
+    'POST /api/user-files': (body) => {
+      const b = body as { name: string; text: string; version: string | null }
+      if (b.version !== null && b.version !== `u${now.userVersions[b.name] ?? 0}`) return { status: 409, json: { status: 'changed', error: `${b.name} changed since it was opened.` } }
+      now.user[b.name] = b.text
+      now.userVersions[b.name] = (now.userVersions[b.name] ?? 0) + 1
+      return { json: { name: b.name, version: `u${now.userVersions[b.name]}` } }
     },
     'GET /api/preferences': () => ({ json: now.preferences }),
     'POST /api/preferences': (body) => {
@@ -1234,8 +1294,10 @@ describe('Code Arena, the IDE', () => {
 
     // Add to chat (Ctrl+L): the lines chosen wait above the box, and go with the next message.
     ed.setSelection({ startLineNumber: 1, startColumn: 1, endLineNumber: 3, endColumn: 1 })
-    act(() => ed.actions.get('arena.addToChat')!.run())
-    expect(ed.actions.get('arena.addToChat')!.keybindings).toEqual([2048 | 42])
+    act(() => ed.actions.get('codeArena.addToChat')!.run())
+    // Its key is the keymap's (keybindings.json may change it), given to Monaco with the workbench's.
+    await waitFor(() => expect(fakes.keybindingRules.at(-1)).toContainEqual({ keybinding: 2048 | 42, command: 'codeArena.addToChat', commandArgs: undefined, when: 'editorTextFocus' }))
+    expect(fakes.keybindingRules.at(-1)![0]).toEqual({ keybinding: 59, command: '-editor.action.quickCommand' })
     const box = screen.getByRole('textbox', { name: 'Message' })
     expect(await within(screen.getByRole('list', { name: 'Sent with the message' })).findByText('src/app.ts:1-2')).toBeInTheDocument()
     await waitFor(() => expect(box).toHaveFocus())
@@ -1250,7 +1312,7 @@ describe('Code Arena, the IDE', () => {
     // Explain this: asked at once, about the line the cursor is on; unsaved, the editor's text goes.
     ed.model!.setValue('const total = 3\nconsole.log(total)\n')
     ed.setSelection({ startLineNumber: 2, startColumn: 4, endLineNumber: 2, endColumn: 4 })
-    act(() => ed.actions.get('arena.explain')!.run())
+    act(() => ed.actions.get('codeArena.explain')!.run())
     await waitFor(() => expect(sent()).toHaveLength(2))
     expect(sent()[1]).toEqual({ text: asks.explain, context: [{ path: 'src/app.ts', startLine: 2, endLine: 2, text: 'console.log(total)' }] })
 
@@ -1258,10 +1320,10 @@ describe('Code Arena, the IDE', () => {
     await screen.findByRole('button', { name: 'Send' })
     fakes.markers.set('file:///src/app.ts', [{ severity: 8, startLineNumber: 1, startColumn: 15, endLineNumber: 1, message: "';' expected." }])
     ed.setSelection({ startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 })
-    act(() => ed.actions.get('arena.fix')!.run())
+    act(() => ed.actions.get('codeArena.fix')!.run())
     await waitFor(() => expect(sent()).toHaveLength(3))
     expect(sent()[2]!.text).toBe("Fix the problems in this code: 1:15 ';' expected.")
-    expect(ed.actions.get('arena.complete')!.label).toBe('Code Arena: Complete this')
+    expect(ed.actions.get('codeArena.complete')!.label).toBe('Code Arena: Complete this')
 
     // The light bulb on a marked line: Fix with Code Arena.
     const [provider] = fakes.codeActions
@@ -1313,7 +1375,8 @@ describe('Code Arena, the IDE', () => {
       expect.arrayContaining(['Code Arena: Add to chatCtrl+L', 'Code Arena: Explain this', 'Code Arena: Fix this', 'Code Arena: Complete this']),
     )
     await userEvent.clear(command)
-    await userEvent.type(command, 'show the terminal')
+    await userEvent.type(command, 'toggle terminal')
+    expect(within(palette).getByRole('option', { name: /View: Toggle Terminal/ })).toHaveTextContent('Ctrl+`')
     await userEvent.keyboard('{Enter}')
     await waitFor(() => expect(fakes.terminals.length).toBeGreaterThan(0))
 
@@ -1354,10 +1417,11 @@ describe('Code Arena, the IDE', () => {
     expect(got.items.map((i) => i.insertText)).toEqual(['+ 1'])
     expect(calls.find((c) => c.path === '/api/complete')?.body).toEqual({ path: 'src/app.ts', prefix: 'const total = 1', suffix: '\nconsole.log(total)\n' })
 
-    // Turned off in the status bar: nothing is asked, and the choice is kept.
+    // Turned off in the status bar: nothing is asked, and the choice is kept in the person's settings.json.
     const toggle = screen.getByRole('button', { name: 'Code completion on' })
     await userEvent.click(toggle)
-    await waitFor(() => expect(calls.find((c) => c.path === '/api/preferences' && c.method === 'POST')?.body).toEqual({ completion: false }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/user-files' && c.method === 'POST')?.body).toEqual({ name: 'settings.json', text: '{\n    "codeArena.inlineCompletion.enabled": false\n}\n', version: 'u0' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Code completion off' })).toBeInTheDocument())
     const asked = calls.filter((c) => c.path === '/api/complete').length
     expect((await provider!.provideInlineCompletions(model, { lineNumber: 2, column: 1 }, {}, token())).items).toEqual([])
     expect(calls.filter((c) => c.path === '/api/complete')).toHaveLength(asked)
@@ -1493,8 +1557,8 @@ describe('Code Arena, the IDE', () => {
     expect(await within(tabs()).findByRole('tab', { name: 'cart.ts' })).toHaveAttribute('aria-selected', 'true')
   })
 
-  it('opens as it was left in an earlier run, whatever its port: code-arena keeps the layout and the theme', async () => {
-    const { calls, now } = backend({}, { layout: { view: 'search', chatOpen: false, side: 300, chat: 5000, unknown: 1 }, theme: 'dark' })
+  it('opens as it was left in an earlier run, whatever its port: code-arena keeps the layout, and the theme in settings.json', async () => {
+    const { calls, now } = backend({}, { layout: { view: 'search', chatOpen: false, side: 300, chat: 5000, unknown: 1 } }, { 'settings.json': '{\n  // mine\n  "window.autoDetectColorScheme": false,\n  "workbench.colorTheme": "Code Arena Dark"\n}\n' })
     renderIde()
     expect(await screen.findByRole('textbox', { name: 'Search' })).toBeInTheDocument()
     expect(screen.getByRole('complementary', { name: 'Search' })).toHaveStyle({ width: '300px' })
@@ -1503,14 +1567,14 @@ describe('Code Arena, the IDE', () => {
     const saves = () => calls.filter((c) => c.method === 'POST' && c.path === '/api/preferences')
     expect(saves()).toHaveLength(0)
 
-    // A change is kept a moment later (the sizes within bounds), the theme at once.
+    // A change is kept a moment later (the sizes within bounds); the theme in the person's settings.json at once, its comments kept.
     await userEvent.click(screen.getByRole('button', { name: 'Explorer' }))
     await waitFor(() => expect(now.preferences.layout).toEqual({ view: 'explorer', side: 300, chat: 960, panel: 280, sideOpen: true, chatOpen: false, panelOpen: false }))
     expect(saves()).toHaveLength(1)
     await userEvent.click(screen.getByRole('button', { name: 'Theme' }))
     await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Light' }))
-    await waitFor(() => expect(now.preferences.theme).toBe('light'))
-    expect(document.documentElement).not.toHaveClass('dark')
+    await waitFor(() => expect(now.user['settings.json']).toBe('{\n  // mine\n  "window.autoDetectColorScheme": false,\n  "workbench.colorTheme": "Code Arena Light"\n}\n'))
+    await waitFor(() => expect(document.documentElement).not.toHaveClass('dark'))
   })
 
   it('follows the light and dark theme in the editor', async () => {
@@ -1521,6 +1585,73 @@ describe('Code Arena, the IDE', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Theme' }))
     await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Dark' }))
     await waitFor(() => expect(fakes.themes.at(-1)).toBe('arena-dark'))
+  })
+
+  it("takes VS Code's keys, chords too, and the person's keybindings.json over them", async () => {
+    const keybindings = '[\n  // mine\n  { "key": "ctrl+shift+e", "command": "workbench.action.togglePanel" },\n  { "key": "ctrl+b", "command": "-workbench.action.toggleSidebarVisibility" }\n]'
+    const { calls } = backend({}, {}, { 'keybindings.json': keybindings })
+    renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    // Ctrl+J: the panel; Ctrl+Alt+B: the chat.
+    await userEvent.keyboard('{Control>}j{/Control}')
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/terminals')).toBe(true))
+    expect(screen.getByRole('region', { name: 'Chat' })).toBeInTheDocument()
+    await userEvent.keyboard('{Control>}{Alt>}b{/Alt}{/Control}')
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Chat' })).not.toBeInTheDocument())
+    // keybindings.json: Ctrl+Shift+E is the panel's now, and Ctrl+B is nobody's.
+    expect(screen.getByRole('button', { name: 'Terminal' })).toHaveAttribute('aria-pressed', 'true')
+    await userEvent.keyboard('{Control>}{Shift>}e{/Shift}{/Control}')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Terminal' })).toHaveAttribute('aria-pressed', 'false'))
+    await userEvent.keyboard('{Control>}b{/Control}')
+    expect(screen.getByRole('complementary', { name: 'Explorer' })).toBeVisible()
+    // A chord: Ctrl+K waits (the status bar says so), then Ctrl+S opens the keyboard shortcuts.
+    await userEvent.keyboard('{Control>}k{/Control}')
+    expect(within(screen.getByRole('contentinfo', { name: 'Status bar' })).getByRole('status')).toHaveTextContent('(Ctrl+K) was pressed. Waiting for the second key of the chord…')
+    await userEvent.keyboard('{Control>}s{/Control}')
+    expect(await within(tabs()).findByRole('tab', { name: /keybindings\.json/ })).toHaveAttribute('aria-selected', 'true')
+    await waitFor(() => expect(editor().model?.value).toBe(keybindings))
+    expect(editor().model?.uri?.toString()).toBe('vscode-userdata:///User/keybindings.json')
+    await userEvent.keyboard('{Control>}k{/Control}x')
+    expect(within(screen.getByRole('contentinfo', { name: 'Status bar' })).getByRole('status')).toHaveTextContent('The key combination (Ctrl+K, X) is not a command.')
+  })
+
+  it("applies settings.json to the editor: the person's, the project's over them, a language's own, and Alt+Z", async () => {
+    const { disk } = backend({}, {}, { 'settings.json': '{ "editor.fontSize": 16, "editor.wordWrap": "on", "editor.detectIndentation": false, "[typescript]": { "editor.tabSize": 2 } }' })
+    disk['.vscode/settings.json'] = { text: '{ "editor.fontSize": 18 }', version: 'w1' }
+    renderIde()
+    await openApp()
+    expect(editor().options).toMatchObject({ fontSize: 18, wordWrap: 'on' })
+    expect(editor().model!.options).toMatchObject({ tabSize: 2, insertSpaces: true })
+    await userEvent.keyboard('{Alt>}z{/Alt}')
+    expect(editor().options.wordWrap).toBe('off')
+  })
+
+  it('saves as VS Code does: trailing whitespace and the final newline as set, Save All, and auto save after a delay', async () => {
+    const { calls } = backend({}, {}, { 'settings.json': '{ "files.trimTrailingWhitespace": true, "files.insertFinalNewline": true }' })
+    renderIde()
+    await openApp()
+    const saved = () => calls.filter((c) => c.method === 'POST' && c.path === '/api/file').map((c) => (c.body as { path: string; text: string }))
+    act(() => editor().model!.setValue('const total = 2   \nconsole.log(total)'))
+    await userEvent.keyboard('{Control>}s{/Control}')
+    await waitFor(() => expect(saved().at(-1)).toMatchObject({ path: 'src/app.ts', text: 'const total = 2\nconsole.log(total)\n' }))
+    expect(editor().model!.getValue()).toBe('const total = 2\nconsole.log(total)\n')
+
+    // Save All (Ctrl+K S): every tab with unsaved changes.
+    await userEvent.click(screen.getByRole('treeitem', { name: 'README.md' }))
+    await waitFor(() => expect(editor().model?.value).toBe('# Shop\n'))
+    act(() => editor().model!.setValue('# Shop!\n'))
+    act(() => fakes.models.find((m) => m.uri?.toString() === 'file:///src/app.ts')!.setValue('const total = 3\n'))
+    await userEvent.keyboard('{Control>}k{/Control}s')
+    await waitFor(() => expect(saved().slice(-2).map((b) => b.path).sort()).toEqual(['README.md', 'src/app.ts']))
+  })
+
+  it('saves by itself a moment after the last change with "files.autoSave": "afterDelay", without the save\'s steps', async () => {
+    const { calls } = backend({}, {}, { 'settings.json': '{ "files.autoSave": "afterDelay", "files.autoSaveDelay": 30, "files.trimTrailingWhitespace": true }' })
+    renderIde()
+    await openApp()
+    act(() => editor().model!.setValue('typing  '))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/file')?.body).toEqual({ path: 'src/app.ts', text: 'typing  ', version: 'v1' }))
+    expect(within(tabs()).getByRole('tab', { name: 'app.ts' })).toBeInTheDocument()
   })
 })
 

@@ -1,4 +1,4 @@
-import { api } from '@/lib/api'
+import { api, ApiError } from '@/lib/api'
 
 /** A file or folder in a folder's listing; paths are relative to the working directory, with "/". */
 export interface Entry {
@@ -144,9 +144,8 @@ export const revertChange = (path: string) => api<Change[]>('/api/changes/revert
  */
 export interface Preferences {
   layout?: Record<string, unknown>
-  theme?: unknown
-  /** Code completion in the editor: false when the person turned it off. */
-  completion?: unknown
+  /** The palette's commands run last, newest first. */
+  paletteRecent?: unknown
 }
 
 /** Read once, when the page opens. */
@@ -158,6 +157,59 @@ export const preferencesQuery = {
 
 /** Keeps these keys (the others stay as they were); keepalive when the page is closing. */
 export const savePreferences = (change: Preferences, keepalive = false) => api<Preferences>('/api/preferences', { body: change, keepalive })
+
+/** The person's own settings.json or keybindings.json, in code-arena's config folder (version "none": not there yet). */
+export interface UserFile {
+  name: UserFileName
+  text: string
+  version: string
+}
+
+export type UserFileName = 'settings.json' | 'keybindings.json'
+
+export const userFileQuery = (name: UserFileName) => ({
+  queryKey: ['code', 'user-file', name] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<UserFile>(`/api/user-files?name=${name}`, { signal }),
+  staleTime: 5_000,
+  refetchOnWindowFocus: true,
+})
+
+export const writeUserFile = (name: UserFileName, text: string, version: string | null) => api<{ name: string; version: string }>('/api/user-files', { body: { name, text, version } })
+
+/** VS Code's own copy of the file on this computer, to bring over. */
+export const vscodeUserFile = (name: UserFileName) => api<{ name: string; text: string; from: string }>(`/api/user-files/vscode?name=${name}`)
+
+/** A file of the project read for its settings (.vscode/settings.json…): null when it is not there. */
+export const projectFileQuery = (path: string) => ({
+  queryKey: ['code', 'project-file', path] as const,
+  queryFn: async ({ signal }: { signal: AbortSignal }) => {
+    try {
+      return await api<OpenedFile>(`/api/file?path=${at(path)}`, { signal })
+    } catch (e) {
+      if (e instanceof ApiError && e.http === 404) return null
+      throw e
+    }
+  },
+  staleTime: 5_000,
+  refetchOnWindowFocus: true,
+})
+
+/** What this computer keeps for this project: its trust, build configuration, and the page's own keys. */
+export interface WorkspaceState {
+  trust?: 'trusted' | 'restricted'
+  buildConfiguration?: 'Debug' | 'Release'
+  [key: string]: unknown
+}
+
+export const workspaceStateQuery = {
+  queryKey: ['code', 'workspace-state'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<WorkspaceState>('/api/workspace/state', { signal }),
+  staleTime: Infinity,
+}
+
+export const saveWorkspaceState = (change: Record<string, unknown>, keepalive = false) => api<WorkspaceState>('/api/workspace/state', { body: change, keepalive })
+
+export const trustWorkspace = (trusted: boolean | null) => api<WorkspaceState>('/api/workspace/trust', { body: trusted === null ? {} : { trusted } })
 
 /** A problem the project's check found: a file of the folder, its line and column (from 1), how bad, its code and what it says. */
 export interface CheckProblem {

@@ -73,7 +73,7 @@ const label = (t: TerminalInfo) => `${t.title} ${t.id}`
  * by the server (a page reloaded sees it again). The panel's height is the
  * workbench's (its top edge is dragged); the terminals follow it.
  */
-export default function TerminalPanel({ shown, onHide, focusKey }: { shown: boolean; onHide: () => void; focusKey: number }) {
+export default function TerminalPanel({ shown, onHide, focusKey, newKey = 0 }: { shown: boolean; onHide: () => void; focusKey: number; newKey?: number }) {
   const queryClient = useQueryClient()
   const list = useQuery(terminalsQuery)
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -96,6 +96,15 @@ export default function TerminalPanel({ shown, onHide, focusKey }: { shown: bool
       setOpening(false)
     }
   }, [queryClient])
+
+  // "Terminal: Create New Terminal" (Ctrl+Shift+`): one more, with the panel shown.
+  const asked = useRef(newKey)
+  useEffect(() => {
+    if (newKey === asked.current) return
+    asked.current = newKey
+    seen.current = true
+    void add()
+  }, [newKey, add])
 
   const kill = async (t: TerminalInfo) => {
     try {
