@@ -157,9 +157,11 @@ internal sealed class IdeFiles(Workspace workspace)
     }
 
     /// <summary>A file's text, or why it cannot be edited here (binary, not UTF-8, too large).</summary>
-    public JsonObject Read(string? path)
+    public JsonObject Read(string? path) => ReadFull(ResolveEntry(path));
+
+    /// <summary>A file's text by its full path, as <see cref="Read"/> answers: for one already found allowed.</summary>
+    public JsonObject ReadFull(string full)
     {
-        var full = ResolveEntry(path);
         if (Directory.Exists(full))
         {
             throw new IdeError(400, "folder", $"{Show(full)} is a folder.");

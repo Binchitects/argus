@@ -41,6 +41,7 @@ internal sealed partial class WebApp
         _formatters = new Formatters(_files, _rt.Config, _state, () => _rt.Sandbox, _rt.Env.Env);
         _tasks = new Tasks(_rt.Workspace, _files, _terminals, _problems, _state, _rt.Env.Env);
         _runs = new RunConfigs(_rt.Workspace, _terminals, _tasks, _state, _rt.Env.Env);
+        StartDebug();
     }
 
     /// <summary>One of the IDE's calls; false when the path is none of them.</summary>
@@ -268,6 +269,28 @@ internal sealed partial class WebApp
                 }
                 case ("POST", "/api/run/stop"):
                     await res.JsonAsync(200, await _runs.StopAsync(Body(req)), ct);
+                    return true;
+                case ("POST", "/api/debug/start"):
+                    await DebugStartAsync(Body(req), res, ct);
+                    return true;
+                case ("GET", "/api/debug/sessions"):
+                    await res.JsonAsync(200, new JsonArray([.. _debug.All.Select(s => (JsonNode)s.Json())]), ct);
+                    return true;
+                case ("GET", "/api/debug/socket"):
+                    await DebugSocketAsync(req, res, ct);
+                    return true;
+                case ("POST", "/api/debug/stop"):
+                    if (!await _debug.StopAsync(Body(req).Str("id")))
+                    {
+                        throw new IdeError(404, "not_found", "There is no such debug session.");
+                    }
+                    await res.NoContentAsync(ct);
+                    return true;
+                case ("GET", "/api/debug/source"):
+                    await res.JsonAsync(200, DebugSource(Query(req, "id"), Query(req, "path")), ct);
+                    return true;
+                case ("GET", "/api/debug/adapters"):
+                    await res.JsonAsync(200, await _adapters.ListAsync(ct), ct);
                     return true;
             }
         }

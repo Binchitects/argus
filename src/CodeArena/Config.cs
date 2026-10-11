@@ -201,6 +201,8 @@ internal sealed class Config
     public string? CommitName { get; set; }
     /// <summary>The author email of Code Arena's commits (default: code-arena@ the Arena's host).</summary>
     public string? CommitEmail { get; set; }
+    /// <summary>The IDE's debug adapters the person installed themselves, by id ("gdb", "lldb-dap", …): found before any other.</summary>
+    public Dictionary<string, DebugAdapterConfig> DebugAdapters { get; set; } = [];
 
     /// <summary>https://gateway.DOMAIN, or the gateway given; without a trailing /v1.</summary>
     public string? GatewayUrl => Gateway is { Length: > 0 } g ? TrimV1(g) : DeriveGateway(Url);
@@ -299,6 +301,9 @@ internal sealed class Config
         config.AllowedPaths = raw["allowedPaths"] is JsonArray paths ? [.. paths.Select(p => p?.ToString() ?? "").Where(p => p.Length > 0)] : [];
         config.McpServers = raw["mcpServers"] is JsonObject servers
             ? [.. servers.Select(s => McpServerConfig.From(s.Key, s.Value)).OfType<McpServerConfig>()]
+            : [];
+        config.DebugAdapters = raw["debugAdapters"] is JsonObject adapters
+            ? adapters.ToDictionary(a => a.Key, a => DebugAdapterConfig.From(a.Value), StringComparer.Ordinal)
             : [];
         return config;
     }
@@ -414,6 +419,7 @@ internal sealed class Config
         });
         Set("commitName", CommitName);
         Set("commitEmail", CommitEmail);
+        Set("debugAdapters", DebugAdapters.Count == 0 ? null : new JsonObject(DebugAdapters.Select(a => KeyValuePair.Create(a.Key, a.Value.Raw?.DeepClone()))));
         PrivateFiles.WriteAllText(file, raw.ToJsonString(Json.Indented) + "\n");
         _raw = raw;
     }

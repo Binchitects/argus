@@ -1335,6 +1335,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             await job.Stop.CancelAsync();
             await Task.WhenAny(job.Running, Task.Delay(TimeSpan.FromSeconds(5)));
         }
+        await _debug.DisposeAsync();
         await _terminals.DisposeAsync();
         await _server.DisposeAsync();
         _rt.Agent.Events = null;
