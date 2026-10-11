@@ -173,7 +173,8 @@ internal sealed partial class IdeGit(Workspace workspace)
         // "<mode> <object> <stage>\t<path>" each: the file's first stage when it is in conflict, none when it is new.
         var entry = entries.Split('\0').FirstOrDefault(e => e.EndsWith('\t' + name, StringComparison.Ordinal));
         var mode = entry is null ? "100644" : entry.Split(' ')[0];
-        if (mode is not ("100644" or "100755"))
+        // A link in the folder too, though the index has none there yet: git add would stage it as a link, not as this text.
+        if (mode is not ("100644" or "100755") || new FileInfo(file).LinkTarget is not null)
         {
             throw new IdeError(409, "not_text", $"git keeps {workspace.Show(file)} as a link or a submodule: stage it whole.");
         }

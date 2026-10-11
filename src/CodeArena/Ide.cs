@@ -569,7 +569,8 @@ internal sealed class AgentChanges(Workspace workspace)
             {
                 throw new IdeError(404, "not_found", $"The agent has not changed {workspace.Show(full)} in this run (or it was accepted).");
             }
-            else if (before is null || before == Current(full))
+            // A file gone since is empty now: all of its change accepted is the file's going.
+            else if (before is null || before == (Current(full) ?? ""))
             {
                 _before.Remove(full);
             }

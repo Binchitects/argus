@@ -317,6 +317,7 @@ public sealed class SourceControlTests : IDisposable
         File.WriteAllBytes(Path.Combine(h.Work, "bom.txt"), [0xEF, 0xBB, 0xBF, (byte)'y', (byte)'\n']);
         h.Write("new.ts", "first\nsecond\n");
         h.Write("-my notes.txt", "first\nsecond\n");
+        File.CreateSymbolicLink(Path.Combine(h.Work, "new-link.ts"), "app.ts");
         await using var web = await WebRun.StartAsync(h);
         Task<HttpResponseMessage> StageText(JsonObject body) => web.PostAsync("/api/git/stage-text", body);
         async Task<Dictionary<string, (string? Staged, string? Changed)>> Staged(string path, string text) =>
@@ -346,6 +347,9 @@ public sealed class SourceControlTests : IDisposable
         Assert.Equal(HttpStatusCode.BadRequest, (await StageText(new JsonObject { ["path"] = "src", ["text"] = "x" })).StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, (await StageText(new JsonObject { ["path"] = "link.ts", ["text"] = "x" })).StatusCode);
         Assert.StartsWith("120000 ", GitOut(h.Work, "ls-files", "-s", "link.ts"));
+        // A link git does not know yet would be staged as a link: not as a text either.
+        Assert.Equal(HttpStatusCode.Conflict, (await StageText(new JsonObject { ["path"] = "new-link.ts", ["text"] = "x" })).StatusCode);
+        Assert.Empty(GitOut(h.Work, "ls-files", "-s", "new-link.ts"));
     }
 
     [Fact]
@@ -427,15 +431,20 @@ public sealed class SourceControlTests : IDisposable
         using var h = new Harness(_gateway, _mcp);
         var a = h.Write("a.txt", "one\ntwo\nthree\n");
         var b = h.Write("b.txt", "four\n");
+        var gone = h.Write("c.txt", "five\n");
         _gateway.Answer = req => FakeGateway.Last(req) switch
         {
-            "change them" => Reply.Call(("write_file", """{"path":"a.txt","content":"ONE\ntwo\nTHREE\n"}"""), ("write_file", """{"path":"b.txt","content":"FOUR\n"}""")),
+            "change them" => Reply.Call(("write_file", """{"path":"a.txt","content":"ONE\ntwo\nTHREE\n"}"""), ("write_file", """{"path":"b.txt","content":"FOUR\n"}"""),
+                ("write_file", """{"path":"c.txt","content":"FIVE\n"}""")),
             _ => Reply.Say("?"),
         };
         await using var web = await WebRun.StartAsync(h, "--mode", "auto-edit");
         await (await web.SendAsync("change them")).RestAsync();
         string Listed(JsonNode changes) => string.Join(", ", changes.AsArray().Select(c => $"{c!["path"]} +{c["added"]} -{c["removed"]}"));
-        Assert.Equal("a.txt +2 -2, b.txt +1 -1", Listed(await web.GetJsonAsync("/api/changes")));
+        // A file gone since the agent wrote it (a command removed it): all of what its compare shows accepted, an empty text, is its going.
+        File.Delete(gone);
+        Assert.Equal("a.txt +2 -2, b.txt +1 -1, c.txt +0 -1", Listed(await web.GetJsonAsync("/api/changes")));
+        Assert.Equal("a.txt +2 -2, b.txt +1 -1", Listed(await Json(await web.PostAsync("/api/changes/accept", new JsonObject { ["path"] = "c.txt", ["before"] = "" }))));
         // A before that is not a text is refused, not taken as the whole change.
         Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/changes/accept", new JsonObject { ["path"] = "a.txt", ["before"] = 5 })).StatusCode);
         Assert.Equal("a.txt +2 -2, b.txt +1 -1", Listed(await web.GetJsonAsync("/api/changes")));
