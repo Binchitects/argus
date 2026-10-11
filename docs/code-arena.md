@@ -258,7 +258,11 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   result opens the file at the match. **Replace** replaces what it finds, in
   one file or in all of them (it asks first; `$1` stands for a regular
   expression's group; the files keep their line endings; a file with unsaved
-  changes in the editor keeps them, and saving it then asks). **Ctrl+P** opens any file by a few
+  changes in the editor keeps them, and saving it then asks).
+- **quick diff**: bars beside the line numbers show the lines changed since
+  what git's index has (green added, blue changed, a red mark where lines were
+  taken away), as you type; **Alt+F3** and **Shift+Alt+F3** go to the next and
+  the previous change (`scm.diffDecorations`: `none` turns them off). **Ctrl+P** opens any file by a few
   letters of its path (`app:12` opens it at line 12; `:12` goes to line 12 of
   the file shown, as the line in the status bar does). **Ctrl+Shift+P** (or
   **F1**: Firefox keeps Ctrl+Shift+P for a private window) runs any command by

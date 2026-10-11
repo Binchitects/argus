@@ -139,6 +139,8 @@ export const settingDefs: SettingDef[] = [
   { key: 'terminal.integrated.allowChords', type: 'boolean', default: true, description: 'Lets two-key shortcuts (Ctrl+K …) start in the terminal; off: Ctrl+K reaches the shell.', category: 'Terminal', scope: 'application' },
   { key: 'terminal.integrated.sendKeybindingsToShell', type: 'boolean', default: false, description: 'Sends every key to the shell, but those of "terminal.integrated.commandsToSkipShell".', category: 'Terminal', scope: 'application' },
   { key: 'terminal.integrated.commandsToSkipShell', type: 'array', items: 'string', default: [], description: 'Commands whose keys the workbench takes in the terminal, besides the default ones; "-command" gives a default one\'s key back to the shell.', category: 'Terminal', scope: 'application' },
+  // Source control
+  { key: 'scm.diffDecorations', type: 'string', default: 'all', enum: ['all', 'gutter', 'overview', 'none'], description: "Bars beside the line numbers for the lines changed since git's index (read when the editor opens).", category: 'Source Control' },
   // Debug
   { key: 'debug.saveBeforeStart', type: 'string', default: 'allEditorsInActiveGroup', enum: ['allEditorsInActiveGroup', 'nonUntitledEditorsInActiveGroup', 'none'], description: 'Saves the files with unsaved changes before a session starts.', category: 'Debug' },
   { key: 'debug.internalConsoleOptions', type: 'string', default: 'openOnFirstSessionStart', enum: ['neverOpen', 'openOnSessionStart', 'openOnFirstSessionStart'], description: 'When the Debug Console opens.', category: 'Debug' },

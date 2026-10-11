@@ -392,6 +392,7 @@ vi.mock('monaco-editor', () => ({
     defineTheme: () => undefined,
     remeasureFonts: () => undefined,
     TrackedRangeStickiness: { NeverGrowsWhenTypingAtEdges: 1 },
+    OverviewRulerLane: { Left: 1 },
     MouseTargetType: { GUTTER_GLYPH_MARGIN: 2 },
   },
   Range: class {
@@ -407,7 +408,7 @@ vi.mock('monaco-editor', () => ({
     }
   },
   KeyMod: { CtrlCmd: 2048, Shift: 1024, Alt: 512, WinCtrl: 256, chord: (a: number, b: number) => (a | (b << 16)) >>> 0 },
-  KeyCode: { F1: 59, F2: 60, F5: 63, KeyB: 32, KeyK: 41, KeyL: 42, KeyP: 46, KeyS: 49, Backquote: 92, Delete: 20, Enter: 3 },
+  KeyCode: { F1: 59, F2: 60, F3: 61, F5: 63, KeyB: 32, KeyK: 41, KeyL: 42, KeyP: 46, KeyS: 49, Backquote: 92, Delete: 20, Enter: 3 },
   json: { jsonDefaults: { setDiagnosticsOptions: (o: { schemas?: { fileMatch: string[] }[] }) => fakes.jsonOptions.push(o) } },
   MarkerSeverity: { Hint: 1, Info: 2, Warning: 4, Error: 8 },
   languages: {

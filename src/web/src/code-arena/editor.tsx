@@ -24,6 +24,7 @@ import { addDebugActions, installDebugEditor } from './debug/editor-debug'
 import { bindEditorContext, keymap, useKeyFor } from './keyboard'
 import { monacoKeybinding } from './keys'
 import { installFormatting, minimalEdit, offerFormatting } from './format'
+import { installDirtyDiff } from './dirty-diff'
 import { saveParticipants } from './save-participants'
 import { useSettings, workspaceSettingsPath } from './settings'
 import { settingsSchema } from './settings-schema'
@@ -1094,6 +1095,13 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         askAboutCode(m, ed, actions.selection)
         bindEditorContext(ed)
         installDebugEditor(m.monaco, ed, (model) => m.pathOf(model.uri))
+        if (settingsRef.current.get('scm.diffDecorations') !== 'none') {
+          const dirty = installDirtyDiff(m.monaco, ed, (model) => m.pathOf(model.uri))
+          // git's index moves on a save, a stage, a commit, a discard: the bars are drawn against it again.
+          queryClient.getQueryCache().subscribe((e) => {
+            if (e.type === 'updated' && e.query.queryKey[1] === 'git' && e.query.queryKey[2] === 'status' && e.action.type === 'success') dirty.refresh()
+          })
+        }
         addDebugActions(m.monaco, ed, (model) => m.pathOf(model.uri))
         keymap.setEditorCommands(ed.getSupportedActions().map((a) => ({ id: a.id, label: a.label })))
         installCompletions(m)
@@ -1149,7 +1157,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       if (now?.original !== d.original || now.modified !== d.modified) diffEditor.current.setModel(d)
       setCursor(null)
     }
-  }, [shown, revealed, actions])
+  }, [shown, revealed, actions, queryClient])
 
   // Leaving with unsaved changes asks first.
   const anyDirty = tabs.some((t) => t.dirty)
