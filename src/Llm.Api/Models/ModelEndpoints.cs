@@ -175,11 +175,14 @@ public static class ModelEndpoints
     private static async Task<IResult> LibraryAsync(ModelLibrary library, AppDbContext db, IOptions<EngineOptions> engine, CancellationToken ct)
     {
         var used = await db.LocalModels.AsNoTracking().Select(m => new { m.Name, m.File, m.Projector, m.DraftHead }).ToListAsync(ct);
+        var media = await db.MediaModels.AsNoTracking().ToListAsync(ct);
         var e = engine.Value;
         return Results.Ok(library.List().Select(f => new
         {
             f.File.Path, f.File.Size, f.File.Parts, f.Profile,
-            usedBy = used.Where(u => u.File == f.File.Path || u.Projector == f.File.Path || u.DraftHead == f.File.Path).Select(u => u.Name),
+            // Chat models and picture or video models alike (a text encoder is often both).
+            usedBy = used.Where(u => u.File == f.File.Path || u.Projector == f.File.Path || u.DraftHead == f.File.Path).Select(u => u.Name)
+                .Concat(media.Where(m => m.Files.Any(x => x.Path == f.File.Path)).Select(m => m.Name)),
         }));
     }
 
