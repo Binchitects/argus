@@ -53,6 +53,9 @@ internal sealed class RunConfigs(Workspace workspace, Terminals terminals, Tasks
         "name", "type", "request", "preLaunchTask", "postDebugTask", "presentation", "internalConsoleOptions",
     };
 
+    // The configurations between a start's check that they do not run and their terminal opening (their preLaunchTask's time).
+    private readonly HashSet<string> _starting = new(StringComparer.Ordinal);
+
     /// <summary>Every configuration, its compounds and inputs, and what is wrong; read anew each time.</summary>
     public RunSet Load()
     {
@@ -248,12 +251,9 @@ internal sealed class RunConfigs(Workspace workspace, Terminals terminals, Tasks
         {
             throw RunVariables.BadConfig(config.File, config.Line, $"The envFile of {config.Name}, {path}, is not there.");
         }
-        if (new FileInfo(path).Length > VsCodeJson.MaxBytes)
-        {
-            throw RunVariables.BadConfig(config.File, config.Line, $"The envFile of {config.Name} is larger than 1 MB.");
-        }
+        var text = VsCodeJson.ReadSmall(path) ?? throw RunVariables.BadConfig(config.File, config.Line, $"The envFile of {config.Name} is larger than 1 MB.");
         var vars = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var raw in File.ReadAllLines(path))
+        foreach (var raw in text.Split('\n'))
         {
             var line = raw.Trim();
             if (line.StartsWith("export ", StringComparison.Ordinal))
@@ -300,26 +300,44 @@ internal sealed class RunConfigs(Workspace workspace, Terminals terminals, Tasks
         var resolved = Resolve(set, config, RunContext.From(body["context"]), RunVariables.Answers(body["inputs"]));
         var run = Plain(resolved.Configuration, out var reason) ?? throw RunVariables.BadConfig(config.File, config.Line, $"{name} cannot run: {reason}");
         var key = "run:" + name;
-        if (terminals.All.FirstOrDefault(t => t.ReuseKey == key && t.ExitCode is null) is { } running)
+        lock (_starting)
         {
-            throw new IdeError(409, "running", $"{name} is running.", new JsonObject { ["terminal"] = running.Json() });
+            if (terminals.All.FirstOrDefault(t => t.ReuseKey == key && t.ExitCode is null) is { } running)
+            {
+                throw new IdeError(409, "running", $"{name} is running.", new JsonObject { ["terminal"] = running.Json() });
+            }
+            // Its preLaunchTask runs: a second start now would open a second terminal for it.
+            if (!_starting.Add(name))
+            {
+                throw new IdeError(409, "running", $"{name} is starting.", new JsonObject { ["terminal"] = null });
+            }
         }
         var (cols, rows) = (body.Int("cols") ?? 80, body.Int("rows") ?? 24);
-        if (resolved.Before is { } before && await tasks.RunToReadyAsync(before, config.Configuration.Str("preLaunchTask")!, cols, rows) is { Failed: true } failed)
+        Terminal terminal;
+        try
         {
-            throw Tasks.Failed(failed);
+            if (resolved.Before is { } before && await tasks.RunToReadyAsync(before, config.Configuration.Str("preLaunchTask")!, cols, rows) is { Failed: true } failed)
+            {
+                throw Tasks.Failed(failed);
+            }
+            if (config.Project is { } project && run.Program == "dotnet" && await TargetPathAsync(project) is { } built)
+            {
+                // The program the build made, wherever its framework and name put it.
+                run = run with { Args = [built, .. run.Args.Skip(1)] };
+                resolved.Configuration["program"] = built;
+            }
+            terminal = terminals.Open(cols, rows, new TerminalStart(run.Program, run.Args, run.Cwd, run.Env, name, TerminalKind.Run, key));
         }
-        if (config.Project is { } project && run.Program == "dotnet" && await TargetPathAsync(project) is { } built)
+        finally
         {
-            // The program the build made, wherever its framework and name put it.
-            run = run with { Args = [built, .. run.Args.Skip(1)] };
-            resolved.Configuration["program"] = built;
+            lock (_starting)
+            {
+                _starting.Remove(name);
+            }
         }
-        var terminal = terminals.Open(cols, rows, new TerminalStart(Program(run), run.Args, run.Cwd, run.Env, name, TerminalKind.Run, key));
         if (resolved.After is { } after)
         {
-            var label = config.Configuration.Str("postDebugTask")!;
-            _ = terminal.Exited.ContinueWith(_ => tasks.RunToReadyAsync(after, label, cols, rows), TaskScheduler.Default).Unwrap();
+            _ = AfterAsync(terminal, after, config.Configuration.Str("postDebugTask")!, cols, rows);
         }
         return new JsonObject
         {
@@ -329,18 +347,23 @@ internal sealed class RunConfigs(Workspace workspace, Terminals terminals, Tasks
         };
     }
 
+    /// <summary>A run's postDebugTask, once its program ended; one that cannot start (Code Arena stopping, too many terminals) is not run.</summary>
+    private async Task AfterAsync(Terminal terminal, IReadOnlyDictionary<string, TaskPlan> after, string label, int cols, int rows)
+    {
+        await terminal.Exited;
+        try
+        {
+            await tasks.RunToReadyAsync(after, label, cols, rows);
+        }
+        catch (Exception e) when (e is IdeError or IOException)
+        {
+            // No page waits for it: its terminal, when it opened, says how it went.
+        }
+    }
+
     /// <summary>Ends a run's program: {terminal} to that terminal, once it ended (5 s at most).</summary>
     public async Task<JsonObject> StopAsync(JsonObject body) =>
         (await terminals.StopAsync(body.Str("terminal"), TerminalKind.Run) ?? throw new IdeError(404, "not_found", "There is no such run's terminal.")).Json();
-
-    /// <summary>A run's program as the terminal starts it: a program in the folder it names is that file, not one on the PATH.</summary>
-    private static string Program(PlainRun run)
-    {
-        var program = run.Program;
-        return !Path.IsPathRooted(program) && !program.Contains('/') && !program.Contains('\\') && File.Exists(Path.Combine(run.Cwd, program))
-            ? Path.Combine(run.Cwd, program)
-            : program;
-    }
 
     /// <summary>The program a .NET project built, as MSBuild says (TargetPath in the build configuration); null when it cannot say.</summary>
     private async Task<string?> TargetPathAsync(string project)
@@ -404,11 +427,15 @@ internal sealed class RunConfigs(Workspace workspace, Terminals terminals, Tasks
         var program = c.Str("program");
         (PlainRun?, string?) Run(string executable, IEnumerable<string> arguments) => (new PlainRun(executable, [.. arguments], cwd, vars), null);
         static (PlainRun?, string?) None(string why) => (null, why);
+        // The configuration's own program, named without a folder, is the one in its cwd when there is one; a runtime
+        // (dotnet, node, npm, python3, go, cargo) is always the PATH's, never a file of the project's of that name.
+        string Own(string named) =>
+            !Path.IsPathRooted(named) && !named.Contains('/') && !named.Contains('\\') && File.Exists(Path.Combine(cwd, named)) ? Path.Combine(cwd, named) : named;
         switch (type)
         {
             case "coreclr" or "clr":
                 return program is null ? None("it names no program.")
-                    : program.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ? Run("dotnet", [program, .. args]) : Run(program, args);
+                    : program.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ? Run("dotnet", [program, .. args]) : Run(Own(program), args);
             case "node" or "pwa-node":
             {
                 var runtime = c.Str("runtimeExecutable") ?? "node";
@@ -448,7 +475,7 @@ internal sealed class RunConfigs(Workspace workspace, Terminals terminals, Tasks
                 }
                 return (c.Str("mode") ?? "auto") switch
                 {
-                    "exec" => Run(program, args),
+                    "exec" => Run(Own(program), args),
                     "test" => Run("go", ["test", .. flags, package, .. args.Count > 0 ? ["-args", .. args] : Array.Empty<string>()]),
                     "debug" or "auto" => Run("go", ["run", .. flags, package, .. args]),
                     var mode => None($"its mode {mode} needs the debugger."),
@@ -464,7 +491,7 @@ internal sealed class RunConfigs(Workspace workspace, Terminals terminals, Tasks
                 return Run("cargo", [.. cargoArgs, .. args.Count > 0 ? ["--", .. args] : Array.Empty<string>()]);
             }
             case "cppdbg" or "cppvsdbg" or "lldb" or "lldb-dap" or "gdb":
-                return (program ?? c.Str("target")) is { } native ? Run(native, args) : None("it names no program.");
+                return (program ?? c.Str("target")) is { } native ? Run(Own(native), args) : None("it names no program.");
             default:
                 return None($"a {(type.Length > 0 ? type : "typeless")} configuration runs only with its debugger, not here yet.");
         }

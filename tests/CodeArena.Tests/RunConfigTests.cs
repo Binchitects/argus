@@ -118,7 +118,7 @@ public sealed class RunConfigTests : IDisposable
                 "${workspaceFolder}", "${workspaceFolderBasename}", "${file}", "${fileBasename}", "${fileBasenameNoExtension}", "${fileDirname}",
                 "${fileExtname}", "${relativeFile}", "${relativeFileDirname}", "${lineNumber}", "${selectedText}", "${cwd}", "${pathSeparator}", "${/}",
                 "${env:CODE_ARENA_RUN_TEST}", "${env:ARENA_API_KEY}", "${config:editor.tabSize}", "${config:python.venv}", "${config:codeArena.buildConfiguration}",
-                "${codeArena.buildConfiguration}", "${userHome}", "${input:name}", "${input:color}", "at ${workspaceFolderBasename}:${lineNumber}"],
+                "${codeArena.buildConfiguration}", "${userHome}", "${input:name}", "${input:color}", "at ${workspaceFolderBasename}:${lineNumber}", "${env:Arena_Api_Key}"],
               "anyKey": "${workspaceFolder}" },
             """,
             """
@@ -147,6 +147,8 @@ public sealed class RunConfigTests : IDisposable
 
         Environment.SetEnvironmentVariable("CODE_ARENA_RUN_TEST", "from-env");
         Environment.SetEnvironmentVariable("ARENA_API_KEY", "sk-never-filled-in");
+        // Windows' names are of any case: the key is never filled in, however a file writes its name.
+        Environment.SetEnvironmentVariable("Arena_Api_Key", "sk-never-filled-in");
         JsonObject resolved;
         try
         {
@@ -156,6 +158,7 @@ public sealed class RunConfigTests : IDisposable
         {
             Environment.SetEnvironmentVariable("CODE_ARENA_RUN_TEST", null);
             Environment.SetEnvironmentVariable("ARENA_API_KEY", null);
+            Environment.SetEnvironmentVariable("Arena_Api_Key", null);
         }
         var sep = Path.DirectorySeparatorChar.ToString();
         var file = Path.Combine(_root, "src", "lib", "util.ts");
@@ -164,7 +167,7 @@ public sealed class RunConfigTests : IDisposable
                 _root, Path.GetFileName(_root), file, "util.ts", "util", Path.Combine(_root, "src", "lib"),
                 ".ts", Path.Combine("src", "lib", "util.ts"), Path.Combine("src", "lib"), "12", "picked", _root, sep, sep,
                 "from-env", "", "4", ".venv", "Release",
-                "Release", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Ada", "blue", $"at {Path.GetFileName(_root)}:12",
+                "Release", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Ada", "blue", $"at {Path.GetFileName(_root)}:12", "",
             ],
             VsCodeJson.Strings(resolved["args"]));
         Assert.Equal("Vars", resolved["name"]!.GetValue<string>());
@@ -292,6 +295,48 @@ public sealed class RunConfigTests : IDisposable
     {
         var e = await RefusedAsync(task);
         return (e.Status, e.Code);
+    }
+
+    [Fact]
+    public async Task A_second_start_while_the_first_ones_preLaunchTask_runs_is_refused()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        Write(".vscode/tasks.json", """{ "version": "2.0.0", "tasks": [{ "label": "slow", "type": "shell", "command": "sleep 1" }] }""");
+        LaunchJson("""{ "name": "Run", "type": "cppdbg", "request": "launch", "program": "/bin/sh", "args": ["-c", "sleep 30"], "preLaunchTask": "slow" }""");
+        _state.SetTrust(true);
+
+        var first = _runs.StartAsync(Start("Run"));
+        for (var waited = 0; !_terminals.All.Any(t => t.Title == "slow") && waited < 10_000; waited += 20)
+        {
+            await Task.Delay(20);
+        }
+        var second = await RefusedAsync(_runs.StartAsync(Start("Run")));
+        Assert.Equal((409, "running"), (second.Status, second.Code));
+        // Its terminal is not open yet.
+        Assert.True(second.Details!.ContainsKey("terminal"));
+        Assert.Null(second.Details["terminal"]);
+        var started = await first.WaitAsync(Wait);
+        Assert.Single(_terminals.All, t => t.Kind == TerminalKind.Run);
+        var running = await RefusedAsync(_runs.StartAsync(Start("Run")));
+        Assert.Equal(started["terminal"]!["id"]!.GetValue<string>(), running.Details!["terminal"]!["id"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void A_configurations_own_program_may_be_in_its_folder_but_a_runtime_is_always_the_PATHs()
+    {
+        Write("node", "#!/bin/sh\necho not node\n");
+        Write("app", "#!/bin/sh\n");
+        LaunchJson("""
+            { "name": "Node", "type": "node", "request": "launch", "program": "server.js" },
+            { "name": "Native", "type": "cppdbg", "request": "launch", "program": "app" },
+            """);
+        _state.SetTrust(true);
+        var none = new Dictionary<string, string>();
+        Assert.Equal("node", _runs.Plain(_runs.Resolve("Node", new RunContext(), none), out _)!.Program);
+        Assert.Equal(Path.Combine(_root, "app"), _runs.Plain(_runs.Resolve("Native", new RunContext(), none), out _)!.Program);
     }
 
     [Fact]

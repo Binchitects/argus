@@ -110,7 +110,7 @@ internal sealed partial class RunVariables
             "codeArena.buildConfiguration" => _build,
             // The person's key stays with Code Arena, whatever a task asks for; a command shown before the folder is
             // trusted shows ${env:…} as written, not what may be a secret.
-            "env" => arg == "ARENA_API_KEY" ? "" : _lenient ? null : _env(arg) ?? "",
+            "env" => string.Equals(arg, "ARENA_API_KEY", StringComparison.OrdinalIgnoreCase) ? "" : _lenient ? null : _env(arg) ?? "",
             "config" => Setting(name, arg, file),
             "input" => Input(name, arg, inputs, file),
             "command" => Refuse(file, $"${{{name}}} runs a command of VS Code's: not run here."),
