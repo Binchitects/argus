@@ -260,7 +260,7 @@ internal sealed partial class Tasks(Workspace workspace, IdeFiles files, Termina
     {
         lock (_gate)
         {
-            return _running.TryGetValue(label, out var running) ? running.Terminal : null;
+            return _running.TryGetValue(label, out var running) && running.Terminal.ExitCode is null ? running.Terminal : null;
         }
     }
 
@@ -690,7 +690,8 @@ internal sealed partial class Tasks(Workspace workspace, IdeFiles files, Termina
         var label = plan.Def.Label;
         lock (_gate)
         {
-            if (_running.TryGetValue(label, out var running))
+            // One whose program ended is forgotten a moment later: its next run starts anew now.
+            if (_running.TryGetValue(label, out var running) && running.Terminal.ExitCode is null)
             {
                 return join ? running : throw new IdeError(409, "running", $"The task {label} is running.", new JsonObject { ["terminal"] = running.Terminal.Json() });
             }
@@ -887,10 +888,14 @@ internal sealed partial class Tasks(Workspace workspace, IdeFiles files, Termina
                 // A new round of work: what the last one found is replaced when it ends.
                 _output.Clear();
             }
-            _output.Append(line).Append('\n');
-            if (_output.Length > Problems.MaxOutput)
+            // Kept only to be read by a matcher: a server's log, with none, is its terminal's alone.
+            if (_plan.Matchers.Count > 0)
             {
-                _output.Remove(0, _output.Length - Problems.MaxOutput / 2);
+                _output.Append(line).Append('\n');
+                if (_output.Length > Problems.MaxOutput)
+                {
+                    _output.Remove(0, _output.Length - Problems.MaxOutput / 2);
+                }
             }
             if (_ends is not null && Matches(_ends, line))
             {

@@ -277,6 +277,50 @@ public sealed class TaskTests : IDisposable
     }
 
     [Fact]
+    public void ESLint_compact_Go_and_tsc_watch_matchers_read_their_forms()
+    {
+        Write("web/app.js", "x\n");
+        Write("cmd/main.go", "package main\n");
+        Write("src/a.ts", "let a\n");
+        var eslint = _problems.Read(
+            $"{_root}/web/app.js: line 3, col 9, Warning - Unexpected console statement. (no-console)\n\u001b[31mweb/app.js: line 1, col 1, Error - Parsing error\u001b[0m\nnot a problem\n",
+            [Problems.Named("$eslint-compact")!], "task:lint");
+        Assert.Equal(
+            [("web/app.js", 1, 1, "error", (string?)null, "Parsing error"), ("web/app.js", 3, 9, "warning", "no-console", "Unexpected console statement.")],
+            eslint.Select(p => (p.Path, p.Line, p.Column, p.Severity, p.Code, p.Message)));
+        Assert.All(eslint, p => Assert.Equal("task:lint", p.Source));
+
+        var go = _problems.Read("# shop/cmd\ncmd/main.go:12:2: undefined: x\n./cmd/main.go:3: syntax error\n", [Problems.Named("$go")!], "task:go");
+        Assert.Equal([("cmd/main.go", 3, 1, "syntax error"), ("cmd/main.go", 12, 2, "undefined: x")], go.Select(p => (p.Path, p.Line, p.Column, p.Message)));
+
+        var watch = Problems.Named("$tsc-watch")!;
+        Assert.Matches(watch.Begins!, "[10:00:00 AM] File change detected. Starting incremental compilation...");
+        Assert.Matches(watch.Ends!, "[10:00:01 AM] Found 1 error. Watching for file changes.");
+        Assert.Single(_problems.Read("src/a.ts(1,5): error TS2304: Cannot find name 'b'.\n", [watch], "task:watch"));
+        Assert.Null(Problems.Named("$nope"));
+    }
+
+    [Fact]
+    public void Detection_reads_no_files_name_as_an_option_and_no_link_to_a_device()
+    {
+        Write("-Evil.csproj", """<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType></PropertyGroup></Project>""");
+        Write("package.json", """{ "scripts": { "--prefix=/tmp": "never", "build": "tsc" } }""");
+        if (!OperatingSystem.IsWindows() && File.Exists("/dev/zero"))
+        {
+            // A link that says it holds nothing and never ends: read no further than a project's file can be.
+            File.CreateSymbolicLink(Path.Combine(_root, "Makefile"), "/dev/zero");
+            File.CreateSymbolicLink(Path.Combine(_root, "Cargo.toml"), "/dev/zero");
+            Directory.CreateDirectory(Path.Combine(_root, "web"));
+            File.CreateSymbolicLink(Path.Combine(_root, "web", "package.json"), "/dev/zero");
+            File.CreateSymbolicLink(Path.Combine(_root, "web", "Zero.csproj"), "/dev/zero");
+        }
+        var tasks = _tasks.List()["tasks"]!.AsArray().ToDictionary(t => t!["label"]!.GetValue<string>(), t => t!["command"]?.GetValue<string>());
+        Assert.Equal("dotnet build ./-Evil.csproj -c Debug -p:GenerateFullPaths=true", tasks["dotnet: build"]);
+        Assert.Equal("npm run build", tasks["npm: build"]);
+        Assert.DoesNotContain(tasks.Keys, label => label.Contains("prefix", StringComparison.Ordinal) || label.Contains("Zero", StringComparison.Ordinal) || label.EndsWith("- web", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task A_tasks_terminal_is_used_again_by_its_next_run()
     {
         if (OperatingSystem.IsWindows())

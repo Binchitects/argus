@@ -267,12 +267,12 @@ internal static partial class VsCodeJson
         string text;
         try
         {
-            if (new FileInfo(path).Length > MaxBytes)
+            if (ReadSmall(path) is not { } small)
             {
                 errors.Add(Error(shown, null, $"{shown} is larger than {MaxBytes / 1024 / 1024} MB: not read."));
                 return (null, "");
             }
-            text = File.ReadAllText(path);
+            text = small;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -296,6 +296,25 @@ internal static partial class VsCodeJson
 
     [GeneratedRegex(@"^line (\d+): (.*)$", RegexOptions.Singleline)]
     private static partial Regex LineError();
+
+    /// <summary>
+    /// A file's text when it holds at most <paramref name="max"/> bytes; null when it holds more. Read no further than
+    /// that, as a link to a device (/dev/zero) says it holds nothing and never ends. Throws IOException or
+    /// UnauthorizedAccessException when it cannot be read.
+    /// </summary>
+    public static string? ReadSmall(string path, int max = MaxBytes)
+    {
+        var length = new FileInfo(path).Length;
+        if (length > max)
+        {
+            return null;
+        }
+        using var reader = new StreamReader(path);
+        // UTF-8 never has more characters than bytes: one more than the bytes it said is more than it holds.
+        var chars = new char[length + 1];
+        var read = reader.ReadBlock(chars, 0, chars.Length);
+        return read > length ? null : new string(chars, 0, read);
+    }
 
     /// <summary>What is wrong in a file: {file, line, message}.</summary>
     public static JsonObject Error(string? file, int? line, string message) => new() { ["file"] = file, ["line"] = line, ["message"] = message };

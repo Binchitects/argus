@@ -47,6 +47,11 @@ internal static partial class RunDetect
                     {
                         seen++;
                         var name = Path.GetFileName(file);
+                        // A link may lead anywhere, as a folder's may.
+                        if (new FileInfo(file).LinkTarget is not null)
+                        {
+                            continue;
+                        }
                         if (name.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".fsproj", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".vbproj", StringComparison.OrdinalIgnoreCase))
                         {
                             projects.Add(file);
@@ -83,6 +88,9 @@ internal static partial class RunDetect
 
     /// <summary>A path of the folder as tasks.json writes one: relative, with "/".</summary>
     private static string Rel(string root, string full) => Path.GetRelativePath(root, full).Replace('\\', '/');
+
+    /// <summary>A path of the folder as a program's argument: relative, and never read as an option (a file named -p:X.sln).</summary>
+    private static string Arg(string root, string full) => Rel(root, full) is var rel && rel.StartsWith('-') ? "./" + rel : rel;
 
     /// <summary>A task in tasks.json's shape.</summary>
     private static JsonObject Task(string label, string command, IEnumerable<string> args, string? group = null, string? dir = null, string? matcher = null, string? detail = null, IEnumerable<string>? dependsOn = null)
@@ -142,7 +150,7 @@ internal static partial class RunDetect
             var text = Read(makefile);
             foreach (var target in new[] { "test", "check", "clean" })
             {
-                if (Regex.IsMatch(text, $@"^{target}\s*:", RegexOptions.Multiline, TimeSpan.FromSeconds(1)))
+                if (Matches(text, $@"^{target}\s*:", RegexOptions.Multiline))
                 {
                     tasks.Add(Task($"make: {target}", "make", [target], target is "test" or "check" ? "test" : null, matcher: "$gcc"));
                 }
@@ -177,7 +185,7 @@ internal static partial class RunDetect
         var tests = found.Projects.Where(p => IsTest(Read(p))).ToList();
         if (solution is not null || found.Projects.Count == 1)
         {
-            var target = Rel(root, solution ?? found.Projects[0]);
+            var target = Arg(root, solution ?? found.Projects[0]);
             tasks.Add(Task("dotnet: build", "dotnet", Args("build", target), "build", matcher: "$msCompile"));
             if (tests.Count > 0)
             {
@@ -188,7 +196,7 @@ internal static partial class RunDetect
         {
             foreach (var test in tests)
             {
-                tasks.Add(Task($"dotnet: test {ProjectLabel(found.Projects, test)}", "dotnet", Args("test", Rel(root, test)), "test", matcher: "$msCompile"));
+                tasks.Add(Task($"dotnet: test {ProjectLabel(found.Projects, test)}", "dotnet", Args("test", Arg(root, test)), "test", matcher: "$msCompile"));
             }
         }
         if (solution is not null || found.Projects.Count > 1)
@@ -196,7 +204,7 @@ internal static partial class RunDetect
             // Without a solution every project needs its own build; with one, the projects to run do.
             foreach (var project in found.Projects.Where(p => solution is null || Runnable(Read(p))))
             {
-                tasks.Add(Task(BuildLabel(found, solution, project), "dotnet", Args("build", Rel(root, project)), "build", matcher: "$msCompile"));
+                tasks.Add(Task(BuildLabel(found, solution, project), "dotnet", Args("build", Arg(root, project)), "build", matcher: "$msCompile"));
             }
         }
     }
@@ -219,13 +227,13 @@ internal static partial class RunDetect
     private static bool IsTest(string project) =>
         project.Contains("Microsoft.NET.Test.Sdk", StringComparison.OrdinalIgnoreCase)
         || project.Contains("MSTest.Sdk", StringComparison.OrdinalIgnoreCase)
-        || Regex.IsMatch(project, @"<IsTestProject>\s*true\s*</IsTestProject>", RegexOptions.IgnoreCase, TimeSpan.FromSeconds(1));
+        || Matches(project, @"<IsTestProject>\s*true\s*</IsTestProject>", RegexOptions.IgnoreCase);
 
     /// <summary>Whether a project file makes a program to run (an Exe, or a web or worker project), not a test project.</summary>
     private static bool Runnable(string project) =>
         !IsTest(project)
-        && (Regex.IsMatch(project, @"<OutputType>\s*(Win)?Exe\s*</OutputType>", RegexOptions.IgnoreCase, TimeSpan.FromSeconds(1))
-            || Regex.IsMatch(project, @"Sdk\s*=\s*""Microsoft\.NET\.Sdk\.(Web|Worker|BlazorWebAssembly)""", RegexOptions.IgnoreCase, TimeSpan.FromSeconds(1)));
+        && (Matches(project, @"<OutputType>\s*(Win)?Exe\s*</OutputType>", RegexOptions.IgnoreCase)
+            || Matches(project, @"Sdk\s*=\s*""Microsoft\.NET\.Sdk\.(Web|Worker|BlazorWebAssembly)""", RegexOptions.IgnoreCase));
 
     /// <summary>npm's scripts, of the folder's package.json and those two levels down: "npm: name", or "npm: name - dir".</summary>
     private static void NpmTasks(string root, Found found, List<JsonObject> tasks)
@@ -238,7 +246,8 @@ internal static partial class RunDetect
             }
             var dir = Rel(root, Path.GetDirectoryName(package)!);
             var manager = Manager(root, Path.GetDirectoryName(package)!);
-            foreach (var (name, script) in scripts)
+            // A script named as an option (--prefix=…) would be read as one.
+            foreach (var (name, script) in scripts.Where(s => !s.Key.StartsWith('-')))
             {
                 // npm's, whichever manager runs it, as VS Code names them.
                 var label = dir == "." ? $"npm: {name}" : $"npm: {name} - {dir}";
@@ -528,16 +537,36 @@ internal static partial class RunDetect
     /// <summary>An MSBuild property as a project file writes it, when it is a plain value (not made of other properties).</summary>
     private static string? Property(string project, string name)
     {
-        var m = Regex.Match(project, $@"<{name}>\s*([^<$]+?)\s*</{name}>", RegexOptions.None, TimeSpan.FromSeconds(1));
-        return m.Success ? m.Groups[1].Value : null;
+        try
+        {
+            var m = Regex.Match(project, $@"<{name}>\s*([^<$]+?)\s*</{name}>", RegexOptions.None, TimeSpan.FromSeconds(1));
+            return m.Success ? m.Groups[1].Value : null;
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return null;
+        }
     }
 
-    /// <summary>A small file's text; empty when it is missing or cannot be read.</summary>
+    /// <summary>Whether a project's file has this; one made to take long (spaces without end) has not, rather than failing the list.</summary>
+    private static bool Matches(string text, string pattern, RegexOptions options)
+    {
+        try
+        {
+            return Regex.IsMatch(text, pattern, options, TimeSpan.FromSeconds(1));
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>A small file's text; empty when it is missing, larger than 1 MB, or cannot be read.</summary>
     private static string Read(string path)
     {
         try
         {
-            return File.Exists(path) && new FileInfo(path).Length <= 1024 * 1024 ? File.ReadAllText(path) : "";
+            return File.Exists(path) ? VsCodeJson.ReadSmall(path) ?? "" : "";
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
