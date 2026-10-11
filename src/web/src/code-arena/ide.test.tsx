@@ -210,7 +210,7 @@ const fakes = vi.hoisted(() => {
     updateOptions(o: Record<string, unknown>) {
       Object.assign(this.options, o)
     }
-    side = { createContextKey: () => ({ set() {}, get() {}, reset() {} }), focus() {}, hasTextFocus: () => false }
+    side = { createContextKey: () => ({ set() {}, get() {}, reset() {} }), focus() {}, hasTextFocus: () => false, getSelection: () => ({ startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 }) }
     /** What Monaco would work out: one change, a line each way. */
     lineChanges = [{ originalStartLineNumber: 1, originalEndLineNumber: 1, modifiedStartLineNumber: 1, modifiedEndLineNumber: 1 }]
     getLineChanges() {
@@ -1495,11 +1495,22 @@ describe('Code Arena, the IDE', () => {
 
   it('lists what changed since the last commit, opens a file as it was and is, stages, discards and commits', async () => {
     let status = { repository: true, branch: 'main', ahead: 1, behind: 0, files: [{ path: 'src/app.ts', staged: null as string | null, changed: 'M' as string | null, from: null }, { path: 'notes.txt', staged: null, changed: '?', from: null }] }
+    let index = 'const total = 0\n'
     const { calls } = backend({
       'GET /api/git/status': () => ({ json: status }),
       'GET /api/git/log': () => ({ json: [{ hash: 'abc1234', subject: 'First', author: 'Pat', at: '2026-10-11T09:00:00Z' }] }),
       'GET /api/git/branches': () => ({ json: [{ name: 'main', current: true }, { name: 'feature', current: false }] }),
-      'GET /api/git/diff': () => ({ json: { path: 'src/app.ts', original: 'const total = 0\n', modified: 'const total = 1\n' } }),
+      'GET /api/git/show': (_, __, url) => {
+        const rev = url.searchParams.get('rev')
+        const text = rev === ':' ? index : rev === 'HEAD' ? 'const total = 0\n' : rev === 'abc1234' ? 'const total = 0\n' : 'const total = -1\n'
+        return { json: { path: url.searchParams.get('path'), rev, commit: null, exists: true, size: text.length, text, binary: false, tooLarge: false } }
+      },
+      'GET /api/git/commit': () => ({ json: { hash: 'abc1234', parents: ['0000001'], subject: 'First', author: 'Pat', at: '2026-10-11T09:00:00Z', files: [{ path: 'src/app.ts', status: 'M', from: null }], truncated: false } }),
+      'POST /api/git/stage-text': (body) => {
+        index = (body as { text: string }).text
+        status = { ...status, files: [{ ...status.files[0]!, staged: 'M' }, status.files[1]!] }
+        return { json: status }
+      },
       'POST /api/git/stage': () => {
         status = { ...status, files: [{ ...status.files[0]!, staged: 'M', changed: null }, status.files[1]!] }
         return { json: status }
@@ -1519,10 +1530,21 @@ describe('Code Arena, the IDE', () => {
     const changes = await within(panel).findByRole('list', { name: 'Changed files' })
     expect(within(changes).getAllByRole('listitem')).toHaveLength(2)
 
-    // A file opens as the last commit has it, and now.
+    // A change not staged opens as the index has the file, and the file itself (live, editable).
     await userEvent.click(within(changes).getByRole('button', { name: /^app\.ts/ }))
-    expect(await within(tabs()).findByRole('tab', { name: /app\.ts.*since commit/ })).toHaveAttribute('aria-selected', 'true')
-    await waitFor(() => expect(fakes.diffEditors[0]?.getModel()?.original.getValue()).toBe('const total = 0\n'))
+    expect(await within(tabs()).findByRole('tab', { name: /app\.ts.*working tree/ })).toHaveAttribute('aria-selected', 'true')
+    const diff = () => fakes.diffEditors[0]!
+    await waitFor(() => expect(diff().getModel()?.original.getValue()).toBe('const total = 0\n'))
+    expect(diff().getModel()?.modified.uri?.toString()).toBe('file:///src/app.ts')
+    // Stage the change at the cursor (Monaco's first, line 1): the index takes that line, nothing else.
+    await userEvent.click(screen.getByRole('button', { name: 'Stage the change at the cursor' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/git/stage-text')?.body).toEqual({ path: 'src/app.ts', text: 'const total = 1\n' }))
+    // A commit of the history lists its files; one opens its change (its parent ↔ it).
+    await userEvent.click(within(panel).getByRole('button', { name: /First/ }))
+    await userEvent.click(within(await within(panel).findByRole('list', { name: 'Files of abc1234' })).getByRole('button', { name: /^app\.ts/ }))
+    expect(await within(tabs()).findByRole('tab', { name: 'app.ts (abc1234^) ↔ app.ts (abc1234)', selected: true })).toBeInTheDocument()
+    await waitFor(() => expect(diff().getModel()?.original.getValue()).toBe('const total = -1\n'))
+    expect(calls.some((c) => c.path === '/api/git/show?path=src%2Fapp.ts&rev=abc1234%5E')).toBe(true)
 
     await userEvent.click(within(changes).getByRole('button', { name: 'Stage src/app.ts' }))
     expect(await within(panel).findByRole('list', { name: 'Staged files' })).toHaveTextContent('app.ts')

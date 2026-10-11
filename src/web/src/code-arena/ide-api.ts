@@ -133,7 +133,7 @@ export const deleteEntry = (path: string) => api('/api/files/delete', { body: { 
 
 export const changeTexts = (path: string) => api<ChangeTexts>(`/api/changes/diff?path=${at(path)}`)
 /** Keeps the agent's change to a file (all of them without one). */
-export const acceptChange = (path?: string) => api<Change[]>('/api/changes/accept', { body: path ? { path } : {} })
+export const acceptChange = (path?: string, before?: string) => api<Change[]>('/api/changes/accept', { body: path ? (before === undefined ? { path } : { path, before }) : {} })
 /** Puts the file back as it was before the agent (deletes a file it made). */
 export const revertChange = (path: string) => api<Change[]>('/api/changes/revert', { body: { path } })
 
@@ -313,8 +313,41 @@ export const gitBranchesQuery = {
   queryKey: ['code', 'git', 'branches'] as const,
   queryFn: ({ signal }: { signal: AbortSignal }) => api<{ name: string; current: boolean }[]>('/api/git/branches', { signal }),
 }
-/** A file at the last commit (null: new) and now (null: deleted), for its diff tab. */
-export const gitTexts = (path: string) => api<Omit<ChangeTexts, 'version'>>(`/api/git/diff?path=${at(path)}`)
+/** A file as a revision has it: HEAD, ":" (the index) or a commit. */
+export interface GitShown {
+  path: string
+  rev: string
+  commit: string | null
+  exists: boolean
+  size: number
+  text: string | null
+  binary: boolean
+  tooLarge: boolean
+}
+export const gitShow = (path: string, rev: string) => api<GitShown>(`/api/git/show?path=${at(path)}&rev=${encodeURIComponent(rev)}`)
+
+/** A commit that changed a file, with the file's name in it. */
+export interface GitFileCommit extends GitCommit {
+  status: string | null
+  pathAt: string | null
+  from: string | null
+}
+export const gitFileLog = (path: string, limit = 50) => api<GitFileCommit[]>(`/api/git/log?path=${at(path)}&limit=${limit}`)
+
+/** A commit and the folder's files it changed. */
+export interface GitCommitFiles {
+  hash: string
+  parents: string[]
+  subject: string
+  author: string
+  at: string
+  files: { path: string; status: string; from: string | null }[]
+  truncated: boolean
+}
+export const gitCommitFiles = (hash: string) => api<GitCommitFiles>(`/api/git/commit?hash=${encodeURIComponent(hash)}`)
+
+/** Stages exactly this text as the file's (the file in the folder left alone). */
+export const gitStageText = (path: string, text: string) => api<GitStatus>('/api/git/stage-text', { body: { path, text } })
 export const gitStage = (paths: string[]) => api<GitStatus>('/api/git/stage', { body: { paths } })
 export const gitUnstage = (paths: string[]) => api<GitStatus>('/api/git/unstage', { body: { paths } })
 export const gitDiscard = (paths: string[]) => api<GitStatus>('/api/git/discard', { body: { paths } })

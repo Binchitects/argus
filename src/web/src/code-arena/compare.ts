@@ -68,3 +68,45 @@ export function renamed(s: Side, rename: (p: string) => string): Side {
 
 /** The file chosen with "Select for Compare", waiting for "Compare with Selected". */
 export const compareSelection: { path: string | null } = { path: null }
+
+/** A change Monaco's compare found: its lines on each side (an end of 0: none on that side, after the start line). */
+export interface LineChange {
+  originalStartLineNumber: number
+  originalEndLineNumber: number
+  modifiedStartLineNumber: number
+  modifiedEndLineNumber: number
+}
+
+/** The changes lines from..to of the right side touch (a deletion: the line it sits after, or the next). */
+export function touched(changes: LineChange[], from: number, to: number): LineChange[] {
+  return changes.filter((c) =>
+    c.modifiedEndLineNumber > 0 ? c.modifiedStartLineNumber <= to && c.modifiedEndLineNumber >= from : c.modifiedStartLineNumber >= from - 1 && c.modifiedStartLineNumber <= to,
+  )
+}
+
+const flip = (c: LineChange): LineChange => ({
+  originalStartLineNumber: c.modifiedStartLineNumber,
+  originalEndLineNumber: c.modifiedEndLineNumber,
+  modifiedStartLineNumber: c.originalStartLineNumber,
+  modifiedEndLineNumber: c.originalEndLineNumber,
+})
+
+/**
+ * The left text with these changes taken from the right one (stage a change: the index with it; accept part of the
+ * agent's: the text before it with that part). Lines as the editor counts them: a final newline makes an empty last line.
+ */
+export function takeChanges(original: string, modified: string, take: LineChange[]): string {
+  const lines = original.split('\n')
+  const from = modified.split('\n')
+  for (const c of [...take].sort((a, b) => b.originalStartLineNumber - a.originalStartLineNumber)) {
+    const insert = c.modifiedEndLineNumber > 0 ? from.slice(c.modifiedStartLineNumber - 1, c.modifiedEndLineNumber) : []
+    if (c.originalEndLineNumber > 0) lines.splice(c.originalStartLineNumber - 1, c.originalEndLineNumber - c.originalStartLineNumber + 1, ...insert)
+    else lines.splice(c.originalStartLineNumber, 0, ...insert)
+  }
+  return lines.join('\n')
+}
+
+/** The right text with these changes put back as the left has them (unstage a change, revert one). */
+export function revertChanges(original: string, modified: string, revert: LineChange[]): string {
+  return takeChanges(modified, original, revert.map(flip))
+}

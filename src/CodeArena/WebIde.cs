@@ -57,9 +57,6 @@ internal sealed partial class WebApp
                 case ("GET", "/api/git/status"):
                     await res.JsonAsync(200, await _git.StatusAsync(ct), ct);
                     return true;
-                case ("GET", "/api/git/diff"):
-                    await res.JsonAsync(200, await _git.TextsAsync(Query(req, "path"), ct), ct);
-                    return true;
                 case ("GET", "/api/git/log"):
                     await res.JsonAsync(200, await _git.LogAsync(GitFile(req), Query(req, "limit"), ct), ct);
                     return true;

@@ -24,9 +24,58 @@ import {
   gitUnstage,
   nameOf,
   parentOf,
+  gitCommitFiles,
+  type GitCommit,
   type GitFile,
   type GitStatus,
 } from './ide-api'
+import type { Side } from './compare'
+
+/** A commit of the history: opened, the files it changed; each opens its change (the commit's parent ↔ the commit). */
+function CommitRow({ commit: c }: { commit: GitCommit }) {
+  const editor = useEditor()
+  const [open, setOpen] = useState(false)
+  const files = useQuery({ queryKey: ['code', 'git', 'commit', c.hash], queryFn: () => gitCommitFiles(c.hash), enabled: open, staleTime: Infinity })
+  return (
+    <li>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        title={`${c.hash} ${c.subject} — ${c.author}, ${new Date(c.at).toLocaleString()}`}
+        className="flex w-full min-w-0 items-baseline gap-2 px-3 py-0.5 text-left outline-none hover:bg-accent/70 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
+      >
+        <code className="shrink-0 font-mono text-[0.6875rem] text-muted-foreground">{c.hash.slice(0, 7)}</code>
+        <span className="min-w-0 truncate">{c.subject}</span>
+      </button>
+      {open && (
+        <ul aria-label={`Files of ${c.hash.slice(0, 7)}`} className="pl-4">
+          {files.isPending && <Skeleton className="mx-3 my-1 h-3.5" />}
+          {files.error && <li className="px-3 text-xs text-muted-foreground">{errorMessage(files.error)}</li>}
+          {files.data?.files.map((f) => (
+            <li key={f.path}>
+              <button
+                type="button"
+                onClick={() => {
+                  const root = (files.data?.parents.length ?? 0) === 0
+                  const left: Side = f.status === 'A' || root ? { kind: 'empty', path: f.path } : { kind: 'git', path: f.from ?? f.path, rev: `${files.data!.hash}^` }
+                  const right: Side = f.status === 'D' ? { kind: 'empty', path: f.path } : { kind: 'git', path: f.path, rev: files.data!.hash }
+                  void editor.compare(left, right)
+                }}
+                className="flex h-[1.375rem] w-full min-w-0 items-center gap-1.5 px-3 text-left outline-none hover:bg-accent/70 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
+              >
+                <FileIcon path={f.path} />
+                <span className={cn('truncate', f.status === 'D' && 'line-through')}>{nameOf(f.path)}</span>
+                <span className="min-w-0 truncate text-xs text-muted-foreground">{parentOf(f.path)}</span>
+                <span className={cn('ml-auto w-3 shrink-0 text-center font-mono text-[0.6875rem] font-semibold', tones[f.status] ?? 'text-muted-foreground')}>{f.status}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  )
+}
 
 const action =
   'grid size-6 place-items-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 [&_svg]:size-3.5'
@@ -97,8 +146,8 @@ export function SourceControlPanel() {
       <li key={`${list}:${f.path}`} className="group flex h-[1.375rem] items-center pr-1.5 hover:bg-accent/70 focus-within:bg-accent/70">
         <button
           type="button"
-          onClick={() => void editor.openDiff(f.path, 'git')}
-          title={`${f.path}: as the last commit has it, and now`}
+          onClick={() => void editor.openDiff(f.path, list === 'staged' ? 'staged' : 'git')}
+          title={list === 'staged' ? `${f.path}: as the last commit has it, and as staged` : `${f.path}: as staged (or committed), and now`}
           className="flex h-full min-w-0 flex-1 items-center gap-1.5 pl-3 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
         >
           <FileIcon path={f.path} />
@@ -222,10 +271,7 @@ export function SourceControlPanel() {
               </h3>
               <ul aria-label="Commits">
                 {(log.data ?? []).slice(0, 15).map((c) => (
-                  <li key={c.hash} className="flex min-w-0 items-baseline gap-2 px-3 py-0.5" title={`${c.hash} ${c.subject} — ${c.author}, ${new Date(c.at).toLocaleString()}`}>
-                    <code className="shrink-0 font-mono text-[0.6875rem] text-muted-foreground">{c.hash}</code>
-                    <span className="min-w-0 truncate">{c.subject}</span>
-                  </li>
+                  <CommitRow key={c.hash} commit={c} />
                 ))}
               </ul>
             </section>

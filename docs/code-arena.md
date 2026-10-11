@@ -230,8 +230,11 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   saving it then asks first.
 - **compare**: Monaco's diff editor, as VS Code's compare. The agent's changes
   to a file (as it was before the agent's first change, and now: from Agent
-  changes or the Explorer), a file's changes since the last commit (from
-  Source control), the file shown with what is saved (**Ctrl+K D**), with the
+  changes or the Explorer), a file's changes in Source control (not staged:
+  the index and the file; staged: the last commit and the index; a commit of
+  the history opens to the files it changed, each as its parent and it had
+  it; **Open File History…** and **Compare with Revision…** take any commit or
+  branch), the file shown with what is saved (**Ctrl+K D**), with the
   clipboard (**Ctrl+K C**; when the browser does not let the page read it,
   paste it in the box that opens), with another file (**Compare Active File
   With…**), or two files of the Explorer (right-click **Select for Compare**,
@@ -241,9 +244,14 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   sides, the counts, the previous and the next change (**Shift+Alt+F5**,
   **Alt+F5**), inline or side by side, whitespace ignored, unchanged lines
   folded (`diffEditor.*` in the settings), the sides swapped and Open file;
-  the agent's changes also have **Revert** (puts the file back; a file the
-  agent made is deleted) and **Accept** (keeps it), and Agent changes has
-  **Accept all**. A tab's right-click menu closes it, the others, those to its
+  and, for the change at the cursor (or those selected): **Stage** and
+  **Revert** in a change not staged (Ctrl+K Ctrl+Alt+S, Ctrl+K Ctrl+R: the
+  index takes exactly that change, the file stays), **Unstage** in a staged
+  one (Ctrl+K Ctrl+N), **Accept** and **Revert** in the agent's (Ctrl+K
+  Ctrl+Alt+A: the rest stays to review). The agent's changes also have
+  **Revert** (puts the file back; a file the agent made is deleted) and
+  **Accept** (keeps it) for the whole file, and Agent changes has **Accept
+  all**. A tab's right-click menu closes it, the others, those to its
   right, the saved ones or all, copies its path and compares it.
 - **search**: text across the files git sees (`.gitignore` holds), with match
   case, whole word, regular expression, and files to include or exclude; a
@@ -644,7 +652,6 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/jobs/stop` `{id}` | stops a command run with no time limit; 404 for no such job |
 | `POST /api/replace` `{q, case, word, regex, include, exclude, replacement, paths}` | replaces what that search finds (in `paths` only, when given): `{files: [{path, replaced, version}], count, truncated}` |
 | `GET /api/git/status` | `{repository, branch, ahead, behind, files: [{path, staged, changed, from}]}` (`staged`, `changed`: git's letters M, A, D, R, `?` untracked; null: none) |
-| `GET /api/git/diff?path=FILE` | `{path, original, modified}`: at the last commit (null: new) and now (null: deleted) |
 | `POST /api/git/stage`, `/api/git/unstage`, `/api/git/discard` `{paths}` | the status after; 409 `git` with what git said |
 | `POST /api/git/commit` `{message, all}` | commits what is staged (all of it first, with `all`): `{hash, status}`; 409 `nothing` when nothing is staged |
 | `GET /api/git/log`, `GET /api/git/branches`, `POST /api/git/switch` `{branch}` | the last 30 commits `[{hash, subject, author, at}]` (`limit` for another number, 1 to 1,000); the branches `[{name, current}]`; switches |

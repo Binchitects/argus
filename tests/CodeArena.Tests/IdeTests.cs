@@ -220,7 +220,7 @@ public sealed class IdeTests : IDisposable
             ("GET", "/api/problems", null),
             ("POST", "/api/problems/run", new()),
             ("GET", "/api/git/status", null),
-            ("GET", "/api/git/diff?path=inside.txt", null),
+            ("GET", "/api/git/show?path=inside.txt&rev=HEAD", null),
             ("GET", "/api/git/log", null),
             ("GET", "/api/git/branches", null),
             ("POST", "/api/git/stage", new() { ["paths"] = new JsonArray("inside.txt") }),

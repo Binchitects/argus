@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowLeftRight, ArrowUp, Check, Columns2, FileText, FoldVertical, Rows2, Space, Undo2 } from 'lucide-react'
+import { ArrowDown, ArrowLeftRight, ArrowUp, Check, CheckCheck, Columns2, FileText, FoldVertical, Minus, Plus, RotateCcw, Rows2, Space, Undo2 } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -38,6 +38,10 @@ export function CompareToolbar({ tab, change }: { tab: Tab; change?: Change }) {
   const [counts, setCounts] = useState<{ added: number; removed: number; changes: number } | null>(null)
   const next = useKeyFor('workbench.action.compareEditor.nextChange')
   const previous = useKeyFor('workbench.action.compareEditor.previousChange')
+  const stageKey = useKeyFor('git.stageSelectedRanges')
+  const unstageKey = useKeyFor('git.unstageSelectedRanges')
+  const revertKey = useKeyFor('git.revertSelectedRanges')
+  const acceptKey = useKeyFor('codeArena.changes.acceptSelectedRanges')
   const sideBySide = settings.get<boolean>('diffEditor.renderSideBySide')
   const ignoreWhitespace = settings.get<boolean>('diffEditor.ignoreTrimWhitespace')
   const folded = settings.get<boolean>('diffEditor.hideUnchangedRegions.enabled')
@@ -64,14 +68,14 @@ export function CompareToolbar({ tab, change }: { tab: Tab; change?: Change }) {
 
   const set = (key: string, value: boolean) => void settings.update(key, value).catch((e: unknown) => toast.error(errorMessage(e)))
   const shown = counts ?? (change ? { added: change.added, removed: change.removed, changes: -1 } : null)
-  const tag = tab.source === 'git' ? 'since the last commit' : tab.source === 'agent' ? "the agent's changes" : null
+  const tag = tab.source === 'git' ? 'not staged' : tab.source === 'staged' ? 'staged' : tab.source === 'agent' ? "the agent's changes" : null
   return (
     <div className="flex h-8 shrink-0 items-center gap-1.5 border-b px-3 text-xs text-muted-foreground">
       <span className="min-w-0 truncate font-mono" title={tab.path}>
         {tab.left && tab.right ? `${sideLabel(tab.left)} ↔ ${sideLabel(tab.right)}` : tab.path}
       </span>
       {tag && (
-        <span className="hidden shrink-0 rounded-sm bg-primary/10 px-1.5 py-0.5 text-primary-ink lg:inline" title={tab.source === 'git' ? 'At the last commit, and now' : 'Before the agent, and now'}>
+        <span className="hidden shrink-0 rounded-sm bg-primary/10 px-1.5 py-0.5 text-primary-ink lg:inline" title={tab.source === 'git' ? 'The index, and the file now' : tab.source === 'staged' ? 'The last commit, and the index' : 'Before the agent, and now'}>
           {tag}
         </span>
       )}
@@ -99,6 +103,26 @@ export function CompareToolbar({ tab, change }: { tab: Tab; change?: Change }) {
       <Toggle label="Swap the sides" onClick={() => ed.swapSides(tab.id)}>
         <ArrowLeftRight />
       </Toggle>
+      {tab.source === 'git' && (
+        <Toggle label="Stage the change at the cursor" keys={stageKey} onClick={() => void ed.changeAction('stage')}>
+          <Plus />
+        </Toggle>
+      )}
+      {tab.source === 'staged' && (
+        <Toggle label="Unstage the change at the cursor" keys={unstageKey} onClick={() => void ed.changeAction('unstage')}>
+          <Minus />
+        </Toggle>
+      )}
+      {tab.source === 'agent' && (
+        <Toggle label="Accept the change at the cursor" keys={acceptKey} onClick={() => void ed.changeAction('accept')}>
+          <CheckCheck />
+        </Toggle>
+      )}
+      {(tab.source === 'git' || tab.source === 'agent') && tab.right?.kind === 'file' && (
+        <Toggle label="Revert the change at the cursor" keys={revertKey} onClick={() => void ed.changeAction('revert')}>
+          <RotateCcw />
+        </Toggle>
+      )}
       {tab.right?.kind === 'file' && !change?.deleted && (
         <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => void ed.open(tab.path)}>
           <FileText /> Open file

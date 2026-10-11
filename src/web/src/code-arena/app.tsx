@@ -25,7 +25,7 @@ import { useEditor } from './editor-state'
 import { Explorer } from './explorer'
 import { HelpProvider } from './help'
 import { useOpenHelp } from './help-context'
-import { allFilesQuery, changesQuery, folderQuery, gitStatusQuery, parentOf, preferencesQuery, problemsQuery, savePreferences, writeFile } from './ide-api'
+import { allFilesQuery, changesQuery, folderQuery, gitBranchesQuery, gitFileLog, gitStatusQuery, parentOf, preferencesQuery, problemsQuery, savePreferences, writeFile } from './ide-api'
 import { setContext, useKeyboard, useKeyFor } from './keyboard'
 import { quickPick } from './quick-pick'
 import { QuickPickHost } from './quick-pick-host'
@@ -34,7 +34,7 @@ import { TrustDialog } from './trust-dialog'
 import { askTrust } from './trust'
 import { formatError, formatModel, formattersOf, skipFormat } from './format'
 import { clipboardText } from './paste'
-import { compareSelection } from './compare'
+import { compareSelection, type Side } from './compare'
 import { SearchPanel } from './search'
 import { SettingsProvider, useSettings, workspaceSettingsPath } from './settings'
 import { colorThemes, themeNamed } from './settings-schema'
@@ -477,6 +477,45 @@ function Workbench({
       toast.error(formatError(e))
     }
   }
+  /** A revision (a branch, one of the last commits) against the file as the editor holds it. */
+  const compareWithRevision = async () => {
+    const path = active?.path
+    if (!path) return
+    const [branches, log] = await Promise.all([queryClient.fetchQuery(gitBranchesQuery).catch(() => []), gitFileLog(path, 30).catch(() => [])])
+    const picked = await quickPick({
+      title: 'Compare with revision',
+      placeholder: `Select a branch or a commit to compare ${path.slice(path.lastIndexOf('/') + 1)} with`,
+      items: [
+        { id: 'HEAD', label: 'HEAD', description: 'the last commit', group: '' },
+        { id: ':', label: 'Index', description: 'what is staged', group: '' },
+        ...branches.map((b) => ({ id: b.name, label: b.name, description: b.current ? 'current branch' : undefined, group: 'branches' })),
+        ...log.filter((c) => c.pathAt).map((c) => ({ id: c.hash, label: c.subject, description: `${c.hash.slice(0, 8)} · ${c.author}`, group: 'commits of the file' })),
+      ],
+    })
+    if (picked) await ed.compare({ kind: 'git', path, rev: picked.id }, { kind: 'file', path })
+  }
+  /** The commits that changed the file: one opens its change to the file (its parent ↔ it). */
+  const fileHistory = async () => {
+    const path = active?.path
+    if (!path) return
+    let log
+    try {
+      log = await gitFileLog(path)
+    } catch (e) {
+      toast.error(errorMessage(e))
+      return
+    }
+    const picked = await quickPick({
+      title: `History of ${path.slice(path.lastIndexOf('/') + 1)}`,
+      placeholder: 'Select a commit to see its change to the file',
+      items: log.map((c) => ({ id: c.hash, label: c.subject, description: `${c.hash.slice(0, 8)} · ${c.author} · ${new Date(c.at).toLocaleDateString()}`, value: c })),
+    })
+    const c = picked?.value
+    if (!c?.pathAt) return
+    const left: Side = c.status === 'A' ? { kind: 'empty', path: c.pathAt } : { kind: 'git', path: c.from ?? c.pathAt, rev: `${c.hash}^` }
+    const right: Side = c.status === 'D' ? { kind: 'empty', path: c.pathAt } : { kind: 'git', path: c.pathAt, rev: c.hash }
+    await ed.compare(left, right)
+  }
   const workbenchCommands: Command[] = [
     { id: 'workbench.action.showCommands', category: 'View', title: 'Show All Commands', hidden: true, run: () => setPalette(true) },
     { id: 'workbench.action.quickOpen', category: 'File', title: 'Go to File…', run: () => setQuickOpen(true) },
@@ -540,6 +579,13 @@ function Workbench({
     { id: 'compareFiles', category: 'File', title: 'Compare with Selected', enabled: () => file && !!compareSelection.path && compareSelection.path !== active?.path, run: () => active && compareSelection.path && void ed.compare({ kind: 'file', path: compareSelection.path }, { kind: 'file', path: active.path }) },
     { id: 'workbench.action.compareEditor.nextChange', category: 'Compare', title: 'Go to Next Change', enabled: () => active?.kind === 'diff', run: () => ed.diffEditor()?.goToDiff('next') },
     { id: 'workbench.action.compareEditor.previousChange', category: 'Compare', title: 'Go to Previous Change', enabled: () => active?.kind === 'diff', run: () => ed.diffEditor()?.goToDiff('previous') },
+    { id: 'git.stageSelectedRanges', category: 'Git', title: 'Stage Selected Ranges', enabled: () => active?.source === 'git', run: () => void ed.changeAction('stage') },
+    { id: 'git.unstageSelectedRanges', category: 'Git', title: 'Unstage Selected Ranges', enabled: () => active?.source === 'staged', run: () => void ed.changeAction('unstage') },
+    { id: 'git.revertSelectedRanges', category: 'Git', title: 'Revert Selected Ranges', enabled: () => (active?.source === 'git' || active?.source === 'agent') && active.right?.kind === 'file', run: () => void ed.changeAction('revert') },
+    { id: 'codeArena.changes.acceptSelectedRanges', category: 'Code Arena', title: "Accept the Agent's Selected Changes", enabled: () => active?.source === 'agent', run: () => void ed.changeAction('accept') },
+    { id: 'git.openChange', category: 'Git', title: 'Open Changes', enabled: () => file, run: () => active && void ed.openDiff(active.path, 'git') },
+    { id: 'codeArena.git.compareWithRevision', category: 'Git', title: 'Compare with Revision…', enabled: () => file, run: () => void compareWithRevision() },
+    { id: 'codeArena.git.fileHistory', category: 'Git', title: 'Open File History…', enabled: () => file, run: () => void fileHistory() },
     { id: 'codeArena.compare.swapSides', category: 'Compare', title: 'Swap Left and Right Side', enabled: () => active?.kind === 'diff', run: () => active && ed.swapSides(active.id) },
     { id: 'toggle.diff.renderSideBySide', category: 'Compare', title: 'Toggle Inline View', run: () => void settings.update('diffEditor.renderSideBySide', !settings.get('diffEditor.renderSideBySide')) },
     { id: 'toggle.diff.ignoreTrimWhitespace', category: 'Compare', title: 'Toggle Ignore Trim Whitespace', run: () => void settings.update('diffEditor.ignoreTrimWhitespace', !settings.get('diffEditor.ignoreTrimWhitespace')) },

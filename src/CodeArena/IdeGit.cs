@@ -124,32 +124,6 @@ internal sealed partial class IdeGit(Workspace workspace)
         };
     }
 
-    /// <summary>A file at the last commit (null: it is new) and now in the folder (null: it is deleted).</summary>
-    public async Task<JsonObject> TextsAsync(string? path, CancellationToken ct)
-    {
-        await RequireRootAsync(ct);
-        if (string.IsNullOrEmpty(path))
-        {
-            throw new IdeError(400, "invalid", "Say which file.");
-        }
-        string full;
-        try
-        {
-            full = workspace.Resolve(path);
-        }
-        catch (ToolError e)
-        {
-            throw new IdeError(403, "outside", e.Message);
-        }
-        var (code, before) = await Git(workspace.Root, ["show", $"HEAD:./{path}"], ct);
-        return new JsonObject
-        {
-            ["path"] = path,
-            ["original"] = code == 0 ? before : null,
-            ["modified"] = File.Exists(full) ? await File.ReadAllTextAsync(full, ct) : null,
-        };
-    }
-
     /// <summary>Stages files (all of what changed in them, a deleted one's deletion too).</summary>
     public async Task StageAsync(JsonObject body, CancellationToken ct) =>
         Check(await Git(workspace.Root, ["--literal-pathspecs", "add", "-A", "--", .. Paths(body)], ct), "staged");

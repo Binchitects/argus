@@ -99,11 +99,9 @@ public sealed class SourceControlTests : IDisposable
         Assert.Equal("main", status["branch"]!.GetValue<string>());
         Assert.Equal(new Dictionary<string, (string?, string?)> { ["src/app.ts"] = (null, "M"), ["notes.txt"] = (null, "?") }, Files(status));
 
-        // Before and now, for the diff tab.
-        var texts = await web.GetJsonAsync("/api/git/diff?path=src%2Fapp.ts");
-        Assert.Equal("const total = 1\n", texts["original"]!.GetValue<string>());
-        Assert.Equal("const total = 2\n", texts["modified"]!.GetValue<string>());
-        Assert.Null((await web.GetJsonAsync("/api/git/diff?path=notes.txt"))["original"]);
+        // The last commit's, for the compare (now is the file's own).
+        Assert.Equal("const total = 1\n", (await web.GetJsonAsync("/api/git/show?path=src%2Fapp.ts&rev=HEAD"))["text"]!.GetValue<string>());
+        Assert.False((await web.GetJsonAsync("/api/git/show?path=notes.txt&rev=HEAD"))["exists"]!.GetValue<bool>());
 
         // Staged, then not.
         var staged = JsonNode.Parse(await (await web.PostAsync("/api/git/stage", new JsonObject { ["paths"] = new JsonArray("src/app.ts") })).Content.ReadAsStringAsync())!;

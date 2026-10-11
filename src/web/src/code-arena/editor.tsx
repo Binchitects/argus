@@ -16,13 +16,13 @@ import { cn } from '@/lib/utils'
 import { asks, chatBridge, type Piece } from './bridge'
 import { allCommands, onCommandsChange, runCommand } from './commands'
 import { installCompletions } from './completion'
-import { compareId, renamed, sideLabel, sidePath, type Side } from './compare'
+import { compareId, renamed, revertChanges, sideLabel, sidePath, takeChanges, touched, type LineChange, type Side } from './compare'
 import { CompareToolbar } from './compare-toolbar'
 import { EditorContext, loadMonaco, rankFiles, useEditor, type DiffModels, type DiffSource, type EditorApi, type FileModel, type MonacoModule, type Reveal, type SaveReason, type Tab, type Unsaved } from './editor-state'
-import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitTexts, nameOf, readFile, revertChange, userFileQuery, within, writeFile, writeUserFile, type Change, type CheckProblem, type OpenedFile, type Saved, type UserFileName } from './ide-api'
+import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitShow, gitStageText, gitStatusQuery, nameOf, readFile, revertChange, userFileQuery, within, writeFile, writeUserFile, type Change, type CheckProblem, type OpenedFile, type Saved, type UserFileName } from './ide-api'
 import { keymap, useKeyFor } from './keyboard'
 import { monacoKeybinding } from './keys'
-import { installFormatting, offerFormatting } from './format'
+import { installFormatting, minimalEdit, offerFormatting } from './format'
 import { saveParticipants } from './save-participants'
 import { useSettings, workspaceSettingsPath } from './settings'
 import { settingsSchema } from './settings-schema'
@@ -30,14 +30,14 @@ import { useMonacoTheme } from './theme'
 import { diffOptionsOf, editorOptionsOf, isUserFile } from './editor-options'
 
 /** A diff's tab: the agent's changes to a file ("diff:"), or the file's since the last commit ("git:"). */
-const diffId = (path: string, source: DiffSource = 'agent') => `${source === 'git' ? 'git' : 'diff'}:${path}`
+const diffId = (path: string, source: DiffSource = 'agent') => `${source === 'git' ? 'git' : source === 'staged' ? 'staged' : 'diff'}:${path}`
 
 /** The files a tab holds in the editor: a file tab's own, a compare's live sides. */
 const fileSidesOf = (t: Tab): string[] =>
   t.kind === 'file' ? [t.path] : [t.left, t.right].flatMap((x) => (x?.kind === 'file' ? [x.path] : []))
 
 /** A compare tab's id for its sides: the agent's and git's as they were, any other by its sides. */
-const idOf = (t: Pick<Tab, 'source' | 'path' | 'left' | 'right'>) => (t.source === 'agent' || t.source === 'git' ? diffId(t.path, t.source) : compareId(t.left!, t.right!))
+const idOf = (t: Pick<Tab, 'source' | 'path' | 'left' | 'right'>) => (t.source === 'compare' || !t.source ? compareId(t.left!, t.right!) : diffId(t.path, t.source))
 
 /**
  * The editor's state: the open tabs, a Monaco model per file, one code editor
@@ -448,9 +448,11 @@ export function EditorProvider({ children }: { children: ReactNode }) {
           if (f.text === null) throw new Error(`${nameOf(side.path)} is not text: it cannot be compared.`)
           return f.text
         }
-        case 'git':
-          if (side.rev !== 'HEAD') throw new Error('Only the last commit can be compared here.')
-          return (await gitTexts(side.path)).original ?? ''
+        case 'git': {
+          const shown = await gitShow(side.path, side.rev)
+          if (shown.binary || shown.tooLarge) throw new Error(`${nameOf(side.path)} at ${side.rev === ':' ? 'the index' : side.rev} is ${shown.binary ? 'not text' : 'larger than 5 MB'}: it cannot be compared.`)
+          return shown.text ?? ''
+        }
         case 'agent':
           return (await changeTexts(side.path)).original ?? ''
         case 'clipboard':
@@ -526,12 +528,23 @@ export function EditorProvider({ children }: { children: ReactNode }) {
 
     const compare = (left: Side, right: Side) => openCompare({ kind: 'diff', source: 'compare', left, right, path: sidePath(right) ?? sidePath(left) ?? '' })
 
-    /** The agent's changes to a file (before its first change ↔ the file), or the file's since the last commit (HEAD ↔ the file); a side made or deleted is empty. */
+    /**
+     * A change's sides, as VS Code's: the agent's (before its first change ↔ the file), a file's not staged (the index ↔
+     * the file; nothing on the left for a file git does not know), its staged ones (HEAD ↔ the index; a rename's old name
+     * on the left). A side made or deleted is empty.
+     */
     const sidesOf = async (path: string, source: DiffSource): Promise<{ left: Side; right: Side }> => {
-      const texts = source === 'git' ? await gitTexts(path) : await changeTexts(path)
-      const left: Side = texts.original === null ? { kind: 'empty', path } : source === 'git' ? { kind: 'git', path, rev: 'HEAD' } : { kind: 'agent', path }
-      const right: Side = texts.modified === null ? { kind: 'empty', path } : { kind: 'file', path }
-      return { left, right }
+      if (source === 'agent') {
+        const texts = await changeTexts(path)
+        return { left: texts.original === null ? { kind: 'empty', path } : { kind: 'agent', path }, right: texts.modified === null ? { kind: 'empty', path } : { kind: 'file', path } }
+      }
+      const status = await queryClient.fetchQuery({ ...gitStatusQuery, staleTime: 1_000 })
+      const f = status.files?.find((x) => x.path === path)
+      if (source === 'staged') {
+        const left: Side = f?.staged === 'A' ? { kind: 'empty', path } : { kind: 'git', path: f?.staged === 'R' && f.from ? f.from : path, rev: 'HEAD' }
+        return { left, right: f?.staged === 'D' ? { kind: 'empty', path } : { kind: 'git', path, rev: ':' } }
+      }
+      return { left: f?.changed === '?' ? { kind: 'empty', path } : { kind: 'git', path, rev: ':' }, right: f?.changed === 'D' ? { kind: 'empty', path } : { kind: 'file', path } }
     }
 
     const openDiff = async (path: string, source: DiffSource = 'agent') => {
@@ -562,7 +575,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       const tab = tabsRef.current.find((t) => t.id === id)
       if (!tab || tab.kind !== 'diff') return
       try {
-        if (tab.source === 'agent' || tab.source === 'git') update(id, await sidesOf(tab.path, tab.source))
+        if (tab.source && tab.source !== 'compare') update(id, await sidesOf(tab.path, tab.source))
         await loadSides(id)
         collect()
       } catch (e) {
@@ -579,6 +592,47 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         return
       }
       add({ id: kind, kind, path: kind === 'settings' ? 'Settings' : 'Keyboard Shortcuts', status: 'ready', dirty: false })
+    }
+
+    /**
+     * One change, or the changes the selection touches, of the compare shown: staged (the index takes them from the file),
+     * unstaged (the index puts them back as HEAD has them), reverted (the file puts them back, as one edit Undo takes back)
+     * or accepted (the agent's: what was before it takes them, and the rest stays to review).
+     */
+    const changeAction = async (kind: 'stage' | 'unstage' | 'revert' | 'accept') => {
+      const tab = tabsRef.current.find((t) => t.id === activeRef.current)
+      const de = diffEditor.current
+      const models = tab?.kind === 'diff' ? modelsOf(tab) : null
+      if (!tab || !de || !models) return
+      const original = models.original.getValue()
+      const modified = models.modified.getValue()
+      const sel = de.getModifiedEditor().getSelection?.()
+      const at = sel ?? { startLineNumber: 1, endLineNumber: models.modified.getLineCount() }
+      const picked = touched((de.getLineChanges() ?? []) as LineChange[], at.startLineNumber, at.endLineNumber)
+      if (picked.length === 0) {
+        toast.info('Put the cursor in a change, or select the lines of the changes.')
+        return
+      }
+      try {
+        if (kind === 'stage' && tab.source === 'git') queryClient.setQueryData(gitStatusQuery.queryKey, await gitStageText(tab.path, takeChanges(original, modified, picked)))
+        else if (kind === 'unstage' && tab.source === 'staged') queryClient.setQueryData(gitStatusQuery.queryKey, await gitStageText(tab.path, revertChanges(original, modified, picked)))
+        else if (kind === 'accept' && tab.source === 'agent') queryClient.setQueryData(changesQuery.queryKey, await acceptChange(tab.path, takeChanges(original, modified, picked)))
+        else if (kind === 'revert' && tab.right?.kind === 'file') {
+          const model = models.modified
+          const edit = minimalEdit(modified, revertChanges(original, modified, picked))
+          if (edit) {
+            const a = model.getPositionAt(edit.start)
+            const b = model.getPositionAt(edit.end)
+            model.pushStackElement()
+            model.pushEditOperations([], [{ range: { startLineNumber: a.lineNumber, startColumn: a.column, endLineNumber: b.lineNumber, endColumn: b.column }, text: edit.text }], () => null)
+            model.pushStackElement()
+          }
+          return
+        } else return
+        await reloadCompare(tab.id)
+      } catch (e) {
+        toast.error(errorMessage(e))
+      }
     }
 
     /** Swaps a compare's sides (the agent's and git's become plain compares). */
@@ -709,7 +763,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         if (e instanceof ApiError && e.http === 404 && unchanged(f, at)) {
           drop(tabsRef.current.filter((t) => t.kind === 'file' && t.path === f.path).map((t) => t.id))
           for (const t of tabsRef.current.filter((x) => x.kind === 'diff' && fileSidesOf(x).includes(f.path))) {
-            if (t.source === 'agent' || t.source === 'git') void reloadCompare(t.id)
+            if (t.source && t.source !== 'compare') void reloadCompare(t.id)
             else drop([t.id])
           }
         }
@@ -974,6 +1028,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       saveAll, closeMany, reopenClosed, cycle, activateIndex, navigate, focusEditor, toggleWordWrap, languages, setLanguage, activeModel, autoSaveOn,
       saveWith: save,
       compare,
+      changeAction,
       openPage,
       swapSides,
       diffEditor: () => diffEditor.current,
@@ -1233,7 +1288,7 @@ export function EditorArea() {
                   role="tab"
                   aria-selected={selected}
                   aria-controls="editor-panel"
-                  title={t.kind === 'diff' ? (t.source === 'compare' ? name : `${t.path}: ${t.source === 'git' ? 'its changes since the last commit' : "the agent's changes"}`) : isUserFile(t.path) ? `Your ${t.path.slice(5)} (every project)` : t.path}
+                  title={t.kind === 'diff' ? (t.source === 'compare' ? name : `${t.path}: ${t.source === 'git' ? 'its changes, not staged' : t.source === 'staged' ? 'its staged changes' : "the agent's changes"}`) : isUserFile(t.path) ? `Your ${t.path.slice(5)} (every project)` : t.path}
                   onClick={() => ed.activate(t.id)}
                   onAuxClick={(e) => e.button === 1 && void ed.close(t.id)}
                   className="flex h-full max-w-56 items-center gap-1.5 pr-1 pl-3 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
@@ -1249,7 +1304,7 @@ export function EditorArea() {
                   )}
                   <span className="truncate">{name}</span>
                   {isUserFile(t.path) && <span className="text-xs text-muted-foreground">User</span>}
-                  {t.kind === 'diff' && t.source !== 'compare' && <span className="text-xs text-muted-foreground">{t.source === 'git' ? 'since commit' : 'changes'}</span>}
+                  {t.kind === 'diff' && t.source !== 'compare' && <span className="text-xs text-muted-foreground">{t.source === 'git' ? 'working tree' : t.source === 'staged' ? 'index' : 'changes'}</span>}
                   {t.dirty && <span className="sr-only">, not saved</span>}
                 </button>
                 <button
