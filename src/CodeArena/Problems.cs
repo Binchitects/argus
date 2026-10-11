@@ -11,9 +11,10 @@ internal sealed record Problem(string Path, int Line, int Column, string Severit
 /// The IDE's Problems: the project's own check run in the folder (its build, type check or linter: "checkCommand" in
 /// config.json, else the first found of dotnet build, tsc, npm run lint, cargo check, go vet and ruff), and the errors
 /// and warnings it printed, read by the common forms (MSBuild's and tsc's path(line,col), gcc's and most linters'
-/// path:line:col). Run by the person, not the agent: no sandbox, as their terminals.
+/// path:line:col). Run by the person, not the agent: no sandbox, as their terminals. A build follows the project's
+/// build configuration (Debug or Release, kept in its state).
 /// </summary>
-internal sealed partial class Problems(Workspace workspace, Config config)
+internal sealed partial class Problems(Workspace workspace, Config config, WorkspaceState? state = null)
 {
     /// <summary>The longest a check runs.</summary>
     public static readonly TimeSpan Limit = TimeSpan.FromMinutes(5);
@@ -46,10 +47,11 @@ internal sealed partial class Problems(Workspace workspace, Config config)
             return own;
         }
         var root = workspace.Root;
+        var release = state?.BuildConfiguration == "Release";
         bool Has(string pattern) => Directory.EnumerateFiles(root, pattern, SearchOption.TopDirectoryOnly).Any();
         if (Has("*.sln") || Has("*.slnx") || Has("*.csproj") || Has("*.fsproj"))
         {
-            return "dotnet build -nologo -v q -clp:NoSummary";
+            return $"dotnet build -c {(release ? "Release" : "Debug")} -nologo -v q -clp:NoSummary";
         }
         if (File.Exists(Path.Combine(root, "tsconfig.json")))
         {
@@ -61,7 +63,7 @@ internal sealed partial class Problems(Workspace workspace, Config config)
         }
         if (File.Exists(Path.Combine(root, "Cargo.toml")))
         {
-            return "cargo check --message-format=short";
+            return release ? "cargo check --release --message-format=short" : "cargo check --message-format=short";
         }
         if (File.Exists(Path.Combine(root, "go.mod")))
         {

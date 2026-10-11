@@ -33,11 +33,11 @@ internal sealed partial class WebApp
         _files = new IdeFiles(_rt.Workspace);
         _changes = new AgentChanges(_rt.Workspace);
         _terminals = new Terminals(_rt.Workspace, _rt.Config, _rt.Env.Env);
-        _problems = new Problems(_rt.Workspace, _rt.Config);
+        _state = new WorkspaceState(_rt.Env.Paths.DataDir, _rt.Workspace.Root);
+        _problems = new Problems(_rt.Workspace, _rt.Config, _state);
         _git = new IdeGit(_rt.Workspace);
         _preferences = new PagePreferences(Path.Combine(_rt.Env.Paths.DataDir, PagePreferences.FileName));
         _userFiles = new UserFiles(_rt.Env.Paths.ConfigDir);
-        _state = new WorkspaceState(_rt.Env.Paths.DataDir, _rt.Workspace.Root);
         _formatters = new Formatters(_files, _rt.Config, _state, () => _rt.Sandbox, _rt.Env.Env);
     }
 

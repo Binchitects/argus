@@ -68,6 +68,25 @@ public sealed class ProblemsTests : IDisposable
     }
 
     [Fact]
+    public void A_build_follows_the_projects_build_configuration_Debug_unless_Release_is_chosen()
+    {
+        var data = Directory.CreateDirectory(Path.Combine(_root, ".data")).FullName;
+        var state = new WorkspaceState(data, _root);
+        Problems Checked() => new(new Workspace(_root), new Config(), state);
+        Write("Cargo.toml", "[package]\nname = \"shop\"\n");
+        Assert.Equal("cargo check --message-format=short", Checked().Command());
+        state.Merge(new JsonObject { ["buildConfiguration"] = "Release" });
+        Assert.Equal("cargo check --release --message-format=short", Checked().Command());
+
+        Write("Shop.csproj", "<Project />");
+        Assert.StartsWith("dotnet build -c Release ", Checked().Command());
+        state.Merge(new JsonObject { ["buildConfiguration"] = null });
+        Assert.StartsWith("dotnet build -c Debug ", Checked().Command());
+        // Without the project's state (no IDE): Debug.
+        Assert.StartsWith("dotnet build -c Debug ", New().Command());
+    }
+
+    [Fact]
     public async Task The_IDE_runs_the_check_and_lists_what_it_found()
     {
         if (OperatingSystem.IsWindows())
@@ -90,6 +109,17 @@ public sealed class ProblemsTests : IDisposable
         Assert.Equal(2, problem["line"]!.GetValue<int>());
         Assert.Equal("error", problem["severity"]!.GetValue<string>());
         Assert.NotNull((await web.GetJsonAsync("/api/problems"))["ran"]);
+    }
+
+    [Fact]
+    public async Task The_page_chooses_Release_and_the_check_builds_it()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        h.Write("Shop.csproj", "<Project />");
+        await using var web = await WebRun.StartAsync(h);
+        Assert.StartsWith("dotnet build -c Debug ", (await web.GetJsonAsync("/api/problems"))["command"]!.GetValue<string>());
+        Assert.Equal(HttpStatusCode.OK, (await web.PostAsync("/api/workspace/state", new JsonObject { ["buildConfiguration"] = "Release" })).StatusCode);
+        Assert.StartsWith("dotnet build -c Release ", (await web.GetJsonAsync("/api/problems"))["command"]!.GetValue<string>());
     }
 
     [Fact]
