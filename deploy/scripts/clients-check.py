@@ -128,7 +128,7 @@ def main() -> int:
     domain = env("DOMAIN", "llm.localhost") or "llm.localhost"
     app, base, argus = f"https://{domain}", f"https://gateway.{domain}/v1", f"https://argus.{domain}/mcp"
     xhr = {"X-Requested-With": "fetch"}
-    print(f"Clients against {domain} (TLS with {CA.relative_to(REPO) if CA.exists() else 'system roots'})")
+    print(f"Clients against {domain} (TLS {'checked against the system roots' if env('ACME_EMAIL') else 'with Traefik’s own certificate, not checked'})")
 
     status, _, _ = call(f"{app}/api/auth/login", {"userName": "admin", "password": env("ADMIN_PASSWORD")}, xhr)
     if not check("the admin signs in", status == 200, str(status)):
