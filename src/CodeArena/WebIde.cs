@@ -59,7 +59,13 @@ internal sealed partial class WebApp
                     await res.JsonAsync(200, await _git.TextsAsync(Query(req, "path"), ct), ct);
                     return true;
                 case ("GET", "/api/git/log"):
-                    await res.JsonAsync(200, await _git.LogAsync(ct), ct);
+                    await res.JsonAsync(200, await _git.LogAsync(GitFile(req), Query(req, "limit"), ct), ct);
+                    return true;
+                case ("GET", "/api/git/show"):
+                    await res.JsonAsync(200, await _git.ShowAsync(GitFile(req), Query(req, "rev"), ct), ct);
+                    return true;
+                case ("GET", "/api/git/commit"):
+                    await res.JsonAsync(200, await _git.CommitFilesAsync(Query(req, "hash"), ct), ct);
                     return true;
                 case ("GET", "/api/git/branches"):
                     await res.JsonAsync(200, await _git.BranchesAsync(ct), ct);
@@ -228,6 +234,9 @@ internal sealed partial class WebApp
     private static string? Query(HttpRequest req, string name) => req.Query.GetValueOrDefault(name);
 
     private static bool Flag(HttpRequest req, string name) => Query(req, name) is "1" or "true";
+
+    /// <summary>The file a git call names (<c>path</c>), checked as every path of the page's is (403 outside the folder); null when none is named.</summary>
+    private string? GitFile(HttpRequest req) => Query(req, "path") is { Length: > 0 } path ? _files.Resolve(path) : null;
 
     private static JsonObject Body(HttpRequest req) => req.Json() ?? throw new IdeError(400, "invalid", "Send a JSON object.");
 

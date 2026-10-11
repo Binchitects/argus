@@ -166,23 +166,34 @@ internal sealed class IdeFiles(Workspace workspace)
             result["tooLarge"] = true;
             return result;
         }
-        var bytes = File.ReadAllBytes(full);
-        var bom = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
-        var body = bytes.AsSpan(bom ? 3 : 0);
-        if (body.IndexOf((byte)0) >= 0)
+        if (Text(File.ReadAllBytes(full)) is { } text)
         {
-            result["binary"] = true;
-            return result;
+            result["text"] = text;
         }
-        try
-        {
-            result["text"] = Strict.GetString(body);
-        }
-        catch (DecoderFallbackException)
+        else
         {
             result["binary"] = true;
         }
         return result;
+    }
+
+    /// <summary>A file's bytes as the editor's text, its byte-order mark left out; null when they are binary (a NUL byte, or not UTF-8).</summary>
+    public static string? Text(ReadOnlySpan<byte> bytes)
+    {
+        var bom = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
+        var body = bytes[(bom ? 3 : 0)..];
+        if (body.IndexOf((byte)0) >= 0)
+        {
+            return null;
+        }
+        try
+        {
+            return Strict.GetString(body);
+        }
+        catch (DecoderFallbackException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Saves a file (its byte-order mark kept), unless it changed on disk since the page read it at <paramref name="version"/>.</summary>
