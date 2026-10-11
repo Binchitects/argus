@@ -434,6 +434,7 @@ public sealed class RunConfigTests : IDisposable
             {
               "configurations": [
                 { "name": "Greet", "type": "cppdbg", "request": "launch", "program": "/bin/sh", "args": ["-c", "echo \"hello ${input:who} at ${lineNumber}\"; sleep 30"] },
+                { "name": "Java", "type": "java", "request": "launch", "mainClass": "App" },
               ],
               "inputs": [{ "id": "who", "type": "promptString", "description": "Who?" }],
             }
@@ -465,9 +466,8 @@ public sealed class RunConfigTests : IDisposable
         var stopped = await web.PostAsync("/api/run/stop", new JsonObject { ["terminal"] = id });
         Assert.Equal(129, JsonNode.Parse(await stopped.Content.ReadAsStringAsync())!["exitCode"]!.GetValue<int>());
         Assert.Equal(HttpStatusCode.NotFound, (await web.PostAsync("/api/run/stop", new JsonObject { ["terminal"] = "99" })).StatusCode);
-        body["noDebug"] = false;
-        Assert.Equal("not_yet", await StatusAsync(await web.PostAsync("/api/run/start", body), HttpStatusCode.NotImplemented));
-        body["noDebug"] = true;
+        // With the debugger: made ready here, then started as a debug session, which says what it cannot debug.
+        Assert.Equal("unsupported", await StatusAsync(await web.PostAsync("/api/run/start", new JsonObject { ["name"] = "Java", ["noDebug"] = false }), HttpStatusCode.BadRequest));
         body["context"] = new JsonObject { ["file"] = "../outside.ts" };
         Assert.Equal(HttpStatusCode.Forbidden, (await web.PostAsync("/api/run/start", body)).StatusCode);
 

@@ -264,7 +264,16 @@ internal sealed partial class WebApp
                 case ("POST", "/api/run/start"):
                 {
                     var body = Body(req);
-                    await res.JsonAsync(200, await Task.Run(() => _runs.StartAsync(body), ct), ct);
+                    if (body.Bool("noDebug") == true)
+                    {
+                        await res.JsonAsync(200, await Task.Run(() => _runs.StartAsync(body), ct), ct);
+                    }
+                    else
+                    {
+                        // With its debugger: the configuration made ready here, then a debug session as /api/debug/start starts one.
+                        var configuration = await Task.Run(() => _runs.DebugConfigurationAsync(body), ct);
+                        await DebugStartAsync(new JsonObject { ["configuration"] = configuration }, res, ct);
+                    }
                     return true;
                 }
                 case ("POST", "/api/run/stop"):

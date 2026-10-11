@@ -286,7 +286,8 @@ internal sealed class RunConfigs(Workspace workspace, Terminals terminals, Tasks
     /// <summary>
     /// Runs a configuration without its debugger ({name, noDebug: true, context, inputs, cols, rows}): its preLaunchTask
     /// first (waited for; a failure stops it, 409 task_failed), then its program in a terminal of its own, then its
-    /// postDebugTask once it ended. {terminal, configuration, command}. 501 not_yet for debugging.
+    /// postDebugTask once it ended. {terminal, configuration, command}. Debugging goes through
+    /// <see cref="DebugConfigurationAsync"/>; 501 not_yet here.
     /// </summary>
     public async Task<JsonObject> StartAsync(JsonObject body)
     {
@@ -345,6 +346,30 @@ internal sealed class RunConfigs(Workspace workspace, Terminals terminals, Tasks
             ["configuration"] = resolved.Configuration,
             ["command"] = run.Line,
         };
+    }
+
+    /// <summary>
+    /// A configuration made ready for its debugger ({name, context, inputs, cols, rows}): its variables filled in, its
+    /// preLaunchTask run first and waited for (a failure stops it, 409 task_failed), a detected .NET program as MSBuild
+    /// built it. The debug session's start takes it from there.
+    /// </summary>
+    public async Task<JsonObject> DebugConfigurationAsync(JsonObject body)
+    {
+        var name = body.Str("name") ?? throw new IdeError(400, "invalid", "Say which configuration to debug: its name.");
+        var set = Load();
+        var config = Find(set, name);
+        var resolved = Resolve(set, config, RunContext.From(body["context"]), RunVariables.Answers(body["inputs"]));
+        var (cols, rows) = (body.Int("cols") ?? 80, body.Int("rows") ?? 24);
+        if (resolved.Before is { } before && await tasks.RunToReadyAsync(before, config.Configuration.Str("preLaunchTask")!, cols, rows) is { Failed: true } failed)
+        {
+            throw Tasks.Failed(failed);
+        }
+        if (config.Project is { } project && resolved.Configuration.Str("type") == "coreclr" && await TargetPathAsync(project) is { } built)
+        {
+            resolved.Configuration["program"] = built;
+        }
+        resolved.Configuration["name"] ??= name;
+        return resolved.Configuration;
     }
 
     /// <summary>A run's postDebugTask, once its program ended; one that cannot start (Code Arena stopping, too many terminals) is not run.</summary>
