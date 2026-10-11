@@ -255,7 +255,7 @@ public sealed class TimeTool(TimeProvider clock) : IChatTool
 
 /// <summary>Pictures from the gateway's image model, kept as the person's files.</summary>
 public sealed partial class ImageTool(ChatModels models, GatewayChat gateway, AppDbContext db, Safeguards.Safeguards safeguards, Models.MediaControl media,
-    Gateway.PriceBook prices, Storage.StorageQuotas quotas, Gateway.Credit credit) : IChatTool
+    Gateway.PriceBook prices, Storage.StorageQuotas quotas, Gateway.Credit credit, Models.ModelPolicy policy, Operations.Modules modules) : IChatTool
 {
     public static readonly string[] Sizes = ["1024x1024", "1024x768", "768x1024", "768x768", "512x512"];
 
@@ -265,19 +265,38 @@ public sealed partial class ImageTool(ChatModels models, GatewayChat gateway, Ap
     public string Icon => "image";
 
     public async Task<string?> UnavailableAsync(CancellationToken ct) =>
-        await models.ImageModelAsync(ct) is null ? "The gateway serves no picture model: turn it on under Admin -> Models (the imagegen module runs it)." : null;
+        (await OursAsync(ct)).Count == 0 && await models.ImageModelAsync(ct) is null
+            ? "There is no picture model: add one under Admin -> Models (the imagegen module runs it)." : null;
+
+    /// <summary>This stack's picture models, while its picture server runs (the imagegen module).</summary>
+    private async Task<List<string>> OursAsync(CancellationToken ct) =>
+        await modules.HasAsync("imagegen", ct) ? [.. media.All.Where(m => m.Mode == Llm.Core.Models.MediaModes.Image).Select(m => m.Name)] : [];
 
     public async Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct)
     {
-        var model = await models.ImageModelAsync(ct) ?? throw new McpException("The gateway serves no image model.");
+        // This stack's picture models the person may use (the models' access rules), the chat's own first; else the gateway's.
+        var ours = await OursAsync(ct);
+        var allowed = ours.Count > 0 ? await policy.AllowedAsync(context.User, ours, ct) : [];
+        var chosen = media.Pick(Llm.Core.Models.MediaModes.Image, null, allowed)?.Name
+            ?? (ours.Count == 0 ? (await models.ImageModelAsync(ct))?.Name : null)
+            ?? throw new McpException("There is no picture model you may use (Admin -> Models).");
+        var choices = ours.Where(allowed.Contains).ToList();
+        var parameters = new JsonObject
+        {
+            ["prompt"] = Schema.Text("What to draw, in detail"),
+            ["size"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray([.. Sizes.Select(s => (JsonNode)s)]), ["description"] = "width x height; default 1024x1024" },
+        };
+        if (choices.Count > 1)
+        {
+            parameters["model"] = new JsonObject
+            {
+                ["type"] = "string", ["enum"] = new JsonArray([.. choices.Select(c => (JsonNode)c)]),
+                ["description"] = $"the picture model, when the person names one; default {chosen}",
+            };
+        }
         return new LocalRun(
             [Schema.Function("generate_image", "Makes a picture from a description and shows it to the person. Write the prompt in English, " +
-                "concrete and visual: subject, setting, style, lighting, composition.",
-                new JsonObject
-                {
-                    ["prompt"] = Schema.Text("What to draw, in detail"),
-                    ["size"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray([.. Sizes.Select(s => (JsonNode)s)]), ["description"] = "width x height; default 1024x1024" },
-                }, "prompt")],
+                "concrete and visual: subject, setting, style, lighting, composition.", parameters, "prompt")],
             "When the person asks for a picture, call generate_image. The picture is shown to them under your answer: " +
             "do not repeat it, link it or write its data; say in a sentence what you made.",
             async (_, args, token) =>
@@ -288,6 +307,7 @@ public sealed partial class ImageTool(ChatModels models, GatewayChat gateway, Ap
                     return new ToolResult("Say what to draw in 'prompt'.", IsError: true);
                 }
                 var size = Schema.Str(args, "size") is { } s && Sizes.Contains(s) ? s : Sizes[0];
+                var model = new { Name = Schema.Str(args, "model") is { } named && choices.Contains(named) ? named : chosen };
                 if (await quotas.ToolRefusalAsync(context.User.Id, "picture", token) is { } full)
                 {
                     return new ToolResult(full, IsError: true);

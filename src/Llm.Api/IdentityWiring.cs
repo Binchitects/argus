@@ -341,6 +341,7 @@ public static class IdentityWiring
         services.AddHostedService(sp => sp.GetRequiredService<Models.Provisioning>());
         services.AddHttpClient(Models.MediaControl.Client, c => c.Timeout = TimeSpan.FromSeconds(60));
         services.AddHttpClient(Models.ModelDownloads.SpeechClient, c => c.Timeout = TimeSpan.FromMinutes(30));
+        services.Configure<Models.MediaOptions>(config.GetSection("Media"));
         services.AddSingleton<Models.MediaControl>();
         services.AddHostedService(sp => sp.GetRequiredService<Models.MediaControl>());
         services.Configure<Schedules.ScheduleOptions>(config.GetSection("Schedules"));

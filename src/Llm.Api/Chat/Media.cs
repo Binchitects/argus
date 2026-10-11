@@ -159,7 +159,7 @@ public sealed partial class Media(SandboxClient sandbox, AppDbContext db, Gatewa
         {
             return "";
         }
-        var model = await models.OfModeAsync("audio_transcription", media.All.FirstOrDefault(m => m.Mode == Llm.Core.Models.MediaModes.Transcription)?.Name, ct)
+        var model = await models.OfModeAsync("audio_transcription", media.Pick(Llm.Core.Models.MediaModes.Transcription)?.Name, ct)
             ?? throw new MediaException("The gateway has no speech to text model (the audio module).");
         var owner = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == a.UserId, ct);
         // Sound turned into text counts to its owner's speech credit.

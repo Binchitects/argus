@@ -50,7 +50,7 @@ public static class Talk
         {
             return AuthEndpoints.Problem(413, "too_large", "That recording is too long: say it in shorter parts.");
         }
-        if (await models.OfModeAsync("audio_transcription", media.All.FirstOrDefault(m => m.Mode == Llm.Core.Models.MediaModes.Transcription)?.Name, ct) is not { } model)
+        if (await models.OfModeAsync("audio_transcription", media.Pick(Llm.Core.Models.MediaModes.Transcription)?.Name, ct) is not { } model)
         {
             return AuthEndpoints.Problem(503, "no_transcription", "The gateway has no speech to text model (the audio module).");
         }

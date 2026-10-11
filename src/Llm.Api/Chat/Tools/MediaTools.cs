@@ -128,12 +128,10 @@ public static partial class Voices
 /// <summary>Short videos from the stack's video server (its video model, Admin -> Models), kept as the person's files.</summary>
 /// <remarks>The video server is not behind the gateway: each clip is booked in the gateway's request log by the app, at its price per second.</remarks>
 public sealed partial class VideoTool(IHttpClientFactory http, Operations.Modules modules, AppDbContext db, Safeguards.Safeguards safeguards, MediaControl media,
-    Gateway.PriceBook prices, Gateway.SpendLog spendLog, ChatKey chatKey, Storage.StorageQuotas quotas, Gateway.Credit credit) : IChatTool
+    Gateway.PriceBook prices, Gateway.SpendLog spendLog, ChatKey chatKey, Storage.StorageQuotas quotas, Gateway.Credit credit, ModelPolicy policy) : IChatTool
 {
     public const string Client = "videogen";
 
-    /// <summary>The video model a clip is made with: the first one (Admin -> Models).</summary>
-    private MediaControl.Model? Model => media.All.FirstOrDefault(m => m.Mode == Llm.Core.Models.MediaModes.Video);
 
     public string Id => "video";
     public string Title => "Video generation";
@@ -144,7 +142,15 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
         !await modules.HasAsync("videogen", ct) ? "The video server does not run here (the videogen module)."
         : !media.All.Any(m => m.Mode == Llm.Core.Models.MediaModes.Video) ? "There is no video model (Admin -> Models)." : null;
 
-    public Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct) => Task.FromResult<IToolRun>(new LocalRun(
+    public async Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct)
+    {
+        // The video model Settings names for the chat, else the first, of those the person may use.
+        var ours = media.All.Where(m => m.Mode == Llm.Core.Models.MediaModes.Video).Select(m => m.Name).ToList();
+        var chosen = media.Pick(Llm.Core.Models.MediaModes.Video, null, await policy.AllowedAsync(context.User, ours, ct));
+        return Run(context, chosen);
+    }
+
+    private LocalRun Run(ToolContext context, MediaControl.Model? Model) => new LocalRun(
         [Schema.Function("generate_video", "Makes a short video clip (1 to 5 seconds, no sound) from a description and shows it to the person. " +
             "Write the prompt in English, concrete and visual: subject, action, setting, camera movement, style, lighting.",
             new JsonObject
@@ -209,7 +215,7 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
             {
                 ["shown_to_the_person"] = true, ["file"] = file.FileName, ["seconds"] = seconds, ["model"] = model.Name,
             }.ToJsonString(Mcp.Plain), Files: [file]) { Cost = cost };
-        }));
+        });
 
     private sealed class VideoException(string message) : Exception(message);
 

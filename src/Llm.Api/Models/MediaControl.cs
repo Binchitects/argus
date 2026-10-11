@@ -21,6 +21,14 @@ namespace Llm.Api.Models;
 /// minutes (ten by default). With several replicas, the one that leads writes the control files and
 /// loads the speech models; a model asked for on another is told to it.
 /// </summary>
+/// <summary>Configuration section "Media": the models the chat uses unless a person names another (Settings → Model).</summary>
+public sealed class MediaOptions
+{
+    public string? PictureModel { get; set; }
+    public string? VideoModel { get; set; }
+    public string? TranscriptionModel { get; set; }
+}
+
 public sealed partial class MediaControl : BackgroundService
 {
     public const string Client = "media";
@@ -48,11 +56,12 @@ public sealed partial class MediaControl : BackgroundService
     private readonly TimeProvider clock;
     private readonly Replicas replicas;
     private readonly ILogger<MediaControl> logger;
+    private readonly IOptionsMonitor<MediaOptions> choices;
 
     public MediaControl(IServiceScopeFactory scopes, Modules modules, IHttpClientFactory http, IOptions<EngineOptions> engine, TimeProvider clock, Replicas replicas,
-        ILogger<MediaControl> logger)
+        ILogger<MediaControl> logger, IOptionsMonitor<MediaOptions> choices)
     {
-        (this.scopes, this.modules, this.http, this.engine, this.clock, this.replicas, this.logger) = (scopes, modules, http, engine, clock, replicas, logger);
+        (this.scopes, this.modules, this.http, this.engine, this.clock, this.replicas, this.logger, this.choices) = (scopes, modules, http, engine, clock, replicas, logger, choices);
         replicas.On(AskedTopic, name =>
         {
             if (Find(name) is not null)
@@ -117,6 +126,24 @@ public sealed partial class MediaControl : BackgroundService
     public IReadOnlyList<Model> All => _models ?? LoadNow();
 
     public Model? Find(string name) => All.FirstOrDefault(m => m.Name == name);
+
+    /// <summary>
+    /// The model of a kind to use: the one named (a person's choice), else the one Settings names for the chat, else the
+    /// first; only among <paramref name="allowed"/> when given (the models' access rules), and null when none is.
+    /// </summary>
+    public Model? Pick(string mode, string? named = null, IReadOnlySet<string>? allowed = null)
+    {
+        var o = choices.CurrentValue;
+        var preferred = mode switch
+        {
+            MediaModes.Image => o.PictureModel,
+            MediaModes.Video => o.VideoModel,
+            MediaModes.Transcription => o.TranscriptionModel,
+            _ => null,
+        };
+        var of = All.Where(m => m.Mode == mode && (allowed is null || allowed.Contains(m.Name))).ToList();
+        return of.FirstOrDefault(m => m.Name == named) ?? of.FirstOrDefault(m => m.Name == preferred) ?? (of.Count > 0 ? of[0] : null);
+    }
 
     private static IReadOnlyList<Model> Of(IEnumerable<MediaModel> rows) =>
         [.. rows.OrderBy(r => r.Name, StringComparer.Ordinal).Select(r => new Model(r.Name, r.Mode, r.Server, r.SpeechId, r))];

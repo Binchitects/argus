@@ -157,4 +157,27 @@ public sealed class MediaModelsTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.Created, await Add(new { name = "kokoro-heart", mode = "audio_speech", speechId = "speaches-ai/Kokoro-82M-v1.0-ONNX", voices = new[] { "af_heart" } }));
         Assert.Equal(["af_heart"], (await MediaRowsAsync(admin)).Single(r => r.GetProperty("name").GetString() == "kokoro-heart").GetProperty("settings").GetProperty("voices").EnumerateArray().Select(v => v.GetString()));
     }
+
+    [Fact]
+    public async Task The_chat_uses_the_picture_model_settings_name_then_the_first_and_only_those_a_person_may_use()
+    {
+        var gateway = new FakeGateway();
+        await using var f = app.Create(app.ConnectionStringFor("mpick_" + Guid.NewGuid().ToString("N")[..8]), gateway, new Dictionary<string, string?>
+        {
+            ["Modules:imagegen"] = "true", ["Media:PictureModel"] = "FLUX-8",
+        });
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.Http.PostAsJsonAsync(new Uri("/api/admin/models/media", UriKind.Relative), new
+        {
+            name = "FLUX-8", mode = "image_generation", files = new[] { new { role = "diffusion", path = "image/flux2-klein-4b/flux-2-klein-4b-Q4_0.gguf" } }, steps = 8,
+        }));
+        var media = f.Services.GetRequiredService<MediaControl>();
+        await media.RefreshAsync(CancellationToken.None);
+        // Settings names FLUX-8; a person may name another; one not allowed is never picked.
+        Assert.Equal("FLUX-8", media.Pick(MediaModes.Image)!.Name);
+        Assert.Equal(MediaModels.ImageModel, media.Pick(MediaModes.Image, MediaModels.ImageModel)!.Name);
+        Assert.Equal(MediaModels.ImageModel, media.Pick(MediaModes.Image, null, new HashSet<string> { MediaModels.ImageModel })!.Name);
+        Assert.Null(media.Pick(MediaModes.Image, null, new HashSet<string>()));
+        Assert.Equal(MediaModels.SpeechToText, media.Pick(MediaModes.Transcription)!.Name);
+    }
 }
