@@ -14,10 +14,26 @@ namespace Llm.Tests;
 /// never answers is said to have failed, and an idle one is not down.
 /// </summary>
 [Collection(nameof(AppCollection))]
-public sealed class ModelStateMediaTests(AppFixture app)
+public sealed class ModelStateMediaTests(AppFixture app) : IDisposable
 {
+    public void Dispose() => Pictures.Dispose();
+
     private const string Image = MediaModels.ImageModel;
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(30);
+
+    /// <summary>LiteLLM as an API key's picture reaches it, once the app has the model loaded.</summary>
+    private sealed class PictureGateway : HttpMessageHandler
+    {
+        public readonly System.Collections.Concurrent.ConcurrentQueue<string> Paths = new();
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Paths.Enqueue(request.RequestUri!.AbsolutePath);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"data":[{"b64_json":"AA=="}]}""", Encoding.UTF8, "application/json") });
+        }
+    }
+
+    private readonly PictureGateway Pictures = new();
 
     /// <summary>sd-server behind sd-serve.sh: it answers /v1/models while it runs; nothing answers otherwise (the Overview's probes too).</summary>
     private sealed class FakeSdServer : HttpMessageHandler
@@ -85,6 +101,7 @@ public sealed class ModelStateMediaTests(AppFixture app)
                 s.AddSingleton<TimeProvider>(clock);
                 s.AddHttpClient(MediaControl.Client).ConfigurePrimaryHttpMessageHandler(() => server);
                 s.AddHttpClient("probe").ConfigurePrimaryHttpMessageHandler(() => server);
+                s.AddHttpClient(Llm.Api.Gateway.KeySpeech.Client).ConfigurePrimaryHttpMessageHandler(() => Pictures);
             });
         var media = f.Services.GetRequiredService<MediaControl>();
         return new Setup(f, media, server, clock, Path.Combine(config, "imagegen.conf"), dir);
@@ -365,5 +382,31 @@ public sealed class ModelStateMediaTests(AppFixture app)
         Assert.Contains("arg=--steps\narg=8\n", await File.ReadAllTextAsync(s.Control));
         Assert.False(s.Media.Find(Image)!.Row.Kept);
         Assert.Equal("unloaded", (await s.Media.ListAsync(CancellationToken.None)).Single(x => x.Model.Name == Image).Now);
+    }
+
+    [Fact]
+    public async Task An_API_keys_picture_loads_its_model_first_and_is_answered_once_it_runs()
+    {
+        await using var s = await NewAsync();
+        await s.Media.SetKeptAsync(Image, false);
+        await UntilFileAsync(s, "off", "the picture server is off");
+        var admin = await new TestBrowser(s.App).SignedInAsync("admin", AppFixture.AdminPassword);
+        var name = "k" + Guid.NewGuid().ToString("N")[..10];
+        var key = (await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }))).GetProperty("apiKey").GetString()!;
+        var client = s.App.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://gateway.{AppFixture.Domain}"), HandleCookies = false });
+        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri("/v1/images/generations", UriKind.Relative))
+        {
+            Content = new StringContent($$"""{"model":"{{Image}}","prompt":"an apple","size":"512x512"}""", Encoding.UTF8, "application/json"),
+        };
+        req.Headers.Authorization = new("Bearer", key);
+        var sending = client.SendAsync(req);
+        // The app turns its server on for it, and holds the request until it answers.
+        await UntilFileAsync(s, "on", "the picture server is turned on for the key's request");
+        Assert.False(sending.IsCompleted);
+        Assert.Empty(Pictures.Paths);
+        s.Server.Up = true;
+        var res = await sending.WaitAsync(Deadline);
+        await StatusAssert.Is(HttpStatusCode.OK, res);
+        Assert.Equal("/v1/images/generations", Assert.Single(Pictures.Paths));
     }
 }

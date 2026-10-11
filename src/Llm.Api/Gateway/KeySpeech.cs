@@ -24,8 +24,12 @@ public static class KeySpeech
 {
     public const string Client = "key-speech";
 
-    /// <summary>The gateway's speech paths that come by the app (with and without /v1, as LiteLLM takes both).</summary>
-    public static readonly IReadOnlyList<string> Paths = ["/v1/audio/speech", "/audio/speech", "/v1/audio/transcriptions", "/audio/transcriptions"];
+    /// <summary>
+    /// The gateway's speech and picture paths that come by the app (with and without /v1, as LiteLLM takes both): a picture
+    /// model that is not loaded is loaded first (its server runs one model at a time), as for the chat's own pictures.
+    /// </summary>
+    public static readonly IReadOnlyList<string> Paths =
+        ["/v1/audio/speech", "/audio/speech", "/v1/audio/transcriptions", "/audio/transcriptions", "/v1/images/generations", "/images/generations"];
 
     /// <summary>Text to speech requests larger than this go on as they came.</summary>
     private const int MostRead = 1024 * 1024;
@@ -53,6 +57,24 @@ public static class KeySpeech
                     content = form;
                     length += added;
                 }
+            }
+            else if (request.Path.Value?.EndsWith("/images/generations", StringComparison.Ordinal) == true && request.ContentLength is > 0 and <= MostRead)
+            {
+                var body = await ReadAsync(request, ct);
+                if (body is null)
+                {
+                    http.Response.StatusCode = StatusCodes.Status400BadRequest;
+                    return;
+                }
+                // A picture model of this stack's: loaded first (a few minutes the first time), or the caller told why not.
+                if (SpokenBy(body) is { } model && media.Find(model) is { Mode: Llm.Core.Models.MediaModes.Image } && await media.ReadyAsync(model, ct) is { } notReady)
+                {
+                    http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                    await http.Response.WriteAsJsonAsync(new { error = new { message = notReady, type = "model_not_ready", code = "503" } }, ct);
+                    return;
+                }
+                content = new ByteArrayContent(body);
+                length = body.Length;
             }
             else if (request.ContentLength is > 0 and <= MostRead)
             {
@@ -137,6 +159,19 @@ public static class KeySpeech
                 await http.Response.Body.FlushAsync(ct);
             }
         }
+    }
+
+    /// <summary>The whole body (a request this short), or null when it ends early.</summary>
+    private static async Task<byte[]?> ReadAsync(HttpRequest request, CancellationToken ct)
+    {
+        var body = new byte[request.ContentLength!.Value];
+        var read = 0;
+        int n;
+        while (read < body.Length && (n = await request.Body.ReadAsync(body.AsMemory(read), ct)) > 0)
+        {
+            read += n;
+        }
+        return read < body.Length ? null : body;
     }
 
     /// <summary>The model a text to speech request names, if it is JSON that names one.</summary>

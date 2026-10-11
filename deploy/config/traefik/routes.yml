@@ -32,8 +32,9 @@ http:
     # key's person's voice, and writes down speech that names no language in the
     # language they speak (Your account → Voice); straight to LiteLLM when the app is down.
     # POST only: a browser's preflight (OPTIONS) goes to LiteLLM, which answers it.
+    # Pictures with keys go by it too: a picture model that is not loaded is loaded first.
     gateway-speech:
-      rule: Host(`gateway.{{ $domain }}`) && Method(`POST`) && (Path(`/v1/audio/speech`) || Path(`/audio/speech`) || Path(`/v1/audio/transcriptions`) || Path(`/audio/transcriptions`))
+      rule: Host(`gateway.{{ $domain }}`) && Method(`POST`) && (Path(`/v1/audio/speech`) || Path(`/audio/speech`) || Path(`/v1/audio/transcriptions`) || Path(`/audio/transcriptions`) || Path(`/v1/images/generations`) || Path(`/images/generations`))
       service: speech
       middlewares: [secure]
       tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}

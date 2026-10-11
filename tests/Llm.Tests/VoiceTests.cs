@@ -861,7 +861,10 @@ public sealed class VoiceTests(AppFixture app)
         Assert.Contains("Host(`gateway.{{ $domain }}`) && Method(`POST`) && (Path(`/v1/audio/speech`)", routes, StringComparison.Ordinal);
         var ingress = File.ReadAllText(Path.Combine(deploy, "helm", "argus-arena", "templates", "ingress.yaml"));
         Assert.Contains("\"/v1/audio/speech\" \"/audio/speech\" \"/v1/audio/transcriptions\" \"/audio/transcriptions\"", ingress, StringComparison.Ordinal);
-        Assert.Equal(["/v1/audio/speech", "/audio/speech", "/v1/audio/transcriptions", "/audio/transcriptions"], KeySpeech.Paths);
+        Assert.Equal(["/v1/audio/speech", "/audio/speech", "/v1/audio/transcriptions", "/audio/transcriptions", "/v1/images/generations", "/images/generations"], KeySpeech.Paths);
+        // Pictures too: a picture model not loaded is loaded first.
+        Assert.Contains("Path(`/v1/images/generations`) || Path(`/images/generations`)", routes, StringComparison.Ordinal);
+        Assert.Contains("\"/v1/images/generations\" \"/images/generations\"", ingress, StringComparison.Ordinal);
     }
 
     [Fact]
