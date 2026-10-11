@@ -470,6 +470,118 @@ formats a selection too (`${rangeStart}` and `${rangeEnd}`, offsets, and
 `config.json` names commands: a project cannot add one. Your own formatters
 come first, so the first one that can run is the default.
 
+### Run and Debug
+
+**Run and Debug** in the activity bar (**Ctrl+Shift+D**) is VS Code's: a run
+configuration to start, **Start Debugging** (**F5**) and **Run** (Run Without
+Debugging, **Ctrl+F5**: the program in a terminal of its own, without the
+debugger), and **Build**, Debug or Release. While a session runs, it shows the
+frame chosen's **Variables** (each opens to its members; double-click one to
+change it), **Watch** expressions (evaluated at each stop, kept for the
+folder), the **Call Stack** (a frame opens its file at its line, and is the one
+the variables and watches are of) and the **Breakpoints** (each on or off,
+removed, all removed; the exceptions to stop at, as the adapter offers them).
+A toolbar over the editor continues (**F5**) or pauses (**F6**), steps over
+(**F10**), into (**F11**) and out (**Shift+F11**), restarts
+(**Ctrl+Shift+F5**) and stops (**Shift+F5**). The panel's **Debug Console**
+(**Ctrl+Shift+Y**) shows what the program and the debugger print, and its box
+evaluates an expression in the frame chosen while the program is stopped.
+
+In the editor, a click beside a line number (or **F9**) sets or clears a
+breakpoint; the right-click menu adds a **Conditional Breakpoint…** (it breaks
+when an expression is true) or a **Logpoint…** (it prints a message, `{x}`
+replaced by `x`'s value, and goes on), and **Add to Watch**. A breakpoint no
+adapter has bound yet is hollow, one turned off grey; breakpoints follow their
+lines as the file is edited, and are kept for the folder on this computer
+(with the watches and the exceptions chosen). The line a session stopped at is
+yellow (the frame chosen, green), and the pointer over an expression shows its
+value. As the program stops, the file opens at its line and Run and Debug
+shows (`debug.openDebug`); the Debug Console opens as the first session starts
+(`debug.internalConsoleOptions`); files with unsaved changes are saved first
+(`debug.saveBeforeStart`); `debug.toolBarLocation` hides the toolbar.
+
+**Configurations.** `.vscode/launch.json` gives them, as VS Code reads it: a
+`windows`, `linux` or `osx` part merged over each, `envFile` read under `env`,
+`preLaunchTask` (run first and waited for; one that fails stops the start) and
+`postDebugTask`, and `inputs`. The project's files give more: each .NET
+program (its build first, then the program MSBuild says it built, Debug or
+Release), npm's `start` and `dev` scripts, the Python file open, Go's package,
+Cargo's programs, CMake's executables and the programs a Makefile built. The
+**gear** opens launch.json (made when it is not there); **Add Configuration…**
+adds one the project gives, or a type's template. **Run** turns each type into
+a plain program: `coreclr` (a `.dll` through `dotnet`), `node` and `pwa-node`,
+`python` and `debugpy`, `go` (`go run`, or the program with `"mode":
+"exec"`), `cppdbg`, `lldb`, `lldb-dap` and `gdb` (the program; CodeLLDB's
+`cargo` as `cargo run`); attach configurations need their debugger. Variables
+work as in VS Code: `${workspaceFolder}`, `${file}`, `${relativeFile}`,
+`${fileDirname}`, `${lineNumber}`, `${selectedText}`, `${env:NAME}` (never
+`ARENA_API_KEY`), `${config:key}`, `${input:id}` (promptString and pickString
+are asked first), `${codeArena.buildConfiguration}` and the others; another
+variable, or `${command:…}`, is refused naming it (write a shell's own
+variables as `$NAME`). Compounds are listed, and do not start yet.
+
+**Tasks.** `.vscode/tasks.json` (version 2.0.0) as VS Code reads it: `shell`
+and `process` tasks (and `npm` and `typescript` ones) with `options`, `group`
+(`build`, `test`, `isDefault`), `dependsOn` (at once, or in order with
+`"dependsOrder": "sequence"`), a system's part, `isBackground` (ready when its
+matcher's `background.endsPattern` shows) and `problemMatcher` (`$msCompile`,
+`$tsc`, `$tsc-watch`, `$gcc`, `$eslint-compact`, `$go`, or a pattern of one
+line: what they find joins Problems). The project's files give more: `dotnet:
+build` and `test` (with `-c Debug` or `-c Release`), `npm: <script>`, `cargo:
+build` and `test`, `go: build` and `test`, `make` targets, `cmake: configure`,
+`build` and `test`, `python: pytest`. **Tasks: Run Task**, **Run Build Task**
+(**Ctrl+Shift+B**), **Run Test Task** and **Terminate Task** run and stop
+them, each in a terminal of its own named after it. **Debug or Release** is
+the project's own choice (**Build** in Run and Debug, or **Select the Build
+Configuration**): the Problems check, the detected tasks and configurations
+build and run it.
+
+**Trust.** tasks.json's tasks, launch.json's configurations and every debug
+session run only in a folder you trust; until then, starting one lists the
+commands it would run and asks first. Detected tasks and configurations show
+their command and need no trust to run without the debugger.
+
+**Debuggers.** The debugger is the page's own: it speaks the Debug Adapter
+Protocol to a debug adapter through code-arena, as VS Code does. code-arena
+starts the adapter, passes messages both ways and keeps what a page that comes
+back needs (a reloaded page attaches again). Nothing is downloaded: a missing
+adapter says how to get it.
+
+| Adapter | Languages | launch.json types | How to get it |
+|---|---|---|---|
+| gdb 14 or later | C, C++, Rust | `cppdbg`, `gdb` | the system's packages (`apt install gdb`) |
+| lldb-dap (or lldb-vscode) | C, C++, Rust | `cppdbg` with `"MIMode": "lldb"` (the default on macOS), `lldb`, `lldb-dap` | LLVM, Xcode |
+| netcoredbg | .NET | `coreclr` | Samsung's releases on GitHub |
+| debugpy | Python | `python`, `debugpy` | `pip install debugpy` |
+| Delve | Go | `go` | `go install github.com/go-delve/delve/cmd/dlv@latest` |
+| js-debug | Node.js | `node`, `pwa-node` | the `js-debug-dap` release of vscode-js-debug |
+
+Each adapter is looked for in `config.json`'s `"debugAdapters"`, then the data
+folder (`adapters/ID/current`), then the folders on `PATH` (full paths only),
+then where its usual installs put it:
+
+```json
+"debugAdapters": {
+  "gdb": {"command": ["/opt/gdb/bin/gdb", "-i", "dap"]},
+  "dlv": {"command": ["dlv", "dap", "--listen=127.0.0.1:${port}"]},
+  "netcoredbg": {"port": 4711}
+}
+```
+
+`command`'s program is a full path or a name on PATH; `${port}` is where it
+takes a port to listen on (code-arena picks a free one); `port` names an
+adapter already listening on 127.0.0.1, as a configuration's `"debugServer":
+N` does. `cppvsdbg` (Microsoft's debugger, licensed for its own products
+only), browser types and `java` are refused, each saying why. A session runs
+in the working directory, without `ARENA_API_KEY` and without a sandbox (as
+the terminals do); eight run at once at most; stopping one sends `terminate`,
+then `disconnect`, and kills what is left 3 s later (an attach session is
+disconnected, the program let go). A file outside the folder is read only when
+the session's adapter named it, and never code-arena's own config or data.
+
+The browser keeps a few function keys for itself in a tab (F11 makes the
+window full screen in some): **Step Into** is also in the toolbar.
+
 ### Ask about code from the editor
 
 Lines of a file go to the agent from the editor itself:

@@ -8,7 +8,7 @@ import { modKey } from './editor-state'
  */
 
 /** The parts of the workbench. */
-export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'git' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status' | 'settings' | 'keybindings'
+export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'git' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status' | 'settings' | 'keybindings' | 'debug' | 'console'
 
 export interface PartHelp extends HelpPart {
   /** Where the manual's Code Arena page (docs/code-arena.md) tells the rest: one of its headings. */
@@ -18,6 +18,16 @@ export interface PartHelp extends HelpPart {
 export const about = 'An editor around the coding agent, for this folder: its files, a terminal, and the agent\'s chat, which can read, change and run things here as the mode allows.'
 
 export const parts: Record<Part, PartHelp> = {
+  debug: {
+    name: 'Run and Debug',
+    text: `Choose a run configuration (.vscode/launch.json's, or one the project's files give) and press **Start Debugging** (F5) or **Run** (Ctrl+F5: in a terminal, without the debugger). **Build** is Debug or Release. While a session runs: **Variables** of the frame chosen (double-click one to change it), **Watch** expressions, the **Call Stack** (a frame opens its line), and the **Breakpoints** (click beside a line number, or F9; right-click for a condition or a log message). The toolbar over the editor continues (F5), pauses (F6), steps over (F10), into (F11), out (Shift+F11), restarts and stops (Shift+F5).`,
+    manual: 'run-and-debug',
+  },
+  console: {
+    name: 'Debug Console',
+    text: 'What the program and the debugger print while debugging; the box below evaluates an expression in the frame chosen while the program is stopped (↑ and ↓ bring back what you typed).',
+    manual: 'run-and-debug',
+  },
   settings: {
     name: 'Settings',
     text: `The settings Code Arena reads, as VS Code's (${modKey}+,). Search by words, or **@modified**, **@lang:python** (a language's own), **@id:editor.tabSize**. **User** is your settings.json, for every project; **Workspace** the project's .vscode/settings.json. A change is written at once, the file's comments kept; the menu beside a setting resets it.`,
@@ -178,5 +188,7 @@ export const regions: Record<string, Part> = {
   Chat: 'chat',
   'Status bar': 'status',
   Settings: 'settings',
+  'Run and Debug': 'debug',
+  'Debug Console': 'console',
   'Keyboard Shortcuts': 'keybindings',
 }

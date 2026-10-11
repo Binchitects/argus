@@ -79,9 +79,22 @@ function rebuild() {
   changed()
 }
 
+/** The context keys Monaco's own resolver is given too (for the rules it applies in the editor). */
+const editorKeys = ['inDebugMode', 'debugState', 'debugType', 'sideBarVisible', 'panelVisible', 'auxiliaryBarVisible']
+const editorContexts: Map<string, { set(v: unknown): void }>[] = []
+
+/** An editor of Monaco's gets the workbench's context keys, kept up to date. */
+export function bindEditorContext(ed: { createContextKey?: (key: string, value: never) => { set(v: never): void } }) {
+  if (!ed.createContextKey) return
+  const keys = new Map<string, { set(v: unknown): void }>()
+  for (const k of editorKeys) keys.set(k, ed.createContextKey(k, (context[k] ?? false) as never) as { set(v: unknown): void })
+  editorContexts.push(keys)
+}
+
 /** Sets context keys the when clauses read (sideBarVisible, editorIsOpen…). */
 export function setContext(values: Context) {
   Object.assign(context, values)
+  for (const keys of editorContexts) for (const [k, v] of Object.entries(values)) keys.get(k)?.set(v ?? false)
 }
 
 export const contextKeys = () => context

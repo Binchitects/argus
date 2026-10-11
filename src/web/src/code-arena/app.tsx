@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, CircleAlert, CircleHelp, Files, GitBranch, GitCompareArrows, Info, MessagesSquare, Search, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, Bug, CircleAlert, CircleHelp, Files, GitBranch, GitCompareArrows, Info, MessagesSquare, Search, SquareTerminal, type LucideIcon } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { toast } from '@/components/ui/toaster'
 import { Alert } from '@/components/ui/alert'
@@ -25,10 +25,16 @@ import { useEditor } from './editor-state'
 import { Explorer } from './explorer'
 import { HelpProvider } from './help'
 import { useOpenHelp } from './help-context'
-import { allFilesQuery, changesQuery, folderQuery, gitBranchesQuery, gitFileLog, gitStatusQuery, parentOf, preferencesQuery, problemsQuery, savePreferences, writeFile } from './ide-api'
+import { allFilesQuery, changesQuery, folderQuery, gitBranchesQuery, gitFileLog, gitStatusQuery, readFile, saveWorkspaceState, workspaceStateQuery, parentOf, preferencesQuery, problemsQuery, savePreferences, writeFile } from './ide-api'
 import { setContext, useKeyboard, useKeyFor } from './keyboard'
 import { quickPick } from './quick-pick'
 import { QuickPickHost } from './quick-pick-host'
+import { DebugConsole } from './debug/console'
+import { DebugToolbar } from './debug/toolbar'
+import { RunDebugView } from './debug/view'
+import { debug, useDebug } from './debug/session'
+import { startConfiguration, startTask } from './debug/start'
+import { runConfigsQuery, stopTask, tasksQuery } from './debug/run-api'
 import { PasteDialog } from './paste-dialog'
 import { TrustDialog } from './trust-dialog'
 import { askTrust } from './trust'
@@ -39,6 +45,7 @@ import { SearchPanel } from './search'
 import { SettingsProvider, useSettings, workspaceSettingsPath } from './settings'
 import { colorThemes, themeNamed } from './settings-schema'
 import { useThemeSync } from './theme'
+import { appendElement } from './jsonc'
 import { Splitter } from './splitter'
 import { About, StatusBar } from './status-bar'
 
@@ -160,7 +167,7 @@ function Unreachable({ error }: { error: unknown }) {
   )
 }
 
-type View = 'explorer' | 'search' | 'git' | 'changes' | 'problems' | 'chat'
+type View = 'explorer' | 'search' | 'git' | 'debug' | 'changes' | 'problems' | 'chat'
 
 /** Where the panels are and how large: the person's own, kept by code-arena for every run. */
 interface Layout {
@@ -171,9 +178,11 @@ interface Layout {
   sideOpen: boolean
   chatOpen: boolean
   panelOpen: boolean
+  /** The panel's tab: the terminals, or the Debug Console. */
+  panelTab: 'terminal' | 'console'
 }
 
-const defaults: Layout = { view: 'explorer', side: 264, chat: 440, panel: 280, sideOpen: true, chatOpen: true, panelOpen: false }
+const defaults: Layout = { view: 'explorer', side: 264, chat: 440, panel: 280, sideOpen: true, chatOpen: true, panelOpen: false, panelTab: 'terminal' }
 /** The panels' sizes, smallest and largest (the terminal's largest also follows the window). */
 const bounds = { side: [180, 640], chat: [320, 960], panel: [100, 4000] } as const
 
@@ -182,7 +191,8 @@ function layoutOf(saved: Record<string, unknown> | undefined): Layout {
   const layout = { ...defaults }
   if (!saved) return layout
   const view = saved.view
-  if (view === 'explorer' || view === 'search' || view === 'git' || view === 'changes' || view === 'problems' || view === 'chat') layout.view = view
+  if (view === 'explorer' || view === 'search' || view === 'git' || view === 'debug' || view === 'changes' || view === 'problems' || view === 'chat') layout.view = view
+  if (saved.panelTab === 'terminal' || saved.panelTab === 'console') layout.panelTab = saved.panelTab
   for (const k of ['side', 'chat', 'panel'] as const) {
     const size = saved[k]
     if (typeof size === 'number' && Number.isFinite(size)) layout[k] = Math.round(Math.min(bounds[k][1], Math.max(bounds[k][0], size)))
@@ -225,6 +235,7 @@ const views: { id: View; label: string; icon: LucideIcon; command: string }[] = 
   { id: 'explorer', label: 'Explorer', icon: Files, command: 'workbench.view.explorer' },
   { id: 'search', label: 'Search', icon: Search, command: 'workbench.action.findInFiles' },
   { id: 'git', label: 'Source control', icon: GitBranch, command: 'workbench.view.scm' },
+  { id: 'debug', label: 'Run and Debug', icon: Bug, command: 'workbench.view.debug' },
   { id: 'changes', label: 'Agent changes', icon: GitCompareArrows, command: 'codeArena.view.changes' },
   { id: 'problems', label: 'Problems', icon: CircleAlert, command: 'workbench.actions.view.problems' },
   { id: 'chat', label: 'Chat', icon: MessagesSquare, command: 'codeArena.view.sessions' },
@@ -293,6 +304,8 @@ function Workbench({
   const [terminalFocus, setTerminalFocus] = useState(0)
   const [newTerminal, setNewTerminal] = useState(0)
   const [panelUsed, setPanelUsed] = useState(layout.panelOpen)
+  // Run and Debug is drawn the first time it shows (it asks code-arena for the configurations then).
+  const [debugUsed, setDebugUsed] = useState(layout.view === 'debug')
   const changes = useQuery(changesQuery)
   const [height, setHeight] = useState(() => window.innerHeight)
 
@@ -307,6 +320,7 @@ function Workbench({
     (view: View, toggle = false) => {
       if (toggle && layout.sideOpen && layout.view === view) change({ sideOpen: false })
       else change({ view, sideOpen: true, ...(view === 'chat' ? { chatOpen: true } : {}) })
+      if (view === 'debug') setDebugUsed(true)
       if (view === 'search') setSearchFocus((n) => n + 1)
     },
     [change, layout.sideOpen, layout.view],
@@ -314,9 +328,18 @@ function Workbench({
 
   const togglePanel = useCallback(() => {
     setPanelUsed(true)
-    if (!layout.panelOpen) setTerminalFocus((n) => n + 1)
+    if (!layout.panelOpen && layout.panelTab === 'terminal') setTerminalFocus((n) => n + 1)
     change({ panelOpen: !layout.panelOpen })
-  }, [change, layout.panelOpen])
+  }, [change, layout.panelOpen, layout.panelTab])
+  /** Ctrl+`: the terminals, shown (the panel on their tab) or hidden. */
+  const toggleTerminal = useCallback(() => {
+    setPanelUsed(true)
+    if (layout.panelOpen && layout.panelTab === 'terminal') change({ panelOpen: false })
+    else {
+      setTerminalFocus((n) => n + 1)
+      change({ panelOpen: true, panelTab: 'terminal' })
+    }
+  }, [change, layout.panelOpen, layout.panelTab])
 
   // What the agent does shows in the editor: a file it edits reloads (when nothing in it is unsaved), a file it makes appears.
   const onEvent = useCallback(
@@ -516,6 +539,184 @@ function Workbench({
     const right: Side = c.status === 'D' ? { kind: 'empty', path: c.pathAt } : { kind: 'git', path: c.pathAt, rev: c.hash }
     await ed.compare(left, right)
   }
+  // The debugger: its breakpoints and watches as this folder left them, sessions still running after a reload, and
+  // where a session stops shown in the editor.
+  const dbg = useDebug()
+  const workspace = useQuery(workspaceStateQuery)
+  const loaded = useRef(false)
+  useEffect(() => {
+    if (loaded.current || !workspace.data) return
+    loaded.current = true
+    debug.root = state.folder
+    debug.load(workspace.data)
+    void debug.reattach()
+  }, [workspace.data, state.folder])
+  useEffect(() => {
+    debug.onStop = (_s, frame) => {
+      if (frame.path) void ed.open(frame.path, { line: frame.line, column: frame.column })
+      // "debug.openDebug": Run and Debug shows as the program stops.
+      if (settings.get('debug.openDebug') !== 'neverOpen') show('debug')
+    }
+    return () => {
+      debug.onStop = null
+    }
+  }, [ed, settings, show])
+  const s = dbg.active
+  setContext({ inDebugMode: dbg.sessions.some((x) => x.state !== 'ended'), debugState: s?.state ?? 'inactive', debugType: s?.start.adapterId ?? '' })
+  const editorContext = () => {
+    const model = ed.activeModel()
+    const piece = ed.selection(false)
+    const text = model && piece ? model.getValueInRange({ startLineNumber: piece.startLine, startColumn: 1, endLineNumber: piece.endLine, endColumn: model.getLineMaxColumn(piece.endLine) }) : undefined
+    return { file: active?.kind === 'file' && active.path && !active.path.startsWith('user:') ? active.path : undefined, lineNumber: ed.cursor?.line, selectedText: text, settings: settings.all() }
+  }
+  /** Starts a configuration with its debugger, or without; saving what is unsaved first ("debug.saveBeforeStart"). */
+  const start = async (name: string, noDebug: boolean) => {
+    if (settings.get('debug.saveBeforeStart') !== 'none') await ed.saveAll()
+    const done = await startConfiguration(name, noDebug, editorContext(), queryClient)
+    void queryClient.invalidateQueries({ queryKey: ['code', 'terminals'] })
+    if (!done) return
+    setPanelUsed(true)
+    if (done === 'debugging') {
+      if (settings.get('debug.openDebug') === 'openOnSessionStart') show('debug')
+      const open = settings.get('debug.internalConsoleOptions')
+      if (open === 'openOnSessionStart' || (open === 'openOnFirstSessionStart' && dbg.sessions.length <= 1)) change({ panelOpen: true, panelTab: 'console' })
+    } else change({ panelOpen: true, panelTab: 'terminal' })
+  }
+  /** F5: the configuration chosen in Run and Debug (the first when none was), or the view to choose one. */
+  const startChosen = async (noDebug: boolean) => {
+    const configs = await queryClient.fetchQuery(runConfigsQuery).catch(() => null)
+    const shown = configs?.configurations.filter((c) => !c.hidden) ?? []
+    const saved = workspace.data?.['launch.selected']
+    const chosen = shown.find((c) => c.name === saved) ?? shown[0]
+    if (!chosen) {
+      setDebugUsed(true)
+      show('debug')
+      return
+    }
+    await start(chosen.name, noDebug)
+  }
+  const pickTask = async (title: string, running = false) => {
+    const list = await queryClient.fetchQuery(tasksQuery).catch((e: unknown) => {
+      toast.error(errorMessage(e))
+      return null
+    })
+    if (!list) return undefined
+    const tasks = list.tasks.filter((t) => !running || t.running)
+    if (tasks.length === 0) {
+      toast.info(running ? 'No task is running.' : 'No task: add one to .vscode/tasks.json.')
+      return undefined
+    }
+    return (await quickPick({ title, placeholder: 'Select the task', items: tasks.map((t) => ({ id: t.label, label: t.label, description: t.command ?? (t.dependsOn?.join(', ') || undefined), group: t.source === 'workspace' ? 'tasks.json' : 'detected', value: t })) }))?.value
+  }
+  const runTaskBy = async (which: { label?: string; group?: 'build' | 'test' }) => {
+    const tasks = (await queryClient.fetchQuery(tasksQuery).catch(() => null))?.tasks
+    const done = await startTask(which, editorContext(), tasks)
+    void queryClient.invalidateQueries({ queryKey: ['code', 'terminals'] })
+    if (done) {
+      setPanelUsed(true)
+      change({ panelOpen: true, panelTab: 'terminal' })
+    }
+  }
+  /** .vscode/launch.json, made with VS Code's skeleton when it is not there. */
+  const openLaunchJson = async () => {
+    try {
+      await readFile('.vscode/launch.json')
+    } catch {
+      await writeFile('.vscode/launch.json', '{\n    "version": "0.2.0",\n    "configurations": []\n}\n', 'none').catch((e: unknown) => toast.error(errorMessage(e)))
+    }
+    await ed.open('.vscode/launch.json')
+  }
+  /** Add Configuration…: one the project's files give, or a type's template, at the end of launch.json's configurations. */
+  const addConfiguration = async () => {
+    const configs = await queryClient.fetchQuery(runConfigsQuery).catch(() => null)
+    const detected = (configs?.configurations ?? []).filter((c) => c.source === 'detected' && c.configuration)
+    const templates: Record<string, Record<string, unknown>> = {
+      '.NET: Launch': { name: '.NET: Launch', type: 'coreclr', request: 'launch', preLaunchTask: 'build', program: '${workspaceFolder}/bin/Debug/net10.0/app.dll', args: [], cwd: '${workspaceFolder}', stopAtEntry: false },
+      'Node.js: Launch Program': { name: 'Launch Program', type: 'node', request: 'launch', program: '${workspaceFolder}/index.js' },
+      'Python: Current File': { name: 'Python: Current File', type: 'debugpy', request: 'launch', program: '${file}', console: 'integratedTerminal' },
+      'Go: Launch Package': { name: 'Launch Package', type: 'go', request: 'launch', mode: 'auto', program: '${workspaceFolder}' },
+      'C/C++: gdb Launch': { name: '(gdb) Launch', type: 'cppdbg', request: 'launch', program: '${workspaceFolder}/a.out', args: [], cwd: '${workspaceFolder}', MIMode: 'gdb' },
+    }
+    const picked = await quickPick({
+      title: 'Add configuration',
+      placeholder: 'Select a configuration to add to launch.json',
+      items: [
+        ...detected.map((c) => ({ id: `d:${c.name}`, label: c.name, description: c.command ?? undefined, group: 'detected in the project', value: c.configuration! })),
+        ...Object.entries(templates).map(([label, c]) => ({ id: `t:${label}`, label, group: 'templates', value: c })),
+      ],
+    })
+    if (!picked?.value) return
+    let file: { text: string | null; version: string } | null = null
+    try {
+      file = await readFile('.vscode/launch.json')
+    } catch {
+      file = null
+    }
+    const text = file?.text?.trim() ? file.text : '{\n    "version": "0.2.0",\n    "configurations": []\n}\n'
+    try {
+      await writeFile('.vscode/launch.json', appendElement(text, ['configurations'], picked.value), file?.version ?? 'none')
+      void queryClient.invalidateQueries({ queryKey: runConfigsQuery.queryKey })
+      await ed.open('.vscode/launch.json')
+      await ed.refresh('.vscode/launch.json')
+    } catch (e) {
+      toast.error(errorMessage(e))
+    }
+  }
+  const debugCommands: Command[] = [
+    { id: 'workbench.view.debug', category: 'View', title: 'Show Run and Debug', run: () => {
+      setDebugUsed(true)
+      show('debug')
+    } },
+    { id: 'workbench.action.debug.start', category: 'Debug', title: 'Start Debugging', run: () => void startChosen(false) },
+    { id: 'workbench.action.debug.run', category: 'Debug', title: 'Run Without Debugging', run: () => void startChosen(true) },
+    { id: 'workbench.action.debug.continue', category: 'Debug', title: 'Continue', enabled: () => s?.state === 'stopped', run: () => void s?.continue() },
+    { id: 'workbench.action.debug.pause', category: 'Debug', title: 'Pause', enabled: () => s?.state === 'running', run: () => void s?.pause() },
+    { id: 'workbench.action.debug.stepOver', category: 'Debug', title: 'Step Over', enabled: () => s?.state === 'stopped', run: () => void s?.next() },
+    { id: 'workbench.action.debug.stepInto', category: 'Debug', title: 'Step Into', enabled: () => s?.state === 'stopped', run: () => void s?.stepIn() },
+    { id: 'workbench.action.debug.stepOut', category: 'Debug', title: 'Step Out', enabled: () => s?.state === 'stopped', run: () => void s?.stepOut() },
+    { id: 'workbench.action.debug.stop', category: 'Debug', title: 'Stop', enabled: () => !!s, run: () => void debug.stop() },
+    { id: 'workbench.action.debug.restart', category: 'Debug', title: 'Restart', enabled: () => !!s, run: async () => {
+      const name = s?.name
+      await debug.stop()
+      if (name) await start(name, false)
+    } },
+    { id: 'editor.debug.action.toggleBreakpoint', category: 'Debug', title: 'Toggle Breakpoint', enabled: () => file, run: () => active && ed.cursor && debug.toggle(active.path, ed.cursor.line) },
+    { id: 'workbench.debug.viewlet.action.removeAllBreakpoints', category: 'Debug', title: 'Remove All Breakpoints', run: () => debug.removeAll() },
+    { id: 'workbench.debug.action.toggleRepl', category: 'View', title: 'Toggle Debug Console', run: () => {
+      setPanelUsed(true)
+      if (layout.panelOpen && layout.panelTab === 'console') change({ panelOpen: false })
+      else change({ panelOpen: true, panelTab: 'console' })
+    } },
+    { id: 'workbench.action.debug.configure', category: 'Debug', title: 'Open launch.json', run: () => void openLaunchJson() },
+    { id: 'debug.addConfiguration', category: 'Debug', title: 'Add Configuration…', run: () => void addConfiguration() },
+    { id: 'workbench.action.debug.selectandstart', category: 'Debug', title: 'Select and Start Debugging', run: async () => {
+      const configs = await queryClient.fetchQuery(runConfigsQuery).catch(() => null)
+      const picked = await quickPick({ title: 'Start debugging', placeholder: 'Select a configuration', items: (configs?.configurations ?? []).filter((c) => !c.hidden).map((c) => ({ id: c.name, label: c.name, description: c.command ?? undefined, group: c.source === 'launch' ? 'launch.json' : 'detected' })) })
+      if (picked) {
+        void saveWorkspaceState({ 'launch.selected': picked.id }).then(() => queryClient.invalidateQueries({ queryKey: workspaceStateQuery.queryKey }))
+        await start(picked.id, false)
+      }
+    } },
+    { id: 'workbench.action.tasks.runTask', category: 'Tasks', title: 'Run Task', run: async () => {
+      const t = await pickTask('Run task')
+      if (t) await runTaskBy({ label: t.label })
+    } },
+    { id: 'workbench.action.tasks.build', category: 'Tasks', title: 'Run Build Task', run: () => void runTaskBy({ group: 'build' }) },
+    { id: 'workbench.action.tasks.test', category: 'Tasks', title: 'Run Test Task', run: () => void runTaskBy({ group: 'test' }) },
+    { id: 'workbench.action.tasks.terminate', category: 'Tasks', title: 'Terminate Task', run: async () => {
+      const t = await pickTask('Terminate task', true)
+      if (t?.terminal) await stopTask(t.terminal.id).catch((e: unknown) => toast.error(errorMessage(e)))
+    } },
+    { id: 'codeArena.selectBuildConfiguration', category: 'Code Arena', title: 'Select the Build Configuration (Debug or Release)', run: async () => {
+      const picked = await quickPick({ title: 'Build configuration', placeholder: 'Debug or Release', items: [{ id: 'Debug', label: 'Debug' }, { id: 'Release', label: 'Release' }] })
+      if (picked) {
+        await saveWorkspaceState({ buildConfiguration: picked.id }).catch((e: unknown) => toast.error(errorMessage(e)))
+        void queryClient.invalidateQueries({ queryKey: ['code', 'run'] })
+        void queryClient.invalidateQueries({ queryKey: tasksQuery.queryKey })
+      }
+    } },
+  ]
+  useCommands(debugCommands)
   const workbenchCommands: Command[] = [
     { id: 'workbench.action.showCommands', category: 'View', title: 'Show All Commands', hidden: true, run: () => setPalette(true) },
     { id: 'workbench.action.quickOpen', category: 'File', title: 'Go to File…', run: () => setQuickOpen(true) },
@@ -560,7 +761,7 @@ function Workbench({
     { id: 'codeArena.view.changes', category: 'View', title: "Show the Agent's Changes", run: () => show('changes') },
     { id: 'codeArena.view.sessions', category: 'View', title: 'Show the Chat Sessions', run: () => show('chat') },
     { id: 'codeArena.acceptAllChanges', category: 'Code Arena', title: "Accept All the Agent's Changes", enabled: () => count > 0, run: () => void accept() },
-    { id: 'workbench.action.terminal.toggleTerminal', category: 'View', title: 'Toggle Terminal', run: togglePanel },
+    { id: 'workbench.action.terminal.toggleTerminal', category: 'View', title: 'Toggle Terminal', run: toggleTerminal },
     { id: 'workbench.action.terminal.new', category: 'Terminal', title: 'Create New Terminal', run: () => {
       setPanelUsed(true)
       change({ panelOpen: true })
@@ -620,7 +821,7 @@ function Workbench({
             </ActivityButton>
           ))}
           <span className="flex-1" />
-          <ActivityButton label="Terminal" command="workbench.action.terminal.toggleTerminal" pressed={layout.panelOpen} onClick={togglePanel}>
+          <ActivityButton label="Terminal" command="workbench.action.terminal.toggleTerminal" pressed={layout.panelOpen} onClick={toggleTerminal}>
             <SquareTerminal aria-hidden="true" />
           </ActivityButton>
           <div className="grid place-items-center pb-1">
@@ -644,6 +845,9 @@ function Workbench({
           <div hidden={layout.view !== 'git'} className="h-full">
             <SourceControlPanel />
           </div>
+          <div hidden={layout.view !== 'debug'} className="h-full">
+            {debugUsed && <RunDebugView onStart={(name, noDebug) => void start(name, noDebug)} />}
+          </div>
           <div hidden={layout.view !== 'changes'} className="h-full">
             <ChangesPanel />
           </div>
@@ -656,20 +860,42 @@ function Workbench({
         </aside>
         {layout.sideOpen && <Splitter label="Resize the side bar" orientation="vertical" value={layout.side} min={bounds.side[0]} max={bounds.side[1]} grow={1} onChange={(side) => change({ side })} />}
 
-        <main className="flex min-w-0 flex-1 flex-col">
+        <main className="relative flex min-w-0 flex-1 flex-col">
+          {settings.get('debug.toolBarLocation') !== 'hidden' && <DebugToolbar />}
           <EditorArea />
           {layout.panelOpen && <Splitter label="Resize the terminal" orientation="horizontal" value={Math.min(layout.panel, maxPanel)} min={bounds.panel[0]} max={maxPanel} grow={-1} onChange={(panel) => change({ panel })} />}
           {panelUsed && (
-            <div hidden={!layout.panelOpen} style={{ height: Math.min(layout.panel, maxPanel) }} className="shrink-0">
-              <Suspense
-                fallback={
-                  <div className="grid h-full place-items-center">
-                    <Spinner label="Loading the terminal" />
-                  </div>
-                }
-              >
-                <TerminalPanel shown={layout.panelOpen} onHide={() => change({ panelOpen: false })} focusKey={terminalFocus} newKey={newTerminal} />
-              </Suspense>
+            <div hidden={!layout.panelOpen} style={{ height: Math.min(layout.panel, maxPanel) }} className="flex shrink-0 flex-col">
+              <div role="tablist" aria-label="Panel" className="flex h-7 shrink-0 items-end gap-3 border-t px-3 text-[0.6875rem] font-semibold tracking-wider uppercase">
+                {(['terminal', 'console'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    role="tab"
+                    aria-selected={layout.panelTab === t}
+                    onClick={() => change({ panelTab: t })}
+                    className={cn('border-b pb-1 outline-none focus-visible:ring-1 focus-visible:ring-ring', layout.panelTab === t ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}
+                  >
+                    {t === 'terminal' ? 'Terminal' : 'Debug Console'}
+                  </button>
+                ))}
+              </div>
+              <div hidden={layout.panelTab !== 'terminal'} className="min-h-0 flex-1">
+                <Suspense
+                  fallback={
+                    <div className="grid h-full place-items-center">
+                      <Spinner label="Loading the terminal" />
+                    </div>
+                  }
+                >
+                  <TerminalPanel shown={layout.panelOpen && layout.panelTab === 'terminal'} onHide={() => change({ panelOpen: false })} focusKey={terminalFocus} newKey={newTerminal} />
+                </Suspense>
+              </div>
+              {layout.panelTab === 'console' && (
+                <div className="min-h-0 flex-1">
+                  <DebugConsole />
+                </div>
+              )}
             </div>
           )}
         </main>
@@ -693,7 +919,7 @@ function Workbench({
         onChanges={() => show('changes')}
         onProblems={() => show('problems')}
         onBranch={() => show('git')}
-        onTerminal={togglePanel}
+        onTerminal={toggleTerminal}
         onChat={() => change({ chatOpen: true })}
         onAbout={() => setAbout(true)}
         completing={completing}

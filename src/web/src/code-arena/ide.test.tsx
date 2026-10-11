@@ -177,6 +177,28 @@ const fakes = vi.hoisted(() => {
     onDidBlurEditorText() {
       return { dispose() {} }
     }
+    onDidChangeModel() {
+      return { dispose() {} }
+    }
+    onDidChangeModelContent() {
+      return { dispose() {} }
+    }
+    onMouseDown() {
+      return { dispose() {} }
+    }
+    /** The decorations the page drew (breakpoints, the line stopped at). */
+    decorations: { range: { startLineNumber: number }; options: { glyphMarginClassName?: string; className?: string } }[] = []
+    createDecorationsCollection() {
+      return {
+        set: (list: Editor['decorations']) => {
+          this.decorations = list
+        },
+        clear: () => {
+          this.decorations = []
+        },
+        getRanges: () => this.decorations.map((d) => d.range),
+      }
+    }
     contextKeys: Record<string, unknown> = {}
     createContextKey(key: string, value: unknown) {
       this.contextKeys[key] = value
@@ -368,6 +390,8 @@ vi.mock('monaco-editor', () => ({
     },
     defineTheme: () => undefined,
     remeasureFonts: () => undefined,
+    TrackedRangeStickiness: { NeverGrowsWhenTypingAtEdges: 1 },
+    MouseTargetType: { GUTTER_GLYPH_MARGIN: 2 },
   },
   Range: class {
     startLineNumber: number
@@ -395,6 +419,7 @@ vi.mock('monaco-editor', () => ({
       return { dispose() {} }
     },
     registerDocumentRangeFormattingEditProvider: () => ({ dispose() {} }),
+    registerHoverProvider: () => ({ dispose() {} }),
     registerCodeActionProvider: (_: string, provider: { provideCodeActions: (...args: unknown[]) => unknown }) => {
       fakes.codeActions.push(provider)
       return { dispose() {} }
@@ -543,6 +568,9 @@ function backend(extra: Record<string, Handler> = {}, preferences: Preferences =
       now.terminals = now.terminals.filter((t) => t.id !== (body as { id: string }).id)
       return { status: 204 }
     },
+    'GET /api/workspace/state': () => ({ json: {} }),
+    'POST /api/workspace/state': (body) => ({ json: body }),
+    'GET /api/debug/sessions': () => ({ json: [] }),
     'GET /api/user-files': (_, __, url) => {
       const name = url.searchParams.get('name')!
       return { json: { name, text: now.user[name] ?? '', version: `u${now.userVersions[name] ?? 0}`, exists: name in now.user } }
@@ -627,7 +655,7 @@ describe('Code Arena, the IDE', () => {
     const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
     // The agent's changes are counted on their button.
     expect(await within(bar).findByRole('button', { name: 'Agent changes (1)' })).toBeInTheDocument()
-    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Agent changes (1)', 'Problems', 'Chat', 'Terminal', 'Theme', 'Help', 'About Code Arena'])
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Agent changes (1)', 'Problems', 'Chat', 'Terminal', 'Theme', 'Help', 'About Code Arena'])
     expect(within(bar).getByRole('button', { name: 'Explorer' })).toHaveAttribute('aria-pressed', 'true')
     expect(await screen.findByRole('tree', { name: 'Files' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'No file is open' })).toBeInTheDocument()
@@ -1620,7 +1648,7 @@ describe('Code Arena, the IDE', () => {
 
     // A change is kept a moment later (the sizes within bounds); the theme in the person's settings.json at once, its comments kept.
     await userEvent.click(screen.getByRole('button', { name: 'Explorer' }))
-    await waitFor(() => expect(now.preferences.layout).toEqual({ view: 'explorer', side: 300, chat: 960, panel: 280, sideOpen: true, chatOpen: false, panelOpen: false }))
+    await waitFor(() => expect(now.preferences.layout).toEqual({ view: 'explorer', side: 300, chat: 960, panel: 280, sideOpen: true, chatOpen: false, panelOpen: false, panelTab: 'terminal' }))
     expect(saves()).toHaveLength(1)
     await userEvent.click(screen.getByRole('button', { name: 'Theme' }))
     await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Light' }))
@@ -1695,6 +1723,77 @@ describe('Code Arena, the IDE', () => {
     expect(within(tabs()).getAllByRole('tab').map((t) => t.textContent)).toEqual(['app.ts'])
     expect(file.disposed).toBe(false)
     expect(fakes.models.find((m) => m.uri?.toString() === 'file:///README.md')?.disposed).toBe(true)
+  })
+
+  it('debugs as VS Code does: a breakpoint (F9), F5, the call stack, variables and a watch, a step (F10), and stop (Shift+F5)', async () => {
+    const started = { id: 'd1', name: 'Run app', adapter: 'gdb', adapterId: 'cppdbg', configuration: { type: 'gdb', request: 'launch', program: '/home/ada/shop/app' }, notes: [], root: '/home/ada/shop', rootReal: '/home/ada/shop', pathStyle: 'posix' }
+    let kept: Record<string, unknown> = {}
+    const { calls } = backend({
+      'GET /api/run/configs': () => ({ json: { configurations: [{ name: 'Run app', type: 'cppdbg', request: 'launch', source: 'launch', supported: true, command: '/home/ada/shop/app' }], compounds: [], errors: [], trusted: true, buildConfiguration: 'Debug' } }),
+      'GET /api/debug/adapters': () => ({ json: [{ id: 'gdb', name: 'gdb', types: ['cppdbg', 'gdb'], found: true, path: '/usr/bin/gdb', version: '17.1' }] }),
+      'GET /api/debug/sessions': () => ({ json: [] }),
+      'GET /api/workspace/state': () => ({ json: kept }),
+      'POST /api/workspace/state': (body) => {
+        kept = { ...kept, ...(body as Record<string, unknown>) }
+        return { json: kept }
+      },
+      'POST /api/run/start': () => ({ json: started }),
+      'POST /api/debug/stop': () => ({ status: 204 }),
+    })
+    renderIde()
+    await openApp()
+    // F9: a breakpoint on the cursor's line, kept for the folder.
+    await userEvent.keyboard('{F9}')
+    await waitFor(() => expect(kept.breakpoints).toEqual({ 'src/app.ts': [{ line: 1, enabled: true }] }))
+
+    // F5: the configuration started with its debugger; the page drives the adapter as VS Code does.
+    await userEvent.keyboard('{F5}')
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/run/start')?.body).toMatchObject({ name: 'Run app', noDebug: false, context: { file: 'src/app.ts', lineNumber: 1 } }))
+    const dap = () => fakes.sockets.find((x) => x.url.endsWith('/api/debug/socket?id=d1'))!
+    await waitFor(() => expect(dap()).toBeTruthy())
+    act(() => dap().open())
+    const answered = new Set<number>()
+    const requests = () => dap().sent.map((x) => JSON.parse(x as string) as { seq: number; command: string; arguments?: Record<string, unknown> })
+    const answer = async (command: string, body: unknown = {}) => {
+      let req: { seq: number; arguments?: Record<string, unknown> } | undefined
+      await waitFor(() => {
+        req = requests().find((r) => r.command === command && !answered.has(r.seq))
+        expect(req, `the page asks ${command}`).toBeTruthy()
+      })
+      answered.add(req!.seq)
+      act(() => dap().receive(JSON.stringify({ seq: 0, type: 'response', request_seq: req!.seq, success: true, command, body })))
+      return req!.arguments
+    }
+    const event = (name: string, body: unknown = {}) => act(() => dap().receive(JSON.stringify({ seq: 0, type: 'event', event: name, body })))
+    expect(await answer('initialize', { supportsConfigurationDoneRequest: true })).toMatchObject({ adapterID: 'cppdbg', linesStartAt1: true })
+    await waitFor(() => expect(requests().map((r) => r.command)).toContain('launch'))
+    event('initialized')
+    expect(await answer('setBreakpoints', { breakpoints: [{ verified: true, line: 1 }] })).toMatchObject({ source: { path: '/home/ada/shop/src/app.ts' }, breakpoints: [{ line: 1 }] })
+    await answer('configurationDone')
+    await answer('launch')
+    // Stopped at the breakpoint: the call stack, the line in the editor, the variables, a watch.
+    event('stopped', { reason: 'breakpoint', threadId: 1 })
+    await answer('threads', { threads: [{ id: 1, name: 'main' }] })
+    await answer('stackTrace', { stackFrames: [{ id: 7, name: 'main', line: 1, column: 1, source: { path: '/home/ada/shop/src/app.ts' } }] })
+    const view = await screen.findByRole('complementary', { name: 'Run and Debug' })
+    expect(await within(view).findByRole('button', { name: /main.*app\.ts:1/ })).toBeInTheDocument()
+    expect(within(screen.getByRole('toolbar', { name: 'Debug' })).getByRole('button', { name: 'Continue' })).toBeInTheDocument()
+    expect(await answer('scopes', { scopes: [{ name: 'Locals', variablesReference: 5 }] })).toEqual({ frameId: 7 })
+    await answer('variables', { variables: [{ name: 'total', value: '1', type: 'int', variablesReference: 0 }] })
+    expect(await within(within(view).getByRole('list', { name: 'Variables' })).findByText('total')).toBeInTheDocument()
+    await userEvent.click(within(view).getByRole('button', { name: '+ Add expression' }))
+    await userEvent.type(within(view).getByRole('textbox', { name: 'Expression to watch' }), 'total + 1{Enter}')
+    expect(await answer('evaluate', { result: '2', variablesReference: 0 })).toMatchObject({ expression: 'total + 1', frameId: 7, context: 'watch' })
+    expect(await within(within(view).getByRole('list', { name: 'Watch expressions' })).findByText('2')).toBeInTheDocument()
+    await waitFor(() => expect(kept.watch).toEqual(['total + 1']))
+    // F10 steps over; Shift+F5 stops the session.
+    await userEvent.click(view)
+    await userEvent.keyboard('{F10}')
+    expect(await answer('next')).toEqual({ threadId: 1 })
+    await waitFor(() => expect(within(screen.getByRole('toolbar', { name: 'Debug' })).getByRole('button', { name: 'Pause' })).toBeInTheDocument())
+    await userEvent.keyboard('{Shift>}{F5}{/Shift}')
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/debug/stop')?.body).toEqual({ id: 'd1' }))
+    await waitFor(() => expect(screen.queryByRole('toolbar', { name: 'Debug' })).not.toBeInTheDocument())
   })
 
   it("takes VS Code's keys, chords too, and the person's keybindings.json over them", async () => {
@@ -1881,12 +1980,15 @@ describe('Code Arena, the help', () => {
     await screen.findByRole('tree', { name: 'Files' })
     const seen = new Set(regionsShown())
     // Every view of the side bar, and the terminal panel, drawn once.
-    for (const name of ['Search', 'Source control', 'Agent changes (1)', 'Problems', 'Chat']) {
+    for (const name of ['Search', 'Source control', 'Run and Debug', 'Agent changes (1)', 'Problems', 'Chat']) {
       await userEvent.click(within(bar).getByRole('button', { name }))
       for (const r of regionsShown()) seen.add(r)
     }
     await userEvent.click(within(bar).getByRole('button', { name: 'Terminal' }))
     await screen.findByRole('region', { name: 'Terminal' })
+    for (const r of regionsShown()) seen.add(r)
+    await userEvent.click(screen.getByRole('tab', { name: 'Debug Console' }))
+    await screen.findByRole('region', { name: 'Debug Console' })
     for (const r of regionsShown()) seen.add(r)
     // The workbench's own pages: the Settings and the Keyboard Shortcuts editors.
     await userEvent.keyboard('{Control>},{/Control}')

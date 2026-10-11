@@ -20,7 +20,8 @@ import { compareId, renamed, revertChanges, sideLabel, sidePath, takeChanges, to
 import { CompareToolbar } from './compare-toolbar'
 import { EditorContext, loadMonaco, rankFiles, useEditor, type DiffModels, type DiffSource, type EditorApi, type FileModel, type MonacoModule, type Reveal, type SaveReason, type Tab, type Unsaved } from './editor-state'
 import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitShow, gitStageText, gitStatusQuery, nameOf, readFile, revertChange, userFileQuery, within, writeFile, writeUserFile, type Change, type CheckProblem, type OpenedFile, type Saved, type UserFileName } from './ide-api'
-import { keymap, useKeyFor } from './keyboard'
+import { addDebugActions, installDebugEditor } from './debug/editor-debug'
+import { bindEditorContext, keymap, useKeyFor } from './keyboard'
 import { monacoKeybinding } from './keys'
 import { installFormatting, minimalEdit, offerFormatting } from './format'
 import { saveParticipants } from './save-participants'
@@ -163,12 +164,13 @@ function installKeymap(m: MonacoModule) {
   let queued = false
   const sync = () => {
     queued = false
+    // Monaco's own commands stay its own; the workbench's (editor.action.toggleWordWrap, the debugger's…) are given to it.
+    const own = keymap.editorCommands
     for (const c of allCommands()) {
-      if (!commands.has(c.id) && !c.id.startsWith('editor.')) commands.set(c.id, m.monaco.editor.registerCommand(c.id, (_: unknown, args: unknown) => void runCommand(c.id, args)))
+      if (!commands.has(c.id) && !own.has(c.id)) commands.set(c.id, m.monaco.editor.registerCommand(c.id, (_: unknown, args: unknown) => void runCommand(c.id, args)))
     }
     rules?.dispose()
     const list = keymap.rules
-      .filter((r) => r.source !== 'default' || !r.command.startsWith('editor.'))
       .map((r) => ({ keybinding: monacoKeybinding(r.chords, m.monaco), command: r.command, commandArgs: r.args, when: r.whenText }))
       .filter((r): r is { keybinding: number; command: string; commandArgs: unknown; when: string | undefined } => r.keybinding !== null)
     rules = m.monaco.editor.addKeybindingRules([{ keybinding: m.monaco.KeyCode.F1, command: '-editor.action.quickCommand' }, ...list])
@@ -1090,6 +1092,9 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         ed.onDidBlurEditorText?.(() => void actions.autoSaveOn('focus'))
         linesOf.current = actions.pieceOf
         askAboutCode(m, ed, actions.selection)
+        bindEditorContext(ed)
+        installDebugEditor(m.monaco, ed, (model) => m.pathOf(model.uri))
+        addDebugActions(m.monaco, ed, (model) => m.pathOf(model.uri))
         keymap.setEditorCommands(ed.getSupportedActions().map((a) => ({ id: a.id, label: a.label })))
         installCompletions(m)
         editor.current = ed
@@ -1134,6 +1139,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         for (const side of [diffEditor.current.getOriginalEditor?.(), diffEditor.current.getModifiedEditor?.()]) {
           side?.createContextKey('editorIsOpen', true)
           side?.createContextKey('textCompareEditorVisible', true)
+          if (side) bindEditorContext(side)
         }
       }
       // A file's side is the file itself: typed in, it is unsaved (Ctrl+S saves it); a side of a text (a commit, the
