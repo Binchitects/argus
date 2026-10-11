@@ -10,7 +10,7 @@ import { admin, fakeApi, renderApp } from '@/test/utils'
 const everyone = { audience: 'Everyone', groups: [] }
 const ago = (s: number) => new Date(Date.now() - s * 1000).toISOString()
 
-type Row = { status: string; why?: string | null; since?: string | null; instead?: boolean; evicted?: number }
+type Row = { status: string; why?: string | null; since?: string | null; instead?: boolean; evicted?: number; retryAt?: string | null; failure?: object | null }
 
 function view(tiny: Row, image: Row = { status: 'unloaded' }) {
   return {
@@ -67,6 +67,37 @@ describe('admin models: loading and unloading', () => {
     image = { status: 'unloaded' }
     await client.invalidateQueries({ queryKey: ['admin', 'models'] })
     await waitFor(() => expect(within(card('FLUX.2-klein-4B')).getByText('Not loaded')).toBeInTheDocument())
+  })
+
+  it('says why a picture model failed to load, how often, and when it is tried again', async () => {
+    const retry = new Date(Date.now() + 4 * 60_000).toISOString()
+    fakeApi(admin, {
+      'GET /api/admin/models': () => ({
+        json: view({ status: 'unloaded' }, {
+          status: 'failed', why: 'kept loaded', since: ago(70), retryAt: retry,
+          failure: { kind: 'gpu-memory', detail: 'CUDA error: out of memory', tries: 3, since: ago(60) },
+        }),
+      }),
+    })
+    renderApp('/admin/models')
+    await screen.findByRole('heading', { name: /FLUX/ })
+    const flux = card('FLUX.2-klein-4B')
+    expect(within(flux).getByText('Too little GPU memory to load it')).toBeInTheDocument()
+    expect(within(flux).getByText('CUDA error: out of memory')).toBeInTheDocument()
+    expect(within(flux).getByText(/3 times in a row\./)).toBeInTheDocument()
+    expect(within(flux).getByText(/next from/)).toBeInTheDocument()
+  })
+
+  it('a picture model whose server refused its settings waits to be changed', async () => {
+    fakeApi(admin, {
+      'GET /api/admin/models': () => ({
+        json: view({ status: 'unloaded' }, { status: 'failed', failure: { kind: 'bad-options', detail: 'error: unknown argument: --stepz', tries: 1, since: ago(5) } }),
+      }),
+    })
+    renderApp('/admin/models')
+    await screen.findByRole('heading', { name: /FLUX/ })
+    expect(within(card('FLUX.2-klein-4B')).getByText('Its server refused its settings')).toBeInTheDocument()
+    expect(within(card('FLUX.2-klein-4B')).getByText(/not tried again until it is changed or loaded by hand/)).toBeInTheDocument()
   })
 
   it('says why a model loads: a request asked for it after an Unload', async () => {

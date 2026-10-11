@@ -52,12 +52,34 @@ interface ModelRow extends SavedModel {
   cache?: TokenCache | null
   /** Failed to load: when it is tried again by itself. */
   retryAt?: string | null
+  /** A media model that failed to load: why (gpu-memory, bad-options, missing-file, crashed, timeout, refused), the line that says so, how many times in a row. */
+  failure?: { kind: string; detail: string; tries: number; since: string } | null
   /** Pinned to keep loaded: loaded at start, and again whenever it is not (outside working hours). */
   kept?: boolean
   /** Kept loaded now: pinned, or by the working hours in force. */
   keptNow?: boolean
   /** A picture, video or speech model's price (Settings → Prices). */
   unitPrice?: { unit: string; amount: number }
+}
+
+/** What a media model's failure to load was, said plainly. */
+function failureTitle(kind: string | undefined): string {
+  switch (kind) {
+    case 'gpu-memory':
+      return 'Too little GPU memory to load it'
+    case 'bad-options':
+      return 'Its server refused its settings'
+    case 'missing-file':
+      return 'Its server could not read a file'
+    case 'crashed':
+      return 'Its server stopped as it loaded'
+    case 'timeout':
+      return 'Its server did not answer in time'
+    case 'refused':
+      return 'The speech server would not load it'
+    default:
+      return 'It could not load'
+  }
 }
 
 /** "$0.20 in · $0.02 cached · $0.80 out per 1M tokens (the defaults)", or a media model's "$0.01 per picture". */
@@ -428,12 +450,19 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
           </Alert>
         )}
         {m.status === 'failed' && media && (
-          <Alert variant="destructive" title="Its server did not answer">
-            It has not answered for ten minutes since it was turned on, and is still tried. Its server's log says why:{' '}
+          <Alert variant="destructive" title={failureTitle(m.failure?.kind)}>
+            {m.failure?.detail && <code className="mb-1 block text-xs [overflow-wrap:anywhere]">{m.failure.detail}</code>}
+            {m.failure && m.failure.tries > 1 ? `${m.failure.tries} times in a row. ` : ''}
+            {m.failure?.kind === 'bad-options'
+              ? 'It is not tried again until it is changed or loaded by hand. '
+              : `It is tried again by itself after a minute, then after 2, 4, 8, 16 and at most 30 minutes${
+                  m.retryAt ? `: next from ${new Date(m.retryAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''
+                }. Loading it tries at once. `}
+            Its server's log says more:{' '}
             <Link to={`/admin/logs?container=${m.server}&level=warn`} className="font-medium underline underline-offset-2">
               its warnings and errors
             </Link>
-            ; too little GPU memory left beside the chat models is the usual cause.
+            .
           </Alert>
         )}
         {m.status === 'failed' && !media && (

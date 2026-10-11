@@ -134,6 +134,8 @@ public static class ModelEndpoints
             rows.Add(new
             {
                 name = x.Model.Name, source = "media", mode = x.Model.Mode, server = x.Model.Server, status = x.Now, enabled = x.State.Enabled, kept = x.State.Kept,
+                why = x.Why, since = x.Since, retryAt = x.Failure?.RetryAt,
+                failure = x.Failure is { } f ? new { kind = f.Class, detail = f.Detail, tries = f.Count, since = f.Since } : null,
                 keptNow = x.State.Kept, vision = false, atGateway = At(x.Model.Name) is not null, access = Access(x.Model.Name),
                 unitPrice = MediaPrice(x.Model.Name),
             });

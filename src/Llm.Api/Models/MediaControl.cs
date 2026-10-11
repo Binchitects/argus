@@ -104,7 +104,38 @@ public sealed partial class MediaControl : BackgroundService
     /// did not answer within ten minutes of being turned on; it is still tried), waiting (for its files), or off (its server
     /// does not run).
     /// </summary>
-    public sealed record Status(Model Model, State State, string Now);
+    public sealed record Status(Model Model, State State, string Now, string? Why = null, DateTimeOffset? Since = null, MediaFailure? Failure = null);
+
+    /// <summary>Why each model loads or unloads, and since when (Admin -> Models says so, as for chat models).</summary>
+    private readonly ConcurrentDictionary<string, (string Why, DateTimeOffset Since)> _why = new(StringComparer.Ordinal);
+
+    /// <summary>Each model's failure to load, while it lasts (gone once it loads).</summary>
+    private readonly ConcurrentDictionary<string, MediaFailure> _failures = new(StringComparer.Ordinal);
+
+    /// <summary>Since when each server has run its generation (by the app's clock), to tell an exit at once from a crash.</summary>
+    private readonly ConcurrentDictionary<string, (string Gen, DateTimeOffset Since)> _running = new(StringComparer.Ordinal);
+
+    private void Because(string name, string why)
+    {
+        if (!_why.TryGetValue(name, out var now) || now.Why != why)
+        {
+            _why[name] = (why, clock.GetUtcNow());
+        }
+    }
+
+    /// <summary>Why it cannot load now: it failed lately and its wait is not over (or it waits to be changed); null: it may.</summary>
+    private string? NotYet(string name)
+    {
+        if (_failures.GetValueOrDefault(name) is not { } f || f.RetryAt is { } at && clock.GetUtcNow() >= at)
+        {
+            return null;
+        }
+        var when = f.RetryAt is { } retry ? $"it is tried again from {retry:HH:mm} UTC" : "it is not tried again until an admin changes or loads it";
+        return $"{name} could not load ({f.Class}: {f.Detail}); {when} (Admin -> Models).";
+    }
+
+    /// <summary>Its failure, while it lasts.</summary>
+    public MediaFailure? FailureOf(string name) => _failures.GetValueOrDefault(name);
 
     private readonly ConcurrentDictionary<string, DateTimeOffset> _asked = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> _now = new(StringComparer.Ordinal);
@@ -119,7 +150,12 @@ public sealed partial class MediaControl : BackgroundService
     public async Task<IReadOnlyList<Status>> ListAsync(CancellationToken ct)
     {
         var states = await StatesAsync(ct);
-        return [.. All.Select(m => new Status(m, states[m.Name], _now.GetValueOrDefault(m.Name, "unloaded")))];
+        return [.. All.Select(m =>
+        {
+            var now = _now.GetValueOrDefault(m.Name, "unloaded");
+            var why = now is "loading" or "unloading" or "loaded" or "failed" ? _why.GetValueOrDefault(m.Name) : default;
+            return new Status(m, states[m.Name], now, why.Why, why.Why is null ? null : why.Since, _failures.GetValueOrDefault(m.Name));
+        })];
     }
 
     public async Task<State> StateAsync(string name, CancellationToken ct) => (await StatesAsync(ct))[name];
@@ -148,6 +184,12 @@ public sealed partial class MediaControl : BackgroundService
     /// <summary>Loads it now; one not kept loaded unloads again after ten minutes unused.</summary>
     public void Load(string name)
     {
+        // By hand: at once, whatever failed before (a new generation of its server's control file).
+        if (_failures.TryRemove(name, out _) && Find(name) is { Id: null } m)
+        {
+            _gen[m.Server] = Gen(m.Server) + 1;
+        }
+        Because(name, "loaded by an admin");
         Asked(name);
         _now[name] = "loading";
         WakeHere();
@@ -156,6 +198,8 @@ public sealed partial class MediaControl : BackgroundService
     /// <summary>Unloads it now (and stops keeping it loaded, as with the engine's models).</summary>
     public async Task UnloadAsync(string name, CancellationToken ct)
     {
+        Because(name, "unloaded by an admin");
+        _failures.TryRemove(name, out _);
         _asked.TryRemove(name, out _);
         replicas.Tell(ForgetTopic, name);
         if ((await StateAsync(name, ct)).Kept)
@@ -208,9 +252,16 @@ public sealed partial class MediaControl : BackgroundService
         {
             return null;
         }
+        // It failed to load lately: not tried again until its wait is over (as a chat model), and the person is told why.
+        if (NotYet(name) is { } failed)
+        {
+            return failed;
+        }
         // Off, or turned off a moment ago (ten minutes unused): its server answering now may be on its way out. On again first,
         // and its answer counts once the script has read that.
-        Load(name);
+        Because(name, "for a request");
+        _now[name] = "loading";
+        WakeHere();
         var until = clock.GetUtcNow() + TimeSpan.FromMinutes(5);
         while (clock.GetUtcNow() < until)
         {
@@ -219,6 +270,10 @@ public sealed partial class MediaControl : BackgroundService
             {
                 _now[name] = "loaded";
                 return null;
+            }
+            if (NotYet(name) is { } now)
+            {
+                return now;
             }
         }
         return $"{name} did not load within five minutes (its server's log says why).";
@@ -262,6 +317,7 @@ public sealed partial class MediaControl : BackgroundService
             // Only that ask: one made meanwhile (a picture asked for at this moment) keeps it loaded.
             if (now - at > Idle && !states[name].Kept && _asked.TryRemove(new KeyValuePair<string, DateTimeOffset>(name, at)))
             {
+                Because(name, "unused for ten minutes");
                 LogIdle(logger, name);
             }
         }
@@ -279,18 +335,37 @@ public sealed partial class MediaControl : BackgroundService
             {
                 var recipe = MediaRecipes.Of(m.Name)!;
                 var status = StatusOf(m.Server);
-                // Wanted, and its server exited (it crashed, or its flags are wrong): started again after a while, never at once.
-                if (want && status is { Phase: "exited" } && status.Gen == Gen(m.Server).ToString(System.Globalization.CultureInfo.InvariantCulture)
-                    && now - status.Since >= Retry)
+                var gen = Gen(m.Server).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (want && !_why.ContainsKey(m.Name) || want && _why.GetValueOrDefault(m.Name).Why is "unused for ten minutes" or "unloaded by an admin")
                 {
-                    LogExited(logger, m.Name, status.Exit);
-                    _gen[m.Server] = Gen(m.Server) + 1;
+                    Because(m.Name, s.Kept ? "kept loaded" : "for a request");
                 }
+                if (status is { Phase: "running" } && status.Gen == gen && (!_running.TryGetValue(m.Server, out var r) || r.Gen != gen))
+                {
+                    _running[m.Server] = (gen, now);
+                }
+                // Its server exited while wanted (no GPU memory, flags it refused, a crash): why, once for this generation.
+                if (want && status is { Phase: "exited" } && status.Gen == gen && _failures.GetValueOrDefault(m.Name)?.Gen != gen)
+                {
+                    var ran = _running.TryGetValue(m.Server, out var since) && since.Gen == gen ? (now - since.Since).TotalSeconds : 0;
+                    var (kind, detail) = MediaFailure.Classify(LogTail(m.Server), status.Exit, ran);
+                    Failed(m.Name, kind, detail, gen, now);
+                }
+                // Tried again after its wait (1, 2, 4… minutes), as a new generation; flags it refused, not until it is changed or loaded.
+                if (want && _failures.TryGetValue(m.Name, out var failed) && failed.Gen == gen && failed.RetryAt is { } retry && now >= retry)
+                {
+                    LogRetry(logger, m.Name, failed.Class, failed.Count);
+                    _gen[m.Server] = Gen(m.Server) + 1;
+                    gen = Gen(m.Server).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    _loadingSince.TryRemove(m.Name, out _);
+                }
+                // While it waits to be tried again, its server is off.
+                var holding = _failures.GetValueOrDefault(m.Name)?.Gen == gen;
                 if (lead)
                 {
-                    Write(m.Server, SdArgs.Conf(recipe, Gen(m.Server), want));
+                    Write(m.Server, SdArgs.Conf(recipe, Gen(m.Server), want && !holding));
                 }
-                if (want)
+                if (want && !holding)
                 {
                     _onSince.TryAdd(m.Server, Environment.TickCount64);
                 }
@@ -299,12 +374,17 @@ public sealed partial class MediaControl : BackgroundService
                     _onSince.TryRemove(m.Server, out _);
                 }
                 var ready = status is not null ? status.Phase != "waiting" : recipe.Files.All(f => File.Exists(Path.Combine(engine.Value.LibraryDir, f.Path)));
-                var up = ready && (status is null || status.Phase is "running" or "stopping") && await UpAsync(m, ct);
+                var up = ready && !holding && (status is null || status.Phase is "running" or "stopping") && await UpAsync(m, ct);
+                if (up && want)
+                {
+                    _failures.TryRemove(m.Name, out _);
+                }
                 _now[m.Name] = !ready ? "waiting"
+                    : holding ? "failed"
                     : status is { Phase: "stopping" } ? "unloading"
                     : up ? (want ? "loaded" : "unloading")
-                    : want ? Loading(m.Name, now) : "unloaded";
-                if (up || !want || !ready)
+                    : want ? Loading(m.Name, now, gen) : "unloaded";
+                if (up || !want || !ready || holding)
                 {
                     _loadingSince.TryRemove(m.Name, out _);
                 }
@@ -313,10 +393,24 @@ public sealed partial class MediaControl : BackgroundService
             speechLoaded ??= await SpeechLoadedAsync(ct);
             var loaded = speechLoaded.Contains(m.Id);
             // The replica that leads loads and unloads; the others only read what the speech server has.
-            if (lead && want && !loaded)
+            if (want)
+            {
+                Because(m.Name, s.Kept ? "kept loaded" : "for a request");
+            }
+            var waiting = _failures.TryGetValue(m.Name, out var refused) && refused.RetryAt is { } next && now < next;
+            if (lead && want && !loaded && !waiting)
             {
                 using var res = await http.CreateClient(Client).PostAsync($"{MediaModels.AudioUrl}/api/ps/{m.Id}", null, ct);
                 loaded = res.IsSuccessStatusCode;
+                if (!loaded)
+                {
+                    var said = await res.Content.ReadAsStringAsync(ct);
+                    Failed(m.Name, "refused", $"HTTP {(int)res.StatusCode}: {said[..Math.Min(said.Length, 300)]}", "", now);
+                }
+            }
+            if (loaded && want)
+            {
+                _failures.TryRemove(m.Name, out _);
             }
             else if (lead && !want && loaded)
             {
@@ -324,7 +418,7 @@ public sealed partial class MediaControl : BackgroundService
                 using var _ = await http.CreateClient(Client).DeleteAsync($"{MediaModels.AudioUrl}/api/ps/{m.Id}", ct);
                 loaded = false;
             }
-            _now[m.Name] = loaded ? "loaded" : "unloaded";
+            _now[m.Name] = loaded ? "loaded" : want && _failures.ContainsKey(m.Name) ? "failed" : "unloaded";
         }
     }
 
@@ -341,9 +435,6 @@ public sealed partial class MediaControl : BackgroundService
         }
         return _onSince.TryGetValue(server, out var since) && Environment.TickCount64 - since >= OnSettle.TotalMilliseconds;
     }
-
-    /// <summary>How long a server that exited while wanted waits before it is started again.</summary>
-    private static readonly TimeSpan Retry = TimeSpan.FromSeconds(30);
 
     /// <summary>What a picture or video server says it does (services/sd-serve.sh's status file).</summary>
     public sealed record ServerStatus(string Gen, string Phase, DateTimeOffset Since, DateTimeOffset At, long? FreeMb, int? Exit, IReadOnlyList<string> Missing, string Vae);
@@ -392,19 +483,46 @@ public sealed partial class MediaControl : BackgroundService
 
     private readonly ConcurrentDictionary<string, long> _gen = new(StringComparer.Ordinal);
 
-    /// <summary>"loading", or "failed" once it has loaded for longer than <see cref="LoadLimit"/> (it is still tried: its script starts it again).</summary>
-    private string Loading(string name, DateTimeOffset now)
+    /// <summary>"loading", or past <see cref="LoadLimit"/> a timeout: failed, its server stopped, and tried again after its wait.</summary>
+    private string Loading(string name, DateTimeOffset now, string gen)
     {
         var since = _loadingSince.GetOrAdd(name, now);
         if (now - since < LoadLimit)
         {
             return "loading";
         }
-        if (_now.GetValueOrDefault(name) != "failed")
-        {
-            LogNotLoaded(logger, name, (int)LoadLimit.TotalMinutes);
-        }
+        LogNotLoaded(logger, name, (int)LoadLimit.TotalMinutes);
+        Failed(name, "timeout", $"its server did not answer within {(int)LoadLimit.TotalMinutes} minutes", gen, now);
         return "failed";
+    }
+
+    /// <summary>A failure to load: one more in a row (its wait doubles), since now.</summary>
+    private void Failed(string name, string kind, string detail, string gen, DateTimeOffset now)
+    {
+        var count = (_failures.GetValueOrDefault(name)?.Count ?? 0) + 1;
+        _failures[name] = new MediaFailure(kind, detail, count, now, gen);
+        LogFailedLoad(logger, name, kind, detail);
+    }
+
+    /// <summary>The end of a server's output (its status folder's log), for why it exited.</summary>
+    private string LogTail(string server)
+    {
+        try
+        {
+            var path = Path.Combine(engine.Value.MediaStatusDir, server + ".log");
+            if (!File.Exists(path))
+            {
+                return "";
+            }
+            using var f = File.OpenRead(path);
+            f.Seek(Math.Max(0, f.Length - 4096), SeekOrigin.Begin);
+            using var reader = new StreamReader(f);
+            return reader.ReadToEnd();
+        }
+        catch (IOException)
+        {
+            return "";
+        }
     }
 
     private async Task<Dictionary<string, State>> StatesAsync(CancellationToken ct)
@@ -480,8 +598,11 @@ public sealed partial class MediaControl : BackgroundService
     [LoggerMessage(Level = LogLevel.Warning, Message = "Media models: {Model}'s server has not answered for {Minutes} minutes since it was turned on (its log says why: often no GPU memory left beside the chat models); it is still tried")]
     private static partial void LogNotLoaded(ILogger logger, string model, int minutes);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Media models: {Model}'s server exited (code {Exit}); starting it again")]
-    private static partial void LogExited(ILogger logger, string model, int? exit);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Media models: {Model} failed to load ({Kind}): {Detail}")]
+    private static partial void LogFailedLoad(ILogger logger, string model, string kind, string detail);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Media models: {Model} is tried again ({Kind}, {Count} in a row)")]
+    private static partial void LogRetry(ILogger logger, string model, string kind, int count);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Media models: cannot write {Path}: {Error}")]
     private static partial void LogControl(ILogger logger, string path, string error);

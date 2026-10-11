@@ -107,6 +107,9 @@ class SdServeTests(unittest.TestCase):
         self.assertEqual(self.starts(), 1)
         self.conf("gen=1", "want=off", "model=A")
         self.until(lambda: self.status().get("phase") == "off", "off stops it")
+        # On again, the same generation: it starts again.
+        self.conf("gen=1", "want=on", "model=A", "file=image/a.gguf")
+        self.until(lambda: self.status().get("phase") == "running" and self.starts() == 2, "on again starts it again")
 
     def test_It_waits_for_its_files_and_starts_once_they_are_there(self):
         self.conf("gen=1", "want=on", "model=A", "file=image/a.gguf", "file=image/vae.safetensors", "arg=--vae", "arg=image/vae.safetensors")

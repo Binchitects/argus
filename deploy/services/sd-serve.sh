@@ -14,7 +14,7 @@
 # Every 2 s it writes /status/$NAME.json: the gen it runs, its phase (off, waiting for its
 # files, running, exited, stopping), since when, the GPU's free memory, how it exited, the
 # files it lacks and where it decodes; the server's output goes to /status/$NAME.log too.
-# It never starts a server again on its own: the app raises gen.
+# It never starts a server that exited again on its own: the app raises gen.
 set -u
 conf=/control/$NAME.conf out=/status/$NAME server=${SD_SERVER:-/sd-server} tick=${SD_SERVE_TICK:-2}
 pid= ran= phase=off since=$(date +%s) code=null missing= free=null vae=
@@ -96,7 +96,8 @@ while true; do
       stop
       ran=$gen
       start
-    elif [ "$phase" = waiting ]; then
+    elif [ "$phase" = waiting ] || [ "$phase" = off ]; then
+      # Waiting for its files, or turned off and on again: started (an exit waits for a new generation).
       start
     fi
   else

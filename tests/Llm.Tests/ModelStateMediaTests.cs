@@ -292,14 +292,21 @@ public sealed class ModelStateMediaTests(AppFixture app)
         await StatusAsync(s, gen, "waiting", s.Clock.Now, "\"image/flux2-klein-4b/flux2-vae.safetensors\"");
         await UntilStatusAsync(s, "waiting", "the page says it waits for its files");
 
-        // It ran and exited a moment ago: not started again yet.
-        await StatusAsync(s, gen, "exited", s.Clock.Now, exit: 139);
-        await s.Media.SetAsync(Image);
-        await Task.Delay(500);
+        // It ran and exited, out of GPU memory: failed, why, its server off while it waits, not started again yet.
+        Directory.CreateDirectory(Path.Combine(s.Dir.FullName, "status"));
+        await File.WriteAllTextAsync(Path.Combine(s.Dir.FullName, "status", "imagegen.log"), "loading model\n[ERROR] ggml_cuda: CUDA error: out of memory\n");
+        await StatusAsync(s, gen, "exited", s.Clock.Now, exit: 1);
+        await UntilStatusAsync(s, "failed", "the page says it failed");
+        var failure = s.Media.FailureOf(Image)!;
+        Assert.Equal(("gpu-memory", 1), (failure.Class, failure.Count));
+        Assert.Contains("out of memory", failure.Detail);
+        await UntilFileAsync(s, "off", "its server is off while it waits");
         Assert.Equal(gen, Conf(s, "gen"));
-        // Half a minute on: a new generation, which its script starts.
-        s.Clock.Now += TimeSpan.FromSeconds(31);
+        Assert.Contains("could not load (gpu-memory", await s.Media.ReadyAsync(Image, CancellationToken.None));
+        // A minute on (1, 2, 4… as a chat model): a new generation, which its script starts.
+        s.Clock.Now += TimeSpan.FromSeconds(61);
         await UntilAsync(s, () => Task.FromResult(Conf(s, "gen") != gen), "the app raises gen to start it again");
+        Assert.Equal("on", s.File);
         var next = Conf(s, "gen");
         await StatusAsync(s, next, "running", s.Clock.Now);
         s.Server.Up = true;
@@ -309,5 +316,24 @@ public sealed class ModelStateMediaTests(AppFixture app)
         await StatusAsync(s, gen, "running", s.Clock.Now);
         await UntilStatusAsync(s, "loaded", "still loaded");
         Assert.NotNull(await s.Media.ReadyAsync(Image, new CancellationTokenSource(TimeSpan.FromSeconds(3)).Token).ContinueWith(t => t.IsCanceled ? "waited" : t.Result));
+    }
+
+    [Theory]
+    [InlineData("loading\nggml_cuda_init: CUDA error: out of memory\n", 1, 40, "gpu-memory")]
+    [InlineData("error: unknown argument: --stepz\nusage: sd-server [options]\n", 1, 0.2, "bad-options")]
+    [InlineData("loading\n", 2, 1, "bad-options")]
+    [InlineData("failed to open 'image/a.gguf': No such file or directory\n", 1, 30, "missing-file")]
+    [InlineData("[INFO] sampling\n", 139, 120, "crashed")]
+    public void A_servers_exit_is_told_by_its_log_its_code_and_how_long_it_ran(string log, int exit, double ran, string kind) =>
+        Assert.Equal(kind, MediaFailure.Classify(log, exit, ran).Class);
+
+    [Fact]
+    public void A_failure_is_tried_again_after_one_two_four_minutes_and_flags_it_refused_wait_to_be_changed()
+    {
+        var at = DateTimeOffset.UtcNow;
+        Assert.Equal(at + TimeSpan.FromMinutes(1), new MediaFailure("crashed", "", 1, at, "1").RetryAt);
+        Assert.Equal(at + TimeSpan.FromMinutes(4), new MediaFailure("gpu-memory", "", 3, at, "1").RetryAt);
+        Assert.Equal(at + TimeSpan.FromMinutes(30), new MediaFailure("timeout", "", 9, at, "1").RetryAt);
+        Assert.Null(new MediaFailure("bad-options", "", 1, at, "1").RetryAt);
     }
 }
