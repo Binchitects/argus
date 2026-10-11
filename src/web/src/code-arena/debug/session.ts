@@ -201,6 +201,7 @@ export class Session {
       // Resumed or ended while it was asked: nothing to show.
     }
     changed()
+    debug.afterStop()
     const top = this.frames.find((f) => f.path) ?? this.frames[0]
     if (top) debug.onStop?.(this, top)
   }
@@ -318,6 +319,8 @@ export const debug = {
   activeId: null as string | null,
   /** The folder, as the server names it (for sessions attached again after a reload). */
   root: '',
+  /** Whether values show at the lines' ends while stopped ("debug.inlineValues", set by the workbench). */
+  inlineValues: () => true as boolean,
   breakpoints: {} as Record<string, SourceBreakpoint[]>,
   watch: [] as string[],
   /** The exception filters chosen; null: the adapter's defaults. */
@@ -450,6 +453,28 @@ export const debug = {
       return b
     })
     if (moved) this.setBreakpoints(path, next)
+  },
+
+  /** Run to Cursor: a breakpoint there for this run only (taken away at the next stop, as VS Code's), then continue. */
+  async runTo(path: string, line: number) {
+    const s = this.active
+    if (!s || s.state !== 'stopped') return
+    if (!(this.breakpoints[path] ?? []).some((b) => b.line === line && b.enabled)) {
+      this.temporary = { path, line }
+      this.setBreakpoints(path, [...(this.breakpoints[path] ?? []).filter((b) => b.line !== line), { line, enabled: true }])
+      await this.sendBreakpoints(s, path)
+    }
+    await s.continue()
+  },
+
+  /** The breakpoint Run to Cursor set, taken away once any session stops. */
+  temporary: null as { path: string; line: number } | null,
+
+  afterStop() {
+    const t = this.temporary
+    if (!t) return
+    this.temporary = null
+    this.setBreakpoints(t.path, (this.breakpoints[t.path] ?? []).filter((b) => b.line !== t.line))
   },
 
   setWatch(list: string[]) {

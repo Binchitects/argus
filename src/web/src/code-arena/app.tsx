@@ -560,6 +560,7 @@ function Workbench({
     void debug.reattach()
   }, [workspace.data, state.folder])
   useEffect(() => {
+    debug.inlineValues = () => settings.get('debug.inlineValues') !== 'off'
     debug.onStop = (_s, frame) => {
       if (frame.path) void ed.open(frame.path, { line: frame.line, column: frame.column })
       // "debug.openDebug": Run and Debug shows as the program stops.

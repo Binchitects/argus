@@ -490,7 +490,10 @@ evaluates an expression in the frame chosen while the program is stopped.
 In the editor, a click beside a line number (or **F9**) sets or clears a
 breakpoint; the right-click menu adds a **Conditional Breakpoint…** (it breaks
 when an expression is true) or a **Logpoint…** (it prints a message, `{x}`
-replaced by `x`'s value, and goes on), and **Add to Watch**. A breakpoint no
+replaced by `x`'s value, and goes on), **Run to Cursor** (a breakpoint there
+for this run only, then continue) and **Add to Watch**. While stopped, the
+variables' values show at the ends of the lines above the one stopped at that
+name them (`debug.inlineValues`). A breakpoint no
 adapter has bound yet is hollow, one turned off grey; breakpoints follow their
 lines as the file is edited, and are kept for the folder on this computer
 (with the watches and the exceptions chosen). The line a session stopped at is

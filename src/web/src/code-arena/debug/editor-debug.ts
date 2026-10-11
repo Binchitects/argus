@@ -19,6 +19,7 @@ const css = `
 .arena-frame-focused::before { color: #89d185; }
 .arena-frame-line { background: rgba(255, 204, 0, 0.18); }
 .arena-frame-focused-line { background: rgba(137, 209, 133, 0.18); }
+.arena-inline-value { color: #8f8f8f; font-style: italic; }
 `
 
 let styled = false
@@ -83,8 +84,48 @@ export function installDebugEditor(monaco: typeof Monaco, ed: Monaco.editor.ISta
       .slice(0, marks)
   }
 
+  // Inline values (debug.inlineValues): while stopped, the frame's variables at the ends of the lines above the one
+  // stopped at that name them, as VS Code shows them.
+  let inline: Monaco.editor.IEditorDecorationsCollection | null = ed.createDecorationsCollection?.() ?? null
+  let inlineFor = ''
+  const values = async () => {
+    const model = ed.getModel()
+    const path = model ? pathOf(model) : null
+    const s = debug.active
+    const frame = s?.frames.find((f) => f.id === s.frameId)
+    const key = `${s?.id}:${s?.frameId}:${s?.state}:${path}`
+    if (key === inlineFor) return
+    inlineFor = key
+    if (!inline || !model || !path || !s || s.state !== 'stopped' || !frame || frame.path !== path || !debug.inlineValues()) {
+      inline?.clear()
+      return
+    }
+    try {
+      const scopes = await s.scopes(frame.id)
+      const vars = (await Promise.all(scopes.filter((x) => !x.expensive && x.presentationHint !== 'registers' && !/^registers$/i.test(x.name)).map((x) => s.variables(x.variablesReference)))).flat()
+      if (inlineFor !== key || model.isDisposed()) return
+      const known = new Map(vars.filter((v) => /^[\w$]+$/.test(v.name)).map((v) => [v.name, v.value]))
+      const list: Monaco.editor.IModelDeltaDecoration[] = []
+      for (let line = Math.max(1, frame.line - 40); line <= frame.line && line <= model.getLineCount(); line++) {
+        const text = model.getLineContent(line)
+        const named = [...new Set(text.match(/[A-Za-z_$][\w$]*/g) ?? [])].filter((w) => known.has(w))
+        if (named.length === 0) continue
+        const shown = named.map((w) => `${w} = ${known.get(w)!.length > 40 ? `${known.get(w)!.slice(0, 40)}…` : known.get(w)}`).join(', ')
+        list.push({ range: new monaco.Range(line, model.getLineMaxColumn(line), line, model.getLineMaxColumn(line)), options: { after: { content: `  ${shown}`, inlineClassName: 'arena-inline-value' } } })
+      }
+      inline.set(list)
+    } catch {
+      inline?.clear()
+    }
+  }
+  const offValues = onDebugChange(() => void values())
+
   const offStore = onDebugChange(draw)
-  const offModel = ed.onDidChangeModel(draw)
+  const offModel = ed.onDidChangeModel(() => {
+    draw()
+    inlineFor = ''
+    void values()
+  })
   // Edited: each breakpoint goes where its line went.
   const offContent = ed.onDidChangeModelContent(() => {
     const model = ed.getModel()
@@ -129,6 +170,9 @@ export function installDebugEditor(monaco: typeof Monaco, ed: Monaco.editor.ISta
   draw()
   return () => {
     offStore()
+    offValues()
+    inline?.clear()
+    inline = null
     offModel.dispose()
     offContent.dispose()
     offMouse.dispose()
@@ -165,6 +209,16 @@ export function addDebugActions(monaco: typeof Monaco, ed: Monaco.editor.IStanda
   }
   ed.addAction({ id: 'editor.debug.action.conditionalBreakpoint', label: 'Add Conditional Breakpoint…', contextMenuGroupId: 'debug', contextMenuOrder: 1, run: () => void ask('condition') })
   ed.addAction({ id: 'editor.debug.action.addLogPoint', label: 'Add Logpoint…', contextMenuGroupId: 'debug', contextMenuOrder: 2, run: () => void ask('logMessage') })
+  ed.addAction({
+    id: 'editor.debug.action.runToCursor',
+    label: 'Run to Cursor',
+    contextMenuGroupId: 'debug',
+    contextMenuOrder: 0,
+    run: () => {
+      const at = here()
+      if (at) void debug.runTo(at.path, at.line)
+    },
+  })
   ed.addAction({
     id: 'editor.debug.action.selectionToWatch',
     label: 'Add to Watch',

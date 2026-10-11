@@ -143,6 +143,7 @@ export const settingDefs: SettingDef[] = [
   { key: 'debug.saveBeforeStart', type: 'string', default: 'allEditorsInActiveGroup', enum: ['allEditorsInActiveGroup', 'nonUntitledEditorsInActiveGroup', 'none'], description: 'Saves the files with unsaved changes before a session starts.', category: 'Debug' },
   { key: 'debug.internalConsoleOptions', type: 'string', default: 'openOnFirstSessionStart', enum: ['neverOpen', 'openOnSessionStart', 'openOnFirstSessionStart'], description: 'When the Debug Console opens.', category: 'Debug' },
   { key: 'debug.openDebug', type: 'string', default: 'openOnDebugBreak', enum: ['neverOpen', 'openOnSessionStart', 'openOnDebugBreak'], description: 'When Run and Debug shows in the side bar: as a session starts, or as the program stops.', category: 'Debug' },
+  { key: 'debug.inlineValues', type: 'string', default: 'auto', enum: ['on', 'off', 'auto'], description: "Shows variables' values at the ends of the lines while stopped (auto: on).", category: 'Debug' },
   { key: 'debug.toolBarLocation', type: 'string', default: 'floating', enum: ['floating', 'hidden'], description: 'Where the debug toolbar is: over the editor, or not shown (the Run and Debug view and the keys still work).', category: 'Debug' },
   // Code Arena
   { key: 'codeArena.inlineCompletion.enabled', type: 'boolean', default: true, description: 'Code Arena\'s code completion as you type (the status bar\'s Complete).', category: 'Code Arena' },

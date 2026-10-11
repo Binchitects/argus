@@ -9,6 +9,7 @@ import type { ChatConfig, Message } from '@/pages/chat/types'
 import { fakeApi, type Handler } from '@/test/utils'
 import type { CodeState } from './api'
 import { App } from './app'
+import { debug } from './debug/session'
 import { asks } from './bridge'
 import { rankFiles } from './editor-state'
 import { parts, regions, tasks } from './help-text'
@@ -460,6 +461,11 @@ vi.mock('@xterm/addon-fit', () => ({
 
 beforeEach(() => {
   vi.stubGlobal('WebSocket', fakes.Socket)
+  // The debugger's store is the page's: each test starts with none of its sessions or breakpoints.
+  debug.sessions = []
+  debug.activeId = null
+  debug.breakpoints = {}
+  debug.watch = []
   for (const list of [fakes.models, fakes.editors, fakes.diffEditors, fakes.terminals, fakes.sockets, fakes.themes, fakes.keybindingRules]) list.length = 0
 })
 afterEach(() => {
@@ -1754,15 +1760,18 @@ describe('Code Arena, the IDE', () => {
     act(() => dap().open())
     const answered = new Set<number>()
     const requests = () => dap().sent.map((x) => JSON.parse(x as string) as { seq: number; command: string; arguments?: Record<string, unknown> })
+    // Each request of a command the page has sent and not had answered, answered alike (the view and the inline values ask the same).
     const answer = async (command: string, body: unknown = {}) => {
-      let req: { seq: number; arguments?: Record<string, unknown> } | undefined
+      let reqs: { seq: number; arguments?: Record<string, unknown> }[] = []
       await waitFor(() => {
-        req = requests().find((r) => r.command === command && !answered.has(r.seq))
-        expect(req, `the page asks ${command}`).toBeTruthy()
+        reqs = requests().filter((r) => r.command === command && !answered.has(r.seq))
+        expect(reqs.length, `the page asks ${command}`).toBeGreaterThan(0)
       })
-      answered.add(req!.seq)
-      act(() => dap().receive(JSON.stringify({ seq: 0, type: 'response', request_seq: req!.seq, success: true, command, body })))
-      return req!.arguments
+      for (const req of reqs) {
+        answered.add(req.seq)
+        act(() => dap().receive(JSON.stringify({ seq: 0, type: 'response', request_seq: req.seq, success: true, command, body })))
+      }
+      return reqs[0]!.arguments
     }
     const event = (name: string, body: unknown = {}) => act(() => dap().receive(JSON.stringify({ seq: 0, type: 'event', event: name, body })))
     expect(await answer('initialize', { supportsConfigurationDoneRequest: true })).toMatchObject({ adapterID: 'cppdbg', linesStartAt1: true })
