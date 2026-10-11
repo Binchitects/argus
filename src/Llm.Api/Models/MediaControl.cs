@@ -13,8 +13,8 @@ namespace Llm.Api.Models;
 /// The picture, video and speech models, managed as the engine's are: on or off, kept loaded or not,
 /// loaded and unloaded by hand, and who may use them (the models' access rules). The picture and video
 /// servers run while their control file says "on" (services/sd-serve.sh reads it); the speech server
-/// loads and unloads its models through its own API. One not kept loaded loads when asked for, and
-/// unloads after ten minutes unused. With several replicas, the one that leads writes the control
+/// loads and unloads its models through its own API (its own unloading is off). One not kept loaded loads
+/// when asked for or used, and unloads after ten minutes unused. With several replicas, the one that leads writes the control
 /// files and loads the speech models; a model asked for on another is told to it.
 /// </summary>
 public sealed partial class MediaControl : BackgroundService
@@ -168,12 +168,21 @@ public sealed partial class MediaControl : BackgroundService
         WakeHere();
     }
 
-    /// <summary>Used now: it stays loaded another ten minutes.</summary>
+    /// <summary>Used now: loaded if it is not (a speech model loads at its first request), and it stays another ten minutes.</summary>
     public void Touch(string name)
     {
-        if (_asked.ContainsKey(name))
+        if (Find(name) is not null)
         {
             Asked(name);
+        }
+    }
+
+    /// <summary>Every model of a kind used now (a request that names its model in a form the app does not read).</summary>
+    public void TouchMode(string mode)
+    {
+        foreach (var m in All.Where(m => m.Mode == mode))
+        {
+            Asked(m.Name);
         }
     }
 
@@ -297,8 +306,9 @@ public sealed partial class MediaControl : BackgroundService
                 using var res = await http.CreateClient(Client).PostAsync($"{MediaModels.AudioUrl}/api/ps/{m.Id}", null, ct);
                 loaded = res.IsSuccessStatusCode;
             }
-            else if (lead && !s.Enabled && loaded)
+            else if (lead && !want && loaded)
             {
+                // Turned off, or unused for ten minutes and not kept loaded: the speech server keeps it until told (its TTL is off).
                 using var _ = await http.CreateClient(Client).DeleteAsync($"{MediaModels.AudioUrl}/api/ps/{m.Id}", ct);
                 loaded = false;
             }

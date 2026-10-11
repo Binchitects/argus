@@ -223,7 +223,7 @@ services:
   # loads and unloads it (Admin -> Models).
   imagegen:
     <<: [*service, *gpu]
-    image: ghcr.io/leejet/stable-diffusion.cpp:master-cuda
+    image: ghcr.io/leejet/stable-diffusion.cpp@sha256:1aee2217d5e20ddfb19dfcbca21db3cbe1dcb0ae3b9bc4151773e503dca8aede
     container_name: imagegen
     user: "65534:65534"
     read_only: true
@@ -242,7 +242,7 @@ services:
   # loads and unloads it (Admin -> Models).
   videogen:
     <<: [*service, *gpu]
-    image: ghcr.io/leejet/stable-diffusion.cpp:master-cuda
+    image: ghcr.io/leejet/stable-diffusion.cpp@sha256:1aee2217d5e20ddfb19dfcbca21db3cbe1dcb0ae3b9bc4151773e503dca8aede
     container_name: videogen
     user: "65534:65534"
     read_only: true
@@ -269,8 +269,9 @@ services:
     <<: *service
     image: ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cpu
     container_name: audio
-    # Plain HTTPS downloads: Hugging Face's Xet transfer stalls on flaky links.
-    environment: { HF_HUB_DISABLE_XET: "1" }
+    # Plain HTTPS downloads: Hugging Face's Xet transfer stalls on flaky links. Its models stay loaded until the app
+    # unloads them (unused for a while, Admin -> Models), not on a timer of its own.
+    environment: { HF_HUB_DISABLE_XET: "1", STT_MODEL_TTL: "-1", TTS_MODEL_TTL: "-1" }
     volumes: [audio:/home/ubuntu/.cache/huggingface/hub]
 
   # The chat's Python: no network, a read-only root, each run its own user.

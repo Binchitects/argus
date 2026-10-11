@@ -192,8 +192,9 @@ spec:
           image: {{ include "arena.image" (dict "root" $ "image" .Values.images.audio) }}
           imagePullPolicy: {{ .Values.images.pullPolicy }}
           ports: [{ name: http, containerPort: 8000 }]
-          # Plain HTTPS downloads: Hugging Face's Xet transfer stalls on flaky links.
-          env: [{ name: HF_HUB_DISABLE_XET, value: "1" }]
+          # Plain HTTPS downloads: Hugging Face's Xet transfer stalls on flaky links. Its models stay loaded until the app
+          # unloads them, not on a timer of its own.
+          env: [{ name: HF_HUB_DISABLE_XET, value: "1" }, { name: STT_MODEL_TTL, value: "-1" }, { name: TTS_MODEL_TTL, value: "-1" }]
           volumeMounts: [{ name: models, mountPath: /home/ubuntu/.cache/huggingface/hub }]
       volumes:
         {{- include "arena.claim" (list "models" "arena-audio") | nindent 8 }}

@@ -874,15 +874,17 @@ make_env() {
 # docker-compose.override.yml for this host, when it has none: what it leaves out, and the
 # speech server kept off the network. Yours afterwards: upgrades and repairs keep it.
 write_override() {   # write_override plan|do SERVICES...
-  local act=$1 svc f="$DEPLOY/docker-compose.override.yml" audio_on=1
+  local act=$1 svc f="$DEPLOY/docker-compose.override.yml" audio_on=1 offline=""
   shift
   for svc in "$@"; do [[ $svc == audio ]] && audio_on=0; done
+  # Offline only when its models come from a folder: with a network an admin may download speech models later.
+  [[ $audio_on -eq 1 && $CMD == install && -n "${NEW_DEFAULTS:-}" && -d "${NEW_DEFAULTS:-}" ]] && offline="; the speech server offline (HF_HUB_OFFLINE=1)"
   if [[ -f "$f" ]]; then
     note "docker-compose.override.yml is there: kept as it is"
     return 0
   fi
   if [[ $act == plan ]]; then
-    would "write docker-compose.override.yml: ${*:+$* left out; }the speech server offline (HF_HUB_OFFLINE=1)"
+    would "write docker-compose.override.yml: ${*:+$* left out}$offline"
     return 0
   fi
   {
@@ -893,12 +895,12 @@ write_override() {   # write_override plan|do SERVICES...
     if [[ $NO_GITLAB -eq 1 ]]; then
       echo "  # Argus waits for a GitLab: put GITLAB_URL and GITLAB_TOKEN in .env, take out the argus line above, then up -d."
     fi
-    if [[ $audio_on -eq 1 ]]; then
-      echo "  # No network here: the speech server uses the models it has and never looks for others."
+    if [[ -n $offline ]]; then
+      echo "  # Its models were copied from a folder: the speech server uses the models it has and never looks for others."
       echo "  audio: { environment: { HF_HUB_OFFLINE: \"1\" } }"
     fi
   } > "$f" || die "cannot write $f"
-  did "docker-compose.override.yml: ${*:+$* left out; }the speech server offline"
+  did "docker-compose.override.yml: ${*:+$* left out}$offline"
 }
 
 # ========================================================================= models

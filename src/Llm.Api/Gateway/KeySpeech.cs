@@ -30,7 +30,7 @@ public static class KeySpeech
     /// <summary>Text to speech requests larger than this go on as they came.</summary>
     private const int MostRead = 1024 * 1024;
 
-    public static async Task ProxyAsync(HttpContext http, ILiteLlm gateway, AppDbContext db, VoiceCatalog voices, IHttpClientFactory factory)
+    public static async Task ProxyAsync(HttpContext http, ILiteLlm gateway, AppDbContext db, VoiceCatalog voices, IHttpClientFactory factory, Models.MediaControl media)
     {
         var ct = http.RequestAborted;
         var request = http.Request;
@@ -46,6 +46,8 @@ public static class KeySpeech
         {
             if (request.Path.Value?.EndsWith("/transcriptions", StringComparison.Ordinal) == true)
             {
+                // Its model is in the form, which goes on as it came: every speech to text model counts as used.
+                media.TouchMode("audio_transcription");
                 if (await WithLanguageAsync(request.Body, request.ContentType, await voices.LanguageOfAsync(person, ct), ct) is (var form, var added))
                 {
                     content = form;
@@ -67,6 +69,14 @@ public static class KeySpeech
                     return;
                 }
                 body = await WithVoiceAsync(body, person, voices, ct) ?? body;
+                if (SpokenBy(body) is { } model)
+                {
+                    media.Touch(model);
+                }
+                else
+                {
+                    media.TouchMode("audio_speech");
+                }
                 content = new ByteArrayContent(body);
                 length = body.Length;
             }
@@ -126,6 +136,19 @@ public static class KeySpeech
                 await http.Response.Body.WriteAsync(buffer.AsMemory(0, n), ct);
                 await http.Response.Body.FlushAsync(ct);
             }
+        }
+    }
+
+    /// <summary>The model a text to speech request names, if it is JSON that names one.</summary>
+    private static string? SpokenBy(byte[] body)
+    {
+        try
+        {
+            return JsonNode.Parse(body) is JsonObject json && json["model"] is JsonValue v && v.GetValueKind() == JsonValueKind.String ? v.GetValue<string>() : null;
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 

@@ -185,4 +185,78 @@ public sealed class ModelStateMediaTests(AppFixture app)
         Assert.True(pictures.GetProperty("ok").GetBoolean(),
             $"Admin -> Models says {Image} is unloaded (idle, as meant), but the Overview counts the picture server down: \"{pictures.GetProperty("detail").GetString()}\".");
     }
+
+    /// <summary>The speech server's loaded models, as speaches keeps them with its own unloading off: loaded until told.</summary>
+    private sealed class FakeSpeech : HttpMessageHandler
+    {
+        public readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> Loaded = new();
+        public readonly System.Collections.Concurrent.ConcurrentQueue<string> Calls = new();
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.RequestUri.Host == "audio" && path.StartsWith("/api/ps", StringComparison.Ordinal))
+            {
+                var id = path.Length > "/api/ps/".Length ? path["/api/ps/".Length..] : "";
+                Calls.Enqueue($"{request.Method} {id}");
+                if (request.Method == HttpMethod.Post)
+                {
+                    Loaded[id] = true;
+                }
+                else if (request.Method == HttpMethod.Delete)
+                {
+                    Loaded.TryRemove(id, out _);
+                }
+                var list = string.Join(",", Loaded.Keys.Select(k => $"\"{k}\""));
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent($$"""{"models":[{{list}}]}""", Encoding.UTF8, "application/json") });
+            }
+            throw new HttpRequestException(HttpRequestError.ConnectionError, $"Connection refused ({request.RequestUri.Authority})");
+        }
+    }
+
+    [Fact]
+    public async Task A_speech_model_used_stays_loaded_while_it_is_used_and_the_app_unloads_it_ten_minutes_after()
+    {
+        var clock = new MovableClock(DateTimeOffset.UtcNow);
+        var speech = new FakeSpeech();
+        await using var f = app.Create(app.ConnectionStringFor("mspeech_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
+            new Dictionary<string, string?> { ["Modules:audio"] = "true", ["Replicas:Enabled"] = "false" },
+            s =>
+            {
+                s.AddSingleton<TimeProvider>(clock);
+                s.AddHttpClient(MediaControl.Client).ConfigurePrimaryHttpMessageHandler(() => speech);
+            });
+        var media = f.Services.GetRequiredService<MediaControl>();
+        var kokoro = MediaModels.Speech.Single(m => m.Name == MediaModels.TextToSpeech).Id;
+        var whisper = MediaModels.Speech.Single(m => m.Name == MediaModels.SpeechToText).Id;
+        async Task Until(Func<bool> done, string what)
+        {
+            var until = DateTime.UtcNow + Deadline;
+            while (!done())
+            {
+                Assert.True(DateTime.UtcNow < until, $"Not within {Deadline.TotalSeconds} s: {what} (calls: {string.Join(", ", speech.Calls)})");
+                await media.SetAsync(MediaModels.TextToSpeech);
+                await Task.Delay(200);
+            }
+        }
+
+        // Kept loaded by default: speech to text. Read aloud uses kokoro (not kept): it counts as used, and is loaded.
+        await Until(() => speech.Loaded.ContainsKey(whisper), "the kept speech to text model is loaded");
+        media.Touch(MediaModels.TextToSpeech);
+        await Until(() => speech.Loaded.ContainsKey(kokoro), "kokoro, used, is loaded");
+
+        // Used again nine minutes on: it stays.
+        clock.Now += TimeSpan.FromMinutes(9);
+        media.Touch(MediaModels.TextToSpeech);
+        clock.Now += TimeSpan.FromMinutes(9);
+        await media.SetAsync(MediaModels.TextToSpeech);
+        await Task.Delay(500);
+        Assert.True(speech.Loaded.ContainsKey(kokoro), "used nine minutes ago: still loaded");
+
+        // Ten minutes and more unused: the app unloads it (speaches would not: its own unloading is off); the kept one stays.
+        clock.Now += TimeSpan.FromMinutes(2);
+        await Until(() => !speech.Loaded.ContainsKey(kokoro), "kokoro, unused for eleven minutes, is unloaded");
+        Assert.True(speech.Loaded.ContainsKey(whisper));
+        Assert.Contains($"DELETE {kokoro}", speech.Calls);
+    }
 }

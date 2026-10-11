@@ -46,7 +46,8 @@ images:
   postgres: { repository: pgvector/pgvector, tag: 0.8.0-pg16 }
   litellm: { repository: ghcr.io/berriai/litellm, tag: main-stable }
   llamacpp: { repository: ghcr.io/ggml-org/llama.cpp, tag: server-cuda }
-  sdcpp: { repository: ghcr.io/leejet/stable-diffusion.cpp, tag: master-cuda }
+  # A build that is known to work: master-cuda moves under its flags.
+  sdcpp: { repository: ghcr.io/leejet/stable-diffusion.cpp, digest: "sha256:1aee2217d5e20ddfb19dfcbca21db3cbe1dcb0ae3b9bc4151773e503dca8aede" }
   audio: { repository: ghcr.io/speaches-ai/speaches, tag: 0.9.0-rc.3-cpu }
   searxng: { repository: ghcr.io/searxng/searxng, tag: latest }
   prometheus: { repository: prom/prometheus, tag: v3.1.0 }

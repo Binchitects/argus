@@ -14,7 +14,11 @@ app.kubernetes.io/instance: {{ .root.Release.Name }}
 
 {{/* An image: (dict "root" $ "image" .Values.images.app); the tag defaults to the chart's appVersion. */}}
 {{- define "arena.image" -}}
+{{- if .image.digest -}}
+{{ .image.repository }}@{{ .image.digest }}
+{{- else -}}
 {{ .image.repository }}:{{ .image.tag | default .root.Chart.AppVersion }}
+{{- end }}
 {{- end }}
 
 {{/* The Secret holding the stack's secrets. */}}

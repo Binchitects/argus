@@ -29,7 +29,7 @@ public sealed class ChatGatewayException(string message, int? status = null) : E
 /// passes on): a conversation's turn to the slot that holds its start, a side request to the last
 /// slot first (<see cref="EngineRoute"/>, which also makes room for a model that is not loaded).
 /// </summary>
-public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFactory scopes, EngineRoute route)
+public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFactory scopes, EngineRoute route, Models.MediaControl media)
 {
     /// <summary>The person a request is for, as LiteLLM attributes spend (its user_header_mappings).</summary>
     public const string UserEmailHeader = "X-LLM-User-Email";
@@ -118,6 +118,7 @@ public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFacto
     public async Task<string> TranscribeAsync(string model, byte[] sound, string fileName, string personEmail, CancellationToken ct, string contentType = "audio/mpeg",
         string? language = null)
     {
+        media.Touch(model);
         // verbose_json says the sound's length: the gateway prices a transcription by it (a plain json answer is priced at nothing).
         using var res = await WithKeyAsync(() => PostAsync("/v1/audio/transcriptions", () =>
         {
@@ -148,6 +149,7 @@ public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFacto
     /// <param name="speed">0.5 to 2; 1 (as the voice speaks) is not sent.</param>
     public Task<HttpResponseMessage> OpenSpeechAsync(string model, string text, string voice, string personEmail, CancellationToken ct, double speed = 1)
     {
+        media.Touch(model);
         var body = new JsonObject { ["model"] = model, ["input"] = text, ["voice"] = voice, ["response_format"] = "mp3", ["user"] = personEmail };
         if (speed != 1)
         {

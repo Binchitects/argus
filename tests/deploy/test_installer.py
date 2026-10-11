@@ -372,7 +372,7 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("dry run: nothing is done", out)
         self.assertIn("the small ones: the rest is checked when it is unpacked", out)
         self.assertIn("would  load 9 images", out)
-        self.assertIn("would  write docker-compose.override.yml: llamacpp argus left out; the speech server offline", out)
+        self.assertIn("would  write docker-compose.override.yml: llamacpp argus left out\n", out)
         self.assertIn("no GitLab given (--gitlab-url, --gitlab-token-file): Argus is left out", out)
         self.assertFalse(self.dir.exists())
         mutating = {"load", "tag", "run", "rm", "rmi", "save"}
@@ -494,7 +494,8 @@ class InstallerTests(unittest.TestCase):
         override = (deploy / "docker-compose.override.yml").read_text()
         self.assertIn("  llamacpp: { profiles: !override [off] }", override)
         self.assertNotIn("imagegen", override)  # not a service of this release
-        self.assertIn('HF_HUB_OFFLINE: "1"', override)
+        # With a network an admin may download speech models later: the speech server is not kept offline.
+        self.assertNotIn("HF_HUB_OFFLINE", override)
         self.assertTrue((deploy / "certs" / "tls.crt").is_file())
         for f in ("docs/deployment.md", "LICENSE.md", "VERSION", "code-arena/code-arena-9.9.9-linux-x64.tar.gz", "packs"):
             self.assertTrue((self.dir / f).exists(), f)
@@ -544,6 +545,8 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual((models / "image" / "flux.gguf").read_text(), "here already\n")
         self.assertIn("1 model file(s) copied from", r.stdout)
         self.assertNotIn("DEFAULT_MODELS=download", (self.dir / "deploy" / ".env").read_text())
+        # Models from a folder: the speech server uses those and never looks for others.
+        self.assertIn('HF_HUB_OFFLINE: "1"', (self.dir / "deploy" / "docker-compose.override.yml").read_text())
 
     def test_A_default_models_choice_that_is_none_of_the_three_is_refused(self):
         r = self.r.run("install", "--dir", str(self.dir), "--yes", "--default-models", "/no/such/folder")
