@@ -201,7 +201,8 @@ internal sealed partial class WebApp
                 case ("POST", "/api/terminals"):
                 {
                     var body = Body(req);
-                    var terminal = await Task.Run(() => _terminals.Open(body.Int("cols") ?? 80, body.Int("rows") ?? 24), ct);
+                    var start = body["program"] is null ? null : DebuggeeStart(body);
+                    var terminal = await Task.Run(() => _terminals.Open(body.Int("cols") ?? 80, body.Int("rows") ?? 24, start), ct);
                     await res.JsonAsync(200, terminal.Json(), ct);
                     return true;
                 }
@@ -314,6 +315,31 @@ internal sealed partial class WebApp
             return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// A debug adapter's runInTerminal, as the page passes it on ({program, args, cwd, env, title}): the program in a
+    /// terminal of its own (a debuggee's), in the folder or one inside it, without ARENA_API_KEY.
+    /// </summary>
+    private TerminalStart DebuggeeStart(JsonObject body)
+    {
+        var program = body.Str("program") is { Length: > 0 } p ? p : throw new IdeError(400, "invalid", "Say which program to run.");
+        var args = body["args"] is JsonArray list ? list.Select(a => a is JsonValue v && v.TryGetValue<string>(out var s) ? s : a?.ToJsonString() ?? "").ToList() : [];
+        string? cwd = null;
+        if (body.Str("cwd") is { Length: > 0 } dir)
+        {
+            var full = Path.GetFullPath(dir, _rt.Workspace.Root);
+            cwd = _rt.Workspace.Inside(full) && Directory.Exists(full) ? full : throw new IdeError(403, "outside", "A debuggee runs in the folder, or in a folder inside it.");
+        }
+        var env = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var (key, value) in body["env"] as JsonObject ?? [])
+        {
+            if (!string.Equals(key, "ARENA_API_KEY", StringComparison.OrdinalIgnoreCase))
+            {
+                env[key] = value is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+            }
+        }
+        return new TerminalStart(program, args, cwd, env, body.Str("title") ?? Path.GetFileName(program), TerminalKind.Debuggee);
     }
 
     private static string? Query(HttpRequest req, string name) => req.Query.GetValueOrDefault(name);

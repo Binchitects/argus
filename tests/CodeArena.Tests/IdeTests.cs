@@ -598,6 +598,30 @@ public sealed class IdeTests : IDisposable
     }
 
     [Fact]
+    public async Task A_debug_adapters_program_runs_in_a_terminal_of_its_own_in_the_folder_only()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        using var h = new Harness(_gateway, _mcp);
+        Directory.CreateDirectory(Path.Combine(h.Work, "sub"));
+        await using var web = await WebRun.StartAsync(h);
+        var opened = await Json(await web.PostAsync("/api/terminals", new JsonObject
+        {
+            ["program"] = "/bin/sh", ["args"] = new JsonArray("-c", "sleep 5"), ["cwd"] = Path.Combine(h.Work, "sub"), ["title"] = "Debuggee",
+            ["env"] = new JsonObject { ["FOO"] = "bar", ["ARENA_API_KEY"] = "never" }, ["cols"] = 80, ["rows"] = 24,
+        }));
+        Assert.Equal("debuggee", opened["kind"]!.GetValue<string>());
+        Assert.Equal("Debuggee", opened["title"]!.GetValue<string>());
+        Assert.True(opened["pid"]!.GetValue<int>() > 0);
+        // A folder outside the working directory is refused.
+        var outside = await web.PostAsync("/api/terminals", new JsonObject { ["program"] = "/bin/sh", ["cwd"] = h.Root });
+        Assert.Equal(HttpStatusCode.Forbidden, outside.StatusCode);
+        await web.PostAsync("/api/terminals/close", new JsonObject { ["id"] = opened["id"]!.GetValue<string>() });
+    }
+
+    [Fact]
     public async Task The_agents_edits_are_listed_diffed_and_accepted_or_reverted_file_by_file()
     {
         using var h = new Harness(_gateway, _mcp);

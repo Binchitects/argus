@@ -548,6 +548,10 @@ session run only in a folder you trust; until then, starting one lists the
 commands it would run and asks first. Detected tasks and configurations show
 their command and need no trust to run without the debugger.
 
+A program an adapter asks to run in a terminal (debugpy's and js-debug's
+`"console": "integratedTerminal"`) runs in a terminal of its own, shown in the
+panel.
+
 **Debuggers.** The debugger is the page's own: it speaks the Debug Adapter
 Protocol to a debug adapter through code-arena, as VS Code does. code-arena
 starts the adapter, passes messages both ways and keeps what a page that comes
@@ -809,7 +813,7 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/changes/accept` `{path, before}` | keeps the change (all of them without `path`); with `before` (a text), part of it: that text becomes the file's before the agent (equal to the file now, or empty for a file gone since: all of it); the list left |
 | `POST /api/changes/revert` `{path}` | puts the file back; the list left |
 | `GET /api/terminals` | `[{id, kind, title, pid, cols, rows, exitCode}]` (`kind`: `shell`, `task`, `run` or `debuggee`; `title`: the shell's name, a task's label or a configuration's name) |
-| `POST /api/terminals` `{cols, rows}` | opens the person's shell; 409 `too_many` past sixteen running |
+| `POST /api/terminals` `{cols, rows}` | opens the person's shell; 409 `too_many` past sixteen running. With `{program, args, cwd, env, title}` (a debug adapter's `runInTerminal`, passed on by the page): that program in a terminal of kind `debuggee`, in the folder or one inside it (403 `outside` else), without `ARENA_API_KEY` |
 | `POST /api/terminals/close` `{id}` | ends its shell and forgets it |
 | `GET /api/terminals/socket?id=ID` | the terminal's WebSocket |
 | `GET /api/history` | what this folder sent, newest first, each text once (500 at most): `[{text}]`, without the terminal's own commands (`/help`, `/model`, …; `/compact` and `/clear` stay) |
@@ -842,7 +846,8 @@ protocol: `initialize`, then `launch` or `attach` with the start's
 `configurationDone`. A `cancel`'s and a `progressStart`'s `requestId` are the
 page's own numbers. A request from the adapter (`runInTerminal`,
 `startDebugging`) goes to every page, and the first answer reaches the
-adapter; the page answers each, with `success: false` when it cannot. A page
+adapter; the page runs `runInTerminal`'s program in a terminal of its own and
+answers with its process, and answers any other with `success: false`. A page
 sends 1 MB per message at most, an adapter 32 MB; a page that falls 10,000
 messages or 64 MB behind is let go (its socket closes; it reattaches to get
 the snapshot).

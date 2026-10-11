@@ -1746,6 +1746,7 @@ describe('Code Arena, the IDE', () => {
       },
       'POST /api/run/start': () => ({ json: started }),
       'POST /api/debug/stop': () => ({ status: 204 }),
+      'POST /api/terminals': (body) => ({ json: { id: '9', kind: 'debuggee', title: (body as { title: string }).title, pid: 4321, cols: 120, rows: 30, exitCode: null } }),
     })
     renderIde()
     await openApp()
@@ -1780,6 +1781,11 @@ describe('Code Arena, the IDE', () => {
     event('initialized')
     expect(await answer('setBreakpoints', { breakpoints: [{ verified: true, line: 1 }] })).toMatchObject({ source: { path: '/home/ada/shop/src/app.ts' }, breakpoints: [{ line: 1 }] })
     await answer('configurationDone')
+    // The adapter asks for its program in a terminal (runInTerminal): it opens, and the adapter is told its process.
+    act(() => dap().receive(JSON.stringify({ seq: 90, type: 'request', command: 'runInTerminal', arguments: { kind: 'integrated', title: 'Debuggee', args: ['/home/ada/shop/app', '--x'], cwd: '/home/ada/shop' } })))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/terminals')?.body).toMatchObject({ program: '/home/ada/shop/app', args: ['--x'], cwd: '/home/ada/shop', title: 'Debuggee' }))
+    await waitFor(() => expect(requests().length).toBeGreaterThan(0))
+    await waitFor(() => expect(dap().sent.map((x) => JSON.parse(x as string) as { type: string; request_seq?: number; body?: unknown })).toContainEqual(expect.objectContaining({ type: 'response', request_seq: 90, success: true, body: { processId: 4321 } })))
     await answer('launch')
     // Stopped at the breakpoint: the call stack, the line in the editor, the variables, a watch.
     event('stopped', { reason: 'breakpoint', threadId: 1 })

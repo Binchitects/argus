@@ -358,6 +358,9 @@ export const gitSwitch = (branch: string) => api<GitStatus>('/api/git/switch', {
 export const completeCode = (body: { path: string; prefix: string; suffix: string }, signal: AbortSignal) => api<{ text: string }>('/api/complete', { body, signal })
 
 export const openTerminal = (cols: number, rows: number) => api<TerminalInfo>('/api/terminals', { body: { cols, rows } })
+
+/** A debuggee's program in a terminal of its own (a debug adapter's runInTerminal). */
+export const openProgram = (body: { program: string; args: string[]; cwd?: string; env?: Record<string, string | null>; title?: string; cols: number; rows: number }) => api<TerminalInfo>('/api/terminals', { body })
 export const closeTerminal = (id: string) => api('/api/terminals/close', { body: { id } })
 
 /**

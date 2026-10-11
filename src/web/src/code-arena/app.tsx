@@ -25,7 +25,7 @@ import { useEditor } from './editor-state'
 import { Explorer } from './explorer'
 import { HelpProvider } from './help'
 import { useOpenHelp } from './help-context'
-import { terminalsQuery, type TerminalInfo } from './ide-api'
+import { openProgram, terminalsQuery, type TerminalInfo } from './ide-api'
 import { allFilesQuery, changesQuery, folderQuery, gitBranchesQuery, gitFileLog, gitStatusQuery, readFile, saveWorkspaceState, workspaceStateQuery, parentOf, preferencesQuery, problemsQuery, savePreferences, writeFile } from './ide-api'
 import { setContext, useKeyboard, useKeyFor } from './keyboard'
 import { quickPick } from './quick-pick'
@@ -306,11 +306,14 @@ function Workbench({
   const [newTerminal, setNewTerminal] = useState(0)
   const [terminalShown, setTerminalShown] = useState<{ id: string; at: number } | undefined>()
   /** A terminal a task or a run opened: in the list at once, and shown in the panel. */
-  const showTerminal = (t: TerminalInfo | null | undefined) => {
-    if (!t) return
-    queryClient.setQueryData<TerminalInfo[]>(terminalsQuery.queryKey, (list) => [...(list ?? []).filter((x) => x.id !== t.id), t])
-    setTerminalShown({ id: t.id, at: Date.now() })
-  }
+  const showTerminal = useCallback(
+    (t: TerminalInfo | null | undefined) => {
+      if (!t) return
+      queryClient.setQueryData<TerminalInfo[]>(terminalsQuery.queryKey, (list) => [...(list ?? []).filter((x) => x.id !== t.id), t])
+      setTerminalShown({ id: t.id, at: Date.now() })
+    },
+    [queryClient],
+  )
   const [panelUsed, setPanelUsed] = useState(layout.panelOpen)
   // Run and Debug is drawn the first time it shows (it asks code-arena for the configurations then).
   const [debugUsed, setDebugUsed] = useState(layout.view === 'debug')
@@ -561,6 +564,21 @@ function Workbench({
   }, [workspace.data, state.folder])
   useEffect(() => {
     debug.inlineValues = () => settings.get('debug.inlineValues') !== 'off'
+    // runInTerminal: the program in a terminal of its own, shown in the panel; the adapter is told its process.
+    debug.onRunInTerminal = async (_s, args) => {
+      const [program, ...rest] = args.args
+      if (!program) return undefined
+      try {
+        const t = await openProgram({ program, args: rest, cwd: args.cwd || undefined, env: args.env, title: args.title, cols: 120, rows: 30 })
+        showTerminal(t)
+        setPanelUsed(true)
+        change({ panelOpen: true, panelTab: 'terminal' })
+        return t.pid
+      } catch (e) {
+        toast.error(errorMessage(e))
+        return undefined
+      }
+    }
     debug.onStop = (_s, frame) => {
       if (frame.path) void ed.open(frame.path, { line: frame.line, column: frame.column })
       // "debug.openDebug": Run and Debug shows as the program stops.
@@ -568,8 +586,9 @@ function Workbench({
     }
     return () => {
       debug.onStop = null
+      debug.onRunInTerminal = null
     }
-  }, [ed, settings, show])
+  }, [ed, settings, show, change, showTerminal])
   const s = dbg.active
   setContext({ inDebugMode: dbg.sessions.some((x) => x.state !== 'ended'), debugState: s?.state ?? 'inactive', debugType: s?.start.adapterId ?? '' })
   const editorContext = () => {
