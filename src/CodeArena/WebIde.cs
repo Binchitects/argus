@@ -1,7 +1,5 @@
-using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json.Nodes;
-using System.Threading.Channels;
 
 namespace CodeArena;
 
@@ -313,101 +311,47 @@ internal sealed partial class WebApp
         }
         using var socket = await res.AcceptWebSocketAsync(req, ct);
         var (backlog, frames) = terminal.Attach();
-        using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var sending = SendFramesAsync(socket, backlog, frames, stop.Token);
         try
         {
-            await ReceiveKeysAsync(socket, terminal, stop.Token);
-        }
-        catch (Exception e) when (e is WebSocketException or OperationCanceledException or IOException)
-        {
-            // The page went away, or the server is stopping.
+            await SocketRelay.RunAsync(
+                socket,
+                backlog.Length > 0 ? [new SocketMessage(backlog, Text: false)] : [],
+                frames.Reader,
+                frame => frame.Output is { } output ? new SocketMessage(output, Text: false)
+                    : frame.Exit is { } code ? SocketMessage.Of(new JsonObject { ["type"] = "exit", ["code"] = code })
+                    : null,
+                (message, _) =>
+                {
+                    Keys(terminal, message);
+                    return ValueTask.CompletedTask;
+                },
+                MaxTerminalMessage,
+                "The shell ended.",
+                ct);
         }
         finally
         {
             terminal.Detach(frames);
-            await stop.CancelAsync();
-            await sending;
-        }
-        if (socket.State == WebSocketState.CloseReceived)
-        {
-            try
-            {
-                using var bye = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, bye.Token);
-            }
-            catch (Exception e) when (e is WebSocketException or OperationCanceledException or IOException)
-            {
-            }
         }
     }
 
-    /// <summary>The only one sending on the socket: the backlog, the output, and at the end the exit and the close.</summary>
-    private static async Task SendFramesAsync(WebSocket socket, byte[] backlog, Channel<TerminalFrame> frames, CancellationToken ct)
+    /// <summary>What the page sent a terminal: keys as bytes, or {"type":"input"} and {"type":"resize"} as text.</summary>
+    private static void Keys(Terminal terminal, SocketMessage message)
     {
-        try
+        if (!message.Text)
         {
-            if (backlog.Length > 0)
-            {
-                await socket.SendAsync(backlog, WebSocketMessageType.Binary, true, ct);
-            }
-            await foreach (var frame in frames.Reader.ReadAllAsync(ct))
-            {
-                if (frame.Output is { } output)
-                {
-                    await socket.SendAsync(output, WebSocketMessageType.Binary, true, ct);
-                }
-                else if (frame.Exit is { } code)
-                {
-                    await socket.SendAsync(Encoding.UTF8.GetBytes(Json.Line(new JsonObject { ["type"] = "exit", ["code"] = code })), WebSocketMessageType.Text, true, ct);
-                }
-            }
-            // The shell ended (the channel completes only then).
-            await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "The shell ended.", ct);
+            terminal.Input(message.Data);
+            return;
         }
-        catch (Exception e) when (e is WebSocketException or OperationCanceledException or IOException or ObjectDisposedException)
+        var json = Json.ParseObject(Encoding.UTF8.GetString(message.Data));
+        switch (json.Str("type"))
         {
-            // The page went away first.
-        }
-    }
-
-    private static async Task ReceiveKeysAsync(WebSocket socket, Terminal terminal, CancellationToken ct)
-    {
-        var buffer = new byte[16 * 1024];
-        using var message = new MemoryStream();
-        while (socket.State is WebSocketState.Open or WebSocketState.CloseSent)
-        {
-            var r = await socket.ReceiveAsync(buffer, ct);
-            if (r.MessageType == WebSocketMessageType.Close)
-            {
-                return;
-            }
-            if (message.Length + r.Count > MaxTerminalMessage)
-            {
-                return;
-            }
-            message.Write(buffer, 0, r.Count);
-            if (!r.EndOfMessage)
-            {
-                continue;
-            }
-            var data = message.ToArray();
-            message.SetLength(0);
-            if (r.MessageType == WebSocketMessageType.Binary)
-            {
-                terminal.Input(data);
-                continue;
-            }
-            var json = Json.ParseObject(Encoding.UTF8.GetString(data));
-            switch (json.Str("type"))
-            {
-                case "input":
-                    terminal.Input(Encoding.UTF8.GetBytes(json.Str("data") ?? ""));
-                    break;
-                case "resize":
-                    terminal.Resize(json.Int("cols") ?? terminal.Cols, json.Int("rows") ?? terminal.Rows);
-                    break;
-            }
+            case "input":
+                terminal.Input(Encoding.UTF8.GetBytes(json.Str("data") ?? ""));
+                break;
+            case "resize":
+                terminal.Resize(json.Int("cols") ?? terminal.Cols, json.Int("rows") ?? terminal.Rows);
+                break;
         }
     }
 
