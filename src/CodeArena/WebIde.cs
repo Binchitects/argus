@@ -167,6 +167,11 @@ internal sealed partial class WebApp
                     var body = Body(req);
                     var path = body.Str("path");
                     var before = body.Str("before");
+                    if (before is null && body["before"] is not null)
+                    {
+                        // Not taken as no before at all: that would accept the whole change, which could no longer be reverted.
+                        throw new IdeError(400, "invalid", "before is the file's text with the part accepted.");
+                    }
                     if (before is not null && path is null)
                     {
                         throw new IdeError(400, "invalid", "Say which file's change is accepted in part.");

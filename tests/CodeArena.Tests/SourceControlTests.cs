@@ -162,6 +162,9 @@ public sealed class SourceControlTests : IDisposable
         File.WriteAllBytes(Path.Combine(h.Work, "logo.png"), [0x89, 0x50, 0x4E, 0x47, 0x00, 0x01]);
         File.WriteAllBytes(Path.Combine(h.Work, "latin1.txt"), [0x63, 0x61, 0x66, 0xE9, 0x0A]);
         h.Write("big.txt", new string('x', CodeArena.IdeFiles.MaxTextBytes + 1));
+        h.Write("two words.txt", "spaced\n");
+        h.Write("-n.txt", "dashed\n");
+        h.Write("cr.txt", "plain\n");
         Commit(h.Work, "Two");
         var second = GitOut(h.Work, "rev-parse", "HEAD");
         h.Write("app.ts", "three\n");
@@ -180,6 +183,11 @@ public sealed class SourceControlTests : IDisposable
         Assert.Equal("one\n", Text(await Show(web, "app.ts", "old")));
         Assert.Equal("one\n", Text(await Show(web, "app.ts", "HEAD~1")));
         Assert.Equal("four\n", File.ReadAllText(Path.Combine(h.Work, "app.ts")));
+
+        // A name is only a name: with a space, or a dash first. One with a carriage return is refused (git would read x\r as x).
+        Assert.Equal(("spaced\n", "spaced\n"), (Text(await Show(web, "two words.txt", "HEAD")), Text(await Show(web, "two words.txt", ":"))));
+        Assert.Equal("dashed\n", Text(await Show(web, "-n.txt", "HEAD")));
+        Assert.Equal(HttpStatusCode.BadRequest, (await Get(web, "/api/git/show", ("path", "cr.txt\r"), ("rev", "HEAD"))).StatusCode);
 
         // Staged only: not at HEAD, in the index.
         var notYet = await Show(web, "staged.txt", "HEAD");
@@ -308,6 +316,7 @@ public sealed class SourceControlTests : IDisposable
         h.Write("run.sh", "#!/bin/sh\necho two\n");
         File.WriteAllBytes(Path.Combine(h.Work, "bom.txt"), [0xEF, 0xBB, 0xBF, (byte)'y', (byte)'\n']);
         h.Write("new.ts", "first\nsecond\n");
+        h.Write("-my notes.txt", "first\nsecond\n");
         await using var web = await WebRun.StartAsync(h);
         Task<HttpResponseMessage> StageText(JsonObject body) => web.PostAsync("/api/git/stage-text", body);
         async Task<Dictionary<string, (string? Staged, string? Changed)>> Staged(string path, string text) =>
@@ -326,6 +335,8 @@ public sealed class SourceControlTests : IDisposable
         Assert.Equal(("A", "M"), (await Staged("new.ts", "first\n"))["new.ts"]);
         Assert.StartsWith("100644 ", GitOut(h.Work, "ls-files", "-s", "new.ts"));
         Assert.Equal("first\nsecond\n", File.ReadAllText(Path.Combine(h.Work, "new.ts")));
+        Assert.Equal(("A", "M"), (await Staged("-my notes.txt", "first\n"))["-my notes.txt"]);
+        Assert.Equal("first\n", Text(await Show(web, "-my notes.txt", ":")));
         Assert.Equal(("M", (string?)null), (await Staged("bom.txt", "y\n"))["bom.txt"]);
 
         // Outside the folder, no text, a folder, a link.
@@ -335,6 +346,58 @@ public sealed class SourceControlTests : IDisposable
         Assert.Equal(HttpStatusCode.BadRequest, (await StageText(new JsonObject { ["path"] = "src", ["text"] = "x" })).StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, (await StageText(new JsonObject { ["path"] = "link.ts", ["text"] = "x" })).StatusCode);
         Assert.StartsWith("120000 ", GitOut(h.Work, "ls-files", "-s", "link.ts"));
+    }
+
+    [Fact]
+    public async Task A_merge_lists_what_it_brought_and_a_staged_text_settles_a_conflict()
+    {
+        using var h = new Harness(_gateway, _mcp, c => c["autoCommit"] = false);
+        Init(h.Work);
+        h.Write("a.txt", "a\n");
+        h.Write("b.txt", "b\n");
+        h.Write("c.txt", "c\n");
+        h.Write("docs/d.txt", "d\n");
+        Commit(h.Work, "Start");
+        Git(h.Work, "switch", "-q", "-c", "side");
+        h.Write("b.txt", "b on the side\n");
+        h.Write("c.txt", "c on the side\n");
+        Commit(h.Work, "Side");
+        Git(h.Work, "switch", "-q", "main");
+        h.Write("a.txt", "a on main\n");
+        Commit(h.Work, "Main");
+        Git(h.Work, "merge", "-q", "--no-ff", "-m", "Merge side", "side");
+        var merge = GitOut(h.Work, "rev-parse", "HEAD");
+        // c.txt changed on both sides now: merging leaves it in conflict (stages 1, 2 and 3, none 0).
+        Git(h.Work, "switch", "-q", "-c", "clash");
+        h.Write("c.txt", "c on clash\n");
+        Commit(h.Work, "Clash");
+        Git(h.Work, "switch", "-q", "main");
+        h.Write("c.txt", "c on main\n");
+        Commit(h.Work, "Main again");
+        var psi = new ProcessStartInfo("git") { WorkingDirectory = h.Work, RedirectStandardOutput = true, RedirectStandardError = true, ArgumentList = { "merge", "-q", "clash" } };
+        using (var merging = Process.Start(psi)!)
+        {
+            merging.WaitForExit();
+            Assert.NotEqual(0, merging.ExitCode);
+        }
+        Assert.Equal(3, GitOut(h.Work, "ls-files", "-s", "c.txt").Split('\n').Length);
+        await using var web = await WebRun.StartAsync(h);
+
+        // Against its first parent: what the side brought in.
+        var merged = await web.GetJsonAsync($"/api/git/commit?hash={merge}");
+        Assert.Equal((2, "M b.txt, M c.txt"), (merged["parents"]!.AsArray().Count, string.Join(", ", merged["files"]!.AsArray().Select(f => $"{f!["status"]} {f["path"]}"))));
+
+        // A folder has no history of its own here: its files do.
+        Assert.Equal(HttpStatusCode.BadRequest, (await Get(web, "/api/git/log", ("path", "docs"))).StatusCode);
+        Assert.Equal(["Start"], (await web.GetJsonAsync("/api/git/log?path=docs%2Fd.txt")).AsArray().Select(c => c!["subject"]!.GetValue<string>()));
+
+        // In conflict, the index has no text of the file's own; staging one settles it, the file left with its markers.
+        Assert.False((await Show(web, "c.txt", ":"))["exists"]!.GetValue<bool>());
+        var settled = Files(await Json(await web.PostAsync("/api/git/stage-text", new JsonObject { ["path"] = "c.txt", ["text"] = "c settled\n" })));
+        Assert.Equal(("M", "M"), settled["c.txt"]);
+        Assert.Matches(@"^100644 [0-9a-f]+ 0\tc\.txt$", GitOut(h.Work, "ls-files", "-s", "c.txt"));
+        Assert.Equal("c settled\n", Text(await Show(web, "c.txt", ":")));
+        Assert.Contains("<<<<<<<", File.ReadAllText(Path.Combine(h.Work, "c.txt")));
     }
 
     [Fact]
@@ -351,6 +414,9 @@ public sealed class SourceControlTests : IDisposable
         await using var web = await WebRun.StartAsync(h, "--mode", "auto-edit");
         await (await web.SendAsync("change them")).RestAsync();
         string Listed(JsonNode changes) => string.Join(", ", changes.AsArray().Select(c => $"{c!["path"]} +{c["added"]} -{c["removed"]}"));
+        Assert.Equal("a.txt +2 -2, b.txt +1 -1", Listed(await web.GetJsonAsync("/api/changes")));
+        // A before that is not a text is refused, not taken as the whole change.
+        Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/changes/accept", new JsonObject { ["path"] = "a.txt", ["before"] = 5 })).StatusCode);
         Assert.Equal("a.txt +2 -2, b.txt +1 -1", Listed(await web.GetJsonAsync("/api/changes")));
 
         // The first line's change accepted: the third's is left, against the text with the first.

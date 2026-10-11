@@ -165,10 +165,11 @@ internal sealed partial class IdeGit(Workspace workspace)
         {
             throw new IdeError(400, "folder", $"{workspace.Show(file)} is a folder.");
         }
-        var (listed, entry) = await Git(root, ["--literal-pathspecs", "ls-files", "-s", "-z", "--", name], ct);
-        Check((listed, entry), "staged");
-        // "<mode> <object> <stage>\t<path>"; the first one when it is in conflict.
-        var mode = entry.Length > 0 ? entry.Split(' ')[0] : "100644";
+        var (listed, entries) = await Git(root, ["--literal-pathspecs", "ls-files", "-s", "-z", "--", name], ct);
+        Check((listed, entries), "staged");
+        // "<mode> <object> <stage>\t<path>" each: the file's first stage when it is in conflict, none when it is new.
+        var entry = entries.Split('\0').FirstOrDefault(e => e.EndsWith('\t' + name, StringComparison.Ordinal));
+        var mode = entry is null ? "100644" : entry.Split(' ')[0];
         if (mode is not ("100644" or "100755"))
         {
             throw new IdeError(409, "not_text", $"git keeps {workspace.Show(file)} as a link or a submodule: stage it whole.");
@@ -273,6 +274,11 @@ internal sealed partial class IdeGit(Workspace workspace)
                 .Select(f => (JsonNode)new JsonObject { ["hash"] = f[0], ["subject"] = f[1], ["author"] = f[2], ["at"] = f[3] })]);
         }
         var name = await InRepoAsync(full, ct);
+        if (Directory.Exists(full))
+        {
+            // --follow follows one file: a folder's commits would each name the first file they changed in it.
+            throw new IdeError(400, "folder", $"{workspace.Show(full)} is a folder: its files have a history, one at a time.");
+        }
         var (followed, history) = await Git(root, ["-c", "log.showSignature=false", "--literal-pathspecs", "log", "--follow", "--name-status", "-z", "-n", Number(most),
             "--pretty=format:%x1e%h%x1f%s%x1f%an%x1f%aI", "--", name], ct);
         var log = new JsonArray();
@@ -335,9 +341,13 @@ internal sealed partial class IdeGit(Workspace workspace)
         }
         var parents = about[1].Split(' ', StringSplitOptions.RemoveEmptyEntries);
         // A merge: what it brought into its first parent, as the history shows it.
-        var (_, changes) = await Git(root, parents.Length > 1
+        var (listed, changes) = await Git(root, parents.Length > 1
             ? ["diff-tree", "-r", "-z", "-M", "--name-status", parents[0], hash]
             : ["diff-tree", "-r", "-z", "-M", "--root", "--no-commit-id", "--name-status", hash], ct);
+        if (listed != 0)
+        {
+            throw new IdeError(409, "git", $"git could not list the commit's files: {Fmt.OneLine(changes.Trim(), 400)}");
+        }
         var files = new JsonArray();
         var truncated = false;
         var fields = changes.Split('\0');
@@ -407,7 +417,8 @@ internal sealed partial class IdeGit(Workspace workspace)
             // HEAD names no commit only before the first one: nothing is there yet.
             return rev == "HEAD" ? result : throw NoRevision(rev);
         }
-        if (name.Contains('\n'))
+        // git reads the question as a line, a carriage return before its end dropped: x\r would be read as x.
+        if (name.AsSpan().IndexOfAny('\n', '\r') >= 0)
         {
             throw new IdeError(400, "invalid", "git cannot be asked for a file with a line break in its name.");
         }
@@ -426,11 +437,8 @@ internal sealed partial class IdeGit(Workspace workspace)
             result["tooLarge"] = true;
             return result;
         }
-        if (await BlobAsync(root, parts[0], ct) is not { } bytes)
-        {
-            result["exists"] = false;
-            return result;
-        }
+        var bytes = await BlobAsync(root, parts[0], ct)
+            ?? throw new IdeError(409, "git", $"git could not read {workspace.Show(full!)} as {rev} has it.");
         if (IdeFiles.Text(bytes) is { } text)
         {
             result["text"] = text;
@@ -473,7 +481,7 @@ internal sealed partial class IdeGit(Workspace workspace)
 
     private static string Number(int n) => n.ToString(CultureInfo.InvariantCulture);
 
-    /// <summary>A blob's bytes as git keeps them (no filters, no text conversion); null when git cannot give them.</summary>
+    /// <summary>A blob's bytes as git keeps them (no filters, no text conversion); null when git cannot give them (within a minute).</summary>
     private static async Task<byte[]?> BlobAsync(string dir, string hash, CancellationToken ct)
     {
         var psi = new ProcessStartInfo("git")
