@@ -304,6 +304,12 @@ internal sealed class Terminals(Workspace workspace, Config config, Func<string,
                 terminal.Kill();
                 throw new IdeError(503, "stopping", "Code Arena is stopping.");
             }
+            // Counted again: others may have opened while this one started (a task's dependencies start at once).
+            if (_all.Count(t => t.ExitCode is null) >= Max)
+            {
+                terminal.Kill();
+                throw new IdeError(409, "too_many", $"{Max} terminals are open: close one first.");
+            }
             if (reused >= 0)
             {
                 _all[reused] = terminal;
