@@ -162,9 +162,9 @@ internal sealed partial class Formatters(IdeFiles files, Config config, Workspac
 
     /// <summary>
     /// The text formatted by the formatter asked for (else the file's default), the whole of it even for a range
-    /// (UTF-16 offsets, as the editor counts); and the formatter's id.
+    /// (UTF-16 offsets, as the editor counts); and the formatter that ran (the folder's own and the global one share an id).
     /// </summary>
-    public async Task<(string Text, string Formatter)> FormatAsync(string? path, string text, string? id, (int Start, int End)? range, JsonObject? options, string? language, CancellationToken ct)
+    public async Task<(string Text, FoundFormatter Formatter)> FormatAsync(string? path, string text, string? id, (int Start, int End)? range, JsonObject? options, string? language, CancellationToken ct)
     {
         if (Encoding.UTF8.GetByteCount(text) > IdeFiles.MaxTextBytes)
         {
@@ -198,17 +198,21 @@ internal sealed partial class Formatters(IdeFiles files, Config config, Workspac
             throw new IdeError(422, "no_range", $"{formatter.Name} formats whole files only.");
         }
         await _running.WaitAsync(ct);
-        var tmp = Directory.CreateTempSubdirectory("code-arena-format-").FullName;
+        string? tmp = null;
         try
         {
-            return (await RunAsync(formatter, full, text, range, options, trusted, tmp, ct), formatter.Id);
+            tmp = Directory.CreateTempSubdirectory("code-arena-format-").FullName;
+            return (await RunAsync(formatter, full, text, range, options, trusted, tmp, ct), formatter);
         }
         finally
         {
             _running.Release();
             try
             {
-                Directory.Delete(tmp, recursive: true);
+                if (tmp is not null)
+                {
+                    Directory.Delete(tmp, recursive: true);
+                }
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
@@ -346,12 +350,16 @@ internal sealed partial class Formatters(IdeFiles files, Config config, Workspac
     private FoundFormatter? Global(string? program) =>
         program is null ? null : new FoundFormatter { Id = "", Name = "", Source = InFolder(program) ? "project" : "global", Program = program, InFolder = InFolder(program) };
 
-    /// <summary>Prettier run as <c>node its-script</c>, never through a shell's or cmd.exe's shim.</summary>
-    private FoundFormatter PrettierScript(string? node, string script, string? version, bool project) => new()
+    /// <summary>Prettier run as <c>node its-script</c>, never through a shell's or cmd.exe's shim; the folder's own when either is in it.</summary>
+    private FoundFormatter PrettierScript(string? node, string script, string? version, bool project)
     {
-        Id = "", Name = "", Source = project || InFolder(script) ? "project" : "global", Program = node, Script = script, Version = version,
-        Missing = node is null ? "node" : null, InFolder = project || InFolder(script),
-    };
+        var inFolder = project || InFolder(script) || InFolder(node);
+        return new()
+        {
+            Id = "", Name = "", Source = inFolder ? "project" : "global", Program = node, Script = script, Version = version,
+            Missing = node is null ? "node" : null, InFolder = inFolder,
+        };
+    }
 
     /// <summary>The project's Prettier: the nearest node_modules/prettier (or node_modules/.bin/prettier, a link to it) from the file's folder up to the root.</summary>
     private FoundFormatter? PrettierProject(string folder, string? node)
@@ -494,6 +502,10 @@ internal sealed partial class Formatters(IdeFiles files, Config config, Workspac
         return false;
     }
 
+    /// <summary>The rustfmt config nearest the file, up to the root, as rustfmt looks for it from where it runs.</summary>
+    private string? RustfmtConfig(string folder) =>
+        Up(folder).SelectMany(dir => new[] { Path.Combine(dir, ".rustfmt.toml"), Path.Combine(dir, "rustfmt.toml") }).FirstOrDefault(File.Exists);
+
     /// <summary>The Rust edition the nearest Cargo.toml gives (2015 for a package that names none, as Cargo has it; 2021 with no Cargo.toml).</summary>
     private string Edition(string folder)
     {
@@ -544,14 +556,15 @@ internal sealed partial class Formatters(IdeFiles files, Config config, Workspac
                     args.Add("--no-config");
                 }
                 args.AddRange(PrettierFlags(options?["prettier"] as JsonObject));
-                args.AddRange(["--stdin-filepath", relative]);
+                // With "=", a file named like a flag (--plugin=x.mjs) stays a file name.
+                args.Add($"--stdin-filepath={relative}");
                 if (range is { } r)
                 {
                     args.AddRange(["--range-start", Number(r.Start), "--range-end", Number(r.End)]);
                 }
                 break;
             case "ruff" when f.Source != "config":
-                args.AddRange(["format", "--no-cache", "--quiet", "--stdin-filename", relative]);
+                args.AddRange(["format", "--no-cache", "--quiet", $"--stdin-filename={relative}"]);
                 if (range is { } rr)
                 {
                     var (startLine, startColumn) = LineColumn(text, rr.Start);
@@ -560,7 +573,7 @@ internal sealed partial class Formatters(IdeFiles files, Config config, Workspac
                 }
                 break;
             case "black" when f.Source != "config":
-                args.AddRange(["--quiet", "--stdin-filename", relative]);
+                args.AddRange(["--quiet", $"--stdin-filename={relative}"]);
                 if (range is { } br)
                 {
                     args.AddRange(["--line-ranges", $"{LineColumn(text, br.Start).Line}-{EndLine(text, br)}"]);
@@ -571,9 +584,22 @@ internal sealed partial class Formatters(IdeFiles files, Config config, Workspac
                 cwd = here;
                 break;
             case "rustfmt" when f.Source != "config":
-                // rustfmt.toml is looked for from where it runs.
-                cwd = here;
                 args.AddRange(["--emit", "stdout", "--edition", Edition(folder)]);
+                if (trusted)
+                {
+                    // rustfmt.toml is looked for from where it runs.
+                    cwd = here;
+                }
+                else
+                {
+                    // rustup's rustfmt takes its toolchain from the rust-toolchain.toml where it runs, which can name a
+                    // program in the folder: an untrusted folder's is not read, and its rustfmt.toml is given instead.
+                    cwd = box.Temp;
+                    if (RustfmtConfig(folder) is { } toml)
+                    {
+                        args.AddRange(["--config-path", toml]);
+                    }
+                }
                 break;
             case "clang-format" when f.Source != "config":
                 cwd = here;
@@ -587,21 +613,25 @@ internal sealed partial class Formatters(IdeFiles files, Config config, Workspac
             case "dotnet-format" when f.Source != "config":
             {
                 // It formats files in place: a copy of the buffer, with the .editorconfig files from the root down beside it.
+                // It runs there, not in the folder, whose global.json could have dotnet load an SDK kept in the folder; the
+                // empty global.json above the copy stops dotnet looking further up.
                 var mirror = Path.Combine(box.Temp, "mirror");
+                Directory.CreateDirectory(mirror);
+                await File.WriteAllTextAsync(Path.Combine(box.Temp, "global.json"), "{}\n", ct);
                 foreach (var dir in Up(folder).Reverse())
                 {
-                    var editorconfig = Path.Combine(dir, ".editorconfig");
-                    if (File.Exists(editorconfig))
+                    if (Read(Path.Combine(dir, ".editorconfig")) is { } editorconfig)
                     {
                         var copy = Path.Combine(mirror, Path.GetRelativePath(root, dir), ".editorconfig");
                         Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
-                        File.Copy(editorconfig, copy);
+                        await File.WriteAllTextAsync(copy, editorconfig, new UTF8Encoding(false), ct);
                     }
                 }
                 result = Path.Combine(mirror, relative);
                 Directory.CreateDirectory(Path.GetDirectoryName(result)!);
                 await File.WriteAllTextAsync(result, text, new UTF8Encoding(false), ct);
-                args.AddRange(["format", "whitespace", box.Inside(mirror), "--folder", "--include", relative.Replace('\\', '/'), "--verbosity", "quiet"]);
+                cwd = mirror;
+                args.AddRange(["format", "whitespace", box.Inside(mirror), "--folder", $"--include={relative.Replace('\\', '/')}", "--verbosity", "quiet"]);
                 input = "";
                 break;
             }
@@ -644,9 +674,14 @@ internal sealed partial class Formatters(IdeFiles files, Config config, Workspac
         if (run.ExitCode != 0)
         {
             var said = Said(run.Error.Trim().Length > 0 ? run.Error : run.Output);
-            var at = Where().Match(said);
-            throw new FormatFailed(said.Length > 0 ? $"{f.Name} could not format {Workspace.Show(full)}: {said}" : $"{f.Name} ended with exit code {run.ExitCode}.",
-                at.Success ? int.Parse(at.Groups[1].Value, CultureInfo.InvariantCulture) : null, at.Success ? int.Parse(at.Groups[2].Value, CultureInfo.InvariantCulture) : null);
+            int? line = null, column = null;
+            // A number too long for a line (a timestamp, an address) is no place in the text.
+            if (Where().Match(said) is { Success: true } at
+                && int.TryParse(at.Groups[1].Value, CultureInfo.InvariantCulture, out var l) && int.TryParse(at.Groups[2].Value, CultureInfo.InvariantCulture, out var c))
+            {
+                (line, column) = (l, c);
+            }
+            throw new FormatFailed(said.Length > 0 ? $"{f.Name} could not format {Workspace.Show(full)}: {said}" : $"{f.Name} ended with exit code {run.ExitCode}.", line, column);
         }
         var formatted = result is not null ? await File.ReadAllTextAsync(result, ct) : run.Output;
         // Nothing back for something to format is no formatting: the text stays as it was, never emptied.
@@ -800,11 +835,32 @@ internal sealed partial class Formatters(IdeFiles files, Config config, Workspac
 
     private string Home() => env("HOME") is { Length: > 0 } h ? h : env("USERPROFILE") is { Length: > 0 } u ? u : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
+    /// <summary>
+    /// A small file's text (a manifest, a config, up to 1 MB); null when it is not there, larger, or not a plain file. A
+    /// folder's package.json can be a link to /dev/zero, which never ends, or to a named pipe, which never opens.
+    /// </summary>
     private static string? Read(string file)
     {
+        const int max = 1024 * 1024;
         try
         {
-            return File.Exists(file) && new FileInfo(file).Length < 1024 * 1024 ? File.ReadAllText(file) : null;
+            if (!File.Exists(file) || !Files.Regular(file))
+            {
+                return null;
+            }
+            using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var kept = new MemoryStream();
+            var buffer = new byte[16 * 1024];
+            int n;
+            while ((n = stream.Read(buffer)) > 0)
+            {
+                if (kept.Length + n > max)
+                {
+                    return null;
+                }
+                kept.Write(buffer, 0, n);
+            }
+            return Encoding.UTF8.GetString(kept.GetBuffer(), 0, (int)kept.Length).TrimStart('\uFEFF');
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {

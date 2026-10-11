@@ -402,7 +402,7 @@ internal sealed partial class WebApp
 
     /// <summary>
     /// The editor's text through a formatter: {path, text, formatter, range: {start, end}, options, language} to {text,
-    /// formatter}. A formatter that failed is 422 <c>format_failed</c> with the line and column it named, when it did.
+    /// formatter, source}. A formatter that failed is 422 <c>format_failed</c> with the line and column it named, when it did.
     /// </summary>
     private async Task FormatAsync(JsonObject body, HttpResponse res, CancellationToken ct)
     {
@@ -414,7 +414,7 @@ internal sealed partial class WebApp
         try
         {
             var (formatted, formatter) = await _formatters.FormatAsync(body.Str("path"), text, body.Str("formatter"), range, body["options"] as JsonObject, body.Str("language"), ct);
-            await res.JsonAsync(200, new JsonObject { ["text"] = formatted, ["formatter"] = formatter }, ct);
+            await res.JsonAsync(200, new JsonObject { ["text"] = formatted, ["formatter"] = formatter.Id, ["source"] = formatter.Source }, ct);
         }
         catch (FormatFailed e)
         {

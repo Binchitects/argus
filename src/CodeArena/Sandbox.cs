@@ -263,7 +263,8 @@ internal sealed class Sandbox
         }
         if (cwd.Length > 0)
         {
-            a.AddRange(["--chdir", cwd]);
+            // A formatter that runs in its own /tmp (dotnet format's copy) is there under /tmp.
+            a.AddRange(["--chdir", Inside(cwd)]);
         }
         a.Add("--");
         return a;

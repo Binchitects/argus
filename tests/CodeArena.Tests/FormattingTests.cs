@@ -55,16 +55,17 @@ public sealed class FormattingTests : IDisposable
             ],
             Summary(listed));
         var formatted = await Format(web, "web/src/app.ts", "let a=1\n");
-        Assert.Equal("global --no-config --stdin-filepath web/src/app.ts\nlet a=1\n", formatted["text"]!.GetValue<string>());
-        Assert.Equal("prettier", formatted["formatter"]!.GetValue<string>());
+        Assert.Equal("global --no-config --stdin-filepath=web/src/app.ts\nlet a=1\n", formatted["text"]!.GetValue<string>());
+        Assert.Equal(("prettier", "global"), (formatted["formatter"]!.GetValue<string>(), formatted["source"]!.GetValue<string>()));
 
         // Trusted: the nearest node_modules wins (the root's for a file beside it), and the global one is no longer offered.
         await web.PostAsync("/api/workspace/trust", new JsonObject { ["trusted"] = true });
         listed = await web.GetJsonAsync("/api/formatters?path=web/src/app.ts");
         Assert.Equal(["prettier Prettier 3.3.3 project true - range web/node_modules/prettier/bin/prettier.cjs"], Summary(listed));
-        Assert.Equal("web --stdin-filepath web/src/app.ts\nlet a=1\n", (await Format(web, "web/src/app.ts", "let a=1\n"))["text"]!.GetValue<string>());
-        Assert.Equal("root --stdin-filepath index.ts\n{}\n", (await Format(web, "index.ts", "{}\n"))["text"]!.GetValue<string>());
-        Assert.Equal("pnpm --stdin-filepath pkg/a.ts\n", (await Format(web, "pkg/a.ts", ""))["text"]!.GetValue<string>());
+        formatted = await Format(web, "web/src/app.ts", "let a=1\n");
+        Assert.Equal(("web --stdin-filepath=web/src/app.ts\nlet a=1\n", "project"), (formatted["text"]!.GetValue<string>(), formatted["source"]!.GetValue<string>()));
+        Assert.Equal("root --stdin-filepath=index.ts\n{}\n", (await Format(web, "index.ts", "{}\n"))["text"]!.GetValue<string>());
+        Assert.Equal("pnpm --stdin-filepath=pkg/a.ts\n", (await Format(web, "pkg/a.ts", ""))["text"]!.GetValue<string>());
         Assert.Equal("3.1.0", (await web.GetJsonAsync("/api/formatters?path=pkg/a.ts"))["formatters"]![0]!["version"]!.GetValue<string>());
 
         // A range (UTF-16 offsets, as Prettier takes them), and the prettier.* settings as flags a project's config file wins over.
@@ -73,7 +74,7 @@ public sealed class FormattingTests : IDisposable
             ["range"] = new JsonObject { ["start"] = 4, ["end"] = 7 },
             ["options"] = new JsonObject { ["tabSize"] = 8, ["prettier"] = new JsonObject { ["printWidth"] = 100, ["semi"] = false, ["trailingComma"] = "none", ["plugins"] = "--x", ["arrowParens"] = "--x" } },
         });
-        Assert.Equal("web --config-precedence prefer-file --print-width 100 --no-semi --trailing-comma none --stdin-filepath web/src/app.ts --range-start 4 --range-end 7\nlet a=1\n", ranged["text"]!.GetValue<string>());
+        Assert.Equal("web --config-precedence prefer-file --print-width 100 --no-semi --trailing-comma none --stdin-filepath=web/src/app.ts --range-start 4 --range-end 7\nlet a=1\n", ranged["text"]!.GetValue<string>());
         Assert.Equal(HttpStatusCode.BadRequest, (await Refused(web, "web/src/app.ts", "let a=1\n", new JsonObject { ["range"] = new JsonObject { ["start"] = 5, ["end"] = 99 } })).Status);
 
         // A language with no formatter, and one asked for that is not there.
@@ -82,7 +83,7 @@ public sealed class FormattingTests : IDisposable
         Assert.Equal((HttpStatusCode.NotFound, "no_formatter"), (none.Status, none.Body["status"]!.GetValue<string>()));
         Assert.Equal(HttpStatusCode.NotFound, (await Refused(web, "index.ts", "{}\n", new JsonObject { ["formatter"] = "biome" })).Status);
         // The page can say the language when the name does not.
-        Assert.Equal("root --stdin-filepath Jakefile\n", (await Format(web, "Jakefile", "", new JsonObject { ["language"] = "javascript" }))["text"]!.GetValue<string>());
+        Assert.Equal("root --stdin-filepath=Jakefile\n", (await Format(web, "Jakefile", "", new JsonObject { ["language"] = "javascript" }))["text"]!.GetValue<string>());
     }
 
     [Fact]
@@ -100,8 +101,8 @@ public sealed class FormattingTests : IDisposable
         }
         // dotnet format changes the file in place: this one writes its arguments and the .editorconfig files it sees into it.
         Tool(Path.Combine(bin, "dotnet"), """
-            folder="$3"; file="$folder/$6"
-            { echo "dotnet $1 $2 $4 $5 $6 $7 $8"; echo "$3"; (cd "$folder" && find . -name .editorconfig | sort); cat "$file"; } > "$file.new" && mv "$file.new" "$file"
+            folder="$3"; file="$folder/${5#--include=}"
+            { echo "dotnet $1 $2 $4 $5 $6 $7"; echo "$3"; [ "$(pwd -P)" = "$(cd "$folder" && pwd -P)" ] && echo "in the copy"; cat ../global.json; (cd "$folder" && find . -name .editorconfig | sort); cat "$file"; } > "$file.new" && mv "$file.new" "$file"
             """);
         h.Write("lib/pyproject.toml", "[tool.black]\nline-length = 100\n");
         h.Write("crates/a/Cargo.toml", "[package]\nname = \"a\"\nedition = \"2018\"\n");
@@ -122,17 +123,25 @@ public sealed class FormattingTests : IDisposable
         // Python: ruff, then black; black first where pyproject.toml configures black and not ruff. Lines and columns from 1.
         var python = await web.GetJsonAsync("/api/formatters?path=src/tool.py");
         Assert.Equal(["ruff Ruff - global true - range " + Path.Combine(bin, "ruff"), "black Black - global true - range " + Path.Combine(bin, "black")], Summary(python));
-        Assert.Equal($"ruff format --no-cache --quiet --stdin-filename src/tool.py in {h.Work}\nx=1\ny=2\n", await Text("src/tool.py", "x=1\ny=2\n"));
-        Assert.Equal($"ruff format --no-cache --quiet --stdin-filename src/tool.py --range 1:3-2:2 in {h.Work}\nx=1\ny=2\n", await Text("src/tool.py", "x=1\ny=2\n", Range(2, 5)));
+        Assert.Equal($"ruff format --no-cache --quiet --stdin-filename=src/tool.py in {h.Work}\nx=1\ny=2\n", await Text("src/tool.py", "x=1\ny=2\n"));
+        Assert.Equal($"ruff format --no-cache --quiet --stdin-filename=src/tool.py --range 1:3-2:2 in {h.Work}\nx=1\ny=2\n", await Text("src/tool.py", "x=1\ny=2\n", Range(2, 5)));
         var black = Range(2, 5);
         black["formatter"] = "black";
-        Assert.Equal($"black --quiet --stdin-filename src/tool.py --line-ranges 1-2 - in {h.Work}\nx=1\ny=2\n", await Text("src/tool.py", "x=1\ny=2\n", black));
+        Assert.Equal($"black --quiet --stdin-filename=src/tool.py --line-ranges 1-2 - in {h.Work}\nx=1\ny=2\n", await Text("src/tool.py", "x=1\ny=2\n", black));
         Assert.Equal("black", (await web.GetJsonAsync("/api/formatters?path=lib/mod.py"))["default"]!.GetValue<string>());
 
         // gofmt and rustfmt run in the file's folder (where their config is looked for), whole files only.
         Assert.Equal($"gofmt  in {h.Work}/cmd\npackage main\n", await Text("cmd/main.go", "package main\n"));
         var ranged = await Refused(web, "cmd/main.go", "package main\n", Range(0, 4));
         Assert.Equal((HttpStatusCode.UnprocessableEntity, "no_range"), (ranged.Status, ranged.Body["status"]!.GetValue<string>()));
+        // Until the folder is trusted, rustfmt runs outside it (rustup would take the toolchain its rust-toolchain.toml
+        // names, which can be a program in the folder), and is given the folder's rustfmt.toml.
+        h.Write("crates/rustfmt.toml", "max_width = 80\n");
+        h.Write("crates/a/rust-toolchain.toml", "[toolchain]\npath = \"./evil\"\n");
+        var untrusted = (await Text("crates/a/src/lib.rs", "")).Split(" in ");
+        Assert.Equal($"rustfmt --emit stdout --edition 2018 --config-path {h.Work}/crates/rustfmt.toml", untrusted[0]);
+        Assert.False(untrusted[1].StartsWith(h.Work, StringComparison.Ordinal), untrusted[1]);
+        await web.PostAsync("/api/workspace/trust", new JsonObject { ["trusted"] = true });
         Assert.Equal($"rustfmt --emit stdout --edition 2018 in {h.Work}/crates/a/src\n", await Text("crates/a/src/lib.rs", ""));
         Assert.Equal($"rustfmt --emit stdout --edition 2015 in {h.Work}/crates/c/src\n", await Text("crates/c/src/lib.rs", ""));
         Assert.Equal($"rustfmt --emit stdout --edition 2021 in {h.Work}\n", await Text("build.rs", ""));
@@ -145,10 +154,11 @@ public sealed class FormattingTests : IDisposable
         // dotnet format: on a copy outside the folder, with the .editorconfig files from the root down to the file's folder.
         var before = Directory.GetFiles(h.Work, "*", SearchOption.AllDirectories).Order().ToList();
         var lines = (await Text("src/App.cs", "class A{}\n")).Split('\n');
-        Assert.Equal("dotnet format whitespace --folder --include src/App.cs --verbosity quiet", lines[0]);
+        Assert.Equal("dotnet format whitespace --folder --include=src/App.cs --verbosity quiet", lines[0]);
         Assert.False(lines[1].StartsWith(h.Work, StringComparison.Ordinal));
         Assert.False(Directory.Exists(lines[1]));
-        Assert.Equal(["./.editorconfig", "./src/.editorconfig", "class A{}", ""], lines[2..]);
+        // It runs in the copy, never in the folder, whose global.json could have dotnet load an SDK kept there.
+        Assert.Equal(["in the copy", "{}", "./.editorconfig", "./src/.editorconfig", "class A{}", ""], lines[2..]);
         Assert.Equal(before, Directory.GetFiles(h.Work, "*", SearchOption.AllDirectories).Order().ToList());
         Assert.Equal(HttpStatusCode.UnprocessableEntity, (await Refused(web, "src/App.cs", "class A{}\n", Range(0, 1))).Status);
     }
@@ -185,7 +195,7 @@ public sealed class FormattingTests : IDisposable
         {
             var pid = Path.Combine(bin, "slow.pid");
             Tool(Path.Combine(bin, "broken"), @"printf '\e[31m[error] x.bad: SyntaxError: Unexpected token (3:5)\e[0m\n' >&2; exit 2");
-            Tool(Path.Combine(bin, "quiet"), "echo 'it broke' >&2; exit 1");
+            Tool(Path.Combine(bin, "quiet"), "echo 'it broke at 99999999999:1' >&2; exit 1");
             Tool(Path.Combine(bin, "slow"), $"sleep 30 & echo $! > '{pid}'; wait");
             using var h = new Harness(_gateway, _mcp, c => c["formatters"] = new JsonObject
             {
@@ -202,7 +212,7 @@ public sealed class FormattingTests : IDisposable
             Assert.Equal("broken could not format x.bad: [error] x.bad: SyntaxError: Unexpected token (3:5)", failed.Body["error"]!.GetValue<string>());
             Assert.Equal((3, 5), (failed.Body["line"]!.GetValue<int>(), failed.Body["column"]!.GetValue<int>()));
             var quiet = await Refused(web, "y.quiet", "a\n");
-            Assert.Equal("quiet could not format y.quiet: it broke", quiet.Body["error"]!.GetValue<string>());
+            Assert.Equal("quiet could not format y.quiet: it broke at 99999999999:1", quiet.Body["error"]!.GetValue<string>());
             Assert.Null(quiet.Body["line"]);
 
             // Stopped at its time limit, with the program it left running.
@@ -261,6 +271,47 @@ public sealed class FormattingTests : IDisposable
     }
 
     [Fact]
+    public async Task A_folders_files_cannot_stall_the_search_nor_pass_flags_by_their_names()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        using var h = new Harness(_gateway, _mcp);
+        var bin = Path.Combine(h.Root, "bin");
+        Tool(Path.Combine(bin, "node"), "exec /bin/bash \"$@\"");
+        Tool(Path.Combine(bin, "ruff"), "echo \"ruff $*\"; cat");
+        Tool(Path.Combine(bin, "rustfmt"), "echo \"rustfmt $*\"; cat");
+        Tool(Path.Combine(bin, "dotnet"), """file="$3/${5#--include=}"; { find "$3" -name .editorconfig | grep -c .; cat "$file"; } > "$file.new" && mv "$file.new" "$file" """);
+        var global = Path.Combine(h.Root, "global");
+        Prettier(Path.Combine(global, "lib", "node_modules", "prettier"), "3.3.3", "global");
+        Directory.CreateDirectory(Path.Combine(global, "bin"));
+        File.CreateSymbolicLink(Path.Combine(global, "bin", "prettier"), "../lib/node_modules/prettier/bin/prettier.cjs");
+        h.Env["PATH"] = $"{bin}:{Path.Combine(global, "bin")}";
+        // What is read to find formatters, made endless (a link to /dev/zero) or never opening (a named pipe).
+        Directory.CreateDirectory(Path.Combine(h.Work, "node_modules", "prettier"));
+        File.CreateSymbolicLink(Path.Combine(h.Work, "node_modules", "prettier", "package.json"), "/dev/zero");
+        File.CreateSymbolicLink(Path.Combine(h.Work, "Cargo.toml"), "/dev/zero");
+        File.CreateSymbolicLink(Path.Combine(h.Work, ".editorconfig"), "/dev/zero");
+        using (var mkfifo = Process.Start(new ProcessStartInfo("mkfifo", [Path.Combine(h.Work, "pyproject.toml")]) { UseShellExecute = false }))
+        {
+            await mkfifo!.WaitForExitAsync();
+        }
+        await using var web = await WebRun.StartAsync(h);
+        var limit = TimeSpan.FromSeconds(20);
+
+        var ts = await web.GetJsonAsync("/api/formatters?path=a.ts").WaitAsync(limit);
+        Assert.Equal(("prettier", "global"), (ts["default"]!.GetValue<string>(), ts["formatters"]![0]!["source"]!.GetValue<string>()));
+        Assert.Equal("ruff", (await web.GetJsonAsync("/api/formatters?path=a.py").WaitAsync(limit))["default"]!.GetValue<string>());
+        Assert.Equal("rustfmt --emit stdout --edition 2021\n", (await Format(web, "lib.rs", "").WaitAsync(limit))["text"]!.GetValue<string>());
+        Assert.Equal("0\nclass A{}\n", (await Format(web, "App.cs", "class A{}\n").WaitAsync(limit))["text"]!.GetValue<string>());
+
+        // A file named like a flag is given as the flag's value, never as a flag (--plugin would load the folder's code).
+        Assert.Equal("global --no-config --stdin-filepath=--plugin=evil.mjs.ts\n", (await Format(web, "--plugin=evil.mjs.ts", ""))["text"]!.GetValue<string>());
+        Assert.Equal("ruff format --no-cache --quiet --stdin-filename=--config=x.py\n", (await Format(web, "--config=x.py", ""))["text"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task An_untrusted_folder_skips_the_formatters_it_holds()
     {
         if (OperatingSystem.IsWindows())
@@ -294,7 +345,7 @@ public sealed class FormattingTests : IDisposable
         Assert.Equal("global ruff\nx = 1\n", (await Format(web, "app.py", "x = 1\n"))["text"]!.GetValue<string>());
         await web.PostAsync("/api/workspace/trust", new JsonObject { ["trusted"] = true });
         Assert.Equal("project ruff\nx = 1\n", (await Format(web, "app.py", "x = 1\n"))["text"]!.GetValue<string>());
-        Assert.Equal("project prettier --stdin-filepath app.ts\nlet a\n", (await Format(web, "app.ts", "let a\n"))["text"]!.GetValue<string>());
+        Assert.Equal("project prettier --stdin-filepath=app.ts\nlet a\n", (await Format(web, "app.ts", "let a\n"))["text"]!.GetValue<string>());
         Assert.Equal("tidy a.tidy\nx\n", (await Format(web, "a.tidy", "x\n"))["text"]!.GetValue<string>());
     }
 
