@@ -30,11 +30,15 @@ export function DebugConsole() {
     at.current = -1
     setTyped('')
     setLines((l) => [...l, { kind: 'in', text: expr }])
+    // gdb takes the console's text as one of its own commands: an expression is evaluated as a watch is, and "-exec"
+    // runs a gdb command (as cppdbg's console does).
+    const command = expr.startsWith('-exec ')
+    const context = s.start.adapter === 'gdb' && !command ? 'watch' : 'repl'
     try {
-      const r = await s.evaluate(expr, 'repl')
+      const r = await s.evaluate(command ? expr.slice(6) : expr, context)
       setLines((l) => [...l, { kind: 'out', text: r.result }])
     } catch (e) {
-      setLines((l) => [...l, { kind: 'error', text: errorMessage(e) }])
+      setLines((l) => [...l, { kind: 'error', text: e instanceof Error ? e.message : errorMessage(e) }])
     }
   }
   return (

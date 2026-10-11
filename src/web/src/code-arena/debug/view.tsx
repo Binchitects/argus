@@ -95,13 +95,14 @@ function VariableRow({ session, v, level, container }: { session: Session; v: Va
 
 /** The variables of the frame chosen, by scope (Locals, Arguments…); an expensive scope opens when asked. */
 function Variables({ session }: { session: Session }) {
-  const [scopes, setScopes] = useState<{ name: string; variablesReference: number; expensive?: boolean; vars: Variable[] | null }[]>([])
+  const [scopes, setScopes] = useState<{ name: string; variablesReference: number; expensive?: boolean; presentationHint?: string; vars: Variable[] | null }[]>([])
   const frameId = session.frameId
   useEffect(() => {
     let live = true
     if (frameId === null || session.state !== 'stopped') return
     void session.scopes(frameId).then(async (list) => {
-      const filled = await Promise.all(list.map(async (s) => ({ ...s, vars: s.expensive ? null : await session.variables(s.variablesReference).catch(() => []) })))
+      // An expensive scope, and the registers, open when asked (as VS Code leaves them folded).
+      const filled = await Promise.all(list.map(async (s) => ({ ...s, vars: s.expensive || s.presentationHint === 'registers' || /^registers$/i.test(s.name) ? null : await session.variables(s.variablesReference).catch(() => []) })))
       if (live) setScopes(filled)
     }, () => live && setScopes([]))
     return () => {

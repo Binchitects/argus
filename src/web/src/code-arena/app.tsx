@@ -25,6 +25,7 @@ import { useEditor } from './editor-state'
 import { Explorer } from './explorer'
 import { HelpProvider } from './help'
 import { useOpenHelp } from './help-context'
+import { terminalsQuery, type TerminalInfo } from './ide-api'
 import { allFilesQuery, changesQuery, folderQuery, gitBranchesQuery, gitFileLog, gitStatusQuery, readFile, saveWorkspaceState, workspaceStateQuery, parentOf, preferencesQuery, problemsQuery, savePreferences, writeFile } from './ide-api'
 import { setContext, useKeyboard, useKeyFor } from './keyboard'
 import { quickPick } from './quick-pick'
@@ -303,6 +304,13 @@ function Workbench({
   const [replaceKey, setReplaceKey] = useState(0)
   const [terminalFocus, setTerminalFocus] = useState(0)
   const [newTerminal, setNewTerminal] = useState(0)
+  const [terminalShown, setTerminalShown] = useState<{ id: string; at: number } | undefined>()
+  /** A terminal a task or a run opened: in the list at once, and shown in the panel. */
+  const showTerminal = (t: TerminalInfo | null | undefined) => {
+    if (!t) return
+    queryClient.setQueryData<TerminalInfo[]>(terminalsQuery.queryKey, (list) => [...(list ?? []).filter((x) => x.id !== t.id), t])
+    setTerminalShown({ id: t.id, at: Date.now() })
+  }
   const [panelUsed, setPanelUsed] = useState(layout.panelOpen)
   // Run and Debug is drawn the first time it shows (it asks code-arena for the configurations then).
   const [debugUsed, setDebugUsed] = useState(layout.view === 'debug')
@@ -573,8 +581,8 @@ function Workbench({
   const start = async (name: string, noDebug: boolean) => {
     if (settings.get('debug.saveBeforeStart') !== 'none') await ed.saveAll()
     const done = await startConfiguration(name, noDebug, editorContext(), queryClient)
-    void queryClient.invalidateQueries({ queryKey: ['code', 'terminals'] })
     if (!done) return
+    if (done !== 'debugging') showTerminal(done.terminal)
     setPanelUsed(true)
     if (done === 'debugging') {
       if (settings.get('debug.openDebug') === 'openOnSessionStart') show('debug')
@@ -611,7 +619,8 @@ function Workbench({
   const runTaskBy = async (which: { label?: string; group?: 'build' | 'test' }) => {
     const tasks = (await queryClient.fetchQuery(tasksQuery).catch(() => null))?.tasks
     const done = await startTask(which, editorContext(), tasks)
-    void queryClient.invalidateQueries({ queryKey: ['code', 'terminals'] })
+    for (const t of done?.terminals ?? []) showTerminal(t)
+    if (done?.terminal) showTerminal(done.terminal)
     if (done) {
       setPanelUsed(true)
       change({ panelOpen: true, panelTab: 'terminal' })
@@ -888,7 +897,7 @@ function Workbench({
                     </div>
                   }
                 >
-                  <TerminalPanel shown={layout.panelOpen && layout.panelTab === 'terminal'} onHide={() => change({ panelOpen: false })} focusKey={terminalFocus} newKey={newTerminal} />
+                  <TerminalPanel shown={layout.panelOpen && layout.panelTab === 'terminal'} onHide={() => change({ panelOpen: false })} focusKey={terminalFocus} newKey={newTerminal} show={terminalShown} />
                 </Suspense>
               </div>
               {layout.panelTab === 'console' && (

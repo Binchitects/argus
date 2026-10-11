@@ -39,6 +39,7 @@ export interface Scope {
   name: string
   variablesReference: number
   expensive?: boolean
+  presentationHint?: string
 }
 
 export interface Variable {

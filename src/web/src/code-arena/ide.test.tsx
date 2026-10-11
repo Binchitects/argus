@@ -1796,6 +1796,34 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() => expect(screen.queryByRole('toolbar', { name: 'Debug' })).not.toBeInTheDocument())
   })
 
+  it('runs a configuration without debugging (Ctrl+F5) in a terminal of its own, shown in the panel, and a build task (Ctrl+Shift+B)', async () => {
+    const run = { id: '7', kind: 'run', title: 'Run app', pid: 70, cols: 80, rows: 24, exitCode: null }
+    const build = { id: '8', kind: 'task', title: 'build', pid: 80, cols: 80, rows: 24, exitCode: null }
+    const terms: TerminalInfo[] = []
+    const { calls } = backend({
+      'GET /api/terminals': () => ({ json: terms }),
+      'GET /api/run/configs': () => ({ json: { configurations: [{ name: 'Run app', type: 'cppdbg', request: 'launch', source: 'launch', supported: true, command: './app' }], compounds: [], errors: [], trusted: true, buildConfiguration: 'Debug' } }),
+      'GET /api/tasks': () => ({ json: { tasks: [{ label: 'build', source: 'workspace', group: 'build', isDefault: true, command: 'make' }], errors: [], trusted: true, buildConfiguration: 'Debug' } }),
+      'POST /api/run/start': () => {
+        terms.push(run)
+        return { json: { terminal: run, configuration: {}, command: './app' } }
+      },
+      'POST /api/tasks/run': () => {
+        terms.push(build)
+        return { json: { task: 'build', terminal: build, terminals: [build] } }
+      },
+    })
+    renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    await userEvent.keyboard('{Control>}{F5}{/Control}')
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/run/start')?.body).toMatchObject({ name: 'Run app', noDebug: true }))
+    const panel = await screen.findByRole('region', { name: 'Terminal' })
+    expect(await within(panel).findByRole('tab', { name: /Run app/, selected: true })).toBeInTheDocument()
+    await userEvent.keyboard('{Control>}{Shift>}b{/Shift}{/Control}')
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/tasks/run')?.body).toMatchObject({ group: 'build' }))
+    expect(await within(panel).findByRole('tab', { name: /build/, selected: true })).toBeInTheDocument()
+  })
+
   it("takes VS Code's keys, chords too, and the person's keybindings.json over them", async () => {
     const keybindings = '[\n  // mine\n  { "key": "ctrl+shift+e", "command": "workbench.action.togglePanel" },\n  { "key": "ctrl+b", "command": "-workbench.action.toggleSidebarVisibility" }\n]'
     const { calls } = backend({}, {}, { 'keybindings.json': keybindings })
