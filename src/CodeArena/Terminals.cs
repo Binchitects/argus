@@ -7,6 +7,30 @@ namespace CodeArena;
 /// <summary>What a terminal sends a page: output as it came, or the exit code once its shell ended.</summary>
 internal readonly record struct TerminalFrame(byte[]? Output, int? Exit);
 
+/// <summary>What a terminal runs: the person's shell, a task, a program run from a run configuration, or a program a debugger asked for.</summary>
+internal enum TerminalKind
+{
+    Shell,
+    Task,
+    Run,
+    Debuggee,
+}
+
+/// <summary>
+/// A terminal that runs a program rather than the person's shell: the program (a full path, else a name found on the
+/// PATH it gets), its arguments, its folder (null: the working directory), the variables set over Code Arena's own (a
+/// null value unsets one), the tab's title (null: the program's name), its kind, and the key by which a terminal whose
+/// program ended is used again (a task's label) rather than another opened.
+/// </summary>
+internal sealed record TerminalStart(
+    string Program,
+    IReadOnlyList<string> Args,
+    string? Cwd = null,
+    IReadOnlyDictionary<string, string?>? Env = null,
+    string? Title = null,
+    TerminalKind Kind = TerminalKind.Task,
+    string? ReuseKey = null);
+
 /// <summary>
 /// One of the IDE's terminals: a shell in a pseudo-terminal, its last output
 /// kept so a page that comes back (or a second tab) sees the screen, and the
@@ -26,10 +50,12 @@ internal sealed class Terminal
     private readonly ManualResetEventSlim _readDone = new();
     private readonly TaskCompletionSource<int> _exited = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public Terminal(string id, string title, IPty pty, int cols, int rows)
+    public Terminal(string id, string title, IPty pty, int cols, int rows, TerminalKind kind = TerminalKind.Shell, string? reuseKey = null)
     {
         Id = id;
         Title = title;
+        Kind = kind;
+        ReuseKey = reuseKey;
         _pty = pty;
         Cols = cols;
         Rows = rows;
@@ -39,6 +65,9 @@ internal sealed class Terminal
 
     public string Id { get; }
     public string Title { get; }
+    public TerminalKind Kind { get; }
+    /// <summary>The key by which this terminal is used again once its program ended; null: never.</summary>
+    public string? ReuseKey { get; }
     public int Pid => _pty.Pid;
     public int Cols { get; private set; }
     public int Rows { get; private set; }
@@ -49,6 +78,7 @@ internal sealed class Terminal
     public JsonObject Json() => new()
     {
         ["id"] = Id,
+        ["kind"] = Kind.ToString().ToLowerInvariant(),
         ["title"] = Title,
         ["pid"] = Pid,
         ["cols"] = Cols,
@@ -187,11 +217,13 @@ internal sealed class Terminal
 /// person's own (the page that drives them is behind this run's key). The
 /// shell is "terminalShell" in config.json, else $SHELL (a login shell on
 /// macOS, as Terminal.app starts it), else bash or sh; on Windows PowerShell 7,
-/// Windows PowerShell, else cmd.exe. The API key stays out of their environment.
+/// Windows PowerShell, else cmd.exe. A terminal may run a named program instead (a task, a run), and one whose program
+/// ended is used again by the next run of the same task. The API key stays out of their environment.
 /// </summary>
 internal sealed class Terminals(Workspace workspace, Config config, Func<string, string?> env) : IAsyncDisposable
 {
-    public const int Max = 10;
+    /// <summary>The most terminals whose program still runs.</summary>
+    public const int Max = 16;
     private readonly object _gate = new();
     private readonly List<Terminal> _all = [];
     private int _next;
@@ -215,8 +247,13 @@ internal sealed class Terminals(Workspace workspace, Config config, Func<string,
         }
     }
 
-    /// <summary>A new terminal at this size. Throws IdeError when there are too many, IOException when the shell does not start.</summary>
-    public Terminal Open(int cols, int rows)
+    /// <summary>
+    /// A new terminal at this size: the person's shell, or the program <paramref name="start"/> names. A terminal whose
+    /// program ended, with the same reuse key, gives way to the new one, which keeps its id (a page attached to it
+    /// attaches again). Throws IdeError when there are too many or the program is not there, IOException when it does
+    /// not start.
+    /// </summary>
+    public Terminal Open(int cols, int rows, TerminalStart? start = null)
     {
         lock (_gate)
         {
@@ -225,14 +262,45 @@ internal sealed class Terminals(Workspace workspace, Config config, Func<string,
                 throw new IdeError(409, "too_many", $"{Max} terminals are open: close one first.");
             }
         }
-        var (program, args) = Shell();
+        var vars = Environment();
+        foreach (var (name, value) in start?.Env ?? new Dictionary<string, string?>())
+        {
+            if (value is null)
+            {
+                vars.Remove(name);
+            }
+            else
+            {
+                vars[name] = value;
+            }
+        }
+        // Whatever a task or a run configuration sets.
+        vars.Remove("ARENA_API_KEY");
+        var cwd = start?.Cwd ?? workspace.Root;
+        if (!Directory.Exists(cwd))
+        {
+            throw new IdeError(400, "bad_config", $"The folder {cwd} is not there.");
+        }
+        var (program, args) = start is null
+            ? Shell()
+            : (Find(start.Program, cwd, vars.GetValueOrDefault("PATH")) ?? throw new IdeError(400, "no_program", $"{start.Program} is not there, nor on the PATH."), start.Args);
         cols = Math.Clamp(cols, 2, Pty.MaxCols);
         rows = Math.Clamp(rows, 2, Pty.MaxRows);
-        var pty = Pty.Start(program, args, workspace.Root, Environment(), cols, rows);
+        var pty = Pty.Start(program, args, cwd, vars, cols, rows);
         lock (_gate)
         {
-            var terminal = new Terminal((++_next).ToString(System.Globalization.CultureInfo.InvariantCulture), Path.GetFileNameWithoutExtension(program), pty, cols, rows);
-            _all.Add(terminal);
+            var title = start?.Title is { Length: > 0 } named ? named : Path.GetFileNameWithoutExtension(program);
+            var reused = start?.ReuseKey is { } key ? _all.FindIndex(t => t.ReuseKey == key && t.ExitCode is not null) : -1;
+            var id = reused >= 0 ? _all[reused].Id : (++_next).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var terminal = new Terminal(id, title, pty, cols, rows, start?.Kind ?? TerminalKind.Shell, start?.ReuseKey);
+            if (reused >= 0)
+            {
+                _all[reused] = terminal;
+            }
+            else
+            {
+                _all.Add(terminal);
+            }
             return terminal;
         }
     }
@@ -284,6 +352,38 @@ internal sealed class Terminals(Workspace workspace, Config config, Func<string,
             if (File.Exists(candidate))
             {
                 return candidate;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// A named program as a full path (exec does not search PATH): as given when it has a folder (from the terminal's
+    /// folder), else found on the PATH the program gets, with Windows' extensions there.
+    /// </summary>
+    private static string? Find(string program, string cwd, string? path)
+    {
+        if (program.Length == 0 || program.Contains('\0'))
+        {
+            return null;
+        }
+        if (Path.IsPathRooted(program) || program.Contains('/') || program.Contains('\\'))
+        {
+            var full = Path.GetFullPath(program, cwd);
+            return File.Exists(full) ? full : null;
+        }
+        string[] extensions = OperatingSystem.IsWindows() && !Path.HasExtension(program)
+            ? (System.Environment.GetEnvironmentVariable("PATHEXT") ?? ".COM;.EXE;.BAT;.CMD").Split(';', StringSplitOptions.RemoveEmptyEntries)
+            : [""];
+        foreach (var dir in (path ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            foreach (var extension in extensions)
+            {
+                var candidate = Path.Combine(dir, program + extension);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
             }
         }
         return null;
