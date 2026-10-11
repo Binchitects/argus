@@ -7,6 +7,8 @@ namespace Llm.Core.Models;
 public sealed class ModelDownload
 {
     public Guid Id { get; set; } = Guid.CreateVersion7();
+    /// <summary>"files": files into the library; "speech": a model the speech server fetches for itself (<see cref="Repo"/> is its id).</summary>
+    public string Kind { get; set; } = "files";
     public required string Repo { get; set; }
     /// <summary>The commit the files are taken at, so every part comes from the same one.</summary>
     public required string Revision { get; set; }

@@ -34,7 +34,7 @@ public sealed record HfGguf(string Name, string? Quant, long Size, IReadOnlyList
 
 /// <summary>A repository's details: its revision, licence, what GGUF says of the model, and its GGUF files grouped as models.</summary>
 public sealed record HfRepo(string Id, string Sha, bool Gated, string? License, string? Architecture, long? Parameters, int? Context,
-    long Downloads, long Likes, string? LastModified, IReadOnlyList<HfGguf> Models);
+    long Downloads, long Likes, string? LastModified, IReadOnlyList<HfGguf> Models, IReadOnlyList<HfFile> Weights);
 
 /// <summary>Hugging Face's API: searching GGUF models, a repository's files, and downloading one (with resume).</summary>
 public sealed partial class HuggingFace(HttpClient http, IOptionsMonitor<HuggingFaceOptions> options)
@@ -85,10 +85,14 @@ public sealed partial class HuggingFace(HttpClient http, IOptionsMonitor<Hugging
         ? "This repository is gated: accept its terms on huggingface.co, and set a token of that account (HF_TOKEN, Settings → Model)."
         : "This repository is gated: accept its terms on huggingface.co with the account whose token is set (HF_TOKEN).";
 
-    /// <summary>GGUF repositories matching the words, most downloaded first.</summary>
-    public async Task<IReadOnlyList<HfModel>> SearchAsync(string query, CancellationToken ct)
+    /// <summary>
+    /// Repositories matching the words, most downloaded first: GGUF ones for chat models, or those of a pipeline
+    /// (text-to-image, text-to-video) for picture and video models, in any format stable-diffusion.cpp reads.
+    /// </summary>
+    public async Task<IReadOnlyList<HfModel>> SearchAsync(string query, CancellationToken ct, string? pipeline = null)
     {
-        var url = $"{Base}/api/models?search={Uri.EscapeDataString(query)}&filter=gguf&sort=downloads&direction=-1&limit=30";
+        var filter = pipeline is null ? "&filter=gguf" : $"&pipeline_tag={Uri.EscapeDataString(pipeline)}";
+        var url = $"{Base}/api/models?search={Uri.EscapeDataString(query)}{filter}&sort=downloads&direction=-1&limit=30";
         var list = await GetJsonAsync(url, ct) as JsonArray ?? [];
         return [.. list.OfType<JsonObject>().Select(m => new HfModel(
             m["id"]?.GetValue<string>() ?? "", Long(m["downloads"]), Long(m["likes"]), m["lastModified"]?.GetValue<string>() ?? m["createdAt"]?.GetValue<string>(),
@@ -108,7 +112,7 @@ public sealed partial class HuggingFace(HttpClient http, IOptionsMonitor<Hugging
         return new HfRepo(id, sha, info["gated"] is JsonValue g && (g.TryGetValue<bool>(out var b) ? b : g.TryGetValue<string>(out var s) && s.Length > 0),
             info["cardData"]?["license"]?.ToString(), gguf?["architecture"]?.GetValue<string>(), gguf?["total"] is { } total ? Long(total) : null,
             gguf?["context_length"] is { } ctx ? (int)Long(ctx) : null, Long(info["downloads"]), Long(info["likes"]), info["lastModified"]?.GetValue<string>(),
-            Group(files));
+            Group(files), [.. files.Where(f => Weights.Any(e => f.Path.EndsWith(e, StringComparison.OrdinalIgnoreCase))).OrderBy(f => f.Path, StringComparer.Ordinal)]);
     }
 
     /// <summary>A repository's details, its current revision, and every file in it.</summary>
@@ -122,6 +126,9 @@ public sealed partial class HuggingFace(HttpClient http, IOptionsMonitor<Hugging
             .ToList();
         return (info, sha, files);
     }
+
+    /// <summary>The files a picture or video model is made of (stable-diffusion.cpp's formats).</summary>
+    private static readonly string[] Weights = [".gguf", ".safetensors", ".ckpt", ".pth"];
 
     /// <summary>GGUF files as models: a split model's parts together, each with its quantisation and size; vision projectors apart.</summary>
     public static IReadOnlyList<HfGguf> Group(IEnumerable<HfFile> files)

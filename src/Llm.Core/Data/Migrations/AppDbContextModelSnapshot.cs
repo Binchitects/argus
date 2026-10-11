@@ -2220,6 +2220,13 @@ namespace Llm.Core.Data.Migrations
                     b.Property<DateTimeOffset?>("FinishedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasDefaultValue("files");
+
                     b.Property<string>("Repo")
                         .IsRequired()
                         .HasMaxLength(200)

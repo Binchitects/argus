@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using System.Security.Claims;
 using Llm.Api.Endpoints;
 using Llm.Api.Identity;
@@ -8,7 +9,11 @@ using Microsoft.EntityFrameworkCore;
 namespace Llm.Api.Models;
 
 /// <param name="Models">The repository's models to download, by name (a split model's parts come together; a vision projector is a model too).</param>
-public sealed record HfDownloadRequest(string Repo, string[] Models);
+/// <param name="Files">Or its files by path: a picture or video model's diffusion model, text encoders and decoder.</param>
+public sealed record HfDownloadRequest(string Repo, string[]? Models = null, string[]? Files = null);
+
+/// <summary>A speech model for the speech server to fetch: its id there (a Hugging Face repository).</summary>
+public sealed record SpeechDownloadRequest(string Id);
 
 /// <summary>Admin → Models → Hugging Face: find GGUF models, see their files and whether they fit, download them into the library.</summary>
 public static class HuggingFaceEndpoints
@@ -23,6 +28,8 @@ public static class HuggingFaceEndpoints
         g.MapPost("/downloads/{id:guid}/pause", PauseAsync);
         g.MapPost("/downloads/{id:guid}/resume", ResumeAsync);
         g.MapDelete("/downloads/{id:guid}", RemoveAsync);
+        g.MapGet("/speech", SpeechRegistryAsync);
+        g.MapPost("/speech", SpeechDownloadAsync);
     }
 
     private static async Task<IResult> Try(Func<Task<IResult>> call)
@@ -37,9 +44,10 @@ public static class HuggingFaceEndpoints
         }
     }
 
-    private static Task<IResult> SearchAsync(string? q, HuggingFace hf, CancellationToken ct) => Try(async () =>
+    /// <param name="kind">chat (GGUF), image or video (their pipelines).</param>
+    private static Task<IResult> SearchAsync(string? q, string? kind, HuggingFace hf, CancellationToken ct) => Try(async () =>
         (q ?? "").Trim() is { Length: >= 2 } words
-            ? Results.Ok(await hf.SearchAsync(words, ct))
+            ? Results.Ok(await hf.SearchAsync(words, ct, kind switch { "image" => "text-to-image", "video" => "text-to-video", _ => null }))
             : AuthEndpoints.Problem(400, "query", "Search for two letters or more, e.g. qwen3 or llama."));
 
     /// <summary>A repository's GGUF models, each with whether it is in the library already, and the machine's room for models to judge the fit by.</summary>
@@ -58,6 +66,12 @@ public static class HuggingFaceEndpoints
                 inLibrary = m.Files.All(f => downloads.PathOf(probe, f.Path) is { } p && File.Exists(p) && new FileInfo(p).Length == f.Size),
                 path = $"{repo.Id}/{m.Files[0].Path}",
             }),
+            // Every file a picture or video model may be made of, with the role its name suggests.
+            files = repo.Weights.Select(f => new
+            {
+                f.Path, f.Size, role = MediaModelEndpoints.RoleOf(f.Path), library = $"{repo.Id}/{f.Path}",
+                inLibrary = downloads.PathOf(probe, f.Path) is { } p && File.Exists(p) && new FileInfo(p).Length == f.Size,
+            }),
         });
     });
 
@@ -72,7 +86,7 @@ public static class HuggingFaceEndpoints
         var live = downloads.Now(d.Id);
         return new
         {
-            d.Id, d.Repo, d.Revision, d.State, bytes = live?.Bytes ?? d.Bytes, d.Total, speed = live?.Speed, d.Error, d.CreatedBy, d.CreatedAt, d.FinishedAt,
+            d.Id, d.Kind, d.Repo, d.Revision, d.State, bytes = live?.Bytes ?? d.Bytes, d.Total, speed = live?.Speed, d.Error, d.CreatedBy, d.CreatedAt, d.FinishedAt,
             files = d.Files.Select(f => new { f.Path, f.Size, library = $"{d.Dir}/{f.Target ?? f.Path}" }),
         };
     }
@@ -82,14 +96,15 @@ public static class HuggingFaceEndpoints
     {
         var repo = await hf.RepoAsync((body.Repo ?? "").Trim(), ct);
         var chosen = repo.Models.Where(m => (body.Models ?? []).Contains(m.Name)).ToList();
-        if (chosen.Count == 0 || chosen.Count != (body.Models ?? []).Distinct().Count())
+        var files = repo.Weights.Where(f => (body.Files ?? []).Contains(f.Path)).ToList();
+        if (chosen.Count + files.Count == 0 || chosen.Count != (body.Models ?? []).Distinct().Count() || files.Count != (body.Files ?? []).Distinct().Count())
         {
-            return AuthEndpoints.Problem(400, "models", "Choose models this repository has (by name).");
+            return AuthEndpoints.Problem(400, "models", "Choose models or files this repository has (by name or path).");
         }
         var d = new ModelDownload
         {
             Repo = repo.Id, Revision = repo.Sha, Dir = repo.Id, CreatedBy = p.Identity?.Name ?? "admin",
-            Files = [.. chosen.SelectMany(m => m.Files).Select(f => new DownloadFile { Path = f.Path, Size = f.Size, Sha256 = f.Sha256 })],
+            Files = [.. chosen.SelectMany(m => m.Files).Concat(files).DistinctBy(f => f.Path).Select(f => new DownloadFile { Path = f.Path, Size = f.Size, Sha256 = f.Sha256 })],
         };
         if (d.Files.Any(f => downloads.PathOf(d, f) is null))
         {
@@ -112,7 +127,7 @@ public static class HuggingFaceEndpoints
         db.ModelDownloads.Add(d);
         await db.SaveChangesAsync(ct);
         downloads.Wake();
-        await audit.WriteAsync("model.download", repo.Id, detail: $"{string.Join(", ", chosen.Select(m => m.Name))} ({Gb(d.Total)})");
+        await audit.WriteAsync("model.download", repo.Id, detail: $"{string.Join(", ", chosen.Select(m => m.Name).Concat(files.Select(f => f.Path)))} ({Gb(d.Total)})");
         return Results.Created($"/api/admin/models/hf/downloads/{d.Id}", View(d, downloads));
     });
 
@@ -164,6 +179,48 @@ public static class HuggingFaceEndpoints
         downloads.Discard(d);
         await audit.WriteAsync("model.download_remove", d.Repo, detail: d.State);
         return Results.NoContent();
+    }
+
+    /// <summary>The models the speech server can fetch (its registry), of a task: text-to-speech or automatic-speech-recognition.</summary>
+    private static async Task<IResult> SpeechRegistryAsync(string? task, IHttpClientFactory http, CancellationToken ct)
+    {
+        try
+        {
+            var url = $"{MediaModels.AudioUrl}/v1/registry" + (task is { Length: > 0 } t ? $"?task={Uri.EscapeDataString(t)}" : "");
+            var list = await http.CreateClient(MediaControl.Client).GetFromJsonAsync<System.Text.Json.Nodes.JsonObject>(url, ct);
+            var have = await http.CreateClient(MediaControl.Client).GetFromJsonAsync<System.Text.Json.Nodes.JsonObject>($"{MediaModels.AudioUrl}/v1/models", ct);
+            var present = (have?["data"] as System.Text.Json.Nodes.JsonArray ?? []).Select(m => m?["id"]?.ToString()).OfType<string>().ToHashSet(StringComparer.Ordinal);
+            return Results.Ok((list?["data"] as System.Text.Json.Nodes.JsonArray ?? []).OfType<System.Text.Json.Nodes.JsonObject>().Select(m => new
+            {
+                id = m["id"]?.ToString(), task = m["task"]?.ToString(),
+                language = (m["language"] as System.Text.Json.Nodes.JsonArray)?.Select(x => x?.ToString()).OfType<string>().ToList(),
+                downloaded = present.Contains(m["id"]?.ToString() ?? ""),
+            }).Where(m => m.id is not null));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException or TaskCanceledException)
+        {
+            return AuthEndpoints.Problem(503, "speech", "The speech server did not answer: its registry cannot be listed now.");
+        }
+    }
+
+    /// <summary>Asks the speech server to fetch a model: a download like the others (Admin -> Models -> Downloads), one at a time.</summary>
+    private static async Task<IResult> SpeechDownloadAsync(SpeechDownloadRequest body, ClaimsPrincipal p, AppDbContext db, ModelDownloads downloads, Audit audit, CancellationToken ct)
+    {
+        var id = (body.Id ?? "").Trim();
+        if (!System.Text.RegularExpressions.Regex.IsMatch(id, @"^[A-Za-z0-9][\w.-]*/[\w.-]+$"))
+        {
+            return AuthEndpoints.Problem(400, "id", "A speech model's id is owner/name, as the speech server's registry lists it.");
+        }
+        if (await db.ModelDownloads.AnyAsync(d => d.Kind == "speech" && d.Repo == id && d.State != "done" && d.State != "failed", ct))
+        {
+            return AuthEndpoints.Problem(409, "exists", "This model has a download already.");
+        }
+        var d = new ModelDownload { Kind = "speech", Repo = id, Revision = "", Dir = "", CreatedBy = p.Identity?.Name ?? "admin" };
+        db.ModelDownloads.Add(d);
+        await db.SaveChangesAsync(ct);
+        downloads.Wake();
+        await audit.WriteAsync("model.download", id, detail: "speech server");
+        return Results.Created($"/api/admin/models/hf/downloads/{d.Id}", View(d, downloads));
     }
 
     private static string Gb(long bytes) => $"{bytes / 1073741824.0:0.#} GB";

@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using Llm.Api.Models;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
 
@@ -111,5 +112,57 @@ public sealed class HuggingFaceTests(AppFixture app) : IDisposable
         }
         var audit = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit"))).EnumerateArray().Select(e => e.GetProperty("action").GetString()).ToList();
         Assert.Contains("model.download", audit);
+    }
+
+    /// <summary>The speech server as a download sees it: it fetches the model asked for, and answers once it has it.</summary>
+    private sealed class SpeechServer : HttpMessageHandler
+    {
+        public readonly System.Collections.Concurrent.ConcurrentQueue<string> Fetched = new();
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Fetched.Enqueue($"{request.Method} {request.RequestUri!.AbsolutePath}");
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") });
+        }
+    }
+
+    [Fact]
+    public async Task Picture_models_are_found_by_their_pipeline_and_files_downloaded_and_speech_models_are_fetched_by_the_speech_server()
+    {
+        var speech = new SpeechServer();
+        await using var f = app.Create(app.ConnectionStringFor("hfm_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
+            new Dictionary<string, string?> { ["Engine:LibraryDir"] = _library },
+            s => s.AddHttpClient(ModelDownloads.SpeechClient).ConfigurePrimaryHttpMessageHandler(() => speech));
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+
+        // Pictures: by the text-to-image pipeline, not only GGUF.
+        await admin.JsonAsync(await admin.GetAsync("/api/admin/models/hf/search?q=flux&kind=image"));
+        var asked = app.HuggingFace.Searches.Last();
+        Assert.Contains("pipeline_tag=text-to-image", asked, StringComparison.Ordinal);
+        Assert.DoesNotContain("filter=gguf", asked, StringComparison.Ordinal);
+        await admin.JsonAsync(await admin.GetAsync("/api/admin/models/hf/search?q=qwen"));
+        Assert.Contains("filter=gguf", app.HuggingFace.Searches.Last(), StringComparison.Ordinal);
+
+        // Its files, by what their names say they are; a README is none of them.
+        var repo = await admin.JsonAsync(await admin.GetAsync($"/api/admin/models/hf/repo?id={FakeHuggingFace.Repo}"));
+        var files = repo.GetProperty("files").EnumerateArray().ToDictionary(x => x.GetProperty("path").GetString()!, x => x.GetProperty("role").GetString());
+        Assert.Equal("diffusion", files["Tiny-Q4_K_M.gguf"]);
+        Assert.DoesNotContain("README.md", files.Keys);
+
+        // A file picked by its path, downloaded and checked as a model's are.
+        var made = await admin.PostAsync("/api/admin/models/hf/downloads", new { repo = FakeHuggingFace.Repo, files = new[] { "mmproj-Tiny-F16.gguf" } });
+        await StatusAssert.Is(HttpStatusCode.Created, made);
+        var done = await DownloadAsync(admin, (await admin.JsonAsync(made)).GetProperty("id").GetGuid());
+        Assert.Equal("done", done.GetProperty("state").GetString());
+        Assert.Equal(FakeHuggingFace.Files["mmproj-Tiny-F16.gguf"], await File.ReadAllBytesAsync(Path.Combine(_library, "acme/Tiny-GGUF/mmproj-Tiny-F16.gguf")));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/models/hf/downloads", new { repo = FakeHuggingFace.Repo, files = new[] { "../../etc/passwd" } }));
+
+        // Speech: the speech server fetches it itself, as a download in the list.
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/models/hf/speech", new { id = "../x" }));
+        var fetch = await admin.PostAsync("/api/admin/models/hf/speech", new { id = "speaches-ai/piper-de_DE-thorsten-medium" });
+        await StatusAssert.Is(HttpStatusCode.Created, fetch);
+        var spoken = await DownloadAsync(admin, (await admin.JsonAsync(fetch)).GetProperty("id").GetGuid());
+        Assert.Equal(("done", "speech"), (spoken.GetProperty("state").GetString(), spoken.GetProperty("kind").GetString()));
+        Assert.Contains("POST /v1/models/speaches-ai/piper-de_DE-thorsten-medium", speech.Fetched);
     }
 }

@@ -19,6 +19,9 @@ namespace Llm.Api.Models;
 /// </summary>
 public sealed partial class ModelDownloads : BackgroundService
 {
+    /// <summary>The speech server's client for a download it makes itself (minutes, for a large model).</summary>
+    public const string SpeechClient = "speech-download";
+
     /// <summary>Room left on the disk after a download, besides its files.</summary>
     public const long SpareBytes = 2L * 1024 * 1024 * 1024;
 
@@ -176,6 +179,17 @@ public sealed partial class ModelDownloads : BackgroundService
         var done = 0L;
         try
         {
+            if (d.Kind == "speech")
+            {
+                // The speech server fetches it into its own store: one request, which answers once the model is there.
+                using var res = await scope.ServiceProvider.GetRequiredService<IHttpClientFactory>().CreateClient(SpeechClient)
+                    .PostAsync($"{MediaModels.AudioUrl}/v1/models/{d.Repo}", null, run.Token);
+                if (!res.IsSuccessStatusCode)
+                {
+                    var said = await res.Content.ReadAsStringAsync(run.Token);
+                    throw new IOException($"The speech server answered HTTP {(int)res.StatusCode}: {said[..Math.Min(said.Length, 300)]}");
+                }
+            }
             foreach (var f in d.Files)
             {
                 var path = PathOf(d, f) ?? throw new IOException($"{f.Path} would land outside the model library.");
@@ -202,12 +216,15 @@ public sealed partial class ModelDownloads : BackgroundService
                 d.State = stoppingToken.IsCancellationRequested || !replicas.IsLeader ? "queued" : "paused";
             }
         }
-        catch (Exception ex) when (ex is HuggingFaceException or IOException or HttpRequestException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is HuggingFaceException or IOException or HttpRequestException or UnauthorizedAccessException or TaskCanceledException)
         {
             d.State = "failed";
-            d.Error = ex is UnauthorizedAccessException
-                ? $"The app cannot write to the model library ({Root}): MODELS_DIR must be writable for the app's user (uid 1000)."
-                : ex.Message;
+            d.Error = ex switch
+            {
+                UnauthorizedAccessException => $"The app cannot write to the model library ({Root}): MODELS_DIR must be writable for the app's user (uid 1000).",
+                TaskCanceledException => "The speech server did not finish fetching it within half an hour.",
+                _ => ex.Message,
+            };
             LogDownloadFailed(logger, d.Repo, ex.Message);
         }
         finally
@@ -224,7 +241,7 @@ public sealed partial class ModelDownloads : BackgroundService
         {
             var files = string.Join(", ", d.Files.Select(f => Path.GetFileName(f.Path)));
             await scope.ServiceProvider.GetRequiredService<Notifications.Notifier>().SendAsync(who.Id, d.State == "done"
-                ? new Notifications.News("download", $"Downloaded {d.Repo}", $"{files} is in the model library: add it under Models.", "/admin/models", $"download:{d.Id}")
+                ? new Notifications.News("download", $"Downloaded {d.Repo}", d.Kind == "speech" ? "The speech server has it: add it under Models." : $"{files} is in the model library: add it under Models.", "/admin/models", $"download:{d.Id}")
                 : new Notifications.News("download", $"Download of {d.Repo} failed", d.Error, "/admin/models"), CancellationToken.None);
         }
     }

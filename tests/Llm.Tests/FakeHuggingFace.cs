@@ -51,6 +51,9 @@ public sealed class FakeHuggingFace : HttpMessageHandler
 
     public List<(string Path, RangeHeaderValue? Range)> Downloads { get; } = [];
 
+    /// <summary>The searches asked, by their query string.</summary>
+    public System.Collections.Concurrent.ConcurrentQueue<string> Searches { get; } = new();
+
     private static byte[] Content(string seed, int size)
     {
         var bytes = new byte[size];
@@ -69,6 +72,7 @@ public sealed class FakeHuggingFace : HttpMessageHandler
         var path = Uri.UnescapeDataString(request.RequestUri!.AbsolutePath);
         if (path == "/api/models")
         {
+            Searches.Enqueue(request.RequestUri!.Query);
             return Json(new[] { new { id = Repo, downloads = 1234, likes = 5, lastModified = "2026-09-01T00:00:00.000Z", gated = false, pipeline_tag = "text-generation", tags = new[] { "gguf", "qwen3" } } });
         }
         if (path is "/api/models/acme/Gated-GGUF")

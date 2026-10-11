@@ -151,11 +151,9 @@ export function ModelsPage() {
         description="Every model at the gateway, and who may use each. The engine holds several at once: the ones kept loaded stay, and the others load when asked for."
         actions={
           <>
-            {engine.enabled && (
-              <Button variant="outline" onClick={() => setHf(true)}>
-                <Search /> Find on Hugging Face
-              </Button>
-            )}
+            <Button variant="outline" onClick={() => setHf(true)}>
+              <Search /> Find on Hugging Face
+            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button>
@@ -181,7 +179,7 @@ export function ModelsPage() {
         </Alert>
       )}
       <DefaultModelsCard />
-      {engine.enabled && <DownloadsCard onAdd={(preset) => setEditing({ preset })} />}
+      <DownloadsCard onAdd={(preset) => setEditing({ preset })} />
       {small?.warning && (
         <Alert variant="warning" className="mb-4" title="The model for small steps">
           {small.warning}

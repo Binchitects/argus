@@ -337,6 +337,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
         });
         builder.Entity<ModelDownload>(e =>
         {
+            e.Property(d => d.Kind).HasMaxLength(10).HasDefaultValue("files");
             e.ToTable("model_downloads");
             e.Property(x => x.Repo).HasMaxLength(200);
             e.Property(x => x.Revision).HasMaxLength(100);

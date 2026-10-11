@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useConfirm } from '@/components/ui/confirm'
 import { DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { formatValue } from '@/lib/format'
@@ -37,10 +38,24 @@ interface HfRepo {
   gpuForModels: number | null
   ramForModels: number | null
   models: { name: string; quant: string | null; size: number; projector: boolean; parts: number; inLibrary: boolean; path: string }[]
+  /** Every file a picture or video model may be made of, with the role its name suggests. */
+  files?: { path: string; size: number; role: string; library: string; inLibrary: boolean }[]
+}
+
+/** What is searched for: chat models (GGUF), picture or video models (their pipelines), or speech models (the speech server's registry). */
+type Kind = 'chat' | 'image' | 'video' | 'speech'
+
+interface SpeechEntry {
+  id: string
+  task: string
+  language?: string[] | null
+  downloaded: boolean
 }
 
 export interface HfDownload {
   id: string
+  /** files: into the library; speech: a model the speech server fetched. */
+  kind?: 'files' | 'speech'
   repo: string
   state: 'queued' | 'running' | 'paused' | 'done' | 'failed'
   bytes: number
@@ -61,66 +76,156 @@ function fit(size: number, gpu: number | null, ram: number | null): { label: str
 }
 
 /**
- * Hugging Face, in a dialog: search GGUF models, open one to see its files (by
- * quantisation, with sizes and whether each fits this machine), and download into the library.
+ * Hugging Face, in a dialog: search chat models (GGUF), picture or video models, or the speech server's models; open one to
+ * see its files (with sizes and, for a chat model, whether each fits this machine), and download into the library.
  */
 export function HuggingFaceBrowser({ onClose }: { onClose: () => void }) {
+  const [kind, setKind] = useState<Kind>('chat')
   const [q, setQ] = useState('')
   const [asked, setAsked] = useState('')
   const [repo, setRepo] = useState<string | null>(null)
   const search = useQuery({
-    queryKey: ['admin', 'hf', 'search', asked],
-    queryFn: ({ signal }) => api<HfModel[]>(`/api/admin/models/hf/search?q=${encodeURIComponent(asked)}`, { signal }),
-    enabled: asked.length >= 2,
+    queryKey: ['admin', 'hf', 'search', kind, asked],
+    queryFn: ({ signal }) => api<HfModel[]>(`/api/admin/models/hf/search?q=${encodeURIComponent(asked)}&kind=${kind}`, { signal }),
+    enabled: asked.length >= 2 && kind !== 'speech',
   })
-  if (repo) return <RepoView id={repo} onBack={() => setRepo(null)} onClose={onClose} />
+  if (repo) return <RepoView id={repo} media={kind === 'image' || kind === 'video'} onBack={() => setRepo(null)} onClose={onClose} />
   return (
     <>
       <DialogHeader>
         <DialogTitle>Find a model on Hugging Face</DialogTitle>
-        <DialogDescription>GGUF models, most downloaded first. Open one to see its files and whether they fit this machine.</DialogDescription>
+        <DialogDescription>
+          {kind === 'speech'
+            ? 'The models the speech server can fetch: it downloads them itself, into its own store.'
+            : kind === 'chat'
+              ? 'GGUF models, most downloaded first. Open one to see its files and whether they fit this machine.'
+              : `${kind === 'image' ? 'Text to image' : 'Text to video'} models, most downloaded first. Open one to pick its files: its diffusion model, text encoders and decoder.`}
+        </DialogDescription>
       </DialogHeader>
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault()
-          setAsked(q.trim())
-        }}
-      >
-        <Input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="qwen3, llama 3.3, gemma…" aria-label="Search Hugging Face" autoFocus />
-        <Button type="submit" disabled={q.trim().length < 2} loading={search.isFetching}>
-          <Search /> Search
-        </Button>
-      </form>
-      {search.error && <Alert variant="destructive">{errorMessage(search.error)}</Alert>}
-      {search.data && search.data.length === 0 && <p className="text-sm text-muted-foreground">No GGUF model matches.</p>}
-      {search.data && search.data.length > 0 && (
-        <ul className="grid max-h-[50dvh] gap-1 overflow-y-auto" aria-label="Models found">
-          {search.data.map((m) => (
-            <li key={m.id}>
-              <button
-                type="button"
-                onClick={() => setRepo(m.id)}
-                className="grid w-full gap-0.5 rounded-md border px-3 py-2 text-left text-sm outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring"
-              >
-                <span className="flex flex-wrap items-center gap-2 font-medium [overflow-wrap:anywhere]">
-                  {m.id}
-                  {m.gated && (
-                    <Badge variant="outline">
-                      <Lock /> Gated
-                    </Badge>
-                  )}
-                </span>
-                <span className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
-                  <span>
-                    <Download className="inline size-3" aria-hidden="true" /> {formatValue(m.downloads)} downloads
-                  </span>
-                  <span>
-                    <Heart className="inline size-3" aria-hidden="true" /> {formatValue(m.likes)}
-                  </span>
-                  {m.lastModified && <span>updated {new Date(m.lastModified).toLocaleDateString()}</span>}
-                </span>
-              </button>
+      <Tabs value={kind} onValueChange={(v) => setKind(v as Kind)}>
+        <TabsList aria-label="What to find">
+          <TabsTrigger value="chat">Chat</TabsTrigger>
+          <TabsTrigger value="image">Pictures</TabsTrigger>
+          <TabsTrigger value="video">Video</TabsTrigger>
+          <TabsTrigger value="speech">Speech</TabsTrigger>
+        </TabsList>
+      </Tabs>
+      {kind === 'speech' ? (
+        <SpeechRegistry onClose={onClose} />
+      ) : (
+        <>
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              setAsked(q.trim())
+            }}
+          >
+            <Input
+              type="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={kind === 'chat' ? 'qwen3, llama 3.3, gemma…' : kind === 'image' ? 'flux, sdxl, stable diffusion…' : 'wan, ltx…'}
+              aria-label="Search Hugging Face"
+              autoFocus
+            />
+            <Button type="submit" disabled={q.trim().length < 2} loading={search.isFetching}>
+              <Search /> Search
+            </Button>
+          </form>
+          {search.error && <Alert variant="destructive">{errorMessage(search.error)}</Alert>}
+          {search.data && search.data.length === 0 && <p className="text-sm text-muted-foreground">Nothing matches.</p>}
+          {search.data && search.data.length > 0 && (
+            <ul className="grid max-h-[50dvh] gap-1 overflow-y-auto" aria-label="Models found">
+              {search.data.map((m) => (
+                <li key={m.id}>
+                  <button
+                    type="button"
+                    onClick={() => setRepo(m.id)}
+                    className="grid w-full gap-0.5 rounded-md border px-3 py-2 text-left text-sm outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring"
+                  >
+                    <span className="flex flex-wrap items-center gap-2 font-medium [overflow-wrap:anywhere]">
+                      {m.id}
+                      {m.gated && (
+                        <Badge variant="outline">
+                          <Lock /> Gated
+                        </Badge>
+                      )}
+                    </span>
+                    <span className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+                      <span>
+                        <Download className="inline size-3" aria-hidden="true" /> {formatValue(m.downloads)} downloads
+                      </span>
+                      <span>
+                        <Heart className="inline size-3" aria-hidden="true" /> {formatValue(m.likes)}
+                      </span>
+                      {m.lastModified && <span>updated {new Date(m.lastModified).toLocaleDateString()}</span>}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </>
+  )
+}
+
+/** The speech server's registry: its models of a task, each downloaded or not; Download asks the speech server to fetch it. */
+function SpeechRegistry({ onClose }: { onClose: () => void }) {
+  const queryClient = useQueryClient()
+  const confirm = useConfirm()
+  const [task, setTask] = useState<'text-to-speech' | 'automatic-speech-recognition'>('text-to-speech')
+  const [filter, setFilter] = useState('')
+  const list = useQuery({
+    queryKey: ['admin', 'hf', 'speech', task],
+    queryFn: ({ signal }) => api<SpeechEntry[]>(`/api/admin/models/hf/speech?task=${task}`, { signal }),
+    retry: false,
+  })
+  const start = useMutation({
+    mutationFn: (id: string) => api('/api/admin/models/hf/speech', { body: { id } }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'hf', 'downloads'] })
+      toast.success('Download started', { description: 'The speech server fetches it; follow it under Downloads, then add it as a model.' })
+      onClose()
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  const words = filter.trim().toLowerCase()
+  const rows = (list.data ?? []).filter((m) => !words || m.id.toLowerCase().includes(words) || (m.language ?? []).some((l) => l.toLowerCase().includes(words)))
+  return (
+    <>
+      <div className="flex flex-wrap gap-2">
+        <Tabs value={task} onValueChange={(v) => setTask(v as typeof task)}>
+          <TabsList aria-label="Speech models of">
+            <TabsTrigger value="text-to-speech">Text to speech</TabsTrigger>
+            <TabsTrigger value="automatic-speech-recognition">Speech to text</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <Input className="min-w-40 flex-1" type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="kokoro, piper fa, whisper…" aria-label="Filter the speech models" />
+      </div>
+      {list.error && <Alert variant="destructive">{errorMessage(list.error)}</Alert>}
+      {list.data && (
+        <ul className="grid max-h-[50dvh] gap-1 overflow-y-auto" aria-label="Speech models">
+          {rows.slice(0, 200).map((m) => (
+            <li key={m.id} className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-sm">
+              <span className="min-w-0 flex-1 font-mono text-xs [overflow-wrap:anywhere]">{m.id}</span>
+              {m.language?.length ? <span className="text-xs text-muted-foreground">{m.language.slice(0, 4).join(', ')}</span> : null}
+              {m.downloaded ? (
+                <Badge variant="success">Downloaded</Badge>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  loading={start.isPending && start.variables === m.id}
+                  onClick={async () => {
+                    if (await confirm({ title: `Download ${m.id}?`, description: 'The speech server fetches it from Hugging Face into its own store.', confirm: 'Download' })) start.mutate(m.id)
+                  }}
+                >
+                  <Download /> Download
+                </Button>
+              )}
             </li>
           ))}
         </ul>
@@ -129,16 +234,18 @@ export function HuggingFaceBrowser({ onClose }: { onClose: () => void }) {
   )
 }
 
-function RepoView({ id, onBack, onClose }: { id: string; onBack: () => void; onClose: () => void }) {
+function RepoView({ id, media = false, onBack, onClose }: { id: string; media?: boolean; onBack: () => void; onClose: () => void }) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const repo = useQuery({ queryKey: ['admin', 'hf', 'repo', id], queryFn: ({ signal }) => api<HfRepo>(`/api/admin/models/hf/repo?id=${encodeURIComponent(id)}`, { signal }) })
   const [picked, setPicked] = useState<string[]>([])
   const r = repo.data
-  const chosen = r?.models.filter((m) => picked.includes(m.name)) ?? []
+  const chosen = media
+    ? (r?.files ?? []).filter((f) => picked.includes(f.path)).map((f) => ({ name: f.path, size: f.size }))
+    : (r?.models.filter((m) => picked.includes(m.name)) ?? [])
   const total = chosen.reduce((s, m) => s + m.size, 0)
   const start = useMutation({
-    mutationFn: () => api('/api/admin/models/hf/downloads', { body: { repo: id, models: picked } }),
+    mutationFn: () => api('/api/admin/models/hf/downloads', { body: media ? { repo: id, files: picked } : { repo: id, models: picked } }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['admin', 'hf', 'downloads'] })
       toast.success('Download started', { description: 'Follow it under Downloads; once it is in, add it as a model.' })
@@ -171,8 +278,44 @@ function RepoView({ id, onBack, onClose }: { id: string; onBack: () => void; onC
         </DialogDescription>
       </DialogHeader>
       {repo.error && <Alert variant="destructive">{errorMessage(repo.error)}</Alert>}
-      {r && r.models.length === 0 && <Alert>This repository has no GGUF files.</Alert>}
-      {r && r.models.length > 0 && (
+      {media && r && (r.files ?? []).length === 0 && <Alert>This repository has no files stable-diffusion.cpp reads (GGUF, safetensors, ckpt).</Alert>}
+      {media && r && (r.files ?? []).length > 0 && (
+        <fieldset className="grid gap-1.5">
+          <legend className="mb-1 text-sm font-medium">Files</legend>
+          <p className="mb-1 text-xs text-muted-foreground">
+            A picture or video model is its diffusion model, its text encoders and its decoder (VAE): pick the ones it needs (one quantisation of each). Encoders and
+            decoders often come from other repositories.
+          </p>
+          <ul className="grid max-h-[45dvh] gap-1.5 overflow-y-auto" aria-label="Files of the repository">
+            {(r.files ?? []).map((f) => (
+              <li key={f.path}>
+                <label
+                  aria-label={f.path}
+                  className="flex cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2 text-sm has-[:checked]:border-primary has-[:checked]:bg-primary/5 has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring"
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 size-3.5 shrink-0 accent-primary outline-none"
+                    checked={picked.includes(f.path)}
+                    disabled={f.inLibrary}
+                    onChange={(e) => setPicked(e.target.checked ? [...picked, f.path] : picked.filter((x) => x !== f.path))}
+                  />
+                  <span className="grid min-w-0 flex-1 gap-0.5">
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-mono text-xs [overflow-wrap:anywhere]">{f.path}</span>
+                      <Badge variant="outline">{f.role}</Badge>
+                      {f.inLibrary && <Badge variant="success">In the library</Badge>}
+                    </span>
+                    <span className="text-xs text-muted-foreground">{bytes(f.size)}</span>
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </fieldset>
+      )}
+      {!media && r && r.models.length === 0 && <Alert>This repository has no GGUF files.</Alert>}
+      {!media && r && r.models.length > 0 && (
         <fieldset className="grid gap-1.5">
           <legend className="mb-1 text-sm font-medium">Files</legend>
           {r.gpuForModels !== null && (
@@ -269,7 +412,7 @@ export function DownloadsCard({ onAdd }: { onAdd: (file: string) => void }) {
         {list.data.map((d) => {
           const pct = d.total ? Math.round((100 * d.bytes) / d.total) : 0
           const eta = d.state === 'running' && d.speed ? (d.total - d.bytes) / d.speed : null
-          const model = d.files.find((f) => !/mmproj/i.test(f.path)) ?? d.files[0]
+          const model = d.kind === 'speech' ? undefined : (d.files.find((f) => !/mmproj/i.test(f.path)) ?? d.files[0])
           return (
             <div key={d.id} className="grid gap-1.5 rounded-lg border p-3">
               <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -278,7 +421,7 @@ export function DownloadsCard({ onAdd }: { onAdd: (file: string) => void }) {
                   {{ queued: 'Waiting', running: 'Downloading', paused: 'Paused', done: 'Done', failed: 'Failed' }[d.state]}
                 </Badge>
                 <span className="ml-auto flex gap-1">
-                  {d.state === 'done' && model && (
+                  {d.state === 'done' && model && /\.gguf$/i.test(model.library) && (
                     <Button size="sm" variant="outline" onClick={() => onAdd(model.library)}>
                       <Plus /> Add as a model
                     </Button>
@@ -306,8 +449,10 @@ export function DownloadsCard({ onAdd }: { onAdd: (file: string) => void }) {
                   </Button>
                 </span>
               </div>
-              <p className="font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">{d.files.map((f) => f.path).join(', ')}</p>
-              {d.state !== 'done' && (
+              <p className="font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                {d.kind === 'speech' ? 'Fetched by the speech server: add it as a text to speech or speech to text model.' : d.files.map((f) => f.path).join(', ')}
+              </p>
+              {d.state !== 'done' && d.kind !== 'speech' && (
                 <>
                   <progress
                     value={pct}
