@@ -1680,11 +1680,72 @@ describe('Code Arena, the IDE', () => {
     await userEvent.keyboard('{Control>}k{/Control}')
     expect(within(screen.getByRole('contentinfo', { name: 'Status bar' })).getByRole('status')).toHaveTextContent('(Ctrl+K) was pressed. Waiting for the second key of the chord…')
     await userEvent.keyboard('{Control>}s{/Control}')
+    expect(await within(tabs()).findByRole('tab', { name: 'Keyboard Shortcuts' })).toHaveAttribute('aria-selected', 'true')
+    await userEvent.click(await screen.findByRole('button', { name: 'Open Keyboard Shortcuts (JSON)' }))
     expect(await within(tabs()).findByRole('tab', { name: /keybindings\.json/ })).toHaveAttribute('aria-selected', 'true')
     await waitFor(() => expect(editor().model?.value).toBe(keybindings))
     expect(editor().model?.uri?.toString()).toBe('vscode-userdata:///User/keybindings.json')
     await userEvent.keyboard('{Control>}k{/Control}x')
     expect(within(screen.getByRole('contentinfo', { name: 'Status bar' })).getByRole('status')).toHaveTextContent('The key combination (Ctrl+K, X) is not a command.')
+  })
+
+  it('has a Settings editor as VS Code\'s: searched, written into the person\'s or the project\'s settings.json, a language\'s own with @lang', async () => {
+    const { calls, now } = backend({}, {}, { 'settings.json': '{\n  // mine\n  "editor.fontSize": 15\n}\n' })
+    renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    await userEvent.keyboard('{Control>},{/Control}')
+    const page = await screen.findByRole('region', { name: 'Settings' })
+    const search = within(page).getByRole('searchbox', { name: 'Search settings' })
+    await userEvent.type(search, 'tab size')
+    const size = await within(page).findByLabelText(/Tab Size/)
+    await userEvent.clear(size)
+    await userEvent.type(size, '2{Enter}')
+    await waitFor(() => expect(now.user['settings.json']).toBe('{\n  // mine\n  "editor.fontSize": 15,\n  "editor.tabSize": 2\n}\n'))
+    // A setting set is marked, and reset from its menu.
+    await userEvent.clear(search)
+    await userEvent.type(search, '@modified')
+    expect(within(page).getAllByText('(modified)')).toHaveLength(2)
+    // @lang: the language's own block.
+    await userEvent.clear(search)
+    await userEvent.type(search, '@lang:python format on save')
+    await userEvent.click(await within(page).findByRole('checkbox', { name: /Formats a file as you save it/ }))
+    await waitFor(() => expect(now.user['settings.json']).toContain('"[python]": {\n    "editor.formatOnSave": true\n  }'))
+    // The project's: .vscode/settings.json.
+    await userEvent.click(within(page).getByRole('tab', { name: 'Workspace' }))
+    await userEvent.clear(search)
+    await userEvent.type(search, 'word wrap column')
+    const column = await within(page).findByLabelText(/Word Wrap Column/)
+    await userEvent.clear(column)
+    await userEvent.type(column, '100{Enter}')
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/file')?.body).toEqual({ path: '.vscode/settings.json', text: '{\n    "editor.wordWrapColumn": 100\n}\n', version: 'none' }))
+  })
+
+  it('has a Keyboard Shortcuts editor as VS Code\'s: a default changed or removed is written into keybindings.json', async () => {
+    const { now } = backend()
+    renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    await userEvent.keyboard('{Control>}k{/Control}{Control>}s{/Control}')
+    const page = await screen.findByRole('region', { name: 'Keyboard Shortcuts' })
+    await userEvent.type(within(page).getByRole('searchbox', { name: 'Search keybindings' }), 'toggle panel')
+    await userEvent.dblClick(await within(page).findByRole('button', { name: /Toggle Panel Visibility: Ctrl\+J/ }))
+    const dialog = await screen.findByRole('dialog', { name: /Keys for View: Toggle Panel Visibility/ })
+    await userEvent.keyboard('{Control>}{Alt>}j{/Alt}{/Control}')
+    expect(within(dialog).getByRole('textbox', { name: 'Press the keys' })).toHaveValue('Ctrl+Alt+J')
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(JSON.parse(now.user['keybindings.json']!)).toEqual([
+      { key: 'ctrl+j', command: '-workbench.action.togglePanel' },
+      { key: 'ctrl+alt+j', command: 'workbench.action.togglePanel' },
+    ]))
+    // Applied at once: the new key toggles the panel.
+    await userEvent.click(page)
+    await userEvent.keyboard('{Control>}{Alt>}j{/Alt}{/Control}')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Terminal' })).toHaveAttribute('aria-pressed', 'true'))
+    // Record Keys: search by pressing them.
+    await userEvent.click(within(page).getByRole('button', { name: /Record Keys/ }))
+    await userEvent.click(within(page).getByRole('searchbox', { name: 'Search keybindings' }))
+    await userEvent.keyboard('{Control>}b{/Control}')
+    expect(within(page).getByRole('button', { name: /Toggle Primary Side Bar Visibility: Ctrl\+B/ })).toBeInTheDocument()
+    expect(within(page).queryByRole('button', { name: /Toggle Panel Visibility/ })).not.toBeInTheDocument()
   })
 
   it("applies settings.json to the editor: the person's, the project's over them, a language's own, and Alt+Z", async () => {
@@ -1749,6 +1810,13 @@ describe('Code Arena, the help', () => {
     }
     await userEvent.click(within(bar).getByRole('button', { name: 'Terminal' }))
     await screen.findByRole('region', { name: 'Terminal' })
+    for (const r of regionsShown()) seen.add(r)
+    // The workbench's own pages: the Settings and the Keyboard Shortcuts editors.
+    await userEvent.keyboard('{Control>},{/Control}')
+    await screen.findByRole('region', { name: 'Settings' })
+    for (const r of regionsShown()) seen.add(r)
+    await userEvent.keyboard('{Control>}k{/Control}{Control>}s{/Control}')
+    await screen.findByRole('region', { name: 'Keyboard Shortcuts' })
     for (const r of regionsShown()) seen.add(r)
     expect([...seen].filter((name) => !Object.hasOwn(regions, name)), 'a region with no help: give it its part in help-text.ts (regions), and the part its help').toEqual([])
     expect([...seen].toSorted()).toEqual(Object.keys(regions).toSorted())

@@ -37,7 +37,8 @@ export type DiffSource = 'agent' | 'git' | 'compare'
 export interface Tab {
   /** The path for a file; "diff:" and the path for the agent's changes, "git:" and the path for those since the last commit. */
   id: string
-  kind: 'file' | 'diff'
+  /** A file, a compare, or one of the workbench's own pages (the Settings and Keyboard Shortcuts editors). */
+  kind: 'file' | 'diff' | 'settings' | 'keybindings'
   /** A diff's: what it compares (the agent's changes when not said). */
   source?: DiffSource
   /** A diff's sides: the left (original) and the right (modified). */
@@ -83,6 +84,10 @@ export interface EditorApi {
   cursor: { line: number; column: number } | null
   open: (path: string, at?: Reveal) => Promise<void>
   openDiff: (path: string, source?: DiffSource) => Promise<void>
+  /** Opens the Settings editor or the Keyboard Shortcuts editor (one tab each). */
+  openPage: (kind: 'settings' | 'keybindings', query?: string) => void
+  /** What the page was opened to search for ("@id:editor.tabSize"), once. */
+  pageQuery: string
   /** Opens a compare of two sides (left: the original). */
   compare: (left: Side, right: Side) => Promise<void>
   /** The diff editor shown, for the compare's toolbar. */

@@ -27,8 +27,8 @@ const listeners = new Set<() => void>()
 let extensionRules: RuleJson[] = []
 let userRules: unknown[] = []
 const context: Context = {}
-/** The editor's own commands (Monaco's actions): a key for one of them in keybindings.json is no mistake. */
-const editorCommands = new Set<string>()
+/** The editor's own commands (Monaco's actions), by id with their titles: a key for one of them in keybindings.json is no mistake. */
+const editorCommands = new Map<string, string>()
 
 const changed = () => {
   state.version++
@@ -62,9 +62,13 @@ export const keymap = {
     rebuild()
   },
   /** Monaco's own commands, once the editor is there. */
-  setEditorCommands(ids: string[]) {
-    for (const id of ids) editorCommands.add(id)
+  setEditorCommands(list: { id: string; label: string }[]) {
+    for (const c of list) editorCommands.set(c.id, c.label)
     rebuild()
+  },
+  /** Monaco's own commands known so far: id to title. */
+  get editorCommands(): ReadonlyMap<string, string> {
+    return editorCommands
   },
 }
 

@@ -484,10 +484,10 @@ function Workbench({
       change({ panelOpen: true })
       setNewTerminal((n) => n + 1)
     } },
-    { id: 'workbench.action.openSettings', category: 'Preferences', title: 'Open Settings', run: () => void ed.open(userFile('settings.json')) },
+    { id: 'workbench.action.openSettings', category: 'Preferences', title: 'Open Settings', run: (args) => ed.openPage('settings', typeof args === 'string' ? args : '') },
     { id: 'workbench.action.openSettingsJson', category: 'Preferences', title: 'Open User Settings (JSON)', run: () => void ed.open(userFile('settings.json')) },
     { id: 'workbench.action.openWorkspaceSettingsFile', category: 'Preferences', title: 'Open Workspace Settings (JSON)', run: () => void openWorkspaceSettings() },
-    { id: 'workbench.action.openGlobalKeybindings', category: 'Preferences', title: 'Open Keyboard Shortcuts', run: () => void ed.open(userFile('keybindings.json')) },
+    { id: 'workbench.action.openGlobalKeybindings', category: 'Preferences', title: 'Open Keyboard Shortcuts', run: (args) => ed.openPage('keybindings', typeof args === 'string' ? args : '') },
     { id: 'workbench.action.openGlobalKeybindingsFile', category: 'Preferences', title: 'Open Keyboard Shortcuts (JSON)', run: () => void ed.open(userFile('keybindings.json')) },
     { id: 'workbench.action.selectTheme', category: 'Preferences', title: 'Color Theme', run: () => void pickTheme() },
     { id: 'workbench.files.action.compareWithSaved', category: 'File', title: 'Compare Active File with Saved', enabled: () => file, run: () => active && void ed.compare({ kind: 'disk', path: active.path }, { kind: 'file', path: active.path }) },

@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { FileCode2, FileDiff, FileText, GitCompareArrows, X } from 'lucide-react'
+import { FileCode2, FileDiff, FileText, GitCompareArrows, Keyboard, Settings2, X } from 'lucide-react'
 import type * as Monaco from 'monaco-editor'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ContextMenu } from 'radix-ui'
 import { Button } from '@/components/ui/button'
 import { CommandDialog, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
@@ -144,6 +144,10 @@ async function writeAny(path: string, text: string, version: string | null): Pro
   return { path, version: saved.version, size: text.length }
 }
 
+// The workbench's own pages, loaded the first time they open.
+const SettingsEditor = lazy(() => import('./settings-editor'))
+const KeybindingsEditor = lazy(() => import('./keybindings-editor'))
+
 let keymapInstalled = false
 
 /**
@@ -225,6 +229,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     showQuickOpen(open)
   }, [])
   const [unsaved, setUnsaved] = useState<{ path: string; answer: (a: Unsaved) => void } | null>(null)
+  const [pageQuery, setPageQuery] = useState('')
   // Each open(…, at) moves the cursor, also in the tab shown already.
   const [revealed, setRevealed] = useState(0)
 
@@ -561,6 +566,16 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         // The agent's change accepted or reverted elsewhere: the compare has nothing to show.
         if (tab.source === 'agent' && e instanceof ApiError && e.http === 404) drop([id])
       }
+    }
+
+    /** The Settings or the Keyboard Shortcuts editor: one tab each, shown again when open. */
+    const openPage = (kind: 'settings' | 'keybindings', query = '') => {
+      setPageQuery(query)
+      if (has(kind)) {
+        activate(kind)
+        return
+      }
+      add({ id: kind, kind, path: kind === 'settings' ? 'Settings' : 'Keyboard Shortcuts', status: 'ready', dirty: false })
     }
 
     /** Swaps a compare's sides (the agent's and git's become plain compares). */
@@ -956,6 +971,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       saveAll, closeMany, reopenClosed, cycle, activateIndex, navigate, focusEditor, toggleWordWrap, languages, setLanguage, activeModel, autoSaveOn,
       saveWith: save,
       compare,
+      openPage,
       swapSides,
       diffEditor: () => diffEditor.current,
       modelsOf,
@@ -1016,7 +1032,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         ed.onDidBlurEditorText?.(() => void actions.autoSaveOn('focus'))
         linesOf.current = actions.pieceOf
         askAboutCode(m, ed, actions.selection)
-        keymap.setEditorCommands(ed.getSupportedActions().map((a) => a.id))
+        keymap.setEditorCommands(ed.getSupportedActions().map((a) => ({ id: a.id, label: a.label })))
         installCompletions(m)
         editor.current = ed
       }
@@ -1044,7 +1060,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       const position = ed.getPosition()
       setCursor(position ? { line: position.lineNumber, column: position.column } : { line: 1, column: 1 })
       ed.focus()
-    } else {
+    } else if (tab.kind === 'diff') {
       const d = actions.modelsOf(tab)
       if (!d || !diffHost.current) return
       if (!diffEditor.current) {
@@ -1095,8 +1111,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo<EditorApi>(
-    () => ({ ...actions, tabs, active, cursor, quickOpen, setQuickOpen, quickText, setQuickText }),
-    [actions, tabs, active, cursor, quickOpen, setQuickOpen, quickText],
+    () => ({ ...actions, tabs, active, cursor, quickOpen, setQuickOpen, quickText, setQuickText, pageQuery }),
+    [actions, tabs, active, cursor, quickOpen, setQuickOpen, quickText, pageQuery],
   )
   return (
     <EditorContext value={value}>
@@ -1219,7 +1235,15 @@ export function EditorArea() {
                   onAuxClick={(e) => e.button === 1 && void ed.close(t.id)}
                   className="flex h-full max-w-56 items-center gap-1.5 pr-1 pl-3 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                 >
-                  {t.kind === 'diff' ? <GitCompareArrows className="size-3.5 shrink-0 text-primary" aria-hidden="true" /> : <FileCode2 className="size-3.5 shrink-0" aria-hidden="true" />}
+                  {t.kind === 'diff' ? (
+                    <GitCompareArrows className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+                  ) : t.kind === 'settings' ? (
+                    <Settings2 className="size-3.5 shrink-0" aria-hidden="true" />
+                  ) : t.kind === 'keybindings' ? (
+                    <Keyboard className="size-3.5 shrink-0" aria-hidden="true" />
+                  ) : (
+                    <FileCode2 className="size-3.5 shrink-0" aria-hidden="true" />
+                  )}
                   <span className="truncate">{name}</span>
                   {isUserFile(t.path) && <span className="text-xs text-muted-foreground">User</span>}
                   {t.kind === 'diff' && t.source !== 'compare' && <span className="text-xs text-muted-foreground">{t.source === 'git' ? 'since commit' : 'changes'}</span>}
@@ -1263,6 +1287,16 @@ export function EditorArea() {
         {/* Not shown: display none (Monaco's parts set their own visibility); shown again, it lays itself out anew. */}
         <div ref={bindEditor} data-testid="code-editor" hidden={!showsFile} className="absolute inset-0" />
         <div ref={bindDiff} data-testid="diff-editor" hidden={!showsDiff} className="absolute inset-0" />
+        {active?.kind === 'settings' && (
+          <Suspense fallback={<Spinner label="Opening the settings" />}>
+            <SettingsEditor />
+          </Suspense>
+        )}
+        {active?.kind === 'keybindings' && (
+          <Suspense fallback={<Spinner label="Opening the keyboard shortcuts" />}>
+            <KeybindingsEditor />
+          </Suspense>
+        )}
         {!active && <Welcome />}
         {active?.status === 'loading' && (
           <div className="absolute inset-0 grid place-items-center bg-background">

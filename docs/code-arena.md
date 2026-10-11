@@ -339,6 +339,23 @@ VS Code settings mean the same here:
   keys, its own (Monaco's: Ctrl+D, Alt+↑, Ctrl+K Ctrl+C…) under theirs, and a
   rule may rebind one of the editor's commands too (`editor.action.…`).
 
+**Ctrl+,** opens the **Settings editor**, as VS Code's: every setting Code
+Arena reads by category, with its description and a box, a list or a tick to
+set it; search by words, or **@modified**, **@lang:python** (that language's
+own) and **@id:editor.tabSize**; **User** writes the person's settings.json,
+**Workspace** the project's (made when it is not there yet); each change is
+written at once, the file's comments kept; a setting's menu resets it or
+copies its id or its JSON; settings of the file Code Arena does not use are
+listed apart (they stay in it); **From VS Code** brings over VS Code's own
+settings.json from this computer (what the person set already stays).
+**Ctrl+K Ctrl+S** opens the **Keyboard Shortcuts editor**: every command with
+its keys, when they apply and whose rule each is (Default, User, Extension),
+searched by words or by pressing the keys (**Record Keys**); double-click a key
+(or its menu) to press new ones (it says how many other commands have them),
+and the menu removes, resets or changes when one applies, written into the
+person's keybindings.json as VS Code writes it (a default taken away is a
+`-command` rule). The `{}` button of either opens its JSON file.
+
 In a terminal the keys go to the shell, but those of the commands that skip
 it (the palette, quick open, the panels and views, the debugger's), and the
 first key of a chord (Ctrl+K: `terminal.integrated.allowChords` false gives it

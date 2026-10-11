@@ -8,7 +8,7 @@ import { modKey } from './editor-state'
  */
 
 /** The parts of the workbench. */
-export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'git' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status'
+export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'git' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status' | 'settings' | 'keybindings'
 
 export interface PartHelp extends HelpPart {
   /** Where the manual's Code Arena page (docs/code-arena.md) tells the rest: one of its headings. */
@@ -18,6 +18,16 @@ export interface PartHelp extends HelpPart {
 export const about = 'An editor around the coding agent, for this folder: its files, a terminal, and the agent\'s chat, which can read, change and run things here as the mode allows.'
 
 export const parts: Record<Part, PartHelp> = {
+  settings: {
+    name: 'Settings',
+    text: `The settings Code Arena reads, as VS Code's (${modKey}+,). Search by words, or **@modified**, **@lang:python** (a language's own), **@id:editor.tabSize**. **User** is your settings.json, for every project; **Workspace** the project's .vscode/settings.json. A change is written at once, the file's comments kept; the menu beside a setting resets it.`,
+    manual: 'settings-and-keyboard-shortcuts',
+  },
+  keybindings: {
+    name: 'Keyboard Shortcuts',
+    text: `Every command with its keys (${modKey}+K ${modKey}+S). Search by words, or press **Record Keys** and the keys. Double-click a key to change it; the menu adds, removes or resets one, or changes when it applies. What you change is written into your keybindings.json.`,
+    manual: 'settings-and-keyboard-shortcuts',
+  },
   activity: {
     name: 'Activity bar',
     text: 'The icons down the left edge. **Explorer**, **Search**, **Agent changes** (with the number of files) and **Chat** switch the side bar; pressing the one shown hides it. At its foot: **Terminal**, the theme, **Help** and **About Code Arena**.',
@@ -167,4 +177,6 @@ export const regions: Record<string, Part> = {
   Agent: 'chat',
   Chat: 'chat',
   'Status bar': 'status',
+  Settings: 'settings',
+  'Keyboard Shortcuts': 'keybindings',
 }

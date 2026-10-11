@@ -145,6 +145,14 @@ export const settingDefs: SettingDef[] = [
 
 export const settingDef = new Map(settingDefs.map((d) => [d.key, d]))
 
+/** "editor.minimap.renderCharacters" as VS Code titles it: "Editor › Minimap: Render Characters". */
+export function titleOf(key: string): { group: string; name: string } {
+  const words = (s: string) => s.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase())
+  const parts = key.split('.')
+  const last = parts.pop()!
+  return { group: parts.map(words).join(' › '), name: words(last) }
+}
+
 /** The JSON schema settings.json is checked with in the editor. */
 export function settingsSchema(): Record<string, unknown> {
   const prop = (d: SettingDef) => ({

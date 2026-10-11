@@ -21,6 +21,8 @@ export interface Rule {
   source: 'default' | 'user' | 'extension'
   /** The key as written, for the Keyboard Shortcuts editor. */
   key: string
+  /** A rule of keybindings.json: its place in the file's array. */
+  index?: number
 }
 
 /** A rule as keybindings.json and the defaults write it. */
@@ -346,7 +348,7 @@ export function buildRules(defaults: RuleJson[], user: unknown[], known?: (id: s
     if (!chords) return problems.push({ index, message: `"${r.key}" is not a key.`, severity: 'error' })
     if (known && r.command && !known(r.command)) problems.push({ index, message: `Code Arena has no command "${r.command}": the rule does nothing here.`, severity: 'warning' })
     if (!r.command) return
-    rules.push({ chords, command: r.command, args: r.args, when: parsed.when, whenText: r.when, source: 'user', key: r.key })
+    rules.push({ chords, command: r.command, args: r.args, when: parsed.when, whenText: r.when, source: 'user', key: r.key, index })
   })
   return { rules, problems }
 }
