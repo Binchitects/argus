@@ -1,8 +1,14 @@
+import { useQuery } from '@tanstack/react-query'
+import { Braces } from 'lucide-react'
 import { useEffect, useState, type ComponentProps } from 'react'
 import { cn } from '@/lib/utils'
 import { runCommand } from './commands'
 import { useEditor } from './editor-state'
+import { isUserFile } from './editor-options'
+import { formatterOf } from './format'
+import { formattersQuery } from './ide-api'
 import { quickPick } from './quick-pick'
+import { useSetting } from './settings'
 
 function Item({ className, ...props }: ComponentProps<'button'>) {
   return (
@@ -22,6 +28,11 @@ export function LanguageStatus() {
   const ed = useEditor()
   const { active } = ed
   const model = active?.kind === 'file' && active.status === 'ready' ? ed.activeModel() : null
+  const path = model && active && !isUserFile(active.path) ? active.path : null
+  const language = active?.languageId
+  const formatters = useQuery({ ...formattersQuery(path ?? '', language), enabled: !!path, retry: false }).data
+  const asked = formatterOf(useSetting('editor.defaultFormatter', language))
+  const formatter = formatters?.formatters.find((f) => f.id === (asked ?? formatters.default))
   // The model's options and line endings change without React knowing: read again as they do.
   const [, setTick] = useState(0)
   useEffect(() => {
@@ -75,6 +86,16 @@ export function LanguageStatus() {
       {eol && (
         <Item onClick={() => void lineEndings()} title="Select end of line sequence" aria-label={`Line endings ${eol === '\r\n' ? 'CRLF' : 'LF'}: change them`} className="hidden sm:flex">
           {eol === '\r\n' ? 'CRLF' : 'LF'}
+        </Item>
+      )}
+      {formatter && (
+        <Item
+          onClick={() => runCommand('editor.action.formatDocument.multiple')}
+          title={`Formats with ${formatter.name}${formatter.version ? ` ${formatter.version}` : ''} (${formatter.source === 'project' ? "the project's" : formatter.source === 'config' ? 'config.json' : 'installed'})${formatter.available ? '' : `: ${formatter.hint ?? 'it cannot run here'}`}. Click to choose another.`}
+          aria-label={`Formatter ${formatter.name}${formatter.available ? '' : ', cannot run here'}: choose another`}
+          className={cn('hidden md:flex', !formatter.available && 'opacity-60')}
+        >
+          <Braces className="size-3.5" aria-hidden="true" /> {formatter.name}
         </Item>
       )}
       {active.language && (

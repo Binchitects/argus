@@ -22,6 +22,7 @@ import { EditorContext, loadMonaco, rankFiles, useEditor, type DiffModels, type 
 import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitTexts, nameOf, readFile, revertChange, userFileQuery, within, writeFile, writeUserFile, type Change, type CheckProblem, type OpenedFile, type Saved, type UserFileName } from './ide-api'
 import { keymap, useKeyFor } from './keyboard'
 import { monacoKeybinding } from './keys'
+import { installFormatting, offerFormatting } from './format'
 import { saveParticipants } from './save-participants'
 import { useSettings, workspaceSettingsPath } from './settings'
 import { settingsSchema } from './settings-schema'
@@ -427,6 +428,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         model.onDidChangeContent(() => markDirty(f))
         files.current.set(path, f)
         markProblems(m, model, problemsOf.current.filter((p) => p.path === path))
+        installFormatting({ m, queryClient, settings: (language) => settingsRef.current.all(language) })
+        if (!isUserFile(path)) void offerFormatting(path, language.id)
         return f
       })()
       loading.set(path, read)

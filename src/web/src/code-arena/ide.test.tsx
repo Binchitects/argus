@@ -123,6 +123,16 @@ const fakes = vi.hoisted(() => {
     getEOL() {
       return '\n'
     }
+    getVersionId() {
+      return this.alt
+    }
+    getOptions() {
+      return { tabSize: 4, insertSpaces: true, ...this.options }
+    }
+    getPositionAt(offset: number) {
+      const before = this.value.slice(0, offset).split('\n')
+      return { lineNumber: before.length, column: before.at(-1)!.length + 1 }
+    }
     dispose() {
       this.disposed = true
     }
@@ -324,6 +334,7 @@ const fakes = vi.hoisted(() => {
     /** The keybinding rules the page gave Monaco, the last given last. */
     keybindingRules: [] as { keybinding: number; command: string; when?: string }[][],
     jsonOptions: [] as { schemas?: { fileMatch: string[] }[] }[],
+    formatting: new Map<string, { provideDocumentFormattingEdits: (...args: unknown[]) => unknown }>(),
     /** What the editor marks (a language's problems), by the file's address. */
     markers: new Map<string, { severity: number; startLineNumber: number; startColumn: number; endLineNumber: number; message: string }[]>(),
     commands: new Map<string, (...args: unknown[]) => void>(),
@@ -379,6 +390,11 @@ vi.mock('monaco-editor', () => ({
       fakes.inline.push(provider)
       return { dispose() {} }
     },
+    registerDocumentFormattingEditProvider: (language: string, provider: { provideDocumentFormattingEdits: (...args: unknown[]) => unknown }) => {
+      fakes.formatting.set(language, provider)
+      return { dispose() {} }
+    },
+    registerDocumentRangeFormattingEditProvider: () => ({ dispose() {} }),
     registerCodeActionProvider: (_: string, provider: { provideCodeActions: (...args: unknown[]) => unknown }) => {
       fakes.codeActions.push(provider)
       return { dispose() {} }
@@ -1746,6 +1762,45 @@ describe('Code Arena, the IDE', () => {
     await userEvent.keyboard('{Control>}b{/Control}')
     expect(within(page).getByRole('button', { name: /Toggle Primary Side Bar Visibility: Ctrl\+B/ })).toBeInTheDocument()
     expect(within(page).queryByRole('button', { name: /Toggle Panel Visibility/ })).not.toBeInTheDocument()
+  })
+
+  it("formats with the project's own formatter on save, asks to trust the folder first, and saves without formatting when asked", async () => {
+    let available = false
+    const { calls } = backend(
+      {
+        'GET /api/formatters': () => ({
+          json: { language: 'typescript', default: available ? 'prettier' : null, formatters: [{ id: 'prettier', name: 'Prettier', version: '3.3.3', source: 'project', available, range: true, path: 'node_modules/prettier/bin/prettier.cjs', ...(available ? {} : { reason: 'trust', hint: 'Trust this folder to run the formatter it holds.' }) }] },
+        }),
+        'POST /api/format': (body) => ({ json: { text: (body as { text: string }).text.replace('total=2', 'total = 2'), formatter: 'prettier' } }),
+        'POST /api/workspace/trust': () => {
+          available = true
+          return { json: { trust: 'trusted' } }
+        },
+      },
+      {},
+      { 'settings.json': '{ "editor.formatOnSave": true, "editor.defaultFormatter": "esbenp.prettier-vscode" }' },
+    )
+    renderIde()
+    await openApp()
+    // The status bar names the formatter; Monaco is given it for the language.
+    expect(await screen.findByRole('button', { name: /Formatter Prettier, cannot run here/ })).toBeInTheDocument()
+    await waitFor(() => expect(fakes.formatting.has('typescript')).toBe(true))
+    act(() => editor().model!.setValue('const total=2\n'))
+    await userEvent.keyboard('{Control>}s{/Control}')
+    // Prettier is the project's (node_modules): the folder is trusted first.
+    const trust = await screen.findByRole('dialog', { name: /Trust the folder shop\?/ })
+    expect(trust).toHaveTextContent('node_modules/prettier/bin/prettier.cjs')
+    await userEvent.click(within(trust).getByRole('button', { name: 'Trust the folder' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/file')?.body).toEqual({ path: 'src/app.ts', text: 'const total = 2\n', version: 'v1' }))
+    expect(calls.find((c) => c.path === '/api/format')?.body).toMatchObject({ path: 'src/app.ts', text: 'const total=2\n', formatter: 'prettier', language: 'typescript' })
+    expect(editor().model!.getValue()).toBe('const total = 2\n')
+
+    // Save without Formatting (Ctrl+K Ctrl+Shift+S): as typed.
+    act(() => editor().model!.setValue('const total=3\n'))
+    const formatted = calls.filter((c) => c.path === '/api/format').length
+    await userEvent.keyboard('{Control>}k{/Control}{Control>}{Shift>}s{/Shift}{/Control}')
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.path === '/api/file').at(-1)?.body).toMatchObject({ text: 'const total=3\n' }))
+    expect(calls.filter((c) => c.path === '/api/format')).toHaveLength(formatted)
   })
 
   it("applies settings.json to the editor: the person's, the project's over them, a language's own, and Alt+Z", async () => {

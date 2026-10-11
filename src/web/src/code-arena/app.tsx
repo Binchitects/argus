@@ -30,6 +30,9 @@ import { setContext, useKeyboard, useKeyFor } from './keyboard'
 import { quickPick } from './quick-pick'
 import { QuickPickHost } from './quick-pick-host'
 import { PasteDialog } from './paste-dialog'
+import { TrustDialog } from './trust-dialog'
+import { askTrust } from './trust'
+import { formatError, formatModel, formattersOf, skipFormat } from './format'
 import { clipboardText } from './paste'
 import { compareSelection } from './compare'
 import { SearchPanel } from './search'
@@ -106,6 +109,7 @@ export function App() {
             </SettingsRead>
             <QuickPickHost />
             <PasteDialog />
+            <TrustDialog folder={state.data.project} />
           </CodeRefsProvider>
         </HelpProvider>
       </EditorProvider>
@@ -434,6 +438,45 @@ function Workbench({
     })
     if (picked) await ed.compare({ kind: 'file', path: picked.id }, { kind: 'file', path })
   }
+  const saveWithoutFormatting = async () => {
+    skipFormat.once = true
+    try {
+      await ed.save()
+    } finally {
+      skipFormat.once = false
+    }
+  }
+  /** Format Document With…: the file's formatters, and the default to set for its language. */
+  const formatWith = async () => {
+    const model = ed.activeModel()
+    const path = active?.path
+    if (!model || !path) return
+    const language = model.getLanguageId()
+    const list = await formattersOf(path, language)
+    const items = [
+      ...(list?.formatters ?? []).map((f) => ({
+        id: f.id,
+        label: f.name,
+        description: [f.version, f.source === 'project' ? 'the project\'s' : f.source === 'config' ? 'config.json' : 'installed'].filter(Boolean).join(' · '),
+        detail: !f.available ? (f.reason === 'trust' ? 'needs the folder trusted' : 'not installed') : f.id === list?.default ? 'default' : undefined,
+      })),
+      { id: 'editor:monaco', label: "The editor's own", description: 'Monaco (TypeScript, JSON, CSS, HTML)' },
+      { id: 'configure', label: 'Configure Default Formatter…', group: ' ' },
+    ]
+    const picked = await quickPick({ title: 'Format document with', placeholder: 'Select a formatter', items })
+    if (!picked) return
+    if (picked.id === 'editor:monaco') return runAction('editor.action.formatDocument')
+    if (picked.id === 'configure') {
+      const which = await quickPick({ title: `Default formatter for ${active?.language ?? language}`, placeholder: 'Select the default formatter', items: (list?.formatters ?? []).map((f) => ({ id: f.id, label: f.name })) })
+      if (which) await settings.update('editor.defaultFormatter', which.id, 'user', language).catch((e: unknown) => toast.error(errorMessage(e)))
+      return
+    }
+    try {
+      await formatModel(model, path, { formatter: picked.id })
+    } catch (e) {
+      toast.error(formatError(e))
+    }
+  }
   const workbenchCommands: Command[] = [
     { id: 'workbench.action.showCommands', category: 'View', title: 'Show All Commands', hidden: true, run: () => setPalette(true) },
     { id: 'workbench.action.quickOpen', category: 'File', title: 'Go to File…', run: () => setQuickOpen(true) },
@@ -501,6 +544,9 @@ function Workbench({
     { id: 'toggle.diff.renderSideBySide', category: 'Compare', title: 'Toggle Inline View', run: () => void settings.update('diffEditor.renderSideBySide', !settings.get('diffEditor.renderSideBySide')) },
     { id: 'toggle.diff.ignoreTrimWhitespace', category: 'Compare', title: 'Toggle Ignore Trim Whitespace', run: () => void settings.update('diffEditor.ignoreTrimWhitespace', !settings.get('diffEditor.ignoreTrimWhitespace')) },
     { id: 'diffEditor.toggleCollapseUnchangedRegions', category: 'Compare', title: 'Toggle Collapse Unchanged Regions', run: () => void settings.update('diffEditor.hideUnchangedRegions.enabled', !settings.get('diffEditor.hideUnchangedRegions.enabled')) },
+    { id: 'editor.action.formatDocument.multiple', category: 'Format', title: 'Format Document With…', enabled: () => file, run: () => void formatWith() },
+    { id: 'workbench.action.files.saveWithoutFormatting', category: 'File', title: 'Save without Formatting', enabled: () => savable, run: () => void saveWithoutFormatting() },
+    { id: 'workbench.trust.manage', category: 'Workspaces', title: 'Manage Workspace Trust', run: () => void askTrust('Choose whether the programs this folder holds may run here.') },
     { id: 'codeArena.help', category: 'Help', title: 'Show Help', run: () => openHelp?.() },
     { id: 'codeArena.about', category: 'Help', title: 'About Code Arena', run: () => setAbout(true) },
   ]

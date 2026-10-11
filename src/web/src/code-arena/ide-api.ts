@@ -211,6 +211,38 @@ export const saveWorkspaceState = (change: Record<string, unknown>, keepalive = 
 
 export const trustWorkspace = (trusted: boolean | null) => api<WorkspaceState>('/api/workspace/trust', { body: trusted === null ? {} : { trusted } })
 
+/** A formatter for a file, as the server found it: whether it can run here, and why not. */
+export interface Formatter {
+  id: string
+  name: string
+  version?: string
+  source: 'project' | 'global' | 'config'
+  available: boolean
+  /** Why it cannot run: "trust" (it lives in the folder, which is not trusted), "missing", "node". */
+  reason?: string
+  /** What the person can do about it. */
+  hint?: string
+  /** It formats a part of a file. */
+  range: boolean
+  path?: string
+}
+
+export interface Formatters {
+  language: string | null
+  formatters: Formatter[]
+  /** The first that can run; null: none. */
+  default: string | null
+}
+
+export const formattersQuery = (path: string, language?: string) => ({
+  queryKey: ['code', 'formatters', path, language ?? ''] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<Formatters>(`/api/formatters?path=${at(path)}${language ? `&language=${encodeURIComponent(language)}` : ''}`, { signal }),
+  staleTime: 10_000,
+})
+
+export const formatText = (body: { path: string; text: string; formatter?: string; range?: { start: number; end: number }; options?: { tabSize: number; insertSpaces: boolean }; language?: string }, signal?: AbortSignal) =>
+  api<{ text: string; formatter: string }>('/api/format', { body, signal })
+
 /** A problem the project's check found: a file of the folder, its line and column (from 1), how bad, its code and what it says. */
 export interface CheckProblem {
   path: string
