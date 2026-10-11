@@ -24,6 +24,8 @@ internal sealed partial class WebApp
     private PagePreferences _preferences = null!;
     private Problems _problems = null!;
     private IdeGit _git = null!;
+    private UserFiles _userFiles = null!;
+    private WorkspaceState _state = null!;
 
     private void StartIde()
     {
@@ -33,6 +35,8 @@ internal sealed partial class WebApp
         _problems = new Problems(_rt.Workspace, _rt.Config);
         _git = new IdeGit(_rt.Workspace);
         _preferences = new PagePreferences(Path.Combine(_rt.Env.Paths.DataDir, PagePreferences.FileName));
+        _userFiles = new UserFiles(_rt.Env.Paths.ConfigDir);
+        _state = new WorkspaceState(_rt.Env.Paths.DataDir, _rt.Workspace.Root);
     }
 
     /// <summary>One of the IDE's calls; false when the path is none of them.</summary>
@@ -180,6 +184,31 @@ internal sealed partial class WebApp
                     return true;
                 case ("POST", "/api/preferences"):
                     await res.JsonAsync(200, _preferences.Save(Body(req)), ct);
+                    return true;
+                case ("GET", "/api/user-files"):
+                    await res.JsonAsync(200, _userFiles.Read(Query(req, "name")), ct);
+                    return true;
+                case ("POST", "/api/user-files"):
+                {
+                    var body = Body(req);
+                    if (body["text"] is not JsonValue value || !value.TryGetValue<string>(out var text))
+                    {
+                        throw new IdeError(400, "invalid", "Send the file's text.");
+                    }
+                    await res.JsonAsync(200, _userFiles.Write(body.Str("name"), text, body.Str("version")), ct);
+                    return true;
+                }
+                case ("GET", "/api/user-files/vscode"):
+                    await res.JsonAsync(200, _userFiles.FromVsCode(Query(req, "name"), _rt.Env.Env), ct);
+                    return true;
+                case ("GET", "/api/workspace/state"):
+                    await res.JsonAsync(200, _state.Read(), ct);
+                    return true;
+                case ("POST", "/api/workspace/state"):
+                    await res.JsonAsync(200, _state.Merge(Body(req)), ct);
+                    return true;
+                case ("POST", "/api/workspace/trust"):
+                    await res.JsonAsync(200, _state.SetTrust(Body(req).Bool("trusted")), ct);
                     return true;
             }
         }

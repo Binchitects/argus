@@ -66,7 +66,7 @@ internal sealed partial class WebRun : IAsyncDisposable
             Out = TextWriter.Synchronized(output),
             Err = TextWriter.Synchronized(error),
             Env = k => h.Env.GetValueOrDefault(k),
-            Cwd = h.Work,
+            Cwd = h.Cwd ?? h.Work,
             Paths = h.Paths,
             Web = WebAssets.Of(
                 ("code-arena.html", "<!doctype html><title>Code Arena</title><script type=\"module\" src=\"/assets/app.js\"></script>"),

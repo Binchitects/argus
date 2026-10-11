@@ -114,6 +114,30 @@ internal static class Json
         }
     }
 
+    /// <summary>
+    /// JSON with comments and trailing commas, as VS Code's own files are (settings.json, tasks.json, launch.json,
+    /// extensions.json): the value, or why it is not JSON, with its line.
+    /// </summary>
+    public static JsonNode? ParseJsonc(string? text, out string? error)
+    {
+        error = null;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+        try
+        {
+            return JsonNode.Parse(text, documentOptions: Jsonc);
+        }
+        catch (JsonException e)
+        {
+            error = $"line {(e.LineNumber ?? 0) + 1}: {e.Message.Split(" Path:", 2)[0].Split(" LineNumber:", 2)[0]}";
+            return null;
+        }
+    }
+
+    private static readonly JsonDocumentOptions Jsonc = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
+
     /// <summary>A copy of an object.</summary>
     public static JsonObject Clone(this JsonObject o) => (JsonObject)o.DeepClone();
 }

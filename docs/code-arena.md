@@ -508,6 +508,12 @@ status (403 `outside` for a path outside the folder).
 | `GET /api/history` | what this folder sent, newest first, each text once (500 at most): `[{text}]`, without the terminal's own commands (`/help`, `/model`, …; `/compact` and `/clear` stay) |
 | `GET /api/preferences` | the page's own preferences (`layout`, `theme`), as it saved them; `{}` at first |
 | `POST /api/preferences` `{key: value}` | keeps these keys, merged over the others (`null` forgets one); 413 `too_large` past 16 KB |
+| `GET /api/user-files?name=settings.json` (or `keybindings.json`) | the person's own file in the config folder: `{name, text, version, exists}` (`text` empty, `version` `none` before the first save); 400 for any other name |
+| `POST /api/user-files` `{name, text, version}` | saves it as sent (comments kept; readable by the person alone); 409 `changed` when it changed since `version`, 413 `too_large` past 1 MB |
+| `GET /api/user-files/vscode?name=…` | VS Code's own copy on this computer (Code, then Insiders, then VSCodium): `{name, text, from}`; 404 when there is none |
+| `GET /api/workspace/state` | what this computer keeps for this folder (in the data folder, never in the project): `trust` (`trusted`, `restricted`, missing: not asked), `buildConfiguration`, and the page's own keys (breakpoints, watch, the run configuration chosen) |
+| `POST /api/workspace/state` `{key: value}` | merges these keys (`null` forgets one); 400 for `trust`, or a `buildConfiguration` other than `Debug` or `Release`; 413 past 1 MB |
+| `POST /api/workspace/trust` `{trusted}` | trusts the folder (`true`), keeps it restricted (`false`) or forgets the choice (missing); the state |
 
 On the terminal's WebSocket, the server sends the output kept so far, then
 the output as it comes, as binary messages (the terminal's bytes), and

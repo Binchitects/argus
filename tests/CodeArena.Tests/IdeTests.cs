@@ -209,6 +209,12 @@ public sealed class IdeTests : IDisposable
             ("GET", "/api/terminals/socket?id=1", null),
             ("GET", "/api/preferences", null),
             ("POST", "/api/preferences", new() { ["theme"] = "dark" }),
+            ("GET", "/api/user-files?name=settings.json", null),
+            ("POST", "/api/user-files", new() { ["name"] = "settings.json", ["text"] = "{}" }),
+            ("GET", "/api/user-files/vscode?name=settings.json", null),
+            ("GET", "/api/workspace/state", null),
+            ("POST", "/api/workspace/state", new() { ["watch"] = new JsonArray("x") }),
+            ("POST", "/api/workspace/trust", new() { ["trusted"] = true }),
             ("POST", "/api/replace", new() { ["q"] = "in", ["replacement"] = "out" }),
             ("POST", "/api/complete", new() { ["path"] = "inside.txt", ["prefix"] = "i", ["suffix"] = "" }),
             ("GET", "/api/problems", null),
@@ -498,6 +504,97 @@ public sealed class IdeTests : IDisposable
         Assert.Empty((await third.GetJsonAsync("/api/preferences")).AsObject());
         await Json(await third.PostAsync("/api/preferences", new JsonObject { ["theme"] = "light" }));
         Assert.Equal("light", JsonNode.Parse(File.ReadAllText(file))!["theme"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task The_persons_settings_and_keybindings_are_kept_in_the_config_folder_and_vs_codes_can_be_read()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        h.Env["XDG_CONFIG_HOME"] = Path.Combine(h.Root, "xdg");
+        await using var web = await WebRun.StartAsync(h);
+        var none = await web.GetJsonAsync("/api/user-files?name=settings.json");
+        Assert.Equal("", none["text"]!.GetValue<string>());
+        Assert.False(none["exists"]!.GetValue<bool>());
+
+        // Saved as sent (comments kept), readable by the person alone; a stale version is refused.
+        const string text = "{\n  // mine\n  \"editor.tabSize\": 2,\n}\n";
+        var saved = await Json(await web.PostAsync("/api/user-files", new JsonObject { ["name"] = "settings.json", ["text"] = text, ["version"] = none["version"]!.GetValue<string>() }));
+        var file = Path.Combine(h.Paths.ConfigDir, "settings.json");
+        Assert.Equal(text, File.ReadAllText(file));
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(file));
+        }
+        var stale = await web.PostAsync("/api/user-files", new JsonObject { ["name"] = "settings.json", ["text"] = "{}", ["version"] = none["version"]!.GetValue<string>() });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        Assert.Equal(text, (await web.GetJsonAsync("/api/user-files?name=settings.json"))["text"]!.GetValue<string>());
+        Assert.NotEqual(none["version"]!.GetValue<string>(), saved["version"]!.GetValue<string>());
+
+        // Only the two names; nothing else in the config folder (config.json holds the key).
+        Assert.Equal(HttpStatusCode.BadRequest, (await web.Http.GetAsync("/api/user-files?name=config.json")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await web.Http.GetAsync("/api/user-files?name=../config.json")).StatusCode);
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, (await web.PostAsync("/api/user-files", new JsonObject { ["name"] = "keybindings.json", ["text"] = new string('x', 1024 * 1024 + 1) })).StatusCode);
+
+        // VS Code's own, from Code, else Insiders, else VSCodium.
+        Assert.Equal(HttpStatusCode.NotFound, (await web.Http.GetAsync("/api/user-files/vscode?name=keybindings.json")).StatusCode);
+        var codium = Directory.CreateDirectory(Path.Combine(h.Root, "xdg", "VSCodium", "User")).FullName;
+        File.WriteAllText(Path.Combine(codium, "keybindings.json"), "[]");
+        Assert.Equal("[]", (await web.GetJsonAsync("/api/user-files/vscode?name=keybindings.json"))["text"]!.GetValue<string>());
+        var code = Directory.CreateDirectory(Path.Combine(h.Root, "xdg", "Code", "User")).FullName;
+        File.WriteAllText(Path.Combine(code, "keybindings.json"), "[{}]");
+        var imported = await web.GetJsonAsync("/api/user-files/vscode?name=keybindings.json");
+        Assert.Equal("[{}]", imported["text"]!.GetValue<string>());
+        Assert.Equal(Path.Combine(code, "keybindings.json"), imported["from"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task A_projects_state_is_kept_per_folder_outside_it_and_only_its_own_call_trusts_the_folder()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        await using (var web = await WebRun.StartAsync(h))
+        {
+            Assert.Empty((await web.GetJsonAsync("/api/workspace/state")).AsObject());
+            var merged = await Json(await web.PostAsync("/api/workspace/state", new JsonObject { ["buildConfiguration"] = "Release", ["watch"] = new JsonArray("total") }));
+            Assert.Equal("Release", merged["buildConfiguration"]!.GetValue<string>());
+            Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/workspace/state", new JsonObject { ["buildConfiguration"] = "Fast" })).StatusCode);
+
+            // The folder cannot trust itself through the merge; only the trust call sets it.
+            Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/workspace/state", new JsonObject { ["trust"] = "trusted" })).StatusCode);
+            Assert.Equal("trusted", (await Json(await web.PostAsync("/api/workspace/trust", new JsonObject { ["trusted"] = true })))["trust"]!.GetValue<string>());
+            Assert.Equal("restricted", (await Json(await web.PostAsync("/api/workspace/trust", new JsonObject { ["trusted"] = false })))["trust"]!.GetValue<string>());
+            Assert.Null((await Json(await web.PostAsync("/api/workspace/trust", new JsonObject())))["trust"]);
+            await Json(await web.PostAsync("/api/workspace/trust", new JsonObject { ["trusted"] = true }));
+
+            // null forgets a key; 1 MB at most.
+            Assert.False((await Json(await web.PostAsync("/api/workspace/state", new JsonObject { ["watch"] = null }))).AsObject().ContainsKey("watch"));
+            Assert.Equal(HttpStatusCode.RequestEntityTooLarge, (await web.PostAsync("/api/workspace/state", new JsonObject { ["notes"] = new string('x', 1024 * 1024) })).StatusCode);
+        }
+        // Kept in the data folder, not in the project, and given back to the next run.
+        var files = Directory.GetFiles(Path.Combine(h.Paths.DataDir, "workspaces"));
+        Assert.Equal(".json", Path.GetExtension(Assert.Single(files)));
+        Assert.Empty(Directory.GetFileSystemEntries(h.Work));
+        await using (var again = await WebRun.StartAsync(h))
+        {
+            var kept = await again.GetJsonAsync("/api/workspace/state");
+            Assert.Equal("trusted", kept["trust"]!.GetValue<string>());
+            Assert.Equal("Release", kept["buildConfiguration"]!.GetValue<string>());
+        }
+
+        // Another folder has its own.
+        var other = Directory.CreateDirectory(Path.Combine(h.Root, "other")).FullName;
+        h.Cwd = other;
+        await using var third = await WebRun.StartAsync(h);
+        Assert.Null((await third.GetJsonAsync("/api/workspace/state"))["trust"]);
+    }
+
+    [Fact]
+    public void Vs_codes_json_with_comments_and_trailing_commas_is_read_and_a_mistake_names_its_line()
+    {
+        var node = CodeArena.Json.ParseJsonc("{\n  // a comment\n  \"a\": [1, 2,],\n  /* more */ \"b\": true,\n}", out var error);
+        Assert.Null(error);
+        Assert.Equal(2, node!["a"]!.AsArray().Count);
+        Assert.Null(CodeArena.Json.ParseJsonc("{\n  \"a\": 1\n  \"b\": 2\n}", out error));
+        Assert.StartsWith("line 3:", error);
     }
 
     [Fact]
