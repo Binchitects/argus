@@ -27,6 +27,7 @@ internal sealed partial class WebApp
     private UserFiles _userFiles = null!;
     private WorkspaceState _state = null!;
     private Formatters _formatters = null!;
+    private Tasks _tasks = null!;
 
     private void StartIde()
     {
@@ -39,6 +40,7 @@ internal sealed partial class WebApp
         _preferences = new PagePreferences(Path.Combine(_rt.Env.Paths.DataDir, PagePreferences.FileName));
         _userFiles = new UserFiles(_rt.Env.Paths.ConfigDir);
         _formatters = new Formatters(_files, _rt.Config, _state, () => _rt.Sandbox, _rt.Env.Env);
+        _tasks = new Tasks(_rt.Workspace, _files, _terminals, _problems, _state, _rt.Env.Env);
     }
 
     /// <summary>One of the IDE's calls; false when the path is none of them.</summary>
@@ -243,11 +245,23 @@ internal sealed partial class WebApp
                 case ("POST", "/api/workspace/trust"):
                     await res.JsonAsync(200, _state.SetTrust(Body(req).Bool("trusted")), ct);
                     return true;
+                case ("GET", "/api/tasks"):
+                    await res.JsonAsync(200, await Task.Run(_tasks.List, ct), ct);
+                    return true;
+                case ("POST", "/api/tasks/run"):
+                {
+                    var body = Body(req);
+                    await res.JsonAsync(200, await Task.Run(() => _tasks.RunAsync(body), ct), ct);
+                    return true;
+                }
+                case ("POST", "/api/tasks/stop"):
+                    await res.JsonAsync(200, await _tasks.StopAsync(Body(req)), ct);
+                    return true;
             }
         }
         catch (IdeError e) when (!res.Started)
         {
-            await res.ErrorAsync(e.Status, e.Code, e.Message, ct);
+            await res.JsonAsync(e.Status, e.Json(), ct);
             return true;
         }
         catch (Exception e) when (!res.Started && e is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
@@ -383,7 +397,7 @@ internal sealed partial class WebApp
         }
     }
 
-    /// <summary>The check's last run as the page shows it: its command (or the one it would run), how it ended, and the problems.</summary>
+    /// <summary>The check's last run as the page shows it: its command (or the one it would run), how it ended, and the problems, then the tasks'.</summary>
     private JsonObject ProblemsJson(CheckRun? run) => new()
     {
         ["command"] = run?.Command ?? _problems.Command(),
@@ -391,9 +405,9 @@ internal sealed partial class WebApp
         ["ran"] = run?.Started.ToString("o"),
         ["exitCode"] = run?.ExitCode,
         ["said"] = run?.Said,
-        ["problems"] = new JsonArray([.. (run?.Found ?? []).Select(p => (JsonNode)new JsonObject
+        ["problems"] = new JsonArray([.. (run?.Found ?? []).Concat(_problems.FromTasks()).Select(p => (JsonNode)new JsonObject
         {
-            ["path"] = p.Path, ["line"] = p.Line, ["column"] = p.Column, ["severity"] = p.Severity, ["code"] = p.Code, ["message"] = p.Message,
+            ["path"] = p.Path, ["line"] = p.Line, ["column"] = p.Column, ["severity"] = p.Severity, ["code"] = p.Code, ["message"] = p.Message, ["source"] = p.Source,
         })]),
     };
 

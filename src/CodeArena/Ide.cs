@@ -4,11 +4,25 @@ using System.Text.RegularExpressions;
 
 namespace CodeArena;
 
-/// <summary>A request of the IDE's refused: its HTTP status, a code for the page, and a message for the person.</summary>
-internal sealed class IdeError(int status, string code, string message) : Exception(message)
+/// <summary>A request of the IDE's refused: its HTTP status, a code for the page, a message for the person, and what more the page needs to act on it.</summary>
+internal sealed class IdeError(int status, string code, string message, JsonObject? details = null) : Exception(message)
 {
     public int Status { get; } = status;
     public string Code { get; } = code;
+
+    /// <summary>Keys sent beside the code and the message: the inputs to ask for, the commands that would run.</summary>
+    public JsonObject? Details { get; } = details;
+
+    /// <summary>{"status", "error"} and the details.</summary>
+    public JsonObject Json()
+    {
+        var json = new JsonObject { ["status"] = Code, ["error"] = Message };
+        foreach (var (key, value) in Details ?? new JsonObject())
+        {
+            json[key] = value?.DeepClone();
+        }
+        return json;
+    }
 }
 
 /// <summary>What the search panel asks for: the text or pattern, and where to look.</summary>

@@ -322,6 +322,19 @@ internal sealed class Terminals(Workspace workspace, Config config, Func<string,
         return true;
     }
 
+    /// <summary>Ends the program of a terminal of this kind (and what it started), and waits a little for it to end; null when there is no such terminal. The terminal is kept, to show how it ended.</summary>
+    public async Task<Terminal?> StopAsync(string? id, TerminalKind kind)
+    {
+        if (Find(id) is not { } terminal || terminal.Kind != kind)
+        {
+            return null;
+        }
+        terminal.Kill();
+        // SIGHUP, and SIGKILL 3 s later to what did not end.
+        await Task.WhenAny(terminal.Exited, Task.Delay(TimeSpan.FromSeconds(5)));
+        return terminal;
+    }
+
     /// <summary>The shell to start, as a full path (exec does not search PATH), and its arguments.</summary>
     public (string Program, string[] Args) Shell()
     {
