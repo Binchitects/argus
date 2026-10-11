@@ -443,7 +443,7 @@ internal sealed partial class Tasks(Workspace workspace, IdeFiles files, Termina
             default:
                 throw RunVariables.BadConfig(def.File, def.Line, $"The task {def.Label} is of type {def.Type}, which a VS Code extension runs: not run here.");
         }
-        line ??= string.Join(' ', argv.Select(Show).Prepend(Show(program)));
+        line ??= Line(program, argv);
         return (new TerminalStart(program, argv, cwd, vars, def.Label, TerminalKind.Task, Key(def.Label)), line);
     }
 
@@ -529,6 +529,9 @@ internal sealed partial class Tasks(Workspace workspace, IdeFiles files, Termina
             _ => $"'{value.Replace("'", @"'\''", StringComparison.Ordinal)}'",
         };
     }
+
+    /// <summary>A command as the person reads it: the program and its arguments, each quoted when it holds a space or a quote, or is empty.</summary>
+    internal static string Line(string program, IEnumerable<string> args) => string.Join(' ', args.Select(Show).Prepend(Show(program)));
 
     /// <summary>A program or argument as the person reads a command: quoted when it holds a space or is empty.</summary>
     private static string Show(string word) => word.Length > 0 && !word.Any(c => char.IsWhiteSpace(c) || c is '"' or '\'') ? word : $"'{word.Replace("'", @"'\''", StringComparison.Ordinal)}'";

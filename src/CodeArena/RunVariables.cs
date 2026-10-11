@@ -21,7 +21,7 @@ internal sealed record RunContext(string? File = null, int? LineNumber = null, s
 /// open file's, ${env:…} (never the API key), ${config:…} from the settings the page sent, ${input:…} from what the
 /// person answered (one not answered yet is noted, to be asked first), and ${codeArena.buildConfiguration}. Any other
 /// variable, or ${command:…}, is refused (400 bad_config) naming it; when lenient (to show a command before the folder is
-/// trusted), it is left as written.
+/// trusted), it is left as written, and so are ${env:…} and the inputs not answered.
 /// </summary>
 internal sealed partial class RunVariables
 {
@@ -108,8 +108,9 @@ internal sealed partial class RunVariables
             "lineNumber" => File(name, _ => _context.LineNumber?.ToString(CultureInfo.InvariantCulture)),
             "selectedText" => _context.SelectedText ?? "",
             "codeArena.buildConfiguration" => _build,
-            // The person's key stays with Code Arena, whatever a task asks for.
-            "env" => arg == "ARENA_API_KEY" ? "" : _env(arg) ?? "",
+            // The person's key stays with Code Arena, whatever a task asks for; a command shown before the folder is
+            // trusted shows ${env:…} as written, not what may be a secret.
+            "env" => arg == "ARENA_API_KEY" ? "" : _lenient ? null : _env(arg) ?? "",
             "config" => Setting(name, arg, file),
             "input" => Input(name, arg, inputs, file),
             "command" => Refuse(file, $"${{{name}}} runs a command of VS Code's: not run here."),

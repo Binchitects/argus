@@ -3,10 +3,14 @@ using System.Text.RegularExpressions;
 
 namespace CodeArena;
 
+/// <summary>A run configuration a project's files give: launch.json's shape, and for .NET the project whose built program it runs.</summary>
+internal sealed record DetectedConfig(JsonObject Configuration, string? Project = null);
+
 /// <summary>
-/// What a project's own files say can be built and tested, with no .vscode file, as VS Code's extensions detect it: .NET
-/// projects, npm scripts, Cargo, Go, Make, CMake and pytest. Each a task in tasks.json's shape (so the page can copy one
-/// into .vscode), building the project's build configuration (Debug or Release).
+/// What a project's own files say can be built, tested and run, with no .vscode file, as VS Code's extensions detect
+/// it: .NET projects, npm scripts, Cargo, Go, Make, CMake, pytest and Python files. Each a task in tasks.json's shape or
+/// a configuration in launch.json's (so the page can copy one into .vscode), building and running the project's build
+/// configuration (Debug or Release).
 /// </summary>
 internal static partial class RunDetect
 {
@@ -22,13 +26,14 @@ internal static partial class RunDetect
         "node_modules", "bin", "obj", "target", "dist", "build", "out", "venv", "__pycache__", "packages",
     };
 
-    /// <summary>The project files found under a folder, as full paths, nearest first.</summary>
-    private sealed record Found(List<string> Projects, List<string> Packages);
+    /// <summary>The project files found under a folder, as full paths, nearest first, and whether Python files are near its top.</summary>
+    private sealed record Found(List<string> Projects, List<string> Packages, bool Python);
 
     private static Found Look(string root)
     {
         var projects = new List<string>();
         var packages = new List<string>();
+        var python = false;
         var level = new List<string> { root };
         var seen = 0;
         for (var depth = 0; depth <= Depth && level.Count > 0 && seen < MostEntries; depth++)
@@ -50,6 +55,10 @@ internal static partial class RunDetect
                         {
                             packages.Add(file);
                         }
+                        else if (depth <= 2 && (name.EndsWith(".py", StringComparison.Ordinal) || name == "pyproject.toml"))
+                        {
+                            python = true;
+                        }
                     }
                     foreach (var sub in Directory.EnumerateDirectories(dir).Order(StringComparer.Ordinal))
                     {
@@ -69,7 +78,7 @@ internal static partial class RunDetect
             }
             level = next;
         }
-        return new Found(projects, packages);
+        return new Found(projects, packages, python);
     }
 
     /// <summary>A path of the folder as tasks.json writes one: relative, with "/".</summary>
@@ -159,7 +168,7 @@ internal static partial class RunDetect
     /// </summary>
     private static void DotnetTasks(string root, string configuration, Found found, List<JsonObject> tasks)
     {
-        var solution = Directory.EnumerateFiles(root, "*.sln").Concat(Directory.EnumerateFiles(root, "*.slnx")).Order(StringComparer.Ordinal).FirstOrDefault();
+        var solution = Solution(root);
         if (solution is null && found.Projects.Count == 0)
         {
             return;
@@ -191,6 +200,9 @@ internal static partial class RunDetect
             }
         }
     }
+
+    private static string? Solution(string root) =>
+        Directory.EnumerateFiles(root, "*.sln").Concat(Directory.EnumerateFiles(root, "*.slnx")).Order(StringComparer.Ordinal).FirstOrDefault();
 
     /// <summary>The detected task that builds a project: "dotnet: build" when it is the folder's only one, else with its name.</summary>
     private static string BuildLabel(Found found, string? solution, string project) =>
@@ -302,6 +314,222 @@ internal static partial class RunDetect
             return Path.Combine(active, bin);
         }
         return OperatingSystem.IsWindows() ? "python" : "python3";
+    }
+
+    /// <summary>
+    /// The configurations the project's files give: each .NET program (its build first, then the program it built), npm's
+    /// start and dev scripts, the Python file open in the editor, Go's package, Cargo's programs, CMake's executables, and
+    /// the programs a Makefile built.
+    /// </summary>
+    public static List<DetectedConfig> Configurations(string root, string configuration, Func<string, string?> env)
+    {
+        var found = Look(root);
+        var release = configuration == "Release";
+        var configs = new List<DetectedConfig>();
+        var solution = Solution(root);
+        foreach (var project in found.Projects)
+        {
+            var text = Read(project);
+            if (!Runnable(text))
+            {
+                continue;
+            }
+            var dir = Rel(root, Path.GetDirectoryName(project)!);
+            var folder = dir == "." ? "${workspaceFolder}" : $"${{workspaceFolder}}/{dir}";
+            var framework = TargetFramework(text) ?? DirectoryFramework(root, Path.GetDirectoryName(project)!) ?? "net10.0";
+            var assembly = Property(text, "AssemblyName") ?? Path.GetFileNameWithoutExtension(project);
+            configs.Add(new(new JsonObject
+            {
+                ["name"] = $".NET: {ProjectLabel(found.Projects, project)}",
+                ["type"] = "coreclr",
+                ["request"] = "launch",
+                ["preLaunchTask"] = BuildLabel(found, solution, project),
+                ["program"] = $"{folder}/bin/${{config:codeArena.buildConfiguration}}/{framework}/{assembly}.dll",
+                ["args"] = new JsonArray(),
+                ["cwd"] = folder,
+                ["stopAtEntry"] = false,
+                ["console"] = "integratedTerminal",
+            }, project));
+        }
+        foreach (var package in found.Packages)
+        {
+            if (Json.ParseObject(Read(package))?["scripts"] is not JsonObject scripts)
+            {
+                continue;
+            }
+            var dir = Rel(root, Path.GetDirectoryName(package)!);
+            foreach (var script in new[] { "start", "dev" }.Where(scripts.ContainsKey))
+            {
+                configs.Add(new(new JsonObject
+                {
+                    ["name"] = dir == "." ? $"npm: {script}" : $"npm: {script} - {dir}",
+                    ["type"] = "node",
+                    ["request"] = "launch",
+                    ["runtimeExecutable"] = Manager(root, Path.GetDirectoryName(package)!),
+                    ["runtimeArgs"] = new JsonArray("run", script),
+                    ["cwd"] = dir == "." ? "${workspaceFolder}" : $"${{workspaceFolder}}/{dir}",
+                    ["console"] = "integratedTerminal",
+                }));
+            }
+        }
+        if (found.Python)
+        {
+            var python = new JsonObject
+            {
+                ["name"] = "Python: Current File",
+                ["type"] = "debugpy",
+                ["request"] = "launch",
+                ["program"] = "${file}",
+                ["console"] = "integratedTerminal",
+                ["python"] = Python(root, env),
+            };
+            if (release)
+            {
+                // Release: asserts and __debug__ blocks off.
+                python["pythonArgs"] = new JsonArray("-O");
+            }
+            configs.Add(new(python));
+        }
+        if (File.Exists(Path.Combine(root, "go.mod")))
+        {
+            var go = new JsonObject { ["name"] = "Go: Run Package", ["type"] = "go", ["request"] = "launch", ["mode"] = "auto", ["program"] = "${workspaceFolder}" };
+            if (release)
+            {
+                go["buildFlags"] = "-trimpath -ldflags='-s -w'";
+            }
+            configs.Add(new(go));
+        }
+        if (File.Exists(Path.Combine(root, "Cargo.toml")))
+        {
+            var bins = CargoBin().Matches(Read(Path.Combine(root, "Cargo.toml"))).Select(m => m.Groups[1].Value).Distinct().ToList();
+            foreach (var bin in bins.Count > 0 ? bins.Cast<string?>() : [null])
+            {
+                var build = new JsonArray("build");
+                if (bin is not null)
+                {
+                    build.Add($"--bin={bin}");
+                }
+                if (release)
+                {
+                    build.Add("--release");
+                }
+                configs.Add(new(new JsonObject
+                {
+                    ["name"] = bin is null ? "Cargo: Run" : $"Cargo: Run {bin}",
+                    ["type"] = "lldb",
+                    ["request"] = "launch",
+                    ["cargo"] = new JsonObject { ["args"] = build },
+                    ["args"] = new JsonArray(),
+                    ["cwd"] = "${workspaceFolder}",
+                }));
+            }
+        }
+        if (File.Exists(Path.Combine(root, "CMakeLists.txt")))
+        {
+            foreach (var target in CmakeExecutable().Matches(Read(Path.Combine(root, "CMakeLists.txt"))).Select(m => m.Groups[1].Value).Distinct())
+            {
+                configs.Add(new(Native($"CMake: {target}", $"${{workspaceFolder}}/build/${{config:codeArena.buildConfiguration}}/{target}", "cmake: build")));
+            }
+        }
+        if (Makefile(root) is not null)
+        {
+            foreach (var program in Programs(root))
+            {
+                configs.Add(new(Native($"Make: {program}", $"${{workspaceFolder}}/{program}", "make: build")));
+            }
+        }
+        return configs;
+    }
+
+    /// <summary>A native program's configuration, as VS Code's C/C++ extension writes one (gdb).</summary>
+    private static JsonObject Native(string name, string program, string build) => new()
+    {
+        ["name"] = name,
+        ["type"] = "cppdbg",
+        ["request"] = "launch",
+        ["program"] = program,
+        ["args"] = new JsonArray(),
+        ["cwd"] = "${workspaceFolder}",
+        ["MIMode"] = "gdb",
+        ["preLaunchTask"] = build,
+    };
+
+    [GeneratedRegex(@"^\[\[bin\]\][^\[]*?^\s*name\s*=\s*""([^""]+)""", RegexOptions.Multiline | RegexOptions.Singleline)]
+    private static partial Regex CargoBin();
+
+    [GeneratedRegex(@"add_executable\s*\(\s*([A-Za-z0-9_.+-]+)", RegexOptions.IgnoreCase)]
+    private static partial Regex CmakeExecutable();
+
+    /// <summary>The programs a Makefile built: executables (ELF, Mach-O or PE files) in the folder, build/ and bin/, as relative paths.</summary>
+    private static List<string> Programs(string root)
+    {
+        var programs = new List<string>();
+        foreach (var dir in new[] { root, Path.Combine(root, "build"), Path.Combine(root, "bin") }.Where(Directory.Exists))
+        {
+            try
+            {
+                foreach (var file in Directory.EnumerateFiles(dir).Order(StringComparer.Ordinal).Take(500))
+                {
+                    if (Executable(file))
+                    {
+                        programs.Add(Rel(root, file));
+                    }
+                }
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // Nothing to offer there.
+            }
+        }
+        return programs;
+    }
+
+    /// <summary>Whether a file is a program the system runs: by its first bytes (ELF, Mach-O or PE), and on Unix its execute bit.</summary>
+    private static bool Executable(string file)
+    {
+        try
+        {
+            if (!OperatingSystem.IsWindows() && (File.GetUnixFileMode(file) & UnixFileMode.UserExecute) == 0)
+            {
+                return false;
+            }
+            Span<byte> head = stackalloc byte[4];
+            using var stream = File.OpenRead(file);
+            if (stream.ReadAtLeast(head, 4, throwOnEndOfStream: false) < 4)
+            {
+                return false;
+            }
+            return head is [0x7F, (byte)'E', (byte)'L', (byte)'F'] or [(byte)'M', (byte)'Z', _, _]
+                or [0xCF, 0xFA, 0xED, 0xFE] or [0xCE, 0xFA, 0xED, 0xFE] or [0xCA, 0xFE, 0xBA, 0xBE];
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>A project's target framework (the first of several).</summary>
+    private static string? TargetFramework(string project) =>
+        Property(project, "TargetFramework") ?? Property(project, "TargetFrameworks")?.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+
+    /// <summary>The target framework a Directory.Build.props above a project sets, up to the folder.</summary>
+    private static string? DirectoryFramework(string root, string dir)
+    {
+        for (var at = dir; at is not null && at.StartsWith(root, StringComparison.Ordinal); at = Path.GetDirectoryName(at))
+        {
+            if (TargetFramework(Read(Path.Combine(at, "Directory.Build.props"))) is { } framework)
+            {
+                return framework;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>An MSBuild property as a project file writes it, when it is a plain value (not made of other properties).</summary>
+    private static string? Property(string project, string name)
+    {
+        var m = Regex.Match(project, $@"<{name}>\s*([^<$]+?)\s*</{name}>", RegexOptions.None, TimeSpan.FromSeconds(1));
+        return m.Success ? m.Groups[1].Value : null;
     }
 
     /// <summary>A small file's text; empty when it is missing or cannot be read.</summary>

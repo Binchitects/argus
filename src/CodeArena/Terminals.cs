@@ -227,6 +227,8 @@ internal sealed class Terminals(Workspace workspace, Config config, Func<string,
     private readonly object _gate = new();
     private readonly List<Terminal> _all = [];
     private int _next;
+    // Once stopping: what a run ending starts (its postDebugTask) would outlive the server.
+    private bool _closed;
 
     public IReadOnlyList<Terminal> All
     {
@@ -257,6 +259,10 @@ internal sealed class Terminals(Workspace workspace, Config config, Func<string,
     {
         lock (_gate)
         {
+            if (_closed)
+            {
+                throw new IdeError(503, "stopping", "Code Arena is stopping.");
+            }
             if (_all.Count(t => t.ExitCode is null) >= Max)
             {
                 throw new IdeError(409, "too_many", $"{Max} terminals are open: close one first.");
@@ -293,6 +299,11 @@ internal sealed class Terminals(Workspace workspace, Config config, Func<string,
             var reused = start?.ReuseKey is { } key ? _all.FindIndex(t => t.ReuseKey == key && t.ExitCode is not null) : -1;
             var id = reused >= 0 ? _all[reused].Id : (++_next).ToString(System.Globalization.CultureInfo.InvariantCulture);
             var terminal = new Terminal(id, title, pty, cols, rows, start?.Kind ?? TerminalKind.Shell, start?.ReuseKey);
+            if (_closed)
+            {
+                terminal.Kill();
+                throw new IdeError(503, "stopping", "Code Arena is stopping.");
+            }
             if (reused >= 0)
             {
                 _all[reused] = terminal;
@@ -430,6 +441,7 @@ internal sealed class Terminals(Workspace workspace, Config config, Func<string,
         List<Terminal> all;
         lock (_gate)
         {
+            _closed = true;
             all = [.. _all];
             _all.Clear();
         }

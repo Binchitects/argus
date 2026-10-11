@@ -28,6 +28,7 @@ internal sealed partial class WebApp
     private WorkspaceState _state = null!;
     private Formatters _formatters = null!;
     private Tasks _tasks = null!;
+    private RunConfigs _runs = null!;
 
     private void StartIde()
     {
@@ -41,6 +42,7 @@ internal sealed partial class WebApp
         _userFiles = new UserFiles(_rt.Env.Paths.ConfigDir);
         _formatters = new Formatters(_files, _rt.Config, _state, () => _rt.Sandbox, _rt.Env.Env);
         _tasks = new Tasks(_rt.Workspace, _files, _terminals, _problems, _state, _rt.Env.Env);
+        _runs = new RunConfigs(_rt.Workspace, _terminals, _tasks, _state, _rt.Env.Env);
     }
 
     /// <summary>One of the IDE's calls; false when the path is none of them.</summary>
@@ -256,6 +258,18 @@ internal sealed partial class WebApp
                 }
                 case ("POST", "/api/tasks/stop"):
                     await res.JsonAsync(200, await _tasks.StopAsync(Body(req)), ct);
+                    return true;
+                case ("GET", "/api/run/configs"):
+                    await res.JsonAsync(200, await Task.Run(_runs.List, ct), ct);
+                    return true;
+                case ("POST", "/api/run/start"):
+                {
+                    var body = Body(req);
+                    await res.JsonAsync(200, await Task.Run(() => _runs.StartAsync(body), ct), ct);
+                    return true;
+                }
+                case ("POST", "/api/run/stop"):
+                    await res.JsonAsync(200, await _runs.StopAsync(Body(req)), ct);
                     return true;
             }
         }

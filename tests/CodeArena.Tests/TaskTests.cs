@@ -301,13 +301,14 @@ public sealed class TaskTests : IDisposable
             return;
         }
         TasksJson(
-            """{ "label": "greet", "type": "shell", "command": "echo ${workspaceFolder} ${input:who} ${env:ARENA_API_KEY}", "dependsOn": ["prepare"] }, { "label": "prepare", "type": "shell", "command": "true" }""",
+            """{ "label": "greet", "type": "shell", "command": "echo ${workspaceFolder} ${input:who} ${env:ARENA_API_KEY} [${env:CODE_ARENA_TASK_TEST}]", "dependsOn": ["prepare"] }, { "label": "prepare", "type": "shell", "command": "true" }""",
             """ "inputs": [{ "id": "who", "type": "promptString", "description": "Who?", "default": "you" }], """);
         Write("Makefile", "all:\n\ttrue\n");
 
         var untrusted = await RefusedAsync(_tasks.RunAsync(Body("greet")));
         Assert.Equal((409, "untrusted"), (untrusted.Status, untrusted.Code));
-        Assert.Equal(["true", $"echo {_root} ${{input:who}} "], VsCodeJson.Strings(untrusted.Details!["commands"]));
+        // What the variables may hold that is secret stays as written: the key never, the environment as ${env:…}.
+        Assert.Equal(["true", $"echo {_root} ${{input:who}}  [${{env:CODE_ARENA_TASK_TEST}}]"], VsCodeJson.Strings(untrusted.Details!["commands"]));
         Assert.Empty(_terminals.All);
         // A detected task shows its command and needs no trust: it runs (or its program is missing here).
         try
@@ -328,17 +329,19 @@ public sealed class TaskTests : IDisposable
         Assert.DoesNotContain(_terminals.All, t => t.Title is "greet" or "prepare");
 
         Environment.SetEnvironmentVariable("ARENA_API_KEY", "sk-never-in-a-task");
+        Environment.SetEnvironmentVariable("CODE_ARENA_TASK_TEST", "filled");
         try
         {
             var (answer, exit) = await RunToEndAsync("greet", new JsonObject { ["inputs"] = new JsonObject { ["who"] = "me" } });
             Assert.Equal(0, exit);
             var output = TerminalTests.Output(_terminals.Find(answer["terminal"]!["id"]!.GetValue<string>())!);
-            Assert.Contains($"{_root} me", output);
+            Assert.Contains($"{_root} me [filled]", output);
             Assert.DoesNotContain("sk-never-in-a-task", output);
         }
         finally
         {
             Environment.SetEnvironmentVariable("ARENA_API_KEY", null);
+            Environment.SetEnvironmentVariable("CODE_ARENA_TASK_TEST", null);
         }
     }
 
