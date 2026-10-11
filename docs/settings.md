@@ -39,7 +39,8 @@ value it overrides, and **Back to the environment's value** removes the saved on
 ## Prices
 
 **Settings → Prices** holds what a chat model costs when it has no price of
-its own (Admin → Models), and what pictures, video and speech cost. Each is in
+its own (Admin → Models), and what pictures, video and speech cost when their
+model has none of its own. Each is in
 dollars; a change applies at once, and the gateway is given the new prices when
 it is saved.
 
@@ -58,6 +59,15 @@ your own. A new price counts from the moment it is saved: what was booked
 before keeps the price it had. Below the prices, **Recalculate past costs**
 works out the costs of chosen days again at today's prices, on request
 ([admin.md](admin.md#prices)).
+
+## The chat's picture, video and speech models
+
+**Settings → Model** names the models the chat uses for pictures (**Picture
+model the chat uses**), clips (**Video model the chat uses**) and Talk and voice
+messages (**Speech to text model**). Empty, each is the first of its kind
+(Admin → Models). The picture and video tools take, of these, the ones a
+person may use (each model's **Who may use it**); with several picture models,
+the chat's model may name another the person asks for.
 
 ## Storage
 
@@ -136,7 +146,7 @@ until it is offered again.
 | Setting | What it holds |
 |---|---|
 | **Language people speak** | **Detect it** (`auto`: Whisper hears which) or one of the languages the speech to text model here knows, by name with its code (`Persian fa`): Talk, voice messages and API keys' speech to text are written down in it. The value is the code Whisper takes (`en`, `fa`, `de`; not `per` or `eng`). A code the speech to text model here does not list (saved before, or from the environment) is said under the setting, and everyone is heard as with `auto` meanwhile |
-| **Voice for each language** | A row for each language a voice reads, its voice chosen from those the speech models really offer (the app asks the speech server), each by name with its id (`Alex (man, Brazilian Portuguese) kokoro/pm_alex`). **Try it** reads a sample in the voice at the reading speed on the page, saved or not. A text is read in the voice of its language; a language left to **The first offered** gets the first voice offered for it. The value is `language:model/voice` pairs, comma-separated: `en:kokoro/af_heart,fa:piper-fa/gyro` (the default). **Edit as text** shows it, and while the speech server cannot be asked it is typed so. A voice here that is not offered (mistyped, its model turned off) is said in its row and under the setting, with the voice that reads instead and the ones offered; a voice of a model the speech server has not listed yet (still downloading) is used as named |
+| **Voice for each language** | A row for each language a voice reads, its voice chosen from those the speech models really offer (the app asks the speech server), each by name with its id (`Alex (man, Brazilian Portuguese) kokoro/pm_alex`). **Try it** reads a sample in the voice at the reading speed on the page, saved or not. A text is read in the voice of its language; a language left to **The first offered** gets the first voice offered for it. The value is `language:model/voice` pairs, comma-separated: `en:kokoro/af_heart,fa:piper-fa/gyro` (the default). **Edit as text** shows it, and while the speech server cannot be asked it is typed so. A voice here that is not offered (mistyped, its model removed) is said in its row and under the setting, with the voice that reads instead and the ones offered; a voice of a model the speech server has not listed yet (still downloading) is used as named |
 | **Reading speed** | 0.5 to 2; 1 is the voice's own pace |
 | **Read answers aloud in Talk** | on or off, for Talk and the answer to a voice message |
 

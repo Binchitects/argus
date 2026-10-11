@@ -319,21 +319,25 @@ All of them are under **Admin → Models**, with the same controls:
   against this machine. Kept loaded, or loaded when asked for; several at once
   (**Settings → Model → Models loaded at once**). An omni model (Qwen3-Omni)
   hears sound and sees pictures when its projector has both.
-- **Picture, video and speech models**: on or off (off, they leave the gateway
-  and the chat's tools), kept loaded or loaded when asked for (and unloaded
-  after ten minutes unused), loaded and unloaded by hand. The picture and video
-  servers run while the app's control file says so (`services/sd-serve.sh`,
-  which reads it every 3 seconds): a picture asked for just as its server is
-  turned off for being unused turns it on again and waits for it, rather than
-  start on a server about to stop. One that has not answered ten minutes after
-  it was turned on reads **Could not load** (it is still tried; its log says
-  why, often too little GPU memory beside the chat models), and one unloaded
-  as meant is idle on the Overview, not down.
-  The video server decodes on the GPU when it has 13 GB free as it loads
-  (`VAE_GPU_MB`, with `VAE_GPU_FLAGS`: a 12 GB budget, the weights in RAM until
-  needed), and on the CPU, slower, while the chat model holds the GPU (a 9-frame
-  clip: 63 s against 309 s on this host's RTX 3090);
-  its log says which (`docker compose logs videogen`).
+- **Picture, video and speech models**: added, edited and removed like chat
+  models, each with its files (or the speech server's id), its settings, GPU,
+  price and idle time; kept loaded, or loaded when asked for (by the chat, Talk
+  or an API key) and unloaded when unused ([admin.md](admin.md#picture-video-and-speech-models)).
+  The picture and video servers (`services/sd-serve.sh`) run the model the app
+  names in their control file, `<server>.conf` in the `engine` volume: its
+  files, its arguments, the GPU, and a generation the app raises to start it
+  again. The script reads it line by line, never as commands, every 2 seconds;
+  waits for missing files; never starts a server that exited again on its own;
+  and writes what it does every 2 seconds to `<server>.json` (with the
+  server's output in `<server>.log`) in the `media-status` volume, a small
+  in-memory one the app reads. Their image is pinned by digest. The speech
+  server's own unloading is off (`STT_MODEL_TTL`, `TTS_MODEL_TTL` -1): the app
+  unloads its models.
+  A video model set to decode where there is room decodes on the GPU when it
+  has that much free as it loads (Wan: 13 GB, with a 12 GB budget and the
+  weights in RAM until needed), and on the CPU, slower, while the chat model
+  holds the GPU (a 9-frame clip: 63 s against 309 s on this host's RTX 3090);
+  its status says which.
 - **Models on other GPU servers**, behind the same gateway.
 
 Who may use each model is set on its card; a person's API key carries the
@@ -613,8 +617,10 @@ on the terminal and never in the log: it is `ADMIN_PASSWORD` in `.env` (0600).
   in `.env` (and its line is out of `docker-compose.override.yml`).
 - `--cpu-only` leaves out the GPU's services, `--leave-out A,B` others. They go
   in `docker-compose.override.yml`, which is yours from then on: upgrades and
-  repairs keep it. It also keeps the speech server from looking for models
-  online (`HF_HUB_OFFLINE=1`).
+  repairs keep it. When the default models are copied from a folder
+  (`--default-models DIR`), it also keeps the speech server from looking for
+  models online (`HF_HUB_OFFLINE=1`); otherwise an admin can download speech
+  models later.
 - `MODEL` is a `.gguf` file in `MODELS_DIR` (the bundle's with `--models`): a
   Hugging Face name (`repo:quant`) needs the network and is refused.
 - `--make-cert` makes a certificate (`scripts/make-cert.sh`); `--hosts` adds the

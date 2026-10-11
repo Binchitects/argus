@@ -429,6 +429,56 @@ and 290 for a long one, and a first round after an idle spell took 13.7 s for
   `memory.low`), so its pages stay in RAM instead of other files' taking
   their place. It is never a limit, and nothing is killed for it.
 
+#### Picture, video and speech models
+
+Picture, video and speech models are models like the chat models: each has a
+card under Admin → Models, and is added, edited, loaded, unloaded, kept loaded
+and removed there.
+
+- **Add a model** has a menu: a chat model, or a picture, video, speech to
+  text or text to speech model. A picture or video model is its files from the
+  library, each by what it is: the diffusion model (or the whole model), its
+  text encoders (an LLM, T5, CLIP) and its decoder (VAE). Its settings are
+  what it makes unless a request says otherwise: steps, CFG scale, guidance,
+  flow shift, sampler, scheduler, size, negative prompt, and for video the
+  frames a second and the longest clip. Its GPU: which one, a budget its
+  weights stay within (the rest waits in RAM), and where it decodes: on the
+  GPU, on the CPU (slower, less GPU memory), or on the GPU when it has room as
+  the model loads (Wan's 13 GB, else the CPU). **More options** takes
+  stable-diffusion.cpp's own, one a line (`--seed 42`); those that pick its
+  files, where it listens or what it reaches are the app's and refused. A
+  speech model is one the speech server has, with its language, and for text
+  to speech the voices it offers, its default voice and speed.
+- **Its price** (per picture, second of video, minute of sound, or 1,000
+  characters read aloud; empty: Settings → Prices) and **how long it stays
+  loaded unused** (10 minutes when empty) are set on it too. Each person's and
+  group's credit for pictures, video and speech is under People and Groups.
+- **One model at a time on each server.** The picture server and the video
+  server run one model each: the one kept loaded, else the one asked for last.
+  Keeping one loaded stops keeping the others of its server; asking for
+  another switches the server to it (a few seconds to load).
+- **Loaded when asked for**, by the chat's tools, Talk, read aloud, a voice
+  message, or an API key (the gateway's picture and speech paths go by the
+  app, which loads the model first), and unloaded after its idle minutes. The
+  speech server unloads nothing by itself: the app does.
+- **States and failures** as a chat model's: Loading… and Unloading… with why
+  and since when; a model whose server exits says why from its log (too little
+  GPU memory, settings it refused, a file it could not read, a crash, no
+  answer in ten minutes) and is tried again after 1, 2, 4, 8, 16, then at most
+  30 minutes, its server off meanwhile; settings it refused wait until it is
+  changed or loaded by hand. **Load** tries at once.
+- **Remove** takes the model away (from the gateway and the chat's tools too);
+  its files stay in the library (Admin → Storage cleans up unused ones).
+- **Find on Hugging Face** has tabs: Chat (GGUF), Pictures and Video (the
+  text-to-image and text-to-video repositories, any format stable-diffusion.cpp
+  reads; pick the files a model needs) and Speech (the speech server's
+  registry: Download asks the speech server to fetch a model, listed under
+  Downloads like the others).
+- **Settings → Model** names the picture, video and speech to text models the
+  chat uses (empty: the first). The picture and video tools pick among those a
+  person may use (each model's **Who may use it**), and the chat's model may
+  name another picture model the person asks for.
+
 ### Quality
 
 Two things feed it, both from the chat ([chat.md](chat.md)):
@@ -810,9 +860,10 @@ Every model has a price, so every request has a cost:
 - **The defaults**, for every model without its own: Settings → **Prices**
   ([settings.md](settings.md#prices)), $0.20, $0.02 and $0.80 per million
   tokens out of the box.
-- **Pictures, video and speech**, by what they are (Settings → Prices): a
-  picture ($0.01), a second of video ($0.05), a minute of sound turned into
-  text ($0.006), 1,000 characters read aloud ($0.015).
+- **Pictures, video and speech**: each model's own (Admin → Models → Edit),
+  else by what they are (Settings → Prices): a picture ($0.01), a second of
+  video ($0.05), a minute of sound turned into text ($0.006), 1,000
+  characters read aloud ($0.015).
 
 The app gives the gateway every model's prices when it registers it
 (`input_cost_per_token`, `cache_read_input_token_cost`,
