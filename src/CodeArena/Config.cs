@@ -75,6 +75,66 @@ internal sealed class McpServerConfig
 }
 
 /// <summary>
+/// A formatter of the person's own (config.json "formatters", by name): a command the IDE runs with the text on its
+/// input, the formatted text read from its output, for these languages (Monaco's ids, or file patterns like "*.lua").
+/// One named as a built-in (prettier, ruff, black, gofmt, rustfmt, clang-format, dotnet-format) takes its place, for
+/// the built-in's languages when it names none. Only the person's config.json names commands, never a project.
+/// </summary>
+internal sealed class FormatterConfig
+{
+    public required string Name { get; init; }
+    /// <summary>The program, then its arguments; ${file}, ${relativeFile}, ${workspaceFolder} and the range's are filled in.</summary>
+    public required List<string> Command { get; init; }
+    public List<string> Languages { get; init; } = [];
+    /// <summary>Whether it formats a range (with ${rangeStart}, ${rangeEnd}, ${startLine} and ${endLine} in its command).</summary>
+    public bool Range { get; init; }
+    /// <summary>The longest it runs, in seconds; null: the default (10).</summary>
+    public int? Timeout { get; init; }
+
+    /// <summary>An entry as the file gives it; what is wrong with it is said (it would be dropped at the next save).</summary>
+    public static FormatterConfig From(string name, JsonNode? node, string file)
+    {
+        var where = $"\"formatters\".\"{name}\" in {file}";
+        if (node is not JsonObject o)
+        {
+            throw new InvalidOperationException($"{where} is an object: {{\"command\": [...], \"languages\": [...]}}.");
+        }
+        static List<string>? Strings(JsonNode? n) =>
+            n is JsonArray a && a.All(x => x is JsonValue v && v.TryGetValue<string>(out _)) ? [.. a.Select(x => x!.GetValue<string>())] : null;
+        var command = Strings(o["command"]);
+        if (command is not { Count: > 0 } || command[0].Length == 0)
+        {
+            throw new InvalidOperationException($"{where}: \"command\" is a list of strings, the program first.");
+        }
+        var languages = o["languages"] is null ? [] : Strings(o["languages"]) ?? throw new InvalidOperationException($"{where}: \"languages\" is a list of strings.");
+        var timeout = o.Int("timeout");
+        if (timeout is < 1 or > 600)
+        {
+            throw new InvalidOperationException($"{where}: \"timeout\" is in seconds, 1 to 600.");
+        }
+        return new FormatterConfig { Name = name, Command = command, Languages = languages, Range = o.Bool("range") ?? false, Timeout = timeout };
+    }
+
+    public JsonObject Json()
+    {
+        var o = new JsonObject { ["command"] = new JsonArray([.. Command.Select(c => (JsonNode)c)]) };
+        if (Languages.Count > 0)
+        {
+            o["languages"] = new JsonArray([.. Languages.Select(l => (JsonNode)l)]);
+        }
+        if (Range)
+        {
+            o["range"] = true;
+        }
+        if (Timeout is { } seconds)
+        {
+            o["timeout"] = seconds;
+        }
+        return o;
+    }
+}
+
+/// <summary>
 /// config.json: the Arena's address, the person's API key and their choices.
 /// Unknown keys are kept as they are when it is saved.
 /// </summary>
@@ -133,6 +193,8 @@ internal sealed class Config
     public bool Completion { get; set; } = true;
     /// <summary>The project's check for the IDE's Problems (a build, a type check or a linter); null: found by the project's files.</summary>
     public string? CheckCommand { get; set; }
+    /// <summary>The IDE's formatters of the person's own, besides (or instead of) those it finds.</summary>
+    public List<FormatterConfig> Formatters { get; set; } = [];
     public string? CompletionModel { get; set; }
     public string CompletionTemplate { get; set; } = "qwen";
     /// <summary>The author name of Code Arena's commits (default: Code Arena).</summary>
@@ -214,6 +276,12 @@ internal sealed class Config
         config.Completion = raw.Bool("completion") ?? true;
         config.CompletionModel = raw.Str("completionModel");
         config.CheckCommand = raw.Str("checkCommand");
+        config.Formatters = raw["formatters"] switch
+        {
+            null => [],
+            JsonObject formatters => [.. formatters.Select(f => FormatterConfig.From(f.Key, f.Value, file))],
+            _ => throw new InvalidOperationException($"\"formatters\" in {file} is an object: {{\"name\": {{\"command\": [...], \"languages\": [...]}}}}."),
+        };
         config.CompletionTemplate = raw.Str("completionTemplate") is { } template && Completions.Templates.ContainsKey(template) ? template : "qwen";
         config.SyncChats = raw.Bool("syncChats") ?? true;
         config.Sandbox = raw.Str("sandbox");
@@ -334,6 +402,7 @@ internal sealed class Config
         Set("completion", Completion ? null : false);
         Set("completionModel", CompletionModel);
         Set("checkCommand", CheckCommand);
+        Set("formatters", Formatters.Count == 0 ? null : new JsonObject(Formatters.Select(f => KeyValuePair.Create(f.Name, (JsonNode?)f.Json()))));
         Set("completionTemplate", CompletionTemplate == "qwen" ? null : CompletionTemplate);
         Set("syncChats", SyncChats ? null : false);
         Set("sandbox", Sandbox);

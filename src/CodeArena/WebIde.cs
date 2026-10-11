@@ -26,6 +26,7 @@ internal sealed partial class WebApp
     private IdeGit _git = null!;
     private UserFiles _userFiles = null!;
     private WorkspaceState _state = null!;
+    private Formatters _formatters = null!;
 
     private void StartIde()
     {
@@ -37,6 +38,7 @@ internal sealed partial class WebApp
         _preferences = new PagePreferences(Path.Combine(_rt.Env.Paths.DataDir, PagePreferences.FileName));
         _userFiles = new UserFiles(_rt.Env.Paths.ConfigDir);
         _state = new WorkspaceState(_rt.Env.Paths.DataDir, _rt.Workspace.Root);
+        _formatters = new Formatters(_files, _rt.Config, _state, () => _rt.Sandbox, _rt.Env.Env);
     }
 
     /// <summary>One of the IDE's calls; false when the path is none of them.</summary>
@@ -106,6 +108,12 @@ internal sealed partial class WebApp
                     return true;
                 case ("POST", "/api/problems/run"):
                     await res.JsonAsync(200, ProblemsJson(await _problems.RunAsync()), ct);
+                    return true;
+                case ("GET", "/api/formatters"):
+                    await res.JsonAsync(200, await Task.Run(() => _formatters.List(Query(req, "path"), Query(req, "language")), ct), ct);
+                    return true;
+                case ("POST", "/api/format"):
+                    await FormatAsync(Body(req), res, ct);
                     return true;
                 case ("GET", "/api/files/all"):
                     await res.JsonAsync(200, await Task.Run(() => _files.All(ct), ct), ct);
@@ -391,6 +399,28 @@ internal sealed partial class WebApp
             ["path"] = p.Path, ["line"] = p.Line, ["column"] = p.Column, ["severity"] = p.Severity, ["code"] = p.Code, ["message"] = p.Message,
         })]),
     };
+
+    /// <summary>
+    /// The editor's text through a formatter: {path, text, formatter, range: {start, end}, options, language} to {text,
+    /// formatter}. A formatter that failed is 422 <c>format_failed</c> with the line and column it named, when it did.
+    /// </summary>
+    private async Task FormatAsync(JsonObject body, HttpResponse res, CancellationToken ct)
+    {
+        if (body["text"] is not JsonValue value || !value.TryGetValue<string>(out var text))
+        {
+            throw new IdeError(400, "invalid", "Send the text to format.");
+        }
+        (int, int)? range = body["range"] is JsonObject r ? (r.Int("start") ?? -1, r.Int("end") ?? -1) : null;
+        try
+        {
+            var (formatted, formatter) = await _formatters.FormatAsync(body.Str("path"), text, body.Str("formatter"), range, body["options"] as JsonObject, body.Str("language"), ct);
+            await res.JsonAsync(200, new JsonObject { ["text"] = formatted, ["formatter"] = formatter }, ct);
+        }
+        catch (FormatFailed e)
+        {
+            await res.JsonAsync(422, new JsonObject { ["status"] = "format_failed", ["error"] = e.Message, ["line"] = e.Line, ["column"] = e.Column }, ct);
+        }
+    }
 
     private Completions? _completions;
 

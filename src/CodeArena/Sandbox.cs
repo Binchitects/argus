@@ -8,6 +8,7 @@ namespace CodeArena;
 /// what holds secrets (keys, tokens, Code Arena's own key and sessions), only the working directory (and the folders
 /// allowed besides it, the build tools' caches and a /tmp of the session's own) may be written, and Docker's socket is
 /// out of reach. Linux: bubblewrap; macOS: sandbox-exec. Commands the person runs in the IDE's terminals are theirs: no sandbox.
+/// <see cref="Only"/> makes a narrower profile of the same sandbox for the tools the IDE runs on the person's code (formatters).
 /// </summary>
 internal sealed class Sandbox
 {
@@ -21,8 +22,9 @@ internal sealed class Sandbox
     private readonly IReadOnlyList<string> _writable;
     private readonly IReadOnlyList<string> _hidden;
     private readonly string _tmp;
+    private readonly IReadOnlyList<string> _readable;
 
-    private Sandbox(Kinds kind, string? why, bool network, IReadOnlyList<string> writable, IReadOnlyList<string> hidden, string tmp)
+    private Sandbox(Kinds kind, string? why, bool network, IReadOnlyList<string> writable, IReadOnlyList<string> hidden, string tmp, IReadOnlyList<string>? readable = null)
     {
         Kind = kind;
         Why = why;
@@ -30,7 +32,28 @@ internal sealed class Sandbox
         _writable = writable;
         _hidden = hidden;
         _tmp = tmp;
+        _readable = readable ?? [];
     }
+
+    /// <summary>The folder that is a command's own /tmp, as this computer sees it ("" when there is none).</summary>
+    public string Temp => _tmp;
+
+    /// <summary>
+    /// A narrower profile of the same sandbox, for a tool the person runs on their code (a formatter): it may write only
+    /// in <paramref name="writable"/> and in <paramref name="tmp"/>, its own /tmp (made here); it has the network only when
+    /// <paramref name="network"/> says; what holds secrets stays hidden; and <paramref name="readable"/> (the working
+    /// directory, the tool's own folder) is seen, read-only, even where its own /tmp would cover it. Off when this one is.
+    /// </summary>
+    public Sandbox Only(IEnumerable<string> writable, bool network, string tmp, IEnumerable<string>? readable = null)
+    {
+        tmp = Path.GetFullPath(tmp);
+        PrivateFiles.EnsureDirectory(tmp);
+        return new Sandbox(Kind, Why, network, [.. writable.Select(Real).Distinct()], _hidden, tmp, [.. (readable ?? []).Select(Real).Distinct()]);
+    }
+
+    /// <summary>Where a command in the sandbox sees a path in its own /tmp: under /tmp with bubblewrap, where it is otherwise.</summary>
+    public string Inside(string path) =>
+        Kind == Kinds.Bubblewrap && _tmp.Length > 0 && Within(path, _tmp) ? "/tmp" + path[_tmp.Length..] : path;
 
     public static readonly Sandbox None = new(Kinds.Off, null, true, [], [], "");
 
@@ -213,6 +236,11 @@ internal sealed class Sandbox
     internal List<string> BubblewrapArguments(string cwd)
     {
         var a = new List<string> { "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--bind", _tmp, "/tmp" };
+        // What its own /tmp covers that it must still read (a project kept in /tmp), before what it may write in there.
+        foreach (var path in _readable.Where(p => p.StartsWith("/tmp/", StringComparison.Ordinal) && Directory.Exists(p)))
+        {
+            a.AddRange(["--ro-bind", path, path]);
+        }
         foreach (var path in _writable.Where(Directory.Exists))
         {
             a.AddRange(["--bind", path, path]);

@@ -871,6 +871,130 @@ internal static class Proc
         return new Result(process.HasExited ? process.ExitCode : -1, output.ToString(), timedOut);
     }
 
+    /// <summary>
+    /// What a tool the text went through (a formatter) gave back: its exit code (-1 when it was stopped), what it printed,
+    /// and apart from it what it said on stderr; whether its time ran out, and whether it printed more than it may (it was
+    /// stopped then).
+    /// </summary>
+    public sealed record PipeResult(int ExitCode, string Output, string Error, bool TimedOut, bool TooLong);
+
+    /// <summary>The most of a piped tool's stderr kept: its start, where tools say what went wrong.</summary>
+    public const int MaxError = 64 * 1024;
+
+    /// <summary>
+    /// Runs a tool with <paramref name="input"/> on its stdin (UTF-8, no byte-order mark) while its stdout and stderr are
+    /// read apart, so a tool that prints before it has read everything never stalls. Its whole tree is stopped when
+    /// <paramref name="timeout"/> passes (TimedOut), when it prints more than <paramref name="maxOut"/> characters
+    /// (TooLong), or when <paramref name="ct"/> is cancelled (thrown).
+    /// </summary>
+    public static async Task<PipeResult> PipeAsync(ProcessStartInfo psi, string input, TimeSpan timeout, int maxOut, CancellationToken ct)
+    {
+        psi.RedirectStandardInput = true;
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
+        psi.UseShellExecute = false;
+        psi.StandardInputEncoding = new UTF8Encoding(false);
+        psi.StandardOutputEncoding = Encoding.UTF8;
+        psi.StandardErrorEncoding = Encoding.UTF8;
+        Prepare(psi);
+        using var process = Process.Start(psi) ?? throw new ToolError($"Could not start {psi.FileName}.");
+        var output = new StringBuilder();
+        var error = new StringBuilder();
+        var writing = WriteAsync(process.StandardInput, input);
+        var reading = ReadAsync(process.StandardOutput, output, maxOut, process);
+        var erring = ReadAsync(process.StandardError, error, MaxError, null);
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        limit.CancelAfter(timeout);
+        var timedOut = false;
+        try
+        {
+            await process.WaitForExitAsync(limit.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            Stop(process);
+            if (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            timedOut = true;
+        }
+        // A child left in the background can hold the pipes open: do not wait for it.
+        await Task.WhenAny(Task.WhenAll(writing, reading, erring), Task.Delay(TimeSpan.FromSeconds(2), CancellationToken.None));
+        var tooLong = reading.IsCompletedSuccessfully && reading.Result;
+        string printed, said;
+        lock (output)
+        {
+            printed = output.ToString();
+        }
+        lock (error)
+        {
+            said = error.ToString();
+        }
+        return new PipeResult(process.HasExited && !tooLong ? process.ExitCode : -1, printed, said, timedOut, tooLong);
+    }
+
+    private static async Task WriteAsync(StreamWriter stdin, string text)
+    {
+        try
+        {
+            await stdin.WriteAsync(text);
+            await stdin.FlushAsync();
+            stdin.Close();
+        }
+        catch (Exception e) when (e is IOException or ObjectDisposedException)
+        {
+            // The tool ended, or closed its input, before reading all of it.
+        }
+    }
+
+    /// <summary>
+    /// Reads to the end, keeping <paramref name="max"/> characters: past them the tool is stopped when given (true), else
+    /// the rest is read and dropped, so the tool never waits on a full pipe.
+    /// </summary>
+    private static async Task<bool> ReadAsync(StreamReader reader, StringBuilder into, int max, Process? stopPast)
+    {
+        var buffer = new char[16 * 1024];
+        try
+        {
+            int n;
+            while ((n = await reader.ReadAsync(buffer)) > 0)
+            {
+                lock (into)
+                {
+                    var room = Math.Max(0, max - into.Length);
+                    into.Append(buffer, 0, Math.Min(n, room));
+                    if (n <= room)
+                    {
+                        continue;
+                    }
+                }
+                if (stopPast is not null)
+                {
+                    Stop(stopPast);
+                    return true;
+                }
+            }
+        }
+        catch (Exception e) when (e is IOException or ObjectDisposedException)
+        {
+            // The process is gone.
+        }
+        return false;
+    }
+
+    private static void Stop(Process process)
+    {
+        try
+        {
+            process.Kill(entireProcessTree: true);
+        }
+        catch (Exception e) when (e is InvalidOperationException or AggregateException or System.ComponentModel.Win32Exception)
+        {
+            // It ended meanwhile.
+        }
+    }
+
     private static async Task Pump(StreamReader reader, Bounded output)
     {
         var buffer = new char[4096];
