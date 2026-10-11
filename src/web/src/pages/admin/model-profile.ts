@@ -1,6 +1,6 @@
 import { formatValue } from '@/lib/format'
 
-export type ModelKind = 'language' | 'embedding' | 'reranker' | 'projector' | 'draft' | 'image' | 'adapter' | 'unknown'
+export type ModelKind = 'language' | 'embedding' | 'reranker' | 'projector' | 'draft' | 'image' | 'video' | 'encoder' | 'adapter' | 'unknown'
 
 /** What a GGUF file is, read from its header and tensors by the API. */
 export interface ModelProfile {
@@ -50,7 +50,9 @@ export const kindLabel: Record<ModelKind, string> = {
   reranker: 'Reranker',
   projector: 'Vision projector',
   draft: 'Draft head',
-  image: 'Image model',
+  image: 'Picture model',
+  video: 'Video model',
+  encoder: 'Text encoder',
   adapter: 'LoRA adapter',
   unknown: 'Unreadable',
 }

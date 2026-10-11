@@ -135,16 +135,22 @@ function body(form: Form, editing: boolean) {
 export function MediaModelForm({
   saved,
   mode = 'image_generation',
+  file,
   gpus = [],
   onClose,
 }: {
   saved: SavedMediaModel | null
   mode?: MediaMode
+  /** A diffusion model's file to start from (chosen in the chat model's form, or just downloaded). */
+  file?: string
   gpus?: { index: number; name: string; total: number }[]
   onClose: () => void
 }) {
   const queryClient = useQueryClient()
-  const [form, setForm] = useState(() => initial(saved, mode))
+  const [form, setForm] = useState(() => {
+    const f = initial(saved, mode)
+    return file && !saved ? { ...f, files: [{ role: 'diffusion', path: file }], name: file.split('/').pop()!.replace(/\.(gguf|safetensors|ckpt|pth|pt|bin)$/i, '') } : f
+  })
   const [error, setError] = useState<string | null>(null)
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }))
   const pictures = form.mode === 'image_generation' || form.mode === 'video_generation'

@@ -27,6 +27,8 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         new GgufFile().Text("general.architecture", "clip").Bool("clip.has_vision_encoder", true).U32("clip.vision.projection_dim", 4096)
             .Tensor("v.blk.0.attn_q.weight", 2048).Write(Path.Combine(Library, "other", "mmproj-Other-F16.gguf"));
         new GgufFile().Tensor("double_blocks.0.img_attn.qkv.weight", 4096).Write(Path.Combine(Library, "image", "flux-2-klein-4b-Q4_0.gguf"));
+        new GgufFile().Text("general.architecture", "wan").Tensor("blocks.0.self_attn.q.weight", 4096).Write(Path.Combine(Library, "video", "Wan2.2-TI2V-5B-Q4_K_M.gguf"));
+        new GgufFile().Text("general.architecture", "t5encoder").Tensor("enc.blk.0.attn_q.weight", 4096).Write(Path.Combine(Library, "video", "umt5-xxl-encoder-Q4_K_M.gguf"));
         GgufFile.Language("qwen3moe", name: "Big", context: 262144, experts: 8, used: 2, expertBytes: 8192).Write(Path.Combine(Library, "big", "Big-00001-of-00002.gguf"));
         new GgufFile().U32("split.no", 1).Tensor("blk.3.ffn_down_exps.weight", 8192, 64, 16, 8).Write(Path.Combine(Library, "big", "Big-00002-of-00002.gguf"));
         new GgufFile().Text("general.architecture", "qwen3moe").Bool("qwen3moe.nextn_shared_target_tensors", true).U32("qwen3moe.block_count", 5)
@@ -127,7 +129,7 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         string Kind(string path) => files[path].GetProperty("profile").GetProperty("kind").GetString()!;
         Assert.Equal(
             ["big/Big-00001-of-00002.gguf", "big/mtp-Big-Q8_0.gguf", "embed/nomic-embed-text-v1.5.f16.gguf", "image/flux-2-klein-4b-Q4_0.gguf", "other/mmproj-Other-F16.gguf",
-             "part/Part-00001-of-00003.gguf", "plain/Plain-Q8_0.gguf", "tiny/Tiny-4B-Q4_K_M.gguf", "tiny/mmproj-Tiny-F16.gguf"],
+             "part/Part-00001-of-00003.gguf", "plain/Plain-Q8_0.gguf", "tiny/Tiny-4B-Q4_K_M.gguf", "tiny/mmproj-Tiny-F16.gguf", "video/Wan2.2-TI2V-5B-Q4_K_M.gguf", "video/umt5-xxl-encoder-Q4_K_M.gguf"],
             files.Keys.Order(StringComparer.Ordinal));
         var tiny = files["tiny/Tiny-4B-Q4_K_M.gguf"].GetProperty("profile");
         Assert.Equal("language", tiny.GetProperty("kind").GetString());
@@ -147,6 +149,10 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         Assert.Equal("projector", Kind("tiny/mmproj-Tiny-F16.gguf"));
         Assert.Equal("draft", Kind("big/mtp-Big-Q8_0.gguf"));
         Assert.Equal("image", Kind("image/flux-2-klein-4b-Q4_0.gguf"));
+        // A video model's diffusion model, and a picture or video model's text encoder: not an image model, nor an embedding one.
+        Assert.Equal("video", Kind("video/Wan2.2-TI2V-5B-Q4_K_M.gguf"));
+        Assert.Equal("encoder", Kind("video/umt5-xxl-encoder-Q4_K_M.gguf"));
+        Assert.Contains("add it as a picture model", files["image/flux-2-klein-4b-Q4_0.gguf"].GetProperty("profile").GetProperty("why").GetString(), StringComparison.Ordinal);
         Assert.Equal("embedding", Kind("embed/nomic-embed-text-v1.5.f16.gguf"));
         Assert.Equal("unknown", Kind("part/Part-00001-of-00003.gguf"));
         Assert.Contains("1 of its 3 parts", files["part/Part-00001-of-00003.gguf"].GetProperty("profile").GetProperty("why").GetString(), StringComparison.Ordinal);

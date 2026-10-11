@@ -211,11 +211,14 @@ function body(form: FormState) {
 export function ModelForm({
   saved,
   onClose,
+  onMedia,
   gpus = [],
   file: preset,
 }: {
   saved: SavedModel | null
   onClose: () => void
+  /** A picture or video model's file chosen here: added as that kind of model instead. */
+  onMedia?: (mode: 'image_generation' | 'video_generation', file: string) => void
   /** The machine's GPUs: a choice is offered with two or more. */
   gpus?: { index: number; name: string; total: number }[]
   /** A library file to start from (one just downloaded). */
@@ -357,9 +360,9 @@ export function ModelForm({
               </SelectGroup>
               {others.length > 0 && (
                 <SelectGroup>
-                  <SelectLabel>Not served from here</SelectLabel>
+                  <SelectLabel>Not chat models: choose one to see what it is</SelectLabel>
                   {others.map((f) => (
-                    <SelectItem key={f.path} value={f.path} disabled className="[overflow-wrap:anywhere]">
+                    <SelectItem key={f.path} value={f.path} className="[overflow-wrap:anywhere]">
                       {f.path} · {kindLabel[f.profile.kind]}
                     </SelectItem>
                   ))}
@@ -369,7 +372,18 @@ export function ModelForm({
           </Select>
         </Field>
 
-        {file && !language && <Alert variant="warning" title={kindLabel[file.profile.kind]}>{file.profile.why}</Alert>}
+        {file && !language && (
+          <Alert variant="warning" title={kindLabel[file.profile.kind]}>
+            {file.profile.why}
+            {onMedia && (file.profile.kind === 'image' || file.profile.kind === 'video') && (
+              <div className="mt-2">
+                <Button type="button" size="sm" variant="outline" onClick={() => onMedia(file.profile.kind === 'video' ? 'video_generation' : 'image_generation', file.path)}>
+                  {file.profile.kind === 'video' ? 'Add it as a video model' : 'Add it as a picture model'}
+                </Button>
+              </div>
+            )}
+          </Alert>
+        )}
         {file && language && <Detected file={file} kvType={form.kvType} />}
 
         {language && (

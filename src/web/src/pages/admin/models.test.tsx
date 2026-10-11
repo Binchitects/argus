@@ -41,7 +41,7 @@ const library = [
     path: 'big/Big-MoE-00001-of-00002.gguf', size: 90e9, parts: 2, usedBy: [],
     profile: profile({ structure: 'moe', parameters: 177e9, activeParameters: 6.7e9, experts: { count: 512, used: 10, shared: 1, layers: 48, bytes: 60e9 }, layers: 48 }),
   },
-  { path: 'image/flux-2-klein-4b-Q4_0.gguf', size: 2e9, parts: 1, usedBy: [], profile: profile({ kind: 'image', why: 'An image model: pictures are made by the image server.' }) },
+  { path: 'image/flux-2-klein-4b-Q4_0.gguf', size: 2e9, parts: 1, usedBy: [], profile: profile({ kind: 'image', why: "A picture model's diffusion model: add it as a picture model." }) },
 ]
 
 /** The API's advice: limits of the file, a start that fits, and whether these settings fit. */
@@ -130,7 +130,8 @@ describe('admin models', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
     await userEvent.click(within(dialog).getByRole('combobox', { name: 'Model file' }))
     // Files that are not language models are there, for what they are, and cannot be chosen.
-    expect(await screen.findByRole('option', { name: /flux-2-klein-4b-Q4_0\.gguf · Image model/ })).toHaveAttribute('aria-disabled', 'true')
+    // Not a chat model: listed for what it is, and it can be chosen to see how to add it.
+    expect(await screen.findByRole('option', { name: /flux-2-klein-4b-Q4_0\.gguf · Picture model/ })).not.toHaveAttribute('aria-disabled', 'true')
     await userEvent.click(screen.getByRole('option', { name: /Qwen-27B-Q4_K_M\.gguf/ }))
     // What the file is, and a start that fits: the name from the file, the context and answer from the advice.
     expect(within(dialog).getByRole('region', { name: 'What the file is' })).toHaveTextContent(/Dense.*Hybrid attention/)
@@ -379,5 +380,26 @@ describe('admin models', () => {
     expect(within(big).queryByText('Small steps')).not.toBeInTheDocument()
     expect(screen.getByText('The model for small steps')).toBeInTheDocument()
     expect(screen.getByText(/each small step waits for it to load/)).toBeInTheDocument()
+  })
+
+  it("a picture model's file chosen in the chat model's form is added as a picture model", async () => {
+    fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: view() }),
+      'GET /api/admin/models/library': () => ({ json: library }),
+      'GET /api/admin/models/media/files': () => ({ json: [{ path: 'image/flux-2-klein-4b-Q4_0.gguf', size: 2e9, role: 'diffusion', usedBy: [] }] }),
+      'POST /api/admin/models/advice': (b) => ({ json: advice(b as { file: string }) }),
+    })
+    renderApp('/admin/models')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add a model' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'A chat model' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'Model file' }))
+    // Not a chat model, but it can be chosen: it says what it is, and how to add it.
+    await userEvent.click(await screen.findByRole('option', { name: /flux-2-klein-4b-Q4_0\.gguf/ }))
+    expect(within(dialog).getByText(/add it as a picture model/)).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add it as a picture model' }))
+    const media = await screen.findByRole('dialog', { name: 'Add a pictures model' })
+    expect(within(media).getByLabelText('Name')).toHaveValue('flux-2-klein-4b-Q4_0')
+    expect(within(media).getByRole('combobox', { name: 'File 1' })).toHaveTextContent('image/flux-2-klein-4b-Q4_0.gguf')
   })
 })

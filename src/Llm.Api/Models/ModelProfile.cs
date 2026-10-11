@@ -13,7 +13,12 @@ public static class ModelKind
     public const string Reranker = "reranker";
     public const string Projector = "projector";
     public const string Draft = "draft";
+    /// <summary>A picture model's diffusion model (Admin → Models → Add a model → A pictures model).</summary>
     public const string Image = "image";
+    /// <summary>A video model's diffusion model (Add a model → A video model).</summary>
+    public const string Video = "video";
+    /// <summary>A text encoder a picture or video model reads (T5, UMT5, CLIP): one of its files.</summary>
+    public const string Encoder = "encoder";
     public const string Adapter = "adapter";
     public const string Unknown = "unknown";
 }
@@ -114,6 +119,15 @@ public static partial class ModelProfiler
         "flux", "flux2", "sd1", "sd2", "sdxl", "sd3", "wan", "qwen_image", "chroma", "hidream", "ltxv", "lumina2", "z_image", "hunyuan-video", "cosmos",
     };
 
+    /// <summary>The diffusion models that make clips.</summary>
+    private static readonly HashSet<string> VideoDiffusion = new(StringComparer.Ordinal) { "wan", "ltxv", "hunyuan-video", "cosmos" };
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"(?i)(^|[^a-z])(wan2?|ltx|hunyuan.?video|cosmos)", System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    private static partial System.Text.RegularExpressions.Regex VideoName();
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"(?i)(^|[^a-z])(u?mt5|t5xxl|t5-v1|clip[_-]?[lg])([^a-z]|$)", System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    private static partial System.Text.RegularExpressions.Regex TextEncoderName();
+
     private static readonly string[] DiffusionTensors =
         ["double_blocks.", "single_blocks.", "model.diffusion_model.", "diffusion_model.", "first_stage_model.", "joint_blocks.", "input_blocks.", "img_in.", "time_in.", "decoder.up_blocks.", "encoder.down_blocks."];
 
@@ -153,7 +167,13 @@ public static partial class ModelProfiler
         }
         if ((arch is not null && Diffusion.Contains(arch)) || (h.Tensors.Count > 0 && h.Tensors.Any(t => DiffusionTensors.Any(p => t.Name.StartsWith(p, StringComparison.Ordinal)))))
         {
-            return basics with { Kind = ModelKind.Image, Why = "An image model: pictures are made by the image server (IMAGEGEN_MODEL_DIR), not by the engine." };
+            return (arch is not null && VideoDiffusion.Contains(arch)) || VideoName().IsMatch(fileName)
+                ? basics with { Kind = ModelKind.Video, Why = "A video model's diffusion model: add it as a video model (Add a model → A video model), with its text encoder and decoder." }
+                : basics with { Kind = ModelKind.Image, Why = "A picture model's diffusion model: add it as a picture model (Add a model → A pictures model), with its text encoder and decoder." };
+        }
+        if (arch is "t5" or "t5encoder" or "umt5" || TextEncoderName().IsMatch(fileName))
+        {
+            return basics with { Kind = ModelKind.Encoder, Why = "A text encoder for a picture or video model (T5, UMT5, CLIP): choose it as one of that model's files." };
         }
         if (arch is null)
         {

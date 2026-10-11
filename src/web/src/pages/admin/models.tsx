@@ -139,7 +139,7 @@ export function ModelsPage() {
     refetchInterval: (q) => (q.state.data?.models.some((m) => m.status === 'loading' || m.status === 'unloading') ? 2000 : 15000),
   })
   const [editing, setEditing] = useState<ModelRow | 'new' | { preset: string } | null>(null)
-  const [media, setMedia] = useState<SavedMediaModel | { mode: MediaMode } | null>(null)
+  const [media, setMedia] = useState<SavedMediaModel | { mode: MediaMode; file?: string } | null>(null)
   const [hf, setHf] = useState(false)
   if (models.isPending) return <PageSkeleton />
   if (models.error) return <QueryError error={models.error} retry={() => models.refetch()} />
@@ -211,6 +211,10 @@ export function ModelsPage() {
             <ModelForm
               key={editing === 'new' ? 'new' : 'preset' in editing ? `preset:${editing.preset}` : editing.name}
               saved={editing === 'new' || 'preset' in editing ? null : editing}
+              onMedia={(mode, file) => {
+                setEditing(null)
+                setMedia({ mode, file })
+              }}
               file={editing !== 'new' && 'preset' in editing ? editing.preset : undefined}
               gpus={engine.gpus}
               onClose={() => setEditing(null)}
@@ -225,6 +229,7 @@ export function ModelsPage() {
               key={'name' in media ? media.name : `new:${media.mode}`}
               saved={'name' in media ? media : null}
               mode={'name' in media ? undefined : media.mode}
+              file={'name' in media ? undefined : media.file}
               gpus={engine.gpus}
               onClose={() => setMedia(null)}
             />

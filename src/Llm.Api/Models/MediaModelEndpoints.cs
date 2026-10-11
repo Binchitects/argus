@@ -326,7 +326,8 @@ public static partial class MediaModelEndpoints
                 continue;
             }
             var path = Path.GetRelativePath(root, file).Replace('\\', '/');
-            if (!SafePath().IsMatch(path))
+            // Laya's checkpoints and the embedding model are other servers' files, never a picture model's.
+            if (!SafePath().IsMatch(path) || path.StartsWith(MediaModels.LayaDir + "/", StringComparison.Ordinal) || path.StartsWith(MediaModels.EmbedDir + "/", StringComparison.Ordinal))
             {
                 continue;
             }
