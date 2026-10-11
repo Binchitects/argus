@@ -349,6 +349,27 @@ public sealed class SourceControlTests : IDisposable
     }
 
     [Fact]
+    public async Task A_folder_reached_through_a_link_has_its_files_listed()
+    {
+        using var h = new Harness(_gateway, _mcp, c => c["autoCommit"] = false);
+        Init(h.Work);
+        h.Write("app.ts", "one\n");
+        Commit(h.Work, "One");
+        Git(h.Work, "mv", "app.ts", "main.ts");
+        Commit(h.Work, "Rename");
+        h.Write("main.ts", "two\n");
+        // The folder by a name that leads there through a link (as /tmp is /private/tmp on macOS): git names its top by where it leads.
+        h.Cwd = Path.Combine(h.Root, "linked");
+        Directory.CreateSymbolicLink(h.Cwd, h.Work);
+        await using var web = await WebRun.StartAsync(h);
+
+        Assert.Equal(new Dictionary<string, (string?, string?)> { ["main.ts"] = (null, "M") }, Files(await web.GetJsonAsync("/api/git/status")));
+        Assert.Equal(["main.ts", "app.ts"], (await web.GetJsonAsync("/api/git/log?path=main.ts")).AsArray().Select(c => c!["pathAt"]?.GetValue<string>()));
+        var renamed = (await web.GetJsonAsync("/api/git/commit?hash=HEAD"))["files"]!.AsArray().Single()!;
+        Assert.Equal(("main.ts", "app.ts"), (renamed["path"]!.GetValue<string>(), renamed["from"]?.GetValue<string>()));
+    }
+
+    [Fact]
     public async Task A_merge_lists_what_it_brought_and_a_staged_text_settles_a_conflict()
     {
         using var h = new Harness(_gateway, _mcp, c => c["autoCommit"] = false);

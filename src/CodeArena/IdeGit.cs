@@ -40,10 +40,13 @@ internal sealed partial class IdeGit(Workspace workspace)
     private async Task<string> RequireRootAsync(CancellationToken ct) =>
         await RootAsync(ct) ?? throw new IdeError(404, "no_git", "This folder is in no git repository (git init makes one).");
 
+    /// <summary>Where the folder leads: git names the repository's top by that, not through a link (/tmp is /private/tmp on macOS).</summary>
+    private readonly string _leads = Workspace.Physical(workspace.Root) ?? workspace.Root;
+
     /// <summary>A path of the repository's (git's, from its top) as the folder's; null: outside the folder.</summary>
     private string? Ours(string root, string gitPath)
     {
-        var rel = Path.GetRelativePath(workspace.Root, Path.GetFullPath(Path.Combine(root, gitPath)));
+        var rel = Path.GetRelativePath(_leads, Path.GetFullPath(Path.Combine(root, gitPath)));
         return rel.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(rel) ? null : rel.Replace('\\', '/');
     }
 
