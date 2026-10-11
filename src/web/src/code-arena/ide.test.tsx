@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import codeArenaDoc from '@docs/code-arena.md?raw'
 import { makeQueryClient, Providers } from '@/app/providers'
 import { manualDocs, parseDoc } from '@/help/manual'
@@ -200,7 +200,19 @@ const fakes = vi.hoisted(() => {
     updateOptions(o: Record<string, unknown>) {
       Object.assign(this.options, o)
     }
-    side = { createContextKey: () => ({ set() {}, get() {}, reset() {} }), focus() {} }
+    side = { createContextKey: () => ({ set() {}, get() {}, reset() {} }), focus() {}, hasTextFocus: () => false }
+    /** What Monaco would work out: one change, a line each way. */
+    lineChanges = [{ originalStartLineNumber: 1, originalEndLineNumber: 1, modifiedStartLineNumber: 1, modifiedEndLineNumber: 1 }]
+    getLineChanges() {
+      return this.lineChanges
+    }
+    onDidUpdateDiff() {
+      return { dispose() {} }
+    }
+    went: string[] = []
+    goToDiff(to: string) {
+      this.went.push(to)
+    }
     getOriginalEditor() {
       return this.side
     }
@@ -1077,10 +1089,11 @@ describe('Code Arena, the IDE', () => {
     await userEvent.click(row)
     await userEvent.click(within(tabs()).getByRole('button', { name: 'Close app.ts' }))
     await userEvent.click(row)
-    await waitFor(() => expect(hold.held()).toBe(2))
+    // Opened again while the first read is on its way: that read serves it (one model for the file).
+    await waitFor(() => expect(hold.held()).toBe(1))
     hold.release()
     await waitFor(() => expect(editor().model?.value).toBe('const total = 1\nconsole.log(total)\n'))
-    await waitFor(() => expect(calls.filter((c) => c.path === '/api/file?path=src%2Fapp.ts')).toHaveLength(2))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/file?path=src%2Fapp.ts')).toHaveLength(1))
     await act(async () => {})
     expect(fakes.models.filter((m) => !m.disposed)).toHaveLength(1)
 
@@ -1585,6 +1598,65 @@ describe('Code Arena, the IDE', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Theme' }))
     await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Dark' }))
     await waitFor(() => expect(fakes.themes.at(-1)).toBe('arena-dark'))
+  })
+
+  it('compares as VS Code does: with the saved file, the clipboard (pasted when the browser refuses), another file; a file\'s side is live', async () => {
+    const { calls } = backend()
+    renderIde()
+    await openApp()
+    const diff = () => fakes.diffEditors[0]!
+    act(() => editor().model!.setValue('const total = 5\n'))
+
+    // Ctrl+K D: the file as saved on the left, as the editor holds it on the right (the same model: typing there is typing in the file).
+    await userEvent.keyboard('{Control>}k{/Control}d')
+    expect(await within(tabs()).findByRole('tab', { name: 'app.ts (Saved) ↔ app.ts, not saved', selected: true })).toBeInTheDocument()
+    await waitFor(() => expect(diff().model?.original.getValue()).toBe('const total = 1\nconsole.log(total)\n'))
+    const file = fakes.models.find((m) => m.uri?.toString() === 'file:///src/app.ts')!
+    expect(diff().model?.modified).toBe(file)
+    expect(diff().options).toMatchObject({ originalEditable: false, readOnly: false, renderMarginRevertIcon: true })
+    // The bar: the counts Monaco works out, the next change, the sides swapped.
+    expect(screen.getByTitle('1 change')).toHaveTextContent('+1 −1')
+    await userEvent.click(screen.getByRole('button', { name: 'Next change' }))
+    expect(diff().went).toEqual(['next'])
+    // Ctrl+S in the compare saves the file.
+    await userEvent.keyboard('{Control>}s{/Control}')
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/file')?.body).toEqual({ path: 'src/app.ts', text: 'const total = 5\n', version: 'v1' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Show inline' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/user-files')?.body).toMatchObject({ name: 'settings.json', text: '{\n    "diffEditor.renderSideBySide": false\n}\n' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Swap the sides' }))
+    expect(await within(tabs()).findByRole('tab', { name: 'app.ts ↔ app.ts (Saved)', selected: true })).toBeInTheDocument()
+    expect(diff().model?.original).toBe(file)
+
+    // The clipboard: refused by the browser, pasted instead.
+    await userEvent.click(within(tabs()).getByRole('tab', { name: 'app.ts' }))
+    const had = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { readText: () => Promise.reject(new Error('denied')), writeText: () => Promise.resolve() } })
+    onTestFinished(() => {
+      if (had) Object.defineProperty(navigator, 'clipboard', had)
+      else delete (navigator as { clipboard?: unknown }).clipboard
+    })
+    await userEvent.keyboard('{Control>}k{/Control}c')
+    const paste = await screen.findByRole('dialog', { name: 'Compare app.ts with the clipboard' })
+    await userEvent.type(within(paste).getByRole('textbox', { name: 'Text to compare with' }), 'pasted')
+    await userEvent.click(within(paste).getByRole('button', { name: 'Compare' }))
+    expect(await within(tabs()).findByRole('tab', { name: 'Clipboard ↔ app.ts', selected: true })).toBeInTheDocument()
+    await waitFor(() => expect(diff().model?.original.getValue()).toBe('pasted'))
+
+    // Two files of the Explorer: both sides live, both editable.
+    await userEvent.pointer({ keys: '[MouseRight]', target: screen.getByRole('treeitem', { name: 'README.md' }) })
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Select for Compare' }))
+    await userEvent.pointer({ keys: '[MouseRight]', target: screen.getByRole('treeitem', { name: 'app.ts, changed by the agent' }) })
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Compare with Selected' }))
+    expect(await within(tabs()).findByRole('tab', { name: 'README.md ↔ app.ts', selected: true })).toBeInTheDocument()
+    await waitFor(() => expect(diff().model?.original.getValue()).toBe('# Shop\n'))
+    expect(diff().options).toMatchObject({ originalEditable: true, readOnly: false })
+    // Closing the compares leaves the file's tab, and its model, alone.
+    await userEvent.keyboard('{Control>}{Alt>}w{/Alt}{/Control}')
+    await userEvent.click(within(tabs()).getByRole('button', { name: 'Close Clipboard ↔ app.ts' }))
+    await userEvent.click(within(tabs()).getByRole('button', { name: 'Close app.ts ↔ app.ts (Saved)' }))
+    expect(within(tabs()).getAllByRole('tab').map((t) => t.textContent)).toEqual(['app.ts'])
+    expect(file.disposed).toBe(false)
+    expect(fakes.models.find((m) => m.uri?.toString() === 'file:///README.md')?.disposed).toBe(true)
   })
 
   it("takes VS Code's keys, chords too, and the person's keybindings.json over them", async () => {

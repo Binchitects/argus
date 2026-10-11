@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, ChevronsDownUp, Copy, FilePlus, Folder, FolderOpen, FolderPlus, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, Trash2 } from 'lucide-react'
+import { ChevronRight, ChevronsDownUp, Columns2, Copy, FilePlus, Folder, FolderOpen, FolderPlus, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, SquareDashedMousePointer, Trash2 } from 'lucide-react'
 import { ContextMenu } from 'radix-ui'
 import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useConfirm } from '@/components/ui/confirm'
@@ -14,6 +14,7 @@ import { FileIcon } from './file-icon'
 import { PartHelp } from './help'
 import { changesQuery, createEntry, deleteEntry, folderQuery, join, nameOf, parentOf, renameEntry, within, type Change, type Entry } from './ide-api'
 import { chatBridge } from './bridge'
+import { compareSelection } from './compare'
 
 /** A row's place in the tree, for keys and the context menu. */
 interface Target {
@@ -194,7 +195,7 @@ export function Explorer({ project, onOpenChanges }: { project: string; onOpenCh
             {root.isPending && Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="mx-3 my-1.5 h-4" />)}
             {root.error && <p className="px-3 py-2 text-sm text-muted-foreground">{errorMessage(root.error)}</p>}
             {root.data && (
-              <ul role="tree" aria-label="Files" className="text-[0.8125rem]">
+              <ul role="tree" aria-label="Files" data-context="explorer" className="text-[0.8125rem]">
                 {editing?.kind === 'new' && editing.parent === '' && <NameInput level={0} type={editing.type} onFinish={rows.onFinish} />}
                 {root.data.entries.map((e) => (
                   <Row key={e.path} entry={e} level={0} first={e === first} {...rows} />
@@ -223,6 +224,19 @@ export function Explorer({ project, onOpenChanges }: { project: string; onOpenCh
                 <ContextMenu.Item className={menuItem} onSelect={() => chatBridge.current?.mention(at.path)}>
                   <MessageSquarePlus /> Add to chat
                 </ContextMenu.Item>
+                {at.kind === 'file' && (
+                  <>
+                    <ContextMenu.Separator className="-mx-1 my-1 h-px bg-border" />
+                    <ContextMenu.Item className={menuItem} onSelect={() => (compareSelection.path = at.path)}>
+                      <SquareDashedMousePointer /> Select for Compare
+                    </ContextMenu.Item>
+                    {compareSelection.path && compareSelection.path !== at.path && (
+                      <ContextMenu.Item className={menuItem} onSelect={() => void editor.compare({ kind: 'file', path: compareSelection.path! }, { kind: 'file', path: at.path })}>
+                        <Columns2 /> Compare with Selected
+                      </ContextMenu.Item>
+                    )}
+                  </>
+                )}
                 <ContextMenu.Item className={menuItem} onSelect={() => void navigator.clipboard?.writeText(at.path).catch(() => undefined)}>
                   <Copy /> Copy path
                 </ContextMenu.Item>

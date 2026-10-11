@@ -25,10 +25,13 @@ import { useEditor } from './editor-state'
 import { Explorer } from './explorer'
 import { HelpProvider } from './help'
 import { useOpenHelp } from './help-context'
-import { changesQuery, folderQuery, gitStatusQuery, parentOf, preferencesQuery, problemsQuery, savePreferences, writeFile } from './ide-api'
+import { allFilesQuery, changesQuery, folderQuery, gitStatusQuery, parentOf, preferencesQuery, problemsQuery, savePreferences, writeFile } from './ide-api'
 import { setContext, useKeyboard, useKeyFor } from './keyboard'
 import { quickPick } from './quick-pick'
 import { QuickPickHost } from './quick-pick-host'
+import { PasteDialog } from './paste-dialog'
+import { clipboardText } from './paste'
+import { compareSelection } from './compare'
 import { SearchPanel } from './search'
 import { SettingsProvider, useSettings, workspaceSettingsPath } from './settings'
 import { colorThemes, themeNamed } from './settings-schema'
@@ -102,6 +105,7 @@ export function App() {
               <Workbench state={state.data} config={config.data} lost={state.error ?? config.error} saved={preferences.data?.layout} recentSaved={preferences.data?.paletteRecent} />
             </SettingsRead>
             <QuickPickHost />
+            <PasteDialog />
           </CodeRefsProvider>
         </HelpProvider>
       </EditorProvider>
@@ -347,6 +351,8 @@ function Workbench({
   })
 
   const file = active?.kind === 'file' && active.status === 'ready'
+  // A tab with a file to save: a file's, or a compare with a file's side.
+  const savable = file || (active?.kind === 'diff' && [active.left, active.right].some((x) => x?.kind === 'file'))
   const copy = (text: string) =>
     void navigator.clipboard?.writeText(text).then(
       () => toast.success('Copied.'),
@@ -405,12 +411,35 @@ function Workbench({
     }
     await ed.open(workspaceSettingsPath)
   }
+  const compareWithClipboard = async () => {
+    const path = active?.path
+    if (!path) return
+    const text = await clipboardText(`Compare ${path.slice(path.lastIndexOf('/') + 1)} with the clipboard`)
+    if (text !== undefined) await ed.compare({ kind: 'clipboard', text }, { kind: 'file', path })
+  }
+  const compareFileWith = async () => {
+    const path = active?.path
+    if (!path) return
+    let all: string[] = []
+    try {
+      all = (await queryClient.fetchQuery(allFilesQuery)).files
+    } catch (e) {
+      toast.error(errorMessage(e))
+      return
+    }
+    const picked = await quickPick({
+      title: 'Compare with',
+      placeholder: `Select a file to compare ${path.slice(path.lastIndexOf('/') + 1)} with`,
+      items: all.filter((p) => p !== path).map((p) => ({ id: p, label: p.slice(p.lastIndexOf('/') + 1), description: p })),
+    })
+    if (picked) await ed.compare({ kind: 'file', path: picked.id }, { kind: 'file', path })
+  }
   const workbenchCommands: Command[] = [
     { id: 'workbench.action.showCommands', category: 'View', title: 'Show All Commands', hidden: true, run: () => setPalette(true) },
     { id: 'workbench.action.quickOpen', category: 'File', title: 'Go to File…', run: () => setQuickOpen(true) },
     { id: 'workbench.action.gotoLine', category: 'Go', title: 'Go to Line/Column…', enabled: () => file, run: () => setQuickOpen(true, ':') },
     { id: 'workbench.action.gotoSymbol', category: 'Go', title: 'Go to Symbol in Editor…', enabled: () => file, run: () => runAction('editor.action.quickOutline') },
-    { id: 'workbench.action.files.save', category: 'File', title: 'Save', enabled: () => file, run: () => void ed.save() },
+    { id: 'workbench.action.files.save', category: 'File', title: 'Save', enabled: () => savable, run: () => void ed.save() },
     { id: 'workbench.action.files.saveAll', category: 'File', title: 'Save All', run: () => void ed.saveAll() },
     { id: 'workbench.action.closeActiveEditor', category: 'View', title: 'Close Editor', enabled: () => !!active, run: () => active && void ed.close(active.id) },
     { id: 'workbench.action.closeAllEditors', category: 'View', title: 'Close All Editors', run: () => void ed.closeMany(ed.tabs.map((t) => t.id)) },
@@ -461,6 +490,17 @@ function Workbench({
     { id: 'workbench.action.openGlobalKeybindings', category: 'Preferences', title: 'Open Keyboard Shortcuts', run: () => void ed.open(userFile('keybindings.json')) },
     { id: 'workbench.action.openGlobalKeybindingsFile', category: 'Preferences', title: 'Open Keyboard Shortcuts (JSON)', run: () => void ed.open(userFile('keybindings.json')) },
     { id: 'workbench.action.selectTheme', category: 'Preferences', title: 'Color Theme', run: () => void pickTheme() },
+    { id: 'workbench.files.action.compareWithSaved', category: 'File', title: 'Compare Active File with Saved', enabled: () => file, run: () => active && void ed.compare({ kind: 'disk', path: active.path }, { kind: 'file', path: active.path }) },
+    { id: 'workbench.files.action.compareWithClipboard', category: 'File', title: 'Compare Active File with Clipboard', enabled: () => file, run: () => void compareWithClipboard() },
+    { id: 'workbench.files.action.compareFileWith', category: 'File', title: 'Compare Active File With…', enabled: () => file, run: () => void compareFileWith() },
+    { id: 'selectForCompare', category: 'File', title: 'Select for Compare', enabled: () => file, run: () => active && (compareSelection.path = active.path) },
+    { id: 'compareFiles', category: 'File', title: 'Compare with Selected', enabled: () => file && !!compareSelection.path && compareSelection.path !== active?.path, run: () => active && compareSelection.path && void ed.compare({ kind: 'file', path: compareSelection.path }, { kind: 'file', path: active.path }) },
+    { id: 'workbench.action.compareEditor.nextChange', category: 'Compare', title: 'Go to Next Change', enabled: () => active?.kind === 'diff', run: () => ed.diffEditor()?.goToDiff('next') },
+    { id: 'workbench.action.compareEditor.previousChange', category: 'Compare', title: 'Go to Previous Change', enabled: () => active?.kind === 'diff', run: () => ed.diffEditor()?.goToDiff('previous') },
+    { id: 'codeArena.compare.swapSides', category: 'Compare', title: 'Swap Left and Right Side', enabled: () => active?.kind === 'diff', run: () => active && ed.swapSides(active.id) },
+    { id: 'toggle.diff.renderSideBySide', category: 'Compare', title: 'Toggle Inline View', run: () => void settings.update('diffEditor.renderSideBySide', !settings.get('diffEditor.renderSideBySide')) },
+    { id: 'toggle.diff.ignoreTrimWhitespace', category: 'Compare', title: 'Toggle Ignore Trim Whitespace', run: () => void settings.update('diffEditor.ignoreTrimWhitespace', !settings.get('diffEditor.ignoreTrimWhitespace')) },
+    { id: 'diffEditor.toggleCollapseUnchangedRegions', category: 'Compare', title: 'Toggle Collapse Unchanged Regions', run: () => void settings.update('diffEditor.hideUnchangedRegions.enabled', !settings.get('diffEditor.hideUnchangedRegions.enabled')) },
     { id: 'codeArena.help', category: 'Help', title: 'Show Help', run: () => openHelp?.() },
     { id: 'codeArena.about', category: 'Help', title: 'About Code Arena', run: () => setAbout(true) },
   ]

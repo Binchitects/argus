@@ -1,6 +1,7 @@
 import type * as Monaco from 'monaco-editor'
 import { createContext, use } from 'react'
 import type { Piece } from './bridge'
+import type { Side } from './compare'
 import type { CheckProblem } from './ide-api'
 
 // The editor's shared parts: Monaco's loader, the tabs' shape, the context the
@@ -30,9 +31,8 @@ export interface Reveal {
   endLine?: number
 }
 
-/** An editor tab: a file, or the agent's changes to one (before and now, side by side). */
-/** What a diff tab compares: the agent's changes to a file, or the file's since the last commit. */
-export type DiffSource = 'agent' | 'git'
+/** What a compare tab is: the agent's changes to a file, the file's since the last commit, or any two sides. */
+export type DiffSource = 'agent' | 'git' | 'compare'
 
 export interface Tab {
   /** The path for a file; "diff:" and the path for the agent's changes, "git:" and the path for those since the last commit. */
@@ -40,6 +40,9 @@ export interface Tab {
   kind: 'file' | 'diff'
   /** A diff's: what it compares (the agent's changes when not said). */
   source?: DiffSource
+  /** A diff's sides: the left (original) and the right (modified). */
+  left?: Side
+  right?: Side
   path: string
   status: 'loading' | 'ready' | 'binary' | 'tooLarge' | 'error'
   message?: string
@@ -65,9 +68,10 @@ export interface FileModel {
   view: Monaco.editor.ICodeEditorViewState | null
 }
 
+/** A compare's own models: the sides that are no file the editor holds (a file's side is its file's model). */
 export interface DiffModels {
-  original: Monaco.editor.ITextModel
-  modified: Monaco.editor.ITextModel
+  left: Monaco.editor.ITextModel | null
+  right: Monaco.editor.ITextModel | null
 }
 
 export type Unsaved = 'save' | 'discard' | 'cancel'
@@ -79,6 +83,12 @@ export interface EditorApi {
   cursor: { line: number; column: number } | null
   open: (path: string, at?: Reveal) => Promise<void>
   openDiff: (path: string, source?: DiffSource) => Promise<void>
+  /** Opens a compare of two sides (left: the original). */
+  compare: (left: Side, right: Side) => Promise<void>
+  /** The diff editor shown, for the compare's toolbar. */
+  diffEditor: () => Monaco.editor.IStandaloneDiffEditor | null
+  /** Swaps a compare's sides. */
+  swapSides: (id: string) => void
   activate: (id: string) => void
   /** Asks first when the file has unsaved changes; false when the person kept it open. */
   close: (id: string) => Promise<boolean>

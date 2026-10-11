@@ -1,11 +1,13 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, FileCode2, FileDiff, FileText, GitCompareArrows, Undo2, X } from 'lucide-react'
+import { FileCode2, FileDiff, FileText, GitCompareArrows, X } from 'lucide-react'
 import type * as Monaco from 'monaco-editor'
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { ContextMenu } from 'radix-ui'
 import { Button } from '@/components/ui/button'
 import { CommandDialog, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { useConfirm } from '@/components/ui/confirm'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { menuContent, menuItem } from '@/components/ui/dropdown-menu'
 import { Kbd } from '@/components/ui/kbd'
 import { Spinner } from '@/components/ui/spinner'
 import { toast } from '@/components/ui/toaster'
@@ -14,6 +16,8 @@ import { cn } from '@/lib/utils'
 import { asks, chatBridge, type Piece } from './bridge'
 import { allCommands, onCommandsChange, runCommand } from './commands'
 import { installCompletions } from './completion'
+import { compareId, renamed, sideLabel, sidePath, type Side } from './compare'
+import { CompareToolbar } from './compare-toolbar'
 import { EditorContext, loadMonaco, rankFiles, useEditor, type DiffModels, type DiffSource, type EditorApi, type FileModel, type MonacoModule, type Reveal, type SaveReason, type Tab, type Unsaved } from './editor-state'
 import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitTexts, nameOf, readFile, revertChange, userFileQuery, within, writeFile, writeUserFile, type Change, type CheckProblem, type OpenedFile, type Saved, type UserFileName } from './ide-api'
 import { keymap, useKeyFor } from './keyboard'
@@ -26,6 +30,13 @@ import { diffOptionsOf, editorOptionsOf, isUserFile } from './editor-options'
 
 /** A diff's tab: the agent's changes to a file ("diff:"), or the file's since the last commit ("git:"). */
 const diffId = (path: string, source: DiffSource = 'agent') => `${source === 'git' ? 'git' : 'diff'}:${path}`
+
+/** The files a tab holds in the editor: a file tab's own, a compare's live sides. */
+const fileSidesOf = (t: Tab): string[] =>
+  t.kind === 'file' ? [t.path] : [t.left, t.right].flatMap((x) => (x?.kind === 'file' ? [x.path] : []))
+
+/** A compare tab's id for its sides: the agent's and git's as they were, any other by its sides. */
+const idOf = (t: Pick<Tab, 'source' | 'path' | 'left' | 'right'>) => (t.source === 'agent' || t.source === 'git' ? diffId(t.path, t.source) : compareId(t.left!, t.right!))
 
 /**
  * The editor's state: the open tabs, a Monaco model per file, one code editor
@@ -201,7 +212,9 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   const monacoTheme = useMonacoTheme()
   const settings = useSettings()
   const settingsRef = useRef(settings)
-  settingsRef.current = settings
+  useLayoutEffect(() => {
+    settingsRef.current = settings
+  })
   const [tabs, setTabs] = useState<Tab[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [cursor, setCursor] = useState<{ line: number; column: number } | null>(null)
@@ -254,11 +267,21 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     const update = (id: string, change: Partial<Tab>) => commit(tabsRef.current.map((t) => (t.id === id ? { ...t, ...change } : t)))
     const has = (id: string) => tabsRef.current.some((t) => t.id === id)
 
+    /** Whether a file the editor holds has unsaved changes. */
+    const fileDirty = (path: string) => {
+      const f = files.current.get(path)
+      return !!f && !f.model.isDisposed() && f.model.getAlternativeVersionId() !== f.savedAlt
+    }
     const markDirty = (f: FileModel) => {
       const dirty = f.model.getAlternativeVersionId() !== f.savedAlt
-      if (tabsRef.current.some((t) => t.kind === 'file' && t.path === f.path && t.dirty !== dirty)) {
-        commit(tabsRef.current.map((t) => (t.kind === 'file' && t.path === f.path ? { ...t, dirty } : t)))
-      }
+      // Every tab that holds the file: its own, and the compares it is a side of.
+      const next = tabsRef.current.map((t) => {
+        const sides = fileSidesOf(t)
+        if (!sides.includes(f.path)) return t
+        const d = sides.some((p) => (p === f.path ? dirty : fileDirty(p)))
+        return t.dirty === d ? t : { ...t, dirty: d }
+      })
+      if (next.some((t, i) => t !== tabsRef.current[i])) commit(next)
       // "files.autoSave": "afterDelay" saves a while after the last change.
       const timer = autoSaves.current.get(f.path)
       if (timer) clearTimeout(timer)
@@ -269,7 +292,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
           f.path,
           setTimeout(() => {
             autoSaves.current.delete(f.path)
-            void save(f.path, 'auto')
+            void saveFile(f, 'auto')
           }, all['files.autoSaveDelay'] as number),
         )
       }
@@ -283,22 +306,33 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       activate(tab.id)
     }
 
-    /** Forgets a tab's models. */
-    const dispose = (tab: Tab) => {
-      if (tab.kind === 'file') {
-        closed.current = [...closed.current.filter((p) => p !== tab.path), tab.path].slice(-20)
-        const f = files.current.get(tab.path)
-        if (!f) return
-        if (editor.current?.getModel() === f.model) editor.current.setModel(null)
+    /** The diff editor lets go of a model about to be disposed of. */
+    const unshow = (model: Monaco.editor.ITextModel | null) => {
+      if (!model) return
+      if (editor.current?.getModel() === model) editor.current.setModel(null)
+      const shown = diffEditor.current?.getModel()
+      if (shown && (shown.original === model || shown.modified === model)) diffEditor.current!.setModel(null)
+    }
+
+    /** Forgets a compare's own models. */
+    const disposeDiff = (id: string) => {
+      const d = diffs.current.get(id)
+      if (!d) return
+      for (const model of [d.left, d.right]) {
+        unshow(model)
+        model?.dispose()
+      }
+      diffs.current.delete(id)
+    }
+
+    /** Forgets the files no tab holds any more (a file is held by its tab and by the compares it is a side of). */
+    const collect = () => {
+      const held = new Set(tabsRef.current.flatMap(fileSidesOf))
+      for (const [path, f] of [...files.current]) {
+        if (held.has(path)) continue
+        unshow(f.model)
         f.model.dispose()
-        files.current.delete(tab.path)
-      } else {
-        const d = diffs.current.get(tab.id)
-        if (!d) return
-        if (diffEditor.current?.getModel()?.modified === d.modified) diffEditor.current.setModel(null)
-        d.original.dispose()
-        d.modified.dispose()
-        diffs.current.delete(tab.id)
+        files.current.delete(path)
       }
     }
 
@@ -306,9 +340,14 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     const drop = (ids: string[]) => {
       if (ids.length === 0) return
       const before = tabsRef.current
-      for (const t of before) if (ids.includes(t.id)) dispose(t)
+      for (const t of before) {
+        if (!ids.includes(t.id)) continue
+        if (t.kind === 'file') closed.current = [...closed.current.filter((p) => p !== t.path), t.path].slice(-20)
+        else disposeDiff(t.id)
+      }
       const left = before.filter((t) => !ids.includes(t.id))
       commit(left)
+      collect()
       if (activeRef.current && ids.includes(activeRef.current)) {
         const at = before.findIndex((t) => t.id === activeRef.current)
         activate(left[Math.min(at, left.length - 1)]?.id ?? null)
@@ -330,65 +369,215 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       // This open's tab as it is now: none when it was closed meanwhile (one opened again has a load of its own), renamed perhaps.
       const mine = () => tabsRef.current.find((t) => t.load === load)
       try {
-        const [file, m] = await Promise.all([readAny(path), loadMonaco()])
-        mon.current = m
-        installKeymap(m)
+        let f = await loadFile(path)
         const tab = mine()
-        if (!tab) return
-        if (file.text === null) {
-          update(tab.id, { status: file.binary ? 'binary' : 'tooLarge' })
+        if (!tab) {
+          collect()
           return
         }
-        const language = m.languageOf(tab.path, settingsRef.current.get('files.associations'))
-        const model = m.monaco.editor.createModel(file.text, language.id, m.fileUri(tab.path))
-        indentModel(model, settingsRef.current.all(language.id))
-        const f: FileModel = { path: tab.path, model, version: file.version, savedAlt: model.getAlternativeVersionId(), view: null }
-        model.onDidChangeContent(() => markDirty(f))
-        files.current.set(tab.path, f)
-        markProblems(m, model, problemsOf.current.filter((p) => p.path === tab.path))
-        update(tab.id, { status: 'ready', language: language.name, languageId: language.id })
+        if (typeof f === 'string') {
+          update(tab.id, { status: f })
+          return
+        }
+        // Renamed while it was read: the model goes to the file's new name.
+        if (tab.path !== path && files.current.get(path) === f && !files.current.has(tab.path) && mon.current) {
+          files.current.delete(path)
+          f.path = tab.path
+          files.current.set(tab.path, f)
+          readdress(mon.current, f)
+          f = files.current.get(tab.path)!
+        }
+        const language = { id: f.model.getLanguageId?.() ?? 'plaintext', name: languageName(f.model) }
+        update(tab.id, { status: 'ready', language: language.name, languageId: language.id, dirty: fileDirty(tab.path) })
       } catch (e) {
         const tab = mine()
         if (tab) update(tab.id, { status: 'error', message: errorMessage(e) })
       }
     }
 
-    /** A file's change, before and now (the agent's, or since the last commit): new models, or the ones there with the texts of now. */
-    const loadDiff = async (path: string, source: DiffSource = 'agent') => {
-      const [texts, m] = await Promise.all([source === 'git' ? gitTexts(path) : changeTexts(path), loadMonaco()])
+    const languageName = (model: Monaco.editor.ITextModel) => {
+      const id = model.getLanguageId?.()
+      const l = mon.current?.monaco.languages.getLanguages().find((x) => x.id === id)
+      return l?.aliases?.[0] ?? id ?? 'Plain Text'
+    }
+
+    const loading = new Map<string, Promise<FileModel | 'binary' | 'tooLarge'>>()
+    /** A file's model, read once however many tabs ask for it at once (the editor holds one model per file). */
+    const loadFile = (path: string): Promise<FileModel | 'binary' | 'tooLarge'> => {
+      const there = files.current.get(path)
+      if (there && !there.model.isDisposed()) return Promise.resolve(there)
+      const going = loading.get(path)
+      if (going) return going
+      const read = (async () => {
+        const [file, m] = await Promise.all([readAny(path), loadMonaco()])
+        mon.current = m
+        installKeymap(m)
+        if (file.text === null) return file.binary ? 'binary' : 'tooLarge'
+        const now = files.current.get(path)
+        if (now && !now.model.isDisposed()) return now
+        const language = m.languageOf(path, settingsRef.current.get('files.associations'))
+        const model = m.monaco.editor.createModel(file.text, language.id, m.fileUri(path))
+        indentModel(model, settingsRef.current.all(language.id))
+        const f: FileModel = { path, model, version: file.version, savedAlt: model.getAlternativeVersionId(), view: null }
+        model.onDidChangeContent(() => markDirty(f))
+        files.current.set(path, f)
+        markProblems(m, model, problemsOf.current.filter((p) => p.path === path))
+        return f
+      })()
+      loading.set(path, read)
+      const forget = () => {
+        if (loading.get(path) === read) loading.delete(path)
+      }
+      read.then(forget, forget)
+      return read
+    }
+
+    /** A side's text, when it is no file the editor holds. */
+    const sideText = async (side: Side): Promise<string> => {
+      switch (side.kind) {
+        case 'disk': {
+          const f = await readAny(side.path)
+          if (f.text === null) throw new Error(`${nameOf(side.path)} is not text: it cannot be compared.`)
+          return f.text
+        }
+        case 'git':
+          if (side.rev !== 'HEAD') throw new Error('Only the last commit can be compared here.')
+          return (await gitTexts(side.path)).original ?? ''
+        case 'agent':
+          return (await changeTexts(side.path)).original ?? ''
+        case 'clipboard':
+          return side.text
+        default:
+          return ''
+      }
+    }
+
+    /**
+     * A compare's sides as models: a file's own model (live: typing in it is typing in the file), a model of the text for
+     * any other side (made, or given the text of now). Its language is its file's.
+     */
+    const loadSides = async (id: string) => {
+      const tab = tabsRef.current.find((t) => t.id === id)
+      if (!tab?.left || !tab.right) throw new Error('Nothing to compare.')
+      const m = await loadMonaco()
       mon.current = m
       installKeymap(m)
-      const language = m.languageOf(path)
-      const id = diffId(path, source)
-      const there = diffs.current.get(id)
-      if (there) {
-        there.original.setValue(texts.original ?? '')
-        there.modified.setValue(texts.modified ?? '')
-      } else {
-        diffs.current.set(id, {
-          original: m.monaco.editor.createModel(texts.original ?? '', language.id, m.diffUri('before', path)),
-          modified: m.monaco.editor.createModel(texts.modified ?? '', language.id, m.diffUri('after', path)),
-        })
+      const path = sidePath(tab.right) ?? sidePath(tab.left) ?? ''
+      const language = m.languageOf(path, settingsRef.current.get('files.associations'))
+      const own: DiffModels = diffs.current.get(id) ?? { left: null, right: null }
+      for (const which of ['left', 'right'] as const) {
+        const side = tab[which]!
+        if (side.kind === 'file') {
+          const f = await loadFile(side.path)
+          if (typeof f === 'string') throw new Error(`${nameOf(side.path)} is ${f === 'binary' ? 'not text' : 'larger than 5 MB'}: it cannot be compared.`)
+          if (own[which]) {
+            unshow(own[which])
+            own[which]!.dispose()
+            own[which] = null
+          }
+          continue
+        }
+        const text = await sideText(side)
+        if (own[which] && !own[which]!.isDisposed()) {
+          if (own[which]!.getValue() !== text) own[which]!.setValue(text)
+        } else own[which] = m.monaco.editor.createModel(text, language.id, m.diffUri(which === 'left' ? 'before' : 'after', path))
       }
-      return language.name
+      diffs.current.set(id, own)
+      return language
+    }
+
+    /** The two models a compare tab shows, left and right. */
+    const modelsOf = (tab: Tab): { original: Monaco.editor.ITextModel; modified: Monaco.editor.ITextModel } | null => {
+      const own = diffs.current.get(tab.id)
+      const of = (side: Side | undefined, mine: Monaco.editor.ITextModel | null | undefined) => (side?.kind === 'file' ? files.current.get(side.path)?.model : mine) ?? null
+      const original = of(tab.left, own?.left)
+      const modified = of(tab.right, own?.right)
+      return original && modified && !original.isDisposed() && !modified.isDisposed() ? { original, modified } : null
+    }
+
+    /** Opens a compare of two sides; one open already is shown, as it is now. */
+    const openCompare = async (tab: Omit<Tab, 'id' | 'status' | 'dirty'>) => {
+      const id = idOf(tab)
+      if (has(id)) {
+        activate(id)
+        void reloadCompare(id)
+        return
+      }
+      add({ ...tab, id, status: 'loading', dirty: false })
+      try {
+        const language = await loadSides(id)
+        if (has(id)) update(id, { status: 'ready', language: language.name, languageId: language.id, dirty: fileSidesOf(tabsRef.current.find((t) => t.id === id)!).some(fileDirty) })
+        else {
+          disposeDiff(id)
+          collect()
+        }
+      } catch (e) {
+        if (has(id)) update(id, { status: 'error', message: errorMessage(e) })
+      }
+    }
+
+    const compare = (left: Side, right: Side) => openCompare({ kind: 'diff', source: 'compare', left, right, path: sidePath(right) ?? sidePath(left) ?? '' })
+
+    /** The agent's changes to a file (before its first change ↔ the file), or the file's since the last commit (HEAD ↔ the file); a side made or deleted is empty. */
+    const sidesOf = async (path: string, source: DiffSource): Promise<{ left: Side; right: Side }> => {
+      const texts = source === 'git' ? await gitTexts(path) : await changeTexts(path)
+      const left: Side = texts.original === null ? { kind: 'empty', path } : source === 'git' ? { kind: 'git', path, rev: 'HEAD' } : { kind: 'agent', path }
+      const right: Side = texts.modified === null ? { kind: 'empty', path } : { kind: 'file', path }
+      return { left, right }
     }
 
     const openDiff = async (path: string, source: DiffSource = 'agent') => {
       const id = diffId(path, source)
       if (has(id)) {
         activate(id)
-        // Shown again: as the file is now.
-        if (source === 'git') void loadDiff(path, source).catch(() => undefined)
+        void reloadCompare(id)
         return
       }
       add({ id, kind: 'diff', source, path, status: 'loading', dirty: false })
       try {
-        const language = await loadDiff(path, source)
-        if (has(id)) update(id, { status: 'ready', language })
-        else dispose({ id, kind: 'diff', source, path, status: 'ready', dirty: false })
+        const sides = await sidesOf(path, source)
+        if (!has(id)) return
+        update(id, sides)
+        const language = await loadSides(id)
+        if (has(id)) update(id, { status: 'ready', language: language.name, languageId: language.id, dirty: fileSidesOf(tabsRef.current.find((t) => t.id === id)!).some(fileDirty) })
+        else {
+          disposeDiff(id)
+          collect()
+        }
       } catch (e) {
         if (has(id)) update(id, { status: 'error', message: errorMessage(e) })
       }
+    }
+
+    /** A compare as it is now: the agent's and git's sides again (a file made or deleted since), the other sides' texts. */
+    const reloadCompare = async (id: string) => {
+      const tab = tabsRef.current.find((t) => t.id === id)
+      if (!tab || tab.kind !== 'diff') return
+      try {
+        if (tab.source === 'agent' || tab.source === 'git') update(id, await sidesOf(tab.path, tab.source))
+        await loadSides(id)
+        collect()
+      } catch (e) {
+        // The agent's change accepted or reverted elsewhere: the compare has nothing to show.
+        if (tab.source === 'agent' && e instanceof ApiError && e.http === 404) drop([id])
+      }
+    }
+
+    /** Swaps a compare's sides (the agent's and git's become plain compares). */
+    const swapSides = (id: string) => {
+      const tab = tabsRef.current.find((t) => t.id === id)
+      if (!tab?.left || !tab.right) return
+      const next = { ...tab, source: 'compare' as const, left: tab.right, right: tab.left }
+      const nid = idOf(next)
+      if (has(nid)) {
+        activate(nid)
+        return
+      }
+      const own = diffs.current.get(id)
+      diffs.current.delete(id)
+      if (own) diffs.current.set(nid, { left: own.right, right: own.left })
+      commit(tabsRef.current.map((t) => (t.id === id ? { ...next, id: nid } : t)))
+      if (activeRef.current === id) activate(nid)
     }
 
     /**
@@ -398,11 +587,24 @@ export function EditorProvider({ children }: { children: ReactNode }) {
      */
     async function save(id?: string, reason: SaveReason = 'explicit'): Promise<boolean> {
       const tab = tabsRef.current.find((t) => t.id === (id ?? activeRef.current))
-      const f = tab?.kind === 'file' ? files.current.get(tab.path) : undefined
+      let path: string | undefined
+      if (tab?.kind === 'file') path = tab.path
+      else if (tab) {
+        // A compare: the side with the focus, else its right side's file, else its left's.
+        const l = tab.left?.kind === 'file' ? tab.left.path : undefined
+        const r = tab.right?.kind === 'file' ? tab.right.path : undefined
+        const leftFocused = activeRef.current === tab.id && !!diffEditor.current?.getOriginalEditor?.().hasTextFocus?.()
+        path = leftFocused && l ? l : (r ?? l)
+      }
+      const f = path ? files.current.get(path) : undefined
       if (!f || f.model.isDisposed()) return false
+      return saveFile(f, reason)
+    }
+
+    async function saveFile(f: FileModel, reason: SaveReason): Promise<boolean> {
       if (reason !== 'auto') {
         const m = mon.current
-        const v = settingsRef.current.all(f.model.getLanguageId?.() ?? tab?.languageId)
+        const v = settingsRef.current.all(f.model.getLanguageId?.())
         for (const step of saveParticipants) {
           if (!m || f.model.isDisposed()) break
           try {
@@ -459,7 +661,9 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     const close = async (id: string): Promise<boolean> => {
       const tab = tabsRef.current.find((t) => t.id === id)
       if (!tab) return true
-      if (tab.dirty) {
+      // Another tab holding the same files keeps what is unsaved in them: no need to ask.
+      const kept = fileSidesOf(tab).every((p) => !fileDirty(p) || tabsRef.current.some((t) => t.id !== id && fileSidesOf(t).includes(p)))
+      if (tab.dirty && !kept) {
         activate(id)
         const answer = await new Promise<Unsaved>((resolve) => setUnsaved({ path: tab.path, answer: resolve }))
         setUnsaved(null)
@@ -470,37 +674,32 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       return true
     }
 
-    /** The tab's file as it was when a read began: still open, the same model, nothing typed in it and nothing saved since. */
-    const unchanged = (t: Tab, f: FileModel, at: { alt: number; version: string }) =>
-      has(t.id) && files.current.get(t.path) === f && !f.model.isDisposed() && f.model.getAlternativeVersionId() === at.alt && f.version === at.version
+    /** The file as it was when a read began: still held, the same model, nothing typed in it and nothing saved since. */
+    const unchanged = (f: FileModel, at: { alt: number; version: string }) =>
+      files.current.get(f.path) === f && !f.model.isDisposed() && f.model.getAlternativeVersionId() === at.alt && f.version === at.version
 
-    /** One tab against the disk. Everything is checked again after each wait: the tab may have closed, been typed in or saved, meanwhile. */
-    const refreshTab = async (t: Tab) => {
-      if (t.kind === 'diff') {
-        try {
-          await loadDiff(t.path, t.source)
-          // Closed while it loaded: its models go too.
-          if (!has(t.id)) dispose(t)
-        } catch {
-          // Accepted or reverted elsewhere: the diff has nothing to show.
-          drop([t.id])
-        }
-        return
-      }
-      const f = files.current.get(t.path)
-      if (!f || f.model.isDisposed() || f.model.getAlternativeVersionId() !== f.savedAlt) return
+    /** One file against the disk. Everything is checked again after each wait: it may have closed, been typed in or saved, meanwhile. */
+    const refreshFile = async (f: FileModel) => {
+      if (f.model.isDisposed() || f.model.getAlternativeVersionId() !== f.savedAlt) return
       const at = { alt: f.savedAlt, version: f.version }
       let file
       try {
-        file = await readAny(t.path)
+        file = await readAny(f.path)
       } catch (e) {
-        // Gone (a change reverted, a file deleted by a command): a tab with nothing unsaved goes too.
-        if (e instanceof ApiError && e.http === 404 && unchanged(t, f, at)) drop([t.id])
+        // Gone (a change reverted, a file deleted by a command): its tab with nothing unsaved goes too, and the compares of it
+        // have nothing on that side.
+        if (e instanceof ApiError && e.http === 404 && unchanged(f, at)) {
+          drop(tabsRef.current.filter((t) => t.kind === 'file' && t.path === f.path).map((t) => t.id))
+          for (const t of tabsRef.current.filter((x) => x.kind === 'diff' && fileSidesOf(x).includes(f.path))) {
+            if (t.source === 'agent' || t.source === 'git') void reloadCompare(t.id)
+            else drop([t.id])
+          }
+        }
         return
       }
       // Typed in while it was read: the person's text stays, unsaved, and saving asks first (the version on disk moved on).
       // Saved while it was read: the read may be from before the save, and what was saved stays.
-      if (!unchanged(t, f, at) || file.version === f.version || file.text === null) return
+      if (!unchanged(f, at) || file.version === f.version || file.text === null) return
       if (f.model.getValue() !== file.text) {
         // An edit, not a new model: the cursor and the scroll stay, and Undo takes it back.
         f.model.pushEditOperations([], [{ range: f.model.getFullModelRange(), text: file.text }], () => null)
@@ -511,13 +710,17 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       markDirty(f)
     }
 
+    /** Files changed on disk: the files the editor holds, then the compares of them (their other sides read again). */
     const refresh = async (path?: string) => {
-      for (const t of tabsRef.current.filter((t) => t.status === 'ready' && (path === undefined || t.path === path))) {
+      for (const f of [...files.current.values()].filter((x) => path === undefined || x.path === path)) {
         try {
-          await refreshTab(t)
+          await refreshFile(f)
         } catch {
-          // One tab that cannot be read again leaves the others to be.
+          // One file that cannot be read again leaves the others to be.
         }
+      }
+      for (const t of tabsRef.current.filter((x) => x.kind === 'diff' && x.status === 'ready' && (path === undefined || [x.left, x.right].some((side) => side && sidePath(side) === path)))) {
+        await reloadCompare(t.id)
       }
     }
 
@@ -531,21 +734,22 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         files.current.set(f.path, f)
         if (m) readdress(m, f)
       }
-      for (const t of tabsRef.current) {
-        const d = t.kind === 'diff' ? diffs.current.get(t.id) : undefined
-        if (!d || !within(t.path, from)) continue
-        diffs.current.delete(t.id)
-        diffs.current.set(diffId(rename(t.path), t.source), d)
-      }
       const ids = new Map<string, string>()
       commit(
         tabsRef.current.map((t) => {
-          if (!within(t.path, from)) return t
+          const touched = within(t.path, from) || [t.left, t.right].some((side) => side && sidePath(side) !== undefined && within(sidePath(side)!, from))
+          if (!touched) return t
           const path = rename(t.path)
-          const id = t.kind === 'file' ? path : diffId(path, t.source)
+          const next: Tab = { ...t, path, left: t.left && renamed(t.left, rename), right: t.right && renamed(t.right, rename) }
+          const id = t.kind === 'file' ? path : idOf(next)
           ids.set(t.id, id)
+          const d = diffs.current.get(t.id)
+          if (d && id !== t.id) {
+            diffs.current.delete(t.id)
+            diffs.current.set(id, d)
+          }
           const language = m && t.status === 'ready' ? m.languageOf(path, settingsRef.current.get('files.associations')) : null
-          return { ...t, id, path, language: language?.name ?? t.language, languageId: language?.id ?? t.languageId }
+          return { ...next, id, language: language?.name ?? t.language, languageId: language?.id ?? t.languageId }
         }),
       )
       const a = activeRef.current
@@ -575,6 +779,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         ed.setModel(model)
         if (view) ed.restoreViewState(view)
       }
+      unshow(old)
       old.dispose()
     }
 
@@ -631,7 +836,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     const accept = async (path?: string) => {
       try {
         queryClient.setQueryData(changesQuery.queryKey, await acceptChange(path))
-        drop(tabsRef.current.filter((t) => t.kind === 'diff' && t.source !== 'git' && (path === undefined || t.path === path)).map((t) => t.id))
+        drop(tabsRef.current.filter((t) => t.kind === 'diff' && t.source === 'agent' && (path === undefined || t.path === path)).map((t) => t.id))
       } catch (e) {
         toast.error(errorMessage(e))
       }
@@ -648,7 +853,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       if (!ok) return
       try {
         queryClient.setQueryData(changesQuery.queryKey, await revertChange(path))
-        drop(tabsRef.current.filter((t) => t.kind === 'diff' && t.source !== 'git' && t.path === path).map((t) => t.id))
+        drop(tabsRef.current.filter((t) => t.kind === 'diff' && t.source === 'agent' && t.path === path).map((t) => t.id))
         await refresh(path)
         void queryClient.invalidateQueries({ queryKey: ['code', 'files'] })
       } catch (e) {
@@ -750,6 +955,10 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       open, openDiff, activate: (id: string) => activate(id), close, save: (id?: string) => save(id), refresh, moved, removed, accept, revert, selection, pieceOf, editorCommands, runAction, showProblems, bindEditor, bindDiff,
       saveAll, closeMany, reopenClosed, cycle, activateIndex, navigate, focusEditor, toggleWordWrap, languages, setLanguage, activeModel, autoSaveOn,
       saveWith: save,
+      compare,
+      swapSides,
+      diffEditor: () => diffEditor.current,
+      modelsOf,
     }
   }, [confirm, queryClient])
 
@@ -836,7 +1045,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       setCursor(position ? { line: position.lineNumber, column: position.column } : { line: 1, column: 1 })
       ed.focus()
     } else {
-      const d = diffs.current.get(tab.id)
+      const d = actions.modelsOf(tab)
       if (!d || !diffHost.current) return
       if (!diffEditor.current) {
         diffEditor.current = m.monaco.editor.createDiffEditor(diffHost.current, {
@@ -853,7 +1062,11 @@ export function EditorProvider({ children }: { children: ReactNode }) {
           side?.createContextKey('textCompareEditorVisible', true)
         }
       }
-      if (diffEditor.current.getModel()?.modified !== d.modified) diffEditor.current.setModel(d)
+      // A file's side is the file itself: typed in, it is unsaved (Ctrl+S saves it); a side of a text (a commit, the
+      // clipboard, before the agent) is read-only. The arrows beside a change put the left side's lines back.
+      diffEditor.current.updateOptions({ originalEditable: tab.left?.kind === 'file', readOnly: tab.right?.kind !== 'file', renderMarginRevertIcon: tab.right?.kind === 'file' })
+      const now = diffEditor.current.getModel()
+      if (now?.original !== d.original || now.modified !== d.modified) diffEditor.current.setModel(d)
       setCursor(null)
     }
   }, [shown, revealed, actions])
@@ -875,8 +1088,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       diffEditor.current?.dispose()
       for (const f of models.values()) f.model.dispose()
       for (const d of pairs.values()) {
-        d.original.dispose()
-        d.modified.dispose()
+        d.left?.dispose()
+        d.right?.dispose()
       }
     }
   }, [])
@@ -976,7 +1189,7 @@ export function EditorArea() {
   const ed = useEditor()
   const { tabs, active, bindEditor, bindDiff } = ed
   const changes = useQuery(changesQuery)
-  const change = active?.kind === 'diff' && active.source !== 'git' ? changes.data?.find((c) => c.path === active.path) : undefined
+  const change = active?.kind === 'diff' && active.source === 'agent' ? changes.data?.find((c) => c.path === active.path) : undefined
   const showsFile = active?.kind === 'file' && active.status === 'ready'
   const showsDiff = active?.kind === 'diff' && active.status === 'ready'
   return (
@@ -985,10 +1198,11 @@ export function EditorArea() {
         <div role="tablist" aria-label="Open files" className="flex h-9 shrink-0 overflow-x-auto overflow-y-hidden border-b bg-sidebar [scrollbar-width:thin]">
           {tabs.map((t) => {
             const selected = t.id === active?.id
-            const name = isUserFile(t.path) ? t.path.slice(5) : nameOf(t.path)
+            const name = isUserFile(t.path) ? t.path.slice(5) : t.source === 'compare' && t.left && t.right ? `${sideLabel(t.left)} ↔ ${sideLabel(t.right)}` : nameOf(t.path)
             return (
+              <ContextMenu.Root key={t.id}>
+                <ContextMenu.Trigger asChild>
               <div
-                key={t.id}
                 role="presentation"
                 className={cn(
                   'group relative flex shrink-0 items-center border-r text-[0.8125rem] transition-colors',
@@ -1000,7 +1214,7 @@ export function EditorArea() {
                   role="tab"
                   aria-selected={selected}
                   aria-controls="editor-panel"
-                  title={t.kind === 'diff' ? `${t.path}: ${t.source === 'git' ? 'its changes since the last commit' : "the agent's changes"}` : isUserFile(t.path) ? `Your ${t.path.slice(5)} (every project)` : t.path}
+                  title={t.kind === 'diff' ? (t.source === 'compare' ? name : `${t.path}: ${t.source === 'git' ? 'its changes since the last commit' : "the agent's changes"}`) : isUserFile(t.path) ? `Your ${t.path.slice(5)} (every project)` : t.path}
                   onClick={() => ed.activate(t.id)}
                   onAuxClick={(e) => e.button === 1 && void ed.close(t.id)}
                   className="flex h-full max-w-56 items-center gap-1.5 pr-1 pl-3 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
@@ -1008,12 +1222,12 @@ export function EditorArea() {
                   {t.kind === 'diff' ? <GitCompareArrows className="size-3.5 shrink-0 text-primary" aria-hidden="true" /> : <FileCode2 className="size-3.5 shrink-0" aria-hidden="true" />}
                   <span className="truncate">{name}</span>
                   {isUserFile(t.path) && <span className="text-xs text-muted-foreground">User</span>}
-                  {t.kind === 'diff' && <span className="text-xs text-muted-foreground">{t.source === 'git' ? 'since commit' : 'changes'}</span>}
+                  {t.kind === 'diff' && t.source !== 'compare' && <span className="text-xs text-muted-foreground">{t.source === 'git' ? 'since commit' : 'changes'}</span>}
                   {t.dirty && <span className="sr-only">, not saved</span>}
                 </button>
                 <button
                   type="button"
-                  aria-label={`Close ${name}${t.kind === 'diff' ? ' changes' : ''}`}
+                  aria-label={`Close ${name}${t.kind === 'diff' && t.source !== 'compare' ? ' changes' : ''}`}
                   title={t.dirty ? 'Not saved: close' : 'Close'}
                   onClick={() => void ed.close(t.id)}
                   className="mr-1 grid size-5 place-items-center rounded-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
@@ -1028,52 +1242,23 @@ export function EditorArea() {
                   )}
                 </button>
               </div>
+                </ContextMenu.Trigger>
+                <ContextMenu.Portal>
+                  <TabMenu tab={t} />
+                </ContextMenu.Portal>
+              </ContextMenu.Root>
             )
           })}
         </div>
       )}
-      {active && (
+      {active?.kind === 'file' && (
         <div className="flex h-8 shrink-0 items-center gap-2 border-b px-3 text-xs text-muted-foreground">
           <span className="min-w-0 truncate font-mono" title={active.path}>
             {isUserFile(active.path) ? `User › ${active.path.slice(5)}` : active.path.split('/').join(' › ')}
           </span>
-          {active.kind === 'diff' && active.source === 'git' && (
-            <>
-              <span className="hidden shrink-0 rounded-sm bg-primary/10 px-1.5 py-0.5 text-primary-ink lg:inline" title="At the last commit, and now">
-                since the last commit
-              </span>
-              <span className="ml-auto" />
-              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => void ed.open(active.path)}>
-                <FileText /> Open file
-              </Button>
-            </>
-          )}
-          {active.kind === 'diff' && active.source !== 'git' && (
-            <>
-              <span className="hidden shrink-0 rounded-sm bg-primary/10 px-1.5 py-0.5 text-primary-ink lg:inline" title="Before the agent, and now">
-                the agent&apos;s changes
-              </span>
-              {change && (
-                <span className="shrink-0 font-mono tabular-nums">
-                  <span className="text-success-ink">+{change.added}</span> <span className="text-destructive-ink">−{change.removed}</span>
-                </span>
-              )}
-              <span className="ml-auto" />
-              {!change?.deleted && (
-                <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => void ed.open(active.path)}>
-                  <FileText /> Open file
-                </Button>
-              )}
-              <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => void ed.revert(active.path)}>
-                <Undo2 /> Revert
-              </Button>
-              <Button size="sm" className="h-6 px-2 text-xs" onClick={() => void ed.accept(active.path)}>
-                <Check /> Accept
-              </Button>
-            </>
-          )}
         </div>
       )}
+      {active?.kind === 'diff' && <CompareToolbar tab={active} change={change} />}
       <div id="editor-panel" role={active ? 'tabpanel' : undefined} aria-label={active ? nameOf(active.path) : undefined} className="relative min-h-0 flex-1">
         {/* Not shown: display none (Monaco's parts set their own visibility); shown again, it lays itself out anew. */}
         <div ref={bindEditor} data-testid="code-editor" hidden={!showsFile} className="absolute inset-0" />
@@ -1097,6 +1282,61 @@ export function EditorArea() {
         )}
       </div>
     </section>
+  )
+}
+
+/** A tab's right-click menu, as VS Code's: closing it and others, its path, compares. */
+function TabMenu({ tab }: { tab: Tab }) {
+  const ed = useEditor()
+  const run = (command: string) => {
+    ed.activate(tab.id)
+    requestAnimationFrame(() => void runCommand(command))
+  }
+  const at = ed.tabs.findIndex((t) => t.id === tab.id)
+  const keys = {
+    close: useKeyFor('workbench.action.closeActiveEditor'),
+    saved: useKeyFor('workbench.action.closeUnmodifiedEditors'),
+    all: useKeyFor('workbench.action.closeAllEditors'),
+    withSaved: useKeyFor('workbench.files.action.compareWithSaved'),
+    withClipboard: useKeyFor('workbench.files.action.compareWithClipboard'),
+  }
+  const item = (label: string, onSelect: () => void, keys?: string) => (
+    <ContextMenu.Item className={menuItem} onSelect={onSelect}>
+      {label}
+      {keys && <span className="ml-auto pl-4 text-xs text-muted-foreground">{keys}</span>}
+    </ContextMenu.Item>
+  )
+  const separator = <ContextMenu.Separator className="-mx-1 my-1 h-px bg-border" />
+  return (
+    <ContextMenu.Content className={menuContent}>
+      {item('Close', () => void ed.close(tab.id), keys.close)}
+      {item('Close Others', () => void ed.closeMany(ed.tabs.filter((t) => t.id !== tab.id).map((t) => t.id)))}
+      {item('Close to the Right', () => void ed.closeMany(ed.tabs.slice(at + 1).map((t) => t.id)))}
+      {item('Close Saved', () => void ed.closeMany(ed.tabs.filter((t) => !t.dirty).map((t) => t.id)), keys.saved)}
+      {item('Close All', () => void ed.closeMany(ed.tabs.map((t) => t.id)), keys.all)}
+      {!isUserFile(tab.path) && (
+        <>
+          {separator}
+          {item('Copy Path', () => run('workbench.action.files.copyPathOfActiveFile'))}
+          {item('Copy Relative Path', () => run('copyRelativeFilePath'))}
+        </>
+      )}
+      {tab.kind === 'file' && (
+        <>
+          {separator}
+          {item('Compare with Saved', () => run('workbench.files.action.compareWithSaved'), keys.withSaved)}
+          {item('Compare with Clipboard', () => run('workbench.files.action.compareWithClipboard'), keys.withClipboard)}
+          {item('Compare With…', () => run('workbench.files.action.compareFileWith'))}
+          {item('Select for Compare', () => run('selectForCompare'))}
+        </>
+      )}
+      {tab.kind === 'diff' && (
+        <>
+          {separator}
+          {item('Swap Left and Right Side', () => ed.swapSides(tab.id))}
+        </>
+      )}
+    </ContextMenu.Content>
   )
 }
 

@@ -228,11 +228,23 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   in it is unsaved (undo still works), and after each turn every open file is
   checked against the disk. What is typed while a file reloads stays, unsaved:
   saving it then asks first.
-- **diff**: Monaco's diff editor for each file the agent changed in this run,
-  as it was before the agent's first change and now, opened from Agent
-  changes or the Explorer. Its bar has the counts, Open file, **Revert** (puts
-  the file back; a file the agent made is deleted) and **Accept** (keeps it);
-  Agent changes also has **Accept all**.
+- **compare**: Monaco's diff editor, as VS Code's compare. The agent's changes
+  to a file (as it was before the agent's first change, and now: from Agent
+  changes or the Explorer), a file's changes since the last commit (from
+  Source control), the file shown with what is saved (**Ctrl+K D**), with the
+  clipboard (**Ctrl+K C**; when the browser does not let the page read it,
+  paste it in the box that opens), with another file (**Compare Active File
+  With…**), or two files of the Explorer (right-click **Select for Compare**,
+  then **Compare with Selected**). A side that is a file is the file itself:
+  typing there changes it (it shows unsaved) and **Ctrl+S** saves it; the
+  arrows beside a change put the left side's lines back. Its bar has the
+  sides, the counts, the previous and the next change (**Shift+Alt+F5**,
+  **Alt+F5**), inline or side by side, whitespace ignored, unchanged lines
+  folded (`diffEditor.*` in the settings), the sides swapped and Open file;
+  the agent's changes also have **Revert** (puts the file back; a file the
+  agent made is deleted) and **Accept** (keeps it), and Agent changes has
+  **Accept all**. A tab's right-click menu closes it, the others, those to its
+  right, the saved ones or all, copies its path and compares it.
 - **search**: text across the files git sees (`.gitignore` holds), with match
   case, whole word, regular expression, and files to include or exclude; a
   result opens the file at the match. **Replace** replaces what it finds, in
