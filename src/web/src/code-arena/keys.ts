@@ -368,9 +368,9 @@ export function resolve(rules: Rule[], pressed: Chord, ctx: Context, pending: Ch
   return { kind: 'none' }
 }
 
-/** The key of a command (its last rule's, as VS Code shows it), for menus and tooltips. */
+/** The key of a command, for menus and tooltips: the person's last rule for it, else its first default (VS Code's primary key). */
 export function keyFor(rules: Rule[], command: string, mac = isMac()): string | undefined {
-  const r = rules.findLast((x) => x.command === command && !x.args)
+  const r = rules.findLast((x) => x.command === command && !x.args && x.source !== 'default') ?? rules.find((x) => x.command === command && !x.args)
   return r ? keysLabel(r.chords, mac) : undefined
 }
 

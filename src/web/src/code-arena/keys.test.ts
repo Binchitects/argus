@@ -75,6 +75,9 @@ describe('VS Code keys', () => {
     expect(resolve(rules, at('ctrl+b'), { editorIsOpen: false }, pending)).toEqual({ kind: 'none' })
     expect(resolve(rules, at('ctrl+b'), { editorIsOpen: true }, pending)).toMatchObject({ kind: 'command' })
     expect(keyFor(rules, 'workbench.action.toggleSidebarVisibility', false)).toBe('Ctrl+K Ctrl+B')
+    // A default's first key is the one shown (VS Code's primary key), not its second.
+    expect(keyFor(rules, 'workbench.action.showCommands', false)).toBe('Ctrl+Shift+P')
+    expect(keyFor(rules, 'workbench.action.quickOpen', false)).toBe('Ctrl+P')
     // A rule a "when" leaves out is skipped for an earlier one.
     expect(resolve(rules, at('ctrl+w'), { editorIsOpen: false }, null)).toEqual({ kind: 'none' })
   })
