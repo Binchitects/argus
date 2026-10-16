@@ -206,6 +206,9 @@ jobs:
             fill "$sample" deploy/argus-standalone/.env
             (cd deploy/argus-standalone && docker compose config --quiet) && echo "$sample resolves"
           done
+      - name: The Helm chart
+        # Its copies of deploy/config and deploy/services, its blocks and values (no helm needed).
+        run: python3 deploy/helm/check-chart.py
       - name: Scripts parse
         run: |
           for f in deploy/scripts/*.sh deploy/argus-standalone/scripts/*.sh deploy/services/*.sh deploy/services/*/*.sh deploy/services/sandbox/soffice \

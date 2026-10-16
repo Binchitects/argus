@@ -20,6 +20,7 @@ What runs today, what it leaves out, and the tests that would close the gap.
 | **Functional** | `scripts/functional-test.py` | what a person does: sign-in, provisioning, key rotation, budget exhaustion and restoration, password reset, per-person billing, access per model, fair use, a key's rate limit (refused past it, seen by the person, the chat not held to it), dashboards and logs for admins only | a running stack |
 | **Sandbox** | `scripts/sandbox-check.py` | the running sandbox's isolation: no network, no reading others' runs, limits bind, nothing outlives a run | a running stack |
 | **Dashboard audit** | `scripts/audit-dashboards.py` | every panel's queries in the app: no errors, no values out of range | a running stack |
+| **Runtimes' parity** | `python3 -m unittest discover -s tests/deploy -p test_runtime_parity.py` (in the tests above, and CI) and `python3 deploy/helm/check-chart.py` | the same services, variables, mounted paths, files and scripts from `deploy/`, secrets and app routes in compose, `podman.yml`, `scale.yml` and the Helm chart, but the allowed differences ([deployment.md](deployment.md#runtimes)); the chart's copies byte for byte | `docker compose` or `podman compose` (`config` only reads); `helm` where installed, else the templates as text |
 
 **Podman** was checked by hand (2026-10-03, Podman 5.7, rootless): every service
 up with `podman.yml`, GPUs through CDI, a chat answer, a Python run, a voice
