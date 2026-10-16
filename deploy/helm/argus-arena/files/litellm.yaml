@@ -8,7 +8,12 @@ router_settings:
   # copy's slots (the app sends max_parallel_requests with each copy).
   routing_strategy: least-busy
   num_retries: 2
-  timeout: 600
+  # A long prompt the engine has not cached reads at 100-150 tokens a second: a full
+  # window takes minutes before the first token. The gateway waits longer than Code
+  # Arena does for an answer to start (15 minutes), so the client gives up first and
+  # says why, never the gateway in the middle of the engine's reading.
+  timeout: 960
+  stream_timeout: 960
 
 litellm_settings:
   drop_params: true

@@ -29,7 +29,8 @@ trap 'if [ -n "$pid" ]; then kill -TERM "$pid" 2>/dev/null; wait "$pid"; fi; exi
 while true; do
   seen=$(stamp)
   echo "router: $(grep -c '^\[' "$models") model(s), up to $(max) at once; kept loaded: $(kept | tr '\n' ' ')"
-  /app/llama-server --models-preset "$models" --models-max "$(max)" --models-autoload --host 0.0.0.0 --port 8080 --api-key "$key" &
+  # The key goes by the environment (LLAMA_API_KEY), not the command line, where ps shows it to anyone in the container.
+  LLAMA_API_KEY="$key" /app/llama-server --models-preset "$models" --models-max "$(max)" --models-autoload --host 0.0.0.0 --port 8080 &
   pid=$!
   (
     for _ in $(seq 1 120); do curl -fs -o /dev/null --max-time 2 http://localhost:8080/health && break; sleep 1; done
