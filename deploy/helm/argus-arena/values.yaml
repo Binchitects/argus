@@ -56,6 +56,8 @@ images:
   nodeExporter: { repository: prom/node-exporter, tag: v1.9.0 }
   # The CPU temperature exporter's (services/cpu-temp-exporter, from the chart's files).
   python: { repository: python, tag: 3.13-slim }
+  # vLLM (vllm.enabled): an image you have; nothing is pulled while it is off (docs/multi-gpu-server.md §6).
+  vllm: { repository: nvcr.io/nvidia/vllm, tag: 26.09-py3 }
   pullPolicy: IfNotPresent
   pullSecrets: []
 
@@ -93,12 +95,35 @@ litellm:
   resources: { requests: { cpu: 250m, memory: 1Gi } }
 
 # The chat models' engine (llama.cpp in router mode), on GPUs. Off: only other GPU servers' models.
+# The GPU resource the GPU pods ask for: nvidia.com/gpu (NVIDIA's device plugin or GPU Operator), or
+# amd.com/gpu (AMD's device plugin) with ROCm images (images.llamacpp server-rocm, a ROCm images.vllm).
+gpuResource: nvidia.com/gpu
+
+# How the app sees the engines' GPUs: llama.cpp's backend (cuda, rocm, vulkan, sycl, metal, cpu: it names
+# the GPUs in the presets), and the GPU the picture server and the embedder run on ("": the first, the CPU).
+engines:
+  backend: cuda
+  mediaGpu: ""
+  embedGpu: ""
+
 llamacpp:
   enabled: true
   gpus: 1
   resources: { requests: { cpu: "4", memory: 16Gi } }
   nodeSelector: {}
   tolerations: []
+
+# vLLM (Admin -> Models, engine vLLM): one `vllm serve` per model the app wants, on its GPUs (services/vllm/supervisor.sh).
+# Each instance is a Deployment of its own with the GPUs it takes (pin it to a node with nodeSelector: several machines).
+# The first is the app's "vllm"; more are named to the app too (app.env: Engine__Vllm__1__Name and the like).
+# fake: tools/fake-vllm in its place, on the python image, with no GPU (CI, load tests).
+vllm:
+  enabled: false
+  fake: false
+  instances:
+    - { name: vllm, gpus: 1, nodeSelector: {}, tolerations: [] }
+  shmSize: 16Gi
+  resources: { requests: { cpu: "4", memory: 32Gi } }
 
 # Embeddings for Argus, on the CPU.
 embed:
@@ -172,6 +197,8 @@ persistence:
   engine: { size: 1Gi }
   # What the picture and video servers say they do (their status files), read by the app.
   mediaStatus: { size: 64Mi }
+  # What the vLLM supervisors say of their models and GPUs, read by the app.
+  vllmStatus: { size: 64Mi }
   directory: { size: 1Gi }
   sandbox: { size: 10Gi }
 

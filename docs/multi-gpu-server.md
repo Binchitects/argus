@@ -442,6 +442,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
 6. **vLLM supervisor.**
    - `deploy/services/vllm/supervisor.sh`: reconcile `/presets/vllm/models.json`; per-entry `CUDA_VISIBLE_DEVICES` and port; status files; drain on SIGTERM; backoff; secrets passed by environment (`VLLM_API_KEY`), never on the command line.
    - Tests: run it with `vllm` pointed at fake-vllm; add, remove, change and crash cases.
+   - **Done**: `deploy/services/vllm/supervisor.sh` with `vllm-helper.py` (JSON and HTTP, standard library): per-model `CUDA_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES`, non-blocking drains, backoff that grows through a crash loop and resets after five stable minutes or a change, sleep and wake from the desired state, a heartbeat and `hardware.json` (gpu-probe.py), and entries that put a key or the supervisor's own options on the command line refused. Runtimes: compose `vllm` service (profile `vllm`, `VLLM_IMAGE`), `podman.yml` (CDI), `rocm.yml` (AMD for both), `fake-gpu.yml` (the supervisor with fake-vllm, no GPU), Helm `vllm.enabled` / `vllm.instances` / `vllm.fake` / `gpuResource`, the `vllm-status` volume or claim, and the chart's copies (`check-chart.py`). Tests: `tests/deploy/test_vllm_supervisor.py`, `test_runtime_parity.py` with the vLLM profile and `vllm.enabled`.
 7. **`IEngineBackend`.**
    - Extract `LlamaCppBackend` from `EngineClient`; add `VllmBackend` (desired state, status, health, metrics-based capacity).
    - `EngineWatcher` iterates the backends.

@@ -29,6 +29,11 @@ COPIES = {
     "files/router.sh": "services/llamacpp/router.sh",
     "files/sd-serve.sh": "services/sd-serve.sh",
     "files/cpu-temp-exporter.py": "services/cpu-temp-exporter/exporter.py",
+    "files/vllm-supervisor.sh": "services/vllm/supervisor.sh",
+    "files/vllm-helper.py": "services/vllm/vllm-helper.py",
+    "files/gpu-probe.py": "services/gpu-probe.py",
+    "files/fake_vllm.py": "../tools/fake-vllm/fake_vllm.py",
+    "files/fake-vllm": "../tools/fake-vllm/vllm",
 }
 for rule in sorted((DEPLOY / "config/prometheus/rules").glob("*.yml")):
     COPIES[f"files/prometheus/rules/{rule.name}"] = f"config/prometheus/rules/{rule.name}"

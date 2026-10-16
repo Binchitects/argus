@@ -51,7 +51,7 @@ public sealed class EngineOptions
     /// Where an engine on the GPUs says what they are (services/gpu-probe.py: nvidia-smi, rocm-smi, or nothing), read
     /// when Prometheus has no GPU figures: a machine with AMD GPUs, or without a GPU exporter.
     /// </summary>
-    public string HardwareFile { get; set; } = "/media-status/hardware.json";
+    public string HardwareFile { get; set; } = "/vllm-status/vllm/hardware.json";
     /// <summary>RAM kept for everything but the engine.</summary>
     public long RamReserveBytes { get; set; } = 8L << 30;
     /// <summary>The picture model's folder in the library: its text encoder there is no chat model.</summary>

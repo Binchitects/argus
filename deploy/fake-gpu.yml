@@ -1,29 +1,25 @@
-# A stand-in vLLM for a stack without a GPU big enough for it (development, CI, load tests):
-# tools/fake-vllm answers as vLLM does (health, models, streamed answers at a set pace,
-# vLLM's metrics, sleep and wake), on the python image the stack already has.
+# The vllm engine with a stand-in vLLM, for a stack without a GPU big enough for it (development,
+# CI, load tests): the real supervisor (services/vllm/supervisor.sh) runs tools/fake-vllm, which
+# answers as vLLM does (health, models, streamed answers at a set pace, vLLM's metrics, sleep and
+# wake), on the python image the stack already has, with no GPU.
 #
 #   docker compose -f docker-compose.yml -f fake-gpu.yml up -d vllm
+#   podman compose -f docker-compose.yml -f podman.yml -f fake-gpu.yml up -d vllm
+#   (Kubernetes: the chart's vllm.fake=true)
 #
-# Nothing else changes: llama.cpp keeps serving the GGUF models. Pace it with
-# FAKE_VLLM_TTFT (seconds to the first token) and FAKE_VLLM_TPS (tokens a second).
+# Admin -> Models then adds vLLM models from the library's snapshots as on a real server. Pace it
+# with FAKE_VLLM_TTFT (seconds to the first token) and FAKE_VLLM_TPS (tokens a second).
 
 services:
   vllm:
     image: python:3.13-slim
-    container_name: vllm
-    restart: unless-stopped
-    logging: { driver: json-file, options: { max-size: 20m, max-file: "5" } }
-    user: "65534:65534"
-    read_only: true
+    # On with this file: no profile to name.
+    profiles: !reset []
     environment:
+      VLLM_BIN: /fake-vllm/vllm
       FAKE_VLLM_TTFT: ${FAKE_VLLM_TTFT:-0.2}
       FAKE_VLLM_TPS: ${FAKE_VLLM_TPS:-60}
-      # The same key as the real engine: by the environment, never on the command line.
-      VLLM_API_KEY: ${ENGINE_KEY:?set ENGINE_KEY in .env}
-    volumes: ["../tools/fake-vllm:/fake-vllm:ro"]
-    entrypoint: [python3, /fake-vllm/fake_vllm.py, serve, fake/model, --served-model-name, fake-vllm, --port, "8000", --enable-sleep-mode]
-    healthcheck:
-      test: [CMD, python3, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
+    # No GPU needed (and none taken from the real engines).
+    deploy: !reset {}
+    devices: !reset []
+    shm_size: 64mb

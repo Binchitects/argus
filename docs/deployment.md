@@ -347,7 +347,8 @@ how). **no**: missing, with the reason.
 | `web`, `app` | yes | differs: the app runs as the container's root, which is you | yes, two replicas by default |
 | `postgres` (or external) | yes | yes | yes (a StatefulSet, or `externalDatabase`) |
 | `litellm` | yes | yes | yes |
-| `llamacpp` | yes, every GPU | yes, CDI; no locked-memory limit | differs: `llamacpp.gpus` whole GPUs; the library read only, so no `LLAMA_CACHE` (a preset's `hf-repo` is fetched again); no `ENGINE_RAM_PROTECT` |
+| `llamacpp` | yes, every GPU | yes, CDI; no locked-memory limit | differs: `llamacpp.gpus` whole GPUs (`gpuResource`: `nvidia.com/gpu` or `amd.com/gpu`); no `ENGINE_RAM_PROTECT` |
+| `vllm` | off (`COMPOSE_PROFILES=vllm`, `VLLM_IMAGE`), every GPU; `fake-gpu.yml`: the fake vLLM, no GPU | the same, CDI; no locked-memory limit | off (`vllm.enabled`); a Deployment per `vllm.instances` entry with its GPUs and node; `vllm.fake` |
 | `embed`, `audio`, `searxng` | yes | yes | yes |
 | `argus` | yes | yes | yes |
 | `imagegen`, `videogen` | yes, every GPU | yes, CDI | differs: whole GPUs each; `videogen` off by default |
@@ -361,14 +362,14 @@ how). **no**: missing, with the reason.
 | **Volumes** | | | |
 | model library | `MODELS_DIR` | the same | the `arena-models` claim (ReadWriteMany across nodes) or `persistence.models.existingClaim` |
 | `engine`, `directory`, `sandbox` | volumes | the same | claims, ReadWriteMany across nodes |
-| `media-status` | in memory (tmpfs) | the same | differs: a small claim, kept on disk |
+| `media-status`, `vllm-status` | in memory (tmpfs) | the same | differs: small claims, kept on disk |
 | `argus`, `audio`, `prometheus`, `alertmanager`, `loki`, `postgres` | volumes | the same | claims, kept when the release goes |
 | `acme`, the certificates | Traefik's | the same | differs: the TLS Secret (`ingress.tlsSecret`) |
 | the pack library | `packs/` or `ARGUS_PACK_LIBRARY_DIR` | the same | `argus.packLibraryClaim` (empty: none) |
 | `/backups` in the app | `BACKUP_DIR`, read only | the same | no: backups are the cluster's |
 | **Configuration and scripts** | | | |
 | `litellm.yaml` (its 960 s timeouts), `argus.yaml`, `searxng.yml`, `alertmanager.yml`, `loki.yml`, `prometheus/` and its rules | mounted from `config/` | the same | the same files, from the chart's copies |
-| `services/llamacpp/router.sh` (the engine key by `LLAMA_API_KEY`), `services/sd-serve.sh`, `services/cpu-temp-exporter` | mounted | the same | the same files, from the chart's copies |
+| `services/llamacpp/router.sh` (the engine key by `LLAMA_API_KEY`), `services/sd-serve.sh`, `services/cpu-temp-exporter`, `services/vllm/` (the key by `VLLM_API_KEY`), `services/gpu-probe.py`, `tools/fake-vllm` | mounted | the same | the same files, from the chart's copies |
 | `promtail.yml`, `traefik/routes.yml` | mounted | the same | no: the cluster's log agent; the Ingress |
 | `services/power-limits.sh` | mounted | no | no |
 | **Secrets** | `.env` | `.env` | the `arena-secrets` Secret, made at install and kept (or `existingSecret`): the same keys |
@@ -376,7 +377,8 @@ how). **no**: missing, with the reason.
 | **Backup and restore** | `scripts/backup.sh` | `scripts/backup.sh --podman` (with `podman.yml`) | no: the cluster's volume snapshots and a `pg_dumpall` |
 | **Install and upgrade** | `installer.sh`, `scripts/upgrade-test.py` | `installer.sh --podman` | `helm install` / `helm upgrade`; the app and Argus migrate as they start; no upgrade test |
 | **Features** | | | |
-| media borrowing the GPU from idle chat models | yes: every server sees every GPU | yes | differs: each pod has its own GPUs, so a picture never needs to borrow; one GPU shared needs the device plugin's time-slicing |
+| media borrowing the GPU from idle chat models | yes: every server sees every GPU | yes | differs: each pod has its own GPUs, so a picture never needs to borrow; one GPU shared needs the device plugin's time-slicing (a vLLM model put to sleep frees its memory only for pods that share its GPU) |
+| AMD GPUs (ROCm) | `rocm.yml`: `/dev/kfd` and `/dev/dri`, ROCm images | `rocm.yml` after `podman.yml` | `gpuResource: amd.com/gpu`, ROCm images, `engines.backend: rocm` |
 | Argus checks agents' API keys with the app | yes | yes | yes |
 | answer cache for API keys, speech and pictures by the app | yes, with fallback to LiteLLM while the app is down | yes | differs: no answer cache; speech and pictures fail while no app pod is ready ([Helm](#helm)) |
 | TLS | Let's Encrypt (`ACME_EMAIL`) or a certificate of your own | the same | a TLS Secret (cert-manager through `ingress.annotations`); no certificate alerts (they read Traefik's metrics) |
