@@ -155,8 +155,8 @@ monitoring:
   lokiSize: 20Gi
   # The host's figures (node-exporter and the CPU's temperature), as compose's: a DaemonSet with the host's
   # processes and its /, /proc and /sys read only, which a namespace with the restricted or baseline Pod
-  # Security level refuses. Off: the host's alerts (TargetDown for node, the disks') fire until the cluster's own
-  # exporters are scraped. On several nodes, a nodeSelector for the GPU node keeps one node's figures.
+  # Security level refuses. Off: TargetDown fires for the node and cpu-temp jobs, and the host's disks, memory and
+  # temperature go unwatched. On several nodes, a nodeSelector for the GPU node keeps one node's figures.
   hostExporters:
     enabled: true
     nodeSelector: {}

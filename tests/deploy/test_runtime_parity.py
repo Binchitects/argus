@@ -270,7 +270,7 @@ class ComposeAndHelmTests(unittest.TestCase):
                     continue
                 files = [p.relative_to(DEPLOY.resolve()) for p in sorted(src.rglob("*")) if p.is_file()] if src.is_dir() else [rel]
                 # A folder of rules or exporters: each file in it that compose's service reads.
-                files = [f for f in files if not f.name.startswith((".", "README"))]
+                files = [f for f in files if not f.name.startswith((".", "README")) and "__pycache__" not in f.parts]
                 for f in files:
                     if f not in copies:
                         problems.append(f"{name}: compose mounts deploy/{f} at {target}; the chart does not carry it "

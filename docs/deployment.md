@@ -309,8 +309,9 @@ Loki only with a log agent of the cluster's (promtail, or another). The host's
 figures come from the `host-exporters` DaemonSet (node-exporter and the CPU's
 temperature, as compose's), which runs with the host's processes and its `/`,
 `/proc` and `/sys` read only: a namespace at the `baseline` or `restricted` Pod
-Security level refuses it, so turn it off there (`monitoring.hostExporters.enabled=false`)
-and point Prometheus at the cluster's own, or the host's alerts fire. On several
+Security level refuses it. Turned off there (`monitoring.hostExporters.enabled=false`),
+`TargetDown` fires for the `node` and `cpu-temp` jobs and the host's disks,
+memory and temperature go unwatched by the stack. On several
 nodes, give it a `nodeSelector` for the GPU node. GPU telemetry and power caps
 are the cluster's. Argus checks coding agents' API keys with the app, as in
 compose; built knowledge packs (**Admin → Packs**) come from a claim of yours
