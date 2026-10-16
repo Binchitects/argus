@@ -384,6 +384,51 @@ how). **no**: missing, with the reason.
 | TLS | Let's Encrypt (`ACME_EMAIL`) or a certificate of your own | the same | a TLS Secret (cert-manager through `ingress.annotations`); no certificate alerts (they read Traefik's metrics) |
 | app replicas | `scale.yml`, `APP_REPLICAS` | the same | `app.replicas` |
 
+## Engines and GPUs
+
+- **llama.cpp** runs on whatever GPUs the machine has (`LLAMACPP_BACKEND`:
+  `cuda`, `rocm`, `vulkan`, `sycl`, `metal`, or `cpu`); the presets name the
+  GPUs for its backend (`CUDA0`, `ROCm0`...).
+- **vLLM** is off until asked for: `COMPOSE_PROFILES=vllm` with `VLLM_IMAGE`
+  set to a vLLM image you have (none is pulled while the profile is off; Docker
+  Hub's is blocked here, see [multi-gpu-server.md](multi-gpu-server.md) §6),
+  `podman.yml` on Podman (CDI), `vllm.enabled` on Kubernetes (one Deployment per
+  `vllm.instances` entry, each with its GPUs and node). Its supervisor
+  (`services/vllm/supervisor.sh`) runs one `vllm serve` per model the app
+  wants, on that model's GPUs, from the app's desired state in the `engine`
+  volume; it says what each does in `vllm-status`. The key goes by
+  `VLLM_API_KEY`, never a command line. Models come from the library's Hugging
+  Face snapshots (Admin → Models → Hugging Face, *snapshot*).
+- **Without a big GPU**, `fake-gpu.yml` (compose and Podman) or `vllm.fake`
+  (Helm) runs the real supervisor over the fake vLLM (`tools/fake-vllm`), on
+  the python image the stack already has, with no GPU.
+- **AMD GPUs**: `rocm.yml` after the compose files (and after `podman.yml` on
+  Podman) gives the engines `/dev/kfd` and `/dev/dri` and ROCm images
+  (`LLAMACPP_ROCM_IMAGE`, `VLLM_IMAGE`, `SDCPP_GPU_IMAGE`: check each exists
+  for your ROCm first); Helm: `gpuResource: amd.com/gpu`, ROCm images,
+  `engines.backend: rocm`. GPUs are read by `services/gpu-probe.py`
+  (`rocm-smi`) into the hardware file the app reads.
+- **The picture server and the embedder** go on any GPU (`MEDIA_GPU`,
+  `EMBED_GPU`; a picture model's own GPU first) or the CPU; the app charges
+  their memory to that GPU only, and lends only that GPU to a job short of
+  room (a vLLM model there sleeps, then wakes).
+- **Several machines**: one `Engine__Vllm__N__Name`/`Host`/`ConfigDir`/`StatusDir`
+  per vLLM machine (its folders on storage both machines see), or a Helm
+  `vllm.instances` entry per node; servers the app does not run are added under
+  Admin → Models → Other GPU servers.
+
+### Supported configurations
+
+| Configuration | Status |
+|---|---|
+| One NVIDIA GPU (this host's RTX 3090), llama.cpp | Live and unchanged |
+| CPU only; several NVIDIA GPUs of mixed sizes; 4 × 96 GB; 8 × 80 GB; AMD 2 × 192 GB | Placement and advice tested with fake machines; needs real hardware to verify |
+| vLLM (CUDA, ROCm), tensor parallel, copies, sleep for media | Tested with the fake vLLM and the real supervisor in a container; needs the hardware and a vLLM image |
+| Vulkan, SYCL, Metal (llama.cpp) | Presets name them; untested on hardware |
+| Docker, Podman, Kubernetes | The same engine services, checked by `tests/deploy/test_runtime_parity.py`, `check-chart.py` and `helm template` |
+
+The full list, with what each needs: [multi-gpu-server.md](multi-gpu-server.md), "Supported configurations".
+
 ## Models
 
 All of them are under **Admin → Models**, with the same controls:

@@ -288,7 +288,7 @@ public sealed class EngineClient(LlamaCppBackend llama, VllmBackends vllm, Exter
             {
                 models.Add(m);
             }
-            if (backend is VllmBackend v && v.Down() is { } why)
+            if (backend is VllmBackend v && v.Presets().Count > 0 && v.Down() is { } why)
             {
                 problems[v.Name] = why;
             }

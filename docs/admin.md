@@ -222,6 +222,22 @@ would be with them.
   the snapshots with their size and whether each is whole (its config, its
   weights, every shard its index names, nothing still downloading); only a
   whole one can be a vLLM model.
+- **vLLM models** (`engineKind: vllm` on `POST /api/admin/models`; the form's
+  fields come with the next step): a snapshot, its GPUs (empty: the ones the
+  advisor proposes for this machine, kept on save), copies (`replicas`, each on
+  its run of the GPUs; a conversation stays on one), its share of each GPU
+  (`gpuMemoryUtilization`, 0.90), quantisation, speculative decoding (`mtp`,
+  or `eagle3` with a draft snapshot), a CPU tier for its cache (`kvCpuGb`),
+  whether it may sleep, and a `fallback` model. **Answers at once** is its
+  `--max-num-seqs` and the cache type its `--kv-cache-dtype` (fp8). A setting
+  its kind does not have is refused, as are GPUs that cannot hold it, a context
+  that does not fit, or a share kept for another model kept loaded there.
+  `POST /api/admin/models/advice` with `engineKind: vllm` shows its fit,
+  cache and recommended context and answers at once. It loads when asked for
+  (a large one takes minutes, and the chat says why it waits), making room only
+  among idle models on its GPUs; it takes none of llama.cpp's places (Models
+  loaded at once). The models list shows each engine (`engine.instances`) and
+  why one is not running.
 - **Load** loads a model now, beside the kept ones (refused when every place is
   kept). At the limit the app makes room for it, as for a request: an idle model
   that may make room unloads first, and is waited for until it has stopped. When

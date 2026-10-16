@@ -497,7 +497,27 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
 
 Commits 1–18 can be built and tested on today's 3090 box: llama.cpp keeps running there, and vLLM is the fake. Commit 19 is the first that needs the new server.
 
+**Progress (2026-10-16):** items 1–10 are done on branch `mgpu/engines`, generalised past this server: any number of GPUs (none included), any vendor, several engine machines, and Docker, Podman and Kubernetes alike (below). Items 11–20 are open; the Admin → Models form (item 11) does not show the vLLM settings yet, though the API takes and checks them.
+
 ---
+
+## Supported configurations
+
+What the code handles, how it was checked, and what still needs the real hardware. **Tested** means automated tests run it
+(fakes where the hardware is missing); **live** means it ran on a real machine.
+
+| Configuration | Status |
+|---|---|
+| One NVIDIA GPU (today's RTX 3090), llama.cpp | Live, unchanged: the same room, presets and lending as before (tested too: `GpuPlanTests`, the model and GPU-sharing suites). |
+| CPU only (`LLAMACPP_BACKEND=cpu`, or a hardware file with no GPU) | Tested with fakes: the advisor places models in RAM, GPUs are refused, vLLM says it needs GPUs. Needs a real CPU-only host to verify speed. |
+| Several NVIDIA GPUs of different sizes, llama.cpp | Tested with fakes (2 mixed, 4 × 96 GB, 8 × 80 GB): placement per GPU, the picture server on its own GPU, presets `CUDA0,…`. Needs real hardware. |
+| AMD GPUs (ROCm), llama.cpp and vLLM | Tested with fakes (2 × 192 GB, `rocm-smi` read by `gpu-probe.py`, presets `ROCm0,…`, compose `rocm.yml`, Helm `gpuResource: amd.com/gpu`). Needs real hardware and the ROCm images (not pulled). |
+| Intel or other GPUs through Vulkan or SYCL, llama.cpp | The presets name them (`Vulkan0`, `SYCL0`); a hardware file with their sizes gives the advisor its figures. Untested on hardware; no probe reads them yet (write the hardware file by hand). vLLM does not run there. |
+| Apple Metal | llama.cpp on the Mac itself, outside containers: add it as another GPU server (an external engine) or point `Engine:Url` at it; presets name `MTL0`. Untested. |
+| vLLM on 1 to 8 or more NVIDIA GPUs, tensor parallel 1/2/4/8, copies | Tested with fakes (the advisor on real model configs, the supervisor with fake-vllm in a container, room per GPU set, sleep for media, the gateway pool). Needs the server and a vLLM image (not pulled). |
+| Several engine machines | vLLM: one `Engine:Vllm` entry per machine (its host, and its folders on storage both see), or one Helm `vllm.instances` entry per node. llama.cpp: the one router (others are external engines). Tested in configuration only. |
+| External OpenAI-compatible servers (another vLLM, SGLang, TGI, Ollama, a cloud) | Registered and health-checked, not managed (Admin → Models → Other GPU servers). Tested with fakes. |
+| Docker Compose, rootless Podman (CDI), Kubernetes (Helm) | The vllm service, its supervisor and status, fake-gpu and AMD mapping in all three; checked by `test_runtime_parity.py`, `docker compose config`, `podman compose config`, `check-chart.py`, `helm template`. |
 
 ## Repo facts this design builds on
 - Multi-GPU support already in the code:

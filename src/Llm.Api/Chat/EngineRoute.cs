@@ -411,6 +411,8 @@ public sealed partial class EngineRoute
     {
         // Real time: the job waits for it, whatever the app's clock says.
         var waited = System.Diagnostics.Stopwatch.StartNew();
+        // Kept models whose sleep was refused: they stay as they are, and are not waited for.
+        var stays = new HashSet<string>(StringComparer.Ordinal);
         while (true)
         {
             IReadOnlyList<EngineModel> models;
@@ -428,7 +430,7 @@ public sealed partial class EngineRoute
             bool OnLent(string name) => gpus is not { Count: > 0 } || !engine.Places.TryGetValue(name, out var p) || p.PerGpu.Count == 0 || p.PerGpu.Keys.Any(gpus.Contains);
             bool Sleeps(string name) => slept is not null && !engine.Counted(name) && engine.Places.ContainsKey(name);
             // Loading ones too: a request let through before the GPU was lent; each makes room once it has loaded and is idle.
-            var spares = models.Where(m => m.Status is "loaded" or "loading" && OnLent(m.Name) && (!kept.Contains(m.Name) || Sleeps(m.Name))).ToList();
+            var spares = models.Where(m => m.Status is "loaded" or "loading" && OnLent(m.Name) && !stays.Contains(m.Name) && (!kept.Contains(m.Name) || Sleeps(m.Name))).ToList();
             if (spares.Count == 0)
             {
                 return;
@@ -463,6 +465,7 @@ public sealed partial class EngineRoute
                     catch (EngineException ex)
                     {
                         LogRoomFailed(logger, spare, ex.Message);
+                        stays.Add(spare);
                         continue;
                     }
                 }
