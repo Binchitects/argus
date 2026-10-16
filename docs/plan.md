@@ -1193,3 +1193,79 @@ under a running job, and a model menu in the chat's tools.
    (Slack, Teams, SAML IdP, Confluence, SharePoint, Helm on a cluster), Code
    Arena's terminals on a real Mac and Windows, Laya's routing quality, deep
    research under six minutes.
+
+## v5.7.0 and v5.8.0 (2026-10-16)
+
+v5.7.0: Code Arena's IDE as VS Code (run and debug, compare, settings and
+keys, formatting, language servers, VS Code extensions, a desktop window).
+v5.8.0: long Code Arena sessions no longer stall, Code Arena and the web chat
+in step by message ids, the GPU shared with picture and video, quoted
+replies, compaction each person chooses, one dialog for every model, the
+three runtimes kept alike.
+
+## Next (after v5.8.0)
+
+**v5.8.x, hotfixes** as the release is used: whatever the team finds, and the
+bump of System.Security.Cryptography.Xml/Pkcs past today's advisory (needs a
+yes: a package download).
+
+**v5.9: code review, rooms and access control** (the person's asks of
+2026-10-16)
+0. Detailed access control per person and group, first, as the rest rests on
+   it: admin roles in place of one admin flag (people, models, credits,
+   auditor, Argus, rooms) and roles of one's own from named permissions;
+   rules per resource (models, tools, MCP servers, plugins, repositories,
+   rooms, reviews, knowledge, features) for people and groups, with deny and
+   a stated precedence; one check every endpoint, Arena MCP, the gateway and
+   Argus go through; Admin → Access with a "can X do Y on Z, and why"
+   checker, bulk changes and an audit of every change; today's admins and
+   group settings carried over as they are.
+1. Merge request review: list a project's MRs (GitLab first, then GitHub,
+   Gitea, any git repository), read the diff, commits, CI and discussions
+   with Argus's read-only access, review with the model (each finding on a
+   line, with its severity and fix, then checked by a second pass that tries
+   to refute it), review again only what a new push added; a branch or a
+   range of commits without an MR.
+2. A review page in Arena: the diff, findings inline, each discussed,
+   resolved or dismissed; posting back to GitLab only with the person's own
+   token.
+3. Rooms: a chat several people share (create, invite, roles, live, who
+   wrote each, mentions), the model asked by any member at their own cost
+   and under their own group's rules; a room per review or MR, and general
+   ones.
+4. The online code assistant: ask about a repository, branch or MR in the
+   browser; explain, find, suggest a patch (a diff to download, an MR with
+   the person's token, or Code Arena to apply it).
+5. Code Arena: /review, a review opened locally, suggestions applied; Arena
+   MCP tools to list and review MRs; notifications; scheduled reviews.
+6. Code Arena's chat with every capability of the web chat (the parity
+   design), as far as it is done.
+
+**v5.10: any hardware, any engine, any runtime** (branch mgpu/engines)
+1. Placement for any machine (CPU only to 8 GPUs, NVIDIA, AMD, Vulkan,
+   Metal), vLLM beside llama.cpp, external servers (SGLang, Ollama, a cloud),
+   several copies of a model, fallbacks, sleep instead of unload for media.
+2. The admin's engine settings and per-GPU bars; the KV cache tiers (vLLM's
+   CPU offload, then LMCache).
+3. Docker Compose, Podman and Kubernetes alike for all of it.
+4. Needs a yes: the vLLM image (NGC or built), AMD images. Needs the real
+   server: the bring-up check, a smoke test per model, the numbers.
+
+**v5.11: durable at scale**
+1. A fair queue for API keys (429 with Retry-After) and the engine's
+   priorities; LiteLLM as several replicas with Valkey; answers that survive
+   an app replica's restart.
+2. Postgres point-in-time recovery (pgBackRest; CloudNativePG on
+   Kubernetes) with a monthly restore drill.
+3. DCGM and vLLM metrics, alerts; load tests at 50, 100 and 300 people.
+4. Needs a yes: Valkey, pgBackRest.
+
+**v5.12: Argus at run time and on the real estate** (carried from after
+v5.6.0): service names to hosts, gRPC, topics and queues, HTTP routes,
+OpenAPI, shared databases, Backstage and Pact as declared links; the
+remaining precision work; `argus graph-eval` on the company's repositories;
+what each repository is for.
+
+**Later**: Code Arena's sandbox on Windows; real platforms (Slack, Teams,
+SAML, Confluence, SharePoint, Helm on a cluster); Laya's routing quality;
+deep research under six minutes; a model menu in the chat's tools.
