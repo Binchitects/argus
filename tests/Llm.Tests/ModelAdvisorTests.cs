@@ -21,7 +21,7 @@ public sealed class ModelAdvisorTests : IDisposable
     }
 
     /// <summary>A GPU with <paramref name="forModels"/> free for models after llama.cpp's own margin; RAM likewise.</summary>
-    private static Hardware Machine(long forModels, long ram = 64 * GiB) => new("Test GPU", 1, forModels + Hardware.FitMargin, 0, 0, ram, 0);
+    private static Hardware Machine(long forModels, long ram = 64 * GiB) => new("Test GPU", 1, forModels + Hardware.FitMargin, 0, ram, 0);
 
     [Fact]
     public void A_mixture_of_experts_too_big_for_the_gpu_keeps_experts_in_ram_and_its_layers_on_the_gpu()
@@ -51,13 +51,13 @@ public sealed class ModelAdvisorTests : IDisposable
         Assert.Equal(1024, tight.Recommended.Ubatch);
     }
 
-    /// <summary>Two GPUs of <paramref name="each"/> for models (the first also runs the image server's <paramref name="image"/>).</summary>
+    /// <summary>Two GPUs of <paramref name="each"/> for models (the first also runs the picture server's <paramref name="image"/>).</summary>
     private static Hardware TwoGpus(long each, long image = 0, long ram = 64 * GiB) =>
-        new("GPU A", 2, 2 * (each + Hardware.FitMargin) + image, 0, image, ram, 0,
-            Devices: [new GpuDevice(0, "GPU A", each + Hardware.FitMargin + image, 0), new GpuDevice(1, "GPU B", each + Hardware.FitMargin, 0)]);
+        new("GPU A", 2, 2 * (each + Hardware.FitMargin) + image, 0, ram, 0,
+            Devices: [new GpuDevice(0, "GPU A", each + Hardware.FitMargin + image, 0), new GpuDevice(1, "GPU B", each + Hardware.FitMargin, 0)], Reserves: image > 0 ? [new GpuReserve(0, "the picture server", image)] : null);
 
     [Fact]
-    public void A_model_on_some_gpus_sees_only_those_and_the_image_server_only_on_the_first()
+    public void A_model_on_some_gpus_sees_only_those_and_the_picture_server_only_on_its_own()
     {
         var hw = TwoGpus(10 * GiB, image: 2 * GiB);
         Assert.Equal(20 * GiB, hw.GpuForModels);
@@ -65,7 +65,7 @@ public sealed class ModelAdvisorTests : IDisposable
         Assert.Equal(1, second.Gpus);
         Assert.Equal("GPU B", second.GpuName);
         Assert.Equal(10 * GiB, second.GpuForModels);
-        Assert.Equal(0, second.ImageReserve);
+        Assert.Equal(0, second.ReservedForOthers);
         Assert.Equal(10 * GiB, hw.On([0]).GpuForModels);
         Assert.Same(hw, hw.On(null));
         Assert.Equal([0, 1], Hardware.ParseDevices(" 1, 0,1"));
@@ -101,7 +101,7 @@ public sealed class ModelAdvisorTests : IDisposable
         Assert.InRange(split.Gpus[0].Need, split.Gpus[1].Need - MiB, split.Gpus[1].Need + MiB);
 
         // Caches and buffers that cannot fit the GPUs and RAM together: one would not load.
-        var tiny = new Hardware("small", 1, Hardware.FitMargin + (16 * MiB), 0, 0, 16 * MiB, 0);
+        var tiny = new Hardware("small", 1, Hardware.FitMargin + (16 * MiB), 0, 16 * MiB, 0);
         Assert.NotNull(ModelAdvisor.PlanKept([(On("h1", null), model), (On("h2", null), model)], all, tiny).FirstError);
 
         // A model whose file is outside the library is said, not guessed.

@@ -424,6 +424,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
    - Replace `Hardware.ImageReserve` (the GPU-0 assumption) with `GpuPlan`: everything resident per GPU (llama.cpp `Devices`, media `gpu`, embedder, future vLLM groups).
    - `KeptPlan` / `GpuUse` derive from it.
    - Tests: a fake 4 × 96 GB `Hardware`; layouts A, B and C validate, and over-commit is refused.
+   - **Done**, vendor-neutral: `Models/GpuPlan.cs`; `GpuDevice` has a vendor, a backend and free memory; `Hardware.Reserves` puts the picture server on its own GPU (its model's, else `MEDIA_GPU`, else the first) and the embedder on `EMBED_GPU`; `HardwareProbe` reads Prometheus, else the hardware file `deploy/services/gpu-probe.py` writes (`nvidia-smi`, `rocm-smi`, or none), and `LLAMACPP_BACKEND=cpu` is a machine without GPUs; llama.cpp's presets name GPUs for its backend (`CUDA0`, `ROCm0`, `Vulkan0`, `SYCL0`, `MTL0`). Tests: `GpuPlanTests` over six fake machines (`FakeHardware`: CPU only, 1 × 24 GB, 2 mixed NVIDIA, 4 × 96 GB, 8 × 80 GB, AMD 2 × 192 GB), `tests/deploy/test_gpu_probe.py`.
 3. **`EngineKind` on `LocalModel`** (EF migration; per your preference, no compatibility shim).
    - `ModelCatalog` writes `models.ini` only for llamacpp models. The other fields are listed in §3.3.
    - Tests: the catalog output for llama.cpp is unchanged.

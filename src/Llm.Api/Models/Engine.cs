@@ -31,8 +31,27 @@ public sealed class EngineOptions
     public string EngineLibraryDir { get; set; } = "/library";
     /// <summary>CPU threads for every model; null: llama.cpp's own choice.</summary>
     public int? Threads { get; set; }
-    /// <summary>GPU memory the picture server may take beside the engine (its --max-vram).</summary>
+    /// <summary>GPU memory the picture server may take beside the engine (its --max-vram), on the GPU it runs on.</summary>
     public long ImageReserveBytes { get; set; } = 2L << 30;
+    /// <summary>
+    /// The GPU the picture server runs on when its model names none (MEDIA_GPU); null: the first GPU. A picture model's own
+    /// GPU (Admin → Models) goes before it.
+    /// </summary>
+    public int? MediaGpu { get; set; }
+    /// <summary>The GPU the embedder runs on (EMBED_GPU); null: the CPU, where it keeps nothing on a GPU.</summary>
+    public int? EmbedGpu { get; set; }
+    /// <summary>What the embedder keeps on its GPU when it runs on one.</summary>
+    public long EmbedReserveBytes { get; set; } = 1L << 30;
+    /// <summary>
+    /// The backend llama.cpp's image drives the GPUs with (LLAMACPP_BACKEND): cuda, rocm, vulkan, sycl, metal, or cpu.
+    /// It names the GPUs in the presets (CUDA0, ROCm0, Vulkan0...); with cpu, the machine has no GPU for the models.
+    /// </summary>
+    public string Backend { get; set; } = "cuda";
+    /// <summary>
+    /// Where an engine on the GPUs says what they are (services/gpu-probe.py: nvidia-smi, rocm-smi, or nothing), read
+    /// when Prometheus has no GPU figures: a machine with AMD GPUs, or without a GPU exporter.
+    /// </summary>
+    public string HardwareFile { get; set; } = "/media-status/hardware.json";
     /// <summary>RAM kept for everything but the engine.</summary>
     public long RamReserveBytes { get; set; } = 8L << 30;
     /// <summary>The picture model's folder in the library: its text encoder there is no chat model.</summary>

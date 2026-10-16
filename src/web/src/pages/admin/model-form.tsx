@@ -74,12 +74,13 @@ interface Advice {
     gpuName: string | null
     gpus: number
     gpuTotal: number
-    imageReserve: number
+    /** What the servers beside the chat models keep on each GPU (the picture server, the embedder). */
+    reserves?: { gpu: number; name: string; bytes: number }[] | null
     ramTotal: number
     gpuForModels: number
     ramForModels: number
-    /** Each GPU the model may use, by nvidia-smi's index. */
-    devices?: { index: number; name: string; total: number; reserved: number }[] | null
+    /** Each GPU the model may use, by its index as its vendor's tool numbers it. */
+    devices?: { index: number; name: string; total: number; reserved: number; vendor?: string; backend?: string }[] | null
   } | null
 }
 

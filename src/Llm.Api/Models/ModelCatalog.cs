@@ -497,8 +497,9 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// The GPU memory a picture model kept loaded takes beside the chat models, and its GPU (null: the first): a model that
     /// fits itself to the GPU leaves it free there.
     /// </param>
+    /// <param name="backend">The backend llama.cpp drives the GPUs with (Engine:Backend): it names them (CUDA0, ROCm0, Vulkan0...).</param>
     public static string Preset(LocalModel m, string library, int? threads = null, ModelProfile? profile = null, int? sessionCacheGb = null,
-        (int? Gpu, int Mb)? pictureRoom = null)
+        (int? Gpu, int Mb)? pictureRoom = null, string? backend = null)
     {
         var own = ExtraValues(m.ExtraPreset);
         var sb = new StringBuilder();
@@ -535,10 +536,10 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
                 sb.Append("fit-target = ").Append(target).Append('\n');
             }
         }
-        if (Hardware.ParseDevices(m.Devices) is { Count: > 0 } devices)
+        if (Hardware.ParseDevices(m.Devices) is { Count: > 0 } devices && Hardware.DevicePrefix(backend) is { } prefix)
         {
-            // CUDA numbers GPUs as nvidia-smi does: the engine runs with CUDA_DEVICE_ORDER=PCI_BUS_ID.
-            sb.Append("device = ").Append(string.Join(',', devices.Select(d => "CUDA" + d.ToString(inv)))).Append('\n');
+            // CUDA numbers GPUs as nvidia-smi does (the engine runs with CUDA_DEVICE_ORDER=PCI_BUS_ID), ROCm as rocm-smi does.
+            sb.Append("device = ").Append(string.Join(',', devices.Select(d => prefix + d.ToString(inv)))).Append('\n');
         }
         if (threads is > 0)
         {
@@ -675,11 +676,11 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             && await db.MediaModels.AsNoTracking().Where(x => x.Kept && x.Mode == MediaModes.Image).OrderBy(x => x.Name).FirstOrDefaultAsync(ct) is { } picture
             && GpuShare.NeedMb(picture) is { } need)
         {
-            pictureRoom = (picture.Gpu, need);
+            pictureRoom = (picture.Gpu ?? options.Value.MediaGpu, need);
         }
         var text = "# Written by the app (Admin -> Models). The engine restarts when this changes.\n\n" +
             string.Join("\n", models.Select(m => Preset(m, options.Value.EngineLibraryDir, options.Value.Threads, profiles.GetValueOrDefault(m.File), options.Value.SessionCacheGb,
-                pictureRoom)));
+                pictureRoom, options.Value.Backend)));
         Write(PresetsFile, text);
     }
 

@@ -165,7 +165,7 @@ public static class ModelEndpoints
                 loaded = now.Models.Where(m => m.Status == "loaded").Select(m => m.Name),
                 loading = now.Models.Where(m => m.Status == "loading").Select(m => m.Name),
                 unloading = now.Models.Where(m => m.Status == "unloading").Select(m => m.Name),
-                gpus = hw?.Devices?.Select(g => new { g.Index, g.Name, g.Total }) ?? [],
+                gpus = hw?.Devices?.Select(g => new { g.Index, g.Name, g.Total, g.Vendor, g.Backend }) ?? [],
                 plan = e.Enabled ? Plan(kept, local, e, library, hw) : null,
             },
             // The model for sub-agents and small steps (Settings → Model), and what keeps it from doing them well.
@@ -559,6 +559,10 @@ public static class ModelEndpoints
         if (body.Devices is { Length: > 0 } devices)
         {
             var chosen = Hardware.ParseDevices(devices);
+            if (hardware is { Gpus: 0 })
+            {
+                return (AuthEndpoints.Problem(400, "devices", "This machine's engine has no GPU: its models run on the CPU, so leave the GPUs empty."), null);
+            }
             if (chosen is null || (hardware?.Devices is { Count: > 0 } known && chosen.Any(i => known.All(g => g.Index != i))))
             {
                 var have = hardware?.Devices is { Count: > 0 } k ? string.Join(", ", k.Select(g => g.Index)) : "0";

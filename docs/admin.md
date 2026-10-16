@@ -280,9 +280,16 @@ would be with them.
   vocabulary); a vision projector only one made for its width; thinking and
   tools only when its chat template has them. The API runs the same checks on
   save.
-- **It starts from what fits this machine.** The GPU memory and RAM come from
-  Prometheus (the `smi` profile's exporter), less what the image server may take
-  (`IMAGEGEN_MAX_VRAM`) and the 1 GiB llama.cpp keeps free. The form estimates
+- **It starts from what fits this machine**, whatever it has: no GPU, one, or
+  several of any size and vendor. The GPU memory and RAM come from Prometheus
+  (the NVIDIA exporter), else from the hardware file an engine writes
+  (`services/gpu-probe.py`: `nvidia-smi` or `rocm-smi`); with `LLAMACPP_BACKEND=cpu`
+  the models have no GPU and run from RAM. Each GPU's room is its memory less
+  what the servers beside the chat models keep **on that GPU** (the picture
+  server, `IMAGEGEN_MAX_VRAM`, on its model's GPU, else `MEDIA_GPU`, else the
+  first; the embedder on `EMBED_GPU` when it has one) and the 1 GiB llama.cpp
+  keeps free. The GPUs a model runs on are named for llama.cpp's backend
+  (`CUDA0`, `ROCm0`, `Vulkan0`, `SYCL0`, `MTL0`). The form estimates
   weights, cache and buffers as it is filled in (within 1% of llama.cpp's own
   estimate for dense and hybrid models, measured), and recommends the largest
   context that keeps the model on the GPU (a mixture of experts: its experts in
