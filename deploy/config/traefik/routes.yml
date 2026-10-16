@@ -2,6 +2,7 @@
 {{ $domain := env "DOMAIN" }}
 {{ $acme := env "ACME_EMAIL" }}
 {{ $replicas := atoi (env "APP_REPLICAS") }}
+{{ $project := env "COMPOSE_PROJECT_NAME" | default "arena" }}
 http:
   routers:
     # The web on the bare domain, except the app's paths (/mcp: Arena MCP, each person's tools for their agents).
@@ -56,7 +57,7 @@ http:
         healthCheck: { path: /healthz, interval: 10s, timeout: 3s }
         servers:
 {{ range $i := until $replicas }}
-          - url: "http://arena-app-{{ add1 $i }}:8080"
+          - url: "http://{{ $project }}-app-{{ add1 $i }}:8080"
 {{ end }}
 {{ else }}
     app: { loadBalancer: { servers: [{ url: "http://app:8080" }] } }

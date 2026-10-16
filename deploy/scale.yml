@@ -9,7 +9,7 @@
 
 services:
   app:
-    # The replicas are arena-app-1, arena-app-2, ...: one container name cannot be shared.
+    # The replicas are arena-app-1, arena-app-2, ... (PROJECT-app-N): one container name cannot be shared.
     container_name: !reset null
     deploy: { replicas: "${APP_REPLICAS:-2}" }
 
@@ -17,3 +17,5 @@ services:
     # config/traefik/routes.yml lists the replicas and turns the sticky cookie on.
     environment:
       APP_REPLICAS: "${APP_REPLICAS:-2}"
+      # The replicas' names begin with the project's (installer.sh's may not be arena).
+      COMPOSE_PROJECT_NAME: "${COMPOSE_PROJECT_NAME}"
