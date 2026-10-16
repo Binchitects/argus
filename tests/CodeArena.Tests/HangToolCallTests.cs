@@ -108,6 +108,28 @@ public sealed class HangToolCallTests : IDisposable
     }
 
     [Fact]
+    public async Task A_media_folder_that_is_a_link_elsewhere_is_not_written_through()
+    {
+        var elsewhere = Directory.CreateTempSubdirectory("arena-elsewhere-").FullName;
+        try
+        {
+            Directory.CreateSymbolicLink(Path.Combine(_work, ".code-arena"), elsewhere);
+            _mcp.CallContent = new JsonArray(new JsonObject { ["type"] = "image", ["data"] = Convert.ToBase64String([1, 2, 3]), ["mimeType"] = "image/png" });
+            await using var client = await ConnectAsync();
+
+            var result = await client.CallAsync("generate_image", [], CancellationToken.None, media: McpMedia.For(_work));
+
+            Assert.Empty(result.Saved);
+            Assert.Contains("not saved:", result.Text);
+            Assert.Empty(Directory.EnumerateFileSystemEntries(elsewhere));
+        }
+        finally
+        {
+            Directory.Delete(elsewhere, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task The_IDE_serves_a_picture_as_it_is_and_nothing_that_could_run()
     {
         using var gateway = new FakeGateway();

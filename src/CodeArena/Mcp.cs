@@ -77,6 +77,14 @@ internal sealed record McpMedia(string Folder, string Shown)
     /// </summary>
     public string Save(string tool, string extension, byte[] bytes, DateTime now)
     {
+        // A link in the project's own files (.code-arena, or media, leading elsewhere) is not followed: nothing is written outside.
+        for (var dir = Folder; dir.Length > 0 && Path.GetFileName(dir) is "media" or ".code-arena"; dir = Path.GetDirectoryName(dir) ?? "")
+        {
+            if (new DirectoryInfo(dir) is { Exists: true, LinkTarget: not null } || File.Exists(dir))
+            {
+                throw new IOException($"{dir} is a link or a file, not a folder: nothing is saved through it.");
+            }
+        }
         if (!Directory.Exists(Folder))
         {
             Directory.CreateDirectory(Folder);
@@ -264,10 +272,17 @@ internal sealed class McpClient : IAsyncDisposable
             var mime = item.Str("mimeType");
             if (type is "image" or "audio" && media is not null && McpMedia.Extension(mime) is { } extension && Decode(item.Str("data")) is { } data)
             {
-                var path = media.Save(tool, extension, data, DateTime.Now);
-                saved.Add(path);
-                inline.Add(mime ?? "");
-                parts.Add($"[{type} saved as {path} ({mime}, {Size(data.Length)})]");
+                try
+                {
+                    var path = media.Save(tool, extension, data, DateTime.Now);
+                    saved.Add(path);
+                    inline.Add(mime ?? "");
+                    parts.Add($"[{type} saved as {path} ({mime}, {Size(data.Length)})]");
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    parts.Add($"[{type}: {mime}, {Size(data.Length)}, not saved: {Fmt.OneLine(e.Message, 160)}]");
+                }
                 continue;
             }
             if (type == "resource_link" && media is not null && McpMedia.Extension(mime) is { } linked)
