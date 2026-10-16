@@ -7,6 +7,7 @@ import { useEditor } from './editor-state'
 import { isUserFile } from './editor-options'
 import { formatterOf } from './format'
 import { formattersQuery } from './ide-api'
+import { LanguageServerStatus } from './lsp/status'
 import { quickPick } from './quick-pick'
 import { useSetting } from './settings'
 
@@ -21,8 +22,9 @@ function Item({ className, ...props }: ComponentProps<'button'>) {
 }
 
 /**
- * The file shown's indentation, line endings and language in the status bar, each a choice as in VS Code: indent with
- * spaces or tabs (or detect it, or convert the file), LF or CRLF, another language (or its settings).
+ * The file shown's indentation, line endings, formatter, language server and language in the status bar, each a choice
+ * as in VS Code: indent with spaces or tabs (or detect it, or convert the file), LF or CRLF, another formatter, the
+ * language server's restart and log, another language (or its settings).
  */
 export function LanguageStatus() {
   const ed = useEditor()
@@ -98,6 +100,7 @@ export function LanguageStatus() {
           <Braces className="size-3.5" aria-hidden="true" /> {formatter.name}
         </Item>
       )}
+      <LanguageServerStatus />
       {active.language && (
         <Item onClick={() => runCommand('workbench.action.editor.changeLanguageMode')} title="Select language mode" aria-label={`Language ${active.language}: change it`} className="hidden sm:flex">
           {active.language}

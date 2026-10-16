@@ -1,5 +1,5 @@
 import { Check, Copy, FileDiff as FileDiffIcon, FileSymlink, ShieldQuestion, Square } from 'lucide-react'
-import { useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -7,11 +7,15 @@ import { formatValue, money } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { answerUsage, seconds, toolTitle } from '@/pages/chat/format'
 import { refLabel, useFileRefs, type FileRef } from '@/pages/chat/file-refs'
+import { ImageViewer } from '@/pages/chat/image-viewer'
 import type { Notice, ToolRunning } from '@/pages/chat/live'
 import { Markdown } from '@/pages/chat/markdown'
+import { MediaPlayer } from '@/pages/chat/media'
 import { NoticeLine, Thinking, ToolCard } from '@/pages/chat/parts'
 import type { ChatConfig, Message } from '@/pages/chat/types'
 import type { FileDiff } from './api'
+import { rawFileUrl } from './ide-api'
+import { mediaNamed } from './media'
 
 /** The first line an edit changed, in the file as it is now; null: not known (an edit of a session read back). */
 const firstChanged = (diff: FileDiff) => diff.lines.find(([op, , b]) => op === '+' && b > 0)?.[2] ?? diff.lines.find(([, , b]) => b > 0)?.[2] ?? null
@@ -153,6 +157,48 @@ function OpenFile({ name, args, diff, said }: { name: string; args: string; diff
   )
 }
 
+/**
+ * The pictures, sounds and videos a tool made in the folder (Arena's tools keep them under .code-arena/media/ and say
+ * where): shown and played under its card, as Arena's chat shows the media its tools make.
+ */
+function MadeMedia({ said }: { said: string }) {
+  const found = useMemo(() => mediaNamed(said), [said])
+  const [viewing, setViewing] = useState<number | null>(null)
+  const pictures = found.filter((m) => m.kind === 'image')
+  const played = found.filter((m) => m.kind !== 'image')
+  return (
+    <>
+      {pictures.length > 0 && (
+        <ul className="mt-2 flex flex-wrap gap-2" aria-label="Pictures">
+          {pictures.map((p, i) => (
+            <li key={p.id}>
+              <button
+                type="button"
+                onClick={() => setViewing(i)}
+                className="block cursor-zoom-in overflow-hidden rounded-xl border outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
+                aria-label={`View ${p.fileName}`}
+                title={p.id}
+              >
+                <img src={rawFileUrl(p.id)} alt={p.fileName} className="max-h-96 w-auto max-w-full object-contain" loading="lazy" />
+              </button>
+            </li>
+          ))}
+          <ImageViewer images={pictures.map((p) => ({ key: p.id, src: rawFileUrl(p.id), name: p.fileName, detail: p.id, download: { href: rawFileUrl(p.id), name: p.fileName } }))} index={viewing} onIndex={setViewing} />
+        </ul>
+      )}
+      {played.length > 0 && (
+        <ul className="mt-2 flex flex-wrap gap-2" aria-label="Sound and video">
+          {played.map((f) => (
+            <li key={f.id}>
+              <MediaPlayer a={f} src={rawFileUrl(f.id)} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  )
+}
+
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [done, setDone] = useState(false)
   return (
@@ -174,24 +220,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   )
 }
 
-/**
- * Everything that answered a message: thinking, text, tool cards with their
- * diffs and questions, and a line with the model, time and tokens (the share
- * read from the cache with them), as Arena's chat shows an answer.
- */
-export function CodeAnswer({
-  answer,
-  live,
-  thinkingSince,
-  notices,
-  config,
-  waiting,
-  always,
-  risks,
-  calls,
-  diffs,
-  onDecide,
-}: {
+interface AnswerProps {
   answer: Message[]
   live: boolean
   thinkingSince: number | null
@@ -205,7 +234,26 @@ export function CodeAnswer({
   calls?: Record<string, ToolRunning>
   diffs: Record<string, FileDiff>
   onDecide: (callId: string, answer: 'allow' | 'always' | 'deny') => void
-}) {
+}
+
+/**
+ * Whether an answer draws as it did: the same message objects, and the same of what it shows of the rest (its edits'
+ * diffs; the questions, probabilities and progress of calls only while it is live). A finished turn of a long thread
+ * is then not drawn again while another streams.
+ */
+function sameAnswer(a: AnswerProps, b: AnswerProps): boolean {
+  if (a.live !== b.live || a.thinkingSince !== b.thinkingSince || a.notices !== b.notices || a.config !== b.config || a.onDecide !== b.onDecide) return false
+  if (a.answer.length !== b.answer.length || a.answer.some((m, i) => m !== b.answer[i])) return false
+  if (b.live && (a.waiting !== b.waiting || a.always !== b.always || a.risks !== b.risks || a.calls !== b.calls)) return false
+  return b.answer.every((m) => m.role !== 'tool' || a.diffs[m.id] === b.diffs[m.id])
+}
+
+/**
+ * Everything that answered a message: thinking, text, tool cards with their
+ * diffs and questions, and a line with the model, time and tokens (the share
+ * read from the cache with them), as Arena's chat shows an answer.
+ */
+export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince, notices, config, waiting, always, risks, calls, diffs, onDecide }: AnswerProps) {
   const results = new Map(answer.filter((m) => m.role === 'tool').map((m) => [m.toolCallId, m]))
   const assistants = answer.filter((m) => m.role === 'assistant')
   const text = assistants.map((a) => a.content).filter(Boolean).join('\n\n')
@@ -244,6 +292,7 @@ export function CodeAnswer({
                 <div key={t.id}>
                   <ToolCard call={t} result={result} live={live} waiting={asking} progress={calls?.[t.id]} />
                   {result && result.status === 'complete' && !result.error && <OpenFile name={t.function.name} args={t.function.arguments} diff={diff} said={result.content} />}
+                  {result && result.status === 'complete' && <MadeMedia said={result.content} />}
                   {diff && <DiffView diff={diff} />}
                   {asking && <Approval name={t.function.name} always={always[t.id]} risk={risks?.[t.id]} onDecide={(answer) => onDecide(t.id, answer)} />}
                 </div>
@@ -279,4 +328,4 @@ export function CodeAnswer({
       )}
     </section>
   )
-}
+}, sameAnswer)

@@ -47,7 +47,7 @@ public sealed class AgentTests : IDisposable
     }
 
     [Fact]
-    public async Task An_Arena_tool_marked_as_changing_things_asks_first_and_is_left_out_of_plan_mode()
+    public async Task An_Arena_tool_marked_as_changing_things_asks_first_and_is_refused_in_plan_mode()
     {
         using var h = new Harness(_gateway, _mcp);
         _gateway.Answer = req => FakeGateway.HasToolResults(req) ? Reply.Say("Result: " + FakeGateway.Last(req)) : Reply.Call(("create_issue", """{"title":"x"}"""));
@@ -56,10 +56,13 @@ public sealed class AgentTests : IDisposable
         Assert.Contains("Result: The person declined", h.Out);
         Assert.DoesNotContain(_mcp.Calls, c => c.Method == "tools/call");
 
+        // Offered in plan mode too (the requests' start stays the same), and refused when called.
         Assert.Equal(0, await h.Run("", "-p", "plan it", "--mode", "plan"));
         var tools = FakeGateway.ToolNames(_gateway.Requests.Last());
         Assert.Contains("web_search", tools);
-        Assert.DoesNotContain("create_issue", tools);
+        Assert.Contains("create_issue", tools);
+        Assert.Contains("Result: Plan mode is read-only: create_issue is not allowed.", h.Out);
+        Assert.DoesNotContain(_mcp.Calls, c => c.Method == "tools/call");
     }
 
     [Fact]
@@ -268,13 +271,15 @@ public sealed class AgentTests : IDisposable
         }
 
         Assert.Equal(0, await h.Run("", "-p", "second question", "--continue"));
-        var messages = _gateway.Requests[1]["messages"]!.AsArray().Skip(1).Select(m => $"{m!["role"]}: {m["content"]}").ToList();
-        Assert.Equal(["user: first question", "assistant: answer 2", "user: second question"], messages);
+        // Code Arena's notes (the mode, the date) aside: they are not part of the history kept.
+        var messages = _gateway.Requests[1]["messages"]!.AsArray().Skip(1).Where(m => !m!["content"]!.GetValue<string>().StartsWith(SystemPrompt.NoteHead, StringComparison.Ordinal))
+            .Select(m => $"{m!["role"]}: {m["content"]}").ToList();
+        Assert.Equal(["user: first question", "assistant: answer 3", "user: second question"], messages);
         Assert.Single(Directory.GetFiles(h.Paths.SessionsDir));
 
         var id = Path.GetFileNameWithoutExtension(file);
         Assert.Equal(0, await h.Run("", "-p", "third", "--resume", id));
-        Assert.Equal(6, _gateway.Requests[2]["messages"]!.AsArray().Count);
+        Assert.Equal(6, _gateway.Requests[2]["messages"]!.AsArray().Count(m => !m!["content"]!.GetValue<string>().StartsWith(SystemPrompt.NoteHead, StringComparison.Ordinal)));
         Assert.Equal(1, await h.Run("", "-p", "x", "--resume", "20000101-000000"));
         Assert.Contains("No saved session", h.Err);
     }
@@ -314,20 +319,26 @@ public sealed class AgentTests : IDisposable
     [Fact]
     public async Task Near_the_window_the_older_history_is_summarized_and_the_recent_turn_kept()
     {
-        _gateway.Context = 3000;
-        using var h = new Harness(_gateway, _mcp);
-        bool Summarizing(JsonObject req) => FakeGateway.System(req).StartsWith("You summarize", StringComparison.Ordinal);
-        _gateway.Answer = req => Summarizing(req) ? Reply.Say("SUMMARY: the person asked about turns 1 to 3.") : Reply.Say(new string('x', 2500));
-        Assert.Equal(0, await h.Run("", "-p", "turn 1 " + new string('a', 2500)));
-        Assert.Equal(0, await h.Run("", "-p", "turn 2 " + new string('b', 2500), "-c"));
-        Assert.Equal(0, await h.Run("", "-p", "turn 3 " + new string('c', 2500), "-c"));
+        // A window the system prompt and the tools do not fill (compacting early): the summary is asked with them, as the
+        // conversation goes on.
+        _gateway.Context = 40_000;
+        using var h = new Harness(_gateway, _mcp, c => c["compactAt"] = 30);
+        _gateway.Answer = req => FakeGateway.Summarizing(req) ? Reply.Say("SUMMARY: the person asked about turns 1 to 3.") : Reply.Say(new string('x', 8000));
+        Assert.Equal(0, await h.Run("", "-p", "turn 1 " + new string('a', 8000)));
+        Assert.Equal(0, await h.Run("", "-p", "turn 2 " + new string('b', 8000), "-c"));
+        Assert.Equal(0, await h.Run("", "-p", "turn 3 " + new string('c', 8000), "-c"));
         Assert.Equal(0, await h.Run("", "-p", "turn 4", "-c"));
 
-        var summaries = _gateway.Requests.Where(Summarizing).ToList();
+        // The summary is asked as the conversation goes on (its start cached): the same system prompt and tools, the older
+        // messages, then the request for a summary; the recent turn is not in it.
+        var summaries = _gateway.Requests.Where(FakeGateway.Summarizing).ToList();
         Assert.NotEmpty(summaries);
-        Assert.Null(summaries[0]["tools"]);
-        Assert.Contains("PERSON: turn 1 aaa", FakeGateway.Last(summaries[0]));
-        Assert.DoesNotContain("turn 2", FakeGateway.Last(summaries[0]));
+        var asked = summaries[0]["messages"]!.AsArray();
+        var before = _gateway.Requests[_gateway.Requests.IndexOf(summaries[0]) - 1];
+        Assert.Equal(FakeGateway.SystemOnly(before), asked[0]!["content"]!.GetValue<string>());
+        Assert.Equal(FakeGateway.ToolNames(before), FakeGateway.ToolNames(summaries[0]));
+        Assert.Contains(asked, m => m!["content"]!.GetValue<string>().StartsWith("turn 1 aaa", StringComparison.Ordinal));
+        Assert.DoesNotContain(asked, m => m!["content"]!.GetValue<string>().StartsWith("turn 4", StringComparison.Ordinal));
         var last = _gateway.Requests.Last();
         var messages = last["messages"]!.AsArray();
         Assert.StartsWith("[The conversation so far, summarized", messages[1]!["content"]!.GetValue<string>());

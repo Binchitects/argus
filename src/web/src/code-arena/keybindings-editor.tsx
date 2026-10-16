@@ -15,7 +15,7 @@ import { useEditor } from './editor-state'
 import { userFileQuery, writeUserFile } from './ide-api'
 import { appendElement, parse, removeElement, setProperty } from './jsonc'
 import { keymap, useKeymap } from './keyboard'
-import { chordOf, chordText, isRemoval, keysLabel, parseWhen, sameChord, type Chord, type Rule } from './keys'
+import { browserKeeps, chordOf, chordText, isRemoval, keysLabel, parseWhen, sameChord, type Chord, type Rule } from './keys'
 import { inputBox } from './quick-pick'
 
 /** A row of the table: a command with one of its keys (or none). */
@@ -25,12 +25,8 @@ interface Row {
   rule: Rule | null
 }
 
-/** Keys the browser keeps for itself in a tab: a rule of one of them works only in an app window. */
-const browserKeeps = (chords: Chord[]) => {
-  const c = chords[0]!
-  const mod = c.ctrl || c.meta
-  return chords.length === 1 && mod && !c.alt && (['w', 't', 'n', 'tab'].includes(c.key) || (c.shift && ['t', 'n'].includes(c.key)) || ['pageup', 'pagedown'].includes(c.key))
-}
+/** Whose rule a row's is, as the Source column says it: Monaco's own keys are defaults too. */
+const sourceLabel: Record<Rule['source'], string> = { default: 'Default', editor: 'Default', user: 'User', extension: 'Extension' }
 
 /**
  * The Keyboard Shortcuts editor (Ctrl+K Ctrl+S), as VS Code's: every command with its keys, when they apply and whose
@@ -62,7 +58,7 @@ export default function KeybindingsEditor() {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
   const shown = rows.filter((row) => {
     if (recording && recorded.length > 0) return !!row.rule && recorded.every((c, i) => row.rule!.chords[i] && sameChord(row.rule!.chords[i]!, c))
-    const text = `${row.title} ${row.command} ${row.rule ? keysLabel(row.rule.chords) : ''} ${row.rule?.whenText ?? ''} ${row.rule?.source ?? ''}`.toLowerCase()
+    const text = `${row.title} ${row.command} ${row.rule ? keysLabel(row.rule.chords) : ''} ${row.rule?.whenText ?? ''} ${row.rule ? sourceLabel[row.rule.source] : ''}`.toLowerCase()
     return words.every((w) => text.includes(w))
   })
 
@@ -203,7 +199,7 @@ export default function KeybindingsEditor() {
                   {row.rule && browserKeeps(row.rule.chords) && <span className="ml-1 text-xs text-muted-foreground">(the browser keeps it)</span>}
                 </td>
                 <td className="hidden max-w-64 truncate px-2 py-1.5 font-mono text-xs text-muted-foreground lg:table-cell">{row.rule?.whenText ?? ''}</td>
-                <td className="hidden px-2 py-1.5 text-xs text-muted-foreground md:table-cell">{row.rule ? { default: 'Default', user: 'User', extension: 'Extension' }[row.rule.source] : ''}</td>
+                <td className="hidden px-2 py-1.5 text-xs text-muted-foreground md:table-cell">{row.rule ? sourceLabel[row.rule.source] : ''}</td>
                 <td className="pr-2">
                   <span className="sr-only">Actions</span>
                   <DropdownMenu>

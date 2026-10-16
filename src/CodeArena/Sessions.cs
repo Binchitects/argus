@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json.Nodes;
 
 namespace CodeArena;
@@ -88,6 +89,26 @@ internal sealed class SessionData
     public string? WebSummary { get; set; }
     /// <summary>How many message lines the file has (the next one's number).</summary>
     public int Keys { get; set; }
+    /// <summary>The last answer's tokens since the last compaction, and how many of <see cref="Messages"/> its request and answer covered; null: none counted.</summary>
+    public (TokenUsage Usage, int Count)? Known { get; set; }
+
+    /// <summary>A message line's body as the list keeps it: none (only what its line says before the message counts there).</summary>
+    private static readonly JsonObject Unread = [];
+
+    /// <summary>A copy of what Arena has of the session and where the model's history starts (the scan's, carried on with what is added).</summary>
+    internal SessionData Copy()
+    {
+        var copy = new SessionData
+        {
+            Id = Id, Cwd = Cwd, Model = Model, Conversation = Conversation, Unlinked = Unlinked, From = From, Branch = Branch, Summary = Summary,
+            WebSummary = WebSummary, Keys = Keys, _pending = _pending,
+        };
+        copy.Stream.AddRange(Stream.Select(e => new SyncEntry
+        {
+            Message = e.Message, Id = e.Id, Web = e.Web, Key = e.Key, At = e.At, Model = e.Model, Usage = e.Usage, Kind = e.Kind, Status = e.Status,
+        }));
+        return copy;
+    }
 
     /// <summary>Where the messages Arena lacks start in <see cref="Stream"/>: the last ones, with no id.</summary>
     public int FirstUnsent
@@ -114,10 +135,11 @@ internal sealed class SessionData
 
     // An answer's tokens are written just before the answer itself.
     private TokenUsage? _pending;
-    // A session from before Arena's ids: its sync line counted the messages Arena had of those this session added.
-    private int _added;
 
-    /// <summary>One line of the session's file, read back.</summary>
+    /// <summary>
+    /// One line of the session's file, read back. <paramref name="light"/>: only what Arena has of the session and where the
+    /// model's history starts (the list's scan), from what a message's or a compaction's line says before its messages.
+    /// </summary>
     internal void Apply(JsonObject entry, DateTimeOffset written, bool light = false)
     {
         switch (entry.Str("type"))
@@ -126,16 +148,21 @@ internal sealed class SessionData
                 Cwd = entry.Str("cwd");
                 Model = entry.Str("model");
                 break;
-            case "message" when entry["message"] is JsonObject m:
+            case "message" when entry["message"] is JsonObject || light:
+                var m = entry["message"] as JsonObject ?? Unread;
                 var web = entry.Str("from") == "web";
                 var model = entry.Str("model") ?? Model;
                 var usage = entry["usage"] is JsonObject u ? new TokenUsage(u.Long("prompt") ?? 0, u.Long("cached") ?? 0, u.Long("completion") ?? 0)
-                    : m.Str("role") == "assistant" ? _pending : null;
+                    : m.Str("role") == "assistant" || (light && entry["message"] is null) ? _pending : null;
                 if (!light)
                 {
                     if (m.Str("role") == "assistant")
                     {
                         Answers[Messages.Count] = (model, usage);
+                        if (usage is not null)
+                        {
+                            Known = (usage, Messages.Count + 1);
+                        }
                     }
                     Messages.Add(m.Clone());
                 }
@@ -154,10 +181,6 @@ internal sealed class SessionData
                     Status = entry.Str("status"),
                 });
                 Keys = Math.Max(Keys, (entry.Int("n") ?? Keys) + 1);
-                if (!web)
-                {
-                    _added++;
-                }
                 break;
             case "sync":
                 Conversation = entry.Str("conversation");
@@ -214,15 +237,17 @@ internal sealed class SessionData
             case "summary" when entry.Int("upTo") is { } upTo && entry.Str("text") is { } text:
                 Summary = (upTo, text);
                 break;
-            case "compact" when entry["messages"] is JsonArray all:
-                if (!light)
+            case "compact" when entry["messages"] is JsonArray || light:
+                var all = entry["messages"] as JsonArray;
+                if (!light && all is not null)
                 {
                     Messages.Clear();
                     Answers.Clear();
-                    Messages.AddRange(all.OfType<JsonObject>().Select(m => m.Clone()));
+                    Known = null;
+                    Messages.AddRange(all.OfType<JsonObject>().Select(c => c.Clone()));
                 }
                 _pending = null;
-                From = Math.Clamp(entry.Int("from") ?? Stream.Count - all.Count, 0, Stream.Count);
+                From = Math.Clamp(entry.Int("from") ?? Stream.Count - (all?.Count ?? 0), 0, Stream.Count);
                 WebSummary = entry.Str("web") ?? WebSummary;
                 break;
             case "model":
@@ -299,7 +324,7 @@ internal sealed class SessionStore
                 return store;
             }
             store = new SessionStore(Path.GetFileNameWithoutExtension(file), file,
-                System.IO.File.Exists(file) ? Load(file) : new SessionData { Id = Path.GetFileNameWithoutExtension(file) }) { Length = Size(file) };
+                System.IO.File.Exists(file) ? Load(file, whole: true) : new SessionData { Id = Path.GetFileNameWithoutExtension(file) }) { Length = Size(file) };
             foreach (var gone in Opened.Where(kv => !kv.Value.TryGetTarget(out _)).Select(kv => kv.Key).ToList())
             {
                 Opened.Remove(gone);
@@ -344,7 +369,7 @@ internal sealed class SessionStore
     /// <summary>A message line, with what Arena and the IDE show of it (numbered as it is written: Arena knows the session's own as session:number).</summary>
     private static JsonObject Line(SyncEntry e)
     {
-        var line = new JsonObject { ["type"] = "message", ["message"] = e.Message.Clone(), ["at"] = e.At.ToString("o") };
+        var line = new JsonObject { ["type"] = "message", ["at"] = e.At.ToString("o") };
         if (e.Web)
         {
             line["from"] = "web";
@@ -366,6 +391,8 @@ internal sealed class SessionStore
         {
             line["status"] = e.Status;
         }
+        // Last: what the line says of itself is read without it (the list's scan, Head).
+        line["message"] = e.Message.Clone();
         return line;
     }
 
@@ -393,16 +420,21 @@ internal sealed class SessionStore
     /// The model's history replaced (a compaction): <paramref name="raw"/> of its last messages are the conversation's last
     /// word for word, those before them a summary of the rest.
     /// </summary>
-    public void Compacted(IEnumerable<JsonObject> messages, int raw, string? webSummary = null)
+    /// <param name="raw">Null: as many as before (long results cut in place).</param>
+    public void Compacted(IEnumerable<JsonObject> messages, int? raw = null, string? webSummary = null)
     {
         var all = new JsonArray([.. messages.Select(m => (JsonNode)m.Clone())]);
         int from;
         lock (_gate)
         {
-            from = Math.Max(0, _state.Stream.Count - raw);
+            from = raw is { } r ? Math.Max(0, _state.Stream.Count - r) : _state.From;
         }
-        Write(new JsonObject { ["type"] = "compact", ["messages"] = all, ["from"] = from, ["web"] = webSummary });
+        Write(Compaction(all, from, webSummary));
     }
+
+    /// <summary>A compaction's line: where its history starts in the conversation first, its messages last (the list's scan reads it without them).</summary>
+    private static JsonObject Compaction(JsonArray messages, int from, string? webSummary = null) =>
+        new() { ["type"] = "compact", ["from"] = from, ["web"] = webSummary, ["messages"] = messages };
 
     /// <summary>A compaction's summary of all but the last <paramref name="raw"/> messages, for Arena to keep where its own are.</summary>
     public void Summarized(string text, int raw)
@@ -451,7 +483,7 @@ internal sealed class SessionStore
         {
             history = [.. summary, .. _state.Stream.Skip(from).Select(e => e.Message.Clone())];
         }
-        Write(new JsonObject { ["type"] = "compact", ["messages"] = new JsonArray([.. history.Select(m => (JsonNode)m.Clone())]), ["from"] = from });
+        Write(Compaction(new JsonArray([.. history.Select(m => (JsonNode)m.Clone())]), from));
         return history;
     }
 
@@ -474,7 +506,7 @@ internal sealed class SessionStore
             history = [.. _state.Messages.Take(messages).Select(m => m.Clone())];
         }
         Write(new JsonObject { ["type"] = "rewrite", ["keep"] = keep, ["rewind"] = true });
-        Write(new JsonObject { ["type"] = "compact", ["messages"] = new JsonArray([.. history.Select(m => (JsonNode)m.Clone())]), ["from"] = keep - raw });
+        Write(Compaction(new JsonArray([.. history.Select(m => (JsonNode)m.Clone())]), keep - raw));
         return history;
     }
 
@@ -490,9 +522,16 @@ internal sealed class SessionStore
     {
         lock (_gate)
         {
-            if (line.Str("type") == "message" && line.Int("n") is null)
+            if (line.Str("type") == "message")
             {
-                line["n"] = _state.Keys;
+                // Its number before the message, with what the line says of itself (the list's scan reads only that much).
+                var message = line["message"];
+                line.Remove("message");
+                if (line.Int("n") is null)
+                {
+                    line["n"] = _state.Keys;
+                }
+                line["message"] = message;
             }
             PrivateFiles.AppendLine(File, Json.Line(line));
             _state.Apply(line, DateTimeOffset.UtcNow);
@@ -500,28 +539,296 @@ internal sealed class SessionStore
         }
     }
 
-    public static SessionData Load(string file) => Read(file, light: false);
+    /// <summary>
+    /// Reads a session back. Its messages, from its last compaction on (where <see cref="Scan"/> found it, so a long
+    /// session's earlier histories are not read again), with what Arena has of it, its model, to-do list and tokens from the
+    /// scan. <paramref name="whole"/>: every line is read, each message with its words: what keeping it in step with Arena
+    /// needs (the store reads it so).
+    /// </summary>
+    public static SessionData Load(string file, bool whole = false)
+    {
+        if (whole)
+        {
+            return Read(file);
+        }
+        var scan = Scan(file);
+        var data = scan.State.Copy();
+        data.Todos = [.. scan.Todos];
+        (data.Prompt, data.Cached, data.Completion) = (scan.Prompt, scan.Cached, scan.Completion);
+        data.Model = scan.ModelAtCompact;
+        TokenUsage? pending = null;
+        foreach (var (_, _, bytes) in Lines(file, Math.Max(0, scan.LastCompact), scan.Length))
+        {
+            if (Json.ParseObject(Encoding.UTF8.GetString(bytes)) is not { } entry)
+            {
+                continue;
+            }
+            switch (entry.Str("type"))
+            {
+                case "message" when entry["message"] is JsonObject m:
+                    if (m.Str("role") == "assistant")
+                    {
+                        var usage = entry["usage"] is JsonObject u ? Usage(u) : pending;
+                        data.Answers[data.Messages.Count] = (entry.Str("model") ?? data.Model, usage);
+                        if (usage is not null)
+                        {
+                            data.Known = (usage, data.Messages.Count + 1);
+                        }
+                    }
+                    pending = null;
+                    data.Messages.Add(m.Clone());
+                    break;
+                case "compact" when entry["messages"] is JsonArray all:
+                    data.Messages.Clear();
+                    data.Answers.Clear();
+                    data.Known = null;
+                    pending = null;
+                    data.Messages.AddRange(all.OfType<JsonObject>().Select(m => m.Clone()));
+                    break;
+                case "model":
+                    data.Model = entry.Str("model") ?? data.Model;
+                    break;
+                case "usage":
+                    pending = Usage(entry);
+                    break;
+            }
+        }
+        data.Model = scan.Model;
+        return data;
+    }
 
-    /// <param name="light">Only what the list shows: the messages are not copied, nor the model's history kept.</param>
-    private static SessionData Read(string file, bool light)
+    /// <summary>Every line of a session, each message with its words.</summary>
+    private static SessionData Read(string file)
     {
         var data = new SessionData { Id = Path.GetFileNameWithoutExtension(file) };
         // Lines from before messages kept their time: the file's.
         var written = new DateTimeOffset(System.IO.File.GetLastWriteTimeUtc(file), TimeSpan.Zero);
-        // Shared: the web interface reads a session while its turn appends to it.
-        using var reader = new StreamReader(new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));
-        while (reader.ReadLine() is { } line)
+        foreach (var (_, _, bytes) in Lines(file, 0, new FileInfo(file).Length))
         {
-            if (Json.ParseObject(line) is not { } entry)
+            if (Json.ParseObject(Encoding.UTF8.GetString(bytes)) is { } entry)
             {
-                continue; // a line cut short when the program was stopped mid-write
+                data.Apply(entry, written);
             }
-            data.Apply(entry, written, light);
         }
         return data;
     }
 
-    /// <summary>Saved sessions, newest first; those of this folder only when cwd is given.</summary>
+    private static TokenUsage Usage(JsonObject entry) => new(entry.Long("prompt") ?? 0, entry.Long("cached") ?? 0, entry.Long("completion") ?? 0);
+
+    private static List<TodoItem> Todos(JsonArray todos) => [.. todos.OfType<JsonObject>().Select(t => new TodoItem(t.Str("content") ?? "", t.Str("status") ?? "pending"))];
+
+    /// <summary>
+    /// What a session file holds as it is listed and read back, scanned once and kept by the file's size and time: an
+    /// appended file is scanned from where the scan before stopped, and a message's or a compaction's line is read only up
+    /// to its messages (what it says of itself comes first), except for the preview.
+    /// </summary>
+    internal sealed record SessionScan
+    {
+        /// <summary>The file's size and time when scanned, and how far its whole lines go.</summary>
+        public long Size { get; init; }
+        public DateTime Written { get; init; }
+        public long Length { get; init; }
+        public string? Cwd { get; init; }
+        public string? Model { get; init; }
+        /// <summary>The model when the last compaction was written (its answers' model, read from there on).</summary>
+        public string? ModelAtCompact { get; init; }
+        public IReadOnlyList<TodoItem> Todos { get; init; } = [];
+        /// <summary>What Arena has of the session and where the model's history starts: its messages without their words.</summary>
+        public SessionData State { get; init; } = new();
+        /// <summary>Message lines, all of them.</summary>
+        public int Messages { get; init; }
+        public string Preview { get; init; } = "";
+        public long Prompt { get; init; }
+        public long Cached { get; init; }
+        public long Completion { get; init; }
+        /// <summary>Where the last compaction's line starts (-1: none).</summary>
+        public long LastCompact { get; init; } = -1;
+    }
+
+    private static readonly Dictionary<string, SessionScan> Scans = new(StringComparer.Ordinal);
+
+    /// <summary>The session file as <see cref="SessionScan"/> says, scanning only what was added since the last time.</summary>
+    internal static SessionScan Scan(string file)
+    {
+        var info = new FileInfo(file);
+        var (size, written) = (info.Length, info.LastWriteTimeUtc);
+        SessionScan? known;
+        lock (Scans)
+        {
+            Scans.TryGetValue(file, out known);
+        }
+        if (known is not null && known.Size == size && known.Written == written)
+        {
+            return known;
+        }
+        // Session files are only ever appended to: a bigger one goes on from where the last scan stopped.
+        var from = known is not null && size >= known.Length && size >= known.Size ? known : new SessionScan { State = new SessionData { Id = Path.GetFileNameWithoutExtension(file) } };
+        var scan = Continue(file, from, size, written);
+        lock (Scans)
+        {
+            Scans[file] = scan;
+        }
+        return scan;
+    }
+
+    private static readonly byte[] TypeMessage = Encoding.UTF8.GetBytes("{\"type\":\"message\"");
+    private static readonly byte[] TypeCompact = Encoding.UTF8.GetBytes("{\"type\":\"compact\"");
+    private static readonly byte[] MessageField = Encoding.UTF8.GetBytes(",\"message\":");
+    private static readonly byte[] MessagesField = Encoding.UTF8.GetBytes(",\"messages\":");
+    private static readonly byte[] FromWeb = Encoding.UTF8.GetBytes(",\"from\":\"web\"}");
+
+    /// <summary>The most of a line kept when only what it says before its messages is read.</summary>
+    private const int HeadBytes = 4096;
+
+    /// <summary>What a message's or a compaction's line says of itself, before its messages: as JSON, without them.</summary>
+    private static JsonObject? Head(byte[] line)
+    {
+        var span = line.AsSpan();
+        var at = span.IndexOf(span.StartsWith(TypeCompact) ? MessagesField : MessageField);
+        if (at < 0)
+        {
+            return null;
+        }
+        var head = Json.ParseObject(Encoding.UTF8.GetString(span[..at]) + "}");
+        // A line of an older Code Arena: the message first, whether it came from the web at its end.
+        if (head is not null && span.StartsWith(TypeMessage) && span.EndsWith(FromWeb))
+        {
+            head["from"] = "web";
+        }
+        return head;
+    }
+
+    private static SessionScan Continue(string file, SessionScan s, long size, DateTime written)
+    {
+        var (cwd, model, atCompact, todos) = (s.Cwd, s.Model, s.ModelAtCompact, s.Todos);
+        var (messages, preview, prompt, cached, completion, compact, length) = (s.Messages, s.Preview, s.Prompt, s.Cached, s.Completion, s.LastCompact, s.Length);
+        var state = s.State.Copy();
+        var at0 = new DateTimeOffset(written, TimeSpan.Zero);
+        // A message's line is read whole only while the preview (the first question) is not found.
+        bool Skip(byte[] b) => b.AsSpan().StartsWith(TypeCompact) || (preview.Length > 0 && b.AsSpan().StartsWith(TypeMessage));
+        foreach (var (at, bytesLong, bytes) in Lines(file, s.Length, size, Skip))
+        {
+            length = at + bytesLong + 1;
+            var line = bytes.AsSpan();
+            if (line.StartsWith(TypeCompact))
+            {
+                compact = at;
+                atCompact = model;
+                if (Head(bytes) is { } head)
+                {
+                    state.Apply(head, at0, light: true);
+                }
+                continue;
+            }
+            if (line.StartsWith(TypeMessage))
+            {
+                messages++;
+                var whole = bytes.Length < HeadBytes || !Skip(bytes) ? Json.ParseObject(Encoding.UTF8.GetString(line)) : null;
+                if (preview.Length == 0 && whole?["message"] is JsonObject m && m.Str("role") == "user")
+                {
+                    preview = Fmt.OneLine(m.Str("content"), 70);
+                }
+                if ((whole is not null ? Without(whole) : Head(bytes)) is { } head)
+                {
+                    state.Apply(head, at0, light: true);
+                }
+                continue;
+            }
+            if (Json.ParseObject(Encoding.UTF8.GetString(line)) is not { } entry)
+            {
+                continue;
+            }
+            state.Apply(entry, at0, light: true);
+            switch (entry.Str("type"))
+            {
+                case "session":
+                    cwd = entry.Str("cwd");
+                    model = entry.Str("model");
+                    atCompact = compact < 0 ? model : atCompact;
+                    break;
+                case "model":
+                    model = entry.Str("model") ?? model;
+                    break;
+                case "todos" when entry["todos"] is JsonArray list:
+                    todos = Todos(list);
+                    break;
+                case "usage":
+                    prompt += entry.Long("prompt") ?? 0;
+                    cached += entry.Long("cached") ?? 0;
+                    completion += entry.Long("completion") ?? 0;
+                    break;
+            }
+        }
+        return new SessionScan
+        {
+            Size = size, Written = written, Length = length, Cwd = cwd, Model = model, ModelAtCompact = atCompact, Todos = todos, State = state,
+            Messages = messages, Preview = preview, Prompt = prompt, Cached = cached, Completion = completion, LastCompact = compact,
+        };
+
+        // A message line read whole, as the scan keeps it: without its words.
+        static JsonObject Without(JsonObject line)
+        {
+            var head = (JsonObject)line.DeepClone();
+            head.Remove("message");
+            return head;
+        }
+    }
+
+    /// <summary>
+    /// The whole lines of a file between two places, each with where it starts and its length (a last line not ended yet
+    /// is left for the next read). A line <paramref name="skip"/> says so of from its start is kept only up to
+    /// <see cref="HeadBytes"/> (what it says of itself before its messages).
+    /// </summary>
+    private static IEnumerable<(long At, long Length, byte[] Bytes)> Lines(string file, long from, long to, Func<byte[], bool>? skip = null)
+    {
+        // Shared: the web interface reads a session while its turn appends to it.
+        using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1 << 16);
+        stream.Seek(from, SeekOrigin.Begin);
+        var buffer = new byte[1 << 16];
+        var line = new MemoryStream();
+        var start = from;
+        var at = from;
+        var skipping = false;
+        var head = Math.Max(TypeMessage.Length, TypeCompact.Length);
+        while (at < to)
+        {
+            var read = stream.Read(buffer, 0, (int)Math.Min(buffer.Length, to - at));
+            if (read <= 0)
+            {
+                break;
+            }
+            var i = 0;
+            while (i < read)
+            {
+                var end = Array.IndexOf(buffer, (byte)'\n', i, read - i);
+                var stop = end < 0 ? read : end;
+                if (!skipping || line.Length < HeadBytes)
+                {
+                    line.Write(buffer, i, (int)Math.Min(stop - i, skipping ? HeadBytes - line.Length : stop - i));
+                    if (!skipping && skip is not null && line.Length >= head && skip(line.GetBuffer()[..head]))
+                    {
+                        skipping = true;
+                        if (line.Length > HeadBytes)
+                        {
+                            line.SetLength(HeadBytes);
+                        }
+                    }
+                }
+                if (end < 0)
+                {
+                    break;
+                }
+                yield return (start, at + end - start, line.ToArray());
+                line.SetLength(0);
+                skipping = false;
+                start = at + end + 1;
+                i = end + 1;
+            }
+            at += read;
+        }
+    }
+
+    /// <summary>Saved sessions, newest first; those of this folder only when cwd is given. Each file is scanned once (<see cref="Scan"/>).</summary>
     public static List<SessionSummary> List(string dir, string? cwd = null, int max = 20)
     {
         if (!Directory.Exists(dir))
@@ -531,26 +838,25 @@ internal sealed class SessionStore
         var found = new List<SessionSummary>();
         foreach (var file in new DirectoryInfo(dir).EnumerateFiles("*.jsonl").OrderByDescending(f => f.LastWriteTimeUtc))
         {
-            SessionData data;
+            SessionScan scan;
             try
             {
-                data = Read(file.FullName, light: true);
+                scan = Scan(file.FullName);
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
                 continue;
             }
-            if (cwd is not null && (data.Cwd is null || !SameFolder(data.Cwd, cwd)))
+            if (cwd is not null && (scan.Cwd is null || !SameFolder(scan.Cwd, cwd)))
             {
                 continue;
             }
-            if (data.Stream.Count == 0)
+            if (scan.Messages == 0)
             {
                 continue;
             }
-            var preview = data.Stream.FirstOrDefault(e => e.Message.Str("role") == "user")?.Message.Str("content") is { } first ? Fmt.OneLine(first, 70) : "";
-            found.Add(new SessionSummary(Path.GetFileNameWithoutExtension(file.Name), file.FullName, data.Cwd, file.LastWriteTime, preview, data.Stream.Count,
-                data.Conversation, data.Unlinked, data.Waiting));
+            found.Add(new SessionSummary(Path.GetFileNameWithoutExtension(file.Name), file.FullName, scan.Cwd, file.LastWriteTime, scan.Preview, scan.Messages,
+                scan.State.Conversation, scan.State.Unlinked, scan.State.Waiting));
             if (found.Count >= max)
             {
                 break;
@@ -574,20 +880,8 @@ internal sealed class SessionStore
         }
         foreach (var file in new DirectoryInfo(dir).EnumerateFiles("*.jsonl").OrderByDescending(f => f.LastWriteTimeUtc))
         {
-            string? linked = null;
-            string? sessionCwd = null;
-            foreach (var line in System.IO.File.ReadLines(file.FullName))
-            {
-                if (sessionCwd is null && line.Contains("\"session\"", StringComparison.Ordinal) && Json.ParseObject(line) is { } head && head.Str("type") == "session")
-                {
-                    sessionCwd = head.Str("cwd");
-                }
-                else if (line.Contains("\"sync\"", StringComparison.Ordinal) && Json.ParseObject(line) is { } entry && entry.Str("type") == "sync")
-                {
-                    linked = entry.Str("conversation");
-                }
-            }
-            if (string.Equals(linked, conversation, StringComparison.OrdinalIgnoreCase) && sessionCwd is not null && SameFolder(sessionCwd, cwd))
+            var scan = Scan(file.FullName);
+            if (string.Equals(scan.State.Conversation, conversation, StringComparison.OrdinalIgnoreCase) && scan.Cwd is not null && SameFolder(scan.Cwd, cwd))
             {
                 return file.FullName;
             }

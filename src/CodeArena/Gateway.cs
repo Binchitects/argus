@@ -44,6 +44,12 @@ internal sealed class GatewayException(string message, int? status = null, bool 
 
     /// <summary>Refused for the key's requests or tokens a minute: asking again within seconds is refused too.</summary>
     public bool PerMinute { get; } = perMinute;
+
+    /// <summary>The request did not fit the model's window (the engine's or LiteLLM's refusal said so): a compaction may make it fit.</summary>
+    public bool ContextExceeded { get; init; }
+
+    /// <summary>The prompt's size in tokens as the refusal counted it (llama.cpp's n_prompt_tokens), when it said.</summary>
+    public long? PromptTokens { get; init; }
 }
 
 /// <summary>The gateway's OpenAI-compatible API, with the person's key.</summary>
@@ -67,6 +73,40 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
 
     /// <summary>When the person is told that the answer has not started yet.</summary>
     public TimeSpan SlowNotice { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>The longest the first wait grows to for a prompt expected to take long to read (<see cref="CompleteAsync"/>'s uncached).</summary>
+    public TimeSpan LongestFirstEventWait { get; set; } = TimeSpan.FromMinutes(60);
+
+    /// <summary>
+    /// How fast the engine reads a prompt it has not cached, in tokens a second, as measured on the answers so far (the
+    /// time to their first event, and the prompt tokens not read from the cache); null until a long enough prompt was read.
+    /// </summary>
+    public double? PrefillRate
+    {
+        get
+        {
+            lock (_rateGate)
+            {
+                return _prefillRate;
+            }
+        }
+        set
+        {
+            lock (_rateGate)
+            {
+                _prefillRate = value;
+            }
+        }
+    }
+
+    private readonly object _rateGate = new();
+    private double? _prefillRate;
+
+    /// <summary>The fewest uncached prompt tokens that measure the reading speed (a short prompt's wait is mostly elsewhere).</summary>
+    private const long MeasuredFrom = 2_000;
+
+    /// <summary>How long reading this many uncached prompt tokens is expected to take, at the speed measured; null when not known yet.</summary>
+    public TimeSpan? PrefillTime(long uncached) => uncached > 0 && PrefillRate is { } rate and > 0 ? TimeSpan.FromSeconds(uncached / rate) : null;
 
     public string BaseUrl { get; } = baseUrl.TrimEnd('/');
 
@@ -139,9 +179,14 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
     /// calls are put together from their pieces. A gateway that is briefly away
     /// (502, 503, 504, 429, a dropped connection) is tried again while nothing has
     /// been shown yet; a key past its requests or tokens a minute is not (the
-    /// minute is not over in a few seconds, and each try counts).
+    /// minute is not over in a few seconds, and each try counts). The gateway's
+    /// timeout (408) is a stalled answer: asked once more, as one that never started.
     /// </summary>
-    public async Task<Completion> CompleteAsync(JsonObject body, IStreamSink? sink, CancellationToken ct)
+    /// <param name="uncached">
+    /// About how many of the prompt's tokens the engine has not cached (0: unknown or few): with the reading speed measured,
+    /// the person is told how long the answer may take to start, and the first wait is long enough for it.
+    /// </param>
+    public async Task<Completion> CompleteAsync(JsonObject body, IStreamSink? sink, CancellationToken ct, long uncached = 0)
     {
         var request = body.Clone();
         request["stream"] = true;
@@ -149,14 +194,20 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
         var shown = false;
         var guard = new GuardSink(sink, () => shown = true);
         var stalls = 0;
+        var expected = PrefillTime(uncached);
+        if (expected is { } reading && reading >= SlowNotice)
+        {
+            Retrying?.Invoke($"The model first reads about {Fmt.Tokens(uncached)} tokens it has not cached: at the {PrefillRate:0} tokens a second measured, " +
+                             $"the answer may take about {Fmt.Duration(reading)} to start.");
+        }
         for (var attempt = 0; ; attempt++)
         {
             try
             {
-                return await StreamOnceAsync(request, guard, ct);
+                return await StreamOnceAsync(request, guard, ct, expected);
             }
             // An answer that never started is asked once more, not five times: each such try waits the whole first wait.
-            catch (Exception e) when (!shown && attempt < RetryWaits.Length && !ct.IsCancellationRequested && Retryable(e) && (e is not StreamStalledException || stalls++ < 1))
+            catch (Exception e) when (!shown && attempt < RetryWaits.Length && !ct.IsCancellationRequested && Retryable(e) && (!Stalled(e) || stalls++ < 1))
             {
                 var wait = RetryWaits[attempt];
                 Retrying?.Invoke($"The gateway did not answer ({Fmt.OneLine(e.Message, 120)}): trying again in {wait.TotalSeconds:0} s ({attempt + 2} of {RetryWaits.Length + 1}).");
@@ -165,11 +216,14 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
         }
     }
 
+    /// <summary>The answer never came in time: the stream stayed quiet, or the gateway gave up waiting for the engine (408).</summary>
+    private static bool Stalled(Exception e) => e is StreamStalledException or GatewayException { Status: 408 };
+
     internal static bool Retryable(Exception e)
     {
         if (e is GatewayException g)
         {
-            return (g.Status is 429 or 502 or 503 or 504) && !g.PerMinute;
+            return (g.Status is 408 or 429 or 502 or 503 or 504) && !g.PerMinute;
         }
         if (e is not (HttpRequestException or IOException))
         {
@@ -186,21 +240,32 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
         return true;
     }
 
-    private async Task<Completion> StreamOnceAsync(JsonObject request, IStreamSink sink, CancellationToken ct)
+    private async Task<Completion> StreamOnceAsync(JsonObject request, IStreamSink sink, CancellationToken ct, TimeSpan? expected)
     {
         using var req = Request(HttpMethod.Post, "/v1/chat/completions");
         req.Content = new StringContent(Json.Line(request), Encoding.UTF8, "application/json");
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
         // A watchdog: no answer at all for too long (not even its headers), or the stream quiet for too long, is a stalled one.
+        // A prompt expected to take longer to read than that waits half as long again as expected (within the longest wait).
+        var firstWait = FirstEventWait;
+        if (expected is { } reading && reading * 1.5 > firstWait)
+        {
+            firstWait = reading * 1.5 < LongestFirstEventWait ? reading * 1.5 : LongestFirstEventWait > firstWait ? LongestFirstEventWait : firstWait;
+        }
         using var quiet = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        quiet.CancelAfter(FirstEventWait);
+        quiet.CancelAfter(firstWait);
         // The person is told when the answer is slow to start (the engine busy with others, or reading a long prompt).
         var talking = false;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        TimeSpan? firstEvent = null;
         using var slow = new Timer(_ =>
         {
             if (!Volatile.Read(ref talking))
             {
-                Retrying?.Invoke($"The model has not started answering for {SlowNotice.TotalSeconds:0} s (the engine may be busy, or reading a long prompt): Ctrl+C or Stop ends the wait.");
+                var why = expected is { } e && e > SlowNotice
+                    ? $" (it reads a long prompt it has not cached: about {Fmt.Duration(e - SlowNotice)} more at the speed measured)"
+                    : " (the engine may be busy, or reading a long prompt)";
+                Retrying?.Invoke($"The model has not started answering for {SlowNotice.TotalSeconds:0} s{why}: Ctrl+C or Stop ends the wait.");
             }
         }, null, SlowNotice, Timeout.InfiniteTimeSpan);
         HttpResponseMessage started;
@@ -210,7 +275,7 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new StreamStalledException($"the answer did not start (nothing for {FirstEventWait.TotalMinutes:0.#} minutes)");
+            throw new StreamStalledException($"the answer did not start (nothing for {firstWait.TotalMinutes:0.#} minutes)");
         }
         using var res = started;
         if (!res.IsSuccessStatusCode)
@@ -248,6 +313,7 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
             await foreach (var ev in Sse.ReadAsync(stream, quiet.Token))
             {
                 Volatile.Write(ref talking, true);
+                firstEvent ??= clock.Elapsed;
                 quiet.CancelAfter(EventWait);
                 if (Event(ev.Data))
                 {
@@ -263,7 +329,7 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
         }
         catch (Exception e) when (!ct.IsCancellationRequested && (e is OperationCanceledException || Retryable(e)))
         {
-            var why = e is OperationCanceledException ? new StreamStalledException($"the answer stopped coming (nothing for {(said ? EventWait : FirstEventWait).TotalMinutes:0.#} minutes)") : e;
+            var why = e is OperationCanceledException ? new StreamStalledException($"the answer stopped coming (nothing for {(firstEvent is not null ? EventWait : firstWait).TotalMinutes:0.#} minutes)") : e;
             if (!said)
             {
                 throw why;
@@ -286,7 +352,11 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
             }
             if (chunk["error"] is JsonObject error)
             {
-                throw new GatewayException("The gateway stopped the answer: " + (error.Str("message") ?? error.ToJsonString()));
+                var whole = error.ToJsonString();
+                throw new GatewayException("The gateway stopped the answer: " + (error.Str("message") ?? whole))
+                {
+                    ContextExceeded = OverWindow(whole), PromptTokens = PromptTokensIn(whole),
+                };
             }
             if (chunk["usage"] is JsonObject u)
             {
@@ -343,8 +413,42 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
                 });
             }
         }
+        if (firstEvent is { } took && usage is { } read)
+        {
+            Measured(read.Prompt - read.Cached, took);
+        }
         return new Completion(Assistant(text.ToString(), toolCalls, thought.ToString()), usage, finish);
     }
+
+    /// <summary>Learns the reading speed from an answer: its uncached prompt tokens over the time to its first event (half the last, half this).</summary>
+    private void Measured(long uncached, TimeSpan took)
+    {
+        if (uncached < MeasuredFrom || took < TimeSpan.FromSeconds(1))
+        {
+            return;
+        }
+        var rate = uncached / took.TotalSeconds;
+        lock (_rateGate)
+        {
+            _prefillRate = _prefillRate is { } before ? (before + rate) / 2 : rate;
+        }
+    }
+
+    /// <summary>
+    /// Whether a refusal says the prompt is bigger than the model's window: llama.cpp's "exceeds the available context size"
+    /// (n_ctx), LiteLLM's ContextWindowExceededError, vLLM's and OpenAI's "maximum context length".
+    /// </summary>
+    internal static bool OverWindow(string text) => ContextWords().IsMatch(text);
+
+    /// <summary>The prompt's tokens as a refusal counted them (llama.cpp's n_prompt_tokens), when it says.</summary>
+    internal static long? PromptTokensIn(string text) =>
+        PromptTokensWords().Match(text) is { Success: true } m && long.TryParse(m.Groups[1].Value, out var n) && n > 0 ? n : null;
+
+    [GeneratedRegex(@"ContextWindowExceeded|exceed_context|exceeds? (the )?(available |maximum )?context|context (size|length|window)|n_ctx|maximum context|prompt is too long|too many (input |prompt )?tokens", RegexOptions.IgnoreCase)]
+    private static partial Regex ContextWords();
+
+    [GeneratedRegex(@"n_prompt_tokens\W{0,4}(\d+)")]
+    private static partial Regex PromptTokensWords();
 
     private sealed class ToolCallPieces
     {
@@ -458,6 +562,11 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
         if (detail.Length > 400)
         {
             detail = detail[..400] + "…";
+        }
+        // Too big for the window: the whole body says so (and how big, in llama.cpp's own fields), not only its message.
+        if ((int)status is 400 or 413 or 422 or 500 && OverWindow(body))
+        {
+            return new GatewayException($"The gateway answered {(int)status}: {detail}", (int)status) { ContextExceeded = true, PromptTokens = PromptTokensIn(body) };
         }
         return status switch
         {

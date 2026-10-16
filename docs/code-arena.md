@@ -222,7 +222,8 @@ The page is laid out as VS Code is, in Argus Arena's design system:
 - **Explorer**: the project's files, with New file, New folder, Refresh and
   Collapse at its top. Click opens; a right-click menu has new file, new
   folder, Copy path, Rename (F2) and Delete (Del, asks first); the arrow
-  keys move through the tree. The files the agent changed are marked, and so
+  keys move through the tree. F2 and Del are the keymap's (`renameFile`,
+  `deleteFile`): keybindings.json changes them or takes them away. The files the agent changed are marked, and so
   are the folders they are in. A file deleted with unsaved changes keeps its
   tab (the question says so): saving it makes the file again.
 - **editor**: tabs with Monaco, highlighting by the file's name (or
@@ -230,13 +231,19 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   changes and **Ctrl+S** saves (**Ctrl+K S** saves them all). A
   file changed on disk since it was opened is not written over unseen: saving
   asks first. Closing a tab with unsaved changes asks Save, Don't save or
-  Cancel; leaving the page with any warns. A binary file, or one over 5 MB,
+  Cancel (a compare asks for each of its files no other tab holds); a file with
+  unsaved changes whose last tab goes without asking (a compare accepted,
+  reverted or dropped) stays open in a tab of its own; leaving the page with
+  any warns. A binary file, or one over 5 MB,
   says so instead of opening. When code-arena stops answering (it stopped, or
   the SSH tunnel dropped), a line at the top says so and the editor stays, so
   what is not saved can still be copied out; it goes when it answers again.
 - **the agent's edits**: a file the agent edits reloads in its tab when nothing
-  in it is unsaved (undo still works), and after each turn every open file is
-  checked against the disk. What is typed while a file reloads stays, unsaved:
+  in it is unsaved (undo still works; only the lines that changed are replaced,
+  so the cursor and the breakpoints stay on their lines, moved down by the lines
+  added above them), and after each turn every open file is checked against the
+  disk. A compare whose file the agent made or deleted shows that side as it
+  is now (empty, or the file). What is typed while a file reloads stays, unsaved:
   saving it then asks first.
 - **compare**: Monaco's diff editor, as VS Code's compare. The agent's changes
   to a file (as it was before the agent's first change, and now: from Agent
@@ -257,7 +264,7 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   and, for the change at the cursor (or those selected): **Stage** and
   **Revert** in a change not staged (Ctrl+K Ctrl+Alt+S, Ctrl+K Ctrl+R: the
   index takes exactly that change, the file stays), **Unstage** in a staged
-  one (Ctrl+K Ctrl+N), **Accept** and **Revert** in the agent's (Ctrl+K
+  one (Ctrl+K Ctrl+Alt+N; Ctrl+K Ctrl+N in a window of its own), **Accept** and **Revert** in the agent's (Ctrl+K
   Ctrl+Alt+A: the rest stays to review). The agent's changes also have
   **Revert** (puts the file back; a file the agent made is deleted) and
   **Accept** (keeps it) for the whole file, and Agent changes has **Accept
@@ -271,8 +278,11 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   changes in the editor keeps them, and saving it then asks).
 - **quick diff**: bars beside the line numbers show the lines changed since
   what git's index has (green added, blue changed, a red mark where lines were
-  taken away), as you type; **Alt+F3** and **Shift+Alt+F3** go to the next and
-  the previous change (`scm.diffDecorations`: `none` turns them off). Lines
+  taken away), as you type; **Alt+F3** and **Shift+Alt+F3** (or **Alt+F5** and
+  **Shift+Alt+F5**, as in a compare) go to the next and the previous change,
+  keys of the keymap that keybindings.json changes. `scm.diffDecorations` says
+  where they are drawn: `all` (beside the line numbers, in the scroll bar and in
+  the minimap), `gutter`, `overview` (the scroll bar), `minimap`, or `none`. Lines
   are compared without their ends, so a file checked out with CRLF against an
   index with LF shows no bars; changes more than about 1,400 lines apart (a
   file rewritten or reformatted) are one bar from the first to the last, so
@@ -291,7 +301,8 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   folder's in a terminal's output (a compiler's `src/app.ts:12:5`) is a link
   that opens the file there. Shown with none,
   it opens one; closing the last one hides it. A page reloaded attaches to the
-  ones still running, with their screens (below).
+  ones still running, with their screens (below). The panel's other tabs are
+  the **Debug Console** and the **Output** (the language servers', below).
 - **chat**: the agent's chat on the right: the model and thinking pickers,
   Sessions and Hide at its top; the thread with a card for each tool call and
   a diff under each edit, the approval card (**Allow**, **Always for this
@@ -304,12 +315,22 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   and runs once the answer ends, each in its turn: **Stop** stops the answer
   and the next queued message runs, and **Clear** drops the queue. A command with no time limit
   that ends while nothing runs starts a turn of its own, which the page shows as
-  any other. The Chat activity lists this folder's sessions.
+  any other. A picture, a sound or a video one of Arena's tools made (kept in
+  the folder under `.code-arena/media/`, the tool's result naming it) shows
+  under its card: the picture opens larger at a click, the sound and the video
+  play in place. A long session opens on its last 30 turns: **Show earlier**
+  at the top adds 30 more each time, the turns being read staying where they
+  were. The thread draws what streams in once per frame, and only the turn
+  being written: a session of thousands of messages streams as smoothly as a
+  short one. The Chat activity lists this folder's sessions; the list is read
+  again when a session's first turn adds it, a turn of a session listed
+  already just moves it to the top.
 - **status bar**: the git branch, the agent's changes, the terminal and the
   number of commands running with no time limit on the left (and, after the
   first key of a chord, that it waits for the second); the cursor's line and
   column, the file's indentation (**Spaces: 4**: indent with spaces or tabs,
-  detect it, or convert the file), its line endings (**LF** or **CRLF**) and
+  detect it, or convert the file), its line endings (**LF** or **CRLF**), its
+  formatter, its language server (its state: Restart and its log, below) and
   its language (another one, or **Configure '…' language based settings**),
   the MCP servers (connected of all:
   **MCP servers** lists them, why one is not connected and when it is tried
@@ -335,7 +356,11 @@ VS Code settings mean the same here:
   `config.json`; **Preferences: Open User Settings (JSON)**), for every
   project; the project's `.vscode/settings.json` (**Preferences: Open
   Workspace Settings (JSON)**) over it; and, over both, a language's own
-  (`"[python]": {"editor.tabSize": 4}`, in either). Comments and trailing
+  (`"[python]": {"editor.tabSize": 4}`, in either; VS Code's ids for what
+  Monaco reads as one language are that language: `[typescriptreact]` is a
+  .tsx file's, as `[typescript]` is, which wins over it, and `[shellscript]`,
+  `[javascriptreact]` and `[jsonc]` are `shell`, `javascript` and `json`, in
+  `files.associations` too). Comments and trailing
   commas are allowed; the editor checks the file against what Code Arena
   reads, with each setting's description. A value of the wrong kind is not
   taken. The person's own settings (the terminal's keys) are not taken from a
@@ -347,14 +372,18 @@ VS Code settings mean the same here:
   (`files.autoSave` after a delay, when the focus or the window leaves;
   `files.trimTrailingWhitespace`, `files.insertFinalNewline`,
   `files.trimFinalNewlines`, steps Undo takes back, never for a save after a
-  delay; `files.associations`), compares (`diffEditor.*`), the terminals
-  (font, cursor, scrollback, the keys they let through), the colour theme
-  (`workbench.colorTheme`, or `window.autoDetectColorScheme` with the
-  preferred light and dark ones: **Ctrl+K Ctrl+T**), the file icon theme
+  delay; `files.associations`; `files.eol`, the line ending of a new, empty
+  file), compares (`diffEditor.*`), the terminals (font, size, line height,
+  cursor, scrollback, applied at once to those open; the keys they let
+  through), the colour theme (`workbench.colorTheme`, or
+  `window.autoDetectColorScheme` with the preferred light and dark ones:
+  **Ctrl+K Ctrl+Alt+T**), the file icon theme
   (`workbench.iconTheme`) and Code Arena's code completion
   (`codeArena.inlineCompletion.enabled`, the status bar's **Complete**: the
   person's own, which a project's settings cannot turn on, since what is typed
-  is sent to the model). They apply as the file is saved. Where Code Arena's
+  is sent to the model). They apply as the file is saved; a file's indentation
+  chosen in the status bar stays until the indentation settings themselves
+  change. Where Code Arena's
   default is not VS Code's, the description says so. Under the person's
   settings are the enabled extensions' `configurationDefaults`
   ([Extensions](#extensions)).
@@ -365,8 +394,10 @@ VS Code settings mean the same here:
   ids); the last rule that matches wins, `"-command"` takes a default key
   away, a key may be two chords (`ctrl+k ctrl+t`) and `when` reads VS Code's
   context keys (`editorIsOpen`, `inputFocus`, `terminalFocus`,
-  `sideBarVisible`, `resourceLangId == python`…). The editor has the same
-  keys, its own (Monaco's: Ctrl+D, Alt+↑, Ctrl+K Ctrl+C…) under theirs, and a
+  `sideBarVisible`, `resourceLangId == python`…, in the editor too). The
+  editor has the same keys, its own (Monaco's: Ctrl+D, Alt+↑, Ctrl+K Ctrl+C…,
+  listed with the defaults in the Keyboard Shortcuts editor and the palette)
+  under theirs, and a
   rule may rebind one of the editor's commands too (`editor.action.…`,
   `cursorUp`), or take its key away (`"-editor.action.deleteLines"`). A
   `"-command"` VS Code wrote keeps the `when` of VS Code's default, which may
@@ -402,23 +433,28 @@ first key of a chord (Ctrl+K: `terminal.integrated.allowChords` false gives it
 to the shell); `terminal.integrated.commandsToSkipShell` adds one
 (`"-command"` gives its key back). On macOS the keys are ⌘: Ctrl+S, Ctrl+P and
 the others stay the terminal's and the editor's there. A browser tab keeps
-Ctrl+W, Ctrl+T, Ctrl+Tab and Ctrl+PageUp/PageDown for itself: their commands
-have a second key (Ctrl+Alt+W closes the tab, Ctrl+Alt+Shift+T reopens it,
-Ctrl+Alt+PageUp/PageDown move between tabs).
+Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Tab, Ctrl+F4 and Ctrl+PageUp/PageDown for itself,
+as the second key of a chord too: their commands have another key, which the
+menus show (Ctrl+Alt+W closes the tab, Ctrl+K Ctrl+Alt+W all of them,
+Ctrl+Alt+Shift+T reopens one, Ctrl+Alt+PageUp/PageDown move between them,
+Ctrl+K Ctrl+Alt+T the colour theme, Ctrl+K Ctrl+Alt+N unstages); in Code
+Arena's own window VS Code's keys work too. F5, Ctrl+F5, Shift+F5 and Ctrl+S
+never reach the browser (no reload, no Save Page As), also when their command
+does nothing at that moment.
 
 | keys | |
 |---|---|
 | Ctrl+Shift+P, F1 | run a command by name |
 | Ctrl+P | open a file by name (`:12` goes to a line); Ctrl+G goes to a line |
 | Ctrl+S, Ctrl+K S | save the file, save them all |
-| Ctrl+Alt+W, Ctrl+K Ctrl+W, Ctrl+K U | close the tab, all the tabs, the saved ones |
+| Ctrl+Alt+W, Ctrl+K Ctrl+Alt+W, Ctrl+K U | close the tab, all the tabs, the saved ones |
 | Ctrl+Alt+Shift+T | reopen the tab closed last |
 | Alt+1 … Alt+9, Ctrl+Alt+PageUp/PageDown | a tab by its place, the next or the one before |
 | Ctrl+Alt+- , Ctrl+Shift+- (Alt+← and Alt+→ on Windows) | back and forward through the tabs shown |
 | Ctrl+B, Ctrl+J, Ctrl+Alt+B | the side bar, the panel, the chat |
 | Ctrl+Shift+E, Ctrl+Shift+F, Ctrl+Shift+H, Ctrl+Shift+G, Ctrl+Shift+M, Ctrl+Shift+X | Explorer, search, replace, source control, problems, extensions |
 | Ctrl+`, Ctrl+Shift+` | show or hide the terminals, a new one |
-| Ctrl+, , Ctrl+K Ctrl+S, Ctrl+K Ctrl+T | settings, keyboard shortcuts, colour theme |
+| Ctrl+, , Ctrl+K Ctrl+S, Ctrl+K Ctrl+Alt+T | settings, keyboard shortcuts, colour theme |
 | Ctrl+K M, Alt+Z, Ctrl+K P | the language mode, word wrap, copy the file's path |
 | Ctrl+L | in the editor: the lines chosen (or the cursor's) go with the next message |
 
@@ -676,7 +712,7 @@ What it uses of an extension:
 
 | contribution | in Code Arena |
 |---|---|
-| `themes` (colour themes, JSON) | offered by **Color Theme** (Ctrl+K Ctrl+T) and `workbench.colorTheme` (by its `id`, else its `label`); going down the list shows each theme at once, and Escape goes back. Its `include` is read. Its `tokenColors` colour the editor by scope: the editor's own highlighting names its tokens as TextMate's broadest scopes (comment, string, keyword…), and the common narrower ones (`constant.numeric`, `entity.name.type`, `entity.name.tag`, `storage.type`…) are given its names too. Its `colors` are the editor's, the terminal's (`terminal.foreground`, `terminal.ansi*`), and the page's for about twenty of the workbench's (`editor.background`, `sideBar.background`, `button.background`, `list.hoverBackground`, `focusBorder`, `panel.border`…); its `uiTheme` makes the page light or dark |
+| `themes` (colour themes, JSON) | offered by **Color Theme** (Ctrl+K Ctrl+Alt+T) and `workbench.colorTheme` (by its `id`, else its `label`); going down the list shows each theme at once, and Escape goes back. Its `include` is read. Its `tokenColors` colour the editor by scope: the editor's own highlighting names its tokens as TextMate's broadest scopes (comment, string, keyword…), and the common narrower ones (`constant.numeric`, `entity.name.type`, `entity.name.tag`, `storage.type`…) are given its names too. Its `colors` are the editor's, the terminal's (`terminal.foreground`, `terminal.ansi*`), and the page's for about twenty of the workbench's (`editor.background`, `sideBar.background`, `button.background`, `list.hoverBackground`, `focusBorder`, `panel.border`…); its `uiTheme` makes the page light or dark |
 | `iconThemes` | offered by **Preferences: File Icon Theme** and `workbench.iconTheme`. A file's icon is by its name, then its extension (the longest first: `test.ts` before `ts`), then its language, else the default; a folder's by its name, open or closed; a light theme's own choices first. Images, and characters of the theme's fonts |
 | `snippets` | suggestions (Ctrl+Space, and as you type) in the files of their language, in VS Code's snippet syntax (`$1`, `${2:name}`, `${3\|a,b\|}`, `$0`) |
 | `languages` | a language for files by their extensions and names (the status bar's language, `files.associations`); for a language the editor does not have, its `language-configuration.json`: comments (Ctrl+/), brackets, auto-closing and surrounding pairs, folding markers, the word pattern, indentation and Enter rules |
@@ -690,7 +726,8 @@ language servers, `jsonValidation`, product icon themes and `.tmTheme`
 colour themes. So ESLint, GitLens, debuggers and language features need
 Code Arena's own way: ESLint as the project's check (Problems), Source
 control and its compares, Run and Debug's adapters, Prettier and the others
-as formatters. An extension with nothing Code Arena uses is refused. A
+as formatters, and the language servers themselves (below) for completions,
+definitions and errors. An extension with nothing Code Arena uses is refused. A
 project's own `.vscode/*.code-snippets` and your own snippets files are not
 read yet: only an extension's.
 
@@ -706,6 +743,100 @@ and a path in its `package.json` that leads out of the extension is left out.
 An extension's files are served to the page only when its contributions name
 them, never as a page of its own (an SVG runs no script). Monaco cannot take a
 language back: one an extension added stays until the page reloads.
+### Language servers
+
+The editor speaks the Language Server Protocol, as VS Code does: open a file
+and the language server for its language starts, and the editor gets its
+completions (with their documentation and auto-imports), hovers, signature
+help, **Go to Definition** (**F12**; into another file of the folder, it opens
+there), declaration, type definition and implementation, **Go to
+References** (**Shift+F12**), the other uses of a name highlighted, the
+symbols (**Ctrl+Shift+O**, the outline), **Rename Symbol** (**F2**, in every
+file it changes: the files not open yet open behind the one shown, unsaved),
+code actions (the light bulb: quick fixes, organize imports, refactorings) and
+formatting. Its errors and warnings are marked in the files and listed under
+**Problems** (below the check's), with the server's name. While a server runs,
+the editor's own services for its languages (TypeScript's and JavaScript's,
+and JSON's, CSS's and HTML's when their servers are on) are turned off, so
+nothing is answered twice; they come back when it stops. The project's own
+formatter (Prettier, ruff, gofmt…: above) still formats its files; a language
+server formats the languages that have none.
+
+| Server | Languages | How to get it |
+|---|---|---|
+| typescript-language-server | TypeScript, JavaScript | `npm install -g typescript-language-server typescript` |
+| Pyright, basedpyright, Python LSP Server (pylsp) | Python | `npm install -g pyright`, `pip install basedpyright`, `pip install python-lsp-server` |
+| gopls | Go | `go install golang.org/x/tools/gopls@latest` |
+| rust-analyzer | Rust | `rustup component add rust-analyzer` |
+| clangd | C, C++ | the system's packages (`apt install clangd`), LLVM |
+| csharp-ls | C# | `dotnet tool install --global csharp-ls` |
+| vscode-json-, vscode-css- and vscode-html-language-server | JSON, CSS (SCSS, Less), HTML | `npm install -g vscode-langservers-extracted` |
+| yaml-language-server | YAML | `npm install -g yaml-language-server` |
+| bash-language-server | shell scripts | `npm install -g bash-language-server` |
+
+A server is looked for in `config.json`'s `"languageServers"`, then in the
+folders on `PATH` (full paths only: `.` in PATH would find the project's own
+program), then where its usual installs put it (`~/go/bin`, `~/.cargo/bin`,
+`~/.dotnet/tools`, `clangd-18` and the like); Python's first in the project's
+`.venv` or `venv` (or `$VIRTUAL_ENV`). For a language, the first one found
+that the settings leave on starts: `codeArena.languageServers.enabled` turns
+them all off, `codeArena.languageServers.ID.enabled` one of them (the JSON,
+CSS and HTML servers are off by default: the editor's own services are the
+same libraries; turned on, they replace them, and while the JSON server runs
+your own settings.json and keybindings.json lose the editor's checks and
+suggestions). TypeScript's
+uses the project's own TypeScript (`node_modules/typescript`) when it has one.
+`config.json` adds your own server, or changes a built-in one (by its id):
+
+```json
+"languageServers": {
+  "lua": {"command": ["lua-language-server"], "languages": ["lua"], "settings": {"Lua": {"diagnostics": {"globals": ["vim"]}}}},
+  "pyright": {"command": ["/opt/node/bin/pyright-langserver", "--stdio"]},
+  "clangd": {"command": ["clangd", "--background-index", "--compile-commands-dir=build"], "env": {"CLANGD_FLAGS": null}},
+  "gopls": {"disabled": true}
+}
+```
+
+`command` is the program (a full path or a name on PATH) and its arguments;
+`languages` are Monaco's language ids (a built-in's own when not given);
+`initializationOptions` go to the server's `initialize`; `settings` answer
+the server's `workspace/configuration` (over your settings.json, where VS
+Code's settings for the server work too: `"python.analysis.typeCheckingMode"`,
+`"gopls": {…}`, `"rust-analyzer.cargo.features"`); `env` adds to its
+environment (`null` takes a variable away); `"disabled": true` turns a
+built-in off. Your own come before the built-in ones for their languages.
+
+**Trust.** A language server runs the folder's code (a tsserver plugin, a
+build script, `go list`, a Cargo build script), so none starts until you
+trust the folder: until then the status bar says so, quietly (no prompt for
+each file); **Manage Workspace Trust** trusts it, and the servers start.
+Taking the trust back stops them.
+
+**Nothing is fetched.** Each runs in the folder, without `ARENA_API_KEY`, in
+the agent's sandbox where the system has one (it can write the folder and the
+build tools' caches, cannot see what holds secrets) and without the network.
+The catalog's servers are also told not to fetch, for a system without a
+sandbox: no type packages for TypeScript, `GOPROXY=off` for gopls,
+`CARGO_NET_OFFLINE=true` for rust-analyzer, no schema store for YAML, and no
+schemas from the web for JSON. Nothing is installed: a missing server says how
+to get it.
+
+**The status bar** names the file's server and its state: starting, ready
+(and what it is doing: indexing…), failed, off until the folder is trusted,
+in use by another page, not installed. Clicking it offers **Restart Language
+Server** and **Show Language Server Log** (both in the palette too). The
+panel's **Output** tab (**Toggle Output**) has a channel per server: when it
+started, its messages, why it ended, and the last 200 lines it wrote to
+stderr. A server that ends by itself starts again (three times in three
+minutes at most).
+
+Six servers run at once at most, one of each; a server serves one page: a
+second page of the folder that opens a file of its language takes it over
+(the first says so, and **Restart** takes it back). A page that closes or
+reloads stops its servers (shutdown and exit, killed 2 s later); the page
+reloaded starts them again. Definitions in a file outside the folder (a
+library's, the standard library's) are not opened: the editor opens the
+folder's files only.
 
 ### Ask about code from the editor
 
@@ -753,7 +884,9 @@ as your terminals run, with no sandbox; five minutes at most). Each problem
 opens its file at its line, where the editor marks it too (as the editor's
 own problems, with **Fix with Code Arena** in the light bulb), and **Fix**
 beside it asks the agent to fix it. The status bar counts the errors and
-warnings; the activity bar the errors.
+warnings; the activity bar the errors. Below the check's, **Language
+servers** lists what the language servers running found (in the files open,
+and in others some servers check too), each with the server's name.
 
 The check is `"checkCommand"` in `config.json`, else the first found by the
 project's files: `dotnet build` (a solution or project), `tsc --noEmit`
@@ -910,6 +1043,9 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/debug/stop` `{id}` | a launch: `terminate` when the adapter has it, then `disconnect` with `terminateDebuggee`; an attach: `disconnect` alone, the program let go. Whatever is left 3 s later is killed with every process it started, and the session is forgotten; 204, 404 for no such session |
 | `GET /api/debug/source?id=ID&path=P` | one of the session's source files. In the folder (an absolute or a relative path), as `/api/file` reads it, with `readOnly: false`. Outside the folder only when the session's adapter named that path (a stack frame, a breakpoint, its loaded sources), and never Code Arena's own config or data files, without `version`, with `readOnly: true`. Anything else is 403 `outside` |
 | `GET /api/debug/adapters` | `[{id, name, types, found, path, version, reason, install}]`: the six adapters as found here (`types`: the launch.json types each serves; `path`: the program, or `127.0.0.1:N`; `reason`: why it is not found or will not do; `install`: how to get it, when it is missing) |
+| `GET /api/lsp` | `[{id, name, languages, found, path, version, reason, install, settings}]`: the language servers, `config.json`'s own first, then the built-in ones (`languages`: Monaco's ids; `path`: the program found; `version` as it says it, for a built-in one found on PATH; `reason`: why it is not found or is off; `install`: how to get it, when it is missing; `settings`: what the page answers its `workspace/configuration` with over settings.json, Code Arena's own defaults with `config.json`'s over them) |
+| `GET /api/lsp/socket?server=ID` | the server's WebSocket, the server started as it opens (in place of the one of that id another page had, which is told) and stopped as it closes: LSP messages as JSON text, one per message, both ways (below). Refused before it opens: 403 `not_trusted` until the folder is trusted, 404 `missing` for no such server or one not found here (`install`), 409 `too_many` past six running, 409 `failed` when it does not start |
+| `GET /api/lsp/log?server=ID` | `{server, running, exitCode, lines, refused}`: the last 200 lines the server running (else the last that ran) wrote to stderr, and why its last start was refused (`refused`, cleared by one that starts: a WebSocket refused tells the page nothing); 404 `missing` for no such server |
 | `POST /api/problems/run` | runs the check (waits for the one running) and answers as above; 404 `no_check` when none is found |
 | `POST /api/complete` `{path, prefix, suffix}` | code completion at the editor's cursor: `{text}`; 404 `off` when the config turns it off, 409 `busy` while an answer is written, 429 `limited` at the key's limit |
 | `POST /api/messages` `{text, context}` | a message, answered as a stream of events; `context`: lines chosen in the editor, `[{path, startLine, endLine, text}]` (`text`: the editor's, when unsaved; eight at most). The stream's `{"type":"attached", id, files}` lists what went with the question |
@@ -918,6 +1054,7 @@ status (403 `outside` for a path outside the folder).
 | `GET /api/files?path=DIR` | a folder's entries, folders first: `{path, entries: [{name, path, kind, size, link}]}` |
 | `GET /api/files/all` | every file, for quick open: `{files, truncated}` (50,000 at most) |
 | `GET /api/file?path=FILE` | `{path, size, version, text}`; `text` is null with `binary` or `tooLarge` (over 5 MB) |
+| `GET /api/media?path=FILE` | a picture, sound or video of the allowed folders as it is (PNG, JPEG, GIF, WebP, BMP, AVIF, MP3, WAV, Ogg, FLAC, M4A, AAC, MP4, WebM, MOV; up to 256 MB), for an `img`, `audio` or `video` element: the media type set, `nosniff` and a sandboxing CSP; 415 `not_media` for anything else (SVG and HTML included), 413 `too_large` |
 | `POST /api/file` `{path, text, version}` | saves; 409 `changed` when the file changed since `version`; `{path, version, size}` |
 | `POST /api/files/new` `{path, kind}` | a new file, or a folder with `kind: "dir"`; 409 `exists` |
 | `POST /api/files/rename` `{from, to}` | moves a file or folder; `{from, to}` |
@@ -977,6 +1114,26 @@ sends 1 MB per message at most, an adapter 32 MB; a page that falls 10,000
 messages or 64 MB behind is let go (its socket closes; it reattaches to get
 the snapshot).
 
+On a language server's WebSocket, each message is relayed as it is but for
+its file URIs: the page names a file of the folder `file:///` and its path in
+the folder (as its editor's models are named), the server `file://` and its
+full path (the folder's real path, its links resolved, is the folder too); a
+file outside the folder is `outside://` and its full path for the page. Every
+string in a message that is a whole file URI is rewritten both ways, and each
+key that is one (a WorkspaceEdit's `changes`), but not a document's or an
+edit's text (`text`, `newText`, `insertText`, `value`), and a path of the
+page's that would leave the folder (`..`) is passed on as it is. `initialize`'s
+`processId` (null in a sandbox), `rootUri`, `rootPath`, `workspaceFolders` and
+`initializationOptions` are the server's to set, whatever the page sends. A
+server that ends (or is stopped) sends the page, last,
+`{"jsonrpc":"2.0","method":"codeArena/ended","params":{reason, exitCode,
+takenOver, stopped}}` (`takenOver`: another page took it; `stopped`: Code
+Arena stopped it: the trust was taken back, or it is stopping), then the socket
+closes. Closing the socket sends the server `shutdown` and `exit`, and kills
+what is left 2 s later with every process it started. A page sends 16 MB per
+message at most, a server 64 MB; a server waits while 1,000 of its messages
+wait for the page.
+
 On the terminal's WebSocket, the server sends the output kept so far, then
 the output as it comes, as binary messages (the terminal's bytes), and
 `{"type":"exit","code":N}` (text) when the shell ends, then closes. The page
@@ -1002,8 +1159,10 @@ time limit.
 
 A question takes **y** (yes), **n** (no: the model is told, and asked to find
 another way) or **a** (always, for this session: every file edit; a command by
-its first two words, `npm test …`; an MCP tool by name). `plan` offers the
-model only the tools that change nothing, and asks it for a plan to approve.
+its first two words, `npm test …`; an MCP tool by name). `plan` refuses every
+tool that changes something when the model calls it (the model is offered the
+same tools in every mode, so the start of its requests stays cached), and asks
+it for a plan to approve.
 `yolo` warns when it starts: use it in a folder you can throw away. Set the
 mode with `--mode`, `/mode`, or `"mode"` in the config file.
 
@@ -1095,6 +1254,23 @@ same tools as the chat, with the same rights and the same audit, as that
 person. They run without asking, except those Arena marks as changing
 something, which ask like a command. A tool named like a local one is offered
 as `arena_<name>`. Arena's own instructions to the model are passed on.
+Arena's tools make pictures, video and speech too: what a tool returns (a
+picture or sound inline, a file it links to, fetched with `resources/read`;
+up to 256 MB) is saved in the working directory under `.code-arena/media/`,
+named after the tool and the time (`generate_image-20261016-101500.png`), and
+the model is given its path to tell the person, who opens it in the IDE. That
+folder has a `.gitignore` of its own, so the files are never committed.
+
+**Every tool call has a deadline**: 10 minutes without an answer, unless the
+tool says it takes longer (`"arena/timeoutSeconds"` or `"timeoutSeconds"` in
+its `_meta`). Each progress report the server sends (MCP
+`notifications/progress`, asked for with a progress token on every call)
+starts the time again and is told to the person (every 20 seconds at most).
+Past it the call is given up: the server is told (`notifications/cancelled`)
+and the model hears that it timed out. Every connection has TCP keep-alive
+(a probe after 30 seconds of quiet, then every 10), so a server that went away
+without a word (a laptop asleep, a VPN that changed) is found out in about a
+minute and a half rather than never.
 
 **Argus's tools** come from `https://argus.DOMAIN/mcp` with the same key
 (`"argusUrl"` in the config file for another address; none for an Arena
@@ -1192,7 +1368,11 @@ shell, the working directory, the git branch, the date and the mode.
 
 Each session is a JSON Lines file in the sessions folder (0600): every message
 as it happens, the model, the to-do list and the tokens. `--continue`,
-`--resume` and `/resume` read it back.
+`--resume` and `/resume` read it back. A compaction appends the new history
+(the summary and the part kept), never rewrites the file. Each file is
+scanned once while Code Arena runs and then only what was appended to it (by
+its size and time), so listing sessions and the IDE's session list stay fast
+with long sessions; reading one back starts at its last compaction.
 
 The model's window comes from the gateway (`/v1/model/info`), or `"context"`
 in the config file when the gateway does not say (32,768 otherwise). When the
@@ -1202,6 +1382,42 @@ decisions, files, commands and the state of the work) and the recent part
 kept whole, within the **target**, 25% of the window by default. `/compact`
 does it at once. A tool's output longer than 40,000 characters (less for a
 small window) is cut in the middle.
+
+A long session never gets stuck on the window:
+
+- **The summary is asked as the conversation goes on**: the same system
+  prompt, tools and older messages the model has read (so the engine reads
+  them from its cache), then a request to summarize them, within what the
+  window holds (the oldest messages left out past it, an earlier summary
+  kept).
+- **A summary that cannot be made is not fatal**: the older messages are left
+  out instead, with a note of what they held (the summary before them, the
+  person's messages, the files changed, the commands run, the last answer),
+  long tool results and file contents the model wrote in older steps are cut
+  to their start, and the turn goes on. A summary is tried again only after 2
+  compactions (then 4, then 8) while it keeps failing; `/compact` always tries
+  it, and leaves the conversation as it was when it fails.
+- **One long turn compacts itself**: when nothing before the turn is left to
+  summarize, the turn's earlier steps are (the person's message and the
+  latest steps kept whole). A compaction that would change nothing writes
+  nothing and does not reset the IDE's page.
+- **A request the window refuses** (the engine's or LiteLLM's "exceeds the
+  context size", `ContextWindowExceededError`, "maximum context length") is
+  compacted at once and asked again, once. If it still does not fit, the turn
+  ends with that, and the message is taken out of the conversation so it does
+  not pile up.
+- **The size is measured, not guessed**: the characters a token holds are
+  learned from the gateway's counts (and from the size a refusal gives); a
+  resumed session starts from its last count. The answer's room (the model's
+  longest answer as the gateway says, 4,096 tokens otherwise, at most an
+  eighth of the window) stays free below the window, whatever the threshold.
+- **The start of every request stays the same**, so the engine does not read
+  the whole conversation again after a change: the same tools in every mode,
+  MCP servers' tools in the order they came (a new server's at the end), and
+  what changes during a session (the mode, the date, the branch, whether
+  Arena's tools are connected, the servers' instructions) in a short note of
+  Code Arena's added to the conversation where it changed, never in the
+  system prompt. The notes are not saved in the session nor shown on the page.
 
 Set them with `/compact-at 70` (the threshold) or `/compact-at 70 30` (and the
 target), in the IDE's **Context** (the window's use in the status bar), or
@@ -1445,7 +1661,7 @@ A `command` runs as a child process speaking MCP on stdin and stdout (`args`,
 `headers` is taken from the environment, so tokens stay out of the file. Their
 tools are named `mcp__<server>__<tool>` and ask before each call unless the
 server has `"trust": true` (or the mode is `yolo`); in `plan` mode only those
-the server marks read-only are offered. `"disabled": true` keeps a server
+the server marks read-only run (the others are refused when called). `"disabled": true` keeps a server
 without starting it. On Windows, `npx` and other `.cmd` scripts need
 `"command": "cmd", "args": ["/c", "npx", …]`.
 
@@ -1454,7 +1670,8 @@ The rest of the file: `"model"`, `"thinking"`, `"mode"`, `"context"`,
 `"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"argusTools": false`
 (no Argus MCP), `"argusUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
 `"mcpUrl"`, `"ca"`, `"autoCommit"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"window"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"checkCommand"`, `"sandbox"`,
-`"sandboxNetwork"`, `"sandboxWritable"`, `"permissions"`. `ARENA_ARGUS_URL` in the environment gives Argus's address
+`"sandboxNetwork"`, `"sandboxWritable"`, `"permissions"`, `"formatters"`, `"debugAdapters"` and
+`"languageServers"` (the IDE's: above). `ARENA_ARGUS_URL` in the environment gives Argus's address
 for one run.
 
 ## Building it (admins)
@@ -1509,8 +1726,13 @@ tried again five times over about a minute and a half, and the session says so
 each time. An answer that has not started after a minute says so (the engine
 busy with others, or reading a long prompt; Ctrl+C or **Stop** ends the wait).
 One that does not start within 15 minutes, or that stops for 3 minutes, is
-given up and asked once more; a second such stall ends the turn with the
-reason, and the next message is sent as usual. When
+given up and asked once more (the gateway's own timeout, 408, counts as such a
+stall); a second such stall ends the turn with the reason, and the next
+message is sent as usual. Once the engine's reading speed is measured (the
+time to the first word of answers whose prompt it had not cached), a request
+with much it has not cached says first about how long the answer may take to
+start, and waits half as long again as that before giving up (an hour at
+most). When
 the connection drops after part of an answer arrived (a stream that ends
 without its end counts too), that part is kept and the model is asked to carry
 on from where it stopped, up to three times a turn.

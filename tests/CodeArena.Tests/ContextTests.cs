@@ -245,5 +245,22 @@ public sealed class ContextTests : IDisposable
         Assert.Contains($"--ro-bind /dev/null {Path.Combine(home, ".netrc")}", args);
         Assert.Contains($"--tmpfs {Paths.ConfigDir}", args);
         Assert.DoesNotContain("--unshare-net", args);
+        Assert.Contains("--die-with-parent", args);
+
+        // A language server's: no network, not tied to the thread that started it (bubblewrap's --die-with-parent
+        // follows the thread), and the folder of its program (or script) seen though its own /tmp covers /tmp.
+        var tools = Directory.CreateTempSubdirectory("code-arena-server-").FullName;
+        try
+        {
+            var lasting = string.Join(' ', sandbox.Lasting([tools]).BubblewrapArguments(project));
+            Assert.Contains("--unshare-net", lasting);
+            Assert.DoesNotContain("--die-with-parent", lasting);
+            Assert.Contains($"--ro-bind {Sandbox.Real(tools)} {Sandbox.Real(tools)}", lasting);
+            Assert.Contains($"--tmpfs {Paths.ConfigDir}", lasting);
+        }
+        finally
+        {
+            Directory.Delete(tools, recursive: true);
+        }
     }
 }

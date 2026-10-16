@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { insertFinalNewline, trimFinalNewlines, trimTrailingWhitespace, type SaveContext } from './save-participants'
 import { effective, extensionDefaults, readLayer } from './settings'
-import { setExtensionIconThemes, setExtensionThemes, settingDef, settingsSchema, themeNamed } from './settings-schema'
+import { monacoLanguageId, setExtensionIconThemes, setExtensionThemes, settingDef, settingsSchema, themeNamed } from './settings-schema'
 
 describe('settings.json', () => {
   it('layers the defaults, the person\'s, the project\'s, then each for the language', () => {
@@ -15,6 +15,17 @@ describe('settings.json', () => {
     expect(effective(user, workspace, 'python')['editor.insertSpaces']).toBe(false)
     expect(effective(user, workspace, 'javascript')['editor.formatOnSave']).toBe(true)
     expect(effective(user, workspace, 'go')['editor.formatOnSave']).toBe(false)
+  })
+
+  it("reads VS Code's language ids that Monaco knows by another (typescriptreact, shellscript…) as Monaco's", () => {
+    const user = readLayer('{ "[typescriptreact]": { "editor.tabSize": 2, "editor.formatOnSave": true }, "[typescript]": { "editor.tabSize": 4 }, "[shellscript]": { "editor.insertSpaces": false }, "[jsonc]": { "editor.tabSize": 3 } }')
+    expect(user.problems).toEqual([])
+    // A .tsx file is "typescript" in Monaco: the block written with Monaco's id wins over VS Code's.
+    expect(effective(user, readLayer(''), 'typescript')).toMatchObject({ 'editor.tabSize': 4, 'editor.formatOnSave': true })
+    expect(effective(user, readLayer(''), 'shell')['editor.insertSpaces']).toBe(false)
+    expect(effective(user, readLayer(''), 'json')['editor.tabSize']).toBe(3)
+    expect(monacoLanguageId('javascriptreact')).toBe('javascript')
+    expect(monacoLanguageId('python')).toBe('python')
   })
 
   it("puts the extensions' configuration defaults under the person's, their language's own over every general setting", () => {

@@ -23,9 +23,11 @@ internal sealed class Sandbox
     private readonly IReadOnlyList<string> _hidden;
     private readonly string _tmp;
     private readonly IReadOnlyList<string> _readable;
+    private readonly bool _lasting;
 
-    private Sandbox(Kinds kind, string? why, bool network, IReadOnlyList<string> writable, IReadOnlyList<string> hidden, string tmp, IReadOnlyList<string>? readable = null)
+    private Sandbox(Kinds kind, string? why, bool network, IReadOnlyList<string> writable, IReadOnlyList<string> hidden, string tmp, IReadOnlyList<string>? readable = null, bool lasting = false)
     {
+        _lasting = lasting;
         Kind = kind;
         Why = why;
         Network = network;
@@ -50,6 +52,16 @@ internal sealed class Sandbox
         PrivateFiles.EnsureDirectory(tmp);
         return new Sandbox(Kind, Why, network, [.. writable.Select(Real).Distinct()], _hidden, tmp, [.. (readable ?? []).Select(Real).Distinct()]);
     }
+
+    /// <summary>
+    /// The same sandbox for a program that lasts (a language server's): without the network (it needs none, and so
+    /// fetches nothing), the folders in <paramref name="readable"/> (the program's, a script it is given) seen even where
+    /// its own /tmp would cover them, and not tied to the thread that starts it: bubblewrap's --die-with-parent follows
+    /// that thread, not the process, and the thread pool lets its threads go, killing the program a while later. It ends
+    /// with its stdin instead, or as it is stopped. Off when this one is.
+    /// </summary>
+    public Sandbox Lasting(IEnumerable<string> readable) =>
+        Kind == Kinds.Off ? this : new Sandbox(Kind, Why, false, _writable, _hidden, _tmp, [.. _readable, .. readable.Select(Real).Distinct()], lasting: true);
 
     /// <summary>Where a command in the sandbox sees a path in its own /tmp: under /tmp with bubblewrap, where it is otherwise.</summary>
     public string Inside(string path) =>
@@ -256,7 +268,11 @@ internal sealed class Sandbox
                 a.AddRange(["--ro-bind", "/dev/null", path]);
             }
         }
-        a.AddRange(["--unshare-pid", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try", "--die-with-parent", "--new-session"]);
+        a.AddRange(["--unshare-pid", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try", "--new-session"]);
+        if (!_lasting)
+        {
+            a.Add("--die-with-parent");
+        }
         if (!Network)
         {
             a.Add("--unshare-net");

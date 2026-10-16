@@ -826,7 +826,7 @@ internal sealed class ChatSync : IAsyncDisposable
         var history = new List<JsonObject>
         {
             new() { ["role"] = "user", ["content"] = Agent.SummaryHead + "\n\n" + text },
-            new() { ["role"] = "assistant", ["content"] = Agent.SummaryAnswer },
+            new() { ["role"] = "assistant", ["content"] = Agent.Understood },
         };
         history.AddRange(_store.Read(d => d.Stream.Skip(index + 1).Select(e => e.Message.Clone()).ToList()));
         _store.Compacted(history, count - index - 1, upTo);

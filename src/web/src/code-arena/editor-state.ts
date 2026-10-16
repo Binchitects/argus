@@ -86,6 +86,8 @@ export interface EditorApi {
   /** The cursor in the file shown, 1-based. */
   cursor: { line: number; column: number } | null
   open: (path: string, at?: Reveal) => Promise<void>
+  /** Opens files in tabs behind the one shown, their text in the editor (a language server's edit changes them). */
+  keep: (paths: string[]) => Promise<void>
   openDiff: (path: string, source?: DiffSource) => Promise<void>
   /** Opens the Settings editor or the Keyboard Shortcuts editor (one tab each). */
   openPage: (kind: 'settings' | 'keybindings', query?: string) => void
@@ -95,6 +97,8 @@ export interface EditorApi {
   compare: (left: Side, right: Side) => Promise<void>
   /** The diff editor shown, for the compare's toolbar. */
   diffEditor: () => Monaco.editor.IStandaloneDiffEditor | null
+  /** Whether the diff editor is made yet (the first time a compare shows): the toolbar renders again when it is. */
+  diffMade: boolean
   /** Stages, unstages, reverts or accepts the change at the cursor (or those selected) in the compare shown. */
   changeAction: (kind: 'stage' | 'unstage' | 'revert' | 'accept') => Promise<void>
   /** Swaps a compare's sides. */

@@ -25,7 +25,7 @@ public sealed class SyncBranchTests : IDisposable
     private static JsonObject Said(string role, string content) => new() { ["role"] = role, ["content"] = content };
 
     /// <summary>What the model was asked last, after the system prompt.</summary>
-    private List<string> Asked() => [.. _gateway.Requests[^1]["messages"]!.AsArray().Skip(1).Select(m => m!["content"]?.ToString() ?? "")];
+    private List<string> Asked() => [.. FakeGateway.History(_gateway.Requests[^1]).Select(m => m["content"]?.ToString() ?? "")];
 
     private static async Task Until(Func<bool> condition, string what)
     {
@@ -128,7 +128,7 @@ public sealed class SyncBranchTests : IDisposable
     public async Task A_compaction_here_is_the_web_chat_s_summary_and_the_web_s_summary_is_read_here()
     {
         using var h = new Harness(_gateway, _mcp);
-        _gateway.Answer = req => FakeGateway.Last(req).StartsWith("Summarize this session", StringComparison.Ordinal)
+        _gateway.Answer = req => FakeGateway.Summarizing(req)
             ? Reply.Say("SUMMARY-OF-THE-SESSION")
             : Reply.Say($"answer to {FakeGateway.Last(req)}");
         Assert.Equal(0, await h.Run("first\nsecond\n/compact\n/exit\n", "chat"));
@@ -144,7 +144,7 @@ public sealed class SyncBranchTests : IDisposable
         var asked = Asked();
         Assert.StartsWith(Agent.SummaryHead, asked[0]);
         Assert.Contains("THE-WEB-SUMMARY", asked[0]);
-        Assert.Equal([Agent.SummaryAnswer, "q3", "a3", "next"], asked[1..]);
+        Assert.Equal([Agent.Understood, "q3", "a3", "next"], asked[1..]);
         Assert.Equal(8, web.Messages.Count);
     }
 

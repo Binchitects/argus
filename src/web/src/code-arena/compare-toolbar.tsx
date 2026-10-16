@@ -45,7 +45,8 @@ export function CompareToolbar({ tab, change }: { tab: Tab; change?: Change }) {
   const sideBySide = settings.get<boolean>('diffEditor.renderSideBySide')
   const ignoreWhitespace = settings.get<boolean>('diffEditor.ignoreTrimWhitespace')
   const folded = settings.get<boolean>('diffEditor.hideUnchangedRegions.enabled')
-  const diff = tab.status === 'ready' ? ed.diffEditor() : null
+  // Made with the first compare shown, after this bar first rendered: diffMade renders it again then.
+  const diff = tab.status === 'ready' && ed.diffMade ? ed.diffEditor() : null
 
   // The counts as Monaco works the compare out (again at each edit).
   useEffect(() => {

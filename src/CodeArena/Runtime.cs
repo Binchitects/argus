@@ -257,7 +257,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             }
             else
             {
-                resumed = SessionStore.Load(resumedFile);
+                resumed = SessionStore.Load(resumedFile, whole: true);
             }
         }
 
@@ -313,17 +313,23 @@ internal sealed partial class Runtime : IAsyncDisposable
             Ui = Ui,
             Model = Model,
             SystemPrompt = () => SystemPrompt.Build(inputs),
+            Note = () => SystemPrompt.Note(inputs),
             Total = Total,
             Stream = !Ui.Quiet,
             Compaction = Compaction,
         };
         Context.SubAgent = (description, prompt, agent, token) => RunSubAgentAsync(inputs, description, prompt, agent, token);
+        Context.Progress = said =>
+        {
+            Notice(false, said);
+            Agent?.Events?.Notice(said);
+        };
         Context.SessionId = () => Session.Id;
 
         if (resumed is not null && resumedFile is not null)
         {
             Session = SessionStore.Open(resumedFile);
-            Agent.Load(resumed.Messages);
+            Agent.Load(resumed.Messages, resumed.Known);
             Context.Todos = resumed.Todos;
             Total.Prompt = resumed.Prompt;
             Total.Cached = resumed.Cached;
@@ -761,7 +767,8 @@ internal sealed partial class Runtime : IAsyncDisposable
         lock (_serversGate)
         {
             var (remote, notes) = Served();
-            Tools.Update(all => all.Where(t => t.Server is null).Concat(remote));
+            // The servers' tools keep their places as others come and go: the requests' start stays what the engine has cached.
+            Tools.Update(all => all.Where(t => t.Server is null).Concat(ToolBox.InPlace(all.Where(t => t.Server is not null), remote)));
             Volatile.Write(ref _instructions, notes);
             if (link.Name == ArenaName)
             {
@@ -913,11 +920,11 @@ internal sealed partial class Runtime : IAsyncDisposable
     /// <summary>Switches to a saved session (/resume).</summary>
     public void Resume(string file)
     {
-        var data = SessionStore.Load(file);
+        var data = SessionStore.Load(file, whole: true);
         _memory = Memory.ForPrompt();
         Session = SessionStore.Open(file);
         Agent.Session = Session;
-        Agent.Load(data.Messages);
+        Agent.Load(data.Messages, data.Known);
         Context.Todos = data.Todos;
         Context.TodosChanged = todos => Session.Todos(todos);
         if (data.Model is not null && data.Model != Model.Name && Models.FirstOrDefault(m => m.Id == data.Model) is { } info)
@@ -1026,11 +1033,12 @@ internal sealed partial class Runtime : IAsyncDisposable
             Trusted = trusted,
             ChangesNothing = changesNothing,
             Summary = a => Fmt.OneLine(Json.Line(a), 100),
-            Run = async (args, _, ct) =>
+            Run = async (args, context, ct) =>
             {
                 try
                 {
-                    var result = await client.CallAsync(remoteName, args, ct);
+                    // Within the tool's time (progress reports count it anew), its progress told, its pictures, sound and video saved.
+                    var result = await client.CallAsync(remoteName, args, ct, progress: context.Progress, media: McpMedia.For(context.Workspace.Root));
                     return new ToolResult(result.Text, result.IsError);
                 }
                 catch (McpException e) when (e.Lost && link is not null)

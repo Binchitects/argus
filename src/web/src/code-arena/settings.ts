@@ -4,7 +4,7 @@ import { ApiError } from '@/lib/api'
 import { useContributions } from './extensions'
 import { parse, setProperty } from './jsonc'
 import { projectFileQuery, userFileQuery, writeFile, writeUserFile, type OpenedFile, type UserFile } from './ide-api'
-import { check, settingDef, settingDefs } from './settings-schema'
+import { check, monacoLanguageId, settingDef, settingDefs } from './settings-schema'
 
 /** The project's own settings, as VS Code keeps them. */
 export const workspaceSettingsPath = '.vscode/settings.json'
@@ -82,6 +82,9 @@ function layerOf(value: unknown, workspace: boolean): Layer {
   }
   const values: Record<string, unknown> = {}
   const languages: Record<string, Record<string, unknown>> = {}
+  // VS Code's ids Monaco reads as one of its own ("[typescriptreact]" for a .tsx file, which Monaco reads as typescript)
+  // go under Monaco's id; a block written with Monaco's id wins over them.
+  const aliased: Record<string, Record<string, unknown>> = {}
   const flat = flatten(value as Record<string, unknown>)
   for (const [key, v] of Object.entries(flat)) {
     const ids = /^(\[[^\]]+\])+$/.test(key) ? [...key.matchAll(/\[([^\]]+)\]/g)].map((m) => m[1]!) : null
@@ -92,8 +95,12 @@ function layerOf(value: unknown, workspace: boolean): Layer {
     }
     const own: Record<string, unknown> = {}
     take(flatten(v as Record<string, unknown>), own, ids[0])
-    for (const id of ids) languages[id] = { ...languages[id], ...own }
+    for (const id of ids) {
+      const into = monacoLanguageId(id) === id ? languages : aliased
+      into[monacoLanguageId(id)] = { ...into[monacoLanguageId(id)], ...own }
+    }
   }
+  for (const [id, own] of Object.entries(aliased)) languages[id] = { ...own, ...languages[id] }
   take(Object.fromEntries(Object.entries(flat).filter(([k]) => !k.startsWith('['))), values)
   return { values, languages, problems }
 }

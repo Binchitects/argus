@@ -8,19 +8,19 @@ import { attachmentUrl } from './api'
 import { speak, voicePrefix } from './sound'
 import type { Attachment } from './types'
 
-/** A sound or a video, played in place: sound with a player, video with its picture. */
-export function MediaPlayer({ a, className }: { a: Attachment; className?: string }) {
+/** A sound or a video, played in place: sound with a player, video with its picture. `src`: where it is when not an attachment of the chat's. */
+export function MediaPlayer({ a, src = attachmentUrl(a.id), className }: { a: Attachment; src?: string; className?: string }) {
   if (a.kind === 'video') {
     return (
       // oxlint-disable-next-line jsx-a11y/media-has-caption -- people's own clips and generated ones have no captions to give
-      <video controls preload="metadata" src={attachmentUrl(a.id)} aria-label={a.fileName} className={className ?? 'max-h-72 max-w-full rounded-lg border bg-black'} />
+      <video controls preload="metadata" src={src} aria-label={a.fileName} className={className ?? 'max-h-72 max-w-full rounded-lg border bg-black'} />
     )
   }
   return (
     <figure className={className ?? 'grid gap-1 rounded-lg border bg-card px-3 py-2'}>
       <figcaption className="truncate text-xs text-muted-foreground">{a.fileName}</figcaption>
       {/* oxlint-disable-next-line jsx-a11y/media-has-caption -- a voice message's transcript is what the model reads */}
-      <audio controls preload="metadata" src={attachmentUrl(a.id)} aria-label={a.fileName} className="h-9 w-64 max-w-full" />
+      <audio controls preload="metadata" src={src} aria-label={a.fileName} className="h-9 w-64 max-w-full" />
     </figure>
   )
 }

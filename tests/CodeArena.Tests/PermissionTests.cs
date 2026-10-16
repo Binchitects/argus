@@ -64,7 +64,7 @@ public sealed class PermissionTests
     }
 
     [Fact]
-    public async Task Plan_mode_is_read_only_and_offers_only_reading_tools()
+    public async Task Plan_mode_is_read_only_through_the_permissions_and_the_same_tools_are_offered()
     {
         var (p, output) = Make(Mode.Plan, "y\ny\ny\n");
         Assert.Null(await p.CheckAsync(Read, [], default));
@@ -77,13 +77,12 @@ public sealed class PermissionTests
         // A server the person trusts runs without asking, but is not taken to change nothing.
         Assert.Contains("Plan mode is read-only", await p.CheckAsync(RemoteTool(trusted: true), [], default));
         var box = new ToolBox([.. LocalTools.All(), LocalTools.SubAgentTool(), RemoteTool(trusted: true), RemoteTool(trusted: false, readOnly: true)]);
-        var offered = box.Offered(Mode.Plan).Select(t => t.Name).ToList();
-        Assert.DoesNotContain("edit_file", offered);
-        Assert.DoesNotContain("write_file", offered);
-        Assert.DoesNotContain("run_shell", offered);
-        Assert.Contains("read_file", offered);
+        // Every tool in every mode, so the start of the requests stays what the engine has cached: plan mode refuses above.
+        var offered = box.Offered().Select(t => t.Name).ToList();
+        Assert.Equal(box.All.Select(t => t.Name), offered);
+        Assert.Contains("edit_file", offered);
+        Assert.Contains("run_shell", offered);
         Assert.Contains("task", offered);
-        Assert.Single(offered, n => n == "mcp__tickets__close");
     }
 
     [Fact]

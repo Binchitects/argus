@@ -35,7 +35,7 @@ public sealed class SyncTests : IDisposable
         // The person carries on in the web chat; the next turn here hears it first.
         _mcp.Chats.Append(chat, Said("user", "asked on the web"), Said("assistant", "answered on the web"));
         Assert.Equal(0, await h.Run("", "-p", "second question", "--continue"));
-        var sent = _gateway.Requests[^1]["messages"]!.AsArray().Skip(1).Select(m => m!["content"]!.ToString()).ToList();
+        var sent = FakeGateway.History(_gateway.Requests[^1]).Select(m => m!["content"]!.ToString()).ToList();
         Assert.Equal(["first question", "answer to first question", "asked on the web", "answered on the web", "second question"], sent);
         Assert.Equal(6, chat.Messages.Count);
         Assert.Equal("answer to second question", Content(chat.Messages[5]));
@@ -43,7 +43,7 @@ public sealed class SyncTests : IDisposable
 
         // Read back later, the session has the web's messages once, and sends nothing twice.
         Assert.Equal(0, await h.Run("", "-p", "third", "--continue"));
-        sent = [.. _gateway.Requests[^1]["messages"]!.AsArray().Skip(1).Select(m => m!["content"]!.ToString())];
+        sent = [.. FakeGateway.History(_gateway.Requests[^1]).Select(m => m!["content"]!.ToString())];
         Assert.Equal(1, sent.Count(s => s == "asked on the web"));
         Assert.Equal(8, chat.Messages.Count);
     }
@@ -76,7 +76,7 @@ public sealed class SyncTests : IDisposable
 
         Assert.Equal(0, await h.Run("", "-p", "two", "--continue"));
         Assert.Equal(["one", "answer to one", "two", "answer to two"], chat.Messages.Select(Content));
-        var sent = _gateway.Requests[^1]["messages"]!.AsArray().Skip(1).Select(m => m!["content"]!.ToString()).ToList();
+        var sent = FakeGateway.History(_gateway.Requests[^1]).Select(m => m!["content"]!.ToString()).ToList();
         Assert.Equal(["one", "answer to one", "two"], sent);
     }
 
@@ -88,7 +88,7 @@ public sealed class SyncTests : IDisposable
         var web = _mcp.Chats.Add("Plan the release", Said("user", "Plan the release"), Said("assistant", "Step one: freeze."));
 
         Assert.Equal(0, await h.Run("", "-p", "and then?", "--web", web.Id));
-        var sent = _gateway.Requests[^1]["messages"]!.AsArray().Skip(1).Select(m => m!["content"]!.ToString()).ToList();
+        var sent = FakeGateway.History(_gateway.Requests[^1]).Select(m => m!["content"]!.ToString()).ToList();
         Assert.Equal(["Plan the release", "Step one: freeze.", "and then?"], sent);
         Assert.Equal(["Plan the release", "Step one: freeze.", "and then?", "answer to and then?"], web.Messages.Select(Content));
         Assert.Single(_mcp.Chats.All);

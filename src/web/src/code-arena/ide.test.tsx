@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import codeArenaDoc from '@docs/code-arena.md?raw'
@@ -10,6 +10,9 @@ import { fakeApi, type Handler } from '@/test/utils'
 import type { CodeState } from './api'
 import { App } from './app'
 import { debug } from './debug/session'
+import { languageServers } from './lsp/servers'
+import * as monaco from 'monaco-editor'
+import type * as Monaco from 'monaco-editor'
 import { asks } from './bridge'
 import { rankFiles } from './editor-state'
 import { parts, regions, tasks } from './help-text'
@@ -121,8 +124,13 @@ const fakes = vi.hoisted(() => {
     getLineContent(line: number) {
       return this.value.split('\n')[line - 1] ?? ''
     }
+    eol = '\n'
     getEOL() {
-      return '\n'
+      return this.eol
+    }
+    /** As Monaco's: LF (0) or CRLF (1). */
+    setEOL(e: number) {
+      this.eol = e === 1 ? '\r\n' : '\n'
     }
     getVersionId() {
       return this.alt
@@ -135,6 +143,7 @@ const fakes = vi.hoisted(() => {
       return { lineNumber: before.length, column: before.at(-1)!.length + 1 }
     }
     dispose() {
+      for (const f of fakes.disposing) f(this)
       this.disposed = true
     }
   }
@@ -199,6 +208,10 @@ const fakes = vi.hoisted(() => {
         },
         getRanges: () => this.decorations.map((d) => d.range),
       }
+    }
+    /** Monaco's keybinding service as its editors hold it: Monaco's own default keys in its resolver. */
+    _standaloneKeybindingService = {
+      _getResolver: () => ({ _defaultKeybindings: [{ command: 'editor.action.addSelectionToNextFindMatch', when: { serialize: () => 'editorFocus' }, resolvedKeybinding: { getUserSettingsLabel: () => 'ctrl+d' } }] }),
     }
     contextKeys: Record<string, unknown> = {}
     createContextKey(key: string, value: unknown) {
@@ -373,8 +386,19 @@ const fakes = vi.hoisted(() => {
     languageConfigs: new Map<string, { comments?: { lineComment?: string }; brackets?: [string, string][] }>(),
     /** The completion providers the page gave Monaco (snippets), by language. */
     completions: [] as { language: string; provider: { provideCompletionItems: (...args: unknown[]) => Promise<{ suggestions: { label: { label: string }; insertText: string; insertTextRules: number }[] }> } }[],
+    /** Who listens to models made, about to go, and given another language (the language servers). */
+    created: [] as ((m: Model) => void)[],
+    disposing: [] as ((m: Model) => void)[],
+    relanguaged: [] as ((e: { model: Model; oldLanguage: string }) => void)[],
+    /** What opens another file for Go to Definition (registerEditorOpener). */
+    openers: [] as { openCodeEditor: (source: unknown, resource: Uri, at?: unknown) => boolean | Promise<boolean> }[],
+    /** The language features the page gave Monaco, by kind (definition, hover…), the last given last. */
+    providers: new Map<string, { languages: unknown; provider: Record<string, (...args: unknown[]) => unknown> }[]>(),
   }
 })
+
+/** A language feature the page gave Monaco: the last of that kind. */
+const provider = (kind: string) => fakes.providers.get(kind)?.at(-1)?.provider
 
 vi.mock('monaco-editor', () => ({
   editor: {
@@ -384,10 +408,33 @@ vi.mock('monaco-editor', () => ({
       fakes.keybindingRules.push(rules)
       return { dispose() {} }
     },
-    createModel: (value: string, language: string, uri?: InstanceType<typeof fakes.Uri>) => new fakes.Model(value, language, uri),
+    createModel: (value: string, language: string, uri?: InstanceType<typeof fakes.Uri>) => {
+      const m = new fakes.Model(value, language, uri)
+      for (const f of fakes.created) f(m)
+      return m
+    },
+    getModels: () => fakes.models.filter((m) => !m.disposed),
+    onDidCreateModel: (f: (m: InstanceType<typeof fakes.Model>) => void) => {
+      fakes.created.push(f)
+      return { dispose() {} }
+    },
+    onWillDisposeModel: (f: (m: InstanceType<typeof fakes.Model>) => void) => {
+      fakes.disposing.push(f)
+      return { dispose() {} }
+    },
+    onDidChangeModelLanguage: (f: (e: { model: InstanceType<typeof fakes.Model>; oldLanguage: string }) => void) => {
+      fakes.relanguaged.push(f)
+      return { dispose() {} }
+    },
+    registerEditorOpener: (o: (typeof fakes.openers)[number]) => {
+      fakes.openers.push(o)
+      return { dispose() {} }
+    },
     getModel: (uri: InstanceType<typeof fakes.Uri>) => fakes.models.find((m) => !m.disposed && m.uri?.toString() === uri.toString()) ?? null,
-    setModelLanguage: (m: { language: string }, language: string) => {
+    setModelLanguage: (m: InstanceType<typeof fakes.Model>, language: string) => {
+      const oldLanguage = m.language
       m.language = language
+      for (const f of fakes.relanguaged) f({ model: m, oldLanguage })
     },
     setTheme: (t: string) => fakes.themes.push(t),
     getModelMarkers: ({ resource }: { resource: InstanceType<typeof fakes.Uri> }) => fakes.markers.get(resource.toString()) ?? [],
@@ -401,6 +448,8 @@ vi.mock('monaco-editor', () => ({
     remeasureFonts: () => undefined,
     TrackedRangeStickiness: { NeverGrowsWhenTypingAtEdges: 1 },
     OverviewRulerLane: { Left: 1 },
+    MinimapPosition: { Inline: 1, Gutter: 2 },
+    EndOfLineSequence: { LF: 0, CRLF: 1 },
     MouseTargetType: { GUTTER_GLYPH_MARGIN: 2 },
   },
   Range: class {
@@ -429,7 +478,20 @@ vi.mock('monaco-editor', () => ({
       return { dispose() {} }
     },
     registerDocumentRangeFormattingEditProvider: () => ({ dispose() {} }),
-    registerHoverProvider: () => ({ dispose() {} }),
+    ...Object.fromEntries(
+      ['Hover', 'Completion', 'SignatureHelp', 'Definition', 'Declaration', 'TypeDefinition', 'Implementation', 'Reference', 'DocumentHighlight', 'DocumentSymbol', 'Rename'].map((kind) => [
+        kind === 'Completion' ? 'registerCompletionItemProvider' : `register${kind}Provider`,
+        (languages: unknown, provider: Record<string, (...args: unknown[]) => unknown>) => {
+          const key = kind.toLowerCase()
+          fakes.providers.set(key, [...(fakes.providers.get(key) ?? []), { languages, provider }])
+          return {
+            dispose() {
+              fakes.providers.set(key, (fakes.providers.get(key) ?? []).filter((p) => p.provider !== provider))
+            },
+          }
+        },
+      ]),
+    ),
     registerCodeActionProvider: (_: string, provider: { provideCodeActions: (...args: unknown[]) => unknown }) => {
       fakes.codeActions.push(provider)
       return { dispose() {} }
@@ -455,11 +517,20 @@ vi.mock('monaco-editor', () => ({
   },
   Uri: {
     file: (path: string) => new fakes.Uri('file', path),
+    parse: (text: string) => {
+      const m = /^([a-z][a-z0-9+.-]*):\/\/([^?]*)(?:\?(.*))?$/.exec(text)
+      return m ? new fakes.Uri(m[1]!, m[2]!, m[3] ?? '') : new fakes.Uri('', text)
+    },
     from: (c: { scheme: string; path: string; query?: string }) => new fakes.Uri(c.scheme, c.path, c.query),
   },
   typescript: {
-    typescriptDefaults: { setDiagnosticsOptions: () => undefined, getCompilerOptions: () => ({}), setCompilerOptions: () => undefined },
-    javascriptDefaults: { setDiagnosticsOptions: () => undefined, getCompilerOptions: () => ({}), setCompilerOptions: () => undefined },
+    typescriptDefaults: {
+      setDiagnosticsOptions: () => undefined,
+      getCompilerOptions: () => ({}),
+      setCompilerOptions: () => undefined,
+      getDiagnosticsOptions: () => ({}),
+    },
+    javascriptDefaults: { setDiagnosticsOptions: () => undefined, getCompilerOptions: () => ({}), setCompilerOptions: () => undefined, getDiagnosticsOptions: () => ({}) },
     JsxEmit: { ReactJSX: 4 },
     ScriptTarget: { ESNext: 99 },
     ModuleKind: { ESNext: 99 },
@@ -491,6 +562,9 @@ beforeEach(() => {
   debug.replHistory = []
   for (const list of [fakes.models, fakes.editors, fakes.diffEditors, fakes.terminals, fakes.sockets, fakes.themes, fakes.keybindingRules]) list.length = 0
   fakes.definedThemes.clear()
+  // The language servers' store is the page's too: none running, the list read again.
+  languageServers.reset()
+  fakes.providers.clear()
 })
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -2349,6 +2423,380 @@ describe('Code Arena, the IDE', () => {
   })
 })
 
+describe('Code Arena, the language servers', () => {
+  const servers = [
+    { id: 'typescript', name: 'typescript-language-server', languages: ['typescript', 'javascript'], found: true, path: '/usr/bin/typescript-language-server', version: '4.3.3', settings: { typescript: { preferences: { quoteStyle: 'single' } } } },
+    { id: 'pyright', name: 'Pyright', languages: ['python'], found: false, reason: 'pyright-langserver is not installed', install: 'npm install -g pyright' },
+  ]
+  const lsp = () => fakes.sockets.find((s) => s.url.endsWith('/api/lsp/socket?server=typescript'))
+  type Sent = { id?: number | string; method?: string; params?: Record<string, unknown>; result?: unknown }
+  const sent = () => (lsp()?.sent ?? []).map((x) => JSON.parse(x as string) as Sent)
+  const token = { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) }
+  const receive = (m: Record<string, unknown>) => act(() => lsp()!.receive(JSON.stringify({ jsonrpc: '2.0', ...m })))
+  /** The page's request of this method, once it has sent it. */
+  const request = async (method: string) => {
+    let found: Sent | undefined
+    await waitFor(() => {
+      found = sent().findLast((m) => m.method === method && m.id !== undefined)
+      expect(found, `the page asks ${method}`).toBeTruthy()
+    })
+    return found!
+  }
+
+  it('starts the server of a file opened in a trusted folder only, says so in the status bar, keeps the folder\'s files in step, and opens a definition in another file', async () => {
+    let trust: string | undefined
+    backend({
+      'GET /api/lsp': () => ({ json: servers }),
+      'GET /api/workspace/state': () => ({ json: trust ? { trust } : {} }),
+      'POST /api/workspace/trust': (body) => {
+        trust = (body as { trusted: boolean }).trusted ? 'trusted' : 'restricted'
+        return { json: { trust } }
+      },
+      'GET /api/lsp/log': () => ({ json: { server: 'typescript', running: true, exitCode: null, lines: ['tsserver 5.6 started'] } }),
+    })
+    renderIde()
+    await openApp()
+    const status = screen.getByRole('contentinfo', { name: 'Status bar' })
+    // Not trusted: a quiet note in the status bar; nothing starts, and nothing asks.
+    const item = await within(status).findByRole('button', { name: 'Language server typescript-language-server: off until the folder is trusted' })
+    expect(lsp()).toBeUndefined()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    // The item offers the trust; trusted, the server starts.
+    await userEvent.click(item)
+    await userEvent.click(within(await screen.findByRole('dialog', { name: /typescript-language-server/ })).getByRole('option', { name: /Manage Workspace Trust/ }))
+    await userEvent.click(within(await screen.findByRole('dialog', { name: /Trust the folder shop\?/ })).getByRole('button', { name: 'Trust the folder' }))
+    await waitFor(() => expect(lsp()).toBeTruthy())
+    expect(within(status).getByRole('button', { name: 'Language server typescript-language-server: starting' })).toBeInTheDocument()
+    act(() => lsp()!.open())
+    const init = await request('initialize')
+    expect(init.params).toMatchObject({ rootUri: 'file:///', workspaceFolders: [{ uri: 'file:///', name: 'shop' }], capabilities: { textDocument: { definition: { linkSupport: true } } } })
+    receive({ id: init.id, result: { capabilities: { textDocumentSync: 2, definitionProvider: true, hoverProvider: true, documentFormattingProvider: true } } })
+    expect(await within(status).findByRole('button', { name: 'Language server typescript-language-server: ready' })).toBeInTheDocument()
+    expect(sent().map((m) => m.method)).toEqual(['initialize', 'initialized', 'workspace/didChangeConfiguration', 'textDocument/didOpen'])
+    expect(sent()[2]!.params).toEqual({ settings: expect.objectContaining({ typescript: { preferences: { quoteStyle: 'single' } } }) })
+    expect(sent()[3]!.params).toEqual({ textDocument: { uri: 'file:///src/app.ts', languageId: 'typescript', version: expect.any(Number), text: 'const total = 1\nconsole.log(total)\n' } })
+    // The editor's own TypeScript service steps aside while the server answers: its features (Monaco's adapters) answer
+    // nothing, and its markers are dropped.
+    class QuickInfo {
+      provideHover() {
+        return { contents: [{ value: 'from the worker' }] }
+      }
+    }
+    monaco.languages.registerHoverProvider('typescript', new QuickInfo())
+    const app = editor().model as unknown as Monaco.editor.ITextModel
+    expect(await provider('hover')!.provideHover(app, { lineNumber: 1, column: 1 }, token)).toBeUndefined()
+    const workerMarker = { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 2, message: "';' expected.", severity: 8 }
+    monaco.editor.setModelMarkers(app, 'typescript', [workerMarker])
+    expect(fakes.marked.get('typescript:file:///src/app.ts')).toEqual([])
+
+    // Typed in: the server is told. A file of another language, and the agent's side of a compare, are not its.
+    act(() => editor().model!.setValue('const total = 2\nconsole.log(total)\n'))
+    await waitFor(() => expect(sent().at(-1)).toMatchObject({ method: 'textDocument/didChange', params: { textDocument: { uri: 'file:///src/app.ts' }, contentChanges: [{ text: 'const total = 2\nconsole.log(total)\n' }] } }))
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'README.md' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Agent changes (1)' }))
+    await userEvent.click(within(await screen.findByRole('list', { name: 'Changed files' })).getByRole('button', { name: /app\.ts.*changed/ }))
+    await waitFor(() => expect(fakes.diffEditors[0]?.model?.original.value).toBe('const total = 0\n'))
+    expect(sent().filter((m) => m.method === 'textDocument/didOpen').map((m) => (m.params!.textDocument as { uri: string }).uri)).toEqual(['file:///src/app.ts'])
+
+    // It asks for its settings: settings.json's and its own.
+    receive({ id: 'c1', method: 'workspace/configuration', params: { items: [{ section: 'typescript.preferences' }, { section: 'nothing.here' }] } })
+    await waitFor(() => expect(sent().find((m) => m.id === 'c1')).toEqual({ jsonrpc: '2.0', id: 'c1', result: [{ quoteStyle: 'single' }, null] }))
+
+    // Its diagnostics are marked in the file, and listed in Problems with its name.
+    receive({ method: 'textDocument/publishDiagnostics', params: { uri: 'file:///src/app.ts', diagnostics: [{ range: { start: { line: 1, character: 0 }, end: { line: 1, character: 7 } }, severity: 1, code: 2304, source: 'ts', message: "Cannot find name 'consol'." }] } })
+    await waitFor(() => expect(fakes.marked.get('lsp:typescript:file:///src/app.ts')).toEqual([expect.objectContaining({ startLineNumber: 2, startColumn: 1, endColumn: 8, message: "Cannot find name 'consol'.", severity: 8 })]))
+    await userEvent.click(screen.getByRole('button', { name: 'Problems' }))
+    const fromServers = await screen.findByRole('region', { name: 'src/app.ts, from the language servers' })
+    expect(fromServers).toHaveTextContent("Cannot find name 'consol'.typescript-language-server 2304 [2, 1]")
+
+    // Go to Definition: the server's answer, and the file it is in opens at it (Monaco's editor opener).
+    await userEvent.click(within(tabs()).getByRole('tab', { name: 'app.ts, not saved' }))
+    await waitFor(() => expect(editor().model?.uri?.toString()).toBe('file:///src/app.ts'))
+    const definition = provider('definition')!
+    const asked = definition.provideDefinition(editor().model, { lineNumber: 1, column: 7 }, token) as Promise<{ uri: InstanceType<typeof fakes.Uri>; range: unknown }[]>
+    const req = await request('textDocument/definition')
+    expect(req.params).toEqual({ textDocument: { uri: 'file:///src/app.ts' }, position: { line: 0, character: 6 } })
+    receive({ id: req.id, result: [{ uri: 'file:///src/lib/cart.ts', range: { start: { line: 0, character: 7 }, end: { line: 0, character: 9 } } }] })
+    const [location] = await asked
+    expect(location!.uri.toString()).toBe('file:///src/lib/cart.ts')
+    let opened: boolean | undefined
+    await act(async () => {
+      opened = await fakes.openers.at(-1)!.openCodeEditor(editor(), location!.uri, location!.range)
+    })
+    expect(opened).toBe(true)
+    await waitFor(() => expect(within(tabs()).getByRole('tab', { name: 'cart.ts' })).toHaveAttribute('aria-selected', 'true'))
+    await waitFor(() => expect(editor().selection).toEqual({ startLineNumber: 1, startColumn: 8, endLineNumber: 1, endColumn: 10 }))
+    await waitFor(() => expect(sent().filter((m) => m.method === 'textDocument/didOpen').map((m) => (m.params!.textDocument as { uri: string }).uri)).toEqual(['file:///src/app.ts', 'file:///src/lib/cart.ts']))
+
+    // Its log: what the page saw, its messages, and what it wrote to stderr.
+    receive({ method: 'window/logMessage', params: { type: 3, message: 'Using TypeScript 5.6' } })
+    await userEvent.click(within(status).getByRole('button', { name: 'Language server typescript-language-server: ready' }))
+    await userEvent.click(within(await screen.findByRole('dialog', { name: /typescript-language-server: ready/ })).getByRole('option', { name: /Show Language Server Log/ }))
+    const output = await screen.findByRole('region', { name: 'Output' })
+    expect(output).toHaveTextContent('Starting typescript-language-server (/usr/bin/typescript-language-server).')
+    expect(output).toHaveTextContent('[Info] Using TypeScript 5.6')
+    expect(await within(output).findByText('tsserver 5.6 started')).toBeInTheDocument()
+
+    // Another page took it over: said so, the editor's own service back, and not started again by itself.
+    const sockets = fakes.sockets.length
+    receive({ method: 'codeArena/ended', params: { reason: 'Another page took this language server over.', takenOver: true, stopped: true } })
+    act(() => lsp()!.onclose?.())
+    expect(await within(status).findByRole('button', { name: 'Language server typescript-language-server: in use by another page' })).toBeInTheDocument()
+    expect(await provider('hover')!.provideHover(app, { lineNumber: 1, column: 1 }, token)).toEqual({ contents: [{ value: 'from the worker' }] })
+    monaco.editor.setModelMarkers(app, 'typescript', [workerMarker])
+    expect(fakes.marked.get('typescript:file:///src/app.ts')).toEqual([workerMarker])
+    expect(fakes.marked.get('lsp:typescript:file:///src/app.ts')).toEqual([])
+    expect(fakes.sockets.length).toBe(sockets)
+  })
+
+  it('starts no server the settings turn off', async () => {
+    backend({ 'GET /api/lsp': () => ({ json: servers }), 'GET /api/workspace/state': () => ({ json: { trust: 'trusted' } }) }, {}, { 'settings.json': '{ "codeArena.languageServers.typescript.enabled": false }' })
+    renderIde()
+    await openApp()
+    const status = screen.getByRole('contentinfo', { name: 'Status bar' })
+    expect(await within(status).findByRole('button', { name: 'Language server typescript-language-server: off' })).toBeInTheDocument()
+    expect(lsp()).toBeUndefined()
+  })
+
+  it('says how to get a server that is not installed, and starts nothing', async () => {
+    backend({
+      'GET /api/lsp': () => ({ json: [{ ...servers[0], found: false, path: null, reason: 'typescript-language-server is not installed (looked for on PATH).', install: 'npm install -g typescript-language-server typescript' }] }),
+      'GET /api/workspace/state': () => ({ json: { trust: 'trusted' } }),
+    })
+    renderIde()
+    await openApp()
+    const item = await within(screen.getByRole('contentinfo', { name: 'Status bar' })).findByRole('button', { name: 'Language server typescript-language-server: not installed' })
+    expect(item).toHaveAttribute('title', expect.stringContaining('npm install -g typescript-language-server typescript'))
+    expect(lsp()).toBeUndefined()
+  })
+})
+
+describe('Code Arena, the IDE, as its review asked', () => {
+  it("gives Monaco the workbench's context keys and quick diff's keys from the keymap, and lists Monaco's own keys", async () => {
+    backend({}, {}, { 'keybindings.json': '[{ "key": "shift+alt+f3", "command": "-editor.action.dirtydiff.previous" }]' })
+    renderIde()
+    await openApp()
+    // A when clause of the workbench's keys holds in the editor too ("resourceLangId == typescript").
+    await waitFor(() => expect(editor().contextKeys).toMatchObject({ resourceLangId: 'typescript', resourceFilename: 'app.ts', activeEditor: 'workbench.editors.files.textFileEditor', activeViewlet: 'workbench.view.explorer' }))
+    // Quick diff's actions have no keys of their own: Alt+F3 is the keymap's, which keybindings.json takes away.
+    expect(editor().actions.get('editor.action.dirtydiff.next')!.keybindings).toBeUndefined()
+    const given = () => fakes.keybindingRules.at(-1)!.filter((r) => !r.command.startsWith('-'))
+    await waitFor(() => expect(given()).toContainEqual({ keybinding: 512 | 61, command: 'editor.action.dirtydiff.next', commandArgs: undefined, when: 'editorTextFocus' }))
+    expect(given().some((r) => r.command === 'editor.action.dirtydiff.previous')).toBe(false)
+    // Monaco's own Ctrl+D: listed with its key, never given back to Monaco (which has it).
+    expect(given().some((r) => r.command === 'editor.action.addSelectionToNextFindMatch')).toBe(false)
+    await userEvent.keyboard('{Control>}k{/Control}{Control>}s{/Control}')
+    const page = await screen.findByRole('region', { name: 'Keyboard Shortcuts' })
+    await userEvent.type(within(page).getByRole('searchbox', { name: 'Search keybindings' }), 'addSelectionToNextFindMatch')
+    expect(await within(page).findByRole('button', { name: /^editor\.action\.addSelectionToNextFindMatch: Ctrl\+D\./ })).toBeInTheDocument()
+  })
+
+  it('keeps the browser from reloading or saving the page when a key of the debugger or Save does nothing now', async () => {
+    backend()
+    renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    // No session: Stop's Shift+F5 holds for none, and the browser's hard reload does not run.
+    expect(fireEvent.keyDown(document.body, { key: 'F5', code: 'F5', shiftKey: true })).toBe(false)
+    // The Settings page has nothing to save: Ctrl+S does not open the browser's Save Page As.
+    await userEvent.keyboard('{Control>},{/Control}')
+    await screen.findByRole('region', { name: 'Settings' })
+    expect(fireEvent.keyDown(document.body, { key: 's', code: 'KeyS', ctrlKey: true })).toBe(false)
+    // Another key goes on.
+    expect(fireEvent.keyDown(document.body, { key: 'F7', code: 'F7' })).toBe(true)
+  })
+
+  it("renames and deletes in the explorer with the keymap's keys, which keybindings.json changes", async () => {
+    backend({}, {}, { 'keybindings.json': '[{ "key": "f2", "command": "-renameFile" }, { "key": "ctrl+alt+r", "command": "renameFile", "when": "filesExplorerFocus" }]' })
+    renderIde()
+    const readme = await screen.findByRole('treeitem', { name: 'README.md' })
+    // The menu shows the key as it is now.
+    await userEvent.pointer({ keys: '[MouseRight]', target: readme })
+    expect(await screen.findByRole('menuitem', { name: 'Rename Ctrl+Alt+R' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Delete Delete' })).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    act(() => screen.getByRole('treeitem', { name: 'README.md' }).focus())
+    await userEvent.keyboard('{F2}')
+    expect(screen.queryByRole('textbox', { name: 'New name for README.md' })).not.toBeInTheDocument()
+    await userEvent.keyboard('{Control>}{Alt>}r{/Alt}{/Control}')
+    expect(await screen.findByRole('textbox', { name: 'New name for README.md' })).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    act(() => screen.getByRole('treeitem', { name: 'README.md' }).focus())
+    await userEvent.keyboard('{Delete}')
+    expect(await screen.findByRole('alertdialog', { name: 'Delete README.md?' })).toBeInTheDocument()
+  })
+
+  it('has the bar of a compare opened before any file work, and closing it saves the unsaved side no other tab holds', async () => {
+    const { calls } = backend()
+    renderIde()
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'src, the agent changed files in it' }))
+    await userEvent.pointer({ keys: '[MouseRight]', target: screen.getByRole('treeitem', { name: 'README.md' }) })
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Select for Compare' }))
+    await userEvent.pointer({ keys: '[MouseRight]', target: await screen.findByRole('treeitem', { name: 'app.ts, changed by the agent' }) })
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Compare with Selected' }))
+    expect(await within(tabs()).findByRole('tab', { name: 'README.md ↔ app.ts', selected: true })).toBeInTheDocument()
+    const diff = () => fakes.diffEditors[0]!
+    await waitFor(() => expect(diff().model?.original.getValue()).toBe('# Shop\n'))
+    // The diff editor was made after the bar first rendered: the bar has its counts and its buttons all the same.
+    expect(await screen.findByTitle('1 change')).toHaveTextContent('+1 −1')
+    await userEvent.click(screen.getByRole('button', { name: 'Next change' }))
+    expect(diff().went).toEqual(['next'])
+    // The left side typed in (README.md has no tab of its own): closing asks for it, and Save saves it.
+    act(() => diff().model!.original.setValue('# Shop!\n'))
+    await userEvent.click(within(tabs()).getByRole('button', { name: 'Close README.md ↔ app.ts' }))
+    const ask = await screen.findByRole('dialog', { name: 'Save the changes to README.md?' })
+    await userEvent.click(within(ask).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/file')?.body).toEqual({ path: 'README.md', text: '# Shop!\n', version: 'r1' }))
+    await waitFor(() => expect(screen.queryByRole('tablist', { name: 'Open files' })).not.toBeInTheDocument())
+  })
+
+  it("keeps what is typed in the agent's compare when the change is accepted: the file stays open, not saved", async () => {
+    const { calls } = backend()
+    renderIde()
+    await userEvent.click(await screen.findByRole('button', { name: 'Agent changes (1)' }))
+    await userEvent.click(within(await screen.findByRole('list', { name: 'Changed files' })).getByRole('button', { name: /app\.ts.*changed/ }))
+    await waitFor(() => expect(fakes.diffEditors[0]?.model?.modified.value).toBe('const total = 1\nconsole.log(total)\n'))
+    const file = fakes.diffEditors[0]!.model!.modified
+    act(() => file.setValue('const total = 2\n'))
+    await userEvent.click(screen.getByRole('button', { name: 'Accept' }))
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/changes/accept')).toBe(true))
+    expect(await within(tabs()).findByRole('tab', { name: 'app.ts, not saved' })).toBeInTheDocument()
+    expect(file.disposed).toBe(false)
+    expect(file.value).toBe('const total = 2\n')
+  })
+
+  it("shows the agent's compare of a file it then deletes with the file's side empty, not blank", async () => {
+    let gone = false
+    const b = backend({
+      'GET /api/changes/diff': (_, __, url) => ({ json: { path: url.searchParams.get('path'), original: 'const total = 0\n', modified: gone ? null : b.disk['src/app.ts']!.text, version: 'v1' } }),
+      'POST /api/messages': () => {
+        gone = true
+        delete b.disk['src/app.ts']
+        return answerOnly()
+      },
+    })
+    renderIde()
+    await userEvent.click(await screen.findByRole('button', { name: 'Agent changes (1)' }))
+    await userEvent.click(within(await screen.findByRole('list', { name: 'Changed files' })).getByRole('button', { name: /app\.ts.*changed/ }))
+    const diff = () => fakes.diffEditors[0]!
+    await waitFor(() => expect(diff().model?.modified.value).toBe('const total = 1\nconsole.log(total)\n'))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'Delete it{Enter}')
+    await waitFor(() => expect(diff().model?.modified.getValue()).toBe(''))
+    expect(diff().model?.original.getValue()).toBe('const total = 0\n')
+    expect(diff().options).toMatchObject({ readOnly: true, renderMarginRevertIcon: false })
+    expect(within(tabs()).getByRole('tab', { name: /app\.ts\s*changes/ })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('moves a breakpoint with its line when the agent adds a line above it', async () => {
+    const b = backend({
+      'POST /api/messages': () => {
+        b.disk['src/app.ts'] = { text: "import x from 'x'\nconst total = 1\nconsole.log(total)\n", version: 'v2' }
+        return answerOnly()
+      },
+    })
+    renderIde()
+    await openApp()
+    const model = editor().model!
+    const edits: unknown[] = []
+    const push = model.pushEditOperations.bind(model)
+    model.pushEditOperations = (before, ops) => {
+      edits.push(...ops.map((o) => o.range))
+      return push(before, ops)
+    }
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'Import x{Enter}')
+    await waitFor(() => expect(model.value).toBe("import x from 'x'\nconst total = 1\nconsole.log(total)\n"))
+    // One edit, at the top, of no old text: Monaco moves what is on the lines below (a breakpoint, the cursor) with them.
+    expect(edits).toEqual([{ startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 }])
+  })
+
+  it('keeps the indentation chosen for a file when another language is shown or another setting changes', async () => {
+    backend()
+    const { client } = renderIde()
+    await openApp()
+    const model = editor().model!
+    // Indent Using Tabs, from the status bar.
+    act(() => model.updateOptions({ insertSpaces: false }))
+    await userEvent.click(screen.getByRole('treeitem', { name: 'README.md' }))
+    await waitFor(() => expect(editor().model?.value).toBe('# Shop\n'))
+    await act(() => client.invalidateQueries())
+    expect(model.options.insertSpaces).toBe(false)
+  })
+
+  it('leaves the Settings page open when a folder named Settings is renamed', async () => {
+    const { calls } = backend()
+    renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    await userEvent.click(screen.getByRole('button', { name: 'New folder' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Name of the new folder' }), 'Settings{Enter}')
+    await screen.findByRole('treeitem', { name: 'Settings' })
+    await userEvent.keyboard('{Control>},{/Control}')
+    expect(await within(tabs()).findByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true')
+    act(() => screen.getByRole('treeitem', { name: 'Settings' }).focus())
+    await userEvent.keyboard('{F2}')
+    const name = screen.getByRole('textbox', { name: 'New name for Settings' })
+    await userEvent.clear(name)
+    const reads = calls.filter((c) => c.path === '/api/changes').length
+    await userEvent.type(name, 'Prefs{Enter}')
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/files/rename')?.body).toEqual({ from: 'Settings', to: 'Prefs' }))
+    // The rename went through: the agent's changes are read again (their paths may have moved).
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/changes').length).toBeGreaterThan(reads))
+    expect(within(tabs()).getByRole('tab', { name: 'Settings' })).toBeInTheDocument()
+    expect(screen.queryByText(/Cannot read/)).not.toBeInTheDocument()
+  })
+
+  it('gives a new file the line ending "files.eol" says, and leaves a file with lines its own', async () => {
+    backend({}, {}, { 'settings.json': '{ "files.eol": "\\r\\n" }' })
+    renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    await userEvent.click(screen.getByRole('button', { name: 'New file' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Name of the new file' }), 'notes.txt{Enter}')
+    await waitFor(() => expect(fakes.models.find((m) => m.uri?.toString() === 'file:///notes.txt')?.getEOL()).toBe('\r\n'))
+    await userEvent.click(screen.getByRole('treeitem', { name: 'README.md' }))
+    await waitFor(() => expect(fakes.models.find((m) => m.uri?.toString() === 'file:///README.md')?.getEOL()).toBe('\n'))
+  })
+
+  it("reads VS Code's language ids in \"files.associations\" as Monaco's", async () => {
+    backend({}, {}, { 'settings.json': '{ "files.associations": { "*.md": "typescriptreact" } }' })
+    renderIde()
+    // A .md file read as "typescriptreact": Monaco's typescript.
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'README.md' }))
+    await waitFor(() => expect(fakes.models.find((m) => m.uri?.toString() === 'file:///README.md')?.language).toBe('typescript'))
+  })
+
+  it('applies the terminal settings to the terminals, and again as they change', async () => {
+    const b = backend({}, {}, { 'settings.json': '{ "terminal.integrated.fontSize": 16, "terminal.integrated.cursorStyle": "line", "terminal.integrated.lineHeight": 1.5 }' })
+    const { client } = renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    await userEvent.keyboard('{Control>}j{/Control}')
+    await waitFor(() => expect(fakes.terminals).toHaveLength(1))
+    expect(fakes.terminals[0]!.options).toMatchObject({ fontSize: 16, cursorStyle: 'bar', lineHeight: 1.5, cursorBlink: true, scrollback: 10000, fontFamily: "'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', monospace" })
+    b.now.user['settings.json'] = '{ "terminal.integrated.fontSize": 18, "terminal.integrated.scrollback": 500 }'
+    await act(() => client.invalidateQueries())
+    await waitFor(() => expect(fakes.terminals[0]!.options).toMatchObject({ fontSize: 18, scrollback: 500, cursorStyle: 'block', lineHeight: 1 }))
+  })
+
+  it("shows the terminal a task reuses when the panel is first drawn for it, whatever the server's order", async () => {
+    const build = { id: '8', kind: 'task', title: 'build', pid: 80, cols: 80, rows: 24, exitCode: 0 }
+    const shell = { id: '9', title: 'bash', pid: 90, cols: 80, rows: 24, exitCode: null }
+    // The server keeps the task's terminal where it was, before the shell.
+    const terms: TerminalInfo[] = [build, shell]
+    backend({
+      'GET /api/terminals': () => ({ json: terms }),
+      'GET /api/tasks': () => ({ json: { tasks: [{ label: 'build', source: 'workspace', group: 'build', isDefault: true, command: 'make' }], errors: [], trusted: true, buildConfiguration: 'Debug' } }),
+      'POST /api/tasks/run': () => {
+        terms[0] = { ...build, exitCode: null }
+        return { json: { task: 'build', terminal: terms[0], terminals: [terms[0]] } }
+      },
+    })
+    renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    await userEvent.keyboard('{Control>}{Shift>}b{/Shift}{/Control}')
+    const panel = await screen.findByRole('region', { name: 'Terminal' })
+    await waitFor(() => expect(within(panel).getAllByRole('tab').map((t) => t.textContent)).toEqual(['build 8', 'bash 9']))
+    expect(within(panel).getByRole('tab', { name: /build/ })).toHaveAttribute('aria-selected', 'true')
+  })
+})
+
 describe('Code Arena, the help', () => {
   /** The workbench's regions on screen, by the names a screen reader gives them. */
   const regionsShown = () => {
@@ -2374,6 +2822,9 @@ describe('Code Arena, the help', () => {
     for (const r of regionsShown()) seen.add(r)
     await userEvent.click(screen.getByRole('tab', { name: 'Debug Console' }))
     await screen.findByRole('region', { name: 'Debug Console' })
+    for (const r of regionsShown()) seen.add(r)
+    await userEvent.click(screen.getByRole('tab', { name: 'Output' }))
+    await screen.findByRole('region', { name: 'Output' })
     for (const r of regionsShown()) seen.add(r)
     // The workbench's own pages: the Settings and the Keyboard Shortcuts editors.
     await userEvent.keyboard('{Control>},{/Control}')

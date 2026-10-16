@@ -23,7 +23,7 @@ public sealed class HangStreamWaitsTests(ITestOutputHelper log) : IDisposable
         _mcp.Dispose();
     }
 
-    private static bool Summarizing(JsonObject req) => FakeGateway.System(req).StartsWith("You summarize", StringComparison.Ordinal);
+    private static bool Summarizing(JsonObject req) => FakeGateway.Summarizing(req);
 
     private static JsonObject Ask(string text) => new()
     {
@@ -188,13 +188,15 @@ public sealed class HangStreamWaitsTests(ITestOutputHelper log) : IDisposable
             // About 1,760 characters read back: under the 2,000 that Shrink cuts tool results to.
             h.Write($"f{i}.txt", string.Join('\n', Enumerable.Range(0, 20).Select(_ => new string((char)('a' + i % 26), 80))));
         }
+        // The model counts its own reads: a compaction of the turn's earlier steps takes their results out of the request.
+        var made = 0;
         _gateway.Answer = req =>
         {
             if (Summarizing(req))
             {
                 return Reply.Say("SUMMARY of the earlier work.");
             }
-            var reads = req["messages"]!.AsArray().Count(m => m!["role"]!.GetValue<string>() == "tool");
+            var reads = Interlocked.Increment(ref made) - 1;
             return reads < Reads ? Reply.Call(("read_file", $$"""{"path":"f{{reads}}.txt"}""")) : Reply.Say("done");
         };
         await using var rt = await StartAsync(h);
@@ -210,11 +212,13 @@ public sealed class HangStreamWaitsTests(ITestOutputHelper log) : IDisposable
         var firstSummary = order.IndexOf('S');
 
         var report = $"finished = {finished} ({(run.IsFaulted ? run.Exception!.InnerException!.Message : "ok")}); {steps} steps and {summaries} summary requests " +
-                     $"(. a step, S a summary): {order}. After the first compaction (request {firstSummary}), every step that follows starts with another summary " +
-                     $"of the summary: the kept part (the whole current turn) alone stays above {rt.Compaction.At}% of the window, and Shrink cuts nothing under 2,000 characters.";
+                     $"(. a step, S a summary): {order}; the first compaction at request {firstSummary}.";
         log.WriteLine(report);
         Assert.True(finished, report);
-        Assert.True(summaries <= 2, report);
+        Assert.Equal("done", await run);
+        // The turn's own earlier steps are summarized when nothing older is left: each such compaction frees room for many
+        // steps, so it does not run again on every step.
+        Assert.True(summaries <= steps / 8, report);
     }
 
     // ------------------------------------------------------------------ Ctrl+C during the waits, and the loops' bounds

@@ -3,8 +3,8 @@ import { gitShow } from './ide-api'
 
 /**
  * VS Code's quick diff: bars beside the line numbers for the lines changed since what git's index has (added green,
- * changed blue, a deletion a red mark between lines), drawn as the file is typed in. Alt+F3 and Shift+Alt+F3 go to the
- * next and the previous change.
+ * changed blue, a deletion a red mark between lines), drawn as the file is typed in. Alt+F3 and Shift+Alt+F3 (and Alt+F5,
+ * Shift+Alt+F5) go to the next and the previous change: their keys are the keymap's, so keybindings.json can change them.
  */
 
 export interface LineChange {
@@ -127,11 +127,27 @@ const css = `
 
 let styled = false
 
+/** Where "scm.diffDecorations" draws the changes: beside the line numbers, in the scroll bar, in the minimap, all, or none. */
+export type DiffDecorations = 'all' | 'gutter' | 'overview' | 'minimap' | 'none'
+
+const colours = { added: '#2ea043', modified: '#1b81a8', deleted: '#e51400' }
+
+/** A change's decoration, drawn only where "scm.diffDecorations" says. */
+export function dirtyDecoration(kind: LineChange['kind'], mode: DiffDecorations, lanes: { overview: number; minimap: number }): Monaco.editor.IModelDecorationOptions {
+  const all = mode === 'all'
+  return {
+    isWholeLine: true,
+    ...(all || mode === 'gutter' ? { linesDecorationsClassName: `arena-dirty-${kind}` } : {}),
+    ...(all || mode === 'overview' ? { overviewRuler: { color: `${colours[kind]}99`, position: lanes.overview } } : {}),
+    ...(all || mode === 'minimap' ? { minimap: { color: `${colours[kind]}99`, position: lanes.minimap } } : {}),
+  }
+}
+
 /**
  * Quick diff in the code editor: the file shown against git's index, read when the file is shown and again when told
  * (it was saved, staged, committed), drawn as it is typed in. The function stops it.
  */
-export function installDirtyDiff(monaco: typeof Monaco, ed: Monaco.editor.IStandaloneCodeEditor, pathOf: (m: Monaco.editor.ITextModel) => string | null) {
+export function installDirtyDiff(monaco: typeof Monaco, ed: Monaco.editor.IStandaloneCodeEditor, pathOf: (m: Monaco.editor.ITextModel) => string | null, mode: DiffDecorations = 'all') {
   if (!styled && typeof document !== 'undefined') {
     styled = true
     const el = document.createElement('style')
@@ -152,12 +168,9 @@ export function installDirtyDiff(monaco: typeof Monaco, ed: Monaco.editor.IStand
       return
     }
     changes = lineChanges(base, model.getValue())
-    bars.set(
-      changes.map((c) => ({
-        range: new monaco.Range(Math.max(1, c.start), 1, Math.max(1, c.end), 1),
-        options: { isWholeLine: true, linesDecorationsClassName: `arena-dirty-${c.kind}`, overviewRuler: { color: c.kind === 'added' ? '#2ea04399' : c.kind === 'modified' ? '#1b81a899' : '#e5140099', position: monaco.editor.OverviewRulerLane.Left } },
-      })),
-    )
+    // The minimap's gutter is where VS Code draws them.
+    const lanes = { overview: monaco.editor.OverviewRulerLane.Left, minimap: monaco.editor.MinimapPosition.Gutter }
+    bars.set(changes.map((c) => ({ range: new monaco.Range(Math.max(1, c.start), 1, Math.max(1, c.end), 1), options: dirtyDecoration(c.kind, mode, lanes) })))
   }
   const read = async () => {
     const model = ed.getModel()
@@ -186,8 +199,9 @@ export function installDirtyDiff(monaco: typeof Monaco, ed: Monaco.editor.IStand
   }
   const a = ed.onDidChangeModel(() => void read())
   const b = ed.onDidChangeModelContent(later)
-  ed.addAction({ id: 'editor.action.dirtydiff.next', label: 'Go to Next Change', keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.F3], run: () => go(1) })
-  ed.addAction({ id: 'editor.action.dirtydiff.previous', label: 'Go to Previous Change', keybindings: [monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.F3], run: () => go(-1) })
+  // No keys of their own: the keymap's defaults (Alt+F3, Shift+Alt+F3) reach them, and keybindings.json takes them away.
+  ed.addAction({ id: 'editor.action.dirtydiff.next', label: 'Go to Next Change', run: () => go(1) })
+  ed.addAction({ id: 'editor.action.dirtydiff.previous', label: 'Go to Previous Change', run: () => go(-1) })
   void read()
   return {
     /** git's index may have changed (a save, a stage, a commit): read again. */

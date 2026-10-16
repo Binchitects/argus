@@ -1,12 +1,19 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { makeQueryClient, Providers } from '@/app/providers'
 import { blank } from '@/pages/chat/live'
 import type { ChatConfig, Message } from '@/pages/chat/types'
+import { argsSummary } from '@/pages/chat/tool-args'
 import { fakeApi, type Handler } from '@/test/utils'
 import { fromSession, keptOutput, reduceCode, type CodeSession, type CodeState, type FileDiff, type SessionSummary } from './api'
 import { App } from './app'
+
+// Each tool card's arguments, as read for its line: counted, to see which cards are drawn again.
+vi.mock('@/pages/chat/tool-args', async (real) => {
+  const actual = await real<typeof import('@/pages/chat/tool-args')>()
+  return { ...actual, argsSummary: vi.fn(actual.argsSummary) }
+})
 
 const state = (over: Partial<CodeState> = {}): CodeState => ({
   name: 'Code Arena', version: '5.0.0', license: 'AGPL-3.0-only', source: 'https://github.com/Binchitects/argus', manual: 'https://llm.test/help/code-arena', folder: '/home/ada/shop', project: 'shop', branch: 'main', model: 'model-a', context: 32768, contextUsed: 4200, compactAt: 80, compactTarget: 25, servers: [], jobs: [], queued: [], thinking: null, mode: 'ask',
@@ -113,8 +120,9 @@ describe('Code Arena in the browser', () => {
     await ask('Change two to 2')
 
     expect(calls.find((c) => c.method === 'POST' && c.path === '/api/messages')?.body).toEqual({ text: 'Change two to 2' })
-    const answer = await screen.findByRole('region', { name: 'Answer' })
-    expect(await within(answer).findByText('Thought for 1.2 s')).toBeInTheDocument()
+    // The events come in at the next frame, together: the question then has the server's id.
+    expect(await screen.findByText('Thought for 1.2 s')).toBeInTheDocument()
+    const answer = screen.getByRole('region', { name: 'Answer' })
     expect(within(answer).getByText('Edit file')).toBeInTheDocument()
     const changes = within(answer).getByRole('figure', { name: 'Changes to src/a.txt' })
     expect(within(changes).getByText('two')).toBeInTheDocument()
@@ -498,6 +506,123 @@ describe('Code Arena in the browser', () => {
     expect(live.jobs[0]).toMatchObject({ running: false, status: 'exit code 2 after 1m 03s', failed: true })
     const ok = reduceCode(reduceCode(fromSession(undefined), { type: 'job', job: 1, command: 'ls', running: true, status: '' }, null), { type: 'job_end', job: 1, running: false, status: 'exit code 0 after 0s', exitCode: 0, stopped: false }, null)
     expect(ok.jobs[0]!.failed).toBe(false)
+  })
+
+  it("draws a long session's last turns, and the earlier ones when asked for", async () => {
+    const long: Message[] = Array.from({ length: 35 }, (_, i) => [
+      msg(`m${2 * i}`, 'user', { content: `Question ${i + 1}` }),
+      msg(`m${2 * i + 1}`, 'assistant', { content: `Answer ${i + 1}.`, model: 'model-a' }),
+    ]).flat()
+    backend({ session: { id: 's2', messages: long, diffs: {}, busy: false } })
+    renderCode()
+    expect(await screen.findByText('Answer 35.')).toBeInTheDocument()
+    expect(screen.getAllByRole('region', { name: 'You' })).toHaveLength(30)
+    expect(screen.queryByText('Answer 5.')).not.toBeInTheDocument()
+    expect(screen.getByText('Answer 6.')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Show earlier (5 more turns)' }))
+    expect(screen.getAllByRole('region', { name: 'You' })).toHaveLength(35)
+    expect(screen.getByText('Answer 1.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Show earlier/ })).not.toBeInTheDocument()
+  })
+
+  it('does not draw the finished turns again while a turn streams, nor when the session is read back after it', async () => {
+    const read = (n: number) => ({ id: `r${n}`, function: { name: 'read_file', arguments: `{"path":"old-${n}.ts"}` } })
+    const earlier: Message[] = Array.from({ length: 5 }, (_, i) => [
+      msg(`m${3 * i}`, 'user', { content: `Read old-${i}.ts` }),
+      msg(`m${3 * i + 1}`, 'assistant', { model: 'model-a', toolCalls: [read(i)] }),
+      msg(`m${3 * i + 2}`, 'tool', { content: 'one\ntwo', toolCallId: `r${i}`, toolName: 'read_file' }),
+    ]).flat()
+    let end!: () => void
+    const over = new Promise<void>((r) => (end = r))
+    const answer = 'All five files are read, and nothing in them needs a change.'
+    const { calls, now } = backend({
+      session: { id: 's2', messages: earlier, diffs: {}, busy: false },
+      extra: {
+        'POST /api/messages': () => {
+          // Read back after the turn: the same earlier messages, as new objects from the server.
+          now.session = {
+            id: 's2', diffs: {}, busy: false,
+            messages: [...structuredClone(earlier), msg('m15', 'user', { content: 'Anything else?' }), msg('m16', 'assistant', { content: answer, model: 'model-a' })],
+          }
+          return {
+            events: [
+              { type: 'question', id: 'm15', parentId: 'm14' },
+              { type: 'assistant', id: 'm16', parentId: 'm15', model: 'model-a' },
+              ...answer.split(' ').map((w, i) => ({ type: 'content', text: i === 0 ? w : ` ${w}` })),
+            ],
+            until: over,
+          }
+        },
+      },
+    })
+    renderCode()
+    expect(await screen.findAllByText('Read file')).toHaveLength(5)
+    const summary = vi.mocked(argsSummary)
+    const earlierCards = () => summary.mock.calls.filter(([args]) => args.includes('old-')).length
+    const atFirst = earlierCards()
+    expect(atFirst).toBeGreaterThan(0)
+
+    await ask('Anything else?')
+    expect(await screen.findByText(answer)).toBeInTheDocument()
+    end()
+    // Over, and the session read back: its answer is the saved one, with the model under it.
+    await waitFor(() => expect(within(screen.getAllByRole('region', { name: 'Answer' }).at(-1)!).getByText('model-a')).toBeInTheDocument())
+    expect(calls.filter((c) => c.path === '/api/session').length).toBeGreaterThan(1)
+    expect(earlierCards()).toBe(atFirst)
+  })
+
+  it("reads the session list again only when it changed: this session's first turn, not each turn", async () => {
+    const { calls } = backend({
+      session: { id: 's2', messages: saved, diffs: { m2: diff }, busy: false },
+      extra: { 'POST /api/messages': () => ({ events: [{ type: 'question', id: 'm4', parentId: 'm3' }, { type: 'assistant', id: 'm5', parentId: 'm4', model: 'model-a' }, { type: 'content', text: 'Done.' }] }) },
+    })
+    renderCode()
+    await userEvent.click(await screen.findByRole('button', { name: 'Chat' }))
+    const list = await screen.findByRole('navigation', { name: 'Sessions' })
+    await within(list).findByRole('button', { name: 'First question' })
+    const listed = () => calls.filter((c) => c.method === 'GET' && c.path === '/api/sessions').length
+    const before = listed()
+    await ask('And the tests?')
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/session').length).toBeGreaterThan(1))
+    await screen.findByRole('button', { name: 'Send' })
+    expect(listed()).toBe(before)
+    // Only moved to the top, as changed now.
+    expect(within(list).getAllByRole('button', { name: /Fix the build|First question/ }).map((b) => b.textContent)).toEqual(['Fix the build', 'First question'])
+  })
+
+  it('reads the session list again after the first turn of a session it does not have yet', async () => {
+    const fresh = backend({ state: { session: 's3' }, extra: { 'POST /api/messages': () => ({ events: [{ type: 'question', id: 'm0', parentId: null }, { type: 'assistant', id: 'm1', parentId: 'm0', model: 'model-a' }, { type: 'content', text: 'Hi.' }] }) } })
+    renderCode()
+    await userEvent.click(await screen.findByRole('button', { name: 'Chat' }))
+    await within(await screen.findByRole('navigation', { name: 'Sessions' })).findByRole('button', { name: 'First question' })
+    const at = fresh.calls.filter((c) => c.method === 'GET' && c.path === '/api/sessions').length
+    await ask('Hello')
+    await waitFor(() => expect(fresh.calls.filter((c) => c.method === 'GET' && c.path === '/api/sessions').length).toBe(at + 1))
+  })
+
+  it('shows the pictures and plays the sounds and videos that Arena\'s tools made in the folder', async () => {
+    const draw = { id: 'd1', function: { name: 'Arena__draw_picture', arguments: '{"prompt":"a red bicycle"}' } }
+    const speak = { id: 'd2', function: { name: 'Arena__speak', arguments: '{"text":"hello"}' } }
+    const made: Message[] = [
+      msg('m0', 'user', { content: 'Draw a bicycle and say hello' }),
+      msg('m1', 'assistant', { model: 'model-a', toolCalls: [draw, speak] }),
+      msg('m2', 'tool', { content: 'The picture is saved as .code-arena/media/draw_picture-20261016-120000.png.', toolCallId: 'd1', toolName: 'Arena__draw_picture' }),
+      msg('m3', 'tool', { content: 'Saved /home/ada/shop/.code-arena/media/speak-20261016-120001.mp3 and .code-arena/media/clip-1.mp4 (and ../.code-arena/media/../../etc/passwd.png is not one).', toolCallId: 'd2', toolName: 'Arena__speak' }),
+      msg('m4', 'assistant', { model: 'model-a', content: 'Here they are.' }),
+    ]
+    backend({ session: { id: 's2', messages: made, diffs: {}, busy: false } })
+    renderCode()
+    const picture = await screen.findByRole('img', { name: 'draw_picture-20261016-120000.png' })
+    expect(picture).toHaveAttribute('src', '/api/media?path=.code-arena%2Fmedia%2Fdraw_picture-20261016-120000.png')
+    const sound = screen.getByLabelText('speak-20261016-120001.mp3')
+    expect(sound.tagName).toBe('AUDIO')
+    expect(sound).toHaveAttribute('src', '/api/media?path=.code-arena%2Fmedia%2Fspeak-20261016-120001.mp3')
+    expect(screen.getByLabelText('clip-1.mp4').tagName).toBe('VIDEO')
+    expect(screen.queryByRole('img', { name: /passwd/ })).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'View draw_picture-20261016-120000.png' }))
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
   })
 
   it('says so when the page holds the key of an earlier run', async () => {

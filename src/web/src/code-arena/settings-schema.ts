@@ -30,6 +30,15 @@ export interface SettingDef {
 
 const lang = 'language' as const
 
+/**
+ * VS Code's language ids that Monaco reads as another of its own (a .tsx file is "typescript" in Monaco, a .sh file
+ * "shell"): a "[typescriptreact]" block of settings.json, or a "files.associations" value, means Monaco's.
+ */
+const monacoIds: Record<string, string> = { typescriptreact: 'typescript', javascriptreact: 'javascript', shellscript: 'shell', jsonc: 'json' }
+
+/** A language id as Monaco knows it: VS Code's own ids for what Monaco reads as one language are that language. */
+export const monacoLanguageId = (id: string) => monacoIds[id] ?? id
+
 /** A colour theme: its name in settings.json, light or dark (the page follows it), and Monaco's theme. */
 export interface ColorTheme {
   name: string
@@ -87,6 +96,23 @@ export function setExtensionIconThemes(list: IconThemeInfo[]) {
 
 /** Every file icon theme offered: Code Arena's own, then the extensions'. */
 export const allIconThemes = (): IconThemeInfo[] => [ownIcons, ...extensionIconThemes]
+
+/** code-arena's own language servers (LanguageServers.cs), by id: their names, and whether they start by default. */
+const languageServerIds: [id: string, name: string, on: boolean][] = [
+  ['typescript', 'typescript-language-server', true],
+  ['pyright', 'Pyright', true],
+  ['basedpyright', 'basedpyright', true],
+  ['pylsp', 'Python LSP Server', true],
+  ['gopls', 'gopls', true],
+  ['rust-analyzer', 'rust-analyzer', true],
+  ['clangd', 'clangd', true],
+  ['csharp-ls', 'csharp-ls', true],
+  ['json', 'vscode-json-language-server', false],
+  ['css', 'vscode-css-language-server', false],
+  ['html', 'vscode-html-language-server', false],
+  ['yaml', 'yaml-language-server', true],
+  ['bash', 'bash-language-server', true],
+]
 
 export const settingDefs: SettingDef[] = [
   // Text Editor
@@ -160,7 +186,7 @@ export const settingDefs: SettingDef[] = [
   { key: 'files.eol', type: 'string', default: 'auto', enum: ['\n', '\r\n', 'auto'], enumDescriptions: ['LF', 'CRLF', "The system's"], description: 'The line ending of new files.', category: 'Files', scope: lang },
   { key: 'files.associations', type: 'object', default: {}, description: 'Languages for files by name or pattern, e.g. {"*.inc": "php"}.', category: 'Files' },
   // Workbench
-  { key: 'workbench.colorTheme', type: 'string', default: 'Code Arena Dark', get enum() { return allColorThemes().map((t) => t.name) }, open: true, description: 'The colour theme (Ctrl+K Ctrl+T): Code Arena\'s, or one an extension brings. VS Code\'s theme names that are not here read as the nearest of Code Arena\'s.', category: 'Workbench' },
+  { key: 'workbench.colorTheme', type: 'string', default: 'Code Arena Dark', get enum() { return allColorThemes().map((t) => t.name) }, open: true, description: 'The colour theme (Ctrl+K Ctrl+Alt+T): Code Arena\'s, or one an extension brings. VS Code\'s theme names that are not here read as the nearest of Code Arena\'s.', category: 'Workbench' },
   { key: 'window.autoDetectColorScheme', type: 'boolean', default: true, description: 'Follows the system\'s light or dark: "workbench.preferredLightColorTheme" or "workbench.preferredDarkColorTheme". (VS Code: off.)', category: 'Workbench' },
   { key: 'workbench.preferredDarkColorTheme', type: 'string', default: 'Code Arena Dark', get enum() { return allColorThemes().map((t) => t.name) }, open: true, description: 'The theme when the system is dark, with "window.autoDetectColorScheme".', category: 'Workbench' },
   { key: 'workbench.preferredLightColorTheme', type: 'string', default: 'Code Arena Light', get enum() { return allColorThemes().map((t) => t.name) }, open: true, description: 'The theme when the system is light, with "window.autoDetectColorScheme".', category: 'Workbench' },
@@ -183,13 +209,22 @@ export const settingDefs: SettingDef[] = [
   { key: 'terminal.integrated.sendKeybindingsToShell', type: 'boolean', default: false, description: 'Sends every key to the shell, but those of "terminal.integrated.commandsToSkipShell".', category: 'Terminal', scope: 'application' },
   { key: 'terminal.integrated.commandsToSkipShell', type: 'array', items: 'string', default: [], description: 'Commands whose keys the workbench takes in the terminal, besides the default ones; "-command" gives a default one\'s key back to the shell.', category: 'Terminal', scope: 'application' },
   // Source control
-  { key: 'scm.diffDecorations', type: 'string', default: 'all', enum: ['all', 'gutter', 'overview', 'none'], description: "Bars beside the line numbers for the lines changed since git's index (read when the editor opens).", category: 'Source Control' },
+  { key: 'scm.diffDecorations', type: 'string', default: 'all', enum: ['all', 'gutter', 'overview', 'minimap', 'none'], enumDescriptions: ['Beside the line numbers, in the scroll bar and in the minimap', 'Beside the line numbers only', 'In the scroll bar only', 'In the minimap only', 'Not drawn'], description: "Where the lines changed since git's index are drawn (read when the editor opens).", category: 'Source Control' },
   // Debug
   { key: 'debug.saveBeforeStart', type: 'string', default: 'allEditorsInActiveGroup', enum: ['allEditorsInActiveGroup', 'nonUntitledEditorsInActiveGroup', 'none'], description: 'Saves the files with unsaved changes before a session starts.', category: 'Debug' },
   { key: 'debug.internalConsoleOptions', type: 'string', default: 'openOnFirstSessionStart', enum: ['neverOpen', 'openOnSessionStart', 'openOnFirstSessionStart'], description: 'When the Debug Console opens.', category: 'Debug' },
   { key: 'debug.openDebug', type: 'string', default: 'openOnDebugBreak', enum: ['neverOpen', 'openOnSessionStart', 'openOnDebugBreak'], description: 'When Run and Debug shows in the side bar: as a session starts, or as the program stops.', category: 'Debug' },
   { key: 'debug.inlineValues', type: 'string', default: 'auto', enum: ['on', 'off', 'auto'], description: "Shows variables' values at the ends of the lines while stopped (auto: on).", category: 'Debug' },
   { key: 'debug.toolBarLocation', type: 'string', default: 'floating', enum: ['floating', 'hidden'], description: 'Where the debug toolbar is: over the editor, or not shown (the Run and Debug view and the keys still work).', category: 'Debug' },
+  // Language servers
+  { key: 'codeArena.languageServers.enabled', type: 'boolean', default: true, description: "Starts a language server for the folder's files of its languages (in a trusted folder): completions, hovers, definitions, references, rename, code actions, formatting and diagnostics.", category: 'Language Servers' },
+  ...languageServerIds.map(([id, name, on]): SettingDef => ({
+    key: `codeArena.languageServers.${id}.enabled`,
+    type: 'boolean',
+    default: on,
+    description: on ? `Starts ${name} when it is installed.` : `Starts ${name} when it is installed. Off by default: the editor's own ${id.toUpperCase()} service is the same, and is turned off while the server runs.`,
+    category: 'Language Servers',
+  })),
   // Code Arena
   { key: 'codeArena.inlineCompletion.enabled', type: 'boolean', default: true, description: "Code Arena's code completion as you type (the status bar's Complete): what you type is sent to the model. Your own setting: a project's settings.json cannot turn it on.", category: 'Code Arena', scope: 'application' },
 ]
