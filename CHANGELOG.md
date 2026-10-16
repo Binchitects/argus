@@ -12,6 +12,86 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v5.7.0 (2026-10-16)
+
+### :rocket: Epics and highlights
+
+- **Code Arena's IDE works as VS Code does**: its commands under VS Code's
+  ids in the palette (by category, the ones run lately first), VS Code's keys
+  (chords too) with the person's keybindings.json over them, the person's
+  settings.json and the project's .vscode/settings.json (a language's own
+  too) setting the editor, compares, terminals, the theme and saving, and
+  VS Code's Settings (Ctrl+,) and Keyboard Shortcuts (Ctrl+K Ctrl+S) editors;
+  VS Code's own settings.json can be brought over
+- **Run and debug**: Run and Debug lists launch.json's configurations and the
+  project's own (.NET, npm, Python, Go, Cargo, CMake, Make), starts one with
+  its debugger (F5) or without (Ctrl+F5), Debug or Release; the debugger
+  speaks the Debug Adapter Protocol to gdb, lldb-dap, netcoredbg, debugpy,
+  Delve or js-debug (whichever is installed): breakpoints (conditions,
+  logpoints, F9), the call stack, variables (changed by a double-click),
+  watches, values at the lines' ends, a hover's value, the Debug Console, Run
+  to Cursor, stepping, restart and stop. Tasks (tasks.json's and the
+  project's) run from the palette and Ctrl+Shift+B, their problem matchers
+  feeding Problems
+- **Language servers and VS Code extensions**: the editor speaks the
+  Language Server Protocol (completion, hover, definition, references,
+  rename, code actions, formatting, diagnostics) to servers found on PATH or
+  named in config.json, in a trusted folder and sandboxed; VS Code extensions
+  bring colour and file icon themes, snippets, languages, keybindings and
+  setting defaults, from a .vsix or VS Code's own on this computer
+- **Code Arena opens in a desktop window of its own** (Chrome, Edge,
+  Chromium or Brave in app mode, no tabs or address bar; closing it stops
+  code-arena); `--browser` or `"window": false` in config.json for a tab
+
+### :sparkles: New features & Enhancements
+
+- launch.json compounds (their preLaunchTask, then every configuration;
+  stopAll), attaching to a process (`${command:pickProcess}`), a program's
+  own terminal (runInTerminal), the configuration's internalConsoleOptions
+- Code Arena says whose chats in Arena its sessions are kept with (login,
+  /sync, the IDE)
+
+- **Compare as VS Code does**: a side may be the file itself (typing there
+  edits it, Ctrl+S saves it), the file as saved (Ctrl+K D), the clipboard
+  (Ctrl+K C), another file, two files of the Explorer, git's index, HEAD or
+  any commit; the bar has the counts, the previous and next change, inline or
+  side by side, whitespace, folding and swapping; Source Control compares the
+  index, HEAD and a commit's files, shows a file's history and compares with
+  any revision; the change at the cursor is staged, unstaged, reverted or (the
+  agent's) accepted alone; the editor's gutter shows the lines changed since
+  git's index (Alt+F3)
+- **Formatting with the project's own tools**: Prettier from the project's
+  node_modules (else installed), ruff or black, gofmt, rustfmt,
+  clang-format, dotnet format and the person's own from config.json, run by
+  code-arena in a sandbox; Format Document, Format Selection, Format Document
+  With…, format on save (within a time limit) and Save without Formatting;
+  VS Code's prettier.* settings
+- **Folder trust, as VS Code's**: a project's own programs (its formatters,
+  tasks.json, launch.json, debug sessions) run only in a folder the person
+  trusts; the choice is kept on this computer
+- Saving as VS Code does: trailing whitespace, the final newline, auto save,
+  Save All; the status bar sets the indentation, the line endings and the
+  language; tabs have VS Code's menu; Alt+Z, navigate back and forward,
+  reopen a closed tab
+
+### :bug: Bugs fixed
+
+- Everything a review of the new IDE found: Run to Cursor's breakpoint is
+  never kept, a step answered after its stop leaves the program stopped,
+  debug sessions that end are let go, inline values of shadowed names, the
+  debug hover's Markdown, quick diff on CRLF files and large rewrites, the
+  editor's own formatter where no project formatter runs, settings and
+  keybindings files keep their comments, compares keep unsaved edits, keys
+  the browser keeps get keys the page receives, terminal settings applied
+
+### :boom: Breaking changes & Deprecations
+
+- The theme and code completion's on/off are now settings.json's
+  (`workbench.colorTheme`, `window.autoDetectColorScheme`,
+  `codeArena.inlineCompletion.enabled`): the theme picked before is asked
+  for once again
+- `/api/git/diff` is gone: `/api/git/show` reads a file at any revision
+
 ## v5.6.1 (2026-10-11)
 
 ### :bug: Bugs fixed
