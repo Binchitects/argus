@@ -23,7 +23,7 @@ import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitShow, gitSta
 import { addDebugActions, installDebugEditor } from './debug/editor-debug'
 import { installExtensions } from './extensions'
 import { bindEditorContext, keymap, useKeyFor } from './keyboard'
-import { monacoKeybinding } from './keys'
+import { monacoDefaults, monacoKeybinding } from './keys'
 import { installFormatting, minimalEdit, offerFormatting } from './format'
 import { installDirtyDiff } from './dirty-diff'
 import { saveParticipants } from './save-participants'
@@ -175,7 +175,9 @@ function installKeymap(m: MonacoModule) {
       if (!commands.has(c.id) && !own.has(c.id)) commands.set(c.id, m.monaco.editor.registerCommand(c.id, (_: unknown, args: unknown) => void runCommand(c.id, args)))
     }
     rules?.dispose()
+    // Monaco's own defaults are in the keymap for the lists: Monaco has them already.
     const list = keymap.rules
+      .filter((r) => r.source !== 'editor')
       .map((r) => ({ keybinding: monacoKeybinding(r.chords, m.monaco), command: r.command, commandArgs: r.args, when: r.whenText }))
       .filter((r): r is { keybinding: number; command: string; commandArgs: unknown; when: string | undefined } => r.keybinding !== null)
     rules = m.monaco.editor.addKeybindingRules([{ keybinding: m.monaco.KeyCode.F1, command: '-editor.action.quickCommand' }, ...list])
@@ -1116,6 +1118,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
           if (own !== a.id) m.monaco.editor.registerCommand(own, () => void ed.getAction(own)?.run())
         }
         keymap.setEditorCommands(ed.getSupportedActions().map((a) => ({ id: actionId(a.id), label: a.label })))
+        keymap.setEditorDefaults(monacoDefaults(ed))
         installCompletions(m)
         editor.current = ed
       }

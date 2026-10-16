@@ -3,8 +3,8 @@ import { gitShow } from './ide-api'
 
 /**
  * VS Code's quick diff: bars beside the line numbers for the lines changed since what git's index has (added green,
- * changed blue, a deletion a red mark between lines), drawn as the file is typed in. Alt+F3 and Shift+Alt+F3 go to the
- * next and the previous change.
+ * changed blue, a deletion a red mark between lines), drawn as the file is typed in. Alt+F3 and Shift+Alt+F3 (and Alt+F5,
+ * Shift+Alt+F5) go to the next and the previous change: their keys are the keymap's, so keybindings.json can change them.
  */
 
 export interface LineChange {
@@ -186,8 +186,9 @@ export function installDirtyDiff(monaco: typeof Monaco, ed: Monaco.editor.IStand
   }
   const a = ed.onDidChangeModel(() => void read())
   const b = ed.onDidChangeModelContent(later)
-  ed.addAction({ id: 'editor.action.dirtydiff.next', label: 'Go to Next Change', keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.F3], run: () => go(1) })
-  ed.addAction({ id: 'editor.action.dirtydiff.previous', label: 'Go to Previous Change', keybindings: [monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.F3], run: () => go(-1) })
+  // No keys of their own: the keymap's defaults (Alt+F3, Shift+Alt+F3) reach them, and keybindings.json takes them away.
+  ed.addAction({ id: 'editor.action.dirtydiff.next', label: 'Go to Next Change', run: () => go(1) })
+  ed.addAction({ id: 'editor.action.dirtydiff.previous', label: 'Go to Previous Change', run: () => go(-1) })
   void read()
   return {
     /** git's index may have changed (a save, a stage, a commit): read again. */

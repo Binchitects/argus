@@ -404,7 +404,7 @@ function Workbench({
       () => toast.success('Copied.'),
       () => toast.error('The browser did not let the page copy.'),
     )
-  /** Color Theme (Ctrl+K Ctrl+T): Code Arena's and the extensions' themes, each shown as it is chosen in the list (Escape goes back). */
+  /** Color Theme (Ctrl+K Ctrl+Alt+T): Code Arena's and the extensions' themes, each shown as it is chosen in the list (Escape goes back). */
   const pickTheme = async () => {
     const now = themeNamed(shownTheme).name
     const picked = await quickPick({
@@ -876,6 +876,9 @@ function Workbench({
     { id: 'compareFiles', category: 'File', title: 'Compare with Selected', enabled: () => file && !!compareSelection.path && compareSelection.path !== active?.path, run: () => active && compareSelection.path && void ed.compare({ kind: 'file', path: compareSelection.path }, { kind: 'file', path: active.path }) },
     { id: 'workbench.action.compareEditor.nextChange', category: 'Compare', title: 'Go to Next Change', enabled: () => active?.kind === 'diff', run: () => ed.diffEditor()?.goToDiff('next') },
     { id: 'workbench.action.compareEditor.previousChange', category: 'Compare', title: 'Go to Previous Change', enabled: () => active?.kind === 'diff', run: () => ed.diffEditor()?.goToDiff('previous') },
+    // Quick diff's changes in the code editor (VS Code's keys for them: Alt+F5, Shift+Alt+F5).
+    { id: 'workbench.action.editor.nextChange', category: 'Go', title: 'Go to Next Change in the File', enabled: () => file, run: () => runAction('editor.action.dirtydiff.next') },
+    { id: 'workbench.action.editor.previousChange', category: 'Go', title: 'Go to Previous Change in the File', enabled: () => file, run: () => runAction('editor.action.dirtydiff.previous') },
     { id: 'git.stageSelectedRanges', category: 'Git', title: 'Stage Selected Ranges', enabled: () => active?.source === 'git', run: () => void ed.changeAction('stage') },
     { id: 'git.unstageSelectedRanges', category: 'Git', title: 'Unstage Selected Ranges', enabled: () => active?.source === 'staged', run: () => void ed.changeAction('unstage') },
     { id: 'git.revertSelectedRanges', category: 'Git', title: 'Revert Selected Ranges', enabled: () => (active?.source === 'git' || active?.source === 'agent') && active.right?.kind === 'file', run: () => void ed.changeAction('revert') },

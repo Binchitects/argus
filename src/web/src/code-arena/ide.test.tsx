@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import codeArenaDoc from '@docs/code-arena.md?raw'
@@ -199,6 +199,10 @@ const fakes = vi.hoisted(() => {
         },
         getRanges: () => this.decorations.map((d) => d.range),
       }
+    }
+    /** Monaco's keybinding service as its editors hold it: Monaco's own default keys in its resolver. */
+    _standaloneKeybindingService = {
+      _getResolver: () => ({ _defaultKeybindings: [{ command: 'editor.action.addSelectionToNextFindMatch', when: { serialize: () => 'editorFocus' }, resolvedKeybinding: { getUserSettingsLabel: () => 'ctrl+d' } }] }),
     }
     contextKeys: Record<string, unknown> = {}
     createContextKey(key: string, value: unknown) {
@@ -2347,6 +2351,62 @@ describe('Code Arena, the IDE', () => {
     await userEvent.click(within(picker).getByRole('option', { name: /Code Arena/ }))
     await waitFor(() => expect(app.querySelector('img')).toBeNull())
   })
+})
+
+describe('Code Arena, the IDE, as its review asked', () => {
+  it("gives Monaco the workbench's context keys and quick diff's keys from the keymap, and lists Monaco's own keys", async () => {
+    backend({}, {}, { 'keybindings.json': '[{ "key": "shift+alt+f3", "command": "-editor.action.dirtydiff.previous" }]' })
+    renderIde()
+    await openApp()
+    // A when clause of the workbench's keys holds in the editor too ("resourceLangId == typescript").
+    await waitFor(() => expect(editor().contextKeys).toMatchObject({ resourceLangId: 'typescript', resourceFilename: 'app.ts', activeEditor: 'workbench.editors.files.textFileEditor', activeViewlet: 'workbench.view.explorer' }))
+    // Quick diff's actions have no keys of their own: Alt+F3 is the keymap's, which keybindings.json takes away.
+    expect(editor().actions.get('editor.action.dirtydiff.next')!.keybindings).toBeUndefined()
+    const given = () => fakes.keybindingRules.at(-1)!.filter((r) => !r.command.startsWith('-'))
+    await waitFor(() => expect(given()).toContainEqual({ keybinding: 512 | 61, command: 'editor.action.dirtydiff.next', commandArgs: undefined, when: 'editorTextFocus' }))
+    expect(given().some((r) => r.command === 'editor.action.dirtydiff.previous')).toBe(false)
+    // Monaco's own Ctrl+D: listed with its key, never given back to Monaco (which has it).
+    expect(given().some((r) => r.command === 'editor.action.addSelectionToNextFindMatch')).toBe(false)
+    await userEvent.keyboard('{Control>}k{/Control}{Control>}s{/Control}')
+    const page = await screen.findByRole('region', { name: 'Keyboard Shortcuts' })
+    await userEvent.type(within(page).getByRole('searchbox', { name: 'Search keybindings' }), 'addSelectionToNextFindMatch')
+    expect(await within(page).findByRole('button', { name: /^editor\.action\.addSelectionToNextFindMatch: Ctrl\+D\./ })).toBeInTheDocument()
+  })
+
+  it('keeps the browser from reloading or saving the page when a key of the debugger or Save does nothing now', async () => {
+    backend()
+    renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    // No session: Stop's Shift+F5 holds for none, and the browser's hard reload does not run.
+    expect(fireEvent.keyDown(document.body, { key: 'F5', code: 'F5', shiftKey: true })).toBe(false)
+    // The Settings page has nothing to save: Ctrl+S does not open the browser's Save Page As.
+    await userEvent.keyboard('{Control>},{/Control}')
+    await screen.findByRole('region', { name: 'Settings' })
+    expect(fireEvent.keyDown(document.body, { key: 's', code: 'KeyS', ctrlKey: true })).toBe(false)
+    // Another key goes on.
+    expect(fireEvent.keyDown(document.body, { key: 'F7', code: 'F7' })).toBe(true)
+  })
+
+  it("renames and deletes in the explorer with the keymap's keys, which keybindings.json changes", async () => {
+    backend({}, {}, { 'keybindings.json': '[{ "key": "f2", "command": "-renameFile" }, { "key": "ctrl+alt+r", "command": "renameFile", "when": "filesExplorerFocus" }]' })
+    renderIde()
+    const readme = await screen.findByRole('treeitem', { name: 'README.md' })
+    // The menu shows the key as it is now.
+    await userEvent.pointer({ keys: '[MouseRight]', target: readme })
+    expect(await screen.findByRole('menuitem', { name: 'Rename Ctrl+Alt+R' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Delete Delete' })).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    act(() => screen.getByRole('treeitem', { name: 'README.md' }).focus())
+    await userEvent.keyboard('{F2}')
+    expect(screen.queryByRole('textbox', { name: 'New name for README.md' })).not.toBeInTheDocument()
+    await userEvent.keyboard('{Control>}{Alt>}r{/Alt}{/Control}')
+    expect(await screen.findByRole('textbox', { name: 'New name for README.md' })).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    act(() => screen.getByRole('treeitem', { name: 'README.md' }).focus())
+    await userEvent.keyboard('{Delete}')
+    expect(await screen.findByRole('alertdialog', { name: 'Delete README.md?' })).toBeInTheDocument()
+  })
+
 })
 
 describe('Code Arena, the help', () => {

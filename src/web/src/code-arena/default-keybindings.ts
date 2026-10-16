@@ -5,8 +5,8 @@ import type { RuleJson } from './keys'
  * from VS Code means the same here). A key is Windows' and Linux's; macOS's is the same with Ctrl as ⌘ unless `mac`
  * says otherwise. The editor's own keys (Ctrl+F, Ctrl+D, Alt+↑, the Ctrl+K Ctrl+C chords…) stay Monaco's.
  *
- * The browser keeps a few keys for itself in a tab (Ctrl+W, Ctrl+T, Ctrl+Tab, Ctrl+PageUp/PageDown): those commands
- * have a second key that reaches the page.
+ * The browser keeps a few keys for itself in a tab (Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Tab, Ctrl+PageUp/PageDown, Ctrl+F4),
+ * as the second key of a chord too: those commands have another key that reaches the page, which menus show.
  */
 export const defaultKeybindings: RuleJson[] = [
   { key: 'ctrl+shift+p', command: 'workbench.action.showCommands' },
@@ -18,6 +18,7 @@ export const defaultKeybindings: RuleJson[] = [
   { key: 'ctrl+,', command: 'workbench.action.openSettings' },
   { key: 'ctrl+k ctrl+s', command: 'workbench.action.openGlobalKeybindings' },
   { key: 'ctrl+k ctrl+t', command: 'workbench.action.selectTheme' },
+  { key: 'ctrl+k ctrl+alt+t', command: 'workbench.action.selectTheme', mac: 'cmd+k ctrl+t' },
   { key: 'ctrl+b', command: 'workbench.action.toggleSidebarVisibility' },
   { key: 'ctrl+j', command: 'workbench.action.togglePanel' },
   { key: 'ctrl+alt+b', command: 'workbench.action.toggleAuxiliaryBar', mac: 'alt+cmd+b' },
@@ -34,11 +35,11 @@ export const defaultKeybindings: RuleJson[] = [
   { key: 'ctrl+1', command: 'workbench.action.focusFirstEditorGroup' },
   { key: 'ctrl+s', command: 'workbench.action.files.save' },
   { key: 'ctrl+k s', command: 'workbench.action.files.saveAll', mac: 'alt+cmd+s' },
-  { key: 'ctrl+n', command: 'workbench.action.files.newUntitledFile' },
   { key: 'ctrl+w', command: 'workbench.action.closeActiveEditor', when: 'editorIsOpen' },
   { key: 'ctrl+f4', command: 'workbench.action.closeActiveEditor', when: 'editorIsOpen', mac: 'cmd+f4' },
   { key: 'ctrl+alt+w', command: 'workbench.action.closeActiveEditor', when: 'editorIsOpen', mac: 'ctrl+w' },
   { key: 'ctrl+k ctrl+w', command: 'workbench.action.closeAllEditors' },
+  { key: 'ctrl+k ctrl+alt+w', command: 'workbench.action.closeAllEditors', mac: 'cmd+k ctrl+w' },
   { key: 'ctrl+k u', command: 'workbench.action.closeUnmodifiedEditors' },
   { key: 'ctrl+shift+t', command: 'workbench.action.reopenClosedEditor' },
   { key: 'ctrl+alt+shift+t', command: 'workbench.action.reopenClosedEditor', mac: 'ctrl+shift+t' },
@@ -57,8 +58,14 @@ export const defaultKeybindings: RuleJson[] = [
   { key: 'ctrl+k c', command: 'workbench.files.action.compareWithClipboard', when: 'editorIsOpen' },
   { key: 'alt+f5', command: 'workbench.action.compareEditor.nextChange', when: 'textCompareEditorVisible' },
   { key: 'shift+alt+f5', command: 'workbench.action.compareEditor.previousChange', when: 'textCompareEditorVisible' },
+  // Quick diff in the code editor (a compare's are the keys above).
+  { key: 'alt+f3', command: 'editor.action.dirtydiff.next', when: 'editorTextFocus' },
+  { key: 'shift+alt+f3', command: 'editor.action.dirtydiff.previous', when: 'editorTextFocus' },
+  { key: 'alt+f5', command: 'workbench.action.editor.nextChange', when: 'editorTextFocus && !textCompareEditorVisible' },
+  { key: 'shift+alt+f5', command: 'workbench.action.editor.previousChange', when: 'editorTextFocus && !textCompareEditorVisible' },
   { key: 'ctrl+k ctrl+alt+s', command: 'git.stageSelectedRanges', when: 'textCompareEditorVisible' },
   { key: 'ctrl+k ctrl+n', command: 'git.unstageSelectedRanges', when: 'textCompareEditorVisible' },
+  { key: 'ctrl+k ctrl+alt+n', command: 'git.unstageSelectedRanges', when: 'textCompareEditorVisible', mac: 'cmd+k ctrl+n' },
   { key: 'ctrl+k ctrl+r', command: 'git.revertSelectedRanges', when: 'textCompareEditorVisible' },
   { key: 'ctrl+k ctrl+alt+a', command: 'codeArena.changes.acceptSelectedRanges', when: 'textCompareEditorVisible' },
   { key: 'f2', command: 'renameFile', when: 'filesExplorerFocus && !inputFocus', mac: 'enter' },

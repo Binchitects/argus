@@ -222,7 +222,8 @@ The page is laid out as VS Code is, in Argus Arena's design system:
 - **Explorer**: the project's files, with New file, New folder, Refresh and
   Collapse at its top. Click opens; a right-click menu has new file, new
   folder, Copy path, Rename (F2) and Delete (Del, asks first); the arrow
-  keys move through the tree. The files the agent changed are marked, and so
+  keys move through the tree. F2 and Del are the keymap's (`renameFile`,
+  `deleteFile`): keybindings.json changes them or takes them away. The files the agent changed are marked, and so
   are the folders they are in. A file deleted with unsaved changes keeps its
   tab (the question says so): saving it makes the file again.
 - **editor**: tabs with Monaco, highlighting by the file's name (or
@@ -257,7 +258,7 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   and, for the change at the cursor (or those selected): **Stage** and
   **Revert** in a change not staged (Ctrl+K Ctrl+Alt+S, Ctrl+K Ctrl+R: the
   index takes exactly that change, the file stays), **Unstage** in a staged
-  one (Ctrl+K Ctrl+N), **Accept** and **Revert** in the agent's (Ctrl+K
+  one (Ctrl+K Ctrl+Alt+N; Ctrl+K Ctrl+N in a window of its own), **Accept** and **Revert** in the agent's (Ctrl+K
   Ctrl+Alt+A: the rest stays to review). The agent's changes also have
   **Revert** (puts the file back; a file the agent made is deleted) and
   **Accept** (keeps it) for the whole file, and Agent changes has **Accept
@@ -271,8 +272,10 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   changes in the editor keeps them, and saving it then asks).
 - **quick diff**: bars beside the line numbers show the lines changed since
   what git's index has (green added, blue changed, a red mark where lines were
-  taken away), as you type; **Alt+F3** and **Shift+Alt+F3** go to the next and
-  the previous change (`scm.diffDecorations`: `none` turns them off). Lines
+  taken away), as you type; **Alt+F3** and **Shift+Alt+F3** (or **Alt+F5** and
+  **Shift+Alt+F5**, as in a compare) go to the next and the previous change,
+  keys of the keymap that keybindings.json changes (`scm.diffDecorations`:
+  `none` turns the bars off). Lines
   are compared without their ends, so a file checked out with CRLF against an
   index with LF shows no bars; changes more than about 1,400 lines apart (a
   file rewritten or reformatted) are one bar from the first to the last, so
@@ -350,7 +353,7 @@ VS Code settings mean the same here:
   delay; `files.associations`), compares (`diffEditor.*`), the terminals
   (font, cursor, scrollback, the keys they let through), the colour theme
   (`workbench.colorTheme`, or `window.autoDetectColorScheme` with the
-  preferred light and dark ones: **Ctrl+K Ctrl+T**), the file icon theme
+  preferred light and dark ones: **Ctrl+K Ctrl+Alt+T**), the file icon theme
   (`workbench.iconTheme`) and Code Arena's code completion
   (`codeArena.inlineCompletion.enabled`, the status bar's **Complete**: the
   person's own, which a project's settings cannot turn on, since what is typed
@@ -365,8 +368,10 @@ VS Code settings mean the same here:
   ids); the last rule that matches wins, `"-command"` takes a default key
   away, a key may be two chords (`ctrl+k ctrl+t`) and `when` reads VS Code's
   context keys (`editorIsOpen`, `inputFocus`, `terminalFocus`,
-  `sideBarVisible`, `resourceLangId == python`…). The editor has the same
-  keys, its own (Monaco's: Ctrl+D, Alt+↑, Ctrl+K Ctrl+C…) under theirs, and a
+  `sideBarVisible`, `resourceLangId == python`…, in the editor too). The
+  editor has the same keys, its own (Monaco's: Ctrl+D, Alt+↑, Ctrl+K Ctrl+C…,
+  listed with the defaults in the Keyboard Shortcuts editor and the palette)
+  under theirs, and a
   rule may rebind one of the editor's commands too (`editor.action.…`,
   `cursorUp`), or take its key away (`"-editor.action.deleteLines"`). A
   `"-command"` VS Code wrote keeps the `when` of VS Code's default, which may
@@ -402,23 +407,28 @@ first key of a chord (Ctrl+K: `terminal.integrated.allowChords` false gives it
 to the shell); `terminal.integrated.commandsToSkipShell` adds one
 (`"-command"` gives its key back). On macOS the keys are ⌘: Ctrl+S, Ctrl+P and
 the others stay the terminal's and the editor's there. A browser tab keeps
-Ctrl+W, Ctrl+T, Ctrl+Tab and Ctrl+PageUp/PageDown for itself: their commands
-have a second key (Ctrl+Alt+W closes the tab, Ctrl+Alt+Shift+T reopens it,
-Ctrl+Alt+PageUp/PageDown move between tabs).
+Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Tab, Ctrl+F4 and Ctrl+PageUp/PageDown for itself,
+as the second key of a chord too: their commands have another key, which the
+menus show (Ctrl+Alt+W closes the tab, Ctrl+K Ctrl+Alt+W all of them,
+Ctrl+Alt+Shift+T reopens one, Ctrl+Alt+PageUp/PageDown move between them,
+Ctrl+K Ctrl+Alt+T the colour theme, Ctrl+K Ctrl+Alt+N unstages); in Code
+Arena's own window VS Code's keys work too. F5, Ctrl+F5, Shift+F5 and Ctrl+S
+never reach the browser (no reload, no Save Page As), also when their command
+does nothing at that moment.
 
 | keys | |
 |---|---|
 | Ctrl+Shift+P, F1 | run a command by name |
 | Ctrl+P | open a file by name (`:12` goes to a line); Ctrl+G goes to a line |
 | Ctrl+S, Ctrl+K S | save the file, save them all |
-| Ctrl+Alt+W, Ctrl+K Ctrl+W, Ctrl+K U | close the tab, all the tabs, the saved ones |
+| Ctrl+Alt+W, Ctrl+K Ctrl+Alt+W, Ctrl+K U | close the tab, all the tabs, the saved ones |
 | Ctrl+Alt+Shift+T | reopen the tab closed last |
 | Alt+1 … Alt+9, Ctrl+Alt+PageUp/PageDown | a tab by its place, the next or the one before |
 | Ctrl+Alt+- , Ctrl+Shift+- (Alt+← and Alt+→ on Windows) | back and forward through the tabs shown |
 | Ctrl+B, Ctrl+J, Ctrl+Alt+B | the side bar, the panel, the chat |
 | Ctrl+Shift+E, Ctrl+Shift+F, Ctrl+Shift+H, Ctrl+Shift+G, Ctrl+Shift+M, Ctrl+Shift+X | Explorer, search, replace, source control, problems, extensions |
 | Ctrl+`, Ctrl+Shift+` | show or hide the terminals, a new one |
-| Ctrl+, , Ctrl+K Ctrl+S, Ctrl+K Ctrl+T | settings, keyboard shortcuts, colour theme |
+| Ctrl+, , Ctrl+K Ctrl+S, Ctrl+K Ctrl+Alt+T | settings, keyboard shortcuts, colour theme |
 | Ctrl+K M, Alt+Z, Ctrl+K P | the language mode, word wrap, copy the file's path |
 | Ctrl+L | in the editor: the lines chosen (or the cursor's) go with the next message |
 
@@ -676,7 +686,7 @@ What it uses of an extension:
 
 | contribution | in Code Arena |
 |---|---|
-| `themes` (colour themes, JSON) | offered by **Color Theme** (Ctrl+K Ctrl+T) and `workbench.colorTheme` (by its `id`, else its `label`); going down the list shows each theme at once, and Escape goes back. Its `include` is read. Its `tokenColors` colour the editor by scope: the editor's own highlighting names its tokens as TextMate's broadest scopes (comment, string, keyword…), and the common narrower ones (`constant.numeric`, `entity.name.type`, `entity.name.tag`, `storage.type`…) are given its names too. Its `colors` are the editor's, the terminal's (`terminal.foreground`, `terminal.ansi*`), and the page's for about twenty of the workbench's (`editor.background`, `sideBar.background`, `button.background`, `list.hoverBackground`, `focusBorder`, `panel.border`…); its `uiTheme` makes the page light or dark |
+| `themes` (colour themes, JSON) | offered by **Color Theme** (Ctrl+K Ctrl+Alt+T) and `workbench.colorTheme` (by its `id`, else its `label`); going down the list shows each theme at once, and Escape goes back. Its `include` is read. Its `tokenColors` colour the editor by scope: the editor's own highlighting names its tokens as TextMate's broadest scopes (comment, string, keyword…), and the common narrower ones (`constant.numeric`, `entity.name.type`, `entity.name.tag`, `storage.type`…) are given its names too. Its `colors` are the editor's, the terminal's (`terminal.foreground`, `terminal.ansi*`), and the page's for about twenty of the workbench's (`editor.background`, `sideBar.background`, `button.background`, `list.hoverBackground`, `focusBorder`, `panel.border`…); its `uiTheme` makes the page light or dark |
 | `iconThemes` | offered by **Preferences: File Icon Theme** and `workbench.iconTheme`. A file's icon is by its name, then its extension (the longest first: `test.ts` before `ts`), then its language, else the default; a folder's by its name, open or closed; a light theme's own choices first. Images, and characters of the theme's fonts |
 | `snippets` | suggestions (Ctrl+Space, and as you type) in the files of their language, in VS Code's snippet syntax (`$1`, `${2:name}`, `${3\|a,b\|}`, `$0`) |
 | `languages` | a language for files by their extensions and names (the status bar's language, `files.associations`); for a language the editor does not have, its `language-configuration.json`: comments (Ctrl+/), brackets, auto-closing and surrounding pairs, folding markers, the word pattern, indentation and Enter rules |

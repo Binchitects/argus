@@ -15,6 +15,8 @@ import { FileIcon, FolderIcon } from './file-icon'
 import { PartHelp } from './help'
 import { changesQuery, createEntry, deleteEntry, folderQuery, join, nameOf, parentOf, renameEntry, within, type Change, type Entry } from './ide-api'
 import { chatBridge } from './bridge'
+import { useCommands } from './commands'
+import { useKeyFor } from './keyboard'
 import { compareSelection } from './compare'
 
 /** A row's place in the tree, for keys and the context menu. */
@@ -133,7 +135,28 @@ export function Explorer({ project, onOpenChanges }: { project: string; onOpenCh
     else void editor.open(t.path)
   }
 
-  /** A row's keys, as in a tree: arrows move and open, Enter opens, F2 renames, Delete deletes. */
+  /**
+   * The row with the focus (else the one selected): renameFile and deleteFile act on it. Their keys (F2, Delete) are the
+   * keymap's, so keybindings.json can change or take them away.
+   */
+  const focusedTarget = (): Target | null => {
+    const row = document.activeElement instanceof HTMLElement ? document.activeElement.closest<HTMLElement>('[data-context="explorer"] [role=treeitem]') : null
+    return row ? { path: row.dataset.path!, kind: row.dataset.kind as 'file' | 'dir' } : selected
+  }
+  useCommands([
+    { id: 'renameFile', category: 'Explorer', title: 'Rename', hidden: true, enabled: () => !!focusedTarget(), run: () => {
+      const t = focusedTarget()
+      if (t) setEditing({ kind: 'rename', path: t.path })
+    } },
+    { id: 'deleteFile', category: 'Explorer', title: 'Delete', hidden: true, enabled: () => !!focusedTarget(), run: () => {
+      const t = focusedTarget()
+      if (t) void remove(t)
+    } },
+  ])
+  const renameKey = useKeyFor('renameFile')
+  const deleteKey = useKeyFor('deleteFile')
+
+  /** A row's keys, as in a tree: arrows move and open, Enter opens (F2 and Delete are the keymap's: renameFile, deleteFile). */
   const onKey = (e: KeyboardEvent<HTMLElement>) => {
     const row = e.currentTarget
     if (e.target !== row) return
@@ -155,8 +178,6 @@ export function Explorer({ project, onOpenChanges }: { project: string; onOpenCh
       ArrowLeft: () => (open ? toggle(t.path, false) : focus(rows.find((r) => r.dataset.path === parentOf(t.path)))),
       Enter: () => activate(t),
       ' ': () => activate(t),
-      F2: () => setEditing({ kind: 'rename', path: t.path }),
-      Delete: () => void remove(t),
     }
     const run = keys[e.key]
     if (run) {
@@ -242,10 +263,10 @@ export function Explorer({ project, onOpenChanges }: { project: string; onOpenCh
                   <Copy /> Copy path
                 </ContextMenu.Item>
                 <ContextMenu.Item className={menuItem} onSelect={() => setEditing({ kind: 'rename', path: at.path })}>
-                  <Pencil /> Rename <span className="ml-auto text-xs text-muted-foreground">F2</span>
+                  <Pencil /> Rename {renameKey && <span className="ml-auto text-xs text-muted-foreground">{renameKey}</span>}
                 </ContextMenu.Item>
                 <ContextMenu.Item className={cn(menuItem, 'text-destructive-ink focus:bg-destructive/10 focus:text-destructive-ink [&_svg]:text-destructive-ink')} onSelect={() => void remove(at)}>
-                  <Trash2 /> Delete <span className="ml-auto text-xs">Del</span>
+                  <Trash2 /> Delete {deleteKey && <span className="ml-auto text-xs">{deleteKey}</span>}
                 </ContextMenu.Item>
               </>
             )}
