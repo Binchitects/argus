@@ -1019,7 +1019,8 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         var fallbacks = (await db.LocalModels.AsNoTracking().Where(m => m.Fallback != null).Select(m => new { m.Name, m.Fallback }).ToListAsync(ct))
             .ToDictionary(m => m.Name, m => (IReadOnlyList<string>)[m.Fallback!], StringComparer.Ordinal);
         var said = string.Join(';', fallbacks.OrderBy(f => f.Key, StringComparer.Ordinal).Select(f => f.Key + "=" + f.Value[0]));
-        if (!GivenFallbacks.TryGetValue(gateway, out var given) || given != said)
+        // Nothing set and nothing to set (a stack without fallbacks): the gateway's settings are left untouched.
+        if ((GivenFallbacks.TryGetValue(gateway, out var given) ? given : "") != said)
         {
             await gateway.SetFallbacksAsync(fallbacks, ct);
             GivenFallbacks.AddOrUpdate(gateway, said);
