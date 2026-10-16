@@ -449,6 +449,30 @@ public sealed class ArenaMcpTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_person_with_no_picture_credit_is_not_offered_the_picture_tool_and_hears_who_gives_it()
+    {
+        var gateway = new FakeGateway();
+        gateway.Models.Add(new GatewayModel("FLUX.2-klein-4B", null, null, false, false, false, null, null, null, Mode: "image_generation"));
+        await using var f = NewApp(gateway);
+        var (_, id, _, key) = await PersonAsync(f);
+        Assert.Contains("generate_image", (await RpcAsync(Agent(f, key), "tools/list")).Answer.GetProperty("result").GetProperty("tools").EnumerateArray()
+            .Select(t => t.GetProperty("name").GetString()));
+
+        // An admin gave them no picture credit ($0, nothing spent): the tool is left out, and the notes say why and who gives it.
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{id}/credits", UriKind.Relative), new { pictures = 0 }));
+        var (_, init, _) = await RpcAsync(Agent(f, key), "initialize", new { protocolVersion = "2025-06-18", capabilities = new { }, clientInfo = new { name = "test", version = "1" } });
+        Assert.Contains("generate_image (You have no picture credit: an admin sets it under People.)", init.GetProperty("result").GetProperty("instructions").GetString(), StringComparison.Ordinal);
+        var names = (await RpcAsync(Agent(f, key), "tools/list")).Answer.GetProperty("result").GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("name").GetString()).ToList();
+        Assert.DoesNotContain("generate_image", names);
+        Assert.Contains("calculate", names);
+        // An agent that calls it anyway hears the same.
+        var called = (await RpcAsync(Agent(f, key), "tools/call", new { name = "generate_image", arguments = new { prompt = "A fox" } })).Answer.GetProperty("result");
+        Assert.True(called.GetProperty("isError").GetBoolean());
+        Assert.Contains("You have no picture credit: an admin sets it under People.", called.GetProperty("content")[0].GetProperty("text").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_picture_comes_back_inline_and_as_a_link_the_agent_reads_and_the_person_opens()
     {
         var gateway = new FakeGateway();

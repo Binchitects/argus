@@ -135,7 +135,10 @@ public sealed class Credit(AppDbContext db, AccessService access, CreditBook boo
         var what = Credits.Label(kind);
         if (Credits.Of(user, kind) is { } own && spent >= own)
         {
-            return $"You have used all your {what} credit for this month ({Money(own)}). Ask an admin to raise it.";
+            // None given is not the same as all used: the person is told who gives it.
+            return own == 0 && spent == 0
+                ? $"You have no {what} credit: an admin sets it under People."
+                : $"You have used all your {what} credit for this month ({Money(own)}). Ask an admin to raise it.";
         }
         foreach (var (g, credit) in await GroupsAsync(user, kind, ct))
         {
@@ -143,12 +146,16 @@ public sealed class Credit(AppDbContext db, AccessService access, CreditBook boo
             {
                 if (spent >= credit)
                 {
-                    return $"You have used your {what} credit as a member of {g.Name} for this month ({Money(credit)}). Ask an admin to raise it.";
+                    return credit == 0 && spent == 0
+                        ? $"You have no {what} credit as a member of {g.Name}: an admin sets it under Groups."
+                        : $"You have used your {what} credit as a member of {g.Name} for this month ({Money(credit)}). Ask an admin to raise it.";
                 }
             }
-            else if ((await MembersAsync(g, ct)).Sum(e => month.Of(e, kind)) >= credit)
+            else if ((await MembersAsync(g, ct)).Sum(e => month.Of(e, kind)) is var used && used >= credit)
             {
-                return $"{g.Name} has used its {what} credit for this month ({Money(credit)}, shared by its members). Ask an admin to raise it.";
+                return credit == 0 && used == 0
+                    ? $"{g.Name} has no {what} credit: an admin sets it under Groups."
+                    : $"{g.Name} has used its {what} credit for this month ({Money(credit)}, shared by its members). Ask an admin to raise it.";
             }
         }
         return null;

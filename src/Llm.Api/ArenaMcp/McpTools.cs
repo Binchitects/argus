@@ -33,7 +33,8 @@ public sealed record McpCatalog(JsonArray Tools, string Instructions, IReadOnlyD
 /// </summary>
 public sealed partial class McpTools(
     ToolRegistry registry, AccessService access, Audit audit, AppDbContext db, IMemoryCache cache, McpResearch research,
-    IOptions<AuthOptions> auth, IOptionsMonitor<BrandingOptions> branding, Gateway.RateLimits rateLimits, TimeProvider clock, IOptionsMonitor<McpOptions> options, ILogger<McpTools> logger)
+    IOptions<AuthOptions> auth, IOptionsMonitor<BrandingOptions> branding, Gateway.RateLimits rateLimits, Gateway.Credit credit, TimeProvider clock,
+    IOptionsMonitor<McpOptions> options, ILogger<McpTools> logger)
 {
     /// <summary>Tools that only make sense inside a chat: its files, questions to the person, sub-agents.</summary>
     public static readonly string[] ChatOnly = ["files", "ask", "agents"];
@@ -43,6 +44,12 @@ public sealed partial class McpTools(
 
     /// <summary>Pictures and sound up to this size come inline as well as by link: the agent sees them at once.</summary>
     private const int InlineBytes = 4 * 1024 * 1024;
+
+    /// <summary>The functions that spend a credit of their own kind: listed only while the person has some of it left.</summary>
+    private static readonly Dictionary<string, Llm.Core.Access.CreditKind> CreditOf = new(StringComparer.Ordinal)
+    {
+        ["generate_image"] = Llm.Core.Access.CreditKind.Pictures, ["generate_video"] = Llm.Core.Access.CreditKind.Video, ["speak"] = Llm.Core.Access.CreditKind.Speech,
+    };
 
     internal const string AskFirstNote =
         " Ask the person before each call and wait for their yes: in the chat this tool asks them first, and this server cannot ask them itself.";
@@ -101,6 +108,9 @@ public sealed partial class McpTools(
             }
         }
         var slow = false;
+        // A picture, video or speech tool the person has no credit for is left out (the agent would offer it, and every
+        // call be refused), and the notes say why.
+        var refused = new Dictionary<Llm.Core.Access.CreditKind, string?>();
         foreach (var choice in served)
         {
             var (run, failure) = early.TryGetValue(choice.Tool.Id, out var started) ? await started : await AttemptAsync(choice, t => choice.Tool.StartAsync(context, t), wait, ct, ct);
@@ -115,6 +125,19 @@ public sealed partial class McpTools(
                 // As in the chat: the first tool with a name has it.
                 if (f["function"] is JsonObject fn && fn["name"]?.GetValue<string>() is { Length: > 0 } name && owners.TryAdd(name, choice.Tool.Id))
                 {
+                    if (CreditOf.TryGetValue(name, out var kind))
+                    {
+                        if (!refused.TryGetValue(kind, out var why))
+                        {
+                            refused[kind] = why = await credit.RefusalAsync(user, kind, ct);
+                        }
+                        if (why is not null)
+                        {
+                            // Still its tool's: a call by its name hears why from the tool itself.
+                            unavailable.Add($"{name} ({why})");
+                            continue;
+                        }
+                    }
                     tools.Add(Definition(fn, name, choice.Setting.AskFirst || run.AsksFirst(name)));
                 }
             }
