@@ -301,11 +301,11 @@ public sealed class RunConfigTests : IDisposable
         var stopped = await _runs.StopAsync(new JsonObject { ["terminal"] = long1["terminal"]!["id"]!.GetValue<string>() });
         Assert.Equal(128 + 1, stopped["exitCode"]!.GetValue<int>());
 
-        // Debugging, and compounds, come with the debugger.
+        // Debugging comes with the debugger; a compound is started by the page, one configuration at a time.
         var debug = Start("Run");
         debug["noDebug"] = false;
         Assert.Equal((501, "not_yet"), await StatusAsync(_runs.StartAsync(debug)));
-        Assert.Equal((501, "not_yet"), await StatusAsync(_runs.StartAsync(Start("Both"))));
+        Assert.Equal((400, "compound"), await StatusAsync(_runs.StartAsync(Start("Both"))));
         Assert.Equal((404, "not_found"), await StatusAsync(_runs.StartAsync(Start("Nothing"))));
     }
 

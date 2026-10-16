@@ -26,14 +26,14 @@ import { Explorer } from './explorer'
 import { HelpProvider } from './help'
 import { useOpenHelp } from './help-context'
 import { openProgram, terminalsQuery, type TerminalInfo } from './ide-api'
-import { allFilesQuery, changesQuery, folderQuery, gitBranchesQuery, gitFileLog, gitStatusQuery, readFile, saveWorkspaceState, workspaceStateQuery, parentOf, preferencesQuery, problemsQuery, savePreferences, writeFile } from './ide-api'
+import { allFilesQuery, changesQuery, folderQuery, gitBranchesQuery, gitFileLog, gitStatusQuery, readFile, saveWorkspaceState, workspaceStateQuery, type WorkspaceState, parentOf, preferencesQuery, problemsQuery, savePreferences, writeFile } from './ide-api'
 import { setContext, useKeyboard, useKeyFor } from './keyboard'
 import { quickPick } from './quick-pick'
 import { QuickPickHost } from './quick-pick-host'
 import { DebugConsole } from './debug/console'
 import { DebugToolbar } from './debug/toolbar'
 import { RunDebugView } from './debug/view'
-import { debug, useDebug } from './debug/session'
+import { debug, Session, useDebug } from './debug/session'
 import { startConfiguration, startTask } from './debug/start'
 import { runConfigsQuery, stopTask, tasksQuery } from './debug/run-api'
 import { PasteDialog } from './paste-dialog'
@@ -565,10 +565,12 @@ function Workbench({
   useEffect(() => {
     debug.inlineValues = () => settings.get('debug.inlineValues') !== 'off'
     // runInTerminal: the program in a terminal of its own, shown in the panel; the adapter is told its process.
-    debug.onRunInTerminal = async (_s, args) => {
+    debug.onRunInTerminal = async (s, args) => {
       const [program, ...rest] = args.args
       if (!program) return undefined
       try {
+        // Its program's terminal stays in front: the Debug Console does not take the panel when the session has started.
+        s.ranInTerminal = true
         const t = await openProgram({ program, args: rest, cwd: args.cwd || undefined, env: args.env, title: args.title, cols: 120, rows: 30 })
         showTerminal(t)
         setPanelUsed(true)
@@ -597,31 +599,51 @@ function Workbench({
     const text = model && piece ? model.getValueInRange({ startLineNumber: piece.startLine, startColumn: 1, endLineNumber: piece.endLine, endColumn: model.getLineMaxColumn(piece.endLine) }) : undefined
     return { file: active?.kind === 'file' && active.path && !active.path.startsWith('user:') ? active.path : undefined, lineNumber: ed.cursor?.line, selectedText: text, settings: settings.all() }
   }
-  /** Starts a configuration with its debugger, or without; saving what is unsaved first ("debug.saveBeforeStart"). */
-  const start = async (name: string, noDebug: boolean) => {
-    if (settings.get('debug.saveBeforeStart') !== 'none') await ed.saveAll()
-    const done = await startConfiguration(name, noDebug, editorContext(), queryClient)
+  const startOne = async (name: string, noDebug: boolean, group: string | null) => {
+    const done = await startConfiguration(name, noDebug, editorContext(), queryClient, group)
     if (!done) return
-    if (done !== 'debugging') showTerminal(done.terminal)
     setPanelUsed(true)
-    if (done === 'debugging') {
-      if (settings.get('debug.openDebug') === 'openOnSessionStart') show('debug')
-      const open = settings.get('debug.internalConsoleOptions')
-      if (open === 'openOnSessionStart' || (open === 'openOnFirstSessionStart' && dbg.sessions.length <= 1)) change({ panelOpen: true, panelTab: 'console' })
-    } else change({ panelOpen: true, panelTab: 'terminal' })
+    if (!(done instanceof Session)) {
+      showTerminal(done.terminal)
+      change({ panelOpen: true, panelTab: 'terminal' })
+      return
+    }
+    if (settings.get('debug.openDebug') === 'openOnSessionStart') show('debug')
+    // launch.json's own word first; a program in a terminal of its own (runInTerminal, "console": "integratedTerminal")
+    // keeps that terminal in front.
+    const own = done.start.configuration.console
+    if (done.ranInTerminal || own === 'integratedTerminal' || own === 'externalTerminal') return
+    const open = done.start.internalConsoleOptions ?? settings.get('debug.internalConsoleOptions')
+    if (open === 'openOnSessionStart' || (open === 'openOnFirstSessionStart' && dbg.sessions.length <= 1)) change({ panelOpen: true, panelTab: 'console' })
   }
-  /** F5: the configuration chosen in Run and Debug (the first when none was), or the view to choose one. */
+  const compounds = useRef(0)
+  /** Starts a configuration with its debugger, or without; a compound starts each of its own. */
+  const start = async (name: string, noDebug: boolean) => {
+    // Saving what is unsaved first ("debug.saveBeforeStart").
+    if (settings.get('debug.saveBeforeStart') !== 'none') await ed.saveAll()
+    const configs = await queryClient.fetchQuery(runConfigsQuery).catch(() => null)
+    const compound = configs && !configs.configurations.some((c) => c.name === name) ? configs.compounds.find((c) => c.name === name) : undefined
+    if (!compound) {
+      await startOne(name, noDebug, null)
+      return
+    }
+    // As VS Code's: its preLaunchTask once, done (or ready) first; then its configurations together.
+    if (compound.preLaunchTask && !(await startTask({ label: compound.preLaunchTask, wait: true }, editorContext()))) return
+    const group = compound.stopAll ? `${compound.name}:${++compounds.current}` : null
+    await Promise.all(compound.configurations.map((c) => startOne(c, noDebug, group)))
+  }
+  /** F5: the configuration (or compound) chosen in Run and Debug (the first when none was), or the view to choose one. */
   const startChosen = async (noDebug: boolean) => {
     const configs = await queryClient.fetchQuery(runConfigsQuery).catch(() => null)
     const shown = configs?.configurations.filter((c) => !c.hidden) ?? []
-    const saved = workspace.data?.['launch.selected']
-    const chosen = shown.find((c) => c.name === saved) ?? shown[0]
+    const saved = queryClient.getQueryData<WorkspaceState>(workspaceStateQuery.queryKey)?.['launch.selected'] ?? workspace.data?.['launch.selected']
+    const chosen = shown.find((c) => c.name === saved)?.name ?? configs?.compounds.find((c) => c.name === saved)?.name ?? shown[0]?.name
     if (!chosen) {
       setDebugUsed(true)
       show('debug')
       return
     }
-    await start(chosen.name, noDebug)
+    await start(chosen, noDebug)
   }
   const pickTask = async (title: string, running = false) => {
     const list = await queryClient.fetchQuery(tasksQuery).catch((e: unknown) => {
@@ -722,7 +744,14 @@ function Workbench({
     { id: 'debug.addConfiguration', category: 'Debug', title: 'Add Configuration…', run: () => void addConfiguration() },
     { id: 'workbench.action.debug.selectandstart', category: 'Debug', title: 'Select and Start Debugging', run: async () => {
       const configs = await queryClient.fetchQuery(runConfigsQuery).catch(() => null)
-      const picked = await quickPick({ title: 'Start debugging', placeholder: 'Select a configuration', items: (configs?.configurations ?? []).filter((c) => !c.hidden).map((c) => ({ id: c.name, label: c.name, description: c.command ?? undefined, group: c.source === 'launch' ? 'launch.json' : 'detected' })) })
+      const picked = await quickPick({
+        title: 'Start debugging',
+        placeholder: 'Select a configuration',
+        items: [
+          ...(configs?.configurations ?? []).filter((c) => !c.hidden).map((c) => ({ id: c.name, label: c.name, description: c.command ?? undefined, group: c.source === 'launch' ? 'launch.json' : 'detected' })),
+          ...(configs?.compounds ?? []).map((c) => ({ id: c.name, label: c.name, description: c.configurations.join(', '), group: 'compounds' })),
+        ],
+      })
       if (picked) {
         void saveWorkspaceState({ 'launch.selected': picked.id }).then(() => queryClient.invalidateQueries({ queryKey: workspaceStateQuery.queryKey }))
         await start(picked.id, false)
@@ -772,7 +801,8 @@ function Workbench({
     { id: 'workbench.action.focusFirstEditorGroup', category: 'View', title: 'Focus First Editor Group', run: () => ed.focusEditor() },
     { id: 'workbench.action.focusSideBar', category: 'View', title: 'Focus into Primary Side Bar', run: () => {
       change({ sideOpen: true })
-      requestAnimationFrame(() => document.querySelector<HTMLElement>('aside[data-side] [tabindex="0"], aside[data-side] button, aside[data-side] input')?.focus())
+      // The view shown: the others are in the side bar too, hidden.
+      requestAnimationFrame(() => document.querySelector<HTMLElement>(['[tabindex="0"]', 'button', 'input'].map((x) => `aside[data-side] > div:not([hidden]) ${x}`).join(', '))?.focus())
     } },
     { id: 'workbench.action.toggleSidebarVisibility', category: 'View', title: 'Toggle Primary Side Bar Visibility', run: () => change({ sideOpen: !layout.sideOpen }) },
     { id: 'workbench.action.togglePanel', category: 'View', title: 'Toggle Panel Visibility', run: togglePanel },
@@ -795,7 +825,7 @@ function Workbench({
     { id: 'workbench.action.terminal.toggleTerminal', category: 'View', title: 'Toggle Terminal', run: toggleTerminal },
     { id: 'workbench.action.terminal.new', category: 'Terminal', title: 'Create New Terminal', run: () => {
       setPanelUsed(true)
-      change({ panelOpen: true })
+      change({ panelOpen: true, panelTab: 'terminal' })
       setNewTerminal((n) => n + 1)
     } },
     { id: 'workbench.action.openSettings', category: 'Preferences', title: 'Open Settings', run: (args) => ed.openPage('settings', typeof args === 'string' ? args : '') },

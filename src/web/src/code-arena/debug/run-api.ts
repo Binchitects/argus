@@ -84,12 +84,14 @@ export interface DebugStart {
   root: string
   rootReal: string
   pathStyle: 'posix' | 'win'
+  /** launch.json's own word on the Debug Console (neverOpen, openOnSessionStart, openOnFirstSessionStart). */
+  internalConsoleOptions?: string | null
 }
 
 export const startRun = (body: { name: string; noDebug: true; context: RunContext; inputs?: Record<string, string>; cols?: number; rows?: number }) => api<Started>('/api/run/start', { body })
 export const startDebug = (body: { name: string; noDebug: false; context: RunContext; inputs?: Record<string, string>; cols?: number; rows?: number }) => api<DebugStart>('/api/run/start', { body })
 export const stopRun = (terminal: string) => api<TerminalInfo>('/api/run/stop', { body: { terminal } })
-export const runTask = (body: { label?: string; group?: 'build' | 'test'; context: RunContext; inputs?: Record<string, string>; cols?: number; rows?: number }) =>
+export const runTask = (body: { label?: string; group?: 'build' | 'test'; wait?: boolean; context: RunContext; inputs?: Record<string, string>; cols?: number; rows?: number }) =>
   api<{ task: string; terminal: TerminalInfo | null; terminals: TerminalInfo[] }>('/api/tasks/run', { body })
 export const stopTask = (terminal: string) => api<TerminalInfo>('/api/tasks/stop', { body: { terminal } })
 

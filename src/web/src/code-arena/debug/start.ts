@@ -3,7 +3,7 @@ import { toast } from '@/components/ui/toaster'
 import { ApiError, errorMessage } from '@/lib/api'
 import { inputBox, quickPick } from '../quick-pick'
 import { askTrust } from '../trust'
-import { debug } from './session'
+import { debug, type Session } from './session'
 import { listProcesses, runTask, startDebug, startRun, type RunContext, type Started, type TaskInfo } from './run-api'
 
 /** What a start that was refused asked for: the inputs of ${input:…}, the commands that would run untrusted. */
@@ -78,24 +78,26 @@ async function pickProcess(): Promise<string | undefined> {
   return picked?.id
 }
 
-/** Starts a run configuration with its debugger, or without (Run Without Debugging): the terminal it runs in, or the session. */
-export async function startConfiguration(name: string, noDebug: boolean, context: RunContext, queryClient: QueryClient): Promise<Started | 'debugging' | undefined> {
+/** Starts a run configuration with its debugger, or without (Run Without Debugging): the terminal it runs in, or the session (of a compound's group, when it stops all together). */
+export async function startConfiguration(name: string, noDebug: boolean, context: RunContext, queryClient: QueryClient, group: string | null = null): Promise<Started | Session | undefined> {
   void queryClient
   if (noDebug) return withAnswers((inputs) => startRun({ name, noDebug: true, context, inputs }))
   const started = await withAnswers((inputs) => startDebug({ name, noDebug: false, context, inputs }))
   if (!started) return undefined
   for (const note of started.notes) toast.info(note)
   try {
-    await debug.open(started)
-    return 'debugging'
+    return await debug.open(started, group)
   } catch (e) {
     toast.error(`The debugger did not start: ${errorMessage(e)}`)
     return undefined
   }
 }
 
-/** Runs a task (by label, or a group's default: build, test), after the trust and inputs it asks for. */
-export async function startTask(which: { label?: string; group?: 'build' | 'test' }, context: RunContext, tasks?: TaskInfo[]) {
+/**
+ * Runs a task (by label, or a group's default: build, test), after the trust and inputs it asks for. With wait, done
+ * once it ended or is ready (a compound's preLaunchTask); undefined when it failed (a message says how).
+ */
+export async function startTask(which: { label?: string; group?: 'build' | 'test'; wait?: boolean }, context: RunContext, tasks?: TaskInfo[]) {
   const done = await withAnswers(async (inputs) => {
     try {
       return await runTask({ ...which, context, inputs })

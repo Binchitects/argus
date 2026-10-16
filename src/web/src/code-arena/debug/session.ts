@@ -15,6 +15,9 @@ export interface SourceBreakpoint {
   hitCondition?: string
   logMessage?: string
   enabled: boolean
+  /** Run to Cursor's, for this run only: taken away at the next stop or end, the breakpoint it stood in for (was) back. */
+  temporary?: boolean
+  was?: SourceBreakpoint
 }
 
 /** What the adapter made of a breakpoint: verified (bound to code), perhaps on another line, or why not. */
@@ -53,6 +56,7 @@ export interface Variable {
 export type DebugState = 'starting' | 'running' | 'stopped' | 'ended'
 
 export interface OutputLine {
+  /** The adapter's (stdout, stderr, console, important…), or the Debug Console's own: repl.in, repl.out, repl.error. */
   category: string
   text: string
 }
@@ -105,7 +109,15 @@ export class Session {
   exitCode: number | null = null
   /** The breakpoints as the adapter took them, by file. */
   results: Record<string, BreakpointResult[]> = {}
+  /** Its program runs in a terminal the adapter asked for (runInTerminal): the Debug Console does not take its place. */
+  ranInTerminal = false
+  /** The compound it was started with, when that compound stops all its sessions together (stopAll). */
+  group: string | null = null
+  /** Counts what a value was set to while stopped: the views that show values ask again. */
+  revision = 0
   private readonly cache = new Map<number, Promise<Variable[]>>()
+  // The stops so far: a step answered after the stop it led to does not mean running (some adapters stop first).
+  private stops = 0
 
   constructor(start: DebugStart) {
     this.start = start
@@ -170,12 +182,7 @@ export class Session {
       case 'output':
         // Kept to 1 MB of text, oldest first out; the console alone redraws for it, a moment later (a program printing in
         // a loop sends thousands a second).
-        if (b.category !== 'telemetry' && typeof b.output === 'string') {
-          this.output.push({ category: (b.category as string) ?? 'console', text: b.output })
-          this.outputSize += b.output.length
-          while (this.outputSize > maxOutput && this.output.length > 1) this.outputSize -= this.output.shift()!.text.length
-          outputChanged()
-        }
+        if (b.category !== 'telemetry' && typeof b.output === 'string') this.write((b.category as string) ?? 'console', b.output)
         return
       case 'exited':
         this.exitCode = (b.exitCode as number) ?? null
@@ -199,6 +206,14 @@ export class Session {
     changed()
   }
 
+  /** A line of output: the adapter's, or the Debug Console's (an expression and its value, in turn with the program's). */
+  write(category: string, text: string) {
+    this.output.push({ category, text })
+    this.outputSize += text.length
+    while (this.outputSize > maxOutput && this.output.length > 1) this.outputSize -= this.output.shift()!.text.length
+    outputChanged()
+  }
+
   private resumed() {
     if (this.state !== 'ended') this.state = 'running'
     this.stopped = null
@@ -209,6 +224,7 @@ export class Session {
   }
 
   private async onStopped(b: Record<string, unknown>) {
+    this.stops++
     this.state = 'stopped'
     this.stopped = { threadId: b.threadId as number | undefined, reason: (b.reason as string) ?? 'pause', description: b.description as string | undefined, text: b.text as string | undefined }
     this.cache.clear()
@@ -263,6 +279,7 @@ export class Session {
   async setVariable(container: number, name: string, value: string) {
     const r = await this.client.request<{ value: string }>('setVariable', { variablesReference: container, name, value })
     this.cache.clear()
+    this.revision++
     changed()
     return r.value
   }
@@ -276,17 +293,30 @@ export class Session {
     return this.stopped?.threadId ?? this.threads[0]?.id ?? 1
   }
 
+  /** Continue or a step: running once the adapter answers, unless it stopped again first. */
+  private resume(command: 'continue' | 'next' | 'stepIn' | 'stepOut') {
+    const stops = this.stops
+    return this.client
+      .request(command, { threadId: this.thread() })
+      .then(
+        () => {
+          if (this.stops === stops) this.resumed()
+        },
+        () => undefined,
+      )
+      .finally(changed)
+  }
   continue() {
-    return this.client.request('continue', { threadId: this.thread() }).then(() => this.resumed(), () => undefined).finally(changed)
+    return this.resume('continue')
   }
   next() {
-    return this.client.request('next', { threadId: this.thread() }).then(() => this.resumed(), () => undefined).finally(changed)
+    return this.resume('next')
   }
   stepIn() {
-    return this.client.request('stepIn', { threadId: this.thread() }).then(() => this.resumed(), () => undefined).finally(changed)
+    return this.resume('stepIn')
   }
   stepOut() {
-    return this.client.request('stepOut', { threadId: this.thread() }).then(() => this.resumed(), () => undefined).finally(changed)
+    return this.resume('stepOut')
   }
   pause() {
     return this.client.request('pause', { threadId: this.thread() }).catch(() => undefined)
@@ -349,6 +379,8 @@ export const debug = {
   inlineValues: () => true as boolean,
   breakpoints: {} as Record<string, SourceBreakpoint[]>,
   watch: [] as string[],
+  /** What was typed in the Debug Console, the last first (↑ goes back through it). */
+  replHistory: [] as string[],
   /** The exception filters chosen; null: the adapter's defaults. */
   exceptionFilters: null as string[] | null,
   /** The editor shows where a session stopped (set by the editor). */
@@ -363,15 +395,16 @@ export const debug = {
   /** The breakpoints and watches kept for this folder. */
   load(state: Record<string, unknown>) {
     const bps = state.breakpoints
-    if (bps && typeof bps === 'object' && !Array.isArray(bps)) this.breakpoints = bps as Record<string, SourceBreakpoint[]>
+    if (bps && typeof bps === 'object' && !Array.isArray(bps)) this.breakpoints = withoutTemporary(bps as Record<string, SourceBreakpoint[]>)
     if (Array.isArray(state.watch)) this.watch = state.watch.filter((x): x is string => typeof x === 'string')
     if (Array.isArray(state.exceptionFilters)) this.exceptionFilters = state.exceptionFilters.filter((x): x is string => typeof x === 'string')
     changed()
   },
 
   /** A session started on the server: spoken to, its handshake made. */
-  async open(start: DebugStart): Promise<Session> {
+  async open(start: DebugStart, group: string | null = null): Promise<Session> {
     const s = new Session(start)
+    s.group = group
     for (const x of this.sessions) if (x.state === 'ended') x.client.close()
     this.sessions = [...this.sessions.filter((x) => x.state !== 'ended'), s]
     this.activeId = s.id
@@ -396,6 +429,7 @@ export const debug = {
     if (s.closed) return
     s.closed = true
     s.state = 'ended'
+    this.afterStop()
     try {
       await stopDebug(s.id)
     } catch {
@@ -427,10 +461,13 @@ export const debug = {
       // Gone already.
     }
     s.state = 'ended'
+    this.afterStop()
     s.client.close()
     this.sessions = this.sessions.filter((x) => x !== s)
     if (this.activeId === s.id) this.activeId = this.sessions.at(-1)?.id ?? null
     changed()
+    // A compound with stopAll: the others it started stop with it.
+    if (s.group) await Promise.all(this.sessions.filter((x) => x.group === s.group).map((x) => this.stop(x)))
   },
 
   select(id: string) {
@@ -461,8 +498,14 @@ export const debug = {
   /** The breakpoints of a file changed: kept, and sent to every session. */
   setBreakpoints(path: string, list: SourceBreakpoint[]) {
     const next = { ...this.breakpoints }
-    if (list.length === 0) delete next[path]
-    else next[path] = [...list].sort((a, b) => a.line - b.line)
+    // One per line (lines deleted bring theirs together): the first, with what the others had that it lacks.
+    const byLine = new Map<number, SourceBreakpoint>()
+    for (const b of [...list].sort((a, b) => a.line - b.line)) {
+      const there = byLine.get(b.line)
+      byLine.set(b.line, there ? { ...b, ...there, condition: there.condition || b.condition, hitCondition: there.hitCondition || b.hitCondition, logMessage: there.logMessage || b.logMessage } : b)
+    }
+    if (byLine.size === 0) delete next[path]
+    else next[path] = [...byLine.values()]
     this.breakpoints = next
     changed()
     keep()
@@ -502,26 +545,27 @@ export const debug = {
     if (moved) this.setBreakpoints(path, next)
   },
 
-  /** Run to Cursor: a breakpoint there for this run only (taken away at the next stop, as VS Code's), then continue. */
+  /**
+   * Run to Cursor: a breakpoint there for this run only, then continue. It is taken away at the next stop or when the
+   * session ends, as VS Code's; one the person had there, turned off, comes back as it was (condition and all).
+   */
   async runTo(path: string, line: number) {
     const s = this.active
     if (!s || s.state !== 'stopped') return
-    if (!(this.breakpoints[path] ?? []).some((b) => b.line === line && b.enabled)) {
-      this.temporary = { path, line }
-      this.setBreakpoints(path, [...(this.breakpoints[path] ?? []).filter((b) => b.line !== line), { line, enabled: true }])
+    const now = this.breakpoints[path] ?? []
+    const there = now.find((b) => b.line === line)
+    if (!there?.enabled) {
+      this.setBreakpoints(path, [...now.filter((b) => b !== there), { line, enabled: true, temporary: true, was: there }])
       await this.sendBreakpoints(s, path)
     }
     await s.continue()
   },
 
-  /** The breakpoint Run to Cursor set, taken away once any session stops. */
-  temporary: null as { path: string; line: number } | null,
-
+  /** A session stopped or ended: Run to Cursor's breakpoints go, those they stood in for come back. */
   afterStop() {
-    const t = this.temporary
-    if (!t) return
-    this.temporary = null
-    this.setBreakpoints(t.path, (this.breakpoints[t.path] ?? []).filter((b) => b.line !== t.line))
+    for (const [path, list] of Object.entries(this.breakpoints)) {
+      if (list.some((b) => b.temporary)) this.setBreakpoints(path, list.flatMap((b) => (b.temporary ? (b.was ? [{ ...b.was, line: b.line }] : []) : [b])))
+    }
   },
 
   setWatch(list: string[]) {
@@ -551,7 +595,17 @@ let keeping: ReturnType<typeof setTimeout> | undefined
 /** Breakpoints, watches and exception filters kept for this folder, a moment after the last change. */
 function keep() {
   clearTimeout(keeping)
-  keeping = setTimeout(() => void saveWorkspaceState({ breakpoints: debug.breakpoints, watch: debug.watch, exceptionFilters: debug.exceptionFilters }).catch(() => undefined), 300)
+  keeping = setTimeout(() => void saveWorkspaceState({ breakpoints: withoutTemporary(debug.breakpoints), watch: debug.watch, exceptionFilters: debug.exceptionFilters }).catch(() => undefined), 300)
+}
+
+/** The breakpoints as the person set them: Run to Cursor's left out, those they stood in for kept. */
+function withoutTemporary(all: Record<string, SourceBreakpoint[]>) {
+  const out: Record<string, SourceBreakpoint[]> = {}
+  for (const [path, list] of Object.entries(all)) {
+    const kept = list.flatMap((b) => (b.temporary ? (b.was ? [{ ...b.was, line: b.line }] : []) : [b]))
+    if (kept.length > 0) out[path] = kept
+  }
+  return out
 }
 
 /** The active session's output, read by the Debug Console: it redraws as output comes, nothing else does. */

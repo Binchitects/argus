@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { useDebug, useDebugOutput } from './session'
+import { debug, useDebug, useDebugOutput } from './session'
 
 /** ANSI colour codes are dropped: the console shows the text. */
 const escape = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, 'g')
@@ -14,48 +14,49 @@ const plain = (text: string) => text.replace(escape, '')
 export function DebugConsole() {
   const d = useDebug()
   const s = d.active
-  const [lines, setLines] = useState<{ kind: 'in' | 'out' | 'error'; text: string }[]>([])
   const [typed, setTyped] = useState('')
-  const history = useRef<string[]>([])
   const at = useRef(-1)
   const end = useRef<HTMLDivElement>(null)
   const output = useDebugOutput()
   const last = output.at(-1)
   useEffect(() => {
     end.current?.scrollIntoView?.({ block: 'end' })
-  }, [last, lines.length])
+  }, [last])
+  // What is typed and what it gives go into the session's output, in turn with the program's, and stay when the panel
+  // shows another tab.
   const evaluate = async () => {
     const expr = typed.trim()
     if (!expr || !s) return
-    history.current = [expr, ...history.current.filter((x) => x !== expr)].slice(0, 100)
+    debug.replHistory = [expr, ...debug.replHistory.filter((x) => x !== expr)].slice(0, 100)
     at.current = -1
     setTyped('')
-    setLines((l) => [...l, { kind: 'in', text: expr }])
+    s.write('repl.in', expr)
     // gdb takes the console's text as one of its own commands: an expression is evaluated as a watch is, and "-exec"
     // runs a gdb command (as cppdbg's console does).
     const command = expr.startsWith('-exec ')
     const context = s.start.adapter === 'gdb' && !command ? 'watch' : 'repl'
     try {
       const r = await s.evaluate(command ? expr.slice(6) : expr, context)
-      setLines((l) => [...l, { kind: 'out', text: r.result }])
+      s.write('repl.out', r.result)
     } catch (e) {
-      setLines((l) => [...l, { kind: 'error', text: e instanceof Error ? e.message : errorMessage(e) }])
+      s.write('repl.error', e instanceof Error ? e.message : errorMessage(e))
     }
   }
   return (
     <section aria-label="Debug Console" className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-auto px-3 py-1 font-mono text-xs whitespace-pre-wrap">
         {!s && <p className="text-muted-foreground">Start debugging (F5): the program's output and the debugger's show here, and expressions can be evaluated below.</p>}
-        {output.map((o, i) => (
-          <span key={i} className={cn(o.category === 'stderr' && 'text-destructive-ink', o.category === 'console' && 'text-muted-foreground', o.category === 'important' && 'font-semibold')}>
-            {plain(o.text)}
-          </span>
-        ))}
-        {lines.map((l, i) => (
-          <div key={`r${i}`} className={cn(l.kind === 'in' && 'text-primary-ink', l.kind === 'error' && 'text-destructive-ink')}>
-            {l.kind === 'in' ? `> ${l.text}` : l.text}
-          </div>
-        ))}
+        {output.map((o, i) =>
+          o.category.startsWith('repl.') ? (
+            <div key={i} className={cn(o.category === 'repl.in' && 'text-primary-ink', o.category === 'repl.error' && 'text-destructive-ink')}>
+              {o.category === 'repl.in' ? `> ${o.text}` : o.text}
+            </div>
+          ) : (
+            <span key={i} className={cn(o.category === 'stderr' && 'text-destructive-ink', o.category === 'console' && 'text-muted-foreground', o.category === 'important' && 'font-semibold')}>
+              {plain(o.text)}
+            </span>
+          ),
+        )}
         <div ref={end} />
       </div>
       <div className="flex shrink-0 items-center gap-1 border-t px-2">
@@ -69,14 +70,14 @@ export function DebugConsole() {
             if (e.key === 'Enter') {
               e.preventDefault()
               void evaluate()
-            } else if (e.key === 'ArrowUp' && history.current.length > 0) {
+            } else if (e.key === 'ArrowUp' && debug.replHistory.length > 0) {
               e.preventDefault()
-              at.current = Math.min(at.current + 1, history.current.length - 1)
-              setTyped(history.current[at.current]!)
+              at.current = Math.min(at.current + 1, debug.replHistory.length - 1)
+              setTyped(debug.replHistory[at.current]!)
             } else if (e.key === 'ArrowDown') {
               e.preventDefault()
               at.current = Math.max(at.current - 1, -1)
-              setTyped(at.current < 0 ? '' : history.current[at.current]!)
+              setTyped(at.current < 0 ? '' : debug.replHistory[at.current]!)
             }
           }}
           disabled={!s || s.state !== 'stopped'}

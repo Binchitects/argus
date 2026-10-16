@@ -9,7 +9,7 @@ import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { runCommand } from '../commands'
 import { useEditor } from '../editor-state'
-import { nameOf, saveWorkspaceState, workspaceStateQuery } from '../ide-api'
+import { nameOf, saveWorkspaceState, workspaceStateQuery, type WorkspaceState } from '../ide-api'
 import { useKeyFor } from '../keyboard'
 import { PartHelp } from '../help'
 import { debugAdaptersQuery, runConfigsQuery } from './run-api'
@@ -108,7 +108,7 @@ function Variables({ session }: { session: Session }) {
     return () => {
       live = false
     }
-  }, [session, frameId, session.state])
+  }, [session, frameId, session.state, session.revision])
   if (session.state !== 'stopped') return <p className="px-3 text-xs text-muted-foreground">{session.state === 'running' ? 'Running: pause it (F6) or stop at a breakpoint to see its variables.' : 'Not stopped.'}</p>
   return (
     <ul aria-label="Variables">
@@ -154,7 +154,7 @@ function Watch() {
     return () => {
       live = false
     }
-  }, [s, frameId, s?.state, d.watch])
+  }, [s, frameId, s?.state, s?.revision, d.watch])
   return (
     <>
       <ul aria-label="Watch expressions">
@@ -296,13 +296,17 @@ export function RunDebugView({ onStart }: { onStart: (name: string, noDebug: boo
   const startKey = useKeyFor('workbench.action.debug.start')
   const runKey = useKeyFor('workbench.action.debug.run')
   const shown = (configs.data?.configurations ?? []).filter((c) => !c.hidden)
+  const compounds = configs.data?.compounds ?? []
   const saved = typeof state.data?.['launch.selected'] === 'string' ? (state.data['launch.selected'] as string) : undefined
   const [chosen, setChosen] = useState<string | undefined>(saved)
-  const current = shown.find((c) => c.name === (chosen ?? saved)) ?? shown[0]
+  const compound = shown.some((c) => c.name === (chosen ?? saved)) ? undefined : compounds.find((c) => c.name === (chosen ?? saved))
+  const current = compound ? undefined : (shown.find((c) => c.name === (chosen ?? saved)) ?? shown[0])
   const s = d.active
   const missing = current && adapters.data && !adapters.data.some((a) => a.found && a.types.includes(current.type)) ? adapters.data.find((a) => a.types.includes(current.type)) : undefined
   const choose = (name: string) => {
     setChosen(name)
+    // F5 reads what is chosen here, at once.
+    queryClient.setQueryData<WorkspaceState>(workspaceStateQuery.queryKey, (old) => ({ ...old, 'launch.selected': name }))
     void saveWorkspaceState({ 'launch.selected': name }).catch(() => undefined)
   }
   const build = configs.data?.buildConfiguration ?? 'Debug'
@@ -321,9 +325,9 @@ export function RunDebugView({ onStart }: { onStart: (name: string, noDebug: boo
         <div className="grid gap-1.5 px-3 pb-2">
           {configs.isPending && <p className="text-xs text-muted-foreground">Looking for run configurations…</p>}
           {configs.error && <p className="text-xs text-muted-foreground">{errorMessage(configs.error)}</p>}
-          {configs.data && shown.length === 0 && <p className="text-xs text-muted-foreground">No run configuration: add one to .vscode/launch.json.</p>}
-          {shown.length > 0 && (
-            <select aria-label="Run configuration" value={current?.name} onChange={(e) => choose(e.target.value)} className="h-7 rounded-md border bg-background px-1.5 text-xs">
+          {configs.data && shown.length === 0 && compounds.length === 0 && <p className="text-xs text-muted-foreground">No run configuration: add one to .vscode/launch.json.</p>}
+          {shown.length + compounds.length > 0 && (
+            <select aria-label="Run configuration" value={compound?.name ?? current?.name} onChange={(e) => choose(e.target.value)} className="h-7 rounded-md border bg-background px-1.5 text-xs">
               {(['launch', 'detected'] as const).map((src) =>
                 shown.some((c) => c.source === src) ? (
                   <optgroup key={src} label={src === 'launch' ? 'launch.json' : 'Detected'}>
@@ -337,7 +341,32 @@ export function RunDebugView({ onStart }: { onStart: (name: string, noDebug: boo
                   </optgroup>
                 ) : null,
               )}
+              {compounds.length > 0 && (
+                <optgroup label="Compounds">
+                  {compounds.map((c) => (
+                    <option key={`compound:${c.name}`} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </select>
+          )}
+          {compound && (
+            <>
+              <div className="flex gap-1.5">
+                <Button size="sm" className="h-7 flex-1 text-xs" onClick={() => onStart(compound.name, false)} title={startKey ? `Start Debugging (${startKey})` : 'Start Debugging'}>
+                  <Bug /> Start Debugging
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => onStart(compound.name, true)} title={runKey ? `Run Without Debugging (${runKey})` : 'Run Without Debugging'}>
+                  <CirclePlay /> Run
+                </Button>
+              </div>
+              <p className="truncate text-[0.6875rem] text-muted-foreground" title={compound.configurations.join(', ')}>
+                Starts {compound.configurations.join(', ')}
+                {compound.preLaunchTask ? ` after ${compound.preLaunchTask}` : ''}
+              </p>
+            </>
           )}
           {current && (
             <div className="flex gap-1.5">

@@ -266,7 +266,8 @@ internal sealed partial class Tasks(Workspace workspace, IdeFiles files, Termina
 
     /// <summary>
     /// Runs a task ({label}, or {group}: its default task, else its only one) and what it waits for first; answers once
-    /// the task's own terminal is open: {task, terminal, terminals} (every terminal the run opened, in order).
+    /// the task's own terminal is open: {task, terminal, terminals} (every terminal the run opened, in order). With
+    /// wait: true, once it ended or is ready (a compound's preLaunchTask), a failure 409 task_failed.
     /// </summary>
     public async Task<JsonObject> RunAsync(JsonObject body)
     {
@@ -288,6 +289,21 @@ internal sealed partial class Tasks(Workspace workspace, IdeFiles files, Termina
         vars.ThrowIfMissing();
         var run = new TaskRun(this, plans, body.Int("cols") ?? 80, body.Int("rows") ?? 24);
         var top = plans[task.Label];
+        if (body.Bool("wait") == true)
+        {
+            // A compound's preLaunchTask: done when it ended, or is ready when it keeps running; a failure is 409 task_failed.
+            var outcome = await run.RunAsync(task.Label);
+            if (outcome.Failed)
+            {
+                throw Failed(outcome);
+            }
+            return new JsonObject
+            {
+                ["task"] = task.Label,
+                ["terminal"] = outcome.Terminal?.Json(),
+                ["terminals"] = new JsonArray([.. run.Terminals.Select(t => (JsonNode)t.Json())]),
+            };
+        }
         if (await run.WaitedForAsync(top) is { } failed)
         {
             throw Failed(failed);

@@ -501,13 +501,17 @@ A toolbar over the editor continues (**F5**) or pauses (**F6**), steps over
 (**F10**), into (**F11**) and out (**Shift+F11**), restarts
 (**Ctrl+Shift+F5**) and stops (**Shift+F5**). The panel's **Debug Console**
 (**Ctrl+Shift+Y**) shows what the program and the debugger print, and its box
-evaluates an expression in the frame chosen while the program is stopped.
+evaluates an expression in the frame chosen while the program is stopped (what
+it gave stays in turn with the output, and **↑** goes back through what was
+typed).
 
 In the editor, a click beside a line number (or **F9**) sets or clears a
 breakpoint; the right-click menu adds a **Conditional Breakpoint…** (it breaks
 when an expression is true) or a **Logpoint…** (it prints a message, `{x}`
 replaced by `x`'s value, and goes on), **Run to Cursor** (a breakpoint there
-for this run only, then continue) and **Add to Watch**. While stopped, the
+for this run only, then continue: it goes at the next stop or when the session
+ends, and one of the person's turned off on that line comes back as it was)
+and **Add to Watch**. While stopped, the
 variables' values show at the ends of the lines above the one stopped at that
 name them (`debug.inlineValues`). A breakpoint no
 adapter has bound yet is hollow, one turned off grey; breakpoints follow their
@@ -517,8 +521,9 @@ yellow (the frame chosen, green), and the pointer over an expression shows its
 value. As the program stops, the file opens at its line and Run and Debug
 shows (`debug.openDebug`); a program that ends by itself lets its debugger go (its
 output stays in the Debug Console until the next start); the Debug Console
-opens as the first session starts
-(`debug.internalConsoleOptions`); files with unsaved changes are saved first
+opens as the first session starts (`debug.internalConsoleOptions`, or the
+configuration's own `internalConsoleOptions`), except for a program that runs
+in a terminal of its own, which stays in front; files with unsaved changes are saved first
 (`debug.saveBeforeStart`); `debug.toolBarLocation` hides the toolbar.
 
 **Configurations.** `.vscode/launch.json` gives them, as VS Code reads it: a
@@ -543,7 +548,10 @@ own variables as `$NAME`). An attach configuration's `${command:pickProcess}`
 asks which of the person's own processes to attach to (by its name, id or
 command line; on Linux, `ptrace_scope` may need the debugger to be the
 process's parent or root: `sudo sysctl kernel.yama.ptrace_scope=0` allows it
-until the next boot). Compounds are listed, and do not start yet.
+until the next boot). **Compounds** (launch.json's `"compounds"`) are chosen
+as a configuration is: one starts its `preLaunchTask` first and waits for it
+(done, or ready for a background task), then all its configurations together;
+with `"stopAll": true`, stopping one of its sessions stops the others.
 
 **Tasks.** `.vscode/tasks.json` (version 2.0.0) as VS Code reads it: `shell`
 and `process` tasks (and `npm` and `typescript` ones) with `options`, `group`
@@ -802,12 +810,12 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/git/stage-text` `{path, text}` | stages exactly `text` as the file's (the file in the folder left as it is; the index's mode kept, 100644 for a new file; the file's byte-order mark kept; a file in conflict is settled); the status after; 409 `not_text` for a link or a submodule, 400 `folder` |
 | `GET /api/problems` | the check's last run: `{command, running, ran, exitCode, said, problems: [{path, line, column, severity, code, message, source}]}` (`ran` null before the first; `command` null when none is found; `source`: `check`, or `task:` and the label for what a task's problem matcher found, listed after the check's) |
 | `GET /api/tasks` | `{tasks: [{label, source, group, isDefault, command, detail, dependsOn, background, terminal, running}], errors: [{file, line, message}], trusted, buildConfiguration}`: `.vscode/tasks.json`'s (`source` `workspace`), then the detected ones of other labels (`detected`); `group` `build`, `test` or null; `command` as written (null: it only waits for others); `terminal` its terminal while kept, `running` while its program runs |
-| `POST /api/tasks/run` `{label}` or `{group}`, with `{context, inputs, cols, rows}` | runs it (a group's default, else its only task) after what it waits for, and answers once its own terminal is open: `{task, terminal, terminals}` (`terminal` null for a task that only waits for others; `terminals` every one the run opened, in order); 404 `not_found`; 409 `pick` `{tasks}` (several in the group, none the default), `untrusted` `{commands}`, `needs_input` `{inputs}`, `running` `{terminal}`, `task_failed` `{task, exitCode, terminal}` (what it waited for failed), `too_many`; 400 `bad_config` `{file, line}` (`circle` too for tasks that wait for each other), `no_program` |
+| `POST /api/tasks/run` `{label}` or `{group}`, with `{context, inputs, cols, rows, wait}` | runs it (a group's default, else its only task) after what it waits for, and answers once its own terminal is open (with `wait`, once it ended or is ready: a compound's preLaunchTask): `{task, terminal, terminals}` (`terminal` null for a task that only waits for others; `terminals` every one the run opened, in order); 404 `not_found`; 409 `pick` `{tasks}` (several in the group, none the default), `untrusted` `{commands}`, `needs_input` `{inputs}`, `running` `{terminal}`, `task_failed` `{task, exitCode, terminal}` (what it waited for failed), `too_many`; 400 `bad_config` `{file, line}` (`circle` too for tasks that wait for each other), `no_program` |
 | `POST /api/tasks/stop` `{terminal}` | ends a task's program (SIGHUP, SIGKILL 3 s later); its terminal once it ended (5 s at most); 404 for no such task's terminal |
 | `GET /api/run/configs` | `{configurations: [{name, type, request, source, program, command, preLaunchTask, supported, reason, hidden, configuration}], compounds: [{name, configurations, preLaunchTask, stopAll}], errors: [{file, line, message}], trusted, buildConfiguration}`: `.vscode/launch.json`'s (`source` `launch`), then the detected ones of other names (`detected`, with `configuration`: what Add Configuration writes); `command` what a run runs, as written; `supported` false with `reason` when it runs only with its debugger |
-| `POST /api/run/start` `{name, noDebug, context: {file, lineNumber, selectedText, settings}, inputs: {id: value}, cols, rows}` | with `noDebug`: runs it without debugging: its `preLaunchTask` first (waited for, or until ready), its program in a terminal of kind `run` (used again by its next run), its `postDebugTask` once it ended: `{terminal, configuration, command}` (`configuration` with everything filled in); 404 `not_found`; 409 `untrusted` `{commands}`, `needs_input` `{inputs: [{id, type, description, default, options: [{label, value}], password}]}`, `running` `{terminal}` (null while its preLaunchTask runs), `task_failed` `{task, exitCode, terminal}`, `too_many`; 400 `bad_config` `{file, line}` (a variable not known, `${command:…}`, a type that runs only with its debugger, a missing envFile), `no_program`; 403 `outside` for a `context.file` outside the folder |
+| `POST /api/run/start` `{name, noDebug, context: {file, lineNumber, selectedText, settings}, inputs: {id: value}, cols, rows}` | with `noDebug`: runs it without debugging: its `preLaunchTask` first (waited for, or until ready), its program in a terminal of kind `run` (used again by its next run), its `postDebugTask` once it ended: `{terminal, configuration, command}` (`configuration` with everything filled in); 404 `not_found`; 409 `untrusted` `{commands}`, `needs_input` `{inputs: [{id, type, description, default, options: [{label, value}], password}]}`, `running` `{terminal}` (null while its preLaunchTask runs), `task_failed` `{task, exitCode, terminal}`, `too_many`; 400 `bad_config` `{file, line}` (a variable not known, `${command:…}`, a type that runs only with its debugger, a missing envFile), `no_program`, `compound` (the page starts each of a compound's configurations); 403 `outside` for a `context.file` outside the folder |
 | `POST /api/run/stop` `{terminal}` | ends a run's program; its terminal once it ended (5 s at most); 404 for no such run's terminal |
-| `POST /api/debug/start` `{configuration}` | starts the debug adapter for a launch configuration whose variables are already filled in (`debugServer: N` reaches one already listening on 127.0.0.1:N): `{id, name, adapter, adapterId, configuration, notes, root, rootReal, pathStyle}`. `adapter` is the adapter's id (`gdb`, `lldb-dap`, `netcoredbg`, `debugpy`, `dlv`, `js-debug`); `adapterId` is the type to send as initialize's `adapterID`; `configuration` is the configuration in the adapter's words, for the page's `launch` or `attach` as its `request` says (cppdbg's `miDebuggerServerAddress` becomes an `attach`); `notes` say what was changed or left out; `rootReal` is `root` with links resolved; `pathStyle` is `posix` or `win`. 409 `untrusted` until the folder is trusted, 409 `no_adapter` `{adapter, install}` when that adapter is not here (`install`: how to get it), 409 `adapter_failed` when it does not start (with the last lines it wrote), 409 `too_many` past eight, 400 `unsupported` for a type no adapter here takes (why, in `error`), 400 `bad_config` (also for a `debugServer` that is no port) |
+| `POST /api/debug/start` `{configuration}` | starts the debug adapter for a launch configuration whose variables are already filled in (`debugServer: N` reaches one already listening on 127.0.0.1:N): `{id, name, adapter, adapterId, configuration, notes, root, rootReal, pathStyle, internalConsoleOptions}`. `adapter` is the adapter's id (`gdb`, `lldb-dap`, `netcoredbg`, `debugpy`, `dlv`, `js-debug`); `adapterId` is the type to send as initialize's `adapterID`; `configuration` is the configuration in the adapter's words, for the page's `launch` or `attach` as its `request` says (cppdbg's `miDebuggerServerAddress` becomes an `attach`); `notes` say what was changed or left out; `rootReal` is `root` with links resolved; `pathStyle` is `posix` or `win`; `internalConsoleOptions` is the configuration's own (left out of what the adapter is told). 409 `untrusted` until the folder is trusted, 409 `no_adapter` `{adapter, install}` when that adapter is not here (`install`: how to get it), 409 `adapter_failed` when it does not start (with the last lines it wrote), 409 `too_many` past eight, 400 `unsupported` for a type no adapter here takes (why, in `error`), 400 `bad_config` (also for a `debugServer` that is no port) |
 | `GET /api/debug/sessions` | `[{id, name, adapter, type, state}]` (`state`: `starting`, `running`, `stopped` or `ended`); an ended one stays listed until it is stopped (the 8 newest) |
 | `GET /api/debug/socket?id=ID` | the session's WebSocket: DAP messages as JSON text, one per message, both ways (below); 404 for no such session |
 | `POST /api/debug/stop` `{id}` | a launch: `terminate` when the adapter has it, then `disconnect` with `terminateDebuggee`; an attach: `disconnect` alone, the program let go. Whatever is left 3 s later is killed with every process it started, and the session is forgotten; 204, 404 for no such session |

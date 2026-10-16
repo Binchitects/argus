@@ -58,10 +58,10 @@ export function installDebugEditor(monaco: typeof Monaco, ed: Monaco.editor.ISta
       const at = enabled.indexOf(b)
       const result = at >= 0 ? results?.[at] : undefined
       const kind = !b.enabled ? 'arena-bp-off' : s && result && !result.verified ? 'arena-bp-pending' : b.logMessage ? 'arena-bp-log' : b.condition || b.hitCondition ? 'arena-bp-condition' : 'arena-bp'
-      const hover = b.logMessage ? `Log: ${b.logMessage}` : b.condition ? `Breaks when ${b.condition}` : b.hitCondition ? `Breaks at hit ${b.hitCondition}` : result && !result.verified ? (result.message ?? 'Not bound to code yet') : 'Breakpoint'
+      const hover = b.temporary ? 'Run to Cursor' : b.logMessage ? `Log: ${b.logMessage}` : b.condition ? `Breaks when ${b.condition}` : b.hitCondition ? `Breaks at hit ${b.hitCondition}` : result && !result.verified ? (result.message ?? 'Not bound to code yet') : 'Breakpoint'
       list.push({
         range: new monaco.Range(b.line, 1, b.line, 1),
-        options: { glyphMarginClassName: kind, glyphMarginHoverMessage: { value: hover }, stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges },
+        options: { glyphMarginClassName: kind, glyphMarginHoverMessage: { value: escapeMarkdown(hover) }, stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges },
       })
     }
     const marks = list.length
@@ -93,7 +93,7 @@ export function installDebugEditor(monaco: typeof Monaco, ed: Monaco.editor.ISta
     const path = model ? pathOf(model) : null
     const s = debug.active
     const frame = s?.frames.find((f) => f.id === s.frameId)
-    const key = `${s?.id}:${s?.frameId}:${s?.state}:${path}`
+    const key = `${s?.id}:${s?.frameId}:${s?.state}:${s?.revision}:${path}`
     if (key === inlineFor) return
     inlineFor = key
     if (!inline || !model || !path || !s || s.state !== 'stopped' || !frame || frame.path !== path || !debug.inlineValues()) {
@@ -104,7 +104,9 @@ export function installDebugEditor(monaco: typeof Monaco, ed: Monaco.editor.ISta
       const scopes = await s.scopes(frame.id)
       const vars = (await Promise.all(scopes.filter((x) => !x.expensive && x.presentationHint !== 'registers' && !/^registers$/i.test(x.name)).map((x) => s.variables(x.variablesReference)))).flat()
       if (inlineFor !== key || model.isDisposed()) return
-      const known = new Map(vars.filter((v) => /^[\w$]+$/.test(v.name)).map((v) => [v.name, v.value]))
+      // The innermost scope's first: a name it shadows shows its own value.
+      const known = new Map<string, string>()
+      for (const v of vars) if (/^[\w$]+$/.test(v.name) && !known.has(v.name)) known.set(v.name, v.value)
       const list: Monaco.editor.IModelDeltaDecoration[] = []
       for (let line = Math.max(1, frame.line - 40); line <= frame.line && line <= model.getLineCount(); line++) {
         const text = model.getLineContent(line)
@@ -161,7 +163,7 @@ export function installDebugEditor(monaco: typeof Monaco, ed: Monaco.editor.ISta
       if (!expression) return null
       try {
         const r = await s.evaluate(expression, s.capabilities.supportsEvaluateForHovers ? 'hover' : 'watch')
-        return { range: new monaco.Range(position.lineNumber, start, position.lineNumber, word.endColumn), contents: [{ value: `\`${expression}\`${r.type ? ` *${r.type}*` : ''}` }, { value: `\`\`\`\n${r.result}\n\`\`\`` }] }
+        return { range: new monaco.Range(position.lineNumber, start, position.lineNumber, word.endColumn), contents: [{ value: `${code(expression)}${r.type ? ` *${escapeMarkdown(r.type)}*` : ''}` }, { value: fenced(r.result) }] }
       } catch {
         return null
       }
@@ -180,6 +182,23 @@ export function installDebugEditor(monaco: typeof Monaco, ed: Monaco.editor.ISta
     decorations?.clear()
     decorations = null
   }
+}
+
+/** Text shown as it is in Markdown (a value the program made could otherwise make links or headings). */
+export function escapeMarkdown(text: string) {
+  return text.replace(/[\\`*_{}[\]()#+\-.!|<>~]/g, '\\$&')
+}
+
+/** Inline code that holds any text: fenced by more backticks than it has in a row. */
+function code(text: string) {
+  const ticks = '`'.repeat(Math.max(0, ...(text.match(/`+/g) ?? []).map((r) => r.length)) + 1)
+  return `${ticks} ${text} ${ticks}`
+}
+
+/** A code block that holds any text, the program's value: its fence longer than any run of backticks in it. */
+export function fenced(text: string) {
+  const ticks = '`'.repeat(Math.max(3, ...(text.match(/`+/g) ?? []).map((r) => r.length + 1)))
+  return `${ticks}\n${text}\n${ticks}`
 }
 
 /** The session the editor shows where it stopped: its top frame's file at its line. */

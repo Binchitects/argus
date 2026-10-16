@@ -35,7 +35,7 @@ internal sealed record ResolvedRun(RunConfig Config, JsonObject Configuration, I
 
 /// <summary>
 /// The IDE's run configurations, as VS Code's Run and Debug view lists them: .vscode/launch.json's configurations (a
-/// part per system, envFile, VS Code's variables and inputs; compounds read, not started yet), then the ones the
+/// part per system, envFile, VS Code's variables and inputs; compounds read: the page starts each of their configurations), then the ones the
 /// project's files give (detected). Run Without Debugging turns each type (coreclr, node, python and debugpy, go,
 /// cppdbg, lldb with CodeLLDB's cargo, gdb) into a plain program run in a terminal of its own, after its preLaunchTask
 /// (a failure stops it) and before its postDebugTask. launch.json's run only in a trusted folder, as tasks.json's do.
@@ -183,7 +183,7 @@ internal sealed class RunConfigs(Workspace workspace, Terminals terminals, Tasks
         }
         if (set.Compounds.Any(c => c.Str("name") == name))
         {
-            throw new IdeError(501, "not_yet", $"{name} is a compound: compounds start with the debugger, later.");
+            throw new IdeError(400, "compound", $"{name} is a compound: the page starts each of its configurations.");
         }
         throw new IdeError(404, "not_found", $"There is no configuration {name}.");
     }

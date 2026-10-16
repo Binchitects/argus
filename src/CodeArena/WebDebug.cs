@@ -62,6 +62,8 @@ internal sealed partial class WebApp
             ["root"] = root,
             ["rootReal"] = Workspace.Physical(root) ?? root,
             ["pathStyle"] = OperatingSystem.IsWindows() ? "win" : "posix",
+            // VS Code's own key, left out of what the adapter is told: whether the Debug Console opens.
+            ["internalConsoleOptions"] = configuration.Str("internalConsoleOptions"),
         }, ct);
     }
 

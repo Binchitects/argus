@@ -468,6 +468,7 @@ beforeEach(() => {
   debug.activeId = null
   debug.breakpoints = {}
   debug.watch = []
+  debug.replHistory = []
   for (const list of [fakes.models, fakes.editors, fakes.diffEditors, fakes.terminals, fakes.sockets, fakes.themes, fakes.keybindingRules]) list.length = 0
 })
 afterEach(() => {
@@ -1761,6 +1762,8 @@ describe('Code Arena, the IDE', () => {
     // F9: a breakpoint on the cursor's line, kept for the folder.
     await userEvent.keyboard('{F9}')
     await waitFor(() => expect(kept.breakpoints).toEqual({ 'src/app.ts': [{ line: 1, enabled: true }] }))
+    // And one turned off on line 2, with a condition.
+    act(() => debug.setBreakpoints('src/app.ts', [...debug.breakpoints['src/app.ts']!, { line: 2, enabled: false, condition: 'total > 9' }]))
 
     // F5: the configuration started with its debugger; the page drives the adapter as VS Code does.
     await userEvent.keyboard('{F5}')
@@ -1810,7 +1813,7 @@ describe('Code Arena, the IDE', () => {
     expect(await answer('evaluate', { result: '2', variablesReference: 0 })).toMatchObject({ expression: 'total + 1', frameId: 7, context: 'watch' })
     expect(await within(within(view).getByRole('list', { name: 'Watch expressions' })).findByText('2')).toBeInTheDocument()
     await waitFor(() => expect(kept.watch).toEqual(['total + 1']))
-    // Run to Cursor: a breakpoint there for this run only, then continue.
+    // Run to Cursor: a breakpoint there for this run only (where the one turned off is), then continue.
     editor().selection = { startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 1 }
     act(() => editor().actions.get('editor.debug.action.runToCursor')!.run())
     expect(await answer('setBreakpoints', { breakpoints: [{ verified: true, line: 1 }, { verified: true, line: 2 }] })).toMatchObject({ breakpoints: [{ line: 1 }, { line: 2 }] })
@@ -1818,14 +1821,35 @@ describe('Code Arena, the IDE', () => {
     event('stopped', { reason: 'breakpoint', threadId: 1 })
     await answer('threads', { threads: [{ id: 1, name: 'main' }] })
     await answer('stackTrace', { stackFrames: [{ id: 8, name: 'main', line: 2, column: 1, source: { path: '/home/ada/shop/src/app.ts' } }] })
-    // Stopped there, the breakpoint goes.
+    // Stopped there, the breakpoint goes, and the person's own comes back as it was; the folder never kept Run to Cursor's.
     expect(await answer('setBreakpoints', { breakpoints: [{ verified: true, line: 1 }] })).toMatchObject({ breakpoints: [{ line: 1 }] })
+    await waitFor(() => expect(debug.breakpoints['src/app.ts']).toEqual([{ line: 1, enabled: true }, { line: 2, enabled: false, condition: 'total > 9' }]))
+    await waitFor(() => expect(kept.breakpoints).toEqual({ 'src/app.ts': [{ line: 1, enabled: true }, { line: 2, enabled: false, condition: 'total > 9' }] }))
     await answer('scopes', { scopes: [] })
     await answer('evaluate', { result: '2', variablesReference: 0 })
-    // F10 steps over; Shift+F5 stops the session.
+    // The Debug Console evaluates in the frame; what it gave stays when the panel shows another tab.
+    await userEvent.click(screen.getByRole('tab', { name: 'Debug Console' }))
+    await userEvent.type(within(screen.getByRole('region', { name: 'Debug Console' })).getByRole('textbox', { name: 'Expression to evaluate' }), 'total * 10{Enter}')
+    expect(await answer('evaluate', { result: '20', variablesReference: 0 })).toMatchObject({ expression: 'total * 10', context: 'watch' })
+    expect(await within(screen.getByRole('region', { name: 'Debug Console' })).findByText('20')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('tab', { name: 'Terminal' }))
+    await userEvent.click(screen.getByRole('tab', { name: 'Debug Console' }))
+    expect(within(screen.getByRole('region', { name: 'Debug Console' })).getByText('> total * 10')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Debug Console' })).getByText('20')).toBeInTheDocument()
+    // F10 steps over. This adapter says it stopped before it answers the step: the program is stopped, not running.
     await userEvent.click(view)
     await userEvent.keyboard('{F10}')
+    await waitFor(() => expect(requests().some((r) => r.command === 'next' && !answered.has(r.seq))).toBe(true))
+    event('stopped', { reason: 'step', threadId: 1 })
+    await answer('threads', { threads: [{ id: 1, name: 'main' }] })
+    await answer('stackTrace', { stackFrames: [{ id: 9, name: 'main', line: 2, column: 1, source: { path: '/home/ada/shop/src/app.ts' } }] })
     expect(await answer('next')).toEqual({ threadId: 1 })
+    await act(async () => {})
+    expect(within(screen.getByRole('toolbar', { name: 'Debug' })).getByRole('button', { name: 'Continue' })).toBeInTheDocument()
+    // F5 continues: running.
+    await userEvent.click(view)
+    await userEvent.keyboard('{F5}')
+    expect(await answer('continue')).toEqual({ threadId: 1 })
     await waitFor(() => expect(within(screen.getByRole('toolbar', { name: 'Debug' })).getByRole('button', { name: 'Pause' })).toBeInTheDocument())
     // The program ends by itself: the adapter is let go (code-arena stops it), the toolbar goes, the output stays.
     event('output', { category: 'stdout', output: 'total 4\n' })
@@ -1835,6 +1859,55 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() => expect(screen.queryByRole('toolbar', { name: 'Debug' })).not.toBeInTheDocument())
     await userEvent.click(screen.getByRole('tab', { name: 'Debug Console' }))
     expect(await within(screen.getByRole('region', { name: 'Debug Console' })).findByText('total 4')).toBeInTheDocument()
+  })
+
+  it("starts a compound as VS Code does: its preLaunchTask first, then its configurations together, and stopAll stops them all", async () => {
+    let kept: Record<string, unknown> = {}
+    const { calls } = backend({
+      'GET /api/run/configs': () => ({
+        json: {
+          configurations: [
+            { name: 'Run app', type: 'cppdbg', request: 'launch', source: 'launch', supported: true, command: './app' },
+            { name: 'Serve', type: 'cppdbg', request: 'launch', source: 'launch', supported: true, command: './server' },
+          ],
+          compounds: [{ name: 'Both', configurations: ['Run app', 'Serve'], preLaunchTask: 'build', stopAll: true }],
+          errors: [],
+          trusted: true,
+          buildConfiguration: 'Debug',
+        },
+      }),
+      'GET /api/debug/adapters': () => ({ json: [{ id: 'gdb', name: 'gdb', types: ['cppdbg', 'gdb'], found: true }] }),
+      'GET /api/debug/sessions': () => ({ json: [] }),
+      'GET /api/workspace/state': () => ({ json: kept }),
+      'POST /api/workspace/state': (body) => {
+        kept = { ...kept, ...(body as Record<string, unknown>) }
+        return { json: kept }
+      },
+      'POST /api/tasks/run': () => ({ json: { task: 'build', terminal: null, terminals: [] } }),
+      'POST /api/run/start': (body) => {
+        const name = (body as { name: string }).name
+        return { json: { id: name === 'Serve' ? 'd2' : 'd1', name, adapter: 'gdb', adapterId: 'cppdbg', configuration: { type: 'gdb', request: 'launch' }, notes: [], root: '/home/ada/shop', rootReal: '/home/ada/shop', pathStyle: 'posix' } }
+      },
+      'POST /api/debug/stop': () => ({ status: 204 }),
+    })
+    renderIde()
+    await openApp()
+    await userEvent.click(screen.getByRole('button', { name: 'Run and Debug' }))
+    const view = await screen.findByRole('complementary', { name: 'Run and Debug' })
+    // Chosen in Run and Debug: F5 starts it at once.
+    await userEvent.selectOptions(await within(view).findByRole('combobox', { name: 'Run configuration' }), 'Both')
+    expect(within(view).getByText('Starts Run app, Serve after build')).toBeInTheDocument()
+    await userEvent.click(view)
+    await userEvent.keyboard('{F5}')
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/tasks/run')?.body).toMatchObject({ label: 'build', wait: true }))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/run/start').map((c) => (c.body as { name: string }).name).sort()).toEqual(['Run app', 'Serve']))
+    expect(calls.findIndex((c) => c.path === '/api/tasks/run')).toBeLessThan(calls.findIndex((c) => c.path === '/api/run/start'))
+    await waitFor(() => expect(debug.sessions.map((x) => x.id).sort()).toEqual(['d1', 'd2']))
+    await waitFor(() => expect(kept['launch.selected']).toBe('Both'))
+    // Stopping one stops both.
+    await act(() => debug.stop(debug.sessions[0]!))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/debug/stop').map((c) => (c.body as { id: string }).id).sort()).toEqual(['d1', 'd2']))
+    expect(debug.sessions).toEqual([])
   })
 
   it('runs a configuration without debugging (Ctrl+F5) in a terminal of its own, shown in the panel, and a build task (Ctrl+Shift+B)', async () => {

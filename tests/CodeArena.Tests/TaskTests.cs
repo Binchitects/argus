@@ -190,6 +190,17 @@ public sealed class TaskTests : IDisposable
         Assert.False(File.Exists(Path.Combine(_root, "fine.txt")));
         Assert.False(File.Exists(Path.Combine(_root, "ran.txt")));
 
+        // Waited for (a compound's preLaunchTask): the task's own failure is told too, and success comes once it ended.
+        var waited = Body("fails");
+        waited["wait"] = true;
+        var own = await RefusedAsync(_tasks.RunAsync(waited));
+        Assert.Equal((409, "task_failed"), (own.Status, own.Code));
+        Assert.Equal("fails", own.Details!["task"]!.GetValue<string>());
+        var fine = Body("fine");
+        fine["wait"] = true;
+        Assert.Equal("fine", (await _tasks.RunAsync(fine))["task"]!.GetValue<string>());
+        Assert.True(File.Exists(Path.Combine(_root, "fine.txt")));
+
         var circle = await RefusedAsync(_tasks.RunAsync(Body("a")));
         Assert.Equal((400, "bad_config"), (circle.Status, circle.Code));
         Assert.Contains("in a circle: a → b → a", circle.Message);
