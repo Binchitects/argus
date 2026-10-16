@@ -56,7 +56,8 @@ images:
   nodeExporter: { repository: prom/node-exporter, tag: v1.9.0 }
   # The CPU temperature exporter's (services/cpu-temp-exporter, from the chart's files).
   python: { repository: python, tag: 3.13-slim }
-  # vLLM (vllm.enabled): an image you have; nothing is pulled while it is off (docs/multi-gpu-server.md §6).
+  # vLLM (vllm.enabled): an image you have (NGC's, or arena-vllm built from deploy/services/vllm.Dockerfile and
+  # pushed to your registry); nothing is pulled while it is off (docs/multi-gpu-server.md §6).
   vllm: { repository: nvcr.io/nvidia/vllm, tag: 26.09-py3 }
   pullPolicy: IfNotPresent
   pullSecrets: []

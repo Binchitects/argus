@@ -470,6 +470,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
     - `vllm` service (profile `vllm`, `shm_size`, `ipc: host` or a large shm, memlock, the `engine` and `vllm-status` volumes), and the `arena-vllm` Dockerfile with pinned vLLM (plus optional LMCache).
     - Helm `vllm` Deployment(s) with values `gpus`, `nodeSelector`, `shmSize`, `kvcache` PV; update `check-chart.py`.
     - Tests: `check-chart.py` and compose config lint.
+    - **Done**: the `vllm` service, its profile, shm, memlock, the `engine` and `vllm-status` volumes and the Helm Deployments came with item 6; now `deploy/services/vllm.Dockerfile` (arena-vllm: vLLM 0.31.0 from PyPI on `nvcr.io/nvidia/cuda:13.0.1-runtime-ubuntu24.04`, LMCache by `LMCACHE_VERSION`, the supervisor inside) and `deploy/vllm-build.yml` to build it with compose. Not built or pulled. Tests: `tests/deploy/test_vllm_image.py`, `check-chart.py`, the parity test.
 13. **Metrics and alerts.**
     - The app writes vLLM targets to `file_sd`; optional DCGM exporter; alert rules (§5.7); dashboard panels.
     - Tests: `audit-dashboards.py`, and rule unit tests with `promtool test rules` if available.
