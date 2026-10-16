@@ -319,6 +319,11 @@ internal sealed partial class Runtime : IAsyncDisposable
             Compaction = Compaction,
         };
         Context.SubAgent = (description, prompt, agent, token) => RunSubAgentAsync(inputs, description, prompt, agent, token);
+        Context.Progress = said =>
+        {
+            Notice(false, said);
+            Agent?.Events?.Notice(said);
+        };
         Context.SessionId = () => Session.Id;
 
         if (resumed is not null && resumedFile is not null)
@@ -957,11 +962,12 @@ internal sealed partial class Runtime : IAsyncDisposable
             Trusted = trusted,
             ChangesNothing = changesNothing,
             Summary = a => Fmt.OneLine(Json.Line(a), 100),
-            Run = async (args, _, ct) =>
+            Run = async (args, context, ct) =>
             {
                 try
                 {
-                    var result = await client.CallAsync(remoteName, args, ct);
+                    // Within the tool's time (progress reports count it anew), its progress told, its pictures, sound and video saved.
+                    var result = await client.CallAsync(remoteName, args, ct, progress: context.Progress, media: McpMedia.For(context.Workspace.Root));
                     return new ToolResult(result.Text, result.IsError);
                 }
                 catch (McpException e) when (e.Lost && link is not null)

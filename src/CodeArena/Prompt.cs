@@ -127,7 +127,8 @@ internal static class SystemPrompt
             sb.Append($"- Git branch: {branch}\n");
         }
         sb.Append(x.HasArenaTools()
-            ? "- Arena's tools are connected: web search and pages, Python in Arena's sandbox, the company's code index, its knowledge and plugins, and making pictures, video and speech, as the person.\n"
+            ? "- Arena's tools are connected: web search and pages, Python in Arena's sandbox, the company's code index, its knowledge and plugins, and making pictures, video and speech, as the person. " +
+              "The pictures, sound and video they make are saved under .code-arena/media/ in the working directory: give the person their paths.\n"
             : "- Arena's tools are not available in this session: work with the other tools you are given.\n");
         foreach (var (server, text) in x.ServerInstructions().Where(s => s.Text.Trim().Length > 0))
         {

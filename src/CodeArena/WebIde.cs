@@ -126,6 +126,17 @@ internal sealed partial class WebApp
                 case ("GET", "/api/file"):
                     await res.JsonAsync(200, _files.Read(Query(req, "path")), ct);
                     return true;
+                case ("GET", "/api/media"):
+                {
+                    // A picture, sound or video as it is, for an img, audio or video element of the page: shown, never run.
+                    var (bytes, type) = _files.Media(Query(req, "path"));
+                    res.Headers["X-Content-Type-Options"] = "nosniff";
+                    res.Headers["Content-Security-Policy"] = "default-src 'none'; sandbox";
+                    res.Headers["Content-Disposition"] = "inline";
+                    res.Headers["Cache-Control"] = "no-store";
+                    await res.SendAsync(200, bytes, type, ct);
+                    return true;
+                }
                 case ("POST", "/api/file"):
                 {
                     var body = Body(req);

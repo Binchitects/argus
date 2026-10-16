@@ -918,6 +918,7 @@ status (403 `outside` for a path outside the folder).
 | `GET /api/files?path=DIR` | a folder's entries, folders first: `{path, entries: [{name, path, kind, size, link}]}` |
 | `GET /api/files/all` | every file, for quick open: `{files, truncated}` (50,000 at most) |
 | `GET /api/file?path=FILE` | `{path, size, version, text}`; `text` is null with `binary` or `tooLarge` (over 5 MB) |
+| `GET /api/media?path=FILE` | a picture, sound or video of the allowed folders as it is (PNG, JPEG, GIF, WebP, BMP, AVIF, MP3, WAV, Ogg, FLAC, M4A, AAC, MP4, WebM, MOV; up to 256 MB), for an `img`, `audio` or `video` element: the media type set, `nosniff` and a sandboxing CSP; 415 `not_media` for anything else (SVG and HTML included), 413 `too_large` |
 | `POST /api/file` `{path, text, version}` | saves; 409 `changed` when the file changed since `version`; `{path, version, size}` |
 | `POST /api/files/new` `{path, kind}` | a new file, or a folder with `kind: "dir"`; 409 `exists` |
 | `POST /api/files/rename` `{from, to}` | moves a file or folder; `{from, to}` |
@@ -1097,6 +1098,23 @@ same tools as the chat, with the same rights and the same audit, as that
 person. They run without asking, except those Arena marks as changing
 something, which ask like a command. A tool named like a local one is offered
 as `arena_<name>`. Arena's own instructions to the model are passed on.
+Arena's tools make pictures, video and speech too: what a tool returns (a
+picture or sound inline, a file it links to, fetched with `resources/read`;
+up to 256 MB) is saved in the working directory under `.code-arena/media/`,
+named after the tool and the time (`generate_image-20261016-101500.png`), and
+the model is given its path to tell the person, who opens it in the IDE. That
+folder has a `.gitignore` of its own, so the files are never committed.
+
+**Every tool call has a deadline**: 10 minutes without an answer, unless the
+tool says it takes longer (`"arena/timeoutSeconds"` or `"timeoutSeconds"` in
+its `_meta`). Each progress report the server sends (MCP
+`notifications/progress`, asked for with a progress token on every call)
+starts the time again and is told to the person (every 20 seconds at most).
+Past it the call is given up: the server is told (`notifications/cancelled`)
+and the model hears that it timed out. Every connection has TCP keep-alive
+(a probe after 30 seconds of quiet, then every 10), so a server that went away
+without a word (a laptop asleep, a VPN that changed) is found out in about a
+minute and a half rather than never.
 
 **Argus's tools** come from `https://argus.DOMAIN/mcp` with the same key
 (`"argusUrl"` in the config file for another address; none for an Arena
@@ -1194,7 +1212,11 @@ shell, the working directory, the git branch, the date and the mode.
 
 Each session is a JSON Lines file in the sessions folder (0600): every message
 as it happens, the model, the to-do list and the tokens. `--continue`,
-`--resume` and `/resume` read it back.
+`--resume` and `/resume` read it back. A compaction appends the new history
+(the summary and the part kept), never rewrites the file. Each file is
+scanned once while Code Arena runs and then only what was appended to it (by
+its size and time), so listing sessions and the IDE's session list stay fast
+with long sessions; reading one back starts at its last compaction.
 
 The model's window comes from the gateway (`/v1/model/info`), or `"context"`
 in the config file when the gateway does not say (32,768 otherwise). When the
@@ -1428,7 +1450,7 @@ A `command` runs as a child process speaking MCP on stdin and stdout (`args`,
 `headers` is taken from the environment, so tokens stay out of the file. Their
 tools are named `mcp__<server>__<tool>` and ask before each call unless the
 server has `"trust": true` (or the mode is `yolo`); in `plan` mode only those
-the server marks read-only are offered. `"disabled": true` keeps a server
+the server marks read-only run (the others are refused when called). `"disabled": true` keeps a server
 without starting it. On Windows, `npx` and other `.cmd` scripts need
 `"command": "cmd", "args": ["/c", "npx", …]`.
 

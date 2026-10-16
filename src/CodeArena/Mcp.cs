@@ -22,13 +22,85 @@ internal sealed class McpUnavailableException(string message) : McpException(mes
 /// <summary>How JSON-RPC messages reach an MCP server and come back.</summary>
 internal interface IMcpTransport : IAsyncDisposable
 {
-    /// <summary>A request: its result, or McpException with the server's error.</summary>
-    Task<JsonNode?> RequestAsync(string method, JsonObject? parameters, CancellationToken ct);
+    /// <summary>
+    /// A request: its result, or McpException with the server's error. <paramref name="progress"/> hears the server's
+    /// progress notifications for it (those of its params._meta.progressToken). Given up (cancelled), the server is told
+    /// with notifications/cancelled, so it can stop the work.
+    /// </summary>
+    Task<JsonNode?> RequestAsync(string method, JsonObject? parameters, CancellationToken ct, Action<JsonObject>? progress = null);
     Task NotifyAsync(string method, JsonObject? parameters, CancellationToken ct);
 }
 
-/// <summary>An MCP tool's answer as text for the model, and whether it is an error.</summary>
-internal sealed record McpResult(string Text, bool IsError);
+/// <summary>An MCP tool's answer as text for the model, and whether it is an error; the files it made, as saved (<see cref="McpMedia"/>).</summary>
+internal sealed record McpResult(string Text, bool IsError)
+{
+    public IReadOnlyList<string> Saved { get; init; } = [];
+}
+
+/// <summary>
+/// Where the pictures, sound and video a tool returns are saved: a folder in the workspace (.code-arena/media), and its
+/// path as the model and the person see it.
+/// </summary>
+internal sealed record McpMedia(string Folder, string Shown)
+{
+    /// <summary>The folder of a workspace: .code-arena/media under its root.</summary>
+    public static McpMedia For(string root) => new(Path.Combine(root, ".code-arena", "media"), ".code-arena/media");
+
+    /// <summary>The largest file a link is fetched for (resources/read): a bigger one stays a link.</summary>
+    public const long MaxBytes = 256L * 1024 * 1024;
+
+    /// <summary>The extension for a media type; null for anything but a picture, sound or video.</summary>
+    public static string? Extension(string? type) => (type ?? "").Split(';')[0].Trim().ToLowerInvariant() switch
+    {
+        "image/png" => ".png",
+        "image/jpeg" or "image/jpg" => ".jpg",
+        "image/gif" => ".gif",
+        "image/webp" => ".webp",
+        "image/bmp" => ".bmp",
+        "image/avif" => ".avif",
+        "audio/mpeg" or "audio/mp3" => ".mp3",
+        "audio/wav" or "audio/x-wav" or "audio/wave" => ".wav",
+        "audio/ogg" or "audio/opus" => ".ogg",
+        "audio/flac" or "audio/x-flac" => ".flac",
+        "audio/mp4" or "audio/aac" or "audio/x-m4a" => ".m4a",
+        "audio/webm" => ".weba",
+        "video/mp4" => ".mp4",
+        "video/webm" => ".webm",
+        "video/ogg" => ".ogv",
+        "video/quicktime" => ".mov",
+        _ => null,
+    };
+
+    /// <summary>
+    /// Saves a file a tool made, named after the tool and the time (with a number when that name is taken); the folder is
+    /// made with a .gitignore of its own, so nothing saved there is committed. Its path as the model sees it.
+    /// </summary>
+    public string Save(string tool, string extension, byte[] bytes, DateTime now)
+    {
+        if (!Directory.Exists(Folder))
+        {
+            Directory.CreateDirectory(Folder);
+            File.WriteAllText(Path.Combine(Folder, ".gitignore"), "# What Arena's tools made for Code Arena: kept out of the repository.\n*\n");
+        }
+        var stem = $"{Safe(tool)}-{now:yyyyMMdd-HHmmss}";
+        for (var n = 1; ; n++)
+        {
+            var name = (n == 1 ? stem : $"{stem}-{n}") + extension;
+            try
+            {
+                using var file = new FileStream(Path.Combine(Folder, name), FileMode.CreateNew, FileAccess.Write);
+                file.Write(bytes);
+                return $"{Shown}/{name}";
+            }
+            catch (IOException) when (n < 1000 && File.Exists(Path.Combine(Folder, name)))
+            {
+                // Taken (another file of the same second): the next number.
+            }
+        }
+    }
+
+    private static string Safe(string tool) => System.Text.RegularExpressions.Regex.Replace(tool, "[^A-Za-z0-9_-]", "_") is { Length: > 0 } safe ? safe : "tool";
+}
 
 /// <summary>
 /// An MCP client: the handshake (initialize, then notifications/initialized),
@@ -116,20 +188,119 @@ internal sealed class McpClient : IAsyncDisposable
         return tools;
     }
 
-    public async Task<McpResult> CallAsync(string tool, JsonObject arguments, CancellationToken ct)
+    /// <summary>How long a tool call may go without an answer (or a progress report), unless the tool says otherwise.</summary>
+    public static readonly TimeSpan CallLimit = TimeSpan.FromMinutes(10);
+
+    /// <summary>How often at most a call's progress is told to the person.</summary>
+    public static TimeSpan ProgressEvery { get; set; } = TimeSpan.FromSeconds(20);
+
+    /// <summary>
+    /// The time a tool says its calls may take (its _meta's "arena/timeoutSeconds" or "timeoutSeconds": a video takes
+    /// longer than a search), else <see cref="CallLimit"/>; from ten seconds to a day.
+    /// </summary>
+    public static TimeSpan LimitOf(JsonObject? tool) =>
+        (tool?["_meta"] is JsonObject meta ? Json.Number(meta["arena/timeoutSeconds"]) ?? Json.Number(meta["timeoutSeconds"]) : null) is { } seconds and > 0
+            ? TimeSpan.FromSeconds(Math.Clamp(seconds, 10, 86_400))
+            : CallLimit;
+
+    /// <summary>
+    /// Calls a tool. It has <paramref name="limit"/> (else its own, <see cref="LimitOf"/>) to answer, counted anew from each
+    /// progress report it sends: past it the call is given up, and the model told it timed out. Its progress is told
+    /// through <paramref name="progress"/> (every <see cref="ProgressEvery"/> at most). The pictures, sound and video it
+    /// returns (inline, or as links read with resources/read) are saved in <paramref name="media"/>'s folder, and the
+    /// model is given their paths.
+    /// </summary>
+    public async Task<McpResult> CallAsync(string tool, JsonObject arguments, CancellationToken ct, TimeSpan? limit = null, Action<string>? progress = null,
+        McpMedia? media = null)
     {
-        var result = await _transport.RequestAsync("tools/call", new JsonObject { ["name"] = tool, ["arguments"] = arguments.Clone() }, ct) as JsonObject;
+        var wait = limit ?? LimitOf(Tools.FirstOrDefault(t => t.Str("name") == tool));
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(wait);
+        var told = DateTime.MinValue;
+        var reports = 0;
+        var parameters = new JsonObject
+        {
+            ["name"] = tool, ["arguments"] = arguments.Clone(), ["_meta"] = new JsonObject { ["progressToken"] = $"code-arena-{Guid.NewGuid():N}" },
+        };
+        JsonObject? result;
+        try
+        {
+            result = await _transport.RequestAsync("tools/call", parameters, deadline.Token, p =>
+            {
+                // Still working: its time starts again.
+                Interlocked.Increment(ref reports);
+                try
+                {
+                    deadline.CancelAfter(wait);
+                }
+                catch (ObjectDisposedException)
+                {
+                    // The call ended meanwhile.
+                }
+                if (progress is not null && DateTime.UtcNow - told >= ProgressEvery)
+                {
+                    told = DateTime.UtcNow;
+                    progress(Progress(tool, p));
+                }
+            }) as JsonObject;
+        }
+        catch (Exception e) when (deadline.IsCancellationRequested && !ct.IsCancellationRequested && e is OperationCanceledException or McpException or IOException or HttpRequestException)
+        {
+            var since = Volatile.Read(ref reports) > 0 ? " since its last progress report" : "";
+            return new McpResult($"The call to {tool} timed out: the {Name} tools did not answer within {Fmt.Duration(wait)}{since}, so it was given up. " +
+                                 "Try again with less to do, or another way.", true);
+        }
         if (result is null)
         {
             return new McpResult("(no result)", false);
         }
         var parts = new List<string>();
+        var saved = new List<string>();
+        // Arena sends a small picture both inline and as a link to its file: the link of one saved already is not fetched.
+        var inline = new List<string>();
         foreach (var item in (result["content"] as JsonArray ?? []).OfType<JsonObject>())
         {
-            parts.Add(item.Str("type") switch
+            var type = item.Str("type");
+            var mime = item.Str("mimeType");
+            if (type is "image" or "audio" && media is not null && McpMedia.Extension(mime) is { } extension && Decode(item.Str("data")) is { } data)
+            {
+                var path = media.Save(tool, extension, data, DateTime.Now);
+                saved.Add(path);
+                inline.Add(mime ?? "");
+                parts.Add($"[{type} saved as {path} ({mime}, {Size(data.Length)})]");
+                continue;
+            }
+            if (type == "resource_link" && media is not null && McpMedia.Extension(mime) is { } linked)
+            {
+                var name = item.Str("name") ?? "link";
+                var uri = item.Str("uri") ?? "";
+                if (inline.Remove(mime ?? ""))
+                {
+                    continue;
+                }
+                if (Json.Number(item["size"]) is > McpMedia.MaxBytes)
+                {
+                    parts.Add($"[{name}: {uri} (too big to fetch here)]");
+                    continue;
+                }
+                try
+                {
+                    var bytes = await ReadResourceAsync(uri, ct);
+                    var path = media.Save(tool, linked, bytes, DateTime.Now);
+                    saved.Add(path);
+                    parts.Add($"[{name} saved as {path} ({mime}, {Size(bytes.Length)})]");
+                }
+                catch (Exception e) when (e is McpException or IOException or HttpRequestException or FormatException or UnauthorizedAccessException
+                                          || (e is OperationCanceledException && !ct.IsCancellationRequested))
+                {
+                    parts.Add($"[{name}: {uri} (it could not be fetched: {Fmt.OneLine(e.Message, 160)})]");
+                }
+                continue;
+            }
+            parts.Add(type switch
             {
                 "text" => item.Str("text") ?? "",
-                "image" or "audio" => $"[{item.Str("type")}: {item.Str("mimeType") ?? "?"}, {(item.Str("data")?.Length ?? 0) * 3 / 4:N0} bytes, not shown]",
+                "image" or "audio" => $"[{type}: {mime ?? "?"}, {(item.Str("data")?.Length ?? 0) * 3 / 4:N0} bytes, not shown]",
                 "resource" => item["resource"].Str("text") ?? $"[resource: {item["resource"].Str("uri")}]",
                 "resource_link" => $"[{item.Str("name") ?? "link"}: {item.Str("uri")}]",
                 _ => Json.Line(item),
@@ -139,8 +310,49 @@ internal sealed class McpClient : IAsyncDisposable
         {
             parts.Add(Json.Line(structured));
         }
-        return new McpResult(parts.Count == 0 ? "(empty result)" : string.Join("\n", parts), result.Bool("isError") ?? false);
+        if (saved.Count > 0)
+        {
+            parts.Add($"(Saved in the working directory: {string.Join(", ", saved)}. Give the person these paths: the IDE shows them.)");
+        }
+        var answer = new McpResult(parts.Count == 0 ? "(empty result)" : string.Join("\n", parts), result.Bool("isError") ?? false);
+        return saved.Count > 0 ? answer with { Saved = saved } : answer;
+
+        static byte[]? Decode(string? data)
+        {
+            try
+            {
+                return data is { Length: > 0 } ? Convert.FromBase64String(data) : null;
+            }
+            catch (FormatException)
+            {
+                return null;
+            }
+        }
     }
+
+    /// <summary>A file the server links to (resources/read), within two minutes: its bytes (a blob, or its text).</summary>
+    public async Task<byte[]> ReadResourceAsync(string uri, CancellationToken ct)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(TimeSpan.FromMinutes(2));
+        var result = await _transport.RequestAsync("resources/read", new JsonObject { ["uri"] = uri }, deadline.Token);
+        var item = (result?["contents"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault() ?? throw new McpException($"{uri} came back empty.");
+        return item.Str("blob") is { } blob ? Convert.FromBase64String(blob) : Encoding.UTF8.GetBytes(item.Str("text") ?? "");
+    }
+
+    /// <summary>A progress report in words: "generate_video is still working: 3 of 10, sampling."</summary>
+    private static string Progress(string tool, JsonObject p)
+    {
+        var done = Real(p["progress"]);
+        var total = Real(p["total"]);
+        var how = done is null ? "" : total is > 0 ? $": {done:0.##} of {total:0.##}" : $": {done:0.##}";
+        var message = p.Str("message") is { Length: > 0 } m ? $"{(how.Length > 0 ? "," : ":")} {Fmt.OneLine(m, 160)}" : "";
+        return $"{tool} is still working{how}{message}.";
+
+        static double? Real(JsonNode? node) => node is JsonValue v && v.TryGetValue<double>(out var d) ? d : null;
+    }
+
+    private static string Size(long bytes) => bytes >= 1024 * 1024 ? $"{bytes / 1048576.0:0.#} MB" : $"{Math.Max(1, bytes / 1024)} KB";
 
     public ValueTask DisposeAsync() => _transport.DisposeAsync();
 }
@@ -159,7 +371,7 @@ internal sealed class HttpMcpTransport(HttpClient http, string url, IReadOnlyDic
     /// <summary>Called when the server has forgotten the session (404 with one): a new handshake.</summary>
     public Func<CancellationToken, Task>? Reinitialize { get; set; }
 
-    public async Task<JsonNode?> RequestAsync(string method, JsonObject? parameters, CancellationToken ct)
+    public async Task<JsonNode?> RequestAsync(string method, JsonObject? parameters, CancellationToken ct, Action<JsonObject>? progress = null)
     {
         for (var attempt = 0; ; attempt++)
         {
@@ -169,28 +381,51 @@ internal sealed class HttpMcpTransport(HttpClient http, string url, IReadOnlyDic
             {
                 message["params"] = parameters.Clone();
             }
-            using var res = await SendAsync(message, ct);
-            if (res.StatusCode == HttpStatusCode.NotFound && _session is not null && attempt == 0 && method != "initialize" && Reinitialize is not null)
-            {
-                _session = null;
-                Protocol = null;
-                await Reinitialize(ct);
-                continue;
-            }
             try
             {
-                return await AnswerAsync(res, method, id, ct);
+                using var res = await SendAsync(message, ct);
+                if (res.StatusCode == HttpStatusCode.NotFound && _session is not null && attempt == 0 && method != "initialize" && Reinitialize is not null)
+                {
+                    _session = null;
+                    Protocol = null;
+                    await Reinitialize(ct);
+                    continue;
+                }
+                try
+                {
+                    return await AnswerAsync(res, method, id, ct, progress);
+                }
+                catch (Exception e) when (e is IOException or HttpRequestException && !ct.IsCancellationRequested)
+                {
+                    // The connection dropped while the answer was read (the server went away, a proxy cut it).
+                    throw new McpException($"{url} dropped the connection while answering {method}: {e.Message}") { Lost = true };
+                }
             }
-            catch (Exception e) when (e is IOException or HttpRequestException)
+            catch (Exception) when (ct.IsCancellationRequested && method != "initialize")
             {
-                // The connection dropped while the answer was read (the server went away, a proxy cut it).
-                throw new McpException($"{url} dropped the connection while answering {method}: {e.Message}") { Lost = true };
+                // Given up (stopped, or past its time): the server is told so it stops the work, not waited for.
+                _ = CancelledAsync(id);
+                throw;
             }
         }
     }
 
-    /// <summary>The answer to request id: from the JSON body, or from the event stream (answering the server's own requests on it).</summary>
-    private async Task<JsonNode?> AnswerAsync(HttpResponseMessage res, string method, long id, CancellationToken ct)
+    /// <summary>Tells the server a request was given up (notifications/cancelled), within a few seconds, whatever comes of it.</summary>
+    private async Task CancelledAsync(long id)
+    {
+        try
+        {
+            using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await NotifyAsync("notifications/cancelled", new JsonObject { ["requestId"] = id, ["reason"] = "given up by code-arena" }, wait.Token);
+        }
+        catch (Exception e) when (e is McpException or HttpRequestException or OperationCanceledException or IOException)
+        {
+            // The server forgets it when its answer finds nobody.
+        }
+    }
+
+    /// <summary>The answer to request id: from the JSON body, or from the event stream (answering the server's own requests on it, hearing its progress).</summary>
+    private async Task<JsonNode?> AnswerAsync(HttpResponseMessage res, string method, long id, CancellationToken ct, Action<JsonObject>? progress)
     {
         await CheckAsync(res, ct);
         if (res.Headers.TryGetValues("Mcp-Session-Id", out var session))
@@ -209,6 +444,10 @@ internal sealed class HttpMcpTransport(HttpClient http, string url, IReadOnlyDic
                 if (node["method"] is not null && node["id"] is not null)
                 {
                     await AnswerServerAsync(node, ct);
+                }
+                else if (node.Str("method") == "notifications/progress" && node["params"] is JsonObject p)
+                {
+                    progress?.Invoke(p);
                 }
                 else if (SameId(node["id"], id))
                 {
@@ -365,6 +604,8 @@ internal sealed class StdioMcpTransport : IMcpTransport
     private readonly StreamReader _output;
     private readonly Process? _process;
     private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonObject>> _pending = new();
+    /// <summary>Who hears each request's progress, by its progress token.</summary>
+    private readonly ConcurrentDictionary<string, Action<JsonObject>> _progress = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _write = new(1, 1);
     private readonly Queue<string> _stderr = new();
     private readonly Task _reader;
@@ -432,7 +673,7 @@ internal sealed class StdioMcpTransport : IMcpTransport
     public static string Expand(string value) =>
         System.Text.RegularExpressions.Regex.Replace(value, @"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", m => Environment.GetEnvironmentVariable(m.Groups[1].Value) ?? "");
 
-    public async Task<JsonNode?> RequestAsync(string method, JsonObject? parameters, CancellationToken ct)
+    public async Task<JsonNode?> RequestAsync(string method, JsonObject? parameters, CancellationToken ct, Action<JsonObject>? progress = null)
     {
         var id = Interlocked.Increment(ref _id);
         var tcs = new TaskCompletionSource<JsonObject>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -442,14 +683,42 @@ internal sealed class StdioMcpTransport : IMcpTransport
         {
             message["params"] = parameters.Clone();
         }
+        var token = parameters?["_meta"].Str("progressToken");
+        if (token is not null && progress is not null)
+        {
+            _progress[token] = progress;
+        }
         try
         {
             await WriteAsync(message, ct);
             return HttpMcpTransport.Unwrap(await tcs.Task.WaitAsync(ct));
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested && method != "initialize")
+        {
+            // Given up: the server is told so it stops the work, not waited for.
+            _ = CancelledAsync(id);
+            throw;
+        }
         finally
         {
             _pending.TryRemove(id, out _);
+            if (token is not null)
+            {
+                _progress.TryRemove(token, out _);
+            }
+        }
+    }
+
+    /// <summary>Tells the server a request was given up (notifications/cancelled), whatever comes of it.</summary>
+    private async Task CancelledAsync(long id)
+    {
+        try
+        {
+            await NotifyAsync("notifications/cancelled", new JsonObject { ["requestId"] = id, ["reason"] = "given up by code-arena" }, CancellationToken.None);
+        }
+        catch (McpException)
+        {
+            // The server is gone already.
         }
     }
 
@@ -506,7 +775,13 @@ internal sealed class StdioMcpTransport : IMcpTransport
                         }
                         await WriteAsync(reply, CancellationToken.None);
                     }
+                    else if (message.Str("method") == "notifications/progress" && message["params"] is JsonObject p
+                             && p["progressToken"] is JsonValue v && _progress.TryGetValue(v.ToString(), out var hears))
+                    {
+                        hears(p);
+                    }
                     continue;
+
                 }
                 if (Json.Number(message["id"]) is { } id && _pending.TryGetValue(id, out var waiting))
                 {

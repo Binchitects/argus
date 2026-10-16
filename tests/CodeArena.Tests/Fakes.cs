@@ -334,6 +334,15 @@ public sealed class FakeMcp : FakeServer
     public TaskCompletionSource? Hold { get; set; }
     /// <summary>The tools it lists instead of Arena's three (web_search, read_file, create_issue): Argus's, say.</summary>
     public JsonArray? ToolList { get; set; }
+    /// <summary>While set, tools/call waits for it: a tool that never answers.</summary>
+    public TaskCompletionSource? CallHold { get; set; }
+    /// <summary>Over an event stream, the progress reports a tools/call sends before its answer, this far apart.</summary>
+    public int CallProgress { get; set; }
+    public TimeSpan ProgressGap { get; set; } = TimeSpan.FromMilliseconds(300);
+    /// <summary>What tools/call answers instead of its text: pictures, sound, links to files.</summary>
+    public JsonArray? CallContent { get; set; }
+    /// <summary>The files resources/read gives, by their link: type and bytes.</summary>
+    public Dictionary<string, (string Type, byte[] Bytes)> Resources { get; } = [];
     public string Url => BaseUrl + "/mcp";
     /// <summary>The sessions closed (DELETE), as a client that lets a connection go does.</summary>
     public int Closed => Volatile.Read(ref _closed);
@@ -393,6 +402,10 @@ public sealed class FakeMcp : FakeServer
         {
             await hold.Task.WaitAsync(ct);
         }
+        if (method == "tools/call" && CallHold is { } held)
+        {
+            await held.Task.WaitAsync(ct);
+        }
         JsonNode result = method switch
         {
             "initialize" => new JsonObject
@@ -427,6 +440,14 @@ public sealed class FakeMcp : FakeServer
                         ["annotations"] = new JsonObject { ["destructiveHint"] = true },
                     }),
             },
+            "tools/call" when CallContent is not null => new JsonObject { ["content"] = CallContent.DeepClone() },
+            "resources/read" when Resources.TryGetValue(message["params"]?["uri"]?.GetValue<string>() ?? "", out var file) => new JsonObject
+            {
+                ["contents"] = new JsonArray(new JsonObject
+                {
+                    ["uri"] = message["params"]!["uri"]!.DeepClone(), ["mimeType"] = file.Type, ["blob"] = Convert.ToBase64String(file.Bytes),
+                }),
+            },
             "tools/call" => new JsonObject
             {
                 ["content"] = new JsonArray(new JsonObject
@@ -447,6 +468,15 @@ public sealed class FakeMcp : FakeServer
             ctx.Response.ContentType = "text/event-stream";
             ctx.Response.SendChunked = true;
             await WriteEvent(ctx, new JsonObject { ["jsonrpc"] = "2.0", ["method"] = "notifications/progress", ["params"] = new JsonObject { ["progress"] = 1 } }.ToJsonString(), "message");
+            for (var i = 0; method == "tools/call" && i < CallProgress; i++)
+            {
+                await Task.Delay(ProgressGap, ct);
+                await WriteEvent(ctx, new JsonObject
+                {
+                    ["jsonrpc"] = "2.0", ["method"] = "notifications/progress",
+                    ["params"] = new JsonObject { ["progressToken"] = message["params"]?["_meta"]?["progressToken"]?.DeepClone(), ["progress"] = i + 1, ["total"] = CallProgress, ["message"] = "sampling" },
+                }.ToJsonString(), "message");
+            }
             await WriteEvent(ctx, answer.ToJsonString(), "message");
             return;
         }

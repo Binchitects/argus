@@ -84,6 +84,8 @@ internal sealed class ToolContext
     public Func<string>? SessionId { get; set; }
     /// <summary>Told before a tool writes a file (its full path): the turn's checkpoint keeps what it held.</summary>
     public Action<string>? BeforeWrite { get; set; }
+    /// <summary>Told how a long call goes (an MCP tool's progress reports), for the person.</summary>
+    public Action<string>? Progress { get; set; }
 }
 
 /// <summary>One line of the to-do list.</summary>
