@@ -584,10 +584,10 @@ describe('Code Arena in the browser', () => {
     backend({ session: { id: 's2', messages: made, diffs: {}, busy: false } })
     renderCode()
     const picture = await screen.findByRole('img', { name: 'draw_picture-20261016-120000.png' })
-    expect(picture).toHaveAttribute('src', '/api/file/raw?path=.code-arena%2Fmedia%2Fdraw_picture-20261016-120000.png')
+    expect(picture).toHaveAttribute('src', '/api/media?path=.code-arena%2Fmedia%2Fdraw_picture-20261016-120000.png')
     const sound = screen.getByLabelText('speak-20261016-120001.mp3')
     expect(sound.tagName).toBe('AUDIO')
-    expect(sound).toHaveAttribute('src', '/api/file/raw?path=.code-arena%2Fmedia%2Fspeak-20261016-120001.mp3')
+    expect(sound).toHaveAttribute('src', '/api/media?path=.code-arena%2Fmedia%2Fspeak-20261016-120001.mp3')
     expect(screen.getByLabelText('clip-1.mp4').tagName).toBe('VIDEO')
     expect(screen.queryByRole('img', { name: /passwd/ })).not.toBeInTheDocument()
 
