@@ -134,6 +134,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         rt.Jobs.Ended += app.JobEnded;
         rt.WebNews = app.WebNews;
         app._server.OnError = e => rt.Ui.Error($"The web interface: {e.Message}");
+        app._server.BodyLimit = (method, path) => method == "POST" && path == InstallPath ? EditorExtensions.MaxVsix : HttpServer.MaxBody;
         app._server.Start(app.HandleAsync);
         return app;
     }
@@ -199,10 +200,14 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 await res.ErrorAsync(403, "forbidden", "Requests from other sites are refused.", ct);
                 return;
             }
-            // JSON only: a form or a plain-text post from another page cannot pass for the page's own.
-            if (req.Method is not ("GET" or "HEAD") && !(req.Header("Content-Type") ?? "").StartsWith("application/json", StringComparison.OrdinalIgnoreCase))
+            // JSON only: a form or a plain-text post from another page cannot pass for the page's own. A .vsix comes as its
+            // bytes, of a type no form sends either (another site's script would need a CORS preflight, which is refused).
+            var type = req.Header("Content-Type") ?? "";
+            if (req.Method is not ("GET" or "HEAD") && !(req.Path == InstallPath
+                ? type.StartsWith("application/octet-stream", StringComparison.OrdinalIgnoreCase) || type.StartsWith("application/zip", StringComparison.OrdinalIgnoreCase) || type.StartsWith("application/vsix", StringComparison.OrdinalIgnoreCase)
+                : type.StartsWith("application/json", StringComparison.OrdinalIgnoreCase)))
             {
-                await res.ErrorAsync(415, "unsupported", "Send JSON (Content-Type: application/json).", ct);
+                await res.ErrorAsync(415, "unsupported", req.Path == InstallPath ? "Send the .vsix's bytes (Content-Type: application/octet-stream)." : "Send JSON (Content-Type: application/json).", ct);
                 return;
             }
             await ApiAsync(req, res, ct);

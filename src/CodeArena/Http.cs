@@ -208,6 +208,12 @@ internal sealed class HttpServer : IAsyncDisposable
     /// <summary>Told of a request that failed for an unexpected reason (answered 500).</summary>
     public Action<Exception>? OnError { get; set; }
 
+    /// <summary>
+    /// The most a request's body may hold, by its method and path: <see cref="MaxBody"/> unless this says more (a
+    /// VS Code extension's file is sent whole). Asked before the body is read.
+    /// </summary>
+    public Func<string, string, int>? BodyLimit { get; set; }
+
     /// <summary>Starts taking connections; each request goes to the handler, one at a time per connection.</summary>
     public void Start(Func<HttpRequest, HttpResponse, CancellationToken, Task> handler) => _accepting = AcceptAsync(handler);
 
@@ -236,7 +242,7 @@ internal sealed class HttpServer : IAsyncDisposable
         {
             client.NoDelay = true;
             var stream = client.GetStream();
-            var reader = new RequestReader(stream);
+            var reader = new RequestReader(stream, BodyLimit);
             while (!_stop.IsCancellationRequested)
             {
                 HttpRequest? request;
@@ -315,7 +321,7 @@ internal sealed class HttpServer : IAsyncDisposable
     }
 
     /// <summary>Reads requests off a connection: the head up to the empty line, then the body by its length.</summary>
-    private sealed class RequestReader(Stream stream)
+    private sealed class RequestReader(Stream stream, Func<string, string, int>? limit)
     {
         private byte[] _buffer = new byte[8192];
         private int _length;
@@ -364,14 +370,6 @@ internal sealed class HttpServer : IAsyncDisposable
             {
                 throw new HttpProblem(400, "Content-Length is not a length.");
             }
-            if (length > MaxBody)
-            {
-                throw new HttpProblem(413, "The request is too large.");
-            }
-            if (length > 0 && string.Equals(headers.GetValueOrDefault("Expect"), "100-continue", StringComparison.OrdinalIgnoreCase))
-            {
-                await HttpResponse.ContinueAsync(stream, ct);
-            }
             var target = start[1];
             var q = target.IndexOf('?');
             string path;
@@ -383,9 +381,18 @@ internal sealed class HttpServer : IAsyncDisposable
             {
                 throw new HttpProblem(400, "The path is not well formed.");
             }
+            var method = start[0].ToUpperInvariant();
+            if (length > Math.Max(MaxBody, limit?.Invoke(method, path) ?? MaxBody))
+            {
+                throw new HttpProblem(413, "The request is too large.");
+            }
+            if (length > 0 && string.Equals(headers.GetValueOrDefault("Expect"), "100-continue", StringComparison.OrdinalIgnoreCase))
+            {
+                await HttpResponse.ContinueAsync(stream, ct);
+            }
             return new HttpRequest
             {
-                Method = start[0].ToUpperInvariant(),
+                Method = method,
                 Path = path,
                 Query = ParseQuery(q < 0 ? "" : target[(q + 1)..]),
                 Headers = headers,
