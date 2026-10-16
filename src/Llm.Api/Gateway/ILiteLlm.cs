@@ -75,6 +75,12 @@ public interface ILiteLlm
 
     Task DeleteModelAsync(string id, CancellationToken ct = default);
 
+    /// <summary>
+    /// The gateway's fallbacks, model by model (its router_settings.fallbacks, kept in its database): a request whose model
+    /// fails goes on to these, an API key's too. Every model the app knows is in it; an empty list: none.
+    /// </summary>
+    Task SetFallbacksAsync(IReadOnlyDictionary<string, IReadOnlyList<string>> fallbacks, CancellationToken ct = default);
+
     /// <summary>The teams the app made for groups (their ids start with "group-").</summary>
     Task<IReadOnlyList<GatewayTeam>> TeamsAsync(CancellationToken ct = default);
 

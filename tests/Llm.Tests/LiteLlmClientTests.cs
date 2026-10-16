@@ -52,6 +52,16 @@ public sealed class LiteLlmClientTests
     }
 
     [Fact]
+    public async Task Fallbacks_go_to_the_gateways_router_settings()
+    {
+        var (client, recorder) = Create();
+        await client.SetFallbacksAsync(new Dictionary<string, IReadOnlyList<string>> { ["flash"] = ["qwen"], ["none"] = [] });
+        var (path, body) = Assert.Single(recorder.Calls);
+        Assert.Equal("/config/update", path);
+        Assert.Equal("""{"router_settings":{"fallbacks":[{"flash":["qwen"]}]}}""", body.GetRawText());
+    }
+
+    [Fact]
     public async Task A_vllm_models_copies_under_their_own_names_are_in_no_list()
     {
         var (client, recorder) = Create();

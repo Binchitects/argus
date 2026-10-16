@@ -204,6 +204,16 @@ public sealed class FakeGateway : ILiteLlm
         return Task.CompletedTask;
     }
 
+    /// <summary>The fallbacks the app set last (router_settings.fallbacks).</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>>? Fallbacks { get; private set; }
+
+    public Task SetFallbacksAsync(IReadOnlyDictionary<string, IReadOnlyList<string>> fallbacks, CancellationToken ct = default)
+    {
+        Check();
+        Fallbacks = fallbacks;
+        return Task.CompletedTask;
+    }
+
     public Task DeleteModelAsync(string id, CancellationToken ct = default)
     {
         Check();

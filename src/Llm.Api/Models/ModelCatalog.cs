@@ -975,6 +975,15 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             await gateway.AddModelAsync(w.Name, w.Params, w.Info, fingerprint, ct);
             LogRegistered(logger, w.Name);
         }
+        // The fallbacks, at the gateway itself: an API key's request whose model fails (its engine restarts) goes on to it.
+        var fallbacks = (await db.LocalModels.AsNoTracking().Where(m => m.Fallback != null).Select(m => new { m.Name, m.Fallback }).ToListAsync(ct))
+            .ToDictionary(m => m.Name, m => (IReadOnlyList<string>)[m.Fallback!], StringComparer.Ordinal);
+        var said = string.Join(';', fallbacks.OrderBy(f => f.Key, StringComparer.Ordinal).Select(f => f.Key + "=" + f.Value[0]));
+        if (!GivenFallbacks.TryGetValue(gateway, out var given) || given != said)
+        {
+            await gateway.SetFallbacksAsync(fallbacks, ct);
+            GivenFallbacks.AddOrUpdate(gateway, said);
+        }
         chatModels.Forget();
     }
 
@@ -1072,6 +1081,9 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
 
     /// <summary>The longest answer when none is set: half the context, at most 32,768 tokens.</summary>
     public static int DefaultMaxOutput(int context) => Math.Max(ModelAdvisor.MinOutput, Math.Min(32768, context / 2 / 1024 * 1024));
+
+    /// <summary>The fallbacks each gateway was last given (by any catalog of this replica): set again only when they change, and at start.</summary>
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ILiteLlm, string> GivenFallbacks = [];
 
     private static string Fingerprint(params object?[] parts) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('|', parts.Select(p => Convert.ToString(p, CultureInfo.InvariantCulture))))))[..16];

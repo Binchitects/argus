@@ -156,6 +156,17 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
     public async Task DeleteModelAsync(string id, CancellationToken ct = default) =>
         await SendAsync(HttpMethod.Post, "/model/delete", new JsonObject { ["id"] = id }, ct, allowStatus: [404]);
 
+    /// <summary>LiteLLM's /config/update merges router_settings into what its database keeps, and every proxy replica reads it.</summary>
+    public async Task SetFallbacksAsync(IReadOnlyDictionary<string, IReadOnlyList<string>> fallbacks, CancellationToken ct = default) =>
+        await SendAsync(HttpMethod.Post, "/config/update", new JsonObject
+        {
+            ["router_settings"] = new JsonObject
+            {
+                ["fallbacks"] = new JsonArray([.. fallbacks.Where(f => f.Value.Count > 0).OrderBy(f => f.Key, StringComparer.Ordinal)
+                    .Select(f => (JsonNode)new JsonObject { [f.Key] = new JsonArray([.. f.Value.Select(v => (JsonNode)v)]) })]),
+            },
+        }, ct);
+
     public async Task<IReadOnlyList<GatewayKey>> KeysAsync(string email, CancellationToken ct = default)
     {
         var res = await SendAsync(HttpMethod.Get, $"/key/list?user_id={Uri.EscapeDataString(email)}&return_full_object=true", null, ct);

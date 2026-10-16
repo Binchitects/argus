@@ -245,6 +245,10 @@ public sealed partial class EngineRoute
         {
             return null;
         }
+        if (!engine.Counted(model))
+        {
+            return await StartForKeyAsync(model, ct);
+        }
         try
         {
             // Wanted before anything is looked at, as TakeAsync counts its own; and again once let through.
@@ -259,6 +263,71 @@ public sealed partial class EngineRoute
             // An API key names its model itself: it is told which answers in its place.
             return FallbackOf(model) is { } fallback ? $"{ex.Message} {fallback} answers in its place: send the request to {fallback}." : ex.Message;
         }
+    }
+
+    /// <summary>
+    /// An API key's request for a vLLM model, answered at once (an API client does not wait minutes inside the gateway's
+    /// check): loaded, it goes; else it is started when its GPUs have room now (one look, no waiting), and the request goes
+    /// on to the gateway when the model has a fallback (the gateway's fallbacks answer while it starts) or is refused saying
+    /// when to try again.
+    /// </summary>
+    private async Task<string?> StartForKeyAsync(string model, CancellationToken ct)
+    {
+        Want(model);
+        var status = await StatusAsync(model, ct);
+        if (status == "loaded")
+        {
+            Tell(model);
+            return null;
+        }
+        var fallback = FallbackOf(model);
+        string why;
+        if (engine.Lent is { } lent && engine.Blocks(model))
+        {
+            why = $"{model} waits while its GPU makes a {lent.Kind} with {lent.Media}.";
+        }
+        else if (status is "loading" or "unloading")
+        {
+            why = $"{model} is starting.";
+        }
+        else if (engine.StatusOf(model) == "failed" && !engine.MayAsk(model))
+        {
+            why = $"{model} could not be started just now.";
+        }
+        else
+        {
+            IReadOnlyList<EngineModel> models;
+            try
+            {
+                var asked = engine.Asking();
+                models = engine.Seen(await client.ModelsAsync(ct), asked);
+            }
+            catch (EngineException ex)
+            {
+                return fallback is null ? $"{model} cannot be started now: {ex.Message}" : null;
+            }
+            var room = await LookGpusAsync(model, models, TimeSpan.Zero, ct);
+            if (room is Room.Free or Room.Made)
+            {
+                try
+                {
+                    await client.LoadAsync(model, ct);
+                    LogStarting(logger, model);
+                    why = $"{model} is starting (a large model takes a few minutes).";
+                }
+                catch (EngineException ex)
+                {
+                    _coming.TryRemove(model, out _);
+                    why = $"{model} cannot be started now: {ex.Message}";
+                }
+            }
+            else
+            {
+                why = $"{model} has no room on its GPUs now: the models there are answering or kept loaded.";
+            }
+        }
+        // With a fallback, the gateway's fallbacks answer (it reaches the model, fails at once, and goes on); without, say when.
+        return fallback is not null ? null : $"{why} Try again in a minute or two.";
     }
 
     /// <summary>
@@ -310,7 +379,16 @@ public sealed partial class EngineRoute
             // This request has the engine load it again: a try, after which the next wait is longer.
             engine.Tried(model);
         }
-        await StartAsync(model, ct);
+        try
+        {
+            await StartAsync(model, ct);
+        }
+        catch (ChatGatewayException)
+        {
+            // It did not start: the place it was given on its GPUs is free again.
+            _coming.TryRemove(model, out _);
+            throw;
+        }
     }
 
     /// <summary>

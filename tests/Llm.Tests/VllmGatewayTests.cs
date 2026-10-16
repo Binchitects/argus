@@ -68,6 +68,10 @@ public sealed class VllmGatewayTests(AppFixture app) : IDisposable
                     Name = "flash", File = "hf/org/flash@r", EngineKind = EngineKinds.Vllm, KvType = "fp8", Context = 65536, Parallel = 16, Devices = "0,1,2,3", Replicas = 2,
                     Fallback = "Qwen3.8-Flash-Next",
                 });
+                db.LocalModels.Add(new LocalModel
+                {
+                    Name = "solo", File = "hf/org/flash@r", EngineKind = EngineKinds.Vllm, KvType = "fp8", Context = 8192, Parallel = 4, Devices = "0", Replicas = 1,
+                });
                 await db.SaveChangesAsync();
                 var catalog = scope.ServiceProvider.GetRequiredService<ModelCatalog>();
                 await catalog.WriteVllmPresetsAsync();
@@ -111,7 +115,10 @@ public sealed class VllmGatewayTests(AppFixture app) : IDisposable
             {
                 Assert.Equal("Qwen3.8-Flash-Next", sending.Model);
             }
-            Assert.Contains("Qwen3.8-Flash-Next answers in its place", await route.RoomForKeyAsync("flash", CancellationToken.None), StringComparison.Ordinal);
+            // An API key's request goes on at once: the gateway's own fallbacks (set from the app) answer while flash cannot.
+            Assert.Null(await route.RoomForKeyAsync("flash", CancellationToken.None));
+            Assert.Equal(["Qwen3.8-Flash-Next"], gateway.Fallbacks!["flash"]);
+            Assert.False(gateway.Fallbacks.ContainsKey("solo"));
 
             // Up again: it starts, and a conversation stays on one copy.
             vllm.Running = true;
@@ -120,6 +127,12 @@ public sealed class VllmGatewayTests(AppFixture app) : IDisposable
             {
                 await Task.Delay(100);
             }
+            // An API key's request for a model without a fallback, not running: started, and told at once to come back.
+            var quick = System.Diagnostics.Stopwatch.StartNew();
+            Assert.Contains("solo is starting", await route.RoomForKeyAsync("solo", CancellationToken.None), StringComparison.Ordinal);
+            Assert.True(quick.Elapsed < TimeSpan.FromSeconds(10), "the key's request waited for the model");
+            Assert.Contains(backend.Desired(), e => e.Model == "solo");
+            await f.Services.GetRequiredService<EngineClient>().UnloadAsync("solo");
             var conversation = Guid.NewGuid();
             using (var sending = await route.TakeAsync("flash", conversation, CancellationToken.None))
             {
