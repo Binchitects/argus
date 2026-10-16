@@ -128,4 +128,78 @@ metadata:
 spec:
   selector: {{- include "arena.selector" (dict "root" $ "name" "loki") | nindent 4 }}
   ports: [{ name: http, port: 3100, targetPort: http }]
+{{- if .Values.monitoring.hostExporters.enabled }}
+---
+{{- /* The host's figures, as compose's node-exporter and cpu-temp-exporter: disks, memory and CPU for the
+dashboards, Admin -> Storage and the host's alerts, and the CPU's temperature. One pod on each node it may run on;
+Prometheus reaches them by their Services' names, so on several nodes it reads one at a time (nodeSelector). */}}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: host-exporters
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "host-exporters") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" "host-exporters") | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" . | nindent 6 }}
+      automountServiceAccountToken: false
+      # The host's processes, as compose's pid: host.
+      hostPID: true
+      {{- with .Values.monitoring.hostExporters.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.monitoring.hostExporters.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: node-exporter
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.nodeExporter) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          args:
+            - --path.procfs=/host/proc
+            - --path.sysfs=/host/sys
+            - --path.rootfs=/rootfs
+            - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|rootfs/var/lib/(docker|kubelet|containerd))($|/)
+          ports: [{ name: http, containerPort: 9100 }]
+          securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          volumeMounts:
+            - { name: proc, mountPath: /host/proc, readOnly: true }
+            - { name: sys, mountPath: /host/sys, readOnly: true }
+            - { name: root, mountPath: /rootfs, readOnly: true, mountPropagation: HostToContainer }
+        - name: cpu-temp-exporter
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.python) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          command: [python, /app/exporter.py]
+          ports: [{ name: cpu-temp, containerPort: 9110 }]
+          securityContext: { runAsUser: 65534, runAsGroup: 65534, runAsNonRoot: true, readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          volumeMounts:
+            - { name: config, mountPath: /app/exporter.py, subPath: cpu-temp-exporter.py }
+      volumes:
+        - { name: proc, hostPath: { path: /proc } }
+        - { name: sys, hostPath: { path: /sys } }
+        - { name: root, hostPath: { path: / } }
+        - { name: config, configMap: { name: arena-config } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-exporter
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "arena.selector" (dict "root" $ "name" "host-exporters") | nindent 4 }}
+  ports: [{ name: http, port: 9100, targetPort: http }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cpu-temp-exporter
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "arena.selector" (dict "root" $ "name" "host-exporters") | nindent 4 }}
+  ports: [{ name: http, port: 9110, targetPort: cpu-temp }]
+{{- end }}
 {{- end }}

@@ -13,6 +13,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { formatValue } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { type ModelSource } from './model-dialog'
 import { bytes } from './model-profile'
 
 interface HfModel {
@@ -384,7 +385,7 @@ function RepoView({ id, media = false, onBack, onClose }: { id: string; media?: 
 }
 
 /** Downloads from Hugging Face: how far each is, how fast, and when done, adding it as a model. */
-export function DownloadsCard({ onAdd }: { onAdd: (file: string) => void }) {
+export function DownloadsCard({ onAdd }: { onAdd: (source: ModelSource) => void }) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const list = useQuery({
@@ -421,8 +422,8 @@ export function DownloadsCard({ onAdd }: { onAdd: (file: string) => void }) {
                   {{ queued: 'Waiting', running: 'Downloading', paused: 'Paused', done: 'Done', failed: 'Failed' }[d.state]}
                 </Badge>
                 <span className="ml-auto flex gap-1">
-                  {d.state === 'done' && model && /\.gguf$/i.test(model.library) && (
-                    <Button size="sm" variant="outline" onClick={() => onAdd(model.library)}>
+                  {d.state === 'done' && (model || d.kind === 'speech') && (
+                    <Button size="sm" variant="outline" onClick={() => onAdd(model ? { file: model.library } : { speech: d.repo })}>
                       <Plus /> Add as a model
                     </Button>
                   )}
@@ -450,7 +451,7 @@ export function DownloadsCard({ onAdd }: { onAdd: (file: string) => void }) {
                 </span>
               </div>
               <p className="font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">
-                {d.kind === 'speech' ? 'Fetched by the speech server: add it as a text to speech or speech to text model.' : d.files.map((f) => f.path).join(', ')}
+                {d.kind === 'speech' ? 'Fetched by the speech server: Add as a model adds it as a text to speech or speech to text model.' : d.files.map((f) => f.path).join(', ')}
               </p>
               {d.state !== 'done' && d.kind !== 'speech' && (
                 <>

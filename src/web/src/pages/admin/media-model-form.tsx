@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { DialogFooter } from '@/components/ui/dialog'
 import { Field } from '@/components/ui/field'
 import { Input, Textarea } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,9 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { formatValue } from '@/lib/format'
+import { roleLabel, type MediaMode } from './media-modes'
 import { Section } from './model-form'
-
-import { mediaModeLabel, type MediaMode } from './media-modes'
 
 /** A picture, video or speech model as Admin -> Models has it (the fields this form edits). */
 export interface SavedMediaModel {
@@ -34,14 +33,14 @@ export interface SavedMediaModel {
   unitPrice?: { unit: string; amount: number; own?: boolean }
 }
 
-interface LibraryRow {
+export interface LibraryRow {
   path: string
   size: number
   role: string
   usedBy: string[]
 }
 
-interface SpeechRow {
+export interface SpeechRow {
   id: string
   task: string
   language?: string[] | null
@@ -49,19 +48,6 @@ interface SpeechRow {
 }
 
 const roles = ['diffusion', 'model', 'llm', 'llm_vision', 't5xxl', 'clip_l', 'clip_g', 'clip_vision', 'vae', 'taesd', 'high_noise'] as const
-const roleLabel: Record<string, string> = {
-  diffusion: 'Diffusion model',
-  model: 'Whole model (one file)',
-  llm: 'Text encoder (LLM)',
-  llm_vision: 'Text encoder vision',
-  t5xxl: 'T5 text encoder',
-  clip_l: 'CLIP-L',
-  clip_g: 'CLIP-G',
-  clip_vision: 'CLIP vision',
-  vae: 'VAE (decoder)',
-  taesd: 'Tiny decoder (TAESD)',
-  high_noise: 'High-noise model (Wan A14B)',
-}
 const samplers = ['euler', 'euler_a', 'heun', 'dpm2', 'dpm++2s_a', 'dpm++2m', 'dpm++2mv2', 'ipndm', 'ipndm_v', 'lcm', 'ddim_trailing', 'tcd']
 const schedulers = ['discrete', 'karras', 'exponential', 'ays', 'gits', 'smoothstep', 'sgm_uniform', 'simple']
 
@@ -131,30 +117,46 @@ function body(form: Form, editing: boolean) {
   return out
 }
 
-/** Adds or changes a picture, video or speech model: its files (or the speech server's id), how it runs, its GPU, price and idle time. */
-export function MediaModelForm({
+/** A name from a file: its own name without the extension. */
+const fileName = (path: string) => path.split('/').pop()!.replace(/\.(gguf|safetensors|ckpt|pth|pt|bin)$/i, '')
+
+/** The file that is the model itself: its diffusion model, or the whole model in one file. */
+const mainFile = (files: { role: string; path: string }[]) => files.find((f) => (f.role === 'diffusion' || f.role === 'model') && f.path)?.path ?? ''
+
+/**
+ * The picture, video and speech models' part of the model dialog: a picture or video model's files from the
+ * library (or the speech server's model), how it runs, its GPU, price and idle time.
+ */
+export function MediaModelSection({
   saved,
-  mode = 'image_generation',
+  mode,
   file,
+  speechId,
+  onFile,
   gpus = [],
   onClose,
 }: {
   saved: SavedMediaModel | null
-  mode?: MediaMode
-  /** A diffusion model's file to start from (chosen in the chat model's form, or just downloaded). */
-  file?: string
+  /** What it does, as the dialog says. */
+  mode: MediaMode
+  /** A file chosen in the dialog (its "File or model"), with the role it reads as: the model itself goes first, another file in its role. */
+  file?: { path: string; role: string }
+  /** A model the speech server has, chosen in the dialog. */
+  speechId?: string
+  /** The model's own file changed here (in its Files): the dialog's choice follows it. */
+  onFile?: (path: string) => void
   gpus?: { index: number; name: string; total: number }[]
   onClose: () => void
 }) {
   const queryClient = useQueryClient()
-  const [form, setForm] = useState(() => {
-    const f = initial(saved, mode)
-    return file && !saved ? { ...f, files: [{ role: 'diffusion', path: file }], name: file.split('/').pop()!.replace(/\.(gguf|safetensors|ckpt|pth|pt|bin)$/i, '') } : f
-  })
+  const [state, setState] = useState(() => initial(saved, mode))
+  // The dialog says what it does; the rest is this form's.
+  const form = { ...state, mode }
+  const [nameTouched, setNameTouched] = useState(!!saved)
   const [error, setError] = useState<string | null>(null)
-  const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }))
-  const pictures = form.mode === 'image_generation' || form.mode === 'video_generation'
-  const video = form.mode === 'video_generation'
+  const set = <K extends keyof Form>(k: K, v: Form[K]) => setState((f) => ({ ...f, [k]: v }))
+  const pictures = mode === 'image_generation' || mode === 'video_generation'
+  const video = mode === 'video_generation'
   const library = useQuery({
     queryKey: ['admin', 'models', 'media', 'files'],
     queryFn: ({ signal }) => api<LibraryRow[]>('/api/admin/models/media/files', { signal }),
@@ -166,16 +168,46 @@ export function MediaModelForm({
     enabled: !pictures,
     retry: false,
   })
-  const task = form.mode === 'audio_speech' ? 'text-to-speech' : 'automatic-speech-recognition'
+  const task = mode === 'audio_speech' ? 'text-to-speech' : 'automatic-speech-recognition'
   const speechModels = (speech.data ?? []).filter((m) => m.task === task)
   const chosenSpeech = speechModels.find((m) => m.id === form.speechId)
   const files = library.data ?? []
+
+  // The files changed: the name follows the model's own file until it is typed, and the dialog's choice follows it too.
+  const shown = useRef(mainFile(state.files))
+  const setFiles = (next: { role: string; path: string }[]) => {
+    const main = mainFile(next)
+    setState((f) => ({ ...f, files: next, name: nameTouched || !main ? f.name : fileName(main) }))
+    if (main && main !== shown.current) {
+      shown.current = main
+      onFile?.(main)
+    }
+  }
+
+  // A file chosen in the dialog: the model itself in place of the one there, another file in its role (in place of the one with that role, else added).
+  const placed = useRef(mainFile(state.files))
+  useEffect(() => {
+    if (!pictures || !file?.path || file.path === placed.current || state.files.some((f) => f.path === file.path)) return
+    placed.current = file.path
+    const own = file.role === 'diffusion' || file.role === 'model'
+    const at = own ? state.files.findIndex((f) => f.role === 'diffusion' || f.role === 'model') : state.files.findIndex((f) => f.role === file.role)
+    const empty = state.files.findIndex((f) => !f.path && (own || (f.role !== 'diffusion' && f.role !== 'model')))
+    const i = at >= 0 ? at : empty
+    setFiles(i >= 0 ? state.files.map((f, j) => (j === i ? { role: file.role, path: file.path } : f)) : own ? [{ role: file.role, path: file.path }, ...state.files] : [...state.files, { role: file.role, path: file.path }])
+  })
+
+  // A model the speech server has, chosen in the dialog: the name follows it until it is typed.
+  const [heard, setHeard] = useState(saved?.speechId ?? '')
+  if (speechId && speechId !== heard) {
+    setHeard(speechId)
+    setState((f) => ({ ...f, speechId, name: nameTouched ? f.name : speechId.split('/').pop()! }))
+  }
 
   const save = useMutation({
     mutationFn: () =>
       saved
         ? api<{ warning: string | null }>(`/api/admin/models/media/${encodeURIComponent(saved.name)}`, { method: 'PATCH', body: body(form, true) })
-        : api<{ warning: string | null }>('/api/admin/models/media', { body: { ...body(form, false), name: form.name.trim(), mode: form.mode } }),
+        : api<{ warning: string | null }>('/api/admin/models/media', { body: { ...body(form, false), name: form.name.trim(), mode } }),
     onSuccess: async (r) => {
       await queryClient.invalidateQueries({ queryKey: ['admin', 'models'] })
       if (r?.warning) toast.warning(r.warning)
@@ -188,16 +220,9 @@ export function MediaModelForm({
 
   return (
     <>
-      <DialogHeader>
-        <DialogTitle>{saved ? `Edit ${saved.name}` : `Add a ${mediaModeLabel[form.mode].toLowerCase()} model`}</DialogTitle>
-        <DialogDescription>
-          {pictures
-            ? 'Its files from the model library, how stable-diffusion.cpp runs it, and what it makes unless asked otherwise. Its server runs one model at a time: the one kept loaded, else the one asked for last.'
-            : 'A model the speech server has (it lists those it has downloaded), and how it is used.'}
-        </DialogDescription>
-      </DialogHeader>
       <form
         className="grid min-w-0 gap-5"
+        aria-label={pictures ? (video ? 'The video model' : 'The picture model') : 'The speech model'}
         onSubmit={(e) => {
           e.preventDefault()
           setError(null)
@@ -205,31 +230,25 @@ export function MediaModelForm({
         }}
       >
         {error && <Alert variant="destructive">{error}</Alert>}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Name" hint="Its name in the chat and at the gateway.">
-            <Input value={form.name} onChange={(e) => set('name', e.target.value)} disabled={!!saved} required maxLength={100} autoComplete="off" />
-          </Field>
-          <Field label="What it does">
-            <Select value={form.mode} onValueChange={(v) => set('mode', v as MediaMode)} disabled={!!saved}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.keys(mediaModeLabel) as MediaMode[]).map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {mediaModeLabel[m]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-        </div>
+        <Field label="Name" hint="Its name in the chat and at the gateway.">
+          <Input
+            value={form.name}
+            onChange={(e) => {
+              setNameTouched(true)
+              set('name', e.target.value)
+            }}
+            disabled={!!saved}
+            required
+            maxLength={100}
+            autoComplete="off"
+          />
+        </Field>
 
         {pictures && (
           <Section title="Files" description="Each file by what it is: the diffusion model, its text encoders and its decoder (VAE), from the library.">
             {form.files.map((f, i) => (
               <div key={i} className="grid gap-2 sm:grid-cols-[12rem_minmax(0,1fr)_auto]">
-                <Select value={f.role} onValueChange={(v) => set('files', form.files.map((x, j) => (j === i ? { ...x, role: v } : x)))}>
+                <Select value={f.role} onValueChange={(v) => v && setFiles(form.files.map((x, j) => (j === i ? { ...x, role: v } : x)))}>
                   <SelectTrigger aria-label={`File ${i + 1}: its role`}>
                     <SelectValue />
                   </SelectTrigger>
@@ -244,9 +263,10 @@ export function MediaModelForm({
                 <Select
                   value={f.path || undefined}
                   onValueChange={(v) => {
+                    // Emptied by the select itself when the library's list changes under it: the file stays.
+                    if (!v) return
                     const hint = files.find((x) => x.path === v)?.role
-                    set('files', form.files.map((x, j) => (j === i ? { role: x.path || !hint ? x.role : hint, path: v } : x)))
-                    if (!form.name.trim() && (hint === 'diffusion' || hint === 'model')) set('name', v.split('/').pop()!.replace(/\.(gguf|safetensors|ckpt|pth|pt|bin)$/i, ''))
+                    setFiles(form.files.map((x, j) => (j === i ? { role: x.path || !hint ? x.role : hint, path: v } : x)))
                   }}
                 >
                   <SelectTrigger className="min-w-0 [&>span]:truncate" aria-label={`File ${i + 1}`}>
@@ -262,13 +282,13 @@ export function MediaModelForm({
                     ))}
                   </SelectContent>
                 </Select>
-                <Button type="button" size="icon" variant="ghost" aria-label={`Remove file ${i + 1}`} onClick={() => set('files', form.files.filter((_, j) => j !== i))}>
+                <Button type="button" size="icon" variant="ghost" aria-label={`Remove file ${i + 1}`} onClick={() => setFiles(form.files.filter((_, j) => j !== i))}>
                   <Trash2 />
                 </Button>
               </div>
             ))}
             <div>
-              <Button type="button" size="sm" variant="outline" onClick={() => set('files', [...form.files, { role: 'vae', path: '' }])}>
+              <Button type="button" size="sm" variant="outline" onClick={() => setFiles([...form.files, { role: 'vae', path: '' }])}>
                 <Plus /> Add a file
               </Button>
             </div>
@@ -401,28 +421,15 @@ export function MediaModelForm({
 
         {!pictures && (
           <Section title="The speech server's model">
-            <Field
-              label="Model"
-              hint={speech.isError ? 'The speech server did not answer: type its id (owner/name).' : 'The models the speech server has downloaded, of this kind.'}
-            >
-              {speechModels.length > 0 ? (
-                <Select value={form.speechId || undefined} onValueChange={(v) => set('speechId', v)} disabled={!!saved && !!form.speechId && !speechModels.some((m) => m.id === form.speechId)}>
-                  <SelectTrigger className="min-w-0 [&>span]:truncate">
-                    <SelectValue placeholder="Choose a model" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {speechModels.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.id}
-                        {m.language?.length ? ` · ${m.language.join(', ')}` : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
+            {/* Chosen above, from those the speech server lists; typed here when it lists none of this kind. */}
+            {!speech.isPending && speechModels.length === 0 && (
+              <Field
+                label="Its id at the speech server"
+                hint={speech.isError ? 'The speech server did not answer: type its id (owner/name).' : 'The speech server lists none of this kind: type its id (owner/name).'}
+              >
                 <Input value={form.speechId} onChange={(e) => set('speechId', e.target.value)} placeholder="owner/name" />
-              )}
-            </Field>
+              </Field>
+            )}
             <div className="grid gap-4 sm:grid-cols-3">
               <Field label="Language" hint="Empty: what it is asked for.">
                 <Input value={form.language} onChange={(e) => set('language', e.target.value)} maxLength={20} />
@@ -484,7 +491,7 @@ export function MediaModelForm({
             Cancel
           </Button>
           <Button type="submit" loading={save.isPending} disabled={blocked}>
-            {saved ? 'Save' : 'Add'}
+            {saved ? 'Save' : 'Add model'}
           </Button>
         </DialogFooter>
       </form>

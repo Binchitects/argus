@@ -113,6 +113,40 @@ class StartedTests(unittest.TestCase):
         self.assertEqual(local - utc, timedelta(hours=3, minutes=30))
 
 
+class PodmanTests(unittest.TestCase):
+    """--podman with no COMPOSE_FILE: the files Podman runs the stack with (podman.yml on top), as installer.sh's."""
+
+    def setUp(self):
+        self.s = Sandbox()
+
+    def tearDown(self):
+        self.s.cleanup()
+
+    def kept(self) -> list[str]:
+        [name] = [d for d in os.listdir(self.s.deploy / "backups") if re.fullmatch(r"20\d\d-\d\d-\d\d_\d{6}", d)]
+        return sorted(os.listdir(self.s.deploy / "backups" / name / "config" / "compose"))
+
+    def test_The_backup_keeps_podman_yml_and_the_override(self):
+        self.s.write(".env", "")
+        self.s.write("docker-compose.override.yml", "services: {}\n")
+        self.s.run("backup.sh", "--podman")
+        self.assertEqual(self.kept(), ["docker-compose.override.yml", "docker-compose.yml", "podman.yml"])
+
+    def test_COMPOSE_FILE_in_env_or_in_the_environment_wins(self):
+        self.s.write(".env", "COMPOSE_FILE=docker-compose.yml\n")
+        self.s.run("backup.sh", "--podman")
+        self.assertEqual(self.kept(), ["docker-compose.yml"])
+        shutil.rmtree(self.s.deploy / "backups")
+        self.s.write(".env", "")
+        self.s.run("backup.sh", "--podman", extra={"COMPOSE_FILE": "docker-compose.yml"})
+        self.assertEqual(self.kept(), ["docker-compose.yml"])
+
+    def test_Docker_is_left_as_it_was(self):
+        self.s.write(".env", "")
+        self.s.run("backup.sh")
+        self.assertEqual(self.kept(), ["docker-compose.yml"])
+
+
 def real_compose() -> str | None:
     """The host's docker, when it has Compose: `docker compose config` only reads files."""
     docker = shutil.which("docker")

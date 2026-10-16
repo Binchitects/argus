@@ -456,7 +456,7 @@ export const topics = {
       { name: 'Working hours', text: 'Other models kept loaded at some hours: a small fast one by day, the big one at night.' },
       { name: 'Other GPU servers', text: 'Another machine\'s OpenAI-compatible engine, whose models the gateway serves beside these.' },
       { name: 'Find on Hugging Face', text: 'Search GGUF models, see whether they fit this machine, and download them into the library. **Downloads** shows the progress.' },
-      { name: 'Add a model', text: 'A GGUF file from the model library. The form shows what fits this machine.' },
+      { name: 'Add a model', text: 'One dialog for every kind: choose a file from the model library or a model the speech server has, and it is taken as what it is (a chat, picture, video or speech model), which you can change. A chat model\'s form shows what fits this machine. **Edit** on a card opens the same dialog.' },
     ],
     tasks: [
       { title: 'Switch the chat to another model', steps: ['Press **Load** on the model (or **Keep loaded** to keep it).', 'Wait while it loads: seconds from memory, minutes from disk.', 'Set **Model new chats use** under Settings → Model to make it the default.'] },
