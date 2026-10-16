@@ -301,6 +301,47 @@ test.describe('search', () => {
   })
 })
 
+/** Selects these words in an answer's message, as a mouse drag would (the page hears the selection change). */
+async function selectInAnswer(page: Page, messageId: string, words: string) {
+  await page.evaluate(
+    ([id, wanted]) => {
+      const host = document.querySelector(`[data-message="${id}"] [data-quote-source]`)!
+      const walk = document.createTreeWalker(host, NodeFilter.SHOW_TEXT)
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        const at = n.nodeValue!.indexOf(wanted)
+        if (at < 0) continue
+        const range = document.createRange()
+        range.setStart(n, at)
+        range.setEnd(n, at + wanted.length)
+        document.getSelection()!.removeAllRanges()
+        document.getSelection()!.addRange(range)
+        return
+      }
+      throw new Error(`${wanted} is not in ${id}`)
+    },
+    [messageId, words],
+  )
+}
+
+test.describe('quoting part of an answer', () => {
+  test('a selection gets a toolbar, and Reply puts it above the box, accessible both ways', async ({ page }, info) => {
+    await serveArgusChat(page)
+    await page.goto(`/chat/${argusChat.id}`)
+    await expect(page.locator('[data-message="a2"]')).toContainText('declared in')
+    await selectInAnswer(page, 'a2', 'declared in')
+    const bar = page.getByRole('toolbar', { name: 'The selected words' })
+    await expect(bar).toBeVisible()
+    await expectAccessible(page, info, 'quote-toolbar')
+    await bar.getByRole('button', { name: /Reply/ }).click()
+    const chip = page.getByRole('group', { name: 'Quoted in your reply' })
+    await expect(chip).toContainText('declared in')
+    await expect(page.getByRole('textbox', { name: 'Message' })).toBeFocused()
+    await expectAccessible(page, info, 'quote-chip')
+    await chip.getByRole('button', { name: 'Remove the quote' }).click()
+    await expect(chip).toBeHidden()
+  })
+})
+
 test.describe('export', () => {
   test('a chat downloads as Markdown and as data, and its summary comes from the model', async ({ page }) => {
     await serveArgusChat(page)
@@ -558,6 +599,21 @@ test.describe('chat with the model', () => {
     await expect(versions).toHaveText(/2 \/ 2/, { timeout: 30_000 })
     await versions.getByRole('button', { name: 'Previous answer version' }).click()
     await expect(versions).toHaveText(/1 \/ 2/)
+  })
+
+  test('a part of an answer can be quoted in a reply, and the model reads it', async ({ page }) => {
+    await page.goto('/chat')
+    await thinking(page, 'No thinking')
+    await ask(page, 'Reply with exactly these words: the password is mangosteen')
+    await done(page)
+    const id = await page.locator('[data-quote-source]').last().getAttribute('data-quote-source')
+    await selectInAnswer(page, id!, 'mangosteen')
+    await page.getByRole('toolbar', { name: 'The selected words' }).getByRole('button', { name: /Reply/ }).click()
+    await expect(page.getByRole('group', { name: 'Quoted in your reply' })).toContainText('mangosteen')
+    await ask(page, 'Repeat the word I quoted, in capital letters, and nothing else.')
+    await expect(page.getByRole('region', { name: 'Answer' }).last()).toContainText('MANGOSTEEN', { timeout: 120_000 })
+    await done(page)
+    await expect(page.getByRole('figure', { name: 'Quoting an earlier answer' }).last()).toContainText('mangosteen')
   })
 
   test('editing a question keeps both versions', async ({ page }) => {

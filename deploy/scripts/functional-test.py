@@ -350,6 +350,19 @@ def main():
     rec("chat", "the app saves the chat with its answer and token counts",
         bool(answer.get("content")) and (answer.get("completionTokens") or 0) > 0, f"HTTP {code}")
 
+    # A reply that quotes part of an answer: the model reads the quote (an odd word only it holds), and the chat keeps it apart.
+    if conv_id:
+        odd = f"zephyrine{int(time.time()) % 10000}"
+        person.req(u("", f"/api/chat/conversations/{conv_id}/messages"),
+                   {"content": "Repeat the one word in the part I quote, and nothing else.", "quote": f"The word is {odd}."},
+                   headers={"X-Requested-With": "functional-test"}, timeout=300)
+        code, conv = person.app("GET", f"/api/chat/conversations/{conv_id}")
+        messages = conv.get("messages", []) if code == 200 else []
+        quoted = next((m.get("quote") or "" for m in reversed(messages) if m.get("role") == "user"), "")
+        said = next((m.get("content") or "" for m in reversed(messages) if m.get("role") == "assistant"), "")
+        rec("chat", "a quoted reply reaches the model, and the question keeps its quote",
+            odd in quoted and odd in said.lower(), f"quote kept: {odd in quoted}, answer: {said[:80]!r}")
+
     # ------------------------------------------------------------ attribution
     print("\n5. Usage is attributed to the person")
     seen = {}
