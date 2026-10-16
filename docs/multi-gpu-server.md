@@ -473,6 +473,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
 13. **Metrics and alerts.**
     - The app writes vLLM targets to `file_sd`; optional DCGM exporter; alert rules (§5.7); dashboard panels.
     - Tests: `audit-dashboards.py`, and rule unit tests with `promtool test rules` if available.
+    - **Done**: the app already writes each vLLM process to `file_sd` (item 7); `rules/engines.yml`: cache over 95% by model (vLLM v1's `kv_cache_usage_perc`, replacing the old rule on its former name), requests waiting inside vLLM for 2 minutes, preemption, an engine restart loop, GPU Xid and ECC errors, low PCIe traffic while busy (DCGM); an optional DCGM exporter (compose profile `dcgm`, CDI on Podman; a cluster's own on Kubernetes) scraped as optional. Tests: `EngineAlertTests` (`promtool test rules` in the stack's Prometheus image). Dashboard panels are not added yet.
 14. **KV tier.**
     - `KvTier = none | cpu(GB) | lmcache(cpu GB, disk GB, remote)`. The app writes the `OffloadingConnector` config or the `lmcache-<model>.yaml`, and the advisor counts RAM and disk.
     - Tests: generated arguments and files; fake-vllm accepts them.

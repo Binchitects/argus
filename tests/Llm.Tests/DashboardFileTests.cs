@@ -34,6 +34,9 @@ public sealed partial class Promtool : IAsyncLifetime
         return (r.ExitCode ?? -1, r.Stdout + r.Stderr);
     }
 
+    /// <summary>Puts a file in the container, for a test file that names it (rule_files).</summary>
+    public Task CopyAsync(string path, string text) => _container.CopyAsync(Encoding.UTF8.GetBytes(text), path);
+
     [GeneratedRegex(@"image:\s*(prom/prometheus:\S+)")]
     private static partial Regex PrometheusImage();
 }

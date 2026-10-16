@@ -41,6 +41,12 @@ scrape_configs:
       - targets: ["gpu-exporter:9835"]
         labels: { tier: optional, component: gpu }
 
+  # NVIDIA's DCGM exporter (the dcgm profile; a cluster's own on Kubernetes): optional, silent when absent.
+  - job_name: dcgm
+    static_configs:
+      - targets: ["dcgm-exporter:9400"]
+        labels: { tier: optional, component: gpu }
+
   - job_name: cpu-temp
     static_configs:
       - targets: ["cpu-temp-exporter:9110"]

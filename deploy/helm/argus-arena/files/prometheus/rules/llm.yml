@@ -78,17 +78,7 @@ groups:
             VLLM_MAX_NUM_SEQS, shorten VLLM_MAX_MODEL_LEN, quantise the model,
             or add a GPU and raise tensor-parallel-size.
 
-      - alert: VllmKvCacheSaturated
-        expr: vllm:gpu_cache_usage_perc > 0.95
-        for: 10m
-        labels:
-          severity: warning
-          component: inference
-        annotations:
-          summary: "KV cache above 95% utilisation"
-          description: >-
-            vLLM will start preempting and recomputing sequences, which shows up
-            as latency spikes. Reduce max-model-len or concurrent sequences.
+      # The token cache's fill: VllmKvCacheFull in engines.yml (vLLM v1's metric name, by model).
 
       - alert: VllmHighTimeToFirstToken
         expr: >-
