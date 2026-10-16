@@ -39,7 +39,7 @@ import { runConfigsQuery, stopTask, tasksQuery } from './debug/run-api'
 import { PasteDialog } from './paste-dialog'
 import { TrustDialog } from './trust-dialog'
 import { askTrust } from './trust'
-import { formatError, formatModel, formattersOf, skipFormat } from './format'
+import { editorsOwn, formatError, formatModel, formattersOf, skipFormat } from './format'
 import { clipboardText } from './paste'
 import { compareSelection, type Side } from './compare'
 import { SearchPanel } from './search'
@@ -494,19 +494,19 @@ function Workbench({
         description: [f.version, f.source === 'project' ? 'the project\'s' : f.source === 'config' ? 'config.json' : 'installed'].filter(Boolean).join(' · '),
         detail: !f.available ? (f.reason === 'trust' ? 'needs the folder trusted' : 'not installed') : f.id === list?.default ? 'default' : undefined,
       })),
-      { id: 'editor:monaco', label: "The editor's own", description: 'Monaco (TypeScript, JSON, CSS, HTML)' },
+      { id: editorsOwn, label: "The editor's own", description: 'Monaco (TypeScript, JSON, CSS, HTML)' },
       { id: 'configure', label: 'Configure Default Formatter…', group: ' ' },
     ]
     const picked = await quickPick({ title: 'Format document with', placeholder: 'Select a formatter', items })
     if (!picked) return
-    if (picked.id === 'editor:monaco') return runAction('editor.action.formatDocument')
     if (picked.id === 'configure') {
-      const which = await quickPick({ title: `Default formatter for ${active?.language ?? language}`, placeholder: 'Select the default formatter', items: (list?.formatters ?? []).map((f) => ({ id: f.id, label: f.name })) })
+      const which = await quickPick({ title: `Default formatter for ${active?.language ?? language}`, placeholder: 'Select the default formatter', items: [...(list?.formatters ?? []).map((f) => ({ id: f.id, label: f.name })), { id: editorsOwn, label: "The editor's own" }] })
       if (which) await settings.update('editor.defaultFormatter', which.id, 'user', language).catch((e: unknown) => toast.error(errorMessage(e)))
       return
     }
     try {
-      await formatModel(model, path, { formatter: picked.id })
+      // The editor's own runs whatever the project's formatters are (Monaco's, not the first provider it finds).
+      if ((await formatModel(model, path, { formatter: picked.id })) === null && picked.id === editorsOwn) toast.info(`The editor has no formatter of its own for ${active?.language ?? language}.`)
     } catch (e) {
       toast.error(formatError(e))
     }
