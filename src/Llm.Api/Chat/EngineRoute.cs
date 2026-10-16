@@ -149,6 +149,12 @@ public sealed partial class EngineRoute
         /// <summary>The slot to send as id_slot; null: send none.</summary>
         public int? Slot => Lease?.Slot;
 
+        /// <summary>
+        /// The model to send the request to in place of the one asked for: one copy of a vLLM model (NAME@i, the same for the
+        /// whole conversation), or its fallback while it cannot answer; null: the one asked for.
+        /// </summary>
+        public string? Model { get; internal set; }
+
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _ended, 1) == 0)
@@ -164,7 +170,9 @@ public sealed partial class EngineRoute
     /// null. The model is in use from now until the request ends (it is disposed): a look for room for another does not
     /// unload it meanwhile.
     /// </summary>
-    public async Task<Sending> TakeAsync(string? model, Guid? conversation, CancellationToken ct)
+    public Task<Sending> TakeAsync(string? model, Guid? conversation, CancellationToken ct) => TakeAsync(model, conversation, true, ct);
+
+    private async Task<Sending> TakeAsync(string? model, Guid? conversation, bool mayFallBack, CancellationToken ct)
     {
         if (!Ours(model))
         {
@@ -180,7 +188,21 @@ public sealed partial class EngineRoute
             await ReadyAsync(model, ct);
             Tell(model);
             sending.Lease = await LeaseAsync(model, conversation, ct);
+            // A model of several copies: a conversation stays on one, where its prefix is cached.
+            if (engine.Places.TryGetValue(model, out var place) && place.Replicas > 1 && conversation is { } c)
+            {
+                sending.Model = $"{model}@{Copy(c, place.Replicas).ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+            }
             return sending;
+        }
+        catch (ChatGatewayException ex) when (ex.NotLoaded && mayFallBack && FallbackOf(model) is { } fallback)
+        {
+            // It cannot answer now (failed, restarting, no room): its fallback does.
+            sending.Dispose();
+            LogFallback(logger, model, fallback, ex.Message);
+            var other = await TakeAsync(fallback, conversation, false, ct);
+            other.Model ??= fallback;
+            return other;
         }
         catch
         {
@@ -188,6 +210,13 @@ public sealed partial class EngineRoute
             throw;
         }
     }
+
+    /// <summary>The copy a conversation stays on: by its id, the same on every replica of the app.</summary>
+    public static int Copy(Guid conversation, int copies) => (int)(BitConverter.ToUInt32(conversation.ToByteArray(), 0) % (uint)Math.Max(1, copies));
+
+    /// <summary>The model that answers for <paramref name="model"/> while it cannot (Admin → Models), or null.</summary>
+    public string? FallbackOf(string? model) =>
+        model is not null && engine.Places.TryGetValue(model, out var p) && p.Fallback is { Length: > 0 } f && f != model ? f : null;
 
     /// <summary>The slot for a request to <paramref name="model"/>, a model of this engine ready for it.</summary>
     private async Task<SlotTable.Lease> LeaseAsync(string model, Guid? conversation, CancellationToken ct)
@@ -227,7 +256,8 @@ public sealed partial class EngineRoute
         }
         catch (ChatGatewayException ex) when (ex.NotLoaded)
         {
-            return ex.Message;
+            // An API key names its model itself: it is told which answers in its place.
+            return FallbackOf(model) is { } fallback ? $"{ex.Message} {fallback} answers in its place: send the request to {fallback}." : ex.Message;
         }
     }
 
@@ -1026,6 +1056,9 @@ public sealed partial class EngineRoute
         }
         return _wanted.TryGetValue(model, out var at) && clock.GetUtcNow() - (at > since ? at : since) < Starting;
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "{Model} cannot answer now ({Why}): its fallback {Fallback} answers")]
+    private static partial void LogFallback(ILogger logger, string model, string fallback, string why);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting {Model} on vLLM for a request")]
     private static partial void LogStarting(ILogger logger, string model);

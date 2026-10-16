@@ -98,6 +98,10 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
                 continue;
             }
             var info = row["model_info"] as JsonObject;
+            if (info?["llm_app_replica_of"] is not null)
+            {
+                continue; // one copy of a vLLM model under its own name: the chat's to choose, in no list
+            }
             var mode = info?["mode"]?.GetValue<string>() ?? "chat";
             if (mode is not ("chat" or "image_generation" or "audio_transcription" or "audio_speech"))
             {

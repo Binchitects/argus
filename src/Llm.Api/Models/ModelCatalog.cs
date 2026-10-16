@@ -888,6 +888,41 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             deployments.Add((m.Name, litellm, info, ["local", m.Name, m.File, m.Context, m.Parallel, m.MaxOutput, m.Projector, projector?.Audio, m.Tools, m.Thinking,
                 price.Input, price.CachedInput, price.Output], m.Parallel));
         }
+        // vLLM's models: each copy at its own port, never sent more at once than its answers at once (--max-num-seqs), a pool when
+        // there are several; each copy also under its own name (NAME@i, kept out of every list) for the chat to keep a conversation
+        // on one; and the fallback that answers while it cannot.
+        foreach (var m in await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.Vllm).ToListAsync(ct))
+        {
+            if (vllm.For(m.Engine) is not { } backend || backend.Presets().Where(e => e.Model == m.Name).ToList() is not { Count: > 0 } entries)
+            {
+                continue;
+            }
+            var vision = VllmAdvisor.Read(library.FullPath(m.File))?.Vision == true;
+            var info = Info(m.Context, Math.Min(m.MaxOutput ?? DefaultMaxOutput(m.Context), m.Context), vision, m.Tools, m.Thinking);
+            if (m.Fallback is { Length: > 0 } fallback)
+            {
+                info["llm_app_fallbacks"] = new JsonArray(fallback);
+            }
+            var price = TokenPrice.Of(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, defaults);
+            foreach (var e in entries)
+            {
+                var litellm = new JsonObject
+                {
+                    ["model"] = "openai/" + e.Name, ["api_base"] = $"http://{backend.Host}:{e.Port}/v1", ["api_key"] = "os.environ/ENGINE_API_KEY",
+                    ["max_parallel_requests"] = Math.Max(1, m.Parallel),
+                };
+                Prices(litellm, price);
+                object?[] print = ["vllm", m.Name, e.Name, backend.Host, e.Port, m.Context, m.Parallel, m.MaxOutput, vision, m.Tools, m.Thinking, m.Fallback,
+                    price.Input, price.CachedInput, price.Output];
+                deployments.Add((m.Name, litellm, (JsonObject)info.DeepClone(), print, Math.Max(1, m.Parallel)));
+                if (entries.Count > 1)
+                {
+                    var own = (JsonObject)info.DeepClone();
+                    own["llm_app_replica_of"] = m.Name;
+                    wanted[Fingerprint([.. print, "replica"])] = (e.Name, (JsonObject)litellm.DeepClone(), own);
+                }
+            }
+        }
         foreach (var server in await db.RemoteServers.AsNoTracking().ToListAsync(ct))
         {
             var key = remote.Unprotect(server.ApiKeyProtected);

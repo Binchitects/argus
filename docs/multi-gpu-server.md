@@ -457,6 +457,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
    - vLLM models go to LiteLLM with `api_base` per port, `max_parallel_requests` from `max-num-seqs`, and **fallbacks** per model.
    - Two replicas register as `name@i` with app-side conversation affinity.
    - Tests: the generated LiteLLM config, and a fallback when fake-vllm is down.
+   - **Done**: each copy registers at `http://HOST:PORT/v1` with `max_parallel_requests` = its `--max-num-seqs`, the copies a pool under the model's name, and each copy under `NAME@i` too (`llm_app_replica_of`: in no list, not the chat's, not the keys' pickers); `llm_app_fallbacks` names the fallback. The chat keeps a conversation on one copy (`EngineRoute.Copy`, by its id, the same on every app replica), sends `fallbacks` with each request (LiteLLM's own, for a failure mid-answer), and goes to the fallback at once when the model cannot answer (its engine down, failed, no room); an API key is told which model answers in its place. LiteLLM router-level fallbacks for API keys (`router_settings.fallbacks`) are not written by the app: that needs LiteLLM's config API, left for the LiteLLM HA step. Tests: `VllmGatewayTests`, `LiteLlmClientTests`.
 10. **`GpuShare` per GPU with sleep.**
     - Lending is scoped to the media server's GPU. A vLLM model on it **sleeps**, or unloads when sleep is off or fails; it wakes afterwards.
     - Tests: fake-vllm `/sleep` and `/wake_up`, and the media status fakes.
