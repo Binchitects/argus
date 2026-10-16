@@ -1163,10 +1163,11 @@ under a running job, and a model menu in the chat's tools.
 
 ## Next (after v5.6.0)
 
-1. **One GPU plan for chat, picture and video models**: the chat engine's fit
-   target leaves room for a picture model kept beside it; a video model makes
-   room by unloading idle chat models and gives it back; a model never
-   switches under a running job (leases); a model menu in the chat's tools.
+1. **One GPU plan for chat, picture and video models**: done in v5.8 (the
+   chat engine's fit target leaves room for a picture model kept beside it; a
+   picture or video job short of memory makes room by unloading idle chat
+   models and gives it back; jobs take turns and a model never switches under
+   a running job). Left: a model menu in the chat's tools.
 2. **Argus at run time**: what the build does not show. Service names to
    hosts (Kubernetes, Helm, compose, environment, Spring and .NET config, CI's
    helm and kubectl), gRPC (a .proto's services and options, server and client

@@ -144,7 +144,8 @@ public sealed partial class EngineWatcher : BackgroundService
                 var names = models.Where(m => m.Status == "loaded").Select(m => m.Name).ToList();
                 // What each model serves at once: its line's places, and the slots conversations keep; and which may make room.
                 await CapacityAsync(scope.ServiceProvider, true, names, held, stoppingToken);
-                if (lead && !loading)
+                // While the GPU is lent to a picture or video job, no chat model loads: the job gives the room back when it ends.
+                if (lead && !loading && state.Lent is null)
                 {
                     // One at a time, each through the app's room-making (an idle model that may make room unloads first), never
                     // by the engine's own choice of the model used least recently, which may be another that never makes room.

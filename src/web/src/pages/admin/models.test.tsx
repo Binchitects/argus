@@ -382,6 +382,36 @@ describe('admin models', () => {
     expect(screen.getByText(/each small step waits for it to load/)).toBeInTheDocument()
   })
 
+  it("a model with several slots says each conversation's share of its context", async () => {
+    const v = view()
+    fakeApi(admin, { 'GET /api/admin/models': () => ({ json: { ...v, models: [{ ...v.models[0], window: 32768 }, ...v.models.slice(1)] } }) })
+    renderApp('/admin/models')
+    expect(await screen.findByText('big/Big-Q4.gguf · 131,072 tokens of context, 32,768 a conversation')).toBeInTheDocument()
+    expect(screen.getByText('small/Small-Q8.gguf · 32,768 tokens of context')).toBeInTheDocument()
+  })
+
+  it('the GPU lent to a video says so, with the room made and given back', async () => {
+    fakeApi(admin, {
+      'GET /api/admin/models': () => ({
+        json: {
+          ...view(),
+          gpu: {
+            lent: { media: 'Wan2.2-TI2V-5B', kind: 'video', since: '2026-10-16T10:00:00Z' },
+            recent: [
+              { at: '2026-10-16T10:00:05Z', text: 'Made room for Wan2.2-TI2V-5B (a video): unloaded Big-Model.' },
+              { at: '2026-10-16T09:00:00Z', text: 'Gave the room back after FLUX.2-klein-4B: loaded Big-Model again.' },
+            ],
+          },
+        },
+      }),
+    })
+    renderApp('/admin/models')
+    expect(await screen.findByText('The GPU is lent to a video (Wan2.2-TI2V-5B)')).toBeInTheDocument()
+    expect(screen.getByText(/no chat model loads until it is done/)).toBeInTheDocument()
+    expect(screen.getByText('Made room for Wan2.2-TI2V-5B (a video): unloaded Big-Model.')).toBeInTheDocument()
+    expect(screen.getByText('Gave the room back after FLUX.2-klein-4B: loaded Big-Model again.')).toBeInTheDocument()
+  })
+
   it("a picture model's file chosen in the chat model's form is added as a picture model", async () => {
     fakeApi(admin, {
       'GET /api/admin/models': () => ({ json: view() }),

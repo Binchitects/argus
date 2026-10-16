@@ -57,9 +57,11 @@ start() {
   fi
   set -- --listen-ip 0.0.0.0 --listen-port 1234
   while IFS= read -r l; do case $l in arg=*) set -- "$@" "${l#arg=}" ;; esac; done < "$conf"
-  # Where it decodes: on the GPU when it has room now, else on the CPU.
+  # Where it decodes: on the GPU when it has room now, else on the CPU. Read again here: a server started again (the
+  # app made room for it) has just stopped and given its own memory back, and the chat models theirs.
   vae= need=$(get vae_gpu_mb) extra=
   if [ -n "$need" ]; then
+    read_free "$(get gpu)"
     if [ "$free" != null ] && [ "$free" -ge "$need" ]; then vae=gpu extra=vae_gpu_arg; else vae=cpu extra=vae_cpu_arg; fi
     while IFS= read -r l; do case $l in "$extra"=*) set -- "$@" "${l#"$extra"=}" ;; esac; done < "$conf"
   fi

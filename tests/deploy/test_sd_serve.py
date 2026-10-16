@@ -33,7 +33,8 @@ class SdServeTests(unittest.TestCase):
             'pwd > "$FAKE_DIR/cwd"\n'
             'echo "loading model"\n'
             '[ -f "$FAKE_DIR/exit" ] && exit "$(cat "$FAKE_DIR/exit")"\n'
-            'trap "exit 0" TERM\n'
+            # Stopped, it gives its GPU memory back (free_after, when the test says how much is free then).
+            'trap \'[ -f "$FAKE_DIR/free_after" ] && cp "$FAKE_DIR/free_after" "$FAKE_DIR/free"; exit 0\' TERM\n'
             'while true; do sleep 0.1; done\n')
         smi = self.dir / "bin" / "nvidia-smi"
         smi.write_text('#!/bin/sh\ncat "$FAKE_DIR/free" 2>/dev/null || exit 9\n')
@@ -158,6 +159,23 @@ class SdServeTests(unittest.TestCase):
         self.until(lambda: self.status().get("gen") == "3" and (self.dir / "args").exists(), "the third runs")
         self.assertEqual(self.status()["vae"], "cpu")
         self.assertIsNone(self.status()["free_mb"])
+
+    def test_Started_again_it_decides_where_it_decodes_by_the_memory_free_once_it_has_stopped(self):
+        # The app made room (unloaded the chat models) and raised gen: the memory the old server and the chat models held is
+        # free only once the old server has stopped, which is after the script read the GPU on that round.
+        self.model("video/w.gguf")
+        lines = ["want=on", "model=W", "file=video/w.gguf", "vae_gpu_mb=13312", "vae_gpu_arg=--max-vram", "vae_gpu_arg=12",
+                 "vae_gpu_arg=--offload-to-cpu", "vae_cpu_arg=--vae-on-cpu"]
+        (self.dir / "free").write_text("2600\n")
+        self.conf("gen=1", *lines)
+        self.run_script()
+        self.until(lambda: self.status().get("phase") == "running" and self.status().get("vae") == "cpu", "it runs, decoding on the CPU")
+        (self.dir / "free_after").write_text("20000\n")
+        (self.dir / "args").unlink()
+        self.conf("gen=2", *lines)
+        self.until(lambda: self.status().get("gen") == "2" and (self.dir / "args").exists(), "the new generation runs")
+        self.assertEqual(self.status()["vae"], "gpu")
+        self.assertEqual((self.dir / "args").read_text().splitlines()[4:], ["--max-vram", "12", "--offload-to-cpu"])
 
     def test_It_stops_its_server_when_it_is_stopped(self):
         self.model("image/a.gguf")

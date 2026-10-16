@@ -1455,7 +1455,11 @@ each time. An answer that has not started after a minute says so (the engine
 busy with others, or reading a long prompt; Ctrl+C or **Stop** ends the wait).
 One that does not start within 15 minutes, or that stops for 3 minutes, is
 given up and asked once more; a second such stall ends the turn with the
-reason, and the next message is sent as usual. When
+reason, and the next message is sent as usual. The gateway waits 16 minutes
+(`timeout` and `stream_timeout` in `config/litellm.yaml`), so Code Arena, not
+the gateway, is the one that gives up on a long prompt being read. Its window
+is the model's at the gateway: what one of the engine's slots holds (Admin →
+Models, "65,536 a conversation"), so it compacts before a slot overflows. When
 the connection drops after part of an answer arrived (a stream that ends
 without its end counts too), that part is kept and the model is asked to carry
 on from where it stopped, up to three times a turn.

@@ -271,6 +271,7 @@ public sealed partial class EngineRoute
     {
         // In use: not quiet.
         _quiet.TryRemove(model, out _);
+        await WhileLentAsync(model, ct);
         Refuse(model);
         await RoomAsync(model, ct);
         if (engine.StatusOf(model) == "failed")
@@ -278,6 +279,104 @@ public sealed partial class EngineRoute
             Refuse(model);
             // This request has the engine load it again: a try, after which the next wait is longer.
             engine.Tried(model);
+        }
+    }
+
+    /// <summary>
+    /// Told why a request waits, while it waits for the GPU (the chat shows it under the answer): set by the answer's job
+    /// around its turn, and flowing to the requests it makes; null for the others (an API key's, a side request's).
+    /// </summary>
+    public static readonly AsyncLocal<Func<string, Task>?> Waiting = new();
+
+    /// <summary>
+    /// While the GPU is lent to a picture or video job (EngineState.Lent), a request for a model that is not loaded waits
+    /// until it is given back, rather than load it (the engine would take the job's memory) or fail: it is told why once.
+    /// A model loaded meanwhile (kept loaded, or not unloaded for the job) answers as ever.
+    /// </summary>
+    private async Task WhileLentAsync(string model, CancellationToken ct)
+    {
+        var told = false;
+        while (engine.Lent is { } lent && engine.StatusOf(model) is not ("loaded" or "loading"))
+        {
+            if (!told)
+            {
+                told = true;
+                LogLentWait(logger, model, lent.Media);
+                if (Waiting.Value is { } say)
+                {
+                    await say($"The GPU is making a {lent.Kind} with {lent.Media} just now: {model} loads again as soon as it is done.");
+                }
+            }
+            await Task.Delay(TimeSpan.FromSeconds(1), clock, ct);
+        }
+    }
+
+    /// <summary>
+    /// Room on the GPU for a picture or video job (<paramref name="media"/>, which makes a <paramref name="kind"/>): each loaded
+    /// chat model not in <paramref name="kept"/> unloads once it is idle, through the same engine call an admin's Unload uses,
+    /// waiting <paramref name="wait"/> at most for those in use. The models unloaded, in order.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> MakeRoomAsync(string media, string kind, IReadOnlyCollection<string> kept, TimeSpan wait, CancellationToken ct)
+    {
+        // Real time: the job waits for it, whatever the app's clock says.
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        var made = new List<string>();
+        while (true)
+        {
+            IReadOnlyList<EngineModel> models;
+            try
+            {
+                var asked = engine.Asking();
+                models = engine.Seen(await client.ModelsAsync(ct), asked);
+            }
+            catch (EngineException ex)
+            {
+                // No engine to make room in: the job runs with what there is.
+                LogRoomFailed(logger, "the engine's models", ex.Message);
+                return made;
+            }
+            // Loading ones too: a request let through before the GPU was lent; each is unloaded once it has loaded and is idle.
+            var spares = models.Where(m => m.Status is "loaded" or "loading" && !kept.Contains(m.Name)).ToList();
+            if (spares.Count == 0)
+            {
+                return made;
+            }
+            foreach (var spare in spares.Where(m => m.Status == "loaded").Select(m => m.Name))
+            {
+                // Idle at the engine: no request on its way or answering, no slot busy. An answer between two steps (the one
+                // that asked for this very picture or video, running its tool) holds its place in the model's line, not the
+                // model: its next step waits for the GPU (WhileLentAsync), and says why.
+                if (InUse(spare) || await ViewAsync(spare, ct) is not { } view || view.Seen is { Busy.Count: > 0 })
+                {
+                    continue;
+                }
+                // Unloaded from now on for every request; one that came for it meanwhile keeps it.
+                engine.Unloading(spare, $"making room for {media} (a {kind})");
+                Interlocked.MemoryBarrier();
+                if (InUse(spare))
+                {
+                    engine.NotUnloading(spare);
+                    continue;
+                }
+                LogRoom(logger, spare, media);
+                try
+                {
+                    await client.UnloadAsync(spare, ct);
+                }
+                catch (EngineException ex)
+                {
+                    engine.NotUnloading(spare);
+                    LogRoomFailed(logger, spare, ex.Message);
+                    continue;
+                }
+                replicas.Tell(UnloadingTopic, spare);
+                made.Add(spare);
+            }
+            if (waited.Elapsed >= wait)
+            {
+                return made;
+            }
+            await Task.Delay(TimeSpan.FromSeconds(1), ct);
         }
     }
 
@@ -761,6 +860,9 @@ public sealed partial class EngineRoute
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Could not unload {Spare} to make room: {Message}")]
     private static partial void LogRoomFailed(ILogger logger, string spare, string message);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "A request for {Model} waits: the GPU is lent to {Media}")]
+    private static partial void LogLentWait(ILogger logger, string model, string media);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "The engine is full: {Model} was not loaded, as no model that may make room is idle")]
     private static partial void LogFull(ILogger logger, string model);

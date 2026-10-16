@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text;
 using Llm.Api.Models;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -408,5 +409,77 @@ public sealed class ModelStateMediaTests(AppFixture app) : IDisposable
         var res = await sending.WaitAsync(Deadline);
         await StatusAssert.Is(HttpStatusCode.OK, res);
         Assert.Equal("/v1/images/generations", Assert.Single(Pictures.Paths));
+    }
+
+    [Fact]
+    public async Task An_API_keys_picture_without_picture_credit_is_refused_before_its_model_loads()
+    {
+        await using var s = await NewAsync();
+        await s.Media.SetKeptAsync(Image, false);
+        await UntilFileAsync(s, "off", "the picture server is off");
+        var admin = await new TestBrowser(s.App).SignedInAsync("admin", AppFixture.AdminPassword);
+        var name = "k" + Guid.NewGuid().ToString("N")[..10];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{made.GetProperty("id").GetGuid()}/credits", UriKind.Relative), new { pictures = 0 }));
+        var client = s.App.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://gateway.{AppFixture.Domain}"), HandleCookies = false });
+        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri("/v1/images/generations", UriKind.Relative))
+        {
+            Content = new StringContent($$"""{"model":"{{Image}}","prompt":"an apple","size":"512x512"}""", Encoding.UTF8, "application/json"),
+        };
+        req.Headers.Authorization = new("Bearer", made.GetProperty("apiKey").GetString()!);
+
+        // Refused at once with who gives the credit; the model was not loaded for it, nor the gateway asked.
+        var res = await client.SendAsync(req).WaitAsync(Deadline);
+        await StatusAssert.Is(HttpStatusCode.BadRequest, res);
+        Assert.Contains("You have no picture credit: an admin sets it under People.", await res.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        s.Media.Wake();
+        await Task.Delay(1000);
+        Assert.Equal("off", s.File);
+        Assert.Empty(Pictures.Paths);
+    }
+
+    [Fact]
+    public async Task The_speech_servers_voice_detector_unloads_when_unused_and_an_admins_load_says_so()
+    {
+        var clock = new MovableClock(DateTimeOffset.UtcNow);
+        var speech = new FakeSpeech();
+        await using var f = app.Create(app.ConnectionStringFor("mvad_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
+            new Dictionary<string, string?> { ["Modules:audio"] = "true", ["Replicas:Enabled"] = "false" },
+            s =>
+            {
+                s.AddSingleton<TimeProvider>(clock);
+                s.AddHttpClient(MediaControl.Client).ConfigurePrimaryHttpMessageHandler(() => speech);
+            });
+        var media = f.Services.GetRequiredService<MediaControl>();
+        async Task Until(Func<Task<bool>> done, string what)
+        {
+            var until = DateTime.UtcNow + Deadline;
+            while (!await done())
+            {
+                Assert.True(DateTime.UtcNow < until, $"Not within {Deadline.TotalSeconds} s: {what} (calls: {string.Join(", ", speech.Calls)})");
+                media.Wake();
+                await Task.Delay(200);
+            }
+        }
+        async Task<MediaControl.Status> Row(string name) => (await media.ListAsync(CancellationToken.None)).Single(x => x.Model.Name == name);
+
+        // An admin loads kokoro: it says so while it is loaded, round after round (not "for a request").
+        media.Load(MediaModels.TextToSpeech);
+        await Until(async () => (await Row(MediaModels.TextToSpeech)).Now == "loaded", "kokoro is loaded");
+        media.Wake();
+        await Task.Delay(500);
+        Assert.Equal("loaded by an admin", (await Row(MediaModels.TextToSpeech)).Why);
+
+        // Dictation: the speech server loaded its voice detector by itself. It stays while speech to text is used.
+        speech.Loaded["silero_vad_v5"] = true;
+        media.Touch(MediaModels.SpeechToText);
+        clock.Now += TimeSpan.FromMinutes(5);
+        media.Wake();
+        await Task.Delay(500);
+        Assert.True(speech.Loaded.ContainsKey("silero_vad_v5"), "used five minutes ago: still loaded");
+        // Ten minutes and more without speech to text: unloaded, as the models are.
+        clock.Now += TimeSpan.FromMinutes(6);
+        await Until(() => Task.FromResult(!speech.Loaded.ContainsKey("silero_vad_v5")), "the voice detector, unused for eleven minutes, is unloaded");
+        Assert.Contains("DELETE silero_vad_v5", speech.Calls);
     }
 }

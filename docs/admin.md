@@ -293,11 +293,26 @@ would be with them.
   far below the card's own (`GPU_POWER_LIMIT_W`) is named for a model that runs
   all on the GPU: it is what limits one.
 - The added models share one cache between the answers in parallel
-  (`kv-unified`, as the `.env` model): one conversation can use all of the
-  context. Each conversation keeps its own slot of it ([the token
-  cache](#the-token-cache)). They run with `LLAMACPP_THREADS`. Sampling left
-  empty is the model's own recommendation from its file, which the engine
-  applies.
+  (`kv-unified`, as the `.env` model), **each slot held to its share of it**
+  (`kv-unified-per-slot`: the context divided by **Answers at once**). A long
+  conversation therefore never pushes the others' out of the cache, nor is
+  pushed out by them (before, a 209,000-token session in a 262,144-token cache
+  left 4 slots 53,000 tokens between them, and each turn of anyone's evicted
+  someone's prefix: 20 to 35 minutes to read it again). The gateway advertises
+  that share as the model's window (`max_input_tokens`), so the chat and Code
+  Arena compact before they reach it, and the card says it ("262,144 tokens of
+  context, 65,536 a conversation"). For longer conversations, give the model
+  fewer answers at once (2 slots: 131,072 each) or more context. Each
+  conversation keeps its own slot ([the token cache](#the-token-cache)). They
+  run with `LLAMACPP_THREADS`. Sampling left empty is the model's own
+  recommendation from its file, which the engine applies.
+- A model on **automatic placement** (`fit = on`) leaves room for the picture
+  model kept loaded: its fit target (`fit-target`, llama.cpp's own margin of
+  1,024 MiB) grows by that model's GPU budget and 1 GiB (FLUX.2-klein: 4,096
+  MiB in all) on the picture model's GPU, so the picture server loads beside
+  it instead of with its weights in RAM. Keeping another picture model loaded,
+  or none, changes the presets, so the engine restarts. A model's own
+  `fit-target` line wins.
 - **More engine options** are `key = value` lines with llama-server's long
   option names. Options the app or the engine owns (files and paths, the port,
   the key), those the form sets, and names this engine does not know are
@@ -357,8 +372,10 @@ only what is new. A model has as many slots as its **Answers at once**.
   preset). By default, with one cache for all slots, llama.cpp moves idle slots
   to RAM and empties them at every new request, and a hybrid model's never come
   back (measured: with each chat in its own slot, not one token then came from
-  the cache). When the cache is full, the engine still empties idle slots, one
-  at a time.
+  the cache). With each slot held to its share of the cache
+  (`kv-unified-per-slot`), no request needs another slot's cells, so emptying
+  idle slots would only move a long session's prefix to RAM and back at each
+  turn: it stays in its slot, on the GPU, whoever else is answered.
 - **Checkpoints.** A hybrid or recurrent model cannot cut its state back to an
   earlier point of a prompt (a retry, an edited question, a changed tool list):
   it keeps copies of its state in RAM to go back to. Each such model's preset
@@ -406,7 +423,11 @@ about all there was to read, thinking on or off. **Settings → Model → RAM fo
 chats that lost their slot** sizes it per loaded model (8 GB as installed:
 about a dozen long chats of a hybrid model, 0.6 GB each); the model card says
 it. RAM it takes is not there for the models' files, so on a host whose model
-does not fit RAM and the GPU, keep it small. The Resources dashboard's
+does not fit RAM and the GPU, keep it small. It stays 8 GB as installed: with
+each slot held to its share of the cache, a long session keeps its prefix in its
+slot whoever else is answered, and this RAM serves only the conversations
+beyond the slots (a 65,536-token window of a hybrid model is about 2.3 GB at
+`q8_0`); raise it on a host with RAM to spare. The Resources dashboard's
 **Memory used by programs** leaves out the page cache that holds the models'
 files: **Memory** below it shows both.
 
@@ -460,9 +481,31 @@ and removed there.
 - **Loaded when asked for**, by the chat's tools, Talk, read aloud, a voice
   message, or an API key (the gateway's picture and speech paths go by the
   app, which loads the model first), and unloaded after its idle minutes. The
-  speech server unloads nothing by itself: the app does.
+  speech server unloads nothing by itself: the app does, its voice detector
+  too (`silero_vad_*`, which it loads by itself for dictation and Talk: ten
+  minutes after the last speech to text).
+- **One GPU for chat, pictures and video.** Pictures and videos take turns (the
+  chat's, Arena MCP's and API keys' alike), and a server never switches to
+  another model under a running job. Before a job whose model is short of GPU
+  memory (by its server's status file: a video model that would decode on the
+  CPU, a picture model whose budget is not free), the GPU is lent to it: the
+  idle chat models that are not kept loaded unload (as with **Unload**), it
+  waits for their memory (a minute at most), and a server already running the
+  model on the CPU starts again, deciding anew where it decodes (measured
+  before: a 1-second clip decoded on the CPU took 8.5 minutes, 427 s of them
+  decoding). While the GPU is lent no chat model loads: an answer that needs
+  one waits and says why ("The GPU is making a video with Wan2.2-TI2V-5B just
+  now: … loads again as soon as it is done"), the engine loads none by itself,
+  and **Load** says to try once it is done. When the job ends the room goes
+  back: the picture or video model unloads (unless kept loaded) and the chat
+  models unloaded for it that are kept loaded or that new chats use load again.
+  Admin → Models says what happened lately ("Made room for Wan2.2-TI2V-5B (a
+  video): unloaded Qwen3.8-Flash-Next.", "Gave the room back …") and, while it
+  lasts, that the GPU is lent. A model kept loaded is never unloaded for a job.
+  With several replicas each says what its own jobs did; a lending lasts an
+  hour at most should its replica stop.
 - **States and failures** as a chat model's: Loading… and Unloading… with why
-  and since when; a model whose server exits says why from its log (too little
+  and since when (a speech model an admin loaded keeps "loaded by an admin"); a model whose server exits says why from its log (too little
   GPU memory, settings it refused, a file it could not read, a crash, no
   answer in ten minutes) and is tried again after 1, 2, 4, 8, 16, then at most
   30 minutes, its server off meanwhile; settings it refused wait until it is
@@ -648,7 +691,11 @@ group's, it is refused with the reason ("You have used all your API credit for
 this month ($20.00)"). The other kinds go on. A person hears once a month at 80%
 of a credit of their own and when it is used up, and the admins when it is used
 up (Notifications). A credit of $0 allows none of that kind; it is not listed as
-used up. A person new since v5.5 has no limit of any kind until an admin sets
+used up, and a request of that kind hears who gives it ("You have no picture
+credit: an admin sets it under People", or under Groups for a group's). Arena
+MCP leaves the picture, video and speech tools out of a person's tool list
+while they have no credit of that kind, and its notes say why. An API key's
+picture is refused before its model is loaded for it. A person new since v5.5 has no limit of any kind until an admin sets
 one. The person's page
 shows each kind's spend against their credit and the tightest group's credit
 left; their home page shows the same. People → **Set credit** sets one kind for

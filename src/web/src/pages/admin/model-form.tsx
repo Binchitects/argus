@@ -89,6 +89,8 @@ export interface SavedModel {
   file?: string | null
   projector?: string | null
   context?: number | null
+  /** What one conversation may hold: the context shared by its slots (Answers at once). */
+  window?: number | null
   maxOutput?: number | null
   placement?: 'auto' | 'manual'
   /** The GPUs it runs on ("0,1"); empty: all. */

@@ -55,11 +55,24 @@ public static class KeySpeech
                 return;
             }
             // A picture model of this stack's, whoever's key it is: loaded first (a few minutes the first time), or the caller told why not.
-            if (SpokenBy(body) is { } model && media.Find(model) is { Mode: Llm.Core.Models.MediaModes.Image } && await media.ReadyAsync(model, ct) is { } notReady)
+            if (SpokenBy(body) is { } model && media.Find(model) is { Mode: Llm.Core.Models.MediaModes.Image } local)
             {
-                http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-                await http.Response.WriteAsJsonAsync(new { error = new { message = notReady, type = "model_not_ready", code = "503" } }, ct);
-                return;
+                // The key's person's picture credit first: a request the gateway refuses anyway does not load the model for nothing.
+                if (await PersonAsync(request.Headers.Authorization.ToString(), gateway, db, ct) is { } owner
+                    && await http.RequestServices.GetRequiredService<Credit>().RefusalAsync(owner, Llm.Core.Access.CreditKind.Pictures, ct) is { } refusal)
+                {
+                    http.Response.StatusCode = StatusCodes.Status400BadRequest;
+                    await http.Response.WriteAsJsonAsync(new { error = new { message = refusal, type = "credit", code = "400" } }, ct);
+                    return;
+                }
+                // Its turn on the GPU as the chat's pictures take it, until it is answered (the response's end lets it go).
+                http.Response.RegisterForDisposeAsync(await http.RequestServices.GetRequiredService<Models.GpuShare>().HoldAsync(local, ct));
+                if (await media.ReadyAsync(model, ct) is { } notReady)
+                {
+                    http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                    await http.Response.WriteAsJsonAsync(new { error = new { message = notReady, type = "model_not_ready", code = "503" } }, ct);
+                    return;
+                }
             }
             content = new ByteArrayContent(body);
             length = body.Length;

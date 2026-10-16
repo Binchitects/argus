@@ -927,7 +927,10 @@ their turn:
   2 answers ahead of you"), or that their own other answer goes first. A free
   place goes to whoever has had least: someone with nothing running goes
   before someone whose last answer just ended. A wait of more than ten minutes
-  gives up and says which model is busy.
+  gives up and says which model is busy. While the GPU is lent to a picture or
+  video ([admin.md](admin.md#picture-video-and-speech-models)), an answer whose
+  model was unloaded for it waits and says so ("The GPU is making a video with
+  Wan2.2-TI2V-5B just now: … loads again as soon as it is done"), then goes on.
 - **Each conversation keeps its slot** in the engine, so the next turn reads
   only what is new from the cache (see [admin.md](admin.md#the-token-cache)).
 - **API keys** (Qwen Code, IDEs, scripts) have at most two requests at once
@@ -1110,6 +1113,7 @@ use and edit one); a new chat takes `assistantId`.
 |---|---|---|
 | "The model gateway is not reachable right now" or "The model could not answer: …" | LiteLLM or the engine is down or still loading | Admin → Overview shows which; loading a model takes minutes |
 | "You have used all your chat credit for this month (…)" (or API, picture, video, speech) | the person's credit of that kind is spent; the other kinds go on | an admin raises it under People, or wait for the first of the month |
+| "You have no picture credit: an admin sets it under People" (or chat, API, video, speech; "under Groups" for a group's) | an admin set that credit to $0 and nothing was spent | an admin sets a credit, or no limit, under People (or Groups) |
 | "… has used its chat credit for this month" or "You have used your chat credit as a member of …" | a group's credit of that kind is spent | an admin raises it under Admin → Groups → the group → Policies |
 | "Your API access is off" | an admin took it (People → the person → API access) | an admin gives it back; the chat is not affected |
 | "This message was not sent: it holds a private key." | secret scanning found a secret | remove it (a placeholder will do) and send again |
