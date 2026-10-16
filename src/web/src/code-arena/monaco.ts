@@ -4,6 +4,7 @@ import CssWorker from 'monaco-editor/language/css/css.worker?worker'
 import HtmlWorker from 'monaco-editor/language/html/html.worker?worker'
 import JsonWorker from 'monaco-editor/language/json/json.worker?worker'
 import TsWorker from 'monaco-editor/language/typescript/ts.worker?worker'
+import { keepEditorFormatters } from './format'
 import { globMatch } from './glob'
 
 // Monaco, bundled with the page: its workers are files of the page's own (Vite's
@@ -30,6 +31,10 @@ self.MonacoEnvironment = {
     }
   },
 }
+
+// The editor's own formatters (TypeScript's, JSON's, CSS's, HTML's) are kept as their services register, before any
+// file opens: they still format where the project's formatter takes their place (see format.ts).
+keepEditorFormatters(monaco.languages)
 
 // One file at a time, without the project's packages: the imports it cannot
 // see would be errors everywhere. Syntax errors and completions stay.

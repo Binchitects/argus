@@ -418,15 +418,22 @@ Monaco loads with the first file opened, xterm.js with the first terminal.
 **Shift+Alt+F** (Ctrl+Shift+I on Linux) formats the file, **Ctrl+K Ctrl+F** the
 lines chosen, **Format Document With…** picks the formatter (and **Configure
 Default Formatter…** sets `editor.defaultFormatter` for the language; VS
-Code's extension ids, `esbenp.prettier-vscode`, mean the same). The status
+Code's extension ids, `esbenp.prettier-vscode`, mean the same, and its
+built-in formatters, `vscode.typescript-language-features`,
+`vscode.json-language-features`, `vscode.css-language-features` and
+`vscode.html-language-features`, mean the editor's own). The status
 bar names the file's formatter. `editor.formatOnSave` formats as the file is
 saved, within `codeArena.formatOnSaveTimeout` (past it, or failing, the file
 is saved as it is, and a message says why); **Save without Formatting**
 (Ctrl+K Ctrl+Shift+S) skips it; `editor.formatOnPaste` formats what is pasted.
 VS Code's `prettier.*` settings (`printWidth`, `semi`, `singleQuote`…) go to
-Prettier as flags; a project's own Prettier config wins over them. A language
-with no formatter of the project's keeps the editor's own (TypeScript, JSON,
-CSS, HTML).
+Prettier as flags; a project's own Prettier config wins over them. A file
+with no formatter of the project's (one that is not installed does not count;
+one that waits on the folder's trust does) keeps the editor's own (TypeScript,
+JSON, CSS, HTML), and so do a file whose `editor.defaultFormatter` names it
+and your own settings files: Format Document, Format Selection, a paste and a
+save format them with it. With no `editor.defaultFormatter`, a formatter that
+waits on the folder's trust is the file's formatter while none other can run.
 
 Code Arena formats the editor's text, saved or not, with the project's own
 tools, which code-arena runs:
