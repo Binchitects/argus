@@ -1,3 +1,4 @@
+using Llm.Api.Access;
 using System.Collections.Immutable;
 using System.Security.Claims;
 using Llm.Api.Identity;
@@ -16,10 +17,10 @@ public static class OidcEndpoints
 {
     public static void MapOidc(this IEndpointRouteBuilder app)
     {
-        app.MapMethods("/connect/authorize", ["GET", "POST"], AuthorizeAsync);
-        app.MapPost("/connect/token", TokenAsync).RequireRateLimiting("token");
-        app.MapMethods("/connect/userinfo", ["GET", "POST"], UserInfoAsync);
-        app.MapMethods("/connect/logout", ["GET", "POST"], LogoutAsync);
+        app.MapMethods("/connect/authorize", ["GET", "POST"], AuthorizeAsync).AllowAnonymous("OpenID Connect: asks the person to sign in when they are not.");
+        app.MapPost("/connect/token", TokenAsync).RequireRateLimiting("token").AllowAnonymous("OpenID Connect: the client's secret and the code are checked.");
+        app.MapMethods("/connect/userinfo", ["GET", "POST"], UserInfoAsync).AllowAnonymous("OpenID Connect: the access token is checked.");
+        app.MapMethods("/connect/logout", ["GET", "POST"], LogoutAsync).AllowAnonymous("OpenID Connect: signs out whoever is signed in.");
     }
 
     private static async Task<IResult> AuthorizeAsync(

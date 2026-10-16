@@ -1,4 +1,5 @@
 using Llm.Core.Access;
+using Llm.Api.Access;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
@@ -46,13 +47,13 @@ public static class OperationsEndpoints
 {
     public static void MapOperations(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin").RequireAuthorization(AdminEndpoints.Policy);
+        var g = app.MapGroup("/api/admin").RequirePermissions(Llm.Core.Access.Permissions.MonitoringRead, Llm.Core.Access.Permissions.SettingsManage);
         g.MapGet("/overview", OverviewAsync);
         g.MapGet("/services", async (IHttpClientFactory f, IOptions<StackOptions> s, IOptions<ArgusOptions> a, IOptions<Dashboards.DashboardOptions> d, Models.MediaControl media,
             CancellationToken ct) => Results.Ok(await ProbeAllAsync(f, s.Value, a.Value, d.Value, media, ct)));
         g.MapGet("/people.csv", PeopleCsvAsync);
 
-        var argus = g.MapGroup("/argus");
+        var argus = g.MapGroup("/argus").RequirePermissions(Llm.Core.Access.Permissions.ArgusRead, Llm.Core.Access.Permissions.ArgusManage);
         argus.MapGet("/status", (ArgusAdmin a, CancellationToken ct) => Relay(() => a.GetAsync("index/status", ct), a));
         // The GitLab webhook: on a push or a merge, the repository's index is brought up to date.
         argus.MapGet("/webhook", (ArgusWebhook w, ArgusAdmin a, CancellationToken ct) => Relay(async () => (JsonNode?)await w.ViewAsync(ct), a));

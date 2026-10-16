@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Llm.Api.Access;
 using Llm.Api.Endpoints;
 using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
@@ -41,7 +42,7 @@ public static class UsageEndpoints
         """;
 
     public static void MapUsage(this IEndpointRouteBuilder app) =>
-        app.MapGet("/api/usage/me", MeAsync).RequireAuthorization();
+        app.MapGet("/api/usage/me", MeAsync).PersonOnly();
 
     private static async Task<IResult> MeAsync(DateTimeOffset from, DateTimeOffset to, long? intervalMs, ClaimsPrincipal principal,
         UserManager<AppUser> users, SqlDatasource sql, CancellationToken ct)

@@ -1,4 +1,5 @@
 using System.Text;
+using Llm.Api.Access;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Llm.Api.ArenaMcp;
@@ -97,7 +98,7 @@ public static class CodeArenaSync
 
     public static void MapCodeArenaSync(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/code-arena");
+        var g = app.MapGroup("/api/code-arena").AllowAnonymous("Code Arena: the person's API key is checked on each call.");
         g.MapGet("/chats", ListAsync);
         g.MapPost("/chats", CreateAsync);
         g.MapGet("/chats/{id:guid}", ReadAsync);

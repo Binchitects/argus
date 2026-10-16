@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Llm.Api.Access;
 using System.Text.Json.Nodes;
 using Llm.Api.Chat.Tools;
 using Llm.Api.Endpoints;
@@ -22,7 +23,7 @@ public static class MemoryEndpoints
 {
     public static void MapMemories(this IEndpointRouteBuilder app)
     {
-        var me = app.MapGroup("/api/account/memories").RequireAuthorization();
+        var me = app.MapGroup("/api/account/memories").PersonOnly();
         me.MapGet("", ListAsync);
         me.MapPost("", AddAsync);
         me.MapPut("/settings", SwitchAsync);

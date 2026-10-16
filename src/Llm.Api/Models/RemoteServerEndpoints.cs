@@ -1,4 +1,5 @@
 using Llm.Api.Chat;
+using Llm.Api.Access;
 using Llm.Api.Endpoints;
 using Llm.Api.Gateway;
 using Llm.Api.Identity;
@@ -27,7 +28,7 @@ public static class RemoteServerEndpoints
 {
     public static void MapRemoteServers(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/servers").RequireAuthorization(AdminEndpoints.Policy);
+        var g = app.MapGroup("/api/admin/servers").RequirePermissions(Llm.Core.Access.Permissions.ModelsRead, Llm.Core.Access.Permissions.ModelsManage);
         g.MapGet("", ListAsync);
         g.MapPost("/probe", ProbeAsync);
         g.MapPost("", AddAsync);

@@ -1,3 +1,4 @@
+using Llm.Api.Access;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
@@ -36,7 +37,8 @@ public static class KeyCheck
         // The gateway's answers by key hash, for this app only (tests run several).
         var known = new ConcurrentDictionary<string, (DateTimeOffset Until, string Email)>(StringComparer.Ordinal);
         app.MapPost(Path, (HttpContext ctx, ILiteLlm gateway, UserManager<AppUser> users, IOptions<ArgusOptions> argus, IOptionsMonitor<ChatOptions> chat,
-            TimeProvider clock, Access.AccessService access) => CheckAsync(ctx, gateway, users, access, argus.Value, chat.CurrentValue, clock, known));
+            TimeProvider clock, Access.AccessService access) => CheckAsync(ctx, gateway, users, access, argus.Value, chat.CurrentValue, clock, known))
+            .AllowAnonymous("Argus and Laya ask whose an API key is: the key itself is checked.");
     }
 
     private static async Task<IResult> CheckAsync(HttpContext ctx, ILiteLlm gateway, UserManager<AppUser> users, Access.AccessService access, ArgusOptions argus, ChatOptions chat,

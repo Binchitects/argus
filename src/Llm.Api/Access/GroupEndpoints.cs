@@ -39,7 +39,7 @@ public static class GroupEndpoints
 
     public static void MapGroups(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/groups").RequireAuthorization(AdminEndpoints.Policy);
+        var g = app.MapGroup("/api/admin/groups").RequirePermissions(Llm.Core.Access.Permissions.PeopleRead, Llm.Core.Access.Permissions.GroupsManage);
         g.MapGet("", ListAsync);
         g.MapPost("", CreateAsync);
         g.MapGet("/directory", DirectoryAsync);

@@ -1,4 +1,5 @@
 using System.Globalization;
+using Llm.Api.Access;
 using System.Numerics;
 using System.Text;
 using Llm.Api.Endpoints;
@@ -33,7 +34,7 @@ public static class LogEndpoints
 
     public static void MapLogs(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/logs").RequireAuthorization(AdminEndpoints.Policy);
+        var g = app.MapGroup("/api/admin/logs").RequirePermissions(Llm.Core.Access.Permissions.LogsRead, Llm.Core.Access.Permissions.LogsRead);
         g.MapGet("/", LinesAsync);
         g.MapGet("/volume", VolumeAsync);
         g.MapGet("/containers", ContainersAsync);

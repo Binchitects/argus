@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.RegularExpressions;
 using Llm.Api.Access;
 using Llm.Core.Access;
@@ -58,7 +59,9 @@ public sealed partial class EndpointAccessTests(AppFixture app)
         var routes = Routes().Where(r => r.Permission is not null && r.Method != "*").ToList();
         var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
         var name = "ea" + Guid.NewGuid().ToString("N")[..10];
-        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+        var created = await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" });
+        Assert.True(created.IsSuccessStatusCode, $"{(int)created.StatusCode} {await created.Content.ReadAsStringAsync()}");
+        var made = await admin.JsonAsync(created);
         var member = await new TestBrowser(app.Factory).SignedInAsync(name, made.GetProperty("password").GetString()!);
         var wrong = new List<string>();
         foreach (var r in routes.Where(r => !Permissions.IsFeature(r.Permission!)))

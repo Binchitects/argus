@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Llm.Api.Access;
 using System.Text.RegularExpressions;
 using Llm.Api.Endpoints;
 using Microsoft.Extensions.Options;
@@ -64,7 +65,7 @@ public static partial class AlertEndpoints
 
     public static void MapAlerts(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/alerts").RequireAuthorization(AdminEndpoints.Policy);
+        var g = app.MapGroup("/api/admin/alerts").RequirePermissions(Llm.Core.Access.Permissions.MonitoringRead, Llm.Core.Access.Permissions.AlertsManage);
         g.MapGet("/", NowAsync);
         g.MapGet("/history", HistoryAsync);
     }

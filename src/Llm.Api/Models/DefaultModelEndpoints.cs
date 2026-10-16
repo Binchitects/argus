@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Llm.Api.Access;
 using System.Text;
 using Llm.Api.Endpoints;
 using Llm.Api.Gateway;
@@ -19,7 +20,7 @@ public static class DefaultModelEndpoints
 
     public static void MapDefaultModels(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/models/defaults").RequireAuthorization(AdminEndpoints.Policy);
+        var g = app.MapGroup("/api/admin/models/defaults").RequirePermissions(Llm.Core.Access.Permissions.ModelsRead, Llm.Core.Access.Permissions.ModelsManage);
         g.MapGet("", async (Provisioning setup, CancellationToken ct) => Results.Ok(await setup.ListAsync(ct)));
         g.MapPost("", async (Provisioning setup, Audit audit, CancellationToken ct) =>
         {
@@ -28,7 +29,7 @@ public static class DefaultModelEndpoints
             return Results.Ok(new { started, models = await setup.ListAsync(ct) });
         });
         app.MapGet(InternalPath, async (HttpContext http, IOptions<LiteLlmOptions> gateway, Provisioning setup, CancellationToken ct) =>
-            Allowed(http, gateway) ? Results.Ok(await setup.ListAsync(ct)) : Results.Unauthorized()).AllowAnonymous();
+            Allowed(http, gateway) ? Results.Ok(await setup.ListAsync(ct)) : Results.Unauthorized()).AllowAnonymous("Internal: the gateway's own key is checked (Allowed).");
         app.MapPost(InternalPath, async (HttpContext http, IOptions<LiteLlmOptions> gateway, Provisioning setup, Audit audit, CancellationToken ct) =>
         {
             if (!Allowed(http, gateway))
@@ -38,7 +39,7 @@ public static class DefaultModelEndpoints
             var started = await StartAsync(setup, ct);
             await audit.WriteAsync("model.defaults", "installer", detail: started.Count == 0 ? "nothing missing" : string.Join("; ", started));
             return Results.Ok(new { started, models = await setup.ListAsync(ct) });
-        }).AllowAnonymous();
+        }).AllowAnonymous("Internal: the gateway's own key is checked (Allowed).");
     }
 
     /// <summary>The downloads started; a Hugging Face that cannot be reached is said as a 502 by the caller's error.</summary>

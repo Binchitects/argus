@@ -1,4 +1,5 @@
 using Llm.Api.Endpoints;
+using Llm.Api.Access;
 using Llm.Api.Identity;
 using Llm.Core.Data;
 using Microsoft.EntityFrameworkCore;
@@ -36,7 +37,7 @@ public static class StorageEndpoints
 
     public static void MapStorage(IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/storage").RequireAuthorization(AdminEndpoints.Policy);
+        var g = app.MapGroup("/api/admin/storage").RequirePermissions(Llm.Core.Access.Permissions.StorageManage, Llm.Core.Access.Permissions.StorageManage);
         // ?fresh: every folder measured again now (Measure again), not as measured in the last two minutes.
         g.MapGet("/", async (bool? fresh, StorageReport report, CancellationToken ct) => Results.Ok(await report.BuildAsync(fresh is true, ct)));
         g.MapGet("/files", ListAsync);

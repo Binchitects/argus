@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using Llm.Api.Access;
 using System.Security.Claims;
 using Llm.Api.Endpoints;
 using Llm.Api.Identity;
@@ -20,7 +21,7 @@ public static class HuggingFaceEndpoints
 {
     public static void MapHuggingFace(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/models/hf").RequireAuthorization(AdminEndpoints.Policy);
+        var g = app.MapGroup("/api/admin/models/hf").RequirePermissions(Llm.Core.Access.Permissions.ModelsRead, Llm.Core.Access.Permissions.ModelsManage);
         g.MapGet("/search", SearchAsync);
         g.MapGet("/repo", RepoAsync);
         g.MapGet("/downloads", ListAsync);

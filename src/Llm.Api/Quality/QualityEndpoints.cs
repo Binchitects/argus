@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Llm.Api.Access;
 using Llm.Api.Chat;
 using Llm.Api.Endpoints;
 using Llm.Api.Identity;
@@ -33,14 +34,14 @@ public static class QualityEndpoints
 
     public static void MapQuality(this IEndpointRouteBuilder app)
     {
-        var chat = app.MapGroup("/api/chat").RequireAuthorization();
+        var chat = app.MapGroup("/api/chat").PersonOnly();
         chat.MapPut("/conversations/{id:guid}/messages/{messageId:guid}/feedback", RateAsync);
         chat.MapDelete("/conversations/{id:guid}/messages/{messageId:guid}/feedback", UnrateAsync);
         chat.MapPost("/conversations/{id:guid}/compare", ChatEndpoints.CompareAsync);
         chat.MapPost("/arena/{id:guid}/vote", VoteAsync);
-        app.MapGet("/api/arena/leaderboard", LeaderboardAsync).RequireAuthorization();
+        app.MapGet("/api/arena/leaderboard", LeaderboardAsync).PersonOnly();
 
-        var admin = app.MapGroup("/api/admin/quality").RequireAuthorization(AdminEndpoints.Policy);
+        var admin = app.MapGroup("/api/admin/quality").RequirePermissions(Llm.Core.Access.Permissions.MonitoringRead, Llm.Core.Access.Permissions.SettingsManage);
         admin.MapGet("", OverviewAsync);
         admin.MapGet("/feedback/{id:guid}", SharedAsync);
     }

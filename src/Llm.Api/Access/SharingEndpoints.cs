@@ -14,7 +14,7 @@ public static class SharingEndpoints
 {
     public static void MapSharing(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/sharing").RequireAuthorization();
+        var g = app.MapGroup("/api/sharing").PersonOnly();
         g.MapGet("/groups", GroupsAsync);
         g.MapGet("/people", PeopleAsync);
     }

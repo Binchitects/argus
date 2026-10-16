@@ -37,7 +37,7 @@ public static class AssistantEndpoints
 
     public static void MapAssistants(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/assistants").RequireAuthorization();
+        var g = app.MapGroup("/api/assistants").PersonOnly();
         g.MapGet("", ListAsync);
         g.MapPost("", CreateAsync);
         g.MapGet("/{id:guid}", GetAsync);

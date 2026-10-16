@@ -28,11 +28,11 @@ public static class ShareEndpoints
 {
     public static void MapShares(this IEndpointRouteBuilder app)
     {
-        var mine = app.MapGroup("/api/chat/conversations/{id:guid}/share").RequireAuthorization();
+        var mine = app.MapGroup("/api/chat/conversations/{id:guid}/share").PersonOnly();
         mine.MapGet("", GetAsync);
         mine.MapPut("", PutAsync);
         mine.MapDelete("", RevokeAsync);
-        var g = app.MapGroup("/api/shared").RequireAuthorization();
+        var g = app.MapGroup("/api/shared").PersonOnly();
         g.MapGet("/{shareId:guid}", OpenAsync);
         g.MapPost("/{shareId:guid}/fork", ForkAsync);
     }

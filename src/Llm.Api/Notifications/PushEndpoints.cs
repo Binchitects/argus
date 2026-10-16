@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Llm.Api.Access;
 using Llm.Api.Endpoints;
 using Llm.Api.Settings;
 using Llm.Core.Chat;
@@ -32,8 +33,8 @@ public static class PushEndpoints
 
     public static void MapPush(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/app/manifest.webmanifest", Manifest).AllowAnonymous();
-        var g = app.MapGroup("/api/push").RequireAuthorization();
+        app.MapGet("/api/app/manifest.webmanifest", Manifest).AllowAnonymous("The web app's manifest: nothing private.");
+        var g = app.MapGroup("/api/push").PersonOnly();
         g.MapGet("", ListAsync);
         g.MapPost("/subscriptions", SubscribeAsync);
         g.MapDelete("/subscriptions/{id:guid}", RemoveAsync);

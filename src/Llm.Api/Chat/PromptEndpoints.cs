@@ -26,7 +26,7 @@ public static class PromptEndpoints
 
     public static void MapPrompts(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/prompts").RequireAuthorization();
+        var g = app.MapGroup("/api/prompts").PersonOnly();
         g.MapGet("", ListAsync);
         g.MapPost("", CreateAsync);
         g.MapPut("/{id:guid}", UpdateAsync);

@@ -32,7 +32,7 @@ public static class PluginEndpoints
 {
     public static void MapPlugins(this IEndpointRouteBuilder app)
     {
-        var admin = app.MapGroup("/api/admin/plugins").RequireAuthorization(AdminEndpoints.Policy);
+        var admin = app.MapGroup("/api/admin/plugins").RequirePermissions(Llm.Core.Access.Permissions.PluginsManage, Llm.Core.Access.Permissions.PluginsManage);
         admin.MapGet("", ListAsync);
         admin.MapPost("/preview", PreviewAsync);
         admin.MapPost("/install", InstallAsync);
@@ -40,7 +40,7 @@ public static class PluginEndpoints
         admin.MapPost("/{id:guid}/update", UpdateAsync);
         admin.MapDelete("/{id:guid}", RemoveAsync);
 
-        var me = app.MapGroup("/api/account/connections").RequireAuthorization();
+        var me = app.MapGroup("/api/account/connections").PersonOnly();
         me.MapGet("", ConnectionsAsync);
         me.MapPut("/{toolId}", SaveKeyAsync);
         me.MapDelete("/{toolId}", DisconnectAsync);

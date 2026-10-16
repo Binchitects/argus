@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Llm.Api.Access;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -415,11 +416,12 @@ public static class AnswerCacheEndpoints
     {
         // Traefik's health check: while it fails (the cache off, or the app down), keys go straight to LiteLLM.
         app.MapGet("/v1/answer-cache", (IOptionsMonitor<AnswerCacheOptions> o) =>
-            o.CurrentValue.On ? Results.Ok(new { mode = o.CurrentValue.AnswerCache }) : Results.Json(new { mode = AnswerCacheModes.Off }, statusCode: 503));
-        app.MapPost("/v1/chat/completions", ProxyAsync).AllowAnonymous().DisableAntiforgery();
-        app.MapPost("/chat/completions", ProxyAsync).AllowAnonymous().DisableAntiforgery();
+            o.CurrentValue.On ? Results.Ok(new { mode = o.CurrentValue.AnswerCache }) : Results.Json(new { mode = AnswerCacheModes.Off }, statusCode: 503))
+            .AllowAnonymous("Traefik's health check of the answer cache: its mode only.");
+        app.MapPost("/v1/chat/completions", ProxyAsync).AllowAnonymous("The OpenAI-style API: the API key is checked.").DisableAntiforgery();
+        app.MapPost("/chat/completions", ProxyAsync).AllowAnonymous("The OpenAI-style API: the API key is checked.").DisableAntiforgery();
 
-        var me = app.MapGroup("/api/account/answer-cache").RequireAuthorization();
+        var me = app.MapGroup("/api/account/answer-cache").PersonOnly();
         me.MapGet("", MineAsync);
         me.MapPut("", ChooseAsync);
     }

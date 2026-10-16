@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Llm.Api.Access;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -25,7 +26,7 @@ public static partial class GuardrailEndpoints
     /// <summary>LiteLLM appends /beta/litellm_basic_guardrail_api to the api_base it is given (http://app:8080/internal/guardrail).</summary>
     public const string Path = "/internal/guardrail/beta/litellm_basic_guardrail_api";
 
-    public static void MapGuardrail(this IEndpointRouteBuilder app) => app.MapPost(Path, CheckAsync).AllowAnonymous();
+    public static void MapGuardrail(this IEndpointRouteBuilder app) => app.MapPost(Path, CheckAsync).AllowAnonymous("The gateway's guardrail: the internal key is checked.");
 
     private static async Task<IResult> CheckAsync(HttpContext http, IOptions<LiteLlmOptions> gateway, UserManager<AppUser> users, Safeguards safeguards, Credit credit,
         EngineRoute route, ILoggerFactory logs)

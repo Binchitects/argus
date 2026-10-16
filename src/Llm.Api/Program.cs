@@ -1,3 +1,4 @@
+using Llm.Api.Access;
 using Llm.Api;
 using Llm.Core.Data;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -54,8 +55,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
 
-app.MapHealthChecks("/healthz", new HealthCheckOptions { Predicate = _ => false });
-app.MapHealthChecks("/readyz", new HealthCheckOptions { Predicate = c => c.Tags.Contains("ready") });
+app.MapHealthChecks("/healthz", new HealthCheckOptions { Predicate = _ => false }).AllowAnonymous("Liveness: up or not, nothing private.");
+app.MapHealthChecks("/readyz", new HealthCheckOptions { Predicate = c => c.Tags.Contains("ready") }).AllowAnonymous("Readiness: ready or not, nothing private.");
 
 app.MapAppIdentity();
 
@@ -74,11 +75,11 @@ api.MapGet("/info", (Microsoft.Extensions.Options.IOptionsMonitor<Llm.Api.Settin
         license = "AGPL-3.0-only",
         source = b.SourceUrl,
     };
-});
-api.MapFallback(() => Results.NotFound());
+}).AllowAnonymous("The sign-in page's name, headline and help: public.");
+api.MapFallback(() => Results.NotFound()).AllowAnonymous("A plain 404.");
 // Pages come from the web container (src/web); Traefik sends only /api,
 // /connect, /.well-known and /scim here. Anything else that arrives is a plain 404.
-app.MapFallback(() => Results.NotFound());
+app.MapFallback(() => Results.NotFound()).AllowAnonymous("A plain 404.");
 
 if (app.Configuration.GetValue("Database:MigrateOnStartup", true))
 {

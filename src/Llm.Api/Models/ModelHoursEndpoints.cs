@@ -1,4 +1,5 @@
 using System.Globalization;
+using Llm.Api.Access;
 using Llm.Api.Chat;
 using Llm.Api.Endpoints;
 using Llm.Api.Identity;
@@ -20,7 +21,7 @@ public static class ModelHoursEndpoints
 {
     public static void MapModelHours(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/model-hours").RequireAuthorization(AdminEndpoints.Policy);
+        var g = app.MapGroup("/api/admin/model-hours").RequirePermissions(Llm.Core.Access.Permissions.ModelsRead, Llm.Core.Access.Permissions.ModelsManage);
         g.MapGet("", ListAsync);
         g.MapPost("", AddAsync);
         g.MapPatch("/{id:guid}", UpdateAsync);

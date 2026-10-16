@@ -1,3 +1,4 @@
+using Llm.Api.Access;
 namespace Llm.Api.Downloads;
 
 /// <summary>A build of Code Arena the app serves: its system, file name, size and SHA-256.</summary>
@@ -24,11 +25,11 @@ public static class DownloadEndpoints
 
     public static void MapDownloads(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/downloads/code-arena").AllowAnonymous();
+        var g = app.MapGroup("/api/downloads/code-arena").AllowAnonymous("Public builds of Code Arena: nothing private.");
         g.MapGet("", List);
         g.MapGet("/{rid}", Download);
         // The certificate people's tools must trust on a self-signed deployment: public, like the web's files.
-        var c = app.MapGroup("/api/downloads/certificate").AllowAnonymous();
+        var c = app.MapGroup("/api/downloads/certificate").AllowAnonymous("The stack's public CA certificate.");
         c.MapGet("", async (SiteCertificate site, CancellationToken ct) =>
         {
             var i = await site.GetAsync(ct);

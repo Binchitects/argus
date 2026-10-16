@@ -1,3 +1,4 @@
+using Llm.Api.Access;
 using Llm.Api.Identity;
 using Llm.Core.Identity;
 using Microsoft.AspNetCore.Authentication;
@@ -39,7 +40,8 @@ public static class ForwardAuth
     }
 
     public static void MapForwardAuth(this IEndpointRouteBuilder app) =>
-        app.MapMethods("/api/authz/forward-auth", ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], CheckAsync);
+        app.MapMethods("/api/authz/forward-auth", ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], CheckAsync)
+            .AllowAnonymous("Traefik's forward auth: the session or key is checked here, for the routes behind it.");
 
     private static async Task<IResult> CheckAsync(HttpContext ctx, UserManager<AppUser> users, PersonClaims claims, IOptions<AuthOptions> auth)
     {

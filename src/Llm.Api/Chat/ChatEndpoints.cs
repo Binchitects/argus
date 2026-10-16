@@ -65,7 +65,7 @@ public static partial class ChatEndpoints
 
     public static void MapChat(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/chat").RequireAuthorization();
+        var g = app.MapGroup("/api/chat").PersonOnly();
         g.MapGet("/config", Config);
         g.MapGet("/conversations", ListAsync);
         g.MapPost("/conversations", CreateAsync);

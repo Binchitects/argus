@@ -1,4 +1,5 @@
 using System.Globalization;
+using Llm.Api.Access;
 using System.Security.Claims;
 using Llm.Api.Endpoints;
 using Llm.Api.Gateway;
@@ -232,8 +233,8 @@ public static class PromptEndpoints
 {
     public static void MapPrompts(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/usage/prompts", MineAsync).RequireAuthorization();
-        var admin = app.MapGroup("/api/admin/usage").RequireAuthorization(AdminEndpoints.Policy);
+        app.MapGet("/api/usage/prompts", MineAsync).PersonOnly();
+        var admin = app.MapGroup("/api/admin/usage").RequirePermissions(Llm.Core.Access.Permissions.UsageRead, Llm.Core.Access.Permissions.UsageRead);
         admin.MapGet("/prompts", EveryoneAsync);
         admin.MapPost("/recalculate", RecalculateAsync);
     }

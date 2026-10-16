@@ -41,7 +41,7 @@ public static class ModelEndpoints
 {
     public static void MapModels(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/models").RequireAuthorization(AdminEndpoints.Policy);
+        var g = app.MapGroup("/api/admin/models").RequirePermissions(Llm.Core.Access.Permissions.ModelsRead, Llm.Core.Access.Permissions.ModelsManage);
         g.MapGet("", ListAsync);
         MediaModelEndpoints.Map(g);
         g.MapGet("/library", LibraryAsync);

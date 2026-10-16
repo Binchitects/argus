@@ -29,7 +29,7 @@ public static class KnowledgeEndpoints
 
     public static void MapKnowledge(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/knowledge").RequireAuthorization(AdminEndpoints.Policy);
+        var g = app.MapGroup("/api/admin/knowledge").RequirePermissions(Llm.Core.Access.Permissions.KnowledgeManage, Llm.Core.Access.Permissions.KnowledgeManage);
         g.MapGet("", ListAsync);
         g.MapPost("", CreateAsync);
         g.MapPatch("/{id:guid}", UpdateAsync);

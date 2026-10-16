@@ -1,4 +1,5 @@
 using Llm.Api.Endpoints;
+using Llm.Api.Access;
 using Llm.Api.Identity;
 using Llm.Api.Ldap;
 
@@ -11,7 +12,7 @@ public static class SettingsEndpoints
 {
     public static void MapSettings(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/config").RequireAuthorization(AdminEndpoints.Policy);
+        var g = app.MapGroup("/api/admin/config").RequirePermissions(Llm.Core.Access.Permissions.SettingsRead, Llm.Core.Access.Permissions.SettingsManage);
 
         g.MapGet("", async (SettingsService settings, CancellationToken ct) => Results.Ok(await settings.ViewAsync(ct)));
 

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Llm.Api.Access;
 using System.Text.Json.Nodes;
 using Llm.Api.Endpoints;
 using Llm.Api.Gateway;
@@ -55,19 +56,19 @@ public static class VoiceEndpoints
 
     public static void MapVoices(this IEndpointRouteBuilder app)
     {
-        var me = app.MapGroup("/api/account/voice").RequireAuthorization();
+        var me = app.MapGroup("/api/account/voice").PersonOnly();
         me.MapGet("", MineAsync);
         me.MapPatch("", ChooseAsync);
         me.MapPost("/try", TryAsync);
         // Settings → Speech: the voices to choose the company's from, and a sample of one before it reads for everyone.
-        var company = app.MapGroup("/api/admin/speech").RequireAuthorization(AdminEndpoints.Policy);
+        var company = app.MapGroup("/api/admin/speech").RequirePermissions(Llm.Core.Access.Permissions.SettingsRead, Llm.Core.Access.Permissions.SettingsManage);
         company.MapGet("/voices", OfferedAsync);
         company.MapPost("/try", TryCompanyAsync);
         // API keys' speech at gateway.DOMAIN, sent here while the app is up: every method, as the gateway answers them all
         // (a browser's preflight gets its CORS headers).
         foreach (var path in KeySpeech.Paths)
         {
-            app.Map(path, KeySpeech.ProxyAsync).AllowAnonymous().DisableAntiforgery();
+            app.Map(path, KeySpeech.ProxyAsync).AllowAnonymous("The OpenAI-style speech API: the API key is checked.").DisableAntiforgery();
         }
     }
 

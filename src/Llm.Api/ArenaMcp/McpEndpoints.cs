@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Llm.Api.Access;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -81,15 +82,15 @@ public static class McpEndpoints
 
     public static void MapArenaMcp(this IEndpointRouteBuilder app)
     {
-        app.MapPost(Path, PostAsync);
+        app.MapPost(Path, PostAsync).AllowAnonymous("Arena MCP: the person's API key or token is checked on each call.");
         // No stream of the server's own (it sends nothing unasked) and no sessions to end.
         app.MapMethods(Path, ["GET", "DELETE"], (HttpContext http) =>
         {
             http.Response.Headers.Allow = "POST";
             return Results.StatusCode(StatusCodes.Status405MethodNotAllowed);
-        });
-        app.MapGet("/.well-known/mcp", Discovery);
-        app.MapGet("/api/account/mcp", InfoAsync).RequireAuthorization();
+        }).AllowAnonymous("Says only that MCP takes POST.");
+        app.MapGet("/.well-known/mcp", Discovery).AllowAnonymous("MCP discovery: where the server is, nothing private.");
+        app.MapGet("/api/account/mcp", InfoAsync).PersonOnly();
     }
 
     /// <summary>For clients that look: where the server is, and how to sign in to it.</summary>

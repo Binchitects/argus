@@ -1,4 +1,5 @@
 using Llm.Core.Access;
+using Llm.Api.Access;
 using System.Globalization;
 using System.Security.Claims;
 using System.Text;
@@ -16,7 +17,7 @@ public static class AccountEndpoints
 {
     public static void MapAccount(this IEndpointRouteBuilder app)
     {
-        var me = app.MapGroup("/api/account").RequireAuthorization();
+        var me = app.MapGroup("/api/account").PersonOnly();
         me.MapPost("/password", ChangePasswordAsync);
         me.MapGet("/2fa", async (ClaimsPrincipal p, UserManager<AppUser> users) =>
         {

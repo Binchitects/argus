@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Llm.Api.Access;
 using System.Text;
 using System.Text.RegularExpressions;
 using Llm.Api.Chat.Tools;
@@ -25,7 +26,7 @@ public static partial class CanvasEndpoints
 {
     public static void MapCanvases(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/chat").RequireAuthorization();
+        var g = app.MapGroup("/api/chat").PersonOnly();
         g.MapGet("/conversations/{id:guid}/canvases", ListAsync);
         g.MapPost("/conversations/{id:guid}/canvases", CreateAsync);
         g.MapGet("/canvases/{id:guid}", GetAsync);

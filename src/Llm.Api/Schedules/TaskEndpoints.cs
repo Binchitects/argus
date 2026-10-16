@@ -31,7 +31,7 @@ public static class TaskEndpoints
 {
     public static void MapTasks(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/tasks").RequireAuthorization();
+        var g = app.MapGroup("/api/tasks").PersonOnly();
         g.MapGet("", ListAsync);
         g.MapPost("", AddAsync);
         g.MapPatch("/{id:guid}", UpdateAsync);
@@ -39,10 +39,10 @@ public static class TaskEndpoints
         g.MapPost("/{id:guid}/run", RunAsync);
         g.MapPost("/{id:guid}/secret", SecretAsync);
         // Events that run a task: anyone may post, only with its secret.
-        app.MapPost("/api/hooks/{id:guid}", HookAsync).AllowAnonymous().DisableAntiforgery();
+        app.MapPost("/api/hooks/{id:guid}", HookAsync).AllowAnonymous("A task's webhook: its secret id in the address, and its signature, are checked.").DisableAntiforgery();
         g.MapGet("/{id:guid}/runs", RunsAsync);
 
-        var n = app.MapGroup("/api/notifications").RequireAuthorization();
+        var n = app.MapGroup("/api/notifications").PersonOnly();
         n.MapGet("", NotificationsAsync);
         n.MapPost("/{id:guid}/read", ReadAsync);
         n.MapPost("/read", ReadAllAsync);

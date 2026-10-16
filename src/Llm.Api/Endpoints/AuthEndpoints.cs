@@ -1,3 +1,4 @@
+using Llm.Api.Access;
 using System.Security.Claims;
 using Llm.Api.Identity;
 using Llm.Core.Identity;
@@ -10,11 +11,11 @@ public static class AuthEndpoints
 {
     public static void MapAuth(this IEndpointRouteBuilder app)
     {
-        var auth = app.MapGroup("/api/auth").RequireRateLimiting("sign-in");
+        var auth = app.MapGroup("/api/auth").RequireRateLimiting("sign-in").AllowAnonymous("Signing in and out: the password and the second factor are checked here.");
         auth.MapPost("/login", LoginAsync);
         auth.MapPost("/login/2fa", TwoFactorAsync);
         auth.MapPost("/logout", async (SignInService s) => { await s.SignOutAsync(); return Results.NoContent(); });
-        app.MapGet("/api/auth/me", MeAsync);
+        app.MapGet("/api/auth/me", MeAsync).AllowAnonymous("Says who is signed in, or that nobody is.");
     }
 
     private static async Task<IResult> LoginAsync(LoginRequest body, SignInService signIn, IOptions<AuthOptions> auth) =>

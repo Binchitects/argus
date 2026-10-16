@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Llm.Api.Access;
 using System.Text;
 using System.Text.Json;
 using Llm.Api.Endpoints;
@@ -28,7 +29,7 @@ public static partial class CompanyEndpoints
 
     public static void MapCompany(this IEndpointRouteBuilder app)
     {
-        var auth = app.MapGroup("/api/auth/company").RequireRateLimiting("sign-in");
+        var auth = app.MapGroup("/api/auth/company").RequireRateLimiting("sign-in").AllowAnonymous("Company sign-in: the identity provider's answer is checked here.");
         // Public: the sign-in page shows the button when company sign-in is on (OIDC or SAML, the same button).
         auth.MapGet("", (IOptionsMonitor<CompanySignInOptions> o) => Results.Ok(new
         {
@@ -39,7 +40,7 @@ public static partial class CompanyEndpoints
         auth.MapGet("/callback", CallbackAsync);
         MapSaml(auth);
 
-        var admin = app.MapGroup("/api/admin/company-sign-in").RequireAuthorization(AdminEndpoints.Policy);
+        var admin = app.MapGroup("/api/admin/company-sign-in").RequirePermissions(Llm.Core.Access.Permissions.SettingsRead, Llm.Core.Access.Permissions.SignInManage);
         admin.MapGet("", StatusAsync);
         // Tries the provider before it is saved: the form's values over the current ones.
         admin.MapPost("/test", (Dictionary<string, string?> form, IOptionsMonitor<CompanySignInOptions> current, CompanyIdp idp, SamlIdp saml, CancellationToken ct) =>

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Llm.Api.Access;
 using System.Text.Json.Nodes;
 using Llm.Api.Endpoints;
 using Llm.Api.Identity;
@@ -37,12 +38,12 @@ public static class BotEndpoints
 
     public static void MapBots(this IEndpointRouteBuilder app)
     {
-        var bots = app.MapGroup("/api/bots").AllowAnonymous().DisableAntiforgery();
+        var bots = app.MapGroup("/api/bots").AllowAnonymous("Slack and Teams: each request's signature is checked.").DisableAntiforgery();
         bots.MapPost("/slack", SlackAsync);
         bots.MapPost("/mattermost", MattermostAsync);
         bots.MapPost("/teams", TeamsAsync);
-        app.MapPost("/api/mail/inbound", MailAsync).AllowAnonymous().DisableAntiforgery();
-        app.MapGet("/api/admin/bots", StatusAsync).RequireAuthorization(AdminEndpoints.Policy);
+        app.MapPost("/api/mail/inbound", MailAsync).AllowAnonymous("Inbound mail: the mail relay's secret is checked.").DisableAntiforgery();
+        app.MapGet("/api/admin/bots", StatusAsync).RequirePermission(Llm.Core.Access.Permissions.BotsManage);
     }
 
     private static async Task<string?> BodyAsync(HttpRequest request, CancellationToken ct)

@@ -1,4 +1,5 @@
 using Llm.Core.Data;
+using Llm.Api.Access;
 using Microsoft.EntityFrameworkCore;
 
 namespace Llm.Api.Chat;
@@ -18,7 +19,7 @@ public static class TraceEndpoints
 {
     public static void MapTraces(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/traces").RequireAuthorization(Endpoints.AdminEndpoints.Policy);
+        var g = app.MapGroup("/api/admin/traces").RequirePermissions(Llm.Core.Access.Permissions.LogsRead, Llm.Core.Access.Permissions.LogsRead);
         g.MapGet("", ListAsync);
         g.MapGet("/{id:guid}", GetAsync);
     }

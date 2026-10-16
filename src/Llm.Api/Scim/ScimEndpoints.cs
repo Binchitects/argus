@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Llm.Api.Access;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Llm.Api.Identity;
@@ -39,7 +40,7 @@ public static class ScimEndpoints
 
     public static void MapScim(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup(Base).AddEndpointFilter(AuthorizeAsync);
+        var g = app.MapGroup(Base).AllowAnonymous("SCIM: the directory's bearer token is checked (AuthorizeAsync).").AddEndpointFilter(AuthorizeAsync);
         g.MapGet("/ServiceProviderConfig", (IOptions<AuthOptions> auth) => new ScimResult(ScimSchemas.ServiceProviderConfig(auth.Value.Origin + Base)));
         g.MapGet("/ResourceTypes", (IOptions<AuthOptions> auth) => new ScimResult(List(ScimSchemas.ResourceTypes(auth.Value.Origin + Base), null, 1)));
         g.MapGet("/ResourceTypes/{id}", (string id, IOptions<AuthOptions> auth) =>

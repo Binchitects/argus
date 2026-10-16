@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Llm.Api.Access;
 using System.Text.Json;
 using Llm.Api.Endpoints;
 using Llm.Api.Models;
@@ -141,7 +142,7 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
 
     public static void MapQueue(IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/chat/conversations/{id:guid}/queue").RequireAuthorization();
+        var g = app.MapGroup("/api/chat/conversations/{id:guid}/queue").PersonOnly();
         g.MapPost("", AddAsync);
         g.MapDelete("/{queuedId:guid}", CancelAsync);
         g.MapPost("/{queuedId:guid}/now", NowAsync);

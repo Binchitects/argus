@@ -134,6 +134,8 @@ public static class IdentityWiring
             };
         });
         services.AddScoped<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, Access.PermissionHandler>();
+        // A route's permission ("permission:people.read") is a policy made on first use.
+        services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationPolicyProvider, Access.PermissionPolicies>();
         services.AddAuthorizationBuilder()
             .AddPolicy(AdminEndpoints.Policy, p => p.AddAuthenticationSchemes(IdentityConstants.ApplicationScheme).AddRequirements(new Access.PermissionRequirement(null)));
 

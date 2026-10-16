@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Llm.Api.Access;
 using Llm.Api.Endpoints;
 using Llm.Api.Identity;
 using Llm.Core.Identity;
@@ -14,17 +15,17 @@ public static class RetentionEndpoints
 {
     public static void MapRetention(this IEndpointRouteBuilder app)
     {
-        var admin = app.MapGroup("/api/admin/people/{id:guid}").RequireAuthorization(AdminEndpoints.Policy);
+        var admin = app.MapGroup("/api/admin/people/{id:guid}").RequirePermissions(Llm.Core.Access.Permissions.ExportPerson, Llm.Core.Access.Permissions.LegalHoldManage);
         admin.MapPut("/legal-hold", HoldAsync);
         admin.MapGet("/export", AdminExportAsync);
-        app.MapGet("/api/account/export", OwnExportAsync).RequireAuthorization();
+        app.MapGet("/api/account/export", OwnExportAsync).PersonOnly();
         // How long the person's chats are kept, and what their files take of their room, for the account page.
         app.MapGet("/api/account/data", async (ClaimsPrincipal p, UserManager<AppUser> users, Retention retention, Storage.StorageQuotas quotas, CancellationToken ct) =>
         {
             var me = (await users.GetUserAsync(p))!;
             var (used, limit) = await quotas.OfAsync(me.Id, ct);
             return Results.Ok(new { retentionDays = await retention.DaysForAsync(me, ct), files = new { bytes = used, limitBytes = limit } });
-        }).RequireAuthorization();
+        }).PersonOnly();
     }
 
     private static async Task<IResult> HoldAsync(Guid id, LegalHoldRequest body, PeopleService people, Retention retention, CancellationToken ct)

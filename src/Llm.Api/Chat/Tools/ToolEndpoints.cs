@@ -29,7 +29,7 @@ public static class ToolEndpoints
 {
     public static void MapTools(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/tools").RequireAuthorization(AdminEndpoints.Policy);
+        var g = app.MapGroup("/api/admin/tools").RequirePermissions(Llm.Core.Access.Permissions.ToolsManage, Llm.Core.Access.Permissions.ToolsManage);
         g.MapGet("", ListAsync);
         g.MapPut("/{toolId}", SetAsync);
         g.MapPost("/servers", AddServerAsync);

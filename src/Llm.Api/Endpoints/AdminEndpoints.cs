@@ -1,4 +1,5 @@
 using Llm.Core.Access;
+using Llm.Api.Access;
 using System.Security.Claims;
 using Llm.Api.Gateway;
 using Llm.Api.Identity;
@@ -17,7 +18,7 @@ public static class AdminEndpoints
 
     public static void MapAdmin(this IEndpointRouteBuilder app)
     {
-        var admin = app.MapGroup("/api/admin").RequireAuthorization(Policy);
+        var admin = app.MapGroup("/api/admin").RequirePermissions(Llm.Core.Access.Permissions.PeopleRead, Llm.Core.Access.Permissions.PeopleManage);
         admin.MapGet("/people", ListAsync);
         admin.MapPost("/people", CreateAsync);
         admin.MapGet("/people/{id:guid}", GetAsync);
