@@ -58,6 +58,7 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         GgufFile.Language("qwen3", name: "Tiny", context: 40960).Write(Path.Combine(Library, "tiny", "Tiny-4B-Q4_K_M.gguf"));
         Directory.CreateDirectory(Path.Combine(Library, "hf", "acme", "Flash@abc123"));
         File.WriteAllText(Path.Combine(Library, "hf", "acme", "Flash@abc123", "config.json"), """{"architectures":["Qwen3ForCausalLM"]}""");
+        File.WriteAllText(Path.Combine(Library, "hf", "acme", "Flash@abc123", "model.safetensors"), "weights");
         Directory.CreateDirectory(Path.Combine(Library, "hf", "acme", "Empty@abc123"));
         Directory.CreateDirectory(Config);
         app.Engine.Reset(Path.Combine(Config, "models.ini"));

@@ -9,6 +9,12 @@ namespace Llm.Api.Models;
 /// <param name="Path">Relative to the library; for a split model, its first part.</param>
 public sealed record LibraryFile(string Path, long Size, int Parts);
 
+/// <summary>
+/// A Hugging Face snapshot in the library, for vLLM: its folder (hf/ORG/REPO@REVISION), repository and revision, size,
+/// whether it is whole (else why not), and the architectures its config.json names.
+/// </summary>
+public sealed record LibrarySnapshot(string Path, string Repo, string Revision, long Size, bool Complete, string? Why, IReadOnlyList<string> Architectures);
+
 /// <summary>A file of the library and what it is.</summary>
 public sealed record LibraryEntry(LibraryFile File, ModelProfile Profile);
 
@@ -55,12 +61,120 @@ public sealed partial class ModelLibrary(IOptions<EngineOptions> options)
     /// <summary>A file of the library by its relative path, or null.</summary>
     public LibraryEntry? Find(string relative) => Contains(relative) ? List().FirstOrDefault(e => e.File.Path == relative) : null;
 
-    /// <summary>Whether a relative path names a Hugging Face snapshot folder inside the library: a folder with its config.json.</summary>
-    public bool IsSnapshot(string relative)
+    /// <summary>Whether a relative path names a whole Hugging Face snapshot folder inside the library (<see cref="Snapshot"/>).</summary>
+    public bool IsSnapshot(string relative) => Snapshot(relative) is { Complete: true };
+
+    /// <summary>
+    /// The Hugging Face snapshots in the library, for vLLM: each folder hf/ORG/REPO@REVISION (ModelDownloads puts them there),
+    /// with its size and whether it is whole.
+    /// </summary>
+    public IReadOnlyList<LibrarySnapshot> Snapshots()
+    {
+        var hf = System.IO.Path.Combine(options.Value.LibraryDir, "hf");
+        if (!Directory.Exists(hf))
+        {
+            return [];
+        }
+        try
+        {
+            return [.. Directory.EnumerateDirectories(hf).SelectMany(Directory.EnumerateDirectories)
+                .Select(d => Snapshot(System.IO.Path.GetRelativePath(options.Value.LibraryDir, d).Replace('\\', '/')))
+                .OfType<LibrarySnapshot>().OrderBy(s => s.Path, StringComparer.Ordinal)];
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// A folder of the library as a snapshot: whole when it has its config.json, safetensors weights, every shard its index
+    /// names, and nothing still downloading; null for a path outside the library or a folder that is no snapshot at all.
+    /// </summary>
+    public LibrarySnapshot? Snapshot(string relative)
     {
         var root = System.IO.Path.GetFullPath(options.Value.LibraryDir);
         var full = System.IO.Path.GetFullPath(System.IO.Path.Combine(root, relative));
-        return relative.Length > 0 && full.StartsWith(root.TrimEnd('/') + "/", StringComparison.Ordinal) && File.Exists(System.IO.Path.Combine(full, "config.json"));
+        if (relative.Length == 0 || !full.StartsWith(root.TrimEnd('/') + "/", StringComparison.Ordinal) || !Directory.Exists(full))
+        {
+            return null;
+        }
+        var name = System.IO.Path.GetFileName(full);
+        var at = name.LastIndexOf('@');
+        var org = System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(full) ?? "");
+        var (repo, revision) = at > 0 ? ($"{org}/{name[..at]}", name[(at + 1)..]) : ($"{org}/{name}", "");
+        List<string> files;
+        try
+        {
+            files = [.. Directory.EnumerateFiles(full, "*", SearchOption.AllDirectories)];
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            return null;
+        }
+        if (files.Count == 0)
+        {
+            return null;
+        }
+        var size = files.Sum(f => new FileInfo(f).Length);
+        string? why = null;
+        var config = System.IO.Path.Combine(full, "config.json");
+        var architectures = new List<string>();
+        if (!File.Exists(config))
+        {
+            why = "It has no config.json: vLLM cannot load it.";
+        }
+        else
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(config));
+                if (doc.RootElement.TryGetProperty("architectures", out var a) && a.ValueKind == System.Text.Json.JsonValueKind.Array)
+                {
+                    architectures.AddRange(a.EnumerateArray().Select(x => x.GetString()).OfType<string>());
+                }
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                why = "Its config.json is not JSON.";
+            }
+        }
+        if (why is null && files.Any(f => f.EndsWith(".part", StringComparison.Ordinal)))
+        {
+            why = "It is still downloading.";
+        }
+        if (why is null && !files.Any(f => f.EndsWith(".safetensors", StringComparison.OrdinalIgnoreCase)))
+        {
+            why = "It has no safetensors weights.";
+        }
+        if (why is null && Missing(full) is { Count: > 0 } missing)
+        {
+            why = $"{missing.Count} of its weight shards are not there ({missing[0]}...): the download is incomplete.";
+        }
+        return new LibrarySnapshot(System.IO.Path.GetRelativePath(root, full).Replace('\\', '/'), repo, revision, size, why is null, why, architectures);
+    }
+
+    /// <summary>The shards a snapshot's index names that are not in its folder.</summary>
+    private static List<string> Missing(string dir)
+    {
+        var missing = new List<string>();
+        foreach (var index in Directory.EnumerateFiles(dir, "*.safetensors.index.json"))
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(index));
+                if (doc.RootElement.TryGetProperty("weight_map", out var map) && map.ValueKind == System.Text.Json.JsonValueKind.Object)
+                {
+                    missing.AddRange(map.EnumerateObject().Select(p => p.Value.GetString()).OfType<string>().Distinct()
+                        .Where(f => !File.Exists(System.IO.Path.Combine(dir, f))));
+                }
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                missing.Add(System.IO.Path.GetFileName(index));
+            }
+        }
+        return missing;
     }
 
     /// <summary>Whether a relative path names a file inside the library (no way out with ..).</summary>

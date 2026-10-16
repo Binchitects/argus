@@ -433,6 +433,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
    - `ModelDownloads` fetches safetensors, config and tokenizer (skipping `original/`, `metal/`, GGUF), showing the size first.
    - `ModelLibrary` recognises `hf/<org>/<repo>@rev`.
    - Tests: a fake HF server (the existing HuggingFace test pattern).
+   - **Done**: `HuggingFace.SnapshotOf` (safetensors, JSON, tokenizer and template files; never `original/`, `metal/`, GGUF or other formats), the repository view's `snapshot` (size first), `snapshot: true` downloads into `hf/<org>/<repo>@<rev>`, `ModelLibrary.Snapshots()` / `Snapshot()` (whole or why not), `GET /api/admin/models/library/snapshots`. Tests: `HuggingFaceTests` with `FakeHuggingFace.SnapshotRepo`.
 5. **`VllmAdvisor`.**
    - Weights bytes from the safetensors index; KV per token from `config.json` (full vs. linear vs. sliding layers, KV heads, head dim, MLA).
    - TP validity, recommended `max-model-len` and `max-num-seqs`, `gpu-memory-utilization`, and the RAM for the KV tier and sleep.

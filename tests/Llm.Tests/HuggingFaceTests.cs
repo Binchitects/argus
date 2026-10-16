@@ -165,4 +165,66 @@ public sealed class HuggingFaceTests(AppFixture app) : IDisposable
         Assert.Equal(("done", "speech"), (spoken.GetProperty("state").GetString(), spoken.GetProperty("kind").GetString()));
         Assert.Contains("POST /v1/models/speaches-ai/piper-de_DE-thorsten-medium", speech.Fetched);
     }
+
+    [Fact]
+    public void A_snapshot_for_vllm_leaves_out_what_vllm_never_reads()
+    {
+        static HfFile F(string path, long size = 10) => new(path, size, null);
+        var snap = HuggingFace.SnapshotOf([F("config.json"), F("model-00001-of-00002.safetensors", 1000), F("model-00002-of-00002.safetensors", 900),
+            F("model.safetensors.index.json"), F("tokenizer.json"), F("tokenizer.model"), F("original/consolidated.safetensors", 5000), F("metal/model.bin", 4000),
+            F("a/original/x.safetensors", 300), F("model.gguf", 3000), F("README.md"), F(".gitattributes"), F("pytorch_model.bin", 7000)])!;
+        Assert.Equal(["config.json", "model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors", "model.safetensors.index.json", "tokenizer.json", "tokenizer.model"],
+            snap.Files.Select(f => f.Path));
+        Assert.Equal(1940, snap.Size);
+        Assert.Equal(5000 + 4000 + 300 + 3000 + 10 + 10 + 7000, snap.Skipped);
+        // No safetensors, or no config: nothing vLLM could load.
+        Assert.Null(HuggingFace.SnapshotOf([F("config.json"), F("model.gguf")]));
+        Assert.Null(HuggingFace.SnapshotOf([F("model.safetensors")]));
+        Assert.Equal("hf/org/repo@abc", HuggingFace.SnapshotDir("org/repo", "abc"));
+    }
+
+    [Fact]
+    public async Task A_snapshot_shows_its_size_first_then_downloads_into_its_own_folder_and_the_library_knows_it_whole()
+    {
+        await using var f = NewApp();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var repo = await admin.JsonAsync(await admin.GetAsync($"/api/admin/models/hf/repo?id={FakeHuggingFace.SnapshotRepo}"));
+        var snapshot = repo.GetProperty("snapshot");
+        var wanted = FakeHuggingFace.SnapshotFiles.Where(x => !x.Key.StartsWith("original/", StringComparison.Ordinal) && !x.Key.StartsWith("metal/", StringComparison.Ordinal)
+            && !x.Key.EndsWith(".gguf", StringComparison.Ordinal) && x.Key != "README.md" && x.Key != ".gitattributes").ToList();
+        Assert.Equal(wanted.Sum(x => x.Value.Length), snapshot.GetProperty("size").GetInt64());
+        Assert.Equal(wanted.Count, snapshot.GetProperty("files").GetInt32());
+        Assert.Equal($"hf/{FakeHuggingFace.SnapshotRepo}@{FakeHuggingFace.Sha}", snapshot.GetProperty("path").GetString());
+        Assert.False(snapshot.GetProperty("inLibrary").GetBoolean());
+        // A GGUF-only repository has none to offer, and asking for one says why.
+        Assert.Equal(JsonValueKind.Null, (await admin.JsonAsync(await admin.GetAsync($"/api/admin/models/hf/repo?id={FakeHuggingFace.Repo}"))).GetProperty("snapshot").ValueKind);
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/models/hf/downloads", new { repo = FakeHuggingFace.Repo, snapshot = true }));
+
+        var made = await admin.PostAsync("/api/admin/models/hf/downloads", new { repo = FakeHuggingFace.SnapshotRepo, snapshot = true });
+        await StatusAssert.Is(HttpStatusCode.Created, made);
+        var done = await DownloadAsync(admin, (await admin.JsonAsync(made)).GetProperty("id").GetGuid());
+        Assert.Equal("done", done.GetProperty("state").GetString());
+        var folder = Path.Combine(_library, "hf", "acme", "Flash-FP8@" + FakeHuggingFace.Sha);
+        foreach (var (file, bytes) in wanted)
+        {
+            Assert.Equal(bytes, await File.ReadAllBytesAsync(Path.Combine(folder, file)));
+        }
+        Assert.False(Directory.Exists(Path.Combine(folder, "original")));
+        Assert.False(File.Exists(Path.Combine(folder, "Flash-Q4_K_M.gguf")));
+        Assert.DoesNotContain(app.HuggingFace.Downloads, d => d.Path.Contains("/original/", StringComparison.Ordinal) || d.Path.Contains("/metal/", StringComparison.Ordinal));
+
+        var listed = Assert.Single((await admin.JsonAsync(await admin.GetAsync("/api/admin/models/library/snapshots"))).EnumerateArray());
+        Assert.Equal(($"hf/acme/Flash-FP8@{FakeHuggingFace.Sha}", FakeHuggingFace.SnapshotRepo, true),
+            (listed.GetProperty("path").GetString(), listed.GetProperty("repo").GetString(), listed.GetProperty("complete").GetBoolean()));
+        Assert.Equal("Qwen3MoeForCausalLM", listed.GetProperty("architectures")[0].GetString());
+        Assert.True((await admin.JsonAsync(await admin.GetAsync($"/api/admin/models/hf/repo?id={FakeHuggingFace.SnapshotRepo}"))).GetProperty("snapshot").GetProperty("inLibrary").GetBoolean());
+
+        // A shard gone: the library says it is not whole, and why.
+        File.Delete(Path.Combine(folder, "model-00002-of-00002.safetensors"));
+        var library = f.Services.GetRequiredService<ModelLibrary>();
+        var broken = library.Snapshot($"hf/acme/Flash-FP8@{FakeHuggingFace.Sha}")!;
+        Assert.False(broken.Complete);
+        Assert.Contains("model-00002-of-00002.safetensors", broken.Why, StringComparison.Ordinal);
+        Assert.Null(library.Snapshot("../outside"));
+    }
 }

@@ -209,6 +209,18 @@ would be with them.
   file chosen. The app needs the library writable by its user (`LLM_UID`) and,
   for gated repositories, `HF_TOKEN` of an account that accepted their terms.
   A download is refused when the disk would keep less than 2 GB free.
+- **Snapshots for vLLM.** A repository with safetensors weights and a
+  `config.json` also offers its **snapshot** (`snapshot` in
+  `GET /api/admin/models/hf/repo`), with its size shown before anything is
+  downloaded and what it leaves out: the `original/` and `metal/` copies, GGUF
+  files, other weight formats and the read-me, which vLLM never reads (for
+  `openai/gpt-oss-120b` that is about two thirds of the repository). It
+  downloads (`POST /api/admin/models/hf/downloads` with `snapshot: true`) into
+  `<library>/hf/<owner>/<repository>@<revision>/`, every file at the same
+  commit and checked as above. `GET /api/admin/models/library/snapshots` lists
+  the snapshots with their size and whether each is whole (its config, its
+  weights, every shard its index names, nothing still downloading); only a
+  whole one can be a vLLM model.
 - **Load** loads a model now, beside the kept ones (refused when every place is
   kept). At the limit the app makes room for it, as for a request: an idle model
   that may make room unloads first, and is waited for until it has stopped. When

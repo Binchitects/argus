@@ -42,6 +42,7 @@ public static class ModelEndpoints
         g.MapGet("", ListAsync);
         MediaModelEndpoints.Map(g);
         g.MapGet("/library", LibraryAsync);
+        g.MapGet("/library/snapshots", SnapshotsAsync);
         g.MapPost("/advice", AdviceAsync);
         g.MapPost("", AddAsync);
         g.MapPatch("/{name}", UpdateAsync);
@@ -196,6 +197,17 @@ public static class ModelEndpoints
             // Chat models and picture or video models alike (a text encoder is often both).
             usedBy = used.Where(u => u.File == f.File.Path || u.Projector == f.File.Path || u.DraftHead == f.File.Path).Select(u => u.Name)
                 .Concat(media.Where(m => m.Files.Any(x => x.Path == f.File.Path)).Select(m => m.Name)),
+        }));
+    }
+
+    /// <summary>The Hugging Face snapshots in the library, for vLLM models: each with its size, whether it is whole, and the models using it.</summary>
+    private static async Task<IResult> SnapshotsAsync(ModelLibrary library, AppDbContext db, CancellationToken ct)
+    {
+        var used = await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.Vllm).Select(m => new { m.Name, m.File, m.DraftHead }).ToListAsync(ct);
+        return Results.Ok(library.Snapshots().Select(s => new
+        {
+            s.Path, s.Repo, s.Revision, s.Size, s.Complete, s.Why, s.Architectures,
+            usedBy = used.Where(u => u.File == s.Path || u.DraftHead == s.Path).Select(u => u.Name),
         }));
     }
 
@@ -611,9 +623,11 @@ public static class ModelEndpoints
     /// <summary>A vLLM model's settings: its folder a Hugging Face snapshot in the library, and only what vLLM has.</summary>
     private static (IResult? Problem, string? Warning) ApplyVllm(LocalModel m, LocalModelRequest body, string file, ModelLibrary library, Hardware? hardware, PriceOptions prices)
     {
-        if (!library.IsSnapshot(file))
+        if (library.Snapshot(file) is not { Complete: true })
         {
-            return (AuthEndpoints.Problem(400, "file", "Choose a Hugging Face snapshot from the model library (hf/ORG/REPO@REVISION, with its config.json)."), null);
+            return (AuthEndpoints.Problem(400, "file", library.Snapshot(file) is { Why: { } why }
+                ? $"{file} cannot be loaded yet: {why}"
+                : "Choose a Hugging Face snapshot from the model library (hf/ORG/REPO@REVISION, with its config.json)."), null);
         }
         var draft = Copy(m);
         Merge(draft, body, file);

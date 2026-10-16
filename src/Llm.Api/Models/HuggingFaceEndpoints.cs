@@ -10,7 +10,8 @@ namespace Llm.Api.Models;
 
 /// <param name="Models">The repository's models to download, by name (a split model's parts come together; a vision projector is a model too).</param>
 /// <param name="Files">Or its files by path: a picture or video model's diffusion model, text encoders and decoder.</param>
-public sealed record HfDownloadRequest(string Repo, string[]? Models = null, string[]? Files = null);
+/// <param name="Snapshot">Or its snapshot for vLLM: the safetensors, config and tokenizer, into hf/ORG/REPO@REVISION.</param>
+public sealed record HfDownloadRequest(string Repo, string[]? Models = null, string[]? Files = null, bool Snapshot = false);
 
 /// <summary>A speech model for the speech server to fetch: its id there (a Hugging Face repository).</summary>
 public sealed record SpeechDownloadRequest(string Id);
@@ -56,6 +57,7 @@ public static class HuggingFaceEndpoints
         var repo = await hf.RepoAsync((id ?? "").Trim(), ct);
         var hw = await hardware.GetAsync(ct);
         var probe = new ModelDownload { Repo = repo.Id, Revision = repo.Sha, Dir = repo.Id, CreatedBy = "" };
+        var snapshotProbe = new ModelDownload { Repo = repo.Id, Revision = repo.Sha, Dir = HuggingFace.SnapshotDir(repo.Id, repo.Sha), CreatedBy = "" };
         return Results.Ok(new
         {
             repo.Id, repo.Sha, repo.Gated, repo.License, repo.Architecture, repo.Parameters, repo.Context, repo.Downloads, repo.Likes, repo.LastModified,
@@ -66,6 +68,12 @@ public static class HuggingFaceEndpoints
                 inLibrary = m.Files.All(f => downloads.PathOf(probe, f.Path) is { } p && File.Exists(p) && new FileInfo(p).Length == f.Size),
                 path = $"{repo.Id}/{m.Files[0].Path}",
             }),
+            // Its snapshot for vLLM, with its size before anything is downloaded (what it leaves out, too), and whether the library has it.
+            snapshot = repo.Snapshot is { } snap ? new
+            {
+                snap.Size, snap.Skipped, files = snap.Files.Count, path = HuggingFace.SnapshotDir(repo.Id, repo.Sha),
+                inLibrary = snap.Files.All(f => downloads.PathOf(snapshotProbe, f.Path) is { } p && File.Exists(p) && new FileInfo(p).Length == f.Size),
+            } : null,
             // Every file a picture or video model may be made of, with the role its name suggests.
             files = repo.Weights.Select(f => new
             {
@@ -97,21 +105,40 @@ public static class HuggingFaceEndpoints
         var repo = await hf.RepoAsync((body.Repo ?? "").Trim(), ct);
         var chosen = repo.Models.Where(m => (body.Models ?? []).Contains(m.Name)).ToList();
         var files = repo.Weights.Where(f => (body.Files ?? []).Contains(f.Path)).ToList();
-        if (chosen.Count + files.Count == 0 || chosen.Count != (body.Models ?? []).Distinct().Count() || files.Count != (body.Files ?? []).Distinct().Count())
+        ModelDownload d;
+        if (body.Snapshot)
         {
-            return AuthEndpoints.Problem(400, "models", "Choose models or files this repository has (by name or path).");
+            // A snapshot for vLLM: its own folder at this revision, never mixed with the GGUF files of the same repository.
+            if (repo.Snapshot is not { } snap || chosen.Count + files.Count > 0)
+            {
+                return AuthEndpoints.Problem(400, "snapshot", repo.Snapshot is null
+                    ? "This repository has no safetensors weights with a config.json: vLLM cannot load it. Choose its GGUF files for llama.cpp instead."
+                    : "Download a snapshot alone, without models or files.");
+            }
+            d = new ModelDownload
+            {
+                Repo = repo.Id, Revision = repo.Sha, Dir = HuggingFace.SnapshotDir(repo.Id, repo.Sha), CreatedBy = p.Identity?.Name ?? "admin",
+                Files = [.. snap.Files.Select(f => new DownloadFile { Path = f.Path, Size = f.Size, Sha256 = f.Sha256 })],
+            };
         }
-        var d = new ModelDownload
+        else
         {
-            Repo = repo.Id, Revision = repo.Sha, Dir = repo.Id, CreatedBy = p.Identity?.Name ?? "admin",
-            Files = [.. chosen.SelectMany(m => m.Files).Concat(files).DistinctBy(f => f.Path).Select(f => new DownloadFile { Path = f.Path, Size = f.Size, Sha256 = f.Sha256 })],
-        };
+            if (chosen.Count + files.Count == 0 || chosen.Count != (body.Models ?? []).Distinct().Count() || files.Count != (body.Files ?? []).Distinct().Count())
+            {
+                return AuthEndpoints.Problem(400, "models", "Choose models or files this repository has (by name or path).");
+            }
+            d = new ModelDownload
+            {
+                Repo = repo.Id, Revision = repo.Sha, Dir = repo.Id, CreatedBy = p.Identity?.Name ?? "admin",
+                Files = [.. chosen.SelectMany(m => m.Files).Concat(files).DistinctBy(f => f.Path).Select(f => new DownloadFile { Path = f.Path, Size = f.Size, Sha256 = f.Sha256 })],
+            };
+        }
         if (d.Files.Any(f => downloads.PathOf(d, f) is null))
         {
             return AuthEndpoints.Problem(400, "path", "A file of this repository would land outside the model library.");
         }
         d.Total = d.Files.Sum(f => f.Size);
-        var open = await db.ModelDownloads.Where(x => x.Repo == d.Repo && x.State != "done").ToListAsync(ct);
+        var open = await db.ModelDownloads.Where(x => x.Repo == d.Repo && x.Dir == d.Dir && x.State != "done").ToListAsync(ct);
         if (open.Any(x => x.Files.Select(f => f.Path).Intersect(d.Files.Select(f => f.Path)).Any()))
         {
             return AuthEndpoints.Problem(409, "exists", "These files have a download already: let it run, resume it, or remove it first.");
@@ -127,7 +154,9 @@ public static class HuggingFaceEndpoints
         db.ModelDownloads.Add(d);
         await db.SaveChangesAsync(ct);
         downloads.Wake();
-        await audit.WriteAsync("model.download", repo.Id, detail: $"{string.Join(", ", chosen.Select(m => m.Name).Concat(files.Select(f => f.Path)))} ({Gb(d.Total)})");
+        await audit.WriteAsync("model.download", repo.Id, detail: body.Snapshot
+            ? $"snapshot {d.Dir} ({Gb(d.Total)})"
+            : $"{string.Join(", ", chosen.Select(m => m.Name).Concat(files.Select(f => f.Path)))} ({Gb(d.Total)})");
         return Results.Created($"/api/admin/models/hf/downloads/{d.Id}", View(d, downloads));
     });
 

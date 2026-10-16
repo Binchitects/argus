@@ -24,6 +24,26 @@ public sealed class FakeHuggingFace : HttpMessageHandler
         ["README.md"] = Encoding.UTF8.GetBytes("# Tiny"),
     };
 
+    /// <summary>A safetensors repository for vLLM, with what vLLM never reads beside it: an original/ copy, a metal/ one, a GGUF file, the read-me.</summary>
+    public const string SnapshotRepo = "acme/Flash-FP8";
+
+    public static readonly Dictionary<string, byte[]> SnapshotFiles = new()
+    {
+        ["config.json"] = Encoding.UTF8.GetBytes("""{"architectures":["Qwen3MoeForCausalLM"],"num_hidden_layers":2,"num_attention_heads":4,"num_key_value_heads":2,"head_dim":64}"""),
+        ["generation_config.json"] = Encoding.UTF8.GetBytes("{}"),
+        ["model.safetensors.index.json"] = Encoding.UTF8.GetBytes("""{"weight_map":{"a":"model-00001-of-00002.safetensors","b":"model-00002-of-00002.safetensors"}}"""),
+        ["model-00001-of-00002.safetensors"] = Content("shard-1", 120_000),
+        ["model-00002-of-00002.safetensors"] = Content("shard-2", 80_000),
+        ["tokenizer.json"] = Content("tokens", 20_000),
+        ["tokenizer_config.json"] = Encoding.UTF8.GetBytes("{}"),
+        ["chat_template.jinja"] = Encoding.UTF8.GetBytes("{{ messages }}"),
+        ["original/consolidated.safetensors"] = Content("original", 200_000),
+        ["metal/model.bin"] = Content("metal", 90_000),
+        ["Flash-Q4_K_M.gguf"] = Content("gguf", 70_000),
+        ["README.md"] = Encoding.UTF8.GetBytes("# Flash"),
+        [".gitattributes"] = Encoding.UTF8.GetBytes("*.safetensors filter=lfs"),
+    };
+
     public const string LayaRepo = "convaiinnovations/laya";
 
     /// <summary>Laya's repository: the English checkpoint at its root, the others in folders, and what else it holds.</summary>
@@ -82,6 +102,25 @@ public sealed class FakeHuggingFace : HttpMessageHandler
         if (path == $"/api/models/{Repo}")
         {
             return Json(new { id = Repo, sha = Sha, gated = false, downloads = 1234, likes = 5, cardData = new { license = "apache-2.0" }, gguf = new { total = 600_000_000, architecture = "qwen3", context_length = 40960 } });
+        }
+        if (path == $"/api/models/{SnapshotRepo}")
+        {
+            return Json(new { id = SnapshotRepo, sha = Sha, gated = false, downloads = 7, likes = 1, cardData = new { license = "apache-2.0" } });
+        }
+        if (path == $"/api/models/{SnapshotRepo}/tree/{Sha}")
+        {
+            return Json(SnapshotFiles.Select(f => f.Key.EndsWith(".safetensors", StringComparison.Ordinal) || f.Key.EndsWith(".gguf", StringComparison.Ordinal)
+                ? (object)new { type = "file", path = f.Key, size = 134, lfs = new { oid = Hash(f.Value), size = f.Value.Length } }
+                : new { type = "file", path = f.Key, size = f.Value.Length }));
+        }
+        if (path.StartsWith($"/{SnapshotRepo}/resolve/{Sha}/", StringComparison.Ordinal) && SnapshotFiles.TryGetValue(path[$"/{SnapshotRepo}/resolve/{Sha}/".Length..], out var snap))
+        {
+            lock (Downloads)
+            {
+                Downloads.Add((SnapshotRepo + "/" + path[$"/{SnapshotRepo}/resolve/{Sha}/".Length..], request.Headers.Range));
+            }
+            var from = request.Headers.Range?.Ranges.First().From ?? 0;
+            return new HttpResponseMessage(from > 0 ? HttpStatusCode.PartialContent : HttpStatusCode.OK) { Content = new ByteArrayContent(snap[(int)from..]) };
         }
         if (path == $"/api/models/{LayaRepo}")
         {
