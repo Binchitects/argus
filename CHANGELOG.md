@@ -33,6 +33,9 @@ Sections used:
 
 ### :sparkles: New features & Enhancements
 
+- **Reply to part of an answer**: select it (or Ctrl+Shift+') and Reply, Ask
+  about this or Copy; the quote rides above the question, the model reads it
+  first, and it syncs between Code Arena and the web chat
 - **When to compact is each person's choice** (Your account → Answers: the
   company's default, a share of the context, or only when a message would
   not fit), in the web chat and in Code Arena (which follows the account
