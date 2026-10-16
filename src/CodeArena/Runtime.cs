@@ -109,7 +109,7 @@ internal sealed partial class Runtime : IAsyncDisposable
     public string CompactAtSource { get; private set; } = "default";
 
     /// <summary>The threshold the Arena account gives (the person's own, else Arena's default), when Arena said at the start.</summary>
-    public (int At, bool Own)? AccountCompactAt { get; private set; }
+    public AccountCompaction? AccountCompactAt { get; private set; }
 
     /// <summary>Where the threshold comes from, as /compact-at and /context say it; null for the built-in default.</summary>
     public string? CompactAtFrom => CompactAtSource switch
@@ -208,7 +208,20 @@ internal sealed partial class Runtime : IAsyncDisposable
             : Config.CompactAt is { } kept ? (kept, "config")
             : AccountCompactAt is { } account ? (account.At, account.Own ? "account" : "arena")
             : (Compaction.DefaultAt, "default");
-        if (Compaction.Set(at, o.CompactTarget ?? Config.CompactTarget) is { } wrong)
+        if (CompactAtSource is "account" or "arena")
+        {
+            // The account's threshold is no mistake of the person's here: what is kept comes down with it when too close, and
+            // a threshold this version cannot take leaves the default.
+            if (Compaction.Set(null, o.CompactTarget ?? Config.CompactTarget) is { } wrongTarget)
+            {
+                throw new StartException($"Compaction: {wrongTarget} (--compact-to, or compactTarget in {Env.Paths.ConfigFile})");
+            }
+            if (Compaction.Set(at, null) is not null)
+            {
+                CompactAtSource = "default";
+            }
+        }
+        else if (Compaction.Set(at, o.CompactTarget ?? Config.CompactTarget) is { } wrong)
         {
             throw new StartException($"Compaction: {wrong} (--compact-at, --compact-to, or compactAt and compactTarget in {Env.Paths.ConfigFile})");
         }

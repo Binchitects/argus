@@ -269,6 +269,16 @@ public sealed class CompactionTests : IDisposable
         Assert.Matches(@"compacts at 80%, and always before a request would not fit, keeping the recent part within 25%\.", h.Out);
     }
 
+    [Fact]
+    public async Task What_is_kept_comes_down_with_a_low_threshold_from_the_account()
+    {
+        // The account's 20% and config.json's 25% kept: no mistake of the person's here, so what is kept comes down to 10%.
+        _mcp.Chats.CompactAt = 20;
+        using var h = new Harness(_gateway, _mcp, c => c["compactTarget"] = 25);
+        Assert.Equal(0, await h.Run("/context\n/exit\n", "chat"));
+        Assert.Contains("compacts at 20% (from your Arena account), and always before a request would not fit, keeping the recent part within 10%.", h.Out);
+    }
+
     /// <summary>What the session says to a front end: its notices.</summary>
     private sealed class Heard : IAgentEvents
     {

@@ -538,7 +538,7 @@ public sealed partial class ChatService(
                 msg.Error = ex.Message;
                 await FinishAsync(conversation, CancellationToken.None);
                 // A chat too long for the model even compacted: the page offers to compact it, or another model.
-                await emit(new { type = "error", kind = ex.ContextOverflow ? "context" : null, message = ex.Message });
+                await emit(new { type = "error", kind = ex is { ContextOverflow: true, SharedCache: false } ? "context" : null, message = ex.Message });
                 return;
             }
 
