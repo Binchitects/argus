@@ -12,7 +12,7 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
-## v5.8.0 (2026-10-16)
+## v5.8.0 (UNRELEASED)
 
 ### :rocket: Epics and highlights
 
@@ -26,11 +26,39 @@ Sections used:
   answers written again, other branches, /rewind and compactions follow both
   ways; thinking, tokens, times, models and attachments come through; while
   Code Arena answers the web chat queues the person's message; the IDE shows
-  where the sync stands and whose chats they are
+  where the sync stands
 - **Picture and video models get room on the GPU**: a video (and a picture
   when short of memory) unloads idle chat models, runs on the GPU and loads
   them back (a 1 s video: 92 s, was 510 s on the CPU)
 
+### :sparkles: New features & Enhancements
+
+- Pictures, video and speech Arena's tools make reach Code Arena (saved under
+  .code-arena/media and shown in its chat)
+- A person with no picture, video or speech credit is told an admin sets it,
+  and Arena MCP does not offer those tools to them; an API key's picture
+  request is refused before its model loads
+- The design for a multi-GPU server (docs/multi-gpu-server.md)
+
+### :bug: Bugs fixed
+
+- The speech server's voice detector is unloaded when idle; a speech model
+  an admin loaded keeps saying so
+- Builds go on when NuGet's audit learns of a vulnerability later
+
+### :boom: Breaking changes & Deprecations
+
+- Each conversation on a llama.cpp model gets the window one of its slots
+  holds (context ÷ answers at once, 65,536 for the default model here):
+  long sessions are no longer evicted by others
+- The engine's key goes by the environment (LLAMA_API_KEY), no longer on its
+  command line
+- Code Arena and Arena sync by message ids: older Code Arena builds cannot
+  sync with this Arena
+
+## v5.7.0 (2026-10-16)
+
+### :rocket: Epics and highlights
 
 - **Code Arena's IDE works as VS Code does**: its commands under VS Code's
   ids in the palette (by category, the ones run lately first), VS Code's keys
@@ -49,24 +77,23 @@ Sections used:
   to Cursor, stepping, restart and stop. Tasks (tasks.json's and the
   project's) run from the palette and Ctrl+Shift+B, their problem matchers
   feeding Problems
+- **Language servers and VS Code extensions**: the editor speaks the
+  Language Server Protocol (completion, hover, definition, references,
+  rename, code actions, formatting, diagnostics) to servers found on PATH or
+  named in config.json, in a trusted folder and sandboxed; VS Code extensions
+  bring colour and file icon themes, snippets, languages, keybindings and
+  setting defaults, from a .vsix or VS Code's own on this computer
+- **Code Arena opens in a desktop window of its own** (Chrome, Edge,
+  Chromium or Brave in app mode, no tabs or address bar; closing it stops
+  code-arena); `--browser` or `"window": false` in config.json for a tab
 
 ### :sparkles: New features & Enhancements
 
-- **Code Arena opens in a desktop window of its own** (Chrome, Edge, Chromium
-  or Brave in app mode); `--browser` or `"window": false` for a tab
-- **Language servers** in Code Arena's editor (completion, hover, definition,
-  references, rename, code actions, formatting, diagnostics), found on PATH or
-  named in config.json, in a trusted folder, sandboxed
-- **VS Code extensions** in Code Arena: colour and file icon themes,
-  snippets, languages, keybindings and setting defaults, from a .vsix or VS
-  Code's own on this computer
-- launch.json compounds, attaching to a process (pickProcess), a program's
-  own terminal (runInTerminal)
-- Pictures, video and speech Arena's tools make reach Code Arena (saved under
-  .code-arena/media and shown in its chat)
-- A person with no picture, video or speech credit is told an admin sets it,
-  and Arena MCP does not offer those tools to them
-
+- launch.json compounds (their preLaunchTask, then every configuration;
+  stopAll), attaching to a process (`${command:pickProcess}`), a program's
+  own terminal (runInTerminal), the configuration's internalConsoleOptions
+- Code Arena says whose chats in Arena its sessions are kept with (login,
+  /sync, the IDE)
 
 - **Compare as VS Code does**: a side may be the file itself (typing there
   edits it, Ctrl+S saves it), the file as saved (Ctrl+K D), the clipboard
@@ -91,14 +118,17 @@ Sections used:
   language; tabs have VS Code's menu; Alt+Z, navigate back and forward,
   reopen a closed tab
 
+### :bug: Bugs fixed
+
+- Everything a review of the new IDE found: Run to Cursor's breakpoint is
+  never kept, a step answered after its stop leaves the program stopped,
+  debug sessions that end are let go, inline values of shadowed names, the
+  debug hover's Markdown, quick diff on CRLF files and large rewrites, the
+  editor's own formatter where no project formatter runs, settings and
+  keybindings files keep their comments, compares keep unsaved edits, keys
+  the browser keeps get keys the page receives, terminal settings applied
+
 ### :boom: Breaking changes & Deprecations
-
-- Each conversation on a llama.cpp model gets the window one of its slots
-  holds (context ÷ answers at once, 65,536 for the default model here):
-  long sessions are no longer evicted by others
-- The engine's key goes by the environment (LLAMA_API_KEY), no longer on its
-  command line
-
 
 - The theme and code completion's on/off are now settings.json's
   (`workbench.colorTheme`, `window.autoDetectColorScheme`,
