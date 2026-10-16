@@ -107,7 +107,7 @@ public sealed partial class AutoModel(AppDbContext db, GatewayChat gateway, Safe
             }
             ask.Append("</earlier>\n\n");
         }
-        ask.Append("The question to sort:\n<question>\n").Append(Cut(mask(question.Content), 4000)).Append("\n</question>");
+        ask.Append("The question to sort:\n<question>\n").Append(Cut(ChatQuotes.ForModel(question.Quote is null ? null : mask(question.Quote), mask(question.Content)), 4000)).Append("\n</question>");
         var request = new JsonObject
         {
             ["model"] = small.Name,

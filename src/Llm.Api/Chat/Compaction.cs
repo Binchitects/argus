@@ -182,7 +182,8 @@ public sealed partial class ChatService
             {
                 case "user":
                     var attached = ParseIds(m.AttachmentsJson).Select(id => files.GetValueOrDefault(id)).OfType<string>().ToList();
-                    yield return "Person: " + m.Content + (attached.Count > 0 ? $"\n[attached: {string.Join(", ", attached)}]" : "");
+                    var quoting = m.Quote is { Length: > 0 } q ? $" (quoting an earlier answer: \"{(q.Length > 300 ? q[..300] + "…" : q)}\")" : "";
+                    yield return "Person" + quoting + ": " + m.Content + (attached.Count > 0 ? $"\n[attached: {string.Join(", ", attached)}]" : "");
                     break;
                 case "assistant":
                     var text = new StringBuilder();

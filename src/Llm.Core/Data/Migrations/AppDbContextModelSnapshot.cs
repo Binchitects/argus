@@ -592,6 +592,9 @@ namespace Llm.Core.Data.Migrations
                     b.Property<int?>("PromptTokens")
                         .HasColumnType("integer");
 
+                    b.Property<string>("Quote")
+                        .HasColumnType("text");
+
                     b.Property<string>("Reasoning")
                         .HasColumnType("text");
 
@@ -1306,6 +1309,9 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<int>("Position")
                         .HasColumnType("integer");
+
+                    b.Property<string>("Quote")
+                        .HasColumnType("text");
 
                     b.Property<bool>("Research")
                         .HasColumnType("boolean");

@@ -81,7 +81,7 @@ public sealed class DataExport(AppDbContext db, AccessService access)
                 c.Id, c.Title, c.CreatedAt, c.UpdatedAt, c.DeletedAt, c.ArchivedAt, c.Model, c.Thinking, c.SystemPrompt, c.AssistantId, c.ForkedFromId, c.CurrentLeafId,
                 messages = messages.Select(m => new
                 {
-                    m.Id, m.ParentId, m.Role, m.Content, m.Reasoning, m.ToolName, m.ToolCallId,
+                    m.Id, m.ParentId, m.Role, m.Content, m.Quote, m.Reasoning, m.ToolName, m.ToolCallId,
                     toolCalls = m.ToolCallsJson is null ? null : JsonNode.Parse(m.ToolCallsJson),
                     files = ChatService.ParseIds(m.AttachmentsJson).Select(f => names.GetValueOrDefault(f, f.ToString())),
                     status = m.Status.ToString().ToLowerInvariant(), m.Error, m.Model, m.PromptTokens, m.CompletionTokens, m.CreatedAt,
@@ -132,7 +132,13 @@ public sealed class DataExport(AppDbContext db, AccessService access)
             switch (m.Role)
             {
                 case "user":
-                    md.AppendLine("## You").AppendLine().AppendLine(m.Content);
+                    md.AppendLine("## You").AppendLine();
+                    if (m.Quote is { Length: > 0 } quote)
+                    {
+                        // The part of an earlier answer it replied to, as a Markdown quote.
+                        md.AppendLine(string.Join('\n', quote.Split('\n').Select(l => l.Length == 0 ? ">" : "> " + l))).AppendLine();
+                    }
+                    md.AppendLine(m.Content);
                     foreach (var f in ChatService.ParseIds(m.AttachmentsJson))
                     {
                         md.Append("- attached: ").AppendLine(names.GetValueOrDefault(f, f.ToString()));

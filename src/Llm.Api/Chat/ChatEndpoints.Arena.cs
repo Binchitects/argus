@@ -12,7 +12,8 @@ namespace Llm.Api.Chat;
 /// Arena: a question for two models, side by side and blind. Models: the two
 /// to compare; none for two at random of those the person may use.
 /// </summary>
-public sealed record CompareRequest(string Content, Guid[]? Attachments = null, Guid? ParentId = null, bool Root = false, string[]? Models = null);
+/// <param name="Quote">The part of an earlier answer the person replies to (ChatQuotes).</param>
+public sealed record CompareRequest(string Content, Guid[]? Attachments = null, Guid? ParentId = null, bool Root = false, string[]? Models = null, string? Quote = null);
 
 public static partial class ChatEndpoints
 {
@@ -37,6 +38,12 @@ public static partial class ChatEndpoints
         if (text.Length == 0 && attachments.Length == 0)
         {
             await Problem(http, 400, "empty", "Write a message first.");
+            return;
+        }
+        var quote = ChatQuotes.Clean(body.Quote);
+        if (ChatQuotes.Check(quote) is { } tooLong)
+        {
+            await Problem(http, 400, "quote", tooLong);
             return;
         }
         if (attachments.Length > 0 && await db.ChatAttachments.CountAsync(a => attachments.Contains(a.Id) && a.UserId == me.Id, ct) != attachments.Length)
@@ -89,12 +96,15 @@ public static partial class ChatEndpoints
         {
             pair = [pair[1], pair[0]];
         }
-        var verdict = await safeguards.CheckMessageAsync(me, text, attachments.Length, false, pair[0], ct);
+        var verdict = await safeguards.CheckMessageAsync(me, text, attachments.Length, false, pair[0], ct, quote);
         if (!verdict.Allowed)
         {
             await Problem(http, verdict.Status, $"safeguard_{verdict.Kind}", verdict.Reason!);
             return;
         }
+        // Its secrets masked, when the person's policy masks them.
+        text = verdict.Text ?? text;
+        quote = verdict.Quote ?? quote;
         var match = new ArenaMatch { UserId = me.Id, ConversationId = c.Id, ModelA = pair[0], ModelB = pair[1] };
         await RunAsync(http, c, me, db, jobs, new AnswerOverrides(), async () =>
         {
@@ -102,7 +112,7 @@ public static partial class ChatEndpoints
             var first = next == 0;
             var question = new ChatMessage
             {
-                ConversationId = c.Id, ParentId = parent, Role = "user", Sequence = next + 1, Content = text,
+                ConversationId = c.Id, ParentId = parent, Role = "user", Sequence = next + 1, Content = text, Quote = quote,
                 AttachmentsJson = attachments.Length > 0 ? JsonSerializer.Serialize(attachments) : null,
             };
             db.ChatMessages.Add(question);

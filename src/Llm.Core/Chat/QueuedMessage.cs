@@ -10,6 +10,8 @@ public sealed class QueuedMessage
     public Guid Id { get; set; } = Guid.CreateVersion7();
     public Guid ConversationId { get; set; }
     public required string Content { get; set; }
+    /// <summary>The part of an earlier answer it quotes, if any (as ChatMessage keeps it).</summary>
+    public string? Quote { get; set; }
     /// <summary>The attachments' ids, as a JSON array (as ChatMessage keeps them).</summary>
     public string? AttachmentsJson { get; set; }
     /// <summary>Deep research for this one.</summary>

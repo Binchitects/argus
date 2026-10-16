@@ -79,6 +79,11 @@ public sealed class ChatMessage
     public int Sequence { get; set; }
     public required string Role { get; set; }
     public string Content { get; set; } = "";
+    /// <summary>
+    /// A question: the part of an earlier answer the person quoted to reply to it, kept apart from what they typed. The model
+    /// reads it before the question (ChatQuotes.ForModel); the page shows it above the question.
+    /// </summary>
+    public string? Quote { get; set; }
     public string? Reasoning { get; set; }
     public string? ToolCallsJson { get; set; }
     public string? ToolCallId { get; set; }

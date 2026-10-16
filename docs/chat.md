@@ -1087,6 +1087,32 @@ with `/versions`, `/versions/{n}`, `POST /versions/{n}/restore` and
 `/export?format=md|docx|pdf|file`; they are kept in `canvases` and
 `canvas_versions`. Chats from before branches were each migrated to one branch.
 
+A question can quote part of an earlier answer: `POST .../messages`,
+`.../compare` and `.../queue` take `quote` beside `content`, and every message
+of `GET` (and of a shared chat) carries its `quote`, as does every queued
+message. The quote is kept in its own column (`chat_messages.Quote`,
+`queued_messages.Quote`), never inside the content, and is at most 4,000
+characters (a 400 `quote` otherwise); the message's own length limit is for
+what was typed, and a quote alone is not a message (typed text or files are).
+It is the person's words to the model, never the model's: secrets, blocked
+words and the model's check apply to it as to the message, and personal data
+in it is masked for the model. The model reads it before the question, in
+this shape (a `</quote>` inside is written `<\/quote>`):
+
+```
+The person quotes this part of an earlier answer:
+<quote>
+…the quoted part…
+</quote>
+
+…the question…
+```
+
+The question's files follow. Compaction summaries, Auto's sorting and the
+passages searched for a question read the quote too; an edit is sent with the
+quote it keeps, and forks, shared chats and the data export (as `> ` lines
+under "## You") carry it.
+
 Each round of an answer keeps its trace beside its tokens: the first token's
 wait and the engine's read and write speeds, and on the first round the wait
 in line and getting ready; the answer's last round keeps the whole answer's
