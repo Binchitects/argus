@@ -61,6 +61,12 @@ Other clients (streamable HTTP):
   call, it is not served (nobody is in its chat to allow the web's calls), and
   the notes for the agent say so, as does **Connect your tools** (it is not
   listed among the tools served); the person starts it in the chat instead.
+- **The person's files with the key**: besides `/mcp` and Code Arena's
+  `/api/code-arena`, the key reaches the chat's file routes alone
+  (`POST /api/chat/attachments`, `GET /api/chat/attachments/{id}/content` and
+  its `pages`), for Code Arena's IDE, which relays them; a file is the
+  person's own, or one shared with them, or not found. Every other route of
+  the chat takes the sign-in alone.
 - **Each function says whose it is**: `_meta` `arena/tool` names the chat's
   tool it is a function of (`argus`, `python`, `web`...), so a client can group
   them as the chat's **Tools** menu does (Code Arena's menu and its tools on

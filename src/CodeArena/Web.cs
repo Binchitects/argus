@@ -136,7 +136,11 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         // What Arena lacks of the earlier sessions (every folder's) goes in the background.
         rt.SendLaterInBackground();
         app._server.OnError = e => rt.Ui.Error($"The web interface: {e.Message}");
-        app._server.BodyLimit = (method, path) => method == "POST" && path == InstallPath ? EditorExtensions.MaxVsix : HttpServer.MaxBody;
+        app._server.BodyLimit = (method, path) => method != "POST" ? HttpServer.MaxBody
+            : path == InstallPath ? EditorExtensions.MaxVsix
+            // A file relayed to Arena: as large as Arena takes (its config says), with room for the form around it.
+            : path == ArenaRelay.Upload ? (int)Math.Min(int.MaxValue, (rt.ArenaChat.Long("maxUploadBytes") ?? ArenaRelay.DefaultUpload) + 1024 * 1024)
+            : HttpServer.MaxBody;
         app._server.Start(app.HandleAsync);
         return app;
     }
@@ -200,6 +204,13 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             if (req.Header("Sec-Fetch-Site") is { } site && site is not ("same-origin" or "none"))
             {
                 await res.ErrorAsync(403, "forbidden", "Requests from other sites are refused.", ct);
+                return;
+            }
+            // Arena's routes the page reaches through here (the person's files): sent on with the key. A file comes as a
+            // form, taken on the upload alone, and only after the checks above (this run's token, the same site).
+            if (ArenaRelay.Relays(req.Method, req.Path))
+            {
+                await ArenaRelay.RelayAsync(_rt.Config, _rt.Http, req, res, ct);
                 return;
             }
             // JSON only: a form or a plain-text post from another page cannot pass for the page's own. A .vsix comes as its

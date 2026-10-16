@@ -55,6 +55,9 @@ Sections used:
   tools on or off per session (the IDE's Tools menu, /tools on|off), and
   past 6,000 characters of definitions only those the model loads go whole
   (about 8,700 tokens fewer in every request with Arena's tools)
+- Code Arena's IDE reaches the person's files in Arena through code-arena,
+  which adds the key (the page never holds it); Arena takes the key on those
+  routes alone
 - Code Arena's model picker says what the web chat's does: which models are
   loaded or load when asked, which see pictures, the deployment's thinking
   levels and its default (which "default" thinking now sends)

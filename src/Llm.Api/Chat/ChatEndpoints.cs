@@ -83,14 +83,17 @@ public static partial class ChatEndpoints
         g.MapPut("/conversations/{id:guid}/leaf", LeafAsync);
         g.MapPost("/conversations/{id:guid}/fork", ForkAsync);
         g.MapPost("/conversations/{id:guid}/tool-calls/{callId}", DecideAsync);
-        g.MapPost("/attachments", UploadAsync).DisableAntiforgery();
         g.MapPost("/speech", SpeechAsync);
         g.MapPost("/transcribe", Talk.TranscribeAsync).DisableAntiforgery();
-        g.MapGet("/attachments/{id:guid}/content", ContentAsync);
-        g.MapGet("/attachments/{id:guid}/pages", PagesAsync);
         g.MapGet("/search", SearchAsync);
         g.MapGet("/history", HistoryAsync);
-        g.MapGet("/attachments/{id:guid}/pages/{number:int}", PageAsync);
+        // The person's files: for the page signed in, and for Code Arena's IDE, which relays them for its page with the
+        // person's key (Code Arena's attachments).
+        var files = app.MapGroup("/api/chat").RequireAuthorization(ArenaMcp.KeyAuthentication.Policy);
+        files.MapPost("/attachments", UploadAsync).DisableAntiforgery();
+        files.MapGet("/attachments/{id:guid}/content", ContentAsync);
+        files.MapGet("/attachments/{id:guid}/pages", PagesAsync);
+        files.MapGet("/attachments/{id:guid}/pages/{number:int}", PageAsync);
     }
 
     private static async Task<IResult> Config(ClaimsPrincipal p, UserManager<AppUser> users, ToolRegistry registry, AccessService access, ModelPolicy policy,

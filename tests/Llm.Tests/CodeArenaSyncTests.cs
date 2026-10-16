@@ -87,6 +87,36 @@ public sealed class CodeArenaSyncTests(AppFixture app)
     }
 
     [Fact]
+    public async Task The_key_uploads_and_reads_the_person_s_own_files_and_nothing_else_of_the_chat()
+    {
+        await using var f = NewApp();
+        var (web, key) = await PersonAsync(f);
+        var (other, otherKey) = await PersonAsync(f);
+        var arena = CodeArena(f, key);
+
+        using var form = new MultipartFormDataContent();
+        var part = new ByteArrayContent("notes for the model"u8.ToArray());
+        part.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+        form.Add(part, "file", "notes.txt");
+        var made = await arena.PostAsync(new Uri("/api/chat/attachments", UriKind.Relative), form);
+        await StatusAssert.Is(HttpStatusCode.OK, made);
+        var id = (await Json(made)).GetProperty("id").GetGuid();
+        Assert.Equal("notes for the model", await arena.GetStringAsync(new Uri($"/api/chat/attachments/{id}/content", UriKind.Relative)));
+        // The person's own, signed in on the web too.
+        Assert.Equal("notes for the model", await (await web.GetAsync($"/api/chat/attachments/{id}/content")).Content.ReadAsStringAsync());
+
+        // Another person's key, or theirs signed in, does not reach it; nor does no key, or one that is not a key.
+        await StatusAssert.Is(HttpStatusCode.NotFound, await CodeArena(f, otherKey).GetAsync(new Uri($"/api/chat/attachments/{id}/content", UriKind.Relative)));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await other.GetAsync($"/api/chat/attachments/{id}/content"));
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await CodeArena(f, null).GetAsync(new Uri($"/api/chat/attachments/{id}/content", UriKind.Relative)));
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await CodeArena(f, "sk-not-a-key").GetAsync(new Uri($"/api/chat/attachments/{id}/content", UriKind.Relative)));
+        // The key opens no other route of the chat's.
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await arena.GetAsync(new Uri("/api/chat/conversations", UriKind.Relative)));
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await arena.GetAsync(new Uri("/api/chat/config", UriKind.Relative)));
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await arena.GetAsync(new Uri("/api/account/mcp", UriKind.Relative)));
+    }
+
+    [Fact]
     public async Task A_quote_crosses_the_sync_both_ways_as_its_own_field_not_in_the_content()
     {
         await using var f = NewApp();

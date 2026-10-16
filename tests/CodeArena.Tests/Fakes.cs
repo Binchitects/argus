@@ -371,6 +371,11 @@ public sealed class FakeMcp : FakeServer
             await Chats.HandleAsync(ctx, body);
             return;
         }
+        if (!Missing && ctx.Request.Url!.AbsolutePath.StartsWith("/api/chat/attachments", StringComparison.Ordinal))
+        {
+            await Chats.HandleFilesAsync(ctx, body);
+            return;
+        }
         if (Missing || ctx.Request.Url!.AbsolutePath != "/mcp")
         {
             ctx.Response.StatusCode = 404;
@@ -808,6 +813,61 @@ public sealed class FakeChats
             ["summary"] = summary is null ? null : new JsonObject { ["upTo"] = summary.Id, ["text"] = summary.Summary },
             ["messages"] = new JsonArray([.. page.Select(n => (JsonNode)n.Message.DeepClone())]),
         };
+    }
+
+    /// <summary>The files the relay sent on: what each request was (method, path and query, its type, the key it came with, its body).</summary>
+    public List<(string Method, string Path, string? Type, string? Authorization, string? Range, string Body)> Relayed { get; } = [];
+
+    /// <summary>The person's files at /api/chat/attachments, taken with the key (as Arena's KeyAuthentication does): an upload, a file's content.</summary>
+    internal async Task HandleFilesAsync(HttpListenerContext ctx, string body)
+    {
+        var path = ctx.Request.Url!.PathAndQuery;
+        lock (_gate)
+        {
+            Relayed.Add((ctx.Request.HttpMethod, path, ctx.Request.ContentType, ctx.Request.Headers["Authorization"], ctx.Request.Headers["Range"], body));
+        }
+        if (ctx.Request.Headers["Authorization"] != "Bearer " + FakeGateway.Key)
+        {
+            ctx.Response.StatusCode = 401;
+            return;
+        }
+        if (ctx.Request.HttpMethod == "POST" && ctx.Request.Headers["X-Requested-With"] is null)
+        {
+            ctx.Response.StatusCode = 400;
+            return;
+        }
+        var parts = ctx.Request.Url.AbsolutePath["/api/chat/attachments".Length..].Trim('/').Split('/');
+        if (ctx.Request.HttpMethod == "POST" && parts is [""])
+        {
+            var id = Guid.NewGuid().ToString();
+            var name = System.Text.RegularExpressions.Regex.Match(body, "filename=\"?([^\";\r\n]+)").Groups[1].Value;
+            lock (_gate)
+            {
+                Files[id] = (Encoding.UTF8.GetBytes(body), "text/plain");
+            }
+            ctx.Response.ContentType = "application/json";
+            await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(new JsonObject { ["id"] = id, ["fileName"] = name, ["kind"] = "text" }.ToJsonString()));
+            return;
+        }
+        if (parts is [var file, "content"])
+        {
+            (byte[] Data, string ContentType) found;
+            bool known;
+            lock (_gate)
+            {
+                known = Files.TryGetValue(file, out found);
+            }
+            ctx.Response.StatusCode = known ? 200 : 404;
+            if (known)
+            {
+                ctx.Response.ContentType = found.ContentType;
+                ctx.Response.Headers["Content-Disposition"] = "inline";
+                ctx.Response.Headers["X-Not-Passed"] = "no";
+                await ctx.Response.OutputStream.WriteAsync(found.Data);
+            }
+            return;
+        }
+        ctx.Response.StatusCode = 404;
     }
 
     internal async Task HandleAsync(HttpListenerContext ctx, string body)

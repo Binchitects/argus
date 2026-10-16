@@ -1009,6 +1009,12 @@ That is why everything below is behind this run's key.
   Sec-Fetch-Site), takes only JSON (a .vsix only as its bytes, which no form
   of another site's can send), and its page cannot be framed. Every call,
   the file calls and the terminals' WebSocket included, passes these checks.
+- The page never holds the API key. The few routes of Arena's chat it uses
+  (the person's files: `POST /api/chat/attachments`, a file's `content`, its
+  `pages`) it calls on code-arena, which passes them on to Arena with the key,
+  after the checks above; a form (a file) is taken there alone. Arena takes
+  the key on those routes and no others of its chat, and a file is the
+  person's own or not found.
 - The file calls take paths relative to the working directory only: an
   absolute path, a drive or `..` is refused, even one that would land inside.
   So is a link that leads outside, one to a file not there yet outside, and
