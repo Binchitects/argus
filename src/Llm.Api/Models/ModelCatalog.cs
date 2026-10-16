@@ -667,7 +667,8 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// <summary>Writes the presets for the engine; it restarts when they change.</summary>
     public async Task WritePresetsAsync(CancellationToken ct = default)
     {
-        var models = await db.LocalModels.AsNoTracking().OrderBy(m => m.Name).ToListAsync(ct);
+        // llama.cpp's models only: the other kinds have their own engines' desired state.
+        var models = await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.LlamaCpp).OrderBy(m => m.Name).ToListAsync(ct);
         // Each file's profile: its attention decides the checkpoints, its training the YaRN stretch.
         var profiles = models.Count > 0 ? library.List().ToDictionary(e => e.File.Path, e => e.Profile, StringComparer.Ordinal) : [];
         // A picture model kept loaded runs beside the chat models: those that fit themselves to the GPU leave it its room.
@@ -724,7 +725,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         var wanted = new Dictionary<string, (string Name, JsonObject Params, JsonObject Info)>(StringComparer.Ordinal);
         // Each chat model on each server first, with what makes it this one and the requests it serves at once.
         var deployments = new List<(string Name, JsonObject Params, JsonObject Info, object?[] Print, int? Slots)>();
-        foreach (var m in await db.LocalModels.AsNoTracking().ToListAsync(ct))
+        foreach (var m in await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.LlamaCpp).ToListAsync(ct))
         {
             // What its projector reads: pictures, sound (an omni model's), or both.
             var projector = m.Projector is { Length: > 0 } p ? library.Find(p)?.Profile.Projector ?? new ProjectorInfo(true, false, null, null) : null;

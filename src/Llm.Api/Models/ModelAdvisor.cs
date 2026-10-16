@@ -215,6 +215,76 @@ public static class ModelAdvisor
         return new ModelAdvice(p, limits, recommended, estimate, problems, hw);
     }
 
+    /// <summary>The token cache types vLLM takes (--kv-cache-dtype).</summary>
+    public static readonly string[] VllmCacheTypes = ["fp8", "fp8_e4m3", "fp8_e5m2", "auto"];
+
+    /// <summary>
+    /// The settings a model has that its engine's kind does not (EngineKinds): llama.cpp runs one copy on its GPUs, without
+    /// vLLM's share of each GPU, quantisation, speculative decoding by EAGLE, or a CPU tier; vLLM has none of llama.cpp's
+    /// placement by layers, experts in RAM, prompt step, YaRN, extra preset lines or projector file.
+    /// </summary>
+    public static IReadOnlyList<ModelProblem> KindProblems(LocalModel m)
+    {
+        var problems = new List<ModelProblem>();
+        var kind = EngineKinds.Of(m.EngineKind);
+        if (kind is null)
+        {
+            problems.Add(new("engineKind", $"There is no engine kind {m.EngineKind}.", true));
+            return problems;
+        }
+        void No(bool set, string field, string what)
+        {
+            if (set)
+            {
+                problems.Add(new(field, $"{kind.Label} has no {what}.", true));
+            }
+        }
+        No(m.Replicas != 1 && !kind.Replicas, "replicas", "copies of one model (one copy runs on its GPUs)");
+        No(m.Replicas < 1 || m.Replicas > 8, "replicas", "fewer than 1 or more than 8 copies");
+        if (kind.Kind == EngineKinds.LlamaCpp)
+        {
+            No(m.GpuMemoryUtilization is not null, "gpuMemoryUtilization", "share of each GPU to set (it fits itself to what is free)");
+            No(m.Quantization is not null, "quantization", "quantisation to choose (the GGUF file has its own)");
+            No(m.SpecDecode is not null, "specDecode", "speculative decoding but its own MTP (Draft tokens)");
+            No(m.KvCpuGb is > 0, "kvCpuGb", "CPU tier for its token cache (it keeps conversations that lost their slot in RAM by itself)");
+        }
+        else
+        {
+            No(m.Placement == "manual", "placement", "placement by hand (it holds every layer on its GPUs)");
+            No(m.CpuMoe > 0, "cpuMoe", "experts in RAM");
+            No(m.Ubatch is not null, "ubatch", "prompt step to set");
+            No(m.Yarn, "yarn", "YaRN switch here (its config says how far it stretches)");
+            No(m.ExtraPreset is not null, "extra", "llama.cpp preset lines");
+            No(m.Projector is not null, "projector", "projector file (a model that sees has it in its folder)");
+            No(m.Mtp, "mtp", "llama.cpp's MTP switch: choose speculative decoding (mtp or eagle3) instead");
+            if (!VllmCacheTypes.Contains(m.KvType))
+            {
+                problems.Add(new("kvType", $"vLLM's token cache is {string.Join(", ", VllmCacheTypes)}.", true));
+            }
+            if (m.GpuMemoryUtilization is < 0.1 or > 0.98)
+            {
+                problems.Add(new("gpuMemoryUtilization", "The share of each GPU is 0.10 to 0.98.", true));
+            }
+            if (m.SpecDecode is not (null or "mtp" or "eagle3"))
+            {
+                problems.Add(new("specDecode", "Speculative decoding is mtp (the model's own layers) or eagle3 (with a draft model).", true));
+            }
+            else if (m.SpecDecode == "eagle3" && m.DraftHead is null)
+            {
+                problems.Add(new("draftHead", "EAGLE-3 needs its draft model: a snapshot folder in the library.", true));
+            }
+            if (m.KvCpuGb is < 0 or > 4096)
+            {
+                problems.Add(new("kvCpuGb", "The CPU tier is 0 to 4,096 GB.", true));
+            }
+            if (m.Parallel is < 1 or > 1024)
+            {
+                problems.Add(new("parallel", "Answers at once (max-num-seqs) are 1 to 1,024.", true));
+            }
+        }
+        return problems;
+    }
+
     private static bool Compatible(ModelProfile model, ModelProfile projector) =>
         projector.Projector?.ProjectionDim is not { } dim || model.EmbeddingLength is not { } embd || dim == embd;
 

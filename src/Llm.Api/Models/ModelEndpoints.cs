@@ -16,7 +16,8 @@ public sealed record LocalModelRequest(
     string? Name, string? File, string? Projector, int? Context, int? MaxOutput, string? Placement, int? GpuLayers, int? CpuMoe, string? KvType, int? Parallel,
     int? Ubatch, bool? Mtp, string? DraftHead, int? DraftMax, bool? Yarn, double? Temperature, double? TopP, int? TopK, double? MinP, double? PresencePenalty,
     string? ExtraPreset, bool? Thinking, bool? Tools, decimal? InputPerMtok, decimal? OutputPerMtok, string[]? Clear = null, string? Devices = null,
-    decimal? CachedInputPerMtok = null)
+    decimal? CachedInputPerMtok = null, string? EngineKind = null, string? Engine = null, int? Replicas = null, double? GpuMemoryUtilization = null,
+    string? Quantization = null, string? SpecDecode = null, int? KvCpuGb = null, bool? Sleep = null, string? Fallback = null)
 {
     /// <summary>A value to empty: a missing one is left as it is.</summary>
     public bool Clears(string field) => Clear?.Contains(field, StringComparer.OrdinalIgnoreCase) == true;
@@ -115,6 +116,8 @@ public static class ModelEndpoints
                 profile = files.GetValueOrDefault(m.File),
                 // What its token cache keeps, and the RAM it takes.
                 cache = TokenCache.Of(m, files.GetValueOrDefault(m.File), onServers.Contains(m.Name), engine.Value.SessionCacheGb),
+                // Its engine, and what only some kinds have (EngineKinds).
+                engineKind = m.EngineKind, m.Engine, m.Replicas, m.GpuMemoryUtilization, m.Quantization, m.SpecDecode, m.KvCpuGb, m.Sleep, m.Fallback,
             });
         }
         foreach (var s in servers)
@@ -167,6 +170,8 @@ public static class ModelEndpoints
                 unloading = now.Models.Where(m => m.Status == "unloading").Select(m => m.Name),
                 gpus = hw?.Devices?.Select(g => new { g.Index, g.Name, g.Total, g.Vendor, g.Backend }) ?? [],
                 plan = e.Enabled ? Plan(kept, local, e, library, hw) : null,
+                // The kinds of engine and what each can do: the form offers a model only its kind's settings.
+                kinds = EngineKinds.All,
             },
             // The model for sub-agents and small steps (Settings → Model), and what keeps it from doing them well.
             small = small.Name is { } name ? new { name, warning = await small.WarningAsync(ct) } : null,
@@ -228,7 +233,7 @@ public static class ModelEndpoints
             return AuthEndpoints.Problem(409, "exists", $"There is already a model named {name}.");
         }
         var model = new LocalModel { Name = name, File = "" };
-        var (problem, warning) = Apply(model, body, library, await hardware.GetAsync(ct), prices.Defaults);
+        var (problem, warning) = Apply(model, body, library, await hardware.GetAsync(ct), prices.Defaults, [.. taken]);
         if (problem is not null)
         {
             return problem;
@@ -240,13 +245,14 @@ public static class ModelEndpoints
     }
 
     private static async Task<IResult> UpdateAsync(string name, LocalModelRequest body, AppDbContext db, ModelCatalog catalog, ModelLibrary library, HardwareProbe hardware,
-        EngineWatcher watcher, PriceBook prices, Audit audit, CancellationToken ct)
+        EngineWatcher watcher, PriceBook prices, ChatModels gatewayModels, Audit audit, CancellationToken ct)
     {
         if (await db.LocalModels.SingleOrDefaultAsync(m => m.Name == name, ct) is not { } model)
         {
             return Results.NotFound();
         }
-        var (problem, warning) = Apply(model, body, library, await hardware.GetAsync(ct), prices.Defaults);
+        var (problem, warning) = Apply(model, body, library, await hardware.GetAsync(ct), prices.Defaults,
+            [.. (await gatewayModels.AllAsync(ct)).Select(x => x.Name), .. await db.LocalModels.Select(x => x.Name).ToListAsync(ct)]);
         if (problem is not null)
         {
             return problem;
@@ -481,7 +487,7 @@ public static class ModelEndpoints
         var models = new List<(LocalModel, LibraryEntry?)>();
         foreach (var name in kept)
         {
-            if (local.FirstOrDefault(m => m.Name == name) is { } m)
+            if (local.FirstOrDefault(m => m.Name == name) is { EngineKind: EngineKinds.LlamaCpp } m)
             {
                 models.Add((m, library.Find(m.File)));
             }
@@ -545,9 +551,25 @@ public static class ModelEndpoints
     /// language model, and every setting inside what that model and this machine allow. The
     /// warnings (slower, not wrong) come back to show.
     /// </summary>
-    private static (IResult? Problem, string? Warning) Apply(LocalModel m, LocalModelRequest body, ModelLibrary library, Hardware? hardware, PriceOptions prices)
+    private static (IResult? Problem, string? Warning) Apply(LocalModel m, LocalModelRequest body, ModelLibrary library, Hardware? hardware, PriceOptions prices,
+        IReadOnlyCollection<string> models)
     {
         var file = (body.File ?? m.File).Trim();
+        var kind = EngineKinds.Of(body.EngineKind is { Length: > 0 } k0 ? k0.Trim() : m.EngineKind);
+        if (kind is not { Managed: true })
+        {
+            return (AuthEndpoints.Problem(400, "engineKind", $"The engine is {string.Join(" or ", EngineKinds.All.Where(x => x.Managed).Select(x => x.Kind))}. "
+                + "A server the app does not run is added under Other GPU servers."), null);
+        }
+        var fallback = body.Fallback ?? m.Fallback;
+        if (fallback is { Length: > 0 } f && !body.Clears("fallback") && (f.Trim() == m.Name || !models.Contains(f.Trim())))
+        {
+            return (AuthEndpoints.Problem(400, "fallback", "The fallback is another model the gateway has."), null);
+        }
+        if (kind.Kind == EngineKinds.Vllm)
+        {
+            return ApplyVllm(m, body, file, library, hardware, prices);
+        }
         if (file.Length == 0 || file.StartsWith('/') || !file.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase) || library.Find(file) is not { } entry)
         {
             return (AuthEndpoints.Problem(400, "file", "Choose a GGUF file from the model library."), null);
@@ -577,7 +599,7 @@ public static class ModelEndpoints
             return (AuthEndpoints.Problem(400, "price", price), null);
         }
         var advice = ModelAdvisor.Advise(draft, entry, library.List(), hardware);
-        if (advice.FirstError is { } error)
+        if (ModelAdvisor.KindProblems(draft).Concat(advice.Problems).FirstOrDefault(p => p.Error) is { } error)
         {
             return (AuthEndpoints.Problem(400, error.Field, error.Message), null);
         }
@@ -586,12 +608,47 @@ public static class ModelEndpoints
         return (null, warnings.Count > 0 ? "Saved. " + string.Join(" ", warnings) : null);
     }
 
+    /// <summary>A vLLM model's settings: its folder a Hugging Face snapshot in the library, and only what vLLM has.</summary>
+    private static (IResult? Problem, string? Warning) ApplyVllm(LocalModel m, LocalModelRequest body, string file, ModelLibrary library, Hardware? hardware, PriceOptions prices)
+    {
+        if (!library.IsSnapshot(file))
+        {
+            return (AuthEndpoints.Problem(400, "file", "Choose a Hugging Face snapshot from the model library (hf/ORG/REPO@REVISION, with its config.json)."), null);
+        }
+        var draft = Copy(m);
+        Merge(draft, body, file);
+        VllmDefaults(draft, body);
+        if (TokenPrice.Check(draft.InputPerMtok, draft.CachedInputPerMtok, draft.OutputPerMtok, prices) is { } price)
+        {
+            return (AuthEndpoints.Problem(400, "price", price), null);
+        }
+        if (ModelAdvisor.KindProblems(draft).FirstOrDefault(p => p.Error) is { } error)
+        {
+            return (AuthEndpoints.Problem(400, error.Field, error.Message), null);
+        }
+        _ = hardware;
+        Merge(m, body, file);
+        VllmDefaults(m, body);
+        return (null, null);
+    }
+
+    /// <summary>A model turned to vLLM keeps none of llama.cpp's own values it did not set again: its cache type becomes vLLM's fp8.</summary>
+    private static void VllmDefaults(LocalModel m, LocalModelRequest body)
+    {
+        if (body.KvType is null && !ModelAdvisor.VllmCacheTypes.Contains(m.KvType))
+        {
+            m.KvType = "fp8";
+        }
+    }
+
     private static LocalModel Copy(LocalModel m) => new()
     {
         Name = m.Name, File = m.File, Projector = m.Projector, Context = m.Context, MaxOutput = m.MaxOutput, Placement = m.Placement, GpuLayers = m.GpuLayers,
         CpuMoe = m.CpuMoe, KvType = m.KvType, Parallel = m.Parallel, Ubatch = m.Ubatch, Mtp = m.Mtp, DraftHead = m.DraftHead, DraftMax = m.DraftMax, Yarn = m.Yarn,
         Temperature = m.Temperature, TopP = m.TopP, TopK = m.TopK, MinP = m.MinP, PresencePenalty = m.PresencePenalty, ExtraPreset = m.ExtraPreset,
         Thinking = m.Thinking, Tools = m.Tools, InputPerMtok = m.InputPerMtok, CachedInputPerMtok = m.CachedInputPerMtok, OutputPerMtok = m.OutputPerMtok, Devices = m.Devices,
+        EngineKind = m.EngineKind, Engine = m.Engine, Replicas = m.Replicas, GpuMemoryUtilization = m.GpuMemoryUtilization, Quantization = m.Quantization,
+        SpecDecode = m.SpecDecode, KvCpuGb = m.KvCpuGb, Sleep = m.Sleep, Fallback = m.Fallback,
     };
 
     /// <summary>The request's values over the model's: a missing value is kept, one named in "clear" emptied.</summary>
@@ -625,5 +682,14 @@ public static class ModelEndpoints
         m.InputPerMtok = body.Clears("inputPerMtok") ? null : body.InputPerMtok ?? m.InputPerMtok;
         m.CachedInputPerMtok = body.Clears("cachedInputPerMtok") ? null : body.CachedInputPerMtok ?? m.CachedInputPerMtok;
         m.OutputPerMtok = body.Clears("outputPerMtok") ? null : body.OutputPerMtok ?? m.OutputPerMtok;
+        m.EngineKind = body.EngineKind is { Length: > 0 } kind ? kind.Trim() : m.EngineKind;
+        m.Engine = body.Clears("engine") ? null : body.Engine is { } en ? (en.Trim() is { Length: > 0 } engine ? engine : null) : m.Engine;
+        m.Replicas = body.Replicas ?? m.Replicas;
+        m.GpuMemoryUtilization = body.Clears("gpuMemoryUtilization") ? null : body.GpuMemoryUtilization ?? m.GpuMemoryUtilization;
+        m.Quantization = body.Clears("quantization") ? null : body.Quantization is { } q ? (q.Trim() is { Length: > 0 } quant ? quant : null) : m.Quantization;
+        m.SpecDecode = body.Clears("specDecode") ? null : body.SpecDecode is { } sd ? (sd.Trim() is { Length: > 0 } spec ? spec : null) : m.SpecDecode;
+        m.KvCpuGb = body.Clears("kvCpuGb") ? null : body.KvCpuGb ?? m.KvCpuGb;
+        m.Sleep = body.Sleep ?? m.Sleep;
+        m.Fallback = body.Clears("fallback") ? null : body.Fallback is { } fb ? (fb.Trim() is { Length: > 0 } fallback ? fallback : null) : m.Fallback;
     }
 }

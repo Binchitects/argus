@@ -55,6 +55,14 @@ public sealed partial class ModelLibrary(IOptions<EngineOptions> options)
     /// <summary>A file of the library by its relative path, or null.</summary>
     public LibraryEntry? Find(string relative) => Contains(relative) ? List().FirstOrDefault(e => e.File.Path == relative) : null;
 
+    /// <summary>Whether a relative path names a Hugging Face snapshot folder inside the library: a folder with its config.json.</summary>
+    public bool IsSnapshot(string relative)
+    {
+        var root = System.IO.Path.GetFullPath(options.Value.LibraryDir);
+        var full = System.IO.Path.GetFullPath(System.IO.Path.Combine(root, relative));
+        return relative.Length > 0 && full.StartsWith(root.TrimEnd('/') + "/", StringComparison.Ordinal) && File.Exists(System.IO.Path.Combine(full, "config.json"));
+    }
+
     /// <summary>Whether a relative path names a file inside the library (no way out with ..).</summary>
     public bool Contains(string relative)
     {

@@ -428,6 +428,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
 3. **`EngineKind` on `LocalModel`** (EF migration; per your preference, no compatibility shim).
    - `ModelCatalog` writes `models.ini` only for llamacpp models. The other fields are listed in §3.3.
    - Tests: the catalog output for llama.cpp is unchanged.
+   - **Done**: migration `EngineKinds`; `LocalModel` has `EngineKind`, `Engine` (the instance, for several machines), `Replicas`, `GpuMemoryUtilization`, `Quantization`, `SpecDecode`, `KvCpuGb`, `Sleep`, `Fallback`; `Parallel` is vLLM's `--max-num-seqs`, `KvType` its `--kv-cache-dtype`, `Devices` its GPU set. `Llm.Core/Models/EngineKinds.cs` says what each kind can do (llama.cpp, vLLM, and external servers, which the app registers but does not run); the API refuses a setting the kind lacks (`ModelAdvisor.KindProblems`). Tests: `EngineKindTests`.
 4. **HF snapshot models in the library.**
    - `ModelDownloads` fetches safetensors, config and tokenizer (skipping `original/`, `metal/`, GGUF), showing the size first.
    - `ModelLibrary` recognises `hf/<org>/<repo>@rev`.

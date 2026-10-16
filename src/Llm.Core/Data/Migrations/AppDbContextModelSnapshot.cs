@@ -1974,9 +1974,24 @@ namespace Llm.Core.Data.Migrations
                         .HasColumnType("integer")
                         .HasDefaultValue(3);
 
+                    b.Property<string>("Engine")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("EngineKind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("llamacpp");
+
                     b.Property<string>("ExtraPreset")
                         .HasMaxLength(4000)
                         .HasColumnType("character varying(4000)");
+
+                    b.Property<string>("Fallback")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
                     b.Property<string>("File")
                         .IsRequired()
@@ -1986,8 +2001,14 @@ namespace Llm.Core.Data.Migrations
                     b.Property<int>("GpuLayers")
                         .HasColumnType("integer");
 
+                    b.Property<double?>("GpuMemoryUtilization")
+                        .HasColumnType("double precision");
+
                     b.Property<decimal?>("InputPerMtok")
                         .HasColumnType("numeric");
+
+                    b.Property<int?>("KvCpuGb")
+                        .HasColumnType("integer");
 
                     b.Property<string>("KvType")
                         .IsRequired()
@@ -2022,6 +2043,24 @@ namespace Llm.Core.Data.Migrations
                     b.Property<string>("Projector")
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Quantization")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<int>("Replicas")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
+                    b.Property<bool>("Sleep")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("SpecDecode")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
 
                     b.Property<double?>("Temperature")
                         .HasColumnType("double precision");
