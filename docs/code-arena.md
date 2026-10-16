@@ -272,7 +272,11 @@ The page is laid out as VS Code is, in Argus Arena's design system:
 - **quick diff**: bars beside the line numbers show the lines changed since
   what git's index has (green added, blue changed, a red mark where lines were
   taken away), as you type; **Alt+F3** and **Shift+Alt+F3** go to the next and
-  the previous change (`scm.diffDecorations`: `none` turns them off). **Ctrl+P** opens any file by a few
+  the previous change (`scm.diffDecorations`: `none` turns them off). Lines
+  are compared without their ends, so a file checked out with CRLF against an
+  index with LF shows no bars; changes more than about 1,400 lines apart (a
+  file rewritten or reformatted) are one bar from the first to the last, so
+  typing stays quick. **Ctrl+P** opens any file by a few
   letters of its path (`app:12` opens it at line 12; `:12` goes to line 12 of
   the file shown, as the line in the status bar does). **Ctrl+Shift+P** (or
   **F1**: Firefox keeps Ctrl+Shift+P for a private window) runs any command by

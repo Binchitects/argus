@@ -37,4 +37,25 @@ describe('quick diff', () => {
       for (const c of lineChanges(a, b)) expect(c.end).toBeLessThanOrEqual(bl.length)
     }
   })
+
+  it('compares lines without their ends: a CRLF file against an LF index is unchanged', () => {
+    // core.autocrlf: the index has LF, the file on disk CRLF.
+    expect(lineChanges('a\nb\nc\n', 'a\r\nb\r\nc\r\n')).toEqual([])
+    expect(lineChanges('a\nb\nc\n', 'a\r\nB\r\nc\r\n')).toEqual([{ kind: 'modified', start: 2, end: 2 }])
+    expect(lineChanges('a\r\nb\r\n', 'a\nb\nc\n')).toEqual([{ kind: 'added', start: 3, end: 3 }])
+  })
+
+  it('gives up on a rewrite too large to diff as it is typed: the lines from the first to the last change are one change', () => {
+    // Every other line of thousands changed: the shortest diff is thousands of edits long, too slow and too large to find
+    // at each key.
+    const a = Array.from({ length: 5000 }, (_, i) => `line ${i}`)
+    const b = a.map((l, i) => (i % 2 ? `${l} changed` : l))
+    const started = performance.now()
+    expect(lineChanges(a.join('\n'), b.join('\n'))).toEqual([{ kind: 'modified', start: 2, end: 5000 }])
+    expect(performance.now() - started).toBeLessThan(1000)
+    // Lines only added, or only taken away, are found at once however many.
+    const added = [...a.slice(0, 10), ...Array.from({ length: 6000 }, (_, i) => `new ${i}`), ...a.slice(10)]
+    expect(lineChanges(a.join('\n'), added.join('\n'))).toEqual([{ kind: 'added', start: 11, end: 6010 }])
+    expect(lineChanges(added.join('\n'), a.join('\n'))).toEqual([{ kind: 'deleted', start: 10, end: 10 }])
+  })
 })
