@@ -42,7 +42,7 @@ async function withAnswers<T>(go: (inputs: Record<string, string>) => Promise<T>
           const value =
             input.type === 'pickString'
               ? (await quickPick({ title: input.description ?? input.id, placeholder: input.description ?? `Choose ${input.id}`, items: (input.options ?? []).map((o) => ({ id: o.value, label: o.label })), active: input.default }))?.id
-              : await inputBox({ title: input.description ?? input.id, placeholder: input.description ?? `Type ${input.id}`, value: input.default })
+              : await inputBox({ title: input.description ?? input.id, placeholder: input.description ?? `Type ${input.id}`, value: input.default, password: input.password })
           if (value === undefined) return undefined
           inputs[input.id] = value
         }

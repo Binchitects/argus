@@ -1441,7 +1441,7 @@ describe('Code Arena, the IDE', () => {
     )
     // One of them run from the palette: the lines go with the next message.
     await userEvent.click(within(palette).getByRole('option', { name: /Code Arena: Add to chat/ }))
-    expect(await within(screen.getByRole('list', { name: 'Sent with the message' })).findByText('src/app.ts:1')).toBeInTheDocument()
+    expect(await within(await screen.findByRole('list', { name: 'Sent with the message' }, { timeout: 3000 })).findByText('src/app.ts:1')).toBeInTheDocument()
     await userEvent.keyboard('{Control>}{Shift>}p{/Shift}{/Control}')
     await userEvent.type(within(await screen.findByRole('dialog', { name: 'Commands' })).getByPlaceholderText('Run a command: type a few words of it'), 'x')
     const command2 = within(screen.getByRole('dialog', { name: 'Commands' })).getByPlaceholderText('Run a command: type a few words of it')
@@ -1739,7 +1739,7 @@ describe('Code Arena, the IDE', () => {
     expect(fakes.models.find((m) => m.uri?.toString() === 'file:///README.md')?.disposed).toBe(true)
   })
 
-  it('debugs as VS Code does: a breakpoint (F9), F5, the call stack, variables and a watch, a step (F10), and stop (Shift+F5)', async () => {
+  it('debugs as VS Code does: a breakpoint (F9), F5, the call stack, variables and a watch, a step (F10), and the program ending', async () => {
     const started = { id: 'd1', name: 'Run app', adapter: 'gdb', adapterId: 'cppdbg', configuration: { type: 'gdb', request: 'launch', program: '/home/ada/shop/app' }, notes: [], root: '/home/ada/shop', rootReal: '/home/ada/shop', pathStyle: 'posix' }
     let kept: Record<string, unknown> = {}
     const { calls } = backend({
@@ -1826,9 +1826,14 @@ describe('Code Arena, the IDE', () => {
     await userEvent.keyboard('{F10}')
     expect(await answer('next')).toEqual({ threadId: 1 })
     await waitFor(() => expect(within(screen.getByRole('toolbar', { name: 'Debug' })).getByRole('button', { name: 'Pause' })).toBeInTheDocument())
-    await userEvent.keyboard('{Shift>}{F5}{/Shift}')
+    // The program ends by itself: the adapter is let go (code-arena stops it), the toolbar goes, the output stays.
+    event('output', { category: 'stdout', output: 'total 4\n' })
+    event('exited', { exitCode: 0 })
+    event('terminated')
     await waitFor(() => expect(calls.find((c) => c.path === '/api/debug/stop')?.body).toEqual({ id: 'd1' }))
     await waitFor(() => expect(screen.queryByRole('toolbar', { name: 'Debug' })).not.toBeInTheDocument())
+    await userEvent.click(screen.getByRole('tab', { name: 'Debug Console' }))
+    expect(await within(screen.getByRole('region', { name: 'Debug Console' })).findByText('total 4')).toBeInTheDocument()
   })
 
   it('runs a configuration without debugging (Ctrl+F5) in a terminal of its own, shown in the panel, and a build task (Ctrl+Shift+B)', async () => {
@@ -1857,6 +1862,27 @@ describe('Code Arena, the IDE', () => {
     await userEvent.keyboard('{Control>}{Shift>}b{/Shift}{/Control}')
     await waitFor(() => expect(calls.find((c) => c.path === '/api/tasks/run')?.body).toMatchObject({ group: 'build' }))
     expect(await within(panel).findByRole('tab', { name: /build/, selected: true })).toBeInTheDocument()
+  })
+
+  it("asks a configuration's inputs before it starts: a password one typed as dots, never shown", async () => {
+    const run = { id: '7', kind: 'run', title: 'Deploy', pid: 70, cols: 80, rows: 24, exitCode: null }
+    const { calls } = backend({
+      'GET /api/run/configs': () => ({ json: { configurations: [{ name: 'Deploy', type: 'node', request: 'launch', source: 'launch', supported: true, command: 'node deploy.js' }], compounds: [], errors: [], trusted: true, buildConfiguration: 'Debug' } }),
+      'POST /api/run/start': (body) =>
+        (body as { inputs?: Record<string, string> }).inputs?.token
+          ? { json: { terminal: run, configuration: {}, command: 'node deploy.js' } }
+          : { status: 409, json: { status: 'needs_input', error: 'Deploy needs its inputs.', inputs: [{ id: 'token', type: 'promptString', description: 'The deploy token', password: true }] } },
+    })
+    renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    await userEvent.keyboard('{Control>}{F5}{/Control}')
+    const ask = await screen.findByRole('dialog', { name: 'The deploy token' })
+    const box = within(ask).getByLabelText('The deploy token')
+    expect(box).toHaveAttribute('type', 'password')
+    await userEvent.type(box, 's3cret')
+    expect(ask).not.toHaveTextContent('s3cret')
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/run/start').at(-1)?.body).toMatchObject({ name: 'Deploy', inputs: { token: 's3cret' } }))
   })
 
   it("takes VS Code's keys, chords too, and the person's keybindings.json over them", async () => {
@@ -1948,7 +1974,7 @@ describe('Code Arena, the IDE', () => {
     expect(within(page).queryByRole('button', { name: /Toggle Panel Visibility/ })).not.toBeInTheDocument()
   })
 
-  it("formats with the project's own formatter on save, asks to trust the folder first, and saves without formatting when asked", async () => {
+  it("formats with the project's own formatter on save once the folder is trusted, which Format Document asks for, and saves without formatting when asked", async () => {
     let available = false
     const { calls } = backend(
       {
@@ -1969,21 +1995,35 @@ describe('Code Arena, the IDE', () => {
     // The status bar names the formatter; Monaco is given it for the language.
     expect(await screen.findByRole('button', { name: /Formatter Prettier, cannot run here/ })).toBeInTheDocument()
     await waitFor(() => expect(fakes.formatting.has('typescript')).toBe(true))
+    const saves = () => calls.filter((c) => c.method === 'POST' && c.path === '/api/file').map((c) => (c.body as { text: string }).text)
+    // Prettier is the project's (node_modules) and the folder is not trusted: a save never asks, it saves as typed.
     act(() => editor().model!.setValue('const total=2\n'))
     await userEvent.keyboard('{Control>}s{/Control}')
-    // Prettier is the project's (node_modules): the folder is trusted first.
+    await waitFor(() => expect(saves()).toEqual(['const total=2\n']))
+    expect(screen.queryByRole('dialog', { name: /Trust the folder/ })).not.toBeInTheDocument()
+    expect(calls.some((c) => c.path === '/api/format')).toBe(false)
+
+    // Format Document With… asks to trust the folder first, then formats.
+    await userEvent.keyboard('{Control>}{Shift>}p{/Shift}{/Control}')
+    await userEvent.type(within(await screen.findByRole('dialog', { name: 'Commands' })).getByPlaceholderText('Run a command: type a few words of it'), 'format document with')
+    await userEvent.keyboard('{Enter}')
+    await userEvent.click(await screen.findByRole('option', { name: /^Prettier/ }))
     const trust = await screen.findByRole('dialog', { name: /Trust the folder shop\?/ })
     expect(trust).toHaveTextContent('node_modules/prettier/bin/prettier.cjs')
     await userEvent.click(within(trust).getByRole('button', { name: 'Trust the folder' }))
-    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/file')?.body).toEqual({ path: 'src/app.ts', text: 'const total = 2\n', version: 'v1' }))
+    await waitFor(() => expect(editor().model!.getValue()).toBe('const total = 2\n'))
     expect(calls.find((c) => c.path === '/api/format')?.body).toMatchObject({ path: 'src/app.ts', text: 'const total=2\n', formatter: 'prettier', language: 'typescript' })
-    expect(editor().model!.getValue()).toBe('const total = 2\n')
+
+    // Trusted now: a save formats.
+    act(() => editor().model!.setValue('const total=2\n'))
+    await userEvent.keyboard('{Control>}s{/Control}')
+    await waitFor(() => expect(saves().at(-1)).toBe('const total = 2\n'))
 
     // Save without Formatting (Ctrl+K Ctrl+Shift+S): as typed.
     act(() => editor().model!.setValue('const total=3\n'))
     const formatted = calls.filter((c) => c.path === '/api/format').length
     await userEvent.keyboard('{Control>}k{/Control}{Control>}{Shift>}s{/Shift}{/Control}')
-    await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.path === '/api/file').at(-1)?.body).toMatchObject({ text: 'const total=3\n' }))
+    await waitFor(() => expect(saves().at(-1)).toBe('const total=3\n'))
     expect(calls.filter((c) => c.path === '/api/format')).toHaveLength(formatted)
   })
 

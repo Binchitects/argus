@@ -26,10 +26,12 @@ describe('settings.json', () => {
   })
 
   it("keeps the person's own settings out of a project's reach", () => {
-    const l = readLayer('{ "terminal.integrated.commandsToSkipShell": ["x"], "[python]": { "files.autoSave": "afterDelay" } }', true)
+    const l = readLayer('{ "terminal.integrated.commandsToSkipShell": ["x"], "codeArena.inlineCompletion.enabled": true, "[python]": { "files.autoSave": "afterDelay" } }', true)
     expect(l.values['terminal.integrated.commandsToSkipShell']).toBeUndefined()
+    // What the person types is sent to the model only when they say so: a project cannot turn completion on.
+    expect(l.values['codeArena.inlineCompletion.enabled']).toBeUndefined()
     expect(l.languages.python?.['files.autoSave']).toBeUndefined()
-    expect(l.problems).toHaveLength(2)
+    expect(l.problems).toHaveLength(3)
     expect(readLayer('[1]').problems).toEqual(['The file holds one object: {"setting": value, …}.'])
     expect(readLayer('{ "a": ').problems[0]).toMatch(/not JSON/)
   })

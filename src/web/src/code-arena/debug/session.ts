@@ -57,8 +57,24 @@ export interface OutputLine {
   text: string
 }
 
+/** The most output kept for a session, in characters. */
+const maxOutput = 1_000_000
+
 let version = 0
 const listeners = new Set<() => void>()
+let outputVersion = 0
+const outputListeners = new Set<() => void>()
+let outputQueued = false
+/** Output came: the console redraws once for all that came in the next moment. */
+function outputChanged() {
+  if (outputQueued) return
+  outputQueued = true
+  setTimeout(() => {
+    outputQueued = false
+    outputVersion++
+    for (const l of outputListeners) l()
+  }, 50)
+}
 const changed = () => {
   version++
   for (const l of listeners) l()
@@ -74,6 +90,8 @@ const subscribe = (f: () => void) => {
 export class Session {
   readonly start: DebugStart
   readonly client: DapClient
+  /** Its adapter let go (it ended, or failed to start). */
+  closed = false
   state: DebugState = 'starting'
   error: string | null = null
   capabilities: Record<string, unknown> = {}
@@ -83,6 +101,7 @@ export class Session {
   frames: StackFrame[] = []
   frameId: number | null = null
   output: OutputLine[] = []
+  outputSize = 0
   exitCode: number | null = null
   /** The breakpoints as the adapter took them, by file. */
   results: Record<string, BreakpointResult[]> = {}
@@ -149,16 +168,23 @@ export class Session {
         else if (!this.threads.some((t) => t.id === b.threadId)) this.threads = [...this.threads, { id: b.threadId as number, name: `Thread ${b.threadId}` }]
         break
       case 'output':
+        // Kept to 1 MB of text, oldest first out; the console alone redraws for it, a moment later (a program printing in
+        // a loop sends thousands a second).
         if (b.category !== 'telemetry' && typeof b.output === 'string') {
-          this.output = [...this.output, { category: (b.category as string) ?? 'console', text: b.output }].slice(-5000)
+          this.output.push({ category: (b.category as string) ?? 'console', text: b.output })
+          this.outputSize += b.output.length
+          while (this.outputSize > maxOutput && this.output.length > 1) this.outputSize -= this.output.shift()!.text.length
+          outputChanged()
         }
-        break
+        return
       case 'exited':
         this.exitCode = (b.exitCode as number) ?? null
         break
       case 'terminated':
         this.state = 'ended'
         this.resumed()
+        // Ended by itself (the program exited): the adapter is let go, as VS Code disconnects it; its output stays to read.
+        void debug.end(this)
         break
       case 'breakpoint':
         // A breakpoint verified later (a library loaded): the gutter shows it as the adapter has it now.
@@ -346,6 +372,7 @@ export const debug = {
   /** A session started on the server: spoken to, its handshake made. */
   async open(start: DebugStart): Promise<Session> {
     const s = new Session(start)
+    for (const x of this.sessions) if (x.state === 'ended') x.client.close()
     this.sessions = [...this.sessions.filter((x) => x.state !== 'ended'), s]
     this.activeId = s.id
     changed()
@@ -353,10 +380,29 @@ export const debug = {
       await s.begin()
     } catch (e) {
       s.error = e instanceof Error ? e.message : String(e)
+      // A launch that failed leaves no adapter waiting for a Stop.
+      void this.end(s)
       changed()
       throw e
     }
     return s
+  },
+
+  /**
+   * A session over (it ended by itself, or failed to start): code-arena stops its adapter and the socket closes; it stays
+   * listed, ended, with its output, until the next start.
+   */
+  async end(s: Session) {
+    if (s.closed) return
+    s.closed = true
+    s.state = 'ended'
+    try {
+      await stopDebug(s.id)
+    } catch {
+      // Gone already.
+    }
+    s.client.close()
+    changed()
   },
 
   /** Sessions still running when the page opens (it was reloaded): attached again, their state from the server's snapshot. */
@@ -374,6 +420,7 @@ export const debug = {
   async stop(target?: Session | null) {
     const s = target === undefined ? debug.active : target
     if (!s) return
+    s.closed = true
     try {
       await stopDebug(s.id)
     } catch {
@@ -505,6 +552,20 @@ let keeping: ReturnType<typeof setTimeout> | undefined
 function keep() {
   clearTimeout(keeping)
   keeping = setTimeout(() => void saveWorkspaceState({ breakpoints: debug.breakpoints, watch: debug.watch, exceptionFilters: debug.exceptionFilters }).catch(() => undefined), 300)
+}
+
+/** The active session's output, read by the Debug Console: it redraws as output comes, nothing else does. */
+export function useDebugOutput() {
+  useSyncExternalStore(
+    (f) => {
+      outputListeners.add(f)
+      return () => {
+        outputListeners.delete(f)
+      }
+    },
+    () => outputVersion,
+  )
+  return debug.active?.output ?? []
 }
 
 /** The debugger's store, read by a component: it renders again as it changes. */

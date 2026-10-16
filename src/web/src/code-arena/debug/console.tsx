@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { useDebug } from './session'
+import { useDebug, useDebugOutput } from './session'
 
 /** ANSI colour codes are dropped: the console shows the text. */
 const escape = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, 'g')
@@ -19,10 +19,11 @@ export function DebugConsole() {
   const history = useRef<string[]>([])
   const at = useRef(-1)
   const end = useRef<HTMLDivElement>(null)
-  const output = s?.output ?? []
+  const output = useDebugOutput()
+  const last = output.at(-1)
   useEffect(() => {
     end.current?.scrollIntoView?.({ block: 'end' })
-  }, [output.length, lines.length])
+  }, [last, lines.length])
   const evaluate = async () => {
     const expr = typed.trim()
     if (!expr || !s) return

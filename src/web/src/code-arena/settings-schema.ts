@@ -148,7 +148,7 @@ export const settingDefs: SettingDef[] = [
   { key: 'debug.inlineValues', type: 'string', default: 'auto', enum: ['on', 'off', 'auto'], description: "Shows variables' values at the ends of the lines while stopped (auto: on).", category: 'Debug' },
   { key: 'debug.toolBarLocation', type: 'string', default: 'floating', enum: ['floating', 'hidden'], description: 'Where the debug toolbar is: over the editor, or not shown (the Run and Debug view and the keys still work).', category: 'Debug' },
   // Code Arena
-  { key: 'codeArena.inlineCompletion.enabled', type: 'boolean', default: true, description: 'Code Arena\'s code completion as you type (the status bar\'s Complete).', category: 'Code Arena' },
+  { key: 'codeArena.inlineCompletion.enabled', type: 'boolean', default: true, description: "Code Arena's code completion as you type (the status bar's Complete): what you type is sent to the model. Your own setting: a project's settings.json cannot turn it on.", category: 'Code Arena', scope: 'application' },
 ]
 
 export const settingDef = new Map(settingDefs.map((d) => [d.key, d]))

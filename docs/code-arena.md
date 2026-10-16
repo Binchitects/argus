@@ -338,7 +338,8 @@ VS Code settings mean the same here:
   (`workbench.colorTheme`, or `window.autoDetectColorScheme` with the
   preferred light and dark ones: **Ctrl+K Ctrl+T**) and Code Arena's code
   completion (`codeArena.inlineCompletion.enabled`, the status bar's
-  **Complete**). They apply as the file is saved. Where Code Arena's default
+  **Complete**: the person's own, which a project's settings cannot turn on,
+  since what is typed is sent to the model). They apply as the file is saved. Where Code Arena's default
   is not VS Code's, the description says so.
 - **keybindings.json**: the person's, beside it (**Preferences: Open Keyboard
   Shortcuts**, **Ctrl+K Ctrl+S**): VS Code's rules, `{"key": "ctrl+shift+e",
@@ -436,9 +437,10 @@ seconds per folder.
 
 A formatter that lives in the folder (a project's `node_modules` or `.venv`,
 or a config formatter whose program is there) runs only once you **trust the
-folder**, as VS Code asks: the first time one would run, Code Arena asks
-(**Manage Workspace Trust** asks again); the choice is kept on this computer,
-never in the project. Until then the global one runs instead, and a global
+folder**, as VS Code asks: **Format Document** (or **Format Document With…**)
+asks the first time (**Manage Workspace Trust** asks again; a folder you kept
+restricted is not asked about again); a save never asks: it saves as typed,
+and says so once. The choice is kept on this computer, never in the project. Until then the global one runs instead, and a global
 Prettier runs without the project's config (a Prettier config can be
 JavaScript or load plugins). Until the folder is trusted, rustfmt runs outside
 it (rustup would otherwise use the toolchain the folder's
@@ -503,7 +505,9 @@ lines as the file is edited, and are kept for the folder on this computer
 (with the watches and the exceptions chosen). The line a session stopped at is
 yellow (the frame chosen, green), and the pointer over an expression shows its
 value. As the program stops, the file opens at its line and Run and Debug
-shows (`debug.openDebug`); the Debug Console opens as the first session starts
+shows (`debug.openDebug`); a program that ends by itself lets its debugger go (its
+output stays in the Debug Console until the next start); the Debug Console
+opens as the first session starts
 (`debug.internalConsoleOptions`); files with unsaved changes are saved first
 (`debug.saveBeforeStart`); `debug.toolBarLocation` hides the toolbar.
 

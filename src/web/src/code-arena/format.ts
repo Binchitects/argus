@@ -4,7 +4,7 @@ import { toast } from '@/components/ui/toaster'
 import { ApiError, errorMessage } from '@/lib/api'
 import { runCommand } from './commands'
 import type { MonacoModule } from './editor-state'
-import { formatText, formattersQuery, type Formatters } from './ide-api'
+import { formatText, formattersQuery, workspaceStateQuery, type Formatters, type WorkspaceState } from './ide-api'
 import { addSaveParticipant, type SaveParticipant } from './save-participants'
 import { askTrust } from './trust'
 
@@ -51,6 +51,8 @@ interface Context {
 }
 
 let context: Context | null = null
+/** The formatters a save has said it skipped (once each). */
+const noted = new Set<string>()
 const registered = new Set<string>()
 
 /** The formatters for a file, kept 10 s; none when code-arena cannot say. */
@@ -73,7 +75,11 @@ function chosen(list: Formatters, language: string, asked?: string): string | un
  * meanwhile drops the result. Errors are thrown with what the formatter said; a formatter in an untrusted folder asks for
  * the folder's trust first.
  */
-export async function formatModel(model: Monaco.editor.ITextModel, path: string, opts: { formatter?: string; range?: Monaco.IRange; signal?: AbortSignal } = {}): Promise<string | null> {
+export async function formatModel(
+  model: Monaco.editor.ITextModel,
+  path: string,
+  opts: { formatter?: string; range?: Monaco.IRange; signal?: AbortSignal; /** False: never ask for the folder's trust (a save does not wait on a dialog). */ ask?: boolean } = {},
+): Promise<string | null> {
   if (!context) return null
   const language = model.getLanguageId()
   const list = await formattersFor(path, language)
@@ -82,6 +88,19 @@ export async function formatModel(model: Monaco.editor.ITextModel, path: string,
   if (!formatter) return null
   const found = list.formatters.find((f) => f.id === formatter)
   if (found && !found.available && found.reason === 'trust') {
+    // A save never asks (it would wait on the dialog, at every save): it says so once. Nor is the person asked again
+    // once they kept the folder restricted: Manage Workspace Trust changes that.
+    if (opts.ask === false) {
+      if (!noted.has(found.id)) {
+        noted.add(found.id)
+        toast.info(`Saved without formatting: ${found.name} lives in this folder, which is not trusted. Format Document asks to trust it.`)
+      }
+      return null
+    }
+    if (context.queryClient.getQueryData<WorkspaceState>(workspaceStateQuery.queryKey)?.trust === 'restricted') {
+      toast.error(`${found.name} lives in this folder, which you keep restricted.`, { action: { label: 'Manage Workspace Trust', onClick: () => void runCommand('workbench.trust.manage') } })
+      return null
+    }
     const trusted = await askTrust(`${found.name} lives in this folder (${found.path ?? 'its node_modules'}): it runs only in a folder you trust.`)
     if (!trusted) return null
   }
@@ -123,7 +142,7 @@ const formatOnSave: SaveParticipant = async (c) => {
   const stop = new AbortController()
   const timer = setTimeout(() => stop.abort(), timeout)
   try {
-    await formatModel(c.model, c.path, { signal: stop.signal })
+    await formatModel(c.model, c.path, { signal: stop.signal, ask: false })
   } catch (e) {
     if (stop.signal.aborted) throw new Error(`the formatter took longer than ${timeout} ms ("codeArena.formatOnSaveTimeout")`)
     throw new Error(formatError(e))

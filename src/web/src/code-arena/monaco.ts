@@ -4,6 +4,7 @@ import CssWorker from 'monaco-editor/language/css/css.worker?worker'
 import HtmlWorker from 'monaco-editor/language/html/html.worker?worker'
 import JsonWorker from 'monaco-editor/language/json/json.worker?worker'
 import TsWorker from 'monaco-editor/language/typescript/ts.worker?worker'
+import { globMatch } from './glob'
 
 // Monaco, bundled with the page: its workers are files of the page's own (Vite's
 // ?worker imports), so nothing is fetched from anywhere else, ever. This module
@@ -124,13 +125,12 @@ export const pathOf = (uri: monaco.Uri) => (uri.scheme === 'file' ? uri.path.sli
 export function languageOf(path: string, associations: Record<string, string> = {}): { id: string; name: string } {
   const name = path.slice(path.lastIndexOf('/') + 1).toLowerCase()
   const languages = monaco.languages.getLanguages()
+  let best: { id: string; name: string; length: number } | null = null
   // "files.associations": a name or a pattern (*.inc, **/build/*.txt) to a language id.
   for (const [pattern, id] of Object.entries(associations)) {
-    const re = new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*\//g, '(?:.*/)?').replace(/\*/g, '[^/]*').replace(/\?/g, '.')}$`, 'i')
     const l = languages.find((x) => x.id === id)
-    if (l && (re.test(pattern.includes('/') ? path : name))) return { id: l.id, name: l.aliases?.[0] ?? l.id }
+    if (l && globMatch(pattern, pattern.includes('/') ? path : name)) return { id: l.id, name: l.aliases?.[0] ?? l.id }
   }
-  let best: { id: string; name: string; length: number } | null = null
   for (const l of languages) {
     const label = l.aliases?.[0] ?? l.id
     if (l.filenames?.some((f) => f.toLowerCase() === name)) return { id: l.id, name: label }

@@ -13,11 +13,34 @@ function Picker({ open: o }: { open: Open }) {
   const finish = (item: PickItem | undefined) => finishPick(o, item)
   const words = typed.toLowerCase().split(/\s+/).filter(Boolean)
   const shown = o.filter ? o.items.filter((i) => words.every((w) => `${i.label} ${i.description ?? ''} ${i.detail ?? ''}`.toLowerCase().includes(w))) : o.items
-  const extra = typed.trim() && o.free ? o.free(typed.trim()) : null
+  // A secret is taken as typed, spaces too.
+  const extra = typed.trim() && o.free ? o.free(o.password ? typed : typed.trim()) : null
   const groups = [...new Set(shown.map((i) => i.group ?? ''))]
   return (
     <CommandDialog open onOpenChange={(v) => !v && finish(undefined)} title={o.title} description={o.placeholder} shouldFilter={false}>
-      <CommandInput value={typed} onValueChange={setTyped} placeholder={o.placeholder} aria-label={o.title} />
+      {o.password ? (
+        // A secret: typed as dots, never shown (cmdk's own box has no password kind; Enter still takes the choice).
+        <div className="flex items-center gap-2 border-b px-3">
+          <input
+            autoFocus
+            type="password"
+            autoComplete="off"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || !extra) return
+              e.preventDefault()
+              e.stopPropagation()
+              finish(extra)
+            }}
+            placeholder={o.placeholder}
+            aria-label={o.title}
+            className="flex h-11 w-full bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+      ) : (
+        <CommandInput value={typed} onValueChange={setTyped} placeholder={o.placeholder} aria-label={o.title} />
+      )}
       <CommandList>
         <CommandEmpty>{extra ? null : 'Nothing matches.'}</CommandEmpty>
         {groups.map((g) => (
