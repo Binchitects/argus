@@ -31,6 +31,9 @@ import { settingsSchema } from './settings-schema'
 import { useMonacoTheme } from './theme'
 import { diffOptionsOf, editorOptionsOf, isUserFile } from './editor-options'
 
+/** An editor action's own id: Monaco lists the ones added to an editor under that editor's id first. */
+const actionId = (id: string) => id.replace(/^vs\.editor\.ICodeEditor:\d+:/, '')
+
 /** A diff's tab: the agent's changes to a file ("diff:"), or the file's since the last commit ("git:"). */
 const diffId = (path: string, source: DiffSource = 'agent') => `${source === 'git' ? 'git' : source === 'staged' ? 'staged' : 'diff'}:${path}`
 
@@ -897,12 +900,12 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       return tab?.kind === 'file' && tab.status === 'ready' ? editor.current : null
     }
     const editorCommands = () =>
-      (shownEditor()?.getSupportedActions() ?? []).filter((a) => a.label).map((a) => ({ id: a.id, label: a.label }))
+      (shownEditor()?.getSupportedActions() ?? []).filter((a) => a.label).map((a) => ({ id: actionId(a.id), label: a.label }))
     const runAction = (id: string) => {
       const ed = shownEditor()
       if (!ed) return
       ed.focus()
-      void ed.getAction(id)?.run()
+      void ed.getAction(actionId(id))?.run()
     }
 
     // A tab with unsaved changes stays: its text is the person's, and saving makes the file again.
@@ -1103,7 +1106,13 @@ export function EditorProvider({ children }: { children: ReactNode }) {
           })
         }
         addDebugActions(m.monaco, ed, (model) => m.pathOf(model.uri))
-        keymap.setEditorCommands(ed.getSupportedActions().map((a) => ({ id: a.id, label: a.label })))
+        // The actions added here are Monaco commands under the editor's own id ("vs.editor.ICodeEditor:1:codeArena.addToChat"):
+        // keys and keybindings.json name them by their own (codeArena.addToChat, editor.debug.action.runToCursor).
+        for (const a of ed.getSupportedActions()) {
+          const own = actionId(a.id)
+          if (own !== a.id) m.monaco.editor.registerCommand(own, () => void ed.getAction(own)?.run())
+        }
+        keymap.setEditorCommands(ed.getSupportedActions().map((a) => ({ id: actionId(a.id), label: a.label })))
         installCompletions(m)
         editor.current = ed
       }

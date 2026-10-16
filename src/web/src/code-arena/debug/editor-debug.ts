@@ -111,7 +111,7 @@ export function installDebugEditor(monaco: typeof Monaco, ed: Monaco.editor.ISta
         const named = [...new Set(text.match(/[A-Za-z_$][\w$]*/g) ?? [])].filter((w) => known.has(w))
         if (named.length === 0) continue
         const shown = named.map((w) => `${w} = ${known.get(w)!.length > 40 ? `${known.get(w)!.slice(0, 40)}…` : known.get(w)}`).join(', ')
-        list.push({ range: new monaco.Range(line, model.getLineMaxColumn(line), line, model.getLineMaxColumn(line)), options: { after: { content: `  ${shown}`, inlineClassName: 'arena-inline-value' } } })
+        list.push({ range: new monaco.Range(line, model.getLineMaxColumn(line), line, model.getLineMaxColumn(line)), options: { after: { content: `  ${shown}`, inlineClassName: 'arena-inline-value' }, showIfCollapsed: true } })
       }
       inline.set(list)
     } catch {

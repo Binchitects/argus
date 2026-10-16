@@ -214,8 +214,9 @@ const fakes = vi.hoisted(() => {
     getSelection() {
       return this.selection
     }
+    /** As Monaco's: an action added to an editor is listed under that editor's id first. */
     getSupportedActions() {
-      return [...this.actions.entries()].map(([id, a]) => ({ id, label: a.label }))
+      return [...this.actions.entries()].map(([id, a]) => ({ id: `vs.editor.ICodeEditor:1:${id}`, label: a.label }))
     }
     getAction(id: string) {
       const a = this.actions.get(id)
@@ -1438,9 +1439,15 @@ describe('Code Arena, the IDE', () => {
     expect(within(palette).getAllByRole('option').map((o) => o.textContent)).toEqual(
       expect.arrayContaining(['Code Arena: Add to chatCtrl+L', 'Code Arena: Explain this', 'Code Arena: Fix this', 'Code Arena: Complete this']),
     )
-    await userEvent.clear(command)
-    await userEvent.type(command, 'toggle terminal')
-    expect(within(palette).getByRole('option', { name: /View: Toggle Terminal/ })).toHaveTextContent('Ctrl+`')
+    // One of them run from the palette: the lines go with the next message.
+    await userEvent.click(within(palette).getByRole('option', { name: /Code Arena: Add to chat/ }))
+    expect(await within(screen.getByRole('list', { name: 'Sent with the message' })).findByText('src/app.ts:1')).toBeInTheDocument()
+    await userEvent.keyboard('{Control>}{Shift>}p{/Shift}{/Control}')
+    await userEvent.type(within(await screen.findByRole('dialog', { name: 'Commands' })).getByPlaceholderText('Run a command: type a few words of it'), 'x')
+    const command2 = within(screen.getByRole('dialog', { name: 'Commands' })).getByPlaceholderText('Run a command: type a few words of it')
+    await userEvent.clear(command2)
+    await userEvent.type(command2, 'toggle terminal')
+    expect(within(screen.getByRole('dialog', { name: 'Commands' })).getByRole('option', { name: /View: Toggle Terminal/ })).toHaveTextContent('Ctrl+`')
     await userEvent.keyboard('{Enter}')
     await waitFor(() => expect(fakes.terminals.length).toBeGreaterThan(0))
 
@@ -1802,6 +1809,18 @@ describe('Code Arena, the IDE', () => {
     expect(await answer('evaluate', { result: '2', variablesReference: 0 })).toMatchObject({ expression: 'total + 1', frameId: 7, context: 'watch' })
     expect(await within(within(view).getByRole('list', { name: 'Watch expressions' })).findByText('2')).toBeInTheDocument()
     await waitFor(() => expect(kept.watch).toEqual(['total + 1']))
+    // Run to Cursor: a breakpoint there for this run only, then continue.
+    editor().selection = { startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 1 }
+    act(() => editor().actions.get('editor.debug.action.runToCursor')!.run())
+    expect(await answer('setBreakpoints', { breakpoints: [{ verified: true, line: 1 }, { verified: true, line: 2 }] })).toMatchObject({ breakpoints: [{ line: 1 }, { line: 2 }] })
+    await answer('continue')
+    event('stopped', { reason: 'breakpoint', threadId: 1 })
+    await answer('threads', { threads: [{ id: 1, name: 'main' }] })
+    await answer('stackTrace', { stackFrames: [{ id: 8, name: 'main', line: 2, column: 1, source: { path: '/home/ada/shop/src/app.ts' } }] })
+    // Stopped there, the breakpoint goes.
+    expect(await answer('setBreakpoints', { breakpoints: [{ verified: true, line: 1 }] })).toMatchObject({ breakpoints: [{ line: 1 }] })
+    await answer('scopes', { scopes: [] })
+    await answer('evaluate', { result: '2', variablesReference: 0 })
     // F10 steps over; Shift+F5 stops the session.
     await userEvent.click(view)
     await userEvent.keyboard('{F10}')
