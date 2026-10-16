@@ -463,15 +463,12 @@ export function AnswerTurn({
                 hurried={a.cutShort}
               />
             )}
-            {a.content &&
-              (live ? (
+            {a.content && (
+              // A finished answer's words can be selected and quoted in a reply (the same element as it was written: nothing is drawn again).
+              <div data-quote-source={live ? undefined : a.id}>
                 <Markdown text={a.content} onOpenFile={onOpenFile} onPreview={onPreview} live={live && isLast} />
-              ) : (
-                // A finished answer's words can be selected and quoted in a reply.
-                <div data-quote-source={a.id}>
-                  <Markdown text={a.content} onOpenFile={onOpenFile} onPreview={onPreview} />
-                </div>
-              ))}
+              </div>
+            )}
             {live && isLast && a.content && <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-primary align-middle" aria-hidden="true" />}
             {a.toolCalls?.map((t) =>
               t.function.name === 'ask_user' && results.get(t.id)?.status !== 'failed' ? (

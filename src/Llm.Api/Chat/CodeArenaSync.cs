@@ -372,7 +372,7 @@ public static class CodeArenaSync
                 Sequence = ++sequence,
                 Role = m.Role,
                 Content = Text(m.Content),
-                Quote = m.Role == "user" && ChatQuotes.Clean(m.Quote) is { } quote ? quote[..Math.Min(quote.Length, ChatQuotes.MaxChars)] : null,
+                Quote = m.Role == "user" && ChatQuotes.Clean(m.Quote) is { } quote ? ChatQuotes.Cut(quote) : null,
                 Reasoning = string.IsNullOrEmpty(m.Reasoning) ? null : m.Reasoning,
                 ToolCallsJson = m.Role == "assistant" && m.ToolCalls is JsonArray { Count: > 0 } calls ? calls.ToJsonString() : null,
                 ToolCallId = m.Role == "tool" ? Clip(m.ToolCallId, 200) : null,

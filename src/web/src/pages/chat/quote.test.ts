@@ -68,6 +68,9 @@ describe('quotes', () => {
     expect(long.text.endsWith('…')).toBe(true)
     expect(quoteOf('a  \r\nb\r\n\r\n\r\n\r\nc')!.text).toBe('a\nb\n\nc')
     expect(quoteOf('  \n ')).toBeNull()
+    // An emoji where it is cut goes whole or not at all.
+    const emoji = quoteOf('x'.repeat(QuoteChars - 2) + '😀' + 'y'.repeat(10))!
+    expect(emoji.text).toBe('x'.repeat(QuoteChars - 2) + '…')
   })
 
   it('a quote shows as plain text, and is found in the nearest answer before its question', () => {

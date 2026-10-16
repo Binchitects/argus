@@ -68,7 +68,9 @@ export function quoteOf(text: string, words = text): Quote | null {
   const tidied = tidy(text)
   if (!tidied) return null
   const cut = tidied.length > QuoteChars
-  return { text: cut ? `${tidied.slice(0, QuoteChars - 1)}…` : tidied, words: tidy(words), cut }
+  // Never between the two halves of a character outside the BMP (an emoji): the server refuses half of one.
+  const end = /[\uD800-\uDBFF]/.test(tidied[QuoteChars - 2] ?? '') ? QuoteChars - 2 : QuoteChars - 1
+  return { text: cut ? `${tidied.slice(0, end)}…` : tidied, words: tidy(words), cut }
 }
 
 /** The answer's message an element is in: the one marked as a source of quotes (`data-quote-source`). */

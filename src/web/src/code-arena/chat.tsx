@@ -399,15 +399,28 @@ export function Thread({
   const scroller = useRef<HTMLDivElement>(null)
   const content = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
-  // The part of an answer the next message quotes (Reply, or the command), and the selection that can be quoted.
-  const [quote, setQuote] = useState<Quote | null>(null)
+  // The part of an answer the next message quotes (Reply, or the command), and the selection that can be quoted. The quote is
+  // the session's it was made in: another session opened here does not send it.
+  const [quoted, setQuoted] = useState<{ session?: string; quote: Quote } | null>(null)
+  const quote = quoted && quoted.session === session.data?.id ? quoted.quote : null
+  const sessionNow = useRef(session.data?.id)
+  useEffect(() => {
+    sessionNow.current = session.data?.id
+  }, [session.data?.id])
+  const setQuote = useCallback((next: Quote | null | ((now: Quote | null) => Quote | null)) => {
+    setQuoted((was) => {
+      const now = was && was.session === sessionNow.current ? was.quote : null
+      const q = typeof next === 'function' ? next(now) : next
+      return q ? { session: sessionNow.current, quote: q } : null
+    })
+  }, [])
   const messagesNow = useRef<Message[]>([])
   const quotable = useQuotableSelection(scroller, (messageId) => messagesNow.current.find((m) => m.id === messageId)?.content)
   // The same function at each drawing: the answers are not drawn again for it.
   const replyQuote = useCallback((q: Quote) => {
     setQuote(q)
     setFocusBox((n) => n + 1)
-  }, [])
+  }, [setQuote])
   const reply = (q: Quote) => {
     replyQuote(q)
     quotable.clear(true)

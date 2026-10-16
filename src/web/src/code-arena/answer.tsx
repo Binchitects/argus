@@ -287,15 +287,12 @@ export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince
         return (
           <div key={a.id} data-message={a.id} className="scroll-mt-4 rounded-lg">
             {a.reasoning && <Thinking text={a.reasoning} live={live && isLast && !a.content && !a.toolCalls?.length} ms={a.thinkingMs} since={isLast ? thinkingSince : null} />}
-            {a.content &&
-              (live ? (
+            {a.content && (
+              // A finished answer's words can be selected and quoted in a reply (the same element as it was written: nothing is drawn again).
+              <div data-quote-source={live ? undefined : a.id}>
                 <Markdown text={a.content} live={live && isLast} />
-              ) : (
-                // A finished answer's words can be selected and quoted in a reply.
-                <div data-quote-source={a.id}>
-                  <Markdown text={a.content} />
-                </div>
-              ))}
+              </div>
+            )}
             {live && isLast && a.content && <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-primary align-middle" aria-hidden="true" />}
             {a.toolCalls?.map((t) => {
               const result = results.get(t.id)

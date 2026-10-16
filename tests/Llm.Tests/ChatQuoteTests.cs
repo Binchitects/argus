@@ -60,6 +60,9 @@ public sealed class ChatQuoteTests(AppFixture app)
         Assert.Null(ChatQuotes.Clean(" \n "));
         Assert.Null(ChatQuotes.Check(new string('q', ChatQuotes.MaxChars)));
         Assert.NotNull(ChatQuotes.Check(new string('q', ChatQuotes.MaxChars + 1)));
+        // Cut, a character outside the BMP is never split in two (the database refuses half of one).
+        Assert.Equal(ChatQuotes.MaxChars - 1, ChatQuotes.Cut(new string('q', ChatQuotes.MaxChars - 1) + "😀x").Length);
+        Assert.Equal(ChatQuotes.MaxChars, ChatQuotes.Cut(new string('q', ChatQuotes.MaxChars + 5)).Length);
         // Passages are searched with what the question asks, the quote included.
         Assert.Equal("the quote\nand?", ChatQuotes.Asked(new ChatMessage { Role = "user", Content = "and?", Quote = "the quote" }));
     }

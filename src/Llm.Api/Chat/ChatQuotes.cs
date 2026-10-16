@@ -21,6 +21,16 @@ public static class ChatQuotes
         return text.Length == 0 ? null : text;
     }
 
+    /// <summary>A quote cut to <paramref name="most"/> characters, never between the two halves of a character outside the BMP.</summary>
+    public static string Cut(string quote, int most = MaxChars)
+    {
+        if (quote.Length <= most)
+        {
+            return quote;
+        }
+        return quote[..(char.IsHighSurrogate(quote[most - 1]) ? most - 1 : most)];
+    }
+
     /// <summary>Why a quote is refused (it is too long); null when it may go.</summary>
     public static string? Check(string? quote) => quote is { Length: > MaxChars } ? TooLong : null;
 
