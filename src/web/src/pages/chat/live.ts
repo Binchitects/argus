@@ -186,6 +186,39 @@ export function stopped(state: LiveState): LiveState {
   return { ...state, messages, thinkingSince: null }
 }
 
+/** Whether two values read from JSON are the same, all the way down (a field left undefined is one not there). */
+export function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+    return a.every((x, i) => sameJson(x, b[i]))
+  }
+  const x = a as Record<string, unknown>
+  const y = b as Record<string, unknown>
+  const kx = Object.keys(x).filter((k) => x[k] !== undefined)
+  const ky = Object.keys(y).filter((k) => y[k] !== undefined)
+  return kx.length === ky.length && kx.every((k) => sameJson(x[k], y[k]))
+}
+
+/**
+ * The messages read again from the server, with each one that did not change kept as the object shown before (the
+ * same id, the same content): the turns made of them are not drawn again, nor their Markdown read again. The list
+ * shown before comes back as it was when nothing changed at all.
+ */
+export function keepSame(before: Message[], after: Message[]): Message[] {
+  if (before.length === 0 || before === after) return after
+  const byId = new Map(before.map((m) => [m.id, m]))
+  let changed = before.length !== after.length
+  const out = after.map((m, i) => {
+    const old = byId.get(m.id)
+    const kept = old && sameJson(old, m) ? old : m
+    if (kept !== before[i]) changed = true
+    return kept
+  })
+  return changed ? out : before
+}
+
 /** One sub-agent step folded into what the page shows of it. */
 function agentStep(agents: AgentWork[], e: Extract<ChatEvent, { type: 'agent' }>): AgentWork[] {
   const next = [...agents]

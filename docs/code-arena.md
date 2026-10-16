@@ -305,7 +305,16 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   and runs once the answer ends, each in its turn: **Stop** stops the answer
   and the next queued message runs, and **Clear** drops the queue. A command with no time limit
   that ends while nothing runs starts a turn of its own, which the page shows as
-  any other. The Chat activity lists this folder's sessions.
+  any other. A picture, a sound or a video one of Arena's tools made (kept in
+  the folder under `.code-arena/media/`, the tool's result naming it) shows
+  under its card: the picture opens larger at a click, the sound and the video
+  play in place. A long session opens on its last 30 turns: **Show earlier**
+  at the top adds 30 more each time, the turns being read staying where they
+  were. The thread draws what streams in once per frame, and only the turn
+  being written: a session of thousands of messages streams as smoothly as a
+  short one. The Chat activity lists this folder's sessions; the list is read
+  again when a session's first turn adds it, a turn of a session listed
+  already just moves it to the top.
 - **status bar**: the git branch, the agent's changes, the terminal and the
   number of commands running with no time limit on the left (and, after the
   first key of a chord, that it waits for the second); the cursor's line and

@@ -126,6 +126,8 @@ export const searchQuery = (o: SearchOptions) => {
 }
 
 export const readFile = (path: string) => api<OpenedFile>(`/api/file?path=${at(path)}`)
+/** A file of the folder as it is (a picture, a sound, a video), for the page to show or play: its cookie lets it through. */
+export const rawFileUrl = (path: string) => `/api/file/raw?path=${at(path)}`
 /** Saves; with the version it was read at, refused (409 "changed") when the file changed on disk since. */
 export const writeFile = (path: string, text: string, version: string | null) => api<Saved>('/api/file', { body: { path, text, version } })
 export const createEntry = (path: string, kind: 'file' | 'dir') => api<{ path: string; kind: 'file' | 'dir' }>('/api/files/new', { body: { path, kind } })

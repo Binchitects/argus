@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Cloud, CloudUpload, FileCode2, FolderGit2, GitBranch, History, ListChecks, LoaderCircle, MessageSquarePlus, Monitor, Moon, PanelRightClose, ScrollText, ShieldCheck, Square, SquareTerminal, Sun, TestTubeDiagonal, Plus, X } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronUp, Cloud, CloudUpload, FileCode2, FolderGit2, GitBranch, History, ListChecks, LoaderCircle, MessageSquarePlus, Monitor, Moon, PanelRightClose, ScrollText, ShieldCheck, Square, SquareTerminal, Sun, TestTubeDiagonal, Plus, X } from 'lucide-react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -18,11 +18,12 @@ import { useFileRefs } from '@/pages/chat/file-refs'
 import { ContextGauge } from '@/pages/chat/context-gauge'
 import { answerNews, bucket } from '@/pages/chat/format'
 import { ModelPicker, ThinkingPicker } from '@/pages/chat/header'
-import { stopped, withQuestion } from '@/pages/chat/live'
+import { batched } from '@/pages/chat/batch'
+import { keepSame, stopped, withQuestion, type Notice } from '@/pages/chat/live'
 import { useRecall, type Older, type RecallSource } from '@/pages/chat/recall'
 import { toTurns } from '@/pages/chat/tree'
 import { CompactedMark, QuestionTurn } from '@/pages/chat/turns'
-import type { ChatConfig } from '@/pages/chat/types'
+import type { ChatConfig, Message } from '@/pages/chat/types'
 import {
   answerApproval,
   clearQueue,
@@ -318,6 +319,20 @@ function ModePicker({ state, onChange }: { state: CodeState; onChange: (mode: Mo
   )
 }
 
+/** How many turns the thread draws at first, and how many more each "Show earlier" adds: a long session's older turns wait until asked for. */
+const turnsAtOnce = 30
+
+/** What the thread passes a turn that has none: the same each time, so the turn is not drawn again for it. */
+const noNotices: Notice[] = []
+const noneWaiting: string[] = []
+const ignore = () => undefined
+
+/** A question in the thread: drawn again only when its message changes. */
+const Question = memo(function Question({ m }: { m: Message }) {
+  // No editing here: nothing for "busy" to hold back.
+  return <QuestionTurn m={m} siblings={[m]} busy={false} onSwitch={ignore} />
+})
+
 const suggestions = [
   { icon: TestTubeDiagonal, text: 'How is this project built and tested? Run the tests and tell me what fails.' },
   { icon: ListChecks, text: 'Find the TODOs and FIXMEs in the code and sum them up by area.' },
@@ -356,10 +371,13 @@ export function Thread({
   const { pieceOf } = useEditor()
   // A code block named for a file of the folder (in a summary) opens it in the editor.
   const refs = useFileRefs()
-  const openNamed = (name: string) => {
-    const path = refs?.known(name)
-    if (path) refs?.open({ path })
-  }
+  const openNamed = useCallback(
+    (name: string) => {
+      const path = refs?.known(name)
+      if (path) refs?.open({ path })
+    },
+    [refs],
+  )
   const [live, setLive] = useState<CodeLive | null>(null)
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -367,11 +385,23 @@ export function Thread({
   // Each run's number: the one that ends leaves the view to a later one.
   const runs = useRef(0)
   const scroller = useRef<HTMLDivElement>(null)
+  const content = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
 
-  const view = live ?? fromSession(session.data)
-  const path = inOrder(view.messages)
-  const turns = toTurns(path)
+  // The session as read, each message that did not change kept as the object the thread drew (the turn that just
+  // streamed included): read again after each turn, the finished turns are not drawn again.
+  const [shared, setShared] = useState({ from: session.data, messages: session.data?.messages ?? [] })
+  if (shared.from !== session.data) setShared({ from: session.data, messages: keepSame(live?.messages ?? shared.messages, session.data?.messages ?? []) })
+  const saved = useMemo(() => ({ ...fromSession(shared.from), messages: shared.messages }), [shared])
+  const view = live ?? saved
+  const path = useMemo(() => inOrder(view.messages), [view.messages])
+  const turns = useMemo(() => toTurns(path), [path])
+  // The last turns, and more of the older ones as asked for ("Show earlier"); another session starts from its last ones again.
+  const [shown, setShown] = useState({ session: session.data?.id, count: turnsAtOnce })
+  const shownCount = shown.session === session.data?.id ? shown.count : turnsAtOnce
+  const firstShown = Math.max(0, turns.length - shownCount)
+  // The distance from the end when earlier turns were asked for: the turns read stay where they were on the screen.
+  const keptFromEnd = useRef<number | null>(null)
   const model = config.models.find((m) => m.name === state.model)
   const answering = streaming && view.mode !== 'compact'
   // ↑ in the box: this session's messages, newest first, then what this folder sent before (the terminal's too).
@@ -388,19 +418,53 @@ export function Thread({
       .map((j): LiveJob => ({ ...j, output: j.output ?? '', failed: false, unwatched: true })),
   ]
 
+  // At the end, the thread follows what is written: when its height changes (seen once the page has laid it out, so
+  // nothing is measured at each streamed word), and when the person comes back to the end.
+  const following = useRef(atBottom)
   useEffect(() => {
+    following.current = atBottom
     const el = scroller.current
     if (atBottom && el) el.scrollTop = el.scrollHeight
-  }, [view.messages, atBottom])
+  }, [atBottom])
+  const threadShown = turns.length > 0
+  useEffect(() => {
+    const el = scroller.current
+    const inner = content.current
+    if (!el || !inner) return
+    if (following.current) el.scrollTop = el.scrollHeight
+    const follow = new ResizeObserver(() => {
+      if (following.current) el.scrollTop = el.scrollHeight
+    })
+    follow.observe(inner)
+    return () => follow.disconnect()
+  }, [threadShown])
+  useLayoutEffect(() => {
+    const el = scroller.current
+    if (keptFromEnd.current === null || !el) return
+    el.scrollTop = el.scrollHeight - keptFromEnd.current
+    keptFromEnd.current = null
+  }, [shownCount])
+  const showEarlier = () => {
+    const el = scroller.current
+    if (el) keptFromEnd.current = el.scrollHeight - el.scrollTop
+    setShown({ session: session.data?.id, count: shownCount + turnsAtOnce })
+  }
 
   /**
    * What a turn changes, read again: the state and the session are waited for (the thread shows the saved turn
-   * from them), the agent's changes, the files and the session list come when they come. The search is left as
-   * it is: it would read every file again after each answer.
+   * from them), the agent's changes and the files come when they come. The search is left as it is: it would read
+   * every file again after each answer. The session list is read again only when it changed (this session's first
+   * turn puts it there): reading it reads every session file of the folder, long in a folder of long sessions.
+   * Otherwise this session just moves to the top, as changed now.
    */
   const refresh = useCallback(async () => {
-    for (const queryKey of [changesQuery.queryKey, ['code', 'files'], ['code', 'git'], sessionsQuery.queryKey, historyQuery.queryKey]) void queryClient.invalidateQueries({ queryKey })
+    for (const queryKey of [changesQuery.queryKey, ['code', 'files'], ['code', 'git'], historyQuery.queryKey]) void queryClient.invalidateQueries({ queryKey })
     await Promise.all([queryClient.invalidateQueries({ queryKey: stateQuery.queryKey }), queryClient.invalidateQueries({ queryKey: sessionQuery.queryKey })])
+    const id = queryClient.getQueryData<CodeState>(stateQuery.queryKey)?.session
+    const list = queryClient.getQueryData<SessionSummary[]>(sessionsQuery.queryKey)
+    const here = list?.find((s) => s.id === id)
+    if (!list || !here) void queryClient.invalidateQueries({ queryKey: sessionsQuery.queryKey })
+    else queryClient.setQueryData<SessionSummary[]>(sessionsQuery.queryKey, [{ ...here, updatedAt: new Date().toISOString() }, ...list.filter((s) => s !== here)])
   }, [queryClient])
 
   /** Streams a turn (or a compaction, or the turn running when the page opened) into the thread, then reads the saved session. */
@@ -414,6 +478,8 @@ export function Thread({
       setAtBottom(true)
       let received = false
       let busy: unknown = null
+      // The events of a frame folded in together: one drawing of the thread per frame, not one per streamed word.
+      const events = batched<CodeEvent>((all) => setLive((s) => all.reduce((now, e) => reduceCode(now, e, localId), s ?? start)))
       try {
         await streamChat(
           path,
@@ -423,17 +489,19 @@ export function Thread({
             const event = e as CodeEvent
             watch?.(event)
             onEvent?.(event)
-            setLive((s) => reduceCode(s ?? start, event, localId))
+            events.push(event)
           },
           new AbortController().signal,
         )
       } catch (err) {
+        events.flush()
         if (busyThrows && !received && err instanceof ApiError && err.status === 'busy') busy = err
         else {
           setError(err instanceof ApiError ? err.message : received ? 'The answer was interrupted: is code-arena web still running?' : 'The message did not reach code-arena web. It is back in the box below.')
           setLive((s) => (s ? { ...s, ...stopped(s) } : s))
         }
       } finally {
+        events.flush()
         // Not watching any more before the state is read again: a turn the server goes on to (the queue, a command that
         // ended) is then attached to at once, and this one's end leaves that one's view alone.
         watching.current = false
@@ -553,10 +621,11 @@ export function Thread({
     }
   }, [onShow])
 
-  const decide = async (callId: string, answer: 'allow' | 'always' | 'deny') => {
+  // The same function at each drawing: the answers are not drawn again for it.
+  const decide = useCallback((callId: string, answer: 'allow' | 'always' | 'deny') => {
     setLive((s) => (s ? { ...s, waiting: (s.waiting ?? []).filter((w) => w !== callId) } : s))
-    await answerApproval(callId, answer).catch((e) => toast.error(errorMessage(e)))
-  }
+    void answerApproval(callId, answer).catch((e) => toast.error(errorMessage(e)))
+  }, [])
 
   const settings = async (change: Parameters<typeof changeSettings>[0]) => {
     try {
@@ -666,27 +735,33 @@ export function Thread({
               }}
               className="relative min-h-0 flex-1 overflow-y-auto"
             >
-              <div className="mx-auto grid w-full max-w-(--thread-max) gap-6 px-4 py-6 @lg:px-6">
-                {turns.map((t, i) => {
+              <div ref={content} className="mx-auto grid w-full max-w-(--thread-max) gap-6 px-4 py-6 @lg:px-6">
+                {firstShown > 0 && (
+                  <Button variant="ghost" size="sm" className="justify-self-center text-muted-foreground" onClick={showEarlier}>
+                    <ChevronUp /> Show earlier ({firstShown} more {firstShown === 1 ? 'turn' : 'turns'})
+                  </Button>
+                )}
+                {turns.slice(firstShown).map((t, at) => {
+                  const i = firstShown + at
                   const isLive = answering && i === lastTurn
                   // The older conversation, summarized to fit the model's window: shown folded, as the chat shows a compaction.
                   if (t.question?.summary) return <CompactedMark key={t.question.id} summary={t.question.summary} onOpenFile={openNamed} />
                   return (
                     <div key={t.question?.id ?? t.answer[0]?.id ?? i} className="grid gap-4">
-                      {t.question && <QuestionTurn m={t.question} siblings={[t.question]} busy={streaming} onSwitch={() => undefined} />}
+                      {t.question && <Question m={t.question} />}
                       {(t.answer.length > 0 || isLive) && (
                         <CodeAnswer
                           answer={t.answer}
                           live={isLive}
                           thinkingSince={isLive ? view.thinkingSince : null}
-                          notices={i === lastTurn ? view.notices : []}
+                          notices={i === lastTurn ? view.notices : noNotices}
                           config={config}
-                          waiting={isLive ? (view.waiting ?? []) : []}
+                          waiting={isLive ? (view.waiting ?? noneWaiting) : noneWaiting}
                           always={view.always}
                           risks={view.risks}
                           calls={isLive ? view.calls : undefined}
                           diffs={view.diffs}
-                          onDecide={(id, answer) => void decide(id, answer)}
+                          onDecide={decide}
                         />
                       )}
                     </div>
