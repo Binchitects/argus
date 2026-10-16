@@ -256,7 +256,7 @@ public sealed partial class EngineRoute
             await ReadyAsync(model, ct);
             Want(model);
             Tell(model);
-            return null;
+            return LineFull(model);
         }
         catch (ChatGatewayException ex) when (ex.NotLoaded)
         {
@@ -278,7 +278,7 @@ public sealed partial class EngineRoute
         if (status == "loaded")
         {
             Tell(model);
-            return null;
+            return await PressureAsync(model, ct);
         }
         var fallback = FallbackOf(model);
         string why;
@@ -329,6 +329,43 @@ public sealed partial class EngineRoute
         // With a fallback, the gateway's fallbacks answer (it reaches the model, fails at once, and goes on); without, say when.
         return fallback is not null ? null : $"{why} Try again in a minute or two.";
     }
+
+    /// <summary>
+    /// Admission for an API key's request to a loaded vLLM model, by what the engine says of itself: refused (to try again
+    /// shortly) while requests already wait inside it beyond a quarter of its places, or its token cache is nearly full. The
+    /// app queues fairly where it can see the line; vLLM's own queue is not let grow by API keys, and the chat's requests
+    /// go ahead of theirs inside it (priority).
+    /// </summary>
+    private async Task<string?> PressureAsync(string model, CancellationToken ct)
+    {
+        if (await client.CapacityAsync(model, Quick, ct) is not { } c)
+        {
+            return null;
+        }
+        if (c.Waiting > Math.Max(2, c.Count / 4))
+        {
+            return $"{model} is busy: {c.Waiting} requests wait inside it. Try again in 30 seconds.";
+        }
+        if (c.KvUsage >= 0.97)
+        {
+            return $"{model}'s token cache is full. Try again in 30 seconds.";
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// For an API key's request to a llama.cpp model: refused (to try again shortly) while more people wait in the chat's line
+    /// for it than it has places. The chat's line is fair (AnswerGate); an API key does not jump it.
+    /// </summary>
+    private string? LineFull(string model)
+    {
+        var (_, waiting) = gate.Now(model);
+        var places = gate.PlacesOf(model);
+        return places > 0 && waiting > places ? $"{model} is busy: {waiting} answers of the chat wait for it. Try again in 30 seconds." : null;
+    }
+
+    /// <summary>The kind of engine a model runs on (EngineKinds); llama.cpp's for one not known.</summary>
+    public string KindOf(string? model) => model is null ? Llm.Core.Models.EngineKinds.LlamaCpp : engine.KindOf(model);
 
     /// <summary>
     /// The engine was told to unload <paramref name="model"/> (an admin's Unload, working hours that ended): it counts as

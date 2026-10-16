@@ -776,6 +776,8 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             "--max-num-seqs", Math.Max(1, m.Parallel).ToString(inv),
             "--gpu-memory-utilization", (m.GpuMemoryUtilization ?? VllmAdvisor.DefaultUtilization).ToString("0.###", inv),
             "--kv-cache-dtype", m.KvType, "--enable-prefix-caching",
+            // The chat's requests (priority -1) go ahead of API keys' (0) inside the engine: people waiting on an answer first.
+            "--scheduling-policy", "priority",
         };
         if (m.Quantization is { Length: > 0 } q)
         {

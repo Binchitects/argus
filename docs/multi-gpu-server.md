@@ -482,6 +482,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
 15. **Fair queue for API keys and engine priority.**
     - The guardrail admits through the gate; 429 with Retry-After; group priority passed to vLLM `priority`; shrink admission on waiting or KV pressure.
     - Tests: `scale-test.py` scenarios against fake-vllm.
+    - **Done**, within what LiteLLM allows: its generic guardrail can only block, which LiteLLM answers with HTTP 400 (no 429 or Retry-After of the app's own; LiteLLM's per-key limits keep their 429), so the refusal's text says to try again in 30 seconds. An API key's request is refused while more chat answers wait for a llama.cpp model than it has places (the chat's fair line is not jumped), or while requests wait inside a vLLM model beyond a quarter of its places or its cache is full. vLLM runs with `--scheduling-policy priority` and the chat's requests carry `priority: -1`, ahead of API keys' (0). Tests: `VllmGatewayTests`, `VllmBackendTests`; the `scale-test.py` scenarios belong with item 18.
 16. **LiteLLM HA.**
     - Valkey service (ECR mirror image); `router_settings.redis_*`; LiteLLM replicas in `scale.yml`; Traefik health checks.
     - Tests: `scale-test.py` with 2 LiteLLM replicas; the limits stay global.

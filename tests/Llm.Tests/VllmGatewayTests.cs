@@ -142,6 +142,13 @@ public sealed class VllmGatewayTests(AppFixture app) : IDisposable
             {
                 Assert.Equal($"flash@{EngineRoute.Copy(conversation, 2)}", again.Model);
             }
+            // Busy inside vLLM (requests waiting past a quarter of its places): an API key is told to come back; the chat is not held.
+            var flashPorts = backend.Presets().Where(e => e.Model == "flash").Select(e => e.Port).ToList();
+            vllm.Busy[flashPorts[0]] = (16, 12);
+            Assert.Contains("flash is busy: 12 requests wait inside it", await route.RoomForKeyAsync("flash", CancellationToken.None), StringComparison.Ordinal);
+            vllm.Busy.Clear();
+            Assert.Null(await route.RoomForKeyAsync("flash", CancellationToken.None));
+            Assert.Equal(EngineKinds.Vllm, route.KindOf("flash"));
             // A side request goes to the pool.
             using (var side = await route.TakeAsync("flash", null, CancellationToken.None))
             {

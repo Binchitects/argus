@@ -45,6 +45,7 @@ public sealed class VllmBackendTests : IDisposable
             (After("--tensor-parallel-size"), After("--max-model-len"), After("--max-num-seqs"), After("--gpu-memory-utilization"), After("--kv-cache-dtype"), After("--quantization")));
         Assert.Contains("--enable-sleep-mode", args);
         Assert.Contains("--enable-prefix-caching", args);
+        Assert.Equal("priority", After("--scheduling-policy"));
         Assert.Equal("""{"method":"mtp","num_speculative_tokens":3}""", After("--speculative-config"));
         Assert.Contains("\"cpu_bytes_to_use\":68719476736", After("--kv-transfer-config"), StringComparison.Ordinal);
         Assert.Equal("""{"temperature":0.6}""", After("--override-generation-config"));
