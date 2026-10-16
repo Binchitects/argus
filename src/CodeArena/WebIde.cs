@@ -27,6 +27,10 @@ internal sealed partial class WebApp
     private Formatters _formatters = null!;
     private Tasks _tasks = null!;
     private RunConfigs _runs = null!;
+    private EditorExtensions _extensions = null!;
+
+    /// <summary>The one call whose body is not JSON: a VS Code extension's .vsix, sent whole.</summary>
+    private const string InstallPath = "/api/extensions/install";
 
     private void StartIde()
     {
@@ -41,6 +45,7 @@ internal sealed partial class WebApp
         _formatters = new Formatters(_files, _rt.Config, _state, () => _rt.Sandbox, _rt.Env.Env);
         _tasks = new Tasks(_rt.Workspace, _files, _terminals, _problems, _state, _rt.Env.Env);
         _runs = new RunConfigs(_rt.Workspace, _terminals, _tasks, _state, _rt.Env.Env);
+        _extensions = new EditorExtensions(_rt.Env.Paths.DataDir, _rt.Env.Env);
         StartDebug();
     }
 
@@ -304,6 +309,48 @@ internal sealed partial class WebApp
                     return true;
                 case ("GET", "/api/debug/adapters"):
                     await res.JsonAsync(200, await _adapters.ListAsync(ct), ct);
+                    return true;
+                case ("GET", "/api/extensions"):
+                    await res.JsonAsync(200, _extensions.List(), ct);
+                    return true;
+                case ("GET", "/api/extensions/contributions"):
+                    await res.JsonAsync(200, _extensions.Contributions(), ct);
+                    return true;
+                case ("GET", "/api/extensions/file"):
+                {
+                    var (bytes, type) = _extensions.File(Query(req, "id"), Query(req, "path"));
+                    // Never a page of this origin's: an SVG opened by its address runs nothing, and is never read as another type.
+                    res.Headers["Content-Security-Policy"] = "sandbox; default-src 'none'";
+                    res.Headers["X-Content-Type-Options"] = "nosniff";
+                    // The page asks with the version in the address: an icon theme's icons are read once, not at each row drawn.
+                    res.Headers["Cache-Control"] = "private, max-age=3600";
+                    await res.SendAsync(200, bytes, type, ct);
+                    return true;
+                }
+                case ("POST", InstallPath):
+                    await res.JsonAsync(200, await Task.Run(() => _extensions.Install(req.Body), ct), ct);
+                    return true;
+                case ("POST", "/api/extensions/import"):
+                {
+                    var id = Body(req).Str("id");
+                    await res.JsonAsync(200, await Task.Run(() => _extensions.Import(id), ct), ct);
+                    return true;
+                }
+                case ("POST", "/api/extensions/uninstall"):
+                    _extensions.Uninstall(Body(req).Str("id"));
+                    await res.NoContentAsync(ct);
+                    return true;
+                case ("POST", "/api/extensions/enable"):
+                {
+                    var body = Body(req);
+                    await res.JsonAsync(200, _extensions.Enable(body.Str("id"), body.Bool("enabled")), ct);
+                    return true;
+                }
+                case ("GET", "/api/extensions/local"):
+                    await res.JsonAsync(200, await Task.Run(_extensions.Local, ct), ct);
+                    return true;
+                case ("GET", "/api/extensions/recommended"):
+                    await res.JsonAsync(200, await Task.Run(() => _extensions.Recommended(_files), ct), ct);
                     return true;
             }
         }

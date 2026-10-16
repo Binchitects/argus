@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, ChevronsDownUp, Columns2, Copy, FilePlus, Folder, FolderOpen, FolderPlus, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, SquareDashedMousePointer, Trash2 } from 'lucide-react'
+import { ChevronRight, ChevronsDownUp, Columns2, Copy, FilePlus, FolderPlus, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, SquareDashedMousePointer, Trash2 } from 'lucide-react'
 import { ContextMenu } from 'radix-ui'
 import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useConfirm } from '@/components/ui/confirm'
@@ -10,7 +10,8 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useEditor } from './editor-state'
-import { FileIcon } from './file-icon'
+import { useIconTheme } from './extensions'
+import { FileIcon, FolderIcon } from './file-icon'
 import { PartHelp } from './help'
 import { changesQuery, createEntry, deleteEntry, folderQuery, join, nameOf, parentOf, renameEntry, within, type Change, type Entry } from './ide-api'
 import { chatBridge } from './bridge'
@@ -277,6 +278,7 @@ function Row({ entry, level, first, ...props }: RowProps & { entry: Entry; level
   const isSelected = selected?.path === entry.path
   const change = marks.files.get(entry.path)
   const changedUnder = dir && marks.folders.has(entry.path)
+  const icons = useIconTheme()
   if (editing?.kind === 'rename' && editing.path === entry.path) {
     return <NameInput level={level} type={entry.kind} initial={entry.name} onFinish={onFinish} />
   }
@@ -308,8 +310,9 @@ function Row({ entry, level, first, ...props }: RowProps & { entry: Entry; level
       >
         {dir ? (
           <>
-            <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform duration-150', open && 'rotate-90')} aria-hidden="true" />
-            {open ? <FolderOpen className="size-4 shrink-0 text-primary/80" aria-hidden="true" /> : <Folder className="size-4 shrink-0 text-primary/80" aria-hidden="true" />}
+            {/* An icon theme whose folder icons say open or closed may hide the arrows, as in VS Code. */}
+            {icons?.theme.doc.hidesExplorerArrows ? <span className="w-3.5 shrink-0" /> : <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform duration-150', open && 'rotate-90')} aria-hidden="true" />}
+            <FolderIcon path={entry.path} open={open} />
           </>
         ) : (
           <>
@@ -372,7 +375,7 @@ function NameInput({ level, type, initial = '', onFinish }: { level: number; typ
   return (
     <li role="none" style={indent(level)} className="flex h-[1.375rem] items-center gap-1 pr-2">
       <span className="w-3.5 shrink-0" />
-      {type === 'dir' ? <Folder className="size-4 shrink-0 text-primary/80" aria-hidden="true" /> : <FileIcon path={name} />}
+      {type === 'dir' ? <FolderIcon path={name} /> : <FileIcon path={name} />}
       <input
         autoFocus
         value={name}

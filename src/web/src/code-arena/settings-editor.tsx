@@ -232,9 +232,11 @@ function Row({
       </label>
     )
   } else if (def.enum) {
+    // A value the list does not know (a theme of an extension not installed here) stays shown as it is written.
+    const values = def.open && typeof value === 'string' && !def.enum.includes(value) ? [value, ...def.enum] : def.enum
     control = (
       <select id={id} value={String(value)} onChange={(e) => onChange(e.target.value)} className="h-8 max-w-sm rounded-md border bg-background px-2 text-sm">
-        {def.enum.map((v, i) => (
+        {values.map((v, i) => (
           <option key={v} value={v} title={def.enumDescriptions?.[i]}>
             {v === '\n' ? 'LF (\\n)' : v === '\r\n' ? 'CRLF (\\r\\n)' : v}
           </option>

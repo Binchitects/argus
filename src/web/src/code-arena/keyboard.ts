@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useSyncExternalStore } from 'react'
-import { getCommand, hasCommand, runCommand } from './commands'
+import { getCommand, hasCommand, onCommandsChange, runCommand } from './commands'
 import { defaultKeybindings } from './default-keybindings'
+import { onExtensionKeybindings } from './extensions'
 import { userFileQuery } from './ide-api'
 import { parse } from './jsonc'
 import { buildRules, chordLabel, chordOf, keyFor, keysLabel, resolve, type Chord, type Context, type Rule, type RuleJson, type RuleProblem } from './keys'
@@ -73,11 +74,27 @@ export const keymap = {
 }
 
 function rebuild() {
-  const built = buildRules(defaultKeybindings, userRules, (id) => hasCommand(id) || editorCommands.has(id) || id.startsWith('editor.'), extensionRules)
+  // An extension's key for a command Code Arena does not have is left out: in the editor it would swallow the key.
+  const extension = extensionRules.filter((r) => hasCommand(r.command) || editorCommands.has(r.command))
+  const built = buildRules(defaultKeybindings, userRules, (id) => hasCommand(id) || editorCommands.has(id) || id.startsWith('editor.'), extension)
   state.rules = built.rules
   state.problems = built.problems
   changed()
 }
+
+// The extensions' keys as they change, and again as commands come (an extension's key waits for its command).
+let rebuildQueued = false
+onCommandsChange(() => {
+  if (extensionRules.length === 0 || rebuildQueued) return
+  rebuildQueued = true
+  queueMicrotask(() => {
+    rebuildQueued = false
+    rebuild()
+  })
+})
+onExtensionKeybindings((rules) => {
+  if (rules.length > 0 || extensionRules.length > 0) keymap.setExtensions(rules)
+})
 
 /** The context keys Monaco's own resolver is given too (for the rules it applies in the editor). */
 const editorKeys = ['inDebugMode', 'debugState', 'debugType', 'sideBarVisible', 'panelVisible', 'auxiliaryBarVisible']

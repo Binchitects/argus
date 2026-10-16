@@ -27,6 +27,7 @@ export const defaultKeybindings: RuleJson[] = [
   { key: 'ctrl+shift+e', command: 'workbench.view.explorer' },
   { key: 'ctrl+shift+g', command: 'workbench.view.scm', mac: 'ctrl+shift+g' },
   { key: 'ctrl+shift+m', command: 'workbench.actions.view.problems' },
+  { key: 'ctrl+shift+x', command: 'workbench.view.extensions' },
   { key: 'ctrl+`', command: 'workbench.action.terminal.toggleTerminal', mac: 'ctrl+`' },
   { key: 'ctrl+shift+`', command: 'workbench.action.terminal.new', mac: 'ctrl+shift+`' },
   { key: 'ctrl+0', command: 'workbench.action.focusSideBar' },

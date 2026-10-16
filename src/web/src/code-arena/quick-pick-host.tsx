@@ -10,14 +10,20 @@ export function QuickPickHost() {
 
 function Picker({ open: o }: { open: Open }) {
   const [typed, setTyped] = useState('')
+  // The item chosen in the list: the caller's at first ("active"), then as the keys and the mouse move it.
+  const [chosen, setChosen] = useState(() => (o.active !== undefined && o.items.some((i) => i.id === o.active) ? o.active : ''))
   const finish = (item: PickItem | undefined) => finishPick(o, item)
   const words = typed.toLowerCase().split(/\s+/).filter(Boolean)
   const shown = o.filter ? o.items.filter((i) => words.every((w) => `${i.label} ${i.description ?? ''} ${i.detail ?? ''}`.toLowerCase().includes(w))) : o.items
   // A secret is taken as typed, spaces too.
   const extra = typed.trim() && o.free ? o.free(o.password ? typed : typed.trim()) : null
   const groups = [...new Set(shown.map((i) => i.group ?? ''))]
+  const choose = (value: string) => {
+    setChosen(value)
+    o.onActive?.(o.items.find((i) => i.id === value))
+  }
   return (
-    <CommandDialog open onOpenChange={(v) => !v && finish(undefined)} title={o.title} description={o.placeholder} shouldFilter={false}>
+    <CommandDialog open onOpenChange={(v) => !v && finish(undefined)} title={o.title} description={o.placeholder} shouldFilter={false} value={chosen} onValueChange={choose}>
       {o.password ? (
         // A secret: typed as dots, never shown (cmdk's own box has no password kind; Enter still takes the choice).
         <div className="flex items-center gap-2 border-b px-3">

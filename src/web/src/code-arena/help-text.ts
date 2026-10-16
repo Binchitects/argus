@@ -8,7 +8,7 @@ import { modKey } from './editor-state'
  */
 
 /** The parts of the workbench. */
-export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'git' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status' | 'settings' | 'keybindings' | 'debug' | 'console'
+export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'git' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status' | 'settings' | 'keybindings' | 'debug' | 'console' | 'extensions'
 
 export interface PartHelp extends HelpPart {
   /** Where the manual's Code Arena page (docs/code-arena.md) tells the rest: one of its headings. */
@@ -18,6 +18,11 @@ export interface PartHelp extends HelpPart {
 export const about = 'An editor around the coding agent, for this folder: its files, a terminal, and the agent\'s chat, which can read, change and run things here as the mode allows.'
 
 export const parts: Record<Part, PartHelp> = {
+  extensions: {
+    name: 'Extensions',
+    text: `VS Code's extensions, for what they declare (${modKey}+Shift+X): colour and file icon themes, snippets, languages (comments, brackets, folding), keybindings and setting defaults. **Install from VSIX…** takes a .vsix you downloaded; **VS Code on this computer** imports one VS Code has; **Recommended** says where each of the project's recommendations stands here. A switch turns one off; the bin uninstalls it. No extension's code runs: ESLint, GitLens, debuggers and language servers are not extensions here.`,
+    manual: 'extensions',
+  },
   debug: {
     name: 'Run and Debug',
     text: `Choose a run configuration (.vscode/launch.json's, or one the project's files give) and press **Start Debugging** (F5) or **Run** (Ctrl+F5: in a terminal, without the debugger). **Build** is Debug or Release. While a session runs: **Variables** of the frame chosen (double-click one to change it), **Watch** expressions, the **Call Stack** (a frame opens its line), and the **Breakpoints** (click beside a line number, or F9; right-click for a condition or a log message). The toolbar over the editor continues (F5), pauses (F6), steps over (F10), into (F11), out (Shift+F11), restarts and stops (Shift+F5).`,
@@ -40,7 +45,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   activity: {
     name: 'Activity bar',
-    text: 'The icons down the left edge. **Explorer**, **Search**, **Agent changes** (with the number of files) and **Chat** switch the side bar; pressing the one shown hides it. At its foot: **Terminal**, the theme, **Help** and **About Code Arena**.',
+    text: 'The icons down the left edge. **Explorer**, **Search**, **Source control**, **Run and Debug**, **Extensions**, **Agent changes** (with the number of files), **Problems** and **Chat** switch the side bar; pressing the one shown hides it. At its foot: **Terminal**, the theme, **Help** and **About Code Arena**.',
     manual: 'the-ide',
   },
   explorer: {
@@ -148,6 +153,14 @@ export const tasks: HelpTask[] = [
     ],
   },
   {
+    title: "Use a VS Code theme, icons or snippets",
+    steps: [
+      `Press ${modKey}+Shift+X (**Extensions**).`,
+      'Press **Install from VSIX…** and choose the extension\'s .vsix (its page on Open VSX or the Marketplace has a download), or import it from **VS Code on this computer**.',
+      `Choose its theme with ${modKey}+K ${modKey}+T (the editor shows each as you go down the list), or its icons with **Preferences: File Icon Theme**; its snippets and languages apply at once.`,
+    ],
+  },
+  {
     title: "Use Arena's and Argus's tools",
     steps: ['They connect by themselves once you are signed in: the plug in the status bar counts those connected.', 'Click it to see why one is not, and press **Try again**.'],
   },
@@ -165,6 +178,7 @@ export const keys: [keys: string, what: string][] = [
   [`${modKey}+,`, 'Settings (settings.json, as VS Code\'s)'],
   [`${modKey}+K ${modKey}+S`, 'Keyboard shortcuts (keybindings.json, as VS Code\'s)'],
   [`${modKey}+K ${modKey}+T`, 'The colour theme'],
+  [`${modKey}+Shift+X`, 'Extensions (VS Code\'s themes, icons, snippets, languages)'],
   [`${modKey}+L`, 'In the editor: the lines chosen go with the next message'],
   ['↑ / ↓', 'In the chat\'s box: what you sent before in this folder (the terminal\'s too); Esc goes back to what you were typing'],
 ]
@@ -190,5 +204,6 @@ export const regions: Record<string, Part> = {
   Settings: 'settings',
   'Run and Debug': 'debug',
   'Debug Console': 'console',
+  Extensions: 'extensions',
   'Keyboard Shortcuts': 'keybindings',
 }

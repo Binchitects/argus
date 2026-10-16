@@ -24,6 +24,8 @@ export interface Open {
   free?: (typed: string) => PickItem | null
   /** What is typed is a secret: shown as dots, never in the list. */
   password?: boolean
+  /** Told of the item chosen in the list as it changes (the Color Theme picker shows it at once). */
+  onActive?: (item: PickItem | undefined) => void
   done: (item: PickItem | undefined) => void
 }
 
@@ -53,7 +55,15 @@ export function finishPick(o: Open, item: PickItem | undefined) {
  * A list to choose one from, as VS Code's quick pick: typing narrows it, Enter takes the one chosen, Escape takes none.
  * One at a time: a second replaces the first (which answers undefined).
  */
-export function quickPick<T>(o: { title: string; placeholder: string; items: PickItem<T>[]; active?: string; free?: (typed: string) => PickItem<T> | null; password?: boolean }): Promise<PickItem<T> | undefined> {
+export function quickPick<T>(o: {
+  title: string
+  placeholder: string
+  items: PickItem<T>[]
+  active?: string
+  free?: (typed: string) => PickItem<T> | null
+  password?: boolean
+  onActive?: (item: PickItem<T> | undefined) => void
+}): Promise<PickItem<T> | undefined> {
   return new Promise((resolve) => {
     open?.done(undefined)
     open = { ...o, filter: true, done: resolve as (item: PickItem | undefined) => void } as Open

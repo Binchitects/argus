@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createContext, createElement, use, useCallback, useMemo, type ReactNode } from 'react'
 import { ApiError } from '@/lib/api'
+import { useContributions } from './extensions'
 import { parse, setProperty } from './jsonc'
 import { projectFileQuery, userFileQuery, writeFile, writeUserFile, type OpenedFile, type UserFile } from './ide-api'
 import { check, settingDef, settingDefs } from './settings-schema'
@@ -34,6 +35,28 @@ export function readLayer(text: string | null | undefined, workspace = false): L
   if (!text?.trim()) return empty
   const { value, errors } = parse(text)
   if (errors.length > 0) return { ...empty, problems: [`The file is not JSON: ${errors[0]!.message}`] }
+  return layerOf(value, workspace)
+}
+
+/**
+ * The extensions' "configurationDefaults", one over another in their order: read as a project's settings are (a setting
+ * that is the person's alone is not theirs to set).
+ */
+export function extensionDefaults(list: { values: Record<string, unknown> }[]): Layer {
+  if (list.length === 0) return empty
+  const all = list.map((d) => layerOf(d.values, true))
+  return {
+    values: Object.assign({}, ...all.map((l) => l.values)) as Record<string, unknown>,
+    languages: all.reduce<Layer['languages']>((out, l) => {
+      for (const [id, v] of Object.entries(l.languages)) out[id] = { ...out[id], ...v }
+      return out
+    }, {}),
+    problems: all.flatMap((l) => l.problems),
+  }
+}
+
+/** Settings as an object holds them, read as readLayer reads a file's. */
+function layerOf(value: unknown, workspace: boolean): Layer {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...empty, problems: ['The file holds one object: {"setting": value, …}.'] }
   const problems: string[] = []
   const take = (all: Record<string, unknown>, into: Record<string, unknown>, language?: string) => {
@@ -77,12 +100,17 @@ export function readLayer(text: string | null | undefined, workspace = false): L
 
 const defaults = Object.fromEntries(settingDefs.map((d) => [d.key, d.default]))
 
-/** Every setting's value: the default, then the person's, then the project's, then the person's and the project's for the language. */
-export function effective(user: Layer, workspace: Layer, language?: string): Record<string, unknown> {
+/**
+ * Every setting's value: the default, the extensions' defaults, then the person's, then the project's; then, for the
+ * language, the extensions', the person's and the project's (a language's own wins, as in VS Code).
+ */
+export function effective(user: Layer, workspace: Layer, language?: string, extension: Layer = empty): Record<string, unknown> {
   return {
     ...defaults,
+    ...extension.values,
     ...user.values,
     ...workspace.values,
+    ...(language ? extension.languages[language] : undefined),
     ...(language ? user.languages[language] : undefined),
     ...(language ? workspace.languages[language] : undefined),
   }
@@ -99,6 +127,8 @@ export interface SettingsApi {
   all: (language?: string) => Record<string, unknown>
   user: Layer
   workspace: Layer
+  /** The enabled extensions' configuration defaults. */
+  extension: Layer
   userText: string
   workspaceText: string | null
   /** Sets a setting in the person's or the project's settings.json (for a language when given; undefined: back to the default), comments kept. */
@@ -121,15 +151,21 @@ export function useSetting<T = unknown>(key: string, language?: string): T {
   return (ctx ? ctx.get(key, language) : settingDef.get(key)?.default) as T
 }
 
-/** The person's settings.json and the project's .vscode/settings.json, read and kept up to date for the whole page. */
+/**
+ * The person's settings.json and the project's .vscode/settings.json, read and kept up to date for the whole page, over
+ * the enabled extensions' configuration defaults.
+ */
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
   const userQ = useQuery(userFileQuery('settings.json'))
   const projectQ = useQuery(projectFileQuery(workspaceSettingsPath))
+  const contributions = useContributions()
   const userText = userQ.data?.text ?? ''
   const workspaceText = projectQ.data?.text ?? null
   const user = useMemo(() => readLayer(userText), [userText])
   const workspace = useMemo(() => readLayer(workspaceText, true), [workspaceText])
+  const defaultsOf = contributions.data?.configurationDefaults
+  const extension = useMemo(() => extensionDefaults(defaultsOf ?? []), [defaultsOf])
 
   const reload = useCallback(async () => {
     await Promise.all([
@@ -178,21 +214,23 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     const all = (language?: string) => {
       const k = language ?? ''
       let v = cache.get(k)
-      if (!v) cache.set(k, (v = effective(user, workspace, language)))
+      if (!v) cache.set(k, (v = effective(user, workspace, language, extension)))
       return v
     }
     return {
-      ready: !userQ.isPending && !projectQ.isPending,
+      // The extensions' too: a theme of theirs is known as the page opens.
+      ready: !userQ.isPending && !projectQ.isPending && !contributions.isPending,
       get: <T,>(key: string, language?: string) => all(language)[key] as T,
       all,
       user,
       workspace,
+      extension,
       userText,
       workspaceText,
       update,
       reload,
     }
-  }, [user, workspace, userText, workspaceText, userQ.isPending, projectQ.isPending, update, reload])
+  }, [user, workspace, extension, userText, workspaceText, userQ.isPending, projectQ.isPending, contributions.isPending, update, reload])
 
   return createElement(SettingsContext, { value }, children)
 }

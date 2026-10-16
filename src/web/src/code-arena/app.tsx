@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Bug, CircleAlert, CircleHelp, Files, GitBranch, GitCompareArrows, Info, MessagesSquare, Search, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, Blocks, Bug, CircleAlert, CircleHelp, Files, GitBranch, GitCompareArrows, Info, MessagesSquare, Search, SquareTerminal, type LucideIcon } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { toast } from '@/components/ui/toaster'
 import { Alert } from '@/components/ui/alert'
@@ -44,8 +44,10 @@ import { clipboardText } from './paste'
 import { compareSelection, type Side } from './compare'
 import { SearchPanel } from './search'
 import { SettingsProvider, useSettings, workspaceSettingsPath } from './settings'
-import { colorThemes, themeNamed } from './settings-schema'
-import { useThemeSync } from './theme'
+import { allColorThemes, allIconThemes, themeNamed } from './settings-schema'
+import { previewTheme, useShownTheme, useThemeSync } from './theme'
+import { ensureTheme } from './extensions'
+import { ExtensionsView } from './extensions-view'
 import { appendElement } from './jsonc'
 import { Splitter } from './splitter'
 import { About, StatusBar } from './status-bar'
@@ -168,7 +170,7 @@ function Unreachable({ error }: { error: unknown }) {
   )
 }
 
-type View = 'explorer' | 'search' | 'git' | 'debug' | 'changes' | 'problems' | 'chat'
+type View = 'explorer' | 'search' | 'git' | 'debug' | 'extensions' | 'changes' | 'problems' | 'chat'
 
 /** Where the panels are and how large: the person's own, kept by code-arena for every run. */
 interface Layout {
@@ -192,7 +194,7 @@ function layoutOf(saved: Record<string, unknown> | undefined): Layout {
   const layout = { ...defaults }
   if (!saved) return layout
   const view = saved.view
-  if (view === 'explorer' || view === 'search' || view === 'git' || view === 'debug' || view === 'changes' || view === 'problems' || view === 'chat') layout.view = view
+  if (view === 'explorer' || view === 'search' || view === 'git' || view === 'debug' || view === 'extensions' || view === 'changes' || view === 'problems' || view === 'chat') layout.view = view
   if (saved.panelTab === 'terminal' || saved.panelTab === 'console') layout.panelTab = saved.panelTab
   for (const k of ['side', 'chat', 'panel'] as const) {
     const size = saved[k]
@@ -237,6 +239,7 @@ const views: { id: View; label: string; icon: LucideIcon; command: string }[] = 
   { id: 'search', label: 'Search', icon: Search, command: 'workbench.action.findInFiles' },
   { id: 'git', label: 'Source control', icon: GitBranch, command: 'workbench.view.scm' },
   { id: 'debug', label: 'Run and Debug', icon: Bug, command: 'workbench.view.debug' },
+  { id: 'extensions', label: 'Extensions', icon: Blocks, command: 'workbench.view.extensions' },
   { id: 'changes', label: 'Agent changes', icon: GitCompareArrows, command: 'codeArena.view.changes' },
   { id: 'problems', label: 'Problems', icon: CircleAlert, command: 'workbench.actions.view.problems' },
   { id: 'chat', label: 'Chat', icon: MessagesSquare, command: 'codeArena.view.sessions' },
@@ -287,6 +290,8 @@ function Workbench({
   const [palette, setPalette] = useState(false)
   const [recent, setRecent] = useState<string[]>(() => (Array.isArray(recentSaved) ? recentSaved.filter((x): x is string => typeof x === 'string') : []))
   useThemeSync()
+  // The theme shown now (with "window.autoDetectColorScheme", the preferred one of the page's light or dark): the picker starts at it.
+  const shownTheme = useShownTheme()
   useKeyboard()
   // Code completion: the person's choice (settings), and not while the agent is working.
   const completing = settings.get<boolean>('codeArena.inlineCompletion.enabled') && settings.get<boolean>('editor.inlineSuggest.enabled')
@@ -317,6 +322,8 @@ function Workbench({
   const [panelUsed, setPanelUsed] = useState(layout.panelOpen)
   // Run and Debug is drawn the first time it shows (it asks code-arena for the configurations then).
   const [debugUsed, setDebugUsed] = useState(layout.view === 'debug')
+  // The Extensions view too (it asks code-arena for VS Code's extensions on this computer then).
+  const [extensionsUsed, setExtensionsUsed] = useState(layout.view === 'extensions')
   const changes = useQuery(changesQuery)
   const [height, setHeight] = useState(() => window.innerHeight)
 
@@ -332,6 +339,7 @@ function Workbench({
       if (toggle && layout.sideOpen && layout.view === view) change({ sideOpen: false })
       else change({ view, sideOpen: true, ...(view === 'chat' ? { chatOpen: true } : {}) })
       if (view === 'debug') setDebugUsed(true)
+      if (view === 'extensions') setExtensionsUsed(true)
       if (view === 'search') setSearchFocus((n) => n + 1)
     },
     [change, layout.sideOpen, layout.view],
@@ -396,21 +404,45 @@ function Workbench({
       () => toast.success('Copied.'),
       () => toast.error('The browser did not let the page copy.'),
     )
+  /** Color Theme (Ctrl+K Ctrl+T): Code Arena's and the extensions' themes, each shown as it is chosen in the list (Escape goes back). */
   const pickTheme = async () => {
-    const now = settings.get<string>('workbench.colorTheme')
+    const now = themeNamed(shownTheme).name
     const picked = await quickPick({
       title: 'Color theme',
-      placeholder: 'Select a color theme',
+      placeholder: 'Select a color theme (up and down to preview)',
       active: now,
-      items: colorThemes.map((t) => ({ id: t.name, label: t.name, description: t.name === themeNamed(now).name ? 'current' : undefined, group: t.kind === 'light' ? 'light themes' : 'dark themes' })),
+      items: allColorThemes().map((t) => ({ id: t.name, label: t.name, description: t.name === now ? 'current' : t.extension, group: t.kind === 'light' ? 'light themes' : 'dark themes' })),
+      onActive: (item) => {
+        if (!item) return
+        void ensureTheme(item.id)
+        previewTheme(item.id)
+      },
     })
-    if (!picked) return
     try {
+      if (!picked) return
       await settings.update('workbench.colorTheme', picked.id)
       if (settings.get('window.autoDetectColorScheme')) await settings.update('window.autoDetectColorScheme', false)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      previewTheme(null)
     }
+  }
+  /** File Icon Theme: Code Arena's own icons, or an extension's. */
+  const pickIconTheme = async () => {
+    const now = settings.get<string>('workbench.iconTheme')
+    const picked = await quickPick({
+      title: 'File icon theme',
+      placeholder: 'Select a file icon theme',
+      active: now,
+      items: allIconThemes().map((t) => ({ id: t.id, label: t.label, description: t.id === now ? 'current' : t.extension })),
+    })
+    if (picked) await settings.update('workbench.iconTheme', picked.id).catch((e: unknown) => toast.error(errorMessage(e)))
+  }
+  /** Install from VSIX…: the Extensions view, and the browser's file chooser for a .vsix. */
+  const installVsix = () => {
+    show('extensions')
+    requestAnimationFrame(() => document.querySelector<HTMLInputElement>('input[data-vsix]')?.click())
   }
   const pickLanguage = async () => {
     const list = ed.languages()
@@ -720,6 +752,8 @@ function Workbench({
       setDebugUsed(true)
       show('debug')
     } },
+    { id: 'workbench.view.extensions', category: 'View', title: 'Show Extensions', run: () => show('extensions') },
+    { id: 'workbench.extensions.action.installVSIX', category: 'Extensions', title: 'Install from VSIX…', run: installVsix },
     { id: 'workbench.action.debug.start', category: 'Debug', title: 'Start Debugging', run: () => void startChosen(false) },
     { id: 'workbench.action.debug.run', category: 'Debug', title: 'Run Without Debugging', run: () => void startChosen(true) },
     { id: 'workbench.action.debug.continue', category: 'Debug', title: 'Continue', enabled: () => s?.state === 'stopped', run: () => void s?.continue() },
@@ -834,6 +868,7 @@ function Workbench({
     { id: 'workbench.action.openGlobalKeybindings', category: 'Preferences', title: 'Open Keyboard Shortcuts', run: (args) => ed.openPage('keybindings', typeof args === 'string' ? args : '') },
     { id: 'workbench.action.openGlobalKeybindingsFile', category: 'Preferences', title: 'Open Keyboard Shortcuts (JSON)', run: () => void ed.open(userFile('keybindings.json')) },
     { id: 'workbench.action.selectTheme', category: 'Preferences', title: 'Color Theme', run: () => void pickTheme() },
+    { id: 'workbench.action.selectIconTheme', category: 'Preferences', title: 'File Icon Theme', run: () => void pickIconTheme() },
     { id: 'workbench.files.action.compareWithSaved', category: 'File', title: 'Compare Active File with Saved', enabled: () => file, run: () => active && void ed.compare({ kind: 'disk', path: active.path }, { kind: 'file', path: active.path }) },
     { id: 'workbench.files.action.compareWithClipboard', category: 'File', title: 'Compare Active File with Clipboard', enabled: () => file, run: () => void compareWithClipboard() },
     { id: 'workbench.files.action.compareFileWith', category: 'File', title: 'Compare Active File With…', enabled: () => file, run: () => void compareFileWith() },
@@ -908,6 +943,9 @@ function Workbench({
           </div>
           <div hidden={layout.view !== 'debug'} className="h-full">
             {debugUsed && <RunDebugView onStart={(name, noDebug) => void start(name, noDebug)} />}
+          </div>
+          <div hidden={layout.view !== 'extensions'} className="h-full">
+            {extensionsUsed && <ExtensionsView />}
           </div>
           <div hidden={layout.view !== 'changes'} className="h-full">
             <ChangesPanel />

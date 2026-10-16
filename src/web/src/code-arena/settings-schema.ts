@@ -21,12 +21,26 @@ export interface SettingDef {
    * cannot set it, as VS Code's cannot); window: either.
    */
   scope?: 'language' | 'application' | 'window'
+  /**
+   * The enum lists the values known now (the themes of the extensions installed): another value is taken too, as VS
+   * Code takes a theme it does not have (it reads as the nearest one).
+   */
+  open?: boolean
 }
 
 const lang = 'language' as const
 
-/** The themes offered, by VS Code's names for their kind; light or dark, and Monaco's theme. */
-export const colorThemes: { name: string; kind: 'light' | 'dark'; monaco: string }[] = [
+/** A colour theme: its name in settings.json, light or dark (the page follows it), and Monaco's theme. */
+export interface ColorTheme {
+  name: string
+  kind: 'light' | 'dark'
+  monaco: string
+  /** The extension it comes from; none: Code Arena's own. */
+  extension?: string
+}
+
+/** The themes Code Arena has, by VS Code's names for their kind. */
+export const colorThemes: ColorTheme[] = [
   { name: 'Code Arena Dark', kind: 'dark', monaco: 'arena-dark' },
   { name: 'Code Arena Light', kind: 'light', monaco: 'arena-light' },
   { name: 'Dark (Visual Studio)', kind: 'dark', monaco: 'vs-dark' },
@@ -35,16 +49,44 @@ export const colorThemes: { name: string; kind: 'light' | 'dark'; monaco: string
   { name: 'High Contrast Light', kind: 'light', monaco: 'hc-light' },
 ]
 
-/** A theme by its name; VS Code's own names (Default Dark Modern, Light+…) as the nearest of these. */
-export function themeNamed(name: string | undefined) {
-  const exact = colorThemes.find((t) => t.name === name)
+let extensionThemes: ColorTheme[] = []
+
+/** The themes the enabled extensions bring (their store sets them as the list of extensions changes). */
+export function setExtensionThemes(list: ColorTheme[]) {
+  extensionThemes = list.filter((t) => !colorThemes.some((c) => c.name === t.name))
+}
+
+/** Every theme offered: Code Arena's, then the extensions'. */
+export const allColorThemes = (): ColorTheme[] => [...colorThemes, ...extensionThemes]
+
+/** A theme by its name; one Code Arena does not have (VS Code's Default Dark Modern, Light+…) as the nearest of its own. */
+export function themeNamed(name: string | undefined): ColorTheme {
+  const exact = colorThemes.find((t) => t.name === name) ?? extensionThemes.find((t) => t.name === name)
   if (exact) return exact
   const n = (name ?? '').toLowerCase()
   if (n.includes('high contrast')) return colorThemes.find((t) => t.name === (n.includes('light') ? 'High Contrast Light' : 'High Contrast'))!
   return colorThemes.find((t) => t.name === (n.includes('light') ? 'Code Arena Light' : 'Code Arena Dark'))!
 }
 
-const themeNames = colorThemes.map((t) => t.name)
+/** A file icon theme: its id in settings.json ("workbench.iconTheme") and its name. */
+export interface IconThemeInfo {
+  id: string
+  label: string
+  extension?: string
+}
+
+/** Code Arena's own file icons, by the kind of file: the default. */
+export const ownIcons: IconThemeInfo = { id: 'code-arena', label: 'Code Arena (by kind)' }
+
+let extensionIconThemes: IconThemeInfo[] = []
+
+/** The file icon themes the enabled extensions bring. */
+export function setExtensionIconThemes(list: IconThemeInfo[]) {
+  extensionIconThemes = list.filter((t) => t.id !== ownIcons.id)
+}
+
+/** Every file icon theme offered: Code Arena's own, then the extensions'. */
+export const allIconThemes = (): IconThemeInfo[] => [ownIcons, ...extensionIconThemes]
 
 export const settingDefs: SettingDef[] = [
   // Text Editor
@@ -118,10 +160,11 @@ export const settingDefs: SettingDef[] = [
   { key: 'files.eol', type: 'string', default: 'auto', enum: ['\n', '\r\n', 'auto'], enumDescriptions: ['LF', 'CRLF', "The system's"], description: 'The line ending of new files.', category: 'Files', scope: lang },
   { key: 'files.associations', type: 'object', default: {}, description: 'Languages for files by name or pattern, e.g. {"*.inc": "php"}.', category: 'Files' },
   // Workbench
-  { key: 'workbench.colorTheme', type: 'string', default: 'Code Arena Dark', enum: themeNames, description: 'The colour theme (Ctrl+K Ctrl+T). VS Code\'s theme names read as the nearest of these.', category: 'Workbench' },
+  { key: 'workbench.colorTheme', type: 'string', default: 'Code Arena Dark', get enum() { return allColorThemes().map((t) => t.name) }, open: true, description: 'The colour theme (Ctrl+K Ctrl+T): Code Arena\'s, or one an extension brings. VS Code\'s theme names that are not here read as the nearest of Code Arena\'s.', category: 'Workbench' },
   { key: 'window.autoDetectColorScheme', type: 'boolean', default: true, description: 'Follows the system\'s light or dark: "workbench.preferredLightColorTheme" or "workbench.preferredDarkColorTheme". (VS Code: off.)', category: 'Workbench' },
-  { key: 'workbench.preferredDarkColorTheme', type: 'string', default: 'Code Arena Dark', enum: themeNames, description: 'The theme when the system is dark, with "window.autoDetectColorScheme".', category: 'Workbench' },
-  { key: 'workbench.preferredLightColorTheme', type: 'string', default: 'Code Arena Light', enum: themeNames, description: 'The theme when the system is light, with "window.autoDetectColorScheme".', category: 'Workbench' },
+  { key: 'workbench.preferredDarkColorTheme', type: 'string', default: 'Code Arena Dark', get enum() { return allColorThemes().map((t) => t.name) }, open: true, description: 'The theme when the system is dark, with "window.autoDetectColorScheme".', category: 'Workbench' },
+  { key: 'workbench.preferredLightColorTheme', type: 'string', default: 'Code Arena Light', get enum() { return allColorThemes().map((t) => t.name) }, open: true, description: 'The theme when the system is light, with "window.autoDetectColorScheme".', category: 'Workbench' },
+  { key: 'workbench.iconTheme', type: 'string', default: ownIcons.id, get enum() { return allIconThemes().map((t) => t.id) }, open: true, description: 'The file icon theme: Code Arena\'s own (by the kind of file), or one an extension brings (the Extensions view). (VS Code: vs-seti.)', category: 'Workbench' },
   // Diff editor
   { key: 'diffEditor.renderSideBySide', type: 'boolean', default: true, description: 'Shows a compare side by side; off: inline.', category: 'Diff Editor' },
   { key: 'diffEditor.ignoreTrimWhitespace', type: 'boolean', default: true, description: 'Ignores spaces at lines\' starts and ends in a compare.', category: 'Diff Editor' },
@@ -167,7 +210,9 @@ export function settingsSchema(): Record<string, unknown> {
     type: d.type === 'integer' ? 'integer' : d.type,
     default: d.default,
     description: d.description,
-    ...(d.enum ? { enum: d.enum, enumDescriptions: d.enumDescriptions } : {}),
+    ...(d.enum && !d.open ? { enum: d.enum, enumDescriptions: d.enumDescriptions } : {}),
+    // Other values are taken too: the known ones are offered.
+    ...(d.enum && d.open ? { anyOf: [{ enum: d.enum }, { type: 'string' }] } : {}),
     ...(d.minimum !== undefined ? { minimum: d.minimum } : {}),
     ...(d.maximum !== undefined ? { maximum: d.maximum } : {}),
     ...(d.items ? { items: { type: d.items } } : {}),
@@ -185,7 +230,7 @@ export function settingsSchema(): Record<string, unknown> {
 export function check(d: SettingDef, v: unknown): string | null {
   const t = Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v
   if (d.type === 'integer' ? !Number.isInteger(v) : d.type === 'number' ? t !== 'number' : t !== d.type) return `"${d.key}" takes ${d.type === 'array' ? 'an array' : d.type === 'object' ? 'an object' : `a ${d.type}`}.`
-  if (d.enum && !d.enum.includes(v as string)) return `"${d.key}" is one of ${d.enum.map((e) => JSON.stringify(e)).join(', ')}.`
+  if (d.enum && !d.open && !d.enum.includes(v as string)) return `"${d.key}" is one of ${d.enum.map((e) => JSON.stringify(e)).join(', ')}.`
   if (typeof v === 'number' && ((d.minimum !== undefined && v < d.minimum) || (d.maximum !== undefined && v > d.maximum))) return `"${d.key}" is from ${d.minimum ?? '…'} to ${d.maximum ?? '…'}.`
   if (d.items && Array.isArray(v) && v.some((x) => typeof x !== d.items)) return `"${d.key}" is a list of ${d.items}s.`
   return null

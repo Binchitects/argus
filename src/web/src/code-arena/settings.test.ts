@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { insertFinalNewline, trimFinalNewlines, trimTrailingWhitespace, type SaveContext } from './save-participants'
-import { effective, readLayer } from './settings'
-import { settingsSchema } from './settings-schema'
+import { effective, extensionDefaults, readLayer } from './settings'
+import { setExtensionIconThemes, setExtensionThemes, settingDef, settingsSchema, themeNamed } from './settings-schema'
 
 describe('settings.json', () => {
   it('layers the defaults, the person\'s, the project\'s, then each for the language', () => {
@@ -15,6 +15,47 @@ describe('settings.json', () => {
     expect(effective(user, workspace, 'python')['editor.insertSpaces']).toBe(false)
     expect(effective(user, workspace, 'javascript')['editor.formatOnSave']).toBe(true)
     expect(effective(user, workspace, 'go')['editor.formatOnSave']).toBe(false)
+  })
+
+  it("puts the extensions' configuration defaults under the person's, their language's own over every general setting", () => {
+    const extension = extensionDefaults([
+      { values: { 'editor.fontSize': 11, 'editor.rulers': [80], '[toml]': { 'editor.tabSize': 2 }, 'terminal.integrated.allowChords': false, 'editor.wordWrap': 'sometimes' } },
+      { values: { 'editor.rulers': [100], '[toml]': { 'editor.insertSpaces': false } } },
+    ])
+    const user = readLayer('{ "editor.fontSize": 15, "editor.tabSize": 8 }')
+    const all = effective(user, readLayer(''), 'toml', extension)
+    expect(all['editor.fontSize']).toBe(15)
+    // The later extension's over the earlier's.
+    expect(all['editor.rulers']).toEqual([100])
+    // A language's own default over the person's general setting, as in VS Code.
+    expect(all['editor.tabSize']).toBe(2)
+    expect(all['editor.insertSpaces']).toBe(false)
+    expect(effective(user, readLayer(''), 'python', extension)['editor.tabSize']).toBe(8)
+    // What is the person's alone, and a value of the wrong kind, an extension cannot set.
+    expect(all['terminal.integrated.allowChords']).toBe(true)
+    expect(all['editor.wordWrap']).toBe('off')
+    expect(effective(user, readLayer(''), 'toml', extensionDefaults([]))['editor.tabSize']).toBe(8)
+  })
+
+  it("takes any colour theme's name, offers the extensions' themes beside Code Arena's, and reads one it does not have as the nearest", () => {
+    const l = readLayer('{ "workbench.colorTheme": "Dracula", "workbench.iconTheme": "material-icon-theme" }')
+    expect(l.problems).toEqual([])
+    expect(l.values['workbench.colorTheme']).toBe('Dracula')
+    expect(themeNamed('Dracula')).toMatchObject({ name: 'Code Arena Dark', kind: 'dark' })
+    expect(themeNamed('Default Light Modern').name).toBe('Code Arena Light')
+    setExtensionThemes([{ name: 'Dracula', kind: 'dark', monaco: 'ext-dracula', extension: 'dracula-theme.theme-dracula' }, { name: 'Code Arena Light', kind: 'dark', monaco: 'ext-x', extension: 'x.y' }])
+    setExtensionIconThemes([{ id: 'material-icon-theme', label: 'Material Icon Theme', extension: 'pkief.material-icon-theme' }])
+    try {
+      expect(themeNamed('Dracula')).toMatchObject({ monaco: 'ext-dracula', extension: 'dracula-theme.theme-dracula' })
+      // Code Arena's own names stay its own.
+      expect(themeNamed('Code Arena Light').monaco).toBe('arena-light')
+      expect(settingDef.get('workbench.colorTheme')!.enum).toContain('Dracula')
+      expect(settingDef.get('workbench.iconTheme')!.enum).toEqual(['code-arena', 'material-icon-theme'])
+      expect(JSON.stringify(settingsSchema())).toContain('"anyOf":[{"enum":["Code Arena Dark"')
+    } finally {
+      setExtensionThemes([])
+      setExtensionIconThemes([])
+    }
   })
 
   it('reads nested objects as dotted names, and refuses values of the wrong kind', () => {
