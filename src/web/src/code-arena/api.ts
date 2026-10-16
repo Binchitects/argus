@@ -225,8 +225,9 @@ export const openWebChat = (id: string) => api<CodeSession>('/api/sessions/web',
 /** Sends Arena each session of this folder it never had: how many went, and what kept the others back. */
 export const sendAllSessions = () => api<{ sent: number; failed: string[] }>('/api/sessions/send-all', { body: {} })
 export const stopTurn = () => api('/api/stop', { body: {} })
-/** A message for after the answer being written (at once when none is). */
-export const queueMessage = (text: string, context?: Piece[]) => api<{ queued: number }>('/api/queue', { body: { text, ...(context?.length && { context }) } })
+/** A message for after the answer being written (at once when none is), with the lines chosen in the editor and the part of an answer it quotes. */
+export const queueMessage = (text: string, context?: Piece[], quote?: string) =>
+  api<{ queued: number }>('/api/queue', { body: { text, ...(context?.length && { context }), ...(quote && { quote }) } })
 // A body, so it goes as JSON: code-arena web refuses any other call that changes something.
 export const clearQueue = () => api('/api/queue', { method: 'DELETE', body: {} })
 export const answerApproval = (id: string, answer: 'allow' | 'always' | 'deny') => api('/api/approvals', { body: { id, answer } })
@@ -276,10 +277,10 @@ const withJob = (jobs: LiveJob[], id: number, change: (j: LiveJob) => LiveJob, a
 export function reduceCode(state: CodeLive, e: CodeEvent, localId: string | null): CodeLive {
   switch (e.type) {
     case 'question': {
-      // A turn this page did not start (a queued message, another tab): its question comes with its text.
-      const q = e as { id: string; parentId: string | null; text?: string }
+      // A turn this page did not start (a queued message, another tab): its question comes with its text and its quote.
+      const q = e as { id: string; parentId: string | null; text?: string; quote?: string | null }
       if (localId === null && q.text != null && !state.messages.some((m) => m.id === q.id))
-        return reduce({ ...state, messages: [...state.messages, { ...blank(q.id, 'user', q.parentId), content: q.text }] }, e, localId) as CodeLive
+        return reduce({ ...state, messages: [...state.messages, { ...blank(q.id, 'user', q.parentId), content: q.text, quote: q.quote ?? null }] }, e, localId) as CodeLive
       return reduce(state, e, localId) as CodeLive
     }
     case 'attached': {

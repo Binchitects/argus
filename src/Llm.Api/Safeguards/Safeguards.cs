@@ -23,6 +23,9 @@ public sealed record Verdict(bool Allowed, string? Reason = null, string Kind = 
 
     /// <summary>When allowed: the text to take instead of the one sent (its secrets masked); null: as sent.</summary>
     public string? Text { get; init; }
+
+    /// <summary>When allowed: the quote to take instead of the one sent (its secrets masked); null: as sent.</summary>
+    public string? Quote { get; init; }
 }
 
 /// <summary>Which checks apply to a person: the company's settings, each overridden by their groups (the strictest of the groups that set it).</summary>
@@ -98,8 +101,12 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
         ["fraud"] = "fraud, scams, phishing or forging documents",
     };
 
-    /// <summary>A message the person is sending: its length, files, the rate, research, the blocked words, and the model's reading.</summary>
-    public async Task<Verdict> CheckMessageAsync(AppUser user, string text, int attachments, bool research, string? model, CancellationToken ct)
+    /// <summary>
+    /// A message the person is sending: its length, files, the rate, research, the blocked words, and the model's reading. The part
+    /// of an earlier answer it quotes (<paramref name="quote"/>) is the person's words too: its secrets, the blocked words and the
+    /// model's reading apply to it as to the message (the model reads the two together); its length is ChatQuotes' to check.
+    /// </summary>
+    public async Task<Verdict> CheckMessageAsync(AppUser user, string text, int attachments, bool research, string? model, CancellationToken ct, string? quote = null)
     {
         var o = O;
         if (!o.Enabled)
@@ -135,7 +142,17 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
         {
             return refused;
         }
-        if (policy.BlockedPatterns && Blocked(checkedText, o.BlockedPatterns) is { } match)
+        var checkedQuote = quote;
+        if (!string.IsNullOrEmpty(quote))
+        {
+            (refused, checkedQuote) = await SecretsAsync(user, policy, quote, "quote",
+                "This message was not sent: the part of an answer it quotes holds {0}. Remove it from the quote and send it again.", ct);
+            if (refused is not null)
+            {
+                return refused;
+            }
+        }
+        if (policy.BlockedPatterns && (Blocked(checkedText, o.BlockedPatterns) ?? (checkedQuote is null ? null : Blocked(checkedQuote, o.BlockedPatterns))) is { } match)
         {
             return await RefuseAsync(user, "blocked", $"matched \"{match}\"", ct);
         }
@@ -144,7 +161,7 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
             string? category;
             try
             {
-                category = await ModerateAsync(user, checkedText, model, ct);
+                category = await ModerateAsync(user, ChatQuotes.ForModel(checkedQuote, checkedText), model, ct);
             }
             catch (ChatGatewayException ex) when (ex.NotLoaded)
             {
@@ -156,7 +173,8 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
                 return await RefuseAsync(user, "flagged", $"the model judged it {category}", ct);
             }
         }
-        return checkedText == text ? Verdict.Ok : Verdict.Ok with { Text = checkedText };
+        return checkedText == text && checkedQuote == quote ? Verdict.Ok
+            : Verdict.Ok with { Text = checkedText == text ? null : checkedText, Quote = checkedQuote == quote ? null : checkedQuote };
     }
 
     /// <summary>An attached file's text: refused, or masked, when it holds a secret (as the person's policy says).</summary>

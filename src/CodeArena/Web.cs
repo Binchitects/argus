@@ -812,6 +812,11 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             await res.ErrorAsync(400, "invalid", "Write a message first.", ct);
             return;
         }
+        if (!TryQuote(body, out var quote))
+        {
+            await res.ErrorAsync(400, "invalid", "A quote is at most 4,000 characters.", ct);
+            return;
+        }
         await SettleAsync(ct);
         if (Begin("answer") is not { } job)
         {
@@ -820,8 +825,15 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         }
         // Kept for ↑, here and in the terminal: the folder's history.
         _rt.History.Add(text);
-        job.Running = Task.Run(() => RunTurnAsync(job, text, pieces));
+        job.Running = Task.Run(() => RunTurnAsync(job, text, pieces, quote));
         await StreamAsync(job, res, ct);
+    }
+
+    /// <summary>The part of an answer a message quotes (<c>quote</c>; null: none); false when it is longer than <see cref="Quotes.MaxChars"/>.</summary>
+    private static bool TryQuote(JsonObject? body, out string? quote)
+    {
+        quote = Quotes.Clean(body?.Str("quote"));
+        return quote is not { Length: > Quotes.MaxChars };
     }
 
     /// <summary>How much of a running job's output the state carries (the page shows the last 200 lines).</summary>
@@ -833,8 +845,11 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     /// <summary>Set as code-arena web shuts down: nothing new starts.</summary>
     private bool _closing;
 
-    /// <summary>Messages sent while an answer is written (with the lines chosen in the editor): each runs, in order, once the one before it ends.</summary>
-    private readonly List<(string Text, IReadOnlyList<Mentions.Piece>? Pieces)> _queued = [];
+    /// <summary>
+    /// Messages sent while an answer is written (with the lines chosen in the editor, and the part of an answer each quotes): each
+    /// runs, in order, once the one before it ends.
+    /// </summary>
+    private readonly List<(string Text, IReadOnlyList<Mentions.Piece>? Pieces, string? Quote)> _queued = [];
 
     /// <summary>
     /// The lines chosen in the editor that go with a message: <c>context</c>, each <c>{path, startLine, endLine, text?}</c>
@@ -856,12 +871,17 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             await res.ErrorAsync(400, "invalid", "Write a message first.", ct);
             return;
         }
+        if (!TryQuote(body, out var quote))
+        {
+            await res.ErrorAsync(400, "invalid", "A quote is at most 4,000 characters.", ct);
+            return;
+        }
         _rt.History.Add(text);
         int place;
         lock (_gate)
         {
             // The lines as they are now: when it runs, the file may have changed.
-            _queued.Add((text, Pieces(body)?.Select(p => p.Taken(_rt.Workspace)).ToList()));
+            _queued.Add((text, Pieces(body)?.Select(p => p.Taken(_rt.Workspace)).ToList(), quote));
             place = _queued.Count;
         }
         StartNext();
@@ -876,6 +896,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     {
         string? text = null;
         IReadOnlyList<Mentions.Piece>? pieces = null;
+        string? quote = null;
         Job? job;
         lock (_gate)
         {
@@ -885,7 +906,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             }
             if (_queued.Count > 0)
             {
-                (text, pieces) = _queued[0];
+                (text, pieces, quote) = _queued[0];
                 _queued.RemoveAt(0);
             }
             else if (_rt.Jobs.Follow().Count == 0)
@@ -895,7 +916,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             job = _job = new Job("answer");
             _turns++;
         }
-        job.Running = Task.Run(() => RunTurnAsync(job, text, pieces));
+        job.Running = Task.Run(() => RunTurnAsync(job, text, pieces, quote));
     }
 
     /// <summary>A new job when none runs; null when one does.</summary>
@@ -913,7 +934,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     }
 
     /// <summary>A turn as a job: the person's message, or (null) the model carrying on after commands that ended.</summary>
-    private async Task RunTurnAsync(Job job, string? text, IReadOnlyList<Mentions.Piece>? pieces = null)
+    private async Task RunTurnAsync(Job job, string? text, IReadOnlyList<Mentions.Piece>? pieces = null, string? quote = null)
     {
         var turn = new Spend();
         _rt.Turn = turn;
@@ -943,8 +964,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             if (text is not null)
             {
                 text = _rt.Prepare(text);
-                job.Emit(new JsonObject { ["type"] = "question", ["id"] = $"m{count}", ["parentId"] = count == 0 ? null : $"m{count - 1}", ["text"] = text });
-                await _rt.Agent.RunAsync(text, turn, job.Stop.Token, takeIn: false, pieces);
+                job.Emit(new JsonObject { ["type"] = "question", ["id"] = $"m{count}", ["parentId"] = count == 0 ? null : $"m{count - 1}", ["text"] = text, ["quote"] = quote });
+                await _rt.Agent.RunAsync(text, turn, job.Stop.Token, takeIn: false, pieces, quote);
             }
             else
             {
@@ -1576,6 +1597,7 @@ internal static partial class History
             string? toolName = null;
             string? callId = null;
             string? summary = null;
+            string? quote = null;
             List<string>? attached = null;
             if (role == "assistant")
             {
@@ -1609,7 +1631,8 @@ internal static partial class History
             }
             else if (role == "user")
             {
-                // What was typed; what went with it (@files, the lines chosen in the editor) listed apart.
+                // What was typed; the part of an answer it quotes, and what went with it (@files, the lines chosen in the editor), apart.
+                (quote, content) = Quotes.Split(content);
                 attached = Mentions.Attached(content);
                 content = Mentions.Typed(content);
             }
@@ -1621,6 +1644,7 @@ internal static partial class History
                 ["parentId"] = i == 0 ? null : $"m{i - 1}",
                 ["role"] = role,
                 ["content"] = content,
+                ["quote"] = quote,
                 ["reasoning"] = role == "assistant" ? m.Str("reasoning_content") : null,
                 ["toolName"] = toolName,
                 ["toolCallId"] = callId,

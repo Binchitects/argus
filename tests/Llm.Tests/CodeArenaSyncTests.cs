@@ -72,6 +72,35 @@ public sealed class CodeArenaSyncTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_quote_crosses_the_sync_both_ways_as_its_own_field_not_in_the_content()
+    {
+        await using var f = NewApp();
+        var (web, key) = await PersonAsync(f);
+        var arena = CodeArena(f, key);
+        var id = await ChatAsync(arena, "20261016-1200-quote1");
+
+        // From Code Arena: the quote is kept apart from the question, shown above it on the web, and read by the web's model.
+        var ids = await SendAsync(arena, id, null, [User("make it fast"), Answer("Use a hash map."), new { role = "user", content = "why?", quote = "Use a hash map." }, Answer("O(1).")]);
+        var question = (await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{id}"))).GetProperty("messages")[2];
+        Assert.Equal("why?", question.GetProperty("content").GetString());
+        Assert.Equal("Use a hash map.", question.GetProperty("quote").GetString());
+        await (await web.PostAsync($"/api/chat/conversations/{id}/messages", new { content = "and memory? marker-quote", quote = "O(1)." })).Content.ReadAsStringAsync();
+        var asked = app.Model.Requests.Last(r => r.Body.ToJsonString().Contains("marker-quote", StringComparison.Ordinal)).Body["messages"]!.AsArray();
+        Assert.Contains(asked, m => m!["content"]?.ToString() == "The person quotes this part of an earlier answer:\n<quote>\nUse a hash map.\n</quote>\n\nwhy?");
+
+        // Back to Code Arena: the web's quoted question, its quote as its own field.
+        var read = await Json(await arena.GetAsync($"/api/code-arena/chats/{id}?since={ids[^1]}"));
+        var back = read.GetProperty("messages")[0];
+        Assert.Equal("and memory? marker-quote", back.GetProperty("content").GetString());
+        Assert.Equal("O(1).", back.GetProperty("quote").GetString());
+        // An answer carries none, and a quote past the limit is cut to it.
+        Assert.Equal(JsonValueKind.Null, read.GetProperty("messages")[1].GetProperty("quote").ValueKind);
+        var more = await SendAsync(arena, id, read.GetProperty("messages").EnumerateArray().Last().GetProperty("id").GetGuid(), [new { role = "user", content = "long", quote = new string('q', 5000) }]);
+        var cut = (await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{id}"))).GetProperty("messages").EnumerateArray().Single(m => m.GetProperty("id").GetGuid() == more[0]);
+        Assert.Equal(4000, cut.GetProperty("quote").GetString()!.Length);
+    }
+
+    [Fact]
     public async Task A_Code_Arena_session_is_a_chat_here_continued_on_the_web_and_back()
     {
         await using var f = NewApp();

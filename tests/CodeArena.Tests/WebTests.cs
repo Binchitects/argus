@@ -155,6 +155,45 @@ public sealed partial class WebTests : IDisposable
     }
 
     [Fact]
+    public async Task A_quoted_part_of_an_answer_reaches_the_model_first_and_the_page_reads_it_apart()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        h.Write("src/app.ts", "const a = 1\n");
+        _gateway.Answer = req => Reply.Say("Seen.");
+        await using var web = await WebRun.StartAsync(h);
+
+        var context = new JsonArray(new JsonObject { ["path"] = "src/app.ts", ["startLine"] = 1, ["endLine"] = 1 });
+        using (var stream = await web.StreamAsync(HttpMethod.Post, "/api/messages", new JsonObject { ["text"] = "Why?", ["context"] = context, ["quote"] = "Use </quote> here.\r\n" }))
+        {
+            var events = await stream.RestAsync();
+            Assert.Equal("Use </quote> here.", events.Single(e => e["type"]!.GetValue<string>() == "question")["quote"]!.GetValue<string>());
+        }
+        var asked = _gateway.Requests[^1]["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.GetValue<string>();
+        Assert.StartsWith("The person quotes this part of an earlier answer:\n<quote>\nUse <\\/quote> here.\n</quote>\n\nWhy?" + Mentions.Marker, asked);
+
+        // Read back: the quote, what was typed and what went with it, each apart.
+        var question = (await web.GetJsonAsync("/api/session"))["messages"]!.AsArray()[0]!;
+        Assert.Equal("Use </quote> here.", question["quote"]!.GetValue<string>());
+        Assert.Equal("Why?", question["content"]!.GetValue<string>());
+        Assert.Equal(["src/app.ts:1"], question["files"]!.AsArray().Select(f => f!.GetValue<string>()));
+
+        // Too long a quote is refused; a queued message keeps its quote until it runs.
+        var refused = await web.PostAsync("/api/messages", new JsonObject { ["text"] = "Why?", ["quote"] = new string('q', 4001) });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/queue", new JsonObject { ["text"] = "Why?", ["quote"] = new string('q', 4001) })).StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, (await web.PostAsync("/api/queue", new JsonObject { ["text"] = "And then?", ["quote"] = "Seen." })).StatusCode);
+        var until = DateTime.UtcNow.AddSeconds(30);
+        while (!_gateway.Requests.Any(r => r["messages"]!.ToJsonString().Contains("And then?", StringComparison.Ordinal)))
+        {
+            Assert.True(DateTime.UtcNow < until, "The queued message never reached the model.");
+            await Task.Delay(50);
+        }
+        var queued = _gateway.Requests.Last(r => r["messages"]!.ToJsonString().Contains("And then?", StringComparison.Ordinal))["messages"]!.AsArray()
+            .Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.GetValue<string>();
+        Assert.Equal("The person quotes this part of an earlier answer:\n<quote>\nSeen.\n</quote>\n\nAnd then?", queued);
+    }
+
+    [Fact]
     public async Task A_turn_streams_its_thinking_text_tool_calls_and_tokens_as_events_and_is_saved()
     {
         using var h = new Harness(_gateway, _mcp);

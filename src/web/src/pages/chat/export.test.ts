@@ -19,6 +19,12 @@ describe('exporting a chat', () => {
     expect(md).toContain('They found DecodeFrame.')
   })
 
+  it('writes the part of an answer a question quotes as a Markdown quote above it, and keeps it in the data', () => {
+    const quoted = { ...blank('q2', 'user', 'a2', 'Why there?'), quote: 'In `src/decode.c`.\n\nLine two' }
+    expect(chatToMarkdown('Decode', [q, a2, quoted])).toContain('## You\n\n> In `src/decode.c`.\n>\n> Line two\n\nWhy there?')
+    expect(JSON.parse(chatToJson({ id: 'c1', title: 'Decode' }, [quoted])).messages[0].quote).toBe('In `src/decode.c`.\n\nLine two')
+  })
+
   it('makes a page of its own whose HTML cannot run', () => {
     const html = markdownToHtml('A <b> title', '# Hi\n\n<script>alert(1)</script><img src=x onerror="alert(2)">')
     expect(html).toContain('<title>A &lt;b&gt; title</title>')

@@ -256,7 +256,7 @@ internal sealed class Agent
         {
             Messages.AddRange(messages);
         }
-        var question = messages.LastOrDefault(m => m.Str("role") == "user")?.Str("content");
+        var question = messages.LastOrDefault(m => m.Str("role") == "user")?.Str("content") is { } said ? Quotes.Split(said).Text : null;
         var text = taken.Said ?? $"Taken in from the web chat: {messages.Count} message{(messages.Count == 1 ? "" : "s")}" +
                    (question is { Length: > 0 } ? $", the last question \"{Fmt.OneLine(question, 80)}\"." : ".");
         if (say is null)
@@ -289,11 +289,12 @@ internal sealed class Agent
     /// </summary>
     /// <param name="takeIn">Whether the web chat's news is taken in first (<see cref="BeforeTurn"/>); the IDE takes it in itself.</param>
     /// <param name="pieces">Lines chosen in the IDE's editor, sent with the message.</param>
-    public async Task<string> RunAsync(string? input, Spend turn, CancellationToken ct, bool takeIn = true, IReadOnlyList<Mentions.Piece>? pieces = null)
+    /// <param name="quote">The part of an earlier answer the message replies to: the model reads it before the message (<see cref="Quotes"/>).</param>
+    public async Task<string> RunAsync(string? input, Spend turn, CancellationToken ct, bool takeIn = true, IReadOnlyList<Mentions.Piece>? pieces = null, string? quote = null)
     {
         try
         {
-            return await RunTurnAsync(input, turn, ct, takeIn, pieces);
+            return await RunTurnAsync(input, turn, ct, takeIn, pieces, quote);
         }
         finally
         {
@@ -304,7 +305,7 @@ internal sealed class Agent
         }
     }
 
-    private async Task<string> RunTurnAsync(string? input, Spend turn, CancellationToken ct, bool takeIn, IReadOnlyList<Mentions.Piece>? pieces)
+    private async Task<string> RunTurnAsync(string? input, Spend turn, CancellationToken ct, bool takeIn, IReadOnlyList<Mentions.Piece>? pieces, string? quote)
     {
         if (input is not null)
         {
@@ -334,6 +335,8 @@ internal sealed class Agent
                     Events?.Attached(files);
                     input = expanded;
                 }
+                // The part of an answer it replies to goes first (the checkpoint keeps what was typed).
+                input = Quotes.Compose(quote, input);
             }
             Checkpoints?.Begin(Messages.Count, asked);
             Context.Turn++;
@@ -1344,7 +1347,7 @@ internal sealed class Agent
             var start = first.IndexOf("\n\n", StringComparison.Ordinal);
             sb.Append("\nThe summary before them:\n\n").Append(Fmt.Head(start < 0 ? first : first[(start + 2)..], 120, 400)).Append('\n');
         }
-        var asked = older.Where(m => m.Str("role") == "user" && m.Str("content")?.StartsWith(SummaryMark, StringComparison.Ordinal) != true).Select(m => Fmt.OneLine(Mentions.Typed(m.Str("content") ?? ""), 300)).TakeLast(15).ToList();
+        var asked = older.Where(m => m.Str("role") == "user" && m.Str("content")?.StartsWith(SummaryMark, StringComparison.Ordinal) != true).Select(m => Fmt.OneLine(Mentions.Typed(Quotes.Split(m.Str("content") ?? "").Text), 300)).TakeLast(15).ToList();
         if (asked.Count > 0)
         {
             sb.Append("\nThe person's messages:\n").Append(string.Join("", asked.Select(a => $"- {a}\n")));

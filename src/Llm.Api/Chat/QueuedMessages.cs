@@ -12,7 +12,8 @@ namespace Llm.Api.Chat;
 
 /// <summary>A message written while the chat answers, to send when the answer ends.</summary>
 /// <param name="Research">Deep research for this one.</param>
-public sealed record QueueRequest(string? Content, Guid[]? Attachments = null, bool Research = false);
+/// <param name="Quote">The part of an earlier answer it replies to (ChatQuotes).</param>
+public sealed record QueueRequest(string? Content, Guid[]? Attachments = null, bool Research = false, string? Quote = null);
 
 /// <summary>
 /// Messages sent while a chat answers wait here, on the server: a reload or another
@@ -62,7 +63,7 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
                 var last = await db.ChatMessages.Where(m => m.ConversationId == c.Id).MaxAsync(m => (int?)m.Sequence) ?? 0;
                 var question = new ChatMessage
                 {
-                    ConversationId = c.Id, ParentId = c.CurrentLeafId, Role = "user", Sequence = last + 1, Content = next.Content,
+                    ConversationId = c.Id, ParentId = c.CurrentLeafId, Role = "user", Sequence = last + 1, Content = next.Content, Quote = next.Quote,
                     AttachmentsJson = files.Count > 0 ? JsonSerializer.Serialize(files) : null,
                 };
                 db.ChatMessages.Add(question);
@@ -133,7 +134,7 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
             .Select(a => new { a.Id, a.FileName, a.Size, a.Truncated, a.Kind, a.ContentType, original = a.Kind != "image" && a.Data != null }).ToDictionaryAsync(a => a.Id, ct);
         return [.. queued.Select(q => (object)new
         {
-            q.Id, q.Content, q.Research, q.CreatedAt,
+            q.Id, q.Content, q.Quote, q.Research, q.CreatedAt,
             attachments = ChatService.ParseIds(q.AttachmentsJson).Where(files.ContainsKey).Select(a => files[a]),
         })];
     }
@@ -171,6 +172,11 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
         {
             return AuthEndpoints.Problem(400, "empty", "Write a message first.");
         }
+        var quote = ChatQuotes.Clean(body.Quote);
+        if (ChatQuotes.Check(quote) is { } tooLong)
+        {
+            return AuthEndpoints.Problem(400, "quote", tooLong);
+        }
         if (attachments.Length > 0 && await db.ChatAttachments.CountAsync(a => attachments.Contains(a.Id) && a.UserId == me.Id, ct) != attachments.Length)
         {
             return AuthEndpoints.Problem(400, "attachment", "An attachment is missing or is not yours.");
@@ -184,7 +190,7 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
             return AuthEndpoints.Problem(403, "research", Tools.ResearchTool.NotYours);
         }
         var model = c.Model ?? (await policy.ForAsync(me, await models.ListAsync(ct), ct)).Default?.Name;
-        var verdict = await safeguards.CheckMessageAsync(me, text, attachments.Length, body.Research, model, ct);
+        var verdict = await safeguards.CheckMessageAsync(me, text, attachments.Length, body.Research, model, ct, quote);
         if (!verdict.Allowed)
         {
             return AuthEndpoints.Problem(verdict.Status, $"safeguard_{verdict.Kind}", verdict.Reason!);
@@ -196,7 +202,8 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
         var last = await db.QueuedMessages.Where(q => q.ConversationId == id).MaxAsync(q => (int?)q.Position, ct) ?? 0;
         db.QueuedMessages.Add(new QueuedMessage
         {
-            ConversationId = id, Content = text, Research = body.Research, Position = last + 1,
+            // Its secrets masked, when the person's policy masks them.
+            ConversationId = id, Content = verdict.Text ?? text, Quote = verdict.Quote ?? quote, Research = body.Research, Position = last + 1,
             AttachmentsJson = attachments.Length > 0 ? JsonSerializer.Serialize(attachments) : null,
         });
         // Writing in an archived chat brings it back to the list.

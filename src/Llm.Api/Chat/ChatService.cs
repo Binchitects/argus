@@ -1385,7 +1385,8 @@ public sealed partial class ChatService(
             switch (m.Role)
             {
                 case "user":
-                    var text = new StringBuilder(mask(m.Content));
+                    // A quoted part of an earlier answer first, then the question, then its files.
+                    var text = new StringBuilder(ChatQuotes.ForModel(m.Quote is null ? null : mask(m.Quote), mask(m.Content)));
                     var images = new List<ChatAttachment>();
                     var heard = new List<JsonObject>();
                     var mediaWeight = 0L;

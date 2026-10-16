@@ -457,6 +457,7 @@ does nothing at that moment.
 | Ctrl+, , Ctrl+K Ctrl+S, Ctrl+K Ctrl+Alt+T | settings, keyboard shortcuts, colour theme |
 | Ctrl+K M, Alt+Z, Ctrl+K P | the language mode, word wrap, copy the file's path |
 | Ctrl+L | in the editor: the lines chosen (or the cursor's) go with the next message |
+| Ctrl+Shift+' | in the chat: Reply, quoting the words selected in an answer (`codeArena.chat.quoteSelection`) |
 
 Everything the page needs (Monaco and its language workers, xterm.js, the
 fonts) is built into the program; nothing is fetched from anywhere else.
@@ -863,6 +864,21 @@ Lines of a file go to the agent from the editor itself:
 The model gets them numbered, after the message, as `<selection path lines>`
 (with `unsaved="true"` for the editor's text); at most eight a message.
 
+### Reply to part of an answer
+
+Words selected in a finished answer of the chat get the web chat's toolbar
+beside them ([Chat](chat.md#what-it-does)): **Reply** puts them above the box
+as a quote (× or Backspace at the start of an empty box takes it away), and
+the next message goes with it; **Ask about this** asks about them at once
+(queued while an answer is written), leaving what is in the box and the
+editor's lines above it as they are; **Copy** copies them. The command **Chat:
+Reply quoting the selection** (`codeArena.chat.quoteSelection`, Ctrl+Shift+' by
+default, changed in `keybindings.json`) does what Reply does; F1 lists it only
+while words are selected in an answer. **Quote part of this answer…** under an
+answer opens it in a box to select from by keyboard. The thread shows a
+question's quote above it, with a way to the answer it came from. The model
+reads the quote before the message, and the editor's lines after it.
+
 ### Source control
 
 **Source control** in the activity bar (Ctrl+Shift+G, or the branch in the
@@ -1048,8 +1064,8 @@ status (403 `outside` for a path outside the folder).
 | `GET /api/lsp/log?server=ID` | `{server, running, exitCode, lines, refused}`: the last 200 lines the server running (else the last that ran) wrote to stderr, and why its last start was refused (`refused`, cleared by one that starts: a WebSocket refused tells the page nothing); 404 `missing` for no such server |
 | `POST /api/problems/run` | runs the check (waits for the one running) and answers as above; 404 `no_check` when none is found |
 | `POST /api/complete` `{path, prefix, suffix}` | code completion at the editor's cursor: `{text}`; 404 `off` when the config turns it off, 409 `busy` while an answer is written, 429 `limited` at the key's limit |
-| `POST /api/messages` `{text, context}` | a message, answered as a stream of events; `context`: lines chosen in the editor, `[{path, startLine, endLine, text}]` (`text`: the editor's, when unsaved; eight at most). The stream's `{"type":"attached", id, files}` lists what went with the question |
-| `POST /api/queue` `{text, context}` | a message for after the answer being written (runs at once when none is), with its lines; 202 `{queued}` (its place). `/api/messages` while an answer is written is 409 `busy` |
+| `POST /api/messages` `{text, context, quote}` | a message, answered as a stream of events; `context`: lines chosen in the editor, `[{path, startLine, endLine, text}]` (`text`: the editor's, when unsaved; eight at most); `quote`: the part of an earlier answer it replies to (4,000 characters at most, else 400 `invalid`), which the model reads before the message, as Arena's own model does ([Chat](chat.md#how-a-conversation-is-stored)). The stream's `{"type":"question", id, text, quote}` starts it, and `{"type":"attached", id, files}` lists what went with the question. The session as the page reads it gives each question's `quote`, `content` (what was typed) and `files` apart |
+| `POST /api/queue` `{text, context, quote}` | a message for after the answer being written (runs at once when none is), with its lines and its quote; 202 `{queued}` (its place). `/api/messages` while an answer is written is 409 `busy` |
 | `DELETE /api/queue` | drops the queued messages; 204 |
 | `GET /api/files?path=DIR` | a folder's entries, folders first: `{path, entries: [{name, path, kind, size, link}]}` |
 | `GET /api/files/all` | every file, for quick open: `{files, truncated}` (50,000 at most) |
@@ -1619,7 +1635,10 @@ in the session, never sent back to the model), its model, tokens and time; a
 tool's result with its tool; an answer stopped here as stopped; Code Arena's
 own note to the model (the connection dropped) as a notice, not as your words;
 and what went with a question (`@files`, lines chosen in the IDE's editor) as
-what you typed plus the files as chips. Continued on the web, the chat answers
+what you typed plus the files as chips. A question that quotes part of an
+answer (Reply, in either chat) carries its quote both ways as a field of its
+own: the web shows it above the question, and the session keeps it before the
+question, as its model reads it. Continued on the web, the chat answers
 with the model Code Arena answered with last. The other way, what the web
 attached comes with its messages: a text file's text as the web's model reads
 it, a picture as a picture to a model that sees (fetched with your key; named
