@@ -1209,7 +1209,17 @@ three runtimes kept alike.
 bump of System.Security.Cryptography.Xml/Pkcs past today's advisory (needs a
 yes: a package download).
 
-**v5.9: code review and rooms** (the person's ask of 2026-10-16)
+**v5.9: code review, rooms and access control** (the person's asks of
+2026-10-16)
+0. Detailed access control per person and group, first, as the rest rests on
+   it: admin roles in place of one admin flag (people, models, credits,
+   auditor, Argus, rooms) and roles of one's own from named permissions;
+   rules per resource (models, tools, MCP servers, plugins, repositories,
+   rooms, reviews, knowledge, features) for people and groups, with deny and
+   a stated precedence; one check every endpoint, Arena MCP, the gateway and
+   Argus go through; Admin → Access with a "can X do Y on Z, and why"
+   checker, bulk changes and an audit of every change; today's admins and
+   group settings carried over as they are.
 1. Merge request review: list a project's MRs (GitLab first, then GitHub,
    Gitea, any git repository), read the diff, commits, CI and discussions
    with Argus's read-only access, review with the model (each finding on a
