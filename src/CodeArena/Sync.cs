@@ -39,10 +39,10 @@ internal sealed class ChatSync : IAsyncDisposable
     private readonly SessionStore _store;
     private readonly string _place;
     private readonly Func<string> _model;
+    private readonly Func<bool> _vision;
     private readonly Action<bool, string> _notice;
     private readonly object _gate = new();
     private readonly SemaphoreSlim _wake = new(0);
-    private readonly SemaphoreSlim _busy = new(1, 1);
     private readonly CancellationTokenSource _stop = new();
     private readonly Task _loop;
     private readonly Task _watch;
@@ -87,7 +87,7 @@ internal sealed class ChatSync : IAsyncDisposable
     /// </summary>
     public Action? OnNews { get; set; }
 
-    private ChatSync(HttpClient http, string arenaUrl, string key, SessionStore store, string place, Func<string> model, Action<bool, string> notice)
+    private ChatSync(HttpClient http, string arenaUrl, string key, SessionStore store, string place, Func<string> model, Action<bool, string> notice, Func<bool>? vision)
     {
         _http = http;
         _base = arenaUrl.TrimEnd('/');
@@ -96,6 +96,7 @@ internal sealed class ChatSync : IAsyncDisposable
         _place = place;
         _model = model;
         _notice = notice;
+        _vision = vision ?? (() => false);
         store.Added += Added;
         _loop = Task.Run(LoopAsync);
         _watch = Task.Run(WatchAsync);
@@ -105,10 +106,14 @@ internal sealed class ChatSync : IAsyncDisposable
         }
     }
 
-    /// <summary>Keeps this session in step with its chat in Arena (made at its first message); null when there is no Arena to keep it with.</summary>
-    public static ChatSync? Start(Config config, HttpClient http, SessionStore store, string place, Func<string> model, Action<bool, string> notice) =>
+    /// <summary>
+    /// Keeps this session in step with its chat in Arena (made at its first message); null when there is no Arena to keep it
+    /// with. <paramref name="vision"/>: whether the model sees pictures (those attached on the web then come as pictures).
+    /// </summary>
+    public static ChatSync? Start(Config config, HttpClient http, SessionStore store, string place, Func<string> model, Action<bool, string> notice,
+        Func<bool>? vision = null) =>
         config.SyncChats && config.Url is { Length: > 0 } url && config.ApiKey is { Length: > 0 } key
-            ? new ChatSync(http, url, key, store, place, model, notice)
+            ? new ChatSync(http, url, key, store, place, model, notice, vision)
             : null;
 
     /// <summary>The Arena chat this session is kept with, once made.</summary>
@@ -207,7 +212,7 @@ internal sealed class ChatSync : IAsyncDisposable
     /// <summary>Sends what Arena lacks; how long to wait before trying again (zero: nothing left, or nothing to try).</summary>
     private async Task<TimeSpan> PushAsync(CancellationToken ct)
     {
-        await _busy.WaitAsync(ct);
+        await _store.Busy.WaitAsync(ct);
         try
         {
             while (true)
@@ -216,8 +221,11 @@ internal sealed class ChatSync : IAsyncDisposable
                 {
                     var first = d.FirstUnsent;
                     var summary = d.Summary is { } s && s.UpTo < first && d.Stream[s.UpTo].Id is { Length: > 0 } upTo ? new JsonObject { ["upTo"] = upTo, ["text"] = s.Text } : null;
+                    var batch = d.Stream.Skip(first).Take(Batch).ToList();
+                    // Each tool result with its tool's name (the call it answers, maybe sent before).
+                    var names = batch.Select((e, i) => e.Message.Str("role") == "tool" ? SyncEntry.ToolName(d.Stream, first + i) : null).ToList();
                     return (d.Conversation, d.Unlinked, Parent: d.LastSent, Unknown: d.Stream.Take(first).Any(e => e.Id == ""), d.Branch, First: first,
-                        Batch: d.Stream.Skip(first).Take(Batch).ToList(), Summary: summary);
+                        Batch: batch, Names: names, Summary: summary);
                 });
                 if (plan.Unlinked || (plan.Batch.Count == 0 && plan.Summary is null))
                 {
@@ -257,7 +265,7 @@ internal sealed class ChatSync : IAsyncDisposable
                 {
                     ["parent"] = plan.Parent,
                     ["branch"] = plan.Branch,
-                    ["messages"] = new JsonArray([.. plan.Batch.Select(e => (JsonNode)Out(e, _store.Id))]),
+                    ["messages"] = new JsonArray([.. plan.Batch.Select((e, i) => (JsonNode)Out(e, _store.Id, plan.Names[i]))]),
                 };
                 if (plan.Summary is not null)
                 {
@@ -266,7 +274,7 @@ internal sealed class ChatSync : IAsyncDisposable
                 var sent = await SendAsync(HttpMethod.Post, $"/api/code-arena/chats/{plan.Conversation}/messages", body, ct);
                 if (sent.Status == HttpStatusCode.OK)
                 {
-                    _store.Sent(Ids(sent.Body), plan.Summary is not null);
+                    _store.Sent(Ids(sent.Body, plan.Batch), plan.Summary is not null);
                     lock (_gate)
                     {
                         _stamp = sent.Body?.Str("stamp");
@@ -282,7 +290,7 @@ internal sealed class ChatSync : IAsyncDisposable
                 if (sent.Status == HttpStatusCode.Conflict && sent.Body?.Str("status") == "behind")
                 {
                     // Those Arena had already (sent before, the answer lost), or took (a call's results, put straight after it).
-                    _store.Sent(Ids(sent.Body));
+                    _store.Sent(Ids(sent.Body, plan.Batch));
                     if (sent.Body?.Bool("fork") == true && _store.Read(d => d.Waiting) > 0 && !plan.Branch)
                     {
                         // The web shows another branch now: what this session still has to send goes on a branch of its own, shown from then on.
@@ -302,7 +310,7 @@ internal sealed class ChatSync : IAsyncDisposable
         }
         finally
         {
-            _busy.Release();
+            _store.Busy.Release();
         }
     }
 
@@ -312,7 +320,9 @@ internal sealed class ChatSync : IAsyncDisposable
             d.FirstUnsent > 0 && d.Stream[d.FirstUnsent - 1].Message["tool_calls"] is JsonArray { Count: > 0 } calls
             && calls.OfType<JsonObject>().Any(c => c.Str("id") == batch[0].Message.Str("tool_call_id")));
 
-    private static List<string> Ids(JsonObject? body) => [.. (body?["ids"] as JsonArray ?? []).Select(i => i?.GetValue<string>()).OfType<string>()];
+    /// <summary>The ids Arena gave the messages sent, in their order: each with its message's number.</summary>
+    private static List<(int Key, string Id)> Ids(JsonObject? body, List<SyncEntry> batch) =>
+        [.. (body?["ids"] as JsonArray ?? []).Select(i => i?.GetValue<string>()).OfType<string>().Zip(batch, (id, e) => (e.Key, id))];
 
     /// <summary>
     /// The chat is held while a turn runs here, renewed every <see cref="TurnRenew"/>; let go once the turn ended and Arena has
@@ -327,8 +337,13 @@ internal sealed class ChatSync : IAsyncDisposable
         {
             conversation = _store.Read(d => d.Unlinked ? null : d.Conversation);
             var waiting = _store.Read(d => d.Waiting);
-            take = _turn && conversation is not null && (!_lease || DateTime.UtcNow - _leaseAt >= TurnRenew);
-            give = !_turn && _lease && (waiting == 0 || _behind || _problem is not null);
+            take = _turn && !_asking && conversation is not null && (!_lease || DateTime.UtcNow - _leaseAt >= TurnRenew);
+            give = !_turn && _lease && conversation is not null && (waiting == 0 || _behind || _problem is not null);
+            if (give)
+            {
+                // Let go once: a session closing meanwhile does not let it go again.
+                _lease = false;
+            }
         }
         if (conversation is null || (!take && !give))
         {
@@ -339,32 +354,50 @@ internal sealed class ChatSync : IAsyncDisposable
             await HoldAsync(conversation, ct);
             return;
         }
-        var ended = await SendAsync(HttpMethod.Delete, $"/api/code-arena/chats/{conversation}/turn", null, ct);
-        lock (_gate)
-        {
-            // Let go, or the chat was deleted: either way it is not held.
-            _lease = ended.Status != HttpStatusCode.NoContent && ended.Status != HttpStatusCode.NotFound && _lease;
-        }
+        // Not let go (Arena out of reach): Arena lets it go when the hold lapses.
+        await SendAsync(HttpMethod.Delete, $"/api/code-arena/chats/{conversation}/turn", null, ct);
     }
+
+    /// <summary>The chat is being asked for now: not asked again meanwhile.</summary>
+    private bool _asking;
 
     /// <summary>Asks Arena for the chat for this turn; false while the web chat answers.</summary>
     private async Task<bool> HoldAsync(string conversation, CancellationToken ct)
     {
-        var held = await SendAsync(HttpMethod.Post, $"/api/code-arena/chats/{conversation}/turn", null, ct, TakeInLimit);
-        if (held.Status == HttpStatusCode.OK)
+        lock (_gate)
+        {
+            _asking = true;
+        }
+        try
+        {
+            var held = await SendAsync(HttpMethod.Post, $"/api/code-arena/chats/{conversation}/turn", null, ct, TakeInLimit);
+            if (held.Status == HttpStatusCode.OK)
+            {
+                lock (_gate)
+                {
+                    // A turn that ended meanwhile lets it go at once (the loop does).
+                    _lease = true;
+                    _leaseAt = DateTime.UtcNow;
+                }
+                if (!_turn)
+                {
+                    Wake();
+                }
+                return true;
+            }
+            if (held.Status == HttpStatusCode.NotFound && held.Body?.Str("status") == "gone")
+            {
+                Refused(held);
+            }
+            return false;
+        }
+        finally
         {
             lock (_gate)
             {
-                _lease = true;
-                _leaseAt = DateTime.UtcNow;
+                _asking = false;
             }
-            return true;
         }
-        if (held.Status == HttpStatusCode.NotFound && held.Body?.Str("status") == "gone")
-        {
-            Refused(held);
-        }
-        return false;
     }
 
     /// <summary>
@@ -486,7 +519,7 @@ internal sealed class ChatSync : IAsyncDisposable
             return Taken.None;
         }
         // A send under way (Arena slow to answer) never holds the turn: past a few seconds the turn goes on, and the web's news comes next turn.
-        if (!await _busy.WaitAsync(TakeInWait, ct))
+        if (!await _store.Busy.WaitAsync(TakeInWait, ct))
         {
             // Not read, which says nothing of whether the web added anything: the sends go on as they were.
             _notice(false, "The web chat is not read now (Arena is slow to answer): what was added there comes in at the next turn.");
@@ -538,9 +571,11 @@ internal sealed class ChatSync : IAsyncDisposable
                 Problem($"Arena cannot be reached ({Fmt.OneLine(e.Message, 120)}): what was added on the web comes later");
                 return Taken.None;
             }
+            // The pictures that went with the web's messages, for a model that sees them.
+            var images = await ImagesAsync(messages, ct);
             try
             {
-                return Take(read, messages);
+                return Take(read, messages, images);
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
@@ -551,7 +586,7 @@ internal sealed class ChatSync : IAsyncDisposable
         }
         finally
         {
-            _busy.Release();
+            _store.Busy.Release();
         }
     }
 
@@ -609,7 +644,7 @@ internal sealed class ChatSync : IAsyncDisposable
     /// </summary>
     internal async Task<bool> LookAsync(CancellationToken ct)
     {
-        if (!await _busy.WaitAsync(0, ct))
+        if (!await _store.Busy.WaitAsync(0, ct))
         {
             return false;
         }
@@ -658,12 +693,12 @@ internal sealed class ChatSync : IAsyncDisposable
         }
         finally
         {
-            _busy.Release();
+            _store.Busy.Release();
         }
     }
 
     /// <summary>What a read of the web chat brought: written into the session, the session's own messages known and left out.</summary>
-    private Taken Take((HttpStatusCode Status, JsonObject? Body) read, List<JsonObject> messages)
+    private Taken Take((HttpStatusCode Status, JsonObject? Body) read, List<JsonObject> messages, IReadOnlyDictionary<string, string>? images = null)
     {
         if (read.Status != HttpStatusCode.OK)
         {
@@ -705,24 +740,17 @@ internal sealed class ChatSync : IAsyncDisposable
         if (!fork && !unknown)
         {
             // The session's own messages, which Arena had though its answer was lost: not taken in twice.
-            var own = new List<string>();
-            while (start < messages.Count && d.First + own.Count < d.Stream.Count && Own(messages[start].Str("ref")) == d.Stream[d.First + own.Count].Key
-                   && messages[start].Str("id") is { } id)
+            var own = new List<(int Key, string Id)>();
+            while (start < messages.Count && d.First + own.Count < d.Stream.Count && d.Stream[d.First + own.Count] is var mine
+                   && Own(messages[start].Str("ref")) == mine.Key && messages[start].Str("id") is { } id)
             {
-                own.Add(id);
+                own.Add((mine.Key, id));
                 start++;
             }
             _store.Sent(own);
             d = _store.Read(s => (Stream: s.Stream.ToList(), First: s.FirstUnsent, s.Branch));
         }
-        var web = messages.Skip(start).Select(m => new SyncEntry
-        {
-            Message = In(m),
-            Id = m.Str("id") ?? "",
-            Web = true,
-            At = DateTimeOffset.TryParse(m.Str("at"), out var when) ? when : DateTimeOffset.UtcNow,
-            Model = m.Str("model"),
-        }).ToList();
+        var web = messages.Skip(start).Select(m => Entry(m, images)).ToList();
         var unsent = d.Stream.Skip(d.First).ToList();
         Taken taken;
         if (unknown)
@@ -753,7 +781,7 @@ internal sealed class ChatSync : IAsyncDisposable
         {
             foreach (var e in web)
             {
-                _store.Remote(e.Message, e.Id!, e.At, e.Model);
+                _store.Remote(e);
             }
             taken = new Taken(web.Select(e => e.Message).ToList());
         }
@@ -815,7 +843,7 @@ internal sealed class ChatSync : IAsyncDisposable
     /// </summary>
     public async Task<List<JsonObject>> RewindAsync(int messages, CancellationToken ct)
     {
-        var held = await _busy.WaitAsync(RequestLimit, ct);
+        var held = await _store.Busy.WaitAsync(RequestLimit, ct);
         try
         {
             var history = _store.Rewind(messages);
@@ -829,7 +857,7 @@ internal sealed class ChatSync : IAsyncDisposable
         {
             if (held)
             {
-                _busy.Release();
+                _store.Busy.Release();
             }
             Wake();
         }
@@ -897,6 +925,39 @@ internal sealed class ChatSync : IAsyncDisposable
         return chats;
     }
 
+    /// <summary>
+    /// Where the sync stands, as the IDE shows it: this session's chat (null: none yet), how many of its messages Arena lacks,
+    /// what stopped them (null: nothing), and whether the web chat has news not taken in yet.
+    /// </summary>
+    public JsonObject State()
+    {
+        var (conversation, waiting) = _store.Read(d => (d.Unlinked ? null : d.Conversation, d.Waiting));
+        lock (_gate)
+        {
+            return new JsonObject { ["chat"] = conversation, ["waiting"] = waiting, ["trouble"] = _problem, ["behind"] = _behind };
+        }
+    }
+
+    /// <summary>
+    /// The person continues a chat of theirs here: in Arena, an archived one comes back to the list, once (what this end
+    /// adds later leaves it as the person left it). False when Arena cannot say.
+    /// </summary>
+    public static async Task<bool> ContinuedAsync(Config config, HttpClient http, string conversation, CancellationToken ct)
+    {
+        try
+        {
+            using var req = Request(HttpMethod.Post, config.Url!.TrimEnd('/') + $"/api/code-arena/chats/{Uri.EscapeDataString(conversation)}/continued", config.ApiKey!, null);
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            limit.CancelAfter(RequestLimit);
+            using var res = await http.SendAsync(req, limit.Token);
+            return res.IsSuccessStatusCode;
+        }
+        catch (Exception e) when (e is HttpRequestException or OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Arena has every message of this session (it was sent, or there was none to send).</summary>
     public bool InStep => _store.Read(d => !d.Unlinked && d.Conversation is not null && d.Waiting == 0 && d.Summary is null);
 
@@ -918,11 +979,11 @@ internal sealed class ChatSync : IAsyncDisposable
     /// <paramref name="most"/> is up. What the web added meanwhile is taken into the session's file first, before what
     /// is still to send, so that can go.
     /// </summary>
-    public async Task FlushAsync(TimeSpan most, bool patient = false)
+    public async Task FlushAsync(TimeSpan most, bool patient = false, CancellationToken ct = default)
     {
         var until = DateTime.UtcNow + most;
         var tries = 0;
-        while (DateTime.UtcNow < until)
+        while (DateTime.UtcNow < until && !ct.IsCancellationRequested)
         {
             if (_store.Read(d => d.Unlinked || (d.Waiting == 0 && d.Summary is null)))
             {
@@ -945,7 +1006,8 @@ internal sealed class ChatSync : IAsyncDisposable
                 }
                 try
                 {
-                    using var limit = new CancellationTokenSource(until - DateTime.UtcNow is { TotalMilliseconds: > 0 } left ? left : TimeSpan.Zero);
+                    using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    limit.CancelAfter(until - DateTime.UtcNow is { TotalMilliseconds: > 0 } left ? left : TimeSpan.Zero);
                     await TakeInAsync(limit.Token);
                 }
                 catch (OperationCanceledException)
@@ -955,7 +1017,14 @@ internal sealed class ChatSync : IAsyncDisposable
                 }
                 continue;
             }
-            await Task.Delay(100);
+            try
+            {
+                await Task.Delay(100, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
         }
     }
 
@@ -1020,8 +1089,12 @@ internal sealed class ChatSync : IAsyncDisposable
         }
     }
 
-    /// <summary>A message as Arena keeps it: the model's own shape, with the model that wrote it and when, and its ref (session:number).</summary>
-    internal static JsonObject Out(SyncEntry e, string session)
+    /// <summary>
+    /// A message as Arena keeps it: the model's own shape, with its ref (session:number), when it was written, and what the
+    /// web shows of it: an answer's model, tokens and thinking, and whether the person stopped it; a tool result's tool; a
+    /// note of Code Arena's own (not the person's words).
+    /// </summary>
+    internal static JsonObject Out(SyncEntry e, string session, string? toolName = null)
     {
         var m = e.Message;
         var role = m.Str("role") ?? "user";
@@ -1038,42 +1111,144 @@ internal sealed class ChatSync : IAsyncDisposable
         {
             o["toolCallId"] = callId;
         }
-        if (m.Str("name") is { } name)
+        if ((toolName ?? m.Str("name")) is { } name && role == "tool")
         {
             o["name"] = name;
         }
-        if (role == "assistant" && e.Model is not null)
+        if (role == "assistant")
         {
-            o["model"] = e.Model;
+            if (e.Model is not null)
+            {
+                o["model"] = e.Model;
+            }
+            if (e.Usage is { } usage)
+            {
+                o["promptTokens"] = usage.Prompt;
+                o["cachedTokens"] = usage.Cached;
+                o["completionTokens"] = usage.Completion;
+            }
+            // Stopped by the person here: the web shows it as stopped, not the mark the model reads.
+            if (m.Str("content") is { } text && text.EndsWith(Agent.StoppedMark, StringComparison.Ordinal))
+            {
+                o["content"] = text[..^Agent.StoppedMark.Length].TrimEnd();
+                o["status"] = "stopped";
+            }
+        }
+        if (e.Kind is not null)
+        {
+            o["kind"] = e.Kind;
         }
         return o;
     }
 
+    /// <summary>The most of one image a message takes in (a picture larger than that is named instead).</summary>
+    public const int MostImageBytes = 5 * 1024 * 1024;
+
     /// <summary>
-    /// A message from the web chat, in the model's own shape. An answer with no words and no calls (it failed, or was
-    /// stopped before it said anything) says so: some models refuse an empty answer in what they read.
+    /// A message from the web chat as the session keeps it, in the model's own shape: its text files are in its words already
+    /// (Arena put them there, as the web's model reads them), its pictures go as pictures (<paramref name="images"/>: those
+    /// fetched, as data URLs) or by name, an answer stopped there says so, and one with no words and no calls (it failed, or
+    /// was stopped before it said anything) says that: some models refuse an empty answer in what they read.
     /// </summary>
-    internal static JsonObject In(JsonObject m)
+    internal static SyncEntry Entry(JsonObject m, IReadOnlyDictionary<string, string>? images = null)
     {
         var role = m.Str("role") ?? "user";
+        var status = m.Str("status") is { } s && s != "complete" ? s : null;
         var o = new JsonObject { ["role"] = role, ["content"] = m.Str("content") ?? "" };
         if (m["toolCalls"] is JsonArray calls && calls.Count > 0)
         {
             o["tool_calls"] = calls.DeepClone();
         }
-        else if (role == "assistant" && o.Str("content") is { Length: 0 })
+        if (role == "assistant")
         {
-            o["content"] = "(no answer)";
+            var text = o.Str("content") ?? "";
+            if (status == "stopped")
+            {
+                o["content"] = text.Length > 0 ? $"{text}\n\n{Agent.StoppedMark}" : Agent.StoppedMark;
+            }
+            else if (text.Length == 0 && o["tool_calls"] is null)
+            {
+                o["content"] = "(no answer)";
+            }
+            if (m.Str("reasoning") is { Length: > 0 } reasoning)
+            {
+                o["reasoning_content"] = reasoning;
+            }
         }
         if (m.Str("toolCallId") is { } callId)
         {
             o["tool_call_id"] = callId;
         }
-        if (m.Str("name") is { } name && role == "tool")
+        if (role == "user" && (m["attachments"] as JsonArray ?? []).OfType<JsonObject>().Where(a => a.Str("kind") == "image").ToList() is { Count: > 0 } pictures)
         {
-            o["name"] = name;
+            var text = new StringBuilder(o.Str("content"));
+            var parts = new JsonArray();
+            foreach (var picture in pictures)
+            {
+                if (picture.Str("id") is { } id && images?.GetValueOrDefault(id) is { } url)
+                {
+                    parts.Add(new JsonObject { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = url } });
+                }
+                else
+                {
+                    text.Append("\n\n[image attached: ").Append(picture.Str("name") ?? "an image").Append(']');
+                }
+            }
+            o["content"] = parts.Count == 0 ? text.ToString() : new JsonArray([new JsonObject { ["type"] = "text", ["text"] = text.ToString() }, .. parts.Select(p => p!.DeepClone())]);
         }
-        return o;
+        return new SyncEntry
+        {
+            Message = o,
+            Id = m.Str("id") ?? "",
+            Web = true,
+            At = DateTimeOffset.TryParse(m.Str("at"), out var when) ? when : DateTimeOffset.UtcNow,
+            Model = m.Str("model"),
+            Usage = m.Long("promptTokens") is { } prompt ? new TokenUsage(prompt, m.Long("cachedTokens") ?? 0, m.Long("completionTokens") ?? 0) : null,
+            Kind = m.Str("kind"),
+            Status = status,
+        };
+    }
+
+    /// <summary>
+    /// The pictures attached on the web to these messages, as data URLs, fetched with the key (Arena gives them to their
+    /// owner only); none when the model cannot see. One that cannot be fetched, or is too large, is named instead.
+    /// </summary>
+    private async Task<Dictionary<string, string>> ImagesAsync(List<JsonObject> messages, CancellationToken ct)
+    {
+        var found = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (!_vision())
+        {
+            return found;
+        }
+        foreach (var picture in messages.Where(m => m.Str("role") == "user").SelectMany(m => (m["attachments"] as JsonArray ?? []).OfType<JsonObject>())
+                     .Where(a => a.Str("kind") == "image"))
+        {
+            if (picture.Str("id") is not { } id || found.ContainsKey(id))
+            {
+                continue;
+            }
+            try
+            {
+                using var req = Request(HttpMethod.Get, $"{_base}/api/code-arena/attachments/{Uri.EscapeDataString(id)}", _key, null);
+                using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                limit.CancelAfter(RequestLimit);
+                using var res = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, limit.Token);
+                if (!res.IsSuccessStatusCode || res.Content.Headers.ContentLength > MostImageBytes)
+                {
+                    continue;
+                }
+                var bytes = await res.Content.ReadAsByteArrayAsync(limit.Token);
+                if (bytes.Length <= MostImageBytes)
+                {
+                    found[id] = $"data:{res.Content.Headers.ContentType?.MediaType ?? picture.Str("contentType") ?? "image/png"};base64,{Convert.ToBase64String(bytes)}";
+                }
+            }
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException && !ct.IsCancellationRequested)
+            {
+                // Named instead: the model reads that a picture went with it.
+            }
+        }
+        return found;
     }
 
     /// <param name="answerWithin">How long Arena has to start answering (its headers), when shorter than the request's limit:

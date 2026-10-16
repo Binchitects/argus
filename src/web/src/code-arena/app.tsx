@@ -50,6 +50,7 @@ import { ensureTheme } from './extensions'
 import { ExtensionsView } from './extensions-view'
 import { appendElement } from './jsonc'
 import { Splitter } from './splitter'
+import { useNotices } from './sync'
 import { About, StatusBar } from './status-bar'
 
 // xterm.js loads with the panel, the first time it opens.
@@ -86,6 +87,8 @@ export function App() {
   useEffect(() => {
     if (state.data) document.title = `${state.data.project} · Code Arena`
   }, [state.data])
+  // What code-arena said while nothing ran (the sync's trouble, the web's news taken in): shown as it comes.
+  useNotices(state.data)
 
   // Gone only before anything loaded: once the workbench is there, it stays (with what is not saved in it) and says what is wrong.
   if ((state.error && !state.data) || (config.error && !config.data)) return <Gone error={state.error ?? config.error} />

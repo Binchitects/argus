@@ -881,8 +881,8 @@ status (403 `outside` for a path outside the folder).
 
 | call | what it does |
 |---|---|
-| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it is in use), `compactAt` and `compactTarget` (percent); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `account` (whose chats: the key's account, null until Arena said), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`) |
-| `GET /api/sessions` | this folder's sessions, newest first: `[{id, title, updatedAt, messages, chat}]` (`chat`: the chat in Arena it is kept with) |
+| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it is in use), `compactAt` and `compactTarget` (percent); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `account` (whose chats: the key's account, null until Arena said), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`); `sync` (`{chat, account, waiting, trouble, behind}`: the chat, whose chats, how many messages Arena lacks, what stops them, whether the web chat has news not taken in; null without the sync) and `notices` (`[{id, text, at}]`: the last 20 said while nothing ran, the page shows each once) |
+| `GET /api/sessions` | this folder's sessions, newest first: `[{id, title, updatedAt, messages, chat, unsent, waiting}]` (`chat`: the chat in Arena it is kept with; `unsent`: Arena lacks `waiting` of its messages) |
 | `GET /api/sessions/web` | the person's chats in Arena (the 5,000 newest): `[{id, title, origin, place, updatedAt, messages, session}]` (`session`: this folder's session kept with it); 409 `off` without the sync, 503 `arena` when Arena cannot say |
 | `POST /api/sessions/web` `{id}` | continues that chat here (in the session kept with it, else a new one with its messages); the session; 404 `gone` when Arena has no such chat of the person's, 409 `busy` while an answer is written, 503 `arena` when Arena cannot say |
 | `POST /api/sessions/send-all` | sends Arena what it lacks of this folder's sessions: `{sent, failed}` (`failed`: why, per session) |
@@ -1372,7 +1372,32 @@ there, not with your own chats.
 it lacks of this folder's sessions (those it never had, and those sent in
 part), the oldest first, each keeping its place in the list here; one whose
 chat was deleted there stays as it is. When Arena cannot be reached it stops,
-and says how many are left for the next `/sync all`.
+and says how many are left for the next `/sync all`. The terminal's chat and
+the IDE also do this by themselves, in the background, ten seconds after they
+start: what Arena lacks of every folder's sessions goes then (the session open
+now is left to its own sync), and one notice says how many went. The IDE marks
+a session Arena lacks part of as **not sent**.
+
+Nothing is lost on the way. The web shows each answer with its thinking (kept
+in the session, never sent back to the model), its model, tokens and time; a
+tool's result with its tool; an answer stopped here as stopped; Code Arena's
+own note to the model (the connection dropped) as a notice, not as your words;
+and what went with a question (`@files`, lines chosen in the IDE's editor) as
+what you typed plus the files as chips. Continued on the web, the chat answers
+with the model Code Arena answered with last. The other way, what the web
+attached comes with its messages: a text file's text as the web's model reads
+it, a picture as a picture to a model that sees (fetched with your key; named
+otherwise), a sound's or a video's transcript; the web's tool results come
+marked as data where the web marks them for its own model (web pages, the
+company's documents). An archived chat continued from Code Arena (`/web N`,
+`--web`, the IDE's **Chats in Arena**) comes back to the web's list once; what
+the session adds later leaves it as you left it.
+
+The IDE's chat shows where the sync stands in its header (in step, how many
+messages are still to send, the web's news waiting, or what stops it: its
+words on hover), and what was said while nothing ran (Arena out of reach, the
+web's messages taken in) comes as a notice there, not only in the terminal that
+started it.
 
 ## Its commits
 

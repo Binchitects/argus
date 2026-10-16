@@ -390,7 +390,9 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   [Code Arena](code-arena.md#chats-in-arena) session is a chat here too, with
   a terminal mark and its folder: continued here, what is added goes back to
   the session (and what the session adds comes here, within seconds while
-  its page is open). An open chat changed elsewhere (another tab or device:
+  its page is open), with each answer's thinking, model and tokens; the files
+  that went with a question there show as chips, and Code Arena's own notes
+  to its model as notices. An open chat changed elsewhere (another tab or device:
   its messages, branch, title, queue or settings) is read again within
   seconds too, an answer started there is watched as it is written, and the
   list takes in new chats within half a minute. The first

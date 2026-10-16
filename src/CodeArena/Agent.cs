@@ -229,11 +229,15 @@ internal sealed class Agent
         Events?.Notice(text);
     }
 
-    private void Add(JsonObject message)
+    /// <summary>A message added to the conversation: an answer with its tokens; a note (<paramref name="kind"/>) is Code Arena's own word to the model.</summary>
+    private void Add(JsonObject message, TokenUsage? usage = null, string? kind = null)
     {
         Messages.Add(message);
-        Session?.Message(message, message.Str("role") == "assistant" ? Model.Name : null);
+        Session?.Message(message, message.Str("role") == "assistant" ? Model.Name : null, usage, kind);
     }
+
+    /// <summary>What ends an answer the person stopped, as the model reads it back.</summary>
+    internal const string StoppedMark = "(stopped by the person)";
 
     /// <summary>
     /// One turn: the person's message in, the final answer out. Cancelling stops it and keeps the history valid.
@@ -444,7 +448,7 @@ internal sealed class Agent
                 Ui.StopSpinner();
                 printer.End();
                 // What was said before the stop stays, so the next turn follows from it.
-                Add(new JsonObject { ["role"] = "assistant", ["content"] = printer.Said.Length > 0 ? printer.Said + "\n\n(stopped by the person)" : "(stopped by the person)" });
+                Add(new JsonObject { ["role"] = "assistant", ["content"] = printer.Said.Length > 0 ? printer.Said + "\n\n" + StoppedMark : StoppedMark });
                 throw;
             }
             finally
@@ -471,15 +475,16 @@ internal sealed class Agent
                     Warn($"The connection dropped mid-answer {interrupted} times in this turn: stopping here. Send a message to carry on.");
                     if (answer.Text.Length > 0)
                     {
-                        Add(answer.Message);
+                        Add(answer.Message, answer.Usage);
                     }
                     return answer.Text;
                 }
                 Warn("The connection dropped while the model was answering: it carries on from where it stopped.");
                 if (answer.Text.Length > 0)
                 {
-                    Add(answer.Message);
-                    Add(new JsonObject { ["role"] = "user", ["content"] = "(The connection dropped while you were answering: your answer so far is above. Carry on from where it stopped, without repeating it.)" });
+                    Add(answer.Message, answer.Usage);
+                    Add(new JsonObject { ["role"] = "user", ["content"] = "(The connection dropped while you were answering: your answer so far is above. Carry on from where it stopped, without repeating it.)" },
+                        kind: "note");
                 }
                 continue;
             }
@@ -492,7 +497,7 @@ internal sealed class Agent
             }
             else
             {
-                Add(answer.Message);
+                Add(answer.Message, answer.Usage);
                 _knownCount = Messages.Count;
             }
             last = answer.Text;
@@ -564,7 +569,7 @@ internal sealed class Agent
         var request = new JsonObject
         {
             ["model"] = Model.Name,
-            ["messages"] = new JsonArray([new JsonObject { ["role"] = "system", ["content"] = SystemPrompt() }, .. Messages.Select(m => (JsonNode)m.Clone())]),
+            ["messages"] = new JsonArray([new JsonObject { ["role"] = "system", ["content"] = SystemPrompt() }, .. Messages.Select(m => (JsonNode)GatewayClient.Sendable(m))]),
         };
         var tools = Model.Info.Tools ? Tools.Offered(Permissions.Mode).Select(t => (JsonNode)t.Spec()).ToArray() : [];
         if (tools.Length > 0)

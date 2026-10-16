@@ -72,6 +72,8 @@ internal sealed class Repl(Runtime rt)
         };
         // What the person adds in the web chat while the prompt waits comes in at once, said above it.
         rt.WebNews = () => _ = TakeInWhileWaitingAsync(ct);
+        // What Arena lacks of the earlier sessions (every folder's) goes in the background.
+        rt.SendLaterInBackground();
         var pending = first;
         while (!ct.IsCancellationRequested)
         {

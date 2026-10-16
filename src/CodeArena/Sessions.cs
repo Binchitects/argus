@@ -32,6 +32,27 @@ internal sealed class SyncEntry
     public string? Model { get; init; }
     /// <summary>An answer's tokens, when the gateway said.</summary>
     public TokenUsage? Usage { get; init; }
+    /// <summary>"note": a message of Code Arena's own to the model (the connection dropped), not the person's words.</summary>
+    public string? Kind { get; init; }
+    /// <summary>How an answer from the web ended, when not as it should: "stopped", "failed", "declined".</summary>
+    public string? Status { get; init; }
+
+    /// <summary>A tool result's tool: the call it answers, in the messages before it.</summary>
+    public static string? ToolName(IReadOnlyList<SyncEntry> stream, int index)
+    {
+        if (stream[index].Message.Str("tool_call_id") is not { } id)
+        {
+            return null;
+        }
+        for (var i = index - 1; i >= 0; i--)
+        {
+            if (stream[i].Message["tool_calls"] is JsonArray calls && calls.OfType<JsonObject>().FirstOrDefault(c => c.Str("id") == id) is { } call)
+            {
+                return call["function"].Str("name");
+            }
+        }
+        return stream[index].Message.Str("name");
+    }
 }
 
 /// <summary>A saved session read back: its messages (after the last compaction), model, to-do list and tokens.</summary>
@@ -108,7 +129,8 @@ internal sealed class SessionData
             case "message" when entry["message"] is JsonObject m:
                 var web = entry.Str("from") == "web";
                 var model = entry.Str("model") ?? Model;
-                var usage = m.Str("role") == "assistant" ? _pending : null;
+                var usage = entry["usage"] is JsonObject u ? new TokenUsage(u.Long("prompt") ?? 0, u.Long("cached") ?? 0, u.Long("completion") ?? 0)
+                    : m.Str("role") == "assistant" ? _pending : null;
                 if (!light)
                 {
                     if (m.Str("role") == "assistant")
@@ -128,6 +150,8 @@ internal sealed class SessionData
                     At = DateTimeOffset.TryParse(entry.Str("at"), out var at) ? at : written,
                     Model = model,
                     Usage = usage,
+                    Kind = entry.Str("kind"),
+                    Status = entry.Str("status"),
                 });
                 Keys = Math.Max(Keys, (entry.Int("n") ?? Keys) + 1);
                 if (!web)
@@ -152,20 +176,23 @@ internal sealed class SessionData
                     }
                 }
                 break;
-            case "sent" when entry["ids"] is JsonArray ids:
-                var next = FirstUnsent;
-                foreach (var id in ids.Select(i => i?.GetValue<string>()).OfType<string>())
+            case "sent":
+                // Each by its number: told twice (two sends of the same, their answers both in), it is the same.
+                var any = false;
+                foreach (var pair in (entry["sent"] as JsonArray ?? []).OfType<JsonArray>())
                 {
-                    if (next < Stream.Count)
+                    if (pair is [JsonValue key, JsonValue id] && key.TryGetValue<int>(out var n) && id.TryGetValue<string>(out var arena)
+                        && Stream.FindLastIndex(e => e.Key == n) is var place and >= 0 && Stream[place].Id is null)
                     {
-                        Stream[next++].Id = id;
+                        Stream[place].Id = arena;
+                        any = true;
                     }
                 }
                 if (entry.Bool("summary") == true)
                 {
                     Summary = null;
                 }
-                if (ids.Count > 0)
+                if (any)
                 {
                     Branch = false;
                 }
@@ -236,6 +263,9 @@ internal sealed class SessionStore
     public string Id { get; }
     public string File { get; }
 
+    /// <summary>Held while a sync of this session talks with Arena: two (the session open now, /sync all) never send or take in at once.</summary>
+    internal SemaphoreSlim Busy { get; } = new(1, 1);
+
     public static SessionStore Create(string dir, string cwd, string model)
     {
         PrivateFiles.EnsureDirectory(dir);
@@ -246,12 +276,45 @@ internal sealed class SessionStore
             ["type"] = "session", ["id"] = id, ["cwd"] = cwd, ["model"] = model,
             ["created"] = DateTimeOffset.Now.ToString("o"), ["version"] = Cli.Version,
         });
+        lock (Opened)
+        {
+            Opened[Path.GetFullPath(store.File)] = new WeakReference<SessionStore>(store);
+        }
         return store;
     }
 
     /// <summary>Carries on writing to a saved session.</summary>
-    public static SessionStore Open(string file) =>
-        new(Path.GetFileNameWithoutExtension(file), file, System.IO.File.Exists(file) ? Load(file) : new SessionData { Id = Path.GetFileNameWithoutExtension(file) });
+    /// <remarks>
+    /// One store for a file at a time in this process: the session open now and /sync all (or the sending of the sessions
+    /// Arena lacks, at the start) never keep two minds about one file.
+    /// </remarks>
+    public static SessionStore Open(string file)
+    {
+        var full = Path.GetFullPath(file);
+        lock (Opened)
+        {
+            // The same while the file is as it left it (another program, or a person, may have written to it since).
+            if (Opened.TryGetValue(full, out var known) && known.TryGetTarget(out var store) && store.Length == Size(file))
+            {
+                return store;
+            }
+            store = new SessionStore(Path.GetFileNameWithoutExtension(file), file,
+                System.IO.File.Exists(file) ? Load(file) : new SessionData { Id = Path.GetFileNameWithoutExtension(file) }) { Length = Size(file) };
+            foreach (var gone in Opened.Where(kv => !kv.Value.TryGetTarget(out _)).Select(kv => kv.Key).ToList())
+            {
+                Opened.Remove(gone);
+            }
+            Opened[full] = new WeakReference<SessionStore>(store);
+            return store;
+        }
+    }
+
+    private static readonly Dictionary<string, WeakReference<SessionStore>> Opened = [];
+
+    /// <summary>How long the file was when this store last wrote to it (or read it).</summary>
+    private long Length { get; set; }
+
+    private static long Size(string file) => System.IO.File.Exists(file) ? new FileInfo(file).Length : -1;
 
     /// <summary>What the session's lines say now, read under its lock: Arena's sync reads it while a turn adds to it.</summary>
     public T Read<T>(Func<SessionData, T> read)
@@ -262,41 +325,61 @@ internal sealed class SessionStore
         }
     }
 
-    /// <summary>A message the session adds, with the model that wrote it (an answer); Arena is sent it.</summary>
-    public void Message(JsonObject message, string? model = null)
+    /// <summary>
+    /// A message the session adds, with the model that wrote it and its tokens (an answer), or "note" (<paramref name="kind"/>:
+    /// Code Arena's own word to the model, not the person's); Arena is sent it.
+    /// </summary>
+    public void Message(JsonObject message, string? model = null, TokenUsage? usage = null, string? kind = null)
     {
-        Write(Line(message, null, DateTimeOffset.UtcNow, model));
+        Write(Line(new SyncEntry { Message = message, At = DateTimeOffset.UtcNow, Model = model, Usage = usage, Kind = kind }));
         Added?.Invoke(message);
     }
 
     /// <summary>Told of each message the session adds (the chat in Arena is sent it).</summary>
     public event Action<JsonObject>? Added;
 
-    /// <summary>A message the person added in Arena's web chat (its id there), taken into this session.</summary>
-    public void Remote(JsonObject message, string id, DateTimeOffset at, string? model) => Write(Line(message, id, at, model, web: true));
+    /// <summary>A message the person added in Arena's web chat (with its id there), taken into this session.</summary>
+    public void Remote(SyncEntry e) => Write(Line(e));
 
-    /// <summary>A message line (numbered as it is written: Arena knows the session's own as session:number).</summary>
-    private static JsonObject Line(JsonObject message, string? id, DateTimeOffset at, string? model, bool web = false)
+    /// <summary>A message line, with what Arena and the IDE show of it (numbered as it is written: Arena knows the session's own as session:number).</summary>
+    private static JsonObject Line(SyncEntry e)
     {
-        var line = new JsonObject { ["type"] = "message", ["message"] = message.Clone(), ["at"] = at.ToString("o") };
-        if (web)
+        var line = new JsonObject { ["type"] = "message", ["message"] = e.Message.Clone(), ["at"] = e.At.ToString("o") };
+        if (e.Web)
         {
             line["from"] = "web";
-            line["id"] = id;
+            line["id"] = e.Id;
         }
-        if (model is not null)
+        if (e.Model is not null)
         {
-            line["model"] = model;
+            line["model"] = e.Model;
+        }
+        if (e.Usage is { } u)
+        {
+            line["usage"] = new JsonObject { ["prompt"] = u.Prompt, ["cached"] = u.Cached, ["completion"] = u.Completion };
+        }
+        if (e.Kind is not null)
+        {
+            line["kind"] = e.Kind;
+        }
+        if (e.Status is not null)
+        {
+            line["status"] = e.Status;
         }
         return line;
     }
 
-    /// <summary>Arena has the next messages it lacked, under these ids (and the summary waiting, when <paramref name="summary"/>).</summary>
-    public void Sent(IReadOnlyList<string> ids, bool summary = false)
+    /// <summary>Arena has these messages (by their number) under these ids (and the summary waiting, when <paramref name="summary"/>).</summary>
+    public void Sent(IReadOnlyList<(int Key, string Id)> sent, bool summary = false)
     {
-        if (ids.Count > 0 || summary)
+        if (sent.Count > 0 || summary)
         {
-            Write(new JsonObject { ["type"] = "sent", ["ids"] = new JsonArray([.. ids.Select(i => (JsonNode)i)]), ["summary"] = summary ? true : null });
+            Write(new JsonObject
+            {
+                ["type"] = "sent",
+                ["sent"] = new JsonArray([.. sent.Select(s => (JsonNode)new JsonArray(s.Key, s.Id))]),
+                ["summary"] = summary ? true : null,
+            });
         }
     }
 
@@ -355,7 +438,13 @@ internal sealed class SessionStore
         Write(new JsonObject { ["type"] = "rewrite", ["keep"] = keep });
         foreach (var e in entries)
         {
-            Write(Line(e.Message, e.Web ? e.Id : null, e.At, e.Model, e.Web));
+            var line = Line(e);
+            if (!e.Web)
+            {
+                // The session's own keep their number: Arena may have one already (its answer lost), and knows it by it.
+                line["n"] = e.Key;
+            }
+            Write(line);
         }
         List<JsonObject> history;
         lock (_gate)
@@ -401,12 +490,13 @@ internal sealed class SessionStore
     {
         lock (_gate)
         {
-            if (line.Str("type") == "message")
+            if (line.Str("type") == "message" && line.Int("n") is null)
             {
                 line["n"] = _state.Keys;
             }
             PrivateFiles.AppendLine(File, Json.Line(line));
             _state.Apply(line, DateTimeOffset.UtcNow);
+            Length = Size(File);
         }
     }
 

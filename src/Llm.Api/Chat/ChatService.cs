@@ -1151,6 +1151,17 @@ public sealed partial class ChatService(
     /// An attachment as it goes into the question: whole when it is short; otherwise
     /// its start, cut at a line, and a note saying how long it is and how to read on.
     /// </summary>
+    /// <summary>
+    /// A file attached to a question as the model reads it after the question's words: a text file's text (all of it, or what
+    /// fits <paramref name="budget"/>; <paramref name="passages"/> instead when the question's passages of it go), a file
+    /// that is not text by its name. The web's answers and Code Arena (a chat continued there, <paramref name="here"/> false:
+    /// the chat's tools are not there to open them) read it alike.
+    /// </summary>
+    internal static string AttachmentText(ChatAttachment f, string? passages, int budget, bool canReadFiles, bool here = true) =>
+        f.Kind == "file"
+            ? $"\n\n[file attached: {f.FileName} (not text{(here ? "; run_python can open it" : "")})]"
+            : $"\n\n<attachment name=\"{f.FileName.Replace("\"", "'", StringComparison.Ordinal)}\">\n{passages ?? Inline(f, budget, canReadFiles)}\n</attachment>";
+
     public static string Inline(ChatAttachment f, int budget, bool canReadFiles)
     {
         var cutWhenAttached = f.Truncated ? " (the file itself was longer: it was cut when it was attached)" : "";
@@ -1227,14 +1238,7 @@ public sealed partial class ChatService(
                             }
                             continue;
                         }
-                        if (f.Kind == "file")
-                        {
-                            text.Append("\n\n[file attached: ").Append(f.FileName).Append(" (not text; run_python can open it)]");
-                            continue;
-                        }
-                        text.Append("\n\n<attachment name=\"").Append(f.FileName.Replace("\"", "'", StringComparison.Ordinal)).Append("\">\n")
-                            .Append(byPassages.Has(f.Id) ? Knowledge.Retrieval.Head(f, canReadFiles) : Inline(f, chat.CurrentValue.InlineAttachmentChars, canReadFiles))
-                            .Append("\n</attachment>");
+                        text.Append(AttachmentText(f, byPassages.Has(f.Id) ? Knowledge.Retrieval.Head(f, canReadFiles) : null, chat.CurrentValue.InlineAttachmentChars, canReadFiles));
                     }
                     if (images.Count == 0 && heard.Count == 0)
                     {

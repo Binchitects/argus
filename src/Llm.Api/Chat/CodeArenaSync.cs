@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Llm.Api.ArenaMcp;
@@ -7,6 +8,7 @@ using Llm.Core.Chat;
 using Llm.Core.Data;
 using Llm.Core.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Npgsql;
 
 namespace Llm.Api.Chat;
@@ -14,7 +16,10 @@ namespace Llm.Api.Chat;
 /// <summary>
 /// A message as Code Arena and this end exchange it: the model's own shape, with its model, tokens and time. <paramref name="Id"/>
 /// is this end's id for it (in what this end gives); <paramref name="Ref"/> is Code Arena's place for it (session:number), so a
-/// message sent twice is known as one.
+/// message sent twice is known as one. <paramref name="Status"/>: how an answer ended when not as it should ("stopped" by the
+/// person, "failed", "declined"); <paramref name="Kind"/> "note": a message of Code Arena's own to the model (the connection
+/// dropped), shown as a notice, not as the person's words. <paramref name="Attachments"/>: what went with a question here (its
+/// text files are in <paramref name="Content"/> already, as the web's model reads them; its pictures Code Arena fetches).
 /// </summary>
 public sealed record SyncMessage(
     string Role,
@@ -29,7 +34,13 @@ public sealed record SyncMessage(
     int? CompletionTokens = null,
     DateTimeOffset? At = null,
     string? Ref = null,
-    Guid? Id = null);
+    Guid? Id = null,
+    string? Status = null,
+    string? Kind = null,
+    IReadOnlyList<SyncAttachment>? Attachments = null);
+
+/// <summary>A file that went with a question on the web: "image" (fetched with the key from /api/code-arena/attachments/{id}), "text", "file", "audio", "video".</summary>
+public sealed record SyncAttachment(Guid Id, string Name, string Kind, string ContentType);
 
 public sealed record SyncNewChat(string? Ref, string? Place, string? Model, string? Title);
 
@@ -91,7 +102,14 @@ public static class CodeArenaSync
         g.MapPost("/chats/{id:guid}/messages", AppendAsync);
         g.MapPost("/chats/{id:guid}/turn", TurnAsync);
         g.MapDelete("/chats/{id:guid}/turn", TurnEndAsync);
+        g.MapPost("/chats/{id:guid}/continued", ContinuedAsync);
+        g.MapGet("/attachments/{id:guid}", AttachmentAsync);
     }
+
+    /// <summary>What a read gives of each message beyond its row: tool results marked as the web's model reads them, attachments' text up to so much.</summary>
+    private sealed record Outward(Safeguards.Safeguards Safeguards, int Budget);
+
+    private static Outward OutwardOf(Safeguards.Safeguards safeguards, IOptionsMonitor<ChatOptions> chat) => new(safeguards, chat.CurrentValue.InlineAttachmentChars);
 
     /// <summary>Whether Code Arena is answering in the chat now (its turn holds it): the web queues the person's messages.</summary>
     public static bool Answering(Conversation c) => c.CodeArenaTurnUntil is { } until && until > DateTimeOffset.UtcNow;
@@ -209,8 +227,8 @@ public static class CodeArenaSync
     /// stamp of a read that brought nothing new, and the branch has not moved since, it says only that (<c>unchanged</c>):
     /// Code Arena asks every few seconds while it waits, and a long chat is not read each time.
     /// </summary>
-    private static async Task<IResult> ReadAsync(Guid id, HttpContext http, McpPeople people, AppDbContext db, AnswerJobs jobs, Guid? since = null, string? stamp = null,
-        int limit = 200)
+    private static async Task<IResult> ReadAsync(Guid id, HttpContext http, McpPeople people, AppDbContext db, AnswerJobs jobs, Safeguards.Safeguards safeguards,
+        IOptionsMonitor<ChatOptions> chat, Guid? since = null, string? stamp = null, int limit = 200)
     {
         var (me, refusal) = await CallerAsync(http, people);
         if (me is null)
@@ -230,7 +248,7 @@ public static class CodeArenaSync
             return Results.Ok(new { unchanged = true, stamp });
         }
         var tree = await TreeAsync(db, id, http.RequestAborted);
-        return Results.Ok(await ReadFromAsync(db, c, tree, since, Math.Clamp(limit, 0, MostRead), http.RequestAborted));
+        return Results.Ok(await ReadFromAsync(db, c, tree, since, Math.Clamp(limit, 0, MostRead), OutwardOf(safeguards, chat), http.RequestAborted));
     }
 
     /// <summary>
@@ -239,7 +257,8 @@ public static class CodeArenaSync
     /// again. Messages it sent before whose answer was lost are known by their ref and not added twice; its tool results go
     /// straight after their call, before what the web added.
     /// </summary>
-    private static async Task<IResult> AppendAsync(Guid id, SyncAppend body, HttpContext http, McpPeople people, AppDbContext db, AnswerJobs jobs)
+    private static async Task<IResult> AppendAsync(Guid id, SyncAppend body, HttpContext http, McpPeople people, AppDbContext db, AnswerJobs jobs,
+        Safeguards.Safeguards safeguards, IOptionsMonitor<ChatOptions> chat)
     {
         var (me, refusal) = await CallerAsync(http, people);
         if (me is null)
@@ -269,7 +288,7 @@ public static class CodeArenaSync
         if (parent is { } named && !tree.ById.ContainsKey(named))
         {
             // A message this chat does not have (Code Arena's file is from another chat, or the message went): it reads the chat again.
-            return Results.Conflict(await ReadFromAsync(db, c, tree, named, MostRead, ct) with { Status = "behind" });
+            return Results.Conflict(await ReadFromAsync(db, c, tree, named, MostRead, OutwardOf(safeguards, chat), ct) with { Status = "behind" });
         }
         var ids = new List<Guid>();
         var rest = messages;
@@ -302,18 +321,23 @@ public static class CodeArenaSync
                 }
             }
             // The web added after it, or shows another branch: what Code Arena lacks, to take in first.
-            return Results.Conflict(await ReadFromAsync(db, c, tree, parent, MostRead, ct) with { Status = "behind", Ids = ids });
+            return Results.Conflict(await ReadFromAsync(db, c, tree, parent, MostRead, OutwardOf(safeguards, chat), ct) with { Status = "behind", Ids = ids });
         }
         var leaf = parent;
         var count = (parent is null ? 0 : Depth(tree, parent.Value)) + rest.Count;
         if (rest.Count > 0)
         {
             leaf = Add(db, id, parent, rest, ref sequence, ids);
+            // An archived chat stays so: only the person's continuing it from Code Arena (/continued) brings it back to the list.
             c.UpdatedAt = DateTimeOffset.UtcNow;
-            c.ArchivedAt = null;
             if (c.Title == "New chat" && rest.FirstOrDefault(m => m.Role == "user") is { } first && TitleOf(Text(first.Content)) is { } title)
             {
                 c.Title = title;
+            }
+            // Continued on the web, the chat answers with the model Code Arena answered with last.
+            if (rest.LastOrDefault(m => m.Role == "assistant" && !string.IsNullOrWhiteSpace(m.Model)) is { } answer)
+            {
+                c.Model = Clip(answer.Model, 200);
             }
         }
         if (leaf != c.CurrentLeafId && (rest.Count > 0 || body.Branch))
@@ -356,6 +380,10 @@ public static class CodeArenaSync
                 CompletionTokens = m.CompletionTokens,
                 CreatedAt = m.At ?? DateTimeOffset.UtcNow,
                 SyncRef = Clip(m.Ref, 160),
+                // Stopped by the person in Code Arena: shown as stopped, as an answer stopped here is.
+                Status = m.Role == "assistant" && m.Status == "stopped" ? MessageStatus.Stopped : MessageStatus.Complete,
+                // Code Arena's own word to its model: a notice on the web, not the person's.
+                DetailsJson = m.Role == "user" && m.Kind == "note" ? """{"note":true}""" : null,
             };
             db.ChatMessages.Add(message);
             ids.Add(message.Id);
@@ -404,6 +432,39 @@ public static class CodeArenaSync
             await queue.StartNextAsync(id);
         }
         return Results.NoContent();
+    }
+
+    /// <summary>The person continues the chat in Code Arena: archived, it comes back to the list (once: Code Arena's sends leave it be).</summary>
+    private static async Task<IResult> ContinuedAsync(Guid id, HttpContext http, McpPeople people, AppDbContext db)
+    {
+        var (me, refusal) = await CallerAsync(http, people);
+        if (me is null)
+        {
+            return refusal!;
+        }
+        if (await db.Conversations.SingleOrDefaultAsync(c => c.Id == id && c.UserId == me.Id, http.RequestAborted) is not { } c)
+        {
+            return Gone();
+        }
+        if (c.ArchivedAt is not null)
+        {
+            c.ArchivedAt = null;
+            await db.SaveChangesAsync(http.RequestAborted);
+        }
+        return Results.NoContent();
+    }
+
+    /// <summary>A picture (or another file kept whole) the person attached on the web, for their own key only: Code Arena's model looks at it.</summary>
+    private static async Task<IResult> AttachmentAsync(Guid id, HttpContext http, McpPeople people, AppDbContext db)
+    {
+        var (me, refusal) = await CallerAsync(http, people);
+        if (me is null)
+        {
+            return refusal!;
+        }
+        var file = await db.ChatAttachments.AsNoTracking().Where(a => a.Id == id && a.UserId == me.Id && a.Data != null)
+            .Select(a => new { a.Data, a.ContentType, a.FileName }).SingleOrDefaultAsync(http.RequestAborted);
+        return file is null ? AuthEndpoints.Problem(404, "gone", "That file is not there.") : Results.File(file.Data!, file.ContentType, file.FileName);
     }
 
     /// <summary>A send of Code Arena's renews its turn, when it holds one.</summary>
@@ -471,7 +532,7 @@ public static class CodeArenaSync
     /// The branch on screen after <paramref name="since"/>, as Code Arena reads it. When <paramref name="since"/> is not on it, the
     /// branch after the last message they share (a fork); when that is none, all of it.
     /// </summary>
-    private static async Task<SyncRead> ReadFromAsync(AppDbContext db, Conversation c, Tree tree, Guid? since, int limit, CancellationToken ct)
+    private static async Task<SyncRead> ReadFromAsync(AppDbContext db, Conversation c, Tree tree, Guid? since, int limit, Outward outward, CancellationToken ct)
     {
         var (start, @base, fork) = (0, (Guid?)null, false);
         if (since is { } s)
@@ -501,8 +562,13 @@ public static class CodeArenaSync
         {
             summary = new { upTo = covered.Id, text = bodies.GetValueOrDefault(covered.Id)?.Summary ?? await db.ChatMessages.AsNoTracking().Where(m => m.Id == covered.Id).Select(m => m.Summary).SingleAsync(ct) };
         }
+        // The files that went with the questions given: their text (not a picture's bytes, which Code Arena fetches when its model sees).
+        var fileIds = bodies.Values.Where(m => m.Role == "user").SelectMany(m => ChatService.ParseIds(m.AttachmentsJson)).ToHashSet();
+        var files = fileIds.Count == 0 ? new Dictionary<Guid, ChatAttachment>() : await db.ChatAttachments.AsNoTracking().Where(a => fileIds.Contains(a.Id) && a.UserId == c.UserId)
+            .Select(a => new ChatAttachment { Id = a.Id, FileName = a.FileName, ContentType = a.ContentType, Kind = a.Kind, Text = a.Text, Truncated = a.Truncated, Seconds = a.Seconds })
+            .ToDictionaryAsync(a => a.Id, ct);
         return new SyncRead(c.Id, c.Title, c.Model, c.Origin, c.OriginPlace, tree.Path.Count, Stamp(c.CurrentLeafId), @base, fork, start + page.Count < tree.Path.Count, summary,
-            [.. page.Select(i => Out(bodies[i]))]);
+            [.. page.Select(i => Out(bodies[i], files, outward))]);
     }
 
     private static HashSet<string> CallIds(string? json)
@@ -519,20 +585,75 @@ public static class CodeArenaSync
         }
     }
 
-    private static SyncMessage Out(ChatMessage m) => new(
-        m.Role,
-        m.Content,
-        m.Reasoning,
-        m.ToolCallsJson is null ? null : JsonNode.Parse(m.ToolCallsJson),
-        m.ToolCallId,
-        m.ToolName,
-        m.Model,
-        m.PromptTokens,
-        m.CachedTokens,
-        m.CompletionTokens,
-        m.CreatedAt,
-        m.SyncRef,
-        m.Id);
+    /// <summary>
+    /// A message as Code Arena reads it: as the web's own model reads it (a question with its files' text after its words, a
+    /// tool's result marked as data when it came from the web or the company's documents), with what the web shows of it.
+    /// </summary>
+    private static SyncMessage Out(ChatMessage m, Dictionary<Guid, ChatAttachment> files, Outward outward)
+    {
+        var content = m.Content;
+        List<SyncAttachment>? attached = null;
+        if (m.Role == "user" && ChatService.ParseIds(m.AttachmentsJson).Where(files.ContainsKey).Select(id => files[id]).ToList() is { Count: > 0 } with)
+        {
+            var text = new StringBuilder(content);
+            foreach (var f in with)
+            {
+                switch (f.Kind)
+                {
+                    case "image":
+                        // Fetched by Code Arena when its model sees pictures; named there otherwise.
+                        break;
+                    case "audio" or "video":
+                        text.Append("\n\n[").Append(f.Kind == "audio" ? "sound" : "video").Append(" attached: ").Append(f.FileName);
+                        text.Append(f.Text.Length > 0 ? $"; what is said in it:\n{f.Text}]" : "]");
+                        break;
+                    default:
+                        text.Append(ChatService.AttachmentText(f, null, outward.Budget, canReadFiles: false, here: false));
+                        break;
+                }
+            }
+            content = text.ToString();
+            attached = [.. with.Select(f => new SyncAttachment(f.Id, f.FileName, f.Kind, f.ContentType))];
+        }
+        else if (m.Role == "tool")
+        {
+            content = outward.Safeguards.Untrusted(m.ToolName ?? "", m.Content);
+        }
+        return new SyncMessage(
+            m.Role,
+            content,
+            m.Reasoning,
+            m.ToolCallsJson is null ? null : JsonNode.Parse(m.ToolCallsJson),
+            m.ToolCallId,
+            m.ToolName,
+            m.Model,
+            m.PromptTokens,
+            m.CachedTokens,
+            m.CompletionTokens,
+            m.CreatedAt,
+            m.SyncRef,
+            m.Id,
+            m.Status == MessageStatus.Complete ? null : m.Status.ToString().ToLowerInvariant(),
+            Note(m) ? "note" : null,
+            attached);
+    }
+
+    /// <summary>A message of Code Arena's own to its model (the connection dropped), kept as a notice: not the person's words.</summary>
+    private static bool Note(ChatMessage m)
+    {
+        if (m.Role != "user" || m.DetailsJson is null)
+        {
+            return false;
+        }
+        try
+        {
+            return JsonNode.Parse(m.DetailsJson)?["note"]?.GetValue<bool>() == true;
+        }
+        catch (Exception e) when (e is JsonException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
 
     /// <summary>A message's text: a string as it is; parts (text and images), their text, an image said as such.</summary>
     private static string Text(JsonNode? content) => content switch

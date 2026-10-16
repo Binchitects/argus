@@ -133,6 +133,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         rt.Jobs.Output += app.JobOutput;
         rt.Jobs.Ended += app.JobEnded;
         rt.WebNews = app.WebNews;
+        // What Arena lacks of the earlier sessions (every folder's) goes in the background.
+        rt.SendLaterInBackground();
         app._server.OnError = e => rt.Ui.Error($"The web interface: {e.Message}");
         app._server.BodyLimit = (method, path) => method == "POST" && path == InstallPath ? EditorExtensions.MaxVsix : HttpServer.MaxBody;
         app._server.Start(app.HandleAsync);
@@ -500,6 +502,10 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["chat"] = _rt.Sync?.Conversation,
             // Whose chats they are (the key's account): another account's key syncs with that account's chats.
             ["account"] = _rt.Account,
+            // Where the sync stands: the chat, how many messages Arena lacks, what stopped them, whether the web has news (null: no sync).
+            ["sync"] = _rt.Sync?.State() is { } sync ? Account(sync) : null,
+            // What was said while nothing ran here (Arena out of reach, the web's news taken in): the page shows each once.
+            ["notices"] = Notices(),
             // Code completion in the editor: its model; null when the config turns it off.
             ["completion"] = _rt.Config.Completion ? new JsonObject { ["model"] = _rt.Config.CompletionModel ?? _rt.Model.Name } : null,
             ["queued"] = new JsonArray([.. Queued().Select(q => (JsonNode)q)]),
@@ -547,7 +553,50 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         ["updatedAt"] = new DateTimeOffset(s.Updated).ToString("o"),
         ["messages"] = s.Messages,
         ["chat"] = s.Conversation,
+        // Arena lacks some of it: sent in the background, or with Send the other sessions here.
+        ["unsent"] = s.Unsent,
+        ["waiting"] = s.Unsent ? s.Waiting : 0,
     })]);
+
+    /// <summary>The sync's state with whose chats they are.</summary>
+    private JsonObject Account(JsonObject sync)
+    {
+        sync["account"] = _rt.Account;
+        return sync;
+    }
+
+    /// <summary>What was said while nothing ran here, the newest last: the page shows those it has not.</summary>
+    private readonly List<JsonObject> _notices = [];
+    private int _noticed;
+
+    /// <summary>The most notices kept for the page.</summary>
+    private const int MostNotices = 20;
+
+    private JsonArray Notices()
+    {
+        lock (_notices)
+        {
+            return new JsonArray([.. _notices.Select(n => n.DeepClone())]);
+        }
+    }
+
+    /// <summary>A notice of the agent's or the sync's: to the answer running, else kept for the page.</summary>
+    private void Notice(string text)
+    {
+        if (Current() is { Kind: not SyncKind } job)
+        {
+            job.Emit(new JsonObject { ["type"] = "notice", ["kind"] = "warning", ["text"] = text });
+            return;
+        }
+        lock (_notices)
+        {
+            _notices.Add(new JsonObject { ["id"] = ++_noticed, ["text"] = text, ["at"] = DateTimeOffset.UtcNow.ToString("o") });
+            if (_notices.Count > MostNotices)
+            {
+                _notices.RemoveAt(0);
+            }
+        }
+    }
 
     /// <summary>
     /// The person's chats in Arena (the newest <see cref="ChatSync.MostListed"/>), to continue one here: each with the
@@ -1262,7 +1311,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         Emit(new JsonObject { ["type"] = "notice", ["kind"] = "compacted", ["text"] = notice });
     }
 
-    void IAgentEvents.Notice(string text) => Emit(new JsonObject { ["type"] = "notice", ["kind"] = "warning", ["text"] = text });
+    void IAgentEvents.Notice(string text) => Notice(text);
 
     void IAgentEvents.Attached(IReadOnlyList<string> files) =>
         Emit(new JsonObject { ["type"] = "attached", ["id"] = $"m{_rt.Agent.Messages.Count}", ["files"] = new JsonArray([.. files.Select(f => (JsonNode)f)]) });
@@ -1496,19 +1545,28 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
 /// <summary>A saved session as the page shows it: messages in the shape of Arena's chat, and the diffs of its edits.</summary>
 internal static partial class History
 {
-    private const string StoppedMark = "(stopped by the person)";
+    private const string StoppedMark = Agent.StoppedMark;
     private const string SummaryMark = "[The conversation so far, summarized";
 
+    /// <summary>
+    /// The messages the model reads, each with what the session keeps of it (its time, model, tokens, how it ended, whether it
+    /// is a note of Code Arena's own): the conversation's last ones are the model's last word for word.
+    /// </summary>
     public static JsonArray Messages(SessionData data)
     {
         var list = new JsonArray();
         var names = new Dictionary<string, string>(StringComparer.Ordinal);
+        var prefix = data.Prefix;
         for (var i = 0; i < data.Messages.Count; i++)
         {
             var m = data.Messages[i];
+            var entry = i >= prefix && data.From + i - prefix < data.Stream.Count ? data.Stream[data.From + i - prefix] : null;
             var role = m.Str("role") ?? "user";
-            var content = m.Str("content") ?? "";
-            var status = "complete";
+            // A picture from the web goes with its words as parts: the words are shown.
+            var content = m["content"] is JsonArray parts
+                ? string.Join("\n", parts.OfType<JsonObject>().Where(p => p.Str("type") == "text").Select(p => p.Str("text")))
+                : m.Str("content") ?? "";
+            var status = entry?.Status ?? "complete";
             JsonArray? calls = null;
             string? toolName = null;
             string? callId = null;
@@ -1551,29 +1609,32 @@ internal static partial class History
                 content = Mentions.Typed(content);
             }
             var answer = data.Answers.TryGetValue(i, out var a) ? a : default;
+            var usage = entry?.Usage ?? answer.Usage;
             list.Add(new JsonObject
             {
                 ["id"] = $"m{i}",
                 ["parentId"] = i == 0 ? null : $"m{i - 1}",
                 ["role"] = role,
                 ["content"] = content,
-                ["reasoning"] = null,
+                ["reasoning"] = role == "assistant" ? m.Str("reasoning_content") : null,
                 ["toolName"] = toolName,
                 ["toolCallId"] = callId,
                 ["toolCalls"] = calls,
                 ["attachments"] = new JsonArray(),
                 ["status"] = status,
                 ["error"] = null,
-                ["model"] = role == "assistant" ? answer.Model : null,
-                ["promptTokens"] = answer.Usage?.Prompt,
-                ["cachedTokens"] = answer.Usage?.Cached,
-                ["completionTokens"] = answer.Usage?.Completion,
+                ["model"] = role == "assistant" ? entry?.Model ?? answer.Model : null,
+                ["promptTokens"] = usage?.Prompt,
+                ["cachedTokens"] = usage?.Cached,
+                ["completionTokens"] = usage?.Completion,
                 ["thinkingMs"] = null,
                 ["durationMs"] = null,
-                ["createdAt"] = "",
+                ["createdAt"] = entry?.At.ToString("o") ?? "",
                 ["noAccess"] = false,
                 ["summary"] = summary,
                 ["files"] = attached is { Count: > 0 } ? new JsonArray([.. attached.Select(f => (JsonNode)f)]) : null,
+                // Code Arena's own word to the model (the connection dropped), shown as a notice, not as the person's.
+                ["details"] = entry?.Kind == "note" ? new JsonObject { ["note"] = true } : null,
             });
         }
         return list;

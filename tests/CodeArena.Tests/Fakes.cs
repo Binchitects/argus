@@ -121,6 +121,8 @@ public sealed class FakeGateway : FakeServer
 
     public string[] Models { get; set; } = ["model-a", "model-b"];
     public int Context { get; set; } = 32768;
+    /// <summary>The models see pictures (the gateway says so).</summary>
+    public bool Vision { get; set; }
     public Func<JsonObject, Reply> Answer { get; set; } = _ => Reply.Say("Hello from the model.");
     /// <summary>An HTTP status a chat request is answered with instead of an answer (a backend restarting: 500); 0 answers it.</summary>
     public Func<JsonObject, int> Failure { get; set; } = _ => 0;
@@ -174,7 +176,10 @@ public sealed class FakeGateway : FakeServer
                 ["data"] = new JsonArray([.. Models.Select(m => (JsonNode)new JsonObject
                 {
                     ["model_name"] = m,
-                    ["model_info"] = new JsonObject { ["max_input_tokens"] = Context, ["supports_function_calling"] = true, ["supports_reasoning"] = true, ["mode"] = "chat" },
+                    ["model_info"] = new JsonObject
+                    {
+                        ["max_input_tokens"] = Context, ["supports_function_calling"] = true, ["supports_reasoning"] = true, ["supports_vision"] = Vision, ["mode"] = "chat",
+                    },
                 })]),
             });
             return;
@@ -599,6 +604,10 @@ public sealed class FakeChats
     public List<string> Turns { get; } = [];
     /// <summary>The most messages one read gives (Arena: 200 unless asked for fewer).</summary>
     public int Page { get; set; } = 200;
+    /// <summary>Files attached on the web, by id: what /api/code-arena/attachments/{id} gives.</summary>
+    public Dictionary<string, (byte[] Data, string ContentType)> Files { get; } = [];
+    /// <summary>The chats the person continued from Code Arena (/continued), in order.</summary>
+    public List<string> Continued { get; } = [];
 
     /// <summary>The branch as one word, as Arena gives it: its last message.</summary>
     private static string Stamp(Chat c) => c.Leaf ?? "empty";
@@ -756,6 +765,22 @@ public sealed class FakeChats
         var method = ctx.Request.HttpMethod;
         JsonNode? reply;
         var status = 200;
+        if (parts is ["attachments", var file] && method == "GET")
+        {
+            (byte[] Data, string ContentType) found;
+            bool known;
+            lock (_gate)
+            {
+                known = Files.TryGetValue(file, out found);
+            }
+            ctx.Response.StatusCode = known ? 200 : 404;
+            if (known)
+            {
+                ctx.Response.ContentType = found.ContentType;
+                await ctx.Response.OutputStream.WriteAsync(found.Data);
+            }
+            return;
+        }
         lock (_gate)
         {
             if (parts is ["chats"] && method == "GET")
@@ -827,6 +852,11 @@ public sealed class FakeChats
             {
                 All.First(x => x.Id == id6).Turn = null;
                 Turns.Add("end");
+                (reply, status) = (null, 204);
+            }
+            else if (parts is ["chats", var id7, "continued"] && method == "POST")
+            {
+                Continued.Add(id7);
                 (reply, status) = (null, 204);
             }
             else

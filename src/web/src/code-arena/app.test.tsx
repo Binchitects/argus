@@ -366,6 +366,36 @@ describe('Code Arena in the browser', () => {
     expect(calls.filter((c) => c.path === '/api/session').length).toBeGreaterThan(1)
   }, 15_000)
 
+  it('shows where the sync with Arena stands, what was said while nothing ran, and the sessions Arena lacks', async () => {
+    const { now } = backend({
+      state: {
+        arenaChats: true,
+        chat: 'c1',
+        sync: { chat: 'c1', account: 'Pat (pat@example.test)', waiting: 2, trouble: null, behind: false },
+        notices: [{ id: 1, text: 'Taken in from the web chat: 2 messages.', at: new Date().toISOString() }],
+      },
+      extra: { 'GET /api/sessions': () => ({ json: [sessions[0]!, { ...sessions[1]!, unsent: true, waiting: 3 }] }) },
+    })
+    renderCode()
+    const chat = await screen.findByRole('region', { name: 'Chat' })
+    expect(await within(chat).findByText('2 to send')).toBeInTheDocument()
+    expect(within(chat).getByLabelText(/Arena: Kept in step with its chat in Arena \(Pat \(pat@example.test\)'s chats\)\. 2 messages still to send\./)).toBeInTheDocument()
+    expect(await screen.findByText('Taken in from the web chat: 2 messages.')).toBeInTheDocument()
+
+    // Arena out of reach now: said in the header, and the notice raised meanwhile comes once.
+    now.state = {
+      ...now.state,
+      sync: { chat: 'c1', account: null, waiting: 2, trouble: 'Arena cannot be reached', behind: false },
+      notices: [...(now.state.notices ?? []), { id: 2, text: 'Chats are not in step with Arena now: Arena cannot be reached.', at: new Date().toISOString() }],
+    }
+    expect(await within(chat).findByText('Not in step', {}, { timeout: 8000 })).toBeInTheDocument()
+    expect(await screen.findByText('Chats are not in step with Arena now: Arena cannot be reached.')).toBeInTheDocument()
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Chat' }))
+    const list = await screen.findByRole('navigation', { name: 'Sessions' })
+    expect(await within(list).findByText('not sent')).toHaveAttribute('title', 'Arena lacks 3 of its messages')
+  }, 15_000)
+
   it("brings back with ↑ this session's messages, then what this folder sent before, and comes back to the draft", async () => {
     const session: CodeSession = { id: 's2', messages: [msg('m0', 'user', { content: 'Run the tests' }), msg('m1', 'assistant', { content: 'They pass.', model: 'model-a' })], diffs: {}, busy: false }
     const { calls } = backend({ session, extra: { 'GET /api/history': () => ({ json: [{ text: 'Run the tests' }, { text: 'Fix the build\nand say why' }] }) } })
