@@ -1,6 +1,6 @@
 import { AlertTriangle, AudioLines, Brain, Calculator, Check, ChevronRight, CircleX, Clapperboard, Clock, Download, FilePen, FileText, FolderTree, Globe, Image as ImageIcon, ListTree, Loader2, Network, Scale, Search, ShieldQuestion, ShieldX, SquareTerminal, Telescope, TextSearch, Wrench, Zap, type LucideIcon } from 'lucide-react'
 import { Collapsible } from 'radix-ui'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { useNow } from './use-now'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -118,8 +118,9 @@ function ToolArgsView({ name, raw }: { name: string; raw: string }) {
 /**
  * One tool call: what was asked, whether it ran, how long it took, what came
  * back. The no-access notice stays outside the fold: the person must see it.
+ * Drawn again only when its own props change: a long thread has hundreds.
  */
-export function ToolCard({
+export const ToolCard = memo(function ToolCard({
   call,
   result,
   live,
@@ -157,7 +158,8 @@ export function ToolCard({
   const media = result?.attachments.filter(isMedia) ?? []
   const made = result?.attachments.filter((a) => a.kind !== 'image' && !isMedia(a)) ?? []
   const Icon = toolIcons.find(([re]) => re.test(call.function.name))?.[1] ?? Wrench
-  const args: [string, string][] = call.function.name === 'delegate' ? partsSummary(call.function.arguments) : argsSummary(call.function.arguments)
+  // Read once per call's arguments, not at each drawing.
+  const args: [string, string][] = useMemo(() => (delegate ? partsSummary(call.function.arguments) : argsSummary(call.function.arguments)), [delegate, call.function.arguments])
   const running = !result && live && !waiting
   const drawing = running && /image|picture|draw/.test(call.function.name)
   const filming = running && /video/.test(call.function.name)
@@ -354,7 +356,7 @@ export function ToolCard({
       )}
     </div>
   )
-}
+})
 
 export function NoticeLine({ text }: { text: string }) {
   return (

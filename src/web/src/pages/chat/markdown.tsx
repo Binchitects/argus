@@ -1,16 +1,18 @@
 import 'katex/dist/katex.min.css'
-import { memo, use, useLayoutEffect, useMemo, useRef } from 'react'
+import { memo, use, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AnswerTable } from './answer-table'
 import { CodeBlock } from './code-block'
 import { FileRefs, openRef, tagRefs } from './file-refs'
-import { toBlocks } from './markdown-blocks'
+import { LiveBlocks, toBlocks } from './markdown-blocks'
 
 /**
  * A model's answer (or the person's question) as formatted text. While it is being
  * written (live), its last block may be half a diagram: that one is drawn once it is done.
  */
 export const Markdown = memo(function Markdown({ text, onOpenFile, onPreview, live }: { text: string; onOpenFile?: (name: string) => void; onPreview?: (code: string) => void; live?: boolean }) {
-  const blocks = useMemo(() => toBlocks(text), [text])
+  // While it is written, only what the new words change is read again; once done, it is read whole.
+  const [growing] = useState(() => new LiveBlocks())
+  const blocks = useMemo(() => (live ? growing.update(text) : toBlocks(text)), [text, live, growing])
   // In Code Arena's IDE, the folder's files cited are links that open in its editor.
   const refs = use(FileRefs)
   const box = useRef<HTMLDivElement>(null)

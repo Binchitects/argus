@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { reduce, stopped, withQuestion, type LiveState } from './live'
+import { blank, keepSame, reduce, sameJson, stopped, withQuestion, type LiveState } from './live'
 import type { ChatEvent } from './types'
 
 const start: LiveState = { messages: [], leaf: null, notices: [], title: null, thinkingSince: null }
@@ -136,5 +136,39 @@ describe('live answer', () => {
     const s = play([{ type: 'title', title: 'Hello' }, { type: 'notice', kind: 'no_vision', text: 'Cannot see.' }])
     expect(s.title).toBe('Hello')
     expect(s.notices).toEqual([{ kind: 'no_vision', text: 'Cannot see.' }])
+  })
+})
+
+describe('the session read again', () => {
+  const m = (id: string, content: string) => ({ ...blank(id, 'assistant', null, content), createdAt: '2026-10-16T10:00:00Z', toolCalls: [{ id: 'c' + id, function: { name: 'read_file', arguments: '{"path":"a"}' } }] })
+
+  it('keeps each message that did not change as the object shown before, and takes the changed and the new ones', () => {
+    const before = [m('m0', 'one'), m('m1', 'two'), m('m2', 'three, so far')]
+    const after = [m('m0', 'one'), m('m1', 'two'), m('m2', 'three, all of it'), m('m3', 'four')]
+    const kept = keepSame(before, after)
+    expect(kept).toEqual(after)
+    expect(kept[0]).toBe(before[0])
+    expect(kept[1]).toBe(before[1])
+    expect(kept[2]).toBe(after[2])
+    expect(kept[3]).toBe(after[3])
+  })
+
+  it('gives back the list shown before when nothing changed, and a message changed deep inside is a changed one', () => {
+    const before = [m('m0', 'one'), m('m1', 'two')]
+    expect(keepSame(before, [m('m0', 'one'), m('m1', 'two')])).toBe(before)
+    const changed = m('m1', 'two')
+    changed.toolCalls[0]!.function.arguments = '{"path":"b"}'
+    expect(keepSame(before, [m('m0', 'one'), changed])[1]).toBe(changed)
+    // Fewer messages (a compaction): a new list, with those still there kept.
+    const fewer = keepSame(before, [m('m1', 'two')])
+    expect(fewer).toHaveLength(1)
+    expect(fewer[0]).toBe(before[1])
+  })
+
+  it('compares values read from JSON all the way down, a field left undefined being one not there', () => {
+    expect(sameJson({ a: [1, { b: null }], c: undefined }, { a: [1, { b: null }] })).toBe(true)
+    expect(sameJson({ a: [1, 2] }, { a: [1, 2, 3] })).toBe(false)
+    expect(sameJson({ a: [] }, { a: {} })).toBe(false)
+    expect(sameJson({ a: 1 }, { a: '1' })).toBe(false)
   })
 })
