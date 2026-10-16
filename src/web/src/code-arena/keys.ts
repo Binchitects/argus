@@ -1,6 +1,7 @@
 // Keyboard shortcuts as VS Code has them: its key strings ("ctrl+k ctrl+s", "cmd+shift+p"), its when clauses, its
 // keybindings.json rules (the last that matches wins; "-command" takes a default away), chords of two keys. The page's
-// own resolver reads them outside the code editor; inside it, Monaco's resolver gets the same rules (monacoKeybinding).
+// own resolver reads them outside the code editor; inside it, Monaco's resolver gets the same rules (monacoKeybinding),
+// with the person's "-command" rules, which take Monaco's own keys away too.
 
 /** One key press: its modifiers, and the key by VS Code's name for it ("a", "1", "f5", "`", "pagedown", "enter"). */
 export interface Chord {
@@ -11,7 +12,10 @@ export interface Chord {
   key: string
 }
 
-/** A rule of a keymap, read: one or two chords, the command (and its argument), when it applies, and whose rule it is. */
+/**
+ * A rule of a keymap, read: one or two chords, the command (and its argument), when it applies, and whose rule it is. A
+ * removal ("-command", isRemoval) runs nothing: it is there for Monaco, and has no chords when it names no key.
+ */
 export interface Rule {
   chords: Chord[]
   command: string
@@ -289,7 +293,38 @@ export function evalWhen(w: When | undefined, ctx: Context): boolean {
   }
 }
 
+/** The context keys a when clause reads. */
+function contextKeysOf(w: When): string[] {
+  switch (w.op) {
+    case 'true':
+    case 'false':
+      return []
+    case 'not':
+      return contextKeysOf(w.expr)
+    case 'and':
+    case 'or':
+      return w.exprs.flatMap(contextKeysOf)
+    case 'in':
+    case 'notIn':
+      return [w.key, w.list]
+    default:
+      return [w.key]
+  }
+}
+
 // ----- the keymap -----
+
+/** A "-command" rule: it takes keys away and runs nothing. */
+export const isRemoval = (r: Pick<Rule, 'command'>) => r.command.startsWith('-')
+
+/**
+ * The context keys Code Arena sets (the layout, the tab shown, the debugger, where the focus is). With those its rules'
+ * when clauses read, they are the keys a when clause can mean here: one that names another is VS Code's.
+ */
+const ownContextKeys = [
+  'sideBarVisible', 'panelVisible', 'auxiliaryBarVisible', 'editorIsOpen', 'activeEditor', 'textCompareEditorVisible', 'activeViewlet', 'resourceLangId', 'resourceFilename',
+  'inDebugMode', 'debugState', 'debugType', 'inputFocus', 'terminalFocus', 'filesExplorerFocus', 'editorTextFocus', 'isInDiffEditor',
+]
 
 /** A rule of keybindings.json that could not be read: its index, and why. */
 export interface RuleProblem {
@@ -304,7 +339,8 @@ export const keyOnThisSystem = (r: RuleJson, mac = isMac()) =>
 
 /**
  * The rules that apply: the defaults, then the extensions', then the person's, each "-command" rule taking away the
- * earlier rules of that command (only those of its key and when, when it says them).
+ * earlier rules of that command (only those of its key and when, when it says them) and kept itself, for Monaco's own
+ * keys. A rule of a command Code Arena does not have is left out, so the key keeps its default.
  */
 export function buildRules(defaults: RuleJson[], user: unknown[], known?: (id: string) => boolean, extension: RuleJson[] = []): { rules: Rule[]; problems: RuleProblem[] } {
   const rules: Rule[] = []
@@ -323,6 +359,7 @@ export function buildRules(defaults: RuleJson[], user: unknown[], known?: (id: s
     const rule = read(r, 'extension', r.key)
     if (rule) rules.push(rule)
   }
+  const ownKeys = new Set([...ownContextKeys, ...rules.flatMap((r) => (r.when ? contextKeysOf(r.when) : []))])
   user.forEach((raw, index) => {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return problems.push({ index, message: 'Each rule is an object: {"key", "command", "when"}.', severity: 'error' })
     const r = raw as Partial<RuleJson>
@@ -334,19 +371,28 @@ export function buildRules(defaults: RuleJson[], user: unknown[], known?: (id: s
       const command = r.command.slice(1)
       const chords = r.key ? parseKey(r.key) : null
       if (r.key && !chords) return problems.push({ index, message: `"${r.key}" is not a key.`, severity: 'error' })
+      // VS Code writes a default taken away with that default's when, which may read context keys Code Arena does not
+      // have ("taskCommandsRegistered", "debuggersAvailable"): such a rule takes the command's key away whatever the when.
+      const theirs = !!chords && !!parsed.when && contextKeysOf(parsed.when).some((k) => !ownKeys.has(k))
       for (let k = rules.length - 1; k >= 0; k--) {
         const x = rules[k]!
         if (x.command !== command) continue
         if (chords && (x.chords.length !== chords.length || !x.chords.every((c, i) => sameChord(c, chords[i]!)))) continue
-        if (r.when && (x.whenText ?? '') !== r.when) continue
+        if (r.when && !theirs && (x.whenText ?? '') !== r.when) continue
         rules.splice(k, 1)
       }
+      // Monaco's own keys (Ctrl+D, Ctrl+Shift+K…) are none of these rules: Monaco is given the removal, and its resolver
+      // takes them away as VS Code's does.
+      rules.push({ chords: chords ?? [], command: r.command, when: parsed.when, whenText: r.when, source: 'user', key: r.key ?? '', index })
       return
     }
     if (typeof r.key !== 'string') return problems.push({ index, message: 'The rule has no "key".', severity: 'error' })
     const chords = parseKey(r.key)
     if (!chords) return problems.push({ index, message: `"${r.key}" is not a key.`, severity: 'error' })
-    if (known && r.command && !known(r.command)) problems.push({ index, message: `Code Arena has no command "${r.command}": the rule does nothing here.`, severity: 'warning' })
+    // A command Code Arena does not have is left out: it would take the key from the default and run nothing. The editor's
+    // core commands (cursorUp, deleteLeft, undo…) are not among the actions Code Arena is told of: their ids have no dot,
+    // and Monaco runs them.
+    if (known && r.command && !known(r.command) && r.command.includes('.')) return problems.push({ index, message: `Code Arena has no command "${r.command}": the rule does nothing here.`, severity: 'warning' })
     if (!r.command) return
     rules.push({ chords, command: r.command, args: r.args, when: parsed.when, whenText: r.when, source: 'user', key: r.key, index })
   })
@@ -360,7 +406,7 @@ export type Resolution = { kind: 'command'; rule: Rule } | { kind: 'chord'; firs
 export function resolve(rules: Rule[], pressed: Chord, ctx: Context, pending: Chord | null, accept: (r: Rule) => boolean = () => true): Resolution {
   for (let k = rules.length - 1; k >= 0; k--) {
     const r = rules[k]!
-    if (!accept(r)) continue
+    if (isRemoval(r) || !accept(r)) continue
     if (pending) {
       if (r.chords.length === 2 && sameChord(r.chords[0]!, pending) && sameChord(r.chords[1]!, pressed) && evalWhen(r.when, ctx)) return { kind: 'command', rule: r }
     } else if (sameChord(r.chords[0]!, pressed) && evalWhen(r.when, ctx)) {
@@ -390,8 +436,9 @@ interface MonacoKeys {
   KeyCode: Record<string, number | string>
 }
 
-/** Chords as Monaco's keybinding number; null for a key Monaco has no code for. */
+/** Chords as Monaco's keybinding number; null for a key Monaco has no code for; 0 for none (a removal of all its command's keys). */
 export function monacoKeybinding(chords: Chord[], m: MonacoKeys, mac = isMac()): number | null {
+  if (chords.length === 0) return 0
   const one = (c: Chord) => {
     const name = /^[a-z]$/.test(c.key) ? `Key${c.key.toUpperCase()}` : /^\d$/.test(c.key) ? `Digit${c.key}` : /^f\d+$/.test(c.key) ? c.key.toUpperCase() : /^numpad\d$/.test(c.key) ? `Numpad${c.key.slice(6)}` : monacoCodes[c.key]
     const code = name ? m.KeyCode[name] : undefined

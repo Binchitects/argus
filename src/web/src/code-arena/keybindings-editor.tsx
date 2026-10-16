@@ -15,7 +15,7 @@ import { useEditor } from './editor-state'
 import { userFileQuery, writeUserFile } from './ide-api'
 import { appendElement, parse, removeElement, setProperty } from './jsonc'
 import { keymap, useKeymap } from './keyboard'
-import { chordOf, chordText, keysLabel, parseWhen, sameChord, type Chord, type Rule } from './keys'
+import { chordOf, chordText, isRemoval, keysLabel, parseWhen, sameChord, type Chord, type Rule } from './keys'
 import { inputBox } from './quick-pick'
 
 /** A row of the table: a command with one of its keys (or none). */
@@ -53,6 +53,7 @@ export default function KeybindingsEditor() {
   const rows: Row[] = []
   const withKey = new Set<string>()
   for (const r of [...state.rules].reverse()) {
+    if (isRemoval(r)) continue
     rows.push({ command: r.command, title: titles.get(r.command) ?? r.command, rule: r })
     withKey.add(r.command)
   }
@@ -65,14 +66,17 @@ export default function KeybindingsEditor() {
     return words.every((w) => text.includes(w))
   })
 
-  /** keybindings.json changed and saved: read again by the keymap at once. */
+  /**
+   * keybindings.json changed and saved: read again by the keymap at once, and by its tab when it is open with nothing
+   * unsaved (so a save there is not of the text from before).
+   */
   const change = async (edit: (text: string) => string) => {
     try {
       const now = await queryClient.fetchQuery(userFileQuery('keybindings.json'))
       const text = edit(now.text.trim() ? now.text : '[]')
       const saved = await writeUserFile('keybindings.json', text, now.version)
       queryClient.setQueryData(userFileQuery('keybindings.json').queryKey, { ...now, text, version: saved.version })
-      window.dispatchEvent(new CustomEvent('code-arena:keybindings-written'))
+      await ed.refresh(userFile('keybindings.json'))
     } catch (e) {
       toast.error(errorMessage(e))
     }
@@ -247,7 +251,7 @@ export default function KeybindingsEditor() {
 /** Pressing the keys for a command: one chord or two; Enter takes them, Escape does not. */
 function DefineKeys({ row, rules, onCancel, onDone }: { row: Row; rules: Rule[]; onCancel: () => void; onDone: (chords: Chord[]) => void }) {
   const [chords, setChords] = useState<Chord[]>([])
-  const others = chords.length > 0 ? rules.filter((r) => r.command !== row.command && r.chords.length === chords.length && r.chords.every((c, i) => sameChord(c, chords[i]!))) : []
+  const others = chords.length > 0 ? rules.filter((r) => r.command !== row.command && !isRemoval(r) && r.chords.length === chords.length && r.chords.every((c, i) => sameChord(c, chords[i]!))) : []
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     e.preventDefault()
     e.stopPropagation()

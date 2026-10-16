@@ -27,9 +27,22 @@ describe('JSON with comments', () => {
   it('takes a property out with its comma', () => {
     const text = '{\n  "a": 1,\n  "b": 2, // two\n  "c": 3\n}'
     expect(setProperty(text, ['b'], undefined)).toBe('{\n  "a": 1,\n  "c": 3\n}')
-    expect(setProperty(text, ['c'], undefined)).toBe('{\n  "a": 1,\n  "b": 2\n}')
+    // The last: the comma before it goes, and the comment after that comma stays.
+    expect(setProperty(text, ['c'], undefined)).toBe('{\n  "a": 1,\n  "b": 2 // two\n}')
+    expect(setProperty('{ "a": 1, "b": 2 }', ['b'], undefined)).toBe('{ "a": 1 }')
     expect(setProperty('{\n  "a": 1\n}', ['a'], undefined)).toBe('{\n}')
     expect(setProperty(text, ['missing'], undefined)).toBe(text)
+  })
+
+  it('keeps the comments of an object or an array with nothing else in it, the new entry after them', () => {
+    const settings = '{\n    // "editor.fontSize": 16,\n    // "editor.minimap.enabled": false\n}\n'
+    expect(setProperty(settings, ['editor.wordWrap'], 'on')).toBe('{\n    // "editor.fontSize": 16,\n    // "editor.minimap.enabled": false\n    "editor.wordWrap": "on"\n}\n')
+    expect(setProperty('{\n  "[python]": { /* mine */ }\n}', ['[python]', 'editor.tabSize'], 4)).toBe('{\n  "[python]": { /* mine */\n    "editor.tabSize": 4\n  }\n}')
+    const keybindings = '[\n    // { "key": "ctrl+b", "command": "x" }\n]'
+    expect(appendElement(keybindings, [], { key: 'ctrl+j', command: 'y' })).toBe('[\n    // { "key": "ctrl+b", "command": "x" }\n    {\n        "key": "ctrl+j",\n        "command": "y"\n    }\n]')
+    // The last rule taken out: the comment of the rule before it stays.
+    const rules = '[\n  { "key": "a", "command": "x" }, // first\n  { "key": "b", "command": "y" }\n]'
+    expect(removeElement(rules, [], 1)).toBe('[\n  { "key": "a", "command": "x" } // first\n]')
   })
 
   it('adds and removes array elements, as keybindings.json is written', () => {

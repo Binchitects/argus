@@ -35,6 +35,16 @@ function readQuery(q: string) {
 const setIn = (layer: Layer, key: string, lang?: string) => (lang ? !!layer.languages[lang] && key in layer.languages[lang] : key in layer.values)
 
 /**
+ * A setting as one settings file has it, as VS Code's tabs show it: its value there (for a language: in its block, else
+ * the file's own), else the default. Not what applies: the other file's value would hide this one's, and a change here
+ * would seem to do nothing.
+ */
+const valueIn = (layer: Layer, d: SettingDef, lang?: string) => {
+  if (lang && setIn(layer, d.key, lang)) return layer.languages[lang]![d.key]
+  return d.key in layer.values ? layer.values[d.key] : d.default
+}
+
+/**
  * The Settings editor (Ctrl+,), as VS Code's: every setting Code Arena reads, by category, searched by its words or with
  * @modified, @lang:python and @id:; the person's (User) or the project's (Workspace), a language's own with @lang; each
  * written into its settings.json as it changes, the file's comments kept.
@@ -91,6 +101,8 @@ export default function SettingsEditor() {
       for (const [k, v] of entries) text = setProperty(text, [k], v)
       await writeUserFile('settings.json', text, now.version)
       await settings.reload()
+      // An open settings.json tab with nothing unsaved shows what was brought over.
+      window.dispatchEvent(new CustomEvent('code-arena:settings-written', { detail: 'user' }))
       toast.success(`${entries.length} settings brought over.`)
     } catch (e) {
       toast.error(errorMessage(e))
@@ -163,7 +175,7 @@ export default function SettingsEditor() {
                   <Row
                     key={d.key}
                     def={d}
-                    value={settings.get(d.key, q.lang)}
+                    value={valueIn(layer, d, q.lang)}
                     modified={setIn(layer, d.key, q.lang)}
                     alsoIn={setIn(other, d.key, q.lang) ? (scope === 'user' ? 'Workspace' : 'User') : undefined}
                     onChange={(v) => write(d.key, v)}

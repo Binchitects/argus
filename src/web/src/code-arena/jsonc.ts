@@ -256,21 +256,13 @@ export function setProperty(text: string, path: JsonPath, value: unknown): strin
       const comma = after(text, prop.end)
       if (text[comma] === ',') return splice(text, lineStart(text, prop.offset), lineEndAfter(text, comma + 1), '')
       const prev = props[at - 1]
-      if (prev) {
-        const prevComma = after(text, prev.end)
-        return splice(text, prevComma, lineEndAfter(text, prop.end), '\n')
-      }
+      if (prev) return cutLast(text, prev.end, prop.offset, prop.end)
       return splice(text, lineStart(text, prop.offset), lineEndAfter(text, prop.end), '')
     }
     if (value === undefined) return text
     // Missing: the rest of the path made here, as the object's last property.
     const rest = path.slice(d + 1).reduceRight<unknown>((v, s) => (typeof s === 'number' ? [v] : { [s]: v }), value)
-    const parentIndent = lineIndent(text, node.offset)
-    const close = node.offset + node.length - 1
-    if (props.length === 0) {
-      const indent = parentIndent + unit
-      return splice(text, node.offset + 1, close, `\n${indent}${JSON.stringify(seg)}: ${write(rest, unit, indent)}\n${parentIndent}`)
-    }
+    if (props.length === 0) return intoEmpty(text, node, unit, (indent) => `${JSON.stringify(seg)}: ${write(rest, unit, indent)}`)
     const lastProp = props[props.length - 1]!
     const indent = lineIndent(text, lastProp.offset)
     const comma = after(text, lastProp.end)
@@ -290,6 +282,31 @@ const lineEndAfter = (text: string, offset: number) => {
   return offset + (m?.[0].length ?? 0)
 }
 
+/**
+ * The last entry of an object or an array taken out with the comma before it (after the entry before, ending at
+ * prevEnd). On a line of its own, the line goes and the comma alone: what follows the comma on its line (a comment) stays.
+ */
+function cutLast(text: string, prevEnd: number, start: number, end: number): string {
+  const comma = after(text, prevEnd)
+  const begin = text.lastIndexOf('\n', start - 1) + 1
+  if (!/^[ \t]*$/.test(text.slice(begin, start))) return splice(text, comma, end, '')
+  return splice(splice(text, begin, lineEndAfter(text, end), ''), comma, comma + 1, '')
+}
+
+/**
+ * An entry put into an object or an array that has none, on a line of its own: after the comments in it, which stay (a
+ * settings.json of commented-out settings, a keybindings.json of commented-out rules).
+ */
+function intoEmpty(text: string, node: JsonNode, unit: string, entry: (indent: string) => string): string {
+  const parentIndent = lineIndent(text, node.offset)
+  const indent = parentIndent + unit
+  const open = node.offset + 1
+  const close = node.offset + node.length - 1
+  const end = open + text.slice(open, close).trimEnd().length
+  const rest = text.slice(end, close)
+  return splice(text, end, close, `\n${indent}${entry(indent)}${end > open && rest.includes('\n') ? rest : `\n${parentIndent}`}`)
+}
+
 /** The text with a value added at the end of the array at a path (the whole text an array when it is not JSON yet). */
 export function appendElement(text: string, path: JsonPath, value: unknown): string {
   const { root, errors } = parseTree(text)
@@ -301,12 +318,8 @@ export function appendElement(text: string, path: JsonPath, value: unknown): str
   const node = find(root, path)
   if (!node) return setProperty(text, path, [value])
   if (node.type !== 'array') throw new Error('Not an array there.')
-  const parentIndent = lineIndent(text, node.offset)
   const items = node.items!
-  if (items.length === 0) {
-    const indent = parentIndent + unit
-    return splice(text, node.offset + 1, node.offset + node.length - 1, `\n${indent}${write(value, unit, indent)}\n${parentIndent}`)
-  }
+  if (items.length === 0) return intoEmpty(text, node, unit, (indent) => write(value, unit, indent))
   const last = items[items.length - 1]!
   const indent = lineIndent(text, last.offset)
   const comma = after(text, last.offset + last.length)
@@ -326,6 +339,6 @@ export function removeElement(text: string, path: JsonPath, index: number): stri
   const comma = after(text, end)
   if (text[comma] === ',') return splice(text, lineStart(text, item.offset), lineEndAfter(text, comma + 1), '')
   const prev = items[index - 1]
-  if (prev) return splice(text, after(text, prev.offset + prev.length), lineEndAfter(text, end), '\n')
+  if (prev) return cutLast(text, prev.offset + prev.length, item.offset, end)
   return splice(text, lineStart(text, item.offset), lineEndAfter(text, end), '')
 }

@@ -82,6 +82,60 @@ describe('VS Code keys', () => {
     expect(resolve(rules, at('ctrl+w'), { editorIsOpen: false }, null)).toEqual({ kind: 'none' })
   })
 
+  it('leaves out a rule of a command Code Arena does not have, so its key keeps the default', () => {
+    const user = [
+      { key: 'ctrl+`', command: 'workbench.action.terminal.focus' },
+      { key: 'ctrl+p', command: 'cursorUp', when: 'editorTextFocus' },
+    ]
+    const known = (id: string) => id !== 'workbench.action.terminal.focus' && id !== 'cursorUp'
+    const { rules, problems } = buildRules(defaultKeybindings, user, known)
+    expect(problems).toEqual([{ index: 0, message: 'Code Arena has no command "workbench.action.terminal.focus": the rule does nothing here.', severity: 'warning' }])
+    expect(rules.some((r) => r.command === 'workbench.action.terminal.focus')).toBe(false)
+    expect(resolve(rules, parseKey('ctrl+`')![0]!, {}, null)).toMatchObject({ kind: 'command', rule: { command: 'workbench.action.terminal.toggleTerminal' } })
+    // The editor's core commands (their ids have no dot) are not among its actions, but Monaco runs them: the rule stays.
+    expect(rules.at(-1)).toMatchObject({ command: 'cursorUp', whenText: 'editorTextFocus', source: 'user' })
+  })
+
+  it('keeps the "-command" rules for Monaco, which take its own keys away, and runs none of them', () => {
+    const user = [
+      { key: 'ctrl+shift+k', command: '-editor.action.deleteLines' },
+      { key: 'ctrl+d', command: '-editor.action.addSelectionToNextFindMatch', when: 'editorFocus' },
+      { command: '-editor.action.copyLinesDownAction' },
+      { key: 'ctrl+b', command: '-workbench.action.toggleSidebarVisibility' },
+    ]
+    const { rules, problems } = buildRules(defaultKeybindings, user, () => true)
+    expect(problems).toEqual([])
+    const KeyMod = { CtrlCmd: 2048, Shift: 1024, Alt: 512, WinCtrl: 256, chord: (a: number, b: number) => (a | (b << 16)) >>> 0 }
+    const KeyCode = { KeyB: 32, KeyD: 34, KeyK: 41 }
+    // As the editor gives them to Monaco's addKeybindingRules: a removal with no key takes all of its command's (0).
+    const removals = rules.filter((r) => r.command.startsWith('-')).map((r) => ({ keybinding: monacoKeybinding(r.chords, { KeyMod, KeyCode }, false), command: r.command, when: r.whenText }))
+    expect(removals).toEqual([
+      { keybinding: 2048 | 1024 | 41, command: '-editor.action.deleteLines', when: undefined },
+      { keybinding: 2048 | 34, command: '-editor.action.addSelectionToNextFindMatch', when: 'editorFocus' },
+      { keybinding: 0, command: '-editor.action.copyLinesDownAction', when: undefined },
+      { keybinding: 2048 | 32, command: '-workbench.action.toggleSidebarVisibility', when: undefined },
+    ])
+    const at = (k: string) => parseKey(k)![0]!
+    expect(resolve(rules, at('ctrl+shift+k'), {}, null)).toEqual({ kind: 'none' })
+    expect(resolve(rules, at('ctrl+b'), {}, null)).toEqual({ kind: 'none' })
+    expect(keyFor(rules, 'workbench.action.toggleSidebarVisibility', false)).toBeUndefined()
+  })
+
+  it("takes a default away with VS Code's own when for it, which reads context keys Code Arena does not have", () => {
+    const user = [
+      { key: 'ctrl+shift+b', command: '-workbench.action.tasks.build', when: 'taskCommandsRegistered' },
+      { key: 'f5', command: '-workbench.action.debug.start', when: "debuggersAvailable && debugState == 'inactive'" },
+      // A when of Code Arena's own context keys is taken as written: this one is no default's, and takes nothing away.
+      { key: 'ctrl+b', command: '-workbench.action.toggleSidebarVisibility', when: 'terminalFocus' },
+    ]
+    const { rules } = buildRules(defaultKeybindings, user)
+    const at = (k: string) => parseKey(k)![0]!
+    expect(resolve(rules, at('ctrl+shift+b'), {}, null)).toEqual({ kind: 'none' })
+    expect(resolve(rules, at('f5'), { inDebugMode: false, debugState: 'inactive' }, null)).toEqual({ kind: 'none' })
+    expect(resolve(rules, at('f5'), { inDebugMode: true, debugState: 'stopped' }, null)).toMatchObject({ kind: 'command', rule: { command: 'workbench.action.debug.continue' } })
+    expect(resolve(rules, at('ctrl+b'), { terminalFocus: true }, null)).toMatchObject({ kind: 'command', rule: { command: 'workbench.action.toggleSidebarVisibility' } })
+  })
+
   it('gives Monaco the same keys, ⌘ as CtrlCmd on macOS', () => {
     const KeyMod = { CtrlCmd: 2048, Shift: 1024, Alt: 512, WinCtrl: 256, chord: (a: number, b: number) => (a | (b << 16)) >>> 0 }
     const KeyCode = { KeyK: 41, KeyS: 49, KeyP: 46, Backquote: 92, F1: 59 }
