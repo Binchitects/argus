@@ -53,6 +53,38 @@ public sealed class VllmBackendTests : IDisposable
     }
 
     [Fact]
+    public void Its_kv_tier_is_vllms_own_cpu_tier_or_lmcache_with_ram_disk_and_a_shared_store()
+    {
+        var cpu = Model("flash");
+        cpu.KvCpuGb = 32;
+        Assert.Contains("OffloadingConnector", ModelCatalog.VllmArgs(cpu, "/library", 1)[^1], StringComparison.Ordinal);
+
+        var lm = Model("flash", replicas: 2, devices: "0,1");
+        lm.KvTier = "lmcache";
+        lm.KvCpuGb = 64;
+        lm.KvDiskGb = 500;
+        var args = ModelCatalog.VllmArgs(lm, "/library", 1);
+        Assert.Equal("""{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}""", args[args.ToList().IndexOf("--kv-transfer-config") + 1]);
+        var entries = ModelCatalog.VllmEntries(lm, "/library", new Dictionary<string, int>(), new HashSet<int>(), 8001, "/presets/vllm");
+        Assert.Equal(["/presets/vllm/lmcache-flash@0.yaml", "/presets/vllm/lmcache-flash@1.yaml"], entries.Select(e => e.Env!["LMCACHE_CONFIG_FILE"]));
+        // Through the desired state's JSON and back.
+        Assert.Equal(entries[0].Env, VllmEntry.From(entries[0].ToJson())!.Env);
+        var yaml = ModelCatalog.LmcacheConfig(lm, "flash@0", "redis://valkey:6379");
+        Assert.Contains("local_cpu: true\nmax_local_cpu_size: 64\n", yaml, StringComparison.Ordinal);
+        Assert.Contains("local_disk: \"file:///kvcache/flash@0/\"\nmax_local_disk_size: 500\n", yaml, StringComparison.Ordinal);
+        Assert.Contains("remote_url: \"redis://valkey:6379\"\n", yaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("remote_url", ModelCatalog.LmcacheConfig(lm, "flash@0", null), StringComparison.Ordinal);
+
+        // A disk tier without LMCache, a tier vLLM has not, a tier on llama.cpp: refused.
+        var bad = Model("x");
+        bad.KvDiskGb = 10;
+        Assert.Contains(ModelAdvisor.KindProblems(bad), p => p.Field == "kvDiskGb" && p.Error);
+        bad.KvTier = "nvme";
+        Assert.Contains(ModelAdvisor.KindProblems(bad), p => p.Field == "kvTier" && p.Error);
+        Assert.Contains(ModelAdvisor.KindProblems(new LocalModel { Name = "l", File = "l.gguf", KvTier = "lmcache" }), p => p.Field == "kvCpuGb" && p.Error);
+    }
+
+    [Fact]
     public void Copies_take_their_run_of_the_gpus_and_a_model_added_never_moves_another_s_port()
     {
         var two = ModelCatalog.VllmEntries(Model("flash", "0,1,2,3", replicas: 2), "/library", new Dictionary<string, int>(), new HashSet<int>(), 8001);

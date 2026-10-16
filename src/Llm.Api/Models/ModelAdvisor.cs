@@ -250,7 +250,7 @@ public static class ModelAdvisor
             No(m.GpuMemoryUtilization is not null, "gpuMemoryUtilization", "share of each GPU to set (it fits itself to what is free)");
             No(m.Quantization is not null, "quantization", "quantisation to choose (the GGUF file has its own)");
             No(m.SpecDecode is not null, "specDecode", "speculative decoding but its own MTP (Draft tokens)");
-            No(m.KvCpuGb is > 0, "kvCpuGb", "CPU tier for its token cache (it keeps conversations that lost their slot in RAM by itself)");
+            No(m.KvCpuGb is > 0 || m.KvTier is not null || m.KvDiskGb is > 0, "kvCpuGb", "tiers for its token cache to set (it keeps conversations that lost their slot in RAM by itself)");
         }
         else
         {
@@ -280,6 +280,18 @@ public static class ModelAdvisor
             if (m.KvCpuGb is < 0 or > 4096)
             {
                 problems.Add(new("kvCpuGb", "The CPU tier is 0 to 4,096 GB.", true));
+            }
+            if (m.KvTier is not (null or "cpu" or "lmcache"))
+            {
+                problems.Add(new("kvTier", "The cache's tier is cpu (vLLM's own) or lmcache.", true));
+            }
+            if (m.KvDiskGb is > 0 && m.KvTier != "lmcache")
+            {
+                problems.Add(new("kvDiskGb", "A disk tier needs LMCache (the cache's tier: lmcache).", true));
+            }
+            if (m.KvDiskGb is < 0 or > 65536)
+            {
+                problems.Add(new("kvDiskGb", "The disk tier is 0 to 65,536 GB.", true));
             }
             if (m.Parallel is < 1 or > 1024)
             {

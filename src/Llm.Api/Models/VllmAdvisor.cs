@@ -330,6 +330,10 @@ public static class VllmAdvisor
         var share = copies.Sum(c => c.Sum(d => (long)(d.Total * utilization)));
         var budget = group.Sum(d => GpuPlan.BudgetOf(d) - (others?.GetValueOrDefault(d.Index) ?? 0));
         var ram = (m.Sleep ? p.WeightBytes * replicas : 0) + ((long)(m.KvCpuGb ?? 0) << 30) * replicas;
+        if (m.KvDiskGb is > 0 and var disk)
+        {
+            problems.Add(new("kvDiskGb", $"Its disk tier takes up to {disk * replicas} GB of the engine's /kvcache (KVCACHE_DIR): keep it on an NVMe drive with that room.", false));
+        }
         var fit = room <= 0 ? "none" : "gpu";
         var estimate = new MemoryEstimate(p.WeightBytes * replicas, room * replicas, Overhead * gpus.Count, share, budget,
             0, 0, ram, hw.RamForModels, p.Layers + 1, p.Layers, 0, p.Experts is > 0 ? p.Layers : 0, fit, p.Approximate);

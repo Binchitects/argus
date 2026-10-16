@@ -20,6 +20,8 @@ export type EngineModel = SavedModel & {
   quantization?: string | null
   specDecode?: string | null
   kvCpuGb?: number | null
+  kvTier?: 'cpu' | 'lmcache' | null
+  kvDiskGb?: number | null
   sleep?: boolean
   fallback?: string | null
 }

@@ -2019,6 +2019,13 @@ namespace Llm.Core.Data.Migrations
                     b.Property<int?>("KvCpuGb")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("KvDiskGb")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("KvTier")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.Property<string>("KvType")
                         .IsRequired()
                         .HasMaxLength(20)

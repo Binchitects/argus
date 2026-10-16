@@ -179,6 +179,20 @@ class SupervisorTests(unittest.TestCase):
         # Its heartbeat, for the app.
         self.assertGreater(json.loads((self.dir / "status" / "supervisor.json").read_text())["at"], time.time() - 10)
 
+    def test_a_kv_tier_reaches_the_server_and_no_secret_rides_in_its_environment(self):
+        port = free_port()
+        m = self.model("tiered", port, extra=("--kv-transfer-config", '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}'))
+        m["env"] = {"LMCACHE_CONFIG_FILE": "/presets/vllm/lmcache-tiered.yaml", "SOME_TOKEN": "leak", "bad name": "x"}
+        self.want(m)
+        self.run_supervisor()
+        self.until(lambda: self.status("tiered").get("phase") == "ready", "tiered ready")
+        pid = self.status("tiered")["pid"]
+        environ = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+        cmdline = b"\0".join(Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0"))
+        self.assertIn(b"LMCACHE_CONFIG_FILE=/presets/vllm/lmcache-tiered.yaml", environ)
+        self.assertFalse(any(e.startswith(b"SOME_TOKEN") for e in environ))
+        self.assertIn(b"LMCacheConnectorV1", cmdline)
+
     def test_sigterm_drains_every_model_and_exits(self):
         port = free_port()
         self.want(self.model("m", port))

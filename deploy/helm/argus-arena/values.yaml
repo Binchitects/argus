@@ -106,6 +106,8 @@ engines:
   backend: cuda
   mediaGpu: ""
   embedGpu: ""
+  # LMCache's remote store for the vLLM models' token cache (redis://arena-valkey:6379 with valkey.enabled); "": none.
+  lmcacheRemote: ""
 
 llamacpp:
   enabled: true
@@ -124,6 +126,8 @@ vllm:
   instances:
     - { name: vllm, gpus: 1, nodeSelector: {}, tolerations: [] }
   shmSize: 16Gi
+  # LMCache's disk tier (/kvcache): a claim on the node's NVMe (a local-path PV); "": an emptyDir, lost with the pod.
+  kvcacheClaim: ""
   resources: { requests: { cpu: "4", memory: 32Gi } }
 
 # Embeddings for Argus, on the CPU.

@@ -17,7 +17,7 @@ public sealed record LocalModelRequest(
     int? Ubatch, bool? Mtp, string? DraftHead, int? DraftMax, bool? Yarn, double? Temperature, double? TopP, int? TopK, double? MinP, double? PresencePenalty,
     string? ExtraPreset, bool? Thinking, bool? Tools, decimal? InputPerMtok, decimal? OutputPerMtok, string[]? Clear = null, string? Devices = null,
     decimal? CachedInputPerMtok = null, string? EngineKind = null, string? Engine = null, int? Replicas = null, double? GpuMemoryUtilization = null,
-    string? Quantization = null, string? SpecDecode = null, int? KvCpuGb = null, bool? Sleep = null, string? Fallback = null)
+    string? Quantization = null, string? SpecDecode = null, int? KvCpuGb = null, bool? Sleep = null, string? Fallback = null, string? KvTier = null, int? KvDiskGb = null)
 {
     /// <summary>A value to empty: a missing one is left as it is.</summary>
     public bool Clears(string field) => Clear?.Contains(field, StringComparer.OrdinalIgnoreCase) == true;
@@ -121,7 +121,7 @@ public static class ModelEndpoints
                     ? TokenCache.OfVllm(m, state.StatusOf(m.Name) == "loaded" ? await engines.CapacityAsync(m.Name, TimeSpan.FromSeconds(1), ct) : null)
                     : TokenCache.Of(m, files.GetValueOrDefault(m.File), onServers.Contains(m.Name), engine.Value.SessionCacheGb),
                 // Its engine, and what only some kinds have (EngineKinds).
-                engineKind = m.EngineKind, m.Engine, m.Replicas, m.GpuMemoryUtilization, m.Quantization, m.SpecDecode, m.KvCpuGb, m.Sleep, m.Fallback,
+                engineKind = m.EngineKind, m.Engine, m.Replicas, m.GpuMemoryUtilization, m.Quantization, m.SpecDecode, m.KvCpuGb, m.Sleep, m.Fallback, m.KvTier, m.KvDiskGb,
             });
         }
         foreach (var s in servers)
@@ -742,7 +742,7 @@ public static class ModelEndpoints
         Temperature = m.Temperature, TopP = m.TopP, TopK = m.TopK, MinP = m.MinP, PresencePenalty = m.PresencePenalty, ExtraPreset = m.ExtraPreset,
         Thinking = m.Thinking, Tools = m.Tools, InputPerMtok = m.InputPerMtok, CachedInputPerMtok = m.CachedInputPerMtok, OutputPerMtok = m.OutputPerMtok, Devices = m.Devices,
         EngineKind = m.EngineKind, Engine = m.Engine, Replicas = m.Replicas, GpuMemoryUtilization = m.GpuMemoryUtilization, Quantization = m.Quantization,
-        SpecDecode = m.SpecDecode, KvCpuGb = m.KvCpuGb, Sleep = m.Sleep, Fallback = m.Fallback,
+        SpecDecode = m.SpecDecode, KvCpuGb = m.KvCpuGb, Sleep = m.Sleep, Fallback = m.Fallback, KvTier = m.KvTier, KvDiskGb = m.KvDiskGb,
     };
 
     /// <summary>The request's values over the model's: a missing value is kept, one named in "clear" emptied.</summary>
@@ -783,6 +783,8 @@ public static class ModelEndpoints
         m.Quantization = body.Clears("quantization") ? null : body.Quantization is { } q ? (q.Trim() is { Length: > 0 } quant ? quant : null) : m.Quantization;
         m.SpecDecode = body.Clears("specDecode") ? null : body.SpecDecode is { } sd ? (sd.Trim() is { Length: > 0 } spec ? spec : null) : m.SpecDecode;
         m.KvCpuGb = body.Clears("kvCpuGb") ? null : body.KvCpuGb ?? m.KvCpuGb;
+        m.KvTier = body.Clears("kvTier") ? null : body.KvTier is { } tier ? (tier.Trim() is { Length: > 0 } t ? t : null) : m.KvTier;
+        m.KvDiskGb = body.Clears("kvDiskGb") ? null : body.KvDiskGb ?? m.KvDiskGb;
         m.Sleep = body.Sleep ?? m.Sleep;
         m.Fallback = body.Clears("fallback") ? null : body.Fallback is { } fb ? (fb.Trim() is { Length: > 0 } fallback ? fallback : null) : m.Fallback;
     }

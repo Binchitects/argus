@@ -44,8 +44,16 @@ public sealed class LocalModel
     public string? Quantization { get; set; }
     /// <summary>vLLM: speculative decoding, "mtp" (the model's own layers) or "eagle3" (with <see cref="DraftHead"/>, a folder); null: none.</summary>
     public string? SpecDecode { get; set; }
-    /// <summary>vLLM: RAM for a CPU tier of its token cache (the OffloadingConnector), in GB; null or 0: none.</summary>
+    /// <summary>vLLM: RAM for a CPU tier of its token cache, in GB a copy; null or 0: none.</summary>
     public int? KvCpuGb { get; set; }
+    /// <summary>
+    /// vLLM: what keeps its token cache beyond the GPU: "cpu" (vLLM's own OffloadingConnector, <see cref="KvCpuGb"/> of RAM)
+    /// or "lmcache" (LMCache: <see cref="KvCpuGb"/> of RAM, <see cref="KvDiskGb"/> of local disk that survives a restart,
+    /// and the stack's remote store when it has one); null: "cpu" when it has a CPU tier, else none.
+    /// </summary>
+    public string? KvTier { get; set; }
+    /// <summary>vLLM with LMCache: local disk for its token cache, in GB a copy (it survives a restart); null or 0: none.</summary>
+    public int? KvDiskGb { get; set; }
     /// <summary>vLLM: it may sleep (its weights to RAM) when its GPUs are lent to a picture or video job, rather than unload.</summary>
     public bool Sleep { get; set; } = true;
     /// <summary>The model that answers for it while it cannot (it restarts, or failed): the gateway's fallback, and the chat's.</summary>

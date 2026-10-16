@@ -45,6 +45,7 @@ spec:
             - { name: Engine__Backend, value: {{ .Values.engines.backend | quote }} }
             - { name: Engine__MediaGpu, value: {{ .Values.engines.mediaGpu | quote }} }
             - { name: Engine__EmbedGpu, value: {{ .Values.engines.embedGpu | quote }} }
+            - { name: Engine__LmcacheRemote, value: {{ .Values.engines.lmcacheRemote | quote }} }
             {{- include "arena.secretEnv" (list $ "Argus__AdminToken" "ARGUS_KEY") | nindent 12 }}
             - { name: Argus__GitlabUrl, value: {{ .Values.gitlab.url | quote }} }
             {{- include "arena.optionalSecretEnv" (list $ "HuggingFace__Token" "HF_TOKEN") | nindent 12 }}

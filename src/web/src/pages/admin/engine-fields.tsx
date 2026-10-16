@@ -117,6 +117,8 @@ interface VllmForm {
   specDecode: string
   draftHead: string
   kvCpuGb: string
+  kvTier: string
+  kvDiskGb: string
   sleep: boolean
   fallback: string
 }
@@ -137,6 +139,8 @@ function start(saved: EngineModel | null, snapshot: string): VllmForm {
     specDecode: saved?.specDecode ?? '',
     draftHead: saved?.draftHead ?? '',
     kvCpuGb: saved?.kvCpuGb ? String(saved.kvCpuGb) : '',
+    kvTier: saved?.kvTier ?? '',
+    kvDiskGb: saved?.kvDiskGb ? String(saved.kvDiskGb) : '',
     sleep: saved?.sleep ?? true,
     fallback: saved?.fallback ?? '',
   }
@@ -145,7 +149,7 @@ function start(saved: EngineModel | null, snapshot: string): VllmForm {
 /** What the API takes for a vLLM model: what is empty is cleared (the default), what is set is sent. */
 function request(form: VllmForm, file: string) {
   const n = (s: string) => (s.trim() === '' ? undefined : Number(s))
-  const clear = (['devices', 'gpuMemoryUtilization', 'quantization', 'specDecode', 'draftHead', 'kvCpuGb', 'fallback', 'engine'] as const).filter((k) => String(form[k]).trim() === '')
+  const clear = (['devices', 'gpuMemoryUtilization', 'quantization', 'specDecode', 'draftHead', 'kvCpuGb', 'kvTier', 'kvDiskGb', 'fallback', 'engine'] as const).filter((k) => String(form[k]).trim() === '')
   return {
     engineKind: 'vllm',
     file,
@@ -160,6 +164,8 @@ function request(form: VllmForm, file: string) {
     specDecode: form.specDecode || undefined,
     draftHead: form.draftHead || undefined,
     kvCpuGb: n(form.kvCpuGb),
+    kvTier: form.kvTier || undefined,
+    kvDiskGb: form.kvTier === 'lmcache' ? n(form.kvDiskGb) : undefined,
     sleep: form.sleep,
     fallback: form.fallback || undefined,
     clear,
@@ -322,9 +328,25 @@ export function VllmModelSection({
             </Select>
           </Field>
         )}
-        <Field label="CPU tier for its cache (GB)" hint="RAM a copy keeps conversations in (OffloadingConnector); empty: none." error={errors.kvCpuGb}>
+        <Field label="Cache beyond the GPU" hint="vLLM's own CPU tier, or LMCache (RAM, local disk that survives a restart, the stack's shared store)." error={errors.kvTier}>
+          <Select value={form.kvTier || 'cpu'} onValueChange={(v) => set('kvTier', v === 'cpu' ? '' : v)}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="cpu">vLLM's own (RAM)</SelectItem>
+              <SelectItem value="lmcache">LMCache (RAM and disk)</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="CPU tier for its cache (GB)" hint="RAM a copy keeps conversations in; empty: none." error={errors.kvCpuGb}>
           <Input inputMode="numeric" value={form.kvCpuGb} onChange={(ev) => set('kvCpuGb', ev.target.value)} />
         </Field>
+        {form.kvTier === 'lmcache' && (
+          <Field label="Disk tier (GB)" hint="Under the engine's /kvcache (KVCACHE_DIR), a copy; empty: none." error={errors.kvDiskGb}>
+            <Input inputMode="numeric" value={form.kvDiskGb} onChange={(ev) => set('kvDiskGb', ev.target.value)} />
+          </Field>
+        )}
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <Label className="flex items-center gap-3 font-normal">

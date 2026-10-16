@@ -794,7 +794,12 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             }
             args.AddRange(["--speculative-config", spec.ToJsonString()]);
         }
-        if (m.KvCpuGb is > 0 and var gb)
+        if (m.KvTier == "lmcache")
+        {
+            // LMCache: its tiers in its own file (LMCacheConfig), named to the process by LMCACHE_CONFIG_FILE.
+            args.AddRange(["--kv-transfer-config", new JsonObject { ["kv_connector"] = "LMCacheConnectorV1", ["kv_role"] = "kv_both" }.ToJsonString()]);
+        }
+        else if (m.KvCpuGb is > 0 and var gb)
         {
             args.AddRange(["--kv-transfer-config", new JsonObject
             {
@@ -819,7 +824,29 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// A vLLM model's processes on its engine: one per copy (NAME, or NAME@0, NAME@1... with several), each on its run of
     /// the model's GPUs, on the port it had (a model added never moves another), else the lowest free one.
     /// </summary>
-    public static IReadOnlyList<VllmEntry> VllmEntries(LocalModel m, string library, IReadOnlyDictionary<string, int> ports, ISet<int> taken, int firstPort)
+    /// <summary>
+    /// LMCache's configuration for a model's copy (LMCACHE_CONFIG_FILE): its RAM tier, its disk tier under /kvcache (the
+    /// engine's NVMe; it survives a restart), and the stack's remote store (Engine:LmcacheRemote, a Valkey) when there is one.
+    /// </summary>
+    public static string LmcacheConfig(LocalModel m, string copy, string? remote)
+    {
+        var inv = CultureInfo.InvariantCulture;
+        var sb = new StringBuilder("# Written by the app (Admin -> Models). LMCache reads it as its process starts.\n");
+        sb.Append("chunk_size: 256\n");
+        sb.Append(inv, $"local_cpu: {(m.KvCpuGb is > 0 ? "true" : "false")}\nmax_local_cpu_size: {m.KvCpuGb ?? 0}\n");
+        if (m.KvDiskGb is > 0 and var disk)
+        {
+            sb.Append(inv, $"local_disk: \"file:///kvcache/{copy}/\"\nmax_local_disk_size: {disk}\n");
+        }
+        if (remote is { Length: > 0 } r)
+        {
+            sb.Append(inv, $"remote_url: \"{r}\"\nremote_serde: \"naive\"\n");
+        }
+        return sb.ToString();
+    }
+
+    public static IReadOnlyList<VllmEntry> VllmEntries(LocalModel m, string library, IReadOnlyDictionary<string, int> ports, ISet<int> taken, int firstPort,
+        string? presets = null)
     {
         var replicas = Math.Max(1, m.Replicas);
         var gpus = Hardware.ParseDevices(m.Devices) ?? [];
@@ -836,7 +863,10 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
                     port++;
                 }
             }
-            entries.Add(new VllmEntry(m.Name, name, port, groups[i], false, VllmArgs(m, library, Math.Max(1, groups[i].Count)), Math.Max(1, m.Parallel)));
+            // LMCache's file, as the engine sees the presets (/presets/INSTANCE).
+            var env = m.KvTier == "lmcache" && presets is not null
+                ? new Dictionary<string, string>(StringComparer.Ordinal) { ["LMCACHE_CONFIG_FILE"] = $"{presets.TrimEnd('/')}/lmcache-{name}.yaml" } : null;
+            entries.Add(new VllmEntry(m.Name, name, port, groups[i], false, VllmArgs(m, library, Math.Max(1, groups[i].Count)), Math.Max(1, m.Parallel), env));
         }
         return entries;
     }
@@ -863,7 +893,15 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             var entries = new List<VllmEntry>();
             foreach (var m in mine.OrderBy(m => ports.ContainsKey(m.Replicas > 1 ? m.Name + "@0" : m.Name) ? 0 : 1))
             {
-                entries.AddRange(VllmEntries(m, options.Value.EngineLibraryDir, ports, taken, backend.FirstPort));
+                var made = VllmEntries(m, options.Value.EngineLibraryDir, ports, taken, backend.FirstPort, $"/presets/{backend.Name}");
+                entries.AddRange(made);
+                if (m.KvTier == "lmcache")
+                {
+                    foreach (var e in made)
+                    {
+                        backend.WriteText($"lmcache-{e.Name}.yaml", LmcacheConfig(m, e.Name, options.Value.LmcacheRemote));
+                    }
+                }
             }
             backend.Write(VllmBackend.PresetsFile, entries);
             var desired = backend.Desired();

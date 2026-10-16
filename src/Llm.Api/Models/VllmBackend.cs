@@ -10,13 +10,23 @@ namespace Llm.Api.Models;
 /// One vLLM process the supervisor runs: a model, or one copy of it ("NAME@0", "NAME@1"), its port, GPUs, whether it
 /// should sleep, its `vllm serve` arguments, and its answers at once (--max-num-seqs).
 /// </summary>
-public sealed record VllmEntry(string Model, string Name, int Port, IReadOnlyList<int> Gpus, bool Sleep, IReadOnlyList<string> Args, int Parallel)
+/// <param name="Env">More environment for its process (LMCACHE_CONFIG_FILE): never a secret (the supervisor refuses keys and tokens).</param>
+public sealed record VllmEntry(string Model, string Name, int Port, IReadOnlyList<int> Gpus, bool Sleep, IReadOnlyList<string> Args, int Parallel,
+    IReadOnlyDictionary<string, string>? Env = null)
 {
-    public JsonObject ToJson() => new()
+    public JsonObject ToJson()
     {
-        ["model"] = Model, ["name"] = Name, ["port"] = Port, ["gpus"] = new JsonArray([.. Gpus.Select(g => (JsonNode)g)]), ["sleep"] = Sleep,
-        ["args"] = new JsonArray([.. Args.Select(a => (JsonNode)a)]), ["parallel"] = Parallel,
-    };
+        var o = new JsonObject
+        {
+            ["model"] = Model, ["name"] = Name, ["port"] = Port, ["gpus"] = new JsonArray([.. Gpus.Select(g => (JsonNode)g)]), ["sleep"] = Sleep,
+            ["args"] = new JsonArray([.. Args.Select(a => (JsonNode)a)]), ["parallel"] = Parallel,
+        };
+        if (Env is { Count: > 0 } env)
+        {
+            o["env"] = new JsonObject([.. env.OrderBy(e => e.Key, StringComparer.Ordinal).Select(e => KeyValuePair.Create(e.Key, (JsonNode?)e.Value))]);
+        }
+        return o;
+    }
 
     public static VllmEntry? From(JsonObject o)
     {
@@ -24,7 +34,8 @@ public sealed record VllmEntry(string Model, string Name, int Port, IReadOnlyLis
         {
             return new VllmEntry(o["model"]?.GetValue<string>() ?? o["name"]!.GetValue<string>(), o["name"]!.GetValue<string>(), o["port"]!.GetValue<int>(),
                 [.. (o["gpus"] as JsonArray ?? []).Select(g => g!.GetValue<int>())], o["sleep"]?.GetValue<bool>() ?? false,
-                [.. (o["args"] as JsonArray ?? []).Select(a => a!.GetValue<string>())], o["parallel"]?.GetValue<int>() ?? 1);
+                [.. (o["args"] as JsonArray ?? []).Select(a => a!.GetValue<string>())], o["parallel"]?.GetValue<int>() ?? 1,
+                o["env"] is JsonObject env ? env.ToDictionary(e => e.Key, e => e.Value!.GetValue<string>(), StringComparer.Ordinal) : null);
         }
         catch (Exception ex) when (ex is InvalidOperationException or FormatException or NullReferenceException)
         {
@@ -92,6 +103,19 @@ public sealed class VllmBackend(VllmEngineOptions instance, EngineOptions engine
     {
         var text = new JsonObject { ["models"] = new JsonArray([.. entries.OrderBy(e => e.Name, StringComparer.Ordinal).Select(e => (JsonNode)e.ToJson())]) }
             .ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n";
+        Directory.CreateDirectory(ConfigDir);
+        var path = Path.Combine(ConfigDir, file);
+        if (File.Exists(path) && File.ReadAllText(path) == text)
+        {
+            return;
+        }
+        File.WriteAllText(path + ".tmp", text);
+        File.Move(path + ".tmp", path, overwrite: true);
+    }
+
+    /// <summary>Writes another file of its presets (LMCache's configuration), only when it changes.</summary>
+    public void WriteText(string file, string text)
+    {
         Directory.CreateDirectory(ConfigDir);
         var path = Path.Combine(ConfigDir, file);
         if (File.Exists(path) && File.ReadAllText(path) == text)

@@ -117,11 +117,17 @@ spec:
             - { name: engine, mountPath: /presets, readOnly: true }
             - { name: status, mountPath: /status }
             - { name: shm, mountPath: /dev/shm }
+            - { name: kvcache, mountPath: /kvcache }
       volumes:
         - { name: config, configMap: { name: arena-config, defaultMode: 0555 } }
         {{- include "arena.claim" (list "models" (include "arena.modelsClaim" $)) | nindent 8 }}
         {{- include "arena.claim" (list "engine" "arena-engine") | nindent 8 }}
         {{- include "arena.claim" (list "status" "arena-vllm-status") | nindent 8 }}
+        {{- if $.Values.vllm.kvcacheClaim }}
+        {{- include "arena.claim" (list "kvcache" $.Values.vllm.kvcacheClaim) | nindent 8 }}
+        {{- else }}
+        - { name: kvcache, emptyDir: {} }
+        {{- end }}
         - { name: shm, emptyDir: { medium: Memory, sizeLimit: {{ $.Values.vllm.shmSize }} } }
 ---
 apiVersion: v1

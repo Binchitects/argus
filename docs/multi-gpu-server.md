@@ -478,6 +478,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
 14. **KV tier.**
     - `KvTier = none | cpu(GB) | lmcache(cpu GB, disk GB, remote)`. The app writes the `OffloadingConnector` config or the `lmcache-<model>.yaml`, and the advisor counts RAM and disk.
     - Tests: generated arguments and files; fake-vllm accepts them.
+    - **Done**: `KvTier` (`cpu`: vLLM's OffloadingConnector with `KvCpuGb`; `lmcache`: `LMCacheConnectorV1`, its `lmcache-<copy>.yaml` written beside the presets with RAM, a disk tier under `/kvcache` (`KvDiskGb`, `KVCACHE_DIR` on compose, `vllm.kvcacheClaim` on Helm) and the stack's shared store (`LMCACHE_REMOTE` / `engines.lmcacheRemote`), named to the process by `LMCACHE_CONFIG_FILE` in its environment); the advisor counts the RAM and warns of the disk; the form offers it (migration `KvTiers`). Tests: `VllmBackendTests`, `test_vllm_supervisor.py` (the tier reaches the fake server; no secret rides in its environment).
 15. **Fair queue for API keys and engine priority.**
     - The guardrail admits through the gate; 429 with Retry-After; group priority passed to vLLM `priority`; shrink admission on waiting or KV pressure.
     - Tests: `scale-test.py` scenarios against fake-vllm.

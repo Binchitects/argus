@@ -93,6 +93,8 @@ services:
       Engine__Backend: ${LLAMACPP_BACKEND:-cuda}
       Engine__MediaGpu: ${MEDIA_GPU:-}
       Engine__EmbedGpu: ${EMBED_GPU:-}
+      # LMCache's remote store for the vLLM models' token cache (redis://valkey:6379 with the valkey profile); empty: none.
+      Engine__LmcacheRemote: ${LMCACHE_REMOTE:-}
       Argus__AdminToken: ${ARGUS_KEY:?set ARGUS_KEY in .env}
       Argus__GitlabUrl: ${GITLAB_URL:-}
       HuggingFace__Token: ${HF_TOKEN:-}
@@ -203,6 +205,8 @@ services:
       - ${MODELS_DIR:-./models}:/library:ro
       - engine:/presets:ro
       - vllm-status:/status
+      # LMCache's disk tier (a model's KV tier on disk): fast local NVMe, kept across restarts.
+      - ${KVCACHE_DIR:-./kvcache}:/kvcache
     ulimits: { memlock: -1 }
     # Tensor parallel ranks talk through shared memory (NCCL).
     shm_size: ${VLLM_SHM:-16gb}
