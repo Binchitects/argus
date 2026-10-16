@@ -14,6 +14,10 @@ router_settings:
   # says why, never the gateway in the middle of the engine's reading.
   timeout: 960
   stream_timeout: 960
+  # Several gateway replicas (ha.yml, Helm valkey.enabled) share their counts here: least-busy, each
+  # deployment's max_parallel_requests and the keys' limits stay global. Unset: each counts alone.
+  redis_host: os.environ/REDIS_HOST
+  redis_port: os.environ/REDIS_PORT
 
 litellm_settings:
   drop_params: true

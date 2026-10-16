@@ -152,6 +152,18 @@ services:
     volumes: [./config/litellm.yaml:/app/arena.yaml:ro]
     depends_on: { postgres: { condition: service_healthy, required: false } }
 
+  # Valkey: the gateway's shared counts when it runs as several replicas (ha.yml), and LMCache's
+  # shared store (LMCACHE_REMOTE). Off until asked for: COMPOSE_PROFILES=ha (its image comes from
+  # ECR's mirror of Docker's library, not pulled while the profile is off). On the stack's network
+  # only, never published; append-only, so a restart keeps the counts.
+  valkey:
+    <<: *service
+    image: ${VALKEY_IMAGE:-public.ecr.aws/docker/library/valkey:8.1-alpine}
+    container_name: valkey
+    profiles: [ha]
+    command: [valkey-server, --appendonly, "yes", --save, ""]
+    volumes: [valkey:/data]
+
   # The chat models (Admin -> Models), loaded and unloaded live.
   llamacpp:
     <<: [*service, *gpu]
@@ -450,6 +462,7 @@ volumes:
   # What the picture and video servers say they do (services/sd-serve.sh), every 2 s: kept in memory, theirs to write.
   media-status:
     driver_opts: { type: tmpfs, device: tmpfs, o: "uid=65534,gid=65534,mode=0755,size=64m" }
+  valkey:
   # What the vLLM supervisor says of its models (and the GPUs it sees), every 2 s: in memory, its to write.
   vllm-status:
     driver_opts: { type: tmpfs, device: tmpfs, o: "mode=0755,size=64m" }

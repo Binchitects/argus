@@ -56,6 +56,7 @@ images:
   nodeExporter: { repository: prom/node-exporter, tag: v1.9.0 }
   # The CPU temperature exporter's (services/cpu-temp-exporter, from the chart's files).
   python: { repository: python, tag: 3.13-slim }
+  valkey: { repository: public.ecr.aws/docker/library/valkey, tag: 8.1-alpine }
   # vLLM (vllm.enabled): an image you have (NGC's, or arena-vllm built from deploy/services/vllm.Dockerfile and
   # pushed to your registry); nothing is pulled while it is off (docs/multi-gpu-server.md §6).
   vllm: { repository: nvcr.io/nvidia/vllm, tag: 26.09-py3 }
@@ -91,9 +92,16 @@ externalDatabase:
 
 litellm:
   # The gateway counts API keys' rate limits in its own memory: with several
-  # replicas each counts on its own (docs/admin.md, Rate limits for API keys).
+  # replicas each counts on its own (docs/admin.md, Rate limits for API keys),
+  # unless valkey.enabled: then they share their counts there.
   replicas: 1
   resources: { requests: { cpu: 250m, memory: 1Gi } }
+
+# Valkey: the gateway replicas' shared counts (and LMCache's shared store, engines.lmcacheRemote).
+# Its image is ECR's mirror of Docker's library; a cache, so one replica and no persistence is enough.
+valkey:
+  enabled: false
+  resources: { requests: { cpu: 100m, memory: 256Mi } }
 
 # The chat models' engine (llama.cpp in router mode), on GPUs. Off: only other GPU servers' models.
 # The GPU resource the GPU pods ask for: nvidia.com/gpu (NVIDIA's device plugin or GPU Operator), or
@@ -106,7 +114,7 @@ engines:
   backend: cuda
   mediaGpu: ""
   embedGpu: ""
-  # LMCache's remote store for the vLLM models' token cache (redis://arena-valkey:6379 with valkey.enabled); "": none.
+  # LMCache's remote store for the vLLM models' token cache (redis://valkey:6379 with valkey.enabled); "": none.
   lmcacheRemote: ""
 
 llamacpp:

@@ -79,6 +79,11 @@ spec:
             {{- include "arena.secretEnv" (list $ "ENGINE_API_KEY" "ENGINE_KEY") | nindent 12 }}
             - { name: STORE_MODEL_IN_DB, value: "True" }
             - { name: LITELLM_LOCAL_MODEL_COST_MAP, value: "True" }
+            {{- if .Values.valkey.enabled }}
+            # The replicas' shared counts (router_settings.redis_*).
+            - { name: REDIS_HOST, value: valkey }
+            - { name: REDIS_PORT, value: "6379" }
+            {{- end }}
           readinessProbe: { httpGet: { path: /health/readiness, port: http }, periodSeconds: 15, timeoutSeconds: 5 }
           resources: {{- toYaml .Values.litellm.resources | nindent 12 }}
           volumeMounts: [{ name: config, mountPath: /app/arena.yaml, subPath: litellm.yaml }]
@@ -92,3 +97,39 @@ metadata:
 spec:
   selector: {{- include "arena.selector" (dict "root" $ "name" "litellm") | nindent 4 }}
   ports: [{ name: http, port: 4000, targetPort: http }]
+{{- if .Values.valkey.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "valkey") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" "valkey") | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" . | nindent 6 }}
+      containers:
+        - name: valkey
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.valkey) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          args: [valkey-server, --appendonly, "yes", --save, ""]
+          ports: [{ name: redis, containerPort: 6379 }]
+          readinessProbe: { tcpSocket: { port: redis }, periodSeconds: 10 }
+          resources: {{- toYaml .Values.valkey.resources | nindent 12 }}
+          volumeMounts: [{ name: data, mountPath: /data }]
+      volumes: [{ name: data, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "arena.selector" (dict "root" $ "name" "valkey") | nindent 4 }}
+  ports: [{ name: redis, port: 6379, targetPort: redis }]
+{{- end }}

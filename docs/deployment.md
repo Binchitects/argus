@@ -355,6 +355,8 @@ how). **no**: missing, with the reason.
 | `sandbox` | yes | yes | differs: no network by a NetworkPolicy (the CNI must enforce it); no `pids_limit` (the node's pod PID limit) |
 | `laya` | off (`COMPOSE_PROFILES=laya`) | the same | off (`laya.enabled`); a NetworkPolicy for compose's internal network |
 | `prometheus`, `alertmanager`, `loki` | yes | yes | yes |
+| `valkey` (the gateway's shared counts, LMCache's shared store) | off (`COMPOSE_PROFILES=ha`; `ha.yml` runs `LITELLM_REPLICAS` gateway replicas on it) | the same | off (`valkey.enabled`, with `litellm.replicas`) |
+| `dcgm-exporter` | off (`COMPOSE_PROFILES=dcgm`) | the same, CDI | no: the cluster's (GPU Operator) |
 | `node-exporter`, `cpu-temp-exporter` | yes | yes | yes: the `host-exporters` DaemonSet (`monitoring.hostExporters`) |
 | `promtail` | yes | differs: Podman's socket for Docker's | no: the cluster's log agent ships the pods' logs to Loki |
 | `gpu-exporter` | yes | yes, CDI | no: the cluster's (NVIDIA's DCGM exporter); until Prometheus scrapes one, `GpuExporterDown` fires |

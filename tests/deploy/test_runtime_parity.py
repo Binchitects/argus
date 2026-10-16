@@ -37,6 +37,8 @@ ALLOWED: dict[tuple[str, str, str], str] = {
     ("env", "app", "Storage__BackupsKept"): "backups are backup.sh's (compose); a cluster backs up its own volumes",
     ("env", "app", "Stack__Acme"): "Traefik's Let's Encrypt (compose); the Ingress takes a TLS Secret",
     ("env", "app", "Engine__Enabled"): "Helm can leave the engine out (llamacpp.enabled); compose always runs it",
+    ("env", "litellm", "REDIS_HOST"): "the gateway's shared counts: ha.yml on compose, valkey.enabled on Helm",
+    ("env", "litellm", "REDIS_PORT"): "as REDIS_HOST",
     ("env", "app", "Engine__LlamaCpp"): "Helm can run vLLM without llama.cpp (llamacpp.enabled false); compose always runs llama.cpp",
     ("env", "app", "Modules__imagegen"): "Helm says outright which modules run; compose's app looks the names up",
     ("env", "app", "Modules__videogen"): "as Modules__imagegen",
@@ -94,7 +96,7 @@ def compose_config(*files: str) -> dict:
         env_file = Path(tmp) / "parity.env"
         env_file.write_text(example)
         env = {k: v for k, v in os.environ.items() if not k.startswith(("COMPOSE_", "DOCKER_HOST"))}
-        env.update({"COMPOSE_PROFILES": "laya,vllm", "PODMAN_COMPOSE_WARNING_LOGS": "false"})
+        env.update({"COMPOSE_PROFILES": "laya,vllm,ha", "PODMAN_COMPOSE_WARNING_LOGS": "false"})
         args = [*cmd, "--env-file", str(env_file)]
         for f in files:
             args += ["-f", str(DEPLOY / f)]
@@ -127,7 +129,7 @@ def helm_rendered() -> dict[str, dict[str, set[str]]] | None:
         return None
     if helm is None:
         return None
-    on = ["laya.enabled=true", "videogen.enabled=true", "vllm.enabled=true", "argus.packLibraryClaim=packs"]
+    on = ["laya.enabled=true", "videogen.enabled=true", "vllm.enabled=true", "valkey.enabled=true", "argus.packLibraryClaim=packs"]
     out: dict[str, dict[str, set[str]]] = {}
     # This chart's Postgres, and an external one with a CA of its own: together, every variable a pod can be given.
     # The output holds the Secret it made up: it is read here and never printed.

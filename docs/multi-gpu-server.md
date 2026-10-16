@@ -486,6 +486,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
 16. **LiteLLM HA.**
     - Valkey service (ECR mirror image); `router_settings.redis_*`; LiteLLM replicas in `scale.yml`; Traefik health checks.
     - Tests: `scale-test.py` with 2 LiteLLM replicas; the limits stay global.
+    - **Done**: `valkey` (compose profile `ha`, image from ECR's mirror, not pulled; Helm `valkey.enabled`), `deploy/ha.yml` (`LITELLM_REPLICAS` gateway replicas behind the service's name, `REDIS_HOST`/`REDIS_PORT`), `router_settings.redis_host/redis_port` read from the environment (unset: each replica counts alone, as before). Traefik reaches the replicas through Docker's DNS, so no health check is added. Tests: `tests/deploy/test_ha.py`, the parity test with the profile and `valkey.enabled`; the 2-replica `scale-test.py` run needs a running stack.
 17. **Postgres PITR.**
     - pgBackRest in the Postgres image, WAL archive to `BACKUP_DIR`/NAS/S3, `backup.sh --pitr`, and a restore drill (`scripts/restore-drill.sh` restores to a timestamp in a scratch container and checks it).
     - Docs in `deployment.md` "Backups".
