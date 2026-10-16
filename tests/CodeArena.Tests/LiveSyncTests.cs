@@ -223,9 +223,10 @@ public sealed class LiveSyncTests : IDisposable
         // One sent in part before: Arena has its question only.
         Assert.Equal(0, await h.Run("", "-p", "partly sent"));
         var partly = _mcp.Chats.All.Single();
-        partly.Messages.RemoveAt(1);
+        _mcp.Chats.Lose(partly, 1);
         var partlyFile = Directory.GetFiles(h.Paths.SessionsDir, "*.jsonl").Except(files).Single();
-        File.AppendAllText(partlyFile, new JsonObject { ["type"] = "sync", ["conversation"] = partly.Id, ["server"] = 1, ["pushed"] = 1 }.ToJsonString() + "\n");
+        File.WriteAllLines(partlyFile, File.ReadAllLines(partlyFile).Where(l => !l.Contains("\"type\":\"sent\"", StringComparison.Ordinal))
+            .Append(new JsonObject { ["type"] = "sent", ["ids"] = new JsonArray(partly.Messages[0]["id"]!.GetValue<string>()) }.ToJsonString()));
         File.SetLastWriteTimeUtc(partlyFile, DateTime.UtcNow.AddHours(-3));
 
         Assert.Equal(0, await h.Run("/sync all\n/exit\n", "chat"));

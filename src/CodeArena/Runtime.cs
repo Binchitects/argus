@@ -339,23 +339,38 @@ internal sealed partial class Runtime : IAsyncDisposable
         }
         Agent.Session = Session;
         Context.TodosChanged = todos => Session.Todos(todos);
-        Agent.BeforeTurn = ct => Sync?.TakeInAsync(ct) ?? Task.FromResult<IReadOnlyList<System.Text.Json.Nodes.JsonObject>>([]);
-        StartSync(resumed);
+        Agent.BeforeTurn = TakeInForTurnAsync;
+        Agent.AfterTurn = () => Sync?.EndTurn();
+        StartSync();
         if (o.WebChat is { } web && await ContinueWebChatAsync(web, ct) is { } said)
         {
             Ui.Info(said);
         }
     }
 
+    /// <summary>
+    /// A turn starts: the web chat is this session's until it ends (the web queues the person's messages meanwhile), and
+    /// what was added there comes in first.
+    /// </summary>
+    public async Task<Taken> TakeInForTurnAsync(CancellationToken ct)
+    {
+        if (Sync is not { } sync)
+        {
+            return Taken.None;
+        }
+        await sync.BeginTurnAsync(ct);
+        return await sync.TakeInAsync(ct);
+    }
+
     /// <summary>Keeps the session now in use in step with its chat in Arena (the last one's sync ends, sending what it still has).</summary>
-    private void StartSync(SessionData? data)
+    private void StartSync()
     {
         var previous = Sync;
         Sync = ChatSync.Start(Config, Http, Session, Workspace.Root, () => Model.Name, (warn, text) =>
         {
             Notice(warn, text);
             Agent?.Events?.Notice(text);
-        }, data);
+        });
         if (Sync is not null)
         {
             Sync.OnNews = _webNews;
@@ -478,8 +493,7 @@ internal sealed partial class Runtime : IAsyncDisposable
                 TryDelete(empty);
             }
         }
-        var taken = Sync is null ? [] : await Sync.TakeInAsync(ct);
-        Agent.TakeIn(taken);
+        Agent.TakeIn(Sync is null ? Taken.None : await Sync.TakeInAsync(ct));
         return null;
     }
 
@@ -505,9 +519,9 @@ internal sealed partial class Runtime : IAsyncDisposable
             var s = waiting[i];
             progress?.Invoke($"{i + 1}/{waiting.Count} {s.Preview}");
             var written = File.GetLastWriteTimeUtc(s.File);
-            var data = SessionStore.Load(s.File);
-            var sync = ChatSync.Start(Config, Http, SessionStore.Open(s.File), data.Cwd ?? Workspace.Root, () => data.Model ?? Model.Name, (_, _) => { }, data,
-                new DateTimeOffset(written, TimeSpan.Zero));
+            var store = SessionStore.Open(s.File);
+            var (cwd, model) = store.Read(d => (d.Cwd, d.Model));
+            var sync = ChatSync.Start(Config, Http, store, cwd ?? Workspace.Root, () => model ?? Model.Name, (_, _) => { });
             if (sync is null)
             {
                 break;
@@ -605,9 +619,8 @@ internal sealed partial class Runtime : IAsyncDisposable
         var (messages, restored, lost) = Checkpoints.Rewind(number, files);
         if (chat)
         {
-            Agent.Load([.. Agent.Messages.Take(messages)]);
-            // The session file reads back as it is now; the chat in Arena keeps what was said.
-            Session.Compacted(Agent.Messages);
+            // The session file reads back as it is now; the chat in Arena keeps what was said, and goes on from there on a branch of its own.
+            Agent.Load(Sync is { } sync ? await sync.RewindAsync(messages, ct) : Session.Rewind(messages));
         }
         var said = new List<string>
         {
@@ -836,7 +849,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         Agent.Clear();
         Context.Todos = [];
         Context.TodosChanged = todos => Session.Todos(todos);
-        StartSync(null);
+        StartSync();
     }
 
     /// <summary>Switches to a saved session (/resume).</summary>
@@ -853,7 +866,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             Model.Info = info;
         }
-        StartSync(data);
+        StartSync();
     }
 
     public void SwitchModel(ModelInfo info)

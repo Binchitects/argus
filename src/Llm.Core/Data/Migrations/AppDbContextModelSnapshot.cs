@@ -721,6 +721,9 @@ namespace Llm.Core.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("ProjectId");
 
+                    b.Property<DateTimeOffset?>("CodeArenaTurnUntil")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 

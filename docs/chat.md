@@ -65,7 +65,9 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     out of line; **Send now** stops the answer (keeping what it has) and sends
     it at once. Up to 10 wait per chat. Each is checked as a sent message is
     (the safeguards), when it is queued. Messages still waiting when the app
-    restarts go once it is back.
+    restarts go once it is back. While [Code Arena](code-arena.md#chats-in-arena)
+    is answering in the chat, the page says so and every message is queued:
+    they go when its turn ends.
 - **Deep research.** A tool, **Deep research** in the chat's **Tools** menu
   (there is no separate button): while it is on in a chat (it is in new chats
   unless an admin changes that), the model starts it (`deep_research`) when you

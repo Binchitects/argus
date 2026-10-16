@@ -33,8 +33,7 @@ public sealed class SyncTests : IDisposable
         Assert.Equal($"{chat.Ref}:1", chat.Messages[1]["ref"]!.GetValue<string>());
 
         // The person carries on in the web chat; the next turn here hears it first.
-        chat.Messages.Add(Said("user", "asked on the web"));
-        chat.Messages.Add(Said("assistant", "answered on the web"));
+        _mcp.Chats.Append(chat, Said("user", "asked on the web"), Said("assistant", "answered on the web"));
         Assert.Equal(0, await h.Run("", "-p", "second question", "--continue"));
         var sent = _gateway.Requests[^1]["messages"]!.AsArray().Skip(1).Select(m => m!["content"]!.ToString()).ToList();
         Assert.Equal(["first question", "answer to first question", "asked on the web", "answered on the web", "second question"], sent);
@@ -73,7 +72,7 @@ public sealed class SyncTests : IDisposable
         var chat = Assert.Single(_mcp.Chats.All);
         // As if the answers to the sends were lost: the session's file says Arena has none of its messages.
         var file = Directory.GetFiles(h.Paths.SessionsDir, "*.jsonl").Single();
-        File.AppendAllText(file, new JsonObject { ["type"] = "sync", ["conversation"] = chat.Id, ["server"] = 0, ["pushed"] = 0 }.ToJsonString() + "\n");
+        File.WriteAllLines(file, File.ReadAllLines(file).Where(l => !l.Contains("\"type\":\"sent\"", StringComparison.Ordinal)));
 
         Assert.Equal(0, await h.Run("", "-p", "two", "--continue"));
         Assert.Equal(["one", "answer to one", "two", "answer to two"], chat.Messages.Select(Content));

@@ -45,6 +45,11 @@ public sealed class Conversation
     public string? OriginRef { get; set; }
     /// <summary>Where it runs there: the Code Arena session's folder.</summary>
     public string? OriginPlace { get; set; }
+    /// <summary>
+    /// Code Arena is answering in this chat until then (its turn, held while it works and renewed as it goes): the web
+    /// keeps the person's messages in the chat's queue meanwhile, and they go when Code Arena's turn ends. Null: it is not.
+    /// </summary>
+    public DateTimeOffset? CodeArenaTurnUntil { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<ChatMessage> Messages { get; set; } = [];

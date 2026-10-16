@@ -44,6 +44,11 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
                 {
                     return false;
                 }
+                // Code Arena is answering in it: this one goes when its turn ends.
+                if (CodeArenaSync.Answering(c))
+                {
+                    return false;
+                }
                 // Answering: this one goes when that answer ends.
                 job = jobs.Reserve(c.Id, c.UserId);
                 if (job is null)

@@ -4,14 +4,34 @@ namespace CodeArena;
 
 /// <summary>
 /// A saved session as it is listed: which, where, when, how it began, the chat in Arena it is kept in step with (null:
-/// none), whether it ever was (false: it was never sent to Arena; true with no chat: its chat was deleted there), and
-/// how many of the messages it added itself Arena has of how many there are.
+/// none), whether that chat was deleted there (it is not kept in step any more), and how many of its messages Arena lacks.
 /// </summary>
-internal sealed record SessionSummary(string Id, string File, string? Cwd, DateTime Updated, string Preview, int Messages, string? Conversation = null, bool Synced = false,
-    int Pushed = 0, int Local = 0)
+internal sealed record SessionSummary(string Id, string File, string? Cwd, DateTime Updated, string Preview, int Messages, string? Conversation = null,
+    bool Unlinked = false, int Waiting = 0)
 {
     /// <summary>Arena lacks some of it: never sent, or sent in part (its chat not deleted there).</summary>
-    public bool Unsent => Local > 0 && (!Synced || (Conversation is not null && Pushed < Local));
+    public bool Unsent => Waiting > 0 && !Unlinked;
+}
+
+/// <summary>
+/// A message of the session as it goes to its chat in Arena, or came from it, in the chat's order: each with Arena's id
+/// for it once Arena has it.
+/// </summary>
+internal sealed class SyncEntry
+{
+    /// <summary>The message in the model's own shape.</summary>
+    public required JsonObject Message { get; init; }
+    /// <summary>Arena's id for it; null: not sent yet; empty: Arena has it, but its id was never known (a session from before ids).</summary>
+    public string? Id { get; set; }
+    /// <summary>Taken in from the web chat.</summary>
+    public bool Web { get; init; }
+    /// <summary>Its number among the session's messages: Arena knows it as session:number (its ref), so a message sent twice is one.</summary>
+    public int Key { get; init; }
+    public DateTimeOffset At { get; init; }
+    /// <summary>The model that wrote it (an answer).</summary>
+    public string? Model { get; init; }
+    /// <summary>An answer's tokens, when the gateway said.</summary>
+    public TokenUsage? Usage { get; init; }
 }
 
 /// <summary>A saved session read back: its messages (after the last compaction), model, to-do list and tokens.</summary>
@@ -20,6 +40,7 @@ internal sealed class SessionData
     public string Id { get; init; } = "";
     public string? Cwd { get; set; }
     public string? Model { get; set; }
+    /// <summary>What the model reads: a summary of what came before <see cref="From"/>, if any, then <see cref="Stream"/> from there.</summary>
     public List<JsonObject> Messages { get; } = [];
     public List<TodoItem> Todos { get; set; } = [];
     public long Prompt { get; set; }
@@ -29,29 +50,187 @@ internal sealed class SessionData
     public Dictionary<int, (string? Model, TokenUsage? Usage)> Answers { get; } = [];
     /// <summary>The chat in Arena this session is kept in step with; null: none yet (or it was deleted there).</summary>
     public string? Conversation { get; set; }
-    /// <summary>The Arena chat's messages as last seen in step with it.</summary>
-    public int ServerCount { get; set; }
-    /// <summary>How many of <see cref="Local"/> Arena has.</summary>
-    public int Pushed { get; set; }
     /// <summary>The chat in Arena was deleted: the session is no longer kept in step.</summary>
     public bool Unlinked { get; set; }
-    /// <summary>Every message this session added itself (not those taken in from the web), compactions aside, in order.</summary>
-    public List<JsonObject> Local { get; } = [];
+    /// <summary>
+    /// Every message of the conversation in the order of its chat in Arena, compactions aside (the chat keeps what was
+    /// summarized): those this session added, and those taken in from the web.
+    /// </summary>
+    public List<SyncEntry> Stream { get; } = [];
+    /// <summary>Where in <see cref="Stream"/> what the model reads word for word starts (before it: a summary, or nothing).</summary>
+    public int From { get; set; }
+    /// <summary>The session went back to before a turn Arena has (/rewind): what it adds next goes on a branch of its own there.</summary>
+    public bool Branch { get; set; }
+    /// <summary>A compaction's summary Arena has not had: of <see cref="Stream"/> up to UpTo.</summary>
+    public (int UpTo, string Text)? Summary { get; set; }
+    /// <summary>The web's summary last taken in (the id of the last message it covers): not taken in again.</summary>
+    public string? WebSummary { get; set; }
+    /// <summary>How many message lines the file has (the next one's number).</summary>
+    public int Keys { get; set; }
+
+    /// <summary>Where the messages Arena lacks start in <see cref="Stream"/>: the last ones, with no id.</summary>
+    public int FirstUnsent
+    {
+        get
+        {
+            var i = Stream.Count;
+            while (i > 0 && Stream[i - 1].Id is null)
+            {
+                i--;
+            }
+            return i;
+        }
+    }
+
+    /// <summary>How many messages Arena lacks.</summary>
+    public int Waiting => Stream.Count - FirstUnsent;
+
+    /// <summary>Arena's id of the last message both have; null: none (the chat is new to this session, or its ids were never known).</summary>
+    public string? LastSent => Stream.Take(FirstUnsent).LastOrDefault()?.Id is { Length: > 0 } id ? id : null;
+
+    /// <summary>How many of <see cref="Messages"/> are the summary that stands for what came before <see cref="From"/>.</summary>
+    public int Prefix => Math.Max(0, Messages.Count - Math.Max(0, Stream.Count - From));
+
+    // An answer's tokens are written just before the answer itself.
+    private TokenUsage? _pending;
+    // A session from before Arena's ids: its sync line counted the messages Arena had of those this session added.
+    private int _added;
+
+    /// <summary>One line of the session's file, read back.</summary>
+    internal void Apply(JsonObject entry, DateTimeOffset written, bool light = false)
+    {
+        switch (entry.Str("type"))
+        {
+            case "session":
+                Cwd = entry.Str("cwd");
+                Model = entry.Str("model");
+                break;
+            case "message" when entry["message"] is JsonObject m:
+                var web = entry.Str("from") == "web";
+                var model = entry.Str("model") ?? Model;
+                var usage = m.Str("role") == "assistant" ? _pending : null;
+                if (!light)
+                {
+                    if (m.Str("role") == "assistant")
+                    {
+                        Answers[Messages.Count] = (model, usage);
+                    }
+                    Messages.Add(m.Clone());
+                }
+                _pending = null;
+                Stream.Add(new SyncEntry
+                {
+                    Message = light ? m : m.Clone(),
+                    // A message from the web without one is from a session before ids: Arena has it.
+                    Id = entry.Str("id") ?? (web ? "" : null),
+                    Web = web,
+                    Key = entry.Int("n") ?? Keys,
+                    At = DateTimeOffset.TryParse(entry.Str("at"), out var at) ? at : written,
+                    Model = model,
+                    Usage = usage,
+                });
+                Keys = Math.Max(Keys, (entry.Int("n") ?? Keys) + 1);
+                if (!web)
+                {
+                    _added++;
+                }
+                break;
+            case "sync":
+                Conversation = entry.Str("conversation");
+                Unlinked = Conversation is null && entry.Bool("unlinked") != false;
+                if (entry.Long("pushed") is { } pushed)
+                {
+                    // A session from before ids: Arena has the first so many of those it added, by count; their ids are not known.
+                    var known = 0;
+                    foreach (var e in Stream.Where(e => !e.Web))
+                    {
+                        if (known++ >= pushed)
+                        {
+                            break;
+                        }
+                        e.Id ??= "";
+                    }
+                }
+                break;
+            case "sent" when entry["ids"] is JsonArray ids:
+                var next = FirstUnsent;
+                foreach (var id in ids.Select(i => i?.GetValue<string>()).OfType<string>())
+                {
+                    if (next < Stream.Count)
+                    {
+                        Stream[next++].Id = id;
+                    }
+                }
+                if (entry.Bool("summary") == true)
+                {
+                    Summary = null;
+                }
+                if (ids.Count > 0)
+                {
+                    Branch = false;
+                }
+                break;
+            case "branch":
+                Branch = true;
+                break;
+            case "rewrite":
+                var keep = Math.Clamp(entry.Int("keep") ?? Stream.Count, 0, Stream.Count);
+                var sentPast = Stream.Skip(keep).Any(e => e.Id is not null);
+                Stream.RemoveRange(keep, Stream.Count - keep);
+                // Back to before what Arena has: a branch of its own there. Else the web's conversation followed: none.
+                Branch = entry.Bool("rewind") == true ? Branch || sentPast : !sentPast && Branch;
+                if (Summary is { } s && s.UpTo >= keep)
+                {
+                    Summary = null;
+                }
+                break;
+            case "summary" when entry.Int("upTo") is { } upTo && entry.Str("text") is { } text:
+                Summary = (upTo, text);
+                break;
+            case "compact" when entry["messages"] is JsonArray all:
+                if (!light)
+                {
+                    Messages.Clear();
+                    Answers.Clear();
+                    Messages.AddRange(all.OfType<JsonObject>().Select(m => m.Clone()));
+                }
+                _pending = null;
+                From = Math.Clamp(entry.Int("from") ?? Stream.Count - all.Count, 0, Stream.Count);
+                WebSummary = entry.Str("web") ?? WebSummary;
+                break;
+            case "model":
+                Model = entry.Str("model") ?? Model;
+                break;
+            case "todos" when entry["todos"] is JsonArray todos:
+                Todos = [.. todos.OfType<JsonObject>().Select(t => new TodoItem(t.Str("content") ?? "", t.Str("status") ?? "pending"))];
+                break;
+            case "usage":
+                Prompt += entry.Long("prompt") ?? 0;
+                Cached += entry.Long("cached") ?? 0;
+                Completion += entry.Long("completion") ?? 0;
+                _pending = new TokenUsage(entry.Long("prompt") ?? 0, entry.Long("cached") ?? 0, entry.Long("completion") ?? 0);
+                break;
+        }
+    }
 }
 
 /// <summary>
 /// A session as JSON Lines under the data folder's sessions/: a header, then
 /// each message as it is added; a compaction writes the whole new history, and
-/// reading takes the last one. The file is readable by its owner only.
+/// reading takes the last one. The file is readable by its owner only. The
+/// store keeps the session as its lines say (<see cref="Read{T}"/>): what Arena
+/// has of it, and what the model reads.
 /// </summary>
 internal sealed class SessionStore
 {
     private readonly object _gate = new();
+    private readonly SessionData _state;
 
-    private SessionStore(string id, string file)
+    private SessionStore(string id, string file, SessionData state)
     {
         Id = id;
         File = file;
+        _state = state;
     }
 
     public string Id { get; }
@@ -61,7 +240,7 @@ internal sealed class SessionStore
     {
         PrivateFiles.EnsureDirectory(dir);
         var id = $"{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..6]}";
-        var store = new SessionStore(id, Path.Combine(dir, id + ".jsonl"));
+        var store = new SessionStore(id, Path.Combine(dir, id + ".jsonl"), new SessionData { Id = id });
         store.Write(new JsonObject
         {
             ["type"] = "session", ["id"] = id, ["cwd"] = cwd, ["model"] = model,
@@ -71,26 +250,144 @@ internal sealed class SessionStore
     }
 
     /// <summary>Carries on writing to a saved session.</summary>
-    public static SessionStore Open(string file) => new(Path.GetFileNameWithoutExtension(file), file);
+    public static SessionStore Open(string file) =>
+        new(Path.GetFileNameWithoutExtension(file), file, System.IO.File.Exists(file) ? Load(file) : new SessionData { Id = Path.GetFileNameWithoutExtension(file) });
 
-    public void Message(JsonObject message)
+    /// <summary>What the session's lines say now, read under its lock: Arena's sync reads it while a turn adds to it.</summary>
+    public T Read<T>(Func<SessionData, T> read)
     {
-        Write(new JsonObject { ["type"] = "message", ["message"] = message.Clone() });
+        lock (_gate)
+        {
+            return read(_state);
+        }
+    }
+
+    /// <summary>A message the session adds, with the model that wrote it (an answer); Arena is sent it.</summary>
+    public void Message(JsonObject message, string? model = null)
+    {
+        Write(Line(message, null, DateTimeOffset.UtcNow, model));
         Added?.Invoke(message);
     }
 
     /// <summary>Told of each message the session adds (the chat in Arena is sent it).</summary>
     public event Action<JsonObject>? Added;
 
-    /// <summary>A message the person added in Arena's web chat, taken into this session.</summary>
-    public void Remote(JsonObject message) => Write(new JsonObject { ["type"] = "message", ["message"] = message.Clone(), ["from"] = "web" });
+    /// <summary>A message the person added in Arena's web chat (its id there), taken into this session.</summary>
+    public void Remote(JsonObject message, string id, DateTimeOffset at, string? model) => Write(Line(message, id, at, model, web: true));
 
-    /// <summary>Where the session stands with its chat in Arena: which chat (null: none any more), its count, how many of ours it has.</summary>
-    public void Sync(string? conversation, int server, int pushed) =>
-        Write(new JsonObject { ["type"] = "sync", ["conversation"] = conversation, ["server"] = server, ["pushed"] = pushed });
+    /// <summary>A message line (numbered as it is written: Arena knows the session's own as session:number).</summary>
+    private static JsonObject Line(JsonObject message, string? id, DateTimeOffset at, string? model, bool web = false)
+    {
+        var line = new JsonObject { ["type"] = "message", ["message"] = message.Clone(), ["at"] = at.ToString("o") };
+        if (web)
+        {
+            line["from"] = "web";
+            line["id"] = id;
+        }
+        if (model is not null)
+        {
+            line["model"] = model;
+        }
+        return line;
+    }
 
-    public void Compacted(IEnumerable<JsonObject> messages) =>
-        Write(new JsonObject { ["type"] = "compact", ["messages"] = new JsonArray([.. messages.Select(m => (JsonNode)m.Clone())]) });
+    /// <summary>Arena has the next messages it lacked, under these ids (and the summary waiting, when <paramref name="summary"/>).</summary>
+    public void Sent(IReadOnlyList<string> ids, bool summary = false)
+    {
+        if (ids.Count > 0 || summary)
+        {
+            Write(new JsonObject { ["type"] = "sent", ["ids"] = new JsonArray([.. ids.Select(i => (JsonNode)i)]), ["summary"] = summary ? true : null });
+        }
+    }
+
+    /// <summary>The chat in Arena the session is kept with (null: none any more, it was deleted there).</summary>
+    public void Link(string? conversation) => Write(new JsonObject { ["type"] = "sync", ["conversation"] = conversation });
+
+    /// <summary>What the session adds next goes on a branch of its own in Arena (the web moved elsewhere while it was on its way).</summary>
+    public void Branch() => Write(new JsonObject { ["type"] = "branch" });
+
+    /// <summary>
+    /// The model's history replaced (a compaction): <paramref name="raw"/> of its last messages are the conversation's last
+    /// word for word, those before them a summary of the rest.
+    /// </summary>
+    public void Compacted(IEnumerable<JsonObject> messages, int raw, string? webSummary = null)
+    {
+        var all = new JsonArray([.. messages.Select(m => (JsonNode)m.Clone())]);
+        int from;
+        lock (_gate)
+        {
+            from = Math.Max(0, _state.Stream.Count - raw);
+        }
+        Write(new JsonObject { ["type"] = "compact", ["messages"] = all, ["from"] = from, ["web"] = webSummary });
+    }
+
+    /// <summary>A compaction's summary of all but the last <paramref name="raw"/> messages, for Arena to keep where its own are.</summary>
+    public void Summarized(string text, int raw)
+    {
+        int upTo;
+        lock (_gate)
+        {
+            upTo = _state.Stream.Count - raw - 1;
+        }
+        if (upTo >= 0)
+        {
+            Write(new JsonObject { ["type"] = "summary", ["upTo"] = upTo, ["text"] = text });
+        }
+    }
+
+    /// <summary>
+    /// The conversation from <paramref name="keep"/> on is replaced by <paramref name="entries"/> (the web's conversation
+    /// followed, or its messages put before those still to send), and the model's history built again from it.
+    /// </summary>
+    public List<JsonObject> Rewrite(int keep, IReadOnlyList<SyncEntry> entries)
+    {
+        List<JsonObject> summary = [];
+        var from = 0;
+        lock (_gate)
+        {
+            // The summary stands while what it covers is kept; else the model reads the whole conversation again.
+            if (_state.From <= keep)
+            {
+                summary = [.. _state.Messages.Take(_state.Prefix).Select(m => m.Clone())];
+                from = _state.From;
+            }
+        }
+        Write(new JsonObject { ["type"] = "rewrite", ["keep"] = keep });
+        foreach (var e in entries)
+        {
+            Write(Line(e.Message, e.Web ? e.Id : null, e.At, e.Model, e.Web));
+        }
+        List<JsonObject> history;
+        lock (_gate)
+        {
+            history = [.. summary, .. _state.Stream.Skip(from).Select(e => e.Message.Clone())];
+        }
+        Write(new JsonObject { ["type"] = "compact", ["messages"] = new JsonArray([.. history.Select(m => (JsonNode)m.Clone())]), ["from"] = from });
+        return history;
+    }
+
+    /// <summary>
+    /// Back to the first <paramref name="messages"/> of the model's history (/rewind): what came after is gone from the session,
+    /// and goes on a branch of its own in Arena when Arena has it. The history now.
+    /// </summary>
+    public List<JsonObject> Rewind(int messages)
+    {
+        int keep;
+        int raw;
+        List<JsonObject> history;
+        lock (_gate)
+        {
+            var prefix = _state.Prefix;
+            messages = Math.Clamp(messages, 0, _state.Messages.Count);
+            // Back to before a compaction: its summary is all there is of what it covered.
+            raw = Math.Max(0, messages - prefix);
+            keep = Math.Min(_state.Stream.Count, _state.From + raw);
+            history = [.. _state.Messages.Take(messages).Select(m => m.Clone())];
+        }
+        Write(new JsonObject { ["type"] = "rewrite", ["keep"] = keep, ["rewind"] = true });
+        Write(new JsonObject { ["type"] = "compact", ["messages"] = new JsonArray([.. history.Select(m => (JsonNode)m.Clone())]), ["from"] = keep - raw });
+        return history;
+    }
 
     public void Model(string model) => Write(new JsonObject { ["type"] = "model", ["model"] = model });
 
@@ -104,15 +401,23 @@ internal sealed class SessionStore
     {
         lock (_gate)
         {
+            if (line.Str("type") == "message")
+            {
+                line["n"] = _state.Keys;
+            }
             PrivateFiles.AppendLine(File, Json.Line(line));
+            _state.Apply(line, DateTimeOffset.UtcNow);
         }
     }
 
-    public static SessionData Load(string file)
+    public static SessionData Load(string file) => Read(file, light: false);
+
+    /// <param name="light">Only what the list shows: the messages are not copied, nor the model's history kept.</param>
+    private static SessionData Read(string file, bool light)
     {
         var data = new SessionData { Id = Path.GetFileNameWithoutExtension(file) };
-        // An answer's tokens are written just before the answer itself.
-        TokenUsage? pending = null;
+        // Lines from before messages kept their time: the file's.
+        var written = new DateTimeOffset(System.IO.File.GetLastWriteTimeUtc(file), TimeSpan.Zero);
         // Shared: the web interface reads a session while its turn appends to it.
         using var reader = new StreamReader(new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));
         while (reader.ReadLine() is { } line)
@@ -121,49 +426,7 @@ internal sealed class SessionStore
             {
                 continue; // a line cut short when the program was stopped mid-write
             }
-            switch (entry.Str("type"))
-            {
-                case "session":
-                    data.Cwd = entry.Str("cwd");
-                    data.Model = entry.Str("model");
-                    break;
-                case "message" when entry["message"] is JsonObject m:
-                    if (m.Str("role") == "assistant")
-                    {
-                        data.Answers[data.Messages.Count] = (data.Model, pending);
-                    }
-                    pending = null;
-                    data.Messages.Add(m.Clone());
-                    if (entry.Str("from") != "web")
-                    {
-                        data.Local.Add(m.Clone());
-                    }
-                    break;
-                case "sync":
-                    data.Conversation = entry.Str("conversation");
-                    data.Unlinked = data.Conversation is null;
-                    data.ServerCount = (int)(entry.Long("server") ?? 0);
-                    data.Pushed = (int)(entry.Long("pushed") ?? 0);
-                    break;
-                case "compact" when entry["messages"] is JsonArray all:
-                    data.Messages.Clear();
-                    data.Answers.Clear();
-                    pending = null;
-                    data.Messages.AddRange(all.OfType<JsonObject>().Select(m => m.Clone()));
-                    break;
-                case "model":
-                    data.Model = entry.Str("model") ?? data.Model;
-                    break;
-                case "todos" when entry["todos"] is JsonArray todos:
-                    data.Todos = [.. todos.OfType<JsonObject>().Select(t => new TodoItem(t.Str("content") ?? "", t.Str("status") ?? "pending"))];
-                    break;
-                case "usage":
-                    data.Prompt += entry.Long("prompt") ?? 0;
-                    data.Cached += entry.Long("cached") ?? 0;
-                    data.Completion += entry.Long("completion") ?? 0;
-                    pending = new TokenUsage(entry.Long("prompt") ?? 0, entry.Long("cached") ?? 0, entry.Long("completion") ?? 0);
-                    break;
-            }
+            data.Apply(entry, written, light);
         }
         return data;
     }
@@ -178,48 +441,26 @@ internal sealed class SessionStore
         var found = new List<SessionSummary>();
         foreach (var file in new DirectoryInfo(dir).EnumerateFiles("*.jsonl").OrderByDescending(f => f.LastWriteTimeUtc))
         {
-            string? sessionCwd = null;
-            string? conversation = null;
-            var synced = false;
-            var pushed = 0;
-            var local = 0;
-            var preview = "";
-            var messages = 0;
-            foreach (var line in System.IO.File.ReadLines(file.FullName))
+            SessionData data;
+            try
             {
-                var entry = Json.ParseObject(line);
-                if (entry.Str("type") == "session")
-                {
-                    sessionCwd = entry.Str("cwd");
-                }
-                else if (entry.Str("type") == "sync")
-                {
-                    conversation = entry.Str("conversation");
-                    synced = true;
-                    pushed = (int)(entry.Long("pushed") ?? 0);
-                }
-                else if (entry.Str("type") == "message")
-                {
-                    messages++;
-                    if (entry.Str("from") != "web")
-                    {
-                        local++;
-                    }
-                    if (preview.Length == 0 && entry?["message"].Str("role") == "user")
-                    {
-                        preview = Fmt.OneLine(entry["message"].Str("content"), 70);
-                    }
-                }
+                data = Read(file.FullName, light: true);
             }
-            if (cwd is not null && (sessionCwd is null || !SameFolder(sessionCwd, cwd)))
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
                 continue;
             }
-            if (messages == 0)
+            if (cwd is not null && (data.Cwd is null || !SameFolder(data.Cwd, cwd)))
             {
                 continue;
             }
-            found.Add(new SessionSummary(Path.GetFileNameWithoutExtension(file.Name), file.FullName, sessionCwd, file.LastWriteTime, preview, messages, conversation, synced, pushed, local));
+            if (data.Stream.Count == 0)
+            {
+                continue;
+            }
+            var preview = data.Stream.FirstOrDefault(e => e.Message.Str("role") == "user")?.Message.Str("content") is { } first ? Fmt.OneLine(first, 70) : "";
+            found.Add(new SessionSummary(Path.GetFileNameWithoutExtension(file.Name), file.FullName, data.Cwd, file.LastWriteTime, preview, data.Stream.Count,
+                data.Conversation, data.Unlinked, data.Waiting));
             if (found.Count >= max)
             {
                 break;

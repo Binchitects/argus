@@ -1332,7 +1332,37 @@ until Arena has them: a session goes on while Arena is out of reach, and what
 it missed is sent when Arena answers (at the latest when the session is next
 opened). Each message carries its place in the session, so one sent twice
 (its answer lost) is never kept twice. A chat deleted in Arena ends the sync
-for that session, which goes on here. `/sync` says where the session stands
+for that session, which goes on here.
+
+The session keeps Arena's id of each message, and both sides go by those ids:
+the session reads what follows the last message both have, and adds after it.
+So what the web changes is followed here: a question edited there, an answer
+written again, or another branch shown makes the session's conversation the
+web's from where the two part (said in the thread: "The web chat's
+conversation changed"), and what the session sends next goes on after it.
+`/rewind` here works the other way: the turns gone back from stay on the web as
+a branch, and what the session adds goes on a branch of its own there, shown
+from then on. When the web moved to another branch while the session's
+messages were still on their way, those go on a branch of their own too; when
+the web only added messages meanwhile, they come before the session's in
+both places (a tool's result always stays straight after its call). A long
+chat comes in a page of 200 messages at a time.
+
+A compaction here is sent too: Arena keeps its summary where the web's own
+compaction keeps one (on the last message it covers), so the web's next answer
+reads it instead of those messages. The other way, a chat compacted on the
+web is read here as its summary and what follows it. Every message on the
+branch counts, on both sides and in the lists: an answer the model gave with
+nothing in it is not kept here (the thread says the model said nothing), and
+one that failed on the web with nothing in it is read here as "(no answer)".
+
+While a turn runs here, the chat is the session's: Arena holds it for the turn
+(renewed every 30 seconds, and let go once Arena has the turn's messages, or
+after 90 seconds without a word, when Code Arena stopped). Meanwhile the web
+page says **Code Arena is answering in this chat**, and what the person sends
+there waits in the chat's queue, then goes (and is answered on the web) when
+the turn ends. A turn that starts while the web chat is answering waits for
+that answer first (two minutes at most; Stop goes on without it). `/sync` says where the session stands
 and whose chats they are: the sessions go to the chats of the account whose
 key `code-arena login` was given (login says which; the IDE shows it over
 **Chats in Arena**), so a key of another account (a test one) keeps them

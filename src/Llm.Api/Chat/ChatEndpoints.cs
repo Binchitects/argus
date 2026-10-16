@@ -144,8 +144,13 @@ public static partial class ChatEndpoints
         {
             query = query.Where(c => EF.Functions.ILike(c.Title, "%" + q.Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal) + "%"));
         }
-        var list = await query.OrderByDescending(c => c.UpdatedAt).Take(300).Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.AssistantId, c.Origin, c.OriginPlace }).ToListAsync();
-        return Results.Ok(list.Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.AssistantId, c.Origin, c.OriginPlace, answering = jobs.IsAnswering(c.Id) }));
+        var list = await query.OrderByDescending(c => c.UpdatedAt).Take(300)
+            .Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.AssistantId, c.Origin, c.OriginPlace, c.CodeArenaTurnUntil }).ToListAsync();
+        var now = DateTimeOffset.UtcNow;
+        return Results.Ok(list.Select(c => new
+        {
+            c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.AssistantId, c.Origin, c.OriginPlace, answering = jobs.IsAnswering(c.Id), codeArena = c.CodeArenaTurnUntil > now,
+        }));
     }
 
     private static async Task<IResult> CreateAsync(NewConversation body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> chat, ChatModels models,
@@ -336,6 +341,8 @@ public static partial class ChatEndpoints
             c.Id, c.Title, c.Thinking, tools, useArgus = tools.Contains("argus"), c.Model, c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens,
             c.CurrentLeafId, c.ArchivedAt, forkedFrom, assistant, c.CreatedAt, c.UpdatedAt, answering, messages, arenas = arenas ?? Array.Empty<object>(), queued = queued ?? [],
             c.Origin, c.OriginPlace,
+            // Code Arena is answering in it: what the person sends waits in the queue until its turn ends.
+            codeArena = CodeArenaSync.Answering(c),
         };
 
     private static async Task<IResult> UpdateAsync(Guid id, ConversationChange body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> chat, ChatModels models,
@@ -619,6 +626,11 @@ public static partial class ChatEndpoints
             await Problem(http, 403, "assistant", lost);
             return;
         }
+        if (CodeArenaSync.Answering(c))
+        {
+            await Problem(http, 409, "code_arena", "Code Arena is answering in this chat: queue your message, and it goes when Code Arena is done.");
+            return;
+        }
         if (jobs.Reserve(c.Id, me.Id) is not { } job)
         {
             await Problem(http, 409, "busy", "This chat is already answering. Stop it first, or wait.");
@@ -741,7 +753,7 @@ public static partial class ChatEndpoints
     /// (in another tab or device, or by Code Arena keeping its session in step). The stamp changes with the branch on
     /// screen, the chat's last change, its title, its line of queued messages and its settings.
     /// </summary>
-    private static async Task<IResult> StampAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs, CancellationToken ct)
+    private static async Task<IResult> StampAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs, QueuedMessages queue, CancellationToken ct)
     {
         var me = await Me(p, users);
         var c = await db.Conversations.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && x.UserId == me.Id, ct);
@@ -749,11 +761,17 @@ public static partial class ChatEndpoints
         {
             return Results.NotFound();
         }
+        // Code Arena's turn lapsed (it stopped without ending it): the messages queued meanwhile go now.
+        if (c.CodeArenaTurnUntil is not null && !CodeArenaSync.Answering(c) && await CodeArenaSync.LapsedAsync(db, queue, id, ct))
+        {
+            c = await db.Conversations.AsNoTracking().SingleAsync(x => x.Id == id, ct);
+        }
         var queued = await db.QueuedMessages.CountAsync(q => q.ConversationId == id, ct);
         // The chat's settings too (they change without a message): its model, thinking, tools, instructions, assistant, archive.
         var settings = string.Join("\u001f", c.Model, c.Thinking, c.Tools is null ? null : string.Join(",", c.Tools), c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens, c.AssistantId, c.ArchivedAt?.UtcTicks);
         var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(settings)))[..16];
-        return Results.Ok(new { stamp = $"{c.CurrentLeafId}|{c.UpdatedAt.UtcTicks}|{c.Title}|{queued}|{hash}", answering = jobs.IsAnswering(id) });
+        var codeArena = CodeArenaSync.Answering(c);
+        return Results.Ok(new { stamp = $"{c.CurrentLeafId}|{c.UpdatedAt.UtcTicks}|{c.Title}|{queued}|{hash}|{codeArena}", answering = jobs.IsAnswering(id), codeArena });
     }
 
     /// <summary>"Answer now": the answer being written stops thinking and answers with what it has.</summary>

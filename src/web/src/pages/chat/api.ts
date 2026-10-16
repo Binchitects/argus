@@ -67,7 +67,7 @@ export const archiveChat = (id: string, archived: boolean) => api(`/api/chat/con
  */
 export const stampQuery = (id: string) => ({
   queryKey: ['chat', 'stamp', id] as const,
-  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ stamp: string; answering: boolean }>(`/api/chat/conversations/${id}/stamp`, { signal }),
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ stamp: string; answering: boolean; codeArena?: boolean }>(`/api/chat/conversations/${id}/stamp`, { signal }),
   refetchInterval: 4000,
 })
 

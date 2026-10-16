@@ -186,6 +186,8 @@ export interface ConversationSummary {
   origin?: string | null
   /** Where it runs there: the session's folder. */
   originPlace?: string | null
+  /** Code Arena is answering in it: what the person sends waits in the queue until its turn ends. */
+  codeArena?: boolean
 }
 
 export type Reach = 'Private' | 'Groups' | 'Company'

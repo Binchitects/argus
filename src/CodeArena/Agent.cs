@@ -167,7 +167,9 @@ internal sealed class Agent
     /// <summary>When the history is compacted, and to what.</summary>
     public Compaction Compaction { get; init; } = new();
     /// <summary>What the web chat added since the last turn, taken in as a turn starts (the main conversation only).</summary>
-    public Func<CancellationToken, Task<IReadOnlyList<JsonObject>>>? BeforeTurn { get; set; }
+    public Func<CancellationToken, Task<Taken>>? BeforeTurn { get; set; }
+    /// <summary>Told when a turn of the main conversation ends, however it ended (the web chat is let go).</summary>
+    public Action? AfterTurn { get; set; }
     /// <summary>A checkpoint before each turn (/rewind); null: none kept (a sub-agent).</summary>
     public Checkpoints? Checkpoints { get; set; }
     /// <summary>Commits each turn's changes under this name (the main conversation only); null: no commits.</summary>
@@ -194,15 +196,27 @@ internal sealed class Agent
     /// Messages the person added in the web chat: the model hears them (the session has them written already). Said with
     /// <paramref name="say"/> (the terminal's prompt: above what is being typed), else as a line of its own.
     /// </summary>
-    public void TakeIn(IReadOnlyList<JsonObject> messages, Action<string>? say = null)
+    public void TakeIn(Taken taken, Action<string>? say = null)
     {
-        if (messages.Count == 0)
+        if (!taken.Any)
         {
             return;
         }
-        Messages.AddRange(messages);
+        var messages = taken.Added;
+        if (taken.History is { } history)
+        {
+            // The web's conversation changed, or its messages go before some of the session's: the history as the session has it now.
+            Messages = history;
+            _knownTokens = 0;
+            _knownCount = 0;
+            _compactedAt = 0;
+        }
+        else
+        {
+            Messages.AddRange(messages);
+        }
         var question = messages.LastOrDefault(m => m.Str("role") == "user")?.Str("content");
-        var text = $"Taken in from the web chat: {messages.Count} message{(messages.Count == 1 ? "" : "s")}" +
+        var text = taken.Said ?? $"Taken in from the web chat: {messages.Count} message{(messages.Count == 1 ? "" : "s")}" +
                    (question is { Length: > 0 } ? $", the last question \"{Fmt.OneLine(question, 80)}\"." : ".");
         if (say is null)
         {
@@ -218,7 +232,7 @@ internal sealed class Agent
     private void Add(JsonObject message)
     {
         Messages.Add(message);
-        Session?.Message(message);
+        Session?.Message(message, message.Str("role") == "assistant" ? Model.Name : null);
     }
 
     /// <summary>
@@ -231,6 +245,21 @@ internal sealed class Agent
     /// <param name="takeIn">Whether the web chat's news is taken in first (<see cref="BeforeTurn"/>); the IDE takes it in itself.</param>
     /// <param name="pieces">Lines chosen in the IDE's editor, sent with the message.</param>
     public async Task<string> RunAsync(string? input, Spend turn, CancellationToken ct, bool takeIn = true, IReadOnlyList<Mentions.Piece>? pieces = null)
+    {
+        try
+        {
+            return await RunTurnAsync(input, turn, ct, takeIn, pieces);
+        }
+        finally
+        {
+            if (Depth == 0)
+            {
+                AfterTurn?.Invoke();
+            }
+        }
+    }
+
+    private async Task<string> RunTurnAsync(string? input, Spend turn, CancellationToken ct, bool takeIn, IReadOnlyList<Mentions.Piece>? pieces)
     {
         if (input is not null)
         {
@@ -454,12 +483,22 @@ internal sealed class Agent
                 }
                 continue;
             }
-            Add(answer.Message);
-            _knownCount = Messages.Count;
+            if (answer.Text.Length == 0 && answer.ToolCalls.Count == 0)
+            {
+                // Nothing to keep: an empty answer would only be one more message that says nothing (and some models refuse it).
+                Warn(answer.FinishReason == "length"
+                    ? "The model spent its whole output limit before saying anything: nothing of this answer is kept."
+                    : "The model said nothing: nothing of this answer is kept.");
+            }
+            else
+            {
+                Add(answer.Message);
+                _knownCount = Messages.Count;
+            }
             last = answer.Text;
             if (answer.ToolCalls.Count == 0)
             {
-                if (answer.FinishReason == "length")
+                if (answer.FinishReason == "length" && answer.Text.Length > 0)
                 {
                     Warn("The answer was cut at the model's output limit.");
                 }
@@ -712,7 +751,8 @@ internal sealed class Agent
     private long _compactedAt;
 
     /// <summary>The summary a compaction puts first, and the model's answer to it.</summary>
-    private const string SummaryHead = "[The conversation so far, summarized to fit the model's window]";
+    internal const string SummaryHead = "[The conversation so far, summarized to fit the model's window]";
+    internal const string SummaryAnswer = "Understood: I have the summary and carry on from there.";
 
     private static bool IsSummary(List<JsonObject> older) =>
         older.Count == 2 && older[0].Str("content")?.StartsWith(SummaryHead, StringComparison.Ordinal) == true;
@@ -769,7 +809,7 @@ internal sealed class Agent
             // Only the last summary is older: summarizing it again would only lose more. The long results are cut instead.
             Shrink(kept);
             Messages = [.. older, .. kept];
-            Session?.Compacted(Messages);
+            Session?.Compacted(Messages, kept.Count);
             _knownTokens = 0;
             _knownCount = 0;
             Events?.Compacted("Long tool results were cut to fit the model's window.");
@@ -779,7 +819,7 @@ internal sealed class Agent
         {
             Shrink(kept);
             Messages = kept;
-            Session?.Compacted(Messages);
+            Session?.Compacted(Messages, kept.Count);
             _knownTokens = 0;
             _knownCount = 0;
             Events?.Compacted("Long tool results were cut to fit the model's window.");
@@ -798,14 +838,16 @@ internal sealed class Agent
         Messages =
         [
             new JsonObject { ["role"] = "user", ["content"] = SummaryHead + "\n\n" + summary },
-            new JsonObject { ["role"] = "assistant", ["content"] = "Understood: I have the summary and carry on from there." },
+            new JsonObject { ["role"] = "assistant", ["content"] = SummaryAnswer },
             .. kept,
         ];
         if (Estimate() > Model.Context * Compaction.At / 100.0)
         {
             Shrink(kept);
         }
-        Session?.Compacted(Messages);
+        // Arena keeps the summary where the web's own compaction keeps its own: the web chat goes on from it too.
+        Session?.Summarized(summary, kept.Count);
+        Session?.Compacted(Messages, kept.Count);
         _knownTokens = 0;
         _knownCount = 0;
         Ui.Info($"Compacted: {older.Count} messages summarized, {kept.Count} kept.");

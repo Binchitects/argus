@@ -681,7 +681,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 {
                     var taken = await sync.TakeInAsync(job.Stop.Token);
                     _rt.Agent.TakeIn(taken);
-                    if (taken.Count > 0)
+                    if (taken.Any)
                     {
                         Interlocked.Increment(ref _synced);
                     }
@@ -870,15 +870,22 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         {
             // What the web chat added comes in first (inside the job, so Stop ends it and nothing it does leaves the IDE busy),
             // then the question takes its place after it.
-            if (_rt.Sync is { } sync)
+            if (_rt.Sync is not null)
             {
-                var takeIn = sync.TakeInAsync(job.Stop.Token);
+                // The web chat is this session's while the turn runs (the web queues the person's messages meanwhile).
+                var takeIn = _rt.TakeInForTurnAsync(job.Stop.Token);
                 if (await Task.WhenAny(takeIn, Task.Delay(TimeSpan.FromSeconds(1))) != takeIn)
                 {
                     // Said only when it is slow (Arena busy or far away): Stop ends the wait.
                     job.Emit(new JsonObject { ["type"] = "notice", ["text"] = "Reading the web chat…" });
                 }
-                _rt.Agent.TakeIn(await takeIn);
+                var taken = await takeIn;
+                _rt.Agent.TakeIn(taken);
+                if (taken.Any)
+                {
+                    // The page reads the session again: what came in is before the question.
+                    Interlocked.Increment(ref _synced);
+                }
             }
             var count = _rt.Agent.Messages.Count;
             if (text is not null)
@@ -909,6 +916,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         finally
         {
             _rt.Turn = null;
+            // The turn ended however it did (stopped before the model was asked, too): the web chat is let go.
+            _rt.Sync?.EndTurn();
             End(job, new JsonObject
             {
                 ["type"] = "done",
