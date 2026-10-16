@@ -419,6 +419,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
    - `tools/fake-vllm/` (Python stdlib): `/health`, `/v1/models`, streaming `/v1/chat/completions` with configurable TTFT and tok/s, `/metrics` using the real `vllm:*` names, `/sleep` and `/wake_up`, a load delay, and a `--fail` mode.
    - Plus `deploy/fake-gpu.yml`, a compose overlay that runs it as `vllm`.
    - Tests: a script self-test.
+   - **Done**: `tools/fake-vllm/fake_vllm.py` (and a `vllm` wrapper with the same command line), `deploy/fake-gpu.yml`, `tests/deploy/test_fake_vllm.py`.
 2. **Hardware fake and `GpuPlan`.**
    - Replace `Hardware.ImageReserve` (the GPU-0 assumption) with `GpuPlan`: everything resident per GPU (llama.cpp `Devices`, media `gpu`, embedder, future vLLM groups).
    - `KeptPlan` / `GpuUse` derive from it.
