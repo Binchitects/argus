@@ -465,6 +465,57 @@ public sealed partial class WebTests : IDisposable
     }
 
     [Fact]
+    public async Task The_IDE_opens_in_a_window_of_its_own_and_closing_the_window_stops_code_arena()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        var opened = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tabs = 0;
+        var web = await WebRun.StartAsync(h, bare: true, browse: _ => Interlocked.Increment(ref tabs) > 0, window: url =>
+        {
+            opened.TrySetResult(url);
+            return closed.Task;
+        }, TimeSpan.FromSeconds(20));
+        // Through the launcher file, as a browser tab is: never the key on a command line.
+        var url = await opened.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.StartsWith("file://", url);
+        Assert.DoesNotContain(web.Token, url);
+        Assert.Contains("Closing its window stops it too.", web.Out);
+        Assert.Equal(0, tabs);
+        // Closed (its browser ended, well after it started): code-arena stops, as a desktop program does.
+        await Task.Delay(TimeSpan.FromSeconds(1));
+        Assert.False(web.Exited.IsCompleted);
+        closed.SetResult();
+        Assert.Equal(0, await web.Exited.WaitAsync(TimeSpan.FromSeconds(15)));
+        Assert.Contains("Its window was closed.", web.Err);
+        Assert.Contains("Stopped", web.Err);
+
+        // A browser that ends at once handed the window to one already running on the profile (another code-arena's): this
+        // one runs on until Ctrl+C.
+        await using (var handed = await WebRun.StartAsync(h, bare: false, browse: null, window: _ => Task.CompletedTask, TimeSpan.FromSeconds(20)))
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1.5));
+            Assert.False(handed.Exited.IsCompleted);
+        }
+
+        // --browser: a tab of the person's browser, not a window.
+        var windows = 0;
+        await using (var tab = await WebRun.StartAsync(h, bare: false, browse: _ => Interlocked.Increment(ref tabs) > 0, window: _ =>
+        {
+            Interlocked.Increment(ref windows);
+            return closed.Task;
+        }, TimeSpan.FromSeconds(20), "--browser"))
+        {
+            for (var waited = 0; Volatile.Read(ref tabs) == 0 && waited < 10_000; waited += 50)
+            {
+                await Task.Delay(50);
+            }
+            Assert.Equal(1, tabs);
+            Assert.Equal(0, windows);
+        }
+    }
+
+    [Fact]
     public async Task Without_its_page_built_in_web_says_so_plainly_and_the_bare_command_talks_in_the_terminal()
     {
         using var h = new Harness(_gateway, _mcp);

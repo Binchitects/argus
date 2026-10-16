@@ -188,9 +188,19 @@ code-arena --continue --mode auto-edit
 ```
 
 `code-arena` starts a small web server on this machine, prints its address
-and opens the browser (`--no-open`, or a machine without a desktop, only
-prints it), through a file of the person's own that sends it on to the
-address (below). **Ctrl+C** in the terminal stops it, and the turn if one runs;
+and opens the IDE in a **desktop window of its own** (`--no-open`, or a
+machine without a desktop, only prints it), through a file of the person's
+own that sends it on to the address (below). The window is an installed
+Chrome, Edge, Chromium or Brave in app mode: no tabs, no address bar, on a
+profile of Code Arena's own (`window/` in its data folder, so it keeps its
+size and place), and the browser keys VS Code uses there (Ctrl+W, Ctrl+T,
+Ctrl+N) are the IDE's. `CODE_ARENA_BROWSER=/path/to/chrome` picks the
+browser. Closing the window stops code-arena; a second code-arena's window
+goes to the browser the first one started, so that one runs until Ctrl+C.
+Without such a browser (Firefox has no app mode; a snap's browser cannot read
+the data folder), with `--browser`, or with `"window": false` in
+`config.json`, it opens in a tab of the default browser instead.
+**Ctrl+C** in the terminal stops it, and the turn if one runs;
 the terminal shows what the agent does (`● edit_file …`) while the page drives
 it. On another machine over SSH: `code-arena --port 8765 --no-open` there,
 `ssh -L 8765:127.0.0.1:8765 that-machine` here, and open the address printed.
@@ -736,7 +746,7 @@ That is why everything below is behind this run's key.
   site, as the launcher file below is. Every request without the key is
   refused. A new run makes a new key: an old tab says so.
 - The key never goes on a command line, which every user of the machine can
-  read (`ps`, `/proc`): the browser is opened with a file,
+  read (`ps`, `/proc`): the window or the browser is opened with a file,
   `open/code-arena-PORT.html` in code-arena's data folder (0600, in a folder
   of the person's alone, 0700), which sends it on to the address, as Jupyter
   does. The file goes when the run ends. A browser in a sandbox (a snap, as
@@ -1278,7 +1288,7 @@ The rest of the file: `"model"`, `"thinking"`, `"mode"`, `"context"`,
 `"shell"` (the agent's `run_shell`), `"terminalShell"` (the IDE's terminals),
 `"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"argusTools": false`
 (no Argus MCP), `"argusUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
-`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"checkCommand"`, `"sandbox"`,
+`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"window"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"checkCommand"`, `"sandbox"`,
 `"sandboxNetwork"`, `"sandboxWritable"`, `"permissions"`. `ARENA_ARGUS_URL` in the environment gives Argus's address
 for one run.
 

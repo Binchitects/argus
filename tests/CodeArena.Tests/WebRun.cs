@@ -56,7 +56,11 @@ internal sealed partial class WebRun : IAsyncDisposable
     public static Task<WebRun> StartAsync(Harness h, bool bare, params string[] args) => StartAsync(h, bare, browse: null, TimeSpan.FromSeconds(20), args);
 
     /// <summary>With <paramref name="browse"/>, the browser is opened (through it), not left closed with --no-open; <paramref name="browserWait"/> later, if no browser has the page, the person is told.</summary>
-    public static async Task<WebRun> StartAsync(Harness h, bool bare, Func<string, bool>? browse, TimeSpan browserWait, params string[] args)
+    public static Task<WebRun> StartAsync(Harness h, bool bare, Func<string, bool>? browse, TimeSpan browserWait, params string[] args) =>
+        StartAsync(h, bare, browse, window: null, browserWait, args);
+
+    /// <summary>With <paramref name="window"/>, the IDE's own window is opened (through it); without, there is none to open, as on a machine without Chrome.</summary>
+    public static async Task<WebRun> StartAsync(Harness h, bool bare, Func<string, bool>? browse, Func<string, Task?>? window, TimeSpan browserWait, params string[] args)
     {
         var output = new StringWriter();
         var error = new StringWriter();
@@ -73,9 +77,11 @@ internal sealed partial class WebRun : IAsyncDisposable
                 ("assets/app.js", "console.log('code arena')"),
                 ("preview.html", "<!doctype html><p>runner</p>")),
             Browse = browse,
+            Window = window ?? (_ => null),
+            WindowHandOff = TimeSpan.FromMilliseconds(500),
             BrowserWait = browserWait,
         };
-        var exit = Task.Run(() => Cli.RunAsync([.. bare ? Array.Empty<string>() : ["web"], .. browse is null ? ["--no-open"] : Array.Empty<string>(), .. args], env));
+        var exit = Task.Run(() => Cli.RunAsync([.. bare ? Array.Empty<string>() : ["web"], .. browse is null && window is null ? ["--no-open"] : Array.Empty<string>(), .. args], env));
         var run = new WebRun(env, output, error, exit);
         for (var waited = 0; ; waited += 50)
         {
@@ -145,6 +151,9 @@ internal sealed partial class WebRun : IAsyncDisposable
         Assert.Equal("text/event-stream", response.Content.Headers.ContentType!.MediaType);
         return new EventStream(response);
     }
+
+    /// <summary>Its exit code, once code-arena has stopped.</summary>
+    public Task<int> Exited => _exit;
 
     public async ValueTask DisposeAsync()
     {

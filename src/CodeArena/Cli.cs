@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -32,6 +33,8 @@ internal sealed class Options
     /// <summary>The IDE: the port (null: a free one), and whether to leave the browser closed.</summary>
     public int? Port { get; set; }
     public bool NoOpen { get; set; }
+    /// <summary>The IDE in a tab of the person's browser, not in a window of its own.</summary>
+    public bool Browser { get; set; }
     /// <summary>The agent answers in the IDE's page (Markdown, links to files), not in this terminal.</summary>
     public bool Ide { get; set; }
 }
@@ -57,6 +60,10 @@ internal sealed class CliEnv
     public WebAssets? Web { get; init; }
     /// <summary>Opens an address in the person's browser, false when there is none; null: the system's own way (Browser.Open).</summary>
     public Func<string, bool>? Browse { get; init; }
+    /// <summary>Opens the IDE's own window on an address: a task that ends when it closes, null when it cannot (no browser for it); null: AppWindow.Open.</summary>
+    public Func<string, Task?>? Window { get; init; }
+    /// <summary>A window's browser that ends this soon handed it to one already running on the profile: its end is not the window's.</summary>
+    public TimeSpan WindowHandOff { get; init; } = TimeSpan.FromSeconds(3);
     /// <summary>How long a browser opened for the IDE has to arrive before the person is told to open the address.</summary>
     public TimeSpan BrowserWait { get; init; } = TimeSpan.FromSeconds(20);
 }
@@ -115,7 +122,8 @@ internal static partial class Cli
               --gateway URL          login: the gateway, when it is not https://gateway.DOMAIN
               --no-color             plain text
               --port N               the IDE: listen on this port (default: a free one)
-              --no-open              the IDE: print the address, do not open the browser
+              --no-open              the IDE: print the address, do not open a window
+              --browser              the IDE: in a tab of your browser, not a window of its own
           -v, --version              the version, the licence and where the source is
           -h, --help
 
@@ -244,6 +252,9 @@ internal static partial class Cli
                     break;
                 case "--no-open":
                     o.NoOpen = true;
+                    break;
+                case "--browser":
+                    o.Browser = true;
                     break;
                 case "--":
                     words.AddRange(args[(i + 1)..]);
@@ -544,7 +555,17 @@ internal static partial class Cli
                     env.Out.WriteLine("Only this machine can open it, and only with the key in the address. Ctrl+C stops it.");
                     env.Out.WriteLine("The agent in this terminal instead: code-arena chat");
                     using var launcher = o.NoOpen ? null : Launcher.Write(env.Paths.DataDir, app.Port, app.Address);
-                    if (launcher is not null && (env.Browse ?? (url => Browser.Open(url, env.Env)))(launcher.Url))
+                    // Its own window first (config.json "window": false, or --browser, a tab instead), else a tab.
+                    var window = launcher is null || o.Browser || !rt.Config.Window ? null
+                        : (env.Window ?? (url => AppWindow.Open(url, Path.Combine(env.Paths.DataDir, "window"), env.Env)))(launcher.Url);
+                    var closed = Task.Delay(Timeout.Infinite, linked.Token);
+                    if (window is not null)
+                    {
+                        _ = NoBrowserYetAsync(app.Opened, env.BrowserWait, env.Out, linked.Token);
+                        closed = WindowClosedAsync(window, env.WindowHandOff, linked.Token);
+                        env.Out.WriteLine("Closing its window stops it too.");
+                    }
+                    else if (launcher is not null && (env.Browse ?? (url => Browser.Open(url, env.Env)))(launcher.Url))
                     {
                         _ = NoBrowserYetAsync(app.Opened, env.BrowserWait, env.Out, linked.Token);
                     }
@@ -555,7 +576,8 @@ internal static partial class Cli
                     env.Out.Flush();
                     try
                     {
-                        await Task.Delay(Timeout.Infinite, linked.Token);
+                        await closed;
+                        ui.Info("Its window was closed.");
                     }
                     catch (OperationCanceledException)
                     {
@@ -592,6 +614,20 @@ internal static partial class Cli
         catch (OperationCanceledException)
         {
             // Stopped first.
+        }
+    }
+
+    /// <summary>
+    /// Ends when the IDE's window closes: its browser ended. One that ends at once handed the window to a browser
+    /// already running on the profile (another code-arena's), so its end says nothing: Ctrl+C stops this one.
+    /// </summary>
+    private static async Task WindowClosedAsync(Task window, TimeSpan handOff, CancellationToken ct)
+    {
+        var started = Stopwatch.GetTimestamp();
+        await window.WaitAsync(ct);
+        if (Stopwatch.GetElapsedTime(started) < handOff)
+        {
+            await Task.Delay(Timeout.Infinite, ct);
         }
     }
 

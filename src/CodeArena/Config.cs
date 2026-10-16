@@ -184,6 +184,8 @@ internal sealed class Config
     public List<string> Deny { get; set; } = [];
     /// <summary>Sessions are kept in step with chats in Arena (both ways): on unless false.</summary>
     public bool SyncChats { get; set; } = true;
+    /// <summary>The IDE opens in a window of its own (a Chromium-family browser's app window): on unless false, a browser tab then.</summary>
+    public bool Window { get; set; } = true;
     /// <summary>Each turn's changes are committed under Code Arena's name (in a git repository): on unless false.</summary>
     public bool AutoCommit { get; set; } = true;
     /// <summary>
@@ -286,6 +288,7 @@ internal sealed class Config
         };
         config.CompletionTemplate = raw.Str("completionTemplate") is { } template && Completions.Templates.ContainsKey(template) ? template : "qwen";
         config.SyncChats = raw.Bool("syncChats") ?? true;
+        config.Window = raw.Bool("window") ?? true;
         config.Sandbox = raw.Str("sandbox");
         if (config.Sandbox is { } sandbox && sandbox.Trim().ToLowerInvariant() is not ("auto" or "on" or "off"))
         {
@@ -410,6 +413,7 @@ internal sealed class Config
         Set("formatters", Formatters.Count == 0 ? null : new JsonObject(Formatters.Select(f => KeyValuePair.Create(f.Name, (JsonNode?)f.Json()))));
         Set("completionTemplate", CompletionTemplate == "qwen" ? null : CompletionTemplate);
         Set("syncChats", SyncChats ? null : false);
+        Set("window", Window ? null : false);
         Set("sandbox", Sandbox);
         Set("sandboxNetwork", SandboxNetwork ? null : false);
         Set("permissions", Allow.Count + Deny.Count == 0 ? null : new JsonObject
