@@ -495,8 +495,9 @@ and removed there.
   before: a 1-second clip decoded on the CPU took 8.5 minutes, 427 s of them
   decoding). While the GPU is lent no chat model loads: an answer that needs
   one waits and says why ("The GPU is making a video with Wan2.2-TI2V-5B just
-  now: … loads again as soon as it is done"), the engine loads none by itself,
-  and **Load** says to try once it is done. When the job ends the room goes
+  now: … loads again as soon as it is done"; an API key's request waits too, as
+  long as the gateway waits for the app's check, 10 minutes), the engine loads
+  none by itself, and **Load** says to try once it is done. When the job ends the room goes
   back: the picture or video model unloads (unless kept loaded) and the chat
   models unloaded for it that are kept loaded or that new chats use load again.
   Admin → Models says what happened lately ("Made room for Wan2.2-TI2V-5B (a
