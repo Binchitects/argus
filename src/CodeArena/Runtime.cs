@@ -494,7 +494,10 @@ internal sealed partial class Runtime : IAsyncDisposable
             }
         }
         // Continued here by the person: archived on the web, it comes back to the list there (once: what this session adds leaves it be).
-        await ChatSync.ContinuedAsync(Config, Http, chat, ct);
+        if (Sync is not null)
+        {
+            await ChatSync.ContinuedAsync(Config, Http, chat, ct);
+        }
         Agent.TakeIn(Sync is null ? Taken.None : await Sync.TakeInAsync(ct));
         return null;
     }
