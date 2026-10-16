@@ -57,6 +57,21 @@ public sealed class CodeArenaSyncTests(AppFixture app)
     private static object Answer(string text, string? reference = null) => new { role = "assistant", content = text, model = "m", @ref = reference };
 
     [Fact]
+    public async Task Code_Arena_reads_when_the_person_s_chats_compact_with_their_key()
+    {
+        await using var f = NewApp();
+        var (web, key) = await PersonAsync(f);
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await CodeArena(f, null).GetAsync(new Uri("/api/code-arena/preferences", UriKind.Relative)));
+        var arena = CodeArena(f, key);
+        var prefs = await Json(await arena.GetAsync(new Uri("/api/code-arena/preferences", UriKind.Relative)));
+        Assert.Equal((JsonValueKind.Null, 80), (prefs.GetProperty("compactAt").ValueKind, prefs.GetProperty("compactAtDefault").GetInt32()));
+
+        await StatusAssert.Is(HttpStatusCode.OK, await web.Http.PutAsJsonAsync(new Uri("/api/account/preferences", UriKind.Relative), new { compactAt = 0 }));
+        prefs = await Json(await arena.GetAsync(new Uri("/api/code-arena/preferences", UriKind.Relative)));
+        Assert.Equal(0, prefs.GetProperty("compactAt").GetInt32());
+    }
+
+    [Fact]
     public async Task A_Code_Arena_session_is_a_chat_here_continued_on_the_web_and_back()
     {
         await using var f = NewApp();

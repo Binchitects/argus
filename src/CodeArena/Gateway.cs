@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using Llm.Core.Chat;
 
 namespace CodeArena;
 
@@ -50,6 +51,12 @@ internal sealed class GatewayException(string message, int? status = null, bool 
 
     /// <summary>The prompt's size in tokens as the refusal counted it (llama.cpp's n_prompt_tokens), when it said.</summary>
     public long? PromptTokens { get; init; }
+
+    /// <summary>
+    /// The engine's cache, shared by the requests it runs at once, was full (llama.cpp's "Context size has been exceeded."):
+    /// other requests filled it, so asking again in a moment may do, with no compaction.
+    /// </summary>
+    public bool SharedCache { get; init; }
 }
 
 /// <summary>The gateway's OpenAI-compatible API, with the person's key.</summary>
@@ -353,9 +360,10 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
             if (chunk["error"] is JsonObject error)
             {
                 var whole = error.ToJsonString();
+                var overflow = ContextOverflow.Parse(whole);
                 throw new GatewayException("The gateway stopped the answer: " + (error.Str("message") ?? whole))
                 {
-                    ContextExceeded = OverWindow(whole), PromptTokens = PromptTokensIn(whole),
+                    ContextExceeded = overflow.Overflow, PromptTokens = overflow.PromptTokens, SharedCache = overflow.SharedCache,
                 };
             }
             if (chunk["usage"] is JsonObject u)
@@ -436,19 +444,12 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
 
     /// <summary>
     /// Whether a refusal says the prompt is bigger than the model's window: llama.cpp's "exceeds the available context size"
-    /// (n_ctx), LiteLLM's ContextWindowExceededError, vLLM's and OpenAI's "maximum context length".
+    /// (n_ctx), LiteLLM's ContextWindowExceededError, vLLM's and OpenAI's "maximum context length" (<see cref="ContextOverflow"/>).
     /// </summary>
-    internal static bool OverWindow(string text) => ContextWords().IsMatch(text);
+    internal static bool OverWindow(string text) => ContextOverflow.Parse(text).Overflow;
 
     /// <summary>The prompt's tokens as a refusal counted them (llama.cpp's n_prompt_tokens), when it says.</summary>
-    internal static long? PromptTokensIn(string text) =>
-        PromptTokensWords().Match(text) is { Success: true } m && long.TryParse(m.Groups[1].Value, out var n) && n > 0 ? n : null;
-
-    [GeneratedRegex(@"ContextWindowExceeded|exceed_context|exceeds? (the )?(available |maximum )?context|context (size|length|window)|n_ctx|maximum context|prompt is too long|too many (input |prompt )?tokens", RegexOptions.IgnoreCase)]
-    private static partial Regex ContextWords();
-
-    [GeneratedRegex(@"n_prompt_tokens\W{0,4}(\d+)")]
-    private static partial Regex PromptTokensWords();
+    internal static long? PromptTokensIn(string text) => ContextOverflow.Parse(text).PromptTokens;
 
     private sealed class ToolCallPieces
     {
@@ -564,9 +565,12 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
             detail = detail[..400] + "…";
         }
         // Too big for the window: the whole body says so (and how big, in llama.cpp's own fields), not only its message.
-        if ((int)status is 400 or 413 or 422 or 500 && OverWindow(body))
+        if ((int)status is 400 or 413 or 422 or 500 && ContextOverflow.Parse(body) is { Overflow: true } overflow)
         {
-            return new GatewayException($"The gateway answered {(int)status}: {detail}", (int)status) { ContextExceeded = true, PromptTokens = PromptTokensIn(body) };
+            return new GatewayException($"The gateway answered {(int)status}: {detail}", (int)status)
+            {
+                ContextExceeded = true, PromptTokens = overflow.PromptTokens, SharedCache = overflow.SharedCache,
+            };
         }
         return status switch
         {

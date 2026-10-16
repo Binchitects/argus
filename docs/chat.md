@@ -167,9 +167,36 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   answer, and what is free. Each request is measured by kind in characters and
   scaled to its prompt tokens.
 - **Compact.** Near the limit the chat compacts itself: the model summarizes
-  the older messages, and the next answers read the summary instead. **Compact
+  the older messages, and the next answers read the summary instead (the
+  newest exchanges, about a quarter of the context, stay as they are). **Compact
   now** in the gauge (or the chat's menu, or sending `/compact`) does it at
-  once. Nothing is deleted: the messages stay on screen above a mark.
+  once. Nothing is deleted: the messages stay on screen above a mark, which
+  says why it compacted there ("at 80% of the context", "so your message fits",
+  or "the model could not read the whole chat: compacted and asked again").
+  - **When.** Your account → Answers → **Compact long chats**: the company's
+    default (Settings → Chat → **Compact a chat at**, 80% unless an admin chose
+    otherwise), a share of the context of your own (20% to 95%), or **Only when
+    a message would not fit**. The share is of the model's whole context, as
+    the gauge shows it: the gauge marks it, says whose choice it is, and links
+    to where it is changed. Code Arena takes the same choice as its default.
+  - **Before it fails.** Whatever the choice, a chat is compacted before a
+    message would not fit: each request is measured before it is sent (its
+    messages, files, pictures and tool definitions), at the characters a token
+    held in the chat's last answer (3 when none says), with room kept for the
+    answer (the chat's **Longest answer** when set, else an eighth of the
+    context) and a margin. An answer whose tool calls outgrow the context cuts
+    its earlier tool results to their start in what the model reads (the chat
+    keeps them whole), then compacts everything before the question. A
+    message bigger than the whole context even at its most compact is not sent:
+    the answer says so, with **Compact now** and the models with a larger
+    context.
+  - **When the model still refuses.** A request the model refuses as longer
+    than its context (llama.cpp's and LiteLLM's refusal, which say by how much)
+    is compacted and asked once more; a second refusal ends the answer with
+    the same actions. When the engine's cache, shared by the chats it answers
+    at once, is full, the request is asked again after two seconds. A summary
+    the model refuses as too long is written in halves. An answer cut at the
+    end of the context says so, and the next message compacts.
 - **Tools on demand.** Every tool's definition in every request is thousands of
   tokens before the question (Argus alone is about 5,000). Past **Tool
   definitions sent whole up to**, a chat sends in full only the tools it has
@@ -183,7 +210,7 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   tools' notes in a fixed order, what you asked it to remember, your
   instructions, then the assistant's files;
   the tools stay in every round (on the last allowed round calling them is
-  switched off, and the model is told); and with compaction off, the oldest
+  switched off, and the model is told); and when a summary fails, the oldest
   messages are left out a quarter of the room at a time, not one by one. The
   next turn of a long chat reads more than 99% of its prompt from the cache.
   The share per model is on Admin → Dashboards → LLM Overview.

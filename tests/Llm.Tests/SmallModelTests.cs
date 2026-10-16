@@ -124,7 +124,8 @@ public sealed class SmallModelTests(AppFixture app)
 
         // A chat compacted before an answer: the small model summarizes, the chat's model answers.
         var full = await NewChatAsync(b, new { tools = Array.Empty<string>() });
-        await OldExchangesAsync(f, full, 30, 2_500);
+        // 34 exchanges of ~2,500 characters: past 80% of the 32K context, as the gauge counts it.
+        await OldExchangesAsync(f, full, 34, 2_500);
         var before = RequestsOf(email, "You compact").Count;
         var auto = await SendAsync(b, full, "the newest question");
         Assert.Equal(Small, auto.Single(e => Type(e) == "compacted").GetProperty("model").GetString());

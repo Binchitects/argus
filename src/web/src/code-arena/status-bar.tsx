@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bot, CircleAlert, ExternalLink, Gauge, GitBranch, GitCompareArrows, Info, LoaderCircle, Plug, RotateCw, ShieldCheck, Sparkles, SquareTerminal, TriangleAlert, Unplug } from 'lucide-react'
+import { RadioGroup } from 'radix-ui'
 import { useState, type ComponentProps, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -9,7 +10,7 @@ import { toast } from '@/components/ui/toaster'
 import { errorMessage } from '@/lib/api'
 import { formatValue } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { changeSettings, compaction, modeLabels, retryServers, stateQuery, type CodeState, type ServerStatus } from './api'
+import { changeSettings, compaction, compactWho, modeLabels, retryServers, stateQuery, type CodeState, type ServerStatus } from './api'
 import { useEditor } from './editor-state'
 import { changesQuery, problemsQuery } from './ide-api'
 import { useKeyFor, useKeymap } from './keyboard'
@@ -129,9 +130,9 @@ export function StatusBar({
       )}
       <Item
         onClick={() => setDialog('context')}
-        aria-label={`Context: ${formatValue(state.contextUsed)} of ${formatValue(state.context)} tokens (${used}%), compacts at ${state.compactAt}%`}
+        aria-label={`Context: ${formatValue(state.contextUsed)} of ${formatValue(state.context)} tokens (${used}%), ${state.compactAt > 0 ? `compacts at ${state.compactAt}%` : 'compacts only when a request would not fit'}`}
         title="How full the model's window is, and when the session compacts itself"
-        className={cn(used >= state.compactAt && 'bg-warning text-black')}
+        className={cn(used >= (state.compactAt > 0 ? state.compactAt : 90) && 'bg-warning text-black')}
       >
         <Gauge aria-hidden="true" />
         {/* The numbers from md up: on a phone the icon says it, so the model and About keep their room. */}
@@ -181,22 +182,29 @@ function ContextSettings({ open, onOpenChange, state }: { open: boolean; onOpenC
   )
 }
 
+/** When the session compacts: at a share of the window, only when a request would not fit, or as the Arena account says. */
+type CompactWhen = 'share' | 'off' | 'account'
+
 function ContextForm({ state, onDone }: { state: CodeState; onDone: () => void }) {
   const queryClient = useQueryClient()
-  const [at, setAt] = useState(String(state.compactAt))
+  const account = state.compactAtAccount ?? null
+  const [when, setWhen] = useState<CompactWhen>(state.compactAtSource === 'account' || state.compactAtSource === 'arena' ? 'account' : state.compactAt === 0 ? 'off' : 'share')
+  const [at, setAt] = useState(String(state.compactAt || compaction.defaultAt))
   const [target, setTarget] = useState(String(state.compactTarget))
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const save = async (e: FormEvent) => {
     e.preventDefault()
-    const a = Number(at)
+    const a = when === 'off' ? 0 : when === 'account' ? (account ?? compaction.defaultAt) : Number(at)
     const t = Number(target)
-    if (!Number.isInteger(a) || a < compaction.minAt || a > compaction.maxAt) return setError(`The threshold is from ${compaction.minAt}% to ${compaction.maxAt}% of the window.`)
-    if (!Number.isInteger(t) || t < compaction.minTarget || t > a - compaction.gap) return setError(`What is kept is from ${compaction.minTarget}% to ${a - compaction.gap}% (${compaction.gap} points under the threshold).`)
+    if (when === 'share' && (!Number.isInteger(a) || a < compaction.minAt || a > compaction.maxAt)) return setError(`The threshold is from ${compaction.minAt}% to ${compaction.maxAt}% of the window.`)
+    // Off compacts near the window's end: what is kept stays as far under the highest threshold.
+    const ceiling = (a === 0 ? compaction.maxAt : a) - compaction.gap
+    if (!Number.isInteger(t) || t < compaction.minTarget || t > ceiling) return setError(`What is kept is from ${compaction.minTarget}% to ${ceiling}% (${compaction.gap} points under the threshold).`)
     setSaving(true)
     try {
-      queryClient.setQueryData(stateQuery.queryKey, await changeSettings({ compactAt: a, compactTarget: t }))
-      toast.success(`The session compacts at ${a}% of the window, keeping ${t}%.`)
+      queryClient.setQueryData(stateQuery.queryKey, await changeSettings({ compactAt: when === 'account' ? null : a, compactTarget: t }))
+      toast.success(a === 0 ? `The session compacts only when a request would not fit, keeping ${t}%.` : `The session compacts at ${a}% of the window, keeping ${t}%.`)
       onDone()
     } catch (err) {
       setError(errorMessage(err))
@@ -211,19 +219,37 @@ function ContextForm({ state, onDone }: { state: CodeState; onDone: () => void }
         <DialogTitle>Context</DialogTitle>
         <DialogDescription>
           About {formatValue(state.contextUsed)} of {formatValue(state.context)} tokens in use ({used}%). When the conversation reaches the threshold, its older part is summarized and the recent part kept
-          whole.
+          whole; and always before a request would not fit. Now: {state.compactAt > 0 ? `at ${state.compactAt}%` : 'only when a request would not fit'} ({compactWho(state)}).
         </DialogDescription>
       </DialogHeader>
       <div className="h-2 overflow-hidden rounded-full bg-muted" aria-hidden="true">
         <div className="relative h-full rounded-full bg-primary" style={{ width: `${Math.min(100, used)}%` }} />
       </div>
       <form className="grid gap-4" onSubmit={(e) => void save(e)} noValidate>
+        <RadioGroup.Root value={when} onValueChange={(v) => setWhen(v as CompactWhen)} aria-label="When it compacts" className="grid gap-1.5 text-sm">
+          {(
+            [
+              ['share', 'At a share of the window'],
+              ['off', 'Only when a request would not fit'],
+              ['account', account == null ? 'As my Arena account says (Arena did not say: 80%)' : `As my Arena account says (${account > 0 ? `${account}%` : 'only when needed'})`],
+            ] as const
+          ).map(([value, label]) => (
+            <label key={value} className="flex items-center gap-2">
+              <RadioGroup.Item value={value} className="size-4 shrink-0 rounded-full border border-input data-[state=checked]:border-[5px] data-[state=checked]:border-primary" aria-label={label} />
+              {label}
+            </label>
+          ))}
+        </RadioGroup.Root>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Compact at (% of the window)" hint={`Default ${compaction.defaultAt}%`}>
-            <Input type="number" inputMode="numeric" min={compaction.minAt} max={compaction.maxAt} value={at} onChange={(e) => setAt(e.target.value)} />
-          </Field>
+          {when === 'share' ? (
+            <Field label="Compact at (% of the window)" hint={`Default ${compaction.defaultAt}%`}>
+              <Input type="number" inputMode="numeric" min={compaction.minAt} max={compaction.maxAt} value={at} onChange={(e) => setAt(e.target.value)} />
+            </Field>
+          ) : (
+            <span />
+          )}
           <Field label="Keep the recent part within (%)" hint={`Default ${compaction.defaultTarget}%`}>
-            <Input type="number" inputMode="numeric" min={compaction.minTarget} max={Math.max(compaction.minTarget, Number(at) - compaction.gap)} value={target} onChange={(e) => setTarget(e.target.value)} />
+            <Input type="number" inputMode="numeric" min={compaction.minTarget} max={Math.max(compaction.minTarget, (when === 'share' ? Number(at) : compaction.maxAt) - compaction.gap)} value={target} onChange={(e) => setTarget(e.target.value)} />
           </Field>
         </div>
         {error && (
@@ -236,6 +262,7 @@ function ContextForm({ state, onDone }: { state: CodeState; onDone: () => void }
             type="button"
             variant="ghost"
             onClick={() => {
+              setWhen('share')
               setAt(String(compaction.defaultAt))
               setTarget(String(compaction.defaultTarget))
               setError(null)

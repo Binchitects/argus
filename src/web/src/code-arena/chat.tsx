@@ -29,6 +29,7 @@ import {
   clearQueue,
   queueMessage,
   changeSettings,
+  compactWho,
   fromSession,
   historyQuery,
   inOrder,
@@ -672,7 +673,16 @@ export function Thread({
       onStop={stop}
       big={big}
       mode={<ModePicker state={state} onChange={(mode) => void settings({ mode })} />}
-      context={context ? <ContextGauge context={context} onCompact={!streaming && path.length >= 2 ? () => void compact() : undefined} busy={streaming} /> : null}
+      context={
+        context ? (
+          <ContextGauge
+            context={context}
+            onCompact={!streaming && path.length >= 2 ? () => void compact() : undefined}
+            busy={streaming}
+            compact={{ at: state.compactAt, who: compactWho(state), change: 'Change it with Context in the status bar, or /compact-at in the terminal.' }}
+          />
+        ) : null
+      }
       history={history}
     />
   )

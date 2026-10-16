@@ -15,11 +15,21 @@ public sealed class ChatOptions
     public int ToolResultChars { get; set; } = 24_000;
 
     /// <summary>
-    /// A chat is compacted (its older messages summarized) before an answer when it
-    /// fills more than this share of the model's context, in percent. 0: never; the
-    /// oldest messages are left out instead.
+    /// A chat is compacted (its older messages summarized) before an answer when the
+    /// request would fill this share of the model's context, in percent (20 to 95), as
+    /// the context gauge shows it. 0: only when the next request would not fit. Either
+    /// way a chat is always compacted before a request would not fit. Each person may
+    /// choose their own (Your account → Chat); this is the default.
     /// </summary>
-    public int AutoCompactPercent { get; set; } = 80;
+    public int CompactAt { get; set; } = DefaultCompactAt;
+
+    public const int DefaultCompactAt = 80;
+    public const int MinCompactAt = 20;
+    public const int MaxCompactAt = 95;
+
+    /// <summary>Whether <paramref name="percent"/> is a share compaction may start at: 0 (only when needed), or 20 to 95.</summary>
+    public static bool ValidCompactAt(int percent) => percent == 0 || percent is >= MinCompactAt and <= MaxCompactAt;
+
     /// <summary>Text kept per attachment (what the Files panel shows and read_file reads).</summary>
     public int MaxAttachmentChars { get; set; } = 1_000_000;
     /// <summary>What of one attachment goes into the question itself; the rest is read in parts.</summary>

@@ -21,6 +21,9 @@ internal sealed record Taken(IReadOnlyList<JsonObject> Added, List<JsonObject>? 
     public bool Any => Added.Count > 0 || History is not null;
 }
 
+/// <summary>When the Arena account's chats compact, in percent of the window (0: only when a request would not fit); <paramref name="Own"/>: the person chose it, else it is Arena's default.</summary>
+internal sealed record AccountCompaction(int At, bool Own);
+
 /// <summary>
 /// The session kept in step with a chat in Arena (/api/code-arena), both ways: each message the session adds is sent
 /// in the background, in order, again until Arena has it (a lost connection, Arena restarting); what the person added
@@ -881,6 +884,36 @@ internal sealed class ChatSync : IAsyncDisposable
             }
             var (name, email) = (me.Str("name"), me.Str("email"));
             return name is { Length: > 0 } && email is { Length: > 0 } && name != email ? $"{name} ({email})" : email ?? name;
+        }
+        catch (Exception e) when (e is HttpRequestException or OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// When the person's chats compact, as their Arena account says (Your account → Answers): their own choice (Own), else
+    /// Arena's default; 0 compacts only when a request would not fit. Null when Arena does not say (an older one) or cannot
+    /// be reached within <paramref name="limit"/>.
+    /// </summary>
+    public static async Task<AccountCompaction?> CompactAtAsync(Config config, HttpClient http, TimeSpan limit, CancellationToken ct)
+    {
+        if (config.Url is not { Length: > 0 } url || config.ApiKey is not { Length: > 0 } key)
+        {
+            return null;
+        }
+        try
+        {
+            using var req = Request(HttpMethod.Get, url.TrimEnd('/') + "/api/code-arena/preferences", key, null);
+            using var within = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            within.CancelAfter(limit);
+            using var res = await http.SendAsync(req, within.Token);
+            if (!res.IsSuccessStatusCode || Json.ParseObject(await res.Content.ReadAsStringAsync(within.Token)) is not { } prefs)
+            {
+                return null;
+            }
+            var own = prefs.Int("compactAt");
+            return (own ?? prefs.Int("compactAtDefault")) is { } at ? new AccountCompaction(at, own is not null) : null;
         }
         catch (Exception e) when (e is HttpRequestException or OperationCanceledException && !ct.IsCancellationRequested)
         {

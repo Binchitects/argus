@@ -17,6 +17,12 @@
     <InternalsVisibleTo Include="CodeArena.Tests" />
   </ItemGroup>
 
+  <!-- How a refusal says the prompt did not fit the model's context: the web
+       chat's own reading of it, shared as a file (no project reference). -->
+  <ItemGroup>
+    <Compile Include="../Llm.Core/Chat/ContextOverflow.cs" Link="Shared/ContextOverflow.cs" />
+  </ItemGroup>
+
   <!-- The IDE (code-arena, code-arena web): the page src/web builds into web/
        (tools/publish-code-arena.sh does it first), embedded whole. Without it,
        code-arena web says the page is missing. -->

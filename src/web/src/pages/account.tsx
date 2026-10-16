@@ -24,6 +24,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage, meQuery, type Me } from '@/lib/api'
 import { ago } from '@/lib/format'
 import { useTheme, type ThemePreference } from '@/lib/theme'
+import { cn } from '@/lib/utils'
 import { setWidth, useWidth, type WidthPreference } from '@/lib/width'
 import { YourData } from './account-data'
 import { VoiceSection } from './account-voice'
@@ -287,6 +288,13 @@ const choice =
 
 type AnswerLength = 'short' | 'normal' | 'thorough'
 
+/** The person's answer preferences: compactAt null follows the company's (compactAtDefault); 0 compacts only when a message would not fit. */
+interface Preferences {
+  answerLength: AnswerLength
+  compactAt: number | null
+  compactAtDefault: number
+}
+
 const lengths: { value: AnswerLength; label: string; icon: typeof Sun }[] = [
   { value: 'short', label: 'Short', icon: Minus },
   { value: 'normal', label: 'Normal', icon: Text },
@@ -296,9 +304,9 @@ const lengths: { value: AnswerLength; label: string; icon: typeof Sun }[] = [
 /** How long answers should be: said to the model on every question. */
 function Answers() {
   const queryClient = useQueryClient()
-  const prefs = useQuery({ queryKey: ['account', 'preferences'], queryFn: () => api<{ answerLength: AnswerLength }>('/api/account/preferences') })
+  const prefs = useQuery({ queryKey: ['account', 'preferences'], queryFn: () => api<Preferences>('/api/account/preferences') })
   const save = useMutation({
-    mutationFn: (answerLength: AnswerLength) => api<{ answerLength: AnswerLength }>('/api/account/preferences', { method: 'PUT', body: { answerLength } }),
+    mutationFn: (answerLength: AnswerLength) => api<Preferences>('/api/account/preferences', { method: 'PUT', body: { answerLength } }),
     onSuccess: (v) => {
       queryClient.setQueryData(['account', 'preferences'], v)
       toast.success('Saved', { description: { short: 'Answers come short: the answer first, no preamble.', normal: 'The model judges how long.', thorough: 'Answers explain, cover the cases and give examples.' }[v.answerLength] })
@@ -306,7 +314,7 @@ function Answers() {
     onError: (e) => toast.error(errorMessage(e)),
   })
   return (
-    <Card>
+    <Card id="answers">
       <CardHeader>
         <CardTitle>Answers</CardTitle>
         <CardDescription>How long answers are, in every chat. Shorter and Longer under an answer change one answer.</CardDescription>
@@ -326,8 +334,83 @@ function Answers() {
         ) : (
           <Skeleton className="h-20" />
         )}
+        {prefs.data && <CompactChoice prefs={prefs.data} />}
       </CardContent>
     </Card>
+  )
+}
+
+type Compacting = 'company' | 'share' | 'needed'
+
+/** When long chats compact: the company's share of the model's context, one of the person's own (20% to 95%), or only when a message would not fit. */
+function CompactChoice({ prefs }: { prefs: Preferences }) {
+  const queryClient = useQueryClient()
+  const kind: Compacting = prefs.compactAt == null ? 'company' : prefs.compactAt === 0 ? 'needed' : 'share'
+  const [share, setShare] = useState(String(prefs.compactAt || prefs.compactAtDefault || 80))
+  const [chosen, setChosen] = useState<Compacting>(kind)
+  const [error, setError] = useState<string>()
+  const save = useMutation({
+    mutationFn: (compactAt: number | null) => api<Preferences>('/api/account/preferences', { method: 'PUT', body: { compactAt } }),
+    onSuccess: (v) => {
+      queryClient.setQueryData(['account', 'preferences'], v)
+      void queryClient.invalidateQueries({ queryKey: ['chat', 'config'] })
+      toast.success('Saved', {
+        description: v.compactAt == null ? `Your chats compact at the company's ${v.compactAtDefault}%.` : v.compactAt === 0 ? 'Your chats compact only when a message would not fit.' : `Your chats compact at ${v.compactAt}% of the model's context.`,
+      })
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  const choose = (v: Compacting) => {
+    setChosen(v)
+    setError(undefined)
+    if (v === 'company') save.mutate(null)
+    else if (v === 'needed') save.mutate(0)
+  }
+  const saveShare = () => {
+    const n = Number(share)
+    if (!Number.isInteger(n) || n < 20 || n > 95) return setError('From 20% to 95% of the model’s context.')
+    setError(undefined)
+    save.mutate(n)
+  }
+  return (
+    <div className="mt-6 grid gap-3">
+      <div>
+        <p className="text-sm font-medium" id="compact-label">
+          Compact long chats
+        </p>
+        <p className="text-xs text-muted-foreground">
+          When a chat fills this much of the model’s context, its older messages become a summary the model reads instead (you still see them). A chat is always compacted before a message would not fit. Code Arena follows this too, unless chosen there.
+        </p>
+      </div>
+      <RadioGroup.Root value={chosen} onValueChange={(v) => choose(v as Compacting)} aria-labelledby="compact-label" className="grid gap-2 sm:grid-cols-3">
+        <RadioGroup.Item value="company" className={choice} disabled={save.isPending}>
+          Company default ({prefs.compactAtDefault === 0 ? 'only when needed' : `${prefs.compactAtDefault}%`})
+        </RadioGroup.Item>
+        <RadioGroup.Item value="share" className={choice} disabled={save.isPending}>
+          At a share of the context
+        </RadioGroup.Item>
+        <RadioGroup.Item value="needed" className={choice} disabled={save.isPending}>
+          Only when a message would not fit
+        </RadioGroup.Item>
+      </RadioGroup.Root>
+      {chosen === 'share' && (
+        <form
+          className="flex items-end gap-2"
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault()
+            saveShare()
+          }}
+        >
+          <Field label="Compact at (% of the context)" error={error} className="w-48">
+            <Input type="number" min={20} max={95} step={5} inputMode="numeric" value={share} onChange={(e) => setShare(e.target.value)} />
+          </Field>
+          <Button type="submit" variant="outline" disabled={save.isPending} className={cn(error && 'mb-6')}>
+            Save
+          </Button>
+        </form>
+      )}
+    </div>
   )
 }
 

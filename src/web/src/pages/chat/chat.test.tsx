@@ -693,9 +693,77 @@ describe('chat', () => {
     expect(within(parts).getByText('Files').parentElement).toHaveTextContent('Files8 K24%')
     expect(within(parts).getByText('Tool definitions').parentElement).toHaveTextContent('Tool definitions6 K18%')
     expect(within(parts).getByText('Answers').parentElement).toHaveTextContent('Answers1.2 K4%')
-    // Kept for the answer: the model's longest (8,192); the rest is free.
-    expect(within(parts).getByText('Free').parentElement).toHaveTextContent('Free4.38 K13%')
+    // Kept for the answer: an eighth of the context (4,096, within the model's longest); the rest is free.
+    expect(within(parts).getByText('Kept for the answer').parentElement).toHaveTextContent('Kept for the answer4.1 K13%')
+    expect(within(parts).getByText('Free').parentElement).toHaveTextContent('Free8.47 K26%')
     await userEvent.click(screen.getByRole('button', { name: 'Compact now' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/compact')).toBe(true))
+  })
+
+  it('the context gauge marks where the chat compacts, whose choice it is, and where to change it', async () => {
+    const full = [answered[0]!, { ...answered[1]!, promptTokens: 20_000, completionTokens: 200 }]
+    backend({ start: conversation({ messages: full, currentLeafId: 'a1' }), config: { compactAt: 60, compactSource: 'account' } })
+    renderApp('/chat/c1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Context: 62% full. Details and compact' }))
+    expect(await screen.findByText(/Compacts at 60% \(your choice\), and always before a message would not fit\./)).toBeInTheDocument()
+    expect(screen.getByTestId('compact-tick')).toHaveStyle({ left: '60%' })
+    expect(screen.getByRole('link', { name: 'Change' })).toHaveAttribute('href', '/account#answers')
+  })
+
+  it('a chat the model refused as too long says it compacted and asked again', async () => {
+    const summary = 'The person said hello.'
+    backend({
+      start: conversation({ messages: answered, currentLeafId: 'a1' }),
+      hang: true,
+      events: [
+        { type: 'question', id: 'q2', parentId: 'a1' },
+        { type: 'assistant', id: 'a2', parentId: 'q2', model: 'Main-Model' },
+        { type: 'notice', kind: 'context_retry', text: 'The model could not read the whole chat (about 40,000 of 32,768 tokens): compacting it and asking again.' },
+        { type: 'compacting', reason: 'overflow' },
+        { type: 'compacted', id: 'a1', summary, auto: true, reason: 'overflow', tokens: 40000, context: 32768, covered: 2 },
+        { type: 'content', text: 'Answered from the summary.' },
+      ],
+    })
+    renderApp('/chat/c1')
+    await screen.findByText('Hi! Here is code:')
+    await ask('and now?')
+    expect(await screen.findByText(/compacting it and asking again/)).toBeInTheDocument()
+    expect(await screen.findByText('The model could not read the whole chat: compacted and asked again. It reads a summary of the chat above')).toBeInTheDocument()
+    expect(await screen.findByText('Answered from the summary.')).toBeInTheDocument()
+  })
+
+  it('a chat too long for the model even compacted offers to compact it, or a model with a larger context', async () => {
+    const error = 'This chat is longer than the model can read (about 40,000 of 32,768 tokens). Compact it (/compact), start a new chat, or remove large attachments.'
+    const failed = [...answered, msg('q2', 'a1', 'user', { content: 'and now?' }), msg('a2', 'q2', 'assistant', { status: 'failed', error, model: 'Main-Model' })]
+    const big = { name: 'Big-Model', context: 131072, maxOutput: 8192, vision: false, tools: true, thinking: true, loaded: true, prices: { input: 1, cachedInput: 0.1, output: 2 } }
+    const calls = backend({
+      start: conversation({ messages: failed, currentLeafId: 'a2' }),
+      config: { models: [...config.models, big] },
+      extra: { 'POST /api/chat/conversations/c1/compact': () => ({ events: [{ type: 'done', id: 'a2' }] }) },
+    })
+    renderApp('/chat/c1')
+    const alert = (await screen.findByText(/This chat is longer than the model can read/)).closest('[role="alert"]') as HTMLElement
+    await userEvent.click(within(alert).getByRole('button', { name: 'Ask Big-Model (131.07 K tokens)' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/chat/conversations/c1/regenerate')?.body).toEqual({ messageId: 'q2', model: 'Big-Model' }))
+  })
+
+  it('a message too long for the model, live, offers to compact the chat', async () => {
+    const tooBig = "Your message alone is about 42,000 tokens of the model's 32,768: it cannot read it even with the chat compacted. Shorten it, attach it as a file, or choose a model with a larger context."
+    const calls = backend({
+      start: conversation({ messages: answered, currentLeafId: 'a1' }),
+      events: [
+        { type: 'question', id: 'q2', parentId: 'a1' },
+        { type: 'assistant', id: 'a2', parentId: 'q2', model: 'Main-Model' },
+        { type: 'error', kind: 'context', message: tooBig },
+      ],
+      saved: [...answered, msg('q2', 'a1', 'user', { content: 'and now?' }), msg('a2', 'q2', 'assistant', { status: 'failed', error: tooBig })],
+      extra: { 'POST /api/chat/conversations/c1/compact': () => ({ events: [{ type: 'done', id: 'a2' }] }) },
+    })
+    renderApp('/chat/c1')
+    await screen.findByText('Hi! Here is code:')
+    await ask('and now?')
+    const alert = (await screen.findByText(/Your message alone is about 42,000 tokens/)).closest('[role="alert"]') as HTMLElement
+    await userEvent.click(await within(alert).findByRole('button', { name: 'Compact now' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/compact')).toBe(true))
   })
 

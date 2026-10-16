@@ -5,12 +5,14 @@ import { categorical } from '@/components/charts/palette'
 import { formatValue } from '@/lib/format'
 import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
-import { kinds, type ContextView } from './context'
+import { compactsText, kinds, type CompactSetting, type ContextView } from './context'
 
-export function ContextGauge({ context, onCompact, busy }: { context: ContextView; onCompact?: () => void; busy: boolean }) {
+export function ContextGauge({ context, onCompact, busy, compact }: { context: ContextView; onCompact?: () => void; busy: boolean; compact?: CompactSetting }) {
   const { resolved } = useTheme()
   const colors = categorical[resolved]
   const share = Math.min(1, context.used / context.limit)
+  // The ring warns as the chat nears where it compacts (90% when it compacts only when needed).
+  const at = compact && compact.at > 0 ? compact.at / 100 : 0.9
   const percent = Math.round(share * 100)
   const free = Math.max(0, context.limit - context.used - (context.output ?? 0))
   const shown = context.parts?.filter((p) => p.tokens > 0) ?? []
@@ -31,7 +33,7 @@ export function ContextGauge({ context, onCompact, busy }: { context: ContextVie
               strokeWidth="2.5"
               strokeLinecap="round"
               strokeDasharray={`${share * ring} ${ring}`}
-              className={cn(share >= 0.9 ? 'stroke-destructive' : share >= 0.7 ? 'stroke-warning' : 'stroke-primary')}
+              className={cn(share >= at ? 'stroke-destructive' : share >= at - 0.15 ? 'stroke-warning' : 'stroke-primary')}
             />
           </svg>
           {percent}%
@@ -47,13 +49,14 @@ export function ContextGauge({ context, onCompact, busy }: { context: ContextVie
               {context.estimated ? ' since compacting; the next answer counts it' : ''}
             </p>
           </div>
-          <div className="flex h-2.5 w-full gap-0.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+          <div className="relative flex h-2.5 w-full gap-0.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
             {shown.length > 0 ? (
               shown.map((p) => <span key={p.key} className="h-full first:rounded-s-full" style={{ width: of(p.tokens), background: colors[kinds.findIndex((k) => k.key === p.key)] }} />)
             ) : (
               <span className="h-full rounded-s-full bg-primary" style={{ width: of(context.used) }} />
             )}
             {context.output ? <span className="ms-auto h-full bg-[repeating-linear-gradient(135deg,var(--muted-foreground)_0_2px,transparent_2px_5px)] opacity-40" style={{ width: of(context.output) }} /> : null}
+            {compact && compact.at > 0 ? <span data-testid="compact-tick" className="absolute inset-y-0 w-0.5 bg-foreground/70" style={{ left: `${compact.at}%` }} /> : null}
           </div>
           {shown.length > 0 ? (
             <ul className="grid gap-1 text-xs" aria-label="What fills it">
@@ -84,7 +87,8 @@ export function ContextGauge({ context, onCompact, busy }: { context: ContextVie
             <p className="text-xs text-muted-foreground">What fills it is shown from the next answer on.</p>
           )}
           <p className="text-xs text-muted-foreground">
-            Near the limit, the chat compacts itself: its older messages become a summary the model reads instead. Compact now to carry on lighter (also: send /compact).
+            {compact ? compactsText(compact) : 'Near the limit, the chat compacts itself.'} Its older messages then become a summary the model reads instead. Compact now to carry on lighter (also: send /compact).
+            {compact?.change ? <> {compact.change}</> : null}
           </p>
           <Button size="sm" variant="outline" disabled={busy || !onCompact} onClick={onCompact}>
             <FoldVertical /> Compact now

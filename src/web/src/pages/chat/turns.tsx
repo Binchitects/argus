@@ -24,17 +24,18 @@ import { RouteNote } from './route-note'
 import { researchStep } from './research'
 import { MemoryCard } from './memory'
 import { FeedbackButtons } from './feedback'
-import type { AgentWork, ChatConfig, InLine, Message } from './types'
+import { compactedText, contextError } from './context'
+import type { AgentWork, ChatConfig, Compaction, InLine, Message } from './types'
 
 /** Where a chat was compacted: the model reads a summary of everything above instead of the messages. */
-export function CompactedMark({ summary, onOpenFile }: { summary: string; onOpenFile: (name: string) => void }) {
+export function CompactedMark({ summary, compaction, onOpenFile }: { summary: string; compaction?: Compaction | null; onOpenFile: (name: string) => void }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="grid gap-2" role="note" aria-label="Chat compacted">
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
         <span className="h-px flex-1 bg-border" aria-hidden="true" />
         <FoldVertical className="size-3.5 shrink-0" aria-hidden="true" />
-        <span>Compacted: the model reads a summary of the chat above</span>
+        <span>{compactedText(compaction)}</span>
         <Button variant="ghost" size="sm" className="h-6 gap-1 px-1.5 text-xs" onClick={() => setOpen(!open)} aria-expanded={open}>
           {open ? 'Hide summary' : 'Show summary'} <ChevronDown className={cn('size-3 transition-transform', open && 'rotate-180')} aria-hidden="true" />
         </Button>
@@ -45,6 +46,30 @@ export function CompactedMark({ summary, onOpenFile }: { summary: string; onOpen
           <Markdown text={summary} onOpenFile={onOpenFile} />
         </div>
       )}
+    </div>
+  )
+}
+
+/** Under an answer too long for its model: compact the chat now, or ask a model with a larger context (the larger ones that can answer now first). */
+function ContextActions({ model, config, onCompact, onAsk }: { model: string | null; config: ChatConfig; onCompact?: () => void; onAsk?: (model: string) => void }) {
+  const context = config.models.find((m) => m.name === model)?.context ?? 0
+  const larger = config.models
+    .filter((m) => (m.context ?? 0) > context && (m.loaded || m.onRequest))
+    .sort((x, y) => Number(y.loaded) - Number(x.loaded) || (y.context ?? 0) - (x.context ?? 0))
+    .slice(0, 2)
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {onCompact && (
+        <Button size="sm" variant="outline" onClick={onCompact}>
+          <FoldVertical /> Compact now
+        </Button>
+      )}
+      {onAsk &&
+        larger.map((m) => (
+          <Button key={m.name} size="sm" variant="outline" onClick={() => onAsk(m.name)}>
+            Ask {m.name} ({formatValue(m.context ?? 0)} tokens)
+          </Button>
+        ))}
     </div>
   )
 }
@@ -236,6 +261,7 @@ export function AnswerTurn({
   onTrace,
   busy,
   feedbackIn,
+  onCompact,
 }: {
   answer: Message[]
   siblings: Message[]
@@ -273,6 +299,8 @@ export function AnswerTurn({
   busy: boolean
   /** The chat's id: the answer can be rated (thumbs up or down) there. */
   feedbackIn?: string
+  /** Compacts the chat now (offered when the answer failed for being too long for the model). */
+  onCompact?: () => void
 }) {
   const results = new Map(answer.filter((m) => m.role === 'tool').map((m) => [m.toolCallId, m]))
   const assistants = answer.filter((m) => m.role === 'assistant')
@@ -427,6 +455,9 @@ export function AnswerTurn({
             {a.error && (
               <Alert variant="destructive" className="my-2">
                 {a.error}
+                {!live && contextError(a) && (onCompact || (onRegenerate && question)) && (
+                  <ContextActions model={a.model} config={config} onCompact={onCompact} onAsk={onRegenerate && question ? (model) => onRegenerate(question, { model }) : undefined} />
+                )}
               </Alert>
             )}
             {a.status === 'stopped' && (

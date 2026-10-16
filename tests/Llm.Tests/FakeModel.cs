@@ -27,6 +27,9 @@ namespace Llm.Tests;
 ///               the lists run out or calling is switched off (tool_choice none); then answers "Found it."
 ///   [timed]     its last chunk carries llama.cpp's timings: 60 prompt tokens read in 300 ms, 12 written in 1,200 ms
 ///   [offer {json}]  asks for remember with those arguments (the word itself in a message reads as the person asking to remember)
+///   [context overflow]       refused as LiteLLM refuses a prompt bigger than llama.cpp's context (<see cref="Overflow"/>)
+///   [context overflow once]  refused so until the chat was compacted (a summary in the system message)
+///   [summary limit N]  a summary asked of more than N characters that holds it is refused as too long
 /// Its /v1/images/generations answers with a small PNG.
 /// </summary>
 public sealed class FakeModel : HttpMessageHandler
@@ -149,8 +152,17 @@ public sealed class FakeModel : HttpMessageHandler
         }
         if (messages[0]!["content"]?.GetValue<string>().StartsWith("You compact a conversation", StringComparison.Ordinal) == true)
         {
+            if (System.Text.RegularExpressions.Regex.Match(lastUser, @"\[summary limit (\d+)\]") is { Success: true } limit && lastUser.Length > int.Parse(limit.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture))
+            {
+                return OverflowResponse(lastUser.Length / 2);
+            }
             chunks = [Delta(new JsonObject { ["content"] = $"Summary of {lastUser.Length} characters." }), Finish("stop"), Usage(lastUser.Length / 4, 0, 8)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
+        if (lastUser.Contains("[context overflow]", StringComparison.Ordinal)
+            || (lastUser.Contains("[context overflow once]", StringComparison.Ordinal) && !messages[0]!["content"]!.GetValue<string>().Contains("<summary>", StringComparison.Ordinal)))
+        {
+            return OverflowResponse(40_000);
         }
         var call = System.Text.RegularExpressions.Regex.Match(lastUser, @"\[call (\S+) (\{.*\})\]|\[(offer) (\{.*\})\]", System.Text.RegularExpressions.RegexOptions.Singleline);
         var script = lastUser.IndexOf("[script ", StringComparison.Ordinal);
@@ -235,6 +247,27 @@ public sealed class FakeModel : HttpMessageHandler
         }
         return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
     }
+
+    /// <summary>
+    /// LiteLLM's refusal of a prompt bigger than llama.cpp's context (32,768 tokens), as the gateway sends it: a 400 whose
+    /// message is ContextWindowExceededError around llama.cpp's own words.
+    /// </summary>
+    public static string Overflow(long tokens) =>
+        $$$"""{"error":{"message":"litellm.ContextWindowExceededError: litellm.BadRequestError: ContextWindowExceededError: OpenAIException - request ({{{tokens}}} tokens) exceeds the available context size (32768 tokens), try increasing it","type":null,"param":null,"code":"400"}}""";
+
+    /// <summary>llama.cpp's own refusal, straight from the engine (no gateway between).</summary>
+    public const string LlamaOverflow =
+        """{"error":{"code":400,"message":"request (34803 tokens) exceeds the available context size (32768 tokens), try increasing it","type":"exceed_context_size_error","n_prompt_tokens":34803,"n_ctx":32768}}""";
+
+    /// <summary>llama.cpp's error in the middle of a stream when the cache its requests share is full.</summary>
+    public const string SharedCacheFull = """{"error":{"code":500,"message":"Context size has been exceeded.","type":"server_error"}}""";
+
+    /// <summary>OpenAI's and vLLM's words for the same.</summary>
+    public const string OpenAiOverflow =
+        """{"error":{"message":"This model's maximum context length is 32768 tokens. However, you requested 40000 tokens (36000 in the messages, 4000 in the completion). Please reduce the length of the messages or completion.","type":"invalid_request_error","param":"messages","code":"context_length_exceeded"}}""";
+
+    private static HttpResponseMessage OverflowResponse(long tokens) =>
+        new(HttpStatusCode.BadRequest) { Content = new StringContent(Overflow(tokens), Encoding.UTF8, "application/json") };
 
     /// <summary>The chunks as one chat.completion: the words, the finish and the usage.</summary>
     private static JsonObject Whole(IEnumerable<string> chunks)

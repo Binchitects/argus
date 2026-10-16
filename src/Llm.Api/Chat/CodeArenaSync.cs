@@ -104,6 +104,17 @@ public static class CodeArenaSync
         g.MapDelete("/chats/{id:guid}/turn", TurnEndAsync);
         g.MapPost("/chats/{id:guid}/continued", ContinuedAsync);
         g.MapGet("/attachments/{id:guid}", AttachmentAsync);
+        g.MapGet("/preferences", PreferencesAsync);
+    }
+
+    /// <summary>
+    /// What Code Arena takes from the person's account: when their chats compact (Your account → Chat; null: they follow the
+    /// company's, compactAtDefault). Code Arena compacts at it unless a flag or its config.json says otherwise.
+    /// </summary>
+    private static async Task<IResult> PreferencesAsync(HttpContext http, McpPeople people, IOptionsMonitor<ChatOptions> chat)
+    {
+        var (me, refusal) = await CallerAsync(http, people);
+        return me is null ? refusal! : Results.Ok(new { compactAt = me.CompactAt, compactAtDefault = chat.CurrentValue.CompactAt });
     }
 
     /// <summary>What a read gives of each message beyond its row: tool results marked as the web's model reads them, attachments' text up to so much.</summary>

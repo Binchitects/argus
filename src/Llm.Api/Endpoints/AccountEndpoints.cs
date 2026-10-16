@@ -2,10 +2,12 @@ using Llm.Core.Access;
 using System.Globalization;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using Llm.Api.Gateway;
 using Llm.Api.Identity;
 using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Endpoints;
 
@@ -24,26 +26,52 @@ public static class AccountEndpoints
         me.MapPost("/2fa/setup", SetupTwoFactorAsync);
         me.MapPost("/2fa/enable", EnableTwoFactorAsync);
         me.MapPost("/2fa/disable", DisableTwoFactorAsync);
-        me.MapGet("/preferences", async (ClaimsPrincipal p, UserManager<AppUser> users) =>
-            Results.Ok(new { answerLength = (await users.GetUserAsync(p))!.AnswerLength ?? Chat.AnswerLengths.Normal }));
-        me.MapPut("/preferences", async (Preferences body, ClaimsPrincipal p, UserManager<AppUser> users) =>
+        me.MapGet("/preferences", async (ClaimsPrincipal p, UserManager<AppUser> users, IOptionsMonitor<Chat.ChatOptions> chat) =>
+            Results.Ok(PreferencesOf((await users.GetUserAsync(p))!, chat.CurrentValue)));
+        me.MapPut("/preferences", async (Preferences body, ClaimsPrincipal p, UserManager<AppUser> users, IOptionsMonitor<Chat.ChatOptions> chat) =>
         {
             if (body.AnswerLength is { } length && !Chat.AnswerLengths.All.Contains(length))
             {
                 return AuthEndpoints.Problem(400, "answer_length", "The answer length is short, normal or thorough.");
             }
-            var user = (await users.GetUserAsync(p))!;
-            if (body.AnswerLength is not null)
+            // compactAt: a number (0, or 20 to 95), or null for the company's default; left out, it stays.
+            int? compactAt = null;
+            var compactSent = body.CompactAt.ValueKind is not JsonValueKind.Undefined;
+            if (compactSent && body.CompactAt.ValueKind is not JsonValueKind.Null)
             {
-                user.AnswerLength = body.AnswerLength == Chat.AnswerLengths.Normal ? null : body.AnswerLength;
+                if (body.CompactAt.ValueKind is not JsonValueKind.Number || !body.CompactAt.TryGetInt32(out var at) || !Chat.ChatOptions.ValidCompactAt(at))
+                {
+                    return AuthEndpoints.Problem(400, "compact_at", $"Compacting starts at 0 (only when a message would not fit) or from {Chat.ChatOptions.MinCompactAt}% to {Chat.ChatOptions.MaxCompactAt}% of the model's context.");
+                }
+                compactAt = at;
+            }
+            var user = (await users.GetUserAsync(p))!;
+            if (body.AnswerLength is not null || compactSent)
+            {
+                if (body.AnswerLength is not null)
+                {
+                    user.AnswerLength = body.AnswerLength == Chat.AnswerLengths.Normal ? null : body.AnswerLength;
+                }
+                if (compactSent)
+                {
+                    user.CompactAt = compactAt;
+                }
                 await users.UpdateAsync(user);
             }
-            return Results.Ok(new { answerLength = user.AnswerLength ?? Chat.AnswerLengths.Normal });
+            return Results.Ok(PreferencesOf(user, chat.CurrentValue));
         });
         me.MapGet("/keys", KeysAsync);
         me.MapGet("/keys/limits", LimitsAsync);
         me.MapPost("/keys/rotate", RotateAsync);
     }
+
+    /// <summary>A person's choices as the account page shows them: compactAt null follows the company's, compactAtDefault.</summary>
+    private static object PreferencesOf(AppUser user, Chat.ChatOptions chat) => new
+    {
+        answerLength = user.AnswerLength ?? Chat.AnswerLengths.Normal,
+        compactAt = user.CompactAt,
+        compactAtDefault = chat.CompactAt,
+    };
 
     private static async Task<IResult> ChangePasswordAsync(ChangePasswordRequest body, ClaimsPrincipal p, UserManager<AppUser> users,
         SignInManager<AppUser> signIn, Audit audit)
@@ -195,5 +223,8 @@ public static class AccountEndpoints
     }
 }
 
-/// <summary>A person's own choices for their answers. Only what is sent changes.</summary>
-public sealed record Preferences(string? AnswerLength = null);
+/// <summary>
+/// A person's own choices for their answers. Only what is sent changes. <paramref name="CompactAt"/>: when their chats compact
+/// (and Code Arena's, unless chosen there), a number, or null for the company's default.
+/// </summary>
+public sealed record Preferences(string? AnswerLength = null, JsonElement CompactAt = default);
