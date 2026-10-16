@@ -1,0 +1,35 @@
+# Postgres with point-in-time recovery (pgBackRest): every WAL segment archived to the backup disk as it
+# is written, so the database can be restored to any second between backups (scripts/restore-drill.sh
+# shows it works). The logical dump of scripts/backup.sh stays the second line.
+#
+#   docker compose -f docker-compose.yml -f pitr.yml build postgres     # once: arena-postgres (apt; approve)
+#   docker compose -f docker-compose.yml -f pitr.yml up -d postgres
+#   ./scripts/backup.sh --pitr full      # weekly        ./scripts/backup.sh --pitr diff   # daily
+#   ./scripts/restore-drill.sh           # monthly: a restore to a moment, in a scratch container
+#
+# Kubernetes: CloudNativePG with barman-cloud backups to S3 (externalDatabase), not this file.
+
+services:
+  postgres:
+    image: arena-postgres:pg16
+    build:
+      context: ./services
+      dockerfile: postgres.Dockerfile
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=pgbackrest --stanza=arena archive-push %p
+      - -c
+      - archive_timeout=60
+      - -c
+      - max_wal_senders=3
+    volumes:
+      - ./config/pgbackrest/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+      - type: bind
+        source: ${BACKUP_DIR:-./backups}
+        target: /backup
+        bind: { create_host_path: true }

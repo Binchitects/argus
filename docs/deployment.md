@@ -620,6 +620,21 @@ volumes.
 - It refuses the live project's name, and every volume it removes must carry
   its own.
 
+### Point-in-time recovery (PITR)
+
+`pitr.yml` runs the stack's Postgres with pgBackRest (`arena-postgres`, built
+once from the pgvector image already on the host with Debian's pgbackrest
+package: approve the build first): every WAL segment is archived to
+`BACKUP_DIR/pgbackrest` as it is written, so the database can be put back to
+any second. `scripts/backup.sh --pitr full` (weekly) and `--pitr diff`
+(daily) take the backups (four full ones are kept, with their WAL);
+`scripts/restore-drill.sh [--to "YYYY-MM-DD HH:MM:SS+00"]` restores the
+repository to a moment into a scratch container and volume of its own,
+starts it and checks the databases and their people, and never touches the
+stack's Postgres (`--dry-run` says what it would do). The logical dump above
+stays the second line. On Kubernetes, use CloudNativePG with barman-cloud
+backups (an `externalDatabase`), not this file.
+
 ## Rollback
 
 EF migrations only go forward. An older app on a database a newer one migrated

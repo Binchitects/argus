@@ -10,6 +10,8 @@
 #   ./scripts/backup.sh --restore --from DIR     put volumes and the database back (stack stopped)
 #   ./scripts/backup.sh --restore --from DIR --with-config   also .env, overrides and config files
 #   ./scripts/backup.sh --restore --from DIR --yes           without asking (restore-test.sh, rollback-test.sh)
+#   ./scripts/backup.sh --pitr full|diff         a pgBackRest backup (with pitr.yml: WAL archived continuously,
+#                                                a restore to any second; scripts/restore-drill.sh checks one)
 #
 #   --podman        Podman's containers and volumes (podman compose) in place of Docker's
 #   --deploy DIR    the deploy folder to back up or restore (default: the one this script is in;
@@ -87,7 +89,7 @@ case "$COPY_DIR" in ""|/*) ;; *) COPY_DIR="$ROOT/${COPY_DIR#./}" ;; esac
 
 # Named volumes that are caches or models, not state; media-status is what the picture and video
 # servers say they do now (rewritten every 2 seconds, in memory).
-SKIP_VOLUMES=" audio acme sandbox postgres media-status "
+SKIP_VOLUMES=" audio acme sandbox postgres media-status vllm-status valkey "
 LOG_VOLUMES=" loki prometheus alertmanager "
 
 ACTION=backup; FROM=""; WITH_CONFIG=0; VERIFY_DIR=""; YES=0
@@ -103,6 +105,7 @@ while [[ $# -gt 0 ]]; do
     --out) BACKUP_DIR="$2"; shift 2 ;;   # kept for compatibility
     --include-model-cache) SKIP_VOLUMES="${SKIP_VOLUMES/ audio / }"; shift ;;
     --prune) ACTION=prune; shift ;;
+    --pitr) ACTION=pitr; PITR_TYPE="${2:-diff}"; [[ $# -ge 2 ]] && shift; shift ;;
     --keep) [[ $# -ge 2 ]] || die "--keep takes a number"; KEEP="$2"; shift 2 ;;
     -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1 { print }' "$SELF"; exit 0 ;;
     *) die "unknown option: $1 (see --help)" ;;
@@ -150,6 +153,19 @@ own_dir() {   # own_dir <dir>
 check_keep() { [[ "$KEEP" =~ ^[1-9][0-9]*$ ]] || die "BACKUP_KEEP and --keep take a whole number, 1 or more (not '$KEEP')"; }
 
 # ============================================================================ list
+# A pgBackRest backup of the running Postgres (pitr.yml): the stanza made the first time, then a full or
+# differential backup into BACKUP_DIR/pgbackrest. WAL goes there continuously by itself.
+if [[ $ACTION == pitr ]]; then
+  [[ ${PITR_TYPE:-} == full || ${PITR_TYPE:-} == diff ]] || die "--pitr takes full or diff"
+  "$ENGINE" compose exec -T postgres sh -c 'command -v pgbackrest' > /dev/null 2>&1 \
+    || die "the postgres container has no pgBackRest: run it with pitr.yml (docker compose -f docker-compose.yml -f pitr.yml up -d postgres)"
+  "$ENGINE" compose exec -T -u postgres postgres pgbackrest --stanza=arena stanza-create > /dev/null 2>&1 || true
+  say "pitr: a $PITR_TYPE backup"
+  "$ENGINE" compose exec -T -u postgres postgres pgbackrest --stanza=arena --type="$PITR_TYPE" backup || die "pgBackRest failed (its log: /var/log/pgbackrest in the container)"
+  "$ENGINE" compose exec -T -u postgres postgres pgbackrest --stanza=arena info
+  exit 0
+fi
+
 if [[ $ACTION == list ]]; then
   for where in "$BACKUP_DIR" ${COPY_DIR:+"$COPY_DIR"}; do
     say "Backups in $where (keeping $KEEP):"

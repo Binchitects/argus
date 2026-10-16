@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SCRIPTS = ["airgap.sh", "backup.sh", "test-project.sh", "restore-test.sh", "rollback-test.sh", "recovery-check.py",
+SCRIPTS = ["airgap.sh", "backup.sh", "test-project.sh", "restore-test.sh", "rollback-test.sh", "recovery-check.py", "restore-drill.sh",
            "installer.sh", "make-installer.sh", "make-cert.sh", "setup-hosts.sh"]
 COMPOSE = """name: arena
 services:

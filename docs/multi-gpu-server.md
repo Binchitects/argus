@@ -491,6 +491,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
     - pgBackRest in the Postgres image, WAL archive to `BACKUP_DIR`/NAS/S3, `backup.sh --pitr`, and a restore drill (`scripts/restore-drill.sh` restores to a timestamp in a scratch container and checks it).
     - Docs in `deployment.md` "Backups".
     - Tests: the drill runs in CI.
+    - **Done**: `deploy/services/postgres.Dockerfile` (arena-postgres: pgvector's image with pgBackRest from apt; not built), `deploy/pitr.yml` (WAL archiving, the repository on `BACKUP_DIR`), `config/pgbackrest/pgbackrest.conf`, `backup.sh --pitr full|diff`, `scripts/restore-drill.sh`, docs in deployment.md. Tests: `tests/deploy/test_pitr.py` (the scripts with fake docker, never the stack's volume; pitr.yml as compose reads it). The drill against real images, in CI or on the host, needs the image built.
 18. **Load-test extensions.**
     - `multiuser-bench.py` `--ramp`, `--prefix-share`, `--return-after`, `--kill-engine`; `scale-test.py` at 50, 100 and 300 users; JSON baselines.
     - Tests: CI on fake-vllm. Real numbers come on the hardware.
