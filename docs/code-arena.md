@@ -336,10 +336,12 @@ VS Code settings mean the same here:
   delay; `files.associations`), compares (`diffEditor.*`), the terminals
   (font, cursor, scrollback, the keys they let through), the colour theme
   (`workbench.colorTheme`, or `window.autoDetectColorScheme` with the
-  preferred light and dark ones: **Ctrl+K Ctrl+T**) and Code Arena's code
-  completion (`codeArena.inlineCompletion.enabled`, the status bar's
-  **Complete**). They apply as the file is saved. Where Code Arena's default
-  is not VS Code's, the description says so.
+  preferred light and dark ones: **Ctrl+K Ctrl+T**), the file icon theme
+  (`workbench.iconTheme`) and Code Arena's code completion
+  (`codeArena.inlineCompletion.enabled`, the status bar's **Complete**). They
+  apply as the file is saved. Where Code Arena's default is not VS Code's, the
+  description says so. Under the person's settings are the enabled
+  extensions' `configurationDefaults` ([Extensions](#extensions)).
 - **keybindings.json**: the person's, beside it (**Preferences: Open Keyboard
   Shortcuts**, **Ctrl+K Ctrl+S**): VS Code's rules, `{"key": "ctrl+shift+e",
   "command": "workbench.action.togglePanel", "when": "editorIsOpen"}`, over
@@ -388,7 +390,7 @@ Ctrl+Alt+PageUp/PageDown move between tabs).
 | Alt+1 … Alt+9, Ctrl+Alt+PageUp/PageDown | a tab by its place, the next or the one before |
 | Ctrl+Alt+- , Ctrl+Shift+- (Alt+← and Alt+→ on Windows) | back and forward through the tabs shown |
 | Ctrl+B, Ctrl+J, Ctrl+Alt+B | the side bar, the panel, the chat |
-| Ctrl+Shift+E, Ctrl+Shift+F, Ctrl+Shift+H, Ctrl+Shift+G, Ctrl+Shift+M | Explorer, search, replace, source control, problems |
+| Ctrl+Shift+E, Ctrl+Shift+F, Ctrl+Shift+H, Ctrl+Shift+G, Ctrl+Shift+M, Ctrl+Shift+X | Explorer, search, replace, source control, problems, extensions |
 | Ctrl+`, Ctrl+Shift+` | show or hide the terminals, a new one |
 | Ctrl+, , Ctrl+K Ctrl+S, Ctrl+K Ctrl+T | settings, keyboard shortcuts, colour theme |
 | Ctrl+K M, Alt+Z, Ctrl+K P | the language mode, word wrap, copy the file's path |
@@ -593,6 +595,70 @@ the session's adapter named it, and never code-arena's own config or data.
 The browser keeps a few function keys for itself in a tab (F11 makes the
 window full screen in some): **Step Into** is also in the toolbar.
 
+### Extensions
+
+**Extensions** in the activity bar (**Ctrl+Shift+X**) takes VS Code's
+extensions for what they declare in their `package.json`, never for their
+code: Code Arena has no extension host, and no extension's code runs. The
+view lists:
+
+- **Installed**: each with what it brings; its switch turns it off (its
+  contributions stop applying), the bin uninstalls it, and **Not used here**
+  says what it has that Code Arena does not use, and why.
+- **Recommended**: the project's `.vscode/extensions.json`
+  (`recommendations`), each with where it stands here: **Installed**; **Built
+  in** (Code Arena does its work itself: `esbenp.prettier-vscode`, ruff and
+  black are [formatting](#formatting), `ms-vscode.cpptools`,
+  `ms-python.debugpy`, `golang.go` and the others are [Run and
+  Debug](#run-and-debug)'s adapters); **Not supported** (it is its code:
+  ESLint, GitLens, Copilot, Pylance, remote development, with what to do
+  instead, such as ESLint as the project's check in Problems); **On this
+  computer** (VS Code has it here: **Import**); **Not here** (install its
+  .vsix).
+- **VS Code on this computer**: the extensions VS Code installed
+  (`~/.vscode/extensions`), VSCodium's (`~/.vscode-oss/extensions`) and
+  Insiders' (`~/.vscode-insiders/extensions`; `%USERPROFILE%\.vscode\extensions`
+  on Windows), the newest copy of each, and whether it has anything Code Arena
+  uses. **Import** copies one (VS Code's own copy is left as it is).
+- **Install from VSIX…** (also **Extensions: Install from VSIX…** in the
+  palette): a .vsix you downloaded (an extension's page on Open VSX or the
+  Marketplace has one). Code Arena itself downloads nothing.
+
+What it uses of an extension:
+
+| contribution | in Code Arena |
+|---|---|
+| `themes` (colour themes, JSON) | offered by **Color Theme** (Ctrl+K Ctrl+T) and `workbench.colorTheme` (by its `id`, else its `label`); going down the list shows each theme at once, and Escape goes back. Its `include` is read. Its `tokenColors` colour the editor by scope: the editor's own highlighting names its tokens as TextMate's broadest scopes (comment, string, keyword…), and the common narrower ones (`constant.numeric`, `entity.name.type`, `entity.name.tag`, `storage.type`…) are given its names too. Its `colors` are the editor's, the terminal's (`terminal.foreground`, `terminal.ansi*`), and the page's for about twenty of the workbench's (`editor.background`, `sideBar.background`, `button.background`, `list.hoverBackground`, `focusBorder`, `panel.border`…); its `uiTheme` makes the page light or dark |
+| `iconThemes` | offered by **Preferences: File Icon Theme** and `workbench.iconTheme`. A file's icon is by its name, then its extension (the longest first: `test.ts` before `ts`), then its language, else the default; a folder's by its name, open or closed; a light theme's own choices first. Images, and characters of the theme's fonts |
+| `snippets` | suggestions (Ctrl+Space, and as you type) in the files of their language, in VS Code's snippet syntax (`$1`, `${2:name}`, `${3\|a,b\|}`, `$0`) |
+| `languages` | a language for files by their extensions and names (the status bar's language, `files.associations`); for a language the editor does not have, its `language-configuration.json`: comments (Ctrl+/), brackets, auto-closing and surrounding pairs, folding markers, the word pattern, indentation and Enter rules |
+| `grammars` | kept, not used yet: the editor's own highlighting is used (TextMate grammars come later) |
+| `keybindings` | for the commands Code Arena has, by VS Code's ids, between its defaults and your keybindings.json (**Extension** in the Keyboard Shortcuts editor); keys for the extension's own commands are not (they need its code) |
+| `configurationDefaults` | a layer under your settings: Code Arena's defaults, then the extensions', then your settings.json, then the project's; a language's own (`"[toml]": {…}`) over them all, as in VS Code |
+
+Everything else is left out and said so: its code (`main`, `browser`), its
+commands, menus and views, its own settings (`configuration`), debuggers,
+language servers, `jsonValidation`, product icon themes and `.tmTheme`
+colour themes. So ESLint, GitLens, debuggers and language features need
+Code Arena's own way: ESLint as the project's check (Problems), Source
+control and its compares, Run and Debug's adapters, Prettier and the others
+as formatters. An extension with nothing Code Arena uses is refused. A
+project's own `.vscode/*.code-snippets` and your own snippets files are not
+read yet: only an extension's.
+
+Extensions are kept in code-arena's data folder, in
+`extensions/<publisher.name>-<version>/` with only the files their
+contributions name (the themes and what they include, the icons and fonts,
+the snippets, the language configurations, the grammars), and listed in
+`extensions/installed.json` with whether each is on. A new version replaces
+the one before (on or off as it was). A .vsix is taken up to 50 MB, a file
+in it up to 5 MB, 50 MB and 10,000 files kept per extension; a .vsix with a
+name that leads out of it (`..`, `/`, `C:`) or a link in it is refused whole,
+and a path in its `package.json` that leads out of the extension is left out.
+An extension's files are served to the page only when its contributions name
+them, never as a page of its own (an SVG runs no script). Monaco cannot take a
+language back: one an extension added stays until the page reloads.
+
 ### Ask about code from the editor
 
 Lines of a file go to the agent from the editor itself:
@@ -738,7 +804,8 @@ That is why everything below is behind this run's key.
 - The server answers only to `127.0.0.1` and `localhost` at its port (the Host
   header), so a name pointed at 127.0.0.1 (DNS rebinding) gets nothing; it
   refuses requests from other sites, or another port's page (Origin,
-  Sec-Fetch-Site), takes only JSON, and its page cannot be framed. Every call,
+  Sec-Fetch-Site), takes only JSON (a .vsix only as its bytes, which no form
+  of another site's can send), and its page cannot be framed. Every call,
   the file calls and the terminals' WebSocket included, passes these checks.
 - The file calls take paths relative to the working directory only: an
   absolute path, a drive or `..` is refused, even one that would land inside.
@@ -824,6 +891,15 @@ status (403 `outside` for a path outside the folder).
 | `GET /api/user-files?name=settings.json` (or `keybindings.json`) | the person's own file in the config folder: `{name, text, version, exists}` (`text` empty, `version` `none` before the first save); 400 for any other name |
 | `POST /api/user-files` `{name, text, version}` | saves it as sent (comments kept; readable by the person alone); 409 `changed` when it changed since `version`, 413 `too_large` past 1 MB |
 | `GET /api/user-files/vscode?name=…` | VS Code's own copy on this computer (Code, then Insiders, then VSCodium): `{name, text, from}`; 404 when there is none |
+| `GET /api/extensions` | the extensions kept: `[{id, name, displayName, version, publisher, description, icon, enabled, source, contributes: {themes: [{label, uiTheme, path, id}], iconThemes: [{id, label, path}], snippets: [{language, path}], languages: [{id, extensions, filenames, filenamePatterns, aliases, mimetypes, firstLine, configuration}], grammars: [{language, scopeName, path}], keybindings, configurationDefaults}, unused}]` (`id`: `publisher.name`, lower case; `source`: `vsix` or `vscode`; `keybindings`: how many; `unused`: what it has that is not used, and why) |
+| `GET /api/extensions/contributions` | what the enabled ones bring together, for the page to apply: `{themes, iconThemes, snippets, languages, keybindings: [{command, key, mac, linux, win, when, args}], configurationDefaults: [{values}]}`, each entry with its `extension` and `version` |
+| `GET /api/extensions/file?id=ID&path=P` | one of its files that its contributions name (a theme, an icon, a font, snippets…), with its type by its extension, `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`; 404 for any other |
+| `POST /api/extensions/install` (the .vsix's bytes, `Content-Type: application/octet-stream` or `application/zip`) | keeps it (in place of another version of it): the extension as listed; 400 `invalid` for no zip or no `extension/package.json`, 413 `too_large` past the limits, 422 `unsafe` for a name that leads out or a link, 422 `nothing_usable` (with `unused`) for one that is only code |
+| `POST /api/extensions/import` `{id}` | copies VS Code's newest copy of it on this computer, as an install; 404 when VS Code has none |
+| `POST /api/extensions/uninstall` `{id}` | takes it and its files away; 204; 404 for none |
+| `POST /api/extensions/enable` `{id, enabled}` | turns it on or off: the extension as listed |
+| `GET /api/extensions/local` | VS Code's extensions on this computer, the newest copy of each: `[{id, name, displayName, version, publisher, description, contributes, unused, from, path, usable, problem, installed}]` (`from`: VS Code, VSCodium or VS Code - Insiders; `problem`: why it cannot be imported; `installed`: the version kept here) |
+| `GET /api/extensions/recommended` | `.vscode/extensions.json` (comments allowed): `{file, error, recommendations: [{id, name, status, note}], unwanted}` (`status`: `installed`, `built-in`, `unsupported`, `local` or `unknown`; `note`: what it means here) |
 | `GET /api/workspace/state` | what this computer keeps for this folder (in the data folder, never in the project): `trust` (`trusted`, `restricted`, missing: not asked), `buildConfiguration`, and the page's own keys (breakpoints, watch, the run configuration chosen) |
 | `POST /api/workspace/state` `{key: value}` | merges these keys (`null` forgets one); 400 for `trust`, or a `buildConfiguration` other than `Debug` or `Release`; 413 past 1 MB |
 | `POST /api/workspace/trust` `{trusted}` | trusts the folder (`true`), keeps it restricted (`false`) or forgets the choice (missing); the state |

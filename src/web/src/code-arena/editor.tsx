@@ -21,6 +21,7 @@ import { CompareToolbar } from './compare-toolbar'
 import { EditorContext, loadMonaco, rankFiles, useEditor, type DiffModels, type DiffSource, type EditorApi, type FileModel, type MonacoModule, type Reveal, type SaveReason, type Tab, type Unsaved } from './editor-state'
 import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitShow, gitStageText, gitStatusQuery, nameOf, readFile, revertChange, userFileQuery, within, writeFile, writeUserFile, type Change, type CheckProblem, type OpenedFile, type Saved, type UserFileName } from './ide-api'
 import { addDebugActions, installDebugEditor } from './debug/editor-debug'
+import { installExtensions } from './extensions'
 import { bindEditorContext, keymap, useKeyFor } from './keyboard'
 import { monacoKeybinding } from './keys'
 import { installFormatting, minimalEdit, offerFormatting } from './format'
@@ -424,6 +425,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         const [file, m] = await Promise.all([readAny(path), loadMonaco()])
         mon.current = m
         installKeymap(m)
+        installExtensions(m)
         if (file.text === null) return file.binary ? 'binary' : 'tooLarge'
         const now = files.current.get(path)
         if (now && !now.model.isDisposed()) return now
@@ -478,6 +480,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       const m = await loadMonaco()
       mon.current = m
       installKeymap(m)
+      installExtensions(m)
       const path = sidePath(tab.right) ?? sidePath(tab.left) ?? ''
       const language = m.languageOf(path, settingsRef.current.get('files.associations'))
       const own: DiffModels = diffs.current.get(id) ?? { left: null, right: null }

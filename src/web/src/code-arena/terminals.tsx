@@ -3,7 +3,7 @@ import { Terminal, type ITheme } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, Plus, RotateCw, SquareTerminal, Trash2 } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { toast } from '@/components/ui/toaster'
@@ -13,6 +13,7 @@ import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { findRefs, useFileRefs } from '@/pages/chat/file-refs'
 import { PartHelp } from './help'
+import { useTerminalColors } from './theme'
 import { closeTerminal, openTerminal, terminalSocketUrl, terminalsQuery, type TerminalInfo } from './ide-api'
 
 // The page's colours around the ANSI palette editors use, for a light and a dark background.
@@ -228,7 +229,10 @@ export default function TerminalPanel({ shown, onHide, focusKey, newKey = 0, sho
 function XtermView({ terminal, active, focusKey, onSize, onExit }: { terminal: TerminalInfo; active: boolean; focusKey: number; onSize: (cols: number, rows: number) => void; onExit: (code: number) => void }) {
   const host = useRef<HTMLDivElement>(null)
   const { resolved } = useTheme()
-  const theme = useRef(resolved)
+  // An extension's colour theme gives its terminal colours over the page's.
+  const own = useTerminalColors()
+  const colors = useMemo<ITheme>(() => ({ ...themes[resolved], ...own }), [resolved, own])
+  const theme = useRef(colors)
   const term = useRef<Terminal | null>(null)
   const fit = useRef<FitAddon | null>(null)
   const events = useRef({ onSize, onExit })
@@ -246,9 +250,9 @@ function XtermView({ terminal, active, focusKey, onSize, onExit }: { terminal: T
     refsNow.current = refs
   }, [refs])
   useEffect(() => {
-    theme.current = resolved
-    if (term.current) term.current.options.theme = themes[resolved]
-  }, [resolved])
+    theme.current = colors
+    if (term.current) term.current.options.theme = colors
+  }, [colors])
 
   useEffect(() => {
     const el = host.current
@@ -259,7 +263,7 @@ function XtermView({ terminal, active, focusKey, onSize, onExit }: { terminal: T
       lineHeight: 1.2,
       cursorBlink: true,
       scrollback: 10_000,
-      theme: themes[theme.current],
+      theme: theme.current,
     })
     const f = new FitAddon()
     t.loadAddon(f)

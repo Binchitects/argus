@@ -8,13 +8,21 @@ export function Command({ className, ...props }: ComponentProps<typeof CommandPr
   return <CommandPrimitive className={cn('flex h-full w-full flex-col overflow-hidden rounded-md bg-popover text-popover-foreground', className)} {...props} />
 }
 
-export function CommandDialog({ title, description, children, shouldFilter, ...props }: ComponentProps<typeof Dialog> & { title: string; description: string; shouldFilter?: boolean }) {
+export function CommandDialog({
+  title,
+  description,
+  children,
+  shouldFilter,
+  value,
+  onValueChange,
+  ...props
+}: ComponentProps<typeof Dialog> & { title: string; description: string; shouldFilter?: boolean; /** The item chosen, when the caller follows it. */ value?: string; onValueChange?: (value: string) => void }) {
   return (
     <Dialog {...props}>
       <DialogContent className="top-[20%] translate-y-0 overflow-hidden p-0 sm:max-w-xl" hideClose>
         <DialogTitle className="sr-only">{title}</DialogTitle>
         <DialogDescription className="sr-only">{description}</DialogDescription>
-        <Command shouldFilter={shouldFilter} className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground">
+        <Command shouldFilter={shouldFilter} value={value} onValueChange={onValueChange} className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground">
           {children}
         </Command>
       </DialogContent>

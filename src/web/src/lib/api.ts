@@ -59,10 +59,12 @@ export interface ApiInit {
 
 /**
  * Every call goes through here. Every request carries X-Requested-With, which the
- * API requires on state changes (a cross-site page cannot add it).
+ * API requires on state changes (a cross-site page cannot add it). A body is sent
+ * as JSON; a form as a form; a file (a Blob) as its bytes.
  */
 export async function api<T>(path: string, init: ApiInit = {}): Promise<T> {
   const isForm = typeof FormData !== 'undefined' && init.body instanceof FormData
+  const isBlob = typeof Blob !== 'undefined' && init.body instanceof Blob
   const res = await fetch(path, {
     method: init.method ?? (init.body === undefined ? 'GET' : 'POST'),
     signal: init.signal,
@@ -71,9 +73,9 @@ export async function api<T>(path: string, init: ApiInit = {}): Promise<T> {
     headers: {
       Accept: 'application/json',
       'X-Requested-With': 'fetch',
-      ...(init.body === undefined || isForm ? {} : { 'Content-Type': 'application/json' }),
+      ...(init.body === undefined || isForm ? {} : { 'Content-Type': isBlob ? 'application/octet-stream' : 'application/json' }),
     },
-    body: init.body === undefined ? undefined : isForm ? (init.body as FormData) : JSON.stringify(init.body),
+    body: init.body === undefined ? undefined : isForm ? (init.body as FormData) : isBlob ? (init.body as Blob) : JSON.stringify(init.body),
   })
   if (res.status === 204) return undefined as T
   const text = await res.text()

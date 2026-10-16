@@ -366,6 +366,13 @@ const fakes = vi.hoisted(() => {
     marked: new Map<string, { startLineNumber: number; message: string }[]>(),
     codeActions: [] as { provideCodeActions: (...args: unknown[]) => unknown }[],
     inline: [] as { provideInlineCompletions: (...args: unknown[]) => Promise<{ items: { insertText: string }[] }> }[],
+    /** The themes the page gave Monaco, by name. */
+    definedThemes: new Map<string, { base: string; rules: { token: string; foreground?: string; fontStyle?: string }[]; colors: Record<string, string> }>(),
+    /** The languages the page added, and their configurations. */
+    languages: [] as { id: string; extensions?: string[]; aliases?: string[] }[],
+    languageConfigs: new Map<string, { comments?: { lineComment?: string }; brackets?: [string, string][] }>(),
+    /** The completion providers the page gave Monaco (snippets), by language. */
+    completions: [] as { language: string; provider: { provideCompletionItems: (...args: unknown[]) => Promise<{ suggestions: { label: { label: string }; insertText: string; insertTextRules: number }[] }> } }[],
   }
 })
 
@@ -390,7 +397,7 @@ vi.mock('monaco-editor', () => ({
       fakes.commands.set(id, run)
       return { dispose() {} }
     },
-    defineTheme: () => undefined,
+    defineTheme: (name: string, data: Parameters<typeof fakes.definedThemes.set>[1]) => fakes.definedThemes.set(name, data),
     remeasureFonts: () => undefined,
     TrackedRangeStickiness: { NeverGrowsWhenTypingAtEdges: 1 },
     OverviewRulerLane: { Left: 1 },
@@ -431,7 +438,20 @@ vi.mock('monaco-editor', () => ({
       { id: 'typescript', extensions: ['.ts', '.tsx'], aliases: ['TypeScript'] },
       { id: 'markdown', extensions: ['.md'], aliases: ['Markdown'] },
       { id: 'dockerfile', extensions: ['.dockerfile'], filenames: ['Dockerfile'], aliases: ['Dockerfile'] },
+      ...fakes.languages,
     ],
+    register: (l: (typeof fakes.languages)[number]) => fakes.languages.push(l),
+    setLanguageConfiguration: (id: string, c: Parameters<typeof fakes.languageConfigs.set>[1]) => {
+      fakes.languageConfigs.set(id, c)
+      return { dispose: () => fakes.languageConfigs.delete(id) }
+    },
+    registerCompletionItemProvider: (language: string, provider: (typeof fakes.completions)[number]['provider']) => {
+      const entry = { language, provider }
+      fakes.completions.push(entry)
+      return { dispose: () => fakes.completions.splice(fakes.completions.indexOf(entry), 1) }
+    },
+    CompletionItemKind: { Snippet: 27 },
+    CompletionItemInsertTextRule: { InsertAsSnippet: 4 },
   },
   Uri: {
     file: (path: string) => new fakes.Uri('file', path),
@@ -469,6 +489,7 @@ beforeEach(() => {
   debug.breakpoints = {}
   debug.watch = []
   for (const list of [fakes.models, fakes.editors, fakes.diffEditors, fakes.terminals, fakes.sockets, fakes.themes, fakes.keybindingRules]) list.length = 0
+  fakes.definedThemes.clear()
 })
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -595,6 +616,10 @@ function backend(extra: Record<string, Handler> = {}, preferences: Preferences =
       now.preferences = { ...now.preferences, ...(body as Preferences) }
       return { json: now.preferences }
     },
+    'GET /api/extensions': () => ({ json: [] }),
+    'GET /api/extensions/contributions': () => ({ json: { themes: [], iconThemes: [], snippets: [], languages: [], keybindings: [], configurationDefaults: [] } }),
+    'GET /api/extensions/local': () => ({ json: [] }),
+    'GET /api/extensions/recommended': () => ({ json: { file: false, recommendations: [], unwanted: [] } }),
     ...extra,
   })
   return { calls, disk, now }
@@ -663,7 +688,7 @@ describe('Code Arena, the IDE', () => {
     const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
     // The agent's changes are counted on their button.
     expect(await within(bar).findByRole('button', { name: 'Agent changes (1)' })).toBeInTheDocument()
-    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Agent changes (1)', 'Problems', 'Chat', 'Terminal', 'Theme', 'Help', 'About Code Arena'])
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Chat', 'Terminal', 'Theme', 'Help', 'About Code Arena'])
     expect(within(bar).getByRole('button', { name: 'Explorer' })).toHaveAttribute('aria-pressed', 'true')
     expect(await screen.findByRole('tree', { name: 'Files' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'No file is open' })).toBeInTheDocument()
@@ -2025,6 +2050,170 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/file')?.body).toEqual({ path: 'src/app.ts', text: 'typing  ', version: 'v1' }))
     expect(within(tabs()).getByRole('tab', { name: 'app.ts' })).toBeInTheDocument()
   })
+
+  it("installs a VS Code extension from its .vsix and applies what it declares: its theme (shown as it is chosen), snippets, a language, a key", async () => {
+    // code-arena as it answers once the .vsix is kept: the extension, what it brings, and the files its contributions name.
+    const owned = { extension: 'acme.night', version: '1.2.0' }
+    const night = {
+      id: 'acme.night', name: 'night', displayName: 'Night', version: '1.2.0', publisher: 'Acme', description: 'A dark theme.', icon: null, enabled: true, source: 'vsix',
+      contributes: {
+        themes: [{ label: 'Night Sky', uiTheme: 'vs-dark', path: 'themes/night.json', id: null }],
+        iconThemes: [],
+        snippets: [{ language: 'typescript', path: 'snippets/ts.json' }],
+        languages: [{ id: 'toml', extensions: ['.toml'], aliases: ['TOML'], configuration: 'toml.language-configuration.json' }],
+        grammars: [],
+        keybindings: 1,
+        configurationDefaults: {},
+      },
+      unused: ["its code (main: ./out/extension.js): Code Arena runs no extension's code"],
+    }
+    const files: Record<string, unknown> = {
+      'themes/night.json': { include: './base.json', colors: { 'editor.background': '#101020', 'sideBar.background': '#0a0a18' }, tokenColors: [{ scope: 'comment', settings: { foreground: '#808080', fontStyle: 'italic' } }, { scope: 'constant.numeric', settings: { foreground: '#f0a' } }] },
+      'themes/base.json': { colors: { 'editor.foreground': '#e0e0e0' } },
+      'snippets/ts.json': { 'Log it': { prefix: 'log', body: ['console.log($1)', '$0'], description: 'Logs a value' } },
+      'toml.language-configuration.json': { comments: { lineComment: '#' }, brackets: [['[', ']']] },
+    }
+    let installed: typeof night[] = []
+    const { calls, now } = backend({
+      'GET /api/extensions': () => ({ json: installed }),
+      'GET /api/extensions/contributions': () => ({
+        json: installed.some((e) => e.enabled)
+          ? {
+              themes: [{ ...night.contributes.themes[0], ...owned }],
+              iconThemes: [],
+              snippets: [{ ...night.contributes.snippets[0], ...owned }],
+              languages: [{ ...night.contributes.languages[0], ...owned }],
+              keybindings: [{ command: 'workbench.action.togglePanel', key: 'ctrl+alt+l', ...owned }, { command: 'night.own', key: 'ctrl+alt+p', ...owned }],
+              configurationDefaults: [],
+            }
+          : { themes: [], iconThemes: [], snippets: [], languages: [], keybindings: [], configurationDefaults: [] },
+      }),
+      'POST /api/extensions/install': () => {
+        installed = [night]
+        return { json: night }
+      },
+      'POST /api/extensions/enable': (body) => {
+        const b = body as { id: string; enabled: boolean }
+        installed = installed.map((e) => (e.id === b.id ? { ...e, enabled: b.enabled } : e))
+        return { json: installed[0] }
+      },
+      'GET /api/extensions/file': (_, __, url) => {
+        const file = installed.length && url.searchParams.get('id') === 'acme.night' ? files[url.searchParams.get('path')!] : undefined
+        return file ? { json: file } : { status: 404, json: { status: 'not_found', error: 'acme.night has no such file it uses.' } }
+      },
+    })
+    renderIde()
+    await openApp()
+
+    // Ctrl+Shift+X: the Extensions view; a .vsix chosen is sent as its bytes.
+    await userEvent.keyboard('{Control>}{Shift>}x{/Shift}{/Control}')
+    const view = await screen.findByRole('complementary', { name: 'Extensions' })
+    expect(await within(view).findByText(/No extension is installed/)).toBeInTheDocument()
+    const vsix = new File([new Uint8Array([0x50, 0x4b, 3, 4])], 'night-1.2.0.vsix', { type: 'application/octet-stream' })
+    await userEvent.upload(within(view).getByLabelText('A .vsix to install'), vsix)
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/extensions/install')).toBe(true))
+    const sent = calls.find((c) => c.path === '/api/extensions/install')!
+    expect(sent.body).toBe(vsix)
+    expect(sent.headers['Content-Type']).toBe('application/octet-stream')
+    const item = await within(view).findByRole('listitem', { name: 'Night' })
+    expect(item).toHaveTextContent('1 colour theme: Night Sky')
+    expect(item).toHaveTextContent('snippets (typescript)')
+    expect(item).toHaveTextContent('Not used here (1)')
+    expect(await screen.findByText('Night 1.2.0 is installed.')).toBeInTheDocument()
+
+    // Its language, with its configuration (comments, brackets); its snippets in TypeScript's files.
+    await waitFor(() => expect(fakes.languageConfigs.get('toml')).toEqual({ comments: { lineComment: '#' }, brackets: [['[', ']']] }))
+    expect(fakes.languages.some((l) => l.id === 'toml' && l.extensions?.includes('.toml'))).toBe(true)
+    const snippets = fakes.completions.find((c) => c.language === 'typescript')!.provider
+    const model = { getWordUntilPosition: () => ({ word: 'lo', startColumn: 1, endColumn: 3 }), getLanguageId: () => 'typescript' }
+    const { suggestions } = await snippets.provideCompletionItems(model, { lineNumber: 1, column: 3 })
+    expect(suggestions.map((s) => [s.label.label, s.insertText, s.insertTextRules])).toEqual([['log', 'console.log($1)\n$0', 4]])
+
+    // Its key for a command Code Arena has works (Ctrl+Alt+L: the panel), in the editor too; its key for its own command is given to neither.
+    expect(screen.getByRole('button', { name: 'Terminal' })).toHaveAttribute('aria-pressed', 'false')
+    await userEvent.keyboard('{Control>}{Alt>}l{/Alt}{/Control}')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Terminal' })).toHaveAttribute('aria-pressed', 'true'))
+    expect(fakes.keybindingRules.at(-1)!.some((r) => r.command === 'workbench.action.togglePanel' && r.keybinding === (2048 | 512 | 42))).toBe(true)
+    expect(fakes.keybindingRules.at(-1)!.some((r) => r.command === 'night.own')).toBe(false)
+
+    // Ctrl+K Ctrl+T: its theme among Code Arena's; choosing it in the list shows it at once (Monaco's, the page's colours), Escape goes back.
+    expect(document.documentElement).not.toHaveClass('dark')
+    await userEvent.keyboard('{Control>}k{/Control}{Control>}t{/Control}')
+    let picker = await screen.findByRole('dialog', { name: 'Color theme' })
+    expect(within(picker).getByRole('option', { name: /Night Sky/ })).toHaveTextContent('acme.night')
+    await userEvent.type(within(picker).getByRole('combobox'), 'night')
+    await waitFor(() => expect(fakes.themes.at(-1)).toBe('ext-acme-night-night-sky'))
+    const theme = fakes.definedThemes.get('ext-acme-night-night-sky')!
+    expect(theme.base).toBe('vs-dark')
+    expect(theme.colors).toMatchObject({ 'editor.background': '#101020', 'editor.foreground': '#e0e0e0' })
+    expect(theme.rules).toEqual(expect.arrayContaining([{ token: 'comment', foreground: '808080', fontStyle: 'italic' }, { token: 'number', foreground: 'ff00aa' }]))
+    await waitFor(() => expect(document.documentElement).toHaveClass('dark'))
+    expect(document.documentElement.style.getPropertyValue('--sidebar')).toBe('#0a0a18')
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(fakes.themes.at(-1)).toBe('arena-light'))
+    expect(document.documentElement.style.getPropertyValue('--sidebar')).toBe('')
+    expect(now.user['settings.json']).toBeUndefined()
+
+    // Enter takes it: written into the person's settings.json, as VS Code writes it.
+    await userEvent.keyboard('{Control>}k{/Control}{Control>}t{/Control}')
+    picker = await screen.findByRole('dialog', { name: 'Color theme' })
+    await userEvent.type(within(picker).getByRole('combobox'), 'night{Enter}')
+    await waitFor(() => expect(now.user['settings.json']).toContain('"workbench.colorTheme": "Night Sky"'))
+    expect(now.user['settings.json']).toContain('"window.autoDetectColorScheme": false')
+    await waitFor(() => expect(fakes.themes.at(-1)).toBe('ext-acme-night-night-sky'))
+    expect(document.documentElement).toHaveClass('dark')
+
+    // Turned off: its theme is no longer offered (the setting reads as Code Arena's of its kind), nor its language's configuration and snippets.
+    await userEvent.click(within(view).getByRole('switch', { name: 'Disable Night' }))
+    expect(calls.find((c) => c.path === '/api/extensions/enable')?.body).toEqual({ id: 'acme.night', enabled: false })
+    await waitFor(() => expect(fakes.themes.at(-1)).toBe('arena-dark'))
+    await waitFor(() => expect(fakes.languageConfigs.has('toml')).toBe(false))
+    expect(fakes.completions.some((c) => c.language === 'typescript')).toBe(false)
+  })
+
+  it("shows the files and folders with an extension's file icon theme: its images, its font's characters", async () => {
+    const owned = { extension: 'acme.icons', version: '2.0.0' }
+    const files: Record<string, unknown> = {
+      'dist/icons.json': {
+        iconDefinitions: { _ts: { iconPath: './svg/ts.svg' }, _md: { iconPath: '../md.png' }, _folder: { fontCharacter: '\\E001', fontId: 'glyphs', fontColor: '#ffcc00' }, _file: { fontCharacter: 'f' } },
+        fonts: [{ id: 'glyphs', src: [{ path: './glyphs.woff2', format: 'woff2' }] }],
+        file: '_file',
+        folder: '_folder',
+        fileExtensions: { ts: '_ts' },
+        languageIds: { markdown: '_md' },
+      },
+    }
+    backend(
+      {
+        'GET /api/extensions/contributions': () => ({ json: { themes: [], iconThemes: [{ id: 'acme-icons', label: 'Acme Icons', path: 'dist/icons.json', ...owned }], snippets: [], languages: [], keybindings: [], configurationDefaults: [] } }),
+        'GET /api/extensions/file': (_, __, url) => (url.searchParams.get('id') === 'acme.icons' && files[url.searchParams.get('path')!] ? { json: files[url.searchParams.get('path')!] } : { status: 404, json: { status: 'not_found' } }),
+      },
+      {},
+      { 'settings.json': '{ "workbench.iconTheme": "acme-icons" }' },
+    )
+    renderIde()
+    const tree = await screen.findByRole('tree', { name: 'Files' })
+    await userEvent.click(await within(tree).findByRole('treeitem', { name: 'src, the agent changed files in it' }))
+    const app = await within(tree).findByRole('treeitem', { name: 'app.ts, changed by the agent' })
+    // By extension: an image of the extension's, served by code-arena (its path from the icon theme's folder).
+    await waitFor(() => expect(app.querySelector('img')).toHaveAttribute('src', '/api/extensions/file?id=acme.icons&path=dist%2Fsvg%2Fts.svg&v=2.0.0'))
+    // By language (VS Code's id: markdown), from a folder above.
+    expect(within(tree).getByRole('treeitem', { name: 'README.md' }).querySelector('img')).toHaveAttribute('src', '/api/extensions/file?id=acme.icons&path=md.png&v=2.0.0')
+    // A folder: a character of the theme's font, loaded from its files.
+    const glyph = within(tree).getByRole('treeitem', { name: 'lib' }).querySelector('span[aria-hidden="true"][style]') as HTMLElement
+    expect(glyph.textContent).toBe('')
+    expect(glyph.style.fontFamily).toBe('"ca-icons-acme-icons-acme-icons-glyphs"')
+    expect(glyph.style.color).toBe('rgb(255, 204, 0)')
+    expect(document.head.querySelector('style[data-code-arena="icon-fonts"]')!.textContent).toContain('@font-face { font-family: "ca-icons-acme-icons-acme-icons-glyphs"; src: url("/api/extensions/file?id=acme.icons&path=dist%2Fglyphs.woff2&v=2.0.0") format("woff2")')
+    // Preferences: File Icon Theme goes back to Code Arena's own icons.
+    await userEvent.keyboard('{Control>}{Shift>}p{/Shift}{/Control}')
+    const palette = await screen.findByRole('dialog', { name: 'Commands' })
+    await userEvent.type(within(palette).getByPlaceholderText('Run a command: type a few words of it'), 'file icon theme{Enter}')
+    const picker = await screen.findByRole('dialog', { name: 'File icon theme' })
+    expect(within(picker).getAllByRole('option').map((o) => o.textContent)).toEqual(['Code Arena (by kind)', 'Acme Iconscurrent'])
+    await userEvent.click(within(picker).getByRole('option', { name: /Code Arena/ }))
+    await waitFor(() => expect(app.querySelector('img')).toBeNull())
+  })
 })
 
 describe('Code Arena, the help', () => {
@@ -2043,7 +2232,7 @@ describe('Code Arena, the help', () => {
     await screen.findByRole('tree', { name: 'Files' })
     const seen = new Set(regionsShown())
     // Every view of the side bar, and the terminal panel, drawn once.
-    for (const name of ['Search', 'Source control', 'Run and Debug', 'Agent changes (1)', 'Problems', 'Chat']) {
+    for (const name of ['Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Chat']) {
       await userEvent.click(within(bar).getByRole('button', { name }))
       for (const r of regionsShown()) seen.add(r)
     }
