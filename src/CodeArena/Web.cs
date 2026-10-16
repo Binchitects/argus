@@ -522,31 +522,54 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         };
     }
 
-    /// <summary>The models in the shape of Arena's chat config: the page's model picker and tool output read it as they do there.</summary>
-    private JsonObject ChatConfig() => new()
+    /// <summary>
+    /// The models in the shape of Arena's chat config: the page's model picker and tool output read it as they do there. What
+    /// Arena says of the person's chat (loaded or not, pictures, the deployment's thinking levels and default, GitLab's address)
+    /// is taken from it when it has said; until then each model counts as loaded, with Code Arena's own levels.
+    /// </summary>
+    private JsonObject ChatConfig()
     {
-        ["model"] = _rt.Model.Name,
-        ["models"] = new JsonArray([.. _rt.Models.Select(m => (JsonNode)new JsonObject
+        var arena = _rt.ArenaChat;
+        var offered = (arena?["models"] as JsonArray)?.OfType<JsonObject>().Where(m => m.Str("name") is not null)
+            .GroupBy(m => m.Str("name")!).ToDictionary(g => g.Key, g => g.First()) ?? [];
+        // The deployment's levels that Code Arena can send; its own when Arena names none of them.
+        var presets = (arena?["presets"] as JsonArray)?.OfType<JsonObject>().Where(p => p.Str("level") is { } l && ModelState.Levels.Contains(l))
+            .Select(p => (JsonNode)new JsonObject { ["level"] = p.Str("level"), ["label"] = p.Str("label") ?? p.Str("level") }).ToList() ?? [];
+        if (presets.Count == 0)
         {
-            ["name"] = m.Id,
-            ["context"] = m.Id == _rt.Model.Name ? _rt.Model.Context : _rt.Config.Context ?? m.Context,
-            ["maxOutput"] = m.MaxOutput,
-            ["vision"] = false,
-            ["tools"] = m.Tools,
-            ["thinking"] = m.Thinking,
-            ["loaded"] = true,
-            // Per million tokens, as Arena shows them.
-            ["prices"] = new JsonObject { ["input"] = m.InputCost * 1_000_000, ["cachedInput"] = m.CachedCost * 1_000_000, ["output"] = m.OutputCost * 1_000_000 },
-        })]),
-        ["auto"] = null,
-        ["presets"] = new JsonArray([.. ModelState.Levels.Select(l => (JsonNode)new JsonObject { ["level"] = l, ["label"] = l == "xhigh" ? "Extra high" : char.ToUpperInvariant(l[0]) + l[1..] })]),
-        ["defaultThinking"] = null,
-        ["argus"] = false,
-        ["tools"] = new JsonArray(),
-        ["gitlabUrl"] = null,
-        ["maxUploadBytes"] = 0,
-        ["imageTypes"] = new JsonArray(),
-    };
+            presets = [.. ModelState.Levels.Select(l => (JsonNode)new JsonObject { ["level"] = l, ["label"] = l == "xhigh" ? "Extra high" : char.ToUpperInvariant(l[0]) + l[1..] })];
+        }
+        return new()
+        {
+            ["model"] = _rt.Model.Name,
+            ["models"] = new JsonArray([.. _rt.Models.Select(m =>
+            {
+                var there = offered.GetValueOrDefault(m.Id);
+                return (JsonNode)new JsonObject
+                {
+                    ["name"] = m.Id,
+                    ["context"] = m.Id == _rt.Model.Name ? _rt.Model.Context : _rt.Config.Context ?? m.Context,
+                    ["maxOutput"] = m.MaxOutput,
+                    ["vision"] = _rt.Sees(m),
+                    ["tools"] = m.Tools,
+                    ["thinking"] = m.Thinking,
+                    // A model of the engine that is not loaded now, or loaded when asked: the picker marks it as the web's does.
+                    ["loaded"] = there?.Bool("loaded") ?? true,
+                    ["onRequest"] = there?.Bool("onRequest") ?? false,
+                    // Per million tokens, as Arena shows them.
+                    ["prices"] = new JsonObject { ["input"] = m.InputCost * 1_000_000, ["cachedInput"] = m.CachedCost * 1_000_000, ["output"] = m.OutputCost * 1_000_000 },
+                };
+            })]),
+            ["auto"] = null,
+            ["presets"] = new JsonArray([.. presets]),
+            ["defaultThinking"] = _rt.Model.DefaultLevel,
+            ["argus"] = false,
+            ["tools"] = new JsonArray(),
+            ["gitlabUrl"] = arena?.Str("gitlabUrl"),
+            ["maxUploadBytes"] = 0,
+            ["imageTypes"] = new JsonArray(),
+        };
+    }
 
     /// <summary>This folder's saved sessions, newest first, each with the chat in Arena it is kept in step with.</summary>
     private JsonArray Sessions() => new([.. SessionStore.List(_rt.Env.Paths.SessionsDir, _rt.Workspace.Root, 200).Select(s => (JsonNode)new JsonObject

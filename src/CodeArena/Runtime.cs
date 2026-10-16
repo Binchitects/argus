@@ -121,6 +121,17 @@ internal sealed partial class Runtime : IAsyncDisposable
         _ => null,
     };
 
+    /// <summary>
+    /// What the web chat offers the person, as Arena says it with the key (/api/code-arena/config): which models are loaded and
+    /// see pictures, the thinking levels and their default, GitLab's address. Read at the start in the background; null
+    /// until then, and when there is no Arena or it does not say.
+    /// </summary>
+    public JsonObject? ArenaChat { get; private set; }
+
+    /// <summary>Whether a model sees pictures: as the gateway says, or as Arena's chat config does.</summary>
+    public bool Sees(ModelInfo model) => model.Vision
+        || ArenaChat?["models"] is JsonArray offered && offered.OfType<JsonObject>().Any(m => m.Str("name") == model.Id && m.Bool("vision") == true);
+
     /// <summary>How long the start waits for Arena to say when the person's chats compact.</summary>
     private static readonly TimeSpan AccountWait = TimeSpan.FromSeconds(5);
     /// <summary>The session's MCP servers: Arena's, Argus's and the person's own, each connected in the background.</summary>
@@ -196,6 +207,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         // When it compacts: the flag, else config.json, else what the Arena account says (the web chat's own choice), else 80%.
         // Asked at every start (/compact-at account and the IDE say it); waited for only when it decides.
         var asking = ChatSync.CompactAtAsync(Config, Http, AccountWait, ct);
+        var offered = ChatSync.ChatConfigAsync(Config, Http, AccountWait, ct);
         if (o.CompactAt is null && Config.CompactAt is null)
         {
             AccountCompactAt = await asking;
@@ -325,6 +337,15 @@ internal sealed partial class Runtime : IAsyncDisposable
             info = fallback;
         }
         Model = new ModelState { Info = info, Thinking = o.Thinking ?? Config.Thinking, ContextOverride = Config.Context };
+        // The web chat's offer, when Arena gives it: "default" thinking becomes the web's default level.
+        _ = offered.ContinueWith(t =>
+        {
+            if (t.IsCompletedSuccessfully && t.Result is { } chat)
+            {
+                Model.DefaultLevel = chat.Str("defaultThinking") is { } level && ModelState.Levels.Contains(level) ? level : null;
+                ArenaChat = chat;
+            }
+        }, TaskScheduler.Default);
 
         var inputs = new SystemPrompt.Inputs
         {
@@ -423,7 +444,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             Notice(warn, text);
             Agent?.Events?.Notice(text);
-        }, () => Model.Info.Vision);
+        }, () => Sees(Model.Info));
         if (Sync is not null)
         {
             Sync.OnNews = _webNews;
@@ -1054,7 +1075,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             // Its own list narrows the reading tools; it never adds one that changes something.
             tools = new ToolBox(tools.All.Where(t => own.Tools.Any(n => PermissionRules.Glob(n, t.Name))));
         }
-        var model = own?.Model is { } name && Models.FirstOrDefault(m => m.Id == name) is { } info ? new ModelState { Info = info, Thinking = Model.Thinking, ContextOverride = Config.Context } : Model;
+        var model = own?.Model is { } name && Models.FirstOrDefault(m => m.Id == name) is { } info ? new ModelState { Info = info, Thinking = Model.Thinking, DefaultLevel = Model.DefaultLevel, ContextOverride = Config.Context } : Model;
         var sub = new Agent
         {
             Gateway = Gateway,

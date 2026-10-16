@@ -16,10 +16,16 @@ internal sealed class ModelState
 
     public static readonly string[] Levels = ["off", "low", "medium", "high", "xhigh"];
 
+    /// <summary>
+    /// The level "default" stands for: the web chat's default as Arena says it (DEFAULT_THINKING), so a session on default
+    /// thinks as a new chat on the web does; null (the model's own) until Arena says, or when it names no level of these.
+    /// </summary>
+    public string? DefaultLevel { get; set; }
+
     /// <summary>What reaches the model's chat template: reasoning_effort, or enable_thinking false for "off" (as the chat sends it).</summary>
-    public JsonObject? TemplateKwargs() => !Info.Thinking || Thinking is null or "" or "default" ? null
-        : Thinking == "off" ? new JsonObject { ["enable_thinking"] = false }
-        : new JsonObject { ["reasoning_effort"] = Thinking };
+    public JsonObject? TemplateKwargs() => !Info.Thinking || (Thinking is null or "" or "default" ? DefaultLevel : Thinking) is not { Length: > 0 } level ? null
+        : level == "off" ? new JsonObject { ["enable_thinking"] = false }
+        : new JsonObject { ["reasoning_effort"] = level };
 }
 
 /// <summary>

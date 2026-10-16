@@ -51,6 +51,9 @@ Sections used:
   and Arena MCP does not offer those tools to them; an API key's picture
   request is refused before its model loads
 - The design for a multi-GPU server (docs/multi-gpu-server.md)
+- Code Arena's model picker says what the web chat's does: which models are
+  loaded or load when asked, which see pictures, the deployment's thinking
+  levels and its default (which "default" thinking now sends)
 
 ### :bug: Bugs fixed
 

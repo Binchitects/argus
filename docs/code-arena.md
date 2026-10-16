@@ -155,7 +155,7 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/help` | the commands |
 | `/model [name]` | show the models, or switch |
 | `/mode [mode]` | show the mode, or switch |
-| `/thinking [level]` | `default`, `off`, `low`, `medium`, `high`, `xhigh` (sent as the chat sends it, through `chat_template_kwargs`) |
+| `/thinking [level]` | `default`, `off`, `low`, `medium`, `high`, `xhigh` (sent as the chat sends it, through `chat_template_kwargs`); `default` is the web chat's default level when Arena says one (`DEFAULT_THINKING`), else the model's own |
 | `/tools` | the tools of the session, and which ask |
 | `/todo` | the to-do list |
 | `/compact` | summarize the conversation now |
@@ -304,7 +304,12 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   ones still running, with their screens (below). The panel's other tabs are
   the **Debug Console** and the **Output** (the language servers', below).
 - **chat**: the agent's chat on the right: the model and thinking pickers,
-  Sessions and Hide at its top; the thread with a card for each tool call and
+  Sessions and Hide at its top. The pickers say what Arena's web chat says
+  (read with the key from `GET /api/code-arena/config` at the start): which
+  models are loaded, load when asked or are not loaded now, which see
+  pictures, the deployment's thinking levels with their names, and which one
+  **Default** is; Argus's answers link to the same GitLab. Without Arena every
+  model counts as loaded, with Code Arena's own five levels; the thread with a card for each tool call and
   a diff under each edit, the approval card (**Allow**, **Always for this
   session**, **Deny**), Stop, the mode, `/compact` and `/clear`. A command
   the agent runs with no time limit shows above the box while it runs: the

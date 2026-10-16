@@ -72,6 +72,21 @@ public sealed class CodeArenaSyncTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Code_Arena_reads_the_web_chat_s_config_with_the_person_s_key()
+    {
+        await using var f = NewApp();
+        var (web, key) = await PersonAsync(f);
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await CodeArena(f, null).GetAsync(new Uri("/api/code-arena/config", UriKind.Relative)));
+        var config = await Json(await CodeArena(f, key).GetAsync(new Uri("/api/code-arena/config", UriKind.Relative)));
+        var signedIn = await web.JsonAsync(await web.GetAsync("/api/chat/config"));
+        // The same models, each loaded or not and seeing pictures or not, and the same thinking levels and default as the web's.
+        Assert.Equal(signedIn.GetProperty("models").ToString(), config.GetProperty("models").ToString());
+        Assert.Equal(signedIn.GetProperty("presets").ToString(), config.GetProperty("presets").ToString());
+        Assert.Equal("medium", config.GetProperty("defaultThinking").GetString());
+        Assert.True(config.GetProperty("models").EnumerateArray().First().TryGetProperty("loaded", out _));
+    }
+
+    [Fact]
     public async Task A_quote_crosses_the_sync_both_ways_as_its_own_field_not_in_the_content()
     {
         await using var f = NewApp();

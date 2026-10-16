@@ -1,9 +1,13 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Llm.Api.Access;
 using Llm.Api.ArenaMcp;
+using Llm.Api.Chat.Tools;
 using Llm.Api.Endpoints;
 using Llm.Api.Gateway;
+using Llm.Api.Models;
+using Llm.Api.Operations;
 using Llm.Core.Chat;
 using Llm.Core.Data;
 using Llm.Core.Identity;
@@ -107,6 +111,18 @@ public static class CodeArenaSync
         g.MapPost("/chats/{id:guid}/continued", ContinuedAsync);
         g.MapGet("/attachments/{id:guid}", AttachmentAsync);
         g.MapGet("/preferences", PreferencesAsync);
+        g.MapGet("/config", ConfigAsync);
+    }
+
+    /// <summary>
+    /// The web chat's config for the key's person (<see cref="ChatEndpoints"/>' /api/chat/config): Code Arena's model picker
+    /// shows which models are loaded and see pictures, the deployment's thinking levels and default, and its links to GitLab.
+    /// </summary>
+    private static async Task<IResult> ConfigAsync(HttpContext http, McpPeople people, ToolRegistry registry, AccessService access, ModelPolicy policy,
+        IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, SmallModel small, IOptionsMonitor<ChatOptions> chat)
+    {
+        var (me, refusal) = await CallerAsync(http, people);
+        return me is null ? refusal! : Results.Ok(await ChatEndpoints.ConfigForAsync(me, registry, access, policy, argusOptions, argus, models, small, chat, http.RequestAborted));
     }
 
     /// <summary>

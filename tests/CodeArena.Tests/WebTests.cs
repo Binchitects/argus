@@ -436,6 +436,53 @@ public sealed partial class WebTests : IDisposable
     }
 
     [Fact]
+    public async Task The_model_picker_says_what_Arena_s_web_chat_says_of_each_model_and_its_thinking_levels()
+    {
+        _mcp.Chats.ChatConfig = JsonNode.Parse("""
+            {"model":"model-a","defaultThinking":"medium","gitlabUrl":"https://gitlab.example.test",
+             "presets":[{"level":"xhigh","label":"Deep think"},{"level":"medium","label":"Balanced"},{"level":"ultra","label":"Not ours"},{"level":"off","label":"No thinking"}],
+             "models":[{"name":"model-a","vision":true,"loaded":true,"onRequest":false},{"name":"model-b","vision":false,"loaded":false,"onRequest":true}]}
+            """)!.AsObject();
+        using var h = new Harness(_gateway, _mcp);
+        await using var web = await WebRun.StartAsync(h);
+
+        // Arena is read in the background at the start.
+        JsonNode config = new JsonObject();
+        for (var i = 0; i < 100 && (config = await web.GetJsonAsync("/api/chat/config"))["gitlabUrl"] is null; i++)
+        {
+            await Task.Delay(50);
+        }
+        Assert.Equal("https://gitlab.example.test", config["gitlabUrl"]!.GetValue<string>());
+        var models = config["models"]!.AsArray();
+        Assert.Equal((true, true, false), (models[0]!["vision"]!.GetValue<bool>(), models[0]!["loaded"]!.GetValue<bool>(), models[0]!["onRequest"]!.GetValue<bool>()));
+        Assert.Equal((false, false, true), (models[1]!["vision"]!.GetValue<bool>(), models[1]!["loaded"]!.GetValue<bool>(), models[1]!["onRequest"]!.GetValue<bool>()));
+        // The deployment's levels Code Arena can send, with their names there, and its default.
+        Assert.Equal(["xhigh", "medium", "off"], config["presets"]!.AsArray().Select(p => p!["level"]!.GetValue<string>()));
+        Assert.Equal("Deep think", config["presets"]![0]!["label"]!.GetValue<string>());
+        Assert.Equal("medium", config["defaultThinking"]!.GetValue<string>());
+
+        // Default thinking is the web's default, sent as such; a level chosen is sent as chosen.
+        await (await web.SendAsync("think as the web does")).RestAsync();
+        Assert.Equal("medium", _gateway.Requests[^1]["chat_template_kwargs"]!["reasoning_effort"]!.GetValue<string>());
+        await web.PostAsync("/api/settings", new JsonObject { ["thinking"] = "xhigh" });
+        await (await web.SendAsync("think hard")).RestAsync();
+        Assert.Equal("xhigh", _gateway.Requests[^1]["chat_template_kwargs"]!["reasoning_effort"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Without_Arena_s_word_each_model_counts_as_loaded_with_Code_Arena_s_own_levels_and_no_default()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        await using var web = await WebRun.StartAsync(h);
+        var config = await web.GetJsonAsync("/api/chat/config");
+        Assert.All(config["models"]!.AsArray(), m => Assert.True(m!["loaded"]!.GetValue<bool>()));
+        Assert.Null(config["defaultThinking"]);
+        Assert.Null(config["gitlabUrl"]);
+        await (await web.SendAsync("plain")).RestAsync();
+        Assert.Null(_gateway.Requests[^1]["chat_template_kwargs"]);
+    }
+
+    [Fact]
     public async Task The_bare_command_is_the_IDE_and_says_how_to_talk_in_the_terminal_instead()
     {
         using var h = new Harness(_gateway, _mcp);

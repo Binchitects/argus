@@ -662,6 +662,8 @@ public sealed class FakeChats
     public int CompactAtDefault { get; set; } = 80;
     /// <summary>Whether Arena answers /api/code-arena/preferences (an older one does not).</summary>
     public bool Preferences { get; set; } = true;
+    /// <summary>The web chat's config for the person, as /api/code-arena/config gives it; null: Arena does not answer it.</summary>
+    public JsonObject? ChatConfig { get; set; }
 
     /// <summary>The branch as one word, as Arena gives it: its last message.</summary>
     private static string Stamp(Chat c) => c.Leaf ?? "empty";
@@ -832,6 +834,16 @@ public sealed class FakeChats
             {
                 ctx.Response.ContentType = found.ContentType;
                 await ctx.Response.OutputStream.WriteAsync(found.Data);
+            }
+            return;
+        }
+        if (parts is ["config"] && method == "GET")
+        {
+            ctx.Response.StatusCode = ChatConfig is null ? 404 : 200;
+            if (ChatConfig is { } config)
+            {
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(config.ToJsonString()));
             }
             return;
         }

@@ -94,15 +94,23 @@ public static partial class ChatEndpoints
     }
 
     private static async Task<IResult> Config(ClaimsPrincipal p, UserManager<AppUser> users, ToolRegistry registry, AccessService access, ModelPolicy policy,
+        IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, SmallModel small, IOptionsMonitor<ChatOptions> chat, CancellationToken ct) =>
+        Results.Ok(await ConfigForAsync(await Me(p, users), registry, access, policy, argusOptions, argus, models, small, chat, ct));
+
+    /// <summary>
+    /// What the chat offers this person: the models they may use (each loaded or not), the thinking levels, their tools and
+    /// the limits on attachments. The web chat reads it signed in; Code Arena reads the same with the person's key
+    /// (/api/code-arena/config), so its model picker says what the web's does.
+    /// </summary>
+    internal static async Task<object> ConfigForAsync(AppUser me, ToolRegistry registry, AccessService access, ModelPolicy policy,
         IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, SmallModel small, IOptionsMonitor<ChatOptions> chat, CancellationToken ct)
     {
-        var me = await Me(p, users);
         // The models this person may use; a model of the engine that is not loaded is listed, marked so.
         var (list, first, onEngine) = await policy.ForAsync(me, await models.ListAsync(ct), ct);
         var tools = await registry.ForAsync(await access.MembershipAsync(me, ct), ct);
         // Auto, while a model for small steps is set that this person may use.
         var helper = await small.OfferedAsync(me, ct);
-        return Results.Ok(new
+        return new
         {
             model = first?.Name ?? models.DefaultName,
             auto = helper is null ? null : new { model = helper.Name, byDefault = models.AutoByDefault },
@@ -127,7 +135,7 @@ public static partial class ChatEndpoints
             // When this person's chats compact (percent of the context; 0: only when a message would not fit), and whose choice it is.
             compactAt = me.CompactAt ?? chat.CurrentValue.CompactAt,
             compactSource = me.CompactAt is null ? "company" : "account",
-        });
+        };
     }
 
     private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;
