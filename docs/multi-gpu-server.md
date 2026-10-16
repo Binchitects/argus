@@ -506,7 +506,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
 
 Commits 1–18 can be built and tested on today's 3090 box: llama.cpp keeps running there, and vLLM is the fake. Commit 19 is the first that needs the new server.
 
-**Progress (2026-10-16):** items 1–10 are done on branch `mgpu/engines`, generalised past this server: any number of GPUs (none included), any vendor, several engine machines, and Docker, Podman and Kubernetes alike (below). Item 11 (the Admin → Models form) is done too; the rest below says each item's state.
+**Progress (2026-10-16):** items 1–19 are done on branch `mgpu/engines` as far as they can be without the server, generalised past it: any number of GPUs (none included), any vendor, several engine machines, and Docker, Podman and Kubernetes alike (below). Each item says what is done and what waits; item 19's runs and item 20 need the hardware and a second server.
 
 ---
 
