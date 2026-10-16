@@ -452,6 +452,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
    - Room is made only among models sharing the target GPUs.
    - vLLM is "busy" from metrics, with no slot pinning (`TokenCache` for vLLM).
    - Tests: the existing EngineRoute tests, parameterised, plus multi-GPU cases.
+   - **Done**: a vLLM model asked for is started by the app (its processes into the desired state, woken if asleep, waited for up to `Engine:VllmStartWait`, the chat told why it waits); its room is memory on its GPUs (`EngineRoute.Fits`, GpuPlan over the places the watcher keeps), made only by idle spare models on the GPUs it is short on, never from one busy by its metrics; llama.cpp's places (Models loaded at once) count llama.cpp's models only, in the route, the policy, an admin's Load and Keep. `TokenCache.OfVllm`: prefix caching, no pinned slots, the CPU tier, hit rate, cache use and queue from metrics. The existing llama.cpp route tests pass unchanged. Tests: `EngineRouteGpuTests`.
 9. **Gateway registration.**
    - vLLM models go to LiteLLM with `api_base` per port, `max_parallel_requests` from `max-num-seqs`, and **fallbacks** per model.
    - Two replicas register as `name@i` with app-side conversation affinity.

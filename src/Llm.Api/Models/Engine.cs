@@ -18,6 +18,8 @@ public sealed class EngineOptions
     /// its desired state under <see cref="ConfigDir"/>/NAME and its status under <see cref="VllmStatusDir"/>/NAME.
     /// </summary>
     public List<VllmEngineOptions> Vllm { get; set; } = [];
+    /// <summary>How long a request waits for a vLLM model it started (a large one loads in minutes).</summary>
+    public TimeSpan VllmStartWait { get; set; } = TimeSpan.FromMinutes(20);
     /// <summary>Where the vLLM supervisors say what they do (services/vllm/supervisor.sh's status, each in its own folder).</summary>
     public string VllmStatusDir { get; set; } = "/vllm-status";
 

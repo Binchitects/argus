@@ -116,7 +116,10 @@ public static class ModelEndpoints
                 vision = m.Projector is { Length: > 0 }, atGateway = At(m.Name) is not null, access = Access(m.Name),
                 profile = files.GetValueOrDefault(m.File),
                 // What its token cache keeps, and the RAM it takes.
-                cache = TokenCache.Of(m, files.GetValueOrDefault(m.File), onServers.Contains(m.Name), engine.Value.SessionCacheGb),
+                // vLLM's: prefix caching for every request, its CPU tier, and what its metrics say now (hit rate, cache use, queue).
+                cache = m.EngineKind == EngineKinds.Vllm
+                    ? TokenCache.OfVllm(m, state.StatusOf(m.Name) == "loaded" ? await engines.CapacityAsync(m.Name, TimeSpan.FromSeconds(1), ct) : null)
+                    : TokenCache.Of(m, files.GetValueOrDefault(m.File), onServers.Contains(m.Name), engine.Value.SessionCacheGb),
                 // Its engine, and what only some kinds have (EngineKinds).
                 engineKind = m.EngineKind, m.Engine, m.Replicas, m.GpuMemoryUtilization, m.Quantization, m.SpecDecode, m.KvCpuGb, m.Sleep, m.Fallback,
             });
