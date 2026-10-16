@@ -111,6 +111,10 @@ export const notInTheManual = [
   'development.md',
   'testing.md',
   'plan.md',
+  // Design notes for the next releases: the developers'.
+  'design/code-arena-parity.md',
+  'design/v5.9-code-review-access.md',
+  'design/v5.9-rooms.md',
   'argus/roadmap.md',
   'argus/standalone/architecture.md',
   'argus/standalone/configuration.md',
