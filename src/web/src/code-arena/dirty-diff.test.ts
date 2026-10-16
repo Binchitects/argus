@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { lineChanges } from './dirty-diff'
+import { dirtyDecoration, lineChanges } from './dirty-diff'
 
 describe('quick diff', () => {
   it('marks lines added, changed and the place of lines taken away', () => {
@@ -36,6 +36,19 @@ describe('quick diff', () => {
       // Every change is inside the new text.
       for (const c of lineChanges(a, b)) expect(c.end).toBeLessThanOrEqual(bl.length)
     }
+  })
+
+  it('draws the changes where "scm.diffDecorations" says: beside the line numbers, in the scroll bar, in the minimap', () => {
+    const lanes = { overview: 1, minimap: 2 }
+    const at = (mode: Parameters<typeof dirtyDecoration>[1]) => {
+      const d = dirtyDecoration('added', mode, lanes)
+      return [!!d.linesDecorationsClassName, !!d.overviewRuler, !!d.minimap]
+    }
+    expect(at('all')).toEqual([true, true, true])
+    expect(at('gutter')).toEqual([true, false, false])
+    expect(at('overview')).toEqual([false, true, false])
+    expect(at('minimap')).toEqual([false, false, true])
+    expect(dirtyDecoration('deleted', 'all', lanes)).toMatchObject({ linesDecorationsClassName: 'arena-dirty-deleted', overviewRuler: { color: '#e5140099', position: 1 }, minimap: { color: '#e5140099', position: 2 } })
   })
 
   it('compares lines without their ends: a CRLF file against an LF index is unchanged', () => {

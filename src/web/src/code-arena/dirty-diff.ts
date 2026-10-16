@@ -127,11 +127,27 @@ const css = `
 
 let styled = false
 
+/** Where "scm.diffDecorations" draws the changes: beside the line numbers, in the scroll bar, in the minimap, all, or none. */
+export type DiffDecorations = 'all' | 'gutter' | 'overview' | 'minimap' | 'none'
+
+const colours = { added: '#2ea043', modified: '#1b81a8', deleted: '#e51400' }
+
+/** A change's decoration, drawn only where "scm.diffDecorations" says. */
+export function dirtyDecoration(kind: LineChange['kind'], mode: DiffDecorations, lanes: { overview: number; minimap: number }): Monaco.editor.IModelDecorationOptions {
+  const all = mode === 'all'
+  return {
+    isWholeLine: true,
+    ...(all || mode === 'gutter' ? { linesDecorationsClassName: `arena-dirty-${kind}` } : {}),
+    ...(all || mode === 'overview' ? { overviewRuler: { color: `${colours[kind]}99`, position: lanes.overview } } : {}),
+    ...(all || mode === 'minimap' ? { minimap: { color: `${colours[kind]}99`, position: lanes.minimap } } : {}),
+  }
+}
+
 /**
  * Quick diff in the code editor: the file shown against git's index, read when the file is shown and again when told
  * (it was saved, staged, committed), drawn as it is typed in. The function stops it.
  */
-export function installDirtyDiff(monaco: typeof Monaco, ed: Monaco.editor.IStandaloneCodeEditor, pathOf: (m: Monaco.editor.ITextModel) => string | null) {
+export function installDirtyDiff(monaco: typeof Monaco, ed: Monaco.editor.IStandaloneCodeEditor, pathOf: (m: Monaco.editor.ITextModel) => string | null, mode: DiffDecorations = 'all') {
   if (!styled && typeof document !== 'undefined') {
     styled = true
     const el = document.createElement('style')
@@ -152,12 +168,9 @@ export function installDirtyDiff(monaco: typeof Monaco, ed: Monaco.editor.IStand
       return
     }
     changes = lineChanges(base, model.getValue())
-    bars.set(
-      changes.map((c) => ({
-        range: new monaco.Range(Math.max(1, c.start), 1, Math.max(1, c.end), 1),
-        options: { isWholeLine: true, linesDecorationsClassName: `arena-dirty-${c.kind}`, overviewRuler: { color: c.kind === 'added' ? '#2ea04399' : c.kind === 'modified' ? '#1b81a899' : '#e5140099', position: monaco.editor.OverviewRulerLane.Left } },
-      })),
-    )
+    // The minimap's gutter is where VS Code draws them.
+    const lanes = { overview: monaco.editor.OverviewRulerLane.Left, minimap: monaco.editor.MinimapPosition.Gutter }
+    bars.set(changes.map((c) => ({ range: new monaco.Range(Math.max(1, c.start), 1, Math.max(1, c.end), 1), options: dirtyDecoration(c.kind, mode, lanes) })))
   }
   const read = async () => {
     const model = ed.getModel()

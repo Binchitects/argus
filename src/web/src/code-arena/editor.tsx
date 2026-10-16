@@ -24,8 +24,8 @@ import { addDebugActions, installDebugEditor } from './debug/editor-debug'
 import { installExtensions } from './extensions'
 import { bindEditorContext, keymap, useKeyFor } from './keyboard'
 import { monacoDefaults, monacoKeybinding } from './keys'
-import { installFormatting, minimalEdit, offerFormatting } from './format'
-import { installDirtyDiff } from './dirty-diff'
+import { installFormatting, lineEdit, minimalEdit, offerFormatting } from './format'
+import { installDirtyDiff, type DiffDecorations } from './dirty-diff'
 import { saveParticipants } from './save-participants'
 import { useSettings, workspaceSettingsPath } from './settings'
 import { settingsSchema } from './settings-schema'
@@ -212,12 +212,24 @@ function installKeymap(m: MonacoModule) {
   sync()
 }
 
-/** A model's indentation from the settings: the file's own when "editor.detectIndentation" is on. */
-function indentModel(model: Monaco.editor.ITextModel, v: Record<string, unknown>) {
+/** The indentation settings each model was given last, so another setting changing leaves what was chosen for it alone. */
+const indented = new WeakMap<Monaco.editor.ITextModel, string>()
+
+/**
+ * A model's indentation from the settings: the file's own when "editor.detectIndentation" is on. With `always` false, only
+ * when those settings changed since they were given to it: the indentation chosen for a file (Indent Using Tabs in the
+ * status bar) stays as long as they do not.
+ */
+function indentModel(model: Monaco.editor.ITextModel, v: Record<string, unknown>, always = true) {
   const tabSize = v['editor.tabSize'] as number
   const insertSpaces = v['editor.insertSpaces'] as boolean
-  model.updateOptions({ tabSize, insertSpaces, trimAutoWhitespace: v['editor.trimAutoWhitespace'] as boolean })
-  if (v['editor.detectIndentation']) model.detectIndentation(insertSpaces, tabSize)
+  const trimAutoWhitespace = v['editor.trimAutoWhitespace'] as boolean
+  const detect = !!v['editor.detectIndentation']
+  const given = JSON.stringify([tabSize, insertSpaces, trimAutoWhitespace, detect])
+  if (!always && indented.get(model) === given) return
+  indented.set(model, given)
+  model.updateOptions({ tabSize, insertSpaces, trimAutoWhitespace })
+  if (detect) model.detectIndentation(insertSpaces, tabSize)
 }
 
 export function EditorProvider({ children }: { children: ReactNode }) {
@@ -238,10 +250,11 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     setQuickText(typed)
     showQuickOpen(open)
   }, [])
-  const [unsaved, setUnsaved] = useState<{ path: string; answer: (a: Unsaved) => void } | null>(null)
+  const [unsaved, setUnsaved] = useState<{ paths: string[]; answer: (a: Unsaved) => void } | null>(null)
   const [pageQuery, setPageQuery] = useState('')
   // Each open(…, at) moves the cursor, also in the tab shown already.
   const [revealed, setRevealed] = useState(0)
+  const [diffMade, setDiffMade] = useState(false)
 
   // The tabs and the active one as they are now (the state renders them; the actions read these).
   const tabsRef = useRef<Tab[]>([])
@@ -340,19 +353,29 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       diffs.current.delete(id)
     }
 
-    /** Forgets the files no tab holds any more (a file is held by its tab and by the compares it is a side of). */
-    const collect = () => {
+    /**
+     * Forgets the files no tab holds any more (a file is held by its tab and by the compares it is a side of). One with
+     * unsaved changes is never thrown away unasked (a compare closed or dropped that was the only tab holding it): it stays
+     * open in a tab of its own, but those the person chose not to save.
+     */
+    const collect = (discarded: string[] = []) => {
       const held = new Set(tabsRef.current.flatMap(fileSidesOf))
+      const kept: Tab[] = []
       for (const [path, f] of [...files.current]) {
         if (held.has(path)) continue
+        if (fileDirty(path) && !discarded.includes(path)) {
+          kept.push({ id: path, kind: 'file', path, status: 'ready', dirty: true, language: languageName(f.model), languageId: f.model.getLanguageId?.() })
+          continue
+        }
         unshow(f.model)
         f.model.dispose()
         files.current.delete(path)
       }
+      if (kept.length > 0) commit([...tabsRef.current, ...kept])
     }
 
-    /** Takes tabs away, and shows the neighbour of the one shown when it went. */
-    const drop = (ids: string[]) => {
+    /** Takes tabs away, and shows the neighbour of the one shown when it went (the files' changes discarded are thrown away). */
+    const drop = (ids: string[], discarded: string[] = []) => {
       if (ids.length === 0) return
       const before = tabsRef.current
       for (const t of before) {
@@ -362,7 +385,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       }
       const left = before.filter((t) => !ids.includes(t.id))
       commit(left)
-      collect()
+      collect(discarded)
       if (activeRef.current && ids.includes(activeRef.current)) {
         const at = before.findIndex((t) => t.id === activeRef.current)
         activate(left[Math.min(at, left.length - 1)]?.id ?? null)
@@ -516,6 +539,20 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       return original && modified && !original.isDisposed() && !modified.isDisposed() ? { original, modified } : null
     }
 
+    /**
+     * A compare into the diff editor: a file's side is the file itself (typed in, it is unsaved: Ctrl+S saves it); a side
+     * of a text (a commit, the clipboard, before the agent) is read-only. The arrows beside a change put the left side's
+     * lines back.
+     */
+    const present = (tab: Tab) => {
+      const de = diffEditor.current
+      const d = modelsOf(tab)
+      if (!de || !d) return
+      de.updateOptions({ originalEditable: tab.left?.kind === 'file', readOnly: tab.right?.kind !== 'file', renderMarginRevertIcon: tab.right?.kind === 'file' })
+      const now = de.getModel()
+      if (now?.original !== d.original || now.modified !== d.modified) de.setModel(d)
+    }
+
     /** Opens a compare of two sides; one open already is shown, as it is now. */
     const openCompare = async (tab: Omit<Tab, 'id' | 'status' | 'dirty'>) => {
       const id = idOf(tab)
@@ -589,6 +626,9 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         if (tab.source && tab.source !== 'compare') update(id, await sidesOf(tab.path, tab.source))
         await loadSides(id)
         collect()
+        // A side that became a file or stopped being one (made, deleted) has another model now: the compare shows it.
+        const now = tabsRef.current.find((t) => t.id === id)
+        if (now && activeRef.current === id && now.status === 'ready') present(now)
       } catch (e) {
         // The agent's change accepted or reverted elsewhere: the compare has nothing to show.
         if (tab.source === 'agent' && e instanceof ApiError && e.http === 404) drop([id])
@@ -744,16 +784,23 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     const close = async (id: string): Promise<boolean> => {
       const tab = tabsRef.current.find((t) => t.id === id)
       if (!tab) return true
-      // Another tab holding the same files keeps what is unsaved in them: no need to ask.
-      const kept = fileSidesOf(tab).every((p) => !fileDirty(p) || tabsRef.current.some((t) => t.id !== id && fileSidesOf(t).includes(p)))
-      if (tab.dirty && !kept) {
-        activate(id)
-        const answer = await new Promise<Unsaved>((resolve) => setUnsaved({ path: tab.path, answer: resolve }))
-        setUnsaved(null)
-        if (answer === 'cancel') return false
-        if (answer === 'save' && !(await save(id))) return false
+      // The files with unsaved changes no other tab holds (another keeps what is unsaved in them): both sides of a compare may be.
+      const unsavedFiles = fileSidesOf(tab).filter((p) => fileDirty(p) && !tabsRef.current.some((t) => t.id !== id && fileSidesOf(t).includes(p)))
+      if (unsavedFiles.length === 0) {
+        drop([id])
+        return true
       }
-      drop([id])
+      activate(id)
+      const answer = await new Promise<Unsaved>((resolve) => setUnsaved({ paths: unsavedFiles, answer: resolve }))
+      setUnsaved(null)
+      if (answer === 'cancel') return false
+      if (answer === 'save') {
+        for (const p of unsavedFiles) {
+          const f = files.current.get(p)
+          if (f && !f.model.isDisposed() && !(await saveFile(f, 'explicit'))) return false
+        }
+      }
+      drop([id], answer === 'discard' ? unsavedFiles : [])
       return true
     }
 
@@ -783,9 +830,13 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       // Typed in while it was read: the person's text stays, unsaved, and saving asks first (the version on disk moved on).
       // Saved while it was read: the read may be from before the save, and what was saved stays.
       if (!unchanged(f, at) || file.version === f.version || file.text === null) return
-      if (f.model.getValue() !== file.text) {
-        // An edit, not a new model: the cursor and the scroll stay, and Undo takes it back.
-        f.model.pushEditOperations([], [{ range: f.model.getFullModelRange(), text: file.text }], () => null)
+      const edit = lineEdit(f.model.getValue(), file.text)
+      if (edit) {
+        // An edit of the lines that changed, not a new model: the cursor, the scroll and the breakpoints stay with their
+        // lines (moved down by the lines added above them), and Undo takes it back.
+        const a = f.model.getPositionAt(edit.start)
+        const b = f.model.getPositionAt(edit.end)
+        f.model.pushEditOperations([], [{ range: { startLineNumber: a.lineNumber, startColumn: a.column, endLineNumber: b.lineNumber, endColumn: b.column }, text: edit.text }], () => null)
         f.model.pushStackElement()
       }
       f.version = file.version
@@ -820,6 +871,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       const ids = new Map<string, string>()
       commit(
         tabsRef.current.map((t) => {
+          // The workbench's own pages (Settings, Keyboard Shortcuts) are no files, whatever their names.
+          if (t.kind !== 'file' && t.kind !== 'diff') return t
           const touched = within(t.path, from) || [t.left, t.right].some((side) => side && sidePath(side) !== undefined && within(sidePath(side)!, from))
           if (!touched) return t
           const path = rename(t.path)
@@ -914,7 +967,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     }
 
     // A tab with unsaved changes stays: its text is the person's, and saving makes the file again.
-    const removed = (path: string) => drop(tabsRef.current.filter((t) => within(t.path, path) && !t.dirty).map((t) => t.id))
+    const removed = (path: string) => drop(tabsRef.current.filter((t) => (t.kind === 'file' || t.kind === 'diff') && within(t.path, path) && !t.dirty).map((t) => t.id))
 
     const accept = async (path?: string) => {
       try {
@@ -1044,6 +1097,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       swapSides,
       diffEditor: () => diffEditor.current,
       modelsOf,
+      present,
     }
   }, [confirm, queryClient])
 
@@ -1063,7 +1117,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     if (!m) return
     editor.current?.updateOptions(editorOptionsOf(settings.all(activeLanguage), wrapOverride.current ?? undefined))
     diffEditor.current?.updateOptions(diffOptionsOf(settings.all()))
-    for (const f of files.current.values()) if (!f.model.isDisposed()) indentModel(f.model, settings.all(f.model.getLanguageId?.()))
+    for (const f of files.current.values()) if (!f.model.isDisposed()) indentModel(f.model, settings.all(f.model.getLanguageId?.()), false)
   }, [settings, activeLanguage])
 
   // The settings page or a command wrote a settings file: its tab shows it (when nothing in it is unsaved).
@@ -1103,8 +1157,9 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         askAboutCode(m, ed, actions.selection)
         bindEditorContext(ed)
         installDebugEditor(m.monaco, ed, (model) => m.pathOf(model.uri))
-        if (settingsRef.current.get('scm.diffDecorations') !== 'none') {
-          const dirty = installDirtyDiff(m.monaco, ed, (model) => m.pathOf(model.uri))
+        const decorations = settingsRef.current.get<DiffDecorations>('scm.diffDecorations')
+        if (decorations !== 'none') {
+          const dirty = installDirtyDiff(m.monaco, ed, (model) => m.pathOf(model.uri), decorations)
           // git's index moves on a save, a stage, a commit, a discard: the bars are drawn against it again.
           queryClient.getQueryCache().subscribe((e) => {
             if (e.type === 'updated' && e.query.queryKey[1] === 'git' && e.query.queryKey[2] === 'status' && e.action.type === 'success') dirty.refresh()
@@ -1164,12 +1219,10 @@ export function EditorProvider({ children }: { children: ReactNode }) {
           side?.createContextKey('textCompareEditorVisible', true)
           if (side) bindEditorContext(side)
         }
+        // The compare's toolbar reads the diff editor: it renders again now that there is one.
+        setDiffMade(true)
       }
-      // A file's side is the file itself: typed in, it is unsaved (Ctrl+S saves it); a side of a text (a commit, the
-      // clipboard, before the agent) is read-only. The arrows beside a change put the left side's lines back.
-      diffEditor.current.updateOptions({ originalEditable: tab.left?.kind === 'file', readOnly: tab.right?.kind !== 'file', renderMarginRevertIcon: tab.right?.kind === 'file' })
-      const now = diffEditor.current.getModel()
-      if (now?.original !== d.original || now.modified !== d.modified) diffEditor.current.setModel(d)
+      actions.present(tab)
       setCursor(null)
     }
   }, [shown, revealed, actions, queryClient])
@@ -1198,25 +1251,26 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo<EditorApi>(
-    () => ({ ...actions, tabs, active, cursor, quickOpen, setQuickOpen, quickText, setQuickText, pageQuery }),
-    [actions, tabs, active, cursor, quickOpen, setQuickOpen, quickText, pageQuery],
+    () => ({ ...actions, tabs, active, cursor, quickOpen, setQuickOpen, quickText, setQuickText, pageQuery, diffMade }),
+    [actions, tabs, active, cursor, quickOpen, setQuickOpen, quickText, pageQuery, diffMade],
   )
   return (
     <EditorContext value={value}>
       {children}
-      <UnsavedDialog path={unsaved?.path ?? null} onAnswer={(a) => unsaved?.answer(a)} />
+      <UnsavedDialog paths={unsaved?.paths ?? null} onAnswer={(a) => unsaved?.answer(a)} />
       <QuickOpen />
     </EditorContext>
   )
 }
 
-/** Closing a file with unsaved changes: Save, Don't save, or Cancel. */
-function UnsavedDialog({ path, onAnswer }: { path: string | null; onAnswer: (a: Unsaved) => void }) {
+/** Closing a file (or a compare of files) with unsaved changes: Save, Don't save, or Cancel. */
+function UnsavedDialog({ paths, onAnswer }: { paths: string[] | null; onAnswer: (a: Unsaved) => void }) {
+  const names = (paths ?? []).map(nameOf)
   return (
-    <Dialog open={path !== null} onOpenChange={(open) => !open && onAnswer('cancel')}>
+    <Dialog open={paths !== null} onOpenChange={(open) => !open && onAnswer('cancel')}>
       <DialogContent hideClose className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Save the changes to {path ? nameOf(path) : ''}?</DialogTitle>
+          <DialogTitle>Save the changes to {names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0]}?</DialogTitle>
           <DialogDescription>They are lost if you close it without saving.</DialogDescription>
         </DialogHeader>
         <DialogFooter>

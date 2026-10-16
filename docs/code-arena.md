@@ -231,13 +231,19 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   changes and **Ctrl+S** saves (**Ctrl+K S** saves them all). A
   file changed on disk since it was opened is not written over unseen: saving
   asks first. Closing a tab with unsaved changes asks Save, Don't save or
-  Cancel; leaving the page with any warns. A binary file, or one over 5 MB,
+  Cancel (a compare asks for each of its files no other tab holds); a file with
+  unsaved changes whose last tab goes without asking (a compare accepted,
+  reverted or dropped) stays open in a tab of its own; leaving the page with
+  any warns. A binary file, or one over 5 MB,
   says so instead of opening. When code-arena stops answering (it stopped, or
   the SSH tunnel dropped), a line at the top says so and the editor stays, so
   what is not saved can still be copied out; it goes when it answers again.
 - **the agent's edits**: a file the agent edits reloads in its tab when nothing
-  in it is unsaved (undo still works), and after each turn every open file is
-  checked against the disk. What is typed while a file reloads stays, unsaved:
+  in it is unsaved (undo still works; only the lines that changed are replaced,
+  so the cursor and the breakpoints stay on their lines, moved down by the lines
+  added above them), and after each turn every open file is checked against the
+  disk. A compare whose file the agent made or deleted shows that side as it
+  is now (empty, or the file). What is typed while a file reloads stays, unsaved:
   saving it then asks first.
 - **compare**: Monaco's diff editor, as VS Code's compare. The agent's changes
   to a file (as it was before the agent's first change, and now: from Agent
@@ -274,8 +280,9 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   what git's index has (green added, blue changed, a red mark where lines were
   taken away), as you type; **Alt+F3** and **Shift+Alt+F3** (or **Alt+F5** and
   **Shift+Alt+F5**, as in a compare) go to the next and the previous change,
-  keys of the keymap that keybindings.json changes (`scm.diffDecorations`:
-  `none` turns the bars off). Lines
+  keys of the keymap that keybindings.json changes. `scm.diffDecorations` says
+  where they are drawn: `all` (beside the line numbers, in the scroll bar and in
+  the minimap), `gutter`, `overview` (the scroll bar), `minimap`, or `none`. Lines
   are compared without their ends, so a file checked out with CRLF against an
   index with LF shows no bars; changes more than about 1,400 lines apart (a
   file rewritten or reformatted) are one bar from the first to the last, so
@@ -357,7 +364,9 @@ VS Code settings mean the same here:
   (`workbench.iconTheme`) and Code Arena's code completion
   (`codeArena.inlineCompletion.enabled`, the status bar's **Complete**: the
   person's own, which a project's settings cannot turn on, since what is typed
-  is sent to the model). They apply as the file is saved. Where Code Arena's
+  is sent to the model). They apply as the file is saved; a file's indentation
+  chosen in the status bar stays until the indentation settings themselves
+  change. Where Code Arena's
   default is not VS Code's, the description says so. Under the person's
   settings are the enabled extensions' `configurationDefaults`
   ([Extensions](#extensions)).

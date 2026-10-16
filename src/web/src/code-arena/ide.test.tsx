@@ -405,6 +405,7 @@ vi.mock('monaco-editor', () => ({
     remeasureFonts: () => undefined,
     TrackedRangeStickiness: { NeverGrowsWhenTypingAtEdges: 1 },
     OverviewRulerLane: { Left: 1 },
+    MinimapPosition: { Inline: 1, Gutter: 2 },
     MouseTargetType: { GUTTER_GLYPH_MARGIN: 2 },
   },
   Range: class {
@@ -2405,6 +2406,124 @@ describe('Code Arena, the IDE, as its review asked', () => {
     act(() => screen.getByRole('treeitem', { name: 'README.md' }).focus())
     await userEvent.keyboard('{Delete}')
     expect(await screen.findByRole('alertdialog', { name: 'Delete README.md?' })).toBeInTheDocument()
+  })
+
+  it('has the bar of a compare opened before any file work, and closing it saves the unsaved side no other tab holds', async () => {
+    const { calls } = backend()
+    renderIde()
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'src, the agent changed files in it' }))
+    await userEvent.pointer({ keys: '[MouseRight]', target: screen.getByRole('treeitem', { name: 'README.md' }) })
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Select for Compare' }))
+    await userEvent.pointer({ keys: '[MouseRight]', target: await screen.findByRole('treeitem', { name: 'app.ts, changed by the agent' }) })
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Compare with Selected' }))
+    expect(await within(tabs()).findByRole('tab', { name: 'README.md ↔ app.ts', selected: true })).toBeInTheDocument()
+    const diff = () => fakes.diffEditors[0]!
+    await waitFor(() => expect(diff().model?.original.getValue()).toBe('# Shop\n'))
+    // The diff editor was made after the bar first rendered: the bar has its counts and its buttons all the same.
+    expect(await screen.findByTitle('1 change')).toHaveTextContent('+1 −1')
+    await userEvent.click(screen.getByRole('button', { name: 'Next change' }))
+    expect(diff().went).toEqual(['next'])
+    // The left side typed in (README.md has no tab of its own): closing asks for it, and Save saves it.
+    act(() => diff().model!.original.setValue('# Shop!\n'))
+    await userEvent.click(within(tabs()).getByRole('button', { name: 'Close README.md ↔ app.ts' }))
+    const ask = await screen.findByRole('dialog', { name: 'Save the changes to README.md?' })
+    await userEvent.click(within(ask).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/file')?.body).toEqual({ path: 'README.md', text: '# Shop!\n', version: 'r1' }))
+    await waitFor(() => expect(screen.queryByRole('tablist', { name: 'Open files' })).not.toBeInTheDocument())
+  })
+
+  it("keeps what is typed in the agent's compare when the change is accepted: the file stays open, not saved", async () => {
+    const { calls } = backend()
+    renderIde()
+    await userEvent.click(await screen.findByRole('button', { name: 'Agent changes (1)' }))
+    await userEvent.click(within(await screen.findByRole('list', { name: 'Changed files' })).getByRole('button', { name: /app\.ts.*changed/ }))
+    await waitFor(() => expect(fakes.diffEditors[0]?.model?.modified.value).toBe('const total = 1\nconsole.log(total)\n'))
+    const file = fakes.diffEditors[0]!.model!.modified
+    act(() => file.setValue('const total = 2\n'))
+    await userEvent.click(screen.getByRole('button', { name: 'Accept' }))
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/changes/accept')).toBe(true))
+    expect(await within(tabs()).findByRole('tab', { name: 'app.ts, not saved' })).toBeInTheDocument()
+    expect(file.disposed).toBe(false)
+    expect(file.value).toBe('const total = 2\n')
+  })
+
+  it("shows the agent's compare of a file it then deletes with the file's side empty, not blank", async () => {
+    let gone = false
+    const b = backend({
+      'GET /api/changes/diff': (_, __, url) => ({ json: { path: url.searchParams.get('path'), original: 'const total = 0\n', modified: gone ? null : b.disk['src/app.ts']!.text, version: 'v1' } }),
+      'POST /api/messages': () => {
+        gone = true
+        delete b.disk['src/app.ts']
+        return answerOnly()
+      },
+    })
+    renderIde()
+    await userEvent.click(await screen.findByRole('button', { name: 'Agent changes (1)' }))
+    await userEvent.click(within(await screen.findByRole('list', { name: 'Changed files' })).getByRole('button', { name: /app\.ts.*changed/ }))
+    const diff = () => fakes.diffEditors[0]!
+    await waitFor(() => expect(diff().model?.modified.value).toBe('const total = 1\nconsole.log(total)\n'))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'Delete it{Enter}')
+    await waitFor(() => expect(diff().model?.modified.getValue()).toBe(''))
+    expect(diff().model?.original.getValue()).toBe('const total = 0\n')
+    expect(diff().options).toMatchObject({ readOnly: true, renderMarginRevertIcon: false })
+    expect(within(tabs()).getByRole('tab', { name: /app\.ts\s*changes/ })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('moves a breakpoint with its line when the agent adds a line above it', async () => {
+    const b = backend({
+      'POST /api/messages': () => {
+        b.disk['src/app.ts'] = { text: "import x from 'x'\nconst total = 1\nconsole.log(total)\n", version: 'v2' }
+        return answerOnly()
+      },
+    })
+    renderIde()
+    await openApp()
+    const model = editor().model!
+    const edits: unknown[] = []
+    const push = model.pushEditOperations.bind(model)
+    model.pushEditOperations = (before, ops) => {
+      edits.push(...ops.map((o) => o.range))
+      return push(before, ops)
+    }
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'Import x{Enter}')
+    await waitFor(() => expect(model.value).toBe("import x from 'x'\nconst total = 1\nconsole.log(total)\n"))
+    // One edit, at the top, of no old text: Monaco moves what is on the lines below (a breakpoint, the cursor) with them.
+    expect(edits).toEqual([{ startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 }])
+  })
+
+  it('keeps the indentation chosen for a file when another language is shown or another setting changes', async () => {
+    backend()
+    const { client } = renderIde()
+    await openApp()
+    const model = editor().model!
+    // Indent Using Tabs, from the status bar.
+    act(() => model.updateOptions({ insertSpaces: false }))
+    await userEvent.click(screen.getByRole('treeitem', { name: 'README.md' }))
+    await waitFor(() => expect(editor().model?.value).toBe('# Shop\n'))
+    await act(() => client.invalidateQueries())
+    expect(model.options.insertSpaces).toBe(false)
+  })
+
+  it('leaves the Settings page open when a folder named Settings is renamed', async () => {
+    const { calls } = backend()
+    renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    await userEvent.click(screen.getByRole('button', { name: 'New folder' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Name of the new folder' }), 'Settings{Enter}')
+    await screen.findByRole('treeitem', { name: 'Settings' })
+    await userEvent.keyboard('{Control>},{/Control}')
+    expect(await within(tabs()).findByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true')
+    act(() => screen.getByRole('treeitem', { name: 'Settings' }).focus())
+    await userEvent.keyboard('{F2}')
+    const name = screen.getByRole('textbox', { name: 'New name for Settings' })
+    await userEvent.clear(name)
+    const reads = calls.filter((c) => c.path === '/api/changes').length
+    await userEvent.type(name, 'Prefs{Enter}')
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/files/rename')?.body).toEqual({ from: 'Settings', to: 'Prefs' }))
+    // The rename went through: the agent's changes are read again (their paths may have moved).
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/changes').length).toBeGreaterThan(reads))
+    expect(within(tabs()).getByRole('tab', { name: 'Settings' })).toBeInTheDocument()
+    expect(screen.queryByText(/Cannot read/)).not.toBeInTheDocument()
   })
 
 })

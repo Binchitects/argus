@@ -155,6 +155,24 @@ export function minimalEdit(before: string, after: string): { start: number; end
   return { start, end: before.length - end, text: after.slice(start, after.length - end) }
 }
 
+/**
+ * The one edit of whole lines that turns a text into another: the lines both start and end with are left alone, so what
+ * is marked on them (a breakpoint, the cursor) moves with its line, as an edit across them would not take it.
+ */
+export function lineEdit(before: string, after: string): { start: number; end: number; text: string } | null {
+  if (before === after) return null
+  // Each line with its end (\n, \r\n): the last one may have none.
+  const a = before.split(/(?<=\n)/)
+  const b = after.split(/(?<=\n)/)
+  let head = 0
+  while (head < a.length && head < b.length && a[head] === b[head]) head++
+  let tail = 0
+  while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++
+  const start = a.slice(0, head).join('').length
+  const end = before.length - a.slice(a.length - tail).join('').length
+  return { start, end, text: b.slice(head, b.length - tail).join('') }
+}
+
 interface Context {
   m: MonacoModule
   queryClient: QueryClient
