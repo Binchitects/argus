@@ -62,8 +62,8 @@ Other clients (streamable HTTP):
   the notes for the agent say so, as does **Connect your tools** (it is not
   listed among the tools served); the person starts it in the chat instead.
 - **Not served**: the chat's own tools. Reading files (a chat's files),
-  questions to the person (`ask_user`) and sub-agents (`delegate`) have no chat
-  here.
+  questions to the person (`ask_user`), sub-agents (`delegate`) and the canvas
+  (`canvas_*`, a document kept beside a chat) have no chat here.
 - **A tool that asks first** (Admin → Tools, or a plugin's writes) cannot show
   the app's **Allow** card here. It is served with `destructiveHint: true`, and
   its description tells the client to ask before each call. Let the client ask:

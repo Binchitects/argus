@@ -36,8 +36,11 @@ public sealed partial class McpTools(
     IOptions<AuthOptions> auth, IOptionsMonitor<BrandingOptions> branding, Gateway.RateLimits rateLimits, Gateway.Credit credit, TimeProvider clock,
     IOptionsMonitor<McpOptions> options, ILogger<McpTools> logger)
 {
-    /// <summary>Tools that only make sense inside a chat: its files, questions to the person, sub-agents.</summary>
-    public static readonly string[] ChatOnly = ["files", "ask", "agents"];
+    /// <summary>
+    /// Tools that only make sense inside a chat: its files, questions to the person, sub-agents, and the canvas (a document
+    /// beside a chat, kept with it: a call here runs in a chat that is never saved, and an agent has its own editor).
+    /// </summary>
+    public static readonly string[] ChatOnly = ["files", "ask", "agents", "canvas"];
 
     /// <summary>How long a person's tool list is kept: an agent lists right after it connects, and calls by it.</summary>
     private static readonly TimeSpan Fresh = TimeSpan.FromMinutes(1);

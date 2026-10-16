@@ -277,7 +277,10 @@ public sealed class ArenaMcpTests(AppFixture app)
         var listed = info.GetProperty("tools").EnumerateArray().ToList();
         Assert.DoesNotContain(listed, t => t.GetProperty("id").GetString() == "calculator");
         Assert.True(listed.Single(t => t.GetProperty("id").GetString() == "time").GetProperty("askFirst").GetBoolean());
-        Assert.DoesNotContain(listed, t => t.GetProperty("id").GetString() is "files" or "ask" or "agents");
+        Assert.DoesNotContain(listed, t => t.GetProperty("id").GetString() is "files" or "ask" or "agents" or "canvas");
+        // The canvas is the person's in the chat, not here: its document is kept with a chat, and a call here has none.
+        Assert.Contains((await b.JsonAsync(await b.GetAsync("/api/chat/config"))).GetProperty("tools").EnumerateArray(), t => t.GetProperty("id").GetString() == "canvas");
+        Assert.DoesNotContain(Names(tools), n => n.StartsWith("canvas_", StringComparison.Ordinal));
     }
 
     [Fact]

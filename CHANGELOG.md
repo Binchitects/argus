@@ -60,6 +60,8 @@ Sections used:
 - The speech server's voice detector is unloaded when idle; a speech model
   an admin loaded keeps saying so
 - Builds go on when NuGet's audit learns of a vulnerability later
+- Arena MCP no longer offers the canvas, which could not work there (its document is
+  kept with a chat, and an agent's call has none)
 
 ### :boom: Breaking changes & Deprecations
 
