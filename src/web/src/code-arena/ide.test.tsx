@@ -121,8 +121,13 @@ const fakes = vi.hoisted(() => {
     getLineContent(line: number) {
       return this.value.split('\n')[line - 1] ?? ''
     }
+    eol = '\n'
     getEOL() {
-      return '\n'
+      return this.eol
+    }
+    /** As Monaco's: LF (0) or CRLF (1). */
+    setEOL(e: number) {
+      this.eol = e === 1 ? '\r\n' : '\n'
     }
     getVersionId() {
       return this.alt
@@ -406,6 +411,7 @@ vi.mock('monaco-editor', () => ({
     TrackedRangeStickiness: { NeverGrowsWhenTypingAtEdges: 1 },
     OverviewRulerLane: { Left: 1 },
     MinimapPosition: { Inline: 1, Gutter: 2 },
+    EndOfLineSequence: { LF: 0, CRLF: 1 },
     MouseTargetType: { GUTTER_GLYPH_MARGIN: 2 },
   },
   Range: class {
@@ -2526,6 +2532,57 @@ describe('Code Arena, the IDE, as its review asked', () => {
     expect(screen.queryByText(/Cannot read/)).not.toBeInTheDocument()
   })
 
+  it('gives a new file the line ending "files.eol" says, and leaves a file with lines its own', async () => {
+    backend({}, {}, { 'settings.json': '{ "files.eol": "\\r\\n" }' })
+    renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    await userEvent.click(screen.getByRole('button', { name: 'New file' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Name of the new file' }), 'notes.txt{Enter}')
+    await waitFor(() => expect(fakes.models.find((m) => m.uri?.toString() === 'file:///notes.txt')?.getEOL()).toBe('\r\n'))
+    await userEvent.click(screen.getByRole('treeitem', { name: 'README.md' }))
+    await waitFor(() => expect(fakes.models.find((m) => m.uri?.toString() === 'file:///README.md')?.getEOL()).toBe('\n'))
+  })
+
+  it("reads VS Code's language ids in \"files.associations\" as Monaco's", async () => {
+    backend({}, {}, { 'settings.json': '{ "files.associations": { "*.md": "typescriptreact" } }' })
+    renderIde()
+    // A .md file read as "typescriptreact": Monaco's typescript.
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'README.md' }))
+    await waitFor(() => expect(fakes.models.find((m) => m.uri?.toString() === 'file:///README.md')?.language).toBe('typescript'))
+  })
+
+  it('applies the terminal settings to the terminals, and again as they change', async () => {
+    const b = backend({}, {}, { 'settings.json': '{ "terminal.integrated.fontSize": 16, "terminal.integrated.cursorStyle": "line", "terminal.integrated.lineHeight": 1.5 }' })
+    const { client } = renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    await userEvent.keyboard('{Control>}j{/Control}')
+    await waitFor(() => expect(fakes.terminals).toHaveLength(1))
+    expect(fakes.terminals[0]!.options).toMatchObject({ fontSize: 16, cursorStyle: 'bar', lineHeight: 1.5, cursorBlink: true, scrollback: 10000, fontFamily: "'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', monospace" })
+    b.now.user['settings.json'] = '{ "terminal.integrated.fontSize": 18, "terminal.integrated.scrollback": 500 }'
+    await act(() => client.invalidateQueries())
+    await waitFor(() => expect(fakes.terminals[0]!.options).toMatchObject({ fontSize: 18, scrollback: 500, cursorStyle: 'block', lineHeight: 1 }))
+  })
+
+  it("shows the terminal a task reuses when the panel is first drawn for it, whatever the server's order", async () => {
+    const build = { id: '8', kind: 'task', title: 'build', pid: 80, cols: 80, rows: 24, exitCode: 0 }
+    const shell = { id: '9', title: 'bash', pid: 90, cols: 80, rows: 24, exitCode: null }
+    // The server keeps the task's terminal where it was, before the shell.
+    const terms: TerminalInfo[] = [build, shell]
+    backend({
+      'GET /api/terminals': () => ({ json: terms }),
+      'GET /api/tasks': () => ({ json: { tasks: [{ label: 'build', source: 'workspace', group: 'build', isDefault: true, command: 'make' }], errors: [], trusted: true, buildConfiguration: 'Debug' } }),
+      'POST /api/tasks/run': () => {
+        terms[0] = { ...build, exitCode: null }
+        return { json: { task: 'build', terminal: terms[0], terminals: [terms[0]] } }
+      },
+    })
+    renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    await userEvent.keyboard('{Control>}{Shift>}b{/Shift}{/Control}')
+    const panel = await screen.findByRole('region', { name: 'Terminal' })
+    await waitFor(() => expect(within(panel).getAllByRole('tab').map((t) => t.textContent)).toEqual(['build 8', 'bash 9']))
+    expect(within(panel).getByRole('tab', { name: /build/ })).toHaveAttribute('aria-selected', 'true')
+  })
 })
 
 describe('Code Arena, the help', () => {

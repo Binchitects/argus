@@ -8,15 +8,19 @@ export function QuickPickHost() {
   return current ? <Picker key={current.title + current.items.length} open={current} /> : null
 }
 
+/** The items a pick draws at most: a list of thousands (every file of the folder) is narrowed by typing. */
+const shownMost = 200
+
 function Picker({ open: o }: { open: Open }) {
-  const [typed, setTyped] = useState('')
+  const [typed, setTyped] = useState(o.value ?? '')
   // The item chosen in the list: the caller's at first ("active"), then as the keys and the mouse move it.
   const [chosen, setChosen] = useState(() => (o.active !== undefined && o.items.some((i) => i.id === o.active) ? o.active : ''))
   const finish = (item: PickItem | undefined) => finishPick(o, item)
   const words = typed.toLowerCase().split(/\s+/).filter(Boolean)
-  const shown = o.filter ? o.items.filter((i) => words.every((w) => `${i.label} ${i.description ?? ''} ${i.detail ?? ''}`.toLowerCase().includes(w))) : o.items
-  // A secret is taken as typed, spaces too.
-  const extra = typed.trim() && o.free ? o.free(o.password ? typed : typed.trim()) : null
+  const matching = o.match ? o.match(typed) : o.filter ? o.items.filter((i) => words.every((w) => `${i.label} ${i.description ?? ''} ${i.detail ?? ''}`.toLowerCase().includes(w))) : o.items
+  const shown = matching.slice(0, shownMost)
+  // A secret is taken as typed, spaces too; nothing typed, when the caller takes that.
+  const extra = o.free && (typed.trim() || o.empty) ? o.free(o.password ? typed : typed.trim()) : null
   const groups = [...new Set(shown.map((i) => i.group ?? ''))]
   const choose = (value: string) => {
     setChosen(value)
@@ -45,7 +49,7 @@ function Picker({ open: o }: { open: Open }) {
           />
         </div>
       ) : (
-        <CommandInput value={typed} onValueChange={setTyped} placeholder={o.placeholder} aria-label={o.title} />
+        <CommandInput value={typed} onValueChange={setTyped} onFocus={(e) => e.currentTarget.select()} placeholder={o.placeholder} aria-label={o.title} />
       )}
       <CommandList>
         <CommandEmpty>{extra ? null : 'Nothing matches.'}</CommandEmpty>
@@ -69,6 +73,7 @@ function Picker({ open: o }: { open: Open }) {
             {extra.description && <span className="text-xs text-muted-foreground">{extra.description}</span>}
           </CommandItem>
         )}
+        {matching.length > shown.length && <p className="px-2 py-1.5 text-xs text-muted-foreground">{matching.length - shown.length} more: type to narrow the list.</p>}
       </CommandList>
     </CommandDialog>
   )

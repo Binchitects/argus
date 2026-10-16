@@ -18,8 +18,14 @@ export interface Open {
   items: PickItem[]
   /** The id chosen at first. */
   active?: string
-  /** Typing narrows the items (true), or the caller lists what fits (false: onType). */
+  /** Typing narrows the items (true), or the caller lists what fits (false: match). */
   filter: boolean
+  /** With filter false: the items for what is typed, best first (a long list, ranked and cut, as Quick Open's). */
+  match?: (typed: string) => PickItem[]
+  /** The text in the box at first (an input box's value now), selected. */
+  value?: string
+  /** Nothing typed can be taken too (free is asked for ""): an input box's empty answer. */
+  empty?: boolean
   /** Text typed that matches no item can be taken as it is (a name, a value). */
   free?: (typed: string) => PickItem | null
   /** What is typed is a secret: shown as dots, never in the list. */
@@ -63,24 +69,34 @@ export function quickPick<T>(o: {
   free?: (typed: string) => PickItem<T> | null
   password?: boolean
   onActive?: (item: PickItem<T> | undefined) => void
+  /** The items for what is typed, in place of narrowing `items` by its words. */
+  match?: (typed: string) => PickItem<T>[]
+  value?: string
+  empty?: boolean
 }): Promise<PickItem<T> | undefined> {
   return new Promise((resolve) => {
     open?.done(undefined)
-    open = { ...o, filter: true, done: resolve as (item: PickItem | undefined) => void } as Open
+    open = { ...o, filter: !o.match, done: resolve as (item: PickItem | undefined) => void } as Open
     changed()
   })
 }
 
-/** A line of text asked for, as VS Code's input box: undefined when the person cancels. */
+/**
+ * A line of text asked for, as VS Code's input box: the value now in the box at first, what is typed taken as it is (an
+ * empty answer too); undefined when the person cancels.
+ */
 export function inputBox(o: { title: string; placeholder: string; value?: string; validate?: (v: string) => string | null; password?: boolean }): Promise<string | undefined> {
   return quickPick<string>({
     title: o.title,
     placeholder: o.placeholder,
     password: o.password,
-    items: o.value && !o.password ? [{ id: 'value', label: o.value, description: 'as it is', value: o.value }] : [],
+    value: o.value,
+    empty: true,
+    items: [],
     free: (typed) => {
       const why = o.validate?.(typed)
-      return why ? { id: 'invalid', label: why } : { id: 'typed', label: o.password ? '•'.repeat(Math.min(typed.length, 24)) : typed, description: 'Press Enter to use it', value: typed }
+      if (why) return { id: 'invalid', label: why }
+      return { id: 'typed', label: o.password ? '•'.repeat(Math.min(typed.length, 24)) : typed || 'Nothing (empty)', description: 'Press Enter to use it', value: typed }
     },
   }).then((item) => (item && item.id !== 'invalid' ? item.value : undefined))
 }

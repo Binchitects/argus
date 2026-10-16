@@ -232,6 +232,12 @@ function indentModel(model: Monaco.editor.ITextModel, v: Record<string, unknown>
   if (detect) model.detectIndentation(insertSpaces, tabSize)
 }
 
+/** "files.eol" for a file with no text yet (a new one): its line ending, the system's with "auto". */
+function newFileEol(m: MonacoModule, v: Record<string, unknown>) {
+  const eol = v['files.eol'] === 'auto' ? (typeof navigator !== 'undefined' && navigator.platform.startsWith('Win') ? '\r\n' : '\n') : v['files.eol']
+  return eol === '\r\n' ? m.monaco.editor.EndOfLineSequence.CRLF : m.monaco.editor.EndOfLineSequence.LF
+}
+
 export function EditorProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
@@ -456,7 +462,10 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         if (now && !now.model.isDisposed()) return now
         const language = m.languageOf(path, settingsRef.current.get('files.associations'))
         const model = m.monaco.editor.createModel(file.text, language.id, m.fileUri(path))
-        indentModel(model, settingsRef.current.all(language.id))
+        const v = settingsRef.current.all(language.id)
+        indentModel(model, v)
+        // A file with no line yet has no line ending of its own: "files.eol" gives it one.
+        if (file.text === '') model.setEOL(newFileEol(m, v))
         const f: FileModel = { path, model, version: file.version, savedAlt: model.getAlternativeVersionId(), view: null }
         model.onDidChangeContent(() => markDirty(f))
         files.current.set(path, f)

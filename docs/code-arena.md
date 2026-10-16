@@ -345,7 +345,11 @@ VS Code settings mean the same here:
   `config.json`; **Preferences: Open User Settings (JSON)**), for every
   project; the project's `.vscode/settings.json` (**Preferences: Open
   Workspace Settings (JSON)**) over it; and, over both, a language's own
-  (`"[python]": {"editor.tabSize": 4}`, in either). Comments and trailing
+  (`"[python]": {"editor.tabSize": 4}`, in either; VS Code's ids for what
+  Monaco reads as one language are that language: `[typescriptreact]` is a
+  .tsx file's, as `[typescript]` is, which wins over it, and `[shellscript]`,
+  `[javascriptreact]` and `[jsonc]` are `shell`, `javascript` and `json`, in
+  `files.associations` too). Comments and trailing
   commas are allowed; the editor checks the file against what Code Arena
   reads, with each setting's description. A value of the wrong kind is not
   taken. The person's own settings (the terminal's keys) are not taken from a
@@ -357,10 +361,12 @@ VS Code settings mean the same here:
   (`files.autoSave` after a delay, when the focus or the window leaves;
   `files.trimTrailingWhitespace`, `files.insertFinalNewline`,
   `files.trimFinalNewlines`, steps Undo takes back, never for a save after a
-  delay; `files.associations`), compares (`diffEditor.*`), the terminals
-  (font, cursor, scrollback, the keys they let through), the colour theme
-  (`workbench.colorTheme`, or `window.autoDetectColorScheme` with the
-  preferred light and dark ones: **Ctrl+K Ctrl+Alt+T**), the file icon theme
+  delay; `files.associations`; `files.eol`, the line ending of a new, empty
+  file), compares (`diffEditor.*`), the terminals (font, size, line height,
+  cursor, scrollback, applied at once to those open; the keys they let
+  through), the colour theme (`workbench.colorTheme`, or
+  `window.autoDetectColorScheme` with the preferred light and dark ones:
+  **Ctrl+K Ctrl+Alt+T**), the file icon theme
   (`workbench.iconTheme`) and Code Arena's code completion
   (`codeArena.inlineCompletion.enabled`, the status bar's **Complete**: the
   person's own, which a project's settings cannot turn on, since what is typed

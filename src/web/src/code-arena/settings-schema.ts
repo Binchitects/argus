@@ -30,6 +30,15 @@ export interface SettingDef {
 
 const lang = 'language' as const
 
+/**
+ * VS Code's language ids that Monaco reads as another of its own (a .tsx file is "typescript" in Monaco, a .sh file
+ * "shell"): a "[typescriptreact]" block of settings.json, or a "files.associations" value, means Monaco's.
+ */
+const monacoIds: Record<string, string> = { typescriptreact: 'typescript', javascriptreact: 'javascript', shellscript: 'shell', jsonc: 'json' }
+
+/** A language id as Monaco knows it: VS Code's own ids for what Monaco reads as one language are that language. */
+export const monacoLanguageId = (id: string) => monacoIds[id] ?? id
+
 /** A colour theme: its name in settings.json, light or dark (the page follows it), and Monaco's theme. */
 export interface ColorTheme {
   name: string

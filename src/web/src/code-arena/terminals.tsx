@@ -13,6 +13,7 @@ import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { findRefs, useFileRefs } from '@/pages/chat/file-refs'
 import { PartHelp } from './help'
+import { useSetting } from './settings'
 import { useTerminalColors } from './theme'
 import { closeTerminal, openTerminal, terminalSocketUrl, terminalsQuery, type TerminalInfo } from './ide-api'
 
@@ -98,8 +99,9 @@ export default function TerminalPanel({ shown, onHide, focusKey, newKey = 0, sho
     }
   }, [queryClient])
 
-  // A task's or a run's terminal, shown as it starts.
-  const showAt = useRef(show?.at)
+  // A task's or a run's terminal, shown as it starts: the one the panel first mounts with too (a task run with the panel
+  // not drawn yet draws it).
+  const showAt = useRef<number | undefined>(undefined)
   useEffect(() => {
     if (!show || show.at === showAt.current) return
     showAt.current = show.at
@@ -238,6 +240,16 @@ function XtermView({ terminal, active, focusKey, onSize, onExit }: { terminal: T
   const events = useRef({ onSize, onExit })
   const [state, setState] = useState<'connecting' | 'open' | 'ended' | 'lost'>('connecting')
   const [attempt, setAttempt] = useState(0)
+  // "terminal.integrated.*": the font (empty: the editor's), the cursor, the lines kept.
+  const editorFont = useSetting<string>('editor.fontFamily')
+  const fontFamily = useSetting<string>('terminal.integrated.fontFamily') || editorFont
+  const fontSize = useSetting<number>('terminal.integrated.fontSize')
+  const lineHeight = useSetting<number>('terminal.integrated.lineHeight')
+  const cursorStyle = useSetting<'block' | 'line' | 'underline'>('terminal.integrated.cursorStyle')
+  const cursorBlink = useSetting<boolean>('terminal.integrated.cursorBlinking')
+  const scrollback = useSetting<number>('terminal.integrated.scrollback')
+  const options = useMemo(() => ({ fontFamily, fontSize, lineHeight, cursorStyle: cursorStyle === 'line' ? ('bar' as const) : cursorStyle, cursorBlink, scrollback }), [fontFamily, fontSize, lineHeight, cursorStyle, cursorBlink, scrollback])
+  const optionsNow = useRef(options)
 
   // Before the terminal is made (effects run in order): the colours and the callbacks it starts with.
   useEffect(() => {
@@ -253,18 +265,19 @@ function XtermView({ terminal, active, focusKey, onSize, onExit }: { terminal: T
     theme.current = colors
     if (term.current) term.current.options.theme = colors
   }, [colors])
+  // The settings changed: the terminal takes them at once, and fits the panel again (a new font size changes its rows).
+  useEffect(() => {
+    optionsNow.current = options
+    const t = term.current
+    if (!t) return
+    Object.assign(t.options, options)
+    if (active) fit.current?.fit()
+  }, [options, active])
 
   useEffect(() => {
     const el = host.current
     if (!el) return
-    const t = new Terminal({
-      fontFamily: "'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', monospace",
-      fontSize: 13,
-      lineHeight: 1.2,
-      cursorBlink: true,
-      scrollback: 10_000,
-      theme: theme.current,
-    })
+    const t = new Terminal({ ...optionsNow.current, theme: theme.current })
     const f = new FitAddon()
     t.loadAddon(f)
     t.registerLinkProvider({

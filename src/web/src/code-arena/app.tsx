@@ -21,7 +21,7 @@ import { SourceControlPanel } from './scm'
 import { EditorArea, EditorProvider } from './editor'
 import { userFile } from './editor-options'
 import { CodeRefsProvider } from './refs'
-import { useEditor } from './editor-state'
+import { rankFiles, useEditor } from './editor-state'
 import { Explorer } from './explorer'
 import { HelpProvider } from './help'
 import { useOpenHelp } from './help-context'
@@ -497,10 +497,14 @@ function Workbench({
       toast.error(errorMessage(e))
       return
     }
+    const others = all.filter((p) => p !== path)
+    const item = (p: string) => ({ id: p, label: p.slice(p.lastIndexOf('/') + 1), description: p })
+    // Ranked and cut as Quick Open's: a folder of tens of thousands of files is never drawn whole.
     const picked = await quickPick({
       title: 'Compare with',
       placeholder: `Select a file to compare ${path.slice(path.lastIndexOf('/') + 1)} with`,
-      items: all.filter((p) => p !== path).map((p) => ({ id: p, label: p.slice(p.lastIndexOf('/') + 1), description: p })),
+      items: [],
+      match: (typed) => rankFiles(others, typed).map(item),
     })
     if (picked) await ed.compare({ kind: 'file', path: picked.id }, { kind: 'file', path })
   }
