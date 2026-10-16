@@ -24,6 +24,7 @@ export function SelectionToolbar({
   onAsk,
   onClose,
   onHold,
+  keys = replyKeys,
 }: {
   at: Quotable | null
   scroller: RefObject<HTMLElement | null>
@@ -32,6 +33,8 @@ export function SelectionToolbar({
   onClose: () => void
   /** While the question field is open, the selection changing (as it takes the focus) does not close the toolbar. */
   onHold: (on: boolean) => void
+  /** Reply's keys as the person set them (Code Arena's keybindings); none: it has no key. */
+  keys?: string | null
 }) {
   const [asking, setAsking] = useState(false)
   const [question, setQuestion] = useState('')
@@ -120,7 +123,12 @@ export function SelectionToolbar({
           </form>
         ) : (
           <Toolbar.Root aria-label="The selected words" className="flex items-center gap-0.5">
-            <Toolbar.Button className={itemClass} onClick={() => at && onReply(at.quote)} aria-keyshortcuts={replyAria} title={`Reply quoting this (${replyKeys})`}>
+            <Toolbar.Button
+              className={itemClass}
+              onClick={() => at && onReply(at.quote)}
+              aria-keyshortcuts={keys === replyKeys ? replyAria : undefined}
+              title={keys ? `Reply quoting this (${keys})` : 'Reply quoting this'}
+            >
               <Reply className="size-4" aria-hidden="true" /> Reply
             </Toolbar.Button>
             <Toolbar.Button

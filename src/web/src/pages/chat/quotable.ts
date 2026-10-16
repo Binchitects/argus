@@ -27,6 +27,8 @@ export const isReplyKey = (e: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' | 'shift
 export function useQuotableSelection(scroller: RefObject<HTMLElement | null>, sourceOf: (id: string) => string | undefined) {
   const [at, setAt] = useState<Quotable | null>(null)
   const held = useRef(false)
+  // The last selection quotable, kept while the focus is in a field that took it away (the command palette's).
+  const recent = useRef<Quotable | null>(null)
   const source = useRef(sourceOf)
   useEffect(() => {
     source.current = sourceOf
@@ -37,11 +39,12 @@ export function useQuotableSelection(scroller: RefObject<HTMLElement | null>, so
       if (held.current) return
       const sel = document.getSelection()
       const box = scroller.current
-      if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !box) return setAt(null)
-      const range = sel.getRangeAt(0)
-      const id = box.contains(range.startContainer) ? quotedIn(range) : null
-      const quote = id ? quoteOfRange(range, (x) => source.current(x)) : null
-      setAt(id && quote ? { quote, source: id, range } : null)
+      const range = sel && !sel.isCollapsed && sel.rangeCount > 0 && box ? sel.getRangeAt(0) : null
+      const id = range && box?.contains(range.startContainer) ? quotedIn(range) : null
+      const quote = range && id ? quoteOfRange(range, (x) => source.current(x)) : null
+      const now = range && id && quote ? { quote, source: id, range } : null
+      if (now || !document.activeElement?.matches('input, textarea, [contenteditable="true"]')) recent.current = now
+      setAt(now)
     }
     const changed = () => {
       window.clearTimeout(timer)
@@ -56,8 +59,11 @@ export function useQuotableSelection(scroller: RefObject<HTMLElement | null>, so
   return {
     at,
     /** Closes the toolbar; with `deselect`, the page's selection goes too. */
+    /** What was last quotable: still there after the focus went to a field (a command run from the palette quotes it). */
+    recent: () => at ?? recent.current,
     clear: (deselect = false) => {
       held.current = false
+      recent.current = null
       setAt(null)
       if (deselect) document.getSelection()?.removeAllRanges()
     },

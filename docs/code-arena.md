@@ -457,6 +457,7 @@ does nothing at that moment.
 | Ctrl+, , Ctrl+K Ctrl+S, Ctrl+K Ctrl+Alt+T | settings, keyboard shortcuts, colour theme |
 | Ctrl+K M, Alt+Z, Ctrl+K P | the language mode, word wrap, copy the file's path |
 | Ctrl+L | in the editor: the lines chosen (or the cursor's) go with the next message |
+| Ctrl+Shift+' | in the chat: Reply, quoting the words selected in an answer (`codeArena.chat.quoteSelection`) |
 
 Everything the page needs (Monaco and its language workers, xterm.js, the
 fonts) is built into the program; nothing is fetched from anywhere else.
@@ -862,6 +863,21 @@ Lines of a file go to the agent from the editor itself:
 
 The model gets them numbered, after the message, as `<selection path lines>`
 (with `unsaved="true"` for the editor's text); at most eight a message.
+
+### Reply to part of an answer
+
+Words selected in a finished answer of the chat get the web chat's toolbar
+beside them ([Chat](chat.md#what-it-does)): **Reply** puts them above the box
+as a quote (× or Backspace at the start of an empty box takes it away), and
+the next message goes with it; **Ask about this** asks about them at once
+(queued while an answer is written), leaving what is in the box and the
+editor's lines above it as they are; **Copy** copies them. The command **Chat:
+Reply quoting the selection** (`codeArena.chat.quoteSelection`, Ctrl+Shift+' by
+default, changed in `keybindings.json`) does what Reply does; F1 lists it only
+while words are selected in an answer. **Quote part of this answer…** under an
+answer opens it in a box to select from by keyboard. The thread shows a
+question's quote above it, with a way to the answer it came from. The model
+reads the quote before the message, and the editor's lines after it.
 
 ### Source control
 

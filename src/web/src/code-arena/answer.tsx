@@ -1,4 +1,4 @@
-import { Check, Copy, FileDiff as FileDiffIcon, FileSymlink, ShieldQuestion, Square } from 'lucide-react'
+import { Check, Copy, FileDiff as FileDiffIcon, FileSymlink, ShieldQuestion, Square, TextQuote } from 'lucide-react'
 import { memo, useMemo, useState } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,8 @@ import type { Notice, ToolRunning } from '@/pages/chat/live'
 import { Markdown } from '@/pages/chat/markdown'
 import { MediaPlayer } from '@/pages/chat/media'
 import { NoticeLine, Thinking, ToolCard } from '@/pages/chat/parts'
+import type { Quote } from '@/pages/chat/quote'
+import { QuotePartDialog } from '@/pages/chat/quote-parts'
 import type { ChatConfig, Message } from '@/pages/chat/types'
 import type { FileDiff } from './api'
 import { rawFileUrl } from './ide-api'
@@ -234,6 +236,8 @@ interface AnswerProps {
   calls?: Record<string, ToolRunning>
   diffs: Record<string, FileDiff>
   onDecide: (callId: string, answer: 'allow' | 'always' | 'deny') => void
+  /** Puts part of this answer (chosen by keyboard, in a dialog) above the message box as a quote. */
+  onQuote?: (quote: Quote) => void
 }
 
 /**
@@ -242,7 +246,7 @@ interface AnswerProps {
  * is then not drawn again while another streams.
  */
 function sameAnswer(a: AnswerProps, b: AnswerProps): boolean {
-  if (a.live !== b.live || a.thinkingSince !== b.thinkingSince || a.notices !== b.notices || a.config !== b.config || a.onDecide !== b.onDecide) return false
+  if (a.live !== b.live || a.thinkingSince !== b.thinkingSince || a.notices !== b.notices || a.config !== b.config || a.onDecide !== b.onDecide || a.onQuote !== b.onQuote) return false
   if (a.answer.length !== b.answer.length || a.answer.some((m, i) => m !== b.answer[i])) return false
   if (b.live && (a.waiting !== b.waiting || a.always !== b.always || a.risks !== b.risks || a.calls !== b.calls)) return false
   return b.answer.every((m) => m.role !== 'tool' || a.diffs[m.id] === b.diffs[m.id])
@@ -253,7 +257,8 @@ function sameAnswer(a: AnswerProps, b: AnswerProps): boolean {
  * diffs and questions, and a line with the model, time and tokens (the share
  * read from the cache with them), as Arena's chat shows an answer.
  */
-export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince, notices, config, waiting, always, risks, calls, diffs, onDecide }: AnswerProps) {
+export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince, notices, config, waiting, always, risks, calls, diffs, onDecide, onQuote }: AnswerProps) {
+  const [quoting, setQuoting] = useState(false)
   const results = new Map(answer.filter((m) => m.role === 'tool').map((m) => [m.toolCallId, m]))
   const assistants = answer.filter((m) => m.role === 'assistant')
   const text = assistants.map((a) => a.content).filter(Boolean).join('\n\n')
@@ -282,7 +287,15 @@ export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince
         return (
           <div key={a.id} data-message={a.id} className="scroll-mt-4 rounded-lg">
             {a.reasoning && <Thinking text={a.reasoning} live={live && isLast && !a.content && !a.toolCalls?.length} ms={a.thinkingMs} since={isLast ? thinkingSince : null} />}
-            {a.content && <Markdown text={a.content} live={live && isLast} />}
+            {a.content &&
+              (live ? (
+                <Markdown text={a.content} live={live && isLast} />
+              ) : (
+                // A finished answer's words can be selected and quoted in a reply.
+                <div data-quote-source={a.id}>
+                  <Markdown text={a.content} />
+                </div>
+              ))}
             {live && isLast && a.content && <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-primary align-middle" aria-hidden="true" />}
             {a.toolCalls?.map((t) => {
               const result = results.get(t.id)
@@ -314,6 +327,16 @@ export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince
       {!live && last && (
         <div className="mt-1 flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
           {text && <CopyButton text={text} label="Copy answer" />}
+          {text && onQuote && (
+            <>
+              <Tooltip content="Quote part of this answer…">
+                <Button variant="ghost" size="icon-sm" className="size-7" onClick={() => setQuoting(true)} aria-label="Quote part of this answer…">
+                  <TextQuote />
+                </Button>
+              </Tooltip>
+              <QuotePartDialog text={text} open={quoting} onOpenChange={setQuoting} onQuote={onQuote} />
+            </>
+          )}
           <span className="ml-1 flex flex-wrap items-center gap-x-2 tabular-nums">
             {last.model && <span>{last.model}</span>}
             {took > 0 && <span>· {seconds(took)}</span>}
