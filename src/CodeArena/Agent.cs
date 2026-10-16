@@ -778,8 +778,7 @@ internal sealed class Agent
             var name = call["function"].Str("name") ?? "";
             var raw = call["function"].Str("arguments");
             var args = string.IsNullOrWhiteSpace(raw) ? new JsonObject() : Json.ParseObject(raw);
-            var tool = Tools.Find(name);
-            string? refusal = null;
+            var (tool, refusal) = Tools.ForCall(name);
             if (tool is null)
             {
                 refusal = $"There is no tool named {name}. The tools: {string.Join(", ", Tools.Offered().Select(t => t.Name))}.";

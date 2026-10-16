@@ -294,6 +294,21 @@ describe('Code Arena in the browser', () => {
     expect(await screen.findByRole('button', { name: 'Model: model-b' })).toBeInTheDocument()
   })
 
+  it("turns Arena's tools on and off for the session with the web chat's Tools menu", async () => {
+    const group = (id: string, title: string, on: boolean) => ({ id, title, description: `${title}'s tools.`, icon: 'globe', onByDefault: true, askFirst: false, on, loaded: false, functions: 2 })
+    const { calls } = backend({
+      state: { toolGroups: [group('web', 'Web search', true), group('gitlab', 'GitLab', true)] },
+      extra: {
+        'POST /api/settings': (body) => ({ json: state({ toolGroups: [group('web', 'Web search', true), group('gitlab', 'GitLab', (body as { tools: string[] }).tools.includes('gitlab'))] }) }),
+      },
+    })
+    renderCode()
+    await userEvent.click(await screen.findByRole('button', { name: 'Tools: 2 of 2 on' }))
+    await userEvent.click(await screen.findByRole('switch', { name: /GitLab/ }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/settings')?.body).toEqual({ tools: ['web'] }))
+    expect(await screen.findByRole('button', { name: 'Tools: 1 of 2 on' })).toBeInTheDocument()
+  })
+
   it("lists this folder's sessions, newest first, and resumes one with its history", async () => {
     const first: CodeSession = { id: 's1', messages: [msg('m0', 'user', { content: 'First question' }), msg('m1', 'assistant', { content: 'The first answer.', model: 'model-a' })], diffs: {}, busy: false }
     const { calls, now } = backend({

@@ -513,6 +513,10 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["completion"] = _rt.Config.Completion ? new JsonObject { ["model"] = _rt.Config.CompletionModel ?? _rt.Model.Name } : null,
             ["queued"] = new JsonArray([.. Queued().Select(q => (JsonNode)q)]),
             ["arenaTools"] = _rt.ArenaConnected,
+            // The Tools menu: the remote tools by group (Arena's by its chat's tools, each other server as one), on or off in
+            // this session, and loaded (on demand: only those loaded are in the requests whole).
+            ["toolGroups"] = ToolGroups(),
+            ["toolsOnDemand"] = _rt.Demand.Active(_rt.Tools.All.Where(t => t.Group is null || !_rt.Demand.IsOff(t.Group))),
             ["tools"] = new JsonObject
             {
                 ["local"] = _rt.Tools.All.Count(t => t.Server is null),
@@ -521,6 +525,20 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             },
         };
     }
+
+    /// <summary>The remote tools by group, in the shape of the web chat's tools (its Tools menu reads them), with whether each is on and loaded.</summary>
+    private JsonArray ToolGroups() => new([.. _rt.Tools.All.Where(t => t.Group is not null).GroupBy(t => t.Group!).Select(g => (JsonNode)new JsonObject
+    {
+        ["id"] = g.Key,
+        ["title"] = _rt.ToolTitle(g.Key),
+        ["description"] = _rt.ToolAbout(g.Key),
+        ["icon"] = _rt.ToolIcon(g.Key),
+        ["onByDefault"] = true,
+        ["askFirst"] = g.Any(t => !t.Trusted && !t.ReadOnly),
+        ["on"] = !_rt.Demand.IsOff(g.Key),
+        ["loaded"] = _rt.Demand.IsLoaded(g.Key),
+        ["functions"] = g.Count(),
+    })]);
 
     /// <summary>
     /// The models in the shape of Arena's chat config: the page's model picker and tool output read it as they do there. What
@@ -1177,6 +1195,17 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             await res.ErrorAsync(400, "invalid", $"The gateway has no model {name}.", ct);
             return;
         }
+        // The remote tools on in this session (the Tools menu): the groups listed; every other one there is now is off.
+        List<string>? toolsOn = null;
+        if (body.ContainsKey("tools"))
+        {
+            if (body["tools"] is not JsonArray list || list.Any(t => t is not JsonValue v || !v.TryGetValue<string>(out _)))
+            {
+                await res.ErrorAsync(400, "invalid", "tools is a list of the tools to have on (their ids).", ct);
+                return;
+            }
+            toolsOn = [.. list.Select(t => t!.GetValue<string>())];
+        }
         var thinking = body.ContainsKey("thinking") ? body.Str("thinking") ?? "default" : null;
         if (thinking is not null && thinking != "default" && !ModelState.Levels.Contains(thinking))
         {
@@ -1202,6 +1231,12 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         if (thinking is not null)
         {
             _rt.Model.Thinking = thinking == "default" ? null : thinking;
+        }
+        if (toolsOn is not null)
+        {
+            // A group of a server not connected now keeps the choice made for it.
+            var present = _rt.Tools.All.Select(t => t.Group).OfType<string>();
+            _rt.Demand.SetOff(_rt.Demand.Off.Union(present).Except(toolsOn));
         }
         await res.JsonAsync(200, State(), ct);
     }

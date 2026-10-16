@@ -154,6 +154,8 @@ internal sealed class Config
     public string? ArgusUrl { get; set; }
     /// <summary>Whether to connect to Argus's own MCP endpoint (with the same key) besides Arena's.</summary>
     public bool ArgusTools { get; set; } = true;
+    /// <summary>Arena's and the MCP servers' tool definitions past this many characters go on demand (load_tools); 0: always whole; null: <see cref="ToolDemand.DefaultBudget"/>.</summary>
+    public int? ToolChars { get; set; }
     /// <summary>The share of the model's window (in percent) at which the session compacts itself (0, "off": only when a request would not fit); null: the Arena account's, else <see cref="Compaction.DefaultAt"/>.</summary>
     public int? CompactAt { get; set; }
     /// <summary>The share of the window (in percent) the recent part may keep whole when it compacts; null: <see cref="Compaction.DefaultTarget"/>.</summary>
@@ -268,6 +270,7 @@ internal sealed class Config
         config.ArenaTools = raw.Bool("arenaTools") ?? true;
         config.ArgusUrl = raw.Str("argusUrl");
         config.ArgusTools = raw.Bool("argusTools") ?? true;
+        config.ToolChars = raw.Int("toolChars") is { } chars ? Math.Max(0, chars) : null;
         config.CompactAt = Share(raw, "compactAt", file);
         config.CompactTarget = Share(raw, "compactTarget", file);
         config.ApiKey = raw.Str("apiKey");
@@ -401,6 +404,7 @@ internal sealed class Config
         Set("arenaTools", ArenaTools ? null : false);
         Set("argusUrl", ArgusUrl);
         Set("argusTools", ArgusTools ? null : false);
+        Set("toolChars", ToolChars);
         Set("compactAt", CompactAt);
         Set("compactTarget", CompactTarget);
         Set("apiKey", ApiKey);

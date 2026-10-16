@@ -156,7 +156,7 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/model [name]` | show the models, or switch |
 | `/mode [mode]` | show the mode, or switch |
 | `/thinking [level]` | `default`, `off`, `low`, `medium`, `high`, `xhigh` (sent as the chat sends it, through `chat_template_kwargs`); `default` is the web chat's default level when Arena says one (`DEFAULT_THINKING`), else the model's own |
-| `/tools` | the tools of the session, and which ask |
+| `/tools [on\|off NAME]` | the tools of the session, which ask, which are off and which are loaded when needed; `on` or `off` a group of Arena's or a server's tools in this session (by its name, its title or one of its functions) |
 | `/todo` | the to-do list |
 | `/compact` | summarize the conversation now |
 | `/compact-at [% [%]]` | show or set when the session compacts itself and what it keeps (below); `off` for only when a request would not fit, `account` for your Arena account's, `default` for that and 25 |
@@ -1322,6 +1322,21 @@ said. `"arenaTools": false` and `"argusTools": false` in
 `config.json` turn them off. `code-arena login` tries both and says what it
 found.
 
+**Which of them, and when they load.** As in the web chat, a session has its
+own choice of Arena's tools: the IDE's **Tools** menu beside the thinking
+picker (the web chat's own menu: Arena's tools by the name its chat gives them,
+each MCP server of yours as one) or `/tools off NAME` and `/tools on NAME` in
+the terminal. A tool off is left out of the requests, and a call to it is
+refused; the local tools are always there. The choice is kept with the session
+(a new one has every tool on). Arena's tools are many (about 35 functions, some
+9,000 tokens), so they come **on demand**, as in the web chat: past 6,000
+characters of definitions (`"toolChars"` in `config.json`; 0 sends them whole
+always) only those loaded go whole in each request. The others are listed in
+Code Arena's note, a line per tool, and the model loads what a task needs with
+`load_tools` (a function called straight from the list is loaded then). What a
+session loads stays loaded, kept with it, so the start of the requests stays
+what the engine has cached; loading one more reads the prompt again once.
+
 ### Commands with no time limit, and in the background
 
 A command that takes longer than `run_shell`'s limit (a full build, a long
@@ -1712,7 +1727,7 @@ without starting it. On Windows, `npx` and other `.cmd` scripts need
 The rest of the file: `"model"`, `"thinking"`, `"mode"`, `"context"`,
 `"shell"` (the agent's `run_shell`), `"terminalShell"` (the IDE's terminals),
 `"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"argusTools": false`
-(no Argus MCP), `"argusUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
+(no Argus MCP), `"toolChars"` (tools on demand, above), `"argusUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
 `"mcpUrl"`, `"ca"`, `"autoCommit"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"window"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"checkCommand"`, `"sandbox"`,
 `"sandboxNetwork"`, `"sandboxWritable"`, `"permissions"`, `"formatters"`, `"debugAdapters"` and
 `"languageServers"` (the IDE's: above). `ARENA_ARGUS_URL` in the environment gives Argus's address

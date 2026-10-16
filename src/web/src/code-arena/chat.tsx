@@ -18,6 +18,7 @@ import { useFileRefs } from '@/pages/chat/file-refs'
 import { ContextGauge } from '@/pages/chat/context-gauge'
 import { answerNews, bucket } from '@/pages/chat/format'
 import { ModelPicker, ThinkingPicker } from '@/pages/chat/header'
+import { ToolsPicker } from '@/pages/chat/tools-picker'
 import { batched } from '@/pages/chat/batch'
 import { keepSame, stopped, withQuestion, type Notice } from '@/pages/chat/live'
 import { useRecall, type Older, type RecallSource } from '@/pages/chat/recall'
@@ -776,6 +777,9 @@ export function Thread({
       <header className="flex h-11 shrink-0 items-center gap-1 border-b px-2">
         <ModelPicker config={config} value={state.model} onChange={(m) => m && m !== state.model && void settings({ model: m })} />
         {model?.thinking && <ThinkingPicker config={config} value={state.thinking} onChange={(level) => void settings({ thinking: level })} />}
+        {model?.tools !== false && state.toolGroups && (
+          <ToolsPicker tools={state.toolGroups} value={state.toolGroups.filter((g) => g.on).map((g) => g.id)} onChange={(tools) => void settings({ tools })} />
+        )}
         <span className="ml-auto" />
         <SyncStatus sync={state.sync} />
         {state.mode === 'yolo' && <span className="hidden text-xs text-destructive-ink @md:inline">Yolo: nothing asks</span>}

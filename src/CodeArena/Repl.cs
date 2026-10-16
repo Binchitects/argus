@@ -29,7 +29,7 @@ internal sealed class Repl(Runtime rt)
         ("/model [name]", "show or switch the model"),
         ("/mode [mode]", "show or switch the mode: ask, auto-edit, plan, yolo"),
         ("/thinking [level]", "show or set thinking: default, off, low, medium, high, xhigh"),
-        ("/tools", "the tools this session has"),
+        ("/tools [on|off NAME]", "the tools this session has; turn a group of Arena's or a server's tools on or off in it"),
         ("/todo", "the to-do list"),
         ("/compact", "summarize the conversation to free the model's window"),
         ("/compact-at [% [%]]", "show or set when it compacts itself (80% of the window, off, or your Arena account's) and what it keeps (25%)"),
@@ -537,13 +537,31 @@ internal sealed class Repl(Runtime rt)
                     Ui.Error($"Thinking is one of: default, {string.Join(", ", ModelState.Levels)}.");
                 }
                 break;
+            case "/tools" when arg.Split(' ', 2, StringSplitOptions.TrimEntries) is [var verb, { Length: > 0 } which] && verb is "on" or "off":
+                // A group by its id or title (argus, Web search...), or by one of its functions.
+                var found = rt.Tools.All.Where(t => t.Group is { } g && (g == which || t.Name == which || string.Equals(rt.ToolTitle(g), which, StringComparison.OrdinalIgnoreCase)))
+                    .Select(t => t.Group!).Distinct().ToList();
+                if (found.Count == 0)
+                {
+                    Ui.Error($"There are no tools {which} here: /tools lists them (the local ones are always on).");
+                    break;
+                }
+                rt.Demand.SetOff(verb == "off" ? rt.Demand.Off.Union(found) : rt.Demand.Off.Except(found));
+                Ui.Info($"{string.Join(", ", found.Select(rt.ToolTitle))} {(verb == "off" ? "off" : "on")} in this session.");
+                break;
             case "/tools":
                 var width = rt.Tools.All.Max(t => t.Name.Length);
+                var waiting = rt.Tools.ToLoad().Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
                 foreach (var group in rt.Tools.All.GroupBy(t => t.Server))
                 {
                     Ui.Line(Ui.Bold(group.Key is null ? "Local" : rt.Links.FirstOrDefault(l => l.Name == group.Key)?.Title ?? group.Key));
                     foreach (var t in group)
                     {
+                        if (t.Group is { } g && rt.Demand.IsOff(g))
+                        {
+                            Ui.Line(Ui.Dim($"  {t.Name.PadRight(width)}  off in this session ({rt.ToolTitle(g)})"));
+                            continue;
+                        }
                         var mark = t.Kind switch
                         {
                             ToolKind.Edit => Ui.Yellow("edits "),
@@ -551,8 +569,12 @@ internal sealed class Repl(Runtime rt)
                             ToolKind.Remote when !t.Trusted && !t.ReadOnly => Ui.Yellow("asks "),
                             _ => "",
                         };
-                        Ui.Line($"  {t.Name.PadRight(width)}  {mark}{Ui.Dim(Fmt.OneLine(t.Description, 80))}");
+                        Ui.Line($"  {t.Name.PadRight(width)}  {mark}{(waiting.Contains(t.Name) ? Ui.Dim("loaded when needed ") : "")}{Ui.Dim(Fmt.OneLine(t.Description, 80))}");
                     }
+                }
+                if (waiting.Count > 0)
+                {
+                    Ui.Info($"Tools loaded when needed are listed for the model, which loads them with {ToolDemand.Function} (\"toolChars\" in config.json sets when).");
                 }
                 if (!rt.ArenaConnected && rt.Config.ArenaTools)
                 {

@@ -1,6 +1,6 @@
 import { api } from '@/lib/api'
 import { blank, reduce, type LiveState } from '@/pages/chat/live'
-import type { ChatEvent, Message } from '@/pages/chat/types'
+import type { ChatEvent, ChatTool, Message } from '@/pages/chat/types'
 import type { Piece } from './bridge'
 
 /** What code-arena web says of itself: the folder, the model, the mode, the session open now. */
@@ -58,6 +58,17 @@ export interface CodeState {
   completion?: { model: string } | null
   arenaTools: boolean
   tools: { local: number; servers: { name: string; count: number }[] }
+  /** The Tools menu: Arena's tools (as its chat has them) and each other server's, on or off in this session. */
+  toolGroups?: ToolGroup[]
+  /** Their definitions are past the budget: the model loads those it needs (load_tools). */
+  toolsOnDemand?: boolean
+}
+
+/** A group of remote tools, in the shape of the web chat's tools, with whether it is on in this session and loaded. */
+export interface ToolGroup extends ChatTool {
+  on: boolean
+  loaded: boolean
+  functions: number
 }
 
 /** The session's sync with its chat in Arena. */
@@ -197,7 +208,8 @@ export const historyQuery = {
 }
 
 /** compactAt: 0 compacts only when a request would not fit; null follows the Arena account's again. */
-export const changeSettings = (body: { mode?: Mode; model?: string; thinking?: string | null; compactAt?: number | null; compactTarget?: number }) => api<CodeState>('/api/settings', { body })
+export const changeSettings = (body: { mode?: Mode; model?: string; thinking?: string | null; compactAt?: number | null; compactTarget?: number; tools?: string[] }) =>
+  api<CodeState>('/api/settings', { body })
 
 /** Where the session's threshold comes from, as the gauge and the Context dialog say it. */
 export function compactWho(state: Pick<CodeState, 'compactAtSource'>): string {

@@ -21,6 +21,8 @@ internal static class SystemPrompt
         public bool Ide { get; init; }
         /// <summary>The MCP servers' instructions, by server: those connected at the moment.</summary>
         public Func<IReadOnlyList<(string Server, string Text)>> ServerInstructions { get; init; } = () => [];
+        /// <summary>The remote tools to load (on demand), as the note lists them; empty when every tool on is in the requests.</summary>
+        public Func<string> ToolsToLoad { get; init; } = () => "";
         /// <summary>Whether Arena's tools are connected at the moment (they connect in the background).</summary>
         public Func<bool> HasArenaTools { get; init; } = () => false;
         /// <summary>What the agent remembers, as the session started (kept so the prompt stays the same through it).</summary>
@@ -133,6 +135,10 @@ internal static class SystemPrompt
         foreach (var (server, text) in x.ServerInstructions().Where(s => s.Text.Trim().Length > 0))
         {
             sb.Append($"\n# Instructions from the {server} tools\n\n{Cut(text.Trim())}\n");
+        }
+        if (x.ToolsToLoad() is { Length: > 0 } toLoad)
+        {
+            sb.Append("\n# Tools to load\n\n").Append(toLoad).Append('\n');
         }
         return sb.ToString().TrimEnd();
     }

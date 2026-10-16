@@ -48,6 +48,12 @@ internal sealed class ToolDef
     public Func<JsonObject, string>? Summary { get; init; }
     /// <summary>Asks the person in every mode, yolo too (stopping a command they let run with no time limit).</summary>
     public bool AlwaysAsks { get; init; }
+    /// <summary>
+    /// The group a remote tool belongs to, which the person turns on and off and the model loads (<see cref="ToolDemand"/>):
+    /// Arena's tool it is a function of (argus, python, web...), "argus" for Argus's own, "mcp:NAME" for a server of the
+    /// person's. Null for a local tool, which is always there.
+    /// </summary>
+    public string? Group { get; init; }
 
     public JsonObject Spec() => new()
     {
@@ -268,17 +274,70 @@ internal sealed class ToolBox(IEnumerable<ToolDef> tools)
 
     public IReadOnlyList<ToolDef> All => Volatile.Read(ref _all);
 
+    /// <summary>The session's choice of remote tools and those loaded on demand; null: every tool is offered whole (a sub-agent's).</summary>
+    public ToolDemand? Demand { get; init; }
+
     /// <summary>
-    /// What the model is offered: everything, in every mode. Plan mode refuses what changes things through the permissions
-    /// (<see cref="Permissions.CheckAsync"/>) rather than leaving it out, so the tools at the start of every request stay
-    /// the same and the engine reads them from its cache.
+    /// What the model is offered: the local tools, and the remote ones the person has on (all of them whole while their
+    /// definitions fit <see cref="ToolDemand.Budget"/>; past it, those loaded and load_tools), in every mode. Plan mode
+    /// refuses what changes things through the permissions (<see cref="Permissions.CheckAsync"/>) rather than leaving it
+    /// out, so the tools at the start of every request stay the same and the engine reads them from its cache.
     /// </summary>
-    public IReadOnlyList<ToolDef> Offered() => All;
+    public IReadOnlyList<ToolDef> Offered()
+    {
+        var all = All;
+        if (Demand is not { } demand)
+        {
+            return all;
+        }
+        var on = all.Where(t => t.Group is null || !demand.IsOff(t.Group)).ToList();
+        if (!demand.Active(on))
+        {
+            return on;
+        }
+        var offered = on.Where(t => t.Group is null || demand.IsLoaded(t.Group)).ToList();
+        if (offered.Count < on.Count)
+        {
+            offered.Add(demand.LoadTool);
+        }
+        return offered;
+    }
 
-    public ToolDef? Find(string name) => All.FirstOrDefault(t => t.Name == name);
+    /// <summary>The remote tools the person has on whose definitions are not in the requests now: those to load.</summary>
+    public List<ToolDef> ToLoad()
+    {
+        var offered = Offered().Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
+        return [.. All.Where(t => t.Group is not null && !offered.Contains(t.Name) && Demand?.IsOff(t.Group) != true)];
+    }
 
-    /// <summary>A sub-agent's: reading tools only, and no sub-agents of its own.</summary>
-    public ToolBox ForSubAgent() => new(All.Where(t => t.ReadOnly));
+    public ToolDef? Find(string name) => name == ToolDemand.Function && Demand is { } demand ? demand.LoadTool : All.FirstOrDefault(t => t.Name == name);
+
+    /// <summary>
+    /// The tool a call names, or why it may not run: one the person turned off in this session is refused, and one on
+    /// the list to load, called straight from it, is loaded now (its definition is in the requests from the next step on).
+    /// </summary>
+    public (ToolDef? Tool, string? Refusal) ForCall(string name)
+    {
+        if (Find(name) is not { } tool)
+        {
+            return (null, null);
+        }
+        if (tool.Group is { } group && Demand is { } demand)
+        {
+            if (demand.IsOff(group))
+            {
+                return (tool, $"{name} is turned off in this session (the person's Tools menu): do without it, or ask the person to turn it on.");
+            }
+            if (!demand.IsLoaded(group))
+            {
+                demand.Load([group]);
+            }
+        }
+        return (tool, null);
+    }
+
+    /// <summary>A sub-agent's: reading tools only (of those on), whole, and no sub-agents of its own.</summary>
+    public ToolBox ForSubAgent() => new(All.Where(t => t.ReadOnly && (t.Group is null || Demand?.IsOff(t.Group) != true)));
 
     /// <summary>
     /// The tools of the servers as they are now, in a stable order: those offered already keep their places (the start of
@@ -299,4 +358,156 @@ internal sealed class ToolBox(IEnumerable<ToolDef> tools)
             Volatile.Write(ref _all, [.. change(_all)]);
         }
     }
+}
+
+/// <summary>
+/// The session's choice of remote tools, as the web chat has it per chat: the groups the person turned off (the IDE's
+/// Tools menu, /tools off), and tools on demand. Past <see cref="Budget"/> characters of remote definitions, only the
+/// groups the model loaded go whole in each request; the rest are listed in Code Arena's note, and load_tools loads them.
+/// What a session loads stays loaded (kept in its file), so the start of the requests stays what the engine has cached.
+/// </summary>
+internal sealed class ToolDemand
+{
+    public const string Function = "load_tools";
+    /// <summary>The web chat's budget (Chat:ToolTextChars).</summary>
+    public const int DefaultBudget = 6000;
+
+    private readonly object _gate = new();
+    private readonly List<string> _off = [];
+    private readonly List<string> _loaded = [];
+
+    /// <summary>Remote definitions past this many characters go on demand; 0: always whole.</summary>
+    public int Budget { get; set; } = DefaultBudget;
+
+    /// <summary>Told when the choice or what is loaded changes (the groups off, the groups loaded): the session keeps them.</summary>
+    public Action<IReadOnlyList<string>, IReadOnlyList<string>>? Changed { get; set; }
+
+    public IReadOnlyList<string> Off
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return [.. _off];
+            }
+        }
+    }
+
+    public IReadOnlyList<string> Loaded
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return [.. _loaded];
+            }
+        }
+    }
+
+    public bool IsOff(string group)
+    {
+        lock (_gate)
+        {
+            return _off.Contains(group);
+        }
+    }
+
+    public bool IsLoaded(string group)
+    {
+        lock (_gate)
+        {
+            return _loaded.Contains(group);
+        }
+    }
+
+    /// <summary>Whether these tools (the local ones and the remote ones on) go on demand: their remote definitions are past the budget.</summary>
+    public bool Active(IEnumerable<ToolDef> on) => Budget > 0 && on.Where(t => t.Group is not null).Sum(t => (long)Json.Line(t.Spec()).Length) > Budget;
+
+    /// <summary>A session's own choice, read back (a new session: none); not told as a change.</summary>
+    public void Restore(IEnumerable<string> off, IEnumerable<string> loaded)
+    {
+        lock (_gate)
+        {
+            _off.Clear();
+            _off.AddRange(off.Distinct(StringComparer.Ordinal));
+            _loaded.Clear();
+            _loaded.AddRange(loaded.Distinct(StringComparer.Ordinal));
+        }
+    }
+
+    /// <summary>The groups the person has off from now on.</summary>
+    public void SetOff(IEnumerable<string> off)
+    {
+        lock (_gate)
+        {
+            var wanted = off.Distinct(StringComparer.Ordinal).ToList();
+            if (wanted.Order(StringComparer.Ordinal).SequenceEqual(_off.Order(StringComparer.Ordinal)))
+            {
+                return;
+            }
+            _off.Clear();
+            _off.AddRange(wanted);
+        }
+        Tell();
+    }
+
+    /// <summary>Loads groups for the requests from the next step on; those newly loaded.</summary>
+    public List<string> Load(IEnumerable<string> groups)
+    {
+        List<string> added;
+        lock (_gate)
+        {
+            added = [.. groups.Distinct(StringComparer.Ordinal).Where(g => !_loaded.Contains(g))];
+            _loaded.AddRange(added);
+        }
+        if (added.Count > 0)
+        {
+            Tell();
+        }
+        return added;
+    }
+
+    private void Tell() => Changed?.Invoke(Off, Loaded);
+
+    /// <summary>The groups a load_tools call names (a group's id or title, or a function's name), of <paramref name="toLoad"/>; and the names not found.</summary>
+    public static (List<string> Groups, List<string> Unknown) Named(IEnumerable<string> names, IReadOnlyList<ToolDef> toLoad, Func<string, string> title)
+    {
+        var groups = new List<string>();
+        var unknown = new List<string>();
+        foreach (var name in names.Select(n => n.Trim()).Where(n => n.Length > 0))
+        {
+            var found = toLoad.Where(t => t.Name == name || t.Group == name || string.Equals(title(t.Group!), name, StringComparison.OrdinalIgnoreCase))
+                .Select(t => t.Group!).Distinct(StringComparer.Ordinal).ToList();
+            if (found.Count == 0)
+            {
+                unknown.Add(name);
+            }
+            groups.AddRange(found.Where(g => !groups.Contains(g)));
+        }
+        return (groups, unknown);
+    }
+
+    /// <summary>load_tools: offered while some remote tools are on the list to load; what it runs is the session's (<see cref="Loader"/>).</summary>
+    public ToolDef LoadTool => _loadTool ??= new ToolDef
+    {
+        Name = Function,
+        Kind = ToolKind.Read,
+        Description = "Loads tools from the list under \"Tools to load\" in Code Arena's note, so that you can call them from your next step on. Give tool names (in brackets) or function names.",
+        Parameters = new JsonObject
+        {
+            ["type"] = "object",
+            ["properties"] = new JsonObject
+            {
+                ["names"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" }, ["description"] = "Tool names or function names." },
+            },
+            ["required"] = new JsonArray("names"),
+        },
+        Summary = a => a["names"] is JsonArray n ? string.Join(", ", n.Select(x => x?.ToString())) : "",
+        Run = (a, c, ct) => Task.FromResult(Loader?.Invoke(a) ?? new ToolResult("There is nothing to load here.", true)),
+    };
+
+    private ToolDef? _loadTool;
+
+    /// <summary>What a load_tools call does (the session's tools and their titles are the runtime's).</summary>
+    public Func<JsonObject, ToolResult>? Loader { get; set; }
 }
