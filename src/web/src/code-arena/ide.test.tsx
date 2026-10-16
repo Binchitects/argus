@@ -1018,6 +1018,45 @@ describe('Code Arena, the IDE', () => {
     expect(within(about).getByRole('link', { name: 'Source' })).toHaveAttribute('href', 'https://github.com/Binchitects/argus')
   })
 
+  it('compacts only when a request would not fit, or as the Arena account says, and the gauge says whose choice it is', async () => {
+    let now: CodeState = { ...state, compactAt: 60, compactAtSource: 'account', compactAtAccount: 60 }
+    const { calls } = backend({
+      'GET /api/state': () => ({ json: now }),
+      'POST /api/settings': (body) => {
+        const b = body as { compactAt?: number | null; compactTarget?: number }
+        now = b.compactAt === null ? { ...now, compactAt: 60, compactAtSource: 'account', compactTarget: b.compactTarget ?? now.compactTarget } : { ...now, ...(b as object), compactAtSource: 'config' }
+        return { json: now }
+      },
+    })
+    renderIde()
+    const status = await screen.findByRole('contentinfo', { name: 'Status bar' })
+    await userEvent.click(within(status).getByRole('button', { name: 'Context: 4.2 K of 32.77 K tokens (13%), compacts at 60%' }))
+    let dialog = await screen.findByRole('dialog', { name: 'Context' })
+    expect(within(dialog).getByText(/Now: at 60% \(from your Arena account\)/)).toBeInTheDocument()
+    expect(within(dialog).getByRole('radio', { name: 'As my Arena account says (60%)' })).toBeChecked()
+    expect(within(dialog).queryByLabelText('Compact at (% of the window)')).not.toBeInTheDocument()
+
+    // Only when needed: what is kept may then be up to 85%.
+    await userEvent.click(within(dialog).getByRole('radio', { name: 'Only when a request would not fit' }))
+    const keep = within(dialog).getByLabelText('Keep the recent part within (%)')
+    await userEvent.clear(keep)
+    await userEvent.type(keep, '50')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/settings')?.body).toEqual({ compactAt: 0, compactTarget: 50 }))
+    expect(await within(status).findByRole('button', { name: /compacts only when a request would not fit$/ })).toBeInTheDocument()
+
+    // Back to the account's: compactAt null.
+    await userEvent.click(within(status).getByRole('button', { name: /^Context:/ }))
+    dialog = await screen.findByRole('dialog', { name: 'Context' })
+    expect(within(dialog).getByRole('radio', { name: 'Only when a request would not fit' })).toBeChecked()
+    await userEvent.click(within(dialog).getByRole('radio', { name: 'As my Arena account says (60%)' }))
+    await userEvent.clear(within(dialog).getByLabelText('Keep the recent part within (%)'))
+    await userEvent.type(within(dialog).getByLabelText('Keep the recent part within (%)'), '25')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/settings').at(-1)?.body).toEqual({ compactAt: null, compactTarget: 25 }))
+    expect(await within(status).findByRole('button', { name: /compacts at 60%$/ })).toBeInTheDocument()
+  })
+
   it("shows the window's use and sets when the session compacts, and the MCP servers with Try again, in the status bar", async () => {
     const servers: CodeState['servers'] = [
       { name: 'arena', title: 'Arena', url: 'https://llm.test/mcp', state: 'connected', tools: 14, status: 'Arena: 14 tools', error: null, nextTry: null },

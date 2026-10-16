@@ -111,6 +111,26 @@ public sealed class HangCompactionTests(ITestOutputHelper log) : IDisposable
     }
 
     [Fact]
+    public async Task A_full_shared_cache_asks_again_in_a_moment_without_compacting()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        var refused = 0;
+        // llama.cpp's error when the cache its requests share is full: other requests filled it, not this one.
+        _gateway.Failure = _ => Interlocked.Increment(ref refused) == 1 ? 500 : 0;
+        _gateway.FailureBody = _ => new JsonObject { ["error"] = new JsonObject { ["code"] = 500, ["message"] = "Context size has been exceeded.", ["type"] = "server_error" } };
+        _gateway.Answer = _ => Reply.Say("ok");
+        Agent.SharedCacheWait = TimeSpan.FromMilliseconds(50);
+        await using var rt = await StartAsync(h);
+        rt.Agent.Load(History(4));
+
+        Assert.Equal("ok", await Within(rt.Agent.RunAsync("next", new Spend(), CancellationToken.None)));
+
+        Assert.Equal(2, _gateway.Requests.Count);
+        Assert.DoesNotContain(_gateway.Requests, FakeGateway.Summarizing);
+        Assert.Equal("question 0 " + new string('q', 1500), rt.Agent.Messages[0]["content"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task A_request_that_still_does_not_fit_fails_once_and_the_question_does_not_pile_up()
     {
         using var h = new Harness(_gateway, _mcp);

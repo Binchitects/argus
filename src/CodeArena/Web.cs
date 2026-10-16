@@ -471,6 +471,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["contextUsed"] = Current() is null ? _lastUsed = _rt.Agent.Estimate() : _lastUsed,
             ["compactAt"] = _rt.Compaction.At,
             ["compactTarget"] = _rt.Compaction.Target,
+            // Where the threshold comes from (flag, config, account, arena, default), and the Arena account's (null: not said).
+            ["compactAtSource"] = _rt.CompactAtSource,
+            ["compactAtAccount"] = _rt.AccountCompactAt?.At,
             ["servers"] = new JsonArray([.. _rt.Links.Select(l => (JsonNode)new JsonObject
             {
                 ["name"] = l.Name,
@@ -1136,9 +1139,10 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             await res.ErrorAsync(400, "invalid", $"Thinking is one of: default, {string.Join(", ", ModelState.Levels)}.", ct);
             return;
         }
-        // When the session compacts itself: kept in config.json, as /compact-at keeps it.
+        // When the session compacts itself: kept in config.json, as /compact-at keeps it. compactAt 0 compacts only when a
+        // request would not fit; null follows the Arena account's again.
         if ((body.ContainsKey("compactAt") || body.ContainsKey("compactTarget"))
-            && _rt.SetCompaction(body.Int("compactAt"), body.Int("compactTarget")) is { } wrong)
+            && _rt.SetCompaction(body.Int("compactAt"), body.Int("compactTarget"), follow: body.ContainsKey("compactAt") && body["compactAt"] is null) is { } wrong)
         {
             await res.ErrorAsync(400, "invalid", wrong, ct);
             return;

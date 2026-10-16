@@ -657,6 +657,11 @@ public sealed class FakeChats
     public Dictionary<string, (byte[] Data, string ContentType)> Files { get; } = [];
     /// <summary>The chats the person continued from Code Arena (/continued), in order.</summary>
     public List<string> Continued { get; } = [];
+    /// <summary>When the person's chats compact, as /api/code-arena/preferences says: their own choice (null: none), and Arena's default.</summary>
+    public int? CompactAt { get; set; }
+    public int CompactAtDefault { get; set; } = 80;
+    /// <summary>Whether Arena answers /api/code-arena/preferences (an older one does not).</summary>
+    public bool Preferences { get; set; } = true;
 
     /// <summary>The branch as one word, as Arena gives it: its last message.</summary>
     private static string Stamp(Chat c) => c.Leaf ?? "empty";
@@ -827,6 +832,16 @@ public sealed class FakeChats
             {
                 ctx.Response.ContentType = found.ContentType;
                 await ctx.Response.OutputStream.WriteAsync(found.Data);
+            }
+            return;
+        }
+        if (parts is ["preferences"] && method == "GET")
+        {
+            ctx.Response.StatusCode = Preferences ? 200 : 404;
+            if (Preferences)
+            {
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(new JsonObject { ["compactAt"] = CompactAt, ["compactAtDefault"] = CompactAtDefault }.ToJsonString()));
             }
             return;
         }

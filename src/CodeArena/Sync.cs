@@ -888,6 +888,36 @@ internal sealed class ChatSync : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// When the person's chats compact, as their Arena account says (Your account → Answers): their own choice (Own), else
+    /// Arena's default; 0 compacts only when a request would not fit. Null when Arena does not say (an older one) or cannot
+    /// be reached within <paramref name="limit"/>.
+    /// </summary>
+    public static async Task<(int At, bool Own)?> CompactAtAsync(Config config, HttpClient http, TimeSpan limit, CancellationToken ct)
+    {
+        if (config.Url is not { Length: > 0 } url || config.ApiKey is not { Length: > 0 } key)
+        {
+            return null;
+        }
+        try
+        {
+            using var req = Request(HttpMethod.Get, url.TrimEnd('/') + "/api/code-arena/preferences", key, null);
+            using var within = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            within.CancelAfter(limit);
+            using var res = await http.SendAsync(req, within.Token);
+            if (!res.IsSuccessStatusCode || Json.ParseObject(await res.Content.ReadAsStringAsync(within.Token)) is not { } prefs)
+            {
+                return null;
+            }
+            var own = prefs.Int("compactAt");
+            return (own ?? prefs.Int("compactAtDefault")) is { } at ? (at, own is not null) : null;
+        }
+        catch (Exception e) when (e is HttpRequestException or OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
     /// <summary>How many chats in Arena are listed at most (/web all, the IDE): the newest.</summary>
     public const int MostListed = 5000;
 

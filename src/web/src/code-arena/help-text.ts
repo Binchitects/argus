@@ -135,7 +135,11 @@ export const tasks: HelpTask[] = [
   { title: 'Go back to an earlier session', steps: ['Press **Chat** in the activity bar.', 'Click the session; **New session** starts another.'] },
   {
     title: 'Change when the conversation is compacted',
-    steps: ['Click how full the window is, in the status bar (tokens used / the model\'s; the gauge on a phone).', 'Set **Compact at** and what the recent part keeps, in percent of the window.', 'Press **Save**: the next sessions use it too.'],
+    steps: [
+      'Click how full the window is, in the status bar (tokens used / the model\'s; the gauge on a phone).',
+      'Choose **At a share of the window** (and set **Compact at**), **Only when a request would not fit**, or **As my Arena account says** (Your account → Answers in Arena), and what the recent part keeps, in percent of the window. It always compacts before a request would not fit.',
+      'Press **Save**: the next sessions use it too.',
+    ],
   },
   {
     title: 'Stop a long command the agent runs',

@@ -20,9 +20,13 @@ export interface CodeState {
   context: number
   /** About how many of them the conversation fills now (the prompt, the tools and the history). */
   contextUsed: number
-  /** When the session compacts itself, in percent of the window, and what the recent part may keep whole. */
+  /** When the session compacts itself, in percent of the window (0: only when a request would not fit), and what the recent part may keep whole. */
   compactAt: number
   compactTarget: number
+  /** Where the threshold comes from: --compact-at, config.json, the person's Arena account, Arena's default, or the built-in default. */
+  compactAtSource?: 'flag' | 'config' | 'account' | 'arena' | 'default'
+  /** The threshold the Arena account gives (the person's own, else Arena's default); null when Arena did not say. */
+  compactAtAccount?: number | null
   /** Arena's, Argus's and the person's MCP servers, each connected in the background. */
   servers: ServerStatus[]
   /** The commands run with no time limit in this session, running or ended. */
@@ -192,7 +196,24 @@ export const historyQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => api<{ text: string }[]>('/api/history', { signal }),
 }
 
-export const changeSettings = (body: { mode?: Mode; model?: string; thinking?: string | null; compactAt?: number; compactTarget?: number }) => api<CodeState>('/api/settings', { body })
+/** compactAt: 0 compacts only when a request would not fit; null follows the Arena account's again. */
+export const changeSettings = (body: { mode?: Mode; model?: string; thinking?: string | null; compactAt?: number | null; compactTarget?: number }) => api<CodeState>('/api/settings', { body })
+
+/** Where the session's threshold comes from, as the gauge and the Context dialog say it. */
+export function compactWho(state: Pick<CodeState, 'compactAtSource'>): string {
+  switch (state.compactAtSource) {
+    case 'flag':
+      return 'set with --compact-at'
+    case 'config':
+      return 'set in config.json'
+    case 'account':
+      return 'from your Arena account'
+    case 'arena':
+      return "Arena's default"
+    default:
+      return 'the default'
+  }
+}
 /** Tries a server again now (or every one not connected); the state as it is then. */
 export const retryServers = (name?: string) => api<CodeState>('/api/servers/retry', { body: name ? { name } : {} })
 /** Stops a command run with no time limit: the agent is told it ended. */

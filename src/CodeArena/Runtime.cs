@@ -104,6 +104,25 @@ internal sealed partial class Runtime : IAsyncDisposable
     }
     /// <summary>When the session compacts itself.</summary>
     public Compaction Compaction { get; } = new();
+
+    /// <summary>Where the threshold comes from: "flag" (--compact-at), "config" (config.json), "account" (the person's choice in Arena), "arena" (Arena's default), "default".</summary>
+    public string CompactAtSource { get; private set; } = "default";
+
+    /// <summary>The threshold the Arena account gives (the person's own, else Arena's default), when Arena said at the start.</summary>
+    public (int At, bool Own)? AccountCompactAt { get; private set; }
+
+    /// <summary>Where the threshold comes from, as /compact-at and /context say it; null for the built-in default.</summary>
+    public string? CompactAtFrom => CompactAtSource switch
+    {
+        "flag" => "set with --compact-at",
+        "config" => "set in config.json",
+        "account" => "from your Arena account",
+        "arena" => "Arena's default",
+        _ => null,
+    };
+
+    /// <summary>How long the start waits for Arena to say when the person's chats compact.</summary>
+    private static readonly TimeSpan AccountWait = TimeSpan.FromSeconds(5);
     /// <summary>The session's MCP servers: Arena's, Argus's and the person's own, each connected in the background.</summary>
     public IReadOnlyList<ServerLink> Links => _links;
     /// <summary>Whether Arena's MCP endpoint answered.</summary>
@@ -174,7 +193,22 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             throw new StartException($"There is no mode {m}. The modes: {string.Join(", ", Modes.Names)}.");
         }
-        if (Compaction.Set(o.CompactAt ?? Config.CompactAt, o.CompactTarget ?? Config.CompactTarget) is { } wrong)
+        // When it compacts: the flag, else config.json, else what the Arena account says (the web chat's own choice), else 80%.
+        // Asked at every start (/compact-at account and the IDE say it); waited for only when it decides.
+        var asking = ChatSync.CompactAtAsync(Config, Http, AccountWait, ct);
+        if (o.CompactAt is null && Config.CompactAt is null)
+        {
+            AccountCompactAt = await asking;
+        }
+        else
+        {
+            _ = asking.ContinueWith(t => AccountCompactAt = t.IsCompletedSuccessfully ? t.Result : null, TaskScheduler.Default);
+        }
+        (var at, CompactAtSource) = o.CompactAt is { } flag ? (flag, "flag")
+            : Config.CompactAt is { } kept ? (kept, "config")
+            : AccountCompactAt is { } account ? (account.At, account.Own ? "account" : "arena")
+            : (Compaction.DefaultAt, "default");
+        if (Compaction.Set(at, o.CompactTarget ?? Config.CompactTarget) is { } wrong)
         {
             throw new StartException($"Compaction: {wrong} (--compact-at, --compact-to, or compactAt and compactTarget in {Env.Paths.ConfigFile})");
         }
@@ -941,20 +975,34 @@ internal sealed partial class Runtime : IAsyncDisposable
     }
 
     /// <summary>
-    /// Sets when the session compacts (percent of the window; null keeps the current) and keeps it in
-    /// config.json for the next sessions; null when done, else why not.
+    /// Sets when the session compacts (percent of the window, <see cref="Compaction.Off"/> for only when a request would not
+    /// fit; null keeps the current) and keeps it in config.json for the next sessions; <paramref name="follow"/>: the
+    /// threshold is the Arena account's again (else 80%), and out of config.json. Null when done, else why not.
     /// </summary>
-    public string? SetCompaction(int? at, int? target)
+    public string? SetCompaction(int? at, int? target, bool follow = false)
     {
+        if (follow)
+        {
+            at = AccountCompactAt?.At ?? Compaction.DefaultAt;
+        }
         if (Compaction.Set(at, target) is { } wrong)
         {
             return wrong;
         }
+        if (follow)
+        {
+            CompactAtSource = AccountCompactAt is { } account ? (account.Own ? "account" : "arena") : "default";
+        }
+        else if (at is not null)
+        {
+            CompactAtSource = "config";
+        }
         try
         {
-            // The file as it is (not with this run's environment overrides), with the two values changed.
+            // The file as it is (not with this run's environment overrides), with the two values changed: a threshold
+            // chosen is kept as chosen (the account's may differ), one that follows the account is left out.
             var file = Config.Load(Env.Paths.ConfigFile);
-            file.CompactAt = Compaction.At == Compaction.DefaultAt ? null : Compaction.At;
+            file.CompactAt = follow ? null : at is null ? file.CompactAt : Compaction.At;
             file.CompactTarget = Compaction.Target == Compaction.DefaultTarget ? null : Compaction.Target;
             file.Save(Env.Paths.ConfigFile);
             Config.CompactAt = file.CompactAt;
