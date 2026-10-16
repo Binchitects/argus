@@ -146,7 +146,8 @@ internal static class SessionSearch
             {
                 continue;
             }
-            var data = SessionStore.Load(file.FullName);
+            // Its folder from the scan kept of it: the file is read whole only when it is of this folder.
+            var data = SessionStore.Scan(file.FullName);
             if (cwd is not null && !string.Equals(data.Cwd, cwd, StringComparison.Ordinal))
             {
                 continue;

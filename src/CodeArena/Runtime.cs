@@ -257,7 +257,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             }
             else
             {
-                resumed = SessionStore.Load(resumedFile);
+                resumed = SessionStore.Load(resumedFile, whole: true);
             }
         }
 
@@ -506,7 +506,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             var s = waiting[i];
             progress?.Invoke($"{i + 1}/{waiting.Count} {s.Preview}");
             var written = File.GetLastWriteTimeUtc(s.File);
-            var data = SessionStore.Load(s.File);
+            var data = SessionStore.Load(s.File, whole: true);
             var sync = ChatSync.Start(Config, Http, SessionStore.Open(s.File), data.Cwd ?? Workspace.Root, () => data.Model ?? Model.Name, (_, _) => { }, data,
                 new DateTimeOffset(written, TimeSpan.Zero));
             if (sync is null)
@@ -844,7 +844,7 @@ internal sealed partial class Runtime : IAsyncDisposable
     /// <summary>Switches to a saved session (/resume).</summary>
     public void Resume(string file)
     {
-        var data = SessionStore.Load(file);
+        var data = SessionStore.Load(file, whole: true);
         _memory = Memory.ForPrompt();
         Session = SessionStore.Open(file);
         Agent.Session = Session;
