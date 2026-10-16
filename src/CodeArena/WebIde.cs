@@ -47,6 +47,7 @@ internal sealed partial class WebApp
         _runs = new RunConfigs(_rt.Workspace, _terminals, _tasks, _state, _rt.Env.Env);
         _extensions = new EditorExtensions(_rt.Env.Paths.DataDir, _rt.Env.Env);
         StartDebug();
+        StartLsp();
     }
 
     /// <summary>One of the IDE's calls; false when the path is none of them.</summary>
@@ -254,6 +255,11 @@ internal sealed partial class WebApp
                     return true;
                 case ("POST", "/api/workspace/trust"):
                     await res.JsonAsync(200, _state.SetTrust(Body(req).Bool("trusted")), ct);
+                    if (!_state.Trusted)
+                    {
+                        // Its language servers run its code: they stop with the trust.
+                        _ = _lsp.StopAllAsync("The folder is no longer trusted.");
+                    }
                     return true;
                 case ("GET", "/api/tasks"):
                     await res.JsonAsync(200, await Task.Run(_tasks.List, ct), ct);
@@ -351,6 +357,15 @@ internal sealed partial class WebApp
                     return true;
                 case ("GET", "/api/extensions/recommended"):
                     await res.JsonAsync(200, await Task.Run(() => _extensions.Recommended(_files), ct), ct);
+                    return true;
+                case ("GET", "/api/lsp"):
+                    await res.JsonAsync(200, await _lsp.ListAsync(ct), ct);
+                    return true;
+                case ("GET", "/api/lsp/socket"):
+                    await LspSocketAsync(req, res, ct);
+                    return true;
+                case ("GET", "/api/lsp/log"):
+                    await res.JsonAsync(200, _lsp.Log(Query(req, "server")), ct);
                     return true;
             }
         }
