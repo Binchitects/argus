@@ -175,11 +175,29 @@ public sealed class RunConfigTests : IDisposable
     }
 
     [Fact]
+    public void An_attach_configurations_process_is_asked_as_vs_codes_pickProcess_is()
+    {
+        LaunchJson("""
+            { "name": "Attach", "type": "cppdbg", "request": "attach", "program": "${workspaceFolder}/app", "processId": "${command:pickProcess}" },
+            """);
+        _state.SetTrust(true);
+        var asked = Refused(() => _runs.Resolve("Attach", new RunContext(), new Dictionary<string, string>()));
+        Assert.Equal((409, "needs_input"), (asked.Status, asked.Code));
+        var input = Assert.Single(asked.Details!["inputs"]!.AsArray())!;
+        Assert.Equal(("command:pickProcess", "pickProcess"), (input["id"]!.GetValue<string>(), input["type"]!.GetValue<string>()));
+        var resolved = _runs.Resolve("Attach", new RunContext(), new Dictionary<string, string> { ["command:pickProcess"] = "4242" });
+        Assert.Equal("4242", resolved["processId"]!.GetValue<string>());
+        Assert.Equal((400, "bad_config"), Status(Refused(() => _runs.Resolve("Attach", new RunContext(), new Dictionary<string, string> { ["command:pickProcess"] = "1; rm -rf /" }))));
+    }
+
+    private static (int, string) Status(IdeError e) => (e.Status, e.Code);
+
+    [Fact]
     public void A_variable_not_known_a_command_a_missing_input_or_file_and_a_file_outside_are_refused_naming_them()
     {
         LaunchJson("""
             { "name": "Unknown", "type": "cppdbg", "request": "launch", "program": "${nope}" },
-            { "name": "Command", "type": "cppdbg", "request": "launch", "program": "${command:pickProcess}" },
+            { "name": "Command", "type": "cppdbg", "request": "launch", "program": "${command:cpptools.activeConfigName}" },
             { "name": "Input", "type": "cppdbg", "request": "launch", "program": "${input:missing}" },
             { "name": "File", "type": "cppdbg", "request": "launch", "program": "${file}" },
             { "name": "Setting", "type": "cppdbg", "request": "launch", "program": "${config:not.set}" },
@@ -189,7 +207,7 @@ public sealed class RunConfigTests : IDisposable
         foreach (var (name, said) in new[]
         {
             ("Unknown", "${nope} is not a variable"),
-            ("Command", "${command:pickProcess} runs a command of VS Code's"),
+            ("Command", "${command:cpptools.activeConfigName} runs a command of VS Code's"),
             ("Input", ".vscode/launch.json has no input missing"),
             ("File", "${file} needs a file open in the editor"),
             ("Setting", "the setting not.set is not set"),

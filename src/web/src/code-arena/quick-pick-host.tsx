@@ -52,7 +52,7 @@ function Picker({ open: o }: { open: Open }) {
                   {i.icon}
                   <span className="truncate">{i.label}</span>
                   {i.description && <span className="min-w-0 truncate text-xs text-muted-foreground">{i.description}</span>}
-                  {i.detail && <span className="ml-auto shrink-0 text-xs text-muted-foreground">{i.detail}</span>}
+                  {i.detail && <span className="ml-auto max-w-[50%] min-w-0 shrink truncate text-xs text-muted-foreground">{i.detail}</span>}
                 </CommandItem>
               ))}
           </CommandGroup>

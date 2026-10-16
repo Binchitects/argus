@@ -113,6 +113,8 @@ internal sealed partial class RunVariables
             "env" => string.Equals(arg, "ARENA_API_KEY", StringComparison.OrdinalIgnoreCase) ? "" : _lenient ? null : _env(arg) ?? "",
             "config" => Setting(name, arg, file),
             "input" => Input(name, arg, inputs, file),
+            // An attach configuration's process, as VS Code's pickProcess: asked of the person, from their own processes.
+            "command" when arg is "pickProcess" or "PickProcess" => PickProcess(),
             "command" => Refuse(file, $"${{{name}}} runs a command of VS Code's: not run here."),
             _ => Refuse(file, $"${{{name}}} is not a variable Code Arena knows."),
         };
@@ -187,6 +189,21 @@ internal sealed partial class RunVariables
             });
         }
         // Asked first: a run with it missing does not start.
+        return _lenient ? null : "";
+    }
+
+    /// <summary>${command:pickProcess}: the process the person picks (its id), asked first as an input of its own.</summary>
+    private string? PickProcess()
+    {
+        const string id = "command:pickProcess";
+        if (_answers.TryGetValue(id, out var pid))
+        {
+            return int.TryParse(pid, NumberStyles.None, CultureInfo.InvariantCulture, out _) ? pid : Refuse(null, "The process to attach to is a process id.");
+        }
+        if (!Missing.Any(m => m.Str("id") == id))
+        {
+            Missing.Add(new JsonObject { ["id"] = id, ["type"] = "pickProcess", ["description"] = "The process to attach to" });
+        }
         return _lenient ? null : "";
     }
 

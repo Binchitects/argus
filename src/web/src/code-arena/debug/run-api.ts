@@ -124,3 +124,6 @@ export const debugSource = (id: string, path: string) => api<{ path: string; tex
 
 /** A debug session's WebSocket, on this page's server (the page's own cookie lets it in, as the terminals'). */
 export const debugSocketUrl = (id: string, where: Location = window.location) => `${where.protocol === 'https:' ? 'wss' : 'ws'}://${where.host}/api/debug/socket?id=${encodeURIComponent(id)}`
+
+/** The person's own processes, for an attach configuration's ${command:pickProcess}. */
+export const listProcesses = () => api<{ pid: number; name: string; command: string | null }[]>('/api/processes')

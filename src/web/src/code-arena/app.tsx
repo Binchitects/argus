@@ -665,6 +665,8 @@ function Workbench({
       'Python: Current File': { name: 'Python: Current File', type: 'debugpy', request: 'launch', program: '${file}', console: 'integratedTerminal' },
       'Go: Launch Package': { name: 'Launch Package', type: 'go', request: 'launch', mode: 'auto', program: '${workspaceFolder}' },
       'C/C++: gdb Launch': { name: '(gdb) Launch', type: 'cppdbg', request: 'launch', program: '${workspaceFolder}/a.out', args: [], cwd: '${workspaceFolder}', MIMode: 'gdb' },
+      'C/C++: gdb Attach': { name: '(gdb) Attach', type: 'cppdbg', request: 'attach', program: '${workspaceFolder}/a.out', processId: '${command:pickProcess}', MIMode: 'gdb' },
+      '.NET: Attach': { name: '.NET: Attach', type: 'coreclr', request: 'attach', processId: '${command:pickProcess}' },
     }
     const picked = await quickPick({
       title: 'Add configuration',

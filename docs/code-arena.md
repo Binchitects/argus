@@ -528,8 +528,12 @@ work as in VS Code: `${workspaceFolder}`, `${file}`, `${relativeFile}`,
 `${fileDirname}`, `${lineNumber}`, `${selectedText}`, `${env:NAME}` (never
 `ARENA_API_KEY`), `${config:key}`, `${input:id}` (promptString and pickString
 are asked first), `${codeArena.buildConfiguration}` and the others; another
-variable, or `${command:…}`, is refused naming it (write a shell's own
-variables as `$NAME`). Compounds are listed, and do not start yet.
+variable, or another `${command:…}`, is refused naming it (write a shell's
+own variables as `$NAME`). An attach configuration's `${command:pickProcess}`
+asks which of the person's own processes to attach to (by its name, id or
+command line; on Linux, `ptrace_scope` may need the debugger to be the
+process's parent or root: `sudo sysctl kernel.yama.ptrace_scope=0` allows it
+until the next boot). Compounds are listed, and do not start yet.
 
 **Tasks.** `.vscode/tasks.json` (version 2.0.0) as VS Code reads it: `shell`
 and `process` tasks (and `npm` and `typescript` ones) with `options`, `group`
@@ -828,6 +832,7 @@ status (403 `outside` for a path outside the folder).
 | `GET /api/user-files?name=settings.json` (or `keybindings.json`) | the person's own file in the config folder: `{name, text, version, exists}` (`text` empty, `version` `none` before the first save); 400 for any other name |
 | `POST /api/user-files` `{name, text, version}` | saves it as sent (comments kept; readable by the person alone); 409 `changed` when it changed since `version`, 413 `too_large` past 1 MB |
 | `GET /api/user-files/vscode?name=…` | VS Code's own copy on this computer (Code, then Insiders, then VSCodium): `{name, text, from}`; 404 when there is none |
+| `GET /api/processes` | the person's own processes, newest first, Code Arena itself left out: `[{pid, name, command}]` (`command` null where the system does not say; 2,000 at most), for `${command:pickProcess}` |
 | `GET /api/workspace/state` | what this computer keeps for this folder (in the data folder, never in the project): `trust` (`trusted`, `restricted`, missing: not asked), `buildConfiguration`, and the page's own keys (breakpoints, watch, the run configuration chosen) |
 | `POST /api/workspace/state` `{key: value}` | merges these keys (`null` forgets one); 400 for `trust`, or a `buildConfiguration` other than `Debug` or `Release`; 413 past 1 MB |
 | `POST /api/workspace/trust` `{trusted}` | trusts the folder (`true`), keeps it restricted (`false`) or forgets the choice (missing); the state |

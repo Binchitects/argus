@@ -1441,7 +1441,8 @@ describe('Code Arena, the IDE', () => {
     )
     // One of them run from the palette: the lines go with the next message.
     await userEvent.click(within(palette).getByRole('option', { name: /Code Arena: Add to chat/ }))
-    expect(await within(await screen.findByRole('list', { name: 'Sent with the message' }, { timeout: 3000 })).findByText('src/app.ts:1')).toBeInTheDocument()
+    // The chat redraws as the line comes: read again until it is there.
+    await waitFor(() => expect(within(screen.getByRole('list', { name: 'Sent with the message' })).getByText('src/app.ts:1')).toBeInTheDocument(), { timeout: 3000 })
     await userEvent.keyboard('{Control>}{Shift>}p{/Shift}{/Control}')
     await userEvent.type(within(await screen.findByRole('dialog', { name: 'Commands' })).getByPlaceholderText('Run a command: type a few words of it'), 'x')
     const command2 = within(screen.getByRole('dialog', { name: 'Commands' })).getByPlaceholderText('Run a command: type a few words of it')
@@ -1883,6 +1884,25 @@ describe('Code Arena, the IDE', () => {
     expect(ask).not.toHaveTextContent('s3cret')
     await userEvent.keyboard('{Enter}')
     await waitFor(() => expect(calls.filter((c) => c.path === '/api/run/start').at(-1)?.body).toMatchObject({ name: 'Deploy', inputs: { token: 's3cret' } }))
+  })
+
+  it("attaches to a process the person picks from their own, as VS Code's pickProcess", async () => {
+    const { calls } = backend({
+      'GET /api/run/configs': () => ({ json: { configurations: [{ name: 'Attach', type: 'cppdbg', request: 'attach', source: 'launch', supported: false, reason: 'attaching needs the debugger.' }], compounds: [], errors: [], trusted: true, buildConfiguration: 'Debug' } }),
+      'GET /api/debug/adapters': () => ({ json: [{ id: 'gdb', name: 'gdb', types: ['cppdbg'], found: true }] }),
+      'GET /api/processes': () => ({ json: [{ pid: 4242, name: 'server', command: '/home/ada/shop/server --port 8080' }, { pid: 77, name: 'bash', command: 'bash' }] }),
+      'POST /api/run/start': (body) =>
+        (body as { inputs?: Record<string, string> }).inputs?.['command:pickProcess']
+          ? { status: 409, json: { status: 'no_adapter', error: 'stop here', adapter: 'gdb' } }
+          : { status: 409, json: { status: 'needs_input', error: 'Pick the process.', inputs: [{ id: 'command:pickProcess', type: 'pickProcess', description: 'The process to attach to' }] } },
+    })
+    renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    await userEvent.keyboard('{F5}')
+    const pick = await screen.findByRole('dialog', { name: 'Attach to a process' })
+    await userEvent.type(within(pick).getByRole('combobox'), 'port')
+    await userEvent.click(within(pick).getByRole('option', { name: /server/ }))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/run/start').at(-1)?.body).toMatchObject({ name: 'Attach', noDebug: false, inputs: { 'command:pickProcess': '4242' } }))
   })
 
   it("takes VS Code's keys, chords too, and the person's keybindings.json over them", async () => {

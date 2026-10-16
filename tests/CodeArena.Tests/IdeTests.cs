@@ -213,6 +213,7 @@ public sealed class IdeTests : IDisposable
             ("POST", "/api/user-files", new() { ["name"] = "settings.json", ["text"] = "{}" }),
             ("GET", "/api/user-files/vscode?name=settings.json", null),
             ("GET", "/api/workspace/state", null),
+            ("GET", "/api/processes", null),
             ("POST", "/api/workspace/state", new() { ["watch"] = new JsonArray("x") }),
             ("POST", "/api/workspace/trust", new() { ["trusted"] = true }),
             ("POST", "/api/replace", new() { ["q"] = "in", ["replacement"] = "out" }),
@@ -619,6 +620,24 @@ public sealed class IdeTests : IDisposable
         var outside = await web.PostAsync("/api/terminals", new JsonObject { ["program"] = "/bin/sh", ["cwd"] = h.Root });
         Assert.Equal(HttpStatusCode.Forbidden, outside.StatusCode);
         await web.PostAsync("/api/terminals/close", new JsonObject { ["id"] = opened["id"]!.GetValue<string>() });
+    }
+
+    [Fact]
+    public async Task The_persons_own_processes_are_listed_to_attach_to_and_code_arena_is_not_one()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        await using var web = await WebRun.StartAsync(h);
+        using var sleeper = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("sleep", "30") { UseShellExecute = false })!;
+        try
+        {
+            var list = (await web.GetJsonAsync("/api/processes")).AsArray();
+            Assert.Contains(list, p => p!["pid"]!.GetValue<int>() == sleeper.Id && p["name"]!.GetValue<string>() == "sleep");
+            Assert.DoesNotContain(list, p => p!["pid"]!.GetValue<int>() == Environment.ProcessId);
+        }
+        finally
+        {
+            sleeper.Kill();
+        }
     }
 
     [Fact]
