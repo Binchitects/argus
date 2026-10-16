@@ -23,7 +23,7 @@ import { batched } from '@/pages/chat/batch'
 import { keepSame, stopped, withQuestion, type Notice } from '@/pages/chat/live'
 import { useRecall, type Older, type RecallSource } from '@/pages/chat/recall'
 import { toTurns } from '@/pages/chat/tree'
-import { CompactedMark, QuestionTurn } from '@/pages/chat/turns'
+import { CompactedMark, QuestionTurn, type AgainChange } from '@/pages/chat/turns'
 import { useQuotableSelection } from '@/pages/chat/quotable'
 import { findQuoted, type Quote } from '@/pages/chat/quote'
 import { QuoteChip } from '@/pages/chat/quote-parts'
@@ -59,6 +59,7 @@ import {
   type SessionSummary,
   type WebChatSummary,
   webChatsQuery,
+  type AgainBody,
 } from './api'
 import { chatBridge, pieceLabel, type Piece } from './bridge'
 import { useEditor } from './editor-state'
@@ -343,10 +344,12 @@ const noNotices: Notice[] = []
 const noneWaiting: string[] = []
 const ignore = () => undefined
 
-/** A question in the thread: drawn again only when its message changes. `onJump` goes to the answer it quotes. */
-const Question = memo(function Question({ m, onJump }: { m: Message; onJump: (m: Message) => boolean }) {
-  // No editing here: nothing for "busy" to hold back.
-  return <QuestionTurn m={m} siblings={[m]} busy={false} onSwitch={ignore} onJumpToQuote={onJump} />
+/**
+ * A question in the thread: drawn again only when its message changes. `onJump` goes to the answer it quotes; `onEdit`
+ * asks it again with new words (not while an answer is written, nor before code-arena has it).
+ */
+const Question = memo(function Question({ m, onJump, onEdit, busy }: { m: Message; onJump: (m: Message) => boolean; onEdit: (m: Message, text: string, quote: string | null) => void; busy: boolean }) {
+  return <QuestionTurn m={m} siblings={[m]} busy={busy} onSwitch={ignore} onJumpToQuote={onJump} onEdit={m.id.startsWith('local-') ? undefined : onEdit} />
 })
 
 const suggestions = [
@@ -640,7 +643,7 @@ export function Thread({
    * Sends a message, with the lines chosen in the editor (those above the box, or `context` when given: a question from the
    * editor) and the quote above the box (`quoted`: a question about a selection instead).
    */
-  const send = async (text: string, context?: Piece[], quoted?: Quote, attachments: Attachment[] = []): Promise<boolean> => {
+  const send = async (text: string, context?: Piece[], quoted?: Quote, attachments: Attachment[] = [], accepted?: () => void): Promise<boolean> => {
     if (text === '/compact') return compact()
     if (text === '/clear' || text === '/new') {
       await newSession().catch((e) => toast.error(errorMessage(e)))
@@ -662,7 +665,8 @@ export function Thread({
         { text, ...(going.length > 0 && { context: going }), ...(withQuote && { quote: withQuote.text }), ...(attachments.length > 0 && { attachments }) },
         start,
         localId,
-        undefined,
+        // Taken: the files leave the box (they show with the question).
+        (e) => e.type === 'question' && accepted?.(),
         true,
       )
       if (!sent && !context) setPieces((now) => (now.length > 0 ? now : pieces))
@@ -679,6 +683,36 @@ export function Thread({
       throw e
     }
   }
+  /**
+   * A question asked again (Answer again under its answer, or edited): the thread goes back to before it, and the new
+   * answer streams; the chat in Arena keeps the earlier one, on a branch of its own.
+   */
+  const again = async (questionId: string, change: AgainChange & { text?: string; quote?: string | null; files?: boolean } = {}) => {
+    if (streaming) {
+      toast.error('Wait for the answer, or stop it, to ask again.')
+      return
+    }
+    const at = path.findIndex((m) => m.id === questionId)
+    const question = path[at]
+    if (!question) return
+    const before = path.slice(0, at)
+    const localId = newLocalId()
+    const quoted = change.quote !== undefined ? change.quote : question.quote
+    const start = { ...view, ...withQuestion({ ...view, messages: before }, localId, before.at(-1)?.id ?? null, change.text ?? question.content, question.attachments, quoted) }
+    try {
+      await run('/api/again', { question: questionId, ...change } satisfies AgainBody, start, localId)
+    } catch (e) {
+      toast.error(errorMessage(e))
+    }
+  }
+  const againNow = useRef(again)
+  useEffect(() => {
+    againNow.current = again
+  })
+  // The same functions at each drawing: the answers and questions are not drawn again for them.
+  const askAgain = useCallback((question: string, change?: AgainChange & { files?: boolean }) => void againNow.current(question, change), [])
+  const editQuestion = useCallback((m: Message, text: string, quote: string | null) => void againNow.current(m.id, { text, quote }), [])
+
   /** Ask about this: a question about the selection, sent at once with it (queued while an answer runs); the box is left as it is. */
   const askAbout = (q: Quote, text: string) => {
     quotable.clear(true)
@@ -737,7 +771,7 @@ export function Thread({
   const composer = (big: boolean) => (
     <Composer
       streaming={streaming}
-      onSend={(text, attachments) => send(text, undefined, undefined, attachments)}
+      onSend={(text, attachments, accepted) => send(text, undefined, undefined, attachments, accepted)}
       onQueue={async (text, attachments) => {
         const kept = pieces
         const keptQuote = quote
@@ -865,7 +899,7 @@ export function Thread({
                   if (t.question?.summary) return <CompactedMark key={t.question.id} summary={t.question.summary} onOpenFile={openNamed} />
                   return (
                     <div key={t.question?.id ?? t.answer[0]?.id ?? i} className="grid gap-4">
-                      {t.question && <Question m={t.question} onJump={jumpToQuoted} />}
+                      {t.question && <Question m={t.question} onJump={jumpToQuoted} onEdit={editQuestion} busy={streaming} />}
                       {(t.answer.length > 0 || isLive) && (
                         <CodeAnswer
                           answer={t.answer}
@@ -880,6 +914,8 @@ export function Thread({
                           diffs={view.diffs}
                           onDecide={decide}
                           onQuote={replyQuote}
+                          question={!isLive && t.question && !t.question.id.startsWith('local-') && !t.question.details?.note ? t.question.id : undefined}
+                          onAgain={askAgain}
                         />
                       )}
                     </div>
@@ -1033,7 +1069,8 @@ function Composer({
   model,
 }: {
   streaming: boolean
-  onSend: (text: string, attachments: Attachment[]) => Promise<boolean>
+  /** `accepted` is called once code-arena has taken the message (its files then leave the box). */
+  onSend: (text: string, attachments: Attachment[], accepted: () => void) => Promise<boolean>
   /** While an answer is written: the message waits and runs when it ends. */
   onQueue: (text: string, attachments: Attachment[]) => Promise<boolean>
   /** Lines of the folder's files that go with the next message (Add to chat in the editor). */
@@ -1091,7 +1128,7 @@ function Composer({
     const files = uploads.attachments
     setText('')
     recall.reset()
-    if (await (streaming ? onQueue(sent, files) : onSend(sent, files))) uploads.clear()
+    if (streaming ? await onQueue(sent, files) : await onSend(sent, files, uploads.clear)) uploads.clear()
     else setText((now) => now || typed)
     area.current?.focus()
   }

@@ -55,6 +55,9 @@ Sections used:
   tools on or off per session (the IDE's Tools menu, /tools on|off), and
   past 6,000 characters of definitions only those the model loads go whole
   (about 8,700 tokens fewer in every request with Arena's tools)
+- **Answer again and Edit in Code Arena's chat**, as in the web chat: the
+  same, shorter, longer, another model or thinking, or with the files as
+  they were before the turn; the earlier turns stay in Arena on a branch
 - **Files in Code Arena's chat**, as in the web chat: clip, paste or drop;
   Arena reads documents' text for the model, a model that sees gets the
   pictures, and the chat on the web shows them as the question's attachments

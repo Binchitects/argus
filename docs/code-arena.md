@@ -317,7 +317,16 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   60,000 characters a file), and a model that sees gets the pictures with it
   (named otherwise; a sound or a video is named only). The question shows them,
   and the chat in Arena keeps them as its attachments, so the web shows them
-  and its model reads them. Without Arena there is no clip. Then the thread, with a card for each tool call and
+  and its model reads them. Without Arena there is no clip. **Answer again**
+  under an answer asks its question again as the web chat does: as it was,
+  **Shorter** or **Longer** than that answer, with another model or other
+  thinking (for that answer only), or **the files as they were** when the turn
+  changed files (what its tools and the later turns' wrote is put back first,
+  as `/rewind` does, while this run keeps that turn's checkpoint). **Edit** on a
+  question asks it again with new words (its quote kept or taken away, its
+  files sent again). Either goes back to before the question: the session
+  goes on from there, and the chat in Arena keeps the earlier turns on a
+  branch of their own, where the web's version arrows show them. Then the thread, with a card for each tool call and
   a diff under each edit, the approval card (**Allow**, **Always for this
   session**, **Deny**), Stop, the mode, `/compact` and `/clear`. A command
   the agent runs with no time limit shows above the box while it runs: the

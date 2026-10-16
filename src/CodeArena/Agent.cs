@@ -313,8 +313,28 @@ internal sealed class Agent
         }
     }
 
+    /// <summary>
+    /// A question asked again (Answer again, an edited question): <paramref name="words"/> as the model reads them, composed
+    /// already (its quote, what went with it), and its pictures; <paramref name="subject"/> is what was typed, for the
+    /// checkpoint and the turn's commit.
+    /// </summary>
+    public async Task<string> AskAgainAsync(string words, JsonArray? pictures, string subject, Spend turn, CancellationToken ct)
+    {
+        try
+        {
+            return await RunTurnAsync(words, turn, ct, takeIn: false, null, null, pictures is null ? null : ("", pictures), composed: true, subject);
+        }
+        finally
+        {
+            AfterTurn?.Invoke();
+        }
+    }
+
+    /// <summary>A word for the model for this turn only (answer again shorter or longer), in Code Arena's note; null: none.</summary>
+    public string? TurnNote { get; set; }
+
     private async Task<string> RunTurnAsync(string? input, Spend turn, CancellationToken ct, bool takeIn, IReadOnlyList<Mentions.Piece>? pieces, string? quote,
-        (string Section, JsonArray Pictures)? uploaded)
+        (string Section, JsonArray Pictures)? uploaded, bool composed = false, string? subject = null)
     {
         if (input is not null)
         {
@@ -331,11 +351,11 @@ internal sealed class Agent
         {
             TakeIn(await news(ct));
         }
-        var asked = input ?? "Carry on after the commands that ended";
+        var asked = subject ?? input ?? "Carry on after the commands that ended";
         if (Depth == 0)
         {
             // @path: the file goes with the message.
-            if (input is not null)
+            if (input is not null && !composed)
             {
                 var (expanded, files) = Mentions.Expand(input, Context.Workspace, pieces);
                 if (files.Count > 0)
@@ -744,6 +764,10 @@ internal sealed class Agent
         if (Note?.Invoke() is not { Length: > 0 } note)
         {
             return;
+        }
+        if (TurnNote is { Length: > 0 } once)
+        {
+            note += "\n- For this answer: " + once;
         }
         _notes.RemoveAll(n => n.At > Messages.Count);
         if (_notes.Count > 0 && _notes[^1].Text == note)

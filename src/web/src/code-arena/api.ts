@@ -237,6 +237,16 @@ export const openWebChat = (id: string) => api<CodeSession>('/api/sessions/web',
 /** Sends Arena each session of this folder it never had: how many went, and what kept the others back. */
 export const sendAllSessions = () => api<{ sent: number; failed: string[] }>('/api/sessions/send-all', { body: {} })
 export const stopTurn = () => api('/api/stop', { body: {} })
+/** What a question is asked again with: its new words and quote (edited), shorter or longer, another model or thinking, the files put back first. */
+export interface AgainBody {
+  question: string
+  text?: string
+  quote?: string | null
+  length?: 'shorter' | 'longer'
+  model?: string
+  thinking?: string
+  files?: boolean
+}
 /** A message for after the answer being written (at once when none is), with the lines chosen in the editor and the part of an answer it quotes. */
 export const queueMessage = (text: string, context?: Piece[], quote?: string, attachments?: Attachment[]) =>
   api<{ queued: number }>('/api/queue', { body: { text, ...(context?.length && { context }), ...(quote && { quote }), ...(attachments?.length && { attachments }) } })

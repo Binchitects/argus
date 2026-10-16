@@ -390,6 +390,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                     await res.ErrorAsync(409, "idle", "Nothing is running.", ct);
                 }
                 return;
+            case ("POST", "/api/again"):
+                await AgainAsync(req, res, ct);
+                return;
             case ("POST", "/api/compact"):
                 await CompactAsync(res, ct);
                 return;
@@ -888,6 +891,125 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         await StreamAsync(job, res, ct);
     }
 
+    /// <summary>
+    /// A question of the session asked again, as the web chat's Answer again and Edit do: <paramref name="At"/> its place
+    /// (m3), <paramref name="Text"/> its new words (null: as it was) and <paramref name="Quote"/> the part of an answer it
+    /// quotes then (when <paramref name="Requoted"/>: null, none), <paramref name="Length"/> "shorter" or "longer" than
+    /// the answer it had, another model or thinking for this answer only, and <paramref name="Files"/>: the files its turn
+    /// and those after it wrote put back first (when this run kept its checkpoint).
+    /// </summary>
+    private sealed record Again(int At, string? Text, string? Length, ModelInfo? Model, string? Thinking, bool Files, bool Requoted = false, string? Quote = null);
+
+    /// <summary>POST /api/again: back to before a question, then it is asked again (edited, or as it was), answered as a stream.</summary>
+    private async Task AgainAsync(HttpRequest req, HttpResponse res, CancellationToken ct)
+    {
+        var body = req.Json();
+        if (body?.Str("question") is not { Length: > 1 } id || id[0] != 'm' || !int.TryParse(id[1..], out var at) || at < 0)
+        {
+            await res.ErrorAsync(400, "invalid", "Say which question to ask again: its id (m3).", ct);
+            return;
+        }
+        string? text = null;
+        if (body.ContainsKey("text") && (text = body.Str("text")?.Trim()) is not { Length: > 0 })
+        {
+            await res.ErrorAsync(400, "invalid", "Write the question first.", ct);
+            return;
+        }
+        if (!TryQuote(body, out var quote))
+        {
+            await res.ErrorAsync(400, "invalid", "A quote is at most 4,000 characters.", ct);
+            return;
+        }
+        var length = body.Str("length");
+        if (length is not (null or "shorter" or "longer"))
+        {
+            await res.ErrorAsync(400, "invalid", "length is shorter or longer.", ct);
+            return;
+        }
+        ModelInfo? model = null;
+        if (body.Str("model") is { } name && (model = _rt.Models.FirstOrDefault(x => x.Id == name)) is null)
+        {
+            await res.ErrorAsync(400, "invalid", $"The gateway has no model {name}.", ct);
+            return;
+        }
+        if (body.Str("thinking") is { } level && !ModelState.Levels.Contains(level))
+        {
+            await res.ErrorAsync(400, "invalid", $"Thinking is one of: {string.Join(", ", ModelState.Levels)}.", ct);
+            return;
+        }
+        await SettleAsync(ct);
+        if (Begin("answer") is not { } job)
+        {
+            await res.ErrorAsync(409, "busy", "An answer is being written: stop it, or wait for it, to ask again.", ct);
+            return;
+        }
+        var asked = new Again(at, text, length, model, body.Str("thinking"), body.Bool("files") == true, body.ContainsKey("quote"), quote);
+        job.Running = Task.Run(() => RunTurnAsync(job, null, again: asked));
+        await StreamAsync(job, res, ct);
+    }
+
+    /// <summary>The question asked again (within its job): back to before it, then its turn, with the model and thinking asked for this answer only.</summary>
+    private async Task AskAgainAsync(Job job, Again again, Spend turn)
+    {
+        var messages = _rt.Agent.Messages;
+        if (again.At >= messages.Count || messages[again.At] is not { } question || question.Str("role") != "user" || question.Str("content")?.StartsWith("[The conversation so far", StringComparison.Ordinal) == true)
+        {
+            job.Emit(new JsonObject { ["type"] = "error", ["message"] = "That question is not in the session any more (it was compacted, or the session changed): ask it anew." });
+            return;
+        }
+        // Its words as the model read them (its quote, what went with it), and its pictures.
+        var words = question["content"] is JsonArray parts ? parts.OfType<JsonObject>().FirstOrDefault(p => p.Str("type") == "text")?.Str("text") ?? "" : question.Str("content") ?? "";
+        var pictures = question["content"] is JsonArray all ? new JsonArray([.. all.OfType<JsonObject>().Where(p => p.Str("type") != "text").Select(p => p.DeepClone())]) : null;
+        var answered = messages.Skip(again.At + 1).TakeWhile(m => m.Str("role") != "user").Where(m => m.Str("role") == "assistant")
+            .Sum(m => (m.Str("content") ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length);
+        var (quote, rest) = Quotes.Split(words);
+        var (withoutFiles, files) = Uploads.Split(rest);
+        var typed = Mentions.Typed(withoutFiles);
+        if (again.Text is { } edited)
+        {
+            // Edited: the files it names now go with it; those attached go again, with the quote kept or as changed.
+            quote = again.Requoted ? again.Quote : quote;
+            words = Quotes.Compose(quote, Mentions.Expand(edited, _rt.Workspace).Text + rest[withoutFiles.Length..]);
+            typed = edited;
+        }
+        if (await _rt.BackToAsync(again.At, again.Files, job.Stop.Token) is { } said)
+        {
+            job.Emit(new JsonObject { ["type"] = "notice", ["text"] = said });
+        }
+        var (model, thinking) = (_rt.Model.Info, _rt.Model.Thinking);
+        _rt.Model.Info = again.Model ?? model;
+        _rt.Model.Thinking = again.Thinking ?? thinking;
+        _rt.Agent.TurnNote = again.Length switch
+        {
+            "shorter" => $"Answer again, shorter: the last answer to this was about {answered} words; this time about {Math.Max(answered / 2, 15)}, keeping what matters most.",
+            "longer" => $"Answer again, longer: the last answer to this was about {answered} words; this time about {Math.Max(answered * 2, 100)}, with more detail, reasons and examples.",
+            _ => null,
+        };
+        try
+        {
+            var count = _rt.Agent.Messages.Count;
+            job.Emit(new JsonObject
+            {
+                ["type"] = "question", ["id"] = $"m{count}", ["parentId"] = count == 0 ? null : $"m{count - 1}", ["text"] = typed, ["quote"] = quote,
+                ["attachments"] = files.Count > 0 ? Uploads.Shown(files) : null,
+            });
+            await _rt.Agent.AskAgainAsync(words, pictures is { Count: > 0 } ? pictures : null, typed, turn, job.Stop.Token);
+        }
+        finally
+        {
+            _rt.Agent.TurnNote = null;
+            // For this answer only: unless the person chose another meanwhile.
+            if (again.Model is not null && _rt.Model.Info == again.Model)
+            {
+                _rt.Model.Info = model;
+            }
+            if (again.Thinking is not null && _rt.Model.Thinking == again.Thinking)
+            {
+                _rt.Model.Thinking = thinking;
+            }
+        }
+    }
+
     /// <summary>The part of an answer a message quotes (<c>quote</c>; null: none); false when it is longer than <see cref="Quotes.MaxChars"/>.</summary>
     private static bool TryQuote(JsonObject? body, out string? quote)
     {
@@ -1000,7 +1122,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     }
 
     /// <summary>A turn as a job: the person's message, or (null) the model carrying on after commands that ended.</summary>
-    private async Task RunTurnAsync(Job job, string? text, IReadOnlyList<Mentions.Piece>? pieces = null, string? quote = null, IReadOnlyList<Upload>? uploads = null)
+    private async Task RunTurnAsync(Job job, string? text, IReadOnlyList<Mentions.Piece>? pieces = null, string? quote = null, IReadOnlyList<Upload>? uploads = null,
+        Again? again = null)
     {
         var turn = new Spend();
         _rt.Turn = turn;
@@ -1027,7 +1150,13 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 }
             }
             var count = _rt.Agent.Messages.Count;
-            if (text is not null)
+            if (again is not null)
+            {
+                await AskAgainAsync(job, again, turn);
+                // The page reads the session again: what came after the question is on a branch of its own now.
+                Interlocked.Increment(ref _synced);
+            }
+            else if (text is not null)
             {
                 text = _rt.Prepare(text);
                 job.Emit(new JsonObject

@@ -348,6 +348,29 @@ describe('Code Arena in the browser', () => {
     end()
   })
 
+  it("asks a question again as the web chat does: Answer again under its answer (shorter, the files as they were), and Edit", async () => {
+    const { calls } = backend({
+      session: { id: 's2', messages: saved, diffs: { m2: diff }, busy: false },
+      extra: { 'POST /api/again': () => ({ events: [{ type: 'question', id: 'm0', parentId: null }] }) },
+    })
+    renderCode()
+    await userEvent.click(await screen.findByRole('button', { name: 'Answer again' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Shorter' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/again')?.body).toEqual({ question: 'm0', length: 'shorter' }))
+
+    // The turn changed a file: it can be asked again from where the files were before it.
+    await userEvent.click(await screen.findByRole('button', { name: 'Answer again' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /the files as they were/ }))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/again').map((c) => c.body)).toContainEqual({ question: 'm0', files: true }))
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit question' }))
+    const box = await screen.findByRole('textbox', { name: 'Edit your question' })
+    await userEvent.clear(box)
+    await userEvent.type(box, 'Change two to II')
+    await userEvent.click(within(box.closest('form')!).getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/again').map((c) => c.body)).toContainEqual({ question: 'm0', text: 'Change two to II', quote: null }))
+  })
+
   it('offers no files without Arena to take them', async () => {
     backend()
     renderCode()

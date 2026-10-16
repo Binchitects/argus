@@ -838,6 +838,23 @@ internal sealed partial class Runtime : IAsyncDisposable
     }
 
     /// <summary>
+    /// The conversation back to its first <paramref name="messages"/> (before a question asked again), and with
+    /// <paramref name="files"/> the files the turns from there wrote put back, when this run kept that turn's checkpoint
+    /// (/rewind's). The chat in Arena keeps what was said, on a branch of its own from there. What it says (null: nothing).
+    /// </summary>
+    public async Task<string?> BackToAsync(int messages, bool files, CancellationToken ct)
+    {
+        var number = Checkpoints.Turns.ToList().FindLastIndex(t => t.Messages == messages) + 1;
+        if (number > 0)
+        {
+            var said = await RewindAsync(number, files, chat: true, ct);
+            return files ? said : null;
+        }
+        Agent.Load(Sync is { } sync ? await sync.RewindAsync(messages, ct) : Session.Rewind(messages));
+        return files ? "The files stay as they are: Code Arena kept no checkpoint of that turn (it was before this run, or too long ago)." : null;
+    }
+
+    /// <summary>
     /// The session's servers, each in the background: Arena's MCP endpoint and Argus's (with the
     /// person's key, unless the config turns them off), then the person's own.
     /// </summary>
