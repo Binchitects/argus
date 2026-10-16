@@ -53,6 +53,9 @@ images:
   prometheus: { repository: prom/prometheus, tag: v3.1.0 }
   alertmanager: { repository: prom/alertmanager, tag: v0.28.0 }
   loki: { repository: grafana/loki, tag: 3.4.1 }
+  nodeExporter: { repository: prom/node-exporter, tag: v1.9.0 }
+  # The CPU temperature exporter's (services/cpu-temp-exporter, from the chart's files).
+  python: { repository: python, tag: 3.13-slim }
   pullPolicy: IfNotPresent
   pullSecrets: []
 
@@ -106,6 +109,8 @@ embed:
 argus:
   enabled: true
   size: 50Gi
+  # Built knowledge packs to load (Admin -> Packs), as compose's packs/ folder: a claim of yours, mounted read only.
+  packLibraryClaim: ""
   resources: { requests: { cpu: "1", memory: 2Gi } }
 
 # Pictures (FLUX.2 klein) and video (Wan2.2 TI2V 5B), on GPUs. Each GPU pod takes whole GPUs unless the
@@ -148,6 +153,14 @@ monitoring:
   enabled: true
   prometheusSize: 50Gi
   lokiSize: 20Gi
+  # The host's figures (node-exporter and the CPU's temperature), as compose's: a DaemonSet with the host's
+  # processes and its /, /proc and /sys read only, which a namespace with the restricted or baseline Pod
+  # Security level refuses. Off: the host's alerts (TargetDown for node, the disks') fire until the cluster's own
+  # exporters are scraped. On several nodes, a nodeSelector for the GPU node keeps one node's figures.
+  hostExporters:
+    enabled: true
+    nodeSelector: {}
+    tolerations: []
 
 # Volumes. The model library and the app's files are shared by several pods (the app's replicas, the
 # engines, the sandbox): on more than one node they need ReadWriteMany storage (NFS, CephFS, ...).

@@ -33,6 +33,8 @@ spec:
           env:
             {{- include "arena.secretEnv" (list $ "ARGUS_ADMIN_TOKEN" "ARGUS_KEY") | nindent 12 }}
             {{- include "arena.secretEnv" (list $ "ARGUS_CHAT_CLIENT_TOKEN" "ARGUS_KEY") | nindent 12 }}
+            # Coding agents connect with the person's API key (sk-...); the app says whose it is. GitLab tokens are refused.
+            - { name: ARGUS_KEY_CHECK_URL, value: "http://app:8080/api/authz/key" }
             - { name: ARGUS_GITLAB_URL, value: {{ .Values.gitlab.url | quote }} }
             {{- include "arena.optionalSecretEnv" (list $ "ARGUS_GITLAB_TOKEN" "GITLAB_TOKEN") | nindent 12 }}
             {{- include "arena.optionalSecretEnv" (list $ "ARGUS_GITLAB_USERNAME" "GITLAB_USERNAME") | nindent 12 }}
@@ -42,15 +44,26 @@ spec:
             - { name: ARGUS_USERS_FILE, value: /directory/users.yml }
             - { name: ARGUS_EMBED_URL, value: "http://embed:8080" }
             - { name: ARGUS_APP, value: "off" }
+            {{- if .Values.argus.packLibraryClaim }}
+            - { name: ARGUS_PACK_LIBRARY, value: /pack-library }
+            {{- end }}
+          # The image's own health check (compose runs it): Argus answers /healthz on 127.0.0.1 only, past its host guard.
+          readinessProbe: { exec: { command: [argus, healthcheck] }, periodSeconds: 30, timeoutSeconds: 10 }
           resources: {{- toYaml .Values.argus.resources | nindent 12 }}
           volumeMounts:
             - { name: config, mountPath: /etc/argus/config.yaml, subPath: argus.yaml }
             - { name: data, mountPath: /var/lib/argus }
             - { name: directory, mountPath: /directory, readOnly: true }
+            {{- if .Values.argus.packLibraryClaim }}
+            - { name: pack-library, mountPath: /pack-library, readOnly: true }
+            {{- end }}
       volumes:
         - { name: config, configMap: { name: arena-config } }
         {{- include "arena.claim" (list "data" "arena-argus") | nindent 8 }}
         {{- include "arena.claim" (list "directory" "arena-directory") | nindent 8 }}
+        {{- if .Values.argus.packLibraryClaim }}
+        {{- include "arena.claim" (list "pack-library" .Values.argus.packLibraryClaim) | nindent 8 }}
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -79,7 +92,9 @@ spec:
     spec:
       {{- include "arena.podDefaults" . | nindent 6 }}
       automountServiceAccountToken: false
-      shareProcessNamespace: false
+      # The pod's pause process is PID 1 and reaps what a run leaves behind (a document converter's
+      # children), as compose's init: true; a run's own user sees it but cannot signal it.
+      shareProcessNamespace: true
       containers:
         - name: sandbox
           image: {{ include "arena.image" (dict "root" $ "image" .Values.images.sandbox) }}
