@@ -57,7 +57,7 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
     {
         GgufFile.Language("qwen3", name: "Tiny", context: 40960).Write(Path.Combine(Library, "tiny", "Tiny-4B-Q4_K_M.gguf"));
         Directory.CreateDirectory(Path.Combine(Library, "hf", "acme", "Flash@abc123"));
-        File.WriteAllText(Path.Combine(Library, "hf", "acme", "Flash@abc123", "config.json"), """{"architectures":["Qwen3ForCausalLM"]}""");
+        File.WriteAllText(Path.Combine(Library, "hf", "acme", "Flash@abc123", "config.json"), """{"architectures":["Qwen3ForCausalLM"],"max_position_embeddings":131072,"num_hidden_layers":2,"num_attention_heads":4,"num_key_value_heads":2,"head_dim":64}""");
         File.WriteAllText(Path.Combine(Library, "hf", "acme", "Flash@abc123", "model.safetensors"), "weights");
         Directory.CreateDirectory(Path.Combine(Library, "hf", "acme", "Empty@abc123"));
         Directory.CreateDirectory(Config);
@@ -66,6 +66,42 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         {
             ["Engine:Enabled"] = "true", ["Engine:ApiKey"] = FakeEngine.Key, ["Engine:ConfigDir"] = Config, ["Engine:LibraryDir"] = Library,
         });
+    }
+
+    [Fact]
+    public async Task A_vllm_model_without_gpus_gets_those_proposed_for_the_machine_its_engine_reports()
+    {
+        // Four 96 GB GPUs as an engine's probe writes them (services/gpu-probe.py), with gpt-oss-120b's real config.
+        var hardware = Path.Combine(_dir, "hardware.json");
+        File.WriteAllText(hardware, $$"""{"ram_bytes": {{1L << 40}}, "source": "nvidia-smi", "gpus": [{{string.Join(',', Enumerable.Range(0, 4).Select(i =>
+            $$"""{"index": {{i}}, "name": "NVIDIA RTX PRO 6000 Blackwell Server Edition", "vendor": "nvidia", "backend": "cuda", "total_bytes": {{97887L << 20}}}"""))}}]}""");
+        var oss = Path.Combine(Library, "hf", "openai", "gpt-oss-120b@main");
+        Directory.CreateDirectory(oss);
+        foreach (var f in new[] { "config.json", "model.safetensors.index.json" })
+        {
+            File.Copy(Path.Combine(AppContext.BaseDirectory, "Resources", "vllm", "gpt-oss-120b", f), Path.Combine(oss, f));
+        }
+        File.WriteAllText(Path.Combine(oss, "model-00000-of-00014.safetensors"), "weights");
+        GgufFile.Language("qwen3", name: "Tiny", context: 40960).Write(Path.Combine(Library, "tiny", "Tiny-4B-Q4_K_M.gguf"));
+        Directory.CreateDirectory(Config);
+        app.Engine.Reset(Path.Combine(Config, "models.ini"));
+        await using var f2 = app.Create(app.ConnectionStringFor("kinds_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?>
+        {
+            ["Engine:Enabled"] = "true", ["Engine:ApiKey"] = FakeEngine.Key, ["Engine:ConfigDir"] = Config, ["Engine:LibraryDir"] = Library, ["Engine:HardwareFile"] = hardware,
+        });
+        var admin = await new TestBrowser(f2).SignedInAsync("admin", AppFixture.AdminPassword);
+        var advice = await admin.JsonAsync(await admin.PostAsync("/api/admin/models/advice", new { engineKind = "vllm", file = "hf/openai/gpt-oss-120b@main", context = 131072 }));
+        // GPU 0 has the picture server: one GPU of the others, with the cache the design counts.
+        Assert.Equal("1", advice.GetProperty("recommended").GetProperty("devices").GetString());
+        Assert.Equal("gpu", advice.GetProperty("estimate").GetProperty("fit").GetString());
+        var saved = await admin.PostAsync("/api/admin/models", new { name = "oss", engineKind = "vllm", file = "hf/openai/gpt-oss-120b@main", context = 131072 });
+        await StatusAssert.Is(HttpStatusCode.Created, saved);
+        Assert.Contains("GPUs 1, proposed", (await admin.JsonAsync(saved)).GetProperty("warning").GetString(), StringComparison.Ordinal);
+        var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == "oss");
+        Assert.Equal("1", row.GetProperty("devices").GetString());
+        // On GPUs it does not fit, or a split its heads refuse: refused.
+        var refused = await admin.PostAsync("/api/admin/models", new { name = "oss3", engineKind = "vllm", file = "hf/openai/gpt-oss-120b@main", context = 131072, devices = "0,1,2" });
+        await StatusAssert.Is(HttpStatusCode.BadRequest, refused);
     }
 
     [Fact]

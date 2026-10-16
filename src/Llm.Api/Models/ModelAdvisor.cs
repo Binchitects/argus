@@ -103,7 +103,11 @@ public sealed record ModelLimits(
 
 /// <summary>Settings to start from: the fastest that fit this machine, as far as the estimate tells.</summary>
 public sealed record ModelRecommendation(
-    int Context, int MaxOutput, int Parallel, string KvType, int? Ubatch, bool Mtp, string? DraftHead, int DraftMax, string? Projector, bool Thinking, bool Tools);
+    int Context, int MaxOutput, int Parallel, string KvType, int? Ubatch, bool Mtp, string? DraftHead, int DraftMax, string? Projector, bool Thinking, bool Tools)
+{
+    /// <summary>The GPUs proposed for it on this machine ("0,1"); null: llama.cpp's own choice (all of them).</summary>
+    public string? Devices { get; init; }
+}
 
 /// <summary>
 /// Where the model's bytes go with these settings. <see cref="Fit"/>: "gpu" (all of it on the GPU),

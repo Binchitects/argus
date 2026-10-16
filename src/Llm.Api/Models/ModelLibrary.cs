@@ -61,6 +61,9 @@ public sealed partial class ModelLibrary(IOptions<EngineOptions> options)
     /// <summary>A file of the library by its relative path, or null.</summary>
     public LibraryEntry? Find(string relative) => Contains(relative) ? List().FirstOrDefault(e => e.File.Path == relative) : null;
 
+    /// <summary>A path of the library as the app sees it on disk.</summary>
+    public string FullPath(string relative) => System.IO.Path.GetFullPath(System.IO.Path.Combine(options.Value.LibraryDir, relative));
+
     /// <summary>Whether a relative path names a whole Hugging Face snapshot folder inside the library (<see cref="Snapshot"/>).</summary>
     public bool IsSnapshot(string relative) => Snapshot(relative) is { Complete: true };
 
