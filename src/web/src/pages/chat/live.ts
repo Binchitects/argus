@@ -116,11 +116,11 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
       return { ...state, arena: { a: same?.a, b: same?.b, id: e.id, questionId: e.questionId, side: e.side, step: e.step, of: e.of }, thinkingSince: null }
     }
     case 'queued':
-      return { ...state, queued: { ahead: e.ahead, model: e.model ?? null, yours: e.yours === true } }
+      return { ...state, queued: { ahead: e.ahead, model: e.model ?? null, yours: e.yours === true, why: e.why ?? null } }
     case 'reasoning': {
       const a = lastAssistant()
       if (a) a.reasoning = (a.reasoning ?? '') + e.text
-      return { ...state, messages, thinkingSince: state.thinkingSince ?? now }
+      return { ...state, messages, thinkingSince: state.thinkingSince ?? now, queued: null }
     }
     case 'thought': {
       const a = lastAssistant()
@@ -130,7 +130,8 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
     case 'content': {
       const a = lastAssistant()
       if (a) a.content += e.text
-      return { ...state, messages }
+      // Answering again: no longer waiting (for its line, or for the GPU).
+      return { ...state, messages, queued: null }
     }
     case 'usage': {
       const a = lastAssistant()

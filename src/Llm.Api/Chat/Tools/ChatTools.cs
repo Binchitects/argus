@@ -255,7 +255,7 @@ public sealed class TimeTool(TimeProvider clock) : IChatTool
 
 /// <summary>Pictures from the gateway's image model, kept as the person's files.</summary>
 public sealed partial class ImageTool(ChatModels models, GatewayChat gateway, AppDbContext db, Safeguards.Safeguards safeguards, Models.MediaControl media,
-    Gateway.PriceBook prices, Storage.StorageQuotas quotas, Gateway.Credit credit, Models.ModelPolicy policy, Operations.Modules modules) : IChatTool
+    Gateway.PriceBook prices, Storage.StorageQuotas quotas, Gateway.Credit credit, Models.ModelPolicy policy, Operations.Modules modules, Models.GpuShare gpu) : IChatTool
 {
     public static readonly string[] Sizes = ["1024x1024", "1024x768", "768x1024", "768x768", "512x512"];
 
@@ -320,8 +320,10 @@ public sealed partial class ImageTool(ChatModels models, GatewayChat gateway, Ap
                 {
                     return new ToolResult(limit, IsError: true);
                 }
-                // Loaded when it is not (a model not kept loaded unloads when unused).
-                if (media.Find(model.Name) is not null && await media.ReadyAsync(model.Name, token) is { } notReady)
+                // Its turn on the GPU (one picture or video at a time), with room made for it when it is short; loaded when it is
+                // not (a model not kept loaded unloads when unused).
+                await using var hold = media.Find(model.Name) is { } local ? await gpu.HoldAsync(local, token) : null;
+                if (hold is not null && await media.ReadyAsync(model.Name, token) is { } notReady)
                 {
                     return new ToolResult(notReady, IsError: true);
                 }

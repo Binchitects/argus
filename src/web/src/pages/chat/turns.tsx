@@ -425,6 +425,8 @@ export function AnswerTurn({
           </div>
         )
       })}
+      {/* Waiting between two steps of the answer (after a tool), for the GPU lent to a picture or video. */}
+      {live && !waiting && queued?.why && <output className="block text-sm text-muted-foreground">{queued.why}</output>}
       {route && (
         <RouteNote
           route={route}

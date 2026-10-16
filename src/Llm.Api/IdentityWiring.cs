@@ -344,6 +344,7 @@ public static class IdentityWiring
         services.Configure<Models.MediaOptions>(config.GetSection("Media"));
         services.AddSingleton<Models.MediaControl>();
         services.AddHostedService(sp => sp.GetRequiredService<Models.MediaControl>());
+        services.AddSingleton<Models.GpuShare>();
         services.Configure<Schedules.ScheduleOptions>(config.GetSection("Schedules"));
         services.Configure<Operations.ArgusIndexOptions>(config.GetSection("ArgusIndex"));
         services.AddHostedService<Operations.ArgusIndexSchedule>();

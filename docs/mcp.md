@@ -92,6 +92,10 @@ Other clients (streamable HTTP):
 - Argus answers as the person (the chat's token and their email): no GitLab
   token is needed here. A plugin calls its service with the person's own
   account. Pictures and speech go through the gateway on the person's credit;
+  while they have none of a kind left (or none given: "You have no picture
+  credit: an admin sets it under People"), `generate_image`, `generate_video`
+  or `speak` is left out of `tools/list` and the notes say why, so the agent
+  does not offer it (a call by its name hears the same);
   pictures and video count against their pictures a day (Settings →
   Safeguards). Pictures, speech, video and each deep research started count
   against their key's requests a minute too, when an admin sets one, as one

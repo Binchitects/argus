@@ -127,6 +127,8 @@ interface ModelsView {
   }
   /** The model for sub-agents and small steps (Settings → Model), and what keeps it from doing them well. */
   small: { name: string; warning: string | null } | null
+  /** The GPU lent to a picture or video job now (chat models unloaded for it), and what the jobs did lately, the newest first. */
+  gpu?: { lent: { media: string; kind: string; since: string } | null; recent: { at: string; text: string }[] }
   models: ModelRow[]
 }
 
@@ -136,14 +138,14 @@ export function ModelsPage() {
     queryKey: ['admin', 'models'],
     queryFn: ({ signal }) => api<ModelsView>('/api/admin/models', { signal }),
     // Faster while a model loads or unloads (an engine model or a picture, video or speech one), so the page shows it the moment it is done.
-    refetchInterval: (q) => (q.state.data?.models.some((m) => m.status === 'loading' || m.status === 'unloading') ? 2000 : 15000),
+    refetchInterval: (q) => (q.state.data?.gpu?.lent || q.state.data?.models.some((m) => m.status === 'loading' || m.status === 'unloading') ? 2000 : 15000),
   })
   const [editing, setEditing] = useState<ModelRow | 'new' | { preset: string } | null>(null)
   const [media, setMedia] = useState<SavedMediaModel | { mode: MediaMode; file?: string } | null>(null)
   const [hf, setHf] = useState(false)
   if (models.isPending) return <PageSkeleton />
   if (models.error) return <QueryError error={models.error} retry={() => models.refetch()} />
-  const { engine, small } = models.data
+  const { engine, small, gpu } = models.data
   return (
     <>
       <PageHeader
@@ -186,6 +188,7 @@ export function ModelsPage() {
         </Alert>
       )}
       {engine.enabled && <EngineSummary engine={engine} />}
+      {gpu && (gpu.lent || gpu.recent.length > 0) && <GpuSharing gpu={gpu} />}
       {engine.enabled && (
         <WorkingHours
           engineModels={models.data.models.filter((m) => m.source === 'local').map((m) => m.name)}
@@ -344,6 +347,30 @@ function Status({ status, why, since }: { status: ModelRow['status']; why?: stri
   return null
 }
 
+/** "262,144 tokens of context, 65,536 a conversation": the context, and each slot's share of it when it has several. */
+function contextLine(context: number, window?: number | null): string {
+  const all = `${context.toLocaleString('en-US')} tokens of context`
+  return window && window < context ? `${all}, ${window.toLocaleString('en-US')} a conversation` : all
+}
+
+/** The GPU shared by the chat models and the picture and video jobs: lent to a job now, and what the jobs did lately. */
+function GpuSharing({ gpu }: { gpu: NonNullable<ModelsView['gpu']> }) {
+  return (
+    <Alert className="mb-4" title={gpu.lent ? `The GPU is lent to a ${gpu.lent.kind} (${gpu.lent.media})` : 'The GPU, shared with pictures and video'}>
+      {gpu.lent && <p>Since {new Date(gpu.lent.since).toLocaleTimeString()}: no chat model loads until it is done, and answers that need one wait.</p>}
+      {gpu.recent.length > 0 && (
+        <ul className="mt-1 space-y-0.5">
+          {gpu.recent.map((r) => (
+            <li key={`${r.at}:${r.text}`}>
+              <span className="text-muted-foreground tabular-nums">{new Date(r.at).toLocaleTimeString()}</span> {r.text}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Alert>
+  )
+}
+
 function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: ModelRow; engine: ModelsView['engine']; small: boolean; onEdit: () => void; onChanged: () => void }) {
   const confirm = useConfirm()
   const keep = useMutation({
@@ -449,7 +476,7 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
           <CardDescription className="[overflow-wrap:anywhere]">
             {media
               ? `On the ${m.server} server`
-              : [m.source === 'remote' ? `${m.remote} on ${m.server}` : m.file, m.context ? `${m.context.toLocaleString('en-US')} tokens of context` : null].filter(Boolean).join(' · ') ||
+              : [m.source === 'remote' ? `${m.remote} on ${m.server}` : m.file, m.context ? contextLine(m.context, m.window) : null].filter(Boolean).join(' · ') ||
                 (image ? 'An image model' : 'Served by the gateway')}
           </CardDescription>
           {m.profile && <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{summary(m.profile)}</p>}

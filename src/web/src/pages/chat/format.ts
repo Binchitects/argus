@@ -3,6 +3,7 @@ import type { ChatConfig, InLine, Message } from './types'
 /** What an answer waiting for its turn says: whose line it is in, and how many go first. */
 export function waitingText(line: InLine | null | undefined): string {
   if (line == null) return 'Waiting for the model…'
+  if (line.why) return line.why
   if (line.yours) return 'Waiting for your other answer to end first.'
   const busy = line.model ? `${line.model} is busy` : 'The chat is busy'
   return line.ahead === 0 ? `${busy}: your turn is next.` : `${busy}: ${line.ahead} ${line.ahead === 1 ? 'answer' : 'answers'} ahead of you.`

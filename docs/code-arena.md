@@ -1677,7 +1677,11 @@ message is sent as usual. Once the engine's reading speed is measured (the
 time to the first word of answers whose prompt it had not cached), a request
 with much it has not cached says first about how long the answer may take to
 start, and waits half as long again as that before giving up (an hour at
-most). When
+most). The gateway waits 16 minutes (`timeout` and `stream_timeout` in
+`config/litellm.yaml`), so Code Arena, not the gateway, gives up on a long
+prompt being read within its first 15 minutes. Its window is the model's at
+the gateway: what one of the engine's slots holds (Admin → Models, "65,536 a
+conversation"), so it compacts before a slot overflows. When
 the connection drops after part of an answer arrived (a stream that ends
 without its end counts too), that part is kept and the model is asked to carry
 on from where it stopped, up to three times a turn.

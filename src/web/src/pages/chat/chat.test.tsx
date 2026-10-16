@@ -132,6 +132,30 @@ describe('chat', () => {
     expect(await screen.findByText('Main-Model is busy: 2 answers ahead of you.')).toBeInTheDocument()
   })
 
+  it('an answer waiting for the GPU, lent to a video, says so', async () => {
+    const why = 'The GPU is making a video with Wan2.2-TI2V-5B just now: Main-Model loads again as soon as it is done.'
+    backend({ events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'queued', ahead: 0, model: null, yours: false, why }], hang: true })
+    renderApp('/chat')
+    await ask('a moment')
+    expect(await screen.findByText(why)).toBeInTheDocument()
+  })
+
+  it('an answer waiting for the GPU between two of its steps says so until it answers again', async () => {
+    const why = 'The GPU is making a picture with FLUX.2-klein-4B just now: Main-Model loads again as soon as it is done.'
+    const start = [
+      { type: 'question', id: 'q1', parentId: null },
+      { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' },
+      { type: 'tool_call', id: 'call_1', name: 'find_symbol', arguments: '{"name":"Thing"}' },
+      { type: 'tool_result', id: 'call_1', messageId: 't1', name: 'find_symbol', text: 'Found it.', isError: false, durationMs: 20 },
+      { type: 'assistant', id: 'a2', parentId: 't1', model: 'Main-Model' },
+      { type: 'queued', ahead: 0, model: null, yours: false, why },
+    ]
+    backend({ events: start, hang: true })
+    renderApp('/chat')
+    await ask('where is Thing')
+    expect(await screen.findByText(why)).toBeInTheDocument()
+  })
+
   it("the waiting line names the model, the whole chat, or the person's own other answer", () => {
     expect(waitingText(null)).toBe('Waiting for the model…')
     expect(waitingText({ ahead: 0, model: 'Big', yours: false })).toBe('Big is busy: your turn is next.')

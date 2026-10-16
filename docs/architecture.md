@@ -74,7 +74,9 @@ One issuer, the app.
   that person's GitLab membership. Argus takes no GitLab token in the platform.
 - **Inside the stack**: the app speaks to the gateway with its master key and
   to Argus with `ARGUS_KEY` (naming the person, whose GitLab membership
-  applies); the gateway and Prometheus reach the engine with `ENGINE_KEY`.
+  applies); the gateway and Prometheus reach the engine with `ENGINE_KEY`
+  (llama-server reads it from its environment, `LLAMA_API_KEY`, so `ps` in the
+  engine's container does not show it).
 
 ## 6. Request flows
 

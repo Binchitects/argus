@@ -274,6 +274,8 @@ public sealed partial class AnswerJobs : IHostedService, IDisposable
             var titling = overrides.Titled
                 ? services.GetRequiredService<ChatTitles>().WriteAsync(user.Id, conversation.Id, question.Content, job.EmitAsync, ct)
                 : Task.CompletedTask;
+            // A turn that waits for the GPU (lent to a picture or video job) says why, as one waiting in its model's line does.
+            EngineRoute.Waiting.Value = why => job.EmitAsync(new { type = "queued", ahead = 0, model = (string?)null, yours = false, why });
             try
             {
                 await services.GetRequiredService<ChatService>().AnswerAsync(user, conversation, question,

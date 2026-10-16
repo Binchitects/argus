@@ -128,7 +128,7 @@ public static partial class Voices
 /// <summary>Short videos from the stack's video server (its video model, Admin -> Models), kept as the person's files.</summary>
 /// <remarks>The video server is not behind the gateway: each clip is booked in the gateway's request log by the app, at its price per second.</remarks>
 public sealed partial class VideoTool(IHttpClientFactory http, Operations.Modules modules, AppDbContext db, Safeguards.Safeguards safeguards, MediaControl media,
-    Gateway.PriceBook prices, Gateway.SpendLog spendLog, ChatKey chatKey, Storage.StorageQuotas quotas, Gateway.Credit credit, ModelPolicy policy) : IChatTool
+    Gateway.PriceBook prices, Gateway.SpendLog spendLog, ChatKey chatKey, Storage.StorageQuotas quotas, Gateway.Credit credit, ModelPolicy policy, GpuShare gpu) : IChatTool
 {
     public const string Client = "videogen";
 
@@ -185,6 +185,8 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
             {
                 return new ToolResult(limit, IsError: true);
             }
+            // Its turn on the GPU (one picture or video at a time), with room made for it when it is short; the room goes back after.
+            await using var hold = await gpu.HoldAsync(model, token);
             // Loaded when it is not: a few minutes the first time.
             if (await media.ReadyAsync(model.Name, token) is { } notReady)
             {

@@ -377,6 +377,26 @@ public sealed class EngineState(TimeProvider clock)
     public void Fail(string error) => _now = _now with { Error = error, At = clock.GetUtcNow() };
 
     /// <summary>
+    /// The GPU lent to a picture or video job (<see cref="GpuShare"/>): its model, what it makes ("picture", "video"), since
+    /// when, and until when at most (should the replica that holds it stop without giving it back).
+    /// </summary>
+    public sealed record Lending(string Media, string Kind, DateTimeOffset Since, DateTimeOffset Until);
+
+    private volatile Lending? _lent;
+
+    /// <summary>
+    /// The picture or video job the GPU is lent to now, or null. Meanwhile no chat model loads: a request for one that is not
+    /// loaded waits (EngineRoute), the watcher loads none, and an admin's Load is refused.
+    /// </summary>
+    public Lending? Lent => _lent is { } lent && clock.GetUtcNow() < lent.Until ? lent : null;
+
+    /// <summary>The GPU is lent to <paramref name="lending"/>'s job.</summary>
+    public void Lend(Lending lending) => _lent = lending;
+
+    /// <summary>The GPU is the chat models' again.</summary>
+    public void Return() => _lent = null;
+
+    /// <summary>
     /// "loaded", "loading", "unloading" (the app told it to unload and the engine has not stopped it yet), "unloaded", "failed"
     /// (its last load ended in an error), or null when the engine does not have that model.
     /// </summary>
@@ -411,7 +431,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     private static readonly HashSet<string> Managed = new(StringComparer.Ordinal)
     {
         "ctx-size", "n-gpu-layers", "gpu-layers", "n-cpu-moe", "cpu-moe", "cache-type-k", "cache-type-v", "parallel", "jinja", "metrics", "kv-unified", "no-kv-unified",
-        "threads", "ubatch-size", "batch-size", "fit", "device", "rope-scaling", "rope-scale", "yarn-orig-ctx", "spec-type", "spec-draft-n-max", "draft-max", "draft-n",
+        "threads", "ubatch-size", "batch-size", "fit", "device", "kv-unified-per-slot", "rope-scaling", "rope-scale", "yarn-orig-ctx", "spec-type", "spec-draft-n-max", "draft-max", "draft-n",
         "temp", "temperature", "top-p", "top-k", "min-p", "presence-penalty", "embedding", "embeddings", "pooling", "rerank", "reranking",
     };
 
@@ -473,8 +493,14 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     }
 
     /// <summary>A model's section of the engine's presets: the settings of its kind, and only what the engine should not decide itself.</summary>
-    public static string Preset(LocalModel m, string library, int? threads = null, ModelProfile? profile = null, int? sessionCacheGb = null)
+    /// <param name="pictureRoom">
+    /// The GPU memory a picture model kept loaded takes beside the chat models, and its GPU (null: the first): a model that
+    /// fits itself to the GPU leaves it free there.
+    /// </param>
+    public static string Preset(LocalModel m, string library, int? threads = null, ModelProfile? profile = null, int? sessionCacheGb = null,
+        (int? Gpu, int Mb)? pictureRoom = null)
     {
+        var own = ExtraValues(m.ExtraPreset);
         var sb = new StringBuilder();
         var inv = CultureInfo.InvariantCulture;
         var root = library.TrimEnd('/');
@@ -484,8 +510,13 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         {
             sb.Append("mmproj = ").Append(root).Append('/').Append(p).Append('\n');
         }
-        // One cache for the answers in parallel: a conversation can use all of it.
+        // One cache for the answers in parallel, each slot held to its share of it: a long conversation in one slot never
+        // pushes the others' out of the cache, nor is pushed out by them (the window the gateway says is that share).
         sb.Append(inv, $"ctx-size = {m.Context}\nparallel = {m.Parallel}\nkv-unified = true\n");
+        if (m.Parallel > 1)
+        {
+            sb.Append(inv, $"kv-unified-per-slot = {SlotWindow(m)}\n");
+        }
         sb.Append(inv, $"cache-type-k = {m.KvType}\ncache-type-v = {m.KvType}\n");
         if (m.Placement == "manual")
         {
@@ -499,6 +530,10 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         {
             // llama.cpp fits the layers and experts to the GPU memory free when it loads.
             sb.Append("fit = on\n");
+            if (FitTarget(m, pictureRoom) is { } target && !own.ContainsKey("fit-target"))
+            {
+                sb.Append("fit-target = ").Append(target).Append('\n');
+            }
         }
         if (Hardware.ParseDevices(m.Devices) is { Count: > 0 } devices)
         {
@@ -550,7 +585,6 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             sb.Append(inv, $"presence-penalty = {presence:0.###}\n");
         }
         sb.Append("jinja = true\nmetrics = true\n");
-        var own = ExtraValues(m.ExtraPreset);
         // A prompt whose start matches what a slot holds reads that part from the cache; with
         // cache-reuse, chunks further on that match too (after a cut in the middle) are shifted
         // into place. The extra lines may set another size, or 0 for none.
@@ -595,6 +629,35 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         return sb.ToString();
     }
 
+    /// <summary>
+    /// What one conversation of a model may hold: its context shared by its slots (Answers at once), each its share, as
+    /// the engine holds them (kv-unified-per-slot) and the gateway says (max_input_tokens). Fewer slots, a longer window.
+    /// </summary>
+    public static int SlotWindow(LocalModel m) => m.Context / Math.Max(1, m.Parallel);
+
+    /// <summary>
+    /// llama.cpp's fit target for a model that fits itself to the GPU, when a picture model kept loaded runs beside it: what
+    /// fit leaves free on each of its GPUs (its own margin, 1024 MiB), and on the picture model's GPU its room too. One value
+    /// for a model on every GPU (each keeps it); one a GPU, in order, for a model on some; null: llama.cpp's own (no picture
+    /// model kept loaded, or none on this model's GPUs).
+    /// </summary>
+    public static string? FitTarget(LocalModel m, (int? Gpu, int Mb)? pictureRoom)
+    {
+        if (pictureRoom is not { } room)
+        {
+            return null;
+        }
+        var margin = (int)(Hardware.FitMargin >> 20);
+        var gpu = room.Gpu ?? 0;
+        if (Hardware.ParseDevices(m.Devices) is not { Count: > 0 } devices)
+        {
+            return (margin + room.Mb).ToString(CultureInfo.InvariantCulture);
+        }
+        return devices.Contains(gpu)
+            ? string.Join(',', devices.Select(d => (d == gpu ? margin + room.Mb : margin).ToString(CultureInfo.InvariantCulture)))
+            : null;
+    }
+
     /// <summary>What a model's extra preset lines set: each key and its value.</summary>
     public static Dictionary<string, string> ExtraValues(string? extra) =>
         (extra ?? "").Split('\n').Select(l => PresetLine().Match(l.Trim())).Where(k => k.Success)
@@ -606,8 +669,17 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         var models = await db.LocalModels.AsNoTracking().OrderBy(m => m.Name).ToListAsync(ct);
         // Each file's profile: its attention decides the checkpoints, its training the YaRN stretch.
         var profiles = models.Count > 0 ? library.List().ToDictionary(e => e.File.Path, e => e.Profile, StringComparer.Ordinal) : [];
+        // A picture model kept loaded runs beside the chat models: those that fit themselves to the GPU leave it its room.
+        (int? Gpu, int Mb)? pictureRoom = null;
+        if (await modules.HasAsync("imagegen", ct)
+            && await db.MediaModels.AsNoTracking().Where(x => x.Kept && x.Mode == MediaModes.Image).OrderBy(x => x.Name).FirstOrDefaultAsync(ct) is { } picture
+            && GpuShare.NeedMb(picture) is { } need)
+        {
+            pictureRoom = (picture.Gpu, need);
+        }
         var text = "# Written by the app (Admin -> Models). The engine restarts when this changes.\n\n" +
-            string.Join("\n", models.Select(m => Preset(m, options.Value.EngineLibraryDir, options.Value.Threads, profiles.GetValueOrDefault(m.File), options.Value.SessionCacheGb)));
+            string.Join("\n", models.Select(m => Preset(m, options.Value.EngineLibraryDir, options.Value.Threads, profiles.GetValueOrDefault(m.File), options.Value.SessionCacheGb,
+                pictureRoom)));
         Write(PresetsFile, text);
     }
 
@@ -655,11 +727,13 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         {
             // What its projector reads: pictures, sound (an omni model's), or both.
             var projector = m.Projector is { Length: > 0 } p ? library.Find(p)?.Profile.Projector ?? new ProjectorInfo(true, false, null, null) : null;
-            var info = Info(m.Context, m.MaxOutput ?? DefaultMaxOutput(m.Context), projector?.Vision == true, m.Tools, m.Thinking, projector?.Audio == true);
+            // The window one conversation really has: its slot's share of the context.
+            var window = SlotWindow(m);
+            var info = Info(window, Math.Min(m.MaxOutput ?? DefaultMaxOutput(window), window), projector?.Vision == true, m.Tools, m.Thinking, projector?.Audio == true);
             var litellm = new JsonObject { ["model"] = "openai/" + m.Name, ["api_base"] = "os.environ/ENGINE_API_BASE", ["api_key"] = "os.environ/ENGINE_API_KEY" };
             var price = TokenPrice.Of(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, defaults);
             Prices(litellm, price);
-            deployments.Add((m.Name, litellm, info, ["local", m.Name, m.File, m.Context, m.MaxOutput, m.Projector, projector?.Audio, m.Tools, m.Thinking,
+            deployments.Add((m.Name, litellm, info, ["local", m.Name, m.File, m.Context, m.Parallel, m.MaxOutput, m.Projector, projector?.Audio, m.Tools, m.Thinking,
                 price.Input, price.CachedInput, price.Output], m.Parallel));
         }
         foreach (var server in await db.RemoteServers.AsNoTracking().ToListAsync(ct))

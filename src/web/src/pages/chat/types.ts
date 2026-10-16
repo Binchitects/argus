@@ -324,11 +324,12 @@ export interface ChatSettings {
   assistantId?: string | null
 }
 
-/** In line for a turn (the model serves few at once): how many go first, whose line (null: the whole chat's), and whether the person's own answers hold it. */
+/** In line for a turn (the model serves few at once): how many go first, whose line (null: the whole chat's), and whether the person's own answers hold it; or why else it waits (the GPU lent to a picture or video). */
 export interface InLine {
   ahead: number
   model: string | null
   yours: boolean
+  why?: string | null
 }
 
 export type ChatEvent =
@@ -387,7 +388,7 @@ export type ChatEvent =
   /** The answer is deep research: the page says which step it is on. */
   | { type: 'research' }
   /** Waiting for a turn: the model serves few at once, in turn (fair use). Model: whose line (null: the whole chat's); yours: the person's own answers hold it. */
-  | { type: 'queued'; ahead: number; model?: string | null; yours?: boolean }
+  | { type: 'queued'; ahead: number; model?: string | null; yours?: boolean; why?: string | null }
   | { type: 'error'; message: string }
   /** The older messages are being summarized (compaction), before an answer or because the person asked. */
   | { type: 'compacting' }

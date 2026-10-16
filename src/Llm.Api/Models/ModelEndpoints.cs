@@ -52,7 +52,8 @@ public static class ModelEndpoints
     }
 
     private static async Task<IResult> ListAsync(AppDbContext db, ChatModels gatewayModels, EngineState state, ModelCatalog catalog, ModelLibrary library,
-        HardwareProbe hardware, ModelHoursState hours, IOptions<EngineOptions> engine, MediaControl media, SmallModel small, PriceBook prices, ModelPolicy policy, CancellationToken ct)
+        HardwareProbe hardware, ModelHoursState hours, IOptions<EngineOptions> engine, MediaControl media, SmallModel small, PriceBook prices, ModelPolicy policy, GpuShare gpu,
+        CancellationToken ct)
     {
         var e = engine.Value;
         // What each costs: its own prices, else the defaults (Settings → Prices); own says which it sets.
@@ -106,7 +107,8 @@ public static class ModelEndpoints
                 instead = state.LoadedInstead.Contains(m.Name),
                 // The engine unloaded it by its own choice this often lately (it holds fewer models than the app thinks).
                 evicted = state.Evicted(m.Name),
-                file = m.File, m.Projector, context = m.Context, m.MaxOutput, m.Placement, m.GpuLayers, m.CpuMoe, m.KvType, m.Parallel, m.Ubatch,
+                // What one conversation may hold: its slot's share of the context (the gateway says so too).
+                file = m.File, m.Projector, context = m.Context, window = ModelCatalog.SlotWindow(m), m.MaxOutput, m.Placement, m.GpuLayers, m.CpuMoe, m.KvType, m.Parallel, m.Ubatch,
                 m.Mtp, m.DraftHead, m.DraftMax, m.Yarn, m.Temperature, m.TopP, m.TopK, m.MinP, m.PresencePenalty,
                 m.ExtraPreset, m.Thinking, m.Tools, m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, price = Price(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok),
                 vision = m.Projector is { Length: > 0 }, atGateway = At(m.Name) is not null, access = Access(m.Name),
@@ -168,6 +170,12 @@ public static class ModelEndpoints
             },
             // The model for sub-agents and small steps (Settings → Model), and what keeps it from doing them well.
             small = small.Name is { } name ? new { name, warning = await small.WarningAsync(ct) } : null,
+            // The GPU lent to a picture or video job now, and what the jobs did lately (room made, and given back).
+            gpu = new
+            {
+                lent = state.Lent is { } lent ? new { media = lent.Media, kind = lent.Kind, since = lent.Since } : null,
+                recent = gpu.Recent.Reverse().Select(h => new { at = h.At, text = h.Text }),
+            },
             models = rows,
         });
     }
@@ -327,6 +335,11 @@ public static class ModelEndpoints
         if (!await KnownAsync(name, engine, state, ct))
         {
             return AuthEndpoints.Problem(404, "unknown", $"The engine has no model named {name} (yet: a model just added is there once the engine has restarted).");
+        }
+        if (state.Lent is { } lent && state.StatusOf(name) is not ("loaded" or "loading"))
+        {
+            return AuthEndpoints.Problem(409, "lent", $"The GPU is making a {lent.Kind} with {lent.Media} just now (since {lent.Since:HH:mm} UTC). Load {name} once it is done: "
+                + "the chat models unloaded for it load again by themselves then.");
         }
         var kept = catalog.Kept();
         if (!kept.Contains(name) && kept.Count >= options.Value.ModelsMax)

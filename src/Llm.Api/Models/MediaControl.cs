@@ -36,6 +36,8 @@ public sealed partial class MediaControl : BackgroundService
     private const string ChangedTopic = "media:changed";
     private const string ForgetTopic = "media:forget";
     private const string WakeTopic = "media:wake";
+    private const string HeldTopic = "media:held";
+    private const string RestartTopic = "media:restart";
     private const int IdleMinutes = 10;
 
     /// <summary>The picture and video servers, each running one model at a time.</summary>
@@ -85,6 +87,25 @@ public sealed partial class MediaControl : BackgroundService
         replicas.On(ChangedTopic, _ =>
         {
             _models = null;
+            WakeHere();
+            return true;
+        });
+        replicas.On(HeldTopic, name =>
+        {
+            if (name.StartsWith('-'))
+            {
+                UnholdHere(name[1..]);
+            }
+            else
+            {
+                HoldHere(name);
+            }
+            WakeHere();
+            return true;
+        });
+        replicas.On(RestartTopic, server =>
+        {
+            RestartHere(server);
             WakeHere();
             return true;
         });
@@ -183,6 +204,18 @@ public sealed partial class MediaControl : BackgroundService
         if (!_why.TryGetValue(name, out var now) || now.Why != why)
         {
             _why[name] = (why, clock.GetUtcNow());
+        }
+    }
+
+    /// <summary>
+    /// Why it loads, unless something said why already (an admin's Load, a job that made room for it): only in place of
+    /// none, or of why it unloaded last.
+    /// </summary>
+    private void BecauseUnlessSaid(string name, string why)
+    {
+        if (!_why.TryGetValue(name, out var said) || said.Why.StartsWith("unused", StringComparison.Ordinal) || said.Why.StartsWith("unloaded", StringComparison.Ordinal))
+        {
+            Because(name, why);
         }
     }
 
@@ -295,6 +328,85 @@ public sealed partial class MediaControl : BackgroundService
         WakeHere();
     }
 
+    /// <summary>
+    /// The model each picture and video server runs for a job now (<see cref="GpuShare"/>), and until when at most (should
+    /// the replica that holds it stop without letting go): its server does not switch to another meanwhile.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, (string Name, DateTimeOffset Until)> _held = new(StringComparer.Ordinal);
+
+    /// <summary>A job holds <paramref name="name"/> on its server (here and on the replica that leads), until <see cref="Unhold"/>.</summary>
+    public void Hold(string name)
+    {
+        HoldHere(name);
+        replicas.Tell(HeldTopic, name);
+        Asked(name);
+    }
+
+    /// <summary>The job that held <paramref name="name"/> ended.</summary>
+    public void Unhold(string name)
+    {
+        UnholdHere(name);
+        replicas.Tell(HeldTopic, "-" + name);
+        WakeHere();
+    }
+
+    private void HoldHere(string name)
+    {
+        if (Find(name) is { Id: null } m)
+        {
+            _held[m.Server] = (name, clock.GetUtcNow() + GpuShare.LendLimit);
+        }
+    }
+
+    private void UnholdHere(string name)
+    {
+        if (Find(name) is { } m && _held.TryGetValue(m.Server, out var held) && held.Name == name)
+        {
+            _held.TryRemove(new KeyValuePair<string, (string, DateTimeOffset)>(m.Server, held));
+        }
+    }
+
+    /// <summary>
+    /// Starts <paramref name="server"/> again (a new generation of its control file, on every replica): its script decides
+    /// anew where the model decodes, by the GPU memory free then. <paramref name="why"/> is what Admin → Models says.
+    /// </summary>
+    public void Restart(string server, string why)
+    {
+        RestartHere(server);
+        replicas.Tell(RestartTopic, server);
+        if (_target.GetValueOrDefault(server) is { } name)
+        {
+            Because(name, why);
+            _now[name] = "loading";
+        }
+        WakeHere();
+    }
+
+    private void RestartHere(string server)
+    {
+        _gen[server] = Gen(server) + 1;
+        if (_target.GetValueOrDefault(server) is { } name)
+        {
+            _loadingSince.TryRemove(name, out _);
+        }
+    }
+
+    /// <summary>Why <paramref name="name"/> loads now, for Admin → Models (a job made room for it).</summary>
+    public void Explain(string name, string why) => Because(name, why);
+
+    /// <summary>A job is done with <paramref name="name"/> and the room it had goes back: unloaded now unless kept loaded, as after its idle minutes.</summary>
+    public void Done(string name, string why)
+    {
+        if (Find(name) is not { Row.Kept: false })
+        {
+            return;
+        }
+        Because(name, why);
+        _asked.TryRemove(name, out _);
+        replicas.Tell(ForgetTopic, name);
+        WakeHere();
+    }
+
     /// <summary>Used now: loaded if it is not (a speech model loads at its first request), and it stays another ten minutes.</summary>
     public void Touch(string name)
     {
@@ -340,7 +452,7 @@ public sealed partial class MediaControl : BackgroundService
         }
         // Off, or turned off a moment ago (ten minutes unused): its server answering now may be on its way out. On again first,
         // and its answer counts once the script has read that.
-        Because(name, "for a request");
+        BecauseUnlessSaid(name, "for a request");
         _now[name] = "loading";
         WakeHere();
         var until = clock.GetUtcNow() + TimeSpan.FromMinutes(5);
@@ -423,10 +535,11 @@ public sealed partial class MediaControl : BackgroundService
             }
             speechLoaded ??= await SpeechLoadedAsync(ct);
             var loaded = speechLoaded.Contains(m.Id!);
-            // The replica that leads loads and unloads; the others only read what the speech server has.
+            // The replica that leads loads and unloads; the others only read what the speech server has. Why it loads, unless an
+            // admin's Load said so (as for the picture and video servers' models).
             if (want)
             {
-                Because(m.Name, m.Row.Kept ? "kept loaded" : "for a request");
+                BecauseUnlessSaid(m.Name, m.Row.Kept ? "kept loaded" : "for a request");
             }
             var waiting = _failures.TryGetValue(m.Name, out var refused) && refused.RetryAt is { } next && now < next;
             if (lead && want && !loaded && !waiting)
@@ -451,7 +564,33 @@ public sealed partial class MediaControl : BackgroundService
             }
             _now[m.Name] = loaded ? "loaded" : want && _failures.ContainsKey(m.Name) ? "failed" : "unloaded";
         }
+        if (lead && speechLoaded is not null)
+        {
+            await IdleVadAsync(models, speechLoaded, now, ct);
+        }
     }
+
+    /// <summary>
+    /// The speech server's voice activity detector (silero_vad_*), which it loads by itself for a transcription and which has
+    /// no row: unloaded once no speech to text model has been asked for within the idle minutes, as a model not kept loaded is
+    /// (the speech server's own unloading is off).
+    /// </summary>
+    private async Task IdleVadAsync(IReadOnlyList<Model> models, IReadOnlyList<string> loaded, DateTimeOffset now, CancellationToken ct)
+    {
+        var heard = models.Where(m => m.Mode == MediaModes.Transcription).Select(m => _asked.TryGetValue(m.Name, out var at) ? at : default).DefaultIfEmpty().Max();
+        if (heard != default && now - heard <= TimeSpan.FromMinutes(IdleMinutes))
+        {
+            return;
+        }
+        foreach (var id in loaded.Where(i => i.StartsWith(VadPrefix, StringComparison.Ordinal) && models.All(m => m.Id != i)))
+        {
+            LogVad(logger, id, IdleMinutes);
+            using var _ = await http.CreateClient(Client).DeleteAsync($"{MediaModels.AudioUrl}/api/ps/{id}", ct);
+        }
+    }
+
+    /// <summary>The speech server's voice activity detector's id starts so (silero_vad_v5).</summary>
+    public const string VadPrefix = "silero_vad";
 
     /// <summary>The model a picture or video server runs, and what each of its models is doing.</summary>
     private async Task ServerAsync(string server, IReadOnlyList<Model> rows, bool lead, DateTimeOffset now, CancellationToken ct)
@@ -464,8 +603,10 @@ public sealed partial class MediaControl : BackgroundService
             }
             return;
         }
-        // The one kept loaded, else the one asked for last; else none (the server is off, its last model named).
-        var wanted = rows.FirstOrDefault(x => x.Row.Kept)
+        // The one a job holds (it never switches under a running job), else the one kept loaded, else the one asked for last;
+        // else none (the server is off, its last model named).
+        var wanted = rows.FirstOrDefault(x => _held.TryGetValue(server, out var held) && held.Until > now && x.Name == held.Name)
+            ?? rows.FirstOrDefault(x => x.Row.Kept)
             ?? rows.Where(x => _asked.ContainsKey(x.Name)).OrderByDescending(x => _asked.GetValueOrDefault(x.Name)).FirstOrDefault();
         var target = wanted ?? rows.FirstOrDefault(x => x.Name == _target.GetValueOrDefault(server)) ?? (rows.Count > 0 ? rows[0] : null);
         if (target is null)
@@ -491,10 +632,9 @@ public sealed partial class MediaControl : BackgroundService
         }
         var status = StatusOf(server);
         var gen = Gen(server).ToString(CultureInfo.InvariantCulture);
-        if (want && (!_why.ContainsKey(m.Name) || _why.GetValueOrDefault(m.Name).Why.StartsWith("unused", StringComparison.Ordinal)
-            || _why.GetValueOrDefault(m.Name).Why == "unloaded by an admin"))
+        if (want)
         {
-            Because(m.Name, m.Row.Kept ? "kept loaded" : "for a request");
+            BecauseUnlessSaid(m.Name, m.Row.Kept ? "kept loaded" : "for a request");
         }
         if (status is { Phase: "running" } && status.Gen == gen && (!_running.TryGetValue(server, out var r) || r.Gen != gen))
         {
@@ -749,6 +889,9 @@ public sealed partial class MediaControl : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Media models: {Model} is tried again ({Kind}, {Count} in a row)")]
     private static partial void LogRetry(ILogger logger, string model, string kind, int count);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Media models: the speech server's {Id} unused for {Minutes} minutes (no speech to text), unloading")]
+    private static partial void LogVad(ILogger logger, string id, int minutes);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Media models: cannot write {Path}: {Error}")]
     private static partial void LogControl(ILogger logger, string path, string error);
