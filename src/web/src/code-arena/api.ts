@@ -1,6 +1,6 @@
 import { api } from '@/lib/api'
 import { blank, reduce, type LiveState } from '@/pages/chat/live'
-import type { ChatEvent, ChatTool, Message } from '@/pages/chat/types'
+import type { Attachment, ChatEvent, ChatTool, Message } from '@/pages/chat/types'
 import type { Piece } from './bridge'
 
 /** What code-arena web says of itself: the folder, the model, the mode, the session open now. */
@@ -238,8 +238,8 @@ export const openWebChat = (id: string) => api<CodeSession>('/api/sessions/web',
 export const sendAllSessions = () => api<{ sent: number; failed: string[] }>('/api/sessions/send-all', { body: {} })
 export const stopTurn = () => api('/api/stop', { body: {} })
 /** A message for after the answer being written (at once when none is), with the lines chosen in the editor and the part of an answer it quotes. */
-export const queueMessage = (text: string, context?: Piece[], quote?: string) =>
-  api<{ queued: number }>('/api/queue', { body: { text, ...(context?.length && { context }), ...(quote && { quote }) } })
+export const queueMessage = (text: string, context?: Piece[], quote?: string, attachments?: Attachment[]) =>
+  api<{ queued: number }>('/api/queue', { body: { text, ...(context?.length && { context }), ...(quote && { quote }), ...(attachments?.length && { attachments }) } })
 // A body, so it goes as JSON: code-arena web refuses any other call that changes something.
 export const clearQueue = () => api('/api/queue', { method: 'DELETE', body: {} })
 export const answerApproval = (id: string, answer: 'allow' | 'always' | 'deny') => api('/api/approvals', { body: { id, answer } })

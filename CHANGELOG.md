@@ -55,6 +55,9 @@ Sections used:
   tools on or off per session (the IDE's Tools menu, /tools on|off), and
   past 6,000 characters of definitions only those the model loads go whole
   (about 8,700 tokens fewer in every request with Arena's tools)
+- **Files in Code Arena's chat**, as in the web chat: clip, paste or drop;
+  Arena reads documents' text for the model, a model that sees gets the
+  pictures, and the chat on the web shows them as the question's attachments
 - Code Arena's IDE reaches the person's files in Arena through code-arena,
   which adds the key (the page never holds it); Arena takes the key on those
   routes alone

@@ -1187,6 +1187,19 @@ internal sealed class ChatSync : IAsyncDisposable
             o["content"] = split.Text;
             o["quote"] = quote;
         }
+        // Files attached in the IDE: Arena has them already (uploaded there), and keeps them as the question's attachments, so
+        // the web shows them and its model reads them itself; their text and pictures stay out of the words.
+        if (role == "user" && (m["content"] is JsonArray parts ? parts.OfType<JsonObject>().FirstOrDefault(p => p.Str("type") == "text")?.Str("text") : o.Str("content")) is { } words
+            && Uploads.Split(words) is { Files.Count: > 0 } attached)
+        {
+            var (quoted, text) = Quotes.Split(attached.Text);
+            o["content"] = text;
+            if (quoted is not null)
+            {
+                o["quote"] = quoted;
+            }
+            o["attachments"] = new JsonArray([.. attached.Files.Select(f => (JsonNode)new JsonObject { ["id"] = f.Id, ["name"] = f.Name, ["kind"] = f.Kind, ["contentType"] = f.ContentType })]);
+        }
         if (e.Kind is not null)
         {
             o["kind"] = e.Kind;

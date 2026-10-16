@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronUp, Cloud, CloudUpload, FileCode2, FolderGit2, GitBranch, History, ListChecks, LoaderCircle, MessageSquarePlus, Monitor, Moon, PanelRightClose, ScrollText, ShieldCheck, Square, SquareTerminal, Sun, TestTubeDiagonal, Plus, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronUp, Cloud, CloudUpload, FileCode2, FolderGit2, GitBranch, History, ListChecks, LoaderCircle, MessageSquarePlus, Monitor, Moon, PanelRightClose, Paperclip, ScrollText, ShieldCheck, Square, SquareTerminal, Sun, TestTubeDiagonal, Plus, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -28,7 +28,9 @@ import { useQuotableSelection } from '@/pages/chat/quotable'
 import { findQuoted, type Quote } from '@/pages/chat/quote'
 import { QuoteChip } from '@/pages/chat/quote-parts'
 import { SelectionToolbar } from '@/pages/chat/selection-toolbar'
-import type { ChatConfig, Message } from '@/pages/chat/types'
+import type { Attachment, ChatConfig, ChatModel, Message } from '@/pages/chat/types'
+import { UploadChips } from '@/pages/chat/upload-chips'
+import { useUploads } from '@/pages/chat/uploads'
 import {
   answerApproval,
   clearQueue,
@@ -602,13 +604,13 @@ export function Thread({
   }, [state.synced, queryClient])
 
   /** While an answer is written: the message waits in the queue and runs when the answer ends (with the part of an answer it quotes). */
-  const queue = async (text: string, context?: Piece[], quoted?: Quote | null): Promise<boolean> => {
+  const queue = async (text: string, context?: Piece[], quoted?: Quote | null, attachments: Attachment[] = []): Promise<boolean> => {
     if (text === '/compact' || text === '/clear' || text === '/new') {
       toast.error(`Wait for the answer, or stop it, to run ${text}.`)
       return false
     }
     try {
-      await queueMessage(text, context, quoted?.text)
+      await queueMessage(text, context, quoted?.text, attachments)
       toast.success('Queued: it is sent when this answer ends.')
       await queryClient.invalidateQueries({ queryKey: stateQuery.queryKey })
       return true
@@ -638,7 +640,7 @@ export function Thread({
    * Sends a message, with the lines chosen in the editor (those above the box, or `context` when given: a question from the
    * editor) and the quote above the box (`quoted`: a question about a selection instead).
    */
-  const send = async (text: string, context?: Piece[], quoted?: Quote): Promise<boolean> => {
+  const send = async (text: string, context?: Piece[], quoted?: Quote, attachments: Attachment[] = []): Promise<boolean> => {
     if (text === '/compact') return compact()
     if (text === '/clear' || text === '/new') {
       await newSession().catch((e) => toast.error(errorMessage(e)))
@@ -652,17 +654,24 @@ export function Thread({
     if (!context && withQuote) setQuote(null)
     const keepQuote = () => !context && withQuote && setQuote((now) => now ?? withQuote)
     const localId = newLocalId()
-    const asked = withQuestion(view, localId, path.at(-1)?.id ?? null, text, [], withQuote?.text)
+    const asked = withQuestion(view, localId, path.at(-1)?.id ?? null, text, attachments, withQuote?.text)
     const start = { ...view, ...asked, messages: asked.messages.map((m) => (m.id === localId && going.length > 0 ? { ...m, files: going.map(pieceLabel) } : m)) }
     try {
-      const sent = await run('/api/messages', { text, ...(going.length > 0 && { context: going }), ...(withQuote && { quote: withQuote.text }) }, start, localId, undefined, true)
+      const sent = await run(
+        '/api/messages',
+        { text, ...(going.length > 0 && { context: going }), ...(withQuote && { quote: withQuote.text }), ...(attachments.length > 0 && { attachments }) },
+        start,
+        localId,
+        undefined,
+        true,
+      )
       if (!sent && !context) setPieces((now) => (now.length > 0 ? now : pieces))
       if (!sent) keepQuote()
       return sent
     } catch (e) {
       // An answer started meanwhile that this page had not seen yet (a command ended, another tab): the message waits for it.
       if (e instanceof ApiError && e.status === 'busy') {
-        const queued = await queue(text, going, withQuote)
+        const queued = await queue(text, going, withQuote, attachments)
         if (!queued) keepQuote()
         return queued
       }
@@ -728,8 +737,8 @@ export function Thread({
   const composer = (big: boolean) => (
     <Composer
       streaming={streaming}
-      onSend={(text) => send(text)}
-      onQueue={async (text) => {
+      onSend={(text, attachments) => send(text, undefined, undefined, attachments)}
+      onQueue={async (text, attachments) => {
         const kept = pieces
         const keptQuote = quote
         setPieces([])
@@ -738,6 +747,7 @@ export function Thread({
           text,
           kept.map((p) => pieceOf(p.path, p.startLine, p.endLine)),
           keptQuote,
+          attachments,
         )
         if (!queued) {
           setPieces((now) => (now.length > 0 ? now : kept))
@@ -769,6 +779,8 @@ export function Thread({
         ) : null
       }
       history={history}
+      maxUploadBytes={config.maxUploadBytes}
+      model={model}
     />
   )
 
@@ -1017,11 +1029,13 @@ function Composer({
   history,
   quote,
   onClearQuote,
+  maxUploadBytes,
+  model,
 }: {
   streaming: boolean
-  onSend: (text: string) => Promise<boolean>
+  onSend: (text: string, attachments: Attachment[]) => Promise<boolean>
   /** While an answer is written: the message waits and runs when it ends. */
-  onQueue: (text: string) => Promise<boolean>
+  onQueue: (text: string, attachments: Attachment[]) => Promise<boolean>
   /** Lines of the folder's files that go with the next message (Add to chat in the editor). */
   pieces: Piece[]
   onRemovePiece: (p: Piece) => void
@@ -1041,8 +1055,16 @@ function Composer({
   /** The part of an answer the next message quotes, and how to take it away. */
   quote: Quote | null
   onClearQuote: () => void
+  /** The largest file Arena takes (0: no Arena here, so no files). */
+  maxUploadBytes: number
+  /** The model answering: whether it sees the pictures attached. */
+  model?: ChatModel
 }) {
   const area = useRef<HTMLTextAreaElement>(null)
+  const picker = useRef<HTMLInputElement>(null)
+  // Files go to Arena as they are added (through code-arena, which adds the key), as in the web chat.
+  const uploads = useUploads(maxUploadBytes)
+  const canAttach = maxUploadBytes > 0
   const recall = useRecall({ area, setText, source: history })
   const mention = useFileMention({ area, text, setText })
   // The file shown in the editor, and the lines chosen there: a click sends them with the message.
@@ -1060,15 +1082,17 @@ function Composer({
     if (text) el.style.height = `${Math.min(el.scrollHeight, 280)}px`
   }, [text])
   // While an answer is written the box still takes the next message: it is queued, and sent when the answer ends.
-  const canSend = text.trim().length > 0 || pieces.length > 0
+  const canSend = (text.trim().length > 0 || pieces.length > 0 || uploads.attachments.length > 0) && !uploads.busy
   const submit = async () => {
     if (!canSend) return
-    // Lines alone: asked about as they are.
+    // Lines or files alone: asked about as they are.
     const typed = text.trim()
-    const sent = typed || 'Look at these lines.'
+    const sent = typed || (pieces.length > 0 ? 'Look at these lines.' : 'Look at these files.')
+    const files = uploads.attachments
     setText('')
     recall.reset()
-    if (!(await (streaming ? onQueue(sent) : onSend(sent)))) setText((now) => now || typed)
+    if (await (streaming ? onQueue(sent, files) : onSend(sent, files))) uploads.clear()
+    else setText((now) => now || typed)
     area.current?.focus()
   }
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1100,6 +1124,15 @@ function Composer({
         </Button>
       </section>
     )}
+    {/* Files dropped on the box go with the message (a file dragged from the Explorer is a path, not a file: it is left to the editor). */}
+    <div
+      onDragOver={(e) => canAttach && e.dataTransfer.types.includes('Files') && e.preventDefault()}
+      onDrop={(e) => {
+        if (!canAttach || e.dataTransfer.files.length === 0) return
+        e.preventDefault()
+        uploads.add(e.dataTransfer.files)
+      }}
+    >
     <form
       className={cn('relative rounded-2xl border bg-card shadow-sm transition-shadow focus-within:border-primary/50 focus-within:shadow-md', big && 'shadow-md')}
       onSubmit={(e) => {
@@ -1108,6 +1141,7 @@ function Composer({
       }}
     >
       {mention.list}
+      <UploadChips uploads={uploads} model={model} />
       {quote && (
         <QuoteChip
           quote={quote}
@@ -1164,6 +1198,12 @@ function Composer({
         }}
         onSelect={mention.onCaret}
         onKeyDown={onKey}
+        onPaste={(e) => {
+          if (canAttach && e.clipboardData.files.length) {
+            e.preventDefault()
+            uploads.add(e.clipboardData.files)
+          }
+        }}
         aria-controls={mention.open ? 'mention-files' : undefined}
         aria-activedescendant={mention.activeId}
         aria-autocomplete="list"
@@ -1173,6 +1213,16 @@ function Composer({
         className={cn('block max-h-72 w-full resize-none bg-transparent px-4 pt-3 text-[0.9375rem] leading-relaxed outline-none placeholder:text-muted-foreground', big && 'min-h-20')}
       />
       <div className="flex items-center gap-2 px-2 pt-1 pb-2">
+        {canAttach && (
+          <>
+            <input ref={picker} type="file" multiple hidden onChange={(e) => { if (e.target.files) uploads.add(e.target.files); e.target.value = '' }} aria-label="Attach files" />
+            <Tooltip content="Attach files: Word, Excel, PowerPoint, PDF, text, code, images (Arena reads them; a model that sees gets the pictures)">
+              <Button type="button" variant="ghost" size="icon-sm" onClick={() => picker.current?.click()} aria-label="Attach">
+                <Paperclip />
+              </Button>
+            </Tooltip>
+          </>
+        )}
         {mode}
         <span className="hidden text-xs text-muted-foreground @2xl:inline">
           Enter to send · Shift+Enter for a new line<span className="hidden @4xl:inline"> · ↑ for what you sent before</span> · /compact · /clear
@@ -1191,6 +1241,7 @@ function Composer({
         )}
       </div>
     </form>
+    </div>
     </>
   )
 }

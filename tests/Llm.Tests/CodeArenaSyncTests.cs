@@ -117,6 +117,33 @@ public sealed class CodeArenaSyncTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Files_attached_in_Code_Arena_are_the_question_s_attachments_on_the_web_the_person_s_own_only()
+    {
+        await using var f = NewApp();
+        var (web, key) = await PersonAsync(f);
+        var (_, otherKey) = await PersonAsync(f);
+        async Task<Guid> UploadAsync(string withKey, string name)
+        {
+            using var form = new MultipartFormDataContent();
+            var part = new ByteArrayContent(System.Text.Encoding.UTF8.GetBytes("the text of " + name));
+            part.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+            form.Add(part, "file", name);
+            return (await Json(await CodeArena(f, withKey).PostAsync(new Uri("/api/chat/attachments", UriKind.Relative), form))).GetProperty("id").GetGuid();
+        }
+        var mine = await UploadAsync(key, "mine.txt");
+        var theirs = await UploadAsync(otherKey, "theirs.txt");
+        var arena = CodeArena(f, key);
+        var id = await ChatAsync(arena, "20261016-1200-files1");
+        await SendAsync(arena, id, null, [
+            new { role = "user", content = "read these", attachments = new[] { new { id = mine, name = "mine.txt", kind = "text", contentType = "text/plain" }, new { id = theirs, name = "theirs.txt", kind = "text", contentType = "text/plain" } } },
+            Answer("Read."),
+        ]);
+        var question = (await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{id}"))).GetProperty("messages")[0];
+        Assert.Equal("read these", question.GetProperty("content").GetString());
+        Assert.Equal(["mine.txt"], question.GetProperty("attachments").EnumerateArray().Select(a => a.GetProperty("fileName").GetString()));
+    }
+
+    [Fact]
     public async Task A_quote_crosses_the_sync_both_ways_as_its_own_field_not_in_the_content()
     {
         await using var f = NewApp();

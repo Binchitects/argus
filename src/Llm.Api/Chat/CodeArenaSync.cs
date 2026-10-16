@@ -319,6 +319,10 @@ public static class CodeArenaSync
             // A message this chat does not have (Code Arena's file is from another chat, or the message went): it reads the chat again.
             return Results.Conflict(await ReadFromAsync(db, c, tree, named, MostRead, OutwardOf(safeguards, chat), ct) with { Status = "behind" });
         }
+        // Files that went with Code Arena's questions (uploaded through its IDE): kept as the questions' attachments, the
+        // person's own only.
+        var wanted = messages.Where(m => m.Role == "user").SelectMany(m => m.Attachments ?? []).Select(a => a.Id).Distinct().ToList();
+        var owned = wanted.Count == 0 ? [] : (await db.ChatAttachments.Where(a => wanted.Contains(a.Id) && a.UserId == me.Id).Select(a => a.Id).ToListAsync(ct)).ToHashSet();
         var ids = new List<Guid>();
         var rest = messages;
         // Sent before, its answer lost on the way: those already here are not added twice.
@@ -339,7 +343,7 @@ public static class CodeArenaSync
                 var results = rest.TakeWhile(m => m.Role == "tool" && m.ToolCallId is { } call && calls.Contains(call)).ToList();
                 if (results.Count > 0)
                 {
-                    var last = Add(db, id, p, results, ref sequence, ids);
+                    var last = Add(db, id, p, results, ref sequence, ids, owned);
                     var next = await db.ChatMessages.SingleAsync(m => m.Id == tree.Path[place + 1].Id, ct);
                     next.ParentId = last;
                     c.UpdatedAt = DateTimeOffset.UtcNow;
@@ -356,7 +360,7 @@ public static class CodeArenaSync
         var count = (parent is null ? 0 : Depth(tree, parent.Value)) + rest.Count;
         if (rest.Count > 0)
         {
-            leaf = Add(db, id, parent, rest, ref sequence, ids);
+            leaf = Add(db, id, parent, rest, ref sequence, ids, owned);
             // An archived chat stays so: only the person's continuing it from Code Arena (/continued) brings it back to the list.
             c.UpdatedAt = DateTimeOffset.UtcNow;
             if (c.Title == "New chat" && rest.FirstOrDefault(m => m.Role == "user") is { } first && TitleOf(Text(first.Content)) is { } title)
@@ -387,8 +391,11 @@ public static class CodeArenaSync
         return Results.Ok(new { ids, count, stamp = Stamp(c.CurrentLeafId), summarized });
     }
 
-    /// <summary>The messages added after <paramref name="parent"/>, each the next one's parent; the last one's id.</summary>
-    private static Guid? Add(AppDbContext db, Guid conversation, Guid? parent, IEnumerable<SyncMessage> messages, ref int sequence, List<Guid> ids)
+    /// <summary>
+    /// The messages added after <paramref name="parent"/>, each the next one's parent; the last one's id. A question's
+    /// attachments are kept when they are the person's (<paramref name="owned"/>).
+    /// </summary>
+    private static Guid? Add(AppDbContext db, Guid conversation, Guid? parent, IEnumerable<SyncMessage> messages, ref int sequence, List<Guid> ids, HashSet<Guid> owned)
     {
         foreach (var m in messages)
         {
@@ -400,6 +407,8 @@ public static class CodeArenaSync
                 Role = m.Role,
                 Content = Text(m.Content),
                 Quote = m.Role == "user" && ChatQuotes.Clean(m.Quote) is { } quote ? ChatQuotes.Cut(quote) : null,
+                AttachmentsJson = m.Role == "user" && (m.Attachments ?? []).Select(a => a.Id).Where(owned.Contains).Distinct().ToArray() is { Length: > 0 } files
+                    ? JsonSerializer.Serialize(files) : null,
                 Reasoning = string.IsNullOrEmpty(m.Reasoning) ? null : m.Reasoning,
                 ToolCallsJson = m.Role == "assistant" && m.ToolCalls is JsonArray { Count: > 0 } calls ? calls.ToJsonString() : null,
                 ToolCallId = m.Role == "tool" ? Clip(m.ToolCallId, 200) : null,

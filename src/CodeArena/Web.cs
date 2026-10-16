@@ -595,8 +595,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["argus"] = false,
             ["tools"] = new JsonArray(),
             ["gitlabUrl"] = arena?.Str("gitlabUrl"),
-            ["maxUploadBytes"] = 0,
-            ["imageTypes"] = new JsonArray(),
+            // Files go to Arena (relayed with the key): as large as it takes; none without it.
+            ["maxUploadBytes"] = arena?.Long("maxUploadBytes") ?? 0,
+            ["imageTypes"] = arena?["imageTypes"]?.DeepClone() ?? new JsonArray(),
         };
     }
 
@@ -869,6 +870,12 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             await res.ErrorAsync(400, "invalid", "A quote is at most 4,000 characters.", ct);
             return;
         }
+        var uploads = Uploads.From(body, out var wrong);
+        if (wrong is not null)
+        {
+            await res.ErrorAsync(400, "invalid", wrong, ct);
+            return;
+        }
         await SettleAsync(ct);
         if (Begin("answer") is not { } job)
         {
@@ -877,7 +884,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         }
         // Kept for ↑, here and in the terminal: the folder's history.
         _rt.History.Add(text);
-        job.Running = Task.Run(() => RunTurnAsync(job, text, pieces, quote));
+        job.Running = Task.Run(() => RunTurnAsync(job, text, pieces, quote, uploads));
         await StreamAsync(job, res, ct);
     }
 
@@ -901,7 +908,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     /// Messages sent while an answer is written (with the lines chosen in the editor, and the part of an answer each quotes): each
     /// runs, in order, once the one before it ends.
     /// </summary>
-    private readonly List<(string Text, IReadOnlyList<Mentions.Piece>? Pieces, string? Quote)> _queued = [];
+    private readonly List<(string Text, IReadOnlyList<Mentions.Piece>? Pieces, string? Quote, IReadOnlyList<Upload>? Uploads)> _queued = [];
 
     /// <summary>
     /// The lines chosen in the editor that go with a message: <c>context</c>, each <c>{path, startLine, endLine, text?}</c>
@@ -928,12 +935,18 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             await res.ErrorAsync(400, "invalid", "A quote is at most 4,000 characters.", ct);
             return;
         }
+        var uploads = Uploads.From(body, out var wrong);
+        if (wrong is not null)
+        {
+            await res.ErrorAsync(400, "invalid", wrong, ct);
+            return;
+        }
         _rt.History.Add(text);
         int place;
         lock (_gate)
         {
             // The lines as they are now: when it runs, the file may have changed.
-            _queued.Add((text, Pieces(body)?.Select(p => p.Taken(_rt.Workspace)).ToList(), quote));
+            _queued.Add((text, Pieces(body)?.Select(p => p.Taken(_rt.Workspace)).ToList(), quote, uploads));
             place = _queued.Count;
         }
         StartNext();
@@ -949,6 +962,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         string? text = null;
         IReadOnlyList<Mentions.Piece>? pieces = null;
         string? quote = null;
+        IReadOnlyList<Upload>? uploads = null;
         Job? job;
         lock (_gate)
         {
@@ -958,7 +972,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             }
             if (_queued.Count > 0)
             {
-                (text, pieces, quote) = _queued[0];
+                (text, pieces, quote, uploads) = _queued[0];
                 _queued.RemoveAt(0);
             }
             else if (_rt.Jobs.Follow().Count == 0)
@@ -968,7 +982,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             job = _job = new Job("answer");
             _turns++;
         }
-        job.Running = Task.Run(() => RunTurnAsync(job, text, pieces, quote));
+        job.Running = Task.Run(() => RunTurnAsync(job, text, pieces, quote, uploads));
     }
 
     /// <summary>A new job when none runs; null when one does.</summary>
@@ -986,7 +1000,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     }
 
     /// <summary>A turn as a job: the person's message, or (null) the model carrying on after commands that ended.</summary>
-    private async Task RunTurnAsync(Job job, string? text, IReadOnlyList<Mentions.Piece>? pieces = null, string? quote = null)
+    private async Task RunTurnAsync(Job job, string? text, IReadOnlyList<Mentions.Piece>? pieces = null, string? quote = null, IReadOnlyList<Upload>? uploads = null)
     {
         var turn = new Spend();
         _rt.Turn = turn;
@@ -1016,8 +1030,14 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             if (text is not null)
             {
                 text = _rt.Prepare(text);
-                job.Emit(new JsonObject { ["type"] = "question", ["id"] = $"m{count}", ["parentId"] = count == 0 ? null : $"m{count - 1}", ["text"] = text, ["quote"] = quote });
-                await _rt.Agent.RunAsync(text, turn, job.Stop.Token, takeIn: false, pieces, quote);
+                job.Emit(new JsonObject
+                {
+                    ["type"] = "question", ["id"] = $"m{count}", ["parentId"] = count == 0 ? null : $"m{count - 1}", ["text"] = text, ["quote"] = quote,
+                    ["attachments"] = uploads is { Count: > 0 } ? Uploads.Shown(uploads) : null,
+                });
+                // The files attached: their text read from Arena, their pictures for a model that sees them.
+                var uploaded = uploads is { Count: > 0 } ? await Uploads.ReadAsync(uploads, _rt.Config, _rt.Http, _rt.Sees(_rt.Model.Info), job.Stop.Token) : ((string, JsonArray)?)null;
+                await _rt.Agent.RunAsync(text, turn, job.Stop.Token, takeIn: false, pieces, quote, uploaded);
             }
             else
             {
@@ -1668,6 +1688,7 @@ internal static partial class History
             string? summary = null;
             string? quote = null;
             List<string>? attached = null;
+            List<Upload> uploads = [];
             if (role == "assistant")
             {
                 if (content.EndsWith(StoppedMark, StringComparison.Ordinal))
@@ -1702,6 +1723,7 @@ internal static partial class History
             {
                 // What was typed; the part of an answer it quotes, and what went with it (@files, the lines chosen in the editor), apart.
                 (quote, content) = Quotes.Split(content);
+                (content, uploads) = Uploads.Split(content);
                 attached = Mentions.Attached(content);
                 content = Mentions.Typed(content);
             }
@@ -1718,7 +1740,7 @@ internal static partial class History
                 ["toolName"] = toolName,
                 ["toolCallId"] = callId,
                 ["toolCalls"] = calls,
-                ["attachments"] = new JsonArray(),
+                ["attachments"] = Uploads.Shown(uploads),
                 ["status"] = status,
                 ["error"] = null,
                 ["model"] = role == "assistant" ? entry?.Model ?? answer.Model : null,

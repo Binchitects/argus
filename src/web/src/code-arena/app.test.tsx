@@ -10,6 +10,15 @@ import { fromSession, keptOutput, reduceCode, type CodeSession, type CodeState, 
 import { App } from './app'
 import { getCommand } from './commands'
 
+// An upload goes by XMLHttpRequest (for its progress), which has no server in tests.
+vi.mock('@/pages/chat/api', async (original) => ({
+  ...(await original<typeof import('@/pages/chat/api')>()),
+  uploadFile: vi.fn(async (file: File, onProgress: (p: number) => void) => {
+    onProgress(1)
+    return { id: `att-${file.name}`, fileName: file.name, size: file.size, truncated: false, kind: file.type.startsWith('image/') ? 'image' : 'text', contentType: file.type }
+  }),
+}))
+
 // Each tool card's arguments, as read for its line: counted, to see which cards are drawn again.
 vi.mock('@/pages/chat/tool-args', async (real) => {
   const actual = await real<typeof import('@/pages/chat/tool-args')>()
@@ -307,6 +316,43 @@ describe('Code Arena in the browser', () => {
     await userEvent.click(await screen.findByRole('switch', { name: /GitLab/ }))
     await waitFor(() => expect(calls.find((c) => c.path === '/api/settings')?.body).toEqual({ tools: ['web'] }))
     expect(await screen.findByRole('button', { name: 'Tools: 1 of 2 on' })).toBeInTheDocument()
+  })
+
+  it('attaches files as the web chat does, when Arena takes them: shown above the box, sent with the message and shown with the question', async () => {
+    let end!: () => void
+    const over = new Promise<void>((r) => (end = r))
+    const { calls, now } = backend({
+      extra: {
+        'GET /api/chat/config': () => ({ json: { ...config, maxUploadBytes: 1_000_000 } }),
+        'POST /api/messages': () => {
+          now.state = { ...now.state, busy: true }
+          return { events: turn.slice(0, 1), until: over }
+        },
+      },
+    })
+    renderCode()
+    await userEvent.upload(await screen.findByLabelText('Attach files'), new File(['42'], 'numbers.txt', { type: 'text/plain' }))
+    const going = await screen.findByRole('list', { name: 'Files to send' })
+    expect(within(going).getByText('numbers.txt')).toBeInTheDocument()
+    await ask('What do they say?')
+    await waitFor(() =>
+      expect(calls.find((c) => c.path === '/api/messages')?.body).toEqual({
+        text: 'What do they say?',
+        attachments: [{ id: 'att-numbers.txt', fileName: 'numbers.txt', size: 2, truncated: false, kind: 'text', contentType: 'text/plain' }],
+      }),
+    )
+    // Sent: the box is empty of them, and the question shows them.
+    await waitFor(() => expect(screen.queryByRole('list', { name: 'Files to send' })).not.toBeInTheDocument())
+    expect(await screen.findByText('numbers.txt')).toBeInTheDocument()
+    now.state = { ...now.state, busy: false }
+    end()
+  })
+
+  it('offers no files without Arena to take them', async () => {
+    backend()
+    renderCode()
+    await screen.findByRole('textbox', { name: 'Message' })
+    expect(screen.queryByRole('button', { name: 'Attach' })).not.toBeInTheDocument()
   })
 
   it("lists this folder's sessions, newest first, and resumes one with its history", async () => {

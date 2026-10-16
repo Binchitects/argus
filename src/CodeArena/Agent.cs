@@ -296,11 +296,13 @@ internal sealed class Agent
     /// <param name="takeIn">Whether the web chat's news is taken in first (<see cref="BeforeTurn"/>); the IDE takes it in itself.</param>
     /// <param name="pieces">Lines chosen in the IDE's editor, sent with the message.</param>
     /// <param name="quote">The part of an earlier answer the message replies to: the model reads it before the message (<see cref="Quotes"/>).</param>
-    public async Task<string> RunAsync(string? input, Spend turn, CancellationToken ct, bool takeIn = true, IReadOnlyList<Mentions.Piece>? pieces = null, string? quote = null)
+    /// <param name="uploaded">Files attached in the IDE, as <see cref="Uploads.ReadAsync"/> read them: their text after the message, their pictures with it.</param>
+    public async Task<string> RunAsync(string? input, Spend turn, CancellationToken ct, bool takeIn = true, IReadOnlyList<Mentions.Piece>? pieces = null, string? quote = null,
+        (string Section, JsonArray Pictures)? uploaded = null)
     {
         try
         {
-            return await RunTurnAsync(input, turn, ct, takeIn, pieces, quote);
+            return await RunTurnAsync(input, turn, ct, takeIn, pieces, quote, uploaded);
         }
         finally
         {
@@ -311,7 +313,8 @@ internal sealed class Agent
         }
     }
 
-    private async Task<string> RunTurnAsync(string? input, Spend turn, CancellationToken ct, bool takeIn, IReadOnlyList<Mentions.Piece>? pieces, string? quote)
+    private async Task<string> RunTurnAsync(string? input, Spend turn, CancellationToken ct, bool takeIn, IReadOnlyList<Mentions.Piece>? pieces, string? quote,
+        (string Section, JsonArray Pictures)? uploaded)
     {
         if (input is not null)
         {
@@ -341,6 +344,11 @@ internal sealed class Agent
                     Events?.Attached(files);
                     input = expanded;
                 }
+                // The files attached in the IDE come last: their text, and their pictures as parts of the message.
+                if (uploaded is { } attached)
+                {
+                    input += attached.Section;
+                }
                 // The part of an answer it replies to goes first (the checkpoint keeps what was typed).
                 input = Quotes.Compose(quote, input);
             }
@@ -351,7 +359,7 @@ internal sealed class Agent
         var done = false;
         try
         {
-            var answer = await TurnAsync(input, turn, ct);
+            var answer = await TurnAsync(input, turn, ct, Depth == 0 ? uploaded?.Pictures : null);
             done = true;
             await CommitAsync(before, asked, ct);
             return answer;
@@ -473,12 +481,17 @@ internal sealed class Agent
         }
     }
 
-    private async Task<string> TurnAsync(string? input, Spend turn, CancellationToken ct)
+    private async Task<string> TurnAsync(string? input, Spend turn, CancellationToken ct, JsonArray? pictures = null)
     {
         JsonObject? question = null;
         if (input is not null)
         {
-            question = new JsonObject { ["role"] = "user", ["content"] = input };
+            // Pictures go as parts of the message, after its words (as the web chat sends them).
+            question = new JsonObject
+            {
+                ["role"] = "user",
+                ["content"] = pictures is { Count: > 0 } ? new JsonArray([new JsonObject { ["type"] = "text", ["text"] = input }, .. pictures.Select(p => p!.DeepClone())]) : input,
+            };
             Add(question);
         }
         var last = "";

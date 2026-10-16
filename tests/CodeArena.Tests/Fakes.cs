@@ -313,7 +313,7 @@ public sealed class FakeGateway : FakeServer
 
     /// <summary>The conversation a request carries: its messages after the system prompt, Code Arena's notes left out.</summary>
     public static List<JsonNode> History(JsonObject request) =>
-        [.. request["messages"]!.AsArray().Skip(1).Where(m => m!["content"]?.GetValue<string>().StartsWith(SystemPrompt.NoteHead, StringComparison.Ordinal) != true).Select(m => m!)];
+        [.. request["messages"]!.AsArray().Skip(1).Where(m => !(m!["content"] is JsonValue said && said.GetValue<string>().StartsWith(SystemPrompt.NoteHead, StringComparison.Ordinal))).Select(m => m!)];
 
     /// <summary>The notes of Code Arena's in a request.</summary>
     public static List<string> Notes(JsonObject request) =>

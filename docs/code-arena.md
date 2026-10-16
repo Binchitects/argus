@@ -309,7 +309,15 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   models are loaded, load when asked or are not loaded now, which see
   pictures, the deployment's thinking levels with their names, and which one
   **Default** is; Argus's answers link to the same GitLab. Without Arena every
-  model counts as loaded, with Code Arena's own five levels; the thread with a card for each tool call and
+  model counts as loaded, with Code Arena's own five levels. **Files** go with
+  a message as in the web chat: the clip, a paste or a drop on the box (Word,
+  Excel, PowerPoint, PDF, text, code, pictures), up to 10, as large as Arena
+  takes. They are uploaded to Arena (through code-arena, which adds the key),
+  which reads a document's text: the model reads it after the message (up to
+  60,000 characters a file), and a model that sees gets the pictures with it
+  (named otherwise; a sound or a video is named only). The question shows them,
+  and the chat in Arena keeps them as its attachments, so the web shows them
+  and its model reads them. Without Arena there is no clip. Then the thread, with a card for each tool call and
   a diff under each edit, the approval card (**Allow**, **Always for this
   session**, **Deny**), Stop, the mode, `/compact` and `/clear`. A command
   the agent runs with no time limit shows above the box while it runs: the
