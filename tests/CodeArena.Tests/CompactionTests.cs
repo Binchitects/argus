@@ -9,7 +9,7 @@ public sealed class CompactionTests : IDisposable
     private readonly FakeGateway _gateway = new() { Context = 20_000 };
     private readonly FakeMcp _mcp = new();
 
-    private static bool Summarizing(JsonObject req) => FakeGateway.System(req).StartsWith("You summarize", StringComparison.Ordinal);
+    private static bool Summarizing(JsonObject req) => FakeGateway.Summarizing(req);
 
     private async Task<Runtime> StartAsync(Harness h, Options? o = null)
     {

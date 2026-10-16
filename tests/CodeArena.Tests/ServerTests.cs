@@ -104,7 +104,8 @@ public sealed class ServerTests : IDisposable
 
         // Its proxy says it is gone (502): the call fails, said to the model, and the link connects again (and fails).
         _mcp.Status = 502;
-        _gateway.Answer = req => FakeGateway.HasToolResults(req) ? Reply.Say("Saw: " + FakeGateway.Last(req)) : Reply.Call(("web_search", """{"query":"x"}"""));
+        // The tool's result (Code Arena's note that Arena's tools are gone may follow it).
+        _gateway.Answer = req => FakeGateway.HasToolResults(req) ? Reply.Say("Saw: " + FakeGateway.History(req)[^1]["content"]) : Reply.Call(("web_search", """{"query":"x"}"""));
         var answer = await rt.Agent.RunAsync("search", new Spend(), CancellationToken.None);
         Assert.Contains("Error from the arena tools", answer);
         Assert.Contains("502", answer);

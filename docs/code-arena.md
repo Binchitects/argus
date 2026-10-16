@@ -1054,6 +1054,7 @@ status (403 `outside` for a path outside the folder).
 | `GET /api/files?path=DIR` | a folder's entries, folders first: `{path, entries: [{name, path, kind, size, link}]}` |
 | `GET /api/files/all` | every file, for quick open: `{files, truncated}` (50,000 at most) |
 | `GET /api/file?path=FILE` | `{path, size, version, text}`; `text` is null with `binary` or `tooLarge` (over 5 MB) |
+| `GET /api/media?path=FILE` | a picture, sound or video of the allowed folders as it is (PNG, JPEG, GIF, WebP, BMP, AVIF, MP3, WAV, Ogg, FLAC, M4A, AAC, MP4, WebM, MOV; up to 256 MB), for an `img`, `audio` or `video` element: the media type set, `nosniff` and a sandboxing CSP; 415 `not_media` for anything else (SVG and HTML included), 413 `too_large` |
 | `POST /api/file` `{path, text, version}` | saves; 409 `changed` when the file changed since `version`; `{path, version, size}` |
 | `POST /api/files/new` `{path, kind}` | a new file, or a folder with `kind: "dir"`; 409 `exists` |
 | `POST /api/files/rename` `{from, to}` | moves a file or folder; `{from, to}` |
@@ -1158,8 +1159,10 @@ time limit.
 
 A question takes **y** (yes), **n** (no: the model is told, and asked to find
 another way) or **a** (always, for this session: every file edit; a command by
-its first two words, `npm test …`; an MCP tool by name). `plan` offers the
-model only the tools that change nothing, and asks it for a plan to approve.
+its first two words, `npm test …`; an MCP tool by name). `plan` refuses every
+tool that changes something when the model calls it (the model is offered the
+same tools in every mode, so the start of its requests stays cached), and asks
+it for a plan to approve.
 `yolo` warns when it starts: use it in a folder you can throw away. Set the
 mode with `--mode`, `/mode`, or `"mode"` in the config file.
 
@@ -1251,6 +1254,23 @@ same tools as the chat, with the same rights and the same audit, as that
 person. They run without asking, except those Arena marks as changing
 something, which ask like a command. A tool named like a local one is offered
 as `arena_<name>`. Arena's own instructions to the model are passed on.
+Arena's tools make pictures, video and speech too: what a tool returns (a
+picture or sound inline, a file it links to, fetched with `resources/read`;
+up to 256 MB) is saved in the working directory under `.code-arena/media/`,
+named after the tool and the time (`generate_image-20261016-101500.png`), and
+the model is given its path to tell the person, who opens it in the IDE. That
+folder has a `.gitignore` of its own, so the files are never committed.
+
+**Every tool call has a deadline**: 10 minutes without an answer, unless the
+tool says it takes longer (`"arena/timeoutSeconds"` or `"timeoutSeconds"` in
+its `_meta`). Each progress report the server sends (MCP
+`notifications/progress`, asked for with a progress token on every call)
+starts the time again and is told to the person (every 20 seconds at most).
+Past it the call is given up: the server is told (`notifications/cancelled`)
+and the model hears that it timed out. Every connection has TCP keep-alive
+(a probe after 30 seconds of quiet, then every 10), so a server that went away
+without a word (a laptop asleep, a VPN that changed) is found out in about a
+minute and a half rather than never.
 
 **Argus's tools** come from `https://argus.DOMAIN/mcp` with the same key
 (`"argusUrl"` in the config file for another address; none for an Arena
@@ -1348,7 +1368,11 @@ shell, the working directory, the git branch, the date and the mode.
 
 Each session is a JSON Lines file in the sessions folder (0600): every message
 as it happens, the model, the to-do list and the tokens. `--continue`,
-`--resume` and `/resume` read it back.
+`--resume` and `/resume` read it back. A compaction appends the new history
+(the summary and the part kept), never rewrites the file. Each file is
+scanned once while Code Arena runs and then only what was appended to it (by
+its size and time), so listing sessions and the IDE's session list stay fast
+with long sessions; reading one back starts at its last compaction.
 
 The model's window comes from the gateway (`/v1/model/info`), or `"context"`
 in the config file when the gateway does not say (32,768 otherwise). When the
@@ -1358,6 +1382,42 @@ decisions, files, commands and the state of the work) and the recent part
 kept whole, within the **target**, 25% of the window by default. `/compact`
 does it at once. A tool's output longer than 40,000 characters (less for a
 small window) is cut in the middle.
+
+A long session never gets stuck on the window:
+
+- **The summary is asked as the conversation goes on**: the same system
+  prompt, tools and older messages the model has read (so the engine reads
+  them from its cache), then a request to summarize them, within what the
+  window holds (the oldest messages left out past it, an earlier summary
+  kept).
+- **A summary that cannot be made is not fatal**: the older messages are left
+  out instead, with a note of what they held (the summary before them, the
+  person's messages, the files changed, the commands run, the last answer),
+  long tool results and file contents the model wrote in older steps are cut
+  to their start, and the turn goes on. A summary is tried again only after 2
+  compactions (then 4, then 8) while it keeps failing; `/compact` always tries
+  it, and leaves the conversation as it was when it fails.
+- **One long turn compacts itself**: when nothing before the turn is left to
+  summarize, the turn's earlier steps are (the person's message and the
+  latest steps kept whole). A compaction that would change nothing writes
+  nothing and does not reset the IDE's page.
+- **A request the window refuses** (the engine's or LiteLLM's "exceeds the
+  context size", `ContextWindowExceededError`, "maximum context length") is
+  compacted at once and asked again, once. If it still does not fit, the turn
+  ends with that, and the message is taken out of the conversation so it does
+  not pile up.
+- **The size is measured, not guessed**: the characters a token holds are
+  learned from the gateway's counts (and from the size a refusal gives); a
+  resumed session starts from its last count. The answer's room (the model's
+  longest answer as the gateway says, 4,096 tokens otherwise, at most an
+  eighth of the window) stays free below the window, whatever the threshold.
+- **The start of every request stays the same**, so the engine does not read
+  the whole conversation again after a change: the same tools in every mode,
+  MCP servers' tools in the order they came (a new server's at the end), and
+  what changes during a session (the mode, the date, the branch, whether
+  Arena's tools are connected, the servers' instructions) in a short note of
+  Code Arena's added to the conversation where it changed, never in the
+  system prompt. The notes are not saved in the session nor shown on the page.
 
 Set them with `/compact-at 70` (the threshold) or `/compact-at 70 30` (and the
 target), in the IDE's **Context** (the window's use in the status bar), or
@@ -1546,7 +1606,7 @@ A `command` runs as a child process speaking MCP on stdin and stdout (`args`,
 `headers` is taken from the environment, so tokens stay out of the file. Their
 tools are named `mcp__<server>__<tool>` and ask before each call unless the
 server has `"trust": true` (or the mode is `yolo`); in `plan` mode only those
-the server marks read-only are offered. `"disabled": true` keeps a server
+the server marks read-only run (the others are refused when called). `"disabled": true` keeps a server
 without starting it. On Windows, `npx` and other `.cmd` scripts need
 `"command": "cmd", "args": ["/c", "npx", …]`.
 
@@ -1611,8 +1671,13 @@ tried again five times over about a minute and a half, and the session says so
 each time. An answer that has not started after a minute says so (the engine
 busy with others, or reading a long prompt; Ctrl+C or **Stop** ends the wait).
 One that does not start within 15 minutes, or that stops for 3 minutes, is
-given up and asked once more; a second such stall ends the turn with the
-reason, and the next message is sent as usual. When
+given up and asked once more (the gateway's own timeout, 408, counts as such a
+stall); a second such stall ends the turn with the reason, and the next
+message is sent as usual. Once the engine's reading speed is measured (the
+time to the first word of answers whose prompt it had not cached), a request
+with much it has not cached says first about how long the answer may take to
+start, and waits half as long again as that before giving up (an hour at
+most). When
 the connection drops after part of an answer arrived (a stream that ends
 without its end counts too), that part is kept and the model is asked to carry
 on from where it stopped, up to three times a turn.

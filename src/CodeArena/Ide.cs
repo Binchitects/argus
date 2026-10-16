@@ -193,6 +193,45 @@ internal sealed class IdeFiles(Workspace workspace)
         return result;
     }
 
+    /// <summary>The largest picture, sound or video <see cref="Media"/> sends.</summary>
+    public const long MaxMediaBytes = 256L * 1024 * 1024;
+
+    /// <summary>The media types <see cref="Media"/> sends, by extension: pictures, sound and video a page shows as they are (no SVG: it may hold a script).</summary>
+    private static readonly Dictionary<string, string> MediaTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [".png"] = "image/png", [".jpg"] = "image/jpeg", [".jpeg"] = "image/jpeg", [".gif"] = "image/gif", [".webp"] = "image/webp", [".bmp"] = "image/bmp",
+        [".avif"] = "image/avif", [".mp3"] = "audio/mpeg", [".wav"] = "audio/wav", [".ogg"] = "audio/ogg", [".oga"] = "audio/ogg", [".opus"] = "audio/ogg",
+        [".flac"] = "audio/flac", [".m4a"] = "audio/mp4", [".aac"] = "audio/aac", [".weba"] = "audio/webm", [".mp4"] = "video/mp4", [".webm"] = "video/webm",
+        [".ogv"] = "video/ogg", [".mov"] = "video/quicktime",
+    };
+
+    /// <summary>
+    /// A picture, sound or video in the allowed folders as it is (what Arena's tools made, saved in .code-arena/media, or
+    /// any of the project's), for the page to show: its bytes and type. Anything else is refused, as is a file too big.
+    /// </summary>
+    public (byte[] Bytes, string Type) Media(string? path)
+    {
+        var full = ResolveEntry(path);
+        if (!MediaTypes.TryGetValue(Path.GetExtension(full), out var type))
+        {
+            throw new IdeError(415, "not_media", $"{Show(full)} is not a picture, sound or video this shows.");
+        }
+        var info = new FileInfo(full);
+        if (!info.Exists)
+        {
+            throw new IdeError(404, "not_found", $"There is no file {Show(full)}.");
+        }
+        if (!Files.Regular(full))
+        {
+            throw new IdeError(400, "special", $"{Show(full)} is not a regular file (a named pipe, a socket or a device): it does not open here.");
+        }
+        if (info.Length > MaxMediaBytes)
+        {
+            throw new IdeError(413, "too_large", $"{Show(full)} is bigger than {MaxMediaBytes / 1024 / 1024} MB.");
+        }
+        return (File.ReadAllBytes(full), type);
+    }
+
     /// <summary>A file's bytes as the editor's text, its byte-order mark left out; null when they are binary (a NUL byte, or not UTF-8).</summary>
     public static string? Text(ReadOnlySpan<byte> bytes)
     {

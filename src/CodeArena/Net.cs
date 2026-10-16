@@ -28,6 +28,12 @@ internal static class Net
             AutomaticDecompression = DecompressionMethods.All,
             ConnectTimeout = TimeSpan.FromSeconds(20),
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            // A connection that went away without a word (a laptop asleep, a VPN that changed) is found out within minutes,
+            // not hours: TCP keep-alive on every connection, and pings on HTTP/2 ones.
+            ConnectCallback = ConnectAsync,
+            KeepAlivePingDelay = TimeSpan.FromSeconds(30),
+            KeepAlivePingTimeout = TimeSpan.FromSeconds(20),
+            KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests,
         };
         if (caFile is { Length: > 0 })
         {
@@ -37,6 +43,44 @@ internal static class Net
         var http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
         http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("code-arena", Cli.Version));
         return http;
+    }
+
+    /// <summary>How long a quiet connection waits before its first keep-alive probe, and between probes, in seconds; and how many go unanswered before it is dropped.</summary>
+    internal const int KeepAliveIdle = 30;
+    internal const int KeepAliveInterval = 10;
+    internal const int KeepAliveProbes = 6;
+
+    /// <summary>A connection with TCP keep-alive: a peer that is gone ends a request waiting on it in about 90 seconds.</summary>
+    internal static async ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext context, CancellationToken ct)
+    {
+        var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+        try
+        {
+            KeepAlive(socket);
+            await socket.ConnectAsync(context.DnsEndPoint, ct);
+            return new NetworkStream(socket, ownsSocket: true);
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>Turns TCP keep-alive on, with its times where the system lets them be set.</summary>
+    internal static void KeepAlive(Socket socket)
+    {
+        socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+        try
+        {
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, KeepAliveIdle);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, KeepAliveInterval);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, KeepAliveProbes);
+        }
+        catch (Exception e) when (e is SocketException or PlatformNotSupportedException)
+        {
+            // The system's own times, then.
+        }
     }
 
     /// <summary>Every certificate in a PEM bundle, or the one certificate of a DER file.</summary>

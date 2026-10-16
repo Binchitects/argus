@@ -124,6 +124,8 @@ public sealed class FakeGateway : FakeServer
     public Func<JsonObject, Reply> Answer { get; set; } = _ => Reply.Say("Hello from the model.");
     /// <summary>An HTTP status a chat request is answered with instead of an answer (a backend restarting: 500); 0 answers it.</summary>
     public Func<JsonObject, int> Failure { get; set; } = _ => 0;
+    /// <summary>The error body a refused request gets (null: a backend restarting).</summary>
+    public Func<JsonObject, JsonObject?> FailureBody { get; set; } = _ => null;
     /// <summary>Holds each answer until the request is cancelled (to test Ctrl+C).</summary>
     public bool Hang { get; set; }
     /// <summary>The requests whose answer stops after half its text, the connection dropped.</summary>
@@ -211,7 +213,7 @@ public sealed class FakeGateway : FakeServer
         FirstRequest.TrySetResult();
         if (Failure(request) is > 0 and var status)
         {
-            await WriteJson(ctx, new JsonObject { ["error"] = new JsonObject { ["message"] = "The model's backend is restarting." } }, status);
+            await WriteJson(ctx, FailureBody(request) ?? new JsonObject { ["error"] = new JsonObject { ["message"] = "The model's backend is restarting." } }, status);
             return;
         }
         if (Hang)
@@ -293,7 +295,24 @@ public sealed class FakeGateway : FakeServer
 
     public static bool HasToolResults(JsonObject request) => request["messages"]!.AsArray().Any(m => m!["role"]?.GetValue<string>() == "tool");
 
-    public static string System(JsonObject request) => request["messages"]![0]!["content"]!.GetValue<string>();
+    /// <summary>What the model is told besides the conversation: the system prompt, and Code Arena's notes (the mode, the date, the tools' instructions).</summary>
+    public static string System(JsonObject request) => string.Join("\n\n", request["messages"]!.AsArray()
+        .Select((m, i) => (Content: m!["content"]?.GetValue<string>() ?? "", i))
+        .Where(x => x.i == 0 || x.Content.StartsWith(SystemPrompt.NoteHead, StringComparison.Ordinal)).Select(x => x.Content));
+
+    /// <summary>The system prompt alone: the first message, the same in every request of a session.</summary>
+    public static string SystemOnly(JsonObject request) => request["messages"]![0]!["content"]!.GetValue<string>();
+
+    /// <summary>A compaction's request for a summary: the conversation, then Code Arena's ask.</summary>
+    public static bool Summarizing(JsonObject request) => Last(request).StartsWith(Agent.SummaryAsk, StringComparison.Ordinal);
+
+    /// <summary>The conversation a request carries: its messages after the system prompt, Code Arena's notes left out.</summary>
+    public static List<JsonNode> History(JsonObject request) =>
+        [.. request["messages"]!.AsArray().Skip(1).Where(m => m!["content"]?.GetValue<string>().StartsWith(SystemPrompt.NoteHead, StringComparison.Ordinal) != true).Select(m => m!)];
+
+    /// <summary>The notes of Code Arena's in a request.</summary>
+    public static List<string> Notes(JsonObject request) =>
+        [.. request["messages"]!.AsArray().Select(m => m!["content"]?.GetValue<string>() ?? "").Where(c => c.StartsWith(SystemPrompt.NoteHead, StringComparison.Ordinal))];
 
     public static List<string> ToolNames(JsonObject request) =>
         request["tools"] is JsonArray tools ? [.. tools.Select(t => t!["function"]!["name"]!.GetValue<string>())] : [];
@@ -315,6 +334,15 @@ public sealed class FakeMcp : FakeServer
     public TaskCompletionSource? Hold { get; set; }
     /// <summary>The tools it lists instead of Arena's three (web_search, read_file, create_issue): Argus's, say.</summary>
     public JsonArray? ToolList { get; set; }
+    /// <summary>While set, tools/call waits for it: a tool that never answers.</summary>
+    public TaskCompletionSource? CallHold { get; set; }
+    /// <summary>Over an event stream, the progress reports a tools/call sends before its answer, this far apart.</summary>
+    public int CallProgress { get; set; }
+    public TimeSpan ProgressGap { get; set; } = TimeSpan.FromMilliseconds(300);
+    /// <summary>What tools/call answers instead of its text: pictures, sound, links to files.</summary>
+    public JsonArray? CallContent { get; set; }
+    /// <summary>The files resources/read gives, by their link: type and bytes.</summary>
+    public Dictionary<string, (string Type, byte[] Bytes)> Resources { get; } = [];
     public string Url => BaseUrl + "/mcp";
     /// <summary>The sessions closed (DELETE), as a client that lets a connection go does.</summary>
     public int Closed => Volatile.Read(ref _closed);
@@ -374,6 +402,10 @@ public sealed class FakeMcp : FakeServer
         {
             await hold.Task.WaitAsync(ct);
         }
+        if (method == "tools/call" && CallHold is { } held)
+        {
+            await held.Task.WaitAsync(ct);
+        }
         JsonNode result = method switch
         {
             "initialize" => new JsonObject
@@ -408,6 +440,14 @@ public sealed class FakeMcp : FakeServer
                         ["annotations"] = new JsonObject { ["destructiveHint"] = true },
                     }),
             },
+            "tools/call" when CallContent is not null => new JsonObject { ["content"] = CallContent.DeepClone() },
+            "resources/read" when Resources.TryGetValue(message["params"]?["uri"]?.GetValue<string>() ?? "", out var file) => new JsonObject
+            {
+                ["contents"] = new JsonArray(new JsonObject
+                {
+                    ["uri"] = message["params"]!["uri"]!.DeepClone(), ["mimeType"] = file.Type, ["blob"] = Convert.ToBase64String(file.Bytes),
+                }),
+            },
             "tools/call" => new JsonObject
             {
                 ["content"] = new JsonArray(new JsonObject
@@ -428,6 +468,15 @@ public sealed class FakeMcp : FakeServer
             ctx.Response.ContentType = "text/event-stream";
             ctx.Response.SendChunked = true;
             await WriteEvent(ctx, new JsonObject { ["jsonrpc"] = "2.0", ["method"] = "notifications/progress", ["params"] = new JsonObject { ["progress"] = 1 } }.ToJsonString(), "message");
+            for (var i = 0; method == "tools/call" && i < CallProgress; i++)
+            {
+                await Task.Delay(ProgressGap, ct);
+                await WriteEvent(ctx, new JsonObject
+                {
+                    ["jsonrpc"] = "2.0", ["method"] = "notifications/progress",
+                    ["params"] = new JsonObject { ["progressToken"] = message["params"]?["_meta"]?["progressToken"]?.DeepClone(), ["progress"] = i + 1, ["total"] = CallProgress, ["message"] = "sampling" },
+                }.ToJsonString(), "message");
+            }
             await WriteEvent(ctx, answer.ToJsonString(), "message");
             return;
         }
