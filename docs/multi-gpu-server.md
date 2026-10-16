@@ -500,6 +500,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
     - `deploy/scripts/gpu-check.sh`: driver ≥ R580, `nvidia-smi topo -m`, a P2P test, NCCL `all_reduce_perf`, memlock and shm, power caps, MIG state.
     - `docs/deployment.md` "Multi-GPU server" section; `docs/architecture.md` engines and GpuPlan.
     - **Needs the hardware:** run it, then a smoke test of each chosen model on the pinned vLLM (FP8 first, then NVFP4), then step 18 for real numbers. Tune TP=2×2 vs. TP=4 and the KV tier from those results.
+    - **Done** (what can be without the hardware): `deploy/scripts/gpu-check.sh` (read only; NVIDIA and AMD; driver, GPUs, ECC, MIG, P2P matrix, socket topology, power caps, NCCL with `--nccl`, memlock, shm) and the bring-up runbook in deployment.md ("Multi-GPU server: bring-up"). Tests: `tests/deploy/test_gpu_check.py` with fake `nvidia-smi` and `rocm-smi`. Running it, the smoke tests and the numbers wait for the server.
 20. **Later, multi-server.**
     - Helm: one Deployment per engine group, GPU Operator, CloudNativePG, llm-d scheduler, KEDA autoscaling, per-node weight staging; SGLang backend if a model needs it.
 

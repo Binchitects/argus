@@ -419,6 +419,38 @@ how). **no**: missing, with the reason.
   `vllm.instances` entry per node; servers the app does not run are added under
   Admin → Models → Other GPU servers.
 
+### Multi-GPU server: bring-up
+
+In this order, on the new server (each step's details in
+[multi-gpu-server.md](multi-gpu-server.md)):
+
+1. **Hardware and firmware.** All GPUs on one CPU socket's PCIe root complex or
+   behind one Gen5 switch; `iommu=pt`, ACS off on the switch; redundant power,
+   208–240 V. Pin the NVIDIA driver (R580 or newer) so the distribution does not
+   upgrade it; install nvidia-container-toolkit with CDI
+   (`nvidia-ctk cdi generate`; AMD: `amd-ctk`, or `rocm.yml`).
+2. **`scripts/gpu-check.sh`** (read only): driver, GPUs, ECC and MIG, peer to
+   peer between every pair, no pair across sockets, power caps, locked memory and
+   shared memory. With nccl-tests built: `--nccl /path/to/all_reduce_perf`
+   (about 40–50 GB/s bus bandwidth over PCIe Gen5 with P2P). Fix every FAIL
+   before going on.
+3. **The engine image** (approve the download): NGC's vLLM image as `VLLM_IMAGE`,
+   or build arena-vllm (`vllm-build.yml`); `COMPOSE_PROFILES=vllm`. Without the
+   image, `fake-gpu.yml` runs the whole path on the fake vLLM first.
+4. **The models** (approve each snapshot's size, shown before it downloads):
+   Admin → Models → Hugging Face → *snapshot*. A realistic first set is about
+   450–500 GB.
+5. **Add each as a vLLM model**, its GPUs left to the advisor's proposal unless
+   you choose; FP8 checkpoints first, NVFP4 only once one passes its smoke test
+   on the pinned vLLM. Load it, ask it a question in the chat, and read its log
+   under Admin → Models if it fails.
+6. **Measure**: `scripts/multiuser-bench.py --scenarios ramp,prefixshare,returnafter
+   --ramp 1..64 --json run.json`, then again with another setting (TP=2×2 against
+   TP=4, a CPU or LMCache tier) and `--compare run.json`. Keep the JSON of each.
+7. **Durability**: `COMPOSE_PROFILES=ha` with `ha.yml` for gateway replicas,
+   `pitr.yml` for Postgres with point-in-time recovery, the `dcgm` profile for
+   per-GPU errors and PCIe throughput.
+
 ### Supported configurations
 
 | Configuration | Status |
