@@ -12,6 +12,100 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v5.8.0 (2026-10-16)
+
+### :rocket: Epics and highlights
+
+- **Code Arena stays responsive in long sessions**: a compaction that fails
+  falls back to leaving older messages out instead of ending the turn; a
+  request the model's window refuses is compacted and asked again once; the
+  prompt's start stays the same between turns so the engine's cache is
+  reused; a long wait says about how long; tool calls have a deadline; the
+  IDE's chat draws once per frame and only the last turns
+- **Code Arena and the web chat stay in step by message ids**: web edits,
+  answers written again, other branches, /rewind and compactions follow both
+  ways; thinking, tokens, times, models and attachments come through; while
+  Code Arena answers the web chat queues the person's message; the IDE shows
+  where the sync stands and whose chats they are
+- **Picture and video models get room on the GPU**: a video (and a picture
+  when short of memory) unloads idle chat models, runs on the GPU and loads
+  them back (a 1 s video: 92 s, was 510 s on the CPU)
+
+
+- **Code Arena's IDE works as VS Code does**: its commands under VS Code's
+  ids in the palette (by category, the ones run lately first), VS Code's keys
+  (chords too) with the person's keybindings.json over them, the person's
+  settings.json and the project's .vscode/settings.json (a language's own
+  too) setting the editor, compares, terminals, the theme and saving, and
+  VS Code's Settings (Ctrl+,) and Keyboard Shortcuts (Ctrl+K Ctrl+S) editors;
+  VS Code's own settings.json can be brought over
+- **Run and debug**: Run and Debug lists launch.json's configurations and the
+  project's own (.NET, npm, Python, Go, Cargo, CMake, Make), starts one with
+  its debugger (F5) or without (Ctrl+F5), Debug or Release; the debugger
+  speaks the Debug Adapter Protocol to gdb, lldb-dap, netcoredbg, debugpy,
+  Delve or js-debug (whichever is installed): breakpoints (conditions,
+  logpoints, F9), the call stack, variables (changed by a double-click),
+  watches, values at the lines' ends, a hover's value, the Debug Console, Run
+  to Cursor, stepping, restart and stop. Tasks (tasks.json's and the
+  project's) run from the palette and Ctrl+Shift+B, their problem matchers
+  feeding Problems
+
+### :sparkles: New features & Enhancements
+
+- **Code Arena opens in a desktop window of its own** (Chrome, Edge, Chromium
+  or Brave in app mode); `--browser` or `"window": false` for a tab
+- **Language servers** in Code Arena's editor (completion, hover, definition,
+  references, rename, code actions, formatting, diagnostics), found on PATH or
+  named in config.json, in a trusted folder, sandboxed
+- **VS Code extensions** in Code Arena: colour and file icon themes,
+  snippets, languages, keybindings and setting defaults, from a .vsix or VS
+  Code's own on this computer
+- launch.json compounds, attaching to a process (pickProcess), a program's
+  own terminal (runInTerminal)
+- Pictures, video and speech Arena's tools make reach Code Arena (saved under
+  .code-arena/media and shown in its chat)
+- A person with no picture, video or speech credit is told an admin sets it,
+  and Arena MCP does not offer those tools to them
+
+
+- **Compare as VS Code does**: a side may be the file itself (typing there
+  edits it, Ctrl+S saves it), the file as saved (Ctrl+K D), the clipboard
+  (Ctrl+K C), another file, two files of the Explorer, git's index, HEAD or
+  any commit; the bar has the counts, the previous and next change, inline or
+  side by side, whitespace, folding and swapping; Source Control compares the
+  index, HEAD and a commit's files, shows a file's history and compares with
+  any revision; the change at the cursor is staged, unstaged, reverted or (the
+  agent's) accepted alone; the editor's gutter shows the lines changed since
+  git's index (Alt+F3)
+- **Formatting with the project's own tools**: Prettier from the project's
+  node_modules (else installed), ruff or black, gofmt, rustfmt,
+  clang-format, dotnet format and the person's own from config.json, run by
+  code-arena in a sandbox; Format Document, Format Selection, Format Document
+  With…, format on save (within a time limit) and Save without Formatting;
+  VS Code's prettier.* settings
+- **Folder trust, as VS Code's**: a project's own programs (its formatters,
+  tasks.json, launch.json, debug sessions) run only in a folder the person
+  trusts; the choice is kept on this computer
+- Saving as VS Code does: trailing whitespace, the final newline, auto save,
+  Save All; the status bar sets the indentation, the line endings and the
+  language; tabs have VS Code's menu; Alt+Z, navigate back and forward,
+  reopen a closed tab
+
+### :boom: Breaking changes & Deprecations
+
+- Each conversation on a llama.cpp model gets the window one of its slots
+  holds (context ÷ answers at once, 65,536 for the default model here):
+  long sessions are no longer evicted by others
+- The engine's key goes by the environment (LLAMA_API_KEY), no longer on its
+  command line
+
+
+- The theme and code completion's on/off are now settings.json's
+  (`workbench.colorTheme`, `window.autoDetectColorScheme`,
+  `codeArena.inlineCompletion.enabled`): the theme picked before is asked
+  for once again
+- `/api/git/diff` is gone: `/api/git/show` reads a file at any revision
+
 ## v5.6.1 (2026-10-11)
 
 ### :bug: Bugs fixed
