@@ -1002,8 +1002,10 @@ time limit.
 
 A question takes **y** (yes), **n** (no: the model is told, and asked to find
 another way) or **a** (always, for this session: every file edit; a command by
-its first two words, `npm test …`; an MCP tool by name). `plan` offers the
-model only the tools that change nothing, and asks it for a plan to approve.
+its first two words, `npm test …`; an MCP tool by name). `plan` refuses every
+tool that changes something when the model calls it (the model is offered the
+same tools in every mode, so the start of its requests stays cached), and asks
+it for a plan to approve.
 `yolo` warns when it starts: use it in a folder you can throw away. Set the
 mode with `--mode`, `/mode`, or `"mode"` in the config file.
 
@@ -1202,6 +1204,42 @@ decisions, files, commands and the state of the work) and the recent part
 kept whole, within the **target**, 25% of the window by default. `/compact`
 does it at once. A tool's output longer than 40,000 characters (less for a
 small window) is cut in the middle.
+
+A long session never gets stuck on the window:
+
+- **The summary is asked as the conversation goes on**: the same system
+  prompt, tools and older messages the model has read (so the engine reads
+  them from its cache), then a request to summarize them, within what the
+  window holds (the oldest messages left out past it, an earlier summary
+  kept).
+- **A summary that cannot be made is not fatal**: the older messages are left
+  out instead, with a note of what they held (the summary before them, the
+  person's messages, the files changed, the commands run, the last answer),
+  long tool results and file contents the model wrote in older steps are cut
+  to their start, and the turn goes on. A summary is tried again only after 2
+  compactions (then 4, then 8) while it keeps failing; `/compact` always tries
+  it, and leaves the conversation as it was when it fails.
+- **One long turn compacts itself**: when nothing before the turn is left to
+  summarize, the turn's earlier steps are (the person's message and the
+  latest steps kept whole). A compaction that would change nothing writes
+  nothing and does not reset the IDE's page.
+- **A request the window refuses** (the engine's or LiteLLM's "exceeds the
+  context size", `ContextWindowExceededError`, "maximum context length") is
+  compacted at once and asked again, once. If it still does not fit, the turn
+  ends with that, and the message is taken out of the conversation so it does
+  not pile up.
+- **The size is measured, not guessed**: the characters a token holds are
+  learned from the gateway's counts (and from the size a refusal gives); a
+  resumed session starts from its last count. The answer's room (the model's
+  longest answer as the gateway says, 4,096 tokens otherwise, at most an
+  eighth of the window) stays free below the window, whatever the threshold.
+- **The start of every request stays the same**, so the engine does not read
+  the whole conversation again after a change: the same tools in every mode,
+  MCP servers' tools in the order they came (a new server's at the end), and
+  what changes during a session (the mode, the date, the branch, whether
+  Arena's tools are connected, the servers' instructions) in a short note of
+  Code Arena's added to the conversation where it changed, never in the
+  system prompt. The notes are not saved in the session nor shown on the page.
 
 Set them with `/compact-at 70` (the threshold) or `/compact-at 70 30` (and the
 target), in the IDE's **Context** (the window's use in the status bar), or
@@ -1454,8 +1492,13 @@ tried again five times over about a minute and a half, and the session says so
 each time. An answer that has not started after a minute says so (the engine
 busy with others, or reading a long prompt; Ctrl+C or **Stop** ends the wait).
 One that does not start within 15 minutes, or that stops for 3 minutes, is
-given up and asked once more; a second such stall ends the turn with the
-reason, and the next message is sent as usual. When
+given up and asked once more (the gateway's own timeout, 408, counts as such a
+stall); a second such stall ends the turn with the reason, and the next
+message is sent as usual. Once the engine's reading speed is measured (the
+time to the first word of answers whose prompt it had not cached), a request
+with much it has not cached says first about how long the answer may take to
+start, and waits half as long again as that before giving up (an hour at
+most). When
 the connection drops after part of an answer arrived (a stream that ends
 without its end counts too), that part is kept and the model is asked to carry
 on from where it stopped, up to three times a turn.

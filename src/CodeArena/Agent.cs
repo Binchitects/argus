@@ -142,8 +142,14 @@ internal sealed class Agent
     public required ToolContext Context { get; init; }
     public required Ui Ui { get; init; }
     public required ModelState Model { get; init; }
-    /// <summary>Rebuilt for every request: the mode or model may have changed.</summary>
+    /// <summary>Rebuilt for every request: the model may have changed. What changes more often is in <see cref="Note"/>.</summary>
     public required Func<string> SystemPrompt { get; init; }
+    /// <summary>
+    /// Code Arena's note on the session (the mode, the date, the branch, the tools connected), rebuilt for every request and
+    /// added to the conversation where it changed: the start of the requests stays the same, and the engine reads it from
+    /// its cache. Null: none (a sub-agent, whose prompt says it all).
+    /// </summary>
+    public Func<string>? Note { get; init; }
     public SessionStore? Session { get; set; }
     public Spend Total { get; init; } = new();
     /// <summary>0 for the main agent, 1 for a sub-agent (indented, not streamed).</summary>
@@ -176,16 +182,33 @@ internal sealed class Agent
     private Dictionary<string, string?> _uncommitted = new(StringComparer.Ordinal);
 
     private bool _parallelCalls = true;
+    /// <summary>The tokens of the last request and its answer as the gateway counted them, and the messages they covered (0: not counted since a compaction).</summary>
     private long _knownTokens;
     private int _knownCount;
+    /// <summary>The size of the last request sent, in characters (what its tokens are learned against).</summary>
+    private long _sentChars;
 
-    public void Load(IEnumerable<JsonObject> messages)
+    /// <summary>The notes added (<see cref="Note"/>), each before the message at its place (at the end: after the last), in order.</summary>
+    private readonly List<(int At, string Text)> _notes = [];
+
+    /// <summary>
+    /// Starts from these messages (a session resumed, a rewind). <paramref name="known"/>: the last answer's tokens as the
+    /// gateway counted them, and how many of the messages its request and answer covered, so the size is known at once.
+    /// </summary>
+    public void Load(IEnumerable<JsonObject> messages, (TokenUsage Usage, int Count)? known = null)
     {
         Messages = [.. messages];
+        _notes.Clear();
         _knownTokens = 0;
         _knownCount = 0;
         _compactedAt = 0;
         _followUps = 0;
+        if (known is { } k && k.Count > 0 && k.Count <= Messages.Count && k.Usage.Prompt > 0)
+        {
+            Learn(Chars(k.Count - 1), k.Usage.Prompt);
+            _knownTokens = k.Usage.Prompt + k.Usage.Completion;
+            _knownCount = k.Count;
+        }
     }
 
     public void Clear() => Load([]);
@@ -392,12 +415,15 @@ internal sealed class Agent
 
     private async Task<string> TurnAsync(string? input, Spend turn, CancellationToken ct)
     {
+        JsonObject? question = null;
         if (input is not null)
         {
-            Add(new JsonObject { ["role"] = "user", ["content"] = input });
+            question = new JsonObject { ["role"] = "user", ["content"] = input };
+            Add(question);
         }
         var last = "";
         var interrupted = 0;
+        var overflowed = false;
         for (var step = 0; step < MaxSteps; step++)
         {
             await MaybeCompactAsync(ct);
@@ -418,10 +444,27 @@ internal sealed class Agent
                 Add(new JsonObject { ["role"] = "assistant", ["content"] = printer.Said.Length > 0 ? printer.Said + "\n\n(stopped by the person)" : "(stopped by the person)" });
                 throw;
             }
+            catch (GatewayException e) when (e.ContextExceeded)
+            {
+                // Too big for the window (the estimate was short of the engine's count): compacted, then asked once more.
+                Ui.StopSpinner();
+                printer.End();
+                Events?.StepDone(null);
+                if (overflowed || !await OverflowAsync(e, ct))
+                {
+                    DropQuestion(question);
+                    throw new GatewayException($"The conversation does not fit the model's window, even compacted ({Fmt.OneLine(e.Message, 300)}). " +
+                        "/compact or /clear makes room; a smaller request (fewer files at once) may fit.", e.Status) { ContextExceeded = true, PromptTokens = e.PromptTokens };
+                }
+                overflowed = true;
+                step--;
+                continue;
+            }
             finally
             {
                 Ui.StopSpinner();
             }
+            overflowed = false;
             printer.End();
             Events?.StepDone(answer.Usage);
             if (answer.Usage is { } usage)
@@ -433,6 +476,7 @@ internal sealed class Agent
                 }
                 Session?.Usage(usage);
                 _knownTokens = usage.Prompt + usage.Completion;
+                Learn(_sentChars, usage.Prompt);
             }
             if (answer.FinishReason == GatewayClient.Interrupted)
             {
@@ -475,6 +519,37 @@ internal sealed class Agent
         }
         Warn($"Stopped after {MaxSteps} steps.");
         return last;
+    }
+
+    /// <summary>
+    /// A request the window could not hold: its size is learned (the engine's count, else at least the window), and the
+    /// conversation compacted (a summary, else the older messages left out); false when nothing could be made smaller.
+    /// </summary>
+    private async Task<bool> OverflowAsync(GatewayException e, CancellationToken ct)
+    {
+        var tokens = e.PromptTokens ?? Model.Context + 1;
+        if (_sentChars > 0)
+        {
+            CharsPerToken = Math.Clamp(Math.Min(CharsPerToken, (double)_sentChars / tokens), 1.0, 8.0);
+        }
+        _knownTokens = 0;
+        _knownCount = 0;
+        Warn($"The request was too big for the model's window ({(e.PromptTokens is { } n ? $"{Fmt.Tokens(n)} tokens" : "the gateway said so")} " +
+             $"for {Fmt.Tokens(Model.Context)}): compacting the conversation, then asking again.");
+        return await CompactAsync(force: false, ct);
+    }
+
+    /// <summary>The person's message of a turn that could not be asked: out of the history, so a next try does not add to it.</summary>
+    private void DropQuestion(JsonObject? question)
+    {
+        if (question is null || Messages.Count == 0 || !ReferenceEquals(Messages[^1], question))
+        {
+            return;
+        }
+        Messages.RemoveAt(Messages.Count - 1);
+        _notes.RemoveAll(n => n.At > Messages.Count);
+        Session?.Compacted(Messages);
+        Events?.Compacted("The message that did not fit is out of the conversation: send it again, smaller, or after /compact.");
     }
 
     /// <summary>
@@ -522,12 +597,14 @@ internal sealed class Agent
 
     private async Task<Completion> AskAsync(IStreamSink sink, CancellationToken ct)
     {
+        AddNote();
         var request = new JsonObject
         {
             ["model"] = Model.Name,
-            ["messages"] = new JsonArray([new JsonObject { ["role"] = "system", ["content"] = SystemPrompt() }, .. Messages.Select(m => (JsonNode)m.Clone())]),
+            ["messages"] = Conversation(Messages.Count),
         };
-        var tools = Model.Info.Tools ? Tools.Offered(Permissions.Mode).Select(t => (JsonNode)t.Spec()).ToArray() : [];
+        // The same tools in every mode, in the same order: the start of the request is what the engine has cached.
+        var tools = Model.Info.Tools ? Tools.Offered().Select(t => (JsonNode)t.Spec()).ToArray() : [];
         if (tools.Length > 0)
         {
             request["tools"] = new JsonArray(tools);
@@ -540,17 +617,65 @@ internal sealed class Agent
         {
             request["chat_template_kwargs"] = kwargs;
         }
+        _sentChars = Chars(Messages.Count);
+        var uncached = Uncached(_sentChars);
         try
         {
-            return await Gateway.CompleteAsync(request, sink, ct);
+            return await Gateway.CompleteAsync(request, sink, ct, uncached);
         }
         catch (GatewayException e) when (e.Status == 400 && _parallelCalls && e.Message.Contains("parallel_tool_calls", StringComparison.OrdinalIgnoreCase))
         {
             // A backend that does not take the option: one call at a time, then.
             _parallelCalls = false;
             request.Remove("parallel_tool_calls");
-            return await Gateway.CompleteAsync(request, sink, ct);
+            return await Gateway.CompleteAsync(request, sink, ct, uncached);
         }
+    }
+
+    /// <summary>
+    /// Adds Code Arena's note when it says something other than the last one (the mode, the date, the branch or the tools
+    /// changed): before the person's message when one is last, else after the last message. Notes stay where they were
+    /// added, so the requests' start does not change; a compaction or a resume adds the note anew.
+    /// </summary>
+    private void AddNote()
+    {
+        if (Note?.Invoke() is not { Length: > 0 } note)
+        {
+            return;
+        }
+        _notes.RemoveAll(n => n.At > Messages.Count);
+        if (_notes.Count > 0 && _notes[^1].Text == note)
+        {
+            return;
+        }
+        var at = Messages.Count > 0 && Messages[^1].Str("role") == "user" ? Messages.Count - 1 : Messages.Count;
+        // One that nothing follows yet is replaced rather than kept beside the new one.
+        _notes.RemoveAll(n => n.At >= at);
+        _notes.Add((at, note));
+    }
+
+    /// <summary>The notes a request of the first <paramref name="count"/> messages carries: those before them, and those at the end when it is the whole conversation.</summary>
+    private IEnumerable<(int At, string Text)> NotesUpTo(int count) => _notes.Where(n => n.At < count || (n.At == count && count == Messages.Count));
+
+    /// <summary>A request's messages: the system prompt, then the first <paramref name="count"/> of the conversation with the notes where they were added.</summary>
+    private JsonArray Conversation(int count)
+    {
+        var list = new JsonArray { new JsonObject { ["role"] = "system", ["content"] = SystemPrompt() } };
+        var notes = NotesUpTo(count).ToList();
+        var n = 0;
+        for (var i = 0; i < count; i++)
+        {
+            while (n < notes.Count && notes[n].At == i)
+            {
+                list.Add(new JsonObject { ["role"] = "user", ["content"] = notes[n++].Text });
+            }
+            list.Add(Messages[i].Clone());
+        }
+        while (n < notes.Count)
+        {
+            list.Add(new JsonObject { ["role"] = "user", ["content"] = notes[n++].Text });
+        }
+        return list;
     }
 
     /// <summary>Questions first, one at a time; then every allowed call at once. Every call gets a result, in order.</summary>
@@ -567,7 +692,7 @@ internal sealed class Agent
             string? refusal = null;
             if (tool is null)
             {
-                refusal = $"There is no tool named {name}. The tools: {string.Join(", ", Tools.Offered(Permissions.Mode).Select(t => t.Name))}.";
+                refusal = $"There is no tool named {name}. The tools: {string.Join(", ", Tools.Offered().Select(t => t.Name))}.";
             }
             else if (args is null)
             {
@@ -690,56 +815,131 @@ internal sealed class Agent
     }
 
     /// <summary>
-    /// Compacts when the next request would pass the threshold (80% of the window unless the person chose otherwise). After a
-    /// compaction that could not bring it under (the turn alone is that big), not again until it grows by a tenth of the window.
+    /// Compacts when the next request would pass the threshold (80% of the window unless the person chose otherwise, and
+    /// never so late that the answer has no room). After a compaction that could not bring it under (the turn alone is that
+    /// big), not again until it grows by a tenth of the window. It never fails the turn: a summary that cannot be made
+    /// leaves the older messages out instead (<see cref="CompactAsync"/>).
     /// </summary>
     public async Task<bool> MaybeCompactAsync(CancellationToken ct)
     {
-        var at = Model.Context * Compaction.At / 100.0;
-        // Never later than 95% of the window, whatever a compaction before could not bring it under.
-        if (Messages.Count < 3 || Estimate() < Math.Min(Math.Max(at, _compactedAt + Model.Context / 10.0), Model.Context * 0.95))
+        var at = Threshold;
+        // Never later than 95% of the window (nor past the answer's room), whatever a compaction before could not bring it under.
+        if (Messages.Count < 3 || Estimate() < Math.Min(Math.Max(at, _compactedAt + Model.Context / 10.0), Math.Min(Model.Context * 0.95, Limit)))
         {
             return false;
         }
-        Events?.Notice("Compacting the conversation to fit the model's window…");
-        await CompactAsync(force: false, ct);
+        var changed = await CompactAsync(force: false, ct);
         var now = Estimate();
         _compactedAt = now >= at ? now : 0;
-        return true;
+        return changed;
     }
 
     /// <summary>The size a compaction left the conversation at when it stayed over the threshold (0: it got under).</summary>
     private long _compactedAt;
 
+    /// <summary>Where compaction starts, in tokens: the person's share of the window, within <see cref="Limit"/>.</summary>
+    private double Threshold => Math.Min(Model.Context * Compaction.At / 100.0, Limit);
+
+    /// <summary>The most a request may hold, in tokens: the window less the room the answer needs.</summary>
+    public long Limit => Model.Context - Reserve;
+
+    /// <summary>The room left for the answer: the model's longest answer as the gateway says (4,096 when it does not), at most an eighth of the window.</summary>
+    private long Reserve => Math.Min(Model.Info.MaxOutput is > 0 and var most ? most : DefaultReserve, Model.Context / 8);
+
+    private const int DefaultReserve = 4_096;
+
+    /// <summary>How every compaction's first message starts (the IDE shows such a message folded, as a compaction).</summary>
+    private const string SummaryMark = "[The conversation so far, summarized";
+
     /// <summary>The summary a compaction puts first, and the model's answer to it.</summary>
-    private const string SummaryHead = "[The conversation so far, summarized to fit the model's window]";
+    private const string SummaryHead = SummaryMark + " to fit the model's window]";
+
+    /// <summary>What a compaction puts first when the model's summary could not be made: the older messages left out, in brief.</summary>
+    private const string OmittedHead = SummaryMark + " mechanically to fit the model's window: the model's summary could not be made]";
+
+    /// <summary>The person's message and the earlier steps of the same turn, summarized when the turn alone fills the window.</summary>
+    private const string TurnHead = SummaryMark + " to fit the model's window: the person's message, and your earlier steps of this turn]";
+
+    private const string StepsMark = "[Your earlier steps of this turn, in brief]";
+
+    private const string Understood = "Understood: I have the summary and carry on from there.";
+
+    /// <summary>How the request for a summary ends: the conversation as the model has it, then this.</summary>
+    internal const string SummaryAsk = "[Code Arena asks for a summary, to fit the model's window]";
+
+    private const string SummaryInstruction = SummaryAsk + "\n\nSummarize the conversation above so you can carry on from the summary alone: it replaces everything above. " +
+        "Keep the person's goals and instructions, decisions made, files read or changed (with paths), commands run and what they showed, errors met, " +
+        "the state of the work and the next steps. Be concrete and brief (at most 400 words). Invent nothing. Do not call a tool: answer with the summary alone.";
+
+    private const string TurnInstruction = SummaryAsk + "\n\nSummarize what you did in this turn so far, since the person's last message (earlier summaries of it included), " +
+        "so you can carry on from the summary alone: it replaces those steps. Keep the files read or changed (with paths), commands run and what they showed, " +
+        "errors met, what is done and what is left. Be concrete and brief (at most 300 words). Invent nothing. Do not call a tool: answer with the summary alone.";
+
+    /// <summary>The longest summary asked for, in tokens.</summary>
+    private const int SummaryTokens = 2_048;
+
+    /// <summary>
+    /// The most a request for a summary sends, in tokens; null: what the window holds beside the summary. Past it, its
+    /// oldest messages are left out (an earlier summary first among them is kept).
+    /// </summary>
+    public long? SummaryBudget { get; set; }
+
+    /// <summary>Summaries that failed in a row, and the compactions still to do without one before the next try.</summary>
+    private int _summaryFailures;
+    private int _summariesSkipped;
 
     private static bool IsSummary(List<JsonObject> older) =>
-        older.Count == 2 && older[0].Str("content")?.StartsWith(SummaryHead, StringComparison.Ordinal) == true;
+        older.Count == 2 && older[0].Str("role") == "user" && older[0].Str("content")?.StartsWith(SummaryMark, StringComparison.Ordinal) == true;
 
-    /// <summary>Tokens the next request will hold: the last count the gateway gave, plus what was added since (about 3.5 characters a token).</summary>
+    /// <summary>The characters a token holds in this conversation, as learned from the gateway's counts (3.5 until it counted).</summary>
+    public double CharsPerToken { get; private set; } = DefaultCharsPerToken;
+
+    private const double DefaultCharsPerToken = 3.5;
+
+    /// <summary>Learns <see cref="CharsPerToken"/> from a request's size in characters and its tokens as the gateway or engine counted them.</summary>
+    private void Learn(long chars, long tokens)
+    {
+        if (chars > 0 && tokens > 0)
+        {
+            CharsPerToken = Math.Clamp((double)chars / tokens, 1.0, 8.0);
+        }
+    }
+
+    /// <summary>
+    /// Tokens the next request will hold: the last count the gateway gave, plus what was added since; with no count since the
+    /// last compaction or resume, the whole of it. Characters become tokens at <see cref="CharsPerToken"/>.
+    /// </summary>
     public long Estimate()
     {
-        var added = Messages.Skip(_knownCount).Sum(Size);
+        var notes = _notes.Where(n => n.At <= Messages.Count).ToList();
+        var added = Messages.Skip(_knownCount).Sum(Size) + notes.Where(n => n.At >= _knownCount).Sum(n => n.Text.Length + 10);
         if (_knownTokens > 0)
         {
-            return _knownTokens + (long)(added / 3.5);
+            return _knownTokens + (long)(added / CharsPerToken);
         }
-        var tools = Tools.Offered(Permissions.Mode).Sum(t => Json.Line(t.Spec()).Length);
-        return (long)((SystemPrompt().Length + tools + added) / 3.5);
+        return (long)((SystemPrompt().Length + ToolChars() + added) / CharsPerToken);
     }
+
+    private long ToolChars() => Model.Info.Tools ? Tools.Offered().Sum(t => (long)Json.Line(t.Spec()).Length) : 0;
+
+    /// <summary>A request's size in characters: the system prompt, the tools and the first <paramref name="count"/> messages with their notes.</summary>
+    private long Chars(int count) =>
+        SystemPrompt().Length + ToolChars() + Messages.Take(count).Sum(Size) + NotesUpTo(count).Sum(n => n.Text.Length + 10);
 
     private static int Size(JsonObject m) => (m.Str("content")?.Length ?? 0) + (m["tool_calls"] is JsonArray calls ? Json.Line(calls).Length : 0) + 10;
 
     /// <summary>
-    /// Replaces the older part of the history with a summary the model writes.
-    /// The recent part stays whole, from a message of the person's, within the
-    /// compaction's target (a quarter of the window unless the person chose
-    /// otherwise). Forced (/compact): everything is summarized.
+    /// Makes room in the window. The older part of the history is replaced with a summary the model writes, and the recent
+    /// part stays whole, from a message of the person's, within the compaction's target (a quarter of the window unless the
+    /// person chose otherwise). When the summary cannot be made, the older part is left out with a note of what it held
+    /// (and a summary is not tried again for a few compactions). When nothing older is left (one long turn), the earlier
+    /// steps of the turn are summarized; failing that, long results and call arguments are cut. Forced (/compact):
+    /// everything is summarized, and a summary that fails leaves the conversation as it was (the error is thrown).
+    /// False when nothing changed: then nothing is written and the page is not reset.
     /// </summary>
-    public async Task CompactAsync(bool force, CancellationToken ct)
+    public async Task<bool> CompactAsync(bool force, CancellationToken ct)
     {
-        var budget = Model.Context * Compaction.Target / 100.0 * 3.5;
+        var budget = Model.Context * Compaction.Target / 100.0 * CharsPerToken;
         var keepFrom = Messages.Count;
         if (!force)
         {
@@ -762,130 +962,370 @@ internal sealed class Agent
                 keepFrom = Messages.FindLastIndex(m => m.Str("role") == "user");
             }
         }
-        var older = Messages.Take(Math.Max(keepFrom, 0)).ToList();
-        var kept = Messages.Skip(Math.Max(keepFrom, 0)).ToList();
-        if (!force && IsSummary(older))
+        keepFrom = Math.Max(keepFrom, 0);
+        var older = Messages.Take(keepFrom).ToList();
+        var kept = Messages.Skip(keepFrom).ToList();
+        if (older.Count == 0 && force)
         {
-            // Only the last summary is older: summarizing it again would only lose more. The long results are cut instead.
-            Shrink(kept);
-            Messages = [.. older, .. kept];
-            Session?.Compacted(Messages);
-            _knownTokens = 0;
-            _knownCount = 0;
-            Events?.Compacted("Long tool results were cut to fit the model's window.");
-            return;
+            return false;
         }
-        if (older.Count < 2)
+        if (!force && (IsSummary(older) || older.Count < 2))
         {
-            Shrink(kept);
-            Messages = kept;
-            Session?.Compacted(Messages);
-            _knownTokens = 0;
-            _knownCount = 0;
-            Events?.Compacted("Long tool results were cut to fit the model's window.");
-            return;
+            // Nothing older worth summarizing (summarizing the last summary again would only lose more): the earlier steps
+            // of this turn, when it has several; else the long results and arguments are cut.
+            if (await CompactTurnAsync(budget, ct))
+            {
+                return true;
+            }
+            if (!Shrink(Messages))
+            {
+                return false;
+            }
+            Saved("Long tool results and call arguments were cut to fit the model's window.");
+            return true;
+        }
+        Events?.Notice("Compacting the conversation to fit the model's window…");
+        var (summary, failure) = await TrySummaryAsync(keepFrom, SummaryInstruction, force, ct);
+        Messages =
+        [
+            new JsonObject { ["role"] = "user", ["content"] = summary is not null ? SummaryHead + "\n\n" + summary : OmittedHead + "\n\n" + Digest(older, failure!) },
+            new JsonObject { ["role"] = "assistant", ["content"] = Understood },
+            .. kept,
+        ];
+        if (Estimate() > Threshold)
+        {
+            Shrink(Messages);
+        }
+        Saved(summary is not null
+            ? $"Compacted: {older.Count} messages summarized, {kept.Count} kept."
+            : $"Compacted without a summary ({failure}): {older.Count} older messages left out, in brief, and {kept.Count} kept.");
+        return true;
+    }
+
+    /// <summary>
+    /// One long turn (no message of the person's since): its earlier steps are summarized, the person's message and the
+    /// latest steps kept (within the budget, in characters); false when it has too few steps for that.
+    /// </summary>
+    private async Task<bool> CompactTurnAsync(double budget, CancellationToken ct)
+    {
+        var q = Messages.FindLastIndex(m => m.Str("role") == "user");
+        if (q < 0)
+        {
+            return false;
+        }
+        // Each step starts with the model's answer: a cut there keeps every call with its result.
+        var starts = Enumerable.Range(q + 1, Messages.Count - q - 1).Where(i => Messages[i].Str("role") == "assistant").ToList();
+        if (starts.Count < 2)
+        {
+            return false;
+        }
+        var cut = starts[^1];
+        double size = Messages.Skip(cut).Sum(Size);
+        for (var j = starts.Count - 2; j >= 1; j--)
+        {
+            size += Messages.Skip(starts[j]).Take(starts[j + 1] - starts[j]).Sum(Size);
+            if (size > budget)
+            {
+                break;
+            }
+            cut = starts[j];
+        }
+        Events?.Notice("Compacting this turn's earlier steps to fit the model's window…");
+        var (summary, failure) = await TrySummaryAsync(cut, TurnInstruction, false, ct);
+        var head = Messages[q].Str("content") ?? "";
+        var (question, before) = Split(head);
+        var steps = Messages.Skip(q + 1).Take(cut - q - 1).ToList();
+        var said = summary ?? (before is null ? "" : before + "\n\n") + StepsDigest(steps, failure!);
+        Messages =
+        [
+            .. Messages.Take(q),
+            new JsonObject { ["role"] = "user", ["content"] = $"{TurnHead}\n\n{question}\n\n{StepsMark}\n\n{said}" },
+            .. Messages.Skip(cut),
+        ];
+        if (Estimate() > Threshold)
+        {
+            Shrink(Messages);
+        }
+        Saved(summary is not null
+            ? $"Compacted this turn: {steps.Count} messages of its earlier steps summarized, the latest {Messages.Count - q - 1} kept."
+            : $"Compacted this turn without a summary ({failure}): {steps.Count} messages of its earlier steps left out, in brief.");
+        return true;
+
+        // The person's message, and the steps a summary of the turn before had: from such a summary, or the message itself.
+        static (string Question, string? Steps) Split(string text)
+        {
+            if (!text.StartsWith(TurnHead, StringComparison.Ordinal))
+            {
+                return (text, null);
+            }
+            var rest = text[TurnHead.Length..].TrimStart('\n');
+            var at = rest.LastIndexOf("\n\n" + StepsMark + "\n\n", StringComparison.Ordinal);
+            return at < 0 ? (rest, null) : (rest[..at], rest[(at + StepsMark.Length + 4)..]);
+        }
+    }
+
+    /// <summary>The model's summary of the conversation up to <paramref name="upTo"/>, or why there is none (and none is tried for a few compactions).</summary>
+    private async Task<(string? Summary, string? Failure)> TrySummaryAsync(int upTo, string instruction, bool force, CancellationToken ct)
+    {
+        if (!force && _summariesSkipped > 0)
+        {
+            _summariesSkipped--;
+            return (null, "a summary failed a short while ago, and is not tried again yet");
         }
         Ui.StartSpinner("Compacting the conversation");
-        string summary;
         try
         {
-            summary = await SummarizeAsync(older, ct);
+            var summary = await SummarizeAsync(upTo, instruction, ct);
+            _summaryFailures = 0;
+            _summariesSkipped = 0;
+            return (summary, null);
+        }
+        catch (Exception e) when (!force && !(e is OperationCanceledException && ct.IsCancellationRequested))
+        {
+            // Not again at once: after 2, then 4, then 8 compactions without one.
+            _summaryFailures++;
+            _summariesSkipped = 1 << Math.Min(_summaryFailures, 3);
+            var why = Fmt.OneLine(e.Message, 200);
+            Warn($"The model's summary could not be made ({why}): the older messages are left out instead, with a note of what they held. " +
+                 $"A summary is tried again after {_summariesSkipped} compactions.");
+            return (null, why);
         }
         finally
         {
             Ui.StopSpinner();
         }
-        Messages =
-        [
-            new JsonObject { ["role"] = "user", ["content"] = SummaryHead + "\n\n" + summary },
-            new JsonObject { ["role"] = "assistant", ["content"] = "Understood: I have the summary and carry on from there." },
-            .. kept,
-        ];
-        if (Estimate() > Model.Context * Compaction.At / 100.0)
-        {
-            Shrink(kept);
-        }
-        Session?.Compacted(Messages);
-        _knownTokens = 0;
-        _knownCount = 0;
-        Ui.Info($"Compacted: {older.Count} messages summarized, {kept.Count} kept.");
-        Events?.Compacted($"Compacted: {older.Count} messages summarized, {kept.Count} kept.");
     }
 
-    /// <summary>Long tool results, except the last two, cut to their start: a last resort when the recent part is too big.</summary>
-    private static void Shrink(List<JsonObject> messages)
+    /// <summary>
+    /// Asks the model for a summary as a continuation of the conversation it has read: the same system prompt, tools and
+    /// messages up to <paramref name="upTo"/> (the engine has them cached), then the instruction. Past the budget, the
+    /// oldest messages are left out, from a message of the person's.
+    /// </summary>
+    private async Task<string> SummarizeAsync(int upTo, string instruction, CancellationToken ct)
     {
-        var tools = messages.Select((m, i) => (m, i)).Where(x => x.m.Str("role") == "tool").Select(x => x.i).ToList();
-        foreach (var i in tools.Take(Math.Max(0, tools.Count - 2)))
+        var messages = Conversation(upTo);
+        var answer = Math.Min(SummaryTokens, Model.Context / 4);
+        var budget = (long)(Math.Min(SummaryBudget ?? Model.Context - answer, Model.Context - answer) * CharsPerToken);
+        var chars = Chars(upTo) + instruction.Length;
+        // A window so small that the tools fill most of the budget: the summary is asked without them (the tools' start
+        // is not cached for such a request anyway), so the messages have room.
+        var tools = Model.Info.Tools ? Tools.Offered() : [];
+        if (SystemPrompt().Length + ToolChars() > budget / 2)
         {
-            if (messages[i].Str("content") is { Length: > 2000 } text)
+            chars -= ToolChars();
+            tools = [];
+        }
+        var left = 0;
+        // The oldest go first (after an earlier summary, which holds what came before them), each with what follows it up
+        // to the next message of the person's, so every call keeps its result.
+        var from = messages.Count > 3 && messages[1].Str("content")?.StartsWith(SummaryMark, StringComparison.Ordinal) == true ? 3 : 1;
+        while (chars > budget && messages.Count > from + 1)
+        {
+            do
             {
-                messages[i]["content"] = text[..2000] + "\n… (cut to save room)";
+                chars -= Size((JsonObject)messages[from]!);
+                messages.RemoveAt(from);
+                left++;
             }
+            while (messages.Count > from && messages[from].Str("role") != "user");
         }
-    }
-
-    private async Task<string> SummarizeAsync(List<JsonObject> older, CancellationToken ct)
-    {
-        var transcript = new StringBuilder();
-        foreach (var m in older)
+        if (left > 0)
         {
-            var content = m.Str("content") ?? "";
-            switch (m.Str("role"))
-            {
-                case "user":
-                    transcript.Append("PERSON: ").Append(content).Append("\n\n");
-                    break;
-                case "assistant":
-                    if (content.Length > 0)
-                    {
-                        transcript.Append("AGENT: ").Append(content).Append("\n\n");
-                    }
-                    foreach (var call in (m["tool_calls"] as JsonArray ?? []).OfType<JsonObject>())
-                    {
-                        transcript.Append($"AGENT CALLED {call["function"].Str("name")} {Fmt.OneLine(call["function"].Str("arguments"), 300)}\n");
-                    }
-                    break;
-                case "tool":
-                    transcript.Append("RESULT: ").Append(content.Length > 1500 ? content[..1500] + " …" : content).Append("\n\n");
-                    break;
-            }
+            messages.Insert(from, new JsonObject { ["role"] = "user", ["content"] = $"(The {left} oldest messages of the conversation are left out here, to fit the model's window.)" });
+            messages.Insert(from + 1, new JsonObject { ["role"] = "assistant", ["content"] = "Understood." });
         }
-        var max = (int)(Model.Context * 0.6 * 3.5);
-        var text = transcript.ToString();
-        if (text.Length > max)
+        messages.Add(new JsonObject { ["role"] = "user", ["content"] = instruction });
+        var request = new JsonObject { ["model"] = Model.Name, ["messages"] = messages, ["max_tokens"] = answer };
+        if (tools.Count > 0)
         {
-            text = "…\n" + text[^max..];
+            request["tools"] = new JsonArray([.. tools.Select(t => (JsonNode)t.Spec())]);
         }
-        var request = new JsonObject
-        {
-            ["model"] = Model.Name,
-            ["messages"] = new JsonArray(
-                new JsonObject
-                {
-                    ["role"] = "system",
-                    ["content"] = "You summarize a coding session between a person and a coding agent so the agent can carry on from the summary alone.",
-                },
-                new JsonObject
-                {
-                    ["role"] = "user",
-                    ["content"] = "Summarize this session. Keep: the person's goals and instructions, decisions made, files read or changed (with paths), " +
-                                  "commands run and what they showed, errors met, the state of the work and the next steps. Be concrete and brief " +
-                                  "(at most 400 words). Invent nothing.\n\n---\n\n" + text,
-                }),
-            ["max_tokens"] = 2048,
-        };
         if (Model.Info.Thinking)
         {
             request["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = false };
         }
-        var answer = await Gateway.CompleteAsync(request, null, ct);
-        if (answer.Usage is { } usage)
+        var summary = await Gateway.CompleteAsync(request, null, ct, Uncached(chars));
+        if (summary.Usage is { } usage)
         {
             Total.Add(usage, Model.Info);
             Session?.Usage(usage);
+            Learn(chars, usage.Prompt);
         }
-        return answer.Text.Trim() is { Length: > 0 } s ? s : "(no summary)";
+        return summary.Text.Trim() is { Length: > 0 } s ? s : throw new InvalidOperationException("the model answered with no summary");
+    }
+
+    /// <summary>About how many tokens of a request of this many characters the engine has not cached: what was added since its last count.</summary>
+    private long Uncached(long chars) => Math.Max(0, (long)(chars / CharsPerToken) - _knownTokens);
+
+    /// <summary>The compaction is done: written to the session (as the whole new history), said, and the page shown it.</summary>
+    private void Saved(string said)
+    {
+        Session?.Compacted(Messages);
+        _knownTokens = 0;
+        _knownCount = 0;
+        _notes.Clear();
+        Ui.Info(said);
+        Events?.Compacted(said);
+    }
+
+    /// <summary>
+    /// Long tool results and long arguments of the model's calls (a file written whole), except in the last two steps, cut
+    /// to their start: a last resort when the recent part is too big. False when nothing was long enough to cut.
+    /// </summary>
+    private static bool Shrink(List<JsonObject> messages)
+    {
+        var changed = false;
+        var results = messages.Select((m, i) => (m, i)).Where(x => x.m.Str("role") == "tool").Select(x => x.i).ToList();
+        foreach (var i in results.Take(Math.Max(0, results.Count - 2)))
+        {
+            if (messages[i].Str("content") is { Length: > 2000 } text)
+            {
+                messages[i]["content"] = text[..2000] + "\n… (cut to save room)";
+                changed = true;
+            }
+        }
+        var answers = messages.Select((m, i) => (m, i)).Where(x => x.m["tool_calls"] is JsonArray { Count: > 0 }).Select(x => x.i).ToList();
+        foreach (var i in answers.Take(Math.Max(0, answers.Count - 2)))
+        {
+            foreach (var call in ((JsonArray)messages[i]["tool_calls"]!).OfType<JsonObject>())
+            {
+                if (call["function"] is JsonObject f && f.Str("arguments") is { Length: > 2000 } args && ShortArguments(args) is { } shorter && shorter.Length < args.Length)
+                {
+                    f["arguments"] = shorter;
+                    changed = true;
+                }
+            }
+        }
+        return changed;
+    }
+
+    /// <summary>A call's arguments with each long text in them cut to its start, still JSON (engines read them as such); null when they are not.</summary>
+    internal static string? ShortArguments(string args)
+    {
+        if (Json.ParseObject(args) is not { } parsed)
+        {
+            return null;
+        }
+        Cut(parsed);
+        return Json.Line(parsed);
+
+        static void Cut(JsonNode? node)
+        {
+            switch (node)
+            {
+                case JsonObject o:
+                    foreach (var key in o.Select(kv => kv.Key).ToList())
+                    {
+                        if (o[key] is JsonValue v && v.TryGetValue<string>(out var s) && s.Length > 1000)
+                        {
+                            o[key] = s[..600] + $"\n… ({s.Length - 600:N0} characters cut to save room)";
+                        }
+                        else
+                        {
+                            Cut(o[key]);
+                        }
+                    }
+                    break;
+                case JsonArray a:
+                    for (var i = 0; i < a.Count; i++)
+                    {
+                        if (a[i] is JsonValue v && v.TryGetValue<string>(out var s) && s.Length > 1000)
+                        {
+                            a[i] = s[..600] + $"\n… ({s.Length - 600:N0} characters cut to save room)";
+                        }
+                        else
+                        {
+                            Cut(a[i]);
+                        }
+                    }
+                    break;
+            }
+        }
+    }
+
+    /// <summary>What older messages held, when the model could not summarize them: the summary before them, the person's messages, the files changed, the commands run, the last answer.</summary>
+    private string Digest(List<JsonObject> older, string failure)
+    {
+        var sb = new StringBuilder($"{older.Count} older messages were left out here to fit the model's window (no summary was made: {failure}). In brief:\n");
+        if (older.Count > 0 && older[0].Str("content") is { } first && first.StartsWith(SummaryMark, StringComparison.Ordinal))
+        {
+            var start = first.IndexOf("\n\n", StringComparison.Ordinal);
+            sb.Append("\nThe summary before them:\n\n").Append(Fmt.Head(start < 0 ? first : first[(start + 2)..], 120, 400)).Append('\n');
+        }
+        var asked = older.Where(m => m.Str("role") == "user" && m.Str("content")?.StartsWith(SummaryMark, StringComparison.Ordinal) != true).Select(m => Fmt.OneLine(Mentions.Typed(m.Str("content") ?? ""), 300)).TakeLast(15).ToList();
+        if (asked.Count > 0)
+        {
+            sb.Append("\nThe person's messages:\n").Append(string.Join("", asked.Select(a => $"- {a}\n")));
+        }
+        var (files, commands) = Touched(older);
+        if (files.Count > 0)
+        {
+            sb.Append("\nFiles changed: ").Append(string.Join(", ", files.TakeLast(40))).Append('\n');
+        }
+        if (commands.Count > 0)
+        {
+            sb.Append("\nCommands run:\n").Append(string.Join("", commands.TakeLast(15).Select(c => $"- {c}\n")));
+        }
+        if (older.LastOrDefault(m => m.Str("role") == "assistant" && m.Str("content") is { Length: > 0 } && m.Str("content") != Understood) is { } answer)
+        {
+            sb.Append("\nYour last answer among them: ").Append(Fmt.OneLine(answer.Str("content"), 800)).Append('\n');
+        }
+        sb.Append("\nAsk the person, or read the files again, for what you need of it.");
+        return sb.ToString();
+    }
+
+    /// <summary>The steps of a turn in brief, when the model could not summarize them: each call and how it went.</summary>
+    private string StepsDigest(List<JsonObject> steps, string failure)
+    {
+        var lines = new List<string>();
+        var names = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var m in steps)
+        {
+            if (m.Str("role") == "assistant")
+            {
+                if (m.Str("content") is { Length: > 0 } text)
+                {
+                    lines.Add("- You said: " + Fmt.OneLine(text, 200));
+                }
+                foreach (var call in (m["tool_calls"] as JsonArray ?? []).OfType<JsonObject>())
+                {
+                    var name = call["function"].Str("name") ?? "";
+                    names[call.Str("id") ?? ""] = name;
+                    var args = Json.ParseObject(call["function"].Str("arguments"));
+                    var summary = Tools.Find(name)?.Summary is { } s && args is not null ? s(args) : Fmt.OneLine(call["function"].Str("arguments"), 120);
+                    lines.Add($"- You called {name} {Fmt.OneLine(summary, 150)}");
+                }
+            }
+            else if (m.Str("role") == "tool")
+            {
+                lines.Add($"  → {Fmt.OneLine(m.Str("content"), 150)}");
+            }
+        }
+        var kept = lines.TakeLast(60).ToList();
+        return $"({steps.Count} messages of your earlier steps were left out to fit the model's window; no summary was made: {failure}. In brief:)\n" +
+               (kept.Count < lines.Count ? $"- … ({lines.Count - kept.Count} lines before these)\n" : "") + string.Join('\n', kept);
+    }
+
+    /// <summary>The files the calls among these messages changed, and the commands they ran.</summary>
+    private (List<string> Files, List<string> Commands) Touched(List<JsonObject> messages)
+    {
+        var files = new List<string>();
+        var commands = new List<string>();
+        foreach (var call in messages.SelectMany(m => (m["tool_calls"] as JsonArray ?? []).OfType<JsonObject>()))
+        {
+            var tool = Tools.Find(call["function"].Str("name") ?? "");
+            var args = Json.ParseObject(call["function"].Str("arguments"));
+            if (tool?.Kind == ToolKind.Edit && (args.Str("path") ?? args.Str("file_path")) is { Length: > 0 } path)
+            {
+                files.Remove(path);
+                files.Add(path);
+            }
+            else if (tool?.Kind == ToolKind.Shell && args.Str("command") is { Length: > 0 } command)
+            {
+                commands.Add(Fmt.OneLine(command, 150));
+            }
+        }
+        return (files, commands);
     }
 
     /// <summary>Streams the answer to the terminal: reasoning dimmed, then the text; and to the web interface when it listens.</summary>

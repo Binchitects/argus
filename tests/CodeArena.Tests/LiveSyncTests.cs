@@ -80,7 +80,7 @@ public sealed class LiveSyncTests : IDisposable
             // The next turn hears it once, and its own messages follow on in Arena.
             typed.Add("second");
             await Until(() => chat.Messages.Count == 6, "the second turn is in Arena");
-            var sent = _gateway.Requests[^1]["messages"]!.AsArray().Skip(1).Select(m => m!["content"]!.ToString()).ToList();
+            var sent = FakeGateway.History(_gateway.Requests[^1]).Select(m => m!["content"]!.ToString()).ToList();
             Assert.Equal(["first", "answer to first", "asked on the web", "answered on the web", "second"], sent);
             Assert.Equal(["first", "answer to first", "asked on the web", "answered on the web", "second", "answer to second"], chat.Messages.Select(Content));
         }
@@ -118,7 +118,7 @@ public sealed class LiveSyncTests : IDisposable
         Assert.Equal(0, await h.Run("", "-p", "and then?", "--web", web.Id));
         Assert.Equal(0, await h.Run("", "-p", "and after that?", "--web", web.Id));
         Assert.Single(Directory.GetFiles(h.Paths.SessionsDir, "*.jsonl"));
-        var sent = _gateway.Requests[^1]["messages"]!.AsArray().Skip(1).Select(m => m!["content"]!.ToString()).ToList();
+        var sent = FakeGateway.History(_gateway.Requests[^1]).Select(m => m!["content"]!.ToString()).ToList();
         Assert.Equal(["Plan the release", "Step one: freeze.", "and then?", "answer to and then?", "and after that?"], sent);
         Assert.Equal(6, web.Messages.Count);
 

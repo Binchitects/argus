@@ -266,13 +266,28 @@ internal sealed class ToolBox(IEnumerable<ToolDef> tools)
 
     public IReadOnlyList<ToolDef> All => Volatile.Read(ref _all);
 
-    /// <summary>What the model is offered: everything, or in plan mode only what changes nothing.</summary>
-    public IEnumerable<ToolDef> Offered(Mode mode) => mode == Mode.Plan ? All.Where(t => t.ReadOnly || t.Kind == ToolKind.Agent) : All;
+    /// <summary>
+    /// What the model is offered: everything, in every mode. Plan mode refuses what changes things through the permissions
+    /// (<see cref="Permissions.CheckAsync"/>) rather than leaving it out, so the tools at the start of every request stay
+    /// the same and the engine reads them from its cache.
+    /// </summary>
+    public IReadOnlyList<ToolDef> Offered() => All;
 
     public ToolDef? Find(string name) => All.FirstOrDefault(t => t.Name == name);
 
     /// <summary>A sub-agent's: reading tools only, and no sub-agents of its own.</summary>
     public ToolBox ForSubAgent() => new(All.Where(t => t.ReadOnly));
+
+    /// <summary>
+    /// The tools of the servers as they are now, in a stable order: those offered already keep their places (the start of
+    /// the requests stays what the engine has cached), and the new ones come at the end.
+    /// </summary>
+    public static List<ToolDef> InPlace(IEnumerable<ToolDef> before, IEnumerable<ToolDef> now)
+    {
+        var fresh = now.ToList();
+        var places = before.Select((t, i) => (t.Name, i)).GroupBy(x => x.Name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First().i, StringComparer.Ordinal);
+        return [.. fresh.Select((t, i) => (t, i)).OrderBy(x => places.TryGetValue(x.t.Name, out var at) ? at : int.MaxValue).ThenBy(x => x.i).Select(x => x.t)];
+    }
 
     /// <summary>Changes the list as one step: what <paramref name="change"/> makes of the current one.</summary>
     public void Update(Func<IReadOnlyList<ToolDef>, IEnumerable<ToolDef>> change)

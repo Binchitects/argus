@@ -342,7 +342,7 @@ public sealed partial class WebTests : IDisposable
         Assert.Equal(first, (await web.GetJsonAsync("/api/state"))["session"]!.GetValue<string>());
 
         await (await web.SendAsync("third")).RestAsync();
-        var sent = _gateway.Requests[^1]["messages"]!.AsArray().Skip(1).Select(m => m!["content"]!.GetValue<string>()).ToList();
+        var sent = FakeGateway.History(_gateway.Requests[^1]).Select(m => m!["content"]!.GetValue<string>()).ToList();
         Assert.Equal(["first question", "answer to first question", "third"], sent);
         Assert.Equal(HttpStatusCode.NotFound, (await web.PostAsync("/api/sessions/resume", new JsonObject { ["id"] = "../../config/config" })).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await web.PostAsync("/api/sessions/resume", new JsonObject { ["id"] = "20000101-000000" })).StatusCode);
@@ -386,10 +386,12 @@ public sealed partial class WebTests : IDisposable
         var request = _gateway.Requests[^1];
         Assert.Equal("model-b", request["model"]!.GetValue<string>());
         Assert.False(request["chat_template_kwargs"]!["enable_thinking"]!.GetValue<bool>());
+        // The same tools as in the other modes (plan mode refuses edits when they are called); the mode is in Code Arena's note.
         var tools = FakeGateway.ToolNames(request);
         Assert.Contains("read_file", tools);
-        Assert.DoesNotContain("edit_file", tools);
+        Assert.Contains("edit_file", tools);
         Assert.Contains("Mode: plan", FakeGateway.System(request));
+        Assert.DoesNotContain("Mode: plan", FakeGateway.SystemOnly(request));
 
         Assert.Null((await Json(await web.PostAsync("/api/settings", new JsonObject { ["thinking"] = null })))["thinking"]);
     }

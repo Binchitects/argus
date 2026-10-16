@@ -124,6 +124,8 @@ public sealed class FakeGateway : FakeServer
     public Func<JsonObject, Reply> Answer { get; set; } = _ => Reply.Say("Hello from the model.");
     /// <summary>An HTTP status a chat request is answered with instead of an answer (a backend restarting: 500); 0 answers it.</summary>
     public Func<JsonObject, int> Failure { get; set; } = _ => 0;
+    /// <summary>The error body a refused request gets (null: a backend restarting).</summary>
+    public Func<JsonObject, JsonObject?> FailureBody { get; set; } = _ => null;
     /// <summary>Holds each answer until the request is cancelled (to test Ctrl+C).</summary>
     public bool Hang { get; set; }
     /// <summary>The requests whose answer stops after half its text, the connection dropped.</summary>
@@ -211,7 +213,7 @@ public sealed class FakeGateway : FakeServer
         FirstRequest.TrySetResult();
         if (Failure(request) is > 0 and var status)
         {
-            await WriteJson(ctx, new JsonObject { ["error"] = new JsonObject { ["message"] = "The model's backend is restarting." } }, status);
+            await WriteJson(ctx, FailureBody(request) ?? new JsonObject { ["error"] = new JsonObject { ["message"] = "The model's backend is restarting." } }, status);
             return;
         }
         if (Hang)
@@ -293,7 +295,24 @@ public sealed class FakeGateway : FakeServer
 
     public static bool HasToolResults(JsonObject request) => request["messages"]!.AsArray().Any(m => m!["role"]?.GetValue<string>() == "tool");
 
-    public static string System(JsonObject request) => request["messages"]![0]!["content"]!.GetValue<string>();
+    /// <summary>What the model is told besides the conversation: the system prompt, and Code Arena's notes (the mode, the date, the tools' instructions).</summary>
+    public static string System(JsonObject request) => string.Join("\n\n", request["messages"]!.AsArray()
+        .Select((m, i) => (Content: m!["content"]?.GetValue<string>() ?? "", i))
+        .Where(x => x.i == 0 || x.Content.StartsWith(SystemPrompt.NoteHead, StringComparison.Ordinal)).Select(x => x.Content));
+
+    /// <summary>The system prompt alone: the first message, the same in every request of a session.</summary>
+    public static string SystemOnly(JsonObject request) => request["messages"]![0]!["content"]!.GetValue<string>();
+
+    /// <summary>A compaction's request for a summary: the conversation, then Code Arena's ask.</summary>
+    public static bool Summarizing(JsonObject request) => Last(request).StartsWith(Agent.SummaryAsk, StringComparison.Ordinal);
+
+    /// <summary>The conversation a request carries: its messages after the system prompt, Code Arena's notes left out.</summary>
+    public static List<JsonNode> History(JsonObject request) =>
+        [.. request["messages"]!.AsArray().Skip(1).Where(m => m!["content"]?.GetValue<string>().StartsWith(SystemPrompt.NoteHead, StringComparison.Ordinal) != true).Select(m => m!)];
+
+    /// <summary>The notes of Code Arena's in a request.</summary>
+    public static List<string> Notes(JsonObject request) =>
+        [.. request["messages"]!.AsArray().Select(m => m!["content"]?.GetValue<string>() ?? "").Where(c => c.StartsWith(SystemPrompt.NoteHead, StringComparison.Ordinal))];
 
     public static List<string> ToolNames(JsonObject request) =>
         request["tools"] is JsonArray tools ? [.. tools.Select(t => t!["function"]!["name"]!.GetValue<string>())] : [];

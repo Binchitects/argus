@@ -313,6 +313,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             Ui = Ui,
             Model = Model,
             SystemPrompt = () => SystemPrompt.Build(inputs),
+            Note = () => SystemPrompt.Note(inputs),
             Total = Total,
             Stream = !Ui.Quiet,
             Compaction = Compaction,
@@ -323,7 +324,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         if (resumed is not null && resumedFile is not null)
         {
             Session = SessionStore.Open(resumedFile);
-            Agent.Load(resumed.Messages);
+            Agent.Load(resumed.Messages, resumed.Known);
             Context.Todos = resumed.Todos;
             Total.Prompt = resumed.Prompt;
             Total.Cached = resumed.Cached;
@@ -690,7 +691,8 @@ internal sealed partial class Runtime : IAsyncDisposable
         lock (_serversGate)
         {
             var (remote, notes) = Served();
-            Tools.Update(all => all.Where(t => t.Server is null).Concat(remote));
+            // The servers' tools keep their places as others come and go: the requests' start stays what the engine has cached.
+            Tools.Update(all => all.Where(t => t.Server is null).Concat(ToolBox.InPlace(all.Where(t => t.Server is not null), remote)));
             Volatile.Write(ref _instructions, notes);
             if (link.Name == ArenaName)
             {
@@ -846,7 +848,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         _memory = Memory.ForPrompt();
         Session = SessionStore.Open(file);
         Agent.Session = Session;
-        Agent.Load(data.Messages);
+        Agent.Load(data.Messages, data.Known);
         Context.Todos = data.Todos;
         Context.TodosChanged = todos => Session.Todos(todos);
         if (data.Model is not null && data.Model != Model.Name && Models.FirstOrDefault(m => m.Id == data.Model) is { } info)

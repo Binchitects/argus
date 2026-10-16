@@ -155,7 +155,7 @@ public sealed class CliTests : IDisposable
     }
 
     [Fact]
-    public void The_system_prompt_carries_the_environment_the_mode_and_the_instructions()
+    public void The_system_prompt_carries_the_environment_and_the_instructions_and_the_note_what_changes()
     {
         var root = Directory.CreateTempSubdirectory("arena-prompt-").FullName;
         try
@@ -173,10 +173,22 @@ public sealed class CliTests : IDisposable
                 Model = () => "model-a",
             };
             var prompt = SystemPrompt.Build(inputs, now: new DateTime(2026, 10, 4));
-            Assert.Contains("branch feature/x", prompt);
-            Assert.Contains("Date: 2026-10-04 (Sunday)", prompt);
-            Assert.Contains("Mode: plan", prompt);
-            Assert.Contains("You cannot edit files or run commands now", prompt);
+            // What changes during a session (the mode, the date, the branch, Arena's tools) is in the note, not the prompt:
+            // the prompt stays the same and the engine reads it from its cache.
+            Assert.DoesNotContain("feature/x", prompt);
+            Assert.DoesNotContain("2026-10-04", prompt);
+            Assert.DoesNotContain("Mode: plan", prompt);
+            Assert.Equal(prompt, SystemPrompt.Build(inputs, now: new DateTime(2026, 10, 5)));
+            var note = SystemPrompt.Note(inputs, new DateTime(2026, 10, 4));
+            Assert.StartsWith(SystemPrompt.NoteHead, note);
+            Assert.Contains("Git branch: feature/x", note);
+            Assert.Contains("Date: 2026-10-04 (Sunday)", note);
+            Assert.Contains("Mode: plan", note);
+            Assert.Contains("You cannot edit files or run commands now", note);
+            Assert.Contains("Arena's tools are not available in this session", note);
+            var withArena = new SystemPrompt.Inputs { Workspace = inputs.Workspace, Paths = inputs.Paths, Mode = inputs.Mode, Model = inputs.Model, HasArenaTools = () => true };
+            Assert.Contains("pictures, video and speech", SystemPrompt.Note(withArena));
+            Assert.Equal(prompt, SystemPrompt.Build(withArena, now: new DateTime(2026, 10, 4)));
             Assert.Contains("Run make test before finishing.", prompt);
             Assert.Contains("I prefer short answers.", prompt);
             Assert.Contains("Model: model-a", prompt);

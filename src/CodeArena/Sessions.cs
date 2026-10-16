@@ -37,6 +37,8 @@ internal sealed class SessionData
     public bool Unlinked { get; set; }
     /// <summary>Every message this session added itself (not those taken in from the web), compactions aside, in order.</summary>
     public List<JsonObject> Local { get; } = [];
+    /// <summary>The last answer's tokens since the last compaction, and how many of <see cref="Messages"/> its request and answer covered; null: none counted.</summary>
+    public (TokenUsage Usage, int Count)? Known { get; set; }
 }
 
 /// <summary>
@@ -131,6 +133,10 @@ internal sealed class SessionStore
                     if (m.Str("role") == "assistant")
                     {
                         data.Answers[data.Messages.Count] = (data.Model, pending);
+                        if (pending is not null)
+                        {
+                            data.Known = (pending, data.Messages.Count + 1);
+                        }
                     }
                     pending = null;
                     data.Messages.Add(m.Clone());
@@ -148,6 +154,7 @@ internal sealed class SessionStore
                 case "compact" when entry["messages"] is JsonArray all:
                     data.Messages.Clear();
                     data.Answers.Clear();
+                    data.Known = null;
                     pending = null;
                     data.Messages.AddRange(all.OfType<JsonObject>().Select(m => m.Clone()));
                     break;

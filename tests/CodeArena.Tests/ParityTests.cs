@@ -32,7 +32,7 @@ public sealed class ParityTests : IDisposable
         Assert.Equal(0, await h.Run("first\nchange it\n/rewind\n/rewind 2\nafter\n/exit\n", "chat", "--mode", "auto-edit"));
         Assert.Equal("old\n", File.ReadAllText(file));
         Assert.Contains("1 file put back", h.Out);
-        var sent = _gateway.Requests[^1]["messages"]!.AsArray().Skip(1).Select(m => m!["content"]!.ToString()).ToList();
+        var sent = FakeGateway.History(_gateway.Requests[^1]).Select(m => m!["content"]!.ToString()).ToList();
         Assert.Equal(["first", "answer to first", "after"], sent);
     }
 
@@ -169,7 +169,7 @@ public sealed class ReliabilityTests : IDisposable
         _gateway.Drop = _ => Interlocked.Increment(ref calls) == 1;
         _gateway.Answer = req => FakeGateway.Last(req).StartsWith("(The connection dropped", StringComparison.Ordinal) ? Reply.Say("the rest.") : Reply.Say("The first half and");
         Assert.Equal(0, await h.Run("", "-p", "tell me"));
-        var sent = _gateway.Requests[^1]["messages"]!.AsArray().Skip(1).Select(m => m!["role"] + ": " + m["content"]).ToList();
+        var sent = FakeGateway.History(_gateway.Requests[^1]).Select(m => m!["role"] + ": " + m["content"]).ToList();
         Assert.True(sent.Count >= 3, $"{_gateway.Requests.Count} requests; out: {h.Out}; err: {h.Err}; sent: {string.Join(" | ", sent)}");
         Assert.Equal("user: tell me", sent[0]);
         Assert.Equal("assistant: The first", sent[1]);
