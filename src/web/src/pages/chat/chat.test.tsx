@@ -568,6 +568,62 @@ describe('chat', () => {
     expect(await screen.findByText('Fixed it.', {}, { timeout: 8000 })).toBeInTheDocument()
   }, 15_000)
 
+  it('while Code Arena answers in the chat, the page says so and what is sent waits in the queue', async () => {
+    const queued: { id: string; content: string; attachments: []; createdAt: string }[] = []
+    const calls = backend({
+      extra: {
+        'GET /api/chat/conversations/c1': () => ({
+          json: conversation({
+            origin: 'code-arena', codeArena: true, queued, currentLeafId: 'q1', messages: [msg('q1', null, 'user', { content: 'Fix the parser' })],
+          }),
+        }),
+        'GET /api/chat/conversations/c1/stamp': () => ({ json: { stamp: 'one', answering: false, codeArena: true } }),
+        'POST /api/chat/conversations/c1/queue': (body: unknown) => {
+          queued.push({ id: `q${queued.length + 1}`, content: (body as { content: string }).content, attachments: [], createdAt: '' })
+          return { json: { queued, answering: false } }
+        },
+      },
+    })
+    renderApp('/chat/c1')
+    expect(await screen.findByText(/Code Arena is answering in this chat/)).toBeInTheDocument()
+    // Nothing to stop here: it answers elsewhere.
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute('placeholder', 'Queue a message…')
+    await ask('after Code Arena')
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/queue')?.body).toEqual({ content: 'after Code Arena', attachments: [] }),
+    )
+    expect(await screen.findByRole('list', { name: 'Queued messages' })).toHaveTextContent('after Code Arena')
+    expect(calls.some((c) => c.path === '/api/chat/conversations/c1/messages')).toBe(false)
+  })
+
+  it("a question from Code Arena shows what was typed with its files apart, and Code Arena's own note as a notice", async () => {
+    const asked = 'Why does this fail?\n\n<attached>\n<file path="src/app.ts">\nconst a = 1\n</file>\n<selection path="src/util.ts" lines="10-20">\nexport const b = 2\n</selection>\n</attached>'
+    backend({
+      extra: {
+        'GET /api/chat/conversations/c1': () => ({
+          json: conversation({
+            origin: 'code-arena',
+            currentLeafId: 'a2',
+            messages: [
+              msg('q1', null, 'user', { content: asked }),
+              msg('a1', 'q1', 'assistant', { content: 'Half an ans', status: 'complete' }),
+              msg('n1', 'a1', 'user', { content: '(The connection dropped while you were answering: carry on.)', details: { note: true } }),
+              msg('a2', 'n1', 'assistant', { content: 'wer, carried on.' }),
+            ],
+          }),
+        }),
+      },
+    })
+    renderApp('/chat/c1')
+    const you = await screen.findAllByRole('region', { name: 'You' })
+    expect(you[0]).toHaveTextContent('Why does this fail?')
+    expect(you[0]).not.toHaveTextContent('const a = 1')
+    expect(within(you[0]!).getByRole('list', { name: 'Sent with it' })).toHaveTextContent('src/app.tssrc/util.ts:10-20')
+    expect(screen.getByRole('note')).toHaveTextContent('Code Arena: (The connection dropped while you were answering: carry on.)')
+    expect(you).toHaveLength(1)
+  })
+
   it('an answer started in another tab, after one asked here, is watched as it is written', async () => {
     const q2 = msg('q2', 'a1', 'user', { content: 'asked in the other tab' })
     let phase: 'new' | 'asked' | 'elsewhere' = 'new'

@@ -35,12 +35,14 @@ public sealed class HangSessionFilesTests(ITestOutputHelper log) : IDisposable
                 if (i % 3 == 0)
                 {
                     var web = Message("user", $"from the web {c}.{i}");
-                    store.Remote(web);
+                    store.Remote(new SyncEntry { Message = web, Id = $"web-{c}-{i}", Web = true, At = DateTimeOffset.UtcNow });
                     history.Add(web);
                 }
             }
             store.Todos([new TodoItem($"step {c}", "in_progress")]);
-            store.Sync("chat-1", c * 10, c * 7);
+            store.Link("chat-1");
+            // Arena has some of them: three more each time.
+            store.Sent(store.Read(d => d.Stream.Where(e => e.Id is null).Take(3).Select(e => (e.Key, $"id-{e.Key}")).ToList()));
             if (c == 1)
             {
                 store.Model("model-b");
@@ -48,7 +50,7 @@ public sealed class HangSessionFilesTests(ITestOutputHelper log) : IDisposable
             if (c < compactions)
             {
                 history = [Message("user", $"[The conversation so far, summarized to fit the model's window]\n\nsummary {c}"), Message("assistant", "Understood."), .. history.TakeLast(4)];
-                store.Compacted(history);
+                store.Compacted(history, 4);
             }
         }
         return store;
@@ -63,7 +65,9 @@ public sealed class HangSessionFilesTests(ITestOutputHelper log) : IDisposable
         Assert.Equal(whole.Known, fast.Known);
         Assert.Equal(whole.Todos, fast.Todos);
         Assert.Equal((whole.Prompt, whole.Cached, whole.Completion), (fast.Prompt, fast.Cached, fast.Completion));
-        Assert.Equal((whole.Conversation, whole.ServerCount, whole.Pushed, whole.Unlinked), (fast.Conversation, fast.ServerCount, fast.Pushed, fast.Unlinked));
+        Assert.Equal((whole.Conversation, whole.Unlinked, whole.From, whole.Waiting, whole.LastSent, whole.Prefix), (fast.Conversation, fast.Unlinked, fast.From, fast.Waiting, fast.LastSent, fast.Prefix));
+        // What Arena has of it, and what the IDE shows of each message, alike (the words aside: the list does not keep them).
+        Assert.Equal(whole.Stream.Select(e => (e.Key, e.Id, e.Web, e.At, e.Model, e.Usage)), fast.Stream.Select(e => (e.Key, e.Id, e.Web, e.At, e.Model, e.Usage)));
     }
 
     [Fact]
@@ -119,12 +123,11 @@ public sealed class HangSessionFilesTests(ITestOutputHelper log) : IDisposable
         var summary = first.Single(s => s.File == stores[0].File);
         Assert.StartsWith("question 0.0", summary.Preview);
         Assert.Equal(9 * 30 * 2 + 9 * 10, summary.Messages);
-        Assert.Equal(9 * 30 * 2, summary.Local);
-        Assert.Equal(("chat-1", true, 56), (summary.Conversation, summary.Synced, summary.Pushed));
+        Assert.Equal(("chat-1", SessionStore.Load(stores[0].File, whole: true).Waiting), (summary.Conversation, summary.Waiting));
 
         // Appended to: listed with what was added.
         stores[0].Message(Message("user", "one more"));
-        stores[0].Sync("chat-2", 1, 1);
+        stores[0].Link("chat-2");
         var after = SessionStore.List(_dir, "/work/project", 100).Single(s => s.File == stores[0].File);
         Assert.Equal(summary.Messages + 1, after.Messages);
         Assert.Equal("chat-2", after.Conversation);

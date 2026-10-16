@@ -173,7 +173,9 @@ internal sealed class Agent
     /// <summary>When the history is compacted, and to what.</summary>
     public Compaction Compaction { get; init; } = new();
     /// <summary>What the web chat added since the last turn, taken in as a turn starts (the main conversation only).</summary>
-    public Func<CancellationToken, Task<IReadOnlyList<JsonObject>>>? BeforeTurn { get; set; }
+    public Func<CancellationToken, Task<Taken>>? BeforeTurn { get; set; }
+    /// <summary>Told when a turn of the main conversation ends, however it ended (the web chat is let go).</summary>
+    public Action? AfterTurn { get; set; }
     /// <summary>A checkpoint before each turn (/rewind); null: none kept (a sub-agent).</summary>
     public Checkpoints? Checkpoints { get; set; }
     /// <summary>Commits each turn's changes under this name (the main conversation only); null: no commits.</summary>
@@ -217,15 +219,28 @@ internal sealed class Agent
     /// Messages the person added in the web chat: the model hears them (the session has them written already). Said with
     /// <paramref name="say"/> (the terminal's prompt: above what is being typed), else as a line of its own.
     /// </summary>
-    public void TakeIn(IReadOnlyList<JsonObject> messages, Action<string>? say = null)
+    public void TakeIn(Taken taken, Action<string>? say = null)
     {
-        if (messages.Count == 0)
+        if (!taken.Any)
         {
             return;
         }
-        Messages.AddRange(messages);
+        var messages = taken.Added;
+        if (taken.History is { } history)
+        {
+            // The web's conversation changed, or its messages go before some of the session's: the history as the session has it now.
+            Messages = history;
+            _notes.Clear();
+            _knownTokens = 0;
+            _knownCount = 0;
+            _compactedAt = 0;
+        }
+        else
+        {
+            Messages.AddRange(messages);
+        }
         var question = messages.LastOrDefault(m => m.Str("role") == "user")?.Str("content");
-        var text = $"Taken in from the web chat: {messages.Count} message{(messages.Count == 1 ? "" : "s")}" +
+        var text = taken.Said ?? $"Taken in from the web chat: {messages.Count} message{(messages.Count == 1 ? "" : "s")}" +
                    (question is { Length: > 0 } ? $", the last question \"{Fmt.OneLine(question, 80)}\"." : ".");
         if (say is null)
         {
@@ -238,11 +253,15 @@ internal sealed class Agent
         Events?.Notice(text);
     }
 
-    private void Add(JsonObject message)
+    /// <summary>A message added to the conversation: an answer with its tokens; a note (<paramref name="kind"/>) is Code Arena's own word to the model.</summary>
+    private void Add(JsonObject message, TokenUsage? usage = null, string? kind = null)
     {
         Messages.Add(message);
-        Session?.Message(message);
+        Session?.Message(message, message.Str("role") == "assistant" ? Model.Name : null, usage, kind);
     }
+
+    /// <summary>What ends an answer the person stopped, as the model reads it back.</summary>
+    internal const string StoppedMark = "(stopped by the person)";
 
     /// <summary>
     /// One turn: the person's message in, the final answer out. Cancelling stops it and keeps the history valid.
@@ -254,6 +273,21 @@ internal sealed class Agent
     /// <param name="takeIn">Whether the web chat's news is taken in first (<see cref="BeforeTurn"/>); the IDE takes it in itself.</param>
     /// <param name="pieces">Lines chosen in the IDE's editor, sent with the message.</param>
     public async Task<string> RunAsync(string? input, Spend turn, CancellationToken ct, bool takeIn = true, IReadOnlyList<Mentions.Piece>? pieces = null)
+    {
+        try
+        {
+            return await RunTurnAsync(input, turn, ct, takeIn, pieces);
+        }
+        finally
+        {
+            if (Depth == 0)
+            {
+                AfterTurn?.Invoke();
+            }
+        }
+    }
+
+    private async Task<string> RunTurnAsync(string? input, Spend turn, CancellationToken ct, bool takeIn, IReadOnlyList<Mentions.Piece>? pieces)
     {
         if (input is not null)
         {
@@ -441,7 +475,7 @@ internal sealed class Agent
                 Ui.StopSpinner();
                 printer.End();
                 // What was said before the stop stays, so the next turn follows from it.
-                Add(new JsonObject { ["role"] = "assistant", ["content"] = printer.Said.Length > 0 ? printer.Said + "\n\n(stopped by the person)" : "(stopped by the person)" });
+                Add(new JsonObject { ["role"] = "assistant", ["content"] = printer.Said.Length > 0 ? printer.Said + "\n\n" + StoppedMark : StoppedMark });
                 throw;
             }
             catch (GatewayException e) when (e.ContextExceeded)
@@ -486,24 +520,35 @@ internal sealed class Agent
                     Warn($"The connection dropped mid-answer {interrupted} times in this turn: stopping here. Send a message to carry on.");
                     if (answer.Text.Length > 0)
                     {
-                        Add(answer.Message);
+                        Add(answer.Message, answer.Usage);
                     }
                     return answer.Text;
                 }
                 Warn("The connection dropped while the model was answering: it carries on from where it stopped.");
                 if (answer.Text.Length > 0)
                 {
-                    Add(answer.Message);
-                    Add(new JsonObject { ["role"] = "user", ["content"] = "(The connection dropped while you were answering: your answer so far is above. Carry on from where it stopped, without repeating it.)" });
+                    Add(answer.Message, answer.Usage);
+                    Add(new JsonObject { ["role"] = "user", ["content"] = "(The connection dropped while you were answering: your answer so far is above. Carry on from where it stopped, without repeating it.)" },
+                        kind: "note");
                 }
                 continue;
             }
-            Add(answer.Message);
-            _knownCount = Messages.Count;
+            if (answer.Text.Length == 0 && answer.ToolCalls.Count == 0)
+            {
+                // Nothing to keep: an empty answer would only be one more message that says nothing (and some models refuse it).
+                Warn(answer.FinishReason == "length"
+                    ? "The model spent its whole output limit before saying anything: nothing of this answer is kept."
+                    : "The model said nothing: nothing of this answer is kept.");
+            }
+            else
+            {
+                Add(answer.Message, answer.Usage);
+                _knownCount = Messages.Count;
+            }
             last = answer.Text;
             if (answer.ToolCalls.Count == 0)
             {
-                if (answer.FinishReason == "length")
+                if (answer.FinishReason == "length" && answer.Text.Length > 0)
                 {
                     Warn("The answer was cut at the model's output limit.");
                 }
@@ -548,7 +593,8 @@ internal sealed class Agent
         }
         Messages.RemoveAt(Messages.Count - 1);
         _notes.RemoveAll(n => n.At > Messages.Count);
-        Session?.Compacted(Messages);
+        // Out of the session as if gone back from (/rewind): what Arena has of it stays there, on a branch of its own.
+        Session?.Rewind(Messages.Count);
         Events?.Compacted("The message that did not fit is out of the conversation: send it again, smaller, or after /compact.");
     }
 
@@ -669,7 +715,8 @@ internal sealed class Agent
             {
                 list.Add(new JsonObject { ["role"] = "user", ["content"] = notes[n++].Text });
             }
-            list.Add(Messages[i].Clone());
+            // Without the thinking kept with an answer: some providers refuse it in what they read.
+            list.Add(GatewayClient.Sendable(Messages[i]));
         }
         while (n < notes.Count)
         {
@@ -852,7 +899,7 @@ internal sealed class Agent
     private const string SummaryMark = "[The conversation so far, summarized";
 
     /// <summary>The summary a compaction puts first, and the model's answer to it.</summary>
-    private const string SummaryHead = SummaryMark + " to fit the model's window]";
+    internal const string SummaryHead = SummaryMark + " to fit the model's window]";
 
     /// <summary>What a compaction puts first when the model's summary could not be made: the older messages left out, in brief.</summary>
     private const string OmittedHead = SummaryMark + " mechanically to fit the model's window: the model's summary could not be made]";
@@ -862,7 +909,7 @@ internal sealed class Agent
 
     private const string StepsMark = "[Your earlier steps of this turn, in brief]";
 
-    private const string Understood = "Understood: I have the summary and carry on from there.";
+    internal const string Understood = "Understood: I have the summary and carry on from there.";
 
     /// <summary>How the request for a summary ends: the conversation as the model has it, then this.</summary>
     internal const string SummaryAsk = "[Code Arena asks for a summary, to fit the model's window]";
@@ -981,14 +1028,15 @@ internal sealed class Agent
             {
                 return false;
             }
-            Saved("Long tool results and call arguments were cut to fit the model's window.");
+            Saved(null, "Long tool results and call arguments were cut to fit the model's window.");
             return true;
         }
         Events?.Notice("Compacting the conversation to fit the model's window…");
         var (summary, failure) = await TrySummaryAsync(keepFrom, SummaryInstruction, force, ct);
+        var text = summary ?? Digest(older, failure!);
         Messages =
         [
-            new JsonObject { ["role"] = "user", ["content"] = summary is not null ? SummaryHead + "\n\n" + summary : OmittedHead + "\n\n" + Digest(older, failure!) },
+            new JsonObject { ["role"] = "user", ["content"] = summary is not null ? SummaryHead + "\n\n" + summary : OmittedHead + "\n\n" + text },
             new JsonObject { ["role"] = "assistant", ["content"] = Understood },
             .. kept,
         ];
@@ -996,7 +1044,9 @@ internal sealed class Agent
         {
             Shrink(Messages);
         }
-        Saved(summary is not null
+        // Arena keeps the summary where the web's own compaction keeps its own: the web chat goes on from it too.
+        Session?.Summarized(text, kept.Count);
+        Saved(kept.Count, summary is not null
             ? $"Compacted: {older.Count} messages summarized, {kept.Count} kept."
             : $"Compacted without a summary ({failure}): {older.Count} older messages left out, in brief, and {kept.Count} kept.");
         return true;
@@ -1046,7 +1096,8 @@ internal sealed class Agent
         {
             Shrink(Messages);
         }
-        Saved(summary is not null
+        // What follows the turn's summary is the conversation's last word for word; what comes before it stands as a summary.
+        Saved(Messages.Count - q - 1, summary is not null
             ? $"Compacted this turn: {steps.Count} messages of its earlier steps summarized, the latest {Messages.Count - q - 1} kept."
             : $"Compacted this turn without a summary ({failure}): {steps.Count} messages of its earlier steps left out, in brief.");
         return true;
@@ -1158,9 +1209,10 @@ internal sealed class Agent
     private long Uncached(long chars) => Math.Max(0, (long)(chars / CharsPerToken) - _knownTokens);
 
     /// <summary>The compaction is done: written to the session (as the whole new history), said, and the page shown it.</summary>
-    private void Saved(string said)
+    /// <param name="raw">How many of the last messages are the conversation's own, word for word (the rest stands for what came before); null: as before.</param>
+    private void Saved(int? raw, string said)
     {
-        Session?.Compacted(Messages);
+        Session?.Compacted(Messages, raw);
         _knownTokens = 0;
         _knownCount = 0;
         _notes.Clear();

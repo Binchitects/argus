@@ -65,7 +65,9 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     out of line; **Send now** stops the answer (keeping what it has) and sends
     it at once. Up to 10 wait per chat. Each is checked as a sent message is
     (the safeguards), when it is queued. Messages still waiting when the app
-    restarts go once it is back.
+    restarts go once it is back. While [Code Arena](code-arena.md#chats-in-arena)
+    is answering in the chat, the page says so and every message is queued:
+    they go when its turn ends.
 - **Deep research.** A tool, **Deep research** in the chat's **Tools** menu
   (there is no separate button): while it is on in a chat (it is in new chats
   unless an admin changes that), the model starts it (`deep_research`) when you
@@ -388,7 +390,9 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   [Code Arena](code-arena.md#chats-in-arena) session is a chat here too, with
   a terminal mark and its folder: continued here, what is added goes back to
   the session (and what the session adds comes here, within seconds while
-  its page is open). An open chat changed elsewhere (another tab or device:
+  its page is open), with each answer's thinking, model and tokens; the files
+  that went with a question there show as chips, and Code Arena's own notes
+  to its model as notices. An open chat changed elsewhere (another tab or device:
   its messages, branch, title, queue or settings) is read again within
   seconds too, an answer started there is watched as it is written, and the
   list takes in new chats within half a minute. The first

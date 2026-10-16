@@ -95,8 +95,7 @@ public sealed class HangIdeJobTests : IDisposable
         // The person carries on in the web chat; here, the session file cannot be written for a moment (a full disk,
         // a file made read-only): writing the web's messages into it throws before the turn's try/finally.
         var chat = Assert.Single(_arena.Chats.All);
-        chat.Messages.Add(new JsonObject { ["role"] = "user", ["content"] = "asked on the web" });
-        chat.Messages.Add(new JsonObject { ["role"] = "assistant", ["content"] = "answered on the web" });
+        _arena.Chats.Append(chat, new JsonObject { ["role"] = "user", ["content"] = "asked on the web" }, new JsonObject { ["role"] = "assistant", ["content"] = "answered on the web" });
         var id = (await web.GetJsonAsync("/api/session"))["id"]!.GetValue<string>();
         var file = Path.Combine(h.Paths.SessionsDir, id + ".jsonl");
         Assert.True(File.Exists(file), $"No session file at {file}.");

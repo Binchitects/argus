@@ -13,6 +13,8 @@ internal sealed record ModelInfo(string Id)
     public int? MaxOutput { get; init; }
     public bool Tools { get; init; } = true;
     public bool Thinking { get; init; } = true;
+    /// <summary>It sees pictures (what the gateway says; not, when it does not say).</summary>
+    public bool Vision { get; init; }
     /// <summary>Prices per token, when the gateway has them.</summary>
     public decimal? InputCost { get; init; }
     public decimal? CachedCost { get; init; }
@@ -164,6 +166,7 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
                 MaxOutput = mi.Int("max_output_tokens"),
                 Tools = mi.Bool("supports_function_calling") ?? true,
                 Thinking = mi.Bool("supports_reasoning") ?? true,
+                Vision = mi.Bool("supports_vision") ?? false,
                 InputCost = mi.Decimal("input_cost_per_token"),
                 CachedCost = mi.Decimal("cache_read_input_token_cost"),
                 OutputCost = mi.Decimal("output_cost_per_token"),
@@ -293,10 +296,12 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
                 sink.Text(t);
             }
             var calls = message["tool_calls"] as JsonArray;
-            return new Completion(Assistant(message.Str("content") ?? "", calls?.DeepClone() as JsonArray), ReadUsage(whole["usage"]), First(whole["choices"]).Str("finish_reason"));
+            return new Completion(Assistant(message.Str("content") ?? "", calls?.DeepClone() as JsonArray, message.Str("reasoning_content")), ReadUsage(whole["usage"]),
+                First(whole["choices"]).Str("finish_reason"));
         }
 
         var text = new StringBuilder();
+        var thought = new StringBuilder();
         var pieces = new SortedDictionary<int, ToolCallPieces>();
         TokenUsage? usage = null;
         string? finish = null;
@@ -330,7 +335,7 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
                 throw why;
             }
             // Part of the answer reached the person: it is kept, and the agent asks for the rest (its unfinished calls are dropped).
-            return new Completion(Assistant(text.ToString(), null), usage, Interrupted);
+            return new Completion(Assistant(text.ToString(), null, thought.ToString()), usage, Interrupted);
         }
 
         // One event of the stream; true at its end.
@@ -367,6 +372,7 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
             if ((delta.Str("reasoning_content") ?? delta.Str("reasoning")) is { Length: > 0 } reasoning)
             {
                 said = true;
+                thought.Append(reasoning);
                 sink.Reasoning(reasoning);
             }
             if (delta.Str("content") is { Length: > 0 } content)
@@ -411,7 +417,7 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
         {
             Measured(read.Prompt - read.Cached, took);
         }
-        return new Completion(Assistant(text.ToString(), toolCalls), usage, finish);
+        return new Completion(Assistant(text.ToString(), toolCalls, thought.ToString()), usage, finish);
     }
 
     /// <summary>Learns the reading speed from an answer: its uncached prompt tokens over the time to its first event (half the last, half this).</summary>
@@ -469,14 +475,30 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
 
     private static JsonNode? First(JsonNode? choices) => choices is JsonArray { Count: > 0 } list ? list[0] : null;
 
-    private static JsonObject Assistant(string text, JsonArray? toolCalls)
+    /// <summary>The answer as the session keeps it: its words, its calls, and the model's thinking (kept for the person, not sent back: <see cref="Sendable"/>).</summary>
+    private static JsonObject Assistant(string text, JsonArray? toolCalls, string? reasoning = null)
     {
         var message = new JsonObject { ["role"] = "assistant", ["content"] = text };
         if (toolCalls is { Count: > 0 })
         {
             message["tool_calls"] = toolCalls;
         }
+        if (!string.IsNullOrEmpty(reasoning))
+        {
+            message["reasoning_content"] = reasoning;
+        }
         return message;
+    }
+
+    /// <summary>
+    /// A message as the gateway is sent it: without the thinking kept with an answer, which some providers refuse in what
+    /// they read (DeepSeek's reasoner) and none needs back.
+    /// </summary>
+    public static JsonObject Sendable(JsonObject message)
+    {
+        var copy = message.Clone();
+        copy.Remove("reasoning_content");
+        return copy;
     }
 
     private static TokenUsage? ReadUsage(JsonNode? u)

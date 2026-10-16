@@ -57,6 +57,7 @@ import { useEditor } from './editor-state'
 import { useFileMention } from './mention'
 import { CodeAnswer } from './answer'
 import { PartHelp } from './help'
+import { SyncStatus } from './sync-status'
 import { changesQuery } from './ide-api'
 import { useSettings } from './settings'
 import { themeNamed } from './settings-schema'
@@ -227,6 +228,11 @@ export function Sessions({ state, onNavigate }: { state: CodeState; onNavigate?:
                           <Cloud className="ml-1.5 inline size-3 align-[-1px] text-muted-foreground" aria-hidden="true" />
                           <span className="sr-only"> (kept in step with its chat in Arena)</span>
                         </>
+                      )}
+                      {s.unsent && (
+                        <span className="ml-1.5 rounded-full border px-1 text-[0.625rem] text-muted-foreground" title={`Arena lacks ${s.waiting ?? 0} of its messages`}>
+                          not sent
+                        </span>
                       )}
                     </button>
                   </li>
@@ -677,6 +683,7 @@ export function Thread({
         <ModelPicker config={config} value={state.model} onChange={(m) => m && m !== state.model && void settings({ model: m })} />
         {model?.thinking && <ThinkingPicker config={config} value={state.thinking} onChange={(level) => void settings({ thinking: level })} />}
         <span className="ml-auto" />
+        <SyncStatus sync={state.sync} />
         {state.mode === 'yolo' && <span className="hidden text-xs text-destructive-ink @md:inline">Yolo: nothing asks</span>}
         <PartHelp part="chat" className="size-8 rounded-md [&_svg]:size-4" />
         <Tooltip content="This folder's sessions">

@@ -47,6 +47,7 @@ export function Composer({
   compare,
   talk,
   history,
+  elsewhere,
 }: {
   streaming: boolean
   onSend: (text: string) => Promise<boolean>
@@ -72,6 +73,8 @@ export function Composer({
   talk?: ReactNode
   /** What ↑ brings back: this chat's messages, then the person's others. */
   history?: RecallSource
+  /** Answering elsewhere ("Code Arena is answering"): what is sent is queued, and there is nothing here to stop. */
+  elsewhere?: string
 }) {
   const [text, setText] = useState('')
   const area = useRef<HTMLTextAreaElement>(null)
@@ -128,7 +131,9 @@ export function Composer({
   }
 
   const hasContent = text.trim().length > 0 || uploads.attachments.length > 0
-  const canSend = (!streaming || !!onQueue) && !uploads.busy && hasContent
+  // An answer runs, here or elsewhere: what is sent waits its turn.
+  const queueing = streaming || !!elsewhere
+  const canSend = (!queueing || !!onQueue) && !uploads.busy && hasContent
   const submit = async () => {
     if (!canSend) return
     // A prompt from the library goes with its blanks filled in: all of them.
@@ -144,7 +149,7 @@ export function Composer({
     unchoose()
     recall.reset()
     // An answer is running: this one waits its turn (or goes at once with Send now).
-    if (!(await (streaming && onQueue ? onQueue(t) : onSend(t)))) {
+    if (!(await (queueing && onQueue ? onQueue(t) : onSend(t)))) {
       setText((now) => now || before.text)
       if (before.chosen) {
         setChosen(before.chosen)
@@ -290,7 +295,7 @@ export function Composer({
             uploads.add(e.clipboardData.files)
           }
         }}
-        placeholder={streaming && onQueue ? 'Queue a message…' : 'Message, or / for a prompt'}
+        placeholder={queueing && onQueue ? 'Queue a message…' : 'Message, or / for a prompt'}
         aria-label="Message"
         // oxlint-disable-next-line jsx-a11y/no-autofocus -- the chat's whole purpose is this box
         autoFocus={autoFocus}
@@ -321,6 +326,13 @@ export function Composer({
           <Button type="button" size="icon-sm" variant="secondary" className="animate-pop rounded-full" onClick={onStop} aria-label="Stop">
             <Square className="fill-current" />
           </Button>
+        ) : elsewhere && onQueue ? (
+          // Answered elsewhere: nothing to stop here, and what is sent waits for it.
+          <Tooltip content={`${elsewhere}: queued, it is sent when that ends (Enter)`}>
+            <Button type="submit" size="icon-sm" className="animate-pop rounded-full" disabled={!canSend} aria-label="Queue">
+              <ListEnd />
+            </Button>
+          </Tooltip>
         ) : (
           <Button type="submit" size="icon-sm" className="animate-pop rounded-full" disabled={!canSend} aria-label="Send">
             <ArrowUp />

@@ -1014,8 +1014,8 @@ status (403 `outside` for a path outside the folder).
 
 | call | what it does |
 |---|---|
-| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it is in use), `compactAt` and `compactTarget` (percent); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `account` (whose chats: the key's account, null until Arena said), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`) |
-| `GET /api/sessions` | this folder's sessions, newest first: `[{id, title, updatedAt, messages, chat}]` (`chat`: the chat in Arena it is kept with) |
+| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it is in use), `compactAt` and `compactTarget` (percent); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `account` (whose chats: the key's account, null until Arena said), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`); `sync` (`{chat, account, waiting, trouble, behind}`: the chat, whose chats, how many messages Arena lacks, what stops them, whether the web chat has news not taken in; null without the sync) and `notices` (`[{id, text, at}]`: the last 20 said while nothing ran, the page shows each once) |
+| `GET /api/sessions` | this folder's sessions, newest first: `[{id, title, updatedAt, messages, chat, unsent, waiting}]` (`chat`: the chat in Arena it is kept with; `unsent`: Arena lacks `waiting` of its messages) |
 | `GET /api/sessions/web` | the person's chats in Arena (the 5,000 newest): `[{id, title, origin, place, updatedAt, messages, session}]` (`session`: this folder's session kept with it); 409 `off` without the sync, 503 `arena` when Arena cannot say |
 | `POST /api/sessions/web` `{id}` | continues that chat here (in the session kept with it, else a new one with its messages); the session; 404 `gone` when Arena has no such chat of the person's, 409 `busy` while an answer is written, 503 `arena` when Arena cannot say |
 | `POST /api/sessions/send-all` | sends Arena what it lacks of this folder's sessions: `{sent, failed}` (`failed`: why, per session) |
@@ -1548,7 +1548,37 @@ until Arena has them: a session goes on while Arena is out of reach, and what
 it missed is sent when Arena answers (at the latest when the session is next
 opened). Each message carries its place in the session, so one sent twice
 (its answer lost) is never kept twice. A chat deleted in Arena ends the sync
-for that session, which goes on here. `/sync` says where the session stands
+for that session, which goes on here.
+
+The session keeps Arena's id of each message, and both sides go by those ids:
+the session reads what follows the last message both have, and adds after it.
+So what the web changes is followed here: a question edited there, an answer
+written again, or another branch shown makes the session's conversation the
+web's from where the two part (said in the thread: "The web chat's
+conversation changed"), and what the session sends next goes on after it.
+`/rewind` here works the other way: the turns gone back from stay on the web as
+a branch, and what the session adds goes on a branch of its own there, shown
+from then on. When the web moved to another branch while the session's
+messages were still on their way, those go on a branch of their own too; when
+the web only added messages meanwhile, they come before the session's in
+both places (a tool's result always stays straight after its call). A long
+chat comes in a page of 200 messages at a time.
+
+A compaction here is sent too: Arena keeps its summary where the web's own
+compaction keeps one (on the last message it covers), so the web's next answer
+reads it instead of those messages. The other way, a chat compacted on the
+web is read here as its summary and what follows it. Every message on the
+branch counts, on both sides and in the lists: an answer the model gave with
+nothing in it is not kept here (the thread says the model said nothing), and
+one that failed on the web with nothing in it is read here as "(no answer)".
+
+While a turn runs here, the chat is the session's: Arena holds it for the turn
+(renewed every 30 seconds, and let go once Arena has the turn's messages, or
+after 90 seconds without a word, when Code Arena stopped). Meanwhile the web
+page says **Code Arena is answering in this chat**, and what the person sends
+there waits in the chat's queue, then goes (and is answered on the web) when
+the turn ends. A turn that starts while the web chat is answering waits for
+that answer first (two minutes at most; Stop goes on without it). `/sync` says where the session stands
 and whose chats they are: the sessions go to the chats of the account whose
 key `code-arena login` was given (login says which; the IDE shows it over
 **Chats in Arena**), so a key of another account (a test one) keeps them
@@ -1558,7 +1588,32 @@ there, not with your own chats.
 it lacks of this folder's sessions (those it never had, and those sent in
 part), the oldest first, each keeping its place in the list here; one whose
 chat was deleted there stays as it is. When Arena cannot be reached it stops,
-and says how many are left for the next `/sync all`.
+and says how many are left for the next `/sync all`. The terminal's chat and
+the IDE also do this by themselves, in the background, ten seconds after they
+start: what Arena lacks of every folder's sessions goes then (the session open
+now is left to its own sync), and one notice says how many went. The IDE marks
+a session Arena lacks part of as **not sent**.
+
+Nothing is lost on the way. The web shows each answer with its thinking (kept
+in the session, never sent back to the model), its model, tokens and time; a
+tool's result with its tool; an answer stopped here as stopped; Code Arena's
+own note to the model (the connection dropped) as a notice, not as your words;
+and what went with a question (`@files`, lines chosen in the IDE's editor) as
+what you typed plus the files as chips. Continued on the web, the chat answers
+with the model Code Arena answered with last. The other way, what the web
+attached comes with its messages: a text file's text as the web's model reads
+it, a picture as a picture to a model that sees (fetched with your key; named
+otherwise), a sound's or a video's transcript; the web's tool results come
+marked as data where the web marks them for its own model (web pages, the
+company's documents). An archived chat continued from Code Arena (`/web N`,
+`--web`, the IDE's **Chats in Arena**) comes back to the web's list once; what
+the session adds later leaves it as you left it.
+
+The IDE's chat shows where the sync stands in its header (in step, how many
+messages are still to send, the web's news waiting, or what stops it: its
+words on hover), and what was said while nothing ran (Arena out of reach, the
+web's messages taken in) comes as a notice there, not only in the terminal that
+started it.
 
 ## Its commits
 

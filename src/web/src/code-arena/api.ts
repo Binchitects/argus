@@ -46,10 +46,28 @@ export interface CodeState {
   account?: string | null
   /** The chat in Arena this session is kept in step with (null: none yet): the state is read often, for the web's news. */
   chat?: string | null
+  /** Where the sync with Arena stands (null: sessions are not kept with Arena here). */
+  sync?: SyncState | null
+  /** What was said while nothing ran here (Arena out of reach, the web's news taken in), the newest last: each is shown once. */
+  notices?: { id: number; text: string; at: string }[]
   /** Code completion in the editor, from this model; null: off in code-arena's config. */
   completion?: { model: string } | null
   arenaTools: boolean
   tools: { local: number; servers: { name: string; count: number }[] }
+}
+
+/** The session's sync with its chat in Arena. */
+export interface SyncState {
+  /** The chat (null: none yet: it is made with the first message). */
+  chat: string | null
+  /** Whose chats they are: the key's account (null until Arena said). */
+  account: string | null
+  /** Messages Arena does not have yet. */
+  waiting: number
+  /** What stopped them (Arena out of reach, a refusal); null: nothing. */
+  trouble: string | null
+  /** The web chat has messages not taken in yet (they come at the next turn, or at once while nothing runs). */
+  behind: boolean
 }
 
 export type Mode = 'ask' | 'auto-edit' | 'plan' | 'yolo'
@@ -95,6 +113,9 @@ export interface SessionSummary {
   messages: number
   /** The chat in Arena it is kept in step with; null: none. */
   chat?: string | null
+  /** Arena lacks some of it (never sent, or sent in part): how many messages. */
+  unsent?: boolean
+  waiting?: number
 }
 
 /** A chat of the person's in Arena, to continue here: with this folder's session kept in step with it, if one is. */

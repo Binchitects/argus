@@ -345,23 +345,38 @@ internal sealed partial class Runtime : IAsyncDisposable
         }
         Agent.Session = Session;
         Context.TodosChanged = todos => Session.Todos(todos);
-        Agent.BeforeTurn = ct => Sync?.TakeInAsync(ct) ?? Task.FromResult<IReadOnlyList<System.Text.Json.Nodes.JsonObject>>([]);
-        StartSync(resumed);
+        Agent.BeforeTurn = TakeInForTurnAsync;
+        Agent.AfterTurn = () => Sync?.EndTurn();
+        StartSync();
         if (o.WebChat is { } web && await ContinueWebChatAsync(web, ct) is { } said)
         {
             Ui.Info(said);
         }
     }
 
+    /// <summary>
+    /// A turn starts: the web chat is this session's until it ends (the web queues the person's messages meanwhile), and
+    /// what was added there comes in first.
+    /// </summary>
+    public async Task<Taken> TakeInForTurnAsync(CancellationToken ct)
+    {
+        if (Sync is not { } sync)
+        {
+            return Taken.None;
+        }
+        await sync.BeginTurnAsync(ct);
+        return await sync.TakeInAsync(ct);
+    }
+
     /// <summary>Keeps the session now in use in step with its chat in Arena (the last one's sync ends, sending what it still has).</summary>
-    private void StartSync(SessionData? data)
+    private void StartSync()
     {
         var previous = Sync;
         Sync = ChatSync.Start(Config, Http, Session, Workspace.Root, () => Model.Name, (warn, text) =>
         {
             Notice(warn, text);
             Agent?.Events?.Notice(text);
-        }, data);
+        }, () => Model.Info.Vision);
         if (Sync is not null)
         {
             Sync.OnNews = _webNews;
@@ -484,8 +499,12 @@ internal sealed partial class Runtime : IAsyncDisposable
                 TryDelete(empty);
             }
         }
-        var taken = Sync is null ? [] : await Sync.TakeInAsync(ct);
-        Agent.TakeIn(taken);
+        // Continued here by the person: archived on the web, it comes back to the list there (once: what this session adds leaves it be).
+        if (Sync is not null)
+        {
+            await ChatSync.ContinuedAsync(Config, Http, chat, ct);
+        }
+        Agent.TakeIn(Sync is null ? Taken.None : await Sync.TakeInAsync(ct));
         return null;
     }
 
@@ -495,7 +514,8 @@ internal sealed partial class Runtime : IAsyncDisposable
     /// first (Arena lists them as they came); one whose chat was deleted there stays as it is. The sessions keep their
     /// place here (newest first, --continue). How many were sent, and what kept the others back.
     /// </summary>
-    public async Task<(int Sent, List<string> Failed)> SendAllAsync(Action<string>? progress, CancellationToken ct)
+    /// <param name="everyFolder">Every folder's sessions, not only this one's (sent in the background as Code Arena starts).</param>
+    public async Task<(int Sent, List<string> Failed)> SendAllAsync(Action<string>? progress, CancellationToken ct, bool everyFolder = false)
     {
         var failed = new List<string>();
         var sent = 0;
@@ -504,16 +524,21 @@ internal sealed partial class Runtime : IAsyncDisposable
             failed.Add("Chats are not kept with Arena here (\"syncChats\": false in config.json, or no Arena address or key).");
             return (0, failed);
         }
-        var waiting = SessionStore.List(Env.Paths.SessionsDir, Workspace.Root, 10_000).Where(s => s.Unsent && s.File != Session.File).Reverse().ToList();
+        var waiting = SessionStore.List(Env.Paths.SessionsDir, everyFolder ? null : Workspace.Root, 10_000).Where(s => s.Unsent && s.File != Session.File).Reverse().ToList();
         for (var i = 0; i < waiting.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
             var s = waiting[i];
+            if (s.File == Session.File)
+            {
+                // Opened meanwhile: its own sync sends it.
+                continue;
+            }
             progress?.Invoke($"{i + 1}/{waiting.Count} {s.Preview}");
             var written = File.GetLastWriteTimeUtc(s.File);
-            var data = SessionStore.Load(s.File, whole: true);
-            var sync = ChatSync.Start(Config, Http, SessionStore.Open(s.File), data.Cwd ?? Workspace.Root, () => data.Model ?? Model.Name, (_, _) => { }, data,
-                new DateTimeOffset(written, TimeSpan.Zero));
+            var store = SessionStore.Open(s.File);
+            var (cwd, model) = store.Read(d => (d.Cwd, d.Model));
+            var sync = ChatSync.Start(Config, Http, store, cwd ?? Workspace.Root, () => model ?? Model.Name, (_, _) => { });
             if (sync is null)
             {
                 break;
@@ -522,7 +547,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             await using (sync)
             {
                 // Its chat is made, then its messages go 200 at a time, tried again while Arena is out of reach.
-                await sync.FlushAsync(TimeSpan.FromSeconds(60), patient: true);
+                await sync.FlushAsync(TimeSpan.FromSeconds(60), patient: true, ct);
                 trouble = sync.InStep ? null : sync.Trouble ?? "Arena did not take it all within a minute";
             }
             try
@@ -548,6 +573,53 @@ internal sealed partial class Runtime : IAsyncDisposable
             }
         }
         return (sent, failed);
+    }
+
+    /// <summary>The sending of what Arena lacks, in the background as Code Arena starts; null: none runs.</summary>
+    private CancellationTokenSource? _sendingLater;
+
+    /// <summary>How long after Code Arena starts the sessions Arena lacks are sent (the person's own work goes first).</summary>
+    public static TimeSpan SendLaterAfter { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Sends Arena, in the background and a while after the start, what it lacks of every folder's sessions (made before
+    /// signing in, with "syncChats" off, or closed while Arena was out of reach): one summary notice when it is done. The
+    /// session open now is left to its own sync. Started once (the terminal's chat, the IDE).
+    /// </summary>
+    public void SendLaterInBackground()
+    {
+        if (_sendingLater is not null || !Config.SyncChats || Config.Url is not { Length: > 0 } || Config.ApiKey is not { Length: > 0 })
+        {
+            return;
+        }
+        var stop = _sendingLater = new CancellationTokenSource();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(SendLaterAfter, stop.Token);
+                var (sent, failed) = await SendAllAsync(null, stop.Token, everyFolder: true);
+                if (sent > 0)
+                {
+                    Notice(false, $"Sent to Arena in the background: {sent} earlier session{(sent == 1 ? "" : "s")} it did not have.");
+                    Agent?.Events?.Notice($"Sent to Arena in the background: {sent} earlier session{(sent == 1 ? "" : "s")} it did not have.");
+                }
+                if (failed.Count > 0)
+                {
+                    var why = $"Not every earlier session reached Arena: {failed[0]} /sync all tries again.";
+                    Notice(true, why);
+                    Agent?.Events?.Notice(why);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Code Arena is closing.
+            }
+            catch (Exception e) when (e is HttpRequestException or IOException or UnauthorizedAccessException)
+            {
+                Notice(true, $"The earlier sessions Arena lacks were not sent: {Fmt.OneLine(e.Message, 200)} (/sync all tries again).");
+            }
+        });
     }
 
     private static void TryDelete(string file)
@@ -611,9 +683,8 @@ internal sealed partial class Runtime : IAsyncDisposable
         var (messages, restored, lost) = Checkpoints.Rewind(number, files);
         if (chat)
         {
-            Agent.Load([.. Agent.Messages.Take(messages)]);
-            // The session file reads back as it is now; the chat in Arena keeps what was said.
-            Session.Compacted(Agent.Messages);
+            // The session file reads back as it is now; the chat in Arena keeps what was said, and goes on from there on a branch of its own.
+            Agent.Load(Sync is { } sync ? await sync.RewindAsync(messages, ct) : Session.Rewind(messages));
         }
         var said = new List<string>
         {
@@ -843,7 +914,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         Agent.Clear();
         Context.Todos = [];
         Context.TodosChanged = todos => Session.Todos(todos);
-        StartSync(null);
+        StartSync();
     }
 
     /// <summary>Switches to a saved session (/resume).</summary>
@@ -860,7 +931,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             Model.Info = info;
         }
-        StartSync(data);
+        StartSync();
     }
 
     public void SwitchModel(ModelInfo info)
@@ -993,6 +1064,8 @@ internal sealed partial class Runtime : IAsyncDisposable
     {
         Jobs.StopAll("code-arena stopped");
         Sandbox.Clean();
+        // The earlier sessions not sent yet go at the next start.
+        _sendingLater?.Cancel();
         if (Sync is not null)
         {
             // What is still to send goes now, for a few seconds at most; the rest goes when the session is next opened.

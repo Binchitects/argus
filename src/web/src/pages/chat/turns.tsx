@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, FileCode2, FileText, FoldVertical, GitFork, Pencil, RefreshCw, Square, Telescope, Timer } from 'lucide-react'
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, FileCode2, FileText, FoldVertical, GitFork, Info, Pencil, RefreshCw, Square, Telescope, Timer } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -10,6 +10,7 @@ import { isMedia } from './sound'
 import { formatValue, money } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { attachmentUrl } from './api'
+import { attachedOf, typedOf } from './attached'
 import { ImageViewer } from './image-viewer'
 import { asViewerImages } from './viewer-images'
 import type { Notice, ToolRunning } from './live'
@@ -126,6 +127,17 @@ export function QuestionTurn({ m, siblings, busy, onSwitch, onEdit }: { m: Messa
   const [editing, setEditing] = useState<string | null>(null)
   const [viewing, setViewing] = useState<number | null>(null)
   const images = m.attachments.filter((a) => a.kind === 'image')
+  // Code Arena's own word to its model (the connection dropped): a notice, not the person's.
+  if (m.details?.note)
+    return (
+      <p role="note" className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground" data-question={m.id}>
+        <Info className="size-3.5 shrink-0" aria-hidden="true" />
+        <span>Code Arena: {m.content}</span>
+      </p>
+    )
+  // Asked in Code Arena: what went with it (@files, lines chosen in its editor) shows as chips, not as the text the model read.
+  const typed = m.files ? m.content : typedOf(m.content)
+  const files = m.files ?? attachedOf(m.content)
   return (
     <section className="group/q flex animate-enter scroll-mt-4 flex-col items-end gap-1 outline-none" aria-label="You" data-question={m.id} tabIndex={-1}>
       {m.attachments.length > 0 && (
@@ -159,8 +171,8 @@ export function QuestionTurn({ m, siblings, busy, onSwitch, onEdit }: { m: Messa
       {images.length > 0 && <ImageViewer images={asViewerImages(images)} index={viewing} onIndex={setViewing} />}
       {editing === null ? (
         <>
-          {m.content && <div dir="auto" className="max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[0.9375rem] leading-relaxed whitespace-pre-wrap text-secondary-foreground">{m.content}</div>}
-          {m.files && m.files.length > 0 && <QuestionFiles files={m.files} />}
+          {typed && <div dir="auto" className="max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[0.9375rem] leading-relaxed whitespace-pre-wrap text-secondary-foreground">{typed}</div>}
+          {files.length > 0 && <QuestionFiles files={files} />}
         </>
       ) : (
         <form

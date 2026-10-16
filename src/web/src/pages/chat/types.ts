@@ -83,8 +83,11 @@ export interface Message {
   noAccess: boolean
   /** The chat was compacted here: the model reads this summary instead of the branch down to this message. */
   summary?: string | null
-  /** What a message shows beyond what the model read: a tool call's sub-agents' work ({ agents: [...] }), the canvas a call made or changed, an Auto answer's route, a memory to keep ({ memory }). */
-  details?: { agents?: AgentWork[]; canvas?: { id: string; title: string; version: number }; route?: AutoRoute; memory?: MemoryOffer } | null
+  /**
+   * What a message shows beyond what the model read: a tool call's sub-agents' work ({ agents: [...] }), the canvas a call made or changed, an Auto answer's
+   * route, a memory to keep ({ memory }); { note: true }: Code Arena's own word to its model (the connection dropped), shown as a notice, not as the person's.
+   */
+  details?: { agents?: AgentWork[]; canvas?: { id: string; title: string; version: number }; route?: AutoRoute; memory?: MemoryOffer; note?: boolean } | null
   /** An answer: what filled the request it answered, in characters by kind (the context gauge scales it to its prompt tokens). */
   context?: ContextFill | null
   /** An answer whose thinking was cut short ("Answer now"). */
@@ -186,6 +189,8 @@ export interface ConversationSummary {
   origin?: string | null
   /** Where it runs there: the session's folder. */
   originPlace?: string | null
+  /** Code Arena is answering in it: what the person sends waits in the queue until its turn ends. */
+  codeArena?: boolean
 }
 
 export type Reach = 'Private' | 'Groups' | 'Company'

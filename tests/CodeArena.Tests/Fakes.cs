@@ -121,6 +121,8 @@ public sealed class FakeGateway : FakeServer
 
     public string[] Models { get; set; } = ["model-a", "model-b"];
     public int Context { get; set; } = 32768;
+    /// <summary>The models see pictures (the gateway says so).</summary>
+    public bool Vision { get; set; }
     public Func<JsonObject, Reply> Answer { get; set; } = _ => Reply.Say("Hello from the model.");
     /// <summary>An HTTP status a chat request is answered with instead of an answer (a backend restarting: 500); 0 answers it.</summary>
     public Func<JsonObject, int> Failure { get; set; } = _ => 0;
@@ -176,7 +178,10 @@ public sealed class FakeGateway : FakeServer
                 ["data"] = new JsonArray([.. Models.Select(m => (JsonNode)new JsonObject
                 {
                     ["model_name"] = m,
-                    ["model_info"] = new JsonObject { ["max_input_tokens"] = Context, ["supports_function_calling"] = true, ["supports_reasoning"] = true, ["mode"] = "chat" },
+                    ["model_info"] = new JsonObject
+                    {
+                        ["max_input_tokens"] = Context, ["supports_function_calling"] = true, ["supports_reasoning"] = true, ["supports_vision"] = Vision, ["mode"] = "chat",
+                    },
                 })]),
             });
             return;
@@ -587,10 +592,23 @@ internal static class Special
     private static extern int mkfifo([System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPUTF8Str)] string path, uint mode);
 }
 
-/// <summary>Arena's side of Code Arena's chats (/api/code-arena): chats by id, each a list of messages, counted as Arena counts them.</summary>
+/// <summary>
+/// Arena's side of Code Arena's chats (/api/code-arena), as Arena keeps them: each chat a tree of messages with ids (an
+/// edited question or a regenerated answer is a sibling), the branch on screen the path to its leaf. Reads go on after a
+/// message, sends add after one; a turn of Code Arena's holds the chat.
+/// </summary>
 public sealed class FakeChats
 {
     private readonly object _gate = new();
+
+    /// <summary>A message in a chat's tree: Arena's shape (id, role, content, toolCalls, ref...), and the one before it.</summary>
+    public sealed class Node
+    {
+        public required string Id { get; init; }
+        public string? Parent { get; set; }
+        public required JsonObject Message { get; init; }
+        public string? Summary { get; set; }
+    }
 
     public sealed class Chat
     {
@@ -598,27 +616,125 @@ public sealed class FakeChats
         public string? Ref { get; init; }
         public string? Place { get; init; }
         public string Title { get; set; } = "New chat";
-        public List<JsonObject> Messages { get; } = [];
+        /// <summary>Every message, in the order they were added, on every branch.</summary>
+        public List<Node> Nodes { get; } = [];
+        /// <summary>The last message of the branch on screen.</summary>
+        public string? Leaf { get; set; }
         /// <summary>When it last changed: the list is newest first, a page at a time before a time.</summary>
         public DateTimeOffset Updated { get; set; } = DateTimeOffset.UtcNow;
+        /// <summary>Code Arena's turn holds it until then.</summary>
+        public DateTimeOffset? Turn { get; set; }
+
+        /// <summary>The branch on screen, first to last.</summary>
+        public List<Node> Branch
+        {
+            get
+            {
+                var path = new List<Node>();
+                for (var id = Leaf; id is not null && Nodes.FirstOrDefault(n => n.Id == id) is { } n; id = n.Parent)
+                {
+                    path.Add(n);
+                }
+                path.Reverse();
+                return path;
+            }
+        }
+
+        /// <summary>The branch on screen's messages, as Arena gives them.</summary>
+        public List<JsonObject> Messages => [.. Branch.Select(n => n.Message)];
     }
 
     /// <summary>Reads of a chat that brought its messages, and those answered only "unchanged" (asked with its stamp).</summary>
     public int FullReads { get; private set; }
     public int UnchangedReads { get; private set; }
+    /// <summary>Each read: the message it went on after (null: from the start), and how many it gave.</summary>
+    public List<(string? Since, int Given)> Reads { get; } = [];
+    /// <summary>Each turn asked for and let go, in order: "hold" or "end".</summary>
+    public List<string> Turns { get; } = [];
+    /// <summary>The most messages one read gives (Arena: 200 unless asked for fewer).</summary>
+    public int Page { get; set; } = 200;
+    /// <summary>Files attached on the web, by id: what /api/code-arena/attachments/{id} gives.</summary>
+    public Dictionary<string, (byte[] Data, string ContentType)> Files { get; } = [];
+    /// <summary>The chats the person continued from Code Arena (/continued), in order.</summary>
+    public List<string> Continued { get; } = [];
 
-    /// <summary>The branch as one word, as Arena gives it: here its length (messages are only ever added).</summary>
-    private static string Stamp(Chat c) => $"n{c.Messages.Count}";
+    /// <summary>The branch as one word, as Arena gives it: its last message.</summary>
+    private static string Stamp(Chat c) => c.Leaf ?? "empty";
 
     private int _made;
+    private int _ids;
 
-    /// <summary>Adds to a chat as the web does, while Code Arena may be reading it.</summary>
+    private string NewId() => $"00000000-0000-0000-0000-{++_ids:D12}";
+
+    private Node AddNode(Chat chat, string? parent, JsonObject message)
+    {
+        var node = new Node { Id = NewId(), Parent = parent, Message = message.DeepClone().AsObject() };
+        node.Message["id"] = node.Id;
+        chat.Nodes.Add(node);
+        return node;
+    }
+
+    /// <summary>Adds to a chat as the web does, after the branch on screen, while Code Arena may be reading it.</summary>
     public void Append(Chat chat, params JsonObject[] messages)
     {
         lock (_gate)
         {
-            chat.Messages.AddRange(messages);
+            foreach (var m in messages)
+            {
+                chat.Leaf = AddNode(chat, chat.Leaf, m).Id;
+            }
             chat.Updated = DateTimeOffset.UtcNow;
+        }
+    }
+
+    /// <summary>
+    /// The web edits the branch's message at <paramref name="index"/> (a question asked again, an answer written again): a
+    /// sibling of it, with what follows, shown from then on.
+    /// </summary>
+    public void Edit(Chat chat, int index, params JsonObject[] messages)
+    {
+        lock (_gate)
+        {
+            var branch = chat.Branch;
+            var parent = index == 0 ? null : branch[index - 1].Id;
+            foreach (var m in messages)
+            {
+                parent = AddNode(chat, parent, m).Id;
+            }
+            chat.Leaf = parent;
+            chat.Updated = DateTimeOffset.UtcNow;
+        }
+    }
+
+    /// <summary>The web shows another branch: the one ending at <paramref name="leaf"/>.</summary>
+    public void Show(Chat chat, string leaf)
+    {
+        lock (_gate)
+        {
+            chat.Leaf = leaf;
+        }
+    }
+
+    /// <summary>The web compacts its chat: a summary of the branch down to its message at <paramref name="index"/>.</summary>
+    public void Summarize(Chat chat, int index, string text)
+    {
+        lock (_gate)
+        {
+            chat.Branch[index].Summary = text;
+        }
+    }
+
+    /// <summary>As if Arena never had the branch's messages from <paramref name="count"/> on (they never arrived).</summary>
+    public void Lose(Chat chat, int count)
+    {
+        lock (_gate)
+        {
+            var branch = chat.Branch;
+            foreach (var n in branch.Skip(count))
+            {
+                chat.Nodes.Remove(n);
+            }
+            chat.Leaf = count == 0 ? null : branch[count - 1].Id;
         }
     }
 
@@ -634,7 +750,10 @@ public sealed class FakeChats
         {
             // Each a moment after the one before: the newest is the last added.
             var chat = new Chat { Id = Guid.NewGuid().ToString(), Title = title, Updated = DateTimeOffset.UtcNow.AddTicks(++_made * 10) };
-            chat.Messages.AddRange(messages);
+            foreach (var m in messages)
+            {
+                chat.Leaf = AddNode(chat, chat.Leaf, m).Id;
+            }
             All.Add(chat);
             return chat;
         }
@@ -648,6 +767,42 @@ public sealed class FakeChats
         }
     }
 
+    /// <summary>The branch after <paramref name="since"/> as Arena reads it: after the last message both have, and whether that is a fork.</summary>
+    private JsonObject Read(Chat c, string? since, int limit)
+    {
+        var branch = c.Branch;
+        var (start, @base, fork) = (0, (string?)null, false);
+        if (since is not null)
+        {
+            var at = branch.FindIndex(n => n.Id == since);
+            if (at >= 0)
+            {
+                (start, @base) = (at + 1, since);
+            }
+            else
+            {
+                fork = true;
+                for (var up = c.Nodes.FirstOrDefault(n => n.Id == since)?.Parent; up is not null; up = c.Nodes.FirstOrDefault(n => n.Id == up)?.Parent)
+                {
+                    if (branch.FindIndex(n => n.Id == up) is var shared and >= 0)
+                    {
+                        (start, @base) = (shared + 1, up);
+                        break;
+                    }
+                }
+            }
+        }
+        var page = branch.Skip(start).Take(limit).ToList();
+        Reads.Add((since, page.Count));
+        var summary = branch.LastOrDefault(n => n.Summary is not null);
+        return new JsonObject
+        {
+            ["id"] = c.Id, ["count"] = branch.Count, ["stamp"] = Stamp(c), ["base"] = @base, ["fork"] = fork, ["more"] = start + page.Count < branch.Count,
+            ["summary"] = summary is null ? null : new JsonObject { ["upTo"] = summary.Id, ["text"] = summary.Summary },
+            ["messages"] = new JsonArray([.. page.Select(n => (JsonNode)n.Message.DeepClone())]),
+        };
+    }
+
     internal async Task HandleAsync(HttpListenerContext ctx, string body)
     {
         if (Status != 0)
@@ -657,8 +812,24 @@ public sealed class FakeChats
         }
         var parts = ctx.Request.Url!.AbsolutePath["/api/code-arena/".Length..].Split('/');
         var method = ctx.Request.HttpMethod;
-        JsonNode reply;
+        JsonNode? reply;
         var status = 200;
+        if (parts is ["attachments", var file] && method == "GET")
+        {
+            (byte[] Data, string ContentType) found;
+            bool known;
+            lock (_gate)
+            {
+                known = Files.TryGetValue(file, out found);
+            }
+            ctx.Response.StatusCode = known ? 200 : 404;
+            if (known)
+            {
+                ctx.Response.ContentType = found.ContentType;
+                await ctx.Response.OutputStream.WriteAsync(found.Data);
+            }
+            return;
+        }
         lock (_gate)
         {
             if (parts is ["chats"] && method == "GET")
@@ -671,7 +842,7 @@ public sealed class FakeChats
                     ["chats"] = new JsonArray([.. page.Take(limit).Select(c => (JsonNode)new JsonObject
                     {
                         ["id"] = c.Id, ["title"] = c.Title, ["origin"] = c.Ref is null ? null : "code-arena", ["originPlace"] = c.Place,
-                        ["updatedAt"] = c.Updated.ToString("o"), ["messages"] = c.Messages.Count,
+                        ["updatedAt"] = c.Updated.ToString("o"), ["messages"] = c.Branch.Count,
                     })]),
                     ["more"] = page.Count > limit,
                     ["me"] = new JsonObject { ["email"] = "pat@example.test", ["name"] = "Pat" },
@@ -693,14 +864,15 @@ public sealed class FakeChats
             {
                 (reply, status) = (new JsonObject { ["status"] = "gone", ["error"] = "That chat is not there any more: it was deleted." }, 404);
             }
-            else if (parts is ["chats", var id2, ..] && Answering.Contains(id2))
+            else if (parts is ["chats", var id2, ..] && Answering.Contains(id2) && method != "DELETE")
             {
                 (reply, status) = (new JsonObject { ["status"] = "answering", ["error"] = "The chat is answering on the web." }, 409);
             }
             else if (parts is ["chats", var id3] && method == "GET")
             {
                 var c = All.First(x => x.Id == id3);
-                var after = int.TryParse(ctx.Request.QueryString["after"], out var a) ? a : 0;
+                var since = ctx.Request.QueryString["since"];
+                var limit = int.TryParse(ctx.Request.QueryString["limit"], out var l) ? Math.Clamp(l, 0, Page) : Page;
                 if (ctx.Request.QueryString["stamp"] is { } stamp && stamp == Stamp(c))
                 {
                     UnchangedReads++;
@@ -708,29 +880,33 @@ public sealed class FakeChats
                 }
                 else
                 {
-                    FullReads++;
-                    reply = new JsonObject { ["id"] = c.Id, ["count"] = c.Messages.Count, ["stamp"] = Stamp(c), ["messages"] = new JsonArray([.. c.Messages.Skip(after).Select(m => (JsonNode)m.DeepClone())]) };
+                    if (limit > 0)
+                    {
+                        FullReads++;
+                    }
+                    reply = Read(c, since, limit);
                 }
             }
             else if (parts is ["chats", var id4, "messages"] && method == "POST")
             {
-                var c = All.First(x => x.Id == id4);
-                var b = JsonNode.Parse(body)!.AsObject();
-                var after = b["after"]!.GetValue<int>();
-                if (after != c.Messages.Count)
-                {
-                    (reply, status) = (new JsonObject { ["status"] = "behind", ["count"] = c.Messages.Count, ["messages"] = new JsonArray([.. c.Messages.Skip(after).Select(m => (JsonNode)m.DeepClone())]) }, 409);
-                }
-                else
-                {
-                    c.Messages.AddRange(b["messages"]!.AsArray().OfType<JsonObject>().Select(m => m.DeepClone().AsObject()));
-                    if (c.Title == "New chat" && c.Messages.FirstOrDefault(m => m["role"]?.GetValue<string>() == "user") is { } first)
-                    {
-                        c.Title = first["content"]!.ToString().Split('\n')[0];
-                    }
-                    c.Updated = DateTimeOffset.UtcNow;
-                    reply = new JsonObject { ["count"] = c.Messages.Count, ["stamp"] = Stamp(c) };
-                }
+                (reply, status) = Append(All.First(x => x.Id == id4), JsonNode.Parse(body)!.AsObject());
+            }
+            else if (parts is ["chats", var id5, "turn"] && method == "POST")
+            {
+                All.First(x => x.Id == id5).Turn = DateTimeOffset.UtcNow.AddSeconds(90);
+                Turns.Add("hold");
+                reply = new JsonObject { ["until"] = DateTimeOffset.UtcNow.AddSeconds(90).ToString("o") };
+            }
+            else if (parts is ["chats", var id6, "turn"] && method == "DELETE")
+            {
+                All.First(x => x.Id == id6).Turn = null;
+                Turns.Add("end");
+                (reply, status) = (null, 204);
+            }
+            else if (parts is ["chats", var id7, "continued"] && method == "POST")
+            {
+                Continued.Add(id7);
+                (reply, status) = (null, 204);
             }
             else
             {
@@ -738,8 +914,81 @@ public sealed class FakeChats
             }
         }
         ctx.Response.StatusCode = status;
-        ctx.Response.ContentType = "application/json";
-        var bytes = Encoding.UTF8.GetBytes(reply.ToJsonString());
-        await ctx.Response.OutputStream.WriteAsync(bytes);
+        if (reply is not null)
+        {
+            ctx.Response.ContentType = "application/json";
+            var bytes = Encoding.UTF8.GetBytes(reply.ToJsonString());
+            await ctx.Response.OutputStream.WriteAsync(bytes);
+        }
+    }
+
+    /// <summary>A send of Code Arena's, as Arena takes it (CodeArenaSync.AppendAsync).</summary>
+    private (JsonNode Reply, int Status) Append(Chat c, JsonObject b)
+    {
+        var parent = b["parent"]?.GetValue<string>();
+        var branch = b["branch"]?.GetValue<bool>() == true;
+        var messages = b["messages"]!.AsArray().OfType<JsonObject>().ToList();
+        if (parent is not null && c.Nodes.All(n => n.Id != parent))
+        {
+            var behind = Read(c, parent, Page);
+            behind["status"] = "behind";
+            return (behind, 409);
+        }
+        var ids = new JsonArray();
+        var rest = messages;
+        while (rest.Count > 0 && rest[0]["ref"]?.GetValue<string>() is { } reference
+               && c.Nodes.FirstOrDefault(n => n.Parent == parent && n.Message["ref"]?.GetValue<string>() == reference) is { } had)
+        {
+            ids.Add(had.Id);
+            parent = had.Id;
+            rest = rest[1..];
+        }
+        var path = c.Branch;
+        if (!branch && (parent is null ? path.Count > 0 : parent != c.Leaf))
+        {
+            var place = path.FindIndex(n => n.Id == parent);
+            if (place >= 0 && rest.Count > 0 && rest[0]["role"]?.GetValue<string>() == "tool" && place + 1 < path.Count
+                && path[place].Message["toolCalls"] is JsonArray { Count: > 0 } calls && path[place + 1].Message["role"]?.GetValue<string>() != "tool")
+            {
+                var callIds = calls.OfType<JsonObject>().Select(x => x["id"]?.GetValue<string>()).ToHashSet();
+                var results = rest.TakeWhile(m => m["role"]?.GetValue<string>() == "tool" && callIds.Contains(m["toolCallId"]?.GetValue<string>())).ToList();
+                foreach (var m in results)
+                {
+                    parent = AddNode(c, parent, m).Id;
+                    ids.Add(parent);
+                }
+                if (results.Count > 0)
+                {
+                    path[place + 1].Parent = parent;
+                }
+            }
+            var behind = Read(c, parent, Page);
+            behind["status"] = "behind";
+            behind["ids"] = ids;
+            return (behind, 409);
+        }
+        foreach (var m in rest)
+        {
+            parent = AddNode(c, parent, m).Id;
+            ids.Add(parent);
+        }
+        if (rest.Count > 0 || branch)
+        {
+            c.Leaf = parent;
+        }
+        if (b["summary"] is JsonObject summary && c.Nodes.FirstOrDefault(n => n.Id == summary["upTo"]?.GetValue<string>()) is { } covered)
+        {
+            covered.Summary = summary["text"]?.GetValue<string>();
+        }
+        if (c.Title == "New chat" && c.Messages.FirstOrDefault(m => m["role"]?.GetValue<string>() == "user") is { } first)
+        {
+            c.Title = first["content"]!.ToString().Split('\n')[0];
+        }
+        if (c.Turn is not null)
+        {
+            c.Turn = DateTimeOffset.UtcNow.AddSeconds(90);
+        }
+        c.Updated = DateTimeOffset.UtcNow;
+        return (new JsonObject { ["ids"] = ids, ["count"] = c.Branch.Count, ["stamp"] = Stamp(c) }, 200);
     }
 }
