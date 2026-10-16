@@ -5,6 +5,7 @@ and the Python sandbox (a burst of jobs), against the deployed stack.
 
     python3 scripts/scale-test.py                     # 12 people, 24 sandbox jobs
     python3 scripts/scale-test.py --users 30 --sandbox-jobs 60 --json scale.json
+    python3 scripts/scale-test.py --users 50,100,300 --sandbox-jobs 0 --json scale.json   # steps, one after another
 
 It signs in as the admin (ADMIN_PASSWORD in .env), makes the test people and
 removes them at the end. Per scenario it reports successes, the time to the first
@@ -137,14 +138,18 @@ def api_scenario(base: str, model: str, keys: list[str]) -> dict:
                             text += piece
             return {"status": 200, "ok": "10" in text, "first": (first or time.time()) - start, "total": time.time() - start}
         except urllib.error.HTTPError as e:
-            return {"status": e.code, "ok": False, "first": 0, "total": time.time() - start}
+            said = e.read().decode(errors="replace")
+            # Held back by the fair gate (the model is busy: try again) or a key's own limit: not a failure.
+            held = e.code == 429 or (e.code == 400 and ("busy" in said or "Try again" in said))
+            return {"status": e.code, "ok": False, "held": held, "first": 0, "total": time.time() - start}
 
     with cf.ThreadPoolExecutor(len(keys)) as pool:
         runs = list(pool.map(one, keys))
     codes = {c: sum(1 for r in runs if r["status"] == c) for c in {r["status"] for r in runs}}
+    held = sum(1 for r in runs if r.get("held"))
     res = summary("API, every key at once", {"first token": [r["first"] for r in runs if r["ok"]], "whole answer": [r["total"] for r in runs if r["ok"]]},
-                  sum(r["ok"] for r in runs), len(runs), f"statuses {codes}")
-    return {**res, "statuses": codes, "failed": len(runs) - res["ok"]}
+                  sum(r["ok"] for r in runs), len(runs), f"statuses {codes} · {held} held back to try again")
+    return {**res, "statuses": codes, "held": held, "failed": len(runs) - res["ok"] - held}
 
 
 def sandbox_scenario(jobs: int) -> dict:
@@ -181,7 +186,7 @@ def sandbox_scenario(jobs: int) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--users", type=int, default=12)
+    ap.add_argument("--users", default="12", help="people, or steps run one after another: 50,100,300")
     ap.add_argument("--sandbox-jobs", type=int, default=24)
     ap.add_argument("--json")
     args = ap.parse_args()
@@ -198,17 +203,21 @@ def main() -> int:
         return 1
     _, cfg = admin.call("/api/chat/config")
     model = next((m["name"] for m in cfg["models"] if m.get("loaded")), None)
-    print(f"Scale test against {domain}: {args.users} people, model {model}, {args.sandbox_jobs} sandbox jobs")
+    steps = [int(x) for x in str(args.users).split(",") if x.strip()]
+    print(f"Scale test against {domain}: {', '.join(map(str, steps))} people, model {model}, {args.sandbox_jobs} sandbox jobs")
     people, report = [], {}
     stamp = int(time.time())
     try:
-        for i in range(args.users):
-            name = f"scale{stamp}{i:03d}"
-            _, made = admin.call("/api/admin/people", {"userName": name, "email": f"{name}@example.test"})
-            _, keys = admin.call(f"/api/admin/people/{made['id']}/key", {})
-            people.append({"id": made["id"], "name": name, "password": made["password"], "key": keys["apiKey"], "secret": f"ZX-{uuid.uuid4().hex[:10].upper()}"})
-        report["chat"] = chat_scenario(app, people)
-        report["api"] = api_scenario(base, model, [p["key"] for p in people])
+        for n in steps:
+            # The people this step needs beyond those made for the steps before.
+            for i in range(len(people), n):
+                name = f"scale{stamp}{i:03d}"
+                _, made = admin.call("/api/admin/people", {"userName": name, "email": f"{name}@example.test"})
+                _, keys = admin.call(f"/api/admin/people/{made['id']}/key", {})
+                people.append({"id": made["id"], "name": name, "password": made["password"], "key": keys["apiKey"], "secret": f"ZX-{uuid.uuid4().hex[:10].upper()}"})
+            suffix = "" if len(steps) == 1 else f" ({n} people)"
+            report["chat" + suffix] = chat_scenario(app, people[:n])
+            report["api" + suffix] = api_scenario(base, model, [p["key"] for p in people[:n]])
         if args.sandbox_jobs:
             report["sandbox"] = sandbox_scenario(args.sandbox_jobs)
     finally:

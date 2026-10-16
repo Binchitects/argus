@@ -495,6 +495,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
 18. **Load-test extensions.**
     - `multiuser-bench.py` `--ramp`, `--prefix-share`, `--return-after`, `--kill-engine`; `scale-test.py` at 50, 100 and 300 users; JSON baselines.
     - Tests: CI on fake-vllm. Real numbers come on the hardware.
+    - **Done**: `multiuser-bench.py` scenarios `ramp` (`--ramp 1,2,4,8` or `1..16`: aggregate tok/s, TTFT p50/p95, queue wait), `prefixshare` (`--prefix-share N`: the share of prompt tokens from the cache), `returnafter` (`--return-after S`, `--evict-with N`), `killengine` (`--kill-engine CMD`: failures and seconds to recovery, not counted as the run's errors), and `--compare BASELINE.json`; `scale-test.py --users 50,100,300` runs steps one after another and counts API keys held back by the fair gate apart from failures. Tests: `tests/deploy/test_multiuser_bench.py` against fake-vllm (CI: `python3 -m unittest discover -s tests/deploy`). The 50/100/300-user runs and real numbers need a running stack and the hardware.
 19. **Hardware bring-up runbook and check.**
     - `deploy/scripts/gpu-check.sh`: driver ≥ R580, `nvidia-smi topo -m`, a P2P test, NCCL `all_reduce_perf`, memlock and shm, power caps, MIG state.
     - `docs/deployment.md` "Multi-GPU server" section; `docs/architecture.md` engines and GpuPlan.
