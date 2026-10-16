@@ -6,7 +6,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { formatValue } from '@/lib/format'
 import { fillPrompt, promptsQuery, slashItems, slashQuery, variablesOf, type PromptItem, type SlashItem } from '@/lib/prompts'
 import { cn } from '@/lib/utils'
-import type { ContextView } from './context'
+import type { CompactSetting, ContextView } from './context'
 import { ContextGauge } from './context-gauge'
 import { VoiceButton } from './media'
 import { useRecall, type RecallSource } from './recall'
@@ -39,6 +39,7 @@ export function Composer({
   big,
   tools,
   context,
+  compact,
   onCompact,
   queued,
   onQueue,
@@ -60,6 +61,8 @@ export function Composer({
   tools?: ReactNode
   /** How full the model's context is, and what fills it (from the last answer). */
   context?: ContextView
+  /** When the chat compacts itself, for the context gauge. */
+  compact?: CompactSetting
   /** Summarize the chat's older messages (also: send /compact). */
   onCompact?: () => void
   /** While an answer runs: messages waiting to be sent, and how to add (false: it was not taken), hurry or drop one. */
@@ -314,7 +317,7 @@ export function Composer({
         {compare}
         <span className="hidden text-xs text-muted-foreground xl:inline">Enter to send · Shift+Enter for a new line</span>
         <span className="ml-auto" />
-        {context && <ContextGauge context={context} onCompact={onCompact} busy={streaming} />}
+        {context && <ContextGauge context={context} onCompact={onCompact} busy={streaming} compact={compact} />}
         {streaming && onQueue && hasContent && (
           <Tooltip content="Queue: sent when the answer ends (Enter)">
             <Button type="submit" size="icon-sm" variant="outline" className="animate-pop rounded-full" disabled={!canSend} aria-label="Queue">

@@ -95,7 +95,7 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
       return { ...state, compacting: true, mode: state.mode ?? 'compact' }
     case 'compacted': {
       const i = messages.findIndex((m) => m.id === e.id)
-      if (i >= 0) messages[i] = { ...messages[i]!, summary: e.summary }
+      if (i >= 0) messages[i] = { ...messages[i]!, summary: e.summary, compaction: { reason: e.reason, tokens: e.tokens, context: e.context } }
       return { ...state, messages, compacting: false }
     }
     case 'title':
@@ -171,7 +171,7 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
       // A compaction the person asked for has no answer to carry it: the page says it.
       if (state.mode === 'compact') return { ...state, compacting: false }
       const a = lastAssistant()
-      if (a) Object.assign(a, { status: 'failed', error: e.message })
+      if (a) Object.assign(a, { status: 'failed', error: e.message, errorKind: e.kind ?? null })
       return { ...state, messages, thinkingSince: null }
     }
     case 'stopped':

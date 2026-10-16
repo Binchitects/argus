@@ -676,6 +676,163 @@ public sealed class ChatTests(AppFixture app)
         }
     }
 
+    /// <summary>The main requests of a person's answers (not summaries, titles or checks), as sent.</summary>
+    private IEnumerable<JsonObject> AnswersOf(string email) =>
+        app.Model.Requests.Where(r => r.Body["user"]!.GetValue<string>() == email && r.Body["messages"]![0]!["content"]!.GetValue<string>().StartsWith("Today is", StringComparison.Ordinal))
+            .Select(r => r.Body);
+
+    private static async Task<JsonElement> PreferAsync(TestBrowser b, object body)
+    {
+        var res = await b.Http.PutAsJsonAsync(new Uri("/api/account/preferences", UriKind.Relative), body);
+        await StatusAssert.Is(HttpStatusCode.OK, res);
+        return await b.JsonAsync(res);
+    }
+
+    [Fact]
+    public async Task A_person_s_compact_at_overrides_the_company_s_and_zero_compacts_only_when_needed()
+    {
+        var (b, email) = await PersonAsync();
+        var prefs = await b.JsonAsync(await b.GetAsync("/api/account/preferences"));
+        Assert.Equal(JsonValueKind.Null, prefs.GetProperty("compactAt").ValueKind);
+        Assert.Equal(80, prefs.GetProperty("compactAtDefault").GetInt32());
+        var config = await b.JsonAsync(await b.GetAsync("/api/chat/config"));
+        Assert.Equal((80, "company"), (config.GetProperty("compactAt").GetInt32(), config.GetProperty("compactSource").GetString()));
+        foreach (var wrong in new object[] { 10, 99, -1, "50" })
+        {
+            var res = await b.Http.PutAsJsonAsync(new Uri("/api/account/preferences", UriKind.Relative), new { compactAt = wrong });
+            await StatusAssert.Is(HttpStatusCode.BadRequest, res);
+            Assert.Contains("compact_at", await res.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        }
+
+        // 25 exchanges of ~2,500 characters, no tools: about 22k tokens of a 32K context. At 60% the chat compacts.
+        Assert.Equal(60, (await PreferAsync(b, new { compactAt = 60 })).GetProperty("compactAt").GetInt32());
+        config = await b.JsonAsync(await b.GetAsync("/api/chat/config"));
+        Assert.Equal((60, "account"), (config.GetProperty("compactAt").GetInt32(), config.GetProperty("compactSource").GetString()));
+        var at60 = await NewChatAsync(b, new { tools = Array.Empty<string>() });
+        await OldExchangesAsync(at60, 25, 2_500);
+        var compacted = (await SendAsync(b, at60, "the newest question")).Single(e => e.GetProperty("type").GetString() == "compacted");
+        Assert.Equal("threshold", compacted.GetProperty("reason").GetString());
+        Assert.Equal(32_768, compacted.GetProperty("context").GetInt32());
+        Assert.InRange(compacted.GetProperty("tokens").GetInt32(), 19_661, 28_000);
+
+        // Only when needed: the same chat is not compacted; one that would not fit is, to fit. The answer length stays as it was.
+        var saved = await PreferAsync(b, new { compactAt = 0 });
+        Assert.Equal((0, "normal"), (saved.GetProperty("compactAt").GetInt32(), saved.GetProperty("answerLength").GetString()));
+        var fits = await NewChatAsync(b, new { tools = Array.Empty<string>() });
+        await OldExchangesAsync(fits, 25, 2_500);
+        Assert.DoesNotContain("compacting", Types(await SendAsync(b, fits, "the newest question")));
+        var over = await NewChatAsync(b, new { tools = Array.Empty<string>() });
+        await OldExchangesAsync(over, 40, 2_500);
+        var events = await SendAsync(b, over, "the newest question");
+        Assert.Equal("fit", events.Single(e => e.GetProperty("type").GetString() == "compacted").GetProperty("reason").GetString());
+        Assert.Equal("done", Types(events).Last());
+        // What was sent fits the context with room for the answer.
+        Assert.True(AnswersOf(email).Last().ToJsonString().Length / 3 < 32_768 - 4_096);
+
+        // Null: the company's again.
+        Assert.Equal(JsonValueKind.Null, (await PreferAsync(b, new { compactAt = (int?)null })).GetProperty("compactAt").ValueKind);
+        Assert.Equal("company", (await b.JsonAsync(await b.GetAsync("/api/chat/config"))).GetProperty("compactSource").GetString());
+    }
+
+    [Fact]
+    public async Task The_threshold_is_a_share_of_the_context_as_the_gauge_shows_it()
+    {
+        // A chat that keeps little room for its answers (1,024 tokens): 32 exchanges are about 28k tokens, past 80% of the
+        // context, though they fit. The share is of the context itself, not of what the answer's room leaves.
+        var (b, _) = await PersonAsync();
+        var id = await NewChatAsync(b, new { tools = Array.Empty<string>(), maxTokens = 1024 });
+        await OldExchangesAsync(id, 32, 2_500);
+        var events = await SendAsync(b, id, "the newest question");
+        Assert.Equal("threshold", events.Single(e => e.GetProperty("type").GetString() == "compacted").GetProperty("reason").GetString());
+    }
+
+    [Fact]
+    public async Task A_message_is_estimated_from_the_last_answer_s_count_of_tokens()
+    {
+        // Text the model counted at 2 characters a token: 25 exchanges of ~2,500 characters do not fit (at 3 they would).
+        var (b, _) = await PersonAsync();
+        await PreferAsync(b, new { compactAt = 0 });
+        var id = await NewChatAsync(b, new { tools = Array.Empty<string>() });
+        var last = await OldExchangesAsync(id, 25, 2_500);
+        using (var scope = app.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.ChatMessages.Where(m => m.Id == last).ExecuteUpdateAsync(s => s.SetProperty(m => m.ContextJson, """{"system":1000,"you":63000}""").SetProperty(m => m.PromptTokens, 32_000));
+        }
+        var events = await SendAsync(b, id, "the newest question");
+        Assert.Equal("fit", events.Single(e => e.GetProperty("type").GetString() == "compacted").GetProperty("reason").GetString());
+    }
+
+    [Fact]
+    public async Task A_context_overflow_compacts_and_asks_once_more()
+    {
+        var (b, email) = await PersonAsync();
+        var id = await NewChatAsync(b, new { tools = Array.Empty<string>() });
+        await OldExchangesAsync(id, 4, 500);
+        var events = await SendAsync(b, id, "[context overflow once] the newest question");
+        var types = Types(events).ToList();
+        Assert.Equal("done", types[^1]);
+        Assert.True(types.IndexOf("notice") < types.IndexOf("compacting") && types.IndexOf("compacted") < types.IndexOf("content"), string.Join(",", types));
+        var retry = events.First(e => e.GetProperty("type").GetString() == "notice");
+        Assert.Equal("context_retry", retry.GetProperty("kind").GetString());
+        Assert.Contains("about 40,000 of 32,768 tokens", retry.GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.Equal("overflow", events.Single(e => e.GetProperty("type").GetString() == "compacted").GetProperty("reason").GetString());
+        // Asked twice: refused, then from the summary. One answer, complete.
+        var asked = AnswersOf(email).ToList();
+        Assert.Equal(2, asked.Count);
+        Assert.Contains("<summary>", asked[1]["messages"]![0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+        var answer = (await ConversationAsync(b, id)).GetProperty("messages").EnumerateArray().Last();
+        Assert.Equal(("complete", "Answer to: [context overflow on"), (answer.GetProperty("status").GetString(), answer.GetProperty("content").GetString()));
+    }
+
+    [Fact]
+    public async Task A_second_overflow_ends_with_a_context_error_not_a_loop()
+    {
+        var (b, email) = await PersonAsync();
+        var id = await NewChatAsync(b, new { tools = Array.Empty<string>() });
+        await OldExchangesAsync(id, 4, 500);
+        var events = await SendAsync(b, id, "[context overflow] the newest question");
+        var error = events.Last();
+        Assert.Equal(("error", "context"), (error.GetProperty("type").GetString(), error.GetProperty("kind").GetString()));
+        Assert.StartsWith("This chat is longer than the model can read (about 40,000 of 32,768 tokens).", error.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.Equal(2, AnswersOf(email).Count());
+        Assert.Single(RequestsOf(email, summaries: true));
+    }
+
+    [Fact]
+    public async Task A_message_bigger_than_the_whole_context_is_not_sent()
+    {
+        var (b, email) = await PersonAsync();
+        var id = await NewChatAsync(b, new { tools = Array.Empty<string>() });
+        // A message near its longest (100,000 characters) and three files, each 30,000 characters of it in the question.
+        var files = new List<Guid>();
+        for (var i = 0; i < 3; i++)
+        {
+            files.Add((await UploadAsync(b, $"part{i}.txt", Encoding.UTF8.GetBytes(new string('y', 40_000)))).GetProperty("id").GetGuid());
+        }
+        var events = await SendAsync(b, id, "read these: " + new string('x', 90_000), [.. files]);
+        var error = events.Last();
+        Assert.Equal(("error", "context"), (error.GetProperty("type").GetString(), error.GetProperty("kind").GetString()));
+        Assert.StartsWith("Your message alone is about ", error.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.Empty(AnswersOf(email));
+    }
+
+    [Fact]
+    public async Task A_summary_that_overflows_is_written_in_smaller_parts()
+    {
+        var (b, email) = await PersonAsync();
+        var id = await NewChatAsync(b, new { tools = Array.Empty<string>() });
+        await SendAsync(b, id, "[summary limit 3000] first " + new string('a', 3_000));
+        await SendAsync(b, id, "second " + new string('b', 3_000));
+        var events = await SendAsync(b, id, "", path: "compact");
+        Assert.Equal(["compacting", "compacted", "done"], Types(events));
+        var summaries = RequestsOf(email, summaries: true).Select(r => r["messages"]![1]!["content"]!.GetValue<string>()).ToList();
+        // The first try held both and was refused; its halves were folded one after the other.
+        Assert.True(summaries.Count >= 3, string.Join("\n---\n", summaries.Select(s => s.Length)));
+        Assert.Contains("The summary so far:", summaries[^1], StringComparison.Ordinal);
+        Assert.Contains("bbbb", summaries[^1], StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Chats_can_be_renamed_listed_searched_and_deleted()
     {

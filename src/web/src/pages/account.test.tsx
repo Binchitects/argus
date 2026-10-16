@@ -167,6 +167,40 @@ describe('account', () => {
     await waitFor(() => expect(within(group).getByRole('radio', { name: 'Short' })).toBeChecked())
   })
 
+  it('long chats compact at the company default, a share of the context the person chooses, or only when needed', async () => {
+    let prefs: { answerLength: string; compactAt: number | null; compactAtDefault: number } = { answerLength: 'normal', compactAt: null, compactAtDefault: 80 }
+    const calls = fakeApi(member, {
+      'GET /api/account/preferences': () => ({ json: prefs }),
+      'PUT /api/account/preferences': (body) => {
+        const at = (body as { compactAt: number | null }).compactAt
+        if (at !== null && at !== 0 && (at < 20 || at > 95)) return { status: 400, json: { status: 'compact_at', error: 'Out of range.' } }
+        prefs = { ...prefs, compactAt: at }
+        return { json: prefs }
+      },
+    })
+    const puts = () => calls.filter((c) => c.method === 'PUT' && c.path === '/api/account/preferences').map((c) => c.body)
+    renderApp('/account')
+    const group = await screen.findByRole('radiogroup', { name: 'Compact long chats' })
+    expect(within(group).getByRole('radio', { name: 'Company default (80%)' })).toBeChecked()
+
+    await userEvent.click(within(group).getByRole('radio', { name: 'Only when a message would not fit' }))
+    await waitFor(() => expect(puts()).toEqual([{ compactAt: 0 }]))
+
+    await userEvent.click(within(group).getByRole('radio', { name: 'At a share of the context' }))
+    const share = screen.getByLabelText('Compact at (% of the context)')
+    await userEvent.clear(share)
+    await userEvent.type(share, '10')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('From 20% to 95% of the model’s context.')).toBeInTheDocument()
+    await userEvent.clear(share)
+    await userEvent.type(share, '60')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(puts()).toEqual([{ compactAt: 0 }, { compactAt: 60 }]))
+
+    await userEvent.click(within(group).getByRole('radio', { name: 'Company default (80%)' }))
+    await waitFor(() => expect(puts().at(-1)).toEqual({ compactAt: null }))
+  })
+
   it('memory lists what the chat remembers, adds, edits, deletes and turns it off', async () => {
     let view = { enabled: true, on: true, max: 100, maxChars: 300, memories: [{ id: 'm1', text: 'Deploys with Podman.', createdAt: '2026-10-01T10:00:00Z', updatedAt: '2026-10-01T10:00:00Z' }] }
     const calls = fakeApi(member, {

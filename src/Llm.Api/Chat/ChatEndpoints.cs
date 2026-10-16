@@ -122,6 +122,9 @@ public static partial class ChatEndpoints
             gitlabUrl = argus.Enabled ? (string.IsNullOrWhiteSpace(chat.CurrentValue.GitlabLinkUrl) ? argusOptions.Value.GitlabUrl : chat.CurrentValue.GitlabLinkUrl)?.TrimEnd('/') : null,
             maxUploadBytes = chat.CurrentValue.MaxUploadBytes,
             imageTypes = Attachments.ImageTypes,
+            // When this person's chats compact (percent of the context; 0: only when a message would not fit), and whose choice it is.
+            compactAt = me.CompactAt ?? chat.CurrentValue.CompactAt,
+            compactSource = me.CompactAt is null ? "company" : "account",
         });
     }
 

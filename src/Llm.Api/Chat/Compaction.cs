@@ -12,7 +12,9 @@ namespace Llm.Api.Chat;
 /// instead of them, so the chat goes on past the model's context. The summary is
 /// kept on the last message it covers (<see cref="ChatMessage.Summary"/>), so it
 /// holds for every branch that passes there. It happens on its own before the
-/// context fills (Chat:AutoCompactPercent), or when the person asks (/compact).
+/// context fills (at the person's share of it, else Chat:CompactAt), always before a
+/// request would not fit, once more when the model still refuses one as too long,
+/// and when the person asks (/compact).
 /// </summary>
 public sealed partial class ChatService
 {
@@ -21,6 +23,15 @@ public sealed partial class ChatService
 
     /// <summary>What of one tool answer goes into what is summarized.</summary>
     private const int ToolAnswerChars = 3_000;
+
+    /// <summary>The share of the context (percent) the newest exchanges may keep whole when a chat compacts, as Code Arena keeps by default.</summary>
+    internal const int KeepShare = 25;
+
+    /// <summary>Why a chat compacted, as the compacted event says it: at the person's share of the context, so the next request fits, because the model refused one as too long, or asked (/compact).</summary>
+    internal const string AtThreshold = "threshold";
+    internal const string ToFit = "fit";
+    internal const string AfterOverflow = "overflow";
+    internal const string Asked = "asked";
 
     internal const string CompactPrompt =
         "You compact a conversation between a person and an AI assistant, so that it can go on without the whole history: " +
@@ -81,26 +92,20 @@ public sealed partial class ChatService
         var target = path[^1];
         await db.ChatMessages.Where(m => m.Id == target.Id).ExecuteUpdateAsync(s => s.SetProperty(m => m.Summary, summary), CancellationToken.None);
         LogCompacted(logger, conversation.Id, path.Count - from, summary.Length, false);
-        await emit(new { type = "compacted", id = target.Id, summary, auto = false, covered = path.Count - from, model = modelName });
+        await emit(new { type = "compacted", id = target.Id, summary, auto = false, reason = Asked, covered = path.Count - from, model = modelName });
         await emit(new { type = "done", id = target.Id });
     }
 
     /// <summary>
-    /// Before an answer: when the branch fills more of the context than the setting
-    /// allows, the older messages become a summary and the newest exchanges stay as
-    /// they are (about a third of the room). Null when nothing was compacted.
+    /// Before an answer, or before a round of it that would not fit: the older messages become a summary, and the newest
+    /// exchanges stay as they are, from a question of the person's, within <paramref name="keepChars"/> (always the question).
+    /// <paramref name="reason"/> says why (<see cref="AtThreshold"/>, <see cref="ToFit"/>, <see cref="AfterOverflow"/>), and
+    /// <paramref name="tokens"/> of <paramref name="context"/> how big the request was, for the page. Null when nothing was
+    /// compacted: nothing older than the question, or the summary failed (then the oldest messages are left out instead).
     /// </summary>
     private async Task<(string Summary, int Cut)?> AutoCompactAsync(List<(JsonObject Turn, long Weight, ChatMessage Source)> turns, List<ChatMessage> stored, int from,
-        string? earlier, long budgetChars, GatewayModel? model, string modelName, string email, Func<object, Task> emit, CancellationToken ct)
+        string? earlier, long keepChars, string reason, long tokens, int context, GatewayModel? model, string modelName, string email, Func<object, Task> emit, CancellationToken ct)
     {
-        var percent = chat.CurrentValue.AutoCompactPercent;
-        var total = turns.Sum(t => t.Weight) + (earlier?.Length ?? 0);
-        if (percent <= 0 || total <= budgetChars * percent / 100)
-        {
-            return null;
-        }
-        // The newest exchanges that fit in a third of the room stay; always the question.
-        var keep = budgetChars / 3;
         long tail = 0;
         var cut = -1;
         for (var i = turns.Count - 1; i >= 0; i--)
@@ -110,7 +115,7 @@ public sealed partial class ChatService
             {
                 continue;
             }
-            if (cut >= 0 && tail > keep)
+            if (cut >= 0 && tail > keepChars)
             {
                 break;
             }
@@ -121,7 +126,7 @@ public sealed partial class ChatService
         {
             return null;
         }
-        await emit(new { type = "compacting" });
+        await emit(new { type = "compacting", reason });
         string summary;
         try
         {
@@ -136,7 +141,7 @@ public sealed partial class ChatService
         target.Summary = summary;
         await db.ChatMessages.Where(m => m.Id == target.Id).ExecuteUpdateAsync(s => s.SetProperty(m => m.Summary, summary), CancellationToken.None);
         LogCompacted(logger, target.ConversationId, at - from, summary.Length, true);
-        await emit(new { type = "compacted", id = target.Id, summary, auto = true, covered = at - from, model = modelName });
+        await emit(new { type = "compacted", id = target.Id, summary, auto = true, reason, tokens, context, covered = at - from, model = modelName });
         return (summary, cut);
     }
 
@@ -149,7 +154,8 @@ public sealed partial class ChatService
         string prompt = CompactPrompt)
     {
         var output = Math.Min(SummaryTokens, model?.MaxOutput ?? SummaryTokens);
-        var room = (long)Math.Max(4096, (model?.Context ?? 32768) - output - 1024) * 7 / 2 - CompactPrompt.Length - 400;
+        // At 3 characters a token: what is summarized is often denser than prose (code, tool output), and too much is halved anyway.
+        var room = (long)(Math.Max(4096, (model?.Context ?? 32768) - output - 1024) * PromptBudget.DefaultCharsPerToken) - prompt.Length - 400;
         var ids = messages.Where(m => m.Role == "user").SelectMany(m => ParseIds(m.AttachmentsJson)).ToHashSet();
         var names = await db.ChatAttachments.AsNoTracking().Where(a => ids.Contains(a.Id)).ToDictionaryAsync(a => a.Id, a => a.FileName, ct);
 
@@ -160,7 +166,7 @@ public sealed partial class ChatService
             var free = Math.Max(2_000, room - (summary?.Length ?? 0));
             if (part.Length > 0 && part.Length + line.Length > free)
             {
-                summary = await SummaryOnceAsync(summary, part.ToString(), model, modelName, email, output, ct, prompt);
+                summary = await SummaryPartAsync(summary, part.ToString(), model, modelName, email, output, ct, prompt);
                 part.Clear();
                 free = Math.Max(2_000, room - summary.Length);
             }
@@ -168,10 +174,33 @@ public sealed partial class ChatService
         }
         if (part.Length > 0)
         {
-            summary = await SummaryOnceAsync(summary, part.ToString(), model, modelName, email, output, ct, prompt);
+            summary = await SummaryPartAsync(summary, part.ToString(), model, modelName, email, output, ct, prompt);
         }
         return summary ?? "";
     }
+
+    /// <summary>
+    /// The summary so far and one part folded together. A part the model refuses as too long for its context (it reads
+    /// denser than the estimate) is halved, at a message's end where it can, and each half folded in turn.
+    /// </summary>
+    private async Task<string> SummaryPartAsync(string? earlier, string part, GatewayModel? model, string modelName, string email, int output, CancellationToken ct,
+        string prompt = CompactPrompt)
+    {
+        try
+        {
+            return await SummaryOnceAsync(earlier, part, model, modelName, email, output, ct, prompt);
+        }
+        catch (ChatGatewayException ex) when (ex is { ContextOverflow: true, SharedCache: false } && part.Length >= 2 * MinPart)
+        {
+            var middle = part.LastIndexOf("\n\n", part.Length / 2, StringComparison.Ordinal);
+            middle = middle >= MinPart ? middle + 2 : part.Length / 2;
+            var first = await SummaryPartAsync(earlier, part[..middle], model, modelName, email, output, ct, prompt);
+            return await SummaryPartAsync(first, part[middle..], model, modelName, email, output, ct, prompt);
+        }
+    }
+
+    /// <summary>A part is not halved below this many characters: a refusal then is the summary's own or the earlier summary's.</summary>
+    private const int MinPart = 1_000;
 
     /// <summary>The messages as the summarizer reads them: who said what, the tools' answers cut short.</summary>
     private static IEnumerable<string> Transcript(IEnumerable<ChatMessage> messages, IReadOnlyDictionary<Guid, string> files)

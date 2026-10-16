@@ -1707,6 +1707,9 @@ namespace Llm.Core.Data.Migrations
                     b.Property<decimal?>("ChatCredit")
                         .HasColumnType("numeric");
 
+                    b.Property<int?>("CompactAt")
+                        .HasColumnType("integer");
+
                     b.Property<string>("ConcurrencyStamp")
                         .IsConcurrencyToken()
                         .HasColumnType("text");

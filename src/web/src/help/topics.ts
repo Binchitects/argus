@@ -87,7 +87,7 @@ export const topics = {
       { name: '⋯ (chat actions)', text: 'Fork, compact, share, move to an assistant, export, archive or delete this chat.' },
       { name: 'The answers', text: 'Under each answer: the model, time, tokens and cost; thumbs up or down; **Answer again** (also with another model, shorter or longer); **Fork from here**; read aloud. Arrows like 2 / 3 switch between versions of a question or an answer.' },
       { name: 'The message box', text: 'The paperclip attaches files (or paste or drop them). **Tools** chooses what the model may use in this chat, **Deep research** among them when an admin gave it to you: the model starts it when you ask, after your **Allow**. **Compare** applies to the next message. The microphone records a voice message; **Talk** is a voice conversation.' },
-      { name: 'Context', text: 'The gauge beside Send: how full the model\'s window is, and what fills it. **Compact now** summarizes older messages so the chat can go on lighter.' },
+      { name: 'Context', text: 'The gauge beside Send: how full the model\'s window is, what fills it, and where the chat compacts itself (Your account → Answers → **Compact long chats**; it always compacts before a message would not fit). **Compact now** summarizes older messages so the chat can go on lighter.' },
       { name: '/ in the box', text: 'At the start of a message, / finds a saved prompt (Workspace → Prompts) and fills in its blanks.' },
       { name: '↑ in the box', text: 'With the box empty (or the caret on its first line), ↑ brings back what you sent before: this chat\'s messages, then your other chats\'. ↓ goes back to what you were typing, and Esc goes straight there.' },
     ],

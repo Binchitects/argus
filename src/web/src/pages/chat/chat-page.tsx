@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
 import { archiveChat, assistantQuery, cancelQueued, chatModel, configQuery, conversationQuery, forkChat, hurryChat, queueMessage, sendQueuedNow, stampQuery, stopChat, streamChat } from './api'
 import { AssistantIcon } from './assistant-icon'
 import { Composer } from './composer'
-import { contextOf } from './context'
+import { answerRoom, contextOf } from './context'
 import { collectFiles } from './files'
 import { FilesPanel } from './files-panel'
 import { answerNews } from './format'
@@ -220,7 +220,20 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   // A compaction since the last answer: the gauge works out what the next request carries.
   const compactedAt = path.findLastIndex((m) => m.summary)
   const compacted = compactedAt >= 0 && (!lastUsage || compactedAt >= path.indexOf(lastUsage)) ? path[compactedAt]!.summary : null
-  const context = contextOf(lastUsage, model?.context, settings.maxTokens ?? model?.maxOutput ?? null, compacted)
+  const context = contextOf(lastUsage, model?.context, answerRoom(model?.context, model?.maxOutput, settings.maxTokens), compacted)
+  // When this person's chats compact (their own choice under Your account, else the company's).
+  const compactSetting =
+    config.compactAt == null
+      ? undefined
+      : {
+          at: config.compactAt,
+          who: config.compactSource === 'account' ? 'your choice' : "the company's",
+          change: (
+            <Link to="/account#answers" className="font-medium text-foreground underline-offset-2 hover:underline">
+              Change
+            </Link>
+          ),
+        }
 
   useEffect(() => {
     document.title = title ? `${title} · ${brand ?? 'Chat'}` : `Chat · ${brand ?? ''}`.trim()
@@ -899,7 +912,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                       </p>
                     )}
                     {turns.map((t, i) => {
-                      const summary = [t.question, ...t.answer].find((m) => m?.summary)?.summary
+                      const compacted = [t.question, ...t.answer].find((m) => m?.summary)
+                      const summary = compacted?.summary
                       // A question compared (arena mode): both answers side by side.
                       const arena = t.question ? arenaView(t.question, data?.arenas, view.arena, answering && i === lastTurn) : null
                       return (
@@ -949,9 +963,10 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                               onTrace={me?.isAdmin ? setTracing : undefined}
                               busy={streaming}
                               feedbackIn={id}
+                              onCompact={canCompact && i === lastTurn ? () => void compact() : undefined}
                             />
                           )}
-                          {summary && <CompactedMark summary={summary} onOpenFile={openFile} />}
+                          {summary && <CompactedMark summary={summary} compaction={compacted?.compaction} onOpenFile={openFile} />}
                         </div>
                       )
                     })}
@@ -1008,6 +1023,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   model={model}
                   tools={toolsPicker}
                   context={context}
+                  compact={compactSetting}
                   onCompact={canCompact ? () => void compact() : undefined}
                   history={history}
                   autoFocus
