@@ -42,6 +42,8 @@ export interface CodeState {
   synced?: number
   /** Sessions are kept with chats in Arena here: the side bar lists the person's chats there. */
   arenaChats?: boolean
+  /** Whose chats in Arena the sessions are kept with: the key's account (null until Arena said). */
+  account?: string | null
   /** The chat in Arena this session is kept in step with (null: none yet): the state is read often, for the web's news. */
   chat?: string | null
   /** Code completion in the editor, from this model; null: off in code-arena's config. */

@@ -404,6 +404,11 @@ internal static partial class Cli
                     ui.Warn($"Arena's tools did not connect: {e.Message}");
                 }
             }
+            if (config.SyncChats && await ChatSync.WhoAsync(check, http, ct) is { } account)
+            {
+                // A key of another account (a test one) would keep the sessions with that account's chats, not the person's.
+                ui.Line($"{ui.Green("✓")} Sessions are kept with {account}'s chats in Arena: the key's account.");
+            }
             var argus = new Config { Url = url, ArgusUrl = config.ArgusUrl };
             if (config.ArgusTools && argus.ArgusMcpUrl is { } argusUrl)
             {

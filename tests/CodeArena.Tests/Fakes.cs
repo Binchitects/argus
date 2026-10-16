@@ -625,6 +625,7 @@ public sealed class FakeChats
                         ["updatedAt"] = c.Updated.ToString("o"), ["messages"] = c.Messages.Count,
                     })]),
                     ["more"] = page.Count > limit,
+                    ["me"] = new JsonObject { ["email"] = "pat@example.test", ["name"] = "Pat" },
                 };
             }
             else if (parts is ["chats"] && method == "POST")

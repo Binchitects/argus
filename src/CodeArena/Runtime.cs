@@ -46,6 +46,8 @@ internal sealed partial class Runtime : IAsyncDisposable
     public Sandbox Sandbox { get; private set; } = Sandbox.None;
     /// <summary>The session kept in step with its chat in Arena; null when chats are not synced.</summary>
     public ChatSync? Sync { get; private set; }
+    /// <summary>Whose chats in Arena the sessions are kept with (the key's account), once Arena said; null until then or without sync.</summary>
+    public string? Account { get; private set; }
 
     private Action? _webNews;
 
@@ -357,6 +359,10 @@ internal sealed partial class Runtime : IAsyncDisposable
         if (Sync is not null)
         {
             Sync.OnNews = _webNews;
+            if (Account is null)
+            {
+                _ = Task.Run(async () => Account = await ChatSync.WhoAsync(Config, Http, CancellationToken.None));
+            }
         }
         if (previous is not null)
         {

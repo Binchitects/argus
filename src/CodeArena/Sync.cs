@@ -582,6 +582,31 @@ internal sealed class ChatSync : IAsyncDisposable
     private int? Own(string? reference) =>
         reference is { } r && r.StartsWith(_store.Id + ":", StringComparison.Ordinal) && int.TryParse(r.AsSpan(_store.Id.Length + 1), out var index) ? index : null;
 
+    /// <summary>
+    /// Whose chats the key keeps sessions with ("Ada Lovelace (ada@example.com)"): a key of another account syncs with that
+    /// account's chats, not the person's. Null when Arena does not say (an older one) or cannot be reached.
+    /// </summary>
+    public static async Task<string?> WhoAsync(Config config, HttpClient http, CancellationToken ct)
+    {
+        try
+        {
+            using var req = Request(HttpMethod.Get, config.Url!.TrimEnd('/') + "/api/code-arena/chats?limit=1", config.ApiKey!, null);
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            limit.CancelAfter(RequestLimit);
+            using var res = await http.SendAsync(req, limit.Token);
+            if (!res.IsSuccessStatusCode || Json.ParseObject(await res.Content.ReadAsStringAsync(limit.Token))?["me"] is not JsonObject me)
+            {
+                return null;
+            }
+            var (name, email) = (me.Str("name"), me.Str("email"));
+            return name is { Length: > 0 } && email is { Length: > 0 } && name != email ? $"{name} ({email})" : email ?? name;
+        }
+        catch (Exception e) when (e is HttpRequestException or OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
     /// <summary>How many chats in Arena are listed at most (/web all, the IDE): the newest.</summary>
     public const int MostListed = 5000;
 

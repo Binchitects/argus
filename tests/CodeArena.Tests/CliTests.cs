@@ -19,6 +19,8 @@ public sealed class CliTests : IDisposable
 
         Assert.Contains("takes your key: 2 models (model-a, model-b)", h.Out);
         Assert.Contains("Arena's tools: 3 (web_search, read_file, create_issue)", h.Out);
+        // Whose chats the sessions go to: the key's account, which may not be the person's own.
+        Assert.Contains("Sessions are kept with Pat (pat@example.test)'s chats in Arena: the key's account.", h.Out);
         Assert.Contains("Signed in to " + _mcp.BaseUrl, h.Out);
         Assert.DoesNotContain(FakeGateway.Key, h.Out + h.Err);
         var saved = JsonNode.Parse(File.ReadAllText(h.Paths.ConfigFile))!;

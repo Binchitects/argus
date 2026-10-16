@@ -693,7 +693,9 @@ internal sealed class Repl(Runtime rt)
                 }
                 break;
             case "/sync":
-                Ui.Line(rt.Sync?.Describe() ?? "Sessions are not kept with Arena here (\"syncChats\": false in config.json, or no Arena address).");
+                Ui.Line(rt.Sync is { } sync
+                    ? (rt.Account is { } account ? $"Kept with {account}'s chats in Arena (the key's account). " : "") + sync.Describe()
+                    : "Sessions are not kept with Arena here (\"syncChats\": false in config.json, or no Arena address).");
                 break;
             case "/resume":
                 var id = arg.Length > 0 ? arg : Cli.PickSession(rt.Env, Ui, rt.Workspace.Root);

@@ -66,7 +66,8 @@ public static class CodeArenaSync
     /// <summary>
     /// The person's chats, newest first, to list beside Code Arena's own sessions and continue one there: a page of
     /// <paramref name="limit"/> (200 at most), those changed before <paramref name="before"/> (the last one's UpdatedAt) for
-    /// the next page; <c>more</c> says whether there is one.
+    /// the next page; <c>more</c> says whether there is one. <c>me</c> says whose chats they are: Code Arena shows it, as
+    /// a key of another account syncs with that account's chats.
     /// </summary>
     private static async Task<IResult> ListAsync(HttpContext http, McpPeople people, AppDbContext db, int limit = 30, DateTimeOffset? before = null)
     {
@@ -80,7 +81,7 @@ public static class CodeArenaSync
             .OrderByDescending(c => c.UpdatedAt).Take(take + 1)
             .Select(c => new { c.Id, c.Title, c.Origin, c.OriginRef, c.OriginPlace, c.Model, c.UpdatedAt, messages = c.Messages.Count })
             .ToListAsync(http.RequestAborted);
-        return Results.Ok(new { chats = chats.Take(take), more = chats.Count > take });
+        return Results.Ok(new { chats = chats.Take(take), more = chats.Count > take, me = new { email = me.Email, name = me.DisplayName } });
     }
 
     /// <summary>The chat for a Code Arena session: made the first time, the same one after (by the session's id).</summary>

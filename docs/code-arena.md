@@ -792,7 +792,7 @@ status (403 `outside` for a path outside the folder).
 
 | call | what it does |
 |---|---|
-| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it is in use), `compactAt` and `compactTarget` (percent); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`) |
+| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it is in use), `compactAt` and `compactTarget` (percent); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `account` (whose chats: the key's account, null until Arena said), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`) |
 | `GET /api/sessions` | this folder's sessions, newest first: `[{id, title, updatedAt, messages, chat}]` (`chat`: the chat in Arena it is kept with) |
 | `GET /api/sessions/web` | the person's chats in Arena (the 5,000 newest): `[{id, title, origin, place, updatedAt, messages, session}]` (`session`: this folder's session kept with it); 409 `off` without the sync, 503 `arena` when Arena cannot say |
 | `POST /api/sessions/web` `{id}` | continues that chat here (in the session kept with it, else a new one with its messages); the session; 404 `gone` when Arena has no such chat of the person's, 409 `busy` while an answer is written, 503 `arena` when Arena cannot say |
@@ -1234,7 +1234,11 @@ until Arena has them: a session goes on while Arena is out of reach, and what
 it missed is sent when Arena answers (at the latest when the session is next
 opened). Each message carries its place in the session, so one sent twice
 (its answer lost) is never kept twice. A chat deleted in Arena ends the sync
-for that session, which goes on here. `/sync` says where the session stands.
+for that session, which goes on here. `/sync` says where the session stands
+and whose chats they are: the sessions go to the chats of the account whose
+key `code-arena login` was given (login says which; the IDE shows it over
+**Chats in Arena**), so a key of another account (a test one) keeps them
+there, not with your own chats.
 `"syncChats": false` in `config.json` keeps sessions on this machine only;
 `/sync all` (the IDE's **Send the other sessions here**) later sends Arena what
 it lacks of this folder's sessions (those it never had, and those sent in

@@ -113,6 +113,7 @@ function ArenaChats({ state, open, opening }: { state: CodeState; open: (go: () 
       </button>
       {shown && (
         <div className="grid min-w-0 gap-1.5">
+          {state.account && <p className="truncate px-2 text-xs text-muted-foreground" title="The key's account: code-arena login with another key keeps the sessions with that account's chats">{state.account}'s chats</p>}
           <Input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Find a chat" aria-label="Find a chat in Arena" className="h-8 text-sm" />
           {list.isPending && Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="mx-1 h-7" />)}
           {list.error && <p className="px-2 text-xs text-destructive">{errorMessage(list.error)}</p>}

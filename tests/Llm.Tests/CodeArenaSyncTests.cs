@@ -95,6 +95,8 @@ public sealed class CodeArenaSyncTests(AppFixture app)
         // Code Arena lists the person's chats, to continue one there.
         var chats = await Json(await arena.GetAsync("/api/code-arena/chats"));
         Assert.Contains(chats.GetProperty("chats").EnumerateArray(), c => c.GetProperty("id").GetGuid() == id);
+        // And says whose they are: a key of another account syncs with that account's chats.
+        Assert.EndsWith("@example.test", chats.GetProperty("me").GetProperty("email").GetString());
     }
 
     [Fact]
