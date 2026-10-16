@@ -184,7 +184,7 @@ public static class ModelEndpoints
             // The GPU lent to a picture or video job now, and what the jobs did lately (room made, and given back).
             gpu = new
             {
-                lent = state.Lent is { } lent ? new { media = lent.Media, kind = lent.Kind, since = lent.Since } : null,
+                lent = state.Lent is { } lent ? new { media = lent.Media, kind = lent.Kind, since = lent.Since, gpus = lent.Gpus } : null,
                 recent = gpu.Recent.Reverse().Select(h => new { at = h.At, text = h.Text }),
             },
             models = rows,
@@ -376,7 +376,7 @@ public static class ModelEndpoints
         {
             return AuthEndpoints.Problem(404, "unknown", $"The engine has no model named {name} (yet: a model just added is there once the engine has restarted).");
         }
-        if (state.Lent is { } lent && state.StatusOf(name) is not ("loaded" or "loading"))
+        if (state.Lent is { } lent && state.Blocks(name) && state.StatusOf(name) is not ("loaded" or "loading"))
         {
             return AuthEndpoints.Problem(409, "lent", $"The GPU is making a {lent.Kind} with {lent.Media} just now (since {lent.Since:HH:mm} UTC). Load {name} once it is done: "
                 + "the chat models unloaded for it load again by themselves then.");

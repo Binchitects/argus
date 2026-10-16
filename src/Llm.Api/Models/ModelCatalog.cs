@@ -396,9 +396,20 @@ public sealed class EngineState(TimeProvider clock)
 
     /// <summary>
     /// The GPU lent to a picture or video job (<see cref="GpuShare"/>): its model, what it makes ("picture", "video"), since
-    /// when, and until when at most (should the replica that holds it stop without giving it back).
+    /// when, until when at most (should the replica that holds it stop without giving it back), and which GPUs (the media
+    /// server's; null: every one, as on a machine whose GPUs are not known).
     /// </summary>
-    public sealed record Lending(string Media, string Kind, DateTimeOffset Since, DateTimeOffset Until);
+    public sealed record Lending(string Media, string Kind, DateTimeOffset Since, DateTimeOffset Until, IReadOnlyCollection<int>? Gpus = null);
+
+    /// <summary>
+    /// Whether the lending keeps <paramref name="model"/> from loading: it sits on a lent GPU (or its GPUs are not known, or
+    /// every GPU is lent). A model on other GPUs loads as ever.
+    /// </summary>
+    public bool Blocks(string model) =>
+        Lent is { } lent && (lent.Gpus is not { Count: > 0 } gpus || !Places.TryGetValue(model, out var p) || p.PerGpu.Count == 0 || p.PerGpu.Keys.Any(gpus.Contains));
+
+    /// <summary>Whether every GPU is lent (no chat model loads at all).</summary>
+    public bool LentAll => Lent is { Gpus: not { Count: > 0 } };
 
     private volatile Lending? _lent;
 

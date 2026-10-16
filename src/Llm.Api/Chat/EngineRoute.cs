@@ -383,7 +383,7 @@ public sealed partial class EngineRoute
     private async Task WhileLentAsync(string model, CancellationToken ct)
     {
         var told = false;
-        while (engine.Lent is { } lent && engine.StatusOf(model) is not ("loaded" or "loading"))
+        while (engine.Lent is { } lent && engine.Blocks(model) && engine.StatusOf(model) is not ("loaded" or "loading"))
         {
             if (!told)
             {
@@ -400,11 +400,14 @@ public sealed partial class EngineRoute
 
     /// <summary>
     /// Room on the GPU for a picture or video job (<paramref name="media"/>, which makes a <paramref name="kind"/>): each loaded
-    /// chat model not in <paramref name="kept"/> unloads once it is idle, through the same engine call an admin's Unload uses,
-    /// waiting <paramref name="wait"/> at most for those in use. Each one unloaded goes in <paramref name="made"/> at once: a
-    /// job stopped meanwhile gives those back.
+    /// chat model on <paramref name="gpus"/> (null: any) makes room once it is idle, waiting <paramref name="wait"/> at most for
+    /// those in use. A vLLM model that may sleep sleeps (its weights to RAM: back in seconds), kept loaded or not, and goes in
+    /// <paramref name="slept"/>; any other not in <paramref name="kept"/> unloads, through the same engine call an admin's Unload
+    /// uses, and goes in <paramref name="made"/> at once: a job stopped meanwhile gives those back. A vLLM model whose sleep
+    /// fails unloads instead. A model on other GPUs is never touched (a vLLM group sleeps whole: all its GPUs free).
     /// </summary>
-    public async Task MakeRoomAsync(string media, string kind, IReadOnlyCollection<string> kept, TimeSpan wait, ICollection<string> made, CancellationToken ct)
+    public async Task MakeRoomAsync(string media, string kind, IReadOnlyCollection<string> kept, TimeSpan wait, ICollection<string> made, CancellationToken ct,
+        IReadOnlyCollection<int>? gpus = null, ICollection<string>? slept = null)
     {
         // Real time: the job waits for it, whatever the app's clock says.
         var waited = System.Diagnostics.Stopwatch.StartNew();
@@ -422,8 +425,10 @@ public sealed partial class EngineRoute
                 LogRoomFailed(logger, "the engine's models", ex.Message);
                 return;
             }
-            // Loading ones too: a request let through before the GPU was lent; each is unloaded once it has loaded and is idle.
-            var spares = models.Where(m => m.Status is "loaded" or "loading" && !kept.Contains(m.Name)).ToList();
+            bool OnLent(string name) => gpus is not { Count: > 0 } || !engine.Places.TryGetValue(name, out var p) || p.PerGpu.Count == 0 || p.PerGpu.Keys.Any(gpus.Contains);
+            bool Sleeps(string name) => slept is not null && !engine.Counted(name) && engine.Places.ContainsKey(name);
+            // Loading ones too: a request let through before the GPU was lent; each makes room once it has loaded and is idle.
+            var spares = models.Where(m => m.Status is "loaded" or "loading" && OnLent(m.Name) && (!kept.Contains(m.Name) || Sleeps(m.Name))).ToList();
             if (spares.Count == 0)
             {
                 return;
@@ -436,6 +441,30 @@ public sealed partial class EngineRoute
                 if (InUse(spare) || await ViewAsync(spare, ct) is not { } view || view.Seen is { Busy.Count: > 0 })
                 {
                     continue;
+                }
+                if (Sleeps(spare))
+                {
+                    // Asleep: its weights in RAM, its GPUs free, back in seconds when the job ends.
+                    try
+                    {
+                        if (!slept!.Contains(spare))
+                        {
+                            await client.SleepAsync(spare, true, ct);
+                            LogSlept(logger, spare, media);
+                            slept.Add(spare);
+                        }
+                        continue;
+                    }
+                    catch (EngineException ex) when (!kept.Contains(spare))
+                    {
+                        // It may not sleep (or could not): it unloads instead.
+                        LogRoomFailed(logger, spare, ex.Message);
+                    }
+                    catch (EngineException ex)
+                    {
+                        LogRoomFailed(logger, spare, ex.Message);
+                        continue;
+                    }
                 }
                 // Unloaded from now on for every request; one that came for it meanwhile keeps it.
                 engine.Unloading(spare, $"making room for {media} (a {kind})");
@@ -1056,6 +1085,9 @@ public sealed partial class EngineRoute
         }
         return _wanted.TryGetValue(model, out var at) && clock.GetUtcNow() - (at > since ? at : since) < Starting;
     }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Putting {Spare} to sleep, idle, to make room for {Model}")]
+    private static partial void LogSlept(ILogger logger, string spare, string model);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "{Model} cannot answer now ({Why}): its fallback {Fallback} answers")]
     private static partial void LogFallback(ILogger logger, string model, string fallback, string why);

@@ -152,8 +152,8 @@ public sealed partial class EngineWatcher : BackgroundService
                 var names = models.Where(m => m.Status == "loaded").Select(m => m.Name).ToList();
                 // What each model serves at once: its line's places, and the slots conversations keep; and which may make room.
                 await CapacityAsync(scope.ServiceProvider, true, names, held, stoppingToken);
-                // While the GPU is lent to a picture or video job, no chat model loads: the job gives the room back when it ends.
-                if (lead && !loading && state.Lent is null)
+                // While a GPU is lent to a picture or video job, no chat model on it loads: the job gives the room back when it ends.
+                if (lead && !loading && !state.LentAll)
                 {
                     // One at a time, each through the app's room-making (an idle model that may make room unloads first), never
                     // by the engine's own choice of the model used least recently, which may be another that never makes room.
@@ -161,8 +161,8 @@ public sealed partial class EngineWatcher : BackgroundService
                     // kill while it was being stopped, which is not broken (EngineState.MayRetry). One the engine keeps
                     // unloading by its own choice to load another waits too (EngineState.MayReload): it holds fewer models
                     // than Models loaded at once says, and two would push each other out for ever.
-                    var keptNext = kept.FirstOrDefault(k => Status(k) == "unloaded" && Reload(k)) ?? kept.FirstOrDefault(state.MayRetry);
-                    var askedNext = models.FirstOrDefault(m => m.Status == "unloaded" && state.StillAsked(m.Name) && Reload(m.Name))?.Name;
+                    var keptNext = kept.FirstOrDefault(k => Status(k) == "unloaded" && !state.Blocks(k) && Reload(k)) ?? kept.FirstOrDefault(k => !state.Blocks(k) && state.MayRetry(k));
+                    var askedNext = models.FirstOrDefault(m => m.Status == "unloaded" && !state.Blocks(m.Name) && state.StillAsked(m.Name) && Reload(m.Name))?.Name;
                     if (keptNext is { } next)
                     {
                         if (await route.RoomForAsync(next, TimeSpan.Zero, stoppingToken))
@@ -177,7 +177,7 @@ public sealed partial class EngineWatcher : BackgroundService
                         LogAsked(logger, asked2);
                         loading = await LoadAsync(asked2, "loaded by an admin, again after the engine restarted", stoppingToken);
                     }
-                    else if (options.Value.ModelsMax >= 2 && usual is { } back && held.Contains(back) && !state.WasDropped(back)
+                    else if (options.Value.ModelsMax >= 2 && usual is { } back && held.Contains(back) && !state.WasDropped(back) && !state.Blocks(back)
                         && ((Status(back) == "unloaded" && Reload(back)) || state.MayRetry(back))
                         && await route.RoomForAsync(back, EngineRoute.Quiet, stoppingToken))
                     {
@@ -186,7 +186,7 @@ public sealed partial class EngineWatcher : BackgroundService
                         LogBack(logger, back);
                         loading = await LoadAsync(back, "the model new chats use", stoppingToken);
                     }
-                    else if (options.Value.ModelsMax >= 2 && small is { } helper && helper != usual && !state.WasDropped(helper)
+                    else if (options.Value.ModelsMax >= 2 && small is { } helper && helper != usual && !state.WasDropped(helper) && !state.Blocks(helper)
                         && ((Status(helper) == "unloaded" && Reload(helper)) || state.MayRetry(helper))
                         && await route.RoomForAsync(helper, held.Contains(helper) ? EngineRoute.Quiet : SmallQuiet, stoppingToken))
                     {
@@ -443,6 +443,11 @@ public sealed partial class EngineWatcher : BackgroundService
                 && ModelAdvisor.Advise(m, file, entries, hw).Estimate is { Fit: not "unknown" } e)
             {
                 perGpu = GpuPlan.Spread(m.Name, "llamacpp", hw, Hardware.ParseDevices(m.Devices), e.GpuTotal).PerGpu;
+            }
+            else if (Hardware.ParseDevices(m.Devices) is { Count: > 0 } named)
+            {
+                // Its size not known: at least where it sits.
+                perGpu = named.ToDictionary(g => g, _ => 0L);
             }
             places[m.Name] = new EngineState.ModelPlace(m.EngineKind, perGpu, m.Fallback, Math.Max(1, m.Replicas));
         }

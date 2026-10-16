@@ -7,7 +7,8 @@ using Microsoft.Extensions.Options;
 namespace Llm.Api.Models;
 
 /// <summary>
-/// One GPU for the chat engine and the picture and video servers. Picture and video jobs take turns (one at a time, the
+/// A GPU shared by the chat engines and the picture and video servers: the one the media server runs on (its model's GPU,
+/// else Engine:MediaGpu, else the first), never the others. Picture and video jobs take turns (one at a time, the
 /// gateway's pictures too), and each holds its model on its server, which does not switch to another under it. Before a
 /// job whose model is short of GPU memory (a video model that would decode on the CPU, a picture model whose budget is
 /// not free), the GPU is lent to it: the idle chat models not kept loaded unload (the engine call an admin's Unload
@@ -56,10 +57,10 @@ public sealed partial class GpuShare : IDisposable
         replicas.On(LentTopic, said =>
         {
             var parts = said.Split('\n');
-            if (parts.Length == 2)
+            if (parts.Length is 2 or 3)
             {
                 var now = clock.GetUtcNow();
-                state.Lend(new EngineState.Lending(parts[0], parts[1], now, now + LendLimit));
+                state.Lend(new EngineState.Lending(parts[0], parts[1], now, now + LendLimit, parts.Length == 3 ? Hardware.ParseDevices(parts[2]) : null));
             }
             return true;
         });
@@ -147,17 +148,18 @@ public sealed partial class GpuShare : IDisposable
         var model = hold.Model;
         var kind = KindOf(model);
         var now = clock.GetUtcNow();
-        // Lent first: no chat model loads from now on, so the room made stays made.
-        state.Lend(new EngineState.Lending(model.Name, kind, now, now + LendLimit));
-        replicas.Tell(LentTopic, $"{model.Name}\n{kind}");
+        var gpus = GpusOf(model);
+        // Lent first: no chat model on its GPU loads from now on, so the room made stays made.
+        state.Lend(new EngineState.Lending(model.Name, kind, now, now + LendLimit, gpus));
+        replicas.Tell(LentTopic, $"{model.Name}\n{kind}" + (gpus is { Count: > 0 } ? "\n" + string.Join(',', gpus) : ""));
         hold.Lent = true;
         IReadOnlyList<string> kept;
         await using (var scope = scopes.CreateAsyncScope())
         {
             kept = scope.ServiceProvider.GetRequiredService<ModelCatalog>().Kept();
         }
-        await route.MakeRoomAsync(model.Name, kind, kept, RoomWait, hold.Made, ct);
-        if (hold.Unloaded.Count == 0)
+        await route.MakeRoomAsync(model.Name, kind, kept, RoomWait, hold.Made, ct, gpus, hold.Asleep);
+        if (hold.Unloaded.Count == 0 && hold.Asleep.Count == 0)
         {
             // Nothing could make room (every chat model is kept loaded, or in use all this minute): the job runs as it is.
             Say($"{model.Name} had less GPU memory than it needs ({need:N0} MB) for a {kind}, and no idle chat model could make room: it runs as it is.");
@@ -165,8 +167,9 @@ public sealed partial class GpuShare : IDisposable
             hold.Lent = false;
             return;
         }
-        var unloaded = string.Join(", ", hold.Unloaded);
-        Say($"Made room for {model.Name} (a {kind}): unloaded {unloaded}.");
+        var unloaded = string.Join(", ", hold.Unloaded.Concat(hold.Asleep.Select(n => n + " (asleep)")));
+        Say($"Made room for {model.Name} (a {kind}){(gpus is { Count: > 0 } ? $" on GPU {string.Join(", ", gpus)}" : "")}: "
+            + (hold.Unloaded.Count > 0 ? "unloaded " : "put to sleep ") + $"{unloaded}.");
         // Their memory, as the server's script reads it every 2 s (the engine stops a model within 10 s).
         var waited = System.Diagnostics.Stopwatch.StartNew();
         while (media.StatusOf(model.Server) is { FreeMb: { } free } && free < need && waited.Elapsed < RoomWait)
@@ -231,9 +234,44 @@ public sealed partial class GpuShare : IDisposable
         }
     }
 
-    /// <summary>The chat models unloaded for the job that are kept loaded or new chats use, loaded again (each through the app's room-making).</summary>
+    /// <summary>
+    /// The GPUs a media model's job is lent: its server's (the model's GPU, else Engine:MediaGpu, else the machine's first);
+    /// null when the machine's GPUs are not known (then every GPU is lent, as before).
+    /// </summary>
+    public IReadOnlyCollection<int>? GpusOf(MediaControl.Model model)
+    {
+        var devices = state.Hardware is { } hw ? GpuPlan.DevicesOf(hw) : [];
+        var gpu = model.Row.Gpu ?? options.Value.MediaGpu ?? (devices.Count > 0 ? devices[0].Index : null);
+        return gpu is { } g && devices.Any(d => d.Index == g) ? [g] : null;
+    }
+
+    /// <summary>
+    /// The chat models put to sleep for the job, woken; those unloaded for it that are kept loaded or new chats use, loaded
+    /// again (each through the app's room-making).
+    /// </summary>
     private async Task GiveBackAsync(Hold hold)
     {
+        var woken = new List<string>();
+        foreach (var name in hold.Asleep)
+        {
+            try
+            {
+                await engine.SleepAsync(name, false, CancellationToken.None);
+                woken.Add(name);
+            }
+            catch (EngineException ex)
+            {
+                LogGiveBackFailed(logger, name, ex.Message);
+            }
+        }
+        if (woken.Count > 0)
+        {
+            Say($"Gave the room back after {hold.Model.Name}: woke {string.Join(", ", woken)}.");
+        }
+        if (hold.Unloaded.Count == 0)
+        {
+            return;
+        }
         IReadOnlyList<string> kept;
         await using (var scope = scopes.CreateAsyncScope())
         {
@@ -277,6 +315,12 @@ public sealed partial class GpuShare : IDisposable
 
         /// <summary>The chat models unloaded for it.</summary>
         public IReadOnlyList<string> Unloaded => Made;
+
+        /// <summary>The vLLM models put to sleep for it (woken when it ends).</summary>
+        internal List<string> Asleep { get; } = [];
+
+        /// <summary>The chat models put to sleep for it.</summary>
+        public IReadOnlyList<string> Slept => Asleep;
 
         public async ValueTask DisposeAsync()
         {

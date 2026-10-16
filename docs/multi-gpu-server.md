@@ -461,6 +461,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
 10. **`GpuShare` per GPU with sleep.**
     - Lending is scoped to the media server's GPU. A vLLM model on it **sleeps**, or unloads when sleep is off or fails; it wakes afterwards.
     - Tests: fake-vllm `/sleep` and `/wake_up`, and the media status fakes.
+    - **Done**: a lending carries its GPUs (`GpuShare.GpusOf`: the media model's GPU, else `MEDIA_GPU`, else the first; every GPU when the machine is not known, as before); only models on them make room: a vLLM model that may sleep sleeps (kept loaded or not; a TP group sleeps whole), one that may not or whose sleep fails unloads unless kept, a llama.cpp model unloads unless kept; models on other GPUs keep loading and answering (`EngineState.Blocks`); when the job ends the sleepers wake and the unloaded kept or default ones load again. Tests: `GpuShareTests` (four GPUs, video on GPU 3).
 11. **Admin → Models UI.**
     - Engine kind, GPU picker, vLLM options, per-GPU bars, cache hit rate, phase (loading, sleeping, draining).
     - Tests: Playwright against fake 4-GPU hardware and fake-vllm.
