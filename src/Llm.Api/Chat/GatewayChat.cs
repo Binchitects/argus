@@ -21,6 +21,29 @@ public sealed class ChatGatewayException(string message, int? status = null) : E
 
     /// <summary>Nothing was sent: the model is the engine's and cannot be loaded now (the engine is full, or it failed to load and waits for its next try).</summary>
     public bool NotLoaded { get; init; }
+
+    /// <summary>The prompt did not fit the model's context, as the engine or the gateway said (<see cref="ContextOverflow"/>): a compaction may make it fit.</summary>
+    public bool ContextOverflow { get; init; }
+
+    /// <summary>The engine's cache, shared by the requests it runs at once, was full: asking again in a moment may do, with no compaction.</summary>
+    public bool SharedCache { get; init; }
+
+    /// <summary>The prompt's tokens and the context's, as the refusal counted them, when it said.</summary>
+    public long? PromptTokens { get; init; }
+    public long? ContextTokens { get; init; }
+
+    /// <summary>
+    /// A refusal from the gateway or the engine: <paramref name="body"/> as a sentence for the person, and what it says of the
+    /// context. <paramref name="status"/> null: an error in the stream, which has none of its own.
+    /// </summary>
+    public static ChatGatewayException From(string body, int? status)
+    {
+        var overflow = status is null or 400 or 413 or 422 or 500 ? Llm.Core.Chat.ContextOverflow.Parse(body) : default;
+        return new ChatGatewayException(GatewayChat.Explain(body, status ?? 500, overflow), status)
+        {
+            ContextOverflow = overflow.Overflow, SharedCache = overflow.SharedCache, PromptTokens = overflow.PromptTokens, ContextTokens = overflow.ContextTokens,
+        };
+    }
 }
 
 /// <summary>
@@ -231,7 +254,7 @@ public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFacto
         {
             using (res)
             {
-                throw new ChatGatewayException(Explain(await res.Content.ReadAsStringAsync(ct), (int)res.StatusCode), (int)res.StatusCode);
+                throw ChatGatewayException.From(await res.Content.ReadAsStringAsync(ct), (int)res.StatusCode);
             }
         }
         return res;
@@ -264,7 +287,8 @@ public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFacto
                 }
                 if (chunk?["error"] is JsonObject err)
                 {
-                    throw new ChatGatewayException(Explain(err.ToJsonString(), 500));
+                    // An error in the stream (the engine's cache filled mid-answer, say): it has no status of its own.
+                    throw ChatGatewayException.From(err.ToJsonString(), null);
                 }
                 if (chunk?["usage"] is JsonObject u && u["prompt_tokens"] is not null)
                 {
@@ -315,7 +339,9 @@ public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFacto
         n is JsonValue v && v.TryGetValue<double>(out var d) && double.IsFinite(d) ? d : null;
 
     /// <summary>What LiteLLM says, as a sentence for the person. Credit is the common one.</summary>
-    public static string Explain(string body, int status)
+    public static string Explain(string body, int status) => Explain(body, status, Llm.Core.Chat.ContextOverflow.Parse(body));
+
+    internal static string Explain(string body, int status, Llm.Core.Chat.ContextOverflow overflow)
     {
         string? message = null;
         try
@@ -336,9 +362,14 @@ public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFacto
         {
             return "Too many requests right now. Wait a moment and try again.";
         }
-        if (message.Contains("context", StringComparison.OrdinalIgnoreCase) && message.Contains("length", StringComparison.OrdinalIgnoreCase))
+        if (overflow.SharedCache)
         {
-            return "This conversation is longer than the model can read. Start a new chat, or remove large attachments.";
+            return "The model's memory for the chats it answers at once was full. Ask again in a moment.";
+        }
+        if (overflow.Overflow)
+        {
+            var size = overflow is { PromptTokens: { } n, ContextTokens: { } m } ? $" (about {n:N0} of {m:N0} tokens)" : "";
+            return $"This chat is longer than the model can read{size}. Compact it (/compact), start a new chat, or remove large attachments.";
         }
         return "The model could not answer: " + message;
     }

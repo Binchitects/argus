@@ -23,6 +23,7 @@ export const defaultKeybindings: RuleJson[] = [
   { key: 'ctrl+j', command: 'workbench.action.togglePanel' },
   { key: 'ctrl+alt+b', command: 'workbench.action.toggleAuxiliaryBar', mac: 'alt+cmd+b' },
   { key: 'ctrl+alt+i', command: 'workbench.action.chat.open', mac: 'ctrl+cmd+i' },
+  { key: "ctrl+shift+'", command: 'codeArena.chat.quoteSelection' },
   { key: 'ctrl+shift+f', command: 'workbench.action.findInFiles' },
   { key: 'ctrl+shift+h', command: 'workbench.action.replaceInFiles' },
   { key: 'ctrl+shift+e', command: 'workbench.view.explorer' },

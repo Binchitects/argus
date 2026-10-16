@@ -240,8 +240,13 @@ public sealed partial class ChatService(
             conversation.LoadedTools = demand.Loaded;
         }
         kit = kit with { Demand = demand };
-        var (messages, imagesDropped, systemParts) = await BuildHistoryAsync(conversation, question, model, modelName, helper, email, demand.Notes(), runs.ContainsKey("read_file"),
-            AnswerLengths.Note(user.AnswerLength), await memories.NoteAsync(user, ct), emit, ct);
+        // When this person's chats compact (their own choice, else the company's), and what the tool definitions add to each request.
+        var compactAt = user.CompactAt ?? chat.CurrentValue.CompactAt;
+        var offersTools = tools.Count > 0 && chat.CurrentValue.MaxToolRounds > 0;
+        var lengthNote = AnswerLengths.Note(user.AnswerLength);
+        var memory = await memories.NoteAsync(user, ct);
+        var (messages, imagesDropped, systemParts, budget) = await BuildHistoryAsync(conversation, question, model, modelName, helper, email, demand.Notes(), runs.ContainsKey("read_file"),
+            lengthNote, memory, new HistoryFit(compactAt, offersTools ? demand.Request().ToJsonString().Length : 0), emit, ct);
         // Said on the person's turn (models follow it more closely there), at the prompt's end (the
         // cache keeps the rest); the question kept stays as written.
         if (research)
@@ -305,6 +310,38 @@ public sealed partial class ChatService(
             };
         }
 
+        // Earlier tool results of this answer were cut to their start to fit (said once).
+        var resultsCut = false;
+
+        // Room for a request that would not fit the model's context, or that the model refused as too long (force). First this
+        // answer's earlier tool results are cut to their start, in the request only (the chat keeps them whole); then, still
+        // too big (or forced), everything before the question is compacted, and the request starts from the new summary.
+        async Task MakeRoomAsync(JsonObject request, string? force)
+        {
+            var asked = LastUser(messages);
+            if (CutToolResults(messages, asked) && !resultsCut)
+            {
+                resultsCut = true;
+                await emit(new
+                {
+                    type = "notice", kind = "tool_results_cut",
+                    text = "Earlier tool results in this answer were cut to their start so it fits the model's context; the whole results stay in the chat.",
+                });
+            }
+            request["messages"] = messages.DeepClone();
+            if (force is null && budget.Fits(budget.Tokens(request, ImageWeight)))
+            {
+                return;
+            }
+            var answer = messages.Skip(asked + 1).OfType<JsonObject>().ToList();
+            var (rebuilt, _, parts, _) = await BuildHistoryAsync(conversation, question, model, modelName, helper, email, demand.Notes(), runs.ContainsKey("read_file"),
+                lengthNote, memory, new HistoryFit(0, request["tools"]?.ToJsonString().Length ?? 0, budget, answer.Sum(m => m.ToJsonString().Length), answer.Count, force ?? ToFit), emit, ct);
+            // The question as this answer asked it (deep research's steps, answer again) and the answer so far stay as they were.
+            messages = [.. rebuilt.Take(LastUser(rebuilt)).Select(m => m!.DeepClone()), .. messages.Skip(asked).Select(m => m!.DeepClone())];
+            systemParts = parts;
+            request["messages"] = messages.DeepClone();
+        }
+
         for (var round = 0; ; round++)
         {
             var msg = new ChatMessage { ConversationId = conversation.Id, ParentId = parent, Role = "assistant", Sequence = ++next, Model = modelName };
@@ -353,9 +390,26 @@ public sealed partial class ChatService(
                         || (researchByAgents && delegations >= ResearchDelegations));
             }
 
+            // A round after tool calls that outgrew the context makes room before it is sent (the first round's history was built to fit).
+            if (round > 0 && !budget.Fits(budget.Tokens(request, ImageWeight)))
+            {
+                await MakeRoomAsync(request, null);
+            }
+            if (TooBig(request, budget) is { } tooBig)
+            {
+                // Sure not to fit even compacted: the question alone (with its files) is bigger than the model's context. Nothing is sent.
+                msg.Status = MessageStatus.Failed;
+                msg.Error = tooBig;
+                await FinishAsync(conversation, CancellationToken.None);
+                await emit(new { type = "error", kind = "context", message = tooBig });
+                return;
+            }
+
             // What fills this request, for the context gauge (scaled to the prompt tokens the model reports).
             var filled = ContextParts.Measure(request, systemParts, ImageWeight);
             msg.ContextJson = filled.ToJsonString();
+            string? finish = null;
+            var retried = false;
             var content = new StringBuilder();
             var reasoning = new StringBuilder();
             var calls = new SortedDictionary<int, (string? Id, string? Name, StringBuilder Args)>();
@@ -380,6 +434,10 @@ public sealed partial class ChatService(
             }
             try
             {
+                while (true)
+                {
+                try
+                {
                 for (var pass = 0; ; pass++)
                 {
                 var cut = false;
@@ -414,6 +472,11 @@ public sealed partial class ChatService(
                         case UsageReport u:
                             (msg.PromptTokens, msg.CachedTokens, msg.CompletionTokens) = (u.Prompt, u.Cached, u.Completion);
                             msg.Cost = price.Cost(u.Prompt, u.Cached, u.Completion);
+                            // The model's count teaches the budget this chat's characters per token, for the rounds that follow.
+                            budget.Learn(Chars(filled), u.Prompt);
+                            break;
+                        case Finished f:
+                            finish = f.Reason;
                             break;
                     }
                     if (cut)
@@ -431,6 +494,35 @@ public sealed partial class ChatService(
                 await emit(new { type = "thought", ms = msg.ThinkingMs, cutShort = true });
                 request["chat_template_kwargs"] = ThinkingPresets.TemplateKwargs("off");
                 }
+                break;
+                }
+                catch (ChatGatewayException ex) when (ex.ContextOverflow && !retried && content.Length == 0 && reasoning.Length == 0 && calls.Count == 0)
+                {
+                    // Refused as too long before a word of it came: room is made (or, the engine's shared cache being full, a moment
+                    // passes), and the same round is asked once more. A second refusal ends the answer.
+                    retried = true;
+                    if (ex.SharedCache)
+                    {
+                        await emit(new { type = "notice", kind = "context_retry", text = "The model's memory for the chats it answers at once was full: asking again in a moment." });
+                        await Task.Delay(TimeSpan.FromSeconds(2), ct);
+                        continue;
+                    }
+                    budget.Refused(PromptBudget.Chars(request, ImageWeight), ex.PromptTokens);
+                    await emit(new
+                    {
+                        type = "notice", kind = "context_retry",
+                        text = "The model could not read the whole chat" + (ex.PromptTokens is { } n ? $" (about {n:N0} of {ex.ContextTokens ?? budget.Context:N0} tokens)" : "") +
+                            ": compacting it and asking again.",
+                    });
+                    await MakeRoomAsync(request, AfterOverflow);
+                    if (TooBig(request, budget) is { } still)
+                    {
+                        throw new ChatGatewayException(still) { ContextOverflow = true };
+                    }
+                    filled = ContextParts.Measure(request, systemParts, ImageWeight);
+                    msg.ContextJson = filled.ToJsonString();
+                }
+                }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -445,10 +537,17 @@ public sealed partial class ChatService(
                 Keep(MessageStatus.Failed);
                 msg.Error = ex.Message;
                 await FinishAsync(conversation, CancellationToken.None);
-                await emit(new { type = "error", message = ex.Message });
+                // A chat too long for the model even compacted: the page offers to compact it, or another model.
+                await emit(new { type = "error", kind = ex is { ContextOverflow: true, SharedCache: false } ? "context" : null, message = ex.Message });
                 return;
             }
 
+            if (finish == "length" && msg.PromptTokens is { } read && msg.CompletionTokens is { } written && read + written >= budget.Context * 0.95
+                && !(conversation.MaxTokens is { } most && written >= most))
+            {
+                // Not the answer's own limit: the context ran out while it wrote. The next message compacts by the usual rules.
+                await emit(new { type = "notice", kind = "cut_at_context", text = "The answer reached the end of the model's context. The chat is compacted before your next message." });
+            }
             Keep(MessageStatus.Complete);
             await emit(new
             {
@@ -633,6 +732,61 @@ public sealed partial class ChatService(
             ? $"[The result is {text.Length:N0} characters; above are its first {cut:N0}. All of it is the file {name} in this chat: read_file reads on from line {lines}, search_file finds lines in it.]"
             : $"[The result is {text.Length:N0} characters; above are its first {cut:N0}. The rest is in the file {name}, which the person can open.]";
         return (text[..cut] + "\n\n" + said, file);
+    }
+
+    /// <summary>What of an earlier tool result a request keeps when it would not fit otherwise.</summary>
+    public const int CutResultChars = 2_000;
+
+    /// <summary>
+    /// This answer's tool results after the question at <paramref name="asked"/>, all but the last two, cut to their start in
+    /// <paramref name="messages"/> (the request only: the chat keeps them whole). True when one was cut.
+    /// </summary>
+    public static bool CutToolResults(JsonArray messages, int asked)
+    {
+        var cut = false;
+        var results = messages.Skip(asked + 1).OfType<JsonObject>().Where(m => m["role"]?.GetValue<string>() == "tool").ToList();
+        foreach (var m in results.Take(results.Count - 2))
+        {
+            if (m["content"] is JsonValue v && v.TryGetValue<string>(out var text) && text.Length > CutResultChars + 200)
+            {
+                m["content"] = text[..CutResultChars] + $"\n\n[Cut here: the result was {text.Length:N0} characters, too many for the model's context beside the rest. Call the tool again for a part of it if you need more.]";
+                cut = true;
+            }
+        }
+        return cut;
+    }
+
+    /// <summary>Where the person's last message is in <paramref name="messages"/> (this answer's question).</summary>
+    private static int LastUser(JsonArray messages)
+    {
+        for (var i = messages.Count - 1; i > 0; i--)
+        {
+            if (messages[i]?["role"]?.GetValue<string>() == "user")
+            {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    /// <summary>The characters a request's measure (ContextParts) adds up to.</summary>
+    private static long Chars(JsonObject filled) => filled.Sum(p => p.Value is JsonValue v && v.TryGetValue<long>(out var n) ? n : 0);
+
+    /// <summary>
+    /// Why a request is not sent at all, when it is sure not to fit (<see cref="PromptBudget.CannotFit"/>): the question alone, with
+    /// its files, is bigger than the model's context. Null: it is sent, and the model's count decides.
+    /// </summary>
+    private static string? TooBig(JsonObject request, PromptBudget budget)
+    {
+        var chars = PromptBudget.Chars(request, ImageWeight);
+        var count = (request["messages"] as JsonArray)?.Count ?? 0;
+        if (!budget.CannotFit(chars, count))
+        {
+            return null;
+        }
+        var tokens = budget.Tokens(chars, count);
+        return $"Your message alone is about {tokens:N0} tokens of the model's {budget.Context:N0}: it cannot read it even with the chat compacted. " +
+            "Shorten it, attach it as a file, or choose a model with a larger context.";
     }
 
     /// <summary>
@@ -914,6 +1068,9 @@ public sealed partial class ChatService(
         decimal Cost() => price.Cost(used.Prompt, used.Cached, used.Completion) + spent;
         // Its steps go back to the engine slot that holds its start, as a chat's turns do.
         var holder = Guid.NewGuid();
+        // Its rounds grow with its tools' results: past its model's context, the earlier ones are cut to their start.
+        var its = await models.ResolveAsync(kit.Model, ct);
+        var budget = new PromptBudget(its?.Context ?? 32768, PromptBudget.Room(its?.Context ?? 32768, its?.MaxOutput, null));
         for (var round = 0; ; round++)
         {
             var request = new JsonObject
@@ -934,6 +1091,11 @@ public sealed partial class ChatService(
             {
                 Tools(request, demand.Request(), last: round >= Math.Min(chat.CurrentValue.MaxToolRounds, AgentRounds) || steps.Count >= AgentCalls);
             }
+            if (round > 0 && !budget.Fits(budget.Tokens(request, ImageWeight)) && CutToolResults(messages, 1))
+            {
+                request["messages"] = messages.DeepClone();
+            }
+            var sent = PromptBudget.Chars(request, ImageWeight);
             text.Clear();
             var pending = new SortedDictionary<int, (string? Id, string? Name, StringBuilder Args)>();
             var timing = new ModelTiming();
@@ -960,6 +1122,7 @@ public sealed partial class ChatService(
                         case UsageReport u:
                             used = new UsageReport(used.Prompt + u.Prompt, used.Cached + u.Cached, used.Completion + u.Completion);
                             roundUsage = u;
+                            budget.Learn(sent, u.Prompt);
                             break;
                     }
                 }
@@ -1180,13 +1343,26 @@ public sealed partial class ChatService(
     }
 
     /// <summary>
-    /// The branch as the model reads it: from its newest summary on (Compaction.cs),
-    /// compacted first when it fills too much of the context, and trimmed from the
-    /// oldest end as a last resort. Images go as pictures to a model that can see,
-    /// and as their names to one that cannot.
+    /// What a history is built to fit: compaction at <paramref name="CompactAt"/> percent of the context (0: only when the
+    /// request would not fit), the request's tool definitions (<paramref name="ToolChars"/>) and, for a round after the first,
+    /// this answer's own messages so far beside the history (<paramref name="ExtraChars"/> in <paramref name="ExtraMessages"/>).
+    /// <paramref name="Force"/>: compact whatever the estimate says, for that reason (the model refused the request as too long).
+    /// <paramref name="Budget"/>: the answer's own, as it learned; null: made from the chat's last answer.
     /// </summary>
-    private async Task<(JsonArray Messages, bool ImagesDropped, SystemParts System)> BuildHistoryAsync(Conversation conversation, ChatMessage question, GatewayModel? model, string modelName,
-        GatewayModel? summarizer, string email, string? toolInstructions, bool canReadFiles, string? lengthNote, string? memory, Func<object, Task> emit, CancellationToken ct)
+    private sealed record HistoryFit(int CompactAt, long ToolChars, PromptBudget? Budget = null, long ExtraChars = 0, int ExtraMessages = 0, string? Force = null);
+
+    /// <summary>The words around a compaction's summary in the system message.</summary>
+    private const string SummaryIntro = "\n\nThe earlier part of this conversation was compacted: its messages are not shown, this summary stands for them.\n<summary>\n";
+
+    /// <summary>
+    /// The branch as the model reads it: from its newest summary on (Compaction.cs), compacted first when the request would
+    /// fill the person's share of the context or would not fit at all, and trimmed from the oldest end as a last resort.
+    /// Images go as pictures to a model that can see, and as their names to one that cannot. Also the budget the request
+    /// was measured with (<see cref="PromptBudget"/>), for the answer's later rounds.
+    /// </summary>
+    private async Task<(JsonArray Messages, bool ImagesDropped, SystemParts System, PromptBudget Budget)> BuildHistoryAsync(Conversation conversation, ChatMessage question,
+        GatewayModel? model, string modelName, GatewayModel? summarizer, string email, string? toolInstructions, bool canReadFiles, string? lengthNote, string? memory, HistoryFit fit,
+        Func<object, Task> emit, CancellationToken ct)
     {
         var all = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == conversation.Id).ToDictionaryAsync(m => m.Id, ct);
         all[question.Id] = question;
@@ -1209,7 +1385,8 @@ public sealed partial class ChatService(
             switch (m.Role)
             {
                 case "user":
-                    var text = new StringBuilder(mask(m.Content));
+                    // A quoted part of an earlier answer first, then the question, then its files.
+                    var text = new StringBuilder(ChatQuotes.ForModel(m.Quote is null ? null : mask(m.Quote), mask(m.Content)));
                     var images = new List<ChatAttachment>();
                     var heard = new List<JsonObject>();
                     var mediaWeight = 0L;
@@ -1310,12 +1487,27 @@ public sealed partial class ChatService(
             Knowledge.Retrieval.AddToQuestion(turns, question.Id, passages);
         }
 
-        // Rough, and on the safe side: ~3.5 characters a token for English and code.
+        // The request in tokens, at the characters a token held in the chat's last answer (PromptBudget).
         var context = model?.Context ?? 32768;
-        var output = conversation.MaxTokens ?? model?.MaxOutput ?? 8192;
-        var budgetChars = (long)Math.Max(4096, context - output - 1024) * 7 / 2 - system.Length;
-        // The summary is the small model's work when there is one.
-        if (await AutoCompactAsync(turns, stored, from, summary, budgetChars, summarizer ?? model, summarizer?.Name ?? modelName, email, emit, ct) is { } compacted)
+        var budget = fit.Budget ?? new PromptBudget(context, PromptBudget.Room(context, model?.MaxOutput, conversation.MaxTokens),
+            PromptBudget.Measured(stored) ?? PromptBudget.DefaultCharsPerToken);
+        long Chars() => system.Length + (summary is null ? 0 : SummaryIntro.Length + summary.Length + 11) + turns.Sum(t => t.Weight) + fit.ToolChars + fit.ExtraChars;
+        int Count() => turns.Count + 1 + fit.ExtraMessages;
+        var tokens = budget.Tokens(Chars(), Count());
+        var reason = fit.Force
+            ?? (fit.CompactAt > 0 && tokens >= (long)context * fit.CompactAt / 100 ? AtThreshold
+                : !budget.Fits(tokens) ? ToFit
+                : null);
+        // The summary is the small model's work when there is one. The newest exchanges kept whole fit in a quarter of the
+        // context, less what this answer added already; after a refusal, in half of what was sent at most, so something is
+        // compacted even when the estimate thought it all fitted.
+        var keep = (long)(context * KeepShare / 100.0 * budget.CharsPerToken) - fit.ExtraChars;
+        if (reason == AfterOverflow)
+        {
+            keep = Math.Min(keep, turns.Sum(t => t.Weight) / 2);
+        }
+        if (reason is not null
+            && await AutoCompactAsync(turns, stored, from, summary, keep, reason, tokens, context, summarizer ?? model, summarizer?.Name ?? modelName, email, emit, ct) is { } compacted)
         {
             summary = compacted.Summary;
             turns.RemoveRange(0, compacted.Cut);
@@ -1323,17 +1515,17 @@ public sealed partial class ChatService(
         var beforeSummary = system.Length;
         if (summary is not null)
         {
-            system += "\n\nThe earlier part of this conversation was compacted: its messages are not shown, this summary stands for them.\n<summary>\n" + summary + "\n</summary>";
-            budgetChars -= summary.Length + 150;
+            system += SummaryIntro + summary + "\n</summary>";
         }
-        var dropped = TrimOldest(turns, budgetChars);
+        // A last resort (the summary failed, or what is kept is still too big): the oldest turns are left out.
+        var dropped = TrimOldest(turns, (long)(budget.Limit * budget.CharsPerToken) - system.Length - fit.ToolChars - fit.ExtraChars);
         if (dropped > 0)
         {
             LogTrimmed(logger, conversation.Id, dropped);
         }
 
         return ([new JsonObject { ["role"] = "system", ["content"] = system }, .. turns.Select(t => t.Turn)], imagesDropped,
-            new SystemParts(baseLength, toolNotes, person, system.Length - beforeSummary, assistantFiles));
+            new SystemParts(baseLength, toolNotes, person, system.Length - beforeSummary, assistantFiles), budget);
     }
 
     /// <summary>

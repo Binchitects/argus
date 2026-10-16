@@ -25,10 +25,13 @@ internal sealed class ModelState
 /// <summary>
 /// When the session compacts itself, and how much it keeps: shares of the model's window, in
 /// percent. At <see cref="At"/>, the older part of the conversation is summarized and the recent
-/// part kept whole within <see cref="Target"/>.
+/// part kept whole within <see cref="Target"/>. At <see cref="Off"/>, only when the next request
+/// would not fit; and whatever the threshold, always then.
 /// </summary>
 internal sealed class Compaction
 {
+    /// <summary>The threshold that compacts only when the next request would not fit the window (the web chat's "only when needed").</summary>
+    public const int Off = 0;
     public const int DefaultAt = 80;
     public const int DefaultTarget = 25;
     public const int MinAt = 20;
@@ -44,31 +47,45 @@ internal sealed class Compaction
     public string? Set(int? at, int? target)
     {
         var newAt = at ?? At;
-        if (newAt is < MinAt or > MaxAt)
+        if (newAt != Off && newAt is < MinAt or > MaxAt)
         {
-            return $"The threshold is from {MinAt}% to {MaxAt}% of the model's window.";
+            return $"The threshold is from {MinAt}% to {MaxAt}% of the model's window, or off (only when a request would not fit).";
         }
-        var newTarget = target ?? Math.Min(Target, newAt - Gap);
-        if (newTarget < MinTarget || newTarget > newAt - Gap)
+        // Off compacts near the window's end: what is kept stays as far under the highest threshold.
+        var ceiling = (newAt == Off ? MaxAt : newAt) - Gap;
+        var newTarget = target ?? Math.Min(Target, ceiling);
+        if (newTarget < MinTarget || newTarget > ceiling)
         {
-            return $"What is kept is from {MinTarget}% to {newAt - Gap}% of the window ({Gap} points under the threshold, {newAt}%).";
+            return newAt == Off
+                ? $"What is kept is from {MinTarget}% to {ceiling}% of the window."
+                : $"What is kept is from {MinTarget}% to {ceiling}% of the window ({Gap} points under the threshold, {newAt}%).";
         }
         (At, Target) = (newAt, newTarget);
         return null;
     }
 
-    /// <summary>"70", "70%", "0.7" → 70; null when it is none of these.</summary>
+    /// <summary>"70", "70%", "0.7" → 70; "off" or 0 → <see cref="Off"/>; null when it is none of these.</summary>
     public static int? Percent(string? text)
     {
         var t = (text ?? "").Trim().TrimEnd('%').Trim();
-        if (!double.TryParse(t, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n) || n <= 0)
+        if (t.Equals("off", StringComparison.OrdinalIgnoreCase))
+        {
+            return Off;
+        }
+        if (!double.TryParse(t, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n) || n < 0)
         {
             return null;
         }
         return (int)Math.Round(n <= 1 ? n * 100 : n);
     }
 
-    public string Describe() => $"compacts at {At}% of the window, keeping the recent part within {Target}%";
+    /// <summary>"at 80%", or "only when a request would not fit".</summary>
+    public string When() => At == Off ? "only when a request would not fit" : $"at {At}%";
+
+    /// <summary>What it does; <paramref name="from"/>: where the threshold comes from ("from your Arena account"), when said.</summary>
+    public string Describe(string? from = null) =>
+        (At == Off ? "compacts only when a request would not fit the window" : $"compacts at {At}% of the window, and always before a request would not fit") +
+        (from is null ? "" : $" ({from})") + $", keeping the recent part within {Target}%";
 }
 
 /// <summary>Tokens spent: per turn, and for the session (sub-agents included).</summary>
@@ -239,7 +256,7 @@ internal sealed class Agent
         {
             Messages.AddRange(messages);
         }
-        var question = messages.LastOrDefault(m => m.Str("role") == "user")?.Str("content");
+        var question = messages.LastOrDefault(m => m.Str("role") == "user")?.Str("content") is { } said ? Quotes.Split(said).Text : null;
         var text = taken.Said ?? $"Taken in from the web chat: {messages.Count} message{(messages.Count == 1 ? "" : "s")}" +
                    (question is { Length: > 0 } ? $", the last question \"{Fmt.OneLine(question, 80)}\"." : ".");
         if (say is null)
@@ -272,11 +289,12 @@ internal sealed class Agent
     /// </summary>
     /// <param name="takeIn">Whether the web chat's news is taken in first (<see cref="BeforeTurn"/>); the IDE takes it in itself.</param>
     /// <param name="pieces">Lines chosen in the IDE's editor, sent with the message.</param>
-    public async Task<string> RunAsync(string? input, Spend turn, CancellationToken ct, bool takeIn = true, IReadOnlyList<Mentions.Piece>? pieces = null)
+    /// <param name="quote">The part of an earlier answer the message replies to: the model reads it before the message (<see cref="Quotes"/>).</param>
+    public async Task<string> RunAsync(string? input, Spend turn, CancellationToken ct, bool takeIn = true, IReadOnlyList<Mentions.Piece>? pieces = null, string? quote = null)
     {
         try
         {
-            return await RunTurnAsync(input, turn, ct, takeIn, pieces);
+            return await RunTurnAsync(input, turn, ct, takeIn, pieces, quote);
         }
         finally
         {
@@ -287,7 +305,7 @@ internal sealed class Agent
         }
     }
 
-    private async Task<string> RunTurnAsync(string? input, Spend turn, CancellationToken ct, bool takeIn, IReadOnlyList<Mentions.Piece>? pieces)
+    private async Task<string> RunTurnAsync(string? input, Spend turn, CancellationToken ct, bool takeIn, IReadOnlyList<Mentions.Piece>? pieces, string? quote)
     {
         if (input is not null)
         {
@@ -317,6 +335,8 @@ internal sealed class Agent
                     Events?.Attached(files);
                     input = expanded;
                 }
+                // The part of an answer it replies to goes first (the checkpoint keeps what was typed).
+                input = Quotes.Compose(quote, input);
             }
             Checkpoints?.Begin(Messages.Count, asked);
             Context.Turn++;
@@ -458,6 +478,7 @@ internal sealed class Agent
         var last = "";
         var interrupted = 0;
         var overflowed = false;
+        var waitedForCache = false;
         for (var step = 0; step < MaxSteps; step++)
         {
             await MaybeCompactAsync(ct);
@@ -477,6 +498,19 @@ internal sealed class Agent
                 // What was said before the stop stays, so the next turn follows from it.
                 Add(new JsonObject { ["role"] = "assistant", ["content"] = printer.Said.Length > 0 ? printer.Said + "\n\n" + StoppedMark : StoppedMark });
                 throw;
+            }
+            catch (GatewayException e) when (e is { ContextExceeded: true, SharedCache: true } && !waitedForCache && printer.Said.Length == 0)
+            {
+                // The engine's cache, shared by the requests it runs at once, was full: other requests filled it, not this one.
+                // Asked again in a moment, as it was; a second time it is compacted as any refusal for the window is.
+                Ui.StopSpinner();
+                printer.End();
+                Events?.StepDone(null);
+                waitedForCache = true;
+                Warn("The model's memory for the requests it answers at once was full: asking again in a moment.");
+                await Task.Delay(SharedCacheWait, ct);
+                step--;
+                continue;
             }
             catch (GatewayException e) when (e.ContextExceeded)
             {
@@ -565,6 +599,9 @@ internal sealed class Agent
         Warn($"Stopped after {MaxSteps} steps.");
         return last;
     }
+
+    /// <summary>How long a request waits before it is asked again when the engine's shared cache was full.</summary>
+    internal static TimeSpan SharedCacheWait { get; set; } = TimeSpan.FromSeconds(2);
 
     /// <summary>
     /// A request the window could not hold: its size is learned (the engine's count, else at least the window), and the
@@ -870,10 +907,16 @@ internal sealed class Agent
     public async Task<bool> MaybeCompactAsync(CancellationToken ct)
     {
         var at = Threshold;
+        var estimate = Estimate();
         // Never later than 95% of the window (nor past the answer's room), whatever a compaction before could not bring it under.
-        if (Messages.Count < 3 || Estimate() < Math.Min(Math.Max(at, _compactedAt + Model.Context / 10.0), Math.Min(Model.Context * 0.95, Limit)))
+        if (Messages.Count < 3 || estimate < Math.Min(Math.Max(at, _compactedAt + Model.Context / 10.0), Math.Min(Model.Context * 0.95, Limit)))
         {
             return false;
+        }
+        if (Compaction.At == Compaction.Off || estimate < Model.Context * Compaction.At / 100.0)
+        {
+            // Not the person's threshold: the request would not fit otherwise.
+            Warn($"Compacting: the next request (~{Fmt.Tokens(estimate)} tokens) would not fit the window ({Fmt.Tokens(Model.Context)}) with room for the answer.");
         }
         var changed = await CompactAsync(force: false, ct);
         var now = Estimate();
@@ -884,8 +927,8 @@ internal sealed class Agent
     /// <summary>The size a compaction left the conversation at when it stayed over the threshold (0: it got under).</summary>
     private long _compactedAt;
 
-    /// <summary>Where compaction starts, in tokens: the person's share of the window, within <see cref="Limit"/>.</summary>
-    private double Threshold => Math.Min(Model.Context * Compaction.At / 100.0, Limit);
+    /// <summary>Where compaction starts, in tokens: the person's share of the window, within <see cref="Limit"/> (off: at it).</summary>
+    private double Threshold => Compaction.At == Compaction.Off ? Limit : Math.Min(Model.Context * Compaction.At / 100.0, Limit);
 
     /// <summary>The most a request may hold, in tokens: the window less the room the answer needs.</summary>
     public long Limit => Model.Context - Reserve;
@@ -1304,7 +1347,7 @@ internal sealed class Agent
             var start = first.IndexOf("\n\n", StringComparison.Ordinal);
             sb.Append("\nThe summary before them:\n\n").Append(Fmt.Head(start < 0 ? first : first[(start + 2)..], 120, 400)).Append('\n');
         }
-        var asked = older.Where(m => m.Str("role") == "user" && m.Str("content")?.StartsWith(SummaryMark, StringComparison.Ordinal) != true).Select(m => Fmt.OneLine(Mentions.Typed(m.Str("content") ?? ""), 300)).TakeLast(15).ToList();
+        var asked = older.Where(m => m.Str("role") == "user" && m.Str("content")?.StartsWith(SummaryMark, StringComparison.Ordinal) != true).Select(m => Fmt.OneLine(Mentions.Typed(Quotes.Split(m.Str("content") ?? "").Text), 300)).TakeLast(15).ToList();
         if (asked.Count > 0)
         {
             sb.Append("\nThe person's messages:\n").Append(string.Join("", asked.Select(a => $"- {a}\n")));

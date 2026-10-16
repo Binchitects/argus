@@ -32,7 +32,7 @@ internal sealed class Repl(Runtime rt)
         ("/tools", "the tools this session has"),
         ("/todo", "the to-do list"),
         ("/compact", "summarize the conversation to free the model's window"),
-        ("/compact-at [% [%]]", "show or set when it compacts itself (80% of the window) and what it keeps (25%)"),
+        ("/compact-at [% [%]]", "show or set when it compacts itself (80% of the window, off, or your Arena account's) and what it keeps (25%)"),
         ("/context", "how full the model's window is"),
         ("/cost", "tokens spent, and how full the window is"),
         ("/mcp [retry]", "Arena's, Argus's and your MCP servers: connected or not; retry tries now"),
@@ -470,11 +470,11 @@ internal sealed class Repl(Runtime rt)
         }
     }
 
-    /// <summary>"context 18.2k / 131k (14%), compacts at 80%".</summary>
+    /// <summary>"context 18.2k / 131k (14%), compacts at 80%" (or "only when a request would not fit").</summary>
     private string ContextUse()
     {
         var used = rt.Agent.Estimate();
-        return $"context {Fmt.Tokens(used)} / {Fmt.Tokens(rt.Model.Context)} ({100.0 * used / rt.Model.Context:0}%), compacts at {rt.Compaction.At}%";
+        return $"context {Fmt.Tokens(used)} / {Fmt.Tokens(rt.Model.Context)} ({100.0 * used / rt.Model.Context:0}%), compacts {rt.Compaction.When()}";
     }
 
     /// <summary>Runs a slash command; false to leave.</summary>
@@ -594,10 +594,11 @@ internal sealed class Repl(Runtime rt)
             case "/cost":
                 Ui.Line($"This session: {rt.Total.Describe(Ui)}");
                 var used = rt.Agent.Estimate();
-                Ui.Line($"The window: about {Fmt.Tokens(used)} of {Fmt.Tokens(rt.Model.Context)} tokens ({100.0 * used / rt.Model.Context:0}%); {rt.Compaction.Describe()}.");
+                Ui.Line($"The window: about {Fmt.Tokens(used)} of {Fmt.Tokens(rt.Model.Context)} tokens ({100.0 * used / rt.Model.Context:0}%); {rt.Compaction.Describe(rt.CompactAtFrom)}.");
                 break;
             case "/context":
-                Ui.Line(ContextUse() + $", keeping the recent part within {rt.Compaction.Target}%.");
+                Ui.Line(ContextUse() + (rt.CompactAtFrom is { } from ? $" ({from})" : "") + (rt.Compaction.At == Compaction.Off ? "" : ", and always before a request would not fit") +
+                    $", keeping the recent part within {rt.Compaction.Target}%.");
                 break;
             case "/compact-at":
                 CompactAt(arg);
@@ -831,20 +832,29 @@ internal sealed class Repl(Runtime rt)
         }
     }
 
-    /// <summary>/compact-at: shows when the session compacts; "70" sets the threshold, "70 30" what is kept too, "default" both back.</summary>
+    /// <summary>
+    /// /compact-at: shows when the session compacts; "70" sets the threshold, "70 30" what is kept too, "off" only when a
+    /// request would not fit; "account" follows the Arena account's again, "default" that and 25% kept.
+    /// </summary>
     private void CompactAt(string arg)
     {
         if (arg.Length == 0)
         {
-            Ui.Line($"It {rt.Compaction.Describe()}. " + ContextUse() + ".");
-            Ui.Info("Set with /compact-at 70 (the threshold) or /compact-at 70 30 (and what is kept); /compact-at default for 80 and 25. Kept in config.json.");
+            Ui.Line($"It {rt.Compaction.Describe(rt.CompactAtFrom)}. " + ContextUse() + ".");
+            Ui.Info("Set with /compact-at 70 (the threshold), /compact-at 70 30 (and what is kept) or /compact-at off (only when a request would not fit); " +
+                "/compact-at account for your Arena account's (Your account → Answers), /compact-at default for that and 25. Kept in config.json.");
             return;
         }
         var words = arg.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         int? at, target;
+        var follow = false;
         if (words is ["default"])
         {
-            (at, target) = (Compaction.DefaultAt, Compaction.DefaultTarget);
+            (at, target, follow) = (null, Compaction.DefaultTarget, true);
+        }
+        else if (words is ["account"])
+        {
+            (at, target, follow) = (null, null, true);
         }
         else
         {
@@ -852,16 +862,16 @@ internal sealed class Repl(Runtime rt)
             target = words.Length > 1 ? Compaction.Percent(words[1]) : null;
             if (at is null || (words.Length > 1 && target is null) || words.Length > 2)
             {
-                Ui.Error("Give it as a share of the window: /compact-at 70, or /compact-at 70 30.");
+                Ui.Error("Give it as a share of the window: /compact-at 70, /compact-at 70 30, or /compact-at off.");
                 return;
             }
         }
-        if (rt.SetCompaction(at, target) is { } wrong)
+        if (rt.SetCompaction(at, target, follow) is { } wrong)
         {
             Ui.Error(wrong);
             return;
         }
-        Ui.Line($"It {rt.Compaction.Describe()} (kept in config.json).");
+        Ui.Line($"It {rt.Compaction.Describe(follow ? rt.CompactAtFrom : null)} ({(follow ? "config.json no longer sets when" : "kept in config.json")}).");
     }
 
     private void ChooseModel(string arg)

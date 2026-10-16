@@ -95,7 +95,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   chat: {
     name: 'Chat with the agent',
-    text: 'Ask for an answer or a change. The model and its thinking are at the top; each tool the agent uses is a card, with the diff under each edit. A file it cites (`src/app.ts:12`), the path and line numbers of a diff, and the chip under the card of a tool that read or edited a file open it in the editor at those lines. A command it runs with no time limit shows above the box with its output and **Stop**; the turn waits for it. **Stop** under the box ends a turn. The mode under the box says what runs without asking: **Ask**, **Auto-edit**, **Plan** or **Yolo**.',
+    text: 'Ask for an answer or a change. The model and its thinking are at the top; each tool the agent uses is a card, with the diff under each edit. A file it cites (`src/app.ts:12`), the path and line numbers of a diff, and the chip under the card of a tool that read or edited a file open it in the editor at those lines. A command it runs with no time limit shows above the box with its output and **Stop**; the turn waits for it. **Stop** under the box ends a turn. The mode under the box says what runs without asking: **Ask**, **Auto-edit**, **Plan** or **Yolo**. Select words in an answer to **Reply** quoting them (Ctrl+Shift+\'), **Ask about this** or **Copy**; **Quote part of this answer…** under an answer does it by keyboard.',
     manual: 'modes',
   },
   status: {
@@ -135,7 +135,11 @@ export const tasks: HelpTask[] = [
   { title: 'Go back to an earlier session', steps: ['Press **Chat** in the activity bar.', 'Click the session; **New session** starts another.'] },
   {
     title: 'Change when the conversation is compacted',
-    steps: ['Click how full the window is, in the status bar (tokens used / the model\'s; the gauge on a phone).', 'Set **Compact at** and what the recent part keeps, in percent of the window.', 'Press **Save**: the next sessions use it too.'],
+    steps: [
+      'Click how full the window is, in the status bar (tokens used / the model\'s; the gauge on a phone).',
+      'Choose **At a share of the window** (and set **Compact at**), **Only when a request would not fit**, or **As my Arena account says** (Your account → Answers in Arena), and what the recent part keeps, in percent of the window. It always compacts before a request would not fit.',
+      'Press **Save**: the next sessions use it too.',
+    ],
   },
   {
     title: 'Stop a long command the agent runs',

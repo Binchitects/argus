@@ -33,7 +33,10 @@ export function chatToMarkdown(title: string, path: Message[], at = new Date()):
   const out = [`# ${title}`, '', `*Exported from Argus Arena on ${at.toLocaleString()}${models.length ? ` · ${models.join(', ')}` : ''}*`, '']
   for (const m of path) {
     if (m.role === 'user') {
-      out.push('## You', '', m.content.trim() || '*(files only)*')
+      out.push('## You', '')
+      // The part of an earlier answer it replied to, as a Markdown quote.
+      if (m.quote) out.push(m.quote.split('\n').map((l) => (l ? `> ${l}` : '>')).join('\n'), '')
+      out.push(m.content.trim() || '*(files only)*')
       if (m.attachments.length) out.push('', `*Attached: ${m.attachments.map((a) => a.fileName).join(', ')}*`)
       out.push('')
     } else if (m.role === 'assistant') {
@@ -103,6 +106,7 @@ export function chatToJson(conversation: { id: string; title: string }, path: Me
         id: m.id,
         role: m.role,
         content: m.content,
+        ...(m.quote ? { quote: m.quote } : {}),
         model: m.model,
         createdAt: m.createdAt,
         status: m.status,

@@ -169,7 +169,8 @@ public sealed class Retrieval(AppDbContext db, Embedder embedder, KnowledgeStore
         {
             return null;
         }
-        var asked = question.Content.Trim();
+        // A quoted part of an earlier answer is part of what is asked.
+        var asked = Chat.ChatQuotes.Asked(question).Trim();
         if (asked.Length < 80 && path.LastOrDefault(m => m.Role == "user" && m.Id != question.Id) is { } before)
         {
             asked = before.Content.Trim() + "\n" + asked;

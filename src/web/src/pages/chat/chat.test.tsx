@@ -1,4 +1,4 @@
-import { cleanup, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Me } from '@/lib/api'
@@ -6,7 +6,7 @@ import type { AnswerTrace } from '@/pages/admin/traces-api'
 import { admin, fakeApi, member, renderApp } from '@/test/utils'
 import { blank } from './live'
 import { waitingText } from './format'
-import type { ChatConfig, Conversation, Message } from './types'
+import type { ChatConfig, Conversation, Message, QueuedMessage } from './types'
 
 vi.mock('./api', async (original) => ({
   ...(await original<typeof import('./api')>()),
@@ -693,9 +693,77 @@ describe('chat', () => {
     expect(within(parts).getByText('Files').parentElement).toHaveTextContent('Files8 K24%')
     expect(within(parts).getByText('Tool definitions').parentElement).toHaveTextContent('Tool definitions6 K18%')
     expect(within(parts).getByText('Answers').parentElement).toHaveTextContent('Answers1.2 K4%')
-    // Kept for the answer: the model's longest (8,192); the rest is free.
-    expect(within(parts).getByText('Free').parentElement).toHaveTextContent('Free4.38 K13%')
+    // Kept for the answer: an eighth of the context (4,096, within the model's longest); the rest is free.
+    expect(within(parts).getByText('Kept for the answer').parentElement).toHaveTextContent('Kept for the answer4.1 K13%')
+    expect(within(parts).getByText('Free').parentElement).toHaveTextContent('Free8.47 K26%')
     await userEvent.click(screen.getByRole('button', { name: 'Compact now' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/compact')).toBe(true))
+  })
+
+  it('the context gauge marks where the chat compacts, whose choice it is, and where to change it', async () => {
+    const full = [answered[0]!, { ...answered[1]!, promptTokens: 20_000, completionTokens: 200 }]
+    backend({ start: conversation({ messages: full, currentLeafId: 'a1' }), config: { compactAt: 60, compactSource: 'account' } })
+    renderApp('/chat/c1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Context: 62% full. Details and compact' }))
+    expect(await screen.findByText(/Compacts at 60% \(your choice\), and always before a message would not fit\./)).toBeInTheDocument()
+    expect(screen.getByTestId('compact-tick')).toHaveStyle({ left: '60%' })
+    expect(screen.getByRole('link', { name: 'Change' })).toHaveAttribute('href', '/account#answers')
+  })
+
+  it('a chat the model refused as too long says it compacted and asked again', async () => {
+    const summary = 'The person said hello.'
+    backend({
+      start: conversation({ messages: answered, currentLeafId: 'a1' }),
+      hang: true,
+      events: [
+        { type: 'question', id: 'q2', parentId: 'a1' },
+        { type: 'assistant', id: 'a2', parentId: 'q2', model: 'Main-Model' },
+        { type: 'notice', kind: 'context_retry', text: 'The model could not read the whole chat (about 40,000 of 32,768 tokens): compacting it and asking again.' },
+        { type: 'compacting', reason: 'overflow' },
+        { type: 'compacted', id: 'a1', summary, auto: true, reason: 'overflow', tokens: 40000, context: 32768, covered: 2 },
+        { type: 'content', text: 'Answered from the summary.' },
+      ],
+    })
+    renderApp('/chat/c1')
+    await screen.findByText('Hi! Here is code:')
+    await ask('and now?')
+    expect(await screen.findByText(/compacting it and asking again/)).toBeInTheDocument()
+    expect(await screen.findByText('The model could not read the whole chat: compacted and asked again. It reads a summary of the chat above')).toBeInTheDocument()
+    expect(await screen.findByText('Answered from the summary.')).toBeInTheDocument()
+  })
+
+  it('a chat too long for the model even compacted offers to compact it, or a model with a larger context', async () => {
+    const error = 'This chat is longer than the model can read (about 40,000 of 32,768 tokens). Compact it (/compact), start a new chat, or remove large attachments.'
+    const failed = [...answered, msg('q2', 'a1', 'user', { content: 'and now?' }), msg('a2', 'q2', 'assistant', { status: 'failed', error, model: 'Main-Model' })]
+    const big = { name: 'Big-Model', context: 131072, maxOutput: 8192, vision: false, tools: true, thinking: true, loaded: true, prices: { input: 1, cachedInput: 0.1, output: 2 } }
+    const calls = backend({
+      start: conversation({ messages: failed, currentLeafId: 'a2' }),
+      config: { models: [...config.models, big] },
+      extra: { 'POST /api/chat/conversations/c1/compact': () => ({ events: [{ type: 'done', id: 'a2' }] }) },
+    })
+    renderApp('/chat/c1')
+    const alert = (await screen.findByText(/This chat is longer than the model can read/)).closest('[role="alert"]') as HTMLElement
+    await userEvent.click(within(alert).getByRole('button', { name: 'Ask Big-Model (131.07 K tokens)' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/chat/conversations/c1/regenerate')?.body).toEqual({ messageId: 'q2', model: 'Big-Model' }))
+  })
+
+  it('a message too long for the model, live, offers to compact the chat', async () => {
+    const tooBig = "Your message alone is about 42,000 tokens of the model's 32,768: it cannot read it even with the chat compacted. Shorten it, attach it as a file, or choose a model with a larger context."
+    const calls = backend({
+      start: conversation({ messages: answered, currentLeafId: 'a1' }),
+      events: [
+        { type: 'question', id: 'q2', parentId: 'a1' },
+        { type: 'assistant', id: 'a2', parentId: 'q2', model: 'Main-Model' },
+        { type: 'error', kind: 'context', message: tooBig },
+      ],
+      saved: [...answered, msg('q2', 'a1', 'user', { content: 'and now?' }), msg('a2', 'q2', 'assistant', { status: 'failed', error: tooBig })],
+      extra: { 'POST /api/chat/conversations/c1/compact': () => ({ events: [{ type: 'done', id: 'a2' }] }) },
+    })
+    renderApp('/chat/c1')
+    await screen.findByText('Hi! Here is code:')
+    await ask('and now?')
+    const alert = (await screen.findByText(/Your message alone is about 42,000 tokens/)).closest('[role="alert"]') as HTMLElement
+    await userEvent.click(await within(alert).findByRole('button', { name: 'Compact now' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/compact')).toBe(true))
   })
 
@@ -1140,5 +1208,175 @@ describe('chat', () => {
     await userEvent.click(screen.getByRole('button', { name: /^Model:/ }))
     expect(await screen.findByRole('menuitem', { name: /Main-Model/ })).toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: /Auto/ })).not.toBeInTheDocument()
+  })
+})
+
+/** Selects these words where they first are inside `region`, as the mouse would, and tells the page. */
+function selectIn(region: HTMLElement, words: string) {
+  const walk = document.createTreeWalker(region, NodeFilter.SHOW_TEXT)
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+    const at = n.nodeValue!.indexOf(words)
+    if (at < 0) continue
+    const range = document.createRange()
+    range.setStart(n, at)
+    range.setEnd(n, at + words.length)
+    const selection = document.getSelection()!
+    selection.removeAllRanges()
+    selection.addRange(range)
+    document.dispatchEvent(new Event('selectionchange'))
+    return
+  }
+  throw new Error(`"${words}" is not on the page`)
+}
+
+describe('quoting part of an answer', () => {
+  const said = 'Use git rebase to squash commits.\n\nThen push it.'
+  const exchange = [msg('q1', null, 'user', { content: 'how do I tidy commits?' }), msg('a1', 'q1', 'assistant', { content: said, model: 'Main-Model' })]
+  const asked = (over: Partial<Message> = {}) => msg('q2', 'a1', 'user', { content: 'Why not merge?', quote: 'git rebase to squash', ...over })
+  const reply = [{ type: 'question', id: 'q2', parentId: 'a1' }, { type: 'assistant', id: 'a2', parentId: 'q2', model: 'Main-Model' }, { type: 'content', text: 'Because.' }, { type: 'done', id: 'a2' }]
+  const answerRegion = async () => (await screen.findAllByRole('region', { name: 'Answer' }))[0]!
+
+  it('a selection in an answer gets a toolbar; Reply puts the quote above the box, and it goes with the message and shows above the question', async () => {
+    const calls = backend({
+      start: conversation({ messages: exchange, currentLeafId: 'a1' }),
+      events: reply,
+      saved: [...exchange, asked(), msg('a2', 'q2', 'assistant', { content: 'Because.' })],
+    })
+    renderApp('/chat/c1')
+    selectIn(await answerRegion(), 'git rebase to squash')
+    const bar = await screen.findByRole('toolbar', { name: 'The selected words' })
+    const replyButton = within(bar).getByRole('button', { name: /Reply/ })
+    expect(replyButton).toHaveAttribute('aria-keyshortcuts', "Control+Shift+'")
+    await userEvent.click(replyButton)
+    const chip = await screen.findByRole('group', { name: 'Quoted in your reply' })
+    expect(chip).toHaveTextContent('git rebase to squash')
+    expect(screen.queryByRole('toolbar', { name: 'The selected words' })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveFocus())
+    expect(screen.getByText('Quoted in your reply', { selector: 'output' })).toBeInTheDocument()
+
+    await ask('Why not merge?')
+    await waitFor(() =>
+      expect(calls.find((c) => c.path === '/api/chat/conversations/c1/messages')?.body).toEqual({ content: 'Why not merge?', attachments: [], parentId: 'a1', root: false, quote: 'git rebase to squash' }),
+    )
+    expect(screen.queryByRole('group', { name: 'Quoted in your reply' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('figure', { name: 'Quoting an earlier answer' })).toHaveTextContent('git rebase to squash')
+  })
+
+  it("the quote goes with its X, with Backspace at the start of an empty box, and comes by Ctrl+Shift+'", async () => {
+    backend({ start: conversation({ messages: exchange, currentLeafId: 'a1' }) })
+    renderApp('/chat/c1')
+    selectIn(await answerRegion(), 'git rebase')
+    await screen.findByRole('toolbar', { name: 'The selected words' })
+    fireEvent.keyDown(window, { key: "'", code: 'Quote', ctrlKey: true, shiftKey: true })
+    const chip = await screen.findByRole('group', { name: 'Quoted in your reply' })
+    await userEvent.click(within(chip).getByRole('button', { name: 'Remove the quote' }))
+    expect(screen.queryByRole('group', { name: 'Quoted in your reply' })).not.toBeInTheDocument()
+
+    selectIn(await answerRegion(), 'push it')
+    await userEvent.click(within(await screen.findByRole('toolbar', { name: 'The selected words' })).getByRole('button', { name: /Reply/ }))
+    await screen.findByRole('group', { name: 'Quoted in your reply' })
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'x{Backspace}')
+    // The letter went first; the quote stays until the box is empty with the cursor at its start.
+    expect(screen.getByRole('group', { name: 'Quoted in your reply' })).toBeInTheDocument()
+    await userEvent.keyboard('{Backspace}')
+    expect(screen.queryByRole('group', { name: 'Quoted in your reply' })).not.toBeInTheDocument()
+  })
+
+  it('Ask about this sends the quote and a question at once and leaves the draft in the box; Copy copies the words', async () => {
+    const calls = backend({ start: conversation({ messages: exchange, currentLeafId: 'a1' }), events: reply, saved: [...exchange, asked({ content: 'Explain this' })] })
+    renderApp('/chat/c1')
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Message' }), 'my draft')
+    selectIn(await answerRegion(), 'git rebase to squash')
+    await userEvent.click(within(await screen.findByRole('toolbar', { name: 'The selected words' })).getByRole('button', { name: 'Copy' }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('git rebase to squash'))
+
+    selectIn(await answerRegion(), 'git rebase to squash')
+    await userEvent.click(within(await screen.findByRole('toolbar', { name: 'The selected words' })).getByRole('button', { name: 'Ask about this' }))
+    expect(await screen.findByRole('textbox', { name: 'Your question about the selection' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Explain this' }))
+    await waitFor(() =>
+      expect(calls.find((c) => c.path === '/api/chat/conversations/c1/messages')?.body).toEqual({ content: 'Explain this', attachments: [], parentId: 'a1', root: false, quote: 'git rebase to squash' }),
+    )
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('my draft')
+    expect(screen.queryByRole('group', { name: 'Quoted in your reply' })).not.toBeInTheDocument()
+  })
+
+  it('a quote comes back with the text when the message does not reach the server', async () => {
+    backend({ start: conversation({ messages: exchange, currentLeafId: 'a1' }), extra: { 'POST /api/chat/conversations/c1/messages': () => ({ offline: true }) } })
+    renderApp('/chat/c1')
+    selectIn(await answerRegion(), 'git rebase')
+    await userEvent.click(within(await screen.findByRole('toolbar', { name: 'The selected words' })).getByRole('button', { name: /Reply/ }))
+    await ask('Why?')
+    expect(await screen.findByRole('alert')).toHaveTextContent('did not reach the server')
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('Why?'))
+    expect(screen.getByRole('group', { name: 'Quoted in your reply' })).toHaveTextContent('git rebase')
+  })
+
+  it('an edit keeps the quote unless it is taken away, and a queued message carries one', async () => {
+    const withQuote = [...exchange, asked(), msg('a2', 'q2', 'assistant', { content: 'Because.' })]
+    const calls = backend({ start: conversation({ messages: withQuote, currentLeafId: 'a2' }), events: reply, saved: withQuote })
+    renderApp('/chat/c1')
+    const edits = await screen.findAllByRole('button', { name: 'Edit question' })
+    await userEvent.click(edits.at(-1)!)
+    const form = screen.getByRole('textbox', { name: 'Edit your question' }).closest('form')!
+    const chip = within(form).getByRole('group', { name: 'Quoted in your reply' })
+    expect(chip).toHaveTextContent('git rebase to squash')
+    await userEvent.click(within(chip).getByRole('button', { name: 'Remove the quote' }))
+    await userEvent.click(within(form).getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/chat/conversations/c1/messages')?.body).toEqual({ content: 'Why not merge?', attachments: [], parentId: 'a1', root: false }))
+
+    // While Code Arena answers, a reply is queued with its quote.
+    const queued: QueuedMessage[] = []
+    const later = backend({
+      extra: {
+        'GET /api/chat/conversations/c1': () => ({ json: conversation({ codeArena: true, origin: 'code-arena', messages: exchange, currentLeafId: 'a1', queued }) }),
+        'GET /api/chat/conversations/c1/stamp': () => ({ json: { stamp: 'one', answering: false, codeArena: true } }),
+        'POST /api/chat/conversations/c1/queue': (body: unknown) => {
+          queued.push({ id: 'k1', content: (body as { content: string }).content, quote: (body as { quote?: string }).quote ?? null, attachments: [], createdAt: '' })
+          return { json: { queued, answering: false } }
+        },
+      },
+    })
+    cleanup()
+    renderApp('/chat/c1')
+    selectIn(await answerRegion(), 'push it')
+    await userEvent.click(within(await screen.findByRole('toolbar', { name: 'The selected words' })).getByRole('button', { name: /Reply/ }))
+    await ask('and then?')
+    await waitFor(() => expect(later.find((c) => c.path === '/api/chat/conversations/c1/queue')?.body).toEqual({ content: 'and then?', attachments: [], quote: 'push it' }))
+    expect(await screen.findByRole('list', { name: 'Queued messages' })).toHaveTextContent('Quoting part of an answer:')
+  })
+
+  it('no toolbar for a question or an answer being written; the keyboard dialog quotes a part, or the whole answer', async () => {
+    backend({ start: conversation({ messages: exchange, currentLeafId: 'a1' }) })
+    renderApp('/chat/c1')
+    selectIn(await screen.findByRole('region', { name: 'You' }), 'tidy commits')
+    await new Promise((r) => setTimeout(r, 300))
+    expect(screen.queryByRole('toolbar', { name: 'The selected words' })).not.toBeInTheDocument()
+
+    await userEvent.click(within(await answerRegion()).getByRole('button', { name: 'Quote part of this answer…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Quote part of this answer' })
+    const text = within(dialog).getByRole('textbox', { name: 'The answer' }) as HTMLTextAreaElement
+    expect(text).toHaveFocus()
+    text.setSelectionRange(said.indexOf('Then'), said.length)
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Quote' }))
+    expect(await screen.findByRole('group', { name: 'Quoted in your reply' })).toHaveTextContent('Then push it.')
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveFocus())
+
+    await userEvent.click(within(await answerRegion()).getByRole('button', { name: 'Quote part of this answer…' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Quote' }))
+    await waitFor(() => expect(screen.getByRole('group', { name: 'Quoted in your reply' })).toHaveTextContent('Use git rebase to squash commits. Then push it.'))
+  })
+
+  it('a live answer has no source to quote from; a quoted question goes to the answer it quotes, or shows the quote whole', async () => {
+    backend({ start: conversation({ messages: [...exchange, asked({ quote: 'Then push it.' }), msg('q3', 'q2', 'user', { content: 'other', quote: 'never said' })], currentLeafId: 'q3' }) })
+    renderApp('/chat/c1')
+    const [found, lost] = await screen.findAllByRole('figure', { name: 'Quoting an earlier answer' })
+    await userEvent.click(within(found!).getByRole('button', { name: 'Go to the quoted answer' }))
+    expect(document.querySelector('[data-message="a1"]')).toHaveClass('found')
+    await userEvent.click(within(lost!).getByRole('button', { name: 'Go to the quoted answer' }))
+    expect(within(lost!).getByRole('button', { name: 'Show less' })).toHaveAttribute('aria-expanded', 'true')
+    expect(document.querySelectorAll('[data-quote-source]')).toHaveLength(1)
   })
 })

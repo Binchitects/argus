@@ -44,6 +44,8 @@ public sealed class AppUser : IdentityUser<Guid>
     public List<string> DirectoryGroups { get; set; } = [];
     /// <summary>How long answers should be: "short", "thorough", or null for the model's own judgement.</summary>
     public string? AnswerLength { get; set; }
+    /// <summary>When the person's chats compact, in percent of the model's context (0: only when a message would not fit); null: the company's default (Chat:CompactAt). Code Arena takes it as its default too.</summary>
+    public int? CompactAt { get; set; }
     /// <summary>The person turned memory off: their answers neither read nor offer memories (Your account → Memory).</summary>
     public bool MemoryOff { get; set; }
     /// <summary>Set while the person is on legal hold: nothing of theirs is deleted, by retention or by them.</summary>

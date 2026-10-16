@@ -55,6 +55,8 @@ COPY global.json Directory.Build.props VERSION ./
 COPY tools/publish-code-arena.sh tools/
 COPY tools/offline-nuget/ tools/offline-nuget/
 COPY src/CodeArena/ src/CodeArena/
+# The one file Code Arena shares with the app (linked in its project): how a context refusal reads.
+COPY src/Llm.Core/Chat/ContextOverflow.cs src/Llm.Core/Chat/
 COPY --from=code-arena-web /CodeArena/web/ src/CodeArena/web/
 RUN mkdir -p dist/code-arena \
  && case "$CODE_ARENA" in \

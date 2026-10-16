@@ -35,6 +35,19 @@ export interface ChatConfig {
   gitlabUrl: string | null
   maxUploadBytes: number
   imageTypes: string[]
+  /** When the person's chats compact, in percent of the model's context (0: only when a message would not fit), and whose choice it is. */
+  compactAt?: number
+  compactSource?: 'account' | 'company'
+}
+
+/** Why a chat compacted on its own: at the person's share of the context, so the message fits, or because the model refused it as too long; asked: /compact. */
+export type CompactReason = 'threshold' | 'fit' | 'overflow' | 'asked'
+
+/** A compaction as it happened (this page saw it): why, and how big the request was then, of how big a context. */
+export interface Compaction {
+  reason?: CompactReason
+  tokens?: number
+  context?: number
 }
 
 export interface Attachment {
@@ -61,6 +74,8 @@ export interface Message {
   parentId: string | null
   role: 'user' | 'assistant' | 'tool'
   content: string
+  /** A question: the part of an earlier answer it quotes (its Markdown), shown above it; the model reads it before the question. */
+  quote?: string | null
   reasoning: string | null
   toolName: string | null
   toolCallId: string | null
@@ -83,6 +98,10 @@ export interface Message {
   noAccess: boolean
   /** The chat was compacted here: the model reads this summary instead of the branch down to this message. */
   summary?: string | null
+  /** Why it was compacted here, when the page saw it happen. */
+  compaction?: Compaction | null
+  /** "context": the answer failed because the chat (or the message) is too long for the model, even compacted. */
+  errorKind?: string | null
   /**
    * What a message shows beyond what the model read: a tool call's sub-agents' work ({ agents: [...] }), the canvas a call made or changed, an Auto answer's
    * route, a memory to keep ({ memory }); { note: true }: Code Arena's own word to its model (the connection dropped), shown as a notice, not as the person's.
@@ -310,6 +329,7 @@ export interface Conversation extends ConversationSummary {
 export interface QueuedMessage {
   id: string
   content: string
+  quote?: string | null
   attachments: Attachment[]
   createdAt: string
 }
@@ -394,11 +414,12 @@ export type ChatEvent =
   | { type: 'research' }
   /** Waiting for a turn: the model serves few at once, in turn (fair use). Model: whose line (null: the whole chat's); yours: the person's own answers hold it. */
   | { type: 'queued'; ahead: number; model?: string | null; yours?: boolean; why?: string | null }
-  | { type: 'error'; message: string }
+  /** kind "context": too long for the model even compacted (the page offers to compact, or a model with a larger context). */
+  | { type: 'error'; message: string; kind?: string | null }
   /** The older messages are being summarized (compaction), before an answer or because the person asked. */
-  | { type: 'compacting' }
-  /** Compacted at message `id`: `covered` messages became `summary`. */
-  | { type: 'compacted'; id: string; summary: string; auto: boolean; covered: number; model?: string }
+  | { type: 'compacting'; reason?: CompactReason }
+  /** Compacted at message `id`: `covered` messages became `summary`; why, and the request's `tokens` of the `context`, when it was automatic. */
+  | { type: 'compacted'; id: string; summary: string; auto: boolean; covered: number; model?: string; reason?: CompactReason; tokens?: number; context?: number }
   /** Stopped (by the person, from any tab): what was written is kept. */
   | { type: 'stopped'; id: string | null }
   | { type: 'done'; id: string }

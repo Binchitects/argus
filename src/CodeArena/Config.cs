@@ -154,7 +154,7 @@ internal sealed class Config
     public string? ArgusUrl { get; set; }
     /// <summary>Whether to connect to Argus's own MCP endpoint (with the same key) besides Arena's.</summary>
     public bool ArgusTools { get; set; } = true;
-    /// <summary>The share of the model's window (in percent) at which the session compacts itself; null: <see cref="Compaction.DefaultAt"/>.</summary>
+    /// <summary>The share of the model's window (in percent) at which the session compacts itself (0, "off": only when a request would not fit); null: the Arena account's, else <see cref="Compaction.DefaultAt"/>.</summary>
     public int? CompactAt { get; set; }
     /// <summary>The share of the window (in percent) the recent part may keep whole when it compacts; null: <see cref="Compaction.DefaultTarget"/>.</summary>
     public int? CompactTarget { get; set; }
@@ -328,7 +328,7 @@ internal sealed class Config
             return null;
         }
         var text = value is JsonValue v && v.TryGetValue<string>(out var s) ? s : value.ToJsonString();
-        return Compaction.Percent(text) ?? throw new InvalidOperationException($"\"{key}\" in {file} is a share of the model's window: 70, \"70%\" or 0.7.");
+        return Compaction.Percent(text) ?? throw new InvalidOperationException($"\"{key}\" in {file} is a share of the model's window: 70, \"70%\" or 0.7{(key == "compactAt" ? ", or \"off\"" : "")}.");
     }
 
     /// <summary>An address Code Arena can reach: absolute, http or https (a port out of range, a space or another scheme is not).</summary>

@@ -23,12 +23,17 @@ import { keepSame, stopped, withQuestion, type Notice } from '@/pages/chat/live'
 import { useRecall, type Older, type RecallSource } from '@/pages/chat/recall'
 import { toTurns } from '@/pages/chat/tree'
 import { CompactedMark, QuestionTurn } from '@/pages/chat/turns'
+import { useQuotableSelection } from '@/pages/chat/quotable'
+import { findQuoted, type Quote } from '@/pages/chat/quote'
+import { QuoteChip } from '@/pages/chat/quote-parts'
+import { SelectionToolbar } from '@/pages/chat/selection-toolbar'
 import type { ChatConfig, Message } from '@/pages/chat/types'
 import {
   answerApproval,
   clearQueue,
   queueMessage,
   changeSettings,
+  compactWho,
   fromSession,
   historyQuery,
   inOrder,
@@ -56,6 +61,8 @@ import { chatBridge, pieceLabel, type Piece } from './bridge'
 import { useEditor } from './editor-state'
 import { useFileMention } from './mention'
 import { CodeAnswer } from './answer'
+import { useCommands } from './commands'
+import { useKeyFor } from './keyboard'
 import { PartHelp } from './help'
 import { SyncStatus } from './sync-status'
 import { changesQuery } from './ide-api'
@@ -333,10 +340,10 @@ const noNotices: Notice[] = []
 const noneWaiting: string[] = []
 const ignore = () => undefined
 
-/** A question in the thread: drawn again only when its message changes. */
-const Question = memo(function Question({ m }: { m: Message }) {
+/** A question in the thread: drawn again only when its message changes. `onJump` goes to the answer it quotes. */
+const Question = memo(function Question({ m, onJump }: { m: Message; onJump: (m: Message) => boolean }) {
   // No editing here: nothing for "busy" to hold back.
-  return <QuestionTurn m={m} siblings={[m]} busy={false} onSwitch={ignore} />
+  return <QuestionTurn m={m} siblings={[m]} busy={false} onSwitch={ignore} onJumpToQuote={onJump} />
 })
 
 const suggestions = [
@@ -393,6 +400,45 @@ export function Thread({
   const scroller = useRef<HTMLDivElement>(null)
   const content = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
+  // The part of an answer the next message quotes (Reply, or the command), and the selection that can be quoted. The quote is
+  // the session's it was made in: another session opened here does not send it.
+  const [quoted, setQuoted] = useState<{ session?: string; quote: Quote } | null>(null)
+  const quote = quoted && quoted.session === session.data?.id ? quoted.quote : null
+  const sessionNow = useRef(session.data?.id)
+  useEffect(() => {
+    sessionNow.current = session.data?.id
+  }, [session.data?.id])
+  const setQuote = useCallback((next: Quote | null | ((now: Quote | null) => Quote | null)) => {
+    setQuoted((was) => {
+      const now = was && was.session === sessionNow.current ? was.quote : null
+      const q = typeof next === 'function' ? next(now) : next
+      return q ? { session: sessionNow.current, quote: q } : null
+    })
+  }, [])
+  const messagesNow = useRef<Message[]>([])
+  const quotable = useQuotableSelection(scroller, (messageId) => messagesNow.current.find((m) => m.id === messageId)?.content)
+  // The same function at each drawing: the answers are not drawn again for it.
+  const replyQuote = useCallback((q: Quote) => {
+    setQuote(q)
+    setFocusBox((n) => n + 1)
+  }, [setQuote])
+  const reply = (q: Quote) => {
+    replyQuote(q)
+    quotable.clear(true)
+  }
+  const replyKey = useKeyFor('codeArena.chat.quoteSelection')
+  useCommands([
+    {
+      id: 'codeArena.chat.quoteSelection',
+      title: 'Reply quoting the selection',
+      category: 'Chat',
+      run: () => {
+        const q = quotable.recent()
+        if (q) reply(q.quote)
+      },
+      enabled: () => !!quotable.recent(),
+    },
+  ])
 
   // The session as read, each message that did not change kept as the object the thread drew (the turn that just
   // streamed included): read again after each turn, the finished turns are not drawn again.
@@ -402,6 +448,20 @@ export function Thread({
   const view = live ?? saved
   const path = useMemo(() => inOrder(view.messages), [view.messages])
   const turns = useMemo(() => toTurns(path), [path])
+  useEffect(() => {
+    messagesNow.current = path
+  }, [path])
+  // To the answer a question quotes, marked for a moment (false: not in the thread). The same function at each drawing.
+  const jumpToQuoted = useCallback((m: Message): boolean => {
+    const found = m.quote ? findQuoted(messagesNow.current, m.id, m.quote) : null
+    const target = found ? scroller.current?.querySelector<HTMLElement>(`[data-message="${found}"]`) : null
+    if (!target) return false
+    setAtBottom(false)
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    target.classList.add('found')
+    setTimeout(() => target.classList.remove('found'), 2400)
+    return true
+  }, [])
   // The last turns, and more of the older ones as asked for ("Show earlier"); another session starts from its last ones again.
   const [shown, setShown] = useState({ session: session.data?.id, count: turnsAtOnce })
   const shownCount = shown.session === session.data?.id ? shown.count : turnsAtOnce
@@ -540,14 +600,14 @@ export function Thread({
     for (const queryKey of [sessionQuery.queryKey, sessionsQuery.queryKey]) void queryClient.invalidateQueries({ queryKey })
   }, [state.synced, queryClient])
 
-  /** While an answer is written: the message waits in the queue and runs when the answer ends. */
-  const queue = async (text: string, context?: Piece[]): Promise<boolean> => {
+  /** While an answer is written: the message waits in the queue and runs when the answer ends (with the part of an answer it quotes). */
+  const queue = async (text: string, context?: Piece[], quoted?: Quote | null): Promise<boolean> => {
     if (text === '/compact' || text === '/clear' || text === '/new') {
       toast.error(`Wait for the answer, or stop it, to run ${text}.`)
       return false
     }
     try {
-      await queueMessage(text, context)
+      await queueMessage(text, context, quoted?.text)
       toast.success('Queued: it is sent when this answer ends.')
       await queryClient.invalidateQueries({ queryKey: stateQuery.queryKey })
       return true
@@ -573,8 +633,11 @@ export function Thread({
     return true
   }
 
-  /** Sends a message, with the lines chosen in the editor (those above the box, or `context` when given: a question from the editor). */
-  const send = async (text: string, context?: Piece[]): Promise<boolean> => {
+  /**
+   * Sends a message, with the lines chosen in the editor (those above the box, or `context` when given: a question from the
+   * editor) and the quote above the box (`quoted`: a question about a selection instead).
+   */
+  const send = async (text: string, context?: Piece[], quoted?: Quote): Promise<boolean> => {
     if (text === '/compact') return compact()
     if (text === '/clear' || text === '/new') {
       await newSession().catch((e) => toast.error(errorMessage(e)))
@@ -584,18 +647,32 @@ export function Thread({
     // The lines kept above the box, as the editor has them now (changed since they were added, they go as they are now).
     const going = context ?? pieces.map((p) => pieceOf(p.path, p.startLine, p.endLine))
     if (!context) setPieces([])
+    const withQuote = quoted ?? (context ? null : quote)
+    if (!context && withQuote) setQuote(null)
+    const keepQuote = () => !context && withQuote && setQuote((now) => now ?? withQuote)
     const localId = newLocalId()
-    const asked = withQuestion(view, localId, path.at(-1)?.id ?? null, text, [])
+    const asked = withQuestion(view, localId, path.at(-1)?.id ?? null, text, [], withQuote?.text)
     const start = { ...view, ...asked, messages: asked.messages.map((m) => (m.id === localId && going.length > 0 ? { ...m, files: going.map(pieceLabel) } : m)) }
     try {
-      const sent = await run('/api/messages', { text, ...(going.length > 0 && { context: going }) }, start, localId, undefined, true)
+      const sent = await run('/api/messages', { text, ...(going.length > 0 && { context: going }), ...(withQuote && { quote: withQuote.text }) }, start, localId, undefined, true)
       if (!sent && !context) setPieces((now) => (now.length > 0 ? now : pieces))
+      if (!sent) keepQuote()
       return sent
     } catch (e) {
       // An answer started meanwhile that this page had not seen yet (a command ended, another tab): the message waits for it.
-      if (e instanceof ApiError && e.status === 'busy') return queue(text, going)
+      if (e instanceof ApiError && e.status === 'busy') {
+        const queued = await queue(text, going, withQuote)
+        if (!queued) keepQuote()
+        return queued
+      }
+      keepQuote()
       throw e
     }
+  }
+  /** Ask about this: a question about the selection, sent at once with it (queued while an answer runs); the box is left as it is. */
+  const askAbout = (q: Quote, text: string) => {
+    quotable.clear(true)
+    void (streaming ? queue(text, [], q) : send(text, [], q))
   }
 
   // The editor's lines: kept above the box for the next message (Add to chat), or asked about at once (Explain, Fix, Complete).
@@ -653,14 +730,22 @@ export function Thread({
       onSend={(text) => send(text)}
       onQueue={async (text) => {
         const kept = pieces
+        const keptQuote = quote
         setPieces([])
+        setQuote(null)
         const queued = await queue(
           text,
           kept.map((p) => pieceOf(p.path, p.startLine, p.endLine)),
+          keptQuote,
         )
-        if (!queued) setPieces((now) => (now.length > 0 ? now : kept))
+        if (!queued) {
+          setPieces((now) => (now.length > 0 ? now : kept))
+          if (keptQuote) setQuote((now) => now ?? keptQuote)
+        }
         return queued
       }}
+      quote={quote}
+      onClearQuote={() => setQuote(null)}
       pieces={pieces}
       onRemovePiece={(p) => setPieces((now) => now.filter((x) => x !== p))}
       onAddPiece={(p) => setPieces((now) => [...now, p].slice(-8))}
@@ -672,7 +757,16 @@ export function Thread({
       onStop={stop}
       big={big}
       mode={<ModePicker state={state} onChange={(mode) => void settings({ mode })} />}
-      context={context ? <ContextGauge context={context} onCompact={!streaming && path.length >= 2 ? () => void compact() : undefined} busy={streaming} /> : null}
+      context={
+        context ? (
+          <ContextGauge
+            context={context}
+            onCompact={!streaming && path.length >= 2 ? () => void compact() : undefined}
+            busy={streaming}
+            compact={{ at: state.compactAt, who: compactWho(state), change: 'Change it with Context in the status bar, or /compact-at in the terminal.' }}
+          />
+        ) : null
+      }
       history={history}
     />
   )
@@ -755,7 +849,7 @@ export function Thread({
                   if (t.question?.summary) return <CompactedMark key={t.question.id} summary={t.question.summary} onOpenFile={openNamed} />
                   return (
                     <div key={t.question?.id ?? t.answer[0]?.id ?? i} className="grid gap-4">
-                      {t.question && <Question m={t.question} />}
+                      {t.question && <Question m={t.question} onJump={jumpToQuoted} />}
                       {(t.answer.length > 0 || isLive) && (
                         <CodeAnswer
                           answer={t.answer}
@@ -769,6 +863,7 @@ export function Thread({
                           calls={isLive ? view.calls : undefined}
                           diffs={view.diffs}
                           onDecide={decide}
+                          onQuote={replyQuote}
                         />
                       )}
                     </div>
@@ -780,6 +875,7 @@ export function Thread({
                 {error && <Alert variant="destructive">{error}</Alert>}
               </div>
             </div>
+            <SelectionToolbar at={quotable.at} scroller={scroller} onReply={reply} onAsk={askAbout} onClose={() => quotable.clear()} onHold={quotable.hold} keys={replyKey ?? null} />
           </div>
           <div className="relative mx-auto w-full max-w-(--thread-max) px-4 pb-4 @lg:px-6">
             {!atBottom && (
@@ -915,6 +1011,8 @@ function Composer({
   mode,
   context,
   history,
+  quote,
+  onClearQuote,
 }: {
   streaming: boolean
   onSend: (text: string) => Promise<boolean>
@@ -936,6 +1034,9 @@ function Composer({
   mode: ReactNode
   context: ReactNode
   history: RecallSource
+  /** The part of an answer the next message quotes, and how to take it away. */
+  quote: Quote | null
+  onClearQuote: () => void
 }) {
   const area = useRef<HTMLTextAreaElement>(null)
   const recall = useRecall({ area, setText, source: history })
@@ -968,6 +1069,12 @@ function Composer({
   }
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (mention.onKeyDown(e)) return
+    // Backspace at the start of an empty box takes the quote away.
+    if (e.key === 'Backspace' && quote && !text && e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0) {
+      e.preventDefault()
+      onClearQuote()
+      return
+    }
     if (recall.onKeyDown(e)) return
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
@@ -997,6 +1104,16 @@ function Composer({
       }}
     >
       {mention.list}
+      {quote && (
+        <QuoteChip
+          quote={quote}
+          onRemove={() => {
+            onClearQuote()
+            area.current?.focus()
+          }}
+        />
+      )}
+      <output className="sr-only">{quote ? 'Quoted in your reply' : ''}</output>
       {(pieces.length > 0 || (here && !pieces.some((p) => pieceLabel(p) === pieceLabel(here)))) && (
         <ul aria-label="Sent with the message" className="flex flex-wrap gap-1.5 px-3 pt-2.5">
           {pieces.map((p) => (

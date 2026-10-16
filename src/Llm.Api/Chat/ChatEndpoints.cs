@@ -43,7 +43,9 @@ public sealed record SpeechRequest(string? Text, string? Context = null);
 /// </summary>
 /// <param name="Research">Deep research: the answer plans, has sub-agents search the web, and writes a sourced report.</param>
 /// <param name="Spoken">Said aloud in Talk: the answer is read aloud as it is written, so it is asked for in spoken sentences.</param>
-public sealed record NewMessage(string Content, Guid[]? Attachments = null, Guid? ParentId = null, bool Root = false, bool Research = false, bool Spoken = false);
+/// <param name="Quote">The part of an earlier answer the person replies to (ChatQuotes): the model reads it before the question.</param>
+public sealed record NewMessage(string Content, Guid[]? Attachments = null, Guid? ParentId = null, bool Root = false, bool Research = false, bool Spoken = false,
+    string? Quote = null);
 
 /// <summary>Compact the branch down to this message (default: the end of the branch on screen).</summary>
 public sealed record CompactRequest(Guid? MessageId = null);
@@ -122,6 +124,9 @@ public static partial class ChatEndpoints
             gitlabUrl = argus.Enabled ? (string.IsNullOrWhiteSpace(chat.CurrentValue.GitlabLinkUrl) ? argusOptions.Value.GitlabUrl : chat.CurrentValue.GitlabLinkUrl)?.TrimEnd('/') : null,
             maxUploadBytes = chat.CurrentValue.MaxUploadBytes,
             imageTypes = Attachments.ImageTypes,
+            // When this person's chats compact (percent of the context; 0: only when a message would not fit), and whose choice it is.
+            compactAt = me.CompactAt ?? chat.CurrentValue.CompactAt,
+            compactSource = me.CompactAt is null ? "company" : "account",
         });
     }
 
@@ -316,7 +321,7 @@ public static partial class ChatEndpoints
             .Select(a => new { a.Id, a.FileName, a.Size, a.Truncated, a.Kind, a.ContentType, original = a.Kind != "image" && a.Data != null }).ToDictionaryAsync(a => a.Id, ct);
         return messages.Select(m => (object)new
         {
-            m.Id, m.ParentId, m.Role, m.Content, m.Reasoning, m.ToolName, m.ToolCallId,
+            m.Id, m.ParentId, m.Role, m.Content, m.Quote, m.Reasoning, m.ToolName, m.ToolCallId,
             toolCalls = m.ToolCallsJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(m.ToolCallsJson),
             attachments = ChatService.ParseIds(m.AttachmentsJson).Where(files.ContainsKey).Select(a => files[a]),
             details = (quality is null ? m.DetailsJson : quality.Details(m)) is { } details ? JsonSerializer.Deserialize<JsonElement>(details) : (JsonElement?)null,
@@ -485,6 +490,12 @@ public static partial class ChatEndpoints
             await Problem(http, 400, "empty", "Write a message first.");
             return;
         }
+        var quote = ChatQuotes.Clean(body.Quote);
+        if (ChatQuotes.Check(quote) is { } tooLong)
+        {
+            await Problem(http, 400, "quote", tooLong);
+            return;
+        }
         if (attachments.Length > 0 && await db.ChatAttachments.CountAsync(a => attachments.Contains(a.Id) && a.UserId == me.Id) != attachments.Length)
         {
             await Problem(http, 400, "attachment", "An attachment is missing or is not yours.");
@@ -505,7 +516,7 @@ public static partial class ChatEndpoints
         // Safeguards first: limits, blocked words, and (when on) the model's check: the small model's when there is one.
         var model = (await small.ForAsync(me, http.RequestAborted))?.Name ?? (c.Model is { } chosen && chosen != SmallModel.Auto ? chosen : null)
             ?? (await policy.ForAsync(me, await models.ListAsync(http.RequestAborted), http.RequestAborted)).Default?.Name;
-        var verdict = await safeguards.CheckMessageAsync(me, text, attachments.Length, body.Research, model, http.RequestAborted);
+        var verdict = await safeguards.CheckMessageAsync(me, text, attachments.Length, body.Research, model, http.RequestAborted, quote);
         if (!verdict.Allowed)
         {
             await Problem(http, verdict.Status, $"safeguard_{verdict.Kind}", verdict.Reason!);
@@ -517,13 +528,14 @@ public static partial class ChatEndpoints
         }
         // Its secrets masked, when the person's policy masks them.
         text = verdict.Text ?? text;
+        quote = verdict.Quote ?? quote;
         await RunAsync(http, c, me, db, jobs, new AnswerOverrides(Research: body.Research, Again: body.Spoken ? Talk.Note : null), async () =>
         {
             var next = await db.ChatMessages.Where(m => m.ConversationId == c.Id).MaxAsync(m => (int?)m.Sequence) ?? 0;
             var first = next == 0;
             var question = new ChatMessage
             {
-                ConversationId = c.Id, ParentId = parent, Role = "user", Sequence = next + 1, Content = text,
+                ConversationId = c.Id, ParentId = parent, Role = "user", Sequence = next + 1, Content = text, Quote = quote,
                 AttachmentsJson = attachments.Length > 0 ? JsonSerializer.Serialize(attachments) : null,
             };
             db.ChatMessages.Add(question);

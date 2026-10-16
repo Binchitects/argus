@@ -159,7 +159,7 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/tools` | the tools of the session, and which ask |
 | `/todo` | the to-do list |
 | `/compact` | summarize the conversation now |
-| `/compact-at [% [%]]` | show or set when the session compacts itself and what it keeps (below); `default` for 80 and 25 |
+| `/compact-at [% [%]]` | show or set when the session compacts itself and what it keeps (below); `off` for only when a request would not fit, `account` for your Arena account's, `default` for that and 25 |
 | `/context` | how full the model's window is |
 | `/cost` | tokens spent, and how full the model's window is |
 | `/mcp [retry [name]]` | Arena's, Argus's and your MCP servers: connected or not and why; `retry` tries those not connected now |
@@ -457,6 +457,7 @@ does nothing at that moment.
 | Ctrl+, , Ctrl+K Ctrl+S, Ctrl+K Ctrl+Alt+T | settings, keyboard shortcuts, colour theme |
 | Ctrl+K M, Alt+Z, Ctrl+K P | the language mode, word wrap, copy the file's path |
 | Ctrl+L | in the editor: the lines chosen (or the cursor's) go with the next message |
+| Ctrl+Shift+' | in the chat: Reply, quoting the words selected in an answer (`codeArena.chat.quoteSelection`) |
 
 Everything the page needs (Monaco and its language workers, xterm.js, the
 fonts) is built into the program; nothing is fetched from anywhere else.
@@ -863,6 +864,21 @@ Lines of a file go to the agent from the editor itself:
 The model gets them numbered, after the message, as `<selection path lines>`
 (with `unsaved="true"` for the editor's text); at most eight a message.
 
+### Reply to part of an answer
+
+Words selected in a finished answer of the chat get the web chat's toolbar
+beside them ([Chat](chat.md#what-it-does)): **Reply** puts them above the box
+as a quote (× or Backspace at the start of an empty box takes it away), and
+the next message goes with it; **Ask about this** asks about them at once
+(queued while an answer is written), leaving what is in the box and the
+editor's lines above it as they are; **Copy** copies them. The command **Chat:
+Reply quoting the selection** (`codeArena.chat.quoteSelection`, Ctrl+Shift+' by
+default, changed in `keybindings.json`) does what Reply does; F1 lists it only
+while words are selected in an answer. **Quote part of this answer…** under an
+answer opens it in a box to select from by keyboard. The thread shows a
+question's quote above it, with a way to the answer it came from. The model
+reads the quote before the message, and the editor's lines after it.
+
 ### Source control
 
 **Source control** in the activity bar (Ctrl+Shift+G, or the branch in the
@@ -1014,7 +1030,7 @@ status (403 `outside` for a path outside the folder).
 
 | call | what it does |
 |---|---|
-| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it is in use), `compactAt` and `compactTarget` (percent); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `account` (whose chats: the key's account, null until Arena said), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`); `sync` (`{chat, account, waiting, trouble, behind}`: the chat, whose chats, how many messages Arena lacks, what stops them, whether the web chat has news not taken in; null without the sync) and `notices` (`[{id, text, at}]`: the last 20 said while nothing ran, the page shows each once) |
+| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it is in use), `compactAt` and `compactTarget` (percent; `compactAt` 0: only when a request would not fit), `compactAtSource` (`flag`, `config`, `account`, `arena` or `default`) and `compactAtAccount` (the Arena account's threshold, null when Arena did not say); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `account` (whose chats: the key's account, null until Arena said), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`); `sync` (`{chat, account, waiting, trouble, behind}`: the chat, whose chats, how many messages Arena lacks, what stops them, whether the web chat has news not taken in; null without the sync) and `notices` (`[{id, text, at}]`: the last 20 said while nothing ran, the page shows each once) |
 | `GET /api/sessions` | this folder's sessions, newest first: `[{id, title, updatedAt, messages, chat, unsent, waiting}]` (`chat`: the chat in Arena it is kept with; `unsent`: Arena lacks `waiting` of its messages) |
 | `GET /api/sessions/web` | the person's chats in Arena (the 5,000 newest): `[{id, title, origin, place, updatedAt, messages, session}]` (`session`: this folder's session kept with it); 409 `off` without the sync, 503 `arena` when Arena cannot say |
 | `POST /api/sessions/web` `{id}` | continues that chat here (in the session kept with it, else a new one with its messages); the session; 404 `gone` when Arena has no such chat of the person's, 409 `busy` while an answer is written, 503 `arena` when Arena cannot say |
@@ -1048,8 +1064,8 @@ status (403 `outside` for a path outside the folder).
 | `GET /api/lsp/log?server=ID` | `{server, running, exitCode, lines, refused}`: the last 200 lines the server running (else the last that ran) wrote to stderr, and why its last start was refused (`refused`, cleared by one that starts: a WebSocket refused tells the page nothing); 404 `missing` for no such server |
 | `POST /api/problems/run` | runs the check (waits for the one running) and answers as above; 404 `no_check` when none is found |
 | `POST /api/complete` `{path, prefix, suffix}` | code completion at the editor's cursor: `{text}`; 404 `off` when the config turns it off, 409 `busy` while an answer is written, 429 `limited` at the key's limit |
-| `POST /api/messages` `{text, context}` | a message, answered as a stream of events; `context`: lines chosen in the editor, `[{path, startLine, endLine, text}]` (`text`: the editor's, when unsaved; eight at most). The stream's `{"type":"attached", id, files}` lists what went with the question |
-| `POST /api/queue` `{text, context}` | a message for after the answer being written (runs at once when none is), with its lines; 202 `{queued}` (its place). `/api/messages` while an answer is written is 409 `busy` |
+| `POST /api/messages` `{text, context, quote}` | a message, answered as a stream of events; `context`: lines chosen in the editor, `[{path, startLine, endLine, text}]` (`text`: the editor's, when unsaved; eight at most); `quote`: the part of an earlier answer it replies to (4,000 characters at most, else 400 `invalid`), which the model reads before the message, as Arena's own model does ([Chat](chat.md#how-a-conversation-is-stored)). The stream's `{"type":"question", id, text, quote}` starts it, and `{"type":"attached", id, files}` lists what went with the question. The session as the page reads it gives each question's `quote`, `content` (what was typed) and `files` apart |
+| `POST /api/queue` `{text, context, quote}` | a message for after the answer being written (runs at once when none is), with its lines and its quote; 202 `{queued}` (its place). `/api/messages` while an answer is written is 409 `busy` |
 | `DELETE /api/queue` | drops the queued messages; 204 |
 | `GET /api/files?path=DIR` | a folder's entries, folders first: `{path, entries: [{name, path, kind, size, link}]}` |
 | `GET /api/files/all` | every file, for quick open: `{files, truncated}` (50,000 at most) |
@@ -1140,8 +1156,9 @@ the output as it comes, as binary messages (the terminal's bytes), and
 sends keys as `{"type":"input","data":"…"}` (text) or as binary messages, and
 `{"type":"resize","cols":N,"rows":N}`. The chat's calls (`/api/messages`,
 `/api/turn`, `/api/approvals`, `/api/settings`, `/api/sessions`, …) are
-Arena's chat's shapes; `/api/settings` also takes `compactAt` and
-`compactTarget` (400 `invalid` with the bounds), and a turn's stream adds
+Arena's chat's shapes; `/api/settings` also takes `compactAt` (0: only when a
+request would not fit; null: the Arena account's again) and `compactTarget`
+(400 `invalid` with the bounds), and a turn's stream adds
 `{"type":"job", job, command, running, status}`, `{"type":"job_output", job,
 text}` (a few times a second, for as long as the command runs; a page that
 comes back during the turn is sent the last 64 KB of each) and
@@ -1376,7 +1393,9 @@ with long sessions; reading one back starts at its last compaction.
 
 The model's window comes from the gateway (`/v1/model/info`), or `"context"`
 in the config file when the gateway does not say (32,768 otherwise). When the
-next request would pass the **threshold**, 80% of it by default, the older
+next request would pass the **threshold** (your Arena account's choice, as the
+web chat's: Your account → Answers → **Compact long chats**; 80% of the window
+when Arena does not say), or would not fit at all, the older
 part of the conversation is summarized by the model (the person's goals,
 decisions, files, commands and the state of the work) and the recent part
 kept whole, within the **target**, 25% of the window by default. `/compact`
@@ -1401,11 +1420,18 @@ A long session never gets stuck on the window:
   summarize, the turn's earlier steps are (the person's message and the
   latest steps kept whole). A compaction that would change nothing writes
   nothing and does not reset the IDE's page.
+- **A request that would not fit is compacted first**, whatever the
+  threshold (and with it off): "Compacting: the next request (~N tokens) would
+  not fit the window (M) with room for the answer."
 - **A request the window refuses** (the engine's or LiteLLM's "exceeds the
   context size", `ContextWindowExceededError`, "maximum context length") is
   compacted at once and asked again, once. If it still does not fit, the turn
   ends with that, and the message is taken out of the conversation so it does
-  not pile up.
+  not pile up. llama.cpp's "Context size has been exceeded." says the cache
+  its requests share was full (other requests filled it): the request is
+  asked again after two seconds, without compacting, and compacted only if
+  the engine refuses it again. Code Arena and the web chat read these refusals
+  with the same code (`ContextOverflow`, in Llm.Core, linked into Code Arena).
 - **The size is measured, not guessed**: the characters a token holds are
   learned from the gateway's counts (and from the size a refusal gives); a
   resumed session starts from its last count. The answer's room (the model's
@@ -1419,17 +1445,27 @@ A long session never gets stuck on the window:
   Code Arena's added to the conversation where it changed, never in the
   system prompt. The notes are not saved in the session nor shown on the page.
 
-Set them with `/compact-at 70` (the threshold) or `/compact-at 70 30` (and the
-target), in the IDE's **Context** (the window's use in the status bar), or
-`"compactAt"` and `"compactTarget"` in `config.json`: `/compact-at` and the
-IDE keep them there for the next sessions, and `/compact-at default` goes back
-to 80 and 25. `--compact-at 70 --compact-to 30` sets them for one run. A share
-is written `70`, `70%` or `0.7` (in `config.json` too: `70`, `"70%"` or `0.7`;
-anything else stops the session with where it is). The threshold is from 20% to 95%, and the
-target from 5% to 10 points under the threshold (a lower threshold brings the
-target down with it), so a compaction does not start the next one. The use of
-the window shows after each turn in the terminal (`/context` at any time) and
-in the IDE's status bar.
+Set them with `/compact-at 70` (the threshold), `/compact-at 70 30` (and the
+target) or `/compact-at off` (only when a request would not fit), in the IDE's
+**Context** (the window's use in the status bar: at a share, only when a
+request would not fit, or as the Arena account says), or `"compactAt"` and
+`"compactTarget"` in `config.json`: `/compact-at` and the IDE keep them there
+for the next sessions. `/compact-at account` (the IDE's **As my Arena account
+says**) takes the threshold out of `config.json` again, so it follows the
+account, and `/compact-at default` does that and puts the target back to 25.
+`--compact-at 70 --compact-to 30` sets them for one run. Which wins: the flag,
+then `config.json`, then the Arena account (read at the start from
+`GET /api/code-arena/preferences` with the API key: the person's own choice,
+else Arena's default), then 80%. `/compact-at`, `/context` and the IDE say where
+the threshold comes from ("from your Arena account", "Arena's default", "set in
+config.json", "set with --compact-at"). A share is written `70`, `70%` or `0.7`
+(in `config.json` too: `70`, `"70%"`, `0.7`, or `0` and `"off"`; anything else
+stops the session with where it is). The threshold is from 20% to 95%, or off,
+and the target from 5% to 10 points under the threshold (85% when off; a lower
+threshold brings the target down with it), so a compaction does not start the
+next one. The use of the window shows after each turn in the terminal
+(`/context` at any time) and in the IDE's status bar and chat gauge, which marks
+the threshold and says whose it is.
 
 ## What it remembers, and what came before
 
@@ -1599,7 +1635,10 @@ in the session, never sent back to the model), its model, tokens and time; a
 tool's result with its tool; an answer stopped here as stopped; Code Arena's
 own note to the model (the connection dropped) as a notice, not as your words;
 and what went with a question (`@files`, lines chosen in the IDE's editor) as
-what you typed plus the files as chips. Continued on the web, the chat answers
+what you typed plus the files as chips. A question that quotes part of an
+answer (Reply, in either chat) carries its quote both ways as a field of its
+own: the web shows it above the question, and the session keeps it before the
+question, as its model reads it. Continued on the web, the chat answers
 with the model Code Arena answered with last. The other way, what the web
 attached comes with its messages: a text file's text as the web's model reads
 it, a picture as a picture to a model that sees (fetched with your key; named

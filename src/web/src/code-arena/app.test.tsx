@@ -8,6 +8,7 @@ import { argsSummary } from '@/pages/chat/tool-args'
 import { fakeApi, type Handler } from '@/test/utils'
 import { fromSession, keptOutput, reduceCode, type CodeSession, type CodeState, type FileDiff, type SessionSummary } from './api'
 import { App } from './app'
+import { getCommand } from './commands'
 
 // Each tool card's arguments, as read for its line: counted, to see which cards are drawn again.
 vi.mock('@/pages/chat/tool-args', async (real) => {
@@ -638,5 +639,49 @@ describe('Code Arena in the browser', () => {
     const sheet = await screen.findByRole('dialog', { name: 'Code Arena' })
     expect(within(sheet).queryByRole('link')).not.toBeInTheDocument()
     expect(within(sheet).getByText(/in your Argus Arena's manual: Manual, then Code Arena/)).toBeInTheDocument()
+  })
+
+  it("quotes part of an answer as the web chat does: the toolbar, the command (listed only with a selection) and Ctrl+Shift+'", async () => {
+    const answered = [msg('m0', 'user', { content: 'How do I tidy commits?' }), msg('m1', 'assistant', { model: 'model-a', content: 'Use git rebase to squash commits.' })]
+    const server = backend({
+      session: { id: 's2', messages: answered, diffs: {}, busy: false },
+      extra: {
+        'POST /api/messages': () => {
+          // Read back after the turn: the question with its quote apart, as code-arena web gives it.
+          server.now.session = { ...server.now.session, messages: [...answered, msg('m2', 'user', { content: 'Why?', quote: 'git rebase to squash' })] }
+          return { events: [{ type: 'question', id: 'm2', parentId: 'm1', text: 'Why?', quote: 'git rebase to squash' }, { type: 'done' }] }
+        },
+      },
+    })
+    const calls = server.calls
+    renderCode()
+    const answer = await screen.findByRole('region', { name: 'Answer' })
+    const command = () => getCommand('codeArena.chat.quoteSelection')
+    await waitFor(() => expect(command()).toBeDefined())
+    expect(command()!.enabled!()).toBe(false)
+
+    const words = within(answer).getByText('Use git rebase to squash commits.').firstChild!
+    const range = document.createRange()
+    range.setStart(words, 4)
+    range.setEnd(words, 24)
+    document.getSelection()!.removeAllRanges()
+    document.getSelection()!.addRange(range)
+    document.dispatchEvent(new Event('selectionchange'))
+    const bar = await screen.findByRole('toolbar', { name: 'The selected words' })
+    expect(within(bar).getByRole('button', { name: /Reply/ })).toHaveAttribute('title', "Reply quoting this (Ctrl+Shift+')")
+    expect(command()!.enabled!()).toBe(true)
+
+    await userEvent.keyboard("{Control>}{Shift>}'{/Shift}{/Control}")
+    expect(await screen.findByRole('group', { name: 'Quoted in your reply' })).toHaveTextContent('git rebase to squash')
+    await ask('Why?')
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/messages')?.body).toEqual({ text: 'Why?', quote: 'git rebase to squash' }))
+    expect(screen.queryByRole('group', { name: 'Quoted in your reply' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('figure', { name: 'Quoting an earlier answer' })).toHaveTextContent('git rebase to squash')
+  })
+
+  it('shows the quote of a question from a turn it did not start (a queued message)', () => {
+    let live = fromSession({ id: 's2', messages: [msg('m0', 'user', { content: 'first' }), msg('m1', 'assistant', { content: 'done' })], diffs: {}, busy: true })
+    live = reduceCode(live, { type: 'question', id: 'm2', parentId: 'm1', text: 'why?', quote: 'done' } as never, null)
+    expect(live.messages.at(-1)).toMatchObject({ id: 'm2', content: 'why?', quote: 'done' })
   })
 })

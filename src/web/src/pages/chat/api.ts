@@ -50,7 +50,7 @@ export interface QueueState {
 }
 
 /** Queues a message to send when the answer ends (at once when the chat is not answering). */
-export const queueMessage = (id: string, body: { content: string; attachments: string[] }) =>
+export const queueMessage = (id: string, body: { content: string; attachments: string[]; quote?: string }) =>
   api<QueueState>(`/api/chat/conversations/${id}/queue`, { body })
 
 /** Takes a queued message out of line. */

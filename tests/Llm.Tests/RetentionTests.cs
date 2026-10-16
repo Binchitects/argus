@@ -190,12 +190,14 @@ public sealed class RetentionTests(AppFixture app)
         var (ann, _, annName) = await PersonAsync(f, admin);
         var file = await UploadAsync(ann, "plan.txt", "step one, step two");
         await ChatAsync(ann, "Read my plan", [file]);
+        await StatusAssert.Is(HttpStatusCode.OK, await ann.Http.PutAsJsonAsync(new Uri("/api/account/preferences", UriKind.Relative), new { compactAt = 60 }));
         var res = await ann.GetAsync("/api/account/export");
         Assert.Equal("application/zip", res.Content.Headers.ContentType?.MediaType);
         Assert.Contains($"{annName}-data-", res.Content.Headers.ContentDisposition?.FileName ?? "", StringComparison.Ordinal);
         var zip = await ZipAsync(res);
         Assert.Contains("README.txt", zip.Keys);
         Assert.Contains($"\"userName\": \"{annName}\"", zip["person.json"], StringComparison.Ordinal);
+        Assert.Contains("\"compactAt\": 60", zip["person.json"], StringComparison.Ordinal);
         Assert.Contains("assistants.json", zip.Keys);
         Assert.Contains("tasks.json", zip.Keys);
         var md = zip.Single(e => e.Key.EndsWith(".md", StringComparison.Ordinal)).Value;

@@ -20,6 +20,7 @@ namespace Llm.Api.Chat;
 /// person, "failed", "declined"); <paramref name="Kind"/> "note": a message of Code Arena's own to the model (the connection
 /// dropped), shown as a notice, not as the person's words. <paramref name="Attachments"/>: what went with a question here (its
 /// text files are in <paramref name="Content"/> already, as the web's model reads them; its pictures Code Arena fetches).
+/// <paramref name="Quote"/>: the part of an earlier answer a question quotes, kept apart from its words both ways (ChatQuotes).
 /// </summary>
 public sealed record SyncMessage(
     string Role,
@@ -37,7 +38,8 @@ public sealed record SyncMessage(
     Guid? Id = null,
     string? Status = null,
     string? Kind = null,
-    IReadOnlyList<SyncAttachment>? Attachments = null);
+    IReadOnlyList<SyncAttachment>? Attachments = null,
+    string? Quote = null);
 
 /// <summary>A file that went with a question on the web: "image" (fetched with the key from /api/code-arena/attachments/{id}), "text", "file", "audio", "video".</summary>
 public sealed record SyncAttachment(Guid Id, string Name, string Kind, string ContentType);
@@ -104,6 +106,17 @@ public static class CodeArenaSync
         g.MapDelete("/chats/{id:guid}/turn", TurnEndAsync);
         g.MapPost("/chats/{id:guid}/continued", ContinuedAsync);
         g.MapGet("/attachments/{id:guid}", AttachmentAsync);
+        g.MapGet("/preferences", PreferencesAsync);
+    }
+
+    /// <summary>
+    /// What Code Arena takes from the person's account: when their chats compact (Your account → Chat; null: they follow the
+    /// company's, compactAtDefault). Code Arena compacts at it unless a flag or its config.json says otherwise.
+    /// </summary>
+    private static async Task<IResult> PreferencesAsync(HttpContext http, McpPeople people, IOptionsMonitor<ChatOptions> chat)
+    {
+        var (me, refusal) = await CallerAsync(http, people);
+        return me is null ? refusal! : Results.Ok(new { compactAt = me.CompactAt, compactAtDefault = chat.CurrentValue.CompactAt });
     }
 
     /// <summary>What a read gives of each message beyond its row: tool results marked as the web's model reads them, attachments' text up to so much.</summary>
@@ -370,6 +383,7 @@ public static class CodeArenaSync
                 Sequence = ++sequence,
                 Role = m.Role,
                 Content = Text(m.Content),
+                Quote = m.Role == "user" && ChatQuotes.Clean(m.Quote) is { } quote ? ChatQuotes.Cut(quote) : null,
                 Reasoning = string.IsNullOrEmpty(m.Reasoning) ? null : m.Reasoning,
                 ToolCallsJson = m.Role == "assistant" && m.ToolCalls is JsonArray { Count: > 0 } calls ? calls.ToJsonString() : null,
                 ToolCallId = m.Role == "tool" ? Clip(m.ToolCallId, 200) : null,
@@ -635,7 +649,8 @@ public static class CodeArenaSync
             m.Id,
             m.Status == MessageStatus.Complete ? null : m.Status.ToString().ToLowerInvariant(),
             Note(m) ? "note" : null,
-            attached);
+            attached,
+            m.Role == "user" ? m.Quote : null);
     }
 
     /// <summary>A message of Code Arena's own to its model (the connection dropped), kept as a notice: not the person's words.</summary>

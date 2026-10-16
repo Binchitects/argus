@@ -90,6 +90,33 @@ public sealed class SafeguardsTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_blocked_word_or_secret_in_a_quote_is_refused_or_masked_like_the_message()
+    {
+        await using var f = NewApp(new()
+        {
+            ["Safeguards:BlockedPatterns"] = "project falcon",
+            ["Safeguards:SecretScanning"] = "mask",
+            ["Safeguards:RedactPii"] = "mask",
+        });
+        var (_, b, _) = await PeopleAsync(f);
+        var chat = await ChatAsync(b);
+        // The quote is the person's words: a blocked word in it refuses the message as one in the message would.
+        var blocked = await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "What is this?", quote = "It is Project Falcon." });
+        await StatusAssert.Is(HttpStatusCode.Forbidden, blocked);
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await b.PostAsync($"/api/chat/conversations/{chat}/queue", new { content = "What is this?", quote = "It is Project Falcon." }));
+
+        // A secret in it is kept masked; personal data reaches the model masked and stays as written.
+        const string token = "ghp_1234567890abcdefghijklmnopqrstuvwxyzAB";
+        var res = await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "Is this safe?", quote = $"push with {token}, or mail ana@example.com" });
+        res.EnsureSuccessStatusCode();
+        await res.Content.ReadAsStringAsync();
+        var kept = (await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{chat}"))).GetProperty("messages")[0].GetProperty("quote").GetString();
+        Assert.Equal("push with [removed: GitHub token], or mail ana@example.com", kept);
+        var sent = app.Model.Requests.Last().Body["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.GetValue<string>();
+        Assert.Contains("<quote>\npush with [removed: GitHub token], or mail [email]\n</quote>", sent, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Blocked_patterns_match_whole_words_and_regular_expressions_and_a_bad_one_blocks_nothing()
     {
         Assert.Equal("falcon", Safeguards.Blocked("the Falcon flies", "eagle; falcon"));

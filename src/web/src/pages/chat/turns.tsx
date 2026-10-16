@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, FileCode2, FileText, FoldVertical, GitFork, Info, Pencil, RefreshCw, Square, Telescope, Timer } from 'lucide-react'
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, FileCode2, FileText, FoldVertical, GitFork, Info, Pencil, RefreshCw, Square, Telescope, TextQuote, Timer } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -24,17 +24,20 @@ import { RouteNote } from './route-note'
 import { researchStep } from './research'
 import { MemoryCard } from './memory'
 import { FeedbackButtons } from './feedback'
-import type { AgentWork, ChatConfig, InLine, Message } from './types'
+import { compactedText, contextError } from './context'
+import type { Quote } from './quote'
+import { QuoteChip, QuotedLine, QuotePartDialog } from './quote-parts'
+import type { AgentWork, ChatConfig, Compaction, InLine, Message } from './types'
 
 /** Where a chat was compacted: the model reads a summary of everything above instead of the messages. */
-export function CompactedMark({ summary, onOpenFile }: { summary: string; onOpenFile: (name: string) => void }) {
+export function CompactedMark({ summary, compaction, onOpenFile }: { summary: string; compaction?: Compaction | null; onOpenFile: (name: string) => void }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="grid gap-2" role="note" aria-label="Chat compacted">
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
         <span className="h-px flex-1 bg-border" aria-hidden="true" />
         <FoldVertical className="size-3.5 shrink-0" aria-hidden="true" />
-        <span>Compacted: the model reads a summary of the chat above</span>
+        <span>{compactedText(compaction)}</span>
         <Button variant="ghost" size="sm" className="h-6 gap-1 px-1.5 text-xs" onClick={() => setOpen(!open)} aria-expanded={open}>
           {open ? 'Hide summary' : 'Show summary'} <ChevronDown className={cn('size-3 transition-transform', open && 'rotate-180')} aria-hidden="true" />
         </Button>
@@ -45,6 +48,30 @@ export function CompactedMark({ summary, onOpenFile }: { summary: string; onOpen
           <Markdown text={summary} onOpenFile={onOpenFile} />
         </div>
       )}
+    </div>
+  )
+}
+
+/** Under an answer too long for its model: compact the chat now, or ask a model with a larger context (the larger ones that can answer now first). */
+function ContextActions({ model, config, onCompact, onAsk }: { model: string | null; config: ChatConfig; onCompact?: () => void; onAsk?: (model: string) => void }) {
+  const context = config.models.find((m) => m.name === model)?.context ?? 0
+  const larger = config.models
+    .filter((m) => (m.context ?? 0) > context && (m.loaded || m.onRequest))
+    .sort((x, y) => Number(y.loaded) - Number(x.loaded) || (y.context ?? 0) - (x.context ?? 0))
+    .slice(0, 2)
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {onCompact && (
+        <Button size="sm" variant="outline" onClick={onCompact}>
+          <FoldVertical /> Compact now
+        </Button>
+      )}
+      {onAsk &&
+        larger.map((m) => (
+          <Button key={m.name} size="sm" variant="outline" onClick={() => onAsk(m.name)}>
+            Ask {m.name} ({formatValue(m.context ?? 0)} tokens)
+          </Button>
+        ))}
     </div>
   )
 }
@@ -89,7 +116,6 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   )
 }
 
-/** A question; onEdit absent: read-only (a shared chat). */
 /** What went with a question in Code Arena's IDE (files, lines chosen in the editor): each opens there. */
 function QuestionFiles({ files }: { files: string[] }) {
   const refs = useFileRefs()
@@ -123,8 +149,27 @@ function QuestionFiles({ files }: { files: string[] }) {
   )
 }
 
-export function QuestionTurn({ m, siblings, busy, onSwitch, onEdit }: { m: Message; siblings: Message[]; busy: boolean; onSwitch: (id: string) => void; onEdit?: (m: Message, text: string) => void }) {
+/**
+ * A question; onEdit absent: read-only (a shared chat). The part of an answer it quotes shows above it; `onJumpToQuote` goes to
+ * that answer (false: it is not on screen). An edit keeps the quote, unless it is taken away in the edit.
+ */
+export function QuestionTurn({
+  m,
+  siblings,
+  busy,
+  onSwitch,
+  onEdit,
+  onJumpToQuote,
+}: {
+  m: Message
+  siblings: Message[]
+  busy: boolean
+  onSwitch: (id: string) => void
+  onEdit?: (m: Message, text: string, quote: string | null) => void
+  onJumpToQuote?: (m: Message) => boolean
+}) {
   const [editing, setEditing] = useState<string | null>(null)
+  const [editQuote, setEditQuote] = useState<Quote | null>(null)
   const [viewing, setViewing] = useState<number | null>(null)
   const images = m.attachments.filter((a) => a.kind === 'image')
   // Code Arena's own word to its model (the connection dropped): a notice, not the person's.
@@ -169,6 +214,7 @@ export function QuestionTurn({ m, siblings, busy, onSwitch, onEdit }: { m: Messa
         </ul>
       )}
       {images.length > 0 && <ImageViewer images={asViewerImages(images)} index={viewing} onIndex={setViewing} />}
+      {m.quote && editing === null && <QuotedLine quote={m.quote} onJump={onJumpToQuote ? () => onJumpToQuote(m) : undefined} />}
       {editing === null ? (
         <>
           {typed && <div dir="auto" className="max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[0.9375rem] leading-relaxed whitespace-pre-wrap text-secondary-foreground">{typed}</div>}
@@ -179,10 +225,15 @@ export function QuestionTurn({ m, siblings, busy, onSwitch, onEdit }: { m: Messa
           className="grid w-full max-w-[85%] gap-2"
           onSubmit={(e) => {
             e.preventDefault()
-            if (editing.trim()) onEdit?.(m, editing.trim())
+            if (editing.trim()) onEdit?.(m, editing.trim(), editQuote?.text ?? null)
             setEditing(null)
           }}
         >
+          {editQuote && (
+            <div className="-mx-3 -mt-3">
+              <QuoteChip quote={editQuote} onRemove={() => setEditQuote(null)} />
+            </div>
+          )}
           <Textarea dir="auto" value={editing} onChange={(e) => setEditing(e.target.value)} aria-label="Edit your question" autoFocus className="min-h-24" />
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(null)}>
@@ -200,7 +251,17 @@ export function QuestionTurn({ m, siblings, busy, onSwitch, onEdit }: { m: Messa
           <CopyButton text={m.content} label="Copy question" />
           {onEdit && (
             <Tooltip content="Edit: a new version, the old one stays">
-              <Button variant="ghost" size="icon-sm" className="size-7" disabled={busy} onClick={() => setEditing(m.content)} aria-label="Edit question">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="size-7"
+                disabled={busy}
+                onClick={() => {
+                  setEditing(m.content)
+                  setEditQuote(m.quote ? { text: m.quote, words: m.quote, cut: false } : null)
+                }}
+                aria-label="Edit question"
+              >
                 <Pencil />
               </Button>
             </Tooltip>
@@ -236,6 +297,8 @@ export function AnswerTurn({
   onTrace,
   busy,
   feedbackIn,
+  onCompact,
+  onQuote,
 }: {
   answer: Message[]
   siblings: Message[]
@@ -273,7 +336,12 @@ export function AnswerTurn({
   busy: boolean
   /** The chat's id: the answer can be rated (thumbs up or down) there. */
   feedbackIn?: string
+  /** Compacts the chat now (offered when the answer failed for being too long for the model). */
+  onCompact?: () => void
+  /** Puts part of this answer (chosen by keyboard, in a dialog) above the message box as a quote. */
+  onQuote?: (quote: Quote) => void
 }) {
+  const [quoting, setQuoting] = useState(false)
   const results = new Map(answer.filter((m) => m.role === 'tool').map((m) => [m.toolCallId, m]))
   const assistants = answer.filter((m) => m.role === 'assistant')
   const first = assistants[0]
@@ -295,6 +363,16 @@ export function AnswerTurn({
       <div className="mt-1 flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
         <Branches siblings={siblings} current={first} onSwitch={onSwitch} label="Answer" />
         <CopyButton text={text} label="Copy answer" />
+        {onQuote && text && (
+          <>
+            <Tooltip content="Quote part of this answer…">
+              <Button variant="ghost" size="icon-sm" className="size-7" onClick={() => setQuoting(true)} aria-label="Quote part of this answer…">
+                <TextQuote />
+              </Button>
+            </Tooltip>
+            <QuotePartDialog text={text} open={quoting} onOpenChange={setQuoting} onQuote={onQuote} />
+          </>
+        )}
         {feedbackIn && last && !last.id.startsWith('local-') && <FeedbackButtons key={last.id} chatId={feedbackIn} message={last} />}
         {text && <ReadAloud text={text} />}
         {onRegenerate && question && (
@@ -413,7 +491,12 @@ export function AnswerTurn({
                 hurried={a.cutShort}
               />
             )}
-            {a.content && <Markdown text={a.content} onOpenFile={onOpenFile} onPreview={onPreview} live={live && isLast} />}
+            {a.content && (
+              // A finished answer's words can be selected and quoted in a reply (the same element as it was written: nothing is drawn again).
+              <div data-quote-source={live ? undefined : a.id}>
+                <Markdown text={a.content} onOpenFile={onOpenFile} onPreview={onPreview} live={live && isLast} />
+              </div>
+            )}
             {live && isLast && a.content && <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-primary align-middle" aria-hidden="true" />}
             {a.toolCalls?.map((t) =>
               t.function.name === 'ask_user' && results.get(t.id)?.status !== 'failed' ? (
@@ -427,6 +510,9 @@ export function AnswerTurn({
             {a.error && (
               <Alert variant="destructive" className="my-2">
                 {a.error}
+                {!live && contextError(a) && (onCompact || (onRegenerate && question)) && (
+                  <ContextActions model={a.model} config={config} onCompact={onCompact} onAsk={onRegenerate && question ? (model) => onRegenerate(question, { model }) : undefined} />
+                )}
               </Alert>
             )}
             {a.status === 'stopped' && (

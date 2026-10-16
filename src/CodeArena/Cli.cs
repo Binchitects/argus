@@ -114,7 +114,8 @@ internal static partial class Cli
           -m, --model NAME           the model (see code-arena models)
               --mode MODE            ask (default), auto-edit, plan or yolo
               --thinking LEVEL       off, low, medium, high, xhigh, or default
-              --compact-at PERCENT   compact the conversation at this share of the model's window (default 80)
+              --compact-at PERCENT   compact the conversation at this share of the model's window (default: your
+                                     Arena account's, else 80); off: only when a request would not fit
               --compact-to PERCENT   and keep the recent part within this share (default 25)
               --add-dir DIR          let the tools use another folder too (repeatable)
               --ca FILE              trust this CA certificate (PEM) besides the system's
@@ -227,7 +228,7 @@ internal static partial class Cli
                         : throw new ArgumentException($"--thinking is one of: default, {string.Join(", ", ModelState.Levels)}.");
                     break;
                 case "--compact-at":
-                    o.CompactAt = Compaction.Percent(Value()) ?? throw new ArgumentException("--compact-at is a share of the model's window: 70, 70% or 0.7.");
+                    o.CompactAt = Compaction.Percent(Value()) ?? throw new ArgumentException("--compact-at is a share of the model's window: 70, 70% or 0.7, or off.");
                     break;
                 case "--compact-to":
                     o.CompactTarget = Compaction.Percent(Value()) ?? throw new ArgumentException("--compact-to is a share of the model's window: 30, 30% or 0.3.");
