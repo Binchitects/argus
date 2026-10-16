@@ -33,6 +33,15 @@ Sections used:
 
 ### :sparkles: New features & Enhancements
 
+- **When to compact is each person's choice** (Your account → Answers: the
+  company's default, a share of the context, or only when a message would
+  not fit), in the web chat and in Code Arena (which follows the account
+  unless its config or a flag says otherwise); both compact before a request
+  would not fit, and on the model's refusal compact and ask once more
+- **One dialog adds and edits every kind of model** (Admin → Models): the
+  file chosen says whether it is a chat, picture, video or speech model
+- Docker Compose, Podman and Kubernetes deploy the same stack, and a test
+  keeps them so (Argus on Kubernetes checks people's keys again)
 - Pictures, video and speech Arena's tools make reach Code Arena (saved under
   .code-arena/media and shown in its chat)
 - A person with no picture, video or speech credit is told an admin sets it,
@@ -53,6 +62,8 @@ Sections used:
   long sessions are no longer evicted by others
 - The engine's key goes by the environment (LLAMA_API_KEY), no longer on its
   command line
+- `Chat:AutoCompactPercent` is now `Chat:CompactAt`, a share of the whole
+  context (20-95), 0 for only when needed; a saved value is moved
 - Code Arena and Arena sync by message ids: older Code Arena builds cannot
   sync with this Arena
 
