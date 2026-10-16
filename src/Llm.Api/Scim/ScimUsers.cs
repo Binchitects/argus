@@ -35,13 +35,13 @@ public static class ScimUsers
         public bool ExternalIdSet { get; set; }
     }
 
-    public static async Task<IResult> ListAsync(HttpRequest req, AppDbContext db, UserManager<AppUser> users, IOptions<AuthOptions> auth, CancellationToken ct)
+    public static async Task<IResult> ListAsync(HttpRequest req, AppDbContext db, UserManager<AppUser> users, Access.AccessService access, IOptions<AuthOptions> auth, CancellationToken ct)
     {
         if (ScimFilter.Parse(req.Query["filter"]) is not { } conditions)
         {
             return Error(400, "This filter is not understood here: use comparisons with eq, joined by and.", "invalidFilter");
         }
-        var q = await VisibleAsync(db, users);
+        var q = await VisibleAsync(db, access);
         foreach (var c in conditions)
         {
             if (Where(q, c, users) is not { } next)
@@ -57,8 +57,8 @@ public static class ScimUsers
         return new ScimResult(List([.. page.Select(u => Resource(u, groups, Url(auth)))], total, start));
     }
 
-    public static async Task<IResult> GetAsync(string id, AppDbContext db, UserManager<AppUser> users, IOptions<AuthOptions> auth, CancellationToken ct) =>
-        await FindAsync(id, db, users) is { } user
+    public static async Task<IResult> GetAsync(string id, AppDbContext db, UserManager<AppUser> users, Access.AccessService access, IOptions<AuthOptions> auth, CancellationToken ct) =>
+        await FindAsync(id, db, access) is { } user
             ? new ScimResult(Resource(user, await GroupsOfAsync(db, [user.Id], ct), Url(auth)))
             : NotFound(id);
 
@@ -100,10 +100,10 @@ public static class ScimUsers
         }
     }
 
-    public static async Task<IResult> ReplaceAsync(string id, HttpRequest req, AppDbContext db, UserManager<AppUser> users, CompanyPeople company, PeopleService people,
+    public static async Task<IResult> ReplaceAsync(string id, HttpRequest req, AppDbContext db, UserManager<AppUser> users, Access.AccessService access, CompanyPeople company, PeopleService people,
         Audit audit, IOptions<AuthOptions> auth, CancellationToken ct)
     {
-        if (await FindAsync(id, db, users) is not { } user)
+        if (await FindAsync(id, db, access) is not { } user)
         {
             return NotFound(id);
         }
@@ -115,10 +115,10 @@ public static class ScimUsers
             ?? new ScimResult(Resource(user, await GroupsOfAsync(db, [user.Id], ct), Url(auth)));
     }
 
-    public static async Task<IResult> PatchAsync(string id, HttpRequest req, AppDbContext db, UserManager<AppUser> users, CompanyPeople company, PeopleService people,
+    public static async Task<IResult> PatchAsync(string id, HttpRequest req, AppDbContext db, UserManager<AppUser> users, Access.AccessService access, CompanyPeople company, PeopleService people,
         Audit audit, IOptions<AuthOptions> auth, CancellationToken ct)
     {
-        if (await FindAsync(id, db, users) is not { } user)
+        if (await FindAsync(id, db, access) is not { } user)
         {
             return NotFound(id);
         }
@@ -159,9 +159,9 @@ public static class ScimUsers
     }
 
     /// <summary>A person removed in the identity provider is disabled here, not deleted: an admin deletes them under People.</summary>
-    public static async Task<IResult> DeleteAsync(string id, AppDbContext db, UserManager<AppUser> users, CompanyPeople company, PeopleService people, Audit audit)
+    public static async Task<IResult> DeleteAsync(string id, AppDbContext db, UserManager<AppUser> users, Access.AccessService access, CompanyPeople company, PeopleService people, Audit audit)
     {
-        if (await FindAsync(id, db, users) is not { } user)
+        if (await FindAsync(id, db, access) is not { } user)
         {
             return NotFound(id);
         }
@@ -317,14 +317,14 @@ public static class ScimUsers
     }
 
     /// <summary>Everyone but local admins: they stay a way in that the identity provider cannot change.</summary>
-    private static async Task<IQueryable<AppUser>> VisibleAsync(AppDbContext db, UserManager<AppUser> users)
+    private static async Task<IQueryable<AppUser>> VisibleAsync(AppDbContext db, Access.AccessService access)
     {
-        var localAdmins = (await users.GetUsersInRoleAsync(Roles.Admin)).Where(u => u.Source == UserSource.Local).Select(u => u.Id).ToList();
+        var localAdmins = (await access.OwnersAsync(includeDisabled: true)).Where(u => u.Source == UserSource.Local).Select(u => u.Id).ToList();
         return db.Users.Where(u => !localAdmins.Contains(u.Id));
     }
 
-    private static async Task<AppUser?> FindAsync(string id, AppDbContext db, UserManager<AppUser> users) =>
-        Guid.TryParse(id, out var guid) ? await (await VisibleAsync(db, users)).FirstOrDefaultAsync(u => u.Id == guid) : null;
+    private static async Task<AppUser?> FindAsync(string id, AppDbContext db, Access.AccessService access) =>
+        Guid.TryParse(id, out var guid) ? await (await VisibleAsync(db, access)).FirstOrDefaultAsync(u => u.Id == guid) : null;
 
     private static IQueryable<AppUser>? Where(IQueryable<AppUser> q, ScimCondition c, UserManager<AppUser> users)
     {

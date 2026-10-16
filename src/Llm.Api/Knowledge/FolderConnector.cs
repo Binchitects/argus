@@ -38,7 +38,8 @@ public sealed class FolderConnector(IOptionsMonitor<KnowledgeOptions> options) :
         {
             throw new KnowledgeException($"The folder {folder} does not exist, or the app cannot read it. Mount it in docker-compose.override.yml.");
         }
-        var readers = Readers.For(source.Audience, source.Groups);
+        // Who may read the folder is decided at each search (access rules on the source), so a change applies at once.
+        List<string> readers = [Readers.Chosen(source.Id)];
         var walk = new EnumerationOptions
         {
             RecurseSubdirectories = true, IgnoreInaccessible = true, ReturnSpecialDirectories = false,

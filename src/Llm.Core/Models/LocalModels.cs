@@ -54,12 +54,3 @@ public sealed class LocalModel
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
-
-/// <summary>Who may use a model (any model at the gateway, local or not). A model without a row: everyone.</summary>
-public sealed class ModelAccess
-{
-    public required string Model { get; set; }
-    public Audience Audience { get; set; }
-    public List<Guid> Groups { get; set; } = [];
-    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
-}

@@ -17,7 +17,7 @@ public sealed class CompanyRefusedException(string message, bool conflict = fals
 /// SCIM: made, matched and kept current here. The provider is in charge of their
 /// name, email and (at sign-in) role; their password is never checked here.
 /// </summary>
-public sealed partial class CompanyPeople(UserManager<AppUser> users, PeopleService people, ILiteLlm gateway, Audit audit, DirectoryFile directory)
+public sealed partial class CompanyPeople(UserManager<AppUser> users, PeopleService people, ILiteLlm gateway, Audit audit, DirectoryFile directory, Access.AccessService access)
 {
     [System.Text.RegularExpressions.GeneratedRegex("^[a-z0-9][a-z0-9._-]{1,63}$")]
     private static partial System.Text.RegularExpressions.Regex UserNamePattern();
@@ -74,7 +74,6 @@ public sealed partial class CompanyPeople(UserManager<AppUser> users, PeopleServ
         {
             throw new CompanyRefusedException(string.Join(" ", created.Errors.Select(e => e.Description)));
         }
-        await users.AddToRoleAsync(user, Roles.Member);
         await audit.WriteAsync("person.create", user.UserName, detail: how);
         if (!user.IsDisabled)
         {
@@ -101,7 +100,7 @@ public sealed partial class CompanyPeople(UserManager<AppUser> users, PeopleServ
         {
             return;
         }
-        if (user.Source == UserSource.Local && await users.IsInRoleAsync(user, Roles.Admin))
+        if (user.Source == UserSource.Local && await access.IsOwnerAsync(user))
         {
             throw new CompanyRefusedException($"{user.UserName} is a local admin: local admins stay local, so there is a way in when the company sign-in is down", conflict: true);
         }
@@ -194,12 +193,11 @@ public sealed partial class CompanyPeople(UserManager<AppUser> users, PeopleServ
     /// <summary>The role from the provider's admin group; a change signs them out of other apps (fresh tokens carry it).</summary>
     public async Task SetRoleAsync(AppUser user, bool admin, string how)
     {
-        if (await users.IsInRoleAsync(user, Roles.Admin) == admin)
+        if (await access.IsOwnerAsync(user) == admin)
         {
             return;
         }
-        await users.RemoveFromRolesAsync(user, Roles.All);
-        await users.AddToRoleAsync(user, admin ? Roles.Admin : Roles.Member);
+        await access.SetOwnerAsync(PeopleService.DirectorySync, user, admin);
         await users.UpdateSecurityStampAsync(user);
         await audit.WriteAsync(admin ? "person.make_admin" : "person.remove_admin", user.UserName, detail: how);
     }

@@ -62,13 +62,16 @@ public sealed class CreditMoveTests(AppFixture app)
         await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" });
         await using var scope = f.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        // Taken while the gateway could not be reached: the person's flag is set, their key is not blocked yet.
-        await db.Users.Where(u => u.UserName == name).ExecuteUpdateAsync(u => u.SetProperty(x => x.ApiOff, true));
+        // Taken while the gateway could not be reached: the person's deny is kept, their key is not blocked yet.
+        var person = await db.Users.AsNoTracking().SingleAsync(u => u.UserName == name);
+        var access = scope.ServiceProvider.GetRequiredService<Llm.Api.Access.AccessService>();
+        await access.SetFeatureAsync(null, person, Llm.Core.Access.Permissions.ApiKeys, on: false);
         var keys = scope.ServiceProvider.GetRequiredService<KeyAccess>();
+        Assert.All(gateway.KeysOf($"{name}@example.test"), k => Assert.False(k.Blocked));
         Assert.Equal(1, await keys.BlocksAsync());
         Assert.All(gateway.KeysOf($"{name}@example.test"), k => Assert.True(k.Blocked));
         Assert.Equal(0, await keys.BlocksAsync());
-        await db.Users.Where(u => u.UserName == name).ExecuteUpdateAsync(u => u.SetProperty(x => x.ApiOff, false));
+        await access.SetFeatureAsync(null, person, Llm.Core.Access.Permissions.ApiKeys, on: true);
         Assert.Equal(1, await keys.BlocksAsync());
         Assert.All(gateway.KeysOf($"{name}@example.test"), k => Assert.False(k.Blocked));
     }

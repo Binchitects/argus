@@ -26,7 +26,8 @@ public sealed partial class PeopleService(
     DirectoryFile directory,
     IOpenIddictTokenManager tokens,
     IOpenIddictAuthorizationManager authorizations,
-    CreditBook book)
+    CreditBook book,
+    Access.AccessService access)
 {
     [System.Text.RegularExpressions.GeneratedRegex("^[a-z0-9][a-z0-9._-]{1,63}$")]
     private static partial System.Text.RegularExpressions.Regex UserNamePattern();
@@ -79,7 +80,10 @@ public sealed partial class PeopleService(
         p.Credits?.Apply(user);
         var password = GeneratePassword();
         Check(await users.CreateAsync(user, password));
-        Check(await users.AddToRoleAsync(user, p.Admin ? Roles.Admin : Roles.Member));
+        if (p.Admin)
+        {
+            await access.SetOwnerAsync(null, user, true);
+        }
         await audit.WriteAsync("person.create", userName, detail: p.Admin ? "admin" : "member");
         await directory.WriteAsync();
 
@@ -102,15 +106,16 @@ public sealed partial class PeopleService(
     {
         await gateway.EnsureUserAsync(user.Email!);
         // Without API access, no key is made.
-        if (!user.ApiOff && (await gateway.KeysAsync(user.Email!)).Count == 0)
+        if (!await access.ApiOffAsync(user) && (await gateway.KeysAsync(user.Email!)).Count == 0)
         {
             await gateway.GenerateKeyAsync(user.Email!, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel, (await rateLimits.ForAsync(user)).Key);
         }
     }
 
+    /// <summary>Makes the person an admin (their own Owner role) or not; an Owner through a group stays one (Admin → Access).</summary>
     public async Task SetAdminAsync(AppUser actor, AppUser user, bool admin)
     {
-        var isAdmin = await users.IsInRoleAsync(user, Roles.Admin);
+        var isAdmin = await access.IsOwnerAsync(user);
         if (isAdmin == admin)
         {
             return;
@@ -123,8 +128,18 @@ public sealed partial class PeopleService(
             }
             await EnsureAnotherAdminAsync(user);
         }
-        Check(await users.RemoveFromRolesAsync(user, Roles.All.Where(r => r != (admin ? Roles.Admin : Roles.Member))));
-        Check(await users.AddToRoleAsync(user, admin ? Roles.Admin : Roles.Member));
+        try
+        {
+            await access.SetOwnerAsync(actor, user, admin);
+        }
+        catch (Access.AccessRefusedException ex)
+        {
+            throw new PeopleException(ex.Message);
+        }
+        if (!admin && await access.IsOwnerAsync(user))
+        {
+            throw new PeopleException($"{user.UserName} holds Owner through a group or as the first admin: change it under Admin → Access.");
+        }
         // Role changes reach other services through fresh tokens only.
         await EndSessionsAsync(user);
         await audit.WriteAsync(admin ? "person.make_admin" : "person.remove_admin", user.UserName);
@@ -140,7 +155,7 @@ public sealed partial class PeopleService(
         {
             throw new PeopleException("You cannot disable yourself.");
         }
-        if (disabled && await users.IsInRoleAsync(user, Roles.Admin))
+        if (disabled && await access.IsOwnerAsync(user))
         {
             await EnsureAnotherAdminAsync(user);
         }
@@ -151,7 +166,7 @@ public sealed partial class PeopleService(
         {
             await EndSessionsAsync(user);
         }
-        await SetKeysBlockedAsync(user, disabled || user.ApiOff);
+        await SetKeysBlockedAsync(user, disabled || await access.ApiOffAsync(user));
         await audit.WriteAsync(disabled ? "person.disable" : "person.enable", user.UserName, detail: reason);
         await directory.WriteAsync();
     }
@@ -201,7 +216,7 @@ public sealed partial class PeopleService(
     /// <summary>Revoke first, then mint: the reverse leaves a window where the old key still works.</summary>
     public async Task<Secrets> RotateKeyAsync(AppUser user)
     {
-        if (user.ApiOff)
+        if (await access.ApiOffAsync(user))
         {
             throw new PeopleException($"{user.UserName} has no API access: turn it on first (Admin → People).");
         }
@@ -237,27 +252,28 @@ public sealed partial class PeopleService(
     /// them or made, and Arena's MCP endpoint and Argus refuse them; on, their keys work again (unless they are disabled).
     /// Audited. A warning when the gateway could not be reached (the keys follow at the next check).
     /// </summary>
+    /// <remarks>Off is the person's own deny of feature.api_keys; on removes it. A deny through a group, or a role, stays: then the warning says so.</remarks>
     public async Task<string?> SetApiAccessAsync(AppUser user, bool on)
     {
-        if (user.ApiOff == !on)
+        if (await access.ApiOffAsync(user) == !on)
         {
             return null;
         }
-        user.ApiOff = !on;
-        Check(await users.UpdateAsync(user));
+        await access.SetFeatureAsync(null, user, Llm.Core.Access.Permissions.ApiKeys, on, "API access off (Admin → People)");
         await audit.WriteAsync(on ? "person.api_on" : "person.api_off", user.UserName);
+        var stillOff = on && await access.ApiOffAsync(user);
         try
         {
             var keys = await gateway.KeysAsync(user.Email!);
-            var blocked = user.IsDisabled || user.ApiOff;
+            var blocked = user.IsDisabled || await access.ApiOffAsync(user);
             await gateway.SetBlockedAsync(keys.Where(k => k.Blocked != blocked).Select(k => k.Token), blocked);
-            if (on && !user.IsDisabled && keys.Count == 0)
+            if (!blocked && keys.Count == 0)
             {
                 // Given back with no key left: one is made, as for a new person (they see it under Your account).
                 await gateway.EnsureUserAsync(user.Email!);
                 await gateway.GenerateKeyAsync(user.Email!, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel, (await rateLimits.ForAsync(user)).Key);
             }
-            return null;
+            return stillOff ? $"Saved, but {user.UserName} still has no API access: a rule for a group or a role of theirs denies it (Admin → Access)." : null;
         }
         catch (GatewayException ex)
         {
@@ -312,7 +328,7 @@ public sealed partial class PeopleService(
         {
             throw new PeopleException($"{user.UserName} is on legal hold: their data may not be deleted. End the hold first.");
         }
-        if (await users.IsInRoleAsync(user, Roles.Admin))
+        if (await access.IsOwnerAsync(user))
         {
             await EnsureAnotherAdminAsync(user);
         }
@@ -327,6 +343,8 @@ public sealed partial class PeopleService(
             warning = ex.Message;
         }
         Check(await users.DeleteAsync(user));
+        // Their roles and rules go with them.
+        await access.RemoveSubjectAsync(actor, Llm.Core.Access.SubjectKind.Person, user.Id);
         await audit.WriteAsync("person.delete", user.UserName, detail: warning);
         await directory.WriteAsync();
     }
@@ -355,8 +373,8 @@ public sealed partial class PeopleService(
 
     private async Task EnsureAnotherAdminAsync(AppUser leaving)
     {
-        var admins = await users.GetUsersInRoleAsync(Roles.Admin);
-        if (!admins.Any(a => a.Id != leaving.Id && !a.IsDisabled))
+        var admins = await access.OwnersAsync();
+        if (!admins.Any(a => a.Id != leaving.Id))
         {
             throw new PeopleException("That would leave nobody who can administer the service.");
         }

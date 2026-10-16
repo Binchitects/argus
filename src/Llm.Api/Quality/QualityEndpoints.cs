@@ -133,10 +133,11 @@ public static class QualityEndpoints
     }
 
     /// <summary>The company's models on its own questions: Elo from every vote, for everyone unless an admin keeps it to the admins.</summary>
-    private static async Task<IResult> LeaderboardAsync(ClaimsPrincipal p, AppDbContext db, IOptionsMonitor<QualityOptions> options, CancellationToken ct)
+    private static async Task<IResult> LeaderboardAsync(ClaimsPrincipal p, AppDbContext db, IOptionsMonitor<QualityOptions> options, UserManager<AppUser> users,
+        Access.AccessService access, CancellationToken ct)
     {
         var open = options.CurrentValue.PublicLeaderboard;
-        if (!open && !p.IsInRole(Roles.Admin))
+        if (!open && !(await users.GetUserAsync(p) is { } me && await access.IsOwnerAsync(me, ct)))
         {
             return AuthEndpoints.Problem(403, "hidden", "Your admins keep the leaderboard to themselves.");
         }

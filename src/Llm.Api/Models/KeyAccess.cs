@@ -14,7 +14,7 @@ namespace Llm.Api.Models;
 /// is not one of them; the app checks the chat itself. Fair use holds for keys
 /// too: each carries how many requests it may have at once.
 /// </summary>
-public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, ChatModels models, ILiteLlm gateway, IOptionsMonitor<ChatOptions> chat)
+public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, ChatModels models, ILiteLlm gateway, IOptionsMonitor<ChatOptions> chat, Access.AccessService access)
 {
     /// <summary>Requests a key may have at once; null: no limit.</summary>
     public int? MaxParallel => chat.CurrentValue.ApiRequestsPerKey > 0 ? chat.CurrentValue.ApiRequestsPerKey : null;
@@ -34,9 +34,11 @@ public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, Ch
     public async Task<int> BlocksAsync(CancellationToken ct = default)
     {
         var changed = 0;
-        foreach (var user in await users.Users.AsNoTracking().Where(u => u.Email != null).ToListAsync(ct))
+        var people = await users.Users.AsNoTracking().Where(u => u.Email != null).ToListAsync(ct);
+        var memberships = await access.MembershipsAsync(people, ct);
+        foreach (var user in people)
         {
-            var blocked = user.IsDisabled || user.ApiOff;
+            var blocked = user.IsDisabled || memberships[user.Id].ApiOff;
             var wrong = (await gateway.KeysAsync(user.Email!, ct)).Where(k => k.Blocked != blocked).Select(k => k.Token).ToList();
             if (wrong.Count > 0)
             {

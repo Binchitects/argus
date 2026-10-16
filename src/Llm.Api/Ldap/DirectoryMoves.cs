@@ -25,7 +25,7 @@ public sealed record DirectoryMove(
 /// Moves people who have a local account to directory sign-in: only the password check moves (their local
 /// password is removed and the directory's is used), as a person's first directory sign-in would make them.
 /// </summary>
-public sealed class DirectoryMoves(UserManager<AppUser> users, ILdapDirectory ldap, SignInService signIn, Audit audit)
+public sealed class DirectoryMoves(UserManager<AppUser> users, ILdapDirectory ldap, SignInService signIn, Audit audit, Access.AccessService access)
 {
     /// <summary>What moving each of these people would do, finding each in the directory by their email, then by their username.</summary>
     public async Task<List<DirectoryMove>> PlanAsync(IReadOnlyList<Guid> ids, AppUser actor, CancellationToken ct = default) =>
@@ -37,7 +37,7 @@ public sealed class DirectoryMoves(UserManager<AppUser> users, ILdapDirectory ld
         var local = people.Where(u => u.Source == UserSource.Local).ToList();
         var found = local.Count == 0 ? [] : await ldap.FindAsync([.. local.SelectMany(u => new[] { u.Email ?? "", u.UserName ?? "" })], ct);
         // A directory never takes the last local admin: they are how anyone signs in while it cannot be reached.
-        var localAdmins = (await users.GetUsersInRoleAsync(Roles.Admin)).Where(u => u.Source == UserSource.Local && !u.IsDisabled).Select(u => u.Id).ToHashSet();
+        var localAdmins = (await access.OwnersAsync(ct: ct)).Where(u => u.Source == UserSource.Local).Select(u => u.Id).ToHashSet();
         var plans = new List<(DirectoryMove Plan, LdapPerson? Person)>();
         foreach (var user in people)
         {
@@ -55,7 +55,7 @@ public sealed class DirectoryMoves(UserManager<AppUser> users, ILdapDirectory ld
     private async Task<(DirectoryMove Plan, LdapPerson? Person)> PlanOneAsync(AppUser user, AppUser actor, IReadOnlyList<LdapPerson> found)
     {
         var email = user.Email ?? "";
-        var admin = await users.IsInRoleAsync(user, Roles.Admin);
+        var admin = await access.IsOwnerAsync(user);
         (DirectoryMove, LdapPerson?) Refused(string why) => (new(user.Id, user.UserName!, email, user.DisplayName, admin, null, null, null, null, why), null);
         if (user.Source != UserSource.Local)
         {

@@ -12,7 +12,7 @@ namespace Llm.Api.Notifications;
 public sealed record News(string Kind, string Title, string? Body = null, string? Link = null, string? Key = null);
 
 /// <summary>Puts news in people's bells (the page checks it often, and says it on the desktop when allowed).</summary>
-public sealed class Notifier(AppDbContext db, UserManager<AppUser> users, TimeProvider clock)
+public sealed class Notifier(AppDbContext db, Access.AccessService access, TimeProvider clock)
 {
     /// <returns>False when this person had this news already (same key).</returns>
     public async Task<bool> SendAsync(Guid userId, News news, CancellationToken ct = default)
@@ -43,7 +43,7 @@ public sealed class Notifier(AppDbContext db, UserManager<AppUser> users, TimePr
     /// <summary>The same news to every admin who can sign in.</summary>
     public async Task ToAdminsAsync(News news, CancellationToken ct = default)
     {
-        foreach (var admin in (await users.GetUsersInRoleAsync(Roles.Admin)).Where(a => !a.IsDisabled))
+        foreach (var admin in await access.OwnersAsync(ct: ct))
         {
             await SendAsync(admin.Id, news, ct);
         }

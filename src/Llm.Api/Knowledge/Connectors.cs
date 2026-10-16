@@ -61,20 +61,14 @@ public interface IConnectionTest
 public static class Readers
 {
     public const string Everyone = "everyone";
-    public const string Admins = "admins";
-
-    /// <summary>The readers of a folder's or a website's documents, from who may read the source. Admins always may, as they set it up.</summary>
-    public static List<string> For(Audience audience, IEnumerable<Guid> groups) => audience switch
-    {
-        Audience.Everyone => [Everyone],
-        Audience.Groups => [Admins, .. groups.Select(g => "group:" + g)],
-        _ => [Admins],
-    };
 
     /// <summary>A GitLab project's documents: its members may read them (<see cref="KnowledgeReaders"/>), admins only when they are members.</summary>
     public static string GitLab(long project) => "gitlab:" + project.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-    /// <summary>Whom the admin chose for what a source's own permissions cannot tell (Confluence, SharePoint): decided at each search, so a change applies at once.</summary>
+    /// <summary>
+    /// Whom the admin chose (access rules on the source): who may read a folder or a website, and what Confluence's or
+    /// SharePoint's own permissions cannot tell. Decided at each search, so a change applies at once.
+    /// </summary>
     public static string Chosen(Guid source) => "chosen:" + source.ToString("N");
 
     /// <summary>Someone a document was shared with, by their email (or user principal name).</summary>

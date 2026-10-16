@@ -36,8 +36,8 @@ is removed that time).
 | Kind | What is read | Who may read it |
 |---|---|---|
 | **GitLab** | A project, or every project of a group and its subgroups (not archived ones): the wiki pages, and the issues with their comments. Confidential issues and internal notes never. | Each project's members in GitLab: active, Guest and up, inherited ones too. |
-| **Folder** | Every file under a folder mounted below `/knowledge` (subfolders too): text, Markdown, HTML, PDF, Word, Excel, PowerPoint and OpenDocument, as the chat reads attachments. Hidden files and folders and links are skipped; files over 50 MB too. | The groups you choose (or everyone, or admins). |
-| **Website** | Pages reached from the first page through their links, on its hosts only (or the hosts you list), up to **Most pages** (200; at most 2,000), minding the site's `robots.txt`. PDFs and documents linked from it too. | The groups you choose (or everyone, or admins). |
+| **Folder** | Every file under a folder mounted below `/knowledge` (subfolders too): text, Markdown, HTML, PDF, Word, Excel, PowerPoint and OpenDocument, as the chat reads attachments. Hidden files and folders and links are skipped; files over 50 MB too. | The groups you choose (or everyone, or admins), as rules on the source. |
+| **Website** | Pages reached from the first page through their links, on its hosts only (or the hosts you list), up to **Most pages** (200; at most 2,000), minding the site's `robots.txt`. PDFs and documents linked from it too. | The groups you choose (or everyone, or admins), as rules on the source. |
 | **Confluence** | Cloud, or Data Center and Server: the spaces you list, or every space the account may read; their pages, and their blog posts if you choose. | Whoever may view the space and the page in Confluence, read restrictions included ([below](#confluence)). Where Confluence does not tell, the groups you choose. |
 | **SharePoint** | Sites and document libraries (a OneDrive too) by their addresses: their files (Word, PowerPoint, Excel, PDF, text, Markdown and the rest the chat reads), and the sites' pages if you choose. | Each file's permissions in SharePoint ([below](#sharepoint-and-onedrive)). Where Graph cannot tell, the groups you choose. |
 
@@ -256,10 +256,11 @@ their start, and the rest by `read_file`.
   read. Documents embedded by another model are left out of a search and
   embedded again at the next sync.
 - Every document keeps its readers, any of which may read it: `everyone`,
-  `admins`, `group:{id}`, `gitlab:{project}` or `confluence:{space}` (that
-  project's members, that space's viewers, kept in their own table),
-  `person:{email}`, `directory:{group}`, or `chosen:{source}` (the groups
-  chosen for what the source cannot tell, decided at each search). A
+  `gitlab:{project}` or `confluence:{space}` (that project's members, that
+  space's viewers, kept in their own table), `person:{email}`,
+  `directory:{group}`, or `chosen:{source}` (whom the access rules on the
+  source allow: a folder's or a website's readers, and what Confluence or
+  SharePoint cannot tell; decided at each search, [admin.md](admin.md#access-roles-and-rules)). A
   Confluence page's restrictions are what it **requires** besides: a reader
   must pass every one (`confluence:{space}/{page}`).
 - Tables: `knowledge_sources`, `knowledge_documents`, `knowledge_chunks`,

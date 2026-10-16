@@ -25,7 +25,7 @@ public sealed class NotificationOptions
 /// webhook (only to a host an admin allowed, as a task's). A failed email or post is
 /// logged; the bell has the news anyway.
 /// </summary>
-public sealed partial class NewsDelivery(Notifier notifier, UserManager<AppUser> users, Mailer mailer, Webhooks webhooks,
+public sealed partial class NewsDelivery(Notifier notifier, Access.AccessService access, Mailer mailer, Webhooks webhooks,
     IOptionsMonitor<NotificationOptions> options, IOptions<AuthOptions> auth, TimeProvider clock, ILogger<NewsDelivery> logger)
 {
     /// <returns>False when this person had this news already (same key): nothing is sent again.</returns>
@@ -54,7 +54,7 @@ public sealed partial class NewsDelivery(Notifier notifier, UserManager<AppUser>
     public async Task ToAdminsAsync(News news, CancellationToken ct)
     {
         var told = false;
-        foreach (var admin in (await users.GetUsersInRoleAsync(Roles.Admin)).Where(a => !a.IsDisabled))
+        foreach (var admin in await access.OwnersAsync(ct: ct))
         {
             told |= await SendAsync(admin, news, ct);
         }

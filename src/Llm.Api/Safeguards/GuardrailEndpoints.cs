@@ -65,7 +65,7 @@ public static partial class GuardrailEndpoints
         {
             return Answer(new ApiVerdict("BLOCKED", "This account is disabled."));
         }
-        if (user is { ApiOff: true })
+        if (user is not null && await http.RequestServices.GetRequiredService<Access.AccessService>().ApiOffAsync(user, http.RequestAborted))
         {
             return Answer(new ApiVerdict("BLOCKED", "Your API access is off. Ask an admin to turn it on (Admin → People)."));
         }

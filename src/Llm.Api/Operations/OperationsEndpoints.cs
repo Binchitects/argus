@@ -275,10 +275,10 @@ public static class OperationsEndpoints
     private static async Task<IResult> OverviewAsync(AppDbContext db, UserManager<AppUser> users, Ledger ledger, ArgusAdmin argus,
         IHttpClientFactory factory, IOptions<StackOptions> stack, IOptions<ArgusOptions> argusOptions, IOptions<Dashboards.DashboardOptions> dashboards, Chat.ChatModels models,
         Dashboards.PromDatasource prom, TimeProvider clock, Replicas replicas, Storage.StorageDisks disks, IOptionsMonitor<Storage.StorageOptions> storage,
-        Models.MediaControl media, CancellationToken ct)
+        Models.MediaControl media, Access.AccessService access, CancellationToken ct)
     {
         var people = await db.Users.AsNoTracking().Where(u => !u.IsDisabled).ToListAsync(ct);
-        var admins = (await users.GetUsersInRoleAsync(Roles.Admin)).Count(u => !u.IsDisabled);
+        var admins = (await access.OwnersAsync(ct: ct)).Count;
         // This month's spend, and who has used up a credit of their own (of any kind).
         var spending = await ledger.ReadAsync(ct);
         var warning = spending.Problem;
@@ -391,19 +391,21 @@ public static class OperationsEndpoints
         }
     }
 
-    private static async Task<IResult> PeopleCsvAsync(AppDbContext db, UserManager<AppUser> users, Ledger ledger, CancellationToken ct)
+    private static async Task<IResult> PeopleCsvAsync(AppDbContext db, Access.AccessService access, Ledger ledger, CancellationToken ct)
     {
-        var admins = (await users.GetUsersInRoleAsync(Roles.Admin)).Select(u => u.Id).ToHashSet();
+        var all = await db.Users.AsNoTracking().OrderBy(u => u.UserName).ToListAsync(ct);
+        var memberships = await access.MembershipsAsync(all, ct);
         var spending = await ledger.ReadAsync(ct);
         // This month's spend, then each kind's spend and the person's own credit of it (empty: no limit).
         var sb = new StringBuilder("username,display_name,email,role,source,disabled,api_access,spend_this_month,"
             + string.Join(',', Credits.Kinds.Select(k => $"{Credits.Name(k)}_spend,{Credits.Name(k)}_credit")) + "\n");
-        foreach (var u in await db.Users.AsNoTracking().OrderBy(u => u.UserName).ToListAsync(ct))
+        foreach (var u in all)
         {
+            var member = memberships[u.Id];
             sb.AppendJoin(',', new[]
             {
-                Csv(u.UserName), Csv(u.DisplayName), Csv(u.Email), admins.Contains(u.Id) ? "admin" : "member",
-                UserSources.Name(u.Source), u.IsDisabled ? "yes" : "no", u.ApiOff ? "off" : "on",
+                Csv(u.UserName), Csv(u.DisplayName), Csv(u.Email), member.Snapshot.IsOwner(member.Principal with { Disabled = false }, member.Now) ? "admin" : "member",
+                UserSources.Name(u.Source), u.IsDisabled ? "yes" : "no", member.ApiOff ? "off" : "on",
                 spending.Of(u.Email).ToString("0.0000", CultureInfo.InvariantCulture),
             }.Concat(Credits.Kinds.SelectMany(k => new[]
             {

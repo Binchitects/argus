@@ -147,19 +147,4 @@ public sealed class GroupsTests(AppFixture app)
         Assert.True(Llm.Api.Ldap.LdapDirectory.IsAllowed(new Llm.Api.Ldap.LdapOptions { RequiredGroup = $"Sales{id}, EMEA" }, person));
         Assert.False(Llm.Api.Ldap.LdapDirectory.IsAllowed(new Llm.Api.Ldap.LdapOptions { RequiredGroup = "Sales" }, person));
     }
-
-    [Fact]
-    public void Who_may_use_something_admins_always_everyone_or_members()
-    {
-        var group = Guid.NewGuid();
-        var member = new Membership(false, new HashSet<Guid> { group });
-        var outsider = new Membership(false, new HashSet<Guid>());
-        var admin = new Membership(true, new HashSet<Guid>());
-        Assert.True(outsider.May(Audience.Everyone, null));
-        Assert.False(member.May(Audience.Admins, null));
-        Assert.True(admin.May(Audience.Admins, null));
-        Assert.True(member.May(Audience.Groups, [group]));
-        Assert.False(outsider.May(Audience.Groups, [group]));
-        Assert.True(admin.May(Audience.Groups, [Guid.NewGuid()]));
-    }
 }

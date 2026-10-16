@@ -121,26 +121,26 @@ public static class AdminEndpoints
         }
     }
 
-    private static async Task<IResult> ListAsync(AppDbContext db, UserManager<AppUser> users, Ledger ledger)
+    private static async Task<IResult> ListAsync(AppDbContext db, Access.AccessService access, Ledger ledger)
     {
-        var admins = (await users.GetUsersInRoleAsync(Roles.Admin)).Select(u => u.Id).ToHashSet();
         var spending = await ledger.ReadAsync();
         var warning = spending.Problem;
         var people = await db.Users.AsNoTracking().OrderBy(u => u.UserName).ToListAsync();
+        var memberships = await access.MembershipsAsync(people);
         return Results.Ok(new
         {
             warning,
-            people = people.Select(u => Row(u, admins.Contains(u.Id), spending)),
+            people = people.Select(u => Row(u, memberships[u.Id], spending)),
         });
     }
 
-    private static object Row(AppUser u, bool admin, Spending spending) => new
+    private static object Row(AppUser u, Access.Membership member, Spending spending) => new
     {
         id = u.Id,
         userName = u.UserName,
         displayName = u.DisplayName,
         email = u.Email,
-        isAdmin = admin,
+        isAdmin = member.Snapshot.IsOwner(member.Principal with { Disabled = false }, member.Now),
         source = UserSources.Name(u.Source),
         disabled = u.IsDisabled,
         disabledReason = u.DisabledReason,
@@ -152,7 +152,7 @@ public static class AdminEndpoints
         spend = spending.Month is null ? (decimal?)null : spending.Of(u.Email),
         credits = spending.Kinds(u),
         overCredit = spending.Over(u).Select(Credits.Name),
-        apiOff = u.ApiOff,
+        apiOff = member.ApiOff,
         legalHoldSince = u.LegalHoldSince,
         legalHoldReason = u.LegalHoldReason,
     };
@@ -196,7 +196,7 @@ public static class AdminEndpoints
                 .Select(g => new { g.Id, g.Name, directory = g.Directory != null }).ToListAsync();
             return Results.Ok(new
             {
-                person = Row(u, await users.IsInRoleAsync(u, Roles.Admin), spending),
+                person = Row(u, member, spending),
                 // Kind by kind, with the tightest of their groups' credits.
                 standing = (await credit.StandingAsync(u))?.Select(Standing),
                 groups,

@@ -939,8 +939,7 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
     public async Task<HashSet<string>> AllowedAsync(AppUser user, IEnumerable<string> models, CancellationToken ct = default)
     {
         var member = await access.MembershipAsync(user, ct);
-        var rules = await db.ModelAccess.AsNoTracking().ToDictionaryAsync(r => r.Model, ct);
-        return [.. models.Where(m => !rules.TryGetValue(m, out var r) || member.May(r.Audience, r.Groups))];
+        return [.. models.Where(m => member.MayUse(ResourceKinds.Model, m))];
     }
 
     /// <summary>Whether a model is there to answer: always, unless it is the engine's and not loaded.</summary>

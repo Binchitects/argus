@@ -9,11 +9,11 @@ using static OpenIddict.Abstractions.OpenIddictConstants;
 namespace Llm.Api.Oidc;
 
 /// <summary>What other services learn about a person. One place, so every app sees the same identity.</summary>
-public sealed class PersonClaims(UserManager<AppUser> users, IOptions<AuthOptions> auth)
+public sealed class PersonClaims(Access.AccessService access, IOptions<AuthOptions> auth)
 {
     /// <summary>"users" for everyone, plus the admin group (Langfuse and forwardAuth read it).</summary>
     public async Task<string[]> GroupsAsync(AppUser user) =>
-        await users.IsInRoleAsync(user, Roles.Admin) ? [auth.Value.AdminGroup, "users"] : ["users"];
+        await access.IsOwnerAsync(user) ? [auth.Value.AdminGroup, "users"] : ["users"];
 
     public async Task<ClaimsIdentity> IdentityAsync(AppUser user, IEnumerable<string> scopes)
     {

@@ -16,7 +16,7 @@ public sealed record McpCaller(AppUser? User, string? Refusal);
 /// does not ask it on every call, and a key replaced, deleted or blocked there stops working
 /// within that time. Whether the person is disabled is read on every request.
 /// </summary>
-public sealed class McpPeople(ILiteLlm gateway, IMemoryCache cache, UserManager<AppUser> users, TimeProvider clock)
+public sealed class McpPeople(ILiteLlm gateway, IMemoryCache cache, UserManager<AppUser> users, TimeProvider clock, Access.AccessService access)
 {
     public static readonly TimeSpan Remember = TimeSpan.FromSeconds(30);
 
@@ -52,7 +52,7 @@ public sealed class McpPeople(ILiteLlm gateway, IMemoryCache cache, UserManager<
             return new McpCaller(null, "That API key belongs to no one with an account here.");
         }
         return user.IsDisabled ? new McpCaller(null, "Your account is disabled. Ask an admin.")
-            : user.ApiOff ? new McpCaller(null, "Your API access is off. Ask an admin to turn it on.")
+            : await access.ApiOffAsync(user, ct) ? new McpCaller(null, "Your API access is off. Ask an admin to turn it on.")
             : new McpCaller(user, null);
     }
 }

@@ -11,7 +11,7 @@ namespace Llm.Api.Knowledge;
 
 /// <summary>
 /// A search of company knowledge as one person: only documents they may read take part. Everyone's,
-/// their groups', admins' when they are one, the GitLab projects they are a member of (by their
+/// the folders' and websites' the access rules let them read, the GitLab projects they are a member of (by their
 /// username; a members list not read for a day no longer counts, as it cannot be checked), the
 /// Confluence spaces and restricted pages they may view (by their email or username; read at each
 /// sync, and no longer counted a day after the sync was due), what was shared with them or their
@@ -28,11 +28,6 @@ public sealed class KnowledgeSearch(AppDbContext db, AccessService access, Embed
     {
         var member = await access.MembershipAsync(user, ct);
         var readers = new List<string> { Readers.Everyone };
-        if (member.IsAdmin)
-        {
-            readers.Add(Readers.Admins);
-        }
-        readers.AddRange(member.Groups.Select(g => "group:" + g));
         var name = user.UserName?.Trim().ToLowerInvariant() ?? "";
         var email = user.Email?.Trim().ToLowerInvariant() ?? "";
         if (name.Length > 0 || email.Length > 0)
@@ -57,10 +52,9 @@ public sealed class KnowledgeSearch(AppDbContext db, AccessService access, Embed
                 .Select(g => g.Directory ?? g.Name).ToListAsync(ct));
         }
         readers.AddRange(directory.Where(g => g.Trim().Length > 0).Select(Readers.Directory));
-        // Where Confluence's or SharePoint's permissions cannot tell, whom each source's admin chose.
-        var chosen = await db.KnowledgeSources.AsNoTracking().Where(s => s.Kind == "confluence" || s.Kind == "sharepoint")
-            .Select(s => new { s.Id, s.Audience, s.Groups }).ToListAsync(ct);
-        readers.AddRange(chosen.Where(s => Readers.For(s.Audience, s.Groups).Intersect(readers).Any()).Select(s => Readers.Chosen(s.Id)));
+        // Folders and websites, and where Confluence's or SharePoint's permissions cannot tell: whom each source's admin chose (its access rules).
+        var chosen = await db.KnowledgeSources.AsNoTracking().Where(s => s.Kind != "gitlab").Select(s => s.Id).ToListAsync(ct);
+        readers.AddRange(chosen.Where(id => member.MayUse(Core.Access.ResourceKinds.KnowledgeSource, id.ToString())).Select(Readers.Chosen));
         return [.. readers.Distinct()];
     }
 

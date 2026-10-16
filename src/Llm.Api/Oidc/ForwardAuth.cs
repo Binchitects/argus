@@ -83,7 +83,7 @@ public static class ForwardAuth
             return Results.Redirect($"{auth.Value.Origin}/login?rd={Uri.EscapeDataString(original)}");
         }
         var groups = await claims.GroupsAsync(user);
-        if (policy == HostPolicy.Admin && !await users.IsInRoleAsync(user, Roles.Admin))
+        if (policy == HostPolicy.Admin && !await ctx.RequestServices.GetRequiredService<Access.AccessService>().IsOwnerAsync(user))
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }

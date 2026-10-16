@@ -38,7 +38,7 @@ public static class PromptEndpoints
         /// <summary>Whether they may use it: their own, their groups', the company's, or a plugin's whose tool they may use.</summary>
         public bool Sees(SavedPrompt p) => p switch
         {
-            { ServerId: { } server } => Tools.GetValueOrDefault(McpServerTool.Prefix + server) is not { } t || (t.Enabled && Member.May(t.Audience, t.Groups)),
+            { ServerId: { } server } => Tools.GetValueOrDefault(McpServerTool.Prefix + server) is not { } t || (t.Enabled && Member.MayUse(Core.Access.ResourceKinds.Tool, t.ToolId)),
             { UserId: { } owner } when owner == Me.Id => true,
             { Sharing: PromptSharing.Groups } => p.Groups.Any(Member.Groups.Contains),
             { Sharing: PromptSharing.Company, UserId: null } => true,

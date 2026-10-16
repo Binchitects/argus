@@ -160,10 +160,11 @@ public static class AccountEndpoints
     /// A new key for the person, the old one revoked. A few an hour: each new key starts its rate
     /// limits' minute at zero at the gateway, so making keys must not be a way round them.
     /// </summary>
-    private static async Task<IResult> RotateAsync(ClaimsPrincipal p, UserManager<AppUser> users, PeopleService people, Audit audit, TimeProvider clock, HttpContext http)
+    private static async Task<IResult> RotateAsync(ClaimsPrincipal p, UserManager<AppUser> users, PeopleService people, Audit audit, TimeProvider clock, HttpContext http,
+        Access.AccessService access)
     {
         var user = (await users.GetUserAsync(p))!;
-        if (user.ApiOff)
+        if (await access.ApiOffAsync(user))
         {
             return AuthEndpoints.Problem(403, "api_off", "Your API access is off: ask an admin to turn it on.");
         }
@@ -182,16 +183,17 @@ public static class AccountEndpoints
     /// The person's keys (none while their API access is off), what they spent this month, and where they stand on each kind
     /// of credit (the home page shows these too).
     /// </summary>
-    private static async Task<IResult> KeysAsync(ClaimsPrincipal p, UserManager<AppUser> users, ILiteLlm gateway, Ledger ledger, Credit credit)
+    private static async Task<IResult> KeysAsync(ClaimsPrincipal p, UserManager<AppUser> users, ILiteLlm gateway, Ledger ledger, Credit credit, Access.AccessService access)
     {
         var user = (await users.GetUserAsync(p))!;
-        var keys = user.ApiOff ? [] : await gateway.KeysAsync(user.Email!);
+        var apiOff = await access.ApiOffAsync(user);
+        var keys = apiOff ? [] : await gateway.KeysAsync(user.Email!);
         var spending = await ledger.ReadAsync();
         var standing = await credit.StandingAsync(user);
         var api = standing?.FirstOrDefault(s => s.Kind == CreditKind.Api);
         return Results.Ok(new
         {
-            apiOff = user.ApiOff,
+            apiOff,
             keys = keys.Select(k => new { alias = k.Alias, preview = k.Preview, spend = k.Spend, blocked = k.Blocked, createdAt = k.CreatedAt }),
             // This month, every kind together; the API keys' own credit and spend.
             spend = spending.Of(user.Email),

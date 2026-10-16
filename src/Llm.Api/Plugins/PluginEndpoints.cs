@@ -195,7 +195,8 @@ public static class PluginEndpoints
         }
     }
 
-    private static async Task<IResult> RemoveAsync(Guid id, AppDbContext db, Audit audit, CancellationToken ct)
+    private static async Task<IResult> RemoveAsync(Guid id, AppDbContext db, Audit audit, AccessService access, ClaimsPrincipal principal, UserManager<AppUser> users,
+        CancellationToken ct)
     {
         if (await db.McpServers.SingleOrDefaultAsync(s => s.Id == id && s.Plugin != null, ct) is not { } server)
         {
@@ -206,6 +207,7 @@ public static class PluginEndpoints
         await db.ToolSettings.Where(s => s.ToolId == toolId).ExecuteDeleteAsync(ct);
         await db.PersonCredentials.Where(c => c.ToolId == toolId).ExecuteDeleteAsync(ct);
         await db.SaveChangesAsync(ct);
+        await access.RemoveResourceAsync(await users.GetUserAsync(principal), Llm.Core.Access.ResourceKinds.Tool, toolId, ct);
         ServerClients.Forget(id);
         await audit.WriteAsync("plugin.remove", server.Plugin);
         return Results.NoContent();

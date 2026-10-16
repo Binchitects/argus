@@ -58,7 +58,7 @@ public static class KeySpeech
             if (SpokenBy(body) is { } model && media.Find(model) is { Mode: Llm.Core.Models.MediaModes.Image } local)
             {
                 // The key's person's picture credit first: a request the gateway refuses anyway does not load the model for nothing.
-                if (await PersonAsync(request.Headers.Authorization.ToString(), gateway, db, ct) is { } owner
+                if (await PersonAsync(request.Headers.Authorization.ToString(), gateway, db, http.RequestServices.GetRequiredService<Access.AccessService>(), ct) is { } owner
                     && await http.RequestServices.GetRequiredService<Credit>().RefusalAsync(owner, Llm.Core.Access.CreditKind.Pictures, ct) is { } refusal)
                 {
                     http.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -78,7 +78,7 @@ public static class KeySpeech
             length = body.Length;
         }
         // Only a person's speech is changed: who it is comes first, from the key alone, and anyone else's goes on as it came.
-        else if (HttpMethods.IsPost(request.Method) && !picture && await PersonAsync(request.Headers.Authorization.ToString(), gateway, db, ct) is { } person)
+        else if (HttpMethods.IsPost(request.Method) && !picture && await PersonAsync(request.Headers.Authorization.ToString(), gateway, db, http.RequestServices.GetRequiredService<Access.AccessService>(), ct) is { } person)
         {
             if (request.Path.Value?.EndsWith("/transcriptions", StringComparison.Ordinal) == true)
             {
@@ -263,7 +263,7 @@ public static class KeySpeech
     }
 
     /// <summary>The person a key belongs to: null for no key, a key the gateway does not know or blocked, or one of nobody here.</summary>
-    private static async Task<AppUser?> PersonAsync(string authorization, ILiteLlm gateway, AppDbContext db, CancellationToken ct)
+    private static async Task<AppUser?> PersonAsync(string authorization, ILiteLlm gateway, AppDbContext db, Access.AccessService access, CancellationToken ct)
     {
         var key = authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? authorization[7..].Trim() : "";
         if (key.Length == 0)
@@ -285,7 +285,8 @@ public static class KeySpeech
         }
         var normalized = email.ToUpperInvariant();
         // A person whose API access was taken is not one here, whatever the gateway said of the key.
-        return await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.NormalizedEmail == normalized && !u.ApiOff && !u.IsDisabled, ct);
+        var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.NormalizedEmail == normalized && !u.IsDisabled, ct);
+        return user is null || await access.ApiOffAsync(user, ct) ? null : user;
     }
 
     private static string? Str(JsonObject o, string name) => o[name] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;

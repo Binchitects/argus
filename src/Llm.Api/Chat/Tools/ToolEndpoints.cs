@@ -1,9 +1,13 @@
+using System.Security.Claims;
+using Llm.Api.Access;
 using Llm.Api.Endpoints;
 using Llm.Api.Identity;
 using Llm.Api.Settings;
 using Llm.Core.Access;
 using Llm.Core.Chat;
 using Llm.Core.Data;
+using Llm.Core.Identity;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -34,18 +38,19 @@ public static class ToolEndpoints
         g.MapPost("/servers/test", TestAsync);
     }
 
-    private static async Task<IResult> ListAsync(ToolRegistry registry, AppDbContext db, CancellationToken ct)
+    private static async Task<IResult> ListAsync(ToolRegistry registry, AppDbContext db, AccessService access, CancellationToken ct)
     {
         var groups = await db.Groups.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.Name, ct);
-        return Results.Ok((await registry.AllAsync(ct)).Select(t => new
+        var snapshot = await access.SnapshotAsync(ct);
+        return Results.Ok((await registry.AllAsync(ct)).Select(t => (t, who: AccessService.AudienceOf(snapshot, ResourceKinds.Tool, t.Tool.Id))).Select(x => new
         {
-            id = t.Tool.Id, title = t.Tool.Title, description = t.Tool.Description, icon = t.Tool.Icon, unavailable = t.Unavailable,
+            id = x.t.Tool.Id, title = x.t.Tool.Title, description = x.t.Tool.Description, icon = x.t.Tool.Icon, unavailable = x.t.Unavailable,
             setting = new
             {
-                t.Setting.Enabled, t.Setting.Audience, t.Setting.OnByDefault, t.Setting.AskFirst,
-                groups = t.Setting.Groups.Where(groups.ContainsKey).Select(x => new { id = x, name = groups[x] }),
+                x.t.Setting.Enabled, x.who.Audience, x.t.Setting.OnByDefault, x.t.Setting.AskFirst,
+                groups = x.who.Groups.Where(groups.ContainsKey).Select(g => new { id = g, name = groups[g] }),
             },
-            server = t.Tool is IServerTool m ? new
+            server = x.t.Tool is IServerTool m ? new
             {
                 m.Server.Id, m.Server.Name, m.Server.Description, m.Server.Url, m.Server.HeaderName, headerSet = m.Server.HeaderValueEncrypted is not null,
                 m.Server.EmailHeader, m.Server.CallTimeoutMinutes, prefix = m.Slug + "__", kind = m is OpenApiTool ? "openapi" : "mcp",
@@ -56,7 +61,8 @@ public static class ToolEndpoints
         }));
     }
 
-    private static async Task<IResult> SetAsync(string toolId, ToolSettingRequest body, ToolRegistry registry, AppDbContext db, Audit audit, CancellationToken ct)
+    private static async Task<IResult> SetAsync(string toolId, ToolSettingRequest body, ToolRegistry registry, AppDbContext db, Audit audit, AccessService access,
+        ClaimsPrincipal principal, UserManager<AppUser> users, CancellationToken ct)
     {
         if ((await registry.AllAsync(ct)).All(t => t.Tool.Id != toolId))
         {
@@ -78,12 +84,11 @@ public static class ToolEndpoints
             db.ToolSettings.Add(setting);
         }
         setting.Enabled = body.Enabled;
-        setting.Audience = body.Audience;
-        setting.Groups = body.Audience == Audience.Groups ? groups : [];
         setting.OnByDefault = body.OnByDefault;
         setting.AskFirst = body.AskFirst;
         setting.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
+        await access.SetAudienceAsync(await users.GetUserAsync(principal), ResourceKinds.Tool, toolId, body.Audience, groups, ct);
         await audit.WriteAsync("tool.update", toolId,
             detail: $"{(body.Enabled ? "on" : "off")}, {body.Audience.ToString().ToLowerInvariant()}{(body.AskFirst ? ", asks first" : "")}{(body.OnByDefault ? "" : ", off in new chats")}");
         return Results.NoContent();
@@ -120,7 +125,8 @@ public static class ToolEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> RemoveServerAsync(Guid id, AppDbContext db, Audit audit, CancellationToken ct)
+    private static async Task<IResult> RemoveServerAsync(Guid id, AppDbContext db, Audit audit, AccessService access, ClaimsPrincipal principal, UserManager<AppUser> users,
+        CancellationToken ct)
     {
         if (await db.McpServers.SingleOrDefaultAsync(s => s.Id == id, ct) is not { } server)
         {
@@ -129,6 +135,7 @@ public static class ToolEndpoints
         db.McpServers.Remove(server);
         await db.ToolSettings.Where(s => s.ToolId == McpServerTool.Prefix + id).ExecuteDeleteAsync(ct);
         await db.SaveChangesAsync(ct);
+        await access.RemoveResourceAsync(await users.GetUserAsync(principal), ResourceKinds.Tool, McpServerTool.Prefix + id, ct);
         ServerClients.Forget(id);
         await audit.WriteAsync("tool.server_remove", server.Name);
         return Results.NoContent();

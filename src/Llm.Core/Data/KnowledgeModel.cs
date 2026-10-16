@@ -18,7 +18,6 @@ public partial class AppDbContext
             e.Property(x => x.Spaces).HasMaxLength(1000);
             e.Property(x => x.Account).HasMaxLength(320);
             e.Property(x => x.Tenant).HasMaxLength(100);
-            e.Property(x => x.Groups).HasDefaultValueSql("'{}'::uuid[]");
             e.Property(x => x.State).HasMaxLength(20);
             e.Property(x => x.Error).HasMaxLength(2000);
             e.Property(x => x.Mirror).HasMaxLength(2000);

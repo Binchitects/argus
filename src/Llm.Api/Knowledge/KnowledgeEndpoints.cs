@@ -1,9 +1,13 @@
+using System.Security.Claims;
+using Llm.Api.Access;
 using Llm.Api.Endpoints;
 using Llm.Api.Identity;
 using Llm.Api.Settings;
 using Llm.Core.Access;
 using Llm.Core.Chat;
 using Llm.Core.Data;
+using Llm.Core.Identity;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -36,7 +40,8 @@ public static class KnowledgeEndpoints
         g.MapGet("/{id:guid}/documents", DocumentsAsync);
     }
 
-    private static async Task<IResult> ListAsync(AppDbContext db, Embedder embedder, Schedules.GitLabBot bot, IOptionsMonitor<KnowledgeOptions> options, CancellationToken ct)
+    private static async Task<IResult> ListAsync(AppDbContext db, Embedder embedder, Schedules.GitLabBot bot, IOptionsMonitor<KnowledgeOptions> options, AccessService access,
+        CancellationToken ct)
     {
         var sources = await db.KnowledgeSources.AsNoTracking().OrderBy(s => s.Name).ToListAsync(ct);
         var documents = await db.KnowledgeDocuments.AsNoTracking().Where(d => d.SourceId != null).GroupBy(d => d.SourceId)
@@ -44,8 +49,9 @@ public static class KnowledgeEndpoints
         var passages = await db.KnowledgeChunks.AsNoTracking().Join(db.KnowledgeDocuments.Where(d => d.SourceId != null), c => c.DocumentId, d => d.Id, (c, d) => d.SourceId)
             .GroupBy(s => s).Select(x => new { x.Key, n = x.Count() }).ToDictionaryAsync(x => x.Key!.Value, x => x.n, ct);
         var readers = await db.KnowledgeReaders.AsNoTracking().OrderBy(r => r.Name).ToListAsync(ct);
-        var groupIds = sources.SelectMany(s => s.Groups).Distinct().ToList();
-        var groups = await db.Groups.AsNoTracking().Where(x => groupIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.Name, ct);
+        var snapshot = await access.SnapshotAsync(ct);
+        var who = sources.ToDictionary(s => s.Id, s => AccessService.AudienceOf(snapshot, ResourceKinds.KnowledgeSource, s.Id.ToString()));
+        var groups = await db.Groups.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.Name, ct);
         var ready = await embedder.ReadyAsync(ct);
         return Results.Ok(new
         {
@@ -56,8 +62,8 @@ public static class KnowledgeEndpoints
             syncEvery = options.CurrentValue.SyncEvery,
             sources = sources.Select(s => new
             {
-                s.Id, s.Name, s.Kind, s.Location, s.Wiki, s.Issues, s.Hosts, s.MaxPages, s.Audience,
-                groups = s.Groups.Where(groups.ContainsKey).Select(id => new { id, name = groups[id] }),
+                s.Id, s.Name, s.Kind, s.Location, s.Wiki, s.Issues, s.Hosts, s.MaxPages, who[s.Id].Audience,
+                groups = who[s.Id].Groups.Where(groups.ContainsKey).Select(id => new { id, name = groups[id] }),
                 s.Spaces, s.BlogPosts, s.SitePages, s.Account, s.Tenant, secretSet = s.SecretEncrypted != null, s.Mirror,
                 s.State, s.Error, s.SyncStartedAt, s.SyncedAt,
                 documents = documents.GetValueOrDefault(s.Id), passages = passages.GetValueOrDefault(s.Id),
@@ -72,7 +78,9 @@ public static class KnowledgeEndpoints
         });
     }
 
-    private static async Task<IResult?> CheckAsync(SourceRequest body, KnowledgeSource source, AppDbContext db, KnowledgeSyncer syncer, CancellationToken ct)
+    /// <param name="audience">Who may read it, as it will be: the body's, else what it was.</param>
+    private static async Task<IResult?> CheckAsync(SourceRequest body, KnowledgeSource source, (Audience Audience, List<Guid> Groups) audience, AppDbContext db,
+        KnowledgeSyncer syncer, CancellationToken ct)
     {
         if (source.Name.Length is 0 or > 100)
         {
@@ -101,7 +109,7 @@ public static class KnowledgeEndpoints
         {
             return AuthEndpoints.Problem(400, source.Account?.Length > 320 ? "account" : source.Tenant?.Length > 100 ? "tenant" : "spaces", "That is too long.");
         }
-        if (source.Audience == Audience.Groups && source.Groups.Count == 0)
+        if (audience.Audience == Audience.Groups && audience.Groups.Count == 0)
         {
             return AuthEndpoints.Problem(400, "groups", "Choose at least one group, or let everyone read it.");
         }
@@ -164,15 +172,17 @@ public static class KnowledgeEndpoints
         {
             s.SecretEncrypted = SettingsCrypto.Encrypt(secret, dataKey);
         }
-        s.Audience = body.Audience ?? s.Audience;
-        if (body.Groups is not null || body.Audience is not null)
-        {
-            s.Groups = s.Audience == Audience.Groups ? [.. (body.Groups ?? [.. s.Groups]).Distinct()] : [];
-        }
+    }
+
+    /// <summary>Who may read the source after the change: the body's choice over what it was.</summary>
+    private static (Audience Audience, List<Guid> Groups) ReadersOf(SourceRequest body, (Audience Audience, List<Guid> Groups) was)
+    {
+        var audience = body.Audience ?? was.Audience;
+        return (audience, audience == Audience.Groups ? [.. (body.Groups ?? [.. was.Groups]).Distinct()] : []);
     }
 
     private static async Task<IResult> CreateAsync(SourceRequest body, AppDbContext db, KnowledgeSyncer syncer, KnowledgeSync sync, Audit audit, IOptions<AuthOptions> auth,
-        CancellationToken ct)
+        AccessService access, ClaimsPrincipal principal, UserManager<AppUser> users, CancellationToken ct)
     {
         if (SecretProblem(body, auth.Value.DataKey) is { } refused)
         {
@@ -180,17 +190,18 @@ public static class KnowledgeEndpoints
         }
         var source = new KnowledgeSource { Name = "", Kind = (body.Kind ?? "").Trim().ToLowerInvariant(), Location = "" };
         // Where Confluence's or SharePoint's permissions cannot tell, admins only, unless the admin says otherwise.
-        if (Mirrors(source.Kind) && body.Audience is null)
-        {
-            source.Audience = Audience.Admins;
-        }
+        var audience = ReadersOf(body, (Mirrors(source.Kind) ? Audience.Admins : Audience.Everyone, []));
         Apply(body, source, auth.Value.DataKey);
-        if (await CheckAsync(body, source, db, syncer, ct) is { } problem)
+        if (await CheckAsync(body, source, audience, db, syncer, ct) is { } problem)
         {
             return problem;
         }
         db.KnowledgeSources.Add(source);
         await db.SaveChangesAsync(ct);
+        if (source.Kind != "gitlab")
+        {
+            await access.SetAudienceAsync(await users.GetUserAsync(principal), ResourceKinds.KnowledgeSource, source.Id.ToString(), audience.Audience, audience.Groups, ct);
+        }
         await audit.WriteAsync("knowledge.add", source.Name, detail: $"{source.Kind} {Where(source)}");
         sync.Now(source.Id);
         return Results.Created($"/api/admin/knowledge/{source.Id}", new { source.Id, source.Name });
@@ -205,7 +216,7 @@ public static class KnowledgeEndpoints
     };
 
     private static async Task<IResult> UpdateAsync(Guid id, SourceRequest body, AppDbContext db, KnowledgeSyncer syncer, KnowledgeSync sync, Audit audit, IOptions<AuthOptions> auth,
-        CancellationToken ct)
+        AccessService access, ClaimsPrincipal principal, UserManager<AppUser> users, CancellationToken ct)
     {
         if (await db.KnowledgeSources.SingleOrDefaultAsync(s => s.Id == id, ct) is not { } source)
         {
@@ -220,21 +231,21 @@ public static class KnowledgeEndpoints
             return refused;
         }
         var before = Read(source);
-        var readersBefore = Readers.For(source.Audience, source.Groups);
+        var audience = ReadersOf(body, AccessService.AudienceOf(await access.SnapshotAsync(ct), ResourceKinds.KnowledgeSource, id.ToString()));
         Apply(body, source, auth.Value.DataKey);
-        if (await CheckAsync(body, source, db, syncer, ct) is { } problem)
+        if (await CheckAsync(body, source, audience, db, syncer, ct) is { } problem)
         {
             return problem;
         }
         await db.SaveChangesAsync(ct);
-        // Who may read a folder or a website changes at once, for every document; GitLab's readers are its members. Confluence's and
-        // SharePoint's are their own permissions, and whom the admin chose for the rest is decided at each search: at once too.
-        var readers = Readers.For(source.Audience, source.Groups);
-        if (source.Kind is "folder" or "website" && !readers.SequenceEqual(readersBefore))
+        // Who may read a folder or a website, and whom the admin chose where Confluence's or SharePoint's permissions cannot tell, is
+        // decided at each search: a change applies at once. GitLab's readers are its members.
+        if (source.Kind != "gitlab" && (body.Audience is not null || body.Groups is not null))
         {
-            await db.KnowledgeDocuments.Where(d => d.SourceId == id).ExecuteUpdateAsync(u => u.SetProperty(d => d.Readers, readers), ct);
+            await access.SetAudienceAsync(await users.GetUserAsync(principal), ResourceKinds.KnowledgeSource, id.ToString(), audience.Audience, audience.Groups, ct);
         }
-        await audit.WriteAsync("knowledge.change", source.Name, detail: source.Kind == "gitlab" ? source.Location : $"{Where(source)}; readers: {string.Join(", ", readers)}");
+        await audit.WriteAsync("knowledge.change", source.Name,
+            detail: source.Kind == "gitlab" ? source.Location : $"{Where(source)}; readers: {audience.Audience.ToString().ToLowerInvariant()}");
         if (before != Read(source))
         {
             sync.Now(source.Id);
@@ -292,7 +303,8 @@ public static class KnowledgeEndpoints
         return Results.Accepted();
     }
 
-    private static async Task<IResult> DeleteAsync(Guid id, AppDbContext db, Audit audit, CancellationToken ct)
+    private static async Task<IResult> DeleteAsync(Guid id, AppDbContext db, Audit audit, AccessService access, ClaimsPrincipal principal, UserManager<AppUser> users,
+        CancellationToken ct)
     {
         if (await db.KnowledgeSources.AsNoTracking().SingleOrDefaultAsync(s => s.Id == id, ct) is not { } source)
         {
@@ -300,6 +312,7 @@ public static class KnowledgeEndpoints
         }
         // Its documents, passages and readers go with it.
         await db.KnowledgeSources.Where(s => s.Id == id).ExecuteDeleteAsync(ct);
+        await access.RemoveResourceAsync(await users.GetUserAsync(principal), ResourceKinds.KnowledgeSource, id.ToString(), ct);
         await audit.WriteAsync("knowledge.remove", source.Name, detail: $"{source.Kind} {Where(source)}");
         return Results.NoContent();
     }

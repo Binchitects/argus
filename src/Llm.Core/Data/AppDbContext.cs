@@ -41,7 +41,11 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ScheduledRun> ScheduledRuns => Set<ScheduledRun>();
     public DbSet<TaskEvent> TaskEvents => Set<TaskEvent>();
     public DbSet<Notification> Notifications => Set<Notification>();
-    public DbSet<ModelAccess> ModelAccess => Set<ModelAccess>();
+    public DbSet<AccessRole> AccessRoles => Set<AccessRole>();
+    public DbSet<AccessAssignment> AccessAssignments => Set<AccessAssignment>();
+    public DbSet<AccessRule> AccessRules => Set<AccessRule>();
+    public DbSet<AccessChange> AccessChanges => Set<AccessChange>();
+    public DbSet<AccessMeta> AccessMeta => Set<AccessMeta>();
     public DbSet<Memory> Memories => Set<Memory>();
     public DbSet<SavedPrompt> Prompts => Set<SavedPrompt>();
     public DbSet<KnowledgeSource> KnowledgeSources => Set<KnowledgeSource>();
@@ -216,12 +220,13 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasOne<AppUser>().WithMany().HasForeignKey(m => m.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
+        AccessTables.Configure(builder);
+
         builder.Entity<ToolSetting>(e =>
         {
             e.ToTable("tool_settings");
             e.HasKey(t => t.ToolId);
             e.Property(t => t.ToolId).HasMaxLength(100);
-            e.Property(t => t.Groups).HasDefaultValueSql("'{}'::uuid[]");
         });
         builder.Entity<McpServer>(e =>
         {
@@ -355,13 +360,6 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.DefaultModel).HasMaxLength(200);
             e.Property(x => x.Days).HasDefaultValueSql("'{}'::integer[]");
             e.Property(x => x.Keep).HasDefaultValueSql("'{}'::text[]");
-        });
-        builder.Entity<ModelAccess>(e =>
-        {
-            e.ToTable("model_access");
-            e.HasKey(m => m.Model);
-            e.Property(m => m.Model).HasMaxLength(200);
-            e.Property(m => m.Groups).HasDefaultValueSql("'{}'::uuid[]");
         });
         builder.Entity<BotThread>(e =>
         {

@@ -177,7 +177,7 @@ public sealed class ToolRegistry(
 
     /// <summary>The tools this person may use now: on, allowed to them, and available.</summary>
     public async Task<IReadOnlyList<ToolChoice>> ForAsync(Membership member, CancellationToken ct = default) =>
-        [.. (await AllAsync(ct)).Where(t => t.Setting.Enabled && t.Unavailable is null && member.May(t.Setting.Audience, t.Setting.Groups))];
+        [.. (await AllAsync(ct)).Where(t => t.Setting.Enabled && t.Unavailable is null && member.MayUse(Core.Access.ResourceKinds.Tool, t.Tool.Id))];
 
     /// <summary>Whether this person may use the tool now: on, allowed to them, and available.</summary>
     public async Task<bool> MayUseAsync(Membership member, string toolId, CancellationToken ct = default) => (await ForAsync(member, ct)).Any(t => t.Tool.Id == toolId);

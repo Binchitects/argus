@@ -32,7 +32,8 @@ public sealed partial class WebsiteConnector(WebFetcher web) : IKnowledgeConnect
     {
         var start = Plain(new Uri(source.Location.Trim()));
         var hosts = HostsOf(source);
-        var readers = Readers.For(source.Audience, source.Groups);
+        // Who may read the website is decided at each search (access rules on the source), so a change applies at once.
+        List<string> readers = [Readers.Chosen(source.Id)];
         var robots = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var queue = new Queue<Uri>([start]);
         var queued = new HashSet<string>(StringComparer.Ordinal) { start.AbsoluteUri };

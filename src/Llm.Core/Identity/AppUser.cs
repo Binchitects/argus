@@ -71,9 +71,6 @@ public sealed class AppUser : IdentityUser<Guid>
     public decimal? VideoCredit { get; set; }
     /// <summary>... on speech: read aloud, and sound turned into text.</summary>
     public decimal? SpeechCredit { get; set; }
-
-    /// <summary>An admin took their API access away: their keys are blocked, none is shown or made, and the gateway refuses them.</summary>
-    public bool ApiOff { get; set; }
 }
 
 public sealed class AppRole : IdentityRole<Guid>
@@ -81,13 +78,6 @@ public sealed class AppRole : IdentityRole<Guid>
     public AppRole() { }
 
     public AppRole(string name) : base(name) { }
-}
-
-public static class Roles
-{
-    public const string Admin = "admin";
-    public const string Member = "member";
-    public static readonly string[] All = [Admin, Member];
 }
 
 /// <summary>Who did what, when, from where. Written for sign-ins and every admin action.</summary>

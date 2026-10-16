@@ -39,12 +39,6 @@ public sealed class KnowledgeSource
     public string? Tenant { get; set; }
     /// <summary>Confluence's API token or personal access token, or the SharePoint app's client secret, encrypted with APP_DATA_KEY. Never shown.</summary>
     public string? SecretEncrypted { get; set; }
-    /// <summary>
-    /// A folder or a website: who may read it. A GitLab project's readers are its members, in GitLab. Confluence and
-    /// SharePoint: who reads what their own permissions cannot tell (the fallback).
-    /// </summary>
-    public Audience Audience { get; set; }
-    public List<Guid> Groups { get; set; } = [];
     /// <summary>new, syncing, synced or failed.</summary>
     public string State { get; set; } = "new";
     /// <summary>Why the last sync failed, or what it could not read.</summary>
@@ -78,9 +72,10 @@ public sealed class KnowledgeDocument
     /// <summary>The embedding model its passages were embedded with: another model's vectors do not compare.</summary>
     public string? Model { get; set; }
     /// <summary>
-    /// Who may read it, any of: "everyone", "admins", "group:{id}", "gitlab:{project id}" or "confluence:{space}" (people
-    /// kept in <see cref="KnowledgeReaders"/>), "person:{email}", "directory:{group}" (a directory group, by its name or
-    /// ID), or "chosen:{source id}" (whom the admin chose for what the source's permissions cannot tell).
+    /// Who may read it, any of: "everyone", "gitlab:{project id}" or "confluence:{space}" (people kept in
+    /// <see cref="KnowledgeReaders"/>), "person:{email}", "directory:{group}" (a directory group, by its name or ID), or
+    /// "chosen:{source id}" (whom the access rules on the source allow: a folder's or a website's readers, and what
+    /// Confluence's or SharePoint's own permissions cannot tell).
     /// </summary>
     public List<string> Readers { get; set; } = [];
     /// <summary>What a reader must also be, every one: a Confluence page's read restrictions, its own and its ancestors' ("confluence:{space}/{page id}").</summary>

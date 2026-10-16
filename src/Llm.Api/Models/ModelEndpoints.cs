@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security.Claims;
+using Llm.Api.Access;
 using Llm.Api.Chat;
 using Llm.Api.Endpoints;
 using Llm.Api.Gateway;
@@ -6,7 +8,9 @@ using Llm.Api.Identity;
 using Llm.Api.Operations;
 using Llm.Core.Access;
 using Llm.Core.Data;
+using Llm.Core.Identity;
 using Llm.Core.Models;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -53,7 +57,7 @@ public static class ModelEndpoints
 
     private static async Task<IResult> ListAsync(AppDbContext db, ChatModels gatewayModels, EngineState state, ModelCatalog catalog, ModelLibrary library,
         HardwareProbe hardware, ModelHoursState hours, IOptions<EngineOptions> engine, MediaControl media, SmallModel small, PriceBook prices, ModelPolicy policy, GpuShare gpu,
-        CancellationToken ct)
+        AccessService access, CancellationToken ct)
     {
         var e = engine.Value;
         // What each costs: its own prices, else the defaults (Settings → Prices); own says which it sets.
@@ -72,12 +76,14 @@ public static class ModelEndpoints
         };
         var files = e.Enabled ? library.List().ToDictionary(f => f.File.Path, f => f.Profile, StringComparer.Ordinal) : [];
         var local = await db.LocalModels.AsNoTracking().OrderBy(m => m.Name).ToListAsync(ct);
-        var rules = await db.ModelAccess.AsNoTracking().ToDictionaryAsync(r => r.Model, ct);
+        var snapshot = await access.SnapshotAsync(ct);
         var groups = await db.Groups.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.Name, ct);
         var atGateway = await gatewayModels.AllAsync(ct);
-        object Access(string model) => rules.TryGetValue(model, out var r)
-            ? new { r.Audience, groups = r.Groups.Where(groups.ContainsKey).Select(x => new { id = x, name = groups[x] }) }
-            : new { Audience = Audience.Everyone, groups = Enumerable.Empty<object>() };
+        object Access(string model)
+        {
+            var (audience, chosen) = AccessService.AudienceOf(snapshot, ResourceKinds.Model, model);
+            return new { audience, groups = chosen.Where(groups.ContainsKey).Select(x => new { id = x, name = groups[x] }) };
+        }
         GatewayModel? At(string name) => atGateway.FirstOrDefault(m => m.Name == name);
         var now = state.Now;
         // Why a model is on its way in or out: what the app recorded, else (the router's own loads at its start) kept loaded.
@@ -258,15 +264,15 @@ public static class ModelEndpoints
     }
 
     private static async Task<IResult> RemoveAsync(string name, AppDbContext db, ModelCatalog catalog, IOptions<EngineOptions> engine, EngineWatcher watcher,
-        MediaControl media, Audit audit, CancellationToken ct)
+        MediaControl media, Audit audit, AccessService access, ClaimsPrincipal principal, UserManager<AppUser> users, CancellationToken ct)
     {
         // A picture, video or speech model: unloaded, then gone (its files stay in the library, as a chat model's).
         if (await db.MediaModels.SingleOrDefaultAsync(m => m.Name == name, ct) is { } row)
         {
             await media.UnloadAsync(name, ct);
             db.MediaModels.Remove(row);
-            await db.ModelAccess.Where(a => a.Model == name).ExecuteDeleteAsync(ct);
             await db.SaveChangesAsync(ct);
+            await access.RemoveResourceAsync(await users.GetUserAsync(principal), ResourceKinds.Model, name, ct);
             await media.ChangedAsync(ct);
             try
             {
@@ -284,8 +290,8 @@ public static class ModelEndpoints
             return Results.NotFound();
         }
         db.LocalModels.Remove(model);
-        await db.ModelAccess.Where(a => a.Model == name).ExecuteDeleteAsync(ct);
         await db.SaveChangesAsync(ct);
+        await access.RemoveResourceAsync(await users.GetUserAsync(principal), ResourceKinds.Model, name, ct);
         if (catalog.Pinned().Contains(name))
         {
             catalog.SetKept(catalog.Pinned().Where(k => k != name));
@@ -509,7 +515,7 @@ public static class ModelEndpoints
     }
 
     private static async Task<IResult> AccessAsync(string name, ModelAccessRequest body, AppDbContext db, ChatModels gatewayModels, IOptions<EngineOptions> engine,
-        KeyAccessWatcher keys, Audit audit, CancellationToken ct)
+        AccessService access, ClaimsPrincipal principal, UserManager<AppUser> users, Audit audit, CancellationToken ct)
     {
         var known = (await gatewayModels.AllAsync(ct)).Any(m => m.Name == name) || await db.MediaModels.AnyAsync(m => m.Name == name, ct) || await db.LocalModels.AnyAsync(m => m.Name == name, ct);
         if (!known)
@@ -525,18 +531,9 @@ public static class ModelEndpoints
         {
             return AuthEndpoints.Problem(400, "groups", "A group in the list does not exist.");
         }
-        var rule = await db.ModelAccess.SingleOrDefaultAsync(a => a.Model == name, ct);
-        if (rule is null)
-        {
-            rule = new ModelAccess { Model = name };
-            db.ModelAccess.Add(rule);
-        }
-        rule.Audience = body.Audience;
-        rule.Groups = body.Audience == Audience.Groups ? groups : [];
-        rule.UpdatedAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync(ct);
+        // Rules on the model: its keys follow at once (the access change wakes the key sync).
+        await access.SetAudienceAsync(await users.GetUserAsync(principal), ResourceKinds.Model, name, body.Audience, groups, ct);
         await audit.WriteAsync("model.access", name, detail: body.Audience.ToString().ToLowerInvariant());
-        keys.Wake();
         return Results.NoContent();
     }
 

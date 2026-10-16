@@ -133,8 +133,9 @@ public static class IdentityWiring
                 return Task.CompletedTask;
             };
         });
+        services.AddScoped<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, Access.PermissionHandler>();
         services.AddAuthorizationBuilder()
-            .AddPolicy(AdminEndpoints.Policy, p => p.AddAuthenticationSchemes(IdentityConstants.ApplicationScheme).RequireRole(Roles.Admin));
+            .AddPolicy(AdminEndpoints.Policy, p => p.AddAuthenticationSchemes(IdentityConstants.ApplicationScheme).AddRequirements(new Access.PermissionRequirement(null)));
 
         services.AddOpenIddict()
             .AddCore(o => o.UseEntityFrameworkCore().UseDbContext<AppDbContext>().ReplaceDefaultEntities<Guid>())
@@ -221,6 +222,7 @@ public static class IdentityWiring
         services.AddScoped<Audit>();
         services.AddScoped<DirectoryFile>();
         services.AddScoped<PeopleService>();
+        services.AddSingleton<Llm.Core.Access.AccessSnapshotCache>();
         services.AddScoped<Access.AccessService>();
         services.AddScoped<SignInService>();
         services.AddScoped<DirectoryMoves>();

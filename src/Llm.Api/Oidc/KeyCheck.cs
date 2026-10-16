@@ -36,10 +36,10 @@ public static class KeyCheck
         // The gateway's answers by key hash, for this app only (tests run several).
         var known = new ConcurrentDictionary<string, (DateTimeOffset Until, string Email)>(StringComparer.Ordinal);
         app.MapPost(Path, (HttpContext ctx, ILiteLlm gateway, UserManager<AppUser> users, IOptions<ArgusOptions> argus, IOptionsMonitor<ChatOptions> chat,
-            TimeProvider clock) => CheckAsync(ctx, gateway, users, argus.Value, chat.CurrentValue, clock, known));
+            TimeProvider clock, Access.AccessService access) => CheckAsync(ctx, gateway, users, access, argus.Value, chat.CurrentValue, clock, known));
     }
 
-    private static async Task<IResult> CheckAsync(HttpContext ctx, ILiteLlm gateway, UserManager<AppUser> users, ArgusOptions argus, ChatOptions chat,
+    private static async Task<IResult> CheckAsync(HttpContext ctx, ILiteLlm gateway, UserManager<AppUser> users, Access.AccessService access, ArgusOptions argus, ChatOptions chat,
         TimeProvider clock, ConcurrentDictionary<string, (DateTimeOffset Until, string Email)> known)
     {
         // Argus's credentials: the chat's own when set, and ARGUS_KEY (Argus takes it as both).
@@ -114,7 +114,7 @@ public static class KeyCheck
 
         // The person now: someone disabled, or whose API access was taken, since is refused at once, whatever the gateway said.
         var user = await users.FindByEmailAsync(email);
-        if (user is null || user.IsDisabled || user.ApiOff)
+        if (user is null || user.IsDisabled || await access.ApiOffAsync(user, ctx.RequestAborted))
         {
             return Refused();
         }

@@ -23,6 +23,191 @@ namespace Llm.Core.Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Llm.Core.Access.AccessAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("RoleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("SubjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("SubjectKind")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RoleId");
+
+                    b.HasIndex("SubjectKind", "SubjectId");
+
+                    b.ToTable("access_assignments", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Access.AccessChange", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<Guid?>("ActorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("After")
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Before")
+                        .HasColumnType("jsonb");
+
+                    b.Property<Guid?>("BulkId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("At");
+
+                    b.HasIndex("BulkId");
+
+                    b.ToTable("access_changes", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Access.AccessMeta", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("access_meta", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Version = 1L
+                        });
+                });
+
+            modelBuilder.Entity("Llm.Core.Access.AccessRole", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("BuiltIn")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.PrimitiveCollection<List<string>>("Permissions")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasDefaultValueSql("'{}'::text[]");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Key")
+                        .IsUnique();
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("access_roles", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Access.AccessRule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Effect")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Resource")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("ResourceKind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<Guid?>("SubjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("SubjectKind")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ResourceKind", "Resource");
+
+                    b.HasIndex("SubjectKind", "SubjectId");
+
+                    b.ToTable("access_rules", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Access.Group", b =>
                 {
                     b.Property<Guid>("Id")
@@ -956,9 +1141,6 @@ namespace Llm.Core.Data.Migrations
                         .HasMaxLength(320)
                         .HasColumnType("character varying(320)");
 
-                    b.Property<int>("Audience")
-                        .HasColumnType("integer");
-
                     b.Property<bool>("BlogPosts")
                         .HasColumnType("boolean");
 
@@ -971,12 +1153,6 @@ namespace Llm.Core.Data.Migrations
                     b.Property<string>("Error")
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
-
-                    b.PrimitiveCollection<List<Guid>>("Groups")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid[]")
-                        .HasDefaultValueSql("'{}'::uuid[]");
 
                     b.Property<string>("Hosts")
                         .HasMaxLength(1000)
@@ -1587,17 +1763,8 @@ namespace Llm.Core.Data.Migrations
                     b.Property<bool>("AskFirst")
                         .HasColumnType("boolean");
 
-                    b.Property<int>("Audience")
-                        .HasColumnType("integer");
-
                     b.Property<bool>("Enabled")
                         .HasColumnType("boolean");
-
-                    b.PrimitiveCollection<List<Guid>>("Groups")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid[]")
-                        .HasDefaultValueSql("'{}'::uuid[]");
 
                     b.Property<bool>("OnByDefault")
                         .HasColumnType("boolean");
@@ -1703,9 +1870,6 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<decimal?>("ApiCredit")
                         .HasColumnType("numeric");
-
-                    b.Property<bool>("ApiOff")
-                        .HasColumnType("boolean");
 
                     b.Property<bool>("CacheApiAnswers")
                         .HasColumnType("boolean");
@@ -2178,29 +2342,6 @@ namespace Llm.Core.Data.Migrations
                     b.HasIndex("Mode");
 
                     b.ToTable("media_models", (string)null);
-                });
-
-            modelBuilder.Entity("Llm.Core.Models.ModelAccess", b =>
-                {
-                    b.Property<string>("Model")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<int>("Audience")
-                        .HasColumnType("integer");
-
-                    b.PrimitiveCollection<List<Guid>>("Groups")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid[]")
-                        .HasDefaultValueSql("'{}'::uuid[]");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Model");
-
-                    b.ToTable("model_access", (string)null);
                 });
 
             modelBuilder.Entity("Llm.Core.Models.ModelDownload", b =>
@@ -2677,6 +2818,39 @@ namespace Llm.Core.Data.Migrations
                     b.HasIndex("ApplicationId", "Status", "Subject", "Type");
 
                     b.ToTable("OpenIddictTokens", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Access.AccessAssignment", b =>
+                {
+                    b.HasOne("Llm.Core.Access.AccessRole", null)
+                        .WithMany()
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.OwnsOne("Llm.Core.Access.AccessScope", "Scope", b1 =>
+                        {
+                            b1.Property<Guid>("AccessAssignmentId");
+
+                            b1.PrimitiveCollection<string>("Groups")
+                                .IsRequired();
+
+                            b1.PrimitiveCollection<string>("Repos")
+                                .IsRequired();
+
+                            b1.HasKey("AccessAssignmentId");
+
+                            b1.ToTable("access_assignments");
+
+                            b1
+                                .ToJson("Scope")
+                                .HasColumnType("jsonb");
+
+                            b1.WithOwner()
+                                .HasForeignKey("AccessAssignmentId");
+                        });
+
+                    b.Navigation("Scope");
                 });
 
             modelBuilder.Entity("Llm.Core.Access.GroupMember", b =>

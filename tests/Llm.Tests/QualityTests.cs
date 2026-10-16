@@ -234,9 +234,8 @@ public sealed class QualityTests(AppFixture app)
         // A model kept to the admins is not the person's to compare; one left is not enough for two at random.
         await using (var scope = f.Services.CreateAsyncScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            db.ModelAccess.Add(new Llm.Core.Models.ModelAccess { Model = Other, Audience = Llm.Core.Access.Audience.Admins });
-            await db.SaveChangesAsync();
+            await scope.ServiceProvider.GetRequiredService<Llm.Api.Access.AccessService>()
+                .SetAudienceAsync(null, Llm.Core.Access.ResourceKinds.Model, Other, Llm.Core.Access.Audience.Admins, []);
         }
         await StatusAssert.Is(HttpStatusCode.Forbidden, await b.PostAsync(compare, new { content = "x", models = new[] { Main, Other } }));
         var alone = await b.PostAsync(compare, new { content = "x" });

@@ -7,26 +7,19 @@ using Microsoft.Extensions.Options;
 namespace Llm.Api.Identity;
 
 /// <summary>
-/// Startup: roles exist; the first admin comes from .env when nobody exists
-/// yet; the directory Argus reads is current.
+/// Startup: the built-in roles are as this version has them; the first admin comes
+/// from .env when nobody exists yet; the directory Argus reads is current.
 /// </summary>
 public sealed partial class IdentityBootstrap(
     AppDbContext db,
     UserManager<AppUser> users,
-    RoleManager<AppRole> roles,
     DirectoryFile directory,
     IOptions<AuthOptions> options,
     ILogger<IdentityBootstrap> logger)
 {
     public async Task RunAsync(CancellationToken ct = default)
     {
-        foreach (var role in Roles.All)
-        {
-            if (!await roles.RoleExistsAsync(role))
-            {
-                await roles.CreateAsync(new AppRole(role));
-            }
-        }
+        await Access.AccessService.SyncBuiltInRolesAsync(db, ct);
         await SeedAdminAsync();
         await directory.WriteAsync(ct);
     }
@@ -56,7 +49,7 @@ public sealed partial class IdentityBootstrap(
             LogAdminFailed(logger, string.Join(" ", result.Errors.Select(e => e.Description)));
             return;
         }
-        await users.AddToRoleAsync(admin, Roles.Admin);
+        // Owner as the first admin (AccessService), whatever the access data says.
         LogAdminCreated(logger, o.AdminUserName, o.AdminEmail);
     }
 

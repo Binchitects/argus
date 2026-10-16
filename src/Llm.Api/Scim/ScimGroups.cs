@@ -45,7 +45,7 @@ public static class ScimGroups
             ? new ScimResult(Resource(group, WithMembers(req) ? await MembersOfAsync(db, [group.Id], ct) : null, Url(auth)))
             : NotFound(id);
 
-    public static async Task<IResult> CreateAsync(HttpRequest req, AppDbContext db, UserManager<AppUser> users, Audit audit, Models.KeyAccessWatcher keys,
+    public static async Task<IResult> CreateAsync(HttpRequest req, AppDbContext db, UserManager<AppUser> users, Access.AccessService access, Audit audit, Models.KeyAccessWatcher keys,
         IOptions<AuthOptions> auth, CancellationToken ct)
     {
         if (await BodyAsync(req) is not { } body)
@@ -61,13 +61,13 @@ public static class ScimGroups
         db.Groups.Add(group);
         await db.SaveChangesAsync(ct);
         await audit.WriteAsync("group.create", group.Name, detail: "from SCIM");
-        await SetMembersAsync(group, Ids(body["members"]), db, users, audit, ct);
+        await SetMembersAsync(group, Ids(body["members"]), db, access, audit, ct);
         keys.Wake();
         var resource = Resource(group, await MembersOfAsync(db, [group.Id], ct), Url(auth));
         return new ScimResult(resource, StatusCodes.Status201Created, resource["meta"]!["location"]!.GetValue<string>());
     }
 
-    public static async Task<IResult> ReplaceAsync(string id, HttpRequest req, AppDbContext db, UserManager<AppUser> users, Audit audit, Models.KeyAccessWatcher keys,
+    public static async Task<IResult> ReplaceAsync(string id, HttpRequest req, AppDbContext db, UserManager<AppUser> users, Access.AccessService access, Audit audit, Models.KeyAccessWatcher keys,
         IOptions<AuthOptions> auth, CancellationToken ct)
     {
         if (await FindAsync(id, db) is not { } group)
@@ -87,12 +87,12 @@ public static class ScimGroups
             group.ExternalId = Text(body["externalId"]);
             await db.SaveChangesAsync(ct);
         }
-        await SetMembersAsync(group, Ids(body["members"]), db, users, audit, ct);
+        await SetMembersAsync(group, Ids(body["members"]), db, access, audit, ct);
         keys.Wake();
         return new ScimResult(Resource(group, await MembersOfAsync(db, [group.Id], ct), Url(auth)));
     }
 
-    public static async Task<IResult> PatchAsync(string id, HttpRequest req, AppDbContext db, UserManager<AppUser> users, Audit audit, Models.KeyAccessWatcher keys,
+    public static async Task<IResult> PatchAsync(string id, HttpRequest req, AppDbContext db, UserManager<AppUser> users, Access.AccessService access, Audit audit, Models.KeyAccessWatcher keys,
         IOptions<AuthOptions> auth, CancellationToken ct)
     {
         if (await FindAsync(id, db) is not { } group)
@@ -158,7 +158,7 @@ public static class ScimGroups
             return problem;
         }
         await db.SaveChangesAsync(ct);
-        await SetMembersAsync(group, members, db, users, audit, ct);
+        await SetMembersAsync(group, members, db, access, audit, ct);
         keys.Wake();
         return new ScimResult(Resource(group, await MembersOfAsync(db, [group.Id], ct), Url(auth)));
     }
@@ -209,10 +209,10 @@ public static class ScimGroups
     }
 
     /// <summary>Makes the members exactly these, of the people SCIM may see; each change is audited.</summary>
-    private static async Task SetMembersAsync(Group group, IEnumerable<Guid> wanted, AppDbContext db, UserManager<AppUser> users, Audit audit, CancellationToken ct)
+    private static async Task SetMembersAsync(Group group, IEnumerable<Guid> wanted, AppDbContext db, Access.AccessService access, Audit audit, CancellationToken ct)
     {
         var target = wanted.ToHashSet();
-        var localAdmins = (await users.GetUsersInRoleAsync(Roles.Admin)).Where(u => u.Source == UserSource.Local).Select(u => u.Id).ToHashSet();
+        var localAdmins = (await access.OwnersAsync(includeDisabled: true, ct)).Where(u => u.Source == UserSource.Local).Select(u => u.Id).ToHashSet();
         target.ExceptWith(localAdmins);
         var people = await db.Users.AsNoTracking().Where(u => target.Contains(u.Id)).Select(u => new { u.Id, u.UserName }).ToDictionaryAsync(u => u.Id, u => u.UserName, ct);
         var current = await db.GroupMembers.Where(m => m.GroupId == group.Id).ToListAsync(ct);

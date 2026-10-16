@@ -32,6 +32,7 @@ public sealed partial class SignInService(
     Audit audit,
     LoginThrottle throttle,
     IHttpContextAccessor http,
+    Access.AccessService access,
     ILogger<SignInService> logger)
 {
     private string? Ip => http.HttpContext?.Connection.RemoteIpAddress?.ToString();
@@ -316,7 +317,10 @@ public sealed partial class SignInService(
             {
                 return (null, string.Join(" ", created.Errors.Select(e => e.Description)));
             }
-            await users.AddToRoleAsync(user, admin ? Roles.Admin : Roles.Member);
+            if (admin)
+            {
+                await access.SetOwnerAsync(PeopleService.DirectorySync, user, true);
+            }
             await audit.WriteAsync("person.create", user.UserName, detail: "from the directory" + (admin ? ", admin" : ""));
             try
             {
@@ -343,10 +347,9 @@ public sealed partial class SignInService(
         // Kept for access rules (tools, models) that name directory groups.
         user.DirectoryGroups = [.. person.Groups.Order(StringComparer.OrdinalIgnoreCase)];
         await users.UpdateAsync(user);
-        if (await users.IsInRoleAsync(user, Roles.Admin) != admin)
+        if (await access.IsOwnerAsync(user) != admin)
         {
-            await users.RemoveFromRolesAsync(user, Roles.All);
-            await users.AddToRoleAsync(user, admin ? Roles.Admin : Roles.Member);
+            await access.SetOwnerAsync(PeopleService.DirectorySync, user, admin);
             await users.UpdateSecurityStampAsync(user);
             await audit.WriteAsync(admin ? "person.make_admin" : "person.remove_admin", user.UserName, detail: "from the directory");
         }

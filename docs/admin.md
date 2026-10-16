@@ -48,6 +48,62 @@ Indexing, Packs and Explore talk to Argus through the app's server with
 `ARGUS_KEY`, which never reaches a browser. With Argus left out they say
 that it is not set up, and how to turn it on.
 
+### Access: roles and rules
+
+What each person may do is decided in one place, from three things:
+
+- **Permissions**: a fixed list of what can be done, in two kinds.
+  Administrative ones (`people.manage`, `models.manage`, `audit.read`,
+  `settings.manage` and the rest) come only from roles; feature ones
+  (`feature.chat`, `feature.api_keys`, `feature.code_arena`,
+  `feature.pictures` and the rest, and `code.read`, `review.run`) come from
+  the **Member** role, which everyone holds, and rules may give or take them.
+- **Roles**: named sets of permissions. The built-in ones are **Owner**
+  (everything), **People admin**, **Model admin**, **Billing**, **Auditor**
+  (every `.read`, never a change), **Argus admin**, **Room moderator**,
+  **Review admin** and **Member**. A role is held by a person, by a group (an
+  app group, a directory group linked to one, or a SCIM group) or by
+  everyone, maybe until a date.
+- **Rules**: allow or deny one action on a resource (a model, a tool, a
+  knowledge source, a repository, or a feature permission), by its name or a
+  pattern (`*` for anything but a slash, `**` for anything), for a person, a
+  group, a role's holders or everyone, maybe until a date, with a note.
+
+How a question is decided: a disabled person may do nothing. Otherwise the
+rules and roles that match are ranked: the person's own over their groups',
+their groups' over a role's, a role's over everyone's; an exact resource over a
+pattern, and a longer pattern over a shorter one. At the most specific rank that
+matches anything, a deny wins over an allow, and the ranks below do not count.
+So a person's own allow opens what their group's deny closes, on purpose, for
+exceptions. A model, a tool or a knowledge source that no allow rule names is
+everyone's, as each was before anyone chose who may use it. **Owner** may do
+everything and use everything, unless a rule for that person themselves denies
+it.
+
+**Admins are Owners.** The **Make admin** switch on a person's page gives or
+takes their own Owner role. Nobody can be left out: the first admin
+(`ADMIN_USERNAME` in `.env`) always holds Owner whatever the data says, a
+change that would leave no active Owner is refused, and nobody can take their
+own `access.manage` away.
+
+**Who may use it**, on a model's, a tool's or a knowledge source's card,
+writes rules on that resource: everyone (an allow for everyone), admins (an
+allow for the Owner role) or the chosen groups (an allow for each). Rules for
+single people, and denies, are left as they are. **API access** on a person's
+page is that person's own deny of `feature.api_keys`.
+
+Each change is kept with what it was before and after, and raises a version
+every replica reads with each request, so it applies everywhere from the next
+request.
+
+**Upgrading to v5.9** moves every choice there was into roles and rules, and
+the same people may do the same things afterwards: each admin holds Owner,
+everyone holds Member, each tool's, model's and knowledge source's audience
+became its rules (admins only: an allow for Owner), and a person whose API
+access was off has a deny of `feature.api_keys`. A folder's and a website's
+documents are read by whom the rules on their source allow, decided at each
+search.
+
 ### Models
 
 llama.cpp runs in **router mode**: one server that knows several models and
@@ -340,7 +396,8 @@ would be with them.
   learns of the change at once (or within a minute, if it was down).
 - The `.env` model is always there; change it under Deployment. Image models
   and cloud models are listed too, for who may use them.
-- **Who may use it**: everyone, admins, or chosen groups (admins always may).
+- **Who may use it**: everyone, admins, or chosen groups (Owners always may;
+  it writes rules on the model: [Access](#access-roles-and-rules)).
   The chat lists only the models a person may use, and the server refuses the
   others. API keys follow within a minute: a key's model list at the gateway is
   kept to the models its owner may use, so a call to another answers 403.
@@ -727,7 +784,8 @@ still has `max_internal_user_budget` would otherwise give new people a budget of
 its own; take that line out on upgrade.
 
 **API access** is on for everyone; an admin takes it on the person's page (the
-**API access** switch, after a confirmation). Off, their keys are blocked at the
+**API access** switch, after a confirmation: the person's own deny of
+`feature.api_keys`, [Access](#access-roles-and-rules)). Off, their keys are blocked at the
 gateway and refused by the guardrail, none is shown to them or made (by them or
 an admin), and Arena's MCP endpoint, Argus and speech with a key refuse them;
 the chat stays theirs. Given back, their keys work again (one is made if they had

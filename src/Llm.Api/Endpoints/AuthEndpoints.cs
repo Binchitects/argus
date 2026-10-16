@@ -36,7 +36,7 @@ public static class AuthEndpoints
         _ => Problem(500, "error", "Sign-in failed."),
     };
 
-    private static async Task<IResult> MeAsync(ClaimsPrincipal principal, UserManager<AppUser> users)
+    private static async Task<IResult> MeAsync(ClaimsPrincipal principal, UserManager<AppUser> users, Access.AccessService access)
     {
         var user = principal.Identity?.IsAuthenticated == true ? await users.GetUserAsync(principal) : null;
         if (user is null || user.IsDisabled)
@@ -49,7 +49,7 @@ public static class AuthEndpoints
             userName = user.UserName,
             displayName = user.DisplayName,
             email = user.Email,
-            isAdmin = await users.IsInRoleAsync(user, Roles.Admin),
+            isAdmin = await access.IsOwnerAsync(user),
             source = UserSources.Name(user.Source),
             twoFactorEnabled = user.TwoFactorEnabled,
             signedInAt = AppClaimsFactory.SignedInAt(principal)?.ToUnixTimeSeconds(),
