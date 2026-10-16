@@ -726,7 +726,7 @@ internal sealed class SessionStore
                 var whole = bytes.Length < HeadBytes || !Skip(bytes) ? Json.ParseObject(Encoding.UTF8.GetString(line)) : null;
                 if (preview.Length == 0 && whole?["message"] is JsonObject m && m.Str("role") == "user")
                 {
-                    preview = Fmt.OneLine(m.Str("content"), 70);
+                    preview = Fmt.OneLine(Quotes.Split(m.Str("content") ?? "").Text, 70);
                 }
                 if ((whole is not null ? Without(whole) : Head(bytes)) is { } head)
                 {

@@ -1134,6 +1134,12 @@ internal sealed class ChatSync : IAsyncDisposable
                 o["status"] = "stopped";
             }
         }
+        // A question that quotes part of an answer: Arena keeps the quote as its own field, apart from the question.
+        if (role == "user" && m["content"] is JsonValue said && said.TryGetValue<string>(out var asked) && Quotes.Split(asked) is { Quote: { } quote } split)
+        {
+            o["content"] = split.Text;
+            o["quote"] = quote;
+        }
         if (e.Kind is not null)
         {
             o["kind"] = e.Kind;
@@ -1154,7 +1160,8 @@ internal sealed class ChatSync : IAsyncDisposable
     {
         var role = m.Str("role") ?? "user";
         var status = m.Str("status") is { } s && s != "complete" ? s : null;
-        var o = new JsonObject { ["role"] = role, ["content"] = m.Str("content") ?? "" };
+        // A question from the web that quotes part of an answer: the session keeps what the model reads, the quote first.
+        var o = new JsonObject { ["role"] = role, ["content"] = role == "user" ? Quotes.Compose(Quotes.Clean(m.Str("quote")), m.Str("content") ?? "") : m.Str("content") ?? "" };
         if (m["toolCalls"] is JsonArray calls && calls.Count > 0)
         {
             o["tool_calls"] = calls.DeepClone();

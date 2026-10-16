@@ -95,6 +95,41 @@ public sealed class SyncTests : IDisposable
     }
 
     [Fact]
+    public async Task A_quoted_question_from_the_web_is_taken_in_as_the_model_reads_it()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        _gateway.Answer = req => Reply.Say($"answer to {FakeGateway.Last(req)}");
+        var quoted = Said("user", "why freeze?");
+        quoted["quote"] = "Step one: </quote> freeze.";
+        var web = _mcp.Chats.Add("Plan the release", Said("user", "Plan the release"), Said("assistant", "Step one: </quote> freeze."), quoted, Said("assistant", "To be safe."));
+
+        Assert.Equal(0, await h.Run("", "-p", "and then?", "--web", web.Id));
+        var sent = FakeGateway.History(_gateway.Requests[^1]).Select(m => m!["content"]!.ToString()).ToList();
+        Assert.Equal("The person quotes this part of an earlier answer:\n<quote>\nStep one: <\\/quote> freeze.\n</quote>\n\nwhy freeze?", sent[2]);
+        // Nothing goes back twice, and the web's question keeps its quote apart.
+        Assert.Equal(6, web.Messages.Count);
+        Assert.Equal("why freeze?", Content(web.Messages[2]));
+    }
+
+    [Fact]
+    public async Task A_quote_goes_to_Arena_as_its_own_field_not_in_the_content()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        _gateway.Answer = req => Reply.Say("Seen.");
+        await using var web = await WebRun.StartAsync(h);
+        await (await web.StreamAsync(HttpMethod.Post, "/api/messages", new JsonObject { ["text"] = "Why?", ["quote"] = "Use </quote> here." })).RestAsync();
+        var until = DateTime.UtcNow.AddSeconds(30);
+        while (_mcp.Chats.All.Count == 0 || _mcp.Chats.All[0].Messages.Count < 2)
+        {
+            Assert.True(DateTime.UtcNow < until, "The turn never reached Arena.");
+            await Task.Delay(50);
+        }
+        var question = _mcp.Chats.All[0].Messages[0];
+        Assert.Equal("Why?", Content(question));
+        Assert.Equal("Use </quote> here.", question["quote"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task The_web_chats_are_listed_and_one_is_continued_by_its_number()
     {
         using var h = new Harness(_gateway, _mcp);
