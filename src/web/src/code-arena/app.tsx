@@ -51,6 +51,8 @@ import { ExtensionsView } from './extensions-view'
 import { appendElement } from './jsonc'
 import { Splitter } from './splitter'
 import { About, StatusBar } from './status-bar'
+import { languageServers } from './lsp/servers'
+import { OutputPanel } from './lsp/output'
 
 // xterm.js loads with the panel, the first time it opens.
 const TerminalPanel = lazy(() => import('./terminals'))
@@ -181,8 +183,8 @@ interface Layout {
   sideOpen: boolean
   chatOpen: boolean
   panelOpen: boolean
-  /** The panel's tab: the terminals, or the Debug Console. */
-  panelTab: 'terminal' | 'console'
+  /** The panel's tab: the terminals, the Debug Console, or the Output (the language servers'). */
+  panelTab: 'terminal' | 'console' | 'output'
 }
 
 const defaults: Layout = { view: 'explorer', side: 264, chat: 440, panel: 280, sideOpen: true, chatOpen: true, panelOpen: false, panelTab: 'terminal' }
@@ -195,7 +197,7 @@ function layoutOf(saved: Record<string, unknown> | undefined): Layout {
   if (!saved) return layout
   const view = saved.view
   if (view === 'explorer' || view === 'search' || view === 'git' || view === 'debug' || view === 'extensions' || view === 'changes' || view === 'problems' || view === 'chat') layout.view = view
-  if (saved.panelTab === 'terminal' || saved.panelTab === 'console') layout.panelTab = saved.panelTab
+  if (saved.panelTab === 'terminal' || saved.panelTab === 'console' || saved.panelTab === 'output') layout.panelTab = saved.panelTab
   for (const k of ['side', 'chat', 'panel'] as const) {
     const size = saved[k]
     if (typeof size === 'number' && Number.isFinite(size)) layout[k] = Math.round(Math.min(bounds[k][1], Math.max(bounds[k][0], size)))
@@ -365,6 +367,8 @@ function Workbench({
     (e: CodeEvent) => {
       if (e.type !== 'tool_result' || !e.diff) return
       void refresh(e.diff.path)
+      // The language servers see it too (a file the editor does not hold, most of all).
+      languageServers.filesChanged([{ path: e.diff.path, type: e.diff.created ? 1 : 2 }])
       void queryClient.invalidateQueries({ queryKey: changesQuery.queryKey })
       if (e.diff.created) void queryClient.invalidateQueries({ queryKey: folderQuery(parentOf(e.diff.path)).queryKey })
     },
@@ -623,6 +627,47 @@ function Workbench({
       debug.onRunInTerminal = null
     }
   }, [ed, settings, show, change, showTerminal])
+  // The language servers: the folder's trust, the settings and the editor, as they are now.
+  const trusted = workspace.data?.trust === 'trusted'
+  const { open: openFile, keep } = ed
+  useEffect(() => {
+    languageServers.configure({ trusted, settings: settings.all, folder: state.folder, project: state.project, open: (path, at) => void openFile(path, at), keep })
+  }, [trusted, settings.all, state.folder, state.project, openFile, keep])
+  /** The language server of the file shown, or one of those running (chosen when there are several). */
+  const pickServer = async (args: unknown): Promise<{ id?: string; language?: string } | null> => {
+    const id = (args as { id?: unknown } | undefined)?.id
+    if (typeof id === 'string') return { id }
+    if (active?.kind === 'file' && active.languageId && languageServers.statusFor(active.languageId)) return { language: active.languageId }
+    const running = languageServers.channels()
+    if (running.length === 0) {
+      toast.info('No language server has started: open a file of a language one serves.')
+      return null
+    }
+    if (running.length === 1) return { id: running[0]!.id }
+    const picked = await quickPick({ title: 'Language server', placeholder: 'Select a language server', items: running.map((r) => ({ id: r.id, label: r.name })) })
+    return picked ? { id: picked.id } : null
+  }
+  const showOutput = () => {
+    setPanelUsed(true)
+    change({ panelOpen: true, panelTab: 'output' })
+  }
+  useCommands([
+    { id: 'codeArena.languageServer.restart', category: 'Language Server', title: 'Restart Language Server', run: async (args) => {
+      const which = await pickServer(args)
+      if (which) await languageServers.restart(which)
+    } },
+    { id: 'codeArena.languageServer.showLog', category: 'Language Server', title: 'Show Language Server Log', run: async (args) => {
+      const which = await pickServer(args)
+      const id = which?.id ?? (which?.language ? languageServers.statusFor(which.language)?.id : undefined)
+      if (id) languageServers.show(id)
+      showOutput()
+    } },
+    { id: 'workbench.action.output.toggleOutput', category: 'View', title: 'Toggle Output', run: () => {
+      setPanelUsed(true)
+      if (layout.panelOpen && layout.panelTab === 'output') change({ panelOpen: false })
+      else change({ panelOpen: true, panelTab: 'output' })
+    } },
+  ])
   const s = dbg.active
   setContext({ inDebugMode: dbg.sessions.some((x) => x.state !== 'ended'), debugState: s?.state ?? 'inactive', debugType: s?.start.adapterId ?? '' })
   const editorContext = () => {
@@ -966,7 +1011,7 @@ function Workbench({
           {panelUsed && (
             <div hidden={!layout.panelOpen} style={{ height: Math.min(layout.panel, maxPanel) }} className="flex shrink-0 flex-col">
               <div role="tablist" aria-label="Panel" className="flex h-7 shrink-0 items-end gap-3 border-t px-3 text-[0.6875rem] font-semibold tracking-wider uppercase">
-                {(['terminal', 'console'] as const).map((t) => (
+                {(['terminal', 'console', 'output'] as const).map((t) => (
                   <button
                     key={t}
                     type="button"
@@ -975,7 +1020,7 @@ function Workbench({
                     onClick={() => change({ panelTab: t })}
                     className={cn('border-b pb-1 outline-none focus-visible:ring-1 focus-visible:ring-ring', layout.panelTab === t ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}
                   >
-                    {t === 'terminal' ? 'Terminal' : 'Debug Console'}
+                    {t === 'terminal' ? 'Terminal' : t === 'console' ? 'Debug Console' : 'Output'}
                   </button>
                 ))}
               </div>
@@ -993,6 +1038,11 @@ function Workbench({
               {layout.panelTab === 'console' && (
                 <div className="min-h-0 flex-1">
                   <DebugConsole />
+                </div>
+              )}
+              {layout.panelTab === 'output' && (
+                <div className="min-h-0 flex-1">
+                  <OutputPanel shown={layout.panelOpen} />
                 </div>
               )}
             </div>

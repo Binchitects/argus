@@ -291,7 +291,8 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   folder's in a terminal's output (a compiler's `src/app.ts:12:5`) is a link
   that opens the file there. Shown with none,
   it opens one; closing the last one hides it. A page reloaded attaches to the
-  ones still running, with their screens (below).
+  ones still running, with their screens (below). The panel's other tabs are
+  the **Debug Console** and the **Output** (the language servers', below).
 - **chat**: the agent's chat on the right: the model and thinking pickers,
   Sessions and Hide at its top; the thread with a card for each tool call and
   a diff under each edit, the approval card (**Allow**, **Always for this
@@ -309,7 +310,8 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   number of commands running with no time limit on the left (and, after the
   first key of a chord, that it waits for the second); the cursor's line and
   column, the file's indentation (**Spaces: 4**: indent with spaces or tabs,
-  detect it, or convert the file), its line endings (**LF** or **CRLF**) and
+  detect it, or convert the file), its line endings (**LF** or **CRLF**), its
+  formatter, its language server (its state: Restart and its log, below) and
   its language (another one, or **Configure '…' language based settings**),
   the MCP servers (connected of all:
   **MCP servers** lists them, why one is not connected and when it is tried
@@ -690,7 +692,8 @@ language servers, `jsonValidation`, product icon themes and `.tmTheme`
 colour themes. So ESLint, GitLens, debuggers and language features need
 Code Arena's own way: ESLint as the project's check (Problems), Source
 control and its compares, Run and Debug's adapters, Prettier and the others
-as formatters. An extension with nothing Code Arena uses is refused. A
+as formatters, and the language servers themselves (below) for completions,
+definitions and errors. An extension with nothing Code Arena uses is refused. A
 project's own `.vscode/*.code-snippets` and your own snippets files are not
 read yet: only an extension's.
 
@@ -706,6 +709,100 @@ and a path in its `package.json` that leads out of the extension is left out.
 An extension's files are served to the page only when its contributions name
 them, never as a page of its own (an SVG runs no script). Monaco cannot take a
 language back: one an extension added stays until the page reloads.
+### Language servers
+
+The editor speaks the Language Server Protocol, as VS Code does: open a file
+and the language server for its language starts, and the editor gets its
+completions (with their documentation and auto-imports), hovers, signature
+help, **Go to Definition** (**F12**; into another file of the folder, it opens
+there), declaration, type definition and implementation, **Go to
+References** (**Shift+F12**), the other uses of a name highlighted, the
+symbols (**Ctrl+Shift+O**, the outline), **Rename Symbol** (**F2**, in every
+file it changes: the files not open yet open behind the one shown, unsaved),
+code actions (the light bulb: quick fixes, organize imports, refactorings) and
+formatting. Its errors and warnings are marked in the files and listed under
+**Problems** (below the check's), with the server's name. While a server runs,
+the editor's own services for its languages (TypeScript's and JavaScript's,
+and JSON's, CSS's and HTML's when their servers are on) are turned off, so
+nothing is answered twice; they come back when it stops. The project's own
+formatter (Prettier, ruff, gofmt…: above) still formats its files; a language
+server formats the languages that have none.
+
+| Server | Languages | How to get it |
+|---|---|---|
+| typescript-language-server | TypeScript, JavaScript | `npm install -g typescript-language-server typescript` |
+| Pyright, basedpyright, Python LSP Server (pylsp) | Python | `npm install -g pyright`, `pip install basedpyright`, `pip install python-lsp-server` |
+| gopls | Go | `go install golang.org/x/tools/gopls@latest` |
+| rust-analyzer | Rust | `rustup component add rust-analyzer` |
+| clangd | C, C++ | the system's packages (`apt install clangd`), LLVM |
+| csharp-ls | C# | `dotnet tool install --global csharp-ls` |
+| vscode-json-, vscode-css- and vscode-html-language-server | JSON, CSS (SCSS, Less), HTML | `npm install -g vscode-langservers-extracted` |
+| yaml-language-server | YAML | `npm install -g yaml-language-server` |
+| bash-language-server | shell scripts | `npm install -g bash-language-server` |
+
+A server is looked for in `config.json`'s `"languageServers"`, then in the
+folders on `PATH` (full paths only: `.` in PATH would find the project's own
+program), then where its usual installs put it (`~/go/bin`, `~/.cargo/bin`,
+`~/.dotnet/tools`, `clangd-18` and the like); Python's first in the project's
+`.venv` or `venv` (or `$VIRTUAL_ENV`). For a language, the first one found
+that the settings leave on starts: `codeArena.languageServers.enabled` turns
+them all off, `codeArena.languageServers.ID.enabled` one of them (the JSON,
+CSS and HTML servers are off by default: the editor's own services are the
+same libraries; turned on, they replace them, and while the JSON server runs
+your own settings.json and keybindings.json lose the editor's checks and
+suggestions). TypeScript's
+uses the project's own TypeScript (`node_modules/typescript`) when it has one.
+`config.json` adds your own server, or changes a built-in one (by its id):
+
+```json
+"languageServers": {
+  "lua": {"command": ["lua-language-server"], "languages": ["lua"], "settings": {"Lua": {"diagnostics": {"globals": ["vim"]}}}},
+  "pyright": {"command": ["/opt/node/bin/pyright-langserver", "--stdio"]},
+  "clangd": {"command": ["clangd", "--background-index", "--compile-commands-dir=build"], "env": {"CLANGD_FLAGS": null}},
+  "gopls": {"disabled": true}
+}
+```
+
+`command` is the program (a full path or a name on PATH) and its arguments;
+`languages` are Monaco's language ids (a built-in's own when not given);
+`initializationOptions` go to the server's `initialize`; `settings` answer
+the server's `workspace/configuration` (over your settings.json, where VS
+Code's settings for the server work too: `"python.analysis.typeCheckingMode"`,
+`"gopls": {…}`, `"rust-analyzer.cargo.features"`); `env` adds to its
+environment (`null` takes a variable away); `"disabled": true` turns a
+built-in off. Your own come before the built-in ones for their languages.
+
+**Trust.** A language server runs the folder's code (a tsserver plugin, a
+build script, `go list`, a Cargo build script), so none starts until you
+trust the folder: until then the status bar says so, quietly (no prompt for
+each file); **Manage Workspace Trust** trusts it, and the servers start.
+Taking the trust back stops them.
+
+**Nothing is fetched.** Each runs in the folder, without `ARENA_API_KEY`, in
+the agent's sandbox where the system has one (it can write the folder and the
+build tools' caches, cannot see what holds secrets) and without the network.
+The catalog's servers are also told not to fetch, for a system without a
+sandbox: no type packages for TypeScript, `GOPROXY=off` for gopls,
+`CARGO_NET_OFFLINE=true` for rust-analyzer, no schema store for YAML, and no
+schemas from the web for JSON. Nothing is installed: a missing server says how
+to get it.
+
+**The status bar** names the file's server and its state: starting, ready
+(and what it is doing: indexing…), failed, off until the folder is trusted,
+in use by another page, not installed. Clicking it offers **Restart Language
+Server** and **Show Language Server Log** (both in the palette too). The
+panel's **Output** tab (**Toggle Output**) has a channel per server: when it
+started, its messages, why it ended, and the last 200 lines it wrote to
+stderr. A server that ends by itself starts again (three times in three
+minutes at most).
+
+Six servers run at once at most, one of each; a server serves one page: a
+second page of the folder that opens a file of its language takes it over
+(the first says so, and **Restart** takes it back). A page that closes or
+reloads stops its servers (shutdown and exit, killed 2 s later); the page
+reloaded starts them again. Definitions in a file outside the folder (a
+library's, the standard library's) are not opened: the editor opens the
+folder's files only.
 
 ### Ask about code from the editor
 
@@ -753,7 +850,9 @@ as your terminals run, with no sandbox; five minutes at most). Each problem
 opens its file at its line, where the editor marks it too (as the editor's
 own problems, with **Fix with Code Arena** in the light bulb), and **Fix**
 beside it asks the agent to fix it. The status bar counts the errors and
-warnings; the activity bar the errors.
+warnings; the activity bar the errors. Below the check's, **Language
+servers** lists what the language servers running found (in the files open,
+and in others some servers check too), each with the server's name.
 
 The check is `"checkCommand"` in `config.json`, else the first found by the
 project's files: `dotnet build` (a solution or project), `tsc --noEmit`
@@ -910,6 +1009,9 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/debug/stop` `{id}` | a launch: `terminate` when the adapter has it, then `disconnect` with `terminateDebuggee`; an attach: `disconnect` alone, the program let go. Whatever is left 3 s later is killed with every process it started, and the session is forgotten; 204, 404 for no such session |
 | `GET /api/debug/source?id=ID&path=P` | one of the session's source files. In the folder (an absolute or a relative path), as `/api/file` reads it, with `readOnly: false`. Outside the folder only when the session's adapter named that path (a stack frame, a breakpoint, its loaded sources), and never Code Arena's own config or data files, without `version`, with `readOnly: true`. Anything else is 403 `outside` |
 | `GET /api/debug/adapters` | `[{id, name, types, found, path, version, reason, install}]`: the six adapters as found here (`types`: the launch.json types each serves; `path`: the program, or `127.0.0.1:N`; `reason`: why it is not found or will not do; `install`: how to get it, when it is missing) |
+| `GET /api/lsp` | `[{id, name, languages, found, path, version, reason, install, settings}]`: the language servers, `config.json`'s own first, then the built-in ones (`languages`: Monaco's ids; `path`: the program found; `version` as it says it, for a built-in one found on PATH; `reason`: why it is not found or is off; `install`: how to get it, when it is missing; `settings`: what the page answers its `workspace/configuration` with over settings.json, Code Arena's own defaults with `config.json`'s over them) |
+| `GET /api/lsp/socket?server=ID` | the server's WebSocket, the server started as it opens (in place of the one of that id another page had, which is told) and stopped as it closes: LSP messages as JSON text, one per message, both ways (below). Refused before it opens: 403 `not_trusted` until the folder is trusted, 404 `missing` for no such server or one not found here (`install`), 409 `too_many` past six running, 409 `failed` when it does not start |
+| `GET /api/lsp/log?server=ID` | `{server, running, exitCode, lines, refused}`: the last 200 lines the server running (else the last that ran) wrote to stderr, and why its last start was refused (`refused`, cleared by one that starts: a WebSocket refused tells the page nothing); 404 `missing` for no such server |
 | `POST /api/problems/run` | runs the check (waits for the one running) and answers as above; 404 `no_check` when none is found |
 | `POST /api/complete` `{path, prefix, suffix}` | code completion at the editor's cursor: `{text}`; 404 `off` when the config turns it off, 409 `busy` while an answer is written, 429 `limited` at the key's limit |
 | `POST /api/messages` `{text, context}` | a message, answered as a stream of events; `context`: lines chosen in the editor, `[{path, startLine, endLine, text}]` (`text`: the editor's, when unsaved; eight at most). The stream's `{"type":"attached", id, files}` lists what went with the question |
@@ -976,6 +1078,26 @@ answers with its process, and answers any other with `success: false`. A page
 sends 1 MB per message at most, an adapter 32 MB; a page that falls 10,000
 messages or 64 MB behind is let go (its socket closes; it reattaches to get
 the snapshot).
+
+On a language server's WebSocket, each message is relayed as it is but for
+its file URIs: the page names a file of the folder `file:///` and its path in
+the folder (as its editor's models are named), the server `file://` and its
+full path (the folder's real path, its links resolved, is the folder too); a
+file outside the folder is `outside://` and its full path for the page. Every
+string in a message that is a whole file URI is rewritten both ways, and each
+key that is one (a WorkspaceEdit's `changes`), but not a document's or an
+edit's text (`text`, `newText`, `insertText`, `value`), and a path of the
+page's that would leave the folder (`..`) is passed on as it is. `initialize`'s
+`processId` (null in a sandbox), `rootUri`, `rootPath`, `workspaceFolders` and
+`initializationOptions` are the server's to set, whatever the page sends. A
+server that ends (or is stopped) sends the page, last,
+`{"jsonrpc":"2.0","method":"codeArena/ended","params":{reason, exitCode,
+takenOver, stopped}}` (`takenOver`: another page took it; `stopped`: Code
+Arena stopped it: the trust was taken back, or it is stopping), then the socket
+closes. Closing the socket sends the server `shutdown` and `exit`, and kills
+what is left 2 s later with every process it started. A page sends 16 MB per
+message at most, a server 64 MB; a server waits while 1,000 of its messages
+wait for the page.
 
 On the terminal's WebSocket, the server sends the output kept so far, then
 the output as it comes, as binary messages (the terminal's bytes), and
@@ -1399,7 +1521,8 @@ The rest of the file: `"model"`, `"thinking"`, `"mode"`, `"context"`,
 `"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"argusTools": false`
 (no Argus MCP), `"argusUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
 `"mcpUrl"`, `"ca"`, `"autoCommit"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"window"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"checkCommand"`, `"sandbox"`,
-`"sandboxNetwork"`, `"sandboxWritable"`, `"permissions"`. `ARENA_ARGUS_URL` in the environment gives Argus's address
+`"sandboxNetwork"`, `"sandboxWritable"`, `"permissions"`, `"formatters"`, `"debugAdapters"` and
+`"languageServers"` (the IDE's: above). `ARENA_ARGUS_URL` in the environment gives Argus's address
 for one run.
 
 ## Building it (admins)

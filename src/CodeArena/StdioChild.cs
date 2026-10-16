@@ -52,10 +52,13 @@ internal sealed class StdioChild : IAsyncDisposable
     /// <summary>Done once its stderr is read to the end: after it ended, what <see cref="Said"/> gives is all of it.</summary>
     public Task SaidAll => _said.Read;
 
-    /// <summary>Starts a program that speaks on its stdin and stdout. Throws IOException when it cannot be started.</summary>
-    public static StdioChild Start(string program, IReadOnlyList<string> args, string cwd, IReadOnlyDictionary<string, string?>? env = null)
+    /// <summary>
+    /// Starts a program that speaks on its stdin and stdout; <paramref name="wrap"/> puts it in a sandbox (the program
+    /// it gives runs instead, the environment as given). Throws IOException when it cannot be started.
+    /// </summary>
+    public static StdioChild Start(string program, IReadOnlyList<string> args, string cwd, IReadOnlyDictionary<string, string?>? env = null, Func<ProcessStartInfo, ProcessStartInfo>? wrap = null)
     {
-        var process = Launch(program, args, cwd, env);
+        var process = Launch(program, args, cwd, env, wrap);
         var said = new LastLines();
         said.Watch(process.StandardError);
         return new StdioChild(process, null, process.StandardOutput.BaseStream, process.StandardInput.BaseStream, said);
@@ -142,7 +145,7 @@ internal sealed class StdioChild : IAsyncDisposable
     public static string With(string why, IReadOnlyList<string> said) =>
         said.Count == 0 ? why + "." : $"{why}:\n{string.Join('\n', said.TakeLast(20))}";
 
-    private static Process Launch(string program, IReadOnlyList<string> args, string cwd, IReadOnlyDictionary<string, string?>? env)
+    private static Process Launch(string program, IReadOnlyList<string> args, string cwd, IReadOnlyDictionary<string, string?>? env, Func<ProcessStartInfo, ProcessStartInfo>? wrap = null)
     {
         var psi = new ProcessStartInfo(program)
         {
@@ -171,6 +174,16 @@ internal sealed class StdioChild : IAsyncDisposable
         }
         // The person's key stays with Code Arena, whatever the environment given says.
         psi.Environment.Remove("ARENA_API_KEY");
+        if (wrap is not null)
+        {
+            // A wrapper starts from Code Arena's own environment: what was taken away is taken away again.
+            psi = wrap(psi);
+            foreach (var (name, _) in (env ?? new Dictionary<string, string?>()).Where(e => e.Value is null))
+            {
+                psi.Environment.Remove(name);
+            }
+            psi.Environment.Remove("ARENA_API_KEY");
+        }
         try
         {
             return Process.Start(psi) ?? throw new IOException($"{program} did not start.");

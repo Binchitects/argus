@@ -53,6 +53,57 @@ for (const defaults of [ts.typescriptDefaults, ts.javascriptDefaults]) {
   })
 }
 
+// The editor's own language services (Monaco's TypeScript, JSON, CSS and HTML workers) step aside for the files a
+// language server keeps (stepAside), so nothing is answered twice; for the other models of the language (a compare's
+// side, the person's settings.json) they stay. Monaco registers their features once, as the first file of the language
+// opens, and has no way to take them back (TypeScript's and CSS's mode configuration is read then only): each is
+// wrapped as it is registered, and answers nothing for a model its language's server keeps; its markers there (owned
+// by the language's id) are dropped meanwhile. Code Arena's own providers are object literals, never wrapped; Monaco's
+// are instances of its adapters.
+type Kept = (model: monaco.editor.ITextModel) => boolean
+const builtIn = new Set(['typescript', 'javascript', 'json', 'css', 'scss', 'less', 'html', 'handlebars', 'razor'])
+const aside = new Map<string, Kept>()
+const isModel = (x: unknown): x is monaco.editor.ITextModel => !!x && typeof x === 'object' && 'uri' in x && typeof (x as { getLanguageId?: unknown }).getLanguageId === 'function'
+const api = monaco.languages as unknown as Record<string, unknown>
+for (const name of Object.keys(api).filter((k) => /^register\w+Provider$/.test(k))) {
+  const register = api[name] as (selector: unknown, provider: object, ...rest: unknown[]) => monaco.IDisposable
+  api[name] = (selector: unknown, provider: object, ...rest: unknown[]) => {
+    if (typeof selector !== 'string' || !builtIn.has(selector) || !provider || Object.getPrototypeOf(provider) === Object.prototype) return register(selector, provider, ...rest)
+    const gated = new Proxy(provider, {
+      get(target, key, receiver) {
+        const v: unknown = Reflect.get(target, key, receiver)
+        if (typeof v !== 'function' || typeof key !== 'string' || !key.startsWith('provide')) return v
+        // Every provide… takes the model first.
+        return (...args: unknown[]) => (isModel(args[0]) && aside.get(selector)?.(args[0]) ? undefined : (v as (...a: unknown[]) => unknown).apply(target, args))
+      },
+    })
+    return register(selector, gated, ...rest)
+  }
+}
+const setMarkers = monaco.editor.setModelMarkers
+;(monaco.editor as unknown as Record<string, unknown>).setModelMarkers = (model: monaco.editor.ITextModel, owner: string, markers: monaco.editor.IMarkerData[]) =>
+  setMarkers(model, owner, aside.get(owner)?.(model) ? [] : markers)
+
+/** The editor's own service for a language steps aside for the models a language server keeps (null: it comes back). */
+export function stepAside(language: string, kept: Kept | null) {
+  if (!builtIn.has(language) || (aside.has(language) && kept)) return
+  if (kept) {
+    aside.set(language, kept)
+    for (const model of monaco.editor.getModels()) if (model.getLanguageId() === language && kept(model)) setMarkers(model, language, [])
+    return
+  }
+  if (!aside.delete(language)) return
+  // Its diagnostics worked out again (each worker does so as its options change).
+  if (language === 'typescript' || language === 'javascript') {
+    const d = language === 'typescript' ? ts.typescriptDefaults : ts.javascriptDefaults
+    d.setDiagnosticsOptions(d.getDiagnosticsOptions())
+  } else if (language === 'json') monaco.json.jsonDefaults.setDiagnosticsOptions(monaco.json.jsonDefaults.diagnosticsOptions)
+  else if (language === 'css' || language === 'scss' || language === 'less') {
+    const d = language === 'css' ? monaco.css.cssDefaults : language === 'scss' ? monaco.css.scssDefaults : monaco.css.lessDefaults
+    d.setOptions(d.options)
+  }
+}
+
 // Argus Arena's colours (src/styles/index.css, as sRGB: Monaco takes hex).
 monaco.editor.defineTheme('arena-light', {
   base: 'vs',

@@ -31,6 +31,7 @@ import { useSettings, workspaceSettingsPath } from './settings'
 import { settingsSchema } from './settings-schema'
 import { useMonacoTheme } from './theme'
 import { diffOptionsOf, editorOptionsOf, isUserFile } from './editor-options'
+import { languageServers } from './lsp/servers'
 
 /** An editor action's own id: Monaco lists the ones added to an editor under that editor's id first. */
 const actionId = (id: string) => id.replace(/^vs\.editor\.ICodeEditor:\d+:/, '')
@@ -311,12 +312,12 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    const add = (tab: Tab) => {
+    const add = (tab: Tab, show = true) => {
       // Next to the tab shown, as an editor opens one.
       const ts = tabsRef.current
       const at = ts.findIndex((t) => t.id === activeRef.current)
       commit(at < 0 ? [...ts, tab] : [...ts.slice(0, at + 1), tab, ...ts.slice(at + 1)])
-      activate(tab.id)
+      if (show) activate(tab.id)
     }
 
     /** The diff editor lets go of a model about to be disposed of. */
@@ -367,18 +368,20 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    const open = async (path: string, at?: Reveal) => {
+    /** Opens a file in its tab (at a place); behind the tab shown, not shown, with `behind`. */
+    const open = async (path: string, at?: Reveal, behind = false) => {
       const id = path
-      if (at) {
+      if (at && !behind) {
         reveal.current = { id, at }
         setRevealed((n) => n + 1)
       }
       if (has(id)) {
-        activate(id)
+        if (behind) await loadFile(path).catch(() => undefined)
+        else activate(id)
         return
       }
       const load = Symbol(path)
-      add({ id, kind: 'file', path, status: 'loading', dirty: false, load })
+      add({ id, kind: 'file', path, status: 'loading', dirty: false, load }, !behind)
       // This open's tab as it is now: none when it was closed meanwhile (one opened again has a load of its own), renamed perhaps.
       const mine = () => tabsRef.current.find((t) => t.load === load)
       try {
@@ -426,6 +429,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         mon.current = m
         installKeymap(m)
         installExtensions(m)
+        languageServers.attach(m)
         if (file.text === null) return file.binary ? 'binary' : 'tooLarge'
         const now = files.current.get(path)
         if (now && !now.model.isDisposed()) return now
@@ -730,6 +734,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       f.savedAlt = alt
       autoSavePaused.current.delete(f.path)
       markDirty(f)
+      languageServers.saved(f.model)
       // The settings files apply as they are saved.
       if (f.path === 'user:settings.json' || f.path === workspaceSettingsPath) void settingsRef.current.reload()
       if (f.path === 'user:keybindings.json') void queryClient.invalidateQueries({ queryKey: userFileQuery('keybindings.json').queryKey })
@@ -1032,8 +1037,13 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       diffHost.current = el
     }
 
+    /** The folder's files a language server's edit changes: opened behind the tab shown, so the edit can be made in them. */
+    const keep = async (paths: string[]) => {
+      await Promise.all(paths.map((p) => open(p, undefined, true)))
+    }
+
     return {
-      open, openDiff, activate: (id: string) => activate(id), close, save: (id?: string) => save(id), refresh, moved, removed, accept, revert, selection, pieceOf, editorCommands, runAction, showProblems, bindEditor, bindDiff,
+      open: (path: string, at?: Reveal) => open(path, at), keep, openDiff, activate: (id: string) => activate(id), close, save: (id?: string) => save(id), refresh, moved, removed, accept, revert, selection, pieceOf, editorCommands, runAction, showProblems, bindEditor, bindDiff,
       saveAll, closeMany, reopenClosed, cycle, activateIndex, navigate, focusEditor, toggleWordWrap, languages, setLanguage, activeModel, autoSaveOn,
       saveWith: save,
       compare,

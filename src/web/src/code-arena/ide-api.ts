@@ -1,4 +1,5 @@
 import { api, ApiError } from '@/lib/api'
+import type { ServerInfo } from './lsp/client'
 
 /** A file or folder in a folder's listing; paths are relative to the working directory, with "/". */
 export interface Entry {
@@ -369,6 +370,27 @@ export const closeTerminal = (id: string) => api('/api/terminals/close', { body:
  */
 export const terminalSocketUrl = (id: string, where: Location = window.location) =>
   `${where.protocol === 'https:' ? 'wss' : 'ws'}://${where.host}/api/terminals/socket?id=${at(id)}`
+
+/** The language servers code-arena knows, as found on this computer or named in config.json. */
+export const languageServerList = () => api<ServerInfo[]>('/api/lsp')
+
+/** A language server's last stderr lines, whether it runs, and why its last start was refused. */
+export interface LanguageServerLog {
+  server: string
+  running: boolean
+  exitCode: number | null
+  lines: string[]
+  refused?: string | null
+}
+
+export const languageServerLogQuery = (id: string) => ({
+  queryKey: ['code', 'lsp', 'log', id] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<LanguageServerLog>(`/api/lsp/log?server=${encodeURIComponent(id)}`, { signal }),
+})
+
+/** A language server's socket (it starts as the socket opens, and stops as it closes): the Language Server Protocol's messages, one per text frame. */
+export const lspSocketUrl = (id: string, where: Location = window.location) =>
+  `${where.protocol === 'https:' ? 'wss' : 'ws'}://${where.host}/api/lsp/socket?server=${encodeURIComponent(id)}`
 
 /** The folder a path is in ("" for the working directory). */
 export const parentOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '')

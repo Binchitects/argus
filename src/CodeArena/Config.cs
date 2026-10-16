@@ -205,6 +205,8 @@ internal sealed class Config
     public string? CommitEmail { get; set; }
     /// <summary>The IDE's debug adapters the person installed themselves, by id ("gdb", "lldb-dap", …): found before any other.</summary>
     public Dictionary<string, DebugAdapterConfig> DebugAdapters { get; set; } = [];
+    /// <summary>The IDE's language servers the person named, by id: their own, or what changes a built-in one ("typescript", "gopls", …).</summary>
+    public Dictionary<string, LanguageServerConfig> LanguageServers { get; set; } = [];
 
     /// <summary>https://gateway.DOMAIN, or the gateway given; without a trailing /v1.</summary>
     public string? GatewayUrl => Gateway is { Length: > 0 } g ? TrimV1(g) : DeriveGateway(Url);
@@ -307,6 +309,9 @@ internal sealed class Config
             : [];
         config.DebugAdapters = raw["debugAdapters"] is JsonObject adapters
             ? adapters.ToDictionary(a => a.Key, a => DebugAdapterConfig.From(a.Value), StringComparer.Ordinal)
+            : [];
+        config.LanguageServers = raw["languageServers"] is JsonObject languageServers
+            ? languageServers.ToDictionary(s => s.Key, s => LanguageServerConfig.From(s.Value), StringComparer.Ordinal)
             : [];
         return config;
     }
@@ -424,6 +429,7 @@ internal sealed class Config
         Set("commitName", CommitName);
         Set("commitEmail", CommitEmail);
         Set("debugAdapters", DebugAdapters.Count == 0 ? null : new JsonObject(DebugAdapters.Select(a => KeyValuePair.Create(a.Key, a.Value.Raw?.DeepClone()))));
+        Set("languageServers", LanguageServers.Count == 0 ? null : new JsonObject(LanguageServers.Select(s => KeyValuePair.Create(s.Key, s.Value.Raw?.DeepClone()))));
         PrivateFiles.WriteAllText(file, raw.ToJsonString(Json.Indented) + "\n");
         _raw = raw;
     }
