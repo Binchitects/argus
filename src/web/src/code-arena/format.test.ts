@@ -3,7 +3,7 @@ import type * as Monaco from 'monaco-editor'
 import { describe, expect, it, vi } from 'vitest'
 import { toast } from '@/components/ui/toaster'
 import type { MonacoModule } from './editor-state'
-import { editorsOwn, formatModel, formatterOf, installFormatting, keepEditorFormatters, minimalEdit, offerFormatting } from './format'
+import { editorsOwn, formatModel, formatterOf, installFormatting, keepEditorFormatters, lineEdit, minimalEdit, offerFormatting } from './format'
 import { formatText, formattersQuery, type Formatter, type Formatters } from './ide-api'
 
 vi.mock('@/components/ui/toaster', () => ({ toast: { info: vi.fn(), error: vi.fn() } }))
@@ -18,6 +18,19 @@ describe('formatting', () => {
     expect(minimalEdit('xx', '')).toEqual({ start: 0, end: 2, text: '' })
     // Repeated letters at the edges are not counted twice.
     expect(minimalEdit('aaa', 'aa')).toEqual({ start: 2, end: 3, text: '' })
+  })
+
+  it('turns a text read again into one edit of whole lines, so what is marked on the lines left alone moves with them', () => {
+    // A line added at the top: nothing of the old text is in the edit (a breakpoint on foo() moves down a line).
+    expect(lineEdit('a\nfoo()\n', 'import x\na\nfoo()\n')).toEqual({ start: 0, end: 0, text: 'import x\n' })
+    // A line taken away above: only that line goes.
+    expect(lineEdit('import x\na\nfoo()\n', 'a\nfoo()\n')).toEqual({ start: 0, end: 9, text: '' })
+    // A change inside a line takes the whole line, not the letters around it.
+    expect(lineEdit('a = 1\nb = 2\nc = 3\n', 'a = 1\nb = 22\nc = 3\n')).toEqual({ start: 6, end: 12, text: 'b = 22\n' })
+    expect(lineEdit('a\r\nb\r\n', 'a\r\nx\r\nb\r\n')).toEqual({ start: 3, end: 3, text: 'x\r\n' })
+    expect(lineEdit('a\nb', 'a\nb\n')).toEqual({ start: 2, end: 3, text: 'b\n' })
+    expect(lineEdit('', 'x\n')).toEqual({ start: 0, end: 0, text: 'x\n' })
+    expect(lineEdit('same\n', 'same\n')).toBeNull()
   })
 
   it("reads VS Code's extension ids in editor.defaultFormatter as code-arena's formatters", () => {

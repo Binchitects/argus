@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import codeArenaDoc from '@docs/code-arena.md?raw'
@@ -124,8 +124,13 @@ const fakes = vi.hoisted(() => {
     getLineContent(line: number) {
       return this.value.split('\n')[line - 1] ?? ''
     }
+    eol = '\n'
     getEOL() {
-      return '\n'
+      return this.eol
+    }
+    /** As Monaco's: LF (0) or CRLF (1). */
+    setEOL(e: number) {
+      this.eol = e === 1 ? '\r\n' : '\n'
     }
     getVersionId() {
       return this.alt
@@ -203,6 +208,10 @@ const fakes = vi.hoisted(() => {
         },
         getRanges: () => this.decorations.map((d) => d.range),
       }
+    }
+    /** Monaco's keybinding service as its editors hold it: Monaco's own default keys in its resolver. */
+    _standaloneKeybindingService = {
+      _getResolver: () => ({ _defaultKeybindings: [{ command: 'editor.action.addSelectionToNextFindMatch', when: { serialize: () => 'editorFocus' }, resolvedKeybinding: { getUserSettingsLabel: () => 'ctrl+d' } }] }),
     }
     contextKeys: Record<string, unknown> = {}
     createContextKey(key: string, value: unknown) {
@@ -439,6 +448,8 @@ vi.mock('monaco-editor', () => ({
     remeasureFonts: () => undefined,
     TrackedRangeStickiness: { NeverGrowsWhenTypingAtEdges: 1 },
     OverviewRulerLane: { Left: 1 },
+    MinimapPosition: { Inline: 1, Gutter: 2 },
+    EndOfLineSequence: { LF: 0, CRLF: 1 },
     MouseTargetType: { GUTTER_GLYPH_MARGIN: 2 },
   },
   Range: class {
@@ -2558,6 +2569,231 @@ describe('Code Arena, the language servers', () => {
     const item = await within(screen.getByRole('contentinfo', { name: 'Status bar' })).findByRole('button', { name: 'Language server typescript-language-server: not installed' })
     expect(item).toHaveAttribute('title', expect.stringContaining('npm install -g typescript-language-server typescript'))
     expect(lsp()).toBeUndefined()
+  })
+})
+
+describe('Code Arena, the IDE, as its review asked', () => {
+  it("gives Monaco the workbench's context keys and quick diff's keys from the keymap, and lists Monaco's own keys", async () => {
+    backend({}, {}, { 'keybindings.json': '[{ "key": "shift+alt+f3", "command": "-editor.action.dirtydiff.previous" }]' })
+    renderIde()
+    await openApp()
+    // A when clause of the workbench's keys holds in the editor too ("resourceLangId == typescript").
+    await waitFor(() => expect(editor().contextKeys).toMatchObject({ resourceLangId: 'typescript', resourceFilename: 'app.ts', activeEditor: 'workbench.editors.files.textFileEditor', activeViewlet: 'workbench.view.explorer' }))
+    // Quick diff's actions have no keys of their own: Alt+F3 is the keymap's, which keybindings.json takes away.
+    expect(editor().actions.get('editor.action.dirtydiff.next')!.keybindings).toBeUndefined()
+    const given = () => fakes.keybindingRules.at(-1)!.filter((r) => !r.command.startsWith('-'))
+    await waitFor(() => expect(given()).toContainEqual({ keybinding: 512 | 61, command: 'editor.action.dirtydiff.next', commandArgs: undefined, when: 'editorTextFocus' }))
+    expect(given().some((r) => r.command === 'editor.action.dirtydiff.previous')).toBe(false)
+    // Monaco's own Ctrl+D: listed with its key, never given back to Monaco (which has it).
+    expect(given().some((r) => r.command === 'editor.action.addSelectionToNextFindMatch')).toBe(false)
+    await userEvent.keyboard('{Control>}k{/Control}{Control>}s{/Control}')
+    const page = await screen.findByRole('region', { name: 'Keyboard Shortcuts' })
+    await userEvent.type(within(page).getByRole('searchbox', { name: 'Search keybindings' }), 'addSelectionToNextFindMatch')
+    expect(await within(page).findByRole('button', { name: /^editor\.action\.addSelectionToNextFindMatch: Ctrl\+D\./ })).toBeInTheDocument()
+  })
+
+  it('keeps the browser from reloading or saving the page when a key of the debugger or Save does nothing now', async () => {
+    backend()
+    renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    // No session: Stop's Shift+F5 holds for none, and the browser's hard reload does not run.
+    expect(fireEvent.keyDown(document.body, { key: 'F5', code: 'F5', shiftKey: true })).toBe(false)
+    // The Settings page has nothing to save: Ctrl+S does not open the browser's Save Page As.
+    await userEvent.keyboard('{Control>},{/Control}')
+    await screen.findByRole('region', { name: 'Settings' })
+    expect(fireEvent.keyDown(document.body, { key: 's', code: 'KeyS', ctrlKey: true })).toBe(false)
+    // Another key goes on.
+    expect(fireEvent.keyDown(document.body, { key: 'F7', code: 'F7' })).toBe(true)
+  })
+
+  it("renames and deletes in the explorer with the keymap's keys, which keybindings.json changes", async () => {
+    backend({}, {}, { 'keybindings.json': '[{ "key": "f2", "command": "-renameFile" }, { "key": "ctrl+alt+r", "command": "renameFile", "when": "filesExplorerFocus" }]' })
+    renderIde()
+    const readme = await screen.findByRole('treeitem', { name: 'README.md' })
+    // The menu shows the key as it is now.
+    await userEvent.pointer({ keys: '[MouseRight]', target: readme })
+    expect(await screen.findByRole('menuitem', { name: 'Rename Ctrl+Alt+R' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Delete Delete' })).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    act(() => screen.getByRole('treeitem', { name: 'README.md' }).focus())
+    await userEvent.keyboard('{F2}')
+    expect(screen.queryByRole('textbox', { name: 'New name for README.md' })).not.toBeInTheDocument()
+    await userEvent.keyboard('{Control>}{Alt>}r{/Alt}{/Control}')
+    expect(await screen.findByRole('textbox', { name: 'New name for README.md' })).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    act(() => screen.getByRole('treeitem', { name: 'README.md' }).focus())
+    await userEvent.keyboard('{Delete}')
+    expect(await screen.findByRole('alertdialog', { name: 'Delete README.md?' })).toBeInTheDocument()
+  })
+
+  it('has the bar of a compare opened before any file work, and closing it saves the unsaved side no other tab holds', async () => {
+    const { calls } = backend()
+    renderIde()
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'src, the agent changed files in it' }))
+    await userEvent.pointer({ keys: '[MouseRight]', target: screen.getByRole('treeitem', { name: 'README.md' }) })
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Select for Compare' }))
+    await userEvent.pointer({ keys: '[MouseRight]', target: await screen.findByRole('treeitem', { name: 'app.ts, changed by the agent' }) })
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Compare with Selected' }))
+    expect(await within(tabs()).findByRole('tab', { name: 'README.md ↔ app.ts', selected: true })).toBeInTheDocument()
+    const diff = () => fakes.diffEditors[0]!
+    await waitFor(() => expect(diff().model?.original.getValue()).toBe('# Shop\n'))
+    // The diff editor was made after the bar first rendered: the bar has its counts and its buttons all the same.
+    expect(await screen.findByTitle('1 change')).toHaveTextContent('+1 −1')
+    await userEvent.click(screen.getByRole('button', { name: 'Next change' }))
+    expect(diff().went).toEqual(['next'])
+    // The left side typed in (README.md has no tab of its own): closing asks for it, and Save saves it.
+    act(() => diff().model!.original.setValue('# Shop!\n'))
+    await userEvent.click(within(tabs()).getByRole('button', { name: 'Close README.md ↔ app.ts' }))
+    const ask = await screen.findByRole('dialog', { name: 'Save the changes to README.md?' })
+    await userEvent.click(within(ask).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/file')?.body).toEqual({ path: 'README.md', text: '# Shop!\n', version: 'r1' }))
+    await waitFor(() => expect(screen.queryByRole('tablist', { name: 'Open files' })).not.toBeInTheDocument())
+  })
+
+  it("keeps what is typed in the agent's compare when the change is accepted: the file stays open, not saved", async () => {
+    const { calls } = backend()
+    renderIde()
+    await userEvent.click(await screen.findByRole('button', { name: 'Agent changes (1)' }))
+    await userEvent.click(within(await screen.findByRole('list', { name: 'Changed files' })).getByRole('button', { name: /app\.ts.*changed/ }))
+    await waitFor(() => expect(fakes.diffEditors[0]?.model?.modified.value).toBe('const total = 1\nconsole.log(total)\n'))
+    const file = fakes.diffEditors[0]!.model!.modified
+    act(() => file.setValue('const total = 2\n'))
+    await userEvent.click(screen.getByRole('button', { name: 'Accept' }))
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/changes/accept')).toBe(true))
+    expect(await within(tabs()).findByRole('tab', { name: 'app.ts, not saved' })).toBeInTheDocument()
+    expect(file.disposed).toBe(false)
+    expect(file.value).toBe('const total = 2\n')
+  })
+
+  it("shows the agent's compare of a file it then deletes with the file's side empty, not blank", async () => {
+    let gone = false
+    const b = backend({
+      'GET /api/changes/diff': (_, __, url) => ({ json: { path: url.searchParams.get('path'), original: 'const total = 0\n', modified: gone ? null : b.disk['src/app.ts']!.text, version: 'v1' } }),
+      'POST /api/messages': () => {
+        gone = true
+        delete b.disk['src/app.ts']
+        return answerOnly()
+      },
+    })
+    renderIde()
+    await userEvent.click(await screen.findByRole('button', { name: 'Agent changes (1)' }))
+    await userEvent.click(within(await screen.findByRole('list', { name: 'Changed files' })).getByRole('button', { name: /app\.ts.*changed/ }))
+    const diff = () => fakes.diffEditors[0]!
+    await waitFor(() => expect(diff().model?.modified.value).toBe('const total = 1\nconsole.log(total)\n'))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'Delete it{Enter}')
+    await waitFor(() => expect(diff().model?.modified.getValue()).toBe(''))
+    expect(diff().model?.original.getValue()).toBe('const total = 0\n')
+    expect(diff().options).toMatchObject({ readOnly: true, renderMarginRevertIcon: false })
+    expect(within(tabs()).getByRole('tab', { name: /app\.ts\s*changes/ })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('moves a breakpoint with its line when the agent adds a line above it', async () => {
+    const b = backend({
+      'POST /api/messages': () => {
+        b.disk['src/app.ts'] = { text: "import x from 'x'\nconst total = 1\nconsole.log(total)\n", version: 'v2' }
+        return answerOnly()
+      },
+    })
+    renderIde()
+    await openApp()
+    const model = editor().model!
+    const edits: unknown[] = []
+    const push = model.pushEditOperations.bind(model)
+    model.pushEditOperations = (before, ops) => {
+      edits.push(...ops.map((o) => o.range))
+      return push(before, ops)
+    }
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'Import x{Enter}')
+    await waitFor(() => expect(model.value).toBe("import x from 'x'\nconst total = 1\nconsole.log(total)\n"))
+    // One edit, at the top, of no old text: Monaco moves what is on the lines below (a breakpoint, the cursor) with them.
+    expect(edits).toEqual([{ startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 }])
+  })
+
+  it('keeps the indentation chosen for a file when another language is shown or another setting changes', async () => {
+    backend()
+    const { client } = renderIde()
+    await openApp()
+    const model = editor().model!
+    // Indent Using Tabs, from the status bar.
+    act(() => model.updateOptions({ insertSpaces: false }))
+    await userEvent.click(screen.getByRole('treeitem', { name: 'README.md' }))
+    await waitFor(() => expect(editor().model?.value).toBe('# Shop\n'))
+    await act(() => client.invalidateQueries())
+    expect(model.options.insertSpaces).toBe(false)
+  })
+
+  it('leaves the Settings page open when a folder named Settings is renamed', async () => {
+    const { calls } = backend()
+    renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    await userEvent.click(screen.getByRole('button', { name: 'New folder' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Name of the new folder' }), 'Settings{Enter}')
+    await screen.findByRole('treeitem', { name: 'Settings' })
+    await userEvent.keyboard('{Control>},{/Control}')
+    expect(await within(tabs()).findByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true')
+    act(() => screen.getByRole('treeitem', { name: 'Settings' }).focus())
+    await userEvent.keyboard('{F2}')
+    const name = screen.getByRole('textbox', { name: 'New name for Settings' })
+    await userEvent.clear(name)
+    const reads = calls.filter((c) => c.path === '/api/changes').length
+    await userEvent.type(name, 'Prefs{Enter}')
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/files/rename')?.body).toEqual({ from: 'Settings', to: 'Prefs' }))
+    // The rename went through: the agent's changes are read again (their paths may have moved).
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/changes').length).toBeGreaterThan(reads))
+    expect(within(tabs()).getByRole('tab', { name: 'Settings' })).toBeInTheDocument()
+    expect(screen.queryByText(/Cannot read/)).not.toBeInTheDocument()
+  })
+
+  it('gives a new file the line ending "files.eol" says, and leaves a file with lines its own', async () => {
+    backend({}, {}, { 'settings.json': '{ "files.eol": "\\r\\n" }' })
+    renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    await userEvent.click(screen.getByRole('button', { name: 'New file' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Name of the new file' }), 'notes.txt{Enter}')
+    await waitFor(() => expect(fakes.models.find((m) => m.uri?.toString() === 'file:///notes.txt')?.getEOL()).toBe('\r\n'))
+    await userEvent.click(screen.getByRole('treeitem', { name: 'README.md' }))
+    await waitFor(() => expect(fakes.models.find((m) => m.uri?.toString() === 'file:///README.md')?.getEOL()).toBe('\n'))
+  })
+
+  it("reads VS Code's language ids in \"files.associations\" as Monaco's", async () => {
+    backend({}, {}, { 'settings.json': '{ "files.associations": { "*.md": "typescriptreact" } }' })
+    renderIde()
+    // A .md file read as "typescriptreact": Monaco's typescript.
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'README.md' }))
+    await waitFor(() => expect(fakes.models.find((m) => m.uri?.toString() === 'file:///README.md')?.language).toBe('typescript'))
+  })
+
+  it('applies the terminal settings to the terminals, and again as they change', async () => {
+    const b = backend({}, {}, { 'settings.json': '{ "terminal.integrated.fontSize": 16, "terminal.integrated.cursorStyle": "line", "terminal.integrated.lineHeight": 1.5 }' })
+    const { client } = renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    await userEvent.keyboard('{Control>}j{/Control}')
+    await waitFor(() => expect(fakes.terminals).toHaveLength(1))
+    expect(fakes.terminals[0]!.options).toMatchObject({ fontSize: 16, cursorStyle: 'bar', lineHeight: 1.5, cursorBlink: true, scrollback: 10000, fontFamily: "'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', monospace" })
+    b.now.user['settings.json'] = '{ "terminal.integrated.fontSize": 18, "terminal.integrated.scrollback": 500 }'
+    await act(() => client.invalidateQueries())
+    await waitFor(() => expect(fakes.terminals[0]!.options).toMatchObject({ fontSize: 18, scrollback: 500, cursorStyle: 'block', lineHeight: 1 }))
+  })
+
+  it("shows the terminal a task reuses when the panel is first drawn for it, whatever the server's order", async () => {
+    const build = { id: '8', kind: 'task', title: 'build', pid: 80, cols: 80, rows: 24, exitCode: 0 }
+    const shell = { id: '9', title: 'bash', pid: 90, cols: 80, rows: 24, exitCode: null }
+    // The server keeps the task's terminal where it was, before the shell.
+    const terms: TerminalInfo[] = [build, shell]
+    backend({
+      'GET /api/terminals': () => ({ json: terms }),
+      'GET /api/tasks': () => ({ json: { tasks: [{ label: 'build', source: 'workspace', group: 'build', isDefault: true, command: 'make' }], errors: [], trusted: true, buildConfiguration: 'Debug' } }),
+      'POST /api/tasks/run': () => {
+        terms[0] = { ...build, exitCode: null }
+        return { json: { task: 'build', terminal: terms[0], terminals: [terms[0]] } }
+      },
+    })
+    renderIde()
+    await screen.findByRole('tree', { name: 'Files' })
+    await userEvent.keyboard('{Control>}{Shift>}b{/Shift}{/Control}')
+    const panel = await screen.findByRole('region', { name: 'Terminal' })
+    await waitFor(() => expect(within(panel).getAllByRole('tab').map((t) => t.textContent)).toEqual(['build 8', 'bash 9']))
+    expect(within(panel).getByRole('tab', { name: /build/ })).toHaveAttribute('aria-selected', 'true')
   })
 })
 

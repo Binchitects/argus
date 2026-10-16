@@ -97,6 +97,8 @@ export interface EditorApi {
   compare: (left: Side, right: Side) => Promise<void>
   /** The diff editor shown, for the compare's toolbar. */
   diffEditor: () => Monaco.editor.IStandaloneDiffEditor | null
+  /** Whether the diff editor is made yet (the first time a compare shows): the toolbar renders again when it is. */
+  diffMade: boolean
   /** Stages, unstages, reverts or accepts the change at the cursor (or those selected) in the compare shown. */
   changeAction: (kind: 'stage' | 'unstage' | 'revert' | 'accept') => Promise<void>
   /** Swaps a compare's sides. */

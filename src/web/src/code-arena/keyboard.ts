@@ -5,7 +5,7 @@ import { defaultKeybindings } from './default-keybindings'
 import { onExtensionKeybindings } from './extensions'
 import { userFileQuery } from './ide-api'
 import { parse } from './jsonc'
-import { buildRules, chordLabel, chordOf, keyFor, keysLabel, resolve, type Chord, type Context, type Rule, type RuleJson, type RuleProblem } from './keys'
+import { buildRules, chordLabel, chordOf, isMac, keyFor, keysLabel, parseKey, resolve, sameChord, type Chord, type Context, type Rule, type RuleJson, type RuleProblem } from './keys'
 import { useSetting } from './settings'
 
 /**
@@ -27,6 +27,8 @@ const state: KeymapState = { rules: buildRules(defaultKeybindings, []).rules, pr
 const listeners = new Set<() => void>()
 let extensionRules: RuleJson[] = []
 let userRules: unknown[] = []
+/** Monaco's own default keys, as rules: listed and taken away by keybindings.json, never given back to Monaco. */
+let monacoRules: RuleJson[] = []
 const context: Context = {}
 /** The editor's own commands (Monaco's actions), by id with their titles: a key for one of them in keybindings.json is no mistake. */
 const editorCommands = new Map<string, string>()
@@ -67,6 +69,11 @@ export const keymap = {
     for (const c of list) editorCommands.set(c.id, c.label)
     rebuild()
   },
+  /** Monaco's own default keys, once the editor is there. */
+  setEditorDefaults(rules: RuleJson[]) {
+    monacoRules = rules
+    rebuild()
+  },
   /** Monaco's own commands known so far: id to title. */
   get editorCommands(): ReadonlyMap<string, string> {
     return editorCommands
@@ -76,7 +83,7 @@ export const keymap = {
 function rebuild() {
   // An extension's key for a command Code Arena does not have is left out: in the editor it would swallow the key.
   const extension = extensionRules.filter((r) => hasCommand(r.command) || editorCommands.has(r.command))
-  const built = buildRules(defaultKeybindings, userRules, (id) => hasCommand(id) || editorCommands.has(id) || id.startsWith('editor.'), extension)
+  const built = buildRules(defaultKeybindings, userRules, (id) => hasCommand(id) || editorCommands.has(id) || id.startsWith('editor.'), extension, monacoRules)
   state.rules = built.rules
   state.problems = built.problems
   changed()
@@ -96,8 +103,11 @@ onExtensionKeybindings((rules) => {
   if (rules.length > 0 || extensionRules.length > 0) keymap.setExtensions(rules)
 })
 
-/** The context keys Monaco's own resolver is given too (for the rules it applies in the editor). */
-const editorKeys = ['inDebugMode', 'debugState', 'debugType', 'sideBarVisible', 'panelVisible', 'auxiliaryBarVisible']
+/**
+ * The context keys Monaco's own resolver is given too (for the rules it applies in the editor): the workbench's that
+ * Monaco does not set itself. editorIsOpen and textCompareEditorVisible are each editor's own.
+ */
+const editorKeys = ['inDebugMode', 'debugState', 'debugType', 'sideBarVisible', 'panelVisible', 'auxiliaryBarVisible', 'resourceLangId', 'resourceFilename', 'activeEditor', 'activeViewlet']
 const editorContexts: Map<string, { set(v: unknown): void }>[] = []
 
 /** An editor of Monaco's gets the workbench's context keys, kept up to date. */
@@ -149,6 +159,9 @@ export const defaultSkipShell = [
   'workbench.action.tasks.build', 'workbench.action.tasks.runTask', 'workbench.action.tasks.test',
 ]
 
+/** The browser's keys the page always keeps: reload (F5, Ctrl+F5, Shift+F5) and save (Ctrl+S, ⌘S). */
+const guardedKeys = () => ['f5', 'shift+f5', 'ctrl+f5', 'ctrl+shift+f5', isMac() ? 'cmd+s' : 'ctrl+s'].map((k) => parseKey(k)![0]!)
+
 const inputFocused = (el: Element | null) => !!el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || (el as HTMLElement).isContentEditable)
 
 /**
@@ -196,7 +209,8 @@ export function useKeyboard() {
         editorTextFocus: false,
         isInDiffEditor: false,
       }
-      const accept = inTerminal ? (r: Rule) => skip.has(r.command) || (allowChords && r.chords.length === 2) : undefined
+      // Monaco's own keys are its resolver's: they do nothing outside the editor.
+      const accept = (r: Rule) => r.source !== 'editor' && (!inTerminal || skip.has(r.command) || (allowChords && r.chords.length === 2))
       const pending = state.pending
       const found = resolve(state.rules, chord, ctx, pending, accept)
       if (pending) {
@@ -214,14 +228,27 @@ export function useKeyboard() {
         e.stopPropagation()
         return
       }
-      if (found.kind === 'command' && getCommand(found.rule.command) && runCommand(found.rule.command, found.rule.args)) {
+      if (found.kind === 'command' && getCommand(found.rule.command)) {
+        // A command that is off now (Save on the Settings page) still keeps its key from the browser.
         e.preventDefault()
+        if (!runCommand(found.rule.command, found.rule.args)) return
         e.stopPropagation()
         if (state.status) say(null)
       }
     }
+    // After the editor and the terminals had the key (they take theirs): the browser's reload and save never run, whether
+    // or not a rule of the debugger's holds now (F5 while a session runs, Shift+F5 after a run without debugging).
+    const guard = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || (e.target instanceof Element && e.target.closest('.xterm'))) return
+      const chord = chordOf(e)
+      if (chord && guardedKeys().some((g) => sameChord(g, chord))) e.preventDefault()
+    }
     window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
+    window.addEventListener('keydown', guard)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('keydown', guard)
+    }
   }, [allowChords, sendAll, extraSkip])
 }
 

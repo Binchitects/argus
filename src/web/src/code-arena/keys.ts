@@ -22,7 +22,8 @@ export interface Rule {
   args?: unknown
   when?: When
   whenText?: string
-  source: 'default' | 'user' | 'extension'
+  /** editor: Monaco's own default (its resolver has it already: shown, never given back to it). */
+  source: 'default' | 'user' | 'extension' | 'editor'
   /** The key as written, for the Keyboard Shortcuts editor. */
   key: string
   /** A rule of keybindings.json: its place in the file's array. */
@@ -338,11 +339,12 @@ export const keyOnThisSystem = (r: RuleJson, mac = isMac()) =>
   mac ? (r.mac ?? r.key.replace(/\bctrl\+/g, 'cmd+')) : typeof navigator !== 'undefined' && navigator.platform.startsWith('Win') ? (r.win ?? r.key) : (r.linux ?? r.key)
 
 /**
- * The rules that apply: the defaults, then the extensions', then the person's, each "-command" rule taking away the
- * earlier rules of that command (only those of its key and when, when it says them) and kept itself, for Monaco's own
- * keys. A rule of a command Code Arena does not have is left out, so the key keeps its default.
+ * The rules that apply: Monaco's own defaults (for the lists: Monaco applies them itself), the workbench's defaults, then
+ * the extensions', then the person's, each "-command" rule taking away the earlier rules of that command (only those of
+ * its key and when, when it says them) and kept itself, for Monaco's own keys. A rule of a command Code Arena does not
+ * have is left out, so the key keeps its default.
  */
-export function buildRules(defaults: RuleJson[], user: unknown[], known?: (id: string) => boolean, extension: RuleJson[] = []): { rules: Rule[]; problems: RuleProblem[] } {
+export function buildRules(defaults: RuleJson[], user: unknown[], known?: (id: string) => boolean, extension: RuleJson[] = [], editor: RuleJson[] = []): { rules: Rule[]; problems: RuleProblem[] } {
   const rules: Rule[] = []
   const problems: RuleProblem[] = []
   const read = (r: RuleJson, source: Rule['source'], key: string) => {
@@ -350,6 +352,11 @@ export function buildRules(defaults: RuleJson[], user: unknown[], known?: (id: s
     const parsed = r.when ? parseWhen(r.when) : {}
     if (!chords || parsed.error) return null
     return { chords, command: r.command, args: r.args, when: parsed.when, whenText: r.when, source, key } satisfies Rule
+  }
+  // Monaco's keys come first: the workbench's own win over them, as they do in Monaco (given to it as its overrides).
+  for (const r of editor) {
+    const rule = read(r, 'editor', r.key)
+    if (rule) rules.push(rule)
   }
   for (const r of defaults) {
     const rule = read(r, 'default', keyOnThisSystem(r))
@@ -416,9 +423,21 @@ export function resolve(rules: Rule[], pressed: Chord, ctx: Context, pending: Ch
   return { kind: 'none' }
 }
 
-/** The key of a command, for menus and tooltips: the person's last rule for it, else its first default (VS Code's primary key). */
+/**
+ * Keys the browser keeps for itself in a tab (Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Tab, Ctrl+PageUp/PageDown, Ctrl+F4, with Shift
+ * too; ⌘W, ⌘T, ⌘N on macOS), first or second in a chord: a rule with one of them works only in an app window.
+ */
+export const browserKeeps = (chords: Chord[], mac = isMac()) =>
+  chords.some((c) => !c.alt && ((c.ctrl && c.key === 'tab') || ((mac ? c.meta : c.ctrl) && ['w', 't', 'n', 'tab', 'pageup', 'pagedown', 'f4'].includes(c.key))))
+
+/**
+ * The key of a command, for menus and tooltips: the person's (or an extension's) last rule for it, else its first default
+ * (VS Code's primary key) that the browser lets the page have, the workbench's before Monaco's.
+ */
 export function keyFor(rules: Rule[], command: string, mac = isMac()): string | undefined {
-  const r = rules.findLast((x) => x.command === command && !x.args && x.source !== 'default') ?? rules.find((x) => x.command === command && !x.args)
+  const of = (x: Rule) => x.command === command && !x.args
+  const defaults = [...rules.filter((x) => of(x) && x.source === 'default'), ...rules.filter((x) => of(x) && x.source === 'editor')]
+  const r = rules.findLast((x) => of(x) && (x.source === 'user' || x.source === 'extension')) ?? defaults.find((x) => !browserKeeps(x.chords, mac)) ?? defaults[0]
   return r ? keysLabel(r.chords, mac) : undefined
 }
 
@@ -456,4 +475,28 @@ export function monacoKeybinding(chords: Chord[], m: MonacoKeys, mac = isMac()):
   if (chords.length === 1) return first
   const second = one(chords[1]!)
   return second === null ? null : m.KeyMod.chord(first, second)
+}
+
+/** Monaco's keybinding service, as its editors hold it (not in its API): its resolver keeps Monaco's own defaults. */
+interface MonacoKeybindings {
+  _getResolver?: () => {
+    _defaultKeybindings?: { command: string | null; commandArgs?: unknown; when?: { serialize(): string }; resolvedKeybinding?: { getUserSettingsLabel(): string | null } }[]
+  }
+}
+
+/**
+ * Monaco's own default keys (Ctrl+D, Alt+↑, the Ctrl+K Ctrl+C chords…) as keybindings.json writes them, for the Keyboard
+ * Shortcuts editor and the palette. F1 is the workbench's palette's (Monaco's is taken away).
+ */
+export function monacoDefaults(ed: object): RuleJson[] {
+  const service = (ed as unknown as { _standaloneKeybindingService?: MonacoKeybindings })._standaloneKeybindingService
+  const out: RuleJson[] = []
+  for (const k of service?._getResolver?.()._defaultKeybindings ?? []) {
+    const key = k.resolvedKeybinding?.getUserSettingsLabel()
+    if (!key || !k.command || k.command.startsWith('-') || k.command === 'editor.action.quickCommand') continue
+    const when = k.when?.serialize()
+    if (when === 'false') continue
+    out.push({ key, command: k.command, ...(when ? { when } : {}), ...(k.commandArgs !== undefined ? { args: k.commandArgs } : {}) })
+  }
+  return out
 }

@@ -6,6 +6,7 @@ import JsonWorker from 'monaco-editor/language/json/json.worker?worker'
 import TsWorker from 'monaco-editor/language/typescript/ts.worker?worker'
 import { keepEditorFormatters } from './format'
 import { globMatch } from './glob'
+import { monacoLanguageId } from './settings-schema'
 
 // Monaco, bundled with the page: its workers are files of the page's own (Vite's
 // ?worker imports), so nothing is fetched from anywhere else, ever. This module
@@ -184,7 +185,8 @@ export function languageOf(path: string, associations: Record<string, string> = 
   let best: { id: string; name: string; length: number } | null = null
   // "files.associations": a name or a pattern (*.inc, **/build/*.txt) to a language id.
   for (const [pattern, id] of Object.entries(associations)) {
-    const l = languages.find((x) => x.id === id)
+    // VS Code's ids (typescriptreact, shellscript…) are Monaco's language for them.
+    const l = languages.find((x) => x.id === monacoLanguageId(id))
     if (l && globMatch(pattern, pattern.includes('/') ? path : name)) return { id: l.id, name: l.aliases?.[0] ?? l.id }
   }
   for (const l of languages) {
