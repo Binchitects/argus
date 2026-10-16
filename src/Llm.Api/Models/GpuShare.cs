@@ -42,15 +42,16 @@ public sealed partial class GpuShare : IDisposable
     private readonly EngineRoute route;
     private readonly IServiceScopeFactory scopes;
     private readonly IOptions<EngineOptions> options;
+    private readonly Modules modules;
     private readonly Replicas replicas;
     private readonly TimeProvider clock;
     private readonly ILogger<GpuShare> logger;
 
-    public GpuShare(MediaControl media, EngineState state, EngineClient engine, EngineRoute route, IServiceScopeFactory scopes, IOptions<EngineOptions> options,
+    public GpuShare(MediaControl media, EngineState state, EngineClient engine, EngineRoute route, IServiceScopeFactory scopes, IOptions<EngineOptions> options, Modules modules,
         Replicas replicas, TimeProvider clock, ILogger<GpuShare> logger)
     {
-        (this.media, this.state, this.engine, this.route, this.scopes, this.options, this.replicas, this.clock, this.logger) =
-            (media, state, engine, route, scopes, options, replicas, clock, logger);
+        (this.media, this.state, this.engine, this.route, this.scopes, this.options, this.modules, this.replicas, this.clock, this.logger) =
+            (media, state, engine, route, scopes, options, modules, replicas, clock, logger);
         // Lent on another replica: no chat model loads here either (the replica that leads runs the watcher).
         replicas.On(LentTopic, said =>
         {
@@ -114,12 +115,12 @@ public sealed partial class GpuShare : IDisposable
 
     /// <summary>
     /// The GPU for a job of <paramref name="model"/> (a picture or video model): its turn, then room when it is short. Dispose
-    /// it when the job ends (the next job's turn, and the room given back). A speech model, or one of another server, takes
-    /// no turn.
+    /// it when the job ends (the next job's turn, and the room given back). A speech model, or one whose server is not this
+    /// stack's (the gateway answers for it from wherever it is), takes no turn.
     /// </summary>
     public async Task<Hold> HoldAsync(MediaControl.Model model, CancellationToken ct)
     {
-        if (!MediaControl.FileServers.Contains(model.Server))
+        if (!MediaControl.FileServers.Contains(model.Server) || !await modules.HasAsync(model.Server, ct))
         {
             return new Hold(null, model);
         }
