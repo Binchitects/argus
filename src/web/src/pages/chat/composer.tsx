@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { ArrowUp, Clock3, EyeOff, FileText, ListEnd, Paperclip, Square, X } from 'lucide-react'
+import { ArrowUp, Clock3, EyeOff, FileText, ListEnd, Paperclip, Square, TextQuote, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -10,6 +10,8 @@ import type { ContextView } from './context'
 import { ContextGauge } from './context-gauge'
 import { VoiceButton } from './media'
 import { useRecall, type RecallSource } from './recall'
+import type { Quote } from './quote'
+import { QuoteChip } from './quote-parts'
 import { PromptFields, SlashMenu } from './slash'
 import type { Attachment, ChatModel } from './types'
 
@@ -18,6 +20,8 @@ export interface Queued {
   key: string
   text: string
   attachments: Attachment[]
+  /** The part of an answer it quotes. */
+  quote?: string | null
 }
 import type { Uploads } from './uploads'
 
@@ -27,7 +31,8 @@ import type { Uploads } from './uploads'
  * not reach the server comes back here rather than being lost. "/" at the start
  * finds a prompt of the library: chosen, its text comes into the box with a field
  * for each of its blanks, and sending fills them in. ↑ brings back what was sent
- * before (useRecall).
+ * before (useRecall). Part of an answer quoted (Reply) shows above it, and goes with
+ * the message: Backspace at the start of an empty box, or its X, takes it away.
  */
 export function Composer({
   streaming,
@@ -48,6 +53,9 @@ export function Composer({
   talk,
   history,
   elsewhere,
+  quote,
+  onClearQuote,
+  focusSignal,
 }: {
   streaming: boolean
   onSend: (text: string) => Promise<boolean>
@@ -75,10 +83,18 @@ export function Composer({
   history?: RecallSource
   /** Answering elsewhere ("Code Arena is answering"): what is sent is queued, and there is nothing here to stop. */
   elsewhere?: string
+  /** The part of an answer the next message quotes, and how to take it away. */
+  quote?: Quote | null
+  onClearQuote?: () => void
+  /** Each change puts the focus in the box (a quote was just added). */
+  focusSignal?: number
 }) {
   const [text, setText] = useState('')
   const area = useRef<HTMLTextAreaElement>(null)
   const picker = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (focusSignal) area.current?.focus()
+  }, [focusSignal])
 
   // The / menu: the library is fetched once a message starts with "/".
   const menuId = useId()
@@ -176,6 +192,12 @@ export function Composer({
         return
       }
     }
+    // Backspace at the start of an empty box takes the quote away.
+    if (e.key === 'Backspace' && quote && onClearQuote && !text && e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0) {
+      e.preventDefault()
+      onClearQuote()
+      return
+    }
     if (recall.onKeyDown(e)) return
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
@@ -219,6 +241,12 @@ export function Composer({
               <li key={q.key} className="flex min-w-0 items-center gap-2 rounded-lg border border-dashed bg-muted/40 py-1 ps-2.5 pe-1 text-sm">
                 <Clock3 className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                 <span className="sr-only">Queued:</span>
+                {q.quote && (
+                  <>
+                    <TextQuote className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    <span className="sr-only">Quoting part of an answer:</span>
+                  </>
+                )}
                 <span dir="auto" className="min-w-0 flex-1 truncate">
                   {q.text || `${q.attachments.length} file${q.attachments.length === 1 ? '' : 's'}`}
                   {q.text && q.attachments.length > 0 && <span className="text-muted-foreground"> · {q.attachments.length} file{q.attachments.length === 1 ? '' : 's'}</span>}
@@ -235,6 +263,16 @@ export function Composer({
           <p className="text-xs text-muted-foreground">Sent in turn when the answer ends, even if you close the page; Send now stops the answer and sends it at once.</p>
         </div>
       )}
+      {quote && onClearQuote && (
+        <QuoteChip
+          quote={quote}
+          onRemove={() => {
+            onClearQuote()
+            area.current?.focus()
+          }}
+        />
+      )}
+      <output className="sr-only">{quote ? 'Quoted in your reply' : ''}</output>
       {uploads.uploads.length > 0 && (
         <ul className="flex flex-wrap gap-2 px-3 pt-3" aria-label="Files to send">
           {uploads.uploads.map((u) => (

@@ -61,6 +61,11 @@ function tableCell(text: string): TableCell {
   return { html, text: new DOMParser().parseFromString(html, 'text/html').body.textContent ?? '' }
 }
 
+/** Markdown as the page shows it, as an element to read its words from (as a table cell's text is found). */
+export function markdownElement(text: string): HTMLElement {
+  return new DOMParser().parseFromString(sanitize(marked.parse(text, { async: false })), 'text/html').body
+}
+
 function tableBlock(t: Token): Block {
   const table = t as Tokens.Table
   return { kind: 'table', head: table.header.map((c) => tableCell(c.text)), align: table.align, rows: table.rows.map((r) => r.map((c) => tableCell(c.text))) }

@@ -68,6 +68,28 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     restarts go once it is back. While [Code Arena](code-arena.md#chats-in-arena)
     is answering in the chat, the page says so and every message is queued:
     they go when its turn ends.
+- **Reply to part of an answer.** Select words in a finished answer and a
+  small toolbar comes beside them (above them; below them on a touch screen):
+  - **Reply** (`Ctrl+Shift+'`, `⌘⇧'` on macOS) puts the part above the box as
+    a quote, with an X to take it away (Backspace at the start of an empty box
+    does too). It goes with your next message: the model reads it before your
+    question, as the part of an earlier answer you mean, and the thread shows
+    it above your question, two lines of it (**Show all** for the rest).
+    **Go to the quoted answer** goes to the answer it came from.
+  - **Ask about this** asks a short question about the part at once (or
+    three one-click ones: Explain this, Say more, Give an example), leaving
+    what is in the box as it is; while an answer runs, it is queued.
+  - **Copy** copies the words.
+
+  What is quoted is the answer's own Markdown for those words when it is found
+  (code, links and formatting kept), else the words as shown; at most 4,000
+  characters. A message needs words or files: a quote alone is not one. An
+  edit keeps the question's quote (the edit can take it away), and a fork, a
+  shared chat and an export carry it. Without a mouse, **Quote part of this
+  answer…** under an answer opens it in a box where Shift and the arrow keys
+  select a part (nothing selected quotes the whole answer). A selection over
+  several messages quotes the part in the one where it starts; questions,
+  thinking, tool cards and an answer still being written have no toolbar.
 - **Deep research.** A tool, **Deep research** in the chat's **Tools** menu
   (there is no separate button): while it is on in a chat (it is in new chats
   unless an admin changes that), the model starts it (`deep_research`) when you

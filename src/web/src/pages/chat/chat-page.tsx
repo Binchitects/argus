@@ -45,6 +45,9 @@ import { tellDesktop } from '@/lib/desktop'
 import { TraceSheet } from '@/pages/admin/trace-view'
 import { CanvasPanel } from './canvas-panel'
 import { CanvasOpener, useCanvasState } from './canvas-context'
+import { findQuoted, type Quote } from './quote'
+import { isReplyKey, useQuotableSelection } from './quotable'
+import { SelectionToolbar } from './selection-toolbar'
 
 /** The id a question is shown under until the server gives it its own. */
 let localCount = 0
@@ -197,11 +200,39 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     }
   }, [])
 
+  // The part of an answer the next message quotes (Reply), and a nudge that puts the focus in the box.
+  const [quote, setQuote] = useState<Quote | null>(null)
+  const [focusBox, setFocusBox] = useState(0)
+  const messagesNow = useRef<Message[]>([])
+  const quotable = useQuotableSelection(scroller, (messageId) => messagesNow.current.find((m) => m.id === messageId)?.content)
+  const reply = (q: Quote) => {
+    setQuote(q)
+    setFocusBox((n) => n + 1)
+    quotable.clear(true)
+  }
+
   const data = loaded.data
   const settings: ChatSettings = data
     ? { model: data.model, thinking: data.thinking, tools: data.tools, systemPrompt: data.systemPrompt, temperature: data.temperature, topP: data.topP, maxTokens: data.maxTokens }
     : draft
   const view: LiveState = live ?? { messages: data?.messages ?? [], leaf: data?.currentLeafId ?? null, notices: [], title: null, thinkingSince: null }
+  useEffect(() => {
+    messagesNow.current = view.messages
+  }, [view.messages])
+  // Ctrl+Shift+' (⌘⇧' on macOS): Reply, for what is selected in an answer.
+  const replyKey = useRef<(e: KeyboardEvent) => void>(() => {})
+  useEffect(() => {
+    replyKey.current = (e) => {
+      if (!isReplyKey(e) || !quotable.at) return
+      e.preventDefault()
+      reply(quotable.at.quote)
+    }
+  })
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => replyKey.current(e)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
   const tree = useMemo(() => new ChatTree(view.messages), [view.messages])
   const path = useMemo(() => tree.path(view.leaf), [tree, view.leaf])
   const turns = toTurns(path)
@@ -272,6 +303,18 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     if (!el) return
     setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80)
     updateReading()
+  }
+
+  /** To the answer a question quotes, marked for a moment; false when it is not on screen. */
+  const jumpToQuoted = (m: Message): boolean => {
+    const found = m.quote ? findQuoted(path, m.id, m.quote) : null
+    const target = found ? scroller.current?.querySelector<HTMLElement>(`[data-message="${found}"]`) : null
+    if (!target) return false
+    setAtBottom(false)
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    target.classList.add('found')
+    setTimeout(() => target.classList.remove('found'), 2400)
+    return true
   }
 
   const jumpTo = (questionId: string) => {
@@ -473,8 +516,11 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     }
   }
 
-  /** `talkTurn`: said in Talk, which hears the answer's events and its end, and reads it aloud. */
-  const send = async (text: string, files?: Attachment[], talkTurn?: TalkTurn): Promise<boolean> => {
+  /**
+   * `talkTurn`: said in Talk, which hears the answer's events and its end, and reads it aloud. From the box, the quote above
+   * it goes with the message (and comes back if it is not sent); `quoted`: one asked about from the selection's toolbar.
+   */
+  const send = async (text: string, files?: Attachment[], talkTurn?: TalkTurn, quoted?: Quote): Promise<boolean> => {
     const fromBox = files === undefined
     // Compare too: two models answer this message, side by side.
     const versus = fromBox ? compare : null
@@ -488,9 +534,12 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       await compact()
       return true
     }
+    const withQuote = quoted ?? (fromBox ? quote : null)
+    if (fromBox && withQuote) setQuote(null)
     const conversationId = await ensureChat()
     if (!conversationId) {
       if (versus) setCompare(versus)
+      if (fromBox && withQuote) setQuote(withQuote)
       talkTurn?.ended()
       return false
     }
@@ -500,8 +549,16 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     // Asked by voice: answered aloud.
     const aloud = aloudToo && attachments.some((a) => a.fileName.startsWith(voicePrefix))
     // The files went with the question once the server has it: the box is free for the next one while the answer streams.
-    const body = { content: text, attachments: attachments.map((a) => a.id), parentId: parent ?? undefined, root: parent === null, ...(versus?.models ? { models: versus.models } : {}), ...(talkTurn ? { spoken: true } : {}) }
-    const sent = await run(conversationId, versus ? 'compare' : 'messages', body, withQuestion(view, localId, parent, text, attachments), localId, (e) => {
+    const body = {
+      content: text,
+      attachments: attachments.map((a) => a.id),
+      parentId: parent ?? undefined,
+      root: parent === null,
+      ...(versus?.models ? { models: versus.models } : {}),
+      ...(talkTurn ? { spoken: true } : {}),
+      ...(withQuote ? { quote: withQuote.text } : {}),
+    }
+    const sent = await run(conversationId, versus ? 'compare' : 'messages', body, withQuestion(view, localId, parent, text, attachments, withQuote?.text), localId, (e) => {
       if (e.type === 'question' && fromBox) uploads.clear()
       talkTurn?.watch(e)
       // Two answers to a comparison: neither is read aloud.
@@ -511,8 +568,9 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
         if (said) speak(said).catch((err) => toast.error(errorMessage(err)))
       }
     })
-    // Not sent: it goes back into the box, and Compare stays on for it.
+    // Not sent: it goes back into the box with its quote, and Compare stays on for it.
     if (!sent && versus) setCompare(versus)
+    if (!sent && fromBox && withQuote) setQuote((now) => now ?? withQuote)
     talkTurn?.ended()
     return sent
   }
@@ -565,7 +623,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   // Written while an answer runs: each waits on the server (a reload, or another tab, still shows it)
   // and becomes the next question once the answer before is over, or at once with Send now (which
   // stops the answer). This page then watches that answer as it watched the one before.
-  const queue: Queued[] = (data?.queued ?? []).map((q) => ({ key: q.id, text: q.content, attachments: q.attachments }))
+  const queue: Queued[] = (data?.queued ?? []).map((q) => ({ key: q.id, text: q.content, attachments: q.attachments, quote: q.quote }))
   const setQueued = (chat: string, queued: QueuedMessage[]) =>
     queryClient.setQueryData<Conversation>(conversationQuery(chat).queryKey, (c) => (c ? { ...c, queued } : c))
   /** Watches the answer the chat is writing now (a queued message's): from its start, then live. */
@@ -580,24 +638,35 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       if (said) speak(said).catch((err) => toast.error(errorMessage(err)))
     })
   }
-  const enqueue = async (text: string): Promise<boolean> => {
+  /** Queues what the box holds (its files and quote); `quoted`: a question about a selection instead, with no files. */
+  const enqueue = async (text: string, quoted?: Quote): Promise<boolean> => {
     const chat = streamingIn.current ?? id
     if (!chat) return false
-    if (text === '/compact' && uploads.attachments.length === 0) {
+    const fromBox = !quoted
+    if (fromBox && text === '/compact' && uploads.attachments.length === 0) {
       toast.error('Compact when the answer is done.')
       return false
     }
+    const withQuote = quoted ?? quote
+    if (fromBox && withQuote) setQuote(null)
     try {
-      const r = await queueMessage(chat, { content: text, attachments: uploads.attachments.map((a) => a.id) })
-      uploads.clear()
+      const r = await queueMessage(chat, { content: text, attachments: fromBox ? uploads.attachments.map((a) => a.id) : [], ...(withQuote ? { quote: withQuote.text } : {}) })
+      if (fromBox) uploads.clear()
       setQueued(chat, r.queued)
       // The answer ended meanwhile: it went at once.
       if (r.answering && !abort.current) await refreshThenWatch(chat)
       return true
     } catch (e) {
-      toast.error(errorMessage(e, 'The message could not be queued. It is back in the box.'))
+      toast.error(errorMessage(e, fromBox ? 'The message could not be queued. It is back in the box.' : 'The question could not be queued.'))
+      if (fromBox && withQuote) setQuote((now) => now ?? withQuote)
       return false
     }
+  }
+  /** Ask about this: a question about the selection, sent at once with it (queued while an answer runs); the box is left as it is. */
+  const askAbout = (q: Quote, text: string) => {
+    quotable.clear(true)
+    if (streaming || data?.codeArena) void enqueue(text, q)
+    else void send(text, [], undefined, q)
   }
   const sendNow = async (key: string) => {
     const chat = streamingIn.current ?? id
@@ -656,10 +725,16 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   })
   const talkButton = <TalkButton state={talk.state} onStart={() => void talk.start()} onEnd={talk.end} />
 
-  const edit = (m: Message, text: string) => {
+  const edit = (m: Message, text: string, quoted: string | null) => {
     if (!id) return
     const localId = newLocalId()
-    void run(id, 'messages', { content: text, attachments: m.attachments.map((a) => a.id), parentId: m.parentId ?? undefined, root: m.parentId === null }, withQuestion(view, localId, m.parentId, text, m.attachments), localId)
+    void run(
+      id,
+      'messages',
+      { content: text, attachments: m.attachments.map((a) => a.id), parentId: m.parentId ?? undefined, root: m.parentId === null, ...(quoted ? { quote: quoted } : {}) },
+      withQuestion(view, localId, m.parentId, text, m.attachments, quoted),
+      localId,
+    )
   }
 
   const regenerate = (question: Message, overrides?: { model?: string; thinking?: string; length?: 'shorter' | 'longer'; answerId?: string }) => {
@@ -904,7 +979,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                       const arena = t.question ? arenaView(t.question, data?.arenas, view.arena, answering && i === lastTurn) : null
                       return (
                         <div key={t.question?.id ?? t.answer[0]?.id ?? i} className="grid gap-4">
-                          {t.question && <QuestionTurn m={t.question} siblings={tree.siblings(t.question)} busy={streaming} onSwitch={switchTo} onEdit={edit} />}
+                          {t.question && <QuestionTurn m={t.question} siblings={tree.siblings(t.question)} busy={streaming} onSwitch={switchTo} onEdit={edit} onJumpToQuote={jumpToQuoted} />}
                           {arena && t.question ? (
                             <ArenaTurn
                               arena={arena}
@@ -949,6 +1024,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                               onTrace={me?.isAdmin ? setTracing : undefined}
                               busy={streaming}
                               feedbackIn={id}
+                              onQuote={reply}
                             />
                           )}
                           {summary && <CompactedMark summary={summary} onOpenFile={openFile} />}
@@ -969,6 +1045,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   </div>
                 </div>
                 <QuestionRail questions={turns.flatMap((t) => (t.question ? [t.question] : []))} active={readingQuestion} onJump={jumpTo} gutter={gutter} />
+                <SelectionToolbar at={quotable.at} scroller={scroller} onReply={reply} onAsk={askAbout} onClose={() => quotable.clear()} onHold={quotable.hold} />
               </div>
               <div className="relative mx-auto w-full max-w-(--thread-max) px-4 pb-4 sm:px-6">
                 {!atBottom && (
@@ -1010,6 +1087,9 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   context={context}
                   onCompact={canCompact ? () => void compact() : undefined}
                   history={history}
+                  quote={quote}
+                  onClearQuote={() => setQuote(null)}
+                  focusSignal={focusBox}
                   autoFocus
                 />
               </div>

@@ -61,6 +61,8 @@ export interface Message {
   parentId: string | null
   role: 'user' | 'assistant' | 'tool'
   content: string
+  /** A question: the part of an earlier answer it quotes (its Markdown), shown above it; the model reads it before the question. */
+  quote?: string | null
   reasoning: string | null
   toolName: string | null
   toolCallId: string | null
@@ -310,6 +312,7 @@ export interface Conversation extends ConversationSummary {
 export interface QueuedMessage {
   id: string
   content: string
+  quote?: string | null
   attachments: Attachment[]
   createdAt: string
 }
