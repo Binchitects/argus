@@ -218,7 +218,7 @@ test('the engine has its model loaded, and more come from the library', async ({
   await expect(env.getByRole('button', { name: 'Unload' })).toBeVisible()
   await page.getByRole('button', { name: 'Add a model' }).click()
   const dialog = page.getByRole('dialog', { name: 'Add a model' })
-  await dialog.getByRole('combobox', { name: 'Model file' }).click()
+  await dialog.getByRole('combobox', { name: 'File or model' }).click()
   // Choosing a file names the model after it.
   await page.getByRole('option').first().click()
   await expect(dialog.getByLabel('Name')).not.toHaveValue('')

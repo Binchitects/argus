@@ -5,18 +5,17 @@ import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { DialogFooter } from '@/components/ui/dialog'
 import { Field } from '@/components/ui/field'
 import { Input, Textarea } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
-import { formatValue } from '@/lib/format'
 import { useDebounced } from '@/lib/use-debounced'
 import { cn } from '@/lib/utils'
-import { attentionLabel, bytes, kindLabel, params, summary, tokens, type LibraryFile, type ModelProfile } from './model-profile'
+import { attentionLabel, bytes, params, tokens, type LibraryFile, type ModelProfile } from './model-profile'
 
 interface Bounds {
   min: number
@@ -204,32 +203,55 @@ function body(form: FormState) {
   }
 }
 
+/** What a field another component mounts in the chat model's section is given: its values, and the form's. */
+export interface ChatModelSlotContext {
+  saved: SavedModel | null
+  /** The chosen file and what it is (undefined until the library lists it). */
+  file: LibraryFile | undefined
+  values: Record<string, unknown>
+  /** Changes some of its values: they are sent with the model, and with the request for advice. */
+  set: (patch: Record<string, unknown>) => void
+  /** The API's problems and the form's own, by field. */
+  errors: Record<string, string>
+  gpus: { index: number; name: string; total: number }[]
+}
+
 /**
- * Adding or editing an engine model. The file says what it is (dense or a
- * mixture of experts, hybrid attention, what it was trained for); the form
- * asks only what that kind has, shows each limit, starts from settings that
- * fit this machine, and estimates the memory as it is filled in. The API runs
- * the same checks on save.
+ * Fields another component adds to the chat model's section (the engine's own, for one): their starting
+ * values from the saved model, and what they show. Their values go into the request beside the form's.
  */
-export function ModelForm({
+export interface ChatModelSlot {
+  initial?: (saved: SavedModel | null) => Record<string, unknown>
+  render: (ctx: ChatModelSlotContext) => ReactNode
+}
+
+/**
+ * The chat model's part of the model dialog: how the engine runs a GGUF file
+ * from the library. The file says what it is (dense or a mixture of experts,
+ * hybrid attention, what it was trained for); the section asks only what that
+ * kind has, shows each limit, starts from settings that fit this machine, and
+ * estimates the memory as it is filled in. The API runs the same checks on save.
+ */
+export function ChatModelSection({
   saved,
+  file: chosen,
   onClose,
-  onMedia,
   gpus = [],
-  file: preset,
+  slot,
 }: {
   saved: SavedModel | null
+  /** The library file chosen in the dialog (its "File or model"). */
+  file: string
   onClose: () => void
-  /** A picture or video model's file chosen here: added as that kind of model instead. */
-  onMedia?: (mode: 'image_generation' | 'video_generation', file: string) => void
   /** The machine's GPUs: a choice is offered with two or more. */
   gpus?: { index: number; name: string; total: number }[]
-  /** A library file to start from (one just downloaded). */
-  file?: string
+  /** Fields another component mounts here. */
+  slot?: ChatModelSlot
 }) {
   const queryClient = useQueryClient()
   const library = useQuery({ queryKey: ['admin', 'models', 'library'], queryFn: ({ signal }) => api<LibraryFile[]>('/api/admin/models/library', { signal }) })
   const [form, setForm] = useState(() => initial(saved))
+  const [extra, setExtra] = useState<Record<string, unknown>>(() => slot?.initial?.(saved) ?? {})
   const [nameTouched, setNameTouched] = useState(!!saved)
   const [error, setError] = useState<string | null>(null)
   const files = library.data ?? []
@@ -239,7 +261,7 @@ export function ModelForm({
   const defaultPrice = (k: 'input' | 'cachedInput' | 'output') => (saved?.price && !saved.price.own[k] ? `${saved.price[k]} (the default)` : 'the default')
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => ({ ...f, [k]: v }))
 
-  const request = useMemo(() => body(form), [form])
+  const request = useMemo(() => ({ ...body(form), ...extra }), [form, extra])
   const debounced = useDebounced(request, 350)
   const advice = useQuery({
     queryKey: ['admin', 'models', 'advice', debounced],
@@ -280,10 +302,10 @@ export function ModelForm({
     }))
 
   const chooseFile = async (path: string) => {
-    const chosen = files.find((x) => x.path === path)
+    const picked = files.find((x) => x.path === path)
     // The name follows the file until it is typed by hand.
     setForm((cur) => ({ ...cur, file: path, name: nameTouched ? cur.name : baseName(path) }))
-    if (saved || chosen?.profile.kind !== 'language') return
+    if (saved || picked?.profile.kind !== 'language') return
     try {
       const first = await api<Advice>('/api/admin/models/advice', { body: { file: path } })
       if (first.recommended) recommend(first.recommended)
@@ -292,12 +314,12 @@ export function ModelForm({
     }
   }
 
-  // A file just downloaded: chosen once the library lists it, as if picked by hand.
-  const presetDone = useRef(false)
+  // The file chosen in the dialog (or one just downloaded): taken once the library lists it, so a language model starts from what fits.
+  const taken = useRef(saved?.file ?? '')
   useEffect(() => {
-    if (!preset || saved || presetDone.current || !files.some((f) => f.path === preset)) return
-    presetDone.current = true
-    void chooseFile(preset)
+    if (!chosen || chosen === taken.current || !files.some((f) => f.path === chosen)) return
+    taken.current = chosen
+    void chooseFile(chosen)
   })
 
   const save = useMutation({
@@ -315,9 +337,6 @@ export function ModelForm({
   })
 
   const blocked = !form.file || !form.name.trim() || !language || Object.keys(errors).length > 0 || (!current && !!a)
-  const models = files.filter((f) => f.profile.kind === 'language')
-  const others = files.filter((f) => f.profile.kind !== 'language')
-  const describe = (f: LibraryFile) => [f.path, formatValue(f.size, 'bytes') + (f.parts > 1 ? ` in ${f.parts} parts` : ''), summary(f.profile)].filter(Boolean).join(' · ')
   const ctx = Number(form.context) || 0
   const outDefault = defaultMaxOutput(ctx || 32768)
   const moe = profile?.structure === 'moe'
@@ -334,12 +353,9 @@ export function ModelForm({
 
   return (
     <>
-      <DialogHeader>
-        <DialogTitle>{saved ? `Edit ${saved.name}` : 'Add a model'}</DialogTitle>
-        <DialogDescription>A GGUF file from the model library, and how the engine runs it. Its file says what it is; the form asks only what that kind of model has.</DialogDescription>
-      </DialogHeader>
       <form
         className="grid min-w-0 gap-5"
+        aria-label="The chat model"
         onSubmit={(e) => {
           e.preventDefault()
           setError(null)
@@ -347,47 +363,9 @@ export function ModelForm({
         }}
       >
         {error && <Alert variant="destructive">{error}</Alert>}
-        <Field label="Model file" error={errors.file} hint={library.isPending ? 'Reading the library…' : models.length ? 'Language models in the library; the other files are listed for what they are.' : 'No language models in the library (LLAMACPP_LIBRARY_DIR).'}>
-          <Select value={form.file} onValueChange={chooseFile}>
-            <SelectTrigger className="min-w-0 [&>span]:truncate">
-              <SelectValue placeholder="Choose a file" />
-            </SelectTrigger>
-            <SelectContent className="max-w-[calc(100vw-2rem)]">
-              <SelectGroup>
-                <SelectLabel>Language models</SelectLabel>
-                {models.map((f) => (
-                  <SelectItem key={f.path} value={f.path} className="[overflow-wrap:anywhere]">
-                    {describe(f)}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-              {others.length > 0 && (
-                <SelectGroup>
-                  <SelectLabel>Not chat models: choose one to see what it is</SelectLabel>
-                  {others.map((f) => (
-                    <SelectItem key={f.path} value={f.path} className="[overflow-wrap:anywhere]">
-                      {f.path} · {kindLabel[f.profile.kind]}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              )}
-            </SelectContent>
-          </Select>
-        </Field>
-
-        {file && !language && (
-          <Alert variant="warning" title={kindLabel[file.profile.kind]}>
-            {file.profile.why}
-            {onMedia && (file.profile.kind === 'image' || file.profile.kind === 'video') && (
-              <div className="mt-2">
-                <Button type="button" size="sm" variant="outline" onClick={() => onMedia(file.profile.kind === 'video' ? 'video_generation' : 'image_generation', file.path)}>
-                  {file.profile.kind === 'video' ? 'Add it as a video model' : 'Add it as a picture model'}
-                </Button>
-              </div>
-            )}
-          </Alert>
-        )}
+        {errors.file && <Alert variant="destructive">{errors.file}</Alert>}
         {file && language && <Detected file={file} kvType={form.kvType} />}
+        {file && language && slot?.render({ saved, file, values: extra, set: (patch) => setExtra((x) => ({ ...x, ...patch })), errors, gpus })}
 
         {language && (
           <>

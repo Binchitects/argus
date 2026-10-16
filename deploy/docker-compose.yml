@@ -220,7 +220,8 @@ services:
     volumes:
       - ./config/argus.yaml:/etc/argus/config.yaml:ro
       - argus:/var/lib/argus
-      - ../packs:/pack-library:ro
+      # Built knowledge packs to load (Admin -> Packs): the repository's packs/, or ARGUS_PACK_LIBRARY_DIR.
+      - ${ARGUS_PACK_LIBRARY_DIR:-../packs}:/pack-library:ro
       - directory:/directory:ro
     # A GitLab on this machine.
     extra_hosts: ["host.docker.internal:host-gateway"]

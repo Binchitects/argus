@@ -16,6 +16,7 @@ import codeArena from '@docs/code-arena.md?raw'
 import configuration from '@docs/configuration.md?raw'
 import cpuTemperature from '@docs/cpu-temperature.md?raw'
 import deployment from '@docs/deployment.md?raw'
+import multiGpu from '@docs/multi-gpu-server.md?raw'
 import hermes from '@docs/hermes.md?raw'
 import integrations from '@docs/integrations.md?raw'
 import knowledge from '@docs/knowledge.md?raw'
@@ -96,6 +97,7 @@ export const manualGroups: ManualGroup[] = [
       doc('knowledge.md', 'Company knowledge', 'GitLab, Confluence, SharePoint, folders and websites, searched by each person within their rights.', 'admins', knowledge),
       doc('plugins.md', 'Plugins and APIs', 'Installing plugins, each person\'s own account, the manifest, a catalog.', 'admins', plugins),
       doc('deployment.md', 'Deploying', 'The samples and secrets, addresses, a host with no network, switching the model, the traps.', 'admins', deployment),
+      doc('multi-gpu-server.md', 'A multi-GPU server', 'Large models on several GPUs: what fits, vLLM beside llama.cpp, the KV cache tiers, durability, what to buy.', 'admins', multiGpu),
       doc('configuration.md', 'Configuration', 'Every .env variable and every file under deploy/config/.', 'admins', configuration),
       doc('architecture.md', 'Architecture', 'Every service, how a request flows through them, where state lives, what each failure looks like.', 'admins', architecture),
       doc('cpu-temperature.md', 'CPU temperature', 'How CPU temperature reaches the dashboards, on Linux and on Windows.', 'admins', cpuTemperature),

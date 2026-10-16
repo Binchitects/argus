@@ -13,9 +13,9 @@ public static class ModelKind
     public const string Reranker = "reranker";
     public const string Projector = "projector";
     public const string Draft = "draft";
-    /// <summary>A picture model's diffusion model (Admin → Models → Add a model → A pictures model).</summary>
+    /// <summary>A picture model's diffusion model (Admin → Models → Add a model takes it as one).</summary>
     public const string Image = "image";
-    /// <summary>A video model's diffusion model (Add a model → A video model).</summary>
+    /// <summary>A video model's diffusion model (Add a model takes it as one).</summary>
     public const string Video = "video";
     /// <summary>A text encoder a picture or video model reads (T5, UMT5, CLIP): one of its files.</summary>
     public const string Encoder = "encoder";
@@ -168,8 +168,8 @@ public static partial class ModelProfiler
         if ((arch is not null && Diffusion.Contains(arch)) || (h.Tensors.Count > 0 && h.Tensors.Any(t => DiffusionTensors.Any(p => t.Name.StartsWith(p, StringComparison.Ordinal)))))
         {
             return (arch is not null && VideoDiffusion.Contains(arch)) || VideoName().IsMatch(fileName)
-                ? basics with { Kind = ModelKind.Video, Why = "A video model's diffusion model: add it as a video model (Add a model → A video model), with its text encoder and decoder." }
-                : basics with { Kind = ModelKind.Image, Why = "A picture model's diffusion model: add it as a picture model (Add a model → A pictures model), with its text encoder and decoder." };
+                ? basics with { Kind = ModelKind.Video, Why = "A video model's diffusion model: add it as a video model, with its text encoder and decoder." }
+                : basics with { Kind = ModelKind.Image, Why = "A picture model's diffusion model: add it as a picture model, with its text encoder and decoder." };
         }
         if (arch is "t5" or "t5encoder" or "umt5" || TextEncoderName().IsMatch(fileName))
         {

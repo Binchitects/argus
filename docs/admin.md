@@ -205,8 +205,9 @@ would be with them.
   speed and time left; one runs at a time, a paused or cut off one goes on from
   where it got to (HTTP range), every file is checked against Hugging Face's
   SHA-256 and only then renamed into place, so the library never lists half a
-  model. A finished one has **Add as a model**, which opens the form with its
-  file chosen. The app needs the library writable by its user (`LLM_UID`) and,
+  model. A finished one has **Add as a model**, which opens **Add a model** with
+  its file chosen (a speech model the speech server fetched: that model), taken
+  as what it is. The app needs the library writable by its user (`LLM_UID`) and,
   for gated repositories, `HF_TOKEN` of an account that accepted their terms.
   A download is refused when the disk would keep less than 2 GB free.
 - **Snapshots for vLLM.** A repository with safetensors weights and a
@@ -271,16 +272,29 @@ would be with them.
   is in the engine's log (`docker compose logs llamacpp`). It is not tried
   again on its own; when every kept model failed, the `.env` model is loaded
   in their place, and the chat works on.
-- **Add a model** picks a GGUF from the **model library** (`LLAMACPP_LIBRARY_DIR`,
-  searched three levels deep; a split model is listed once, by its first part).
-  **Each file is read for what it is** (its header and tensor table, not its
-  name): a dense or mixture-of-experts language model, with full, hybrid
-  (a cache in some layers only), sliding-window or recurrent attention; or an
-  embedding model, reranker, vision projector, draft head, image model or LoRA
-  adapter. Only language models can be added (the engine serves chat models;
-  the others belong to Argus, the image server or a model's own settings), so
-  the rest are listed with what they are for. A split model with a
-  part missing is refused as incomplete.
+- **Add a model** is one button and one dialog for every kind of model; **Edit**
+  on a model's card opens the same dialog. Its **File or model** lists the
+  **model library** (`LLAMACPP_LIBRARY_DIR`, searched three levels deep; a split
+  model is listed once, by its first part) by what each file is, and the models
+  the speech server has downloaded. **Each GGUF file is read for what it is**
+  (its header and tensor table, not its name): a dense or mixture-of-experts
+  language model, with full, hybrid (a cache in some layers only),
+  sliding-window or recurrent attention; a picture or video model's diffusion
+  model or text encoder; or an embedding model, reranker, vision projector,
+  draft head or LoRA adapter. A safetensors (or other stable-diffusion.cpp)
+  file is known by its name: a diffusion model (Wan, LTX, Hunyuan Video and
+  Cosmos make video), a text encoder or a decoder. The dialog takes the choice
+  as that kind (**Add it as**: a chat, picture, video, speech to text or text to
+  speech model), which can be changed; it says when the file reads as another
+  kind and offers to change back. That kind's own sections follow: the chat
+  model's below, the picture, video and speech models' under
+  [Picture, video and speech models](#picture-video-and-speech-models). A text
+  encoder or decoder is put in among a picture or video model's files by its
+  role. Embedding models, rerankers, projectors, draft heads and adapters are
+  not added as models of their own (they belong to Argus or a model's own
+  settings): chosen, they say what they are for. A chat model needs the
+  llama.cpp engine; a split model with a part missing is refused as
+  incomplete. A saved model keeps its kind when edited.
 - **The form asks what that kind of model has, within its limits**, and shows
   them: the context from 4,096 to what it was trained for (up to 4× with YaRN,
   when its file does not stretch it already); the longest answer, at most the
@@ -475,8 +489,9 @@ Picture, video and speech models are models like the chat models: each has a
 card under Admin → Models, and is added, edited, loaded, unloaded, kept loaded
 and removed there.
 
-- **Add a model** has a menu: a chat model, or a picture, video, speech to
-  text or text to speech model. A picture or video model is its files from the
+- **Add a model** takes a picture or video model's file, or a model the speech
+  server has, as that kind of model (the same dialog as a chat model's; see
+  [Models](#models)). A picture or video model is its files from the
   library, each by what it is: the diffusion model (or the whole model), its
   text encoders (an LLM, T5, CLIP) and its decoder (VAE). Its settings are
   what it makes unless a request says otherwise: steps, CFG scale, guidance,

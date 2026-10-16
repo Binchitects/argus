@@ -64,6 +64,14 @@ CFG=./config
 
 # The project compose runs: from the environment, else .env (installer.sh writes one other than arena there).
 PROJECT="${COMPOSE_PROJECT_NAME:-$(env_get COMPOSE_PROJECT_NAME)}"; PROJECT="${PROJECT:-arena}"
+# Podman runs the stack with podman.yml on top (docs/deployment.md, "Podman"): where COMPOSE_FILE names no
+# files, the same ones as installer.sh and airgap.sh, so a restore makes the volumes and Postgres as Podman
+# runs them, and the backup keeps podman.yml with the compose files.
+if [[ $ENGINE == podman && -z "${COMPOSE_FILE:-}" && -z "$(env_get COMPOSE_FILE)" ]]; then
+  COMPOSE_FILE="docker-compose.yml:podman.yml"
+  [[ -f docker-compose.override.yml ]] && COMPOSE_FILE+=":docker-compose.override.yml"
+  export COMPOSE_FILE
+fi
 BACKUP_DIR="$(env_get BACKUP_DIR)"; BACKUP_DIR="${BACKUP_DIR:-./backups}"
 KEEP="$(env_get BACKUP_KEEP)"; KEEP="${KEEP:-14}"
 INCLUDE_LOGS="$(env_get BACKUP_INCLUDE_LOGS)"; INCLUDE_LOGS="${INCLUDE_LOGS:-1}"
@@ -320,7 +328,7 @@ say "backup $STAMP -> $OUT"
 # ---- 1. configuration and credentials ---------------------------------------
 say "==> config and credentials"
 cp -L .env "$OUT/config/.env" || fail ".env"
-IFS=':' read -r -a CFILES <<< "$(env_get COMPOSE_FILE)"
+IFS=':' read -r -a CFILES <<< "${COMPOSE_FILE:-$(env_get COMPOSE_FILE)}"
 for f in "${CFILES[@]}"; do
   [[ -z "$f" ]] && continue
   [[ "$f" == /* ]] || f="$ROOT/$f"

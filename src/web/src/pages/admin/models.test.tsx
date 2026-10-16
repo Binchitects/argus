@@ -126,9 +126,8 @@ describe('admin models', () => {
     })
     renderApp('/admin/models')
     await userEvent.click(await screen.findByRole('button', { name: 'Add a model' }))
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'A chat model' }))
     const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
-    await userEvent.click(within(dialog).getByRole('combobox', { name: 'Model file' }))
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'File or model' }))
     // Files that are not language models are there, for what they are, and cannot be chosen.
     // Not a chat model: listed for what it is, and it can be chosen to see how to add it.
     expect(await screen.findByRole('option', { name: /flux-2-klein-4b-Q4_0\.gguf · Picture model/ })).not.toHaveAttribute('aria-disabled', 'true')
@@ -184,10 +183,9 @@ describe('admin models', () => {
     })
     renderApp('/admin/models')
     await userEvent.click(await screen.findByRole('button', { name: 'Add a model' }))
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'A chat model' }))
     const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
     const choose = async (name: RegExp) => {
-      await userEvent.click(within(dialog).getByRole('combobox', { name: 'Model file' }))
+      await userEvent.click(within(dialog).getByRole('combobox', { name: 'File or model' }))
       await userEvent.click(await screen.findByRole('option', { name }))
     }
     await choose(/Qwen-27B-Q4_K_M\.gguf/)
@@ -239,9 +237,8 @@ describe('admin models', () => {
     })
     renderApp('/admin/models')
     await userEvent.click(await screen.findByRole('button', { name: 'Add a model' }))
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'A chat model' }))
     const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
-    await userEvent.click(within(dialog).getByRole('combobox', { name: 'Model file' }))
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'File or model' }))
     await userEvent.click(await screen.findByRole('option', { name: /Qwen-27B-Q4_K_M\.gguf/ }))
     const gpus = within(dialog).getByRole('group', { name: 'GPUs' })
     expect(within(gpus).getByRole('checkbox', { name: /GPU 0 · RTX 3090/ })).toBeChecked()
@@ -359,12 +356,14 @@ describe('admin models', () => {
     fakeApi(admin, { 'GET /api/admin/models': () => ({ json: { ...view({ enabled: false, kept: [], loaded: [], plan: null }), models: view().models.slice(2) } }) })
     renderApp('/admin/models')
     expect(await screen.findByText(/needs the llama.cpp engine/)).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Who may use it' })).toBeInTheDocument()
     // Picture, video and speech models are added without it; a chat model is not.
     await userEvent.click(screen.getByRole('button', { name: 'Add a model' }))
-    expect(screen.queryByRole('menuitem', { name: 'A chat model' })).not.toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: 'A pictures model' })).toBeInTheDocument()
-    await userEvent.keyboard('{Escape}')
-    expect(screen.getByRole('combobox', { name: 'Who may use it' })).toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
+    expect(within(dialog).getByRole('combobox', { name: 'Add it as' })).toHaveTextContent('A picture model')
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'Add it as' }))
+    expect(await screen.findByRole('option', { name: 'A text to speech model' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'A chat model' })).not.toBeInTheDocument()
   })
 
   it('the model for small steps is marked, and what keeps it from its work is said', async () => {
@@ -412,7 +411,17 @@ describe('admin models', () => {
     expect(screen.getByText('Gave the room back after FLUX.2-klein-4B: loaded Big-Model again.')).toBeInTheDocument()
   })
 
-  it("a picture model's file chosen in the chat model's form is added as a picture model", async () => {
+  it('one Add a model button, with no menu: the dialog starts as a chat model', async () => {
+    fakeApi(admin, { 'GET /api/admin/models': () => ({ json: view() }), 'GET /api/admin/models/library': () => ({ json: library }) })
+    renderApp('/admin/models')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add a model' }))
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
+    expect(within(dialog).getByRole('combobox', { name: 'Add it as' })).toHaveTextContent('A chat model')
+    expect(within(dialog).getByRole('button', { name: 'Add model' })).toBeDisabled()
+  })
+
+  it("a picture model's file is taken as a picture model, and the kind can be changed", async () => {
     fakeApi(admin, {
       'GET /api/admin/models': () => ({ json: view() }),
       'GET /api/admin/models/library': () => ({ json: library }),
@@ -421,15 +430,52 @@ describe('admin models', () => {
     })
     renderApp('/admin/models')
     await userEvent.click(await screen.findByRole('button', { name: 'Add a model' }))
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'A chat model' }))
     const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
-    await userEvent.click(within(dialog).getByRole('combobox', { name: 'Model file' }))
-    // Not a chat model, but it can be chosen: it says what it is, and how to add it.
-    await userEvent.click(await screen.findByRole('option', { name: /flux-2-klein-4b-Q4_0\.gguf/ }))
-    expect(within(dialog).getByText(/add it as a picture model/)).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'File or model' }))
+    // Not a chat model: chosen, it is read as what it is, and the picture model's section shows with it.
+    await userEvent.click(await screen.findByRole('option', { name: /flux-2-klein-4b-Q4_0\.gguf · Picture model/ }))
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Add it as' })).toHaveTextContent('A picture model (what it reads as)'))
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('flux-2-klein-4b-Q4_0')
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'File 1' })).toHaveTextContent('image/flux-2-klein-4b-Q4_0.gguf'))
+    expect(within(dialog).getByLabelText('Steps')).toBeInTheDocument()
+    // Changed to a chat model: the dialog says what it reads as, and offers to change it back.
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'Add it as' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'A chat model' }))
+    expect(within(dialog).getByText('It reads as a picture model')).toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('Steps')).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Add model' })).toBeDisabled()
     await userEvent.click(within(dialog).getByRole('button', { name: 'Add it as a picture model' }))
-    const media = await screen.findByRole('dialog', { name: 'Add a pictures model' })
-    expect(within(media).getByLabelText('Name')).toHaveValue('flux-2-klein-4b-Q4_0')
-    expect(within(media).getByRole('combobox', { name: 'File 1' })).toHaveTextContent('image/flux-2-klein-4b-Q4_0.gguf')
+    expect(within(dialog).getByRole('combobox', { name: 'Add it as' })).toHaveTextContent('A picture model')
+    expect(within(dialog).getByRole('combobox', { name: 'File 1' })).toHaveTextContent('image/flux-2-klein-4b-Q4_0.gguf')
+  })
+
+  it('a chat model is edited in the same dialog: its kind is kept, and an emptied field is cleared', async () => {
+    const small = { path: 'small/Small-Q8.gguf', size: 8e9, parts: 1, usedBy: ['Small-Model'], profile: profile() }
+    const calls = fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: view() }),
+      'GET /api/admin/models/library': () => ({ json: [...library, small] }),
+      // Advised as the Qwen file is: the same kind of model.
+      'POST /api/admin/models/advice': (b) => ({ json: advice({ ...(b as { context?: number }), file: 'qwen/Qwen-27B-Q4_K_M.gguf' }) }),
+      'PATCH /api/admin/models/Small-Model': () => ({ json: { restarting: true, warning: null } }),
+    })
+    renderApp('/admin/models')
+    const card = (await screen.findByRole('heading', { name: /Small-Model/ })).closest('section')!
+    await userEvent.click(within(card).getByRole('button', { name: /Edit/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit Small-Model' })
+    expect(within(dialog).getByRole('combobox', { name: 'Add it as' })).toBeDisabled()
+    expect(within(dialog).getByRole('combobox', { name: 'Add it as' })).toHaveTextContent('A chat model')
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveTextContent('small/Small-Q8.gguf'))
+    expect(within(dialog).getByLabelText('Name')).toBeDisabled()
+    const context = await within(dialog).findByLabelText('Context (tokens)')
+    expect(context).toHaveValue('32768')
+    await userEvent.clear(context)
+    await userEvent.type(context, '65536')
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Save' })).toBeEnabled())
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true))
+    const sent = calls.find((c) => c.method === 'PATCH')!.body as { file: string; context: number; clear: string[] }
+    expect(sent).toMatchObject({ file: 'small/Small-Q8.gguf', context: 65536 })
+    expect(sent.clear).toContain('maxOutput')
+    expect(sent).not.toHaveProperty('name')
   })
 })

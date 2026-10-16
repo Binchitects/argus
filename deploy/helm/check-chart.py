@@ -28,6 +28,7 @@ COPIES = {
     "files/prometheus/prometheus.yml": "config/prometheus/prometheus.yml",
     "files/router.sh": "services/llamacpp/router.sh",
     "files/sd-serve.sh": "services/sd-serve.sh",
+    "files/cpu-temp-exporter.py": "services/cpu-temp-exporter/exporter.py",
 }
 for rule in sorted((DEPLOY / "config/prometheus/rules").glob("*.yml")):
     COPIES[f"files/prometheus/rules/{rule.name}"] = f"config/prometheus/rules/{rule.name}"

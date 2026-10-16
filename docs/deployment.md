@@ -193,7 +193,10 @@ cdi generate --output=/etc/cdi/nvidia.yaml` once. The override runs the app as
 the container's root, which under rootless Podman is you, so `MODELS_DIR` stays
 yours; it gives Promtail Podman's socket, and leaves the power caps out (they
 need the host's root). The offline installer takes `--podman`
-([below](#the-offline-installer)), with `podman.yml` on top for you.
+([below](#the-offline-installer)), with `podman.yml` on top for you, and so does
+`scripts/backup.sh --podman` when `COMPOSE_FILE` names no files: a restore makes
+the volumes as Podman runs them, and the backup keeps `podman.yml`.
+[Runtimes](#runtimes) says what else differs.
 
 ## External Postgres
 
@@ -237,7 +240,8 @@ echo APP_REPLICAS=2 >> .env
 docker compose -f docker-compose.yml -f scale.yml up -d
 ```
 
-`scale.yml` runs the replicas (`arena-app-1`, `arena-app-2`, ...) and tells
+`scale.yml` runs the replicas (`arena-app-1`, `arena-app-2`, ..., named after
+the project) and tells
 Traefik, whose routes then list them with a **sticky cookie** (`arena_replica`):
 a browser stays on one replica, where its answers run and stream. A replica that
 stops answering `/healthz` is left out. **Admin → Overview** says how many
@@ -301,14 +305,82 @@ app pod is ready (rolling, crashed, scaled to zero), those four paths fail
 answer cache for API keys needs Traefik's health-checked route (compose), so it
 does not answer here.
 External Postgres: `postgresql.enabled=false` and `externalDatabase`. Logs reach
-Loki only with a log agent of the cluster's (promtail, or another), and the
-host exporters (node, GPU, CPU temperature, power caps) are left to the
-cluster's own monitoring.
+Loki only with a log agent of the cluster's (promtail, or another). The host's
+figures come from the `host-exporters` DaemonSet (node-exporter and the CPU's
+temperature, as compose's), which runs with the host's processes and its `/`,
+`/proc` and `/sys` read only: a namespace at the `baseline` or `restricted` Pod
+Security level refuses it. Turned off there (`monitoring.hostExporters.enabled=false`),
+`TargetDown` fires for the `node` and `cpu-temp` jobs and the host's disks,
+memory and temperature go unwatched by the stack. On several
+nodes, give it a `nodeSelector` for the GPU node. GPU telemetry and power caps
+are the cluster's. Argus checks coding agents' API keys with the app, as in
+compose; built knowledge packs (**Admin → Packs**) come from a claim of yours
+(`argus.packLibraryClaim`), mounted read only.
 
 `python3 deploy/helm/check-chart.py` checks the chart without helm: its copies
 of `config/` are the same, every template's blocks close, and every value it
 reads is in `values.yaml`. `helm lint` and `helm template` render it where helm
 is installed.
+
+## Runtimes
+
+One stack, three ways to run it: **Docker** (`docker-compose.yml`, and
+`scale.yml` for replicas), **rootless Podman** (`podman.yml` on top,
+`podman compose`, GPUs through CDI) and **Kubernetes** (the Helm chart). A
+feature added to one is added to all three, or is listed here with the reason.
+`tests/deploy/test_runtime_parity.py` holds them to it: it reads what `docker
+compose config` (or `podman compose config`) resolves with and without
+`podman.yml` and `scale.yml`, and the chart's templates (`helm template` where
+helm is installed), and fails when a service, a variable given to one, a path
+it mounts, a file or script from `deploy/` it reads, a secret or one of the
+app's routes is in one runtime and not the others, unless its allow-list names
+it with one of the reasons below. `deploy/helm/check-chart.py` keeps the
+chart's copies of `config/` and `services/` byte for byte the same.
+
+**yes**: present and the same. **differs**: present, run another way (said
+how). **no**: missing, with the reason.
+
+| | Docker | Podman | Helm |
+|---|---|---|---|
+| **Services** | | | |
+| `traefik` | yes | yes (ports 8080 and 8443) | differs: the cluster's ingress controller and the chart's Ingress |
+| `web`, `app` | yes | differs: the app runs as the container's root, which is you | yes, two replicas by default |
+| `postgres` (or external) | yes | yes | yes (a StatefulSet, or `externalDatabase`) |
+| `litellm` | yes | yes | yes |
+| `llamacpp` | yes, every GPU | yes, CDI; no locked-memory limit | differs: `llamacpp.gpus` whole GPUs; the library read only, so no `LLAMA_CACHE` (a preset's `hf-repo` is fetched again); no `ENGINE_RAM_PROTECT` |
+| `embed`, `audio`, `searxng` | yes | yes | yes |
+| `argus` | yes | yes | yes |
+| `imagegen`, `videogen` | yes, every GPU | yes, CDI | differs: whole GPUs each; `videogen` off by default |
+| `sandbox` | yes | yes | differs: no network by a NetworkPolicy (the CNI must enforce it); no `pids_limit` (the node's pod PID limit) |
+| `laya` | off (`COMPOSE_PROFILES=laya`) | the same | off (`laya.enabled`); a NetworkPolicy for compose's internal network |
+| `prometheus`, `alertmanager`, `loki` | yes | yes | yes |
+| `node-exporter`, `cpu-temp-exporter` | yes | yes | yes: the `host-exporters` DaemonSet (`monitoring.hostExporters`) |
+| `promtail` | yes | differs: Podman's socket for Docker's | no: the cluster's log agent ships the pods' logs to Loki |
+| `gpu-exporter` | yes | yes, CDI | no: the cluster's (NVIDIA's DCGM exporter); until Prometheus scrapes one, `GpuExporterDown` fires |
+| `power-limits` | yes | no: it writes the host's `/sys` | no: privileged; the cluster's |
+| **Volumes** | | | |
+| model library | `MODELS_DIR` | the same | the `arena-models` claim (ReadWriteMany across nodes) or `persistence.models.existingClaim` |
+| `engine`, `directory`, `sandbox` | volumes | the same | claims, ReadWriteMany across nodes |
+| `media-status` | in memory (tmpfs) | the same | differs: a small claim, kept on disk |
+| `argus`, `audio`, `prometheus`, `alertmanager`, `loki`, `postgres` | volumes | the same | claims, kept when the release goes |
+| `acme`, the certificates | Traefik's | the same | differs: the TLS Secret (`ingress.tlsSecret`) |
+| the pack library | `packs/` or `ARGUS_PACK_LIBRARY_DIR` | the same | `argus.packLibraryClaim` (empty: none) |
+| `/backups` in the app | `BACKUP_DIR`, read only | the same | no: backups are the cluster's |
+| **Configuration and scripts** | | | |
+| `litellm.yaml` (its 960 s timeouts), `argus.yaml`, `searxng.yml`, `alertmanager.yml`, `loki.yml`, `prometheus/` and its rules | mounted from `config/` | the same | the same files, from the chart's copies |
+| `services/llamacpp/router.sh` (the engine key by `LLAMA_API_KEY`), `services/sd-serve.sh`, `services/cpu-temp-exporter` | mounted | the same | the same files, from the chart's copies |
+| `promtail.yml`, `traefik/routes.yml` | mounted | the same | no: the cluster's log agent; the Ingress |
+| `services/power-limits.sh` | mounted | no | no |
+| **Secrets** | `.env` | `.env` | the `arena-secrets` Secret, made at install and kept (or `existingSecret`): the same keys |
+| **Health checks** | the images' (app, web, Argus, Laya), Traefik's and Postgres's | the same (compose builds through Podman's Docker API keep them; a `podman build` by hand drops them) | probes: app, web, Postgres, LiteLLM, Laya, Argus |
+| **Backup and restore** | `scripts/backup.sh` | `scripts/backup.sh --podman` (with `podman.yml`) | no: the cluster's volume snapshots and a `pg_dumpall` |
+| **Install and upgrade** | `installer.sh`, `scripts/upgrade-test.py` | `installer.sh --podman` | `helm install` / `helm upgrade`; the app and Argus migrate as they start; no upgrade test |
+| **Features** | | | |
+| media borrowing the GPU from idle chat models | yes: every server sees every GPU | yes | differs: each pod has its own GPUs, so a picture never needs to borrow; one GPU shared needs the device plugin's time-slicing |
+| Argus checks agents' API keys with the app | yes | yes | yes |
+| answer cache for API keys, speech and pictures by the app | yes, with fallback to LiteLLM while the app is down | yes | differs: no answer cache; speech and pictures fail while no app pod is ready ([Helm](#helm)) |
+| TLS | Let's Encrypt (`ACME_EMAIL`) or a certificate of your own | the same | a TLS Secret (cert-manager through `ingress.annotations`); no certificate alerts (they read Traefik's metrics) |
+| app replicas | `scale.yml`, `APP_REPLICAS` | the same | `app.replicas` |
 
 ## Models
 
