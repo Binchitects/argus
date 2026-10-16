@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AudioLines, Boxes, CircleDot, Clapperboard, Clock, Eye, Search, HelpCircle, Image as ImageIcon, Loader2, Mic, Pencil, Pin, Plus, Power, PowerOff, Sparkles, Trash2, XCircle } from 'lucide-react'
+import { AudioLines, Boxes, CircleDot, Clapperboard, Clock, Eye, Search, HelpCircle, Image as ImageIcon, Loader2, Mic, Moon, Pencil, Pin, Plus, Power, PowerOff, Sparkles, Trash2, XCircle } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -18,6 +18,9 @@ import { money } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { AccessPicker, type AccessRule } from './access-picker'
 import { type SavedMediaModel } from './media-model-form'
+import type { EngineInstance } from './engine-api'
+import { EngineProblems } from './engine-fields'
+import { engineSlot } from './engine-slot'
 import { ModelDialog, type ModelDialogOpen } from './model-dialog'
 import { type SavedModel } from './model-form'
 import { WorkingHours } from './model-hours'
@@ -35,7 +38,9 @@ interface ModelRow extends SavedModel {
   mode: string
   /** unloading: told to unload, and not stopped yet; failed: its last load exited with an error (the engine's log says why);
    * missing: the engine does not list it (yet); waiting: a media model whose files are being fetched; off: its server does not run. */
-  status: 'loaded' | 'loading' | 'unloading' | 'unloaded' | 'failed' | 'missing' | 'waiting' | 'off' | null
+  status: 'loaded' | 'loading' | 'unloading' | 'unloaded' | 'failed' | 'missing' | 'waiting' | 'off' | 'sleeping' | null
+  /** Its engine's kind: llama.cpp's or vLLM's. */
+  engineKind?: 'llamacpp' | 'vllm'
   /** Loading or unloading: why ("loaded by ada", "for a chat or an API request", "making room for X", "kept loaded"), and since when. */
   why?: string | null
   since?: string | null
@@ -102,7 +107,7 @@ function priceLine(m: Pick<ModelRow, 'price' | 'unitPrice'>): string | null {
 
 interface Plan {
   problems: { field: string; message: string; error: boolean }[]
-  gpus: { index: number; name: string; budget: number; need: number; models: string[] }[]
+  gpus: { index: number; name: string; budget: number; need: number; models: string[]; vendor?: string; total?: number }[]
 }
 
 interface ModelsView {
@@ -121,7 +126,9 @@ interface ModelsView {
     loaded: string[]
     loading: string[]
     unloading: string[]
-    gpus: { index: number; name: string; total: number }[]
+    gpus: { index: number; name: string; total: number; vendor?: string; backend?: string }[]
+    /** Each engine instance, and why one's models could not be listed (a vLLM engine not running). */
+    instances?: EngineInstance[]
     plan: Plan | null
   }
   /** The model for sub-agents and small steps (Settings → Model), and what keeps it from doing them well. */
@@ -204,6 +211,8 @@ export function ModelsPage() {
               chat={engine.enabled}
               gpus={engine.gpus}
               onClose={() => setDialog(null)}
+              chatSlot={engineSlot}
+              instances={engine.instances}
             />
           )}
         </DialogContent>
@@ -238,6 +247,7 @@ function EngineSummary({ engine }: { engine: ModelsView['engine'] }) {
               <div className="flex flex-wrap justify-between gap-2 text-sm">
                 <span className="font-medium">
                   GPU {g.index} · {g.name}
+                  {g.vendor && g.vendor !== 'nvidia' ? ` · ${g.vendor}` : ''}
                 </span>
                 <span className="text-muted-foreground">
                   {bytes(g.need)} of {bytes(g.budget)} for models{g.models.length ? ` · ${g.models.join(', ')}` : ''}
@@ -249,6 +259,7 @@ function EngineSummary({ engine }: { engine: ModelsView['engine'] }) {
               </div>
             </div>
           ))}
+          <EngineProblems instances={engine.instances} />
           {plan.problems.map((p) => (
             <Alert key={p.message} variant={p.error ? 'destructive' : 'warning'}>
               {p.message}
@@ -267,7 +278,7 @@ function forHowLong(since: string | null | undefined): string | null {
   return s < 90 ? `for ${s} s` : `for ${Math.round(s / 60)} min`
 }
 
-function Status({ status, why, since }: { status: ModelRow['status']; why?: string | null; since?: string | null }) {
+function Status({ status, why, since, draining }: { status: ModelRow['status']; why?: string | null; since?: string | null; draining?: boolean }) {
   const reason = [why, forHowLong(since)].filter(Boolean).join(', ')
   if (status === 'loaded')
     return (
@@ -284,11 +295,20 @@ function Status({ status, why, since }: { status: ModelRow['status']; why?: stri
         {reason && <span className="text-xs text-muted-foreground">{reason}</span>}
       </span>
     )
+  if (status === 'sleeping')
+    return (
+      <span className="flex flex-col items-end text-sm text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <Moon className="size-4" aria-hidden="true" /> Asleep
+        </span>
+        <span className="text-xs">its GPUs lent to a picture or video; back in seconds</span>
+      </span>
+    )
   if (status === 'unloading')
     return (
       <span className="flex flex-col items-end text-sm text-muted-foreground">
         <span className="flex items-center gap-1.5">
-          <Loader2 className="size-4 animate-spin" aria-hidden="true" /> Unloading…
+          <Loader2 className="size-4 animate-spin" aria-hidden="true" /> {draining ? 'Draining…' : 'Unloading…'}
         </span>
         {reason && <span className="text-xs">{reason}</span>}
       </span>
@@ -452,7 +472,7 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
           {priceLine(m) && <p className="mt-1 text-xs text-muted-foreground tabular-nums">{priceLine(m)}</p>}
           {m.cache && <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{cacheLine(m.cache)}</p>}
         </div>
-        <Status status={m.status} why={m.why} since={m.since} />
+        <Status status={m.status} why={m.why} since={m.since} draining={m.engineKind === 'vllm'} />
       </CardHeader>
       <CardContent className="grid gap-4">
         {m.source === 'local' && m.atGateway === false && <Alert variant="warning">Not at the gateway yet: it is added again within a minute.</Alert>}

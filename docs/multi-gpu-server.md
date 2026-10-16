@@ -465,6 +465,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
 11. **Admin → Models UI.**
     - Engine kind, GPU picker, vLLM options, per-GPU bars, cache hit rate, phase (loading, sleeping, draining).
     - Tests: Playwright against fake 4-GPU hardware and fake-vllm.
+    - **Done**: `pages/admin/engine-fields.tsx` (the vLLM model's section: snapshot, engine, GPUs by vendor and size, copies, share, quantisation, cache type, context, answers at once, speculative decoding, CPU tier, sleep, fallback, the advisor's fit and proposal), `engine-slot.tsx` (llama.cpp's engine and fallback, mounted through `ChatModelSection`'s `slot`), `engine-api.ts`; the dialog offers the library's snapshots; model cards show Asleep and Draining; GPU bars name a vendor other than NVIDIA; an engine that is not running is said. Tests: Vitest (`engine-fields.test.tsx`); Playwright not added (no browser run here).
 12. **Compose and Helm.**
     - `vllm` service (profile `vllm`, `shm_size`, `ipc: host` or a large shm, memlock, the `engine` and `vllm-status` volumes), and the `arena-vllm` Dockerfile with pinned vLLM (plus optional LMCache).
     - Helm `vllm` Deployment(s) with values `gpus`, `nodeSelector`, `shmSize`, `kvcache` PV; update `check-chart.py`.
@@ -497,7 +498,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
 
 Commits 1–18 can be built and tested on today's 3090 box: llama.cpp keeps running there, and vLLM is the fake. Commit 19 is the first that needs the new server.
 
-**Progress (2026-10-16):** items 1–10 are done on branch `mgpu/engines`, generalised past this server: any number of GPUs (none included), any vendor, several engine machines, and Docker, Podman and Kubernetes alike (below). Items 11–20 are open; the Admin → Models form (item 11) does not show the vLLM settings yet, though the API takes and checks them.
+**Progress (2026-10-16):** items 1–10 are done on branch `mgpu/engines`, generalised past this server: any number of GPUs (none included), any vendor, several engine machines, and Docker, Podman and Kubernetes alike (below). Item 11 (the Admin → Models form) is done too; the rest below says each item's state.
 
 ---
 
