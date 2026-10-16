@@ -155,7 +155,7 @@ public sealed partial class GpuShare : IDisposable
         {
             kept = scope.ServiceProvider.GetRequiredService<ModelCatalog>().Kept();
         }
-        hold.Unloaded = await route.MakeRoomAsync(model.Name, kind, kept, RoomWait, ct);
+        await route.MakeRoomAsync(model.Name, kind, kept, RoomWait, hold.Made, ct);
         if (hold.Unloaded.Count == 0)
         {
             // Nothing could make room (every chat model is kept loaded, or in use all this minute): the job runs as it is.
@@ -271,8 +271,11 @@ public sealed partial class GpuShare : IDisposable
         /// <summary>Whether the GPU was lent to it (chat models unloaded for it).</summary>
         internal bool Lent { get; set; }
 
+        /// <summary>The chat models unloaded for it, each as it was (a job stopped while room was made gives back those).</summary>
+        internal List<string> Made { get; } = [];
+
         /// <summary>The chat models unloaded for it.</summary>
-        public IReadOnlyList<string> Unloaded { get; internal set; } = [];
+        public IReadOnlyList<string> Unloaded => Made;
 
         public async ValueTask DisposeAsync()
         {

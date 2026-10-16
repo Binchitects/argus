@@ -314,13 +314,13 @@ public sealed partial class EngineRoute
     /// <summary>
     /// Room on the GPU for a picture or video job (<paramref name="media"/>, which makes a <paramref name="kind"/>): each loaded
     /// chat model not in <paramref name="kept"/> unloads once it is idle, through the same engine call an admin's Unload uses,
-    /// waiting <paramref name="wait"/> at most for those in use. The models unloaded, in order.
+    /// waiting <paramref name="wait"/> at most for those in use. Each one unloaded goes in <paramref name="made"/> at once: a
+    /// job stopped meanwhile gives those back.
     /// </summary>
-    public async Task<IReadOnlyList<string>> MakeRoomAsync(string media, string kind, IReadOnlyCollection<string> kept, TimeSpan wait, CancellationToken ct)
+    public async Task MakeRoomAsync(string media, string kind, IReadOnlyCollection<string> kept, TimeSpan wait, ICollection<string> made, CancellationToken ct)
     {
         // Real time: the job waits for it, whatever the app's clock says.
         var waited = System.Diagnostics.Stopwatch.StartNew();
-        var made = new List<string>();
         while (true)
         {
             IReadOnlyList<EngineModel> models;
@@ -333,13 +333,13 @@ public sealed partial class EngineRoute
             {
                 // No engine to make room in: the job runs with what there is.
                 LogRoomFailed(logger, "the engine's models", ex.Message);
-                return made;
+                return;
             }
             // Loading ones too: a request let through before the GPU was lent; each is unloaded once it has loaded and is idle.
             var spares = models.Where(m => m.Status is "loaded" or "loading" && !kept.Contains(m.Name)).ToList();
             if (spares.Count == 0)
             {
-                return made;
+                return;
             }
             foreach (var spare in spares.Where(m => m.Status == "loaded").Select(m => m.Name))
             {
@@ -374,7 +374,7 @@ public sealed partial class EngineRoute
             }
             if (waited.Elapsed >= wait)
             {
-                return made;
+                return;
             }
             await Task.Delay(TimeSpan.FromSeconds(1), ct);
         }

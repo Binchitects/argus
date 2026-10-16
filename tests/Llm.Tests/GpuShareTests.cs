@@ -243,6 +243,38 @@ public sealed class GpuShareTests(AppFixture app) : IDisposable
     }
 
     [Fact]
+    public async Task A_video_stopped_while_room_is_made_gives_back_what_was_unloaded_for_it()
+    {
+        await using var s = await NewAsync();
+        // A second chat model, loaded and answering an API key's request all along (its slot busy): it cannot make room.
+        await using (var scope = s.App.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            db.LocalModels.Add(new Llm.Core.Models.LocalModel { Name = "tiny", File = "tiny/Tiny.gguf", Context = 8192 });
+            await db.SaveChangesAsync();
+            await scope.ServiceProvider.GetRequiredService<ModelCatalog>().WritePresetsAsync();
+        }
+        await UntilAsync(() => app.Engine.StatusOf("tiny") == "unloaded", "the engine lists tiny");
+        await s.App.Services.GetRequiredService<EngineClient>().LoadAsync("tiny");
+        app.Engine.BusySlots["tiny"] = [0];
+        await UntilAsync(() => s.State.StatusOf("tiny") == "loaded" && s.State.StatusOf(Chat) == "loaded", "the watcher sees both loaded");
+        await UntilAsync(() => s.Media.StatusOf("videogen") is { FreeMb: 3500 }, "the video server's script says 3,500 MB are free");
+
+        // The person stops the answer once the idle chat model has unloaded, while the busy one is still waited for.
+        using var stop = new CancellationTokenSource(Deadline);
+        var holding = s.Gpu.HoldAsync(s.Media.Find(Video)!, stop.Token);
+        await UntilAsync(() => app.Engine.StatusOf(Chat) == "unloaded", "the idle chat model unloads for the video");
+        await stop.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => holding);
+
+        // What was unloaded comes back; the GPU is the chat's again.
+        Assert.Contains(s.Gpu.Recent, h => h.Text == $"Gave the room back after {Video}: loaded {Chat} again.");
+        Assert.Null(s.State.Lent);
+        Assert.Equal("loaded", app.Engine.StatusOf(Chat));
+        Assert.Equal("loaded", app.Engine.StatusOf("tiny"));
+    }
+
+    [Fact]
     public void A_chat_model_that_fits_itself_to_the_gpu_leaves_room_for_the_picture_model_kept_loaded()
     {
         static string Preset(string? devices = null, string placement = "auto", string? extra = null, (int?, int)? room = null) =>
