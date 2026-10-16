@@ -43,19 +43,21 @@ public static class Writes
     }
 
     public static Row? GetAclCache(SqliteConnection conn, string tokenHash) =>
-        Sql.One(conn, "SELECT user_id, username, repo_ids_json, fetched_at FROM acl_cache WHERE token_hash = ?", tokenHash);
+        Sql.One(conn, "SELECT user_id, username, repo_ids_json, gitlab_ids_json, fetched_at FROM acl_cache WHERE token_hash = ?", tokenHash);
 
+    /// <param name="gitlabIdsJson">Every GitLab project the token may read, indexed or not; null when not known.</param>
     public static void UpsertAclCache(SqliteConnection conn, string tokenHash, long userId, string username,
-        string repoIdsJson, long fetchedAt) =>
+        string repoIdsJson, long fetchedAt, string? gitlabIdsJson = null) =>
         Atomic(conn, () => Sql.Exec(conn, """
-            INSERT INTO acl_cache (token_hash, user_id, username, repo_ids_json, fetched_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO acl_cache (token_hash, user_id, username, repo_ids_json, gitlab_ids_json, fetched_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(token_hash) DO UPDATE SET
-                user_id       = excluded.user_id,
-                username      = excluded.username,
-                repo_ids_json = excluded.repo_ids_json,
-                fetched_at    = excluded.fetched_at
-            """, tokenHash, userId, username, repoIdsJson, fetchedAt));
+                user_id         = excluded.user_id,
+                username        = excluded.username,
+                repo_ids_json   = excluded.repo_ids_json,
+                gitlab_ids_json = excluded.gitlab_ids_json,
+                fetched_at      = excluded.fetched_at
+            """, tokenHash, userId, username, repoIdsJson, gitlabIdsJson, fetchedAt));
 
     /// <summary>
     /// Removes index rows (a repository taken out, a branch no longer indexed) with their

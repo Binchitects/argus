@@ -10,7 +10,8 @@ Creates:
   * with SEED_PERSON_EMAIL, a person of the platform: Reporter on eal-core and
     etl-decoder, not driver-shim, the address public so a read-only token finds it
   * a merge request on eal-core with two seeded bugs and a committed fake
-    secret, and one on driver-shim that no developer may see (REVIEW_MRS)
+    secret, one on etl-decoder, and one on driver-shim that no developer may
+    see (REVIEW_MRS)
 
 The point is to make the access-control claim falsifiable. Developer alpha is a
 member of eal-core only; developer beta of etl-decoder only. Neither is a member
@@ -216,7 +217,8 @@ FAKE_SECRET = "glpat-FAKE0fake1FAKE2fake3FAKE"
 #: Merge requests for the review checks, one per project: (source branch, title,
 #: files written on it). eal-core's carries two seeded bugs (SumFrame reads
 #: buf[0] before checking buf, and reads one byte past the end with <= len)
-#: and a committed fake secret; driver-shim's is one no developer may see.
+#: and a committed fake secret; etl-decoder's is dev_beta's to read; driver-shim's
+#: is one no developer may see.
 REVIEW_MRS = {
     "eal-core": ("review/frame-sum", "Sum a frame's bytes", {
         "src/decoder.c": PROJECTS["eal-core"]["src/decoder.c"] + (
@@ -232,6 +234,16 @@ REVIEW_MRS = {
             "# Upload settings for the frame archive.\n"
             "ARCHIVE_URL=https://archive.corp.example/frames\n"
             f"ARCHIVE_TOKEN={FAKE_SECRET}\n"
+        ),
+    }),
+    "etl-decoder": ("review/pipeline-guard", "Guard an empty frame", {
+        "src/pipeline.c": (
+            '#include "eal/decoder.h"\n'
+            '#include <stdio.h>\n'
+            "int RunPipeline(const char* b, int n) {\n"
+            "    if (n == 0) return 0;\n"
+            "    return DecodeFrame(b, n);\n"
+            "}\n"
         ),
     }),
     "driver-shim": ("review/shim-only", "Shim-only change", {

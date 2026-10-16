@@ -67,7 +67,7 @@ public static class Mirror
     }
 
     /// <summary>The environment for a credentialed git operation; null means inherit unchanged.</summary>
-    static Dictionary<string, string?>? AuthEnv(IndexConfig index, string? token, GitLabConfig? gitlab)
+    internal static Dictionary<string, string?>? AuthEnv(IndexConfig index, string? token, GitLabConfig? gitlab)
     {
         if (string.IsNullOrEmpty(token) && gitlab is null) return null;
         var env = new Dictionary<string, string?>();
@@ -114,7 +114,7 @@ public static class Mirror
         return new GitResult(proc.ExitCode, outTask.GetAwaiter().GetResult(), errTask.GetAwaiter().GetResult());
     }
 
-    static string Git(string cwd, IEnumerable<string> args, IDictionary<string, string?>? env = null, IReadOnlyList<string>? secrets = null)
+    internal static string Git(string cwd, IEnumerable<string> args, IDictionary<string, string?>? env = null, IReadOnlyList<string>? secrets = null)
     {
         var list = args.ToList();
         var result = RunGit(cwd, list, env);

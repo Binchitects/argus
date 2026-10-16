@@ -152,6 +152,11 @@ public class RepoIdentityTests
         return id;
     }
 
+    /// <summary>A token's access kept as 5.2.0 kept it: its repository rows only.</summary>
+    static void V520Acl(SqliteConnection conn, string token, string repoIdsJson, long fetchedAt) =>
+        Sql.Exec(conn, "INSERT INTO acl_cache (token_hash, user_id, username, repo_ids_json, fetched_at) VALUES (?, 5, 'alice', ?, ?)",
+            Acl.Hash(token), repoIdsJson, fetchedAt);
+
     static void V520Choice(SqliteConnection conn, long gitlabId, string path, long seenAt, bool included = true, string branches = "", long? changedAt = null) =>
         Sql.Exec(conn, "INSERT INTO repo_choices (gitlab_id, path_with_namespace, default_branch, http_url, included, branches, seen_at, changed_at) VALUES (?, ?, 'main', ?, ?, ?, ?, ?)",
             gitlabId, path, $"{GitLabA}/{path}.git", included ? 1L : 0L, branches, seenAt, changedAt);
@@ -181,7 +186,7 @@ public class RepoIdentityTests
             // The new copy of etl-decoder never got indexed: its fetch failed.
             etlNew = V520Row(conn, 12, "root/etl-decoder", "main", null, null, 2000, "git clone failed", "NewEtl");
             shimNew = V520Row(conn, 13, "Root/Driver-Shim", "main", "eee111", 2000, 2000, null, "NewShim");
-            Writes.UpsertAclCache(conn, Acl.Hash("tok"), 5, "alice", $"[{ealOldMain}, {etlOld}]", 2000);
+            V520Acl(conn, "tok", $"[{ealOldMain}, {etlOld}]", 2000);
             Assert.Equal(6L, Count(conn, "SELECT COUNT(*) FROM repo_choices"));
         }
 
@@ -308,7 +313,7 @@ public class RepoIdentityTests
             Db.Migrate(conn, upTo: 16);
             V520Choice(conn, 4, "g/solo", 1000, included: false, changedAt: 1200);
             row = V520Row(conn, 4, "g/solo", "main", "fff111", 1000, 1000, null, "Solo");
-            Writes.UpsertAclCache(conn, Acl.Hash("tok"), 5, "alice", $"[{row}]", 1000);
+            V520Acl(conn, "tok", $"[{row}]", 1000);
         }
         using (var conn = Db.Open(db))
         {

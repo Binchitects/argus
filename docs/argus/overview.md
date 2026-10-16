@@ -43,8 +43,22 @@ the stack.
 | `docs_contracts` | Paste a file → header, library, DLL and IRQL of every API it calls |
 | `docs_verify` | Check a draft you already wrote; reports only contradictions |
 
-**20 tools in total**, and every one of them is contract-tested against a live
-server — see [Checking it](#checking-it).
+**Merge requests and code at any commit**, for reviews, read from GitLab with
+Argus's read-only credential and checked per person, indexed or not — 10 tools
+([README](README.md#merge-requests-and-code-at-any-commit)):
+
+| Tool | Answers |
+|---|---|
+| `mr_list` · `mr_get` | A project's merge requests; one in full, with its diff refs and one version per push |
+| `mr_diff` | Its files and hunks: whole, by path, at a version, or only what changed since a commit |
+| `mr_commits` · `mr_discussions` | Its commits; its threads, with where each comment is anchored |
+| `ci_status` · `job_log` | The latest pipeline and its jobs; a job's log, secrets masked |
+| `compare_refs` | Two branches, tags or commits compared, without a merge request |
+| `file_at` · `grep_at` | A file, or a search, at a merge request's head, a branch nobody indexed, or a commit |
+
+**30 tools in total**. The first twenty are contract-tested against a live
+server — see [Checking it](#checking-it); the merge request tools against a
+fake GitLab in the tests, and against the test GitLab's seeded merge requests.
 
 ## Across repositories
 

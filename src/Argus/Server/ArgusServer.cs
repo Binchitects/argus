@@ -94,6 +94,11 @@ public static partial class ArgusServer
     public const string AppEnv = "ARGUS_APP";
     public static bool AppEnabled() => !string.Equals(Environment.GetEnvironmentVariable(AppEnv), "off", StringComparison.OrdinalIgnoreCase);
     public const string ChatEmailHeader = "x-llm-user-email";
+    /// <summary>
+    /// The merge request and commit tools as plain HTTP for the app (GET /review/mr_list?project=...):
+    /// the chat's credential and the person's email, from inside the network only, as for the chat's MCP.
+    /// </summary>
+    public const string ReviewPrefix = "/review/";
     public const string UsersFileEnv = "ARGUS_USERS_FILE";
     static readonly string[] ProxyHeaders = ["x-forwarded-for", "x-forwarded-host", "x-real-ip"];
     public const string DeniedAtGateTool = "<auth_denied>";
@@ -229,6 +234,7 @@ public static partial class ArgusServer
         MapRepoAdmin(app, cfg, jobs);
         _webhookDbPath = cfg.Index.DbPath;
         MapWebhook(app, jobs);
+        MapReview(app, tools, access);
         if (AppEnabled()) PlatformApi.Map(app, cfg, appDbPath, gateway, chat);
         app.MapMcp("/mcp");
 
@@ -347,6 +353,26 @@ public static partial class ArgusServer
             await next();
             return;
         }
+        if (path.StartsWith(ReviewPrefix, StringComparison.Ordinal))
+        {
+            // Only the app's chat credential, for a person it names: the routes answer as that person.
+            try
+            {
+                var token = ExtractBearer(ctx.Request.Headers.Authorization.ToString());
+                var chatToken = Environment.GetEnvironmentVariable(ChatTokenEnv) ?? "";
+                if (token is null || chatToken.Length == 0 || !SecretEquals(token, chatToken))
+                    throw new AclDenied($"These routes take the chat client's credential ({ChatTokenEnv}) and the person's email in {ChatEmailHeader}.");
+                ctx.Items[CallerItem] = ChatPerson(ctx, access);
+            }
+            catch (AclDenied exc)
+            {
+                AuditDenied(cfg, "token_rejected", path, exc.Message, "chat");
+                await Unauthorized(ctx, exc.Message);
+                return;
+            }
+            await next();
+            return;
+        }
         if (!ctx.Request.Path.StartsWithSegments("/mcp"))
         {
             // The app, /healthz and the webhook: public, or authorised by their own handler.
@@ -377,14 +403,8 @@ public static partial class ArgusServer
                 var chatToken = Environment.GetEnvironmentVariable(ChatTokenEnv) ?? "";
                 if (chatToken.Length > 0 && SecretEquals(token, chatToken))
                 {
-                    // Anyone who can reach the proxy could claim any email with it.
-                    if (ProxyHeaders.Any(h => ctx.Request.Headers.ContainsKey(h)))
-                        throw new AclDenied("The chat-client credential is accepted only from inside the stack's network, not through the proxy.");
-                    var email = PyStr.Strip(ctx.Request.Headers[ChatEmailHeader].ToString());
-                    if (email.Length == 0)
-                        throw new AclDenied("The chat client did not say who is asking, so access is denied.");
                     via = "chat";
-                    caller = Person(access, email, People.UsernameForEmail(Environment.GetEnvironmentVariable(UsersFileEnv), email), via);
+                    caller = ChatPerson(ctx, access);
                 }
                 else if (keys is not null)
                 {
@@ -418,8 +438,84 @@ public static partial class ArgusServer
         await next();
     }
 
+    /// <summary>The person the chat's credential names, once it is known to come from inside the network.</summary>
+    static Caller ChatPerson(HttpContext ctx, PersonAccess access)
+    {
+        // Anyone who can reach the proxy could claim any email with it.
+        if (ProxyHeaders.Any(h => ctx.Request.Headers.ContainsKey(h)))
+            throw new AclDenied("The chat-client credential is accepted only from inside the stack's network, not through the proxy.");
+        var email = PyStr.Strip(ctx.Request.Headers[ChatEmailHeader].ToString());
+        if (email.Length == 0)
+            throw new AclDenied("The chat client did not say who is asking, so access is denied.");
+        return Person(access, email, People.UsernameForEmail(Environment.GetEnvironmentVariable(UsersFileEnv), email), "chat");
+    }
+
     /// <summary>Where the gate leaves the <see cref="Caller"/> for the request.</summary>
     public const string CallerItem = "argus.caller";
+
+    // --- merge requests for the app ------------------------------------------------------
+
+    /// <summary>
+    /// The merge request and commit tools as GET routes, each one's query its arguments
+    /// (/review/mr_diff?project=group/app&amp;iid=4&amp;path=src/a.cs), answered as the tool answers: the
+    /// same access check, the same audit. And /review/access?project=...[&amp;email=...]: whether that
+    /// person (the one asking, or another the app is about to let into a room) may read the project.
+    /// </summary>
+    static void MapReview(WebApplication app, Tools tools, PersonAccess access)
+    {
+        static IResult Failed(Exception exc) => exc switch
+        {
+            AccessNotice => Json(new JsonObject { ["error"] = exc.Message }, 403),
+            NotFoundError => Json(new JsonObject { ["error"] = exc.Message }, 404),
+            HostUnavailable => Json(new JsonObject { ["error"] = exc.Message }, 502),
+            IndexUnavailable => Json(new JsonObject { ["error"] = exc.Message }, 503),
+            AclDenied denied => Json(new JsonObject { ["error"] = exc.Message }, People.Definite(denied) ? 403 : 503),
+            ToolError or QueryError => Json(new JsonObject { ["error"] = exc.Message }, 400),
+            _ => Json(new JsonObject { ["error"] = Short(exc) }, 500),
+        };
+
+        app.MapGet(ReviewPrefix + "access", async (HttpContext ctx) =>
+        {
+            var caller = (Caller)ctx.Items[CallerItem]!;
+            var project = ctx.Request.Query["project"].ToString();
+            var email = PyStr.Strip(ctx.Request.Query["email"].ToString());
+            try
+            {
+                return await Task.Run(() =>
+                {
+                    var who = email.Length == 0
+                        ? caller.Identity
+                        : access.Resolve(email, People.UsernameForEmail(Environment.GetEnvironmentVariable(UsersFileEnv), email));
+                    Tools.KnownProject? known;
+                    using (var conn = Db.ConnectReadonly(tools.IndexPath)) known = Tools.FindProject(conn, project);
+                    var may = known is not null && who.MayRead(known.GitlabId);
+                    return Json(new JsonObject { ["project"] = known?.Path ?? project, ["known"] = known is not null, ["may_read"] = may });
+                });
+            }
+            catch (AclDenied exc) when (People.Definite(exc))
+            {
+                // No GitLab account, or not an active one: a definite no.
+                return Json(new JsonObject { ["project"] = project, ["known"] = null, ["may_read"] = false, ["reason"] = exc.Message });
+            }
+            catch (Exception exc) { return Failed(exc); }
+        });
+
+        app.MapGet(ReviewPrefix + "{tool}", async (HttpContext ctx, string tool) =>
+        {
+            if (!Tools.ReviewTools.Contains(tool)) return Json(new JsonObject { ["error"] = $"no route {ReviewPrefix}{tool}" }, 404);
+            var caller = (Caller)ctx.Items[CallerItem]!;
+            var spec = ToolCatalog.Specs.First(s => s.Name == tool);
+            // Each query value as a JSON string: the tool's own validation reads numbers and booleans from them.
+            var arguments = ctx.Request.Query.ToDictionary(q => q.Key, q => JsonSerializer.SerializeToElement(q.Value.ToString()), StringComparer.Ordinal);
+            try
+            {
+                var args = ToolRuntime.Validate(spec, arguments);
+                var result = await Task.Run(() => tools.Dispatch(tool, args, () => caller.Identity), ctx.RequestAborted);
+                return Json(result ?? new JsonObject());
+            }
+            catch (Exception exc) { return Failed(exc); }
+        });
+    }
 
     // --- webhook ------------------------------------------------------------------------
 
