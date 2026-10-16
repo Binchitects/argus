@@ -86,6 +86,8 @@ export interface EditorApi {
   /** The cursor in the file shown, 1-based. */
   cursor: { line: number; column: number } | null
   open: (path: string, at?: Reveal) => Promise<void>
+  /** Opens files in tabs behind the one shown, their text in the editor (a language server's edit changes them). */
+  keep: (paths: string[]) => Promise<void>
   openDiff: (path: string, source?: DiffSource) => Promise<void>
   /** Opens the Settings editor or the Keyboard Shortcuts editor (one tab each). */
   openPage: (kind: 'settings' | 'keybindings', query?: string) => void

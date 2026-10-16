@@ -88,6 +88,23 @@ export function setExtensionIconThemes(list: IconThemeInfo[]) {
 /** Every file icon theme offered: Code Arena's own, then the extensions'. */
 export const allIconThemes = (): IconThemeInfo[] => [ownIcons, ...extensionIconThemes]
 
+/** code-arena's own language servers (LanguageServers.cs), by id: their names, and whether they start by default. */
+const languageServerIds: [id: string, name: string, on: boolean][] = [
+  ['typescript', 'typescript-language-server', true],
+  ['pyright', 'Pyright', true],
+  ['basedpyright', 'basedpyright', true],
+  ['pylsp', 'Python LSP Server', true],
+  ['gopls', 'gopls', true],
+  ['rust-analyzer', 'rust-analyzer', true],
+  ['clangd', 'clangd', true],
+  ['csharp-ls', 'csharp-ls', true],
+  ['json', 'vscode-json-language-server', false],
+  ['css', 'vscode-css-language-server', false],
+  ['html', 'vscode-html-language-server', false],
+  ['yaml', 'yaml-language-server', true],
+  ['bash', 'bash-language-server', true],
+]
+
 export const settingDefs: SettingDef[] = [
   // Text Editor
   { key: 'editor.fontSize', type: 'number', default: 13, minimum: 6, maximum: 100, description: 'The font size in pixels. (VS Code: 14.)', category: 'Text Editor', scope: lang },
@@ -190,6 +207,15 @@ export const settingDefs: SettingDef[] = [
   { key: 'debug.openDebug', type: 'string', default: 'openOnDebugBreak', enum: ['neverOpen', 'openOnSessionStart', 'openOnDebugBreak'], description: 'When Run and Debug shows in the side bar: as a session starts, or as the program stops.', category: 'Debug' },
   { key: 'debug.inlineValues', type: 'string', default: 'auto', enum: ['on', 'off', 'auto'], description: "Shows variables' values at the ends of the lines while stopped (auto: on).", category: 'Debug' },
   { key: 'debug.toolBarLocation', type: 'string', default: 'floating', enum: ['floating', 'hidden'], description: 'Where the debug toolbar is: over the editor, or not shown (the Run and Debug view and the keys still work).', category: 'Debug' },
+  // Language servers
+  { key: 'codeArena.languageServers.enabled', type: 'boolean', default: true, description: "Starts a language server for the folder's files of its languages (in a trusted folder): completions, hovers, definitions, references, rename, code actions, formatting and diagnostics.", category: 'Language Servers' },
+  ...languageServerIds.map(([id, name, on]): SettingDef => ({
+    key: `codeArena.languageServers.${id}.enabled`,
+    type: 'boolean',
+    default: on,
+    description: on ? `Starts ${name} when it is installed.` : `Starts ${name} when it is installed. Off by default: the editor's own ${id.toUpperCase()} service is the same, and is turned off while the server runs.`,
+    category: 'Language Servers',
+  })),
   // Code Arena
   { key: 'codeArena.inlineCompletion.enabled', type: 'boolean', default: true, description: "Code Arena's code completion as you type (the status bar's Complete): what you type is sent to the model. Your own setting: a project's settings.json cannot turn it on.", category: 'Code Arena', scope: 'application' },
 ]

@@ -8,7 +8,7 @@ import { modKey } from './editor-state'
  */
 
 /** The parts of the workbench. */
-export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'git' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status' | 'settings' | 'keybindings' | 'debug' | 'console' | 'extensions'
+export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'git' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status' | 'settings' | 'keybindings' | 'debug' | 'console' | 'extensions' | 'output'
 
 export interface PartHelp extends HelpPart {
   /** Where the manual's Code Arena page (docs/code-arena.md) tells the rest: one of its headings. */
@@ -32,6 +32,11 @@ export const parts: Record<Part, PartHelp> = {
     name: 'Debug Console',
     text: 'What the program and the debugger print while debugging; the box below evaluates an expression in the frame chosen while the program is stopped (↑ and ↓ bring back what you typed).',
     manual: 'run-and-debug',
+  },
+  output: {
+    name: 'Output',
+    text: "What each language server said, one channel each (choose it above): when it started, its messages, why it ended, and the last lines it wrote to stderr. **Restart** starts it again. The status bar's language server item opens it too (**Show Language Server Log**).",
+    manual: 'language-servers',
   },
   settings: {
     name: 'Settings',
@@ -95,7 +100,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   status: {
     name: 'Status bar',
-    text: 'Along the bottom: the git branch, the agent\'s changes, the terminal and the commands running with no time limit on the left; the cursor\'s line and column, the file\'s language, the MCP servers (**Try again** for one not connected), how full the model\'s window is (**Context** sets when the session compacts), the mode, the model and the version (About: the licence and the source) on the right.',
+    text: 'Along the bottom: the git branch, the agent\'s changes, the terminal and the commands running with no time limit on the left; the cursor\'s line and column, the file\'s formatter, its language server (starting, ready, failed, or off until the folder is trusted: click it to restart it or see its log) and its language, the MCP servers (**Try again** for one not connected), how full the model\'s window is (**Context** sets when the session compacts), the mode, the model and the version (About: the licence and the source) on the right.',
     manual: 'the-ide',
   },
 }
@@ -161,6 +166,14 @@ export const tasks: HelpTask[] = [
     ],
   },
   {
+    title: 'Get completions, definitions and errors from a language server',
+    steps: [
+      'Install the language server for the language (typescript-language-server, pyright, gopls, rust-analyzer, clangd…): the status bar says which, and how, when it is missing.',
+      'Trust the folder (**Manage Workspace Trust**): a language server runs the folder\'s code.',
+      'Open a file of the language: the server starts, and F12 goes to a definition, Shift+F12 lists the references, F2 renames.',
+    ],
+  },
+  {
     title: "Use Arena's and Argus's tools",
     steps: ['They connect by themselves once you are signed in: the plug in the status bar counts those connected.', 'Click it to see why one is not, and press **Try again**.'],
   },
@@ -205,5 +218,6 @@ export const regions: Record<string, Part> = {
   'Run and Debug': 'debug',
   'Debug Console': 'console',
   Extensions: 'extensions',
+  Output: 'output',
   'Keyboard Shortcuts': 'keybindings',
 }
