@@ -11,16 +11,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useConfirm } from '@/components/ui/confirm'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, ApiError, errorMessage } from '@/lib/api'
 import { money } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { AccessPicker, type AccessRule } from './access-picker'
-import { MediaModelForm, type SavedMediaModel } from './media-model-form'
-import { mediaModeLabel, type MediaMode } from './media-modes'
-import { ModelForm, type SavedModel } from './model-form'
+import { type SavedMediaModel } from './media-model-form'
+import { ModelDialog, type ModelDialogOpen } from './model-dialog'
+import { type SavedModel } from './model-form'
 import { WorkingHours } from './model-hours'
 import { DefaultModelsCard } from './default-models'
 import { DownloadsCard, HuggingFaceBrowser } from './huggingface'
@@ -140,8 +139,8 @@ export function ModelsPage() {
     // Faster while a model loads or unloads (an engine model or a picture, video or speech one), so the page shows it the moment it is done.
     refetchInterval: (q) => (q.state.data?.gpu?.lent || q.state.data?.models.some((m) => m.status === 'loading' || m.status === 'unloading') ? 2000 : 15000),
   })
-  const [editing, setEditing] = useState<ModelRow | 'new' | { preset: string } | null>(null)
-  const [media, setMedia] = useState<SavedMediaModel | { mode: MediaMode; file?: string } | null>(null)
+  // The one dialog that adds and edits every kind of model.
+  const [dialog, setDialog] = useState<ModelDialogOpen | null>(null)
   const [hf, setHf] = useState(false)
   if (models.isPending) return <PageSkeleton />
   if (models.error) return <QueryError error={models.error} retry={() => models.refetch()} />
@@ -156,21 +155,9 @@ export function ModelsPage() {
             <Button variant="outline" onClick={() => setHf(true)}>
               <Search /> Find on Hugging Face
             </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button>
-                  <Plus /> Add a model
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {engine.enabled && <DropdownMenuItem onSelect={() => setEditing('new')}>A chat model</DropdownMenuItem>}
-                {(Object.keys(mediaModeLabel) as MediaMode[]).map((mode) => (
-                  <DropdownMenuItem key={mode} onSelect={() => setMedia({ mode })}>
-                    {`A ${mediaModeLabel[mode].toLowerCase()} model`}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Button onClick={() => setDialog({ add: null })}>
+              <Plus /> Add a model
+            </Button>
           </>
         }
       />
@@ -181,7 +168,7 @@ export function ModelsPage() {
         </Alert>
       )}
       <DefaultModelsCard />
-      <DownloadsCard onAdd={(preset) => setEditing({ preset })} />
+      <DownloadsCard onAdd={(source) => setDialog({ add: source })} />
       {small?.warning && (
         <Alert variant="warning" className="mb-4" title="The model for small steps">
           {small.warning}
@@ -203,38 +190,20 @@ export function ModelsPage() {
             model={m}
             engine={engine}
             small={m.name === small?.name && (m.mode ?? 'chat') === 'chat'}
-            onEdit={() => (m.source === 'media' ? setMedia(m as SavedMediaModel) : setEditing(m))}
+            onEdit={() => setDialog({ edit: m.source === 'media' ? { kind: 'media', model: m as SavedMediaModel } : { kind: 'chat', model: m } })}
             onChanged={() => queryClient.invalidateQueries({ queryKey: ['admin', 'models'] })}
           />
         ))}
       </div>
-      <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
+      <Dialog open={dialog !== null} onOpenChange={(o) => !o && setDialog(null)}>
         <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-3xl">
-          {editing !== null && (
-            <ModelForm
-              key={editing === 'new' ? 'new' : 'preset' in editing ? `preset:${editing.preset}` : editing.name}
-              saved={editing === 'new' || 'preset' in editing ? null : editing}
-              onMedia={(mode, file) => {
-                setEditing(null)
-                setMedia({ mode, file })
-              }}
-              file={editing !== 'new' && 'preset' in editing ? editing.preset : undefined}
+          {dialog !== null && (
+            <ModelDialog
+              key={'edit' in dialog ? `edit:${dialog.edit.model.name}` : `add:${dialog.add ? JSON.stringify(dialog.add) : ''}`}
+              open={dialog}
+              chat={engine.enabled}
               gpus={engine.gpus}
-              onClose={() => setEditing(null)}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-      <Dialog open={media !== null} onOpenChange={(o) => !o && setMedia(null)}>
-        <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-3xl">
-          {media !== null && (
-            <MediaModelForm
-              key={'name' in media ? media.name : `new:${media.mode}`}
-              saved={'name' in media ? media : null}
-              mode={'name' in media ? undefined : media.mode}
-              file={'name' in media ? undefined : media.file}
-              gpus={engine.gpus}
-              onClose={() => setMedia(null)}
+              onClose={() => setDialog(null)}
             />
           )}
         </DialogContent>
