@@ -37,7 +37,8 @@ spec:
             {{- include "arena.secretEnv" (list $ "Database__Password" "DB_PASSWORD") | nindent 12 }}
             {{- include "arena.secretEnv" (list $ "Gateway__MasterKey" "GATEWAY_KEY") | nindent 12 }}
             {{- include "arena.secretEnv" (list $ "Engine__ApiKey" "ENGINE_KEY") | nindent 12 }}
-            - { name: Engine__Enabled, value: {{ .Values.llamacpp.enabled | quote }} }
+            - { name: Engine__Enabled, value: {{ or .Values.llamacpp.enabled .Values.vllm.enabled | quote }} }
+            - { name: Engine__LlamaCpp, value: {{ .Values.llamacpp.enabled | quote }} }
             - { name: Engine__FirstModel, value: {{ .Values.model | quote }} }
             - { name: Engine__DefaultModels, value: {{ .Values.defaultModels | default "" | quote }} }
             # Engines and GPUs: llama.cpp's backend, and the GPU the picture server and the embedder run on.

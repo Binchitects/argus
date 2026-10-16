@@ -187,7 +187,7 @@ public sealed class AppFixture : IAsyncLifetime
                 s.AddHttpClient(Llm.Api.Chat.Tools.ToolRegistry.McpClient).ConfigurePrimaryHttpMessageHandler(() => Mcp);
                 s.AddHttpClient(Llm.Api.Plugins.PluginCatalog.Client).ConfigurePrimaryHttpMessageHandler(() => Mcp);
                 s.AddHttpClient(Llm.Api.Schedules.GitLabBot.Client).ConfigurePrimaryHttpMessageHandler(() => Mcp);
-                s.AddHttpClient<Llm.Api.Models.EngineClient>().ConfigurePrimaryHttpMessageHandler(() => Engine);
+                s.AddHttpClient(Llm.Api.Models.LlamaCppBackend.Client).ConfigurePrimaryHttpMessageHandler(() => Engine);
                 s.AddHttpClient(Llm.Api.Models.RemoteServerClient.Client).ConfigurePrimaryHttpMessageHandler(() => Remote);
                 s.AddHttpClient(Llm.Api.Models.RemoteServerClient.Unchecked).ConfigurePrimaryHttpMessageHandler(() => Remote);
                 s.AddSingleton<Llm.Api.Chat.Tools.WebResolver>(Web.Resolver);

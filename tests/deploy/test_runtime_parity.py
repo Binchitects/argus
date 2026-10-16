@@ -37,6 +37,7 @@ ALLOWED: dict[tuple[str, str, str], str] = {
     ("env", "app", "Storage__BackupsKept"): "backups are backup.sh's (compose); a cluster backs up its own volumes",
     ("env", "app", "Stack__Acme"): "Traefik's Let's Encrypt (compose); the Ingress takes a TLS Secret",
     ("env", "app", "Engine__Enabled"): "Helm can leave the engine out (llamacpp.enabled); compose always runs it",
+    ("env", "app", "Engine__LlamaCpp"): "Helm can run vLLM without llama.cpp (llamacpp.enabled false); compose always runs llama.cpp",
     ("env", "app", "Modules__imagegen"): "Helm says outright which modules run; compose's app looks the names up",
     ("env", "app", "Modules__videogen"): "as Modules__imagegen",
     ("env", "app", "Modules__audio"): "as Modules__imagegen",

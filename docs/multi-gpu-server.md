@@ -447,6 +447,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
    - Extract `LlamaCppBackend` from `EngineClient`; add `VllmBackend` (desired state, status, health, metrics-based capacity).
    - `EngineWatcher` iterates the backends.
    - Tests: Testcontainers with fake-vllm.
+   - **Done**: `IEngineBackend` (list, load, unload, sleep, capacity, health) with `LlamaCppBackend` (the router API, as before), `VllmBackend` (presets.json the app writes per instance, models.json the desired state, the supervisor's status and heartbeat, `/metrics`) and `ExternalBackend` (Other GPU servers: registered and checked, never managed). `EngineClient` is every engine as one: each model goes to the engine that lists it; llama.cpp failing fails the whole as before, a vLLM instance down only lists its models unloaded and says why. `Engine:Vllm` lists the vLLM instances (one named `vllm` by default; another machine is another entry with its host and shared folders); `Engine:LlamaCpp` false runs vLLM alone. The watcher writes each instance's presets (ports kept stable), Prometheus targets per vLLM process, and each model's place on the GPUs; vLLM models take none of llama.cpp's places (Models loaded at once). Tests: `VllmBackendTests` (unit, the engines as one, and the real supervisor with fake-vllm in a `python:3.13-slim` container).
 8. **`EngineRoute` per GPU set.**
    - Room is made only among models sharing the target GPUs.
    - vLLM is "busy" from metrics, with no slot pinning (`TokenCache` for vLLM).

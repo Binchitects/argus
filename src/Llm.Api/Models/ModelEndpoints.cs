@@ -55,7 +55,7 @@ public static class ModelEndpoints
 
     private static async Task<IResult> ListAsync(AppDbContext db, ChatModels gatewayModels, EngineState state, ModelCatalog catalog, ModelLibrary library,
         HardwareProbe hardware, ModelHoursState hours, IOptions<EngineOptions> engine, MediaControl media, SmallModel small, PriceBook prices, ModelPolicy policy, GpuShare gpu,
-        CancellationToken ct)
+        EngineClient engines, CancellationToken ct)
     {
         var e = engine.Value;
         // What each costs: its own prices, else the defaults (Settings → Prices); own says which it sets.
@@ -173,6 +173,8 @@ public static class ModelEndpoints
                 plan = e.Enabled ? Plan(kept, local, e, library, hw) : null,
                 // The kinds of engine and what each can do: the form offers a model only its kind's settings.
                 kinds = EngineKinds.All,
+                // Each engine instance (llama.cpp, each vLLM, the servers the app does not run), and why one's models could not be listed.
+                instances = engines.Backends.Select(b => new { b.Name, kind = b.Capabilities.Kind, managed = b.Capabilities.Managed, problem = engines.Problems.GetValueOrDefault(b.Name) }),
             },
             // The model for sub-agents and small steps (Settings → Model), and what keeps it from doing them well.
             small = small.Name is { } name ? new { name, warning = await small.WarningAsync(ct) } : null,
@@ -339,6 +341,7 @@ public static class ModelEndpoints
     private static async Task<object> AfterChangeAsync(ModelCatalog catalog, EngineWatcher watcher, string? warning, CancellationToken ct)
     {
         await catalog.WritePresetsAsync(ct);
+        await catalog.WriteVllmPresetsAsync(ct);
         watcher.Wake();
         try
         {
@@ -376,9 +379,11 @@ public static class ModelEndpoints
                 + "the chat models unloaded for it load again by themselves then.");
         }
         var kept = catalog.Kept();
-        if (!kept.Contains(name) && kept.Count >= options.Value.ModelsMax)
+        // llama.cpp's places only: a vLLM model's room is its GPUs' memory.
+        var keptHere = kept.Where(state.Counted).ToList();
+        if (state.Counted(name) && !kept.Contains(name) && keptHere.Count >= options.Value.ModelsMax)
         {
-            return AuthEndpoints.Problem(409, "full", FullMessage(kept.Count, options.Value.ModelsMax));
+            return AuthEndpoints.Problem(409, "full", FullMessage(keptHere.Count, options.Value.ModelsMax));
         }
         var room = await route.RoomForAdminAsync(name, kept, instead == true, ct);
         if (room.Refusal is { } refusal)
@@ -482,7 +487,7 @@ public static class ModelEndpoints
         string? warning = null;
         if (body.Keep && !kept.Contains(name))
         {
-            if (kept.Count >= e.ModelsMax)
+            if (state.Counted(name) && kept.Count(state.Counted) >= e.ModelsMax)
             {
                 return AuthEndpoints.Problem(409, "full", $"The engine holds {e.ModelsMax} model{(e.ModelsMax == 1 ? "" : "s")} at once, and {(kept.Count == 1 ? "one is" : $"{kept.Count} are")} kept loaded already. Stop keeping one, or raise \"Models loaded at once\" under Settings.");
             }

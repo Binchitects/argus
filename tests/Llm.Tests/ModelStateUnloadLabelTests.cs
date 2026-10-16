@@ -59,8 +59,8 @@ public sealed class ModelStateUnloadLabelTests(AppFixture app, ITestOutputHelper
     public async Task A_model_an_admin_unloads_is_unloading_then_unloaded_never_loading_nor_failed_until_it_is_asked_for_again()
     {
         using var router = new Router();
-        using var http = new HttpClient(router);
-        var engine = new EngineClient(http, Options.Create(new EngineOptions { Url = "http://router" }));
+        var http = new OneClient(router);
+        var engine = new LlamaCppBackend(http, Options.Create(new EngineOptions { Url = "http://router" }), TimeProvider.System);
         var clock = new SteppedClock(DateTimeOffset.UtcNow);
         var state = new EngineState(clock);
         var seen = new List<string?>();
@@ -70,7 +70,7 @@ public sealed class ModelStateUnloadLabelTests(AppFixture app, ITestOutputHelper
         {
             router.Json = RouterSays(routerStatus);
             var asked = state.Asking();
-            state.Set(await engine.ModelsAsync(), asked);
+            state.Set(await engine.ListAsync(default), asked);
             seen.Add(state.StatusOf("tiny"));
         }
 
