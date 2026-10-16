@@ -41,6 +41,17 @@ broken filter shows up as **extra rows**, not as an error. And `driver-shim` has
 no members at all — if either developer can reach it through Argus, the design
 has failed, and the check says so rather than passing quietly.
 
+Two **merge requests** feed the review checks (their iids are in `seeded.json`
+under `merge_requests`):
+
+| Project | Branch | What it carries |
+|---|---|---|
+| `eal-core` | `review/frame-sum` | `SumFrame`, with two seeded bugs (`buf` read before its null check, and a read one past the end with `<= len`), and `config/upload.env` with a committed fake GitLab token |
+| `driver-shim` | `review/shim-only` | a change marked `SHIM_ONLY`, which no developer may see through any merge request tool |
+
+The same fixture runs without a GitLab in Argus's tests
+(`tests/Argus.Tests/FakeGitLabMr.cs`, `ReviewFixture`).
+
 ## Running it
 
 ```bash
