@@ -1,9 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
-import { ArrowUp, Clock3, EyeOff, FileText, ListEnd, Paperclip, Square, TextQuote, X } from 'lucide-react'
+import { ArrowUp, Clock3, ListEnd, Paperclip, Square, TextQuote } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
-import { formatValue } from '@/lib/format'
 import { fillPrompt, promptsQuery, slashItems, slashQuery, variablesOf, type PromptItem, type SlashItem } from '@/lib/prompts'
 import { cn } from '@/lib/utils'
 import type { CompactSetting, ContextView } from './context'
@@ -14,6 +13,7 @@ import type { Quote } from './quote'
 import { QuoteChip } from './quote-parts'
 import { PromptFields, SlashMenu } from './slash'
 import type { Attachment, ChatModel } from './types'
+import { UploadChips } from './upload-chips'
 
 /** A message written while an answer runs, waiting on the server: sent when the answer ends, or at once with Send now. */
 export interface Queued {
@@ -207,8 +207,6 @@ export function Composer({
       void submit()
     }
   }
-  const blindImages = model && !model.vision && uploads.uploads.some((u) => u.isImage && !u.error)
-
   return (
     <form
       className={cn('relative rounded-2xl border bg-card shadow-sm transition-shadow focus-within:border-primary/50 focus-within:shadow-md', big && 'shadow-md')}
@@ -276,46 +274,7 @@ export function Composer({
         />
       )}
       <output className="sr-only">{quote ? 'Quoted in your reply' : ''}</output>
-      {uploads.uploads.length > 0 && (
-        <ul className="flex flex-wrap gap-2 px-3 pt-3" aria-label="Files to send">
-          {uploads.uploads.map((u) => (
-            <li key={u.key} className={cn('relative flex items-center gap-2 overflow-hidden rounded-lg border bg-muted/40 text-sm', u.error && 'border-destructive/50', u.isImage && u.preview ? 'p-0' : 'py-1.5 pr-8 pl-2.5')}>
-              {u.isImage && u.preview ? (
-                <img src={u.preview} alt={u.name} className="size-16 object-cover" />
-              ) : (
-                <>
-                  <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <span className="grid">
-                    <span className="max-w-44 truncate">{u.name}</span>
-                    <span className={cn('text-xs', u.error ? 'text-destructive-ink' : 'text-muted-foreground')}>
-                      {u.error ?? (u.attachment ? `${formatValue(u.size, 'bytes')}${u.attachment.truncated ? ', cut to fit' : ''}` : `Uploading ${Math.round(u.progress * 100)}%`)}
-                    </span>
-                  </span>
-                </>
-              )}
-              {!u.attachment && !u.error && (
-                <span className="absolute inset-x-0 bottom-0 h-0.5 bg-muted" aria-hidden="true">
-                  <span className="block h-full bg-primary transition-[width]" style={{ width: `${u.progress * 100}%` }} />
-                </span>
-              )}
-              {u.isImage && u.error && <span className="px-2 text-xs text-destructive-ink">{u.error}</span>}
-              <button
-                type="button"
-                onClick={() => uploads.remove(u.key)}
-                className="absolute top-1 right-1 flex size-5 items-center justify-center rounded-full bg-background/90 text-muted-foreground shadow-sm outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring"
-                aria-label={`Remove ${u.name}`}
-              >
-                <X className="size-3" />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {blindImages && (
-        <p className="flex items-center gap-1.5 px-4 pt-2 text-xs text-muted-foreground">
-          <EyeOff className="size-3.5" aria-hidden="true" /> {model.name} cannot see images: it gets their names only.
-        </p>
-      )}
+      <UploadChips uploads={uploads} model={model} />
       <textarea
         ref={area}
         dir="auto"

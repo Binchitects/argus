@@ -155,8 +155,8 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/help` | the commands |
 | `/model [name]` | show the models, or switch |
 | `/mode [mode]` | show the mode, or switch |
-| `/thinking [level]` | `default`, `off`, `low`, `medium`, `high`, `xhigh` (sent as the chat sends it, through `chat_template_kwargs`) |
-| `/tools` | the tools of the session, and which ask |
+| `/thinking [level]` | `default`, `off`, `low`, `medium`, `high`, `xhigh` (sent as the chat sends it, through `chat_template_kwargs`); `default` is the web chat's default level when Arena says one (`DEFAULT_THINKING`), else the model's own |
+| `/tools [on\|off NAME]` | the tools of the session, which ask, which are off and which are loaded when needed; `on` or `off` a group of Arena's or a server's tools in this session (by its name, its title or one of its functions) |
 | `/todo` | the to-do list |
 | `/compact` | summarize the conversation now |
 | `/compact-at [% [%]]` | show or set when the session compacts itself and what it keeps (below); `off` for only when a request would not fit, `account` for your Arena account's, `default` for that and 25 |
@@ -304,7 +304,29 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   ones still running, with their screens (below). The panel's other tabs are
   the **Debug Console** and the **Output** (the language servers', below).
 - **chat**: the agent's chat on the right: the model and thinking pickers,
-  Sessions and Hide at its top; the thread with a card for each tool call and
+  Sessions and Hide at its top. The pickers say what Arena's web chat says
+  (read with the key from `GET /api/code-arena/config` at the start): which
+  models are loaded, load when asked or are not loaded now, which see
+  pictures, the deployment's thinking levels with their names, and which one
+  **Default** is; Argus's answers link to the same GitLab. Without Arena every
+  model counts as loaded, with Code Arena's own five levels. **Files** go with
+  a message as in the web chat: the clip, a paste or a drop on the box (Word,
+  Excel, PowerPoint, PDF, text, code, pictures), up to 10, as large as Arena
+  takes. They are uploaded to Arena (through code-arena, which adds the key),
+  which reads a document's text: the model reads it after the message (up to
+  60,000 characters a file), and a model that sees gets the pictures with it
+  (named otherwise; a sound or a video is named only). The question shows them,
+  and the chat in Arena keeps them as its attachments, so the web shows them
+  and its model reads them. Without Arena there is no clip. **Answer again**
+  under an answer asks its question again as the web chat does: as it was,
+  **Shorter** or **Longer** than that answer, with another model or other
+  thinking (for that answer only), or **the files as they were** when the turn
+  changed files (what its tools and the later turns' wrote is put back first,
+  as `/rewind` does, while this run keeps that turn's checkpoint). **Edit** on a
+  question asks it again with new words (its quote kept or taken away, its
+  files sent again). Either goes back to before the question: the session
+  goes on from there, and the chat in Arena keeps the earlier turns on a
+  branch of their own, where the web's version arrows show them. Then the thread, with a card for each tool call and
   a diff under each edit, the approval card (**Allow**, **Always for this
   session**, **Deny**), Stop, the mode, `/compact` and `/clear`. A command
   the agent runs with no time limit shows above the box while it runs: the
@@ -1004,6 +1026,12 @@ That is why everything below is behind this run's key.
   Sec-Fetch-Site), takes only JSON (a .vsix only as its bytes, which no form
   of another site's can send), and its page cannot be framed. Every call,
   the file calls and the terminals' WebSocket included, passes these checks.
+- The page never holds the API key. The few routes of Arena's chat it uses
+  (the person's files: `POST /api/chat/attachments`, a file's `content`, its
+  `pages`) it calls on code-arena, which passes them on to Arena with the key,
+  after the checks above; a form (a file) is taken there alone. Arena takes
+  the key on those routes and no others of its chat, and a file is the
+  person's own or not found.
 - The file calls take paths relative to the working directory only: an
   absolute path, a drive or `..` is refused, even one that would land inside.
   So is a link that leads outside, one to a file not there yet outside, and
@@ -1316,6 +1344,21 @@ where to fix it; an MCP server of your own at such an address is skipped and
 said. `"arenaTools": false` and `"argusTools": false` in
 `config.json` turn them off. `code-arena login` tries both and says what it
 found.
+
+**Which of them, and when they load.** As in the web chat, a session has its
+own choice of Arena's tools: the IDE's **Tools** menu beside the thinking
+picker (the web chat's own menu: Arena's tools by the name its chat gives them,
+each MCP server of yours as one) or `/tools off NAME` and `/tools on NAME` in
+the terminal. A tool off is left out of the requests, and a call to it is
+refused; the local tools are always there. The choice is kept with the session
+(a new one has every tool on). Arena's tools are many (about 35 functions, some
+9,000 tokens), so they come **on demand**, as in the web chat: past 6,000
+characters of definitions (`"toolChars"` in `config.json`; 0 sends them whole
+always) only those loaded go whole in each request. The others are listed in
+Code Arena's note, a line per tool, and the model loads what a task needs with
+`load_tools` (a function called straight from the list is loaded then). What a
+session loads stays loaded, kept with it, so the start of the requests stays
+what the engine has cached; loading one more reads the prompt again once.
 
 ### Commands with no time limit, and in the background
 
@@ -1707,7 +1750,7 @@ without starting it. On Windows, `npx` and other `.cmd` scripts need
 The rest of the file: `"model"`, `"thinking"`, `"mode"`, `"context"`,
 `"shell"` (the agent's `run_shell`), `"terminalShell"` (the IDE's terminals),
 `"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"argusTools": false`
-(no Argus MCP), `"argusUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
+(no Argus MCP), `"toolChars"` (tools on demand, above), `"argusUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
 `"mcpUrl"`, `"ca"`, `"autoCommit"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"window"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"checkCommand"`, `"sandbox"`,
 `"sandboxNetwork"`, `"sandboxWritable"`, `"permissions"`, `"formatters"`, `"debugAdapters"` and
 `"languageServers"` (the IDE's: above). `ARENA_ARGUS_URL` in the environment gives Argus's address

@@ -898,22 +898,36 @@ internal sealed class ChatSync : IAsyncDisposable
     /// </summary>
     public static async Task<AccountCompaction?> CompactAtAsync(Config config, HttpClient http, TimeSpan limit, CancellationToken ct)
     {
+        if (await AccountReadAsync(config, http, "/api/code-arena/preferences", limit, ct) is not { } prefs)
+        {
+            return null;
+        }
+        var own = prefs.Int("compactAt");
+        return (own ?? prefs.Int("compactAtDefault")) is { } at ? new AccountCompaction(at, own is not null) : null;
+    }
+
+    /// <summary>
+    /// What the web chat offers the person, as Arena's /api/chat/config says it (read with the key): each model loaded or
+    /// not and seeing pictures or not, the thinking levels and their default, the address of GitLab for Argus's links. Null
+    /// when Arena does not say (an older one) or cannot be reached within <paramref name="limit"/>.
+    /// </summary>
+    public static Task<JsonObject?> ChatConfigAsync(Config config, HttpClient http, TimeSpan limit, CancellationToken ct) =>
+        AccountReadAsync(config, http, "/api/code-arena/config", limit, ct);
+
+    /// <summary>A JSON object of the account's from Arena, read with the key; null when there is no Arena, it refuses, or it does not answer within <paramref name="limit"/>.</summary>
+    private static async Task<JsonObject?> AccountReadAsync(Config config, HttpClient http, string path, TimeSpan limit, CancellationToken ct)
+    {
         if (config.Url is not { Length: > 0 } url || config.ApiKey is not { Length: > 0 } key)
         {
             return null;
         }
         try
         {
-            using var req = Request(HttpMethod.Get, url.TrimEnd('/') + "/api/code-arena/preferences", key, null);
+            using var req = Request(HttpMethod.Get, url.TrimEnd('/') + path, key, null);
             using var within = CancellationTokenSource.CreateLinkedTokenSource(ct);
             within.CancelAfter(limit);
             using var res = await http.SendAsync(req, within.Token);
-            if (!res.IsSuccessStatusCode || Json.ParseObject(await res.Content.ReadAsStringAsync(within.Token)) is not { } prefs)
-            {
-                return null;
-            }
-            var own = prefs.Int("compactAt");
-            return (own ?? prefs.Int("compactAtDefault")) is { } at ? new AccountCompaction(at, own is not null) : null;
+            return res.IsSuccessStatusCode ? Json.ParseObject(await res.Content.ReadAsStringAsync(within.Token)) : null;
         }
         catch (Exception e) when (e is HttpRequestException or OperationCanceledException && !ct.IsCancellationRequested)
         {
@@ -1172,6 +1186,19 @@ internal sealed class ChatSync : IAsyncDisposable
         {
             o["content"] = split.Text;
             o["quote"] = quote;
+        }
+        // Files attached in the IDE: Arena has them already (uploaded there), and keeps them as the question's attachments, so
+        // the web shows them and its model reads them itself; their text and pictures stay out of the words.
+        if (role == "user" && (m["content"] is JsonArray parts ? parts.OfType<JsonObject>().FirstOrDefault(p => p.Str("type") == "text")?.Str("text") : o.Str("content")) is { } words
+            && Uploads.Split(words) is { Files.Count: > 0 } attached)
+        {
+            var (quoted, text) = Quotes.Split(attached.Text);
+            o["content"] = text;
+            if (quoted is not null)
+            {
+                o["quote"] = quoted;
+            }
+            o["attachments"] = new JsonArray([.. attached.Files.Select(f => (JsonNode)new JsonObject { ["id"] = f.Id, ["name"] = f.Name, ["kind"] = f.Kind, ["contentType"] = f.ContentType })]);
         }
         if (e.Kind is not null)
         {

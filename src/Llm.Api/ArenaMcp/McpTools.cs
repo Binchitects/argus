@@ -36,8 +36,11 @@ public sealed partial class McpTools(
     IOptions<AuthOptions> auth, IOptionsMonitor<BrandingOptions> branding, Gateway.RateLimits rateLimits, Gateway.Credit credit, TimeProvider clock,
     IOptionsMonitor<McpOptions> options, ILogger<McpTools> logger)
 {
-    /// <summary>Tools that only make sense inside a chat: its files, questions to the person, sub-agents.</summary>
-    public static readonly string[] ChatOnly = ["files", "ask", "agents"];
+    /// <summary>
+    /// Tools that only make sense inside a chat: its files, questions to the person, sub-agents, and the canvas (a document
+    /// beside a chat, kept with it: a call here runs in a chat that is never saved, and an agent has its own editor).
+    /// </summary>
+    public static readonly string[] ChatOnly = ["files", "ask", "agents", "canvas"];
 
     /// <summary>How long a person's tool list is kept: an agent lists right after it connects, and calls by it.</summary>
     private static readonly TimeSpan Fresh = TimeSpan.FromMinutes(1);
@@ -138,7 +141,7 @@ public sealed partial class McpTools(
                             continue;
                         }
                     }
-                    tools.Add(Definition(fn, name, choice.Setting.AskFirst || run.AsksFirst(name)));
+                    tools.Add(Definition(fn, name, choice.Tool.Id, choice.Setting.AskFirst || run.AsksFirst(name)));
                 }
             }
             if (!string.IsNullOrWhiteSpace(run.Instructions))
@@ -359,7 +362,11 @@ public sealed partial class McpTools(
     })
     { CallId = "mcp" };
 
-    private static JsonObject Definition(JsonObject function, string name, bool asksFirst)
+    /// <summary>
+    /// A function as MCP lists it. Its _meta says which of the chat's tools it is a function of (arena/tool: argus, python,
+    /// web...): Code Arena groups them so, in its Tools menu and its tools on demand, as the chat does.
+    /// </summary>
+    private static JsonObject Definition(JsonObject function, string name, string toolId, bool asksFirst)
     {
         var schema = function["parameters"]?.DeepClone() as JsonObject ?? [];
         schema["type"] ??= "object";
@@ -368,6 +375,7 @@ public sealed partial class McpTools(
             ["name"] = name,
             ["description"] = (function["description"]?.GetValue<string>() ?? "") + (asksFirst ? AskFirstNote : ""),
             ["inputSchema"] = schema,
+            ["_meta"] = new JsonObject { ["arena/tool"] = toolId },
         };
         if (asksFirst)
         {

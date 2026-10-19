@@ -121,6 +121,74 @@ internal sealed partial class Runtime : IAsyncDisposable
         _ => null,
     };
 
+    /// <summary>
+    /// What the web chat offers the person, as Arena says it with the key (/api/code-arena/config): which models are loaded and
+    /// see pictures, the thinking levels and their default, GitLab's address. Read at the start in the background; null
+    /// until then, and when there is no Arena or it does not say.
+    /// </summary>
+    public JsonObject? ArenaChat { get; private set; }
+
+    /// <summary>Whether a model sees pictures: as the gateway says, or as Arena's chat config does.</summary>
+    public bool Sees(ModelInfo model) => model.Vision
+        || ArenaChat?["models"] is JsonArray offered && offered.OfType<JsonObject>().Any(m => m.Str("name") == model.Id && m.Bool("vision") == true);
+
+    /// <summary>The session's choice of remote tools (the groups turned off), and those loaded on demand.</summary>
+    public ToolDemand Demand { get; } = new();
+
+    /// <summary>Arena's word on one of its tools (title, description, icon), from its chat config; null when it has not said.</summary>
+    private JsonObject? ArenaTool(string group) => (ArenaChat?["tools"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(t => t.Str("id") == group);
+
+    /// <summary>A group of remote tools by name, for the person and the model: Arena's title for its tool, else the server's.</summary>
+    public string ToolTitle(string group) => ArenaTool(group)?.Str("title")
+        ?? (group.StartsWith("mcp:", StringComparison.Ordinal) ? group[4..] : group == ArgusName ? "Argus" : group == ArenaName ? "Arena" : group);
+
+    /// <summary>What a group of remote tools is for: Arena's description of its tool, else which server's tools they are.</summary>
+    public string ToolAbout(string group) => ArenaTool(group)?.Str("description")
+        ?? (group.StartsWith("mcp:", StringComparison.Ordinal) ? $"The tools of the MCP server {group[4..]}." : $"{ToolTitle(group)}'s tools.");
+
+    /// <summary>The icon Arena's chat shows for a group (search-code, globe...): a plug for a server of the person's.</summary>
+    public string ToolIcon(string group) => ArenaTool(group)?.Str("icon") ?? "plug";
+
+    /// <summary>Code Arena's note's list of the remote tools to load, a line per group; empty when every tool on is in the requests.</summary>
+    private string ToolsToLoad()
+    {
+        var waiting = Tools.ToLoad();
+        if (waiting.Count == 0)
+        {
+            return "";
+        }
+        return $"Call {ToolDemand.Function} with a tool's name (in brackets) or its functions' names, then call them. Load only what the task needs.\n" +
+            string.Join("\n", waiting.GroupBy(t => t.Group!).Select(g =>
+            {
+                var about = ToolAbout(g.Key);
+                about = about.Length <= 200 ? about : about[..200] + "…";
+                return $"- {ToolTitle(g.Key)} [{g.Key}]: {about} Functions: {string.Join(", ", g.Select(t => t.Name))}.";
+            }));
+    }
+
+    /// <summary>load_tools: the groups named join the requests from the next step on (and stay for the session).</summary>
+    private ToolResult LoadTools(JsonObject args)
+    {
+        var names = args["names"] switch
+        {
+            JsonArray a => a.Select(n => n?.ToString() ?? ""),
+            JsonValue v => v.ToString().Split(',', StringSplitOptions.TrimEntries),
+            _ => [],
+        };
+        var (groups, unknown) = ToolDemand.Named(names, Tools.ToLoad(), ToolTitle);
+        // A name already in the requests is no mistake: it is loaded.
+        var offered = Tools.Offered();
+        unknown.RemoveAll(n => offered.Any(t => t.Name == n.Trim() || t.Group == n.Trim() || (t.Group is { } g && string.Equals(ToolTitle(g), n.Trim(), StringComparison.OrdinalIgnoreCase))));
+        var added = Demand.Load(groups);
+        var functions = Tools.All.Where(t => t.Group is { } g && added.Contains(g)).Select(t => t.Name).ToList();
+        var said = functions.Count > 0 ? $"Loaded: {string.Join(", ", functions)}. Call them from now on." : "Nothing new was loaded: what you asked for is already loaded.";
+        if (unknown.Count > 0)
+        {
+            said += $" Not found: {string.Join(", ", unknown)}. The names are in the list under \"Tools to load\".";
+        }
+        return new ToolResult(said, functions.Count == 0 && unknown.Count > 0);
+    }
+
     /// <summary>How long the start waits for Arena to say when the person's chats compact.</summary>
     private static readonly TimeSpan AccountWait = TimeSpan.FromSeconds(5);
     /// <summary>The session's MCP servers: Arena's, Argus's and the person's own, each connected in the background.</summary>
@@ -196,6 +264,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         // When it compacts: the flag, else config.json, else what the Arena account says (the web chat's own choice), else 80%.
         // Asked at every start (/compact-at account and the IDE say it); waited for only when it decides.
         var asking = ChatSync.CompactAtAsync(Config, Http, AccountWait, ct);
+        var offered = ChatSync.ChatConfigAsync(Config, Http, AccountWait, ct);
         if (o.CompactAt is null && Config.CompactAt is null)
         {
             AccountCompactAt = await asking;
@@ -255,7 +324,10 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             tools.Add(Extensions.SkillTool());
         }
-        Tools = new ToolBox(tools);
+        Demand.Budget = Config.ToolChars ?? ToolDemand.DefaultBudget;
+        Demand.Loader = LoadTools;
+        Demand.Changed = (off, loaded) => Session?.Tools(off, loaded);
+        Tools = new ToolBox(tools) { Demand = Demand };
 
         // The servers connect in the background; the session starts when the gateway has said which models there are.
         var models = Gateway.ModelsAsync(ct);
@@ -325,6 +397,15 @@ internal sealed partial class Runtime : IAsyncDisposable
             info = fallback;
         }
         Model = new ModelState { Info = info, Thinking = o.Thinking ?? Config.Thinking, ContextOverride = Config.Context };
+        // The web chat's offer, when Arena gives it: "default" thinking becomes the web's default level.
+        _ = offered.ContinueWith(t =>
+        {
+            if (t.IsCompletedSuccessfully && t.Result is { } chat)
+            {
+                Model.DefaultLevel = chat.Str("defaultThinking") is { } level && ModelState.Levels.Contains(level) ? level : null;
+                ArenaChat = chat;
+            }
+        }, TaskScheduler.Default);
 
         var inputs = new SystemPrompt.Inputs
         {
@@ -337,6 +418,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             Ide = o.Ide,
             ServerInstructions = () => Volatile.Read(ref _instructions),
             HasArenaTools = () => ArenaConnected,
+            ToolsToLoad = ToolsToLoad,
             Memory = () => _memory,
             Skills = () => [.. Extensions.Skills.Select(s => (s.Name, s.Description))],
             Agents = () => [.. Extensions.Agents.Select(a => (a.Name, a.Description))],
@@ -378,6 +460,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             Session = SessionStore.Open(resumedFile);
             Agent.Load(resumed.Messages, resumed.Known);
             Context.Todos = resumed.Todos;
+            Demand.Restore(resumed.ToolsOff, resumed.ToolsLoaded);
             Total.Prompt = resumed.Prompt;
             Total.Cached = resumed.Cached;
             Total.Completion = resumed.Completion;
@@ -423,7 +506,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             Notice(warn, text);
             Agent?.Events?.Notice(text);
-        }, () => Model.Info.Vision);
+        }, () => Sees(Model.Info));
         if (Sync is not null)
         {
             Sync.OnNews = _webNews;
@@ -755,6 +838,23 @@ internal sealed partial class Runtime : IAsyncDisposable
     }
 
     /// <summary>
+    /// The conversation back to its first <paramref name="messages"/> (before a question asked again), and with
+    /// <paramref name="files"/> the files the turns from there wrote put back, when this run kept that turn's checkpoint
+    /// (/rewind's). The chat in Arena keeps what was said, on a branch of its own from there. What it says (null: nothing).
+    /// </summary>
+    public async Task<string?> BackToAsync(int messages, bool files, CancellationToken ct)
+    {
+        var number = Checkpoints.Turns.ToList().FindLastIndex(t => t.Messages == messages) + 1;
+        if (number > 0)
+        {
+            var said = await RewindAsync(number, files, chat: true, ct);
+            return files ? said : null;
+        }
+        Agent.Load(Sync is { } sync ? await sync.RewindAsync(messages, ct) : Session.Rewind(messages));
+        return files ? "The files stay as they are: Code Arena kept no checkpoint of that turn (it was before this run, or too long ago)." : null;
+    }
+
+    /// <summary>
     /// The session's servers, each in the background: Arena's MCP endpoint and Argus's (with the
     /// person's key, unless the config turns them off), then the person's own.
     /// </summary>
@@ -855,7 +955,7 @@ internal sealed partial class Runtime : IAsyncDisposable
                 var name = t.Str("name")!;
                 if (own is not null)
                 {
-                    tools.Add(Remote(client, t, OwnToolName(client.Name, name), own.Trust, t["annotations"].Bool("readOnlyHint") == true, link));
+                    tools.Add(Remote(client, t, OwnToolName(client.Name, name), own.Trust, t["annotations"].Bool("readOnlyHint") == true, link, "mcp:" + link.Name));
                 }
                 else if (link.Name == ArgusName && tools.Any(x => x.Server == ArenaName && x.RemoteName == name))
                 {
@@ -865,7 +965,9 @@ internal sealed partial class Runtime : IAsyncDisposable
                 {
                     // Arena (and Argus) decide who may call what; a tool marked as changing things still asks here first.
                     var changes = t["annotations"].Bool("destructiveHint") == true && t["annotations"].Bool("readOnlyHint") != true;
-                    tools.Add(Remote(client, t, local.Contains(name) ? $"{link.Name}_{name}" : name, trusted: !changes, changesNothing: !changes, link));
+                    // Arena's tools by the tool of its chat each is a function of (as its menu has them); Argus's own as Argus.
+                    var group = link.Name == ArenaName ? t["_meta"].Str("arena/tool") ?? ArenaName : link.Name;
+                    tools.Add(Remote(client, t, local.Contains(name) ? $"{link.Name}_{name}" : name, trusted: !changes, changesNothing: !changes, link, group));
                 }
                 added++;
             }
@@ -960,6 +1062,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         Agent.Session = Session;
         Agent.Clear();
         Context.Todos = [];
+        Demand.Restore([], []);
         Context.TodosChanged = todos => Session.Todos(todos);
         StartSync();
     }
@@ -973,6 +1076,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         Agent.Session = Session;
         Agent.Load(data.Messages, data.Known);
         Context.Todos = data.Todos;
+        Demand.Restore(data.ToolsOff, data.ToolsLoaded);
         Context.TodosChanged = todos => Session.Todos(todos);
         if (data.Model is not null && data.Model != Model.Name && Models.FirstOrDefault(m => m.Id == data.Model) is { } info)
         {
@@ -1054,7 +1158,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             // Its own list narrows the reading tools; it never adds one that changes something.
             tools = new ToolBox(tools.All.Where(t => own.Tools.Any(n => PermissionRules.Glob(n, t.Name))));
         }
-        var model = own?.Model is { } name && Models.FirstOrDefault(m => m.Id == name) is { } info ? new ModelState { Info = info, Thinking = Model.Thinking, ContextOverride = Config.Context } : Model;
+        var model = own?.Model is { } name && Models.FirstOrDefault(m => m.Id == name) is { } info ? new ModelState { Info = info, Thinking = Model.Thinking, DefaultLevel = Model.DefaultLevel, ContextOverride = Config.Context } : Model;
         var sub = new Agent
         {
             Gateway = Gateway,
@@ -1075,7 +1179,7 @@ internal sealed partial class Runtime : IAsyncDisposable
     }
 
     /// <summary>An MCP tool as the model sees it, calling the server when run; a call that finds the server gone has it connect again.</summary>
-    public static ToolDef Remote(McpClient client, JsonObject tool, string name, bool trusted, bool changesNothing, ServerLink? link = null)
+    public static ToolDef Remote(McpClient client, JsonObject tool, string name, bool trusted, bool changesNothing, ServerLink? link = null, string? group = null)
     {
         var remoteName = tool.Str("name")!;
         var schema = tool["inputSchema"] is JsonObject s ? s.Clone() : new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() };
@@ -1091,6 +1195,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             Parameters = schema,
             Kind = ToolKind.Remote,
             Server = client.Name,
+            Group = group,
             Trusted = trusted,
             ChangesNothing = changesNothing,
             Summary = a => Fmt.OneLine(Json.Line(a), 100),

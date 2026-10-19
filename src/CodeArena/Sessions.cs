@@ -65,6 +65,9 @@ internal sealed class SessionData
     /// <summary>What the model reads: a summary of what came before <see cref="From"/>, if any, then <see cref="Stream"/> from there.</summary>
     public List<JsonObject> Messages { get; } = [];
     public List<TodoItem> Todos { get; set; } = [];
+    /// <summary>The groups of remote tools the person turned off in the session, and those the model loaded (<see cref="ToolDemand"/>).</summary>
+    public IReadOnlyList<string> ToolsOff { get; set; } = [];
+    public IReadOnlyList<string> ToolsLoaded { get; set; } = [];
     public long Prompt { get; set; }
     public long Cached { get; set; }
     public long Completion { get; set; }
@@ -95,13 +98,15 @@ internal sealed class SessionData
     /// <summary>A message line's body as the list keeps it: none (only what its line says before the message counts there).</summary>
     private static readonly JsonObject Unread = [];
 
+    private static List<string> Names(JsonNode? list) => list is JsonArray a ? [.. a.Select(n => n?.ToString()).OfType<string>()] : [];
+
     /// <summary>A copy of what Arena has of the session and where the model's history starts (the scan's, carried on with what is added).</summary>
     internal SessionData Copy()
     {
         var copy = new SessionData
         {
             Id = Id, Cwd = Cwd, Model = Model, Conversation = Conversation, Unlinked = Unlinked, From = From, Branch = Branch, Summary = Summary,
-            WebSummary = WebSummary, Keys = Keys, _pending = _pending,
+            WebSummary = WebSummary, Keys = Keys, _pending = _pending, ToolsOff = ToolsOff, ToolsLoaded = ToolsLoaded,
         };
         copy.Stream.AddRange(Stream.Select(e => new SyncEntry
         {
@@ -255,6 +260,10 @@ internal sealed class SessionData
                 break;
             case "todos" when entry["todos"] is JsonArray todos:
                 Todos = [.. todos.OfType<JsonObject>().Select(t => new TodoItem(t.Str("content") ?? "", t.Str("status") ?? "pending"))];
+                break;
+            case "tools":
+                ToolsOff = Names(entry["off"]);
+                ToolsLoaded = Names(entry["loaded"]);
                 break;
             case "usage":
                 Prompt += entry.Long("prompt") ?? 0;
@@ -511,6 +520,10 @@ internal sealed class SessionStore
     }
 
     public void Model(string model) => Write(new JsonObject { ["type"] = "model", ["model"] = model });
+
+    /// <summary>The groups of remote tools turned off in the session, and those loaded: the last line of them counts.</summary>
+    public void Tools(IEnumerable<string> off, IEnumerable<string> loaded) =>
+        Write(new JsonObject { ["type"] = "tools", ["off"] = new JsonArray([.. off.Select(g => (JsonNode)g)]), ["loaded"] = new JsonArray([.. loaded.Select(g => (JsonNode)g)]) });
 
     public void Todos(IEnumerable<TodoItem> todos) =>
         Write(new JsonObject { ["type"] = "todos", ["todos"] = new JsonArray([.. todos.Select(t => (JsonNode)new JsonObject { ["content"] = t.Content, ["status"] = t.Status })]) });

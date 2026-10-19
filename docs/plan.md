@@ -1210,7 +1210,10 @@ bump of System.Security.Cryptography.Xml/Pkcs past today's advisory (needs a
 yes: a package download).
 
 **v5.9: code review, rooms and access control** (the person's asks of
-2026-10-16)
+2026-10-16) — released as v5.9.0 on 2026-10-20. Left for later: bulk access
+changes with a dry run; invite links to rooms, mentions in the bell, room
+export; posting nothing back stays; Code Arena's /review and Arena MCP review
+tools, scheduled and automatic reviews, GitHub, Gitea and plain git.
 0. Detailed access control per person and group, first, as the rest rests on
    it: admin roles in place of one admin flag (people, models, credits,
    auditor, Argus, rooms) and roles of one's own from named permissions;

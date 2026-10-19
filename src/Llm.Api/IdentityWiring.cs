@@ -69,6 +69,8 @@ public static class IdentityWiring
             .AddPasswordValidator<StrongPasswordValidator>();
 
         services.AddAuthentication(IdentityConstants.ApplicationScheme).AddIdentityCookies();
+        // The person's API key, on the routes Code Arena's IDE relays (KeyAuthentication.Policy) and no others.
+        services.AddAuthentication().AddScheme<AuthenticationSchemeOptions, ArenaMcp.KeyAuthentication>(ArenaMcp.KeyAuthentication.Name, null);
         services.ConfigureApplicationCookie(o =>
         {
             o.Cookie.Name = "llm_session";
@@ -137,7 +139,8 @@ public static class IdentityWiring
         // A route's permission ("permission:people.read") is a policy made on first use.
         services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationPolicyProvider, Access.PermissionPolicies>();
         services.AddAuthorizationBuilder()
-            .AddPolicy(AdminEndpoints.Policy, p => p.AddAuthenticationSchemes(IdentityConstants.ApplicationScheme).AddRequirements(new Access.PermissionRequirement(null)));
+            .AddPolicy(AdminEndpoints.Policy, p => p.AddAuthenticationSchemes(IdentityConstants.ApplicationScheme).AddRequirements(new Access.PermissionRequirement(null)))
+            .AddPolicy(ArenaMcp.KeyAuthentication.Policy, p => p.AddAuthenticationSchemes(IdentityConstants.ApplicationScheme, ArenaMcp.KeyAuthentication.Name).RequireAuthenticatedUser());
 
         services.AddOpenIddict()
             .AddCore(o => o.UseEntityFrameworkCore().UseDbContext<AppDbContext>().ReplaceDefaultEntities<Guid>())

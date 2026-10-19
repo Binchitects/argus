@@ -1,7 +1,8 @@
-import { Check, Copy, FileDiff as FileDiffIcon, FileSymlink, ShieldQuestion, Square, TextQuote } from 'lucide-react'
+import { Check, Copy, FileDiff as FileDiffIcon, FileSymlink, History, ShieldQuestion, Square, TextQuote } from 'lucide-react'
 import { memo, useMemo, useState } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { Tooltip } from '@/components/ui/tooltip'
 import { formatValue, money } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -14,6 +15,7 @@ import { MediaPlayer } from '@/pages/chat/media'
 import { NoticeLine, Thinking, ToolCard } from '@/pages/chat/parts'
 import type { Quote } from '@/pages/chat/quote'
 import { QuotePartDialog } from '@/pages/chat/quote-parts'
+import { AnswerAgainMenu, type AgainChange } from '@/pages/chat/turns'
 import type { ChatConfig, Message } from '@/pages/chat/types'
 import type { FileDiff } from './api'
 import { rawFileUrl } from './ide-api'
@@ -238,6 +240,9 @@ interface AnswerProps {
   onDecide: (callId: string, answer: 'allow' | 'always' | 'deny') => void
   /** Puts part of this answer (chosen by keyboard, in a dialog) above the message box as a quote. */
   onQuote?: (quote: Quote) => void
+  /** The question this answers (its id), and how to ask it again: as it was, shorter, longer, another model or thinking, the files as they were. */
+  question?: string
+  onAgain?: (question: string, change?: AgainChange & { files?: boolean }) => void
 }
 
 /**
@@ -247,6 +252,7 @@ interface AnswerProps {
  */
 function sameAnswer(a: AnswerProps, b: AnswerProps): boolean {
   if (a.live !== b.live || a.thinkingSince !== b.thinkingSince || a.notices !== b.notices || a.config !== b.config || a.onDecide !== b.onDecide || a.onQuote !== b.onQuote) return false
+  if (a.question !== b.question || a.onAgain !== b.onAgain) return false
   if (a.answer.length !== b.answer.length || a.answer.some((m, i) => m !== b.answer[i])) return false
   if (b.live && (a.waiting !== b.waiting || a.always !== b.always || a.risks !== b.risks || a.calls !== b.calls)) return false
   return b.answer.every((m) => m.role !== 'tool' || a.diffs[m.id] === b.diffs[m.id])
@@ -257,7 +263,7 @@ function sameAnswer(a: AnswerProps, b: AnswerProps): boolean {
  * diffs and questions, and a line with the model, time and tokens (the share
  * read from the cache with them), as Arena's chat shows an answer.
  */
-export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince, notices, config, waiting, always, risks, calls, diffs, onDecide, onQuote }: AnswerProps) {
+export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince, notices, config, waiting, always, risks, calls, diffs, onDecide, onQuote, question, onAgain }: AnswerProps) {
   const [quoting, setQuoting] = useState(false)
   const results = new Map(answer.filter((m) => m.role === 'tool').map((m) => [m.toolCallId, m]))
   const assistants = answer.filter((m) => m.role === 'assistant')
@@ -333,6 +339,25 @@ export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince
               </Tooltip>
               <QuotePartDialog text={text} open={quoting} onOpenChange={setQuoting} onQuote={onQuote} />
             </>
+          )}
+          {question && onAgain && (
+            <AnswerAgainMenu
+              config={config}
+              busy={false}
+              lengths={!!text}
+              onAgain={(change) => onAgain(question, change)}
+              more={
+                // The turn changed files: asked again from where they were before it.
+                answer.some((m) => m.role === 'tool' && diffs[m.id]) && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={() => onAgain(question, { files: true })}>
+                      <History /> Answer again, the files as they were
+                    </DropdownMenuItem>
+                  </>
+                )
+              }
+            />
           )}
           <span className="ml-1 flex flex-wrap items-center gap-x-2 tabular-nums">
             {last.model && <span>{last.model}</span>}

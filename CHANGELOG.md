@@ -12,6 +12,63 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v5.9.0 (2026-10-20)
+
+### :rocket: Epics and highlights
+
+- **Access control per person and group**: a fixed list of permissions,
+  built-in roles (Owner, People admin, Model admin, Billing, Auditor, Argus
+  admin, Room moderator, Review admin, Member) and roles of your own, held by
+  people, groups (directory and SCIM groups too) or everyone, maybe until a
+  date; allows and denies on models, tools, knowledge sources, repositories
+  and features, the most specific winning; one check behind every route,
+  Arena MCP, the gateway's key lists and Argus. **Admin → Access** has the
+  roles, rules, a "may this person…?" checker and the history. People see
+  the admin pages their roles give (a Supervisor with `monitoring.read` sees
+  the dashboards and alerts), and a role given over one group reaches only
+  its people (team managers)
+- **Rooms**: chats several people share. Every message says who wrote it;
+  whoever asks pays, under their own rules; messages can be for the people
+  only, or the model answers only when @Arena is named; questions wait in
+  the room's line; who is here and who is typing show live; no one's memory,
+  code or personal tools in a room's answers
+- **Code review**: merge requests (or a branch over another) reviewed by the
+  model with your own read-only GitLab access through Argus; findings on
+  lines, each put to a second pass that tries to refute it; a walkthrough,
+  risk and verdict; resolve or dismiss findings, review again after new
+  commits, discuss it in a room. The **Code** page also asks the code
+  assistant about a project. Nothing is posted to GitLab
+
+### :sparkles: New features & Enhancements
+
+- **Conversations' caches on NVMe**: when a conversation's (or an API
+  agent's) engine slot goes to another, its cache is written to
+  `KV_CACHE_DIR` and read back when it returns, across restarts (200 GB, kept
+  for ever by default: Settings → Engine)
+- **API keys' parallel requests wait their turn** (four at once per key by
+  default, then a line of up to ten minutes) instead of being refused, so
+  agents no longer look stuck
+- **Feature permissions hold**: taking chat, Code Arena, the web, pictures,
+  video, speech, memory, tasks or sharing from someone takes those tools,
+  routes and models (from their keys too)
+- **Argus follows the app's rules** on repositories (`gitlab:group/*`) and
+  `code.read`, under GitLab's own rights
+- **Code Arena's chat** has the web chat's model picker, Tools menu,
+  attachments (pictures for a model that sees), answer again (shorter,
+  longer, another model) and editing a question
+- **The installer** checks every prerequisite and puts right what it can
+  (`installer.sh requirements --fix`), and asks where data and models live:
+  the stack's data is in folders of `DATA_DIR`, not Docker volumes
+- **The GPU dashboard** shows clocks, throttling, PCIe, fans and ECC, and
+  DCGM's detail where it runs (the `dcgm` profile)
+
+### :boom: Breaking changes & Deprecations
+
+- Admin roles replace the one admin flag; today's admins became Owners and
+  the "Who may use it" choices became rules, as they were
+- The stack's volumes move into `DATA_DIR` on upgrade (the installer does it,
+  with a backup first)
+
 ## v5.8.0 (2026-10-16)
 
 ### :rocket: Epics and highlights
@@ -51,12 +108,30 @@ Sections used:
   and Arena MCP does not offer those tools to them; an API key's picture
   request is refused before its model loads
 - The design for a multi-GPU server (docs/multi-gpu-server.md)
+- **Code Arena's tools menu and tools on demand**, as in the web chat: Arena's
+  tools on or off per session (the IDE's Tools menu, /tools on|off), and
+  past 6,000 characters of definitions only those the model loads go whole
+  (about 8,700 tokens fewer in every request with Arena's tools)
+- **Answer again and Edit in Code Arena's chat**, as in the web chat: the
+  same, shorter, longer, another model or thinking, or with the files as
+  they were before the turn; the earlier turns stay in Arena on a branch
+- **Files in Code Arena's chat**, as in the web chat: clip, paste or drop;
+  Arena reads documents' text for the model, a model that sees gets the
+  pictures, and the chat on the web shows them as the question's attachments
+- Code Arena's IDE reaches the person's files in Arena through code-arena,
+  which adds the key (the page never holds it); Arena takes the key on those
+  routes alone
+- Code Arena's model picker says what the web chat's does: which models are
+  loaded or load when asked, which see pictures, the deployment's thinking
+  levels and its default (which "default" thinking now sends)
 
 ### :bug: Bugs fixed
 
 - The speech server's voice detector is unloaded when idle; a speech model
   an admin loaded keeps saying so
 - Builds go on when NuGet's audit learns of a vulnerability later
+- Arena MCP no longer offers the canvas, which could not work there (its document is
+  kept with a chat, and an agent's call has none)
 
 ### :boom: Breaking changes & Deprecations
 

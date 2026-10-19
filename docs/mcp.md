@@ -61,9 +61,19 @@ Other clients (streamable HTTP):
   call, it is not served (nobody is in its chat to allow the web's calls), and
   the notes for the agent say so, as does **Connect your tools** (it is not
   listed among the tools served); the person starts it in the chat instead.
+- **The person's files with the key**: besides `/mcp` and Code Arena's
+  `/api/code-arena`, the key reaches the chat's file routes alone
+  (`POST /api/chat/attachments`, `GET /api/chat/attachments/{id}/content` and
+  its `pages`), for Code Arena's IDE, which relays them; a file is the
+  person's own, or one shared with them, or not found. Every other route of
+  the chat takes the sign-in alone.
+- **Each function says whose it is**: `_meta` `arena/tool` names the chat's
+  tool it is a function of (`argus`, `python`, `web`...), so a client can group
+  them as the chat's **Tools** menu does (Code Arena's menu and its tools on
+  demand do).
 - **Not served**: the chat's own tools. Reading files (a chat's files),
-  questions to the person (`ask_user`) and sub-agents (`delegate`) have no chat
-  here.
+  questions to the person (`ask_user`), sub-agents (`delegate`) and the canvas
+  (`canvas_*`, a document kept beside a chat) have no chat here.
 - **A tool that asks first** (Admin → Tools, or a plugin's writes) cannot show
   the app's **Allow** card here. It is served with `destructiveHint: true`, and
   its description tells the client to ask before each call. Let the client ask:

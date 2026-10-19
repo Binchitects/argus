@@ -16,10 +16,16 @@ internal sealed class ModelState
 
     public static readonly string[] Levels = ["off", "low", "medium", "high", "xhigh"];
 
+    /// <summary>
+    /// The level "default" stands for: the web chat's default as Arena says it (DEFAULT_THINKING), so a session on default
+    /// thinks as a new chat on the web does; null (the model's own) until Arena says, or when it names no level of these.
+    /// </summary>
+    public string? DefaultLevel { get; set; }
+
     /// <summary>What reaches the model's chat template: reasoning_effort, or enable_thinking false for "off" (as the chat sends it).</summary>
-    public JsonObject? TemplateKwargs() => !Info.Thinking || Thinking is null or "" or "default" ? null
-        : Thinking == "off" ? new JsonObject { ["enable_thinking"] = false }
-        : new JsonObject { ["reasoning_effort"] = Thinking };
+    public JsonObject? TemplateKwargs() => !Info.Thinking || (Thinking is null or "" or "default" ? DefaultLevel : Thinking) is not { Length: > 0 } level ? null
+        : level == "off" ? new JsonObject { ["enable_thinking"] = false }
+        : new JsonObject { ["reasoning_effort"] = level };
 }
 
 /// <summary>
@@ -290,11 +296,13 @@ internal sealed class Agent
     /// <param name="takeIn">Whether the web chat's news is taken in first (<see cref="BeforeTurn"/>); the IDE takes it in itself.</param>
     /// <param name="pieces">Lines chosen in the IDE's editor, sent with the message.</param>
     /// <param name="quote">The part of an earlier answer the message replies to: the model reads it before the message (<see cref="Quotes"/>).</param>
-    public async Task<string> RunAsync(string? input, Spend turn, CancellationToken ct, bool takeIn = true, IReadOnlyList<Mentions.Piece>? pieces = null, string? quote = null)
+    /// <param name="uploaded">Files attached in the IDE, as <see cref="Uploads.ReadAsync"/> read them: their text after the message, their pictures with it.</param>
+    public async Task<string> RunAsync(string? input, Spend turn, CancellationToken ct, bool takeIn = true, IReadOnlyList<Mentions.Piece>? pieces = null, string? quote = null,
+        (string Section, JsonArray Pictures)? uploaded = null)
     {
         try
         {
-            return await RunTurnAsync(input, turn, ct, takeIn, pieces, quote);
+            return await RunTurnAsync(input, turn, ct, takeIn, pieces, quote, uploaded);
         }
         finally
         {
@@ -305,7 +313,28 @@ internal sealed class Agent
         }
     }
 
-    private async Task<string> RunTurnAsync(string? input, Spend turn, CancellationToken ct, bool takeIn, IReadOnlyList<Mentions.Piece>? pieces, string? quote)
+    /// <summary>
+    /// A question asked again (Answer again, an edited question): <paramref name="words"/> as the model reads them, composed
+    /// already (its quote, what went with it), and its pictures; <paramref name="subject"/> is what was typed, for the
+    /// checkpoint and the turn's commit.
+    /// </summary>
+    public async Task<string> AskAgainAsync(string words, JsonArray? pictures, string subject, Spend turn, CancellationToken ct)
+    {
+        try
+        {
+            return await RunTurnAsync(words, turn, ct, takeIn: false, null, null, pictures is null ? null : ("", pictures), composed: true, subject);
+        }
+        finally
+        {
+            AfterTurn?.Invoke();
+        }
+    }
+
+    /// <summary>A word for the model for this turn only (answer again shorter or longer), in Code Arena's note; null: none.</summary>
+    public string? TurnNote { get; set; }
+
+    private async Task<string> RunTurnAsync(string? input, Spend turn, CancellationToken ct, bool takeIn, IReadOnlyList<Mentions.Piece>? pieces, string? quote,
+        (string Section, JsonArray Pictures)? uploaded, bool composed = false, string? subject = null)
     {
         if (input is not null)
         {
@@ -322,11 +351,11 @@ internal sealed class Agent
         {
             TakeIn(await news(ct));
         }
-        var asked = input ?? "Carry on after the commands that ended";
+        var asked = subject ?? input ?? "Carry on after the commands that ended";
         if (Depth == 0)
         {
             // @path: the file goes with the message.
-            if (input is not null)
+            if (input is not null && !composed)
             {
                 var (expanded, files) = Mentions.Expand(input, Context.Workspace, pieces);
                 if (files.Count > 0)
@@ -334,6 +363,11 @@ internal sealed class Agent
                     Ui.Info($"With the message: {string.Join(", ", files)}.");
                     Events?.Attached(files);
                     input = expanded;
+                }
+                // The files attached in the IDE come last: their text, and their pictures as parts of the message.
+                if (uploaded is { } attached)
+                {
+                    input += attached.Section;
                 }
                 // The part of an answer it replies to goes first (the checkpoint keeps what was typed).
                 input = Quotes.Compose(quote, input);
@@ -345,7 +379,7 @@ internal sealed class Agent
         var done = false;
         try
         {
-            var answer = await TurnAsync(input, turn, ct);
+            var answer = await TurnAsync(input, turn, ct, Depth == 0 ? uploaded?.Pictures : null);
             done = true;
             await CommitAsync(before, asked, ct);
             return answer;
@@ -467,12 +501,17 @@ internal sealed class Agent
         }
     }
 
-    private async Task<string> TurnAsync(string? input, Spend turn, CancellationToken ct)
+    private async Task<string> TurnAsync(string? input, Spend turn, CancellationToken ct, JsonArray? pictures = null)
     {
         JsonObject? question = null;
         if (input is not null)
         {
-            question = new JsonObject { ["role"] = "user", ["content"] = input };
+            // Pictures go as parts of the message, after its words (as the web chat sends them).
+            question = new JsonObject
+            {
+                ["role"] = "user",
+                ["content"] = pictures is { Count: > 0 } ? new JsonArray([new JsonObject { ["type"] = "text", ["text"] = input }, .. pictures.Select(p => p!.DeepClone())]) : input,
+            };
             Add(question);
         }
         var last = "";
@@ -726,6 +765,10 @@ internal sealed class Agent
         {
             return;
         }
+        if (TurnNote is { Length: > 0 } once)
+        {
+            note += "\n- For this answer: " + once;
+        }
         _notes.RemoveAll(n => n.At > Messages.Count);
         if (_notes.Count > 0 && _notes[^1].Text == note)
         {
@@ -772,8 +815,7 @@ internal sealed class Agent
             var name = call["function"].Str("name") ?? "";
             var raw = call["function"].Str("arguments");
             var args = string.IsNullOrWhiteSpace(raw) ? new JsonObject() : Json.ParseObject(raw);
-            var tool = Tools.Find(name);
-            string? refusal = null;
+            var (tool, refusal) = Tools.ForCall(name);
             if (tool is null)
             {
                 refusal = $"There is no tool named {name}. The tools: {string.Join(", ", Tools.Offered().Select(t => t.Name))}.";

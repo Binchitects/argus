@@ -136,7 +136,11 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         // What Arena lacks of the earlier sessions (every folder's) goes in the background.
         rt.SendLaterInBackground();
         app._server.OnError = e => rt.Ui.Error($"The web interface: {e.Message}");
-        app._server.BodyLimit = (method, path) => method == "POST" && path == InstallPath ? EditorExtensions.MaxVsix : HttpServer.MaxBody;
+        app._server.BodyLimit = (method, path) => method != "POST" ? HttpServer.MaxBody
+            : path == InstallPath ? EditorExtensions.MaxVsix
+            // A file relayed to Arena: as large as Arena takes (its config says), with room for the form around it.
+            : path == ArenaRelay.Upload ? (int)Math.Min(int.MaxValue, (rt.ArenaChat.Long("maxUploadBytes") ?? ArenaRelay.DefaultUpload) + 1024 * 1024)
+            : HttpServer.MaxBody;
         app._server.Start(app.HandleAsync);
         return app;
     }
@@ -200,6 +204,13 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             if (req.Header("Sec-Fetch-Site") is { } site && site is not ("same-origin" or "none"))
             {
                 await res.ErrorAsync(403, "forbidden", "Requests from other sites are refused.", ct);
+                return;
+            }
+            // Arena's routes the page reaches through here (the person's files): sent on with the key. A file comes as a
+            // form, taken on the upload alone, and only after the checks above (this run's token, the same site).
+            if (ArenaRelay.Relays(req.Method, req.Path))
+            {
+                await ArenaRelay.RelayAsync(_rt.Config, _rt.Http, req, res, ct);
                 return;
             }
             // JSON only: a form or a plain-text post from another page cannot pass for the page's own. A .vsix comes as its
@@ -379,6 +390,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                     await res.ErrorAsync(409, "idle", "Nothing is running.", ct);
                 }
                 return;
+            case ("POST", "/api/again"):
+                await AgainAsync(req, res, ct);
+                return;
             case ("POST", "/api/compact"):
                 await CompactAsync(res, ct);
                 return;
@@ -513,6 +527,10 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["completion"] = _rt.Config.Completion ? new JsonObject { ["model"] = _rt.Config.CompletionModel ?? _rt.Model.Name } : null,
             ["queued"] = new JsonArray([.. Queued().Select(q => (JsonNode)q)]),
             ["arenaTools"] = _rt.ArenaConnected,
+            // The Tools menu: the remote tools by group (Arena's by its chat's tools, each other server as one), on or off in
+            // this session, and loaded (on demand: only those loaded are in the requests whole).
+            ["toolGroups"] = ToolGroups(),
+            ["toolsOnDemand"] = _rt.Demand.Active(_rt.Tools.All.Where(t => t.Group is null || !_rt.Demand.IsOff(t.Group))),
             ["tools"] = new JsonObject
             {
                 ["local"] = _rt.Tools.All.Count(t => t.Server is null),
@@ -522,31 +540,69 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         };
     }
 
-    /// <summary>The models in the shape of Arena's chat config: the page's model picker and tool output read it as they do there.</summary>
-    private JsonObject ChatConfig() => new()
+    /// <summary>The remote tools by group, in the shape of the web chat's tools (its Tools menu reads them), with whether each is on and loaded.</summary>
+    private JsonArray ToolGroups() => new([.. _rt.Tools.All.Where(t => t.Group is not null).GroupBy(t => t.Group!).Select(g => (JsonNode)new JsonObject
     {
-        ["model"] = _rt.Model.Name,
-        ["models"] = new JsonArray([.. _rt.Models.Select(m => (JsonNode)new JsonObject
+        ["id"] = g.Key,
+        ["title"] = _rt.ToolTitle(g.Key),
+        ["description"] = _rt.ToolAbout(g.Key),
+        ["icon"] = _rt.ToolIcon(g.Key),
+        ["onByDefault"] = true,
+        ["askFirst"] = g.Any(t => !t.Trusted && !t.ReadOnly),
+        ["on"] = !_rt.Demand.IsOff(g.Key),
+        ["loaded"] = _rt.Demand.IsLoaded(g.Key),
+        ["functions"] = g.Count(),
+    })]);
+
+    /// <summary>
+    /// The models in the shape of Arena's chat config: the page's model picker and tool output read it as they do there. What
+    /// Arena says of the person's chat (loaded or not, pictures, the deployment's thinking levels and default, GitLab's address)
+    /// is taken from it when it has said; until then each model counts as loaded, with Code Arena's own levels.
+    /// </summary>
+    private JsonObject ChatConfig()
+    {
+        var arena = _rt.ArenaChat;
+        var offered = (arena?["models"] as JsonArray)?.OfType<JsonObject>().Where(m => m.Str("name") is not null)
+            .GroupBy(m => m.Str("name")!).ToDictionary(g => g.Key, g => g.First()) ?? [];
+        // The deployment's levels that Code Arena can send; its own when Arena names none of them.
+        var presets = (arena?["presets"] as JsonArray)?.OfType<JsonObject>().Where(p => p.Str("level") is { } l && ModelState.Levels.Contains(l))
+            .Select(p => (JsonNode)new JsonObject { ["level"] = p.Str("level"), ["label"] = p.Str("label") ?? p.Str("level") }).ToList() ?? [];
+        if (presets.Count == 0)
         {
-            ["name"] = m.Id,
-            ["context"] = m.Id == _rt.Model.Name ? _rt.Model.Context : _rt.Config.Context ?? m.Context,
-            ["maxOutput"] = m.MaxOutput,
-            ["vision"] = false,
-            ["tools"] = m.Tools,
-            ["thinking"] = m.Thinking,
-            ["loaded"] = true,
-            // Per million tokens, as Arena shows them.
-            ["prices"] = new JsonObject { ["input"] = m.InputCost * 1_000_000, ["cachedInput"] = m.CachedCost * 1_000_000, ["output"] = m.OutputCost * 1_000_000 },
-        })]),
-        ["auto"] = null,
-        ["presets"] = new JsonArray([.. ModelState.Levels.Select(l => (JsonNode)new JsonObject { ["level"] = l, ["label"] = l == "xhigh" ? "Extra high" : char.ToUpperInvariant(l[0]) + l[1..] })]),
-        ["defaultThinking"] = null,
-        ["argus"] = false,
-        ["tools"] = new JsonArray(),
-        ["gitlabUrl"] = null,
-        ["maxUploadBytes"] = 0,
-        ["imageTypes"] = new JsonArray(),
-    };
+            presets = [.. ModelState.Levels.Select(l => (JsonNode)new JsonObject { ["level"] = l, ["label"] = l == "xhigh" ? "Extra high" : char.ToUpperInvariant(l[0]) + l[1..] })];
+        }
+        return new()
+        {
+            ["model"] = _rt.Model.Name,
+            ["models"] = new JsonArray([.. _rt.Models.Select(m =>
+            {
+                var there = offered.GetValueOrDefault(m.Id);
+                return (JsonNode)new JsonObject
+                {
+                    ["name"] = m.Id,
+                    ["context"] = m.Id == _rt.Model.Name ? _rt.Model.Context : _rt.Config.Context ?? m.Context,
+                    ["maxOutput"] = m.MaxOutput,
+                    ["vision"] = _rt.Sees(m),
+                    ["tools"] = m.Tools,
+                    ["thinking"] = m.Thinking,
+                    // A model of the engine that is not loaded now, or loaded when asked: the picker marks it as the web's does.
+                    ["loaded"] = there?.Bool("loaded") ?? true,
+                    ["onRequest"] = there?.Bool("onRequest") ?? false,
+                    // Per million tokens, as Arena shows them.
+                    ["prices"] = new JsonObject { ["input"] = m.InputCost * 1_000_000, ["cachedInput"] = m.CachedCost * 1_000_000, ["output"] = m.OutputCost * 1_000_000 },
+                };
+            })]),
+            ["auto"] = null,
+            ["presets"] = new JsonArray([.. presets]),
+            ["defaultThinking"] = _rt.Model.DefaultLevel,
+            ["argus"] = false,
+            ["tools"] = new JsonArray(),
+            ["gitlabUrl"] = arena?.Str("gitlabUrl"),
+            // Files go to Arena (relayed with the key): as large as it takes; none without it.
+            ["maxUploadBytes"] = arena?.Long("maxUploadBytes") ?? 0,
+            ["imageTypes"] = arena?["imageTypes"]?.DeepClone() ?? new JsonArray(),
+        };
+    }
 
     /// <summary>This folder's saved sessions, newest first, each with the chat in Arena it is kept in step with.</summary>
     private JsonArray Sessions() => new([.. SessionStore.List(_rt.Env.Paths.SessionsDir, _rt.Workspace.Root, 200).Select(s => (JsonNode)new JsonObject
@@ -817,6 +873,12 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             await res.ErrorAsync(400, "invalid", "A quote is at most 4,000 characters.", ct);
             return;
         }
+        var uploads = Uploads.From(body, out var wrong);
+        if (wrong is not null)
+        {
+            await res.ErrorAsync(400, "invalid", wrong, ct);
+            return;
+        }
         await SettleAsync(ct);
         if (Begin("answer") is not { } job)
         {
@@ -825,8 +887,127 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         }
         // Kept for ↑, here and in the terminal: the folder's history.
         _rt.History.Add(text);
-        job.Running = Task.Run(() => RunTurnAsync(job, text, pieces, quote));
+        job.Running = Task.Run(() => RunTurnAsync(job, text, pieces, quote, uploads));
         await StreamAsync(job, res, ct);
+    }
+
+    /// <summary>
+    /// A question of the session asked again, as the web chat's Answer again and Edit do: <paramref name="At"/> its place
+    /// (m3), <paramref name="Text"/> its new words (null: as it was) and <paramref name="Quote"/> the part of an answer it
+    /// quotes then (when <paramref name="Requoted"/>: null, none), <paramref name="Length"/> "shorter" or "longer" than
+    /// the answer it had, another model or thinking for this answer only, and <paramref name="Files"/>: the files its turn
+    /// and those after it wrote put back first (when this run kept its checkpoint).
+    /// </summary>
+    private sealed record Again(int At, string? Text, string? Length, ModelInfo? Model, string? Thinking, bool Files, bool Requoted = false, string? Quote = null);
+
+    /// <summary>POST /api/again: back to before a question, then it is asked again (edited, or as it was), answered as a stream.</summary>
+    private async Task AgainAsync(HttpRequest req, HttpResponse res, CancellationToken ct)
+    {
+        var body = req.Json();
+        if (body?.Str("question") is not { Length: > 1 } id || id[0] != 'm' || !int.TryParse(id[1..], out var at) || at < 0)
+        {
+            await res.ErrorAsync(400, "invalid", "Say which question to ask again: its id (m3).", ct);
+            return;
+        }
+        string? text = null;
+        if (body.ContainsKey("text") && (text = body.Str("text")?.Trim()) is not { Length: > 0 })
+        {
+            await res.ErrorAsync(400, "invalid", "Write the question first.", ct);
+            return;
+        }
+        if (!TryQuote(body, out var quote))
+        {
+            await res.ErrorAsync(400, "invalid", "A quote is at most 4,000 characters.", ct);
+            return;
+        }
+        var length = body.Str("length");
+        if (length is not (null or "shorter" or "longer"))
+        {
+            await res.ErrorAsync(400, "invalid", "length is shorter or longer.", ct);
+            return;
+        }
+        ModelInfo? model = null;
+        if (body.Str("model") is { } name && (model = _rt.Models.FirstOrDefault(x => x.Id == name)) is null)
+        {
+            await res.ErrorAsync(400, "invalid", $"The gateway has no model {name}.", ct);
+            return;
+        }
+        if (body.Str("thinking") is { } level && !ModelState.Levels.Contains(level))
+        {
+            await res.ErrorAsync(400, "invalid", $"Thinking is one of: {string.Join(", ", ModelState.Levels)}.", ct);
+            return;
+        }
+        await SettleAsync(ct);
+        if (Begin("answer") is not { } job)
+        {
+            await res.ErrorAsync(409, "busy", "An answer is being written: stop it, or wait for it, to ask again.", ct);
+            return;
+        }
+        var asked = new Again(at, text, length, model, body.Str("thinking"), body.Bool("files") == true, body.ContainsKey("quote"), quote);
+        job.Running = Task.Run(() => RunTurnAsync(job, null, again: asked));
+        await StreamAsync(job, res, ct);
+    }
+
+    /// <summary>The question asked again (within its job): back to before it, then its turn, with the model and thinking asked for this answer only.</summary>
+    private async Task AskAgainAsync(Job job, Again again, Spend turn)
+    {
+        var messages = _rt.Agent.Messages;
+        if (again.At >= messages.Count || messages[again.At] is not { } question || question.Str("role") != "user" || question.Str("content")?.StartsWith("[The conversation so far", StringComparison.Ordinal) == true)
+        {
+            job.Emit(new JsonObject { ["type"] = "error", ["message"] = "That question is not in the session any more (it was compacted, or the session changed): ask it anew." });
+            return;
+        }
+        // Its words as the model read them (its quote, what went with it), and its pictures.
+        var words = question["content"] is JsonArray parts ? parts.OfType<JsonObject>().FirstOrDefault(p => p.Str("type") == "text")?.Str("text") ?? "" : question.Str("content") ?? "";
+        var pictures = question["content"] is JsonArray all ? new JsonArray([.. all.OfType<JsonObject>().Where(p => p.Str("type") != "text").Select(p => p.DeepClone())]) : null;
+        var answered = messages.Skip(again.At + 1).TakeWhile(m => m.Str("role") != "user").Where(m => m.Str("role") == "assistant")
+            .Sum(m => (m.Str("content") ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length);
+        var (quote, rest) = Quotes.Split(words);
+        var (withoutFiles, files) = Uploads.Split(rest);
+        var typed = Mentions.Typed(withoutFiles);
+        if (again.Text is { } edited)
+        {
+            // Edited: the files it names now go with it; those attached go again, with the quote kept or as changed.
+            quote = again.Requoted ? again.Quote : quote;
+            words = Quotes.Compose(quote, Mentions.Expand(edited, _rt.Workspace).Text + rest[withoutFiles.Length..]);
+            typed = edited;
+        }
+        if (await _rt.BackToAsync(again.At, again.Files, job.Stop.Token) is { } said)
+        {
+            job.Emit(new JsonObject { ["type"] = "notice", ["text"] = said });
+        }
+        var (model, thinking) = (_rt.Model.Info, _rt.Model.Thinking);
+        _rt.Model.Info = again.Model ?? model;
+        _rt.Model.Thinking = again.Thinking ?? thinking;
+        _rt.Agent.TurnNote = again.Length switch
+        {
+            "shorter" => $"Answer again, shorter: the last answer to this was about {answered} words; this time about {Math.Max(answered / 2, 15)}, keeping what matters most.",
+            "longer" => $"Answer again, longer: the last answer to this was about {answered} words; this time about {Math.Max(answered * 2, 100)}, with more detail, reasons and examples.",
+            _ => null,
+        };
+        try
+        {
+            var count = _rt.Agent.Messages.Count;
+            job.Emit(new JsonObject
+            {
+                ["type"] = "question", ["id"] = $"m{count}", ["parentId"] = count == 0 ? null : $"m{count - 1}", ["text"] = typed, ["quote"] = quote,
+                ["attachments"] = files.Count > 0 ? Uploads.Shown(files) : null,
+            });
+            await _rt.Agent.AskAgainAsync(words, pictures is { Count: > 0 } ? pictures : null, typed, turn, job.Stop.Token);
+        }
+        finally
+        {
+            _rt.Agent.TurnNote = null;
+            // For this answer only: unless the person chose another meanwhile.
+            if (again.Model is not null && _rt.Model.Info == again.Model)
+            {
+                _rt.Model.Info = model;
+            }
+            if (again.Thinking is not null && _rt.Model.Thinking == again.Thinking)
+            {
+                _rt.Model.Thinking = thinking;
+            }
+        }
     }
 
     /// <summary>The part of an answer a message quotes (<c>quote</c>; null: none); false when it is longer than <see cref="Quotes.MaxChars"/>.</summary>
@@ -849,7 +1030,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     /// Messages sent while an answer is written (with the lines chosen in the editor, and the part of an answer each quotes): each
     /// runs, in order, once the one before it ends.
     /// </summary>
-    private readonly List<(string Text, IReadOnlyList<Mentions.Piece>? Pieces, string? Quote)> _queued = [];
+    private readonly List<(string Text, IReadOnlyList<Mentions.Piece>? Pieces, string? Quote, IReadOnlyList<Upload>? Uploads)> _queued = [];
 
     /// <summary>
     /// The lines chosen in the editor that go with a message: <c>context</c>, each <c>{path, startLine, endLine, text?}</c>
@@ -876,12 +1057,18 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             await res.ErrorAsync(400, "invalid", "A quote is at most 4,000 characters.", ct);
             return;
         }
+        var uploads = Uploads.From(body, out var wrong);
+        if (wrong is not null)
+        {
+            await res.ErrorAsync(400, "invalid", wrong, ct);
+            return;
+        }
         _rt.History.Add(text);
         int place;
         lock (_gate)
         {
             // The lines as they are now: when it runs, the file may have changed.
-            _queued.Add((text, Pieces(body)?.Select(p => p.Taken(_rt.Workspace)).ToList(), quote));
+            _queued.Add((text, Pieces(body)?.Select(p => p.Taken(_rt.Workspace)).ToList(), quote, uploads));
             place = _queued.Count;
         }
         StartNext();
@@ -897,6 +1084,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         string? text = null;
         IReadOnlyList<Mentions.Piece>? pieces = null;
         string? quote = null;
+        IReadOnlyList<Upload>? uploads = null;
         Job? job;
         lock (_gate)
         {
@@ -906,7 +1094,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             }
             if (_queued.Count > 0)
             {
-                (text, pieces, quote) = _queued[0];
+                (text, pieces, quote, uploads) = _queued[0];
                 _queued.RemoveAt(0);
             }
             else if (_rt.Jobs.Follow().Count == 0)
@@ -916,7 +1104,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             job = _job = new Job("answer");
             _turns++;
         }
-        job.Running = Task.Run(() => RunTurnAsync(job, text, pieces, quote));
+        job.Running = Task.Run(() => RunTurnAsync(job, text, pieces, quote, uploads));
     }
 
     /// <summary>A new job when none runs; null when one does.</summary>
@@ -934,7 +1122,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     }
 
     /// <summary>A turn as a job: the person's message, or (null) the model carrying on after commands that ended.</summary>
-    private async Task RunTurnAsync(Job job, string? text, IReadOnlyList<Mentions.Piece>? pieces = null, string? quote = null)
+    private async Task RunTurnAsync(Job job, string? text, IReadOnlyList<Mentions.Piece>? pieces = null, string? quote = null, IReadOnlyList<Upload>? uploads = null,
+        Again? again = null)
     {
         var turn = new Spend();
         _rt.Turn = turn;
@@ -961,11 +1150,23 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 }
             }
             var count = _rt.Agent.Messages.Count;
-            if (text is not null)
+            if (again is not null)
+            {
+                await AskAgainAsync(job, again, turn);
+                // The page reads the session again: what came after the question is on a branch of its own now.
+                Interlocked.Increment(ref _synced);
+            }
+            else if (text is not null)
             {
                 text = _rt.Prepare(text);
-                job.Emit(new JsonObject { ["type"] = "question", ["id"] = $"m{count}", ["parentId"] = count == 0 ? null : $"m{count - 1}", ["text"] = text, ["quote"] = quote });
-                await _rt.Agent.RunAsync(text, turn, job.Stop.Token, takeIn: false, pieces, quote);
+                job.Emit(new JsonObject
+                {
+                    ["type"] = "question", ["id"] = $"m{count}", ["parentId"] = count == 0 ? null : $"m{count - 1}", ["text"] = text, ["quote"] = quote,
+                    ["attachments"] = uploads is { Count: > 0 } ? Uploads.Shown(uploads) : null,
+                });
+                // The files attached: their text read from Arena, their pictures for a model that sees them.
+                var uploaded = uploads is { Count: > 0 } ? await Uploads.ReadAsync(uploads, _rt.Config, _rt.Http, _rt.Sees(_rt.Model.Info), job.Stop.Token) : ((string, JsonArray)?)null;
+                await _rt.Agent.RunAsync(text, turn, job.Stop.Token, takeIn: false, pieces, quote, uploaded);
             }
             else
             {
@@ -1154,6 +1355,17 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             await res.ErrorAsync(400, "invalid", $"The gateway has no model {name}.", ct);
             return;
         }
+        // The remote tools on in this session (the Tools menu): the groups listed; every other one there is now is off.
+        List<string>? toolsOn = null;
+        if (body.ContainsKey("tools"))
+        {
+            if (body["tools"] is not JsonArray list || list.Any(t => t is not JsonValue v || !v.TryGetValue<string>(out _)))
+            {
+                await res.ErrorAsync(400, "invalid", "tools is a list of the tools to have on (their ids).", ct);
+                return;
+            }
+            toolsOn = [.. list.Select(t => t!.GetValue<string>())];
+        }
         var thinking = body.ContainsKey("thinking") ? body.Str("thinking") ?? "default" : null;
         if (thinking is not null && thinking != "default" && !ModelState.Levels.Contains(thinking))
         {
@@ -1179,6 +1391,12 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         if (thinking is not null)
         {
             _rt.Model.Thinking = thinking == "default" ? null : thinking;
+        }
+        if (toolsOn is not null)
+        {
+            // A group of a server not connected now keeps the choice made for it.
+            var present = _rt.Tools.All.Select(t => t.Group).OfType<string>();
+            _rt.Demand.SetOff(_rt.Demand.Off.Union(present).Except(toolsOn));
         }
         await res.JsonAsync(200, State(), ct);
     }
@@ -1599,6 +1817,7 @@ internal static partial class History
             string? summary = null;
             string? quote = null;
             List<string>? attached = null;
+            List<Upload> uploads = [];
             if (role == "assistant")
             {
                 if (content.EndsWith(StoppedMark, StringComparison.Ordinal))
@@ -1633,6 +1852,7 @@ internal static partial class History
             {
                 // What was typed; the part of an answer it quotes, and what went with it (@files, the lines chosen in the editor), apart.
                 (quote, content) = Quotes.Split(content);
+                (content, uploads) = Uploads.Split(content);
                 attached = Mentions.Attached(content);
                 content = Mentions.Typed(content);
             }
@@ -1649,7 +1869,7 @@ internal static partial class History
                 ["toolName"] = toolName,
                 ["toolCallId"] = callId,
                 ["toolCalls"] = calls,
-                ["attachments"] = new JsonArray(),
+                ["attachments"] = Uploads.Shown(uploads),
                 ["status"] = status,
                 ["error"] = null,
                 ["model"] = role == "assistant" ? entry?.Model ?? answer.Model : null,

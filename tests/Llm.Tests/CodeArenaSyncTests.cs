@@ -72,6 +72,78 @@ public sealed class CodeArenaSyncTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Code_Arena_reads_the_web_chat_s_config_with_the_person_s_key()
+    {
+        await using var f = NewApp();
+        var (web, key) = await PersonAsync(f);
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await CodeArena(f, null).GetAsync(new Uri("/api/code-arena/config", UriKind.Relative)));
+        var config = await Json(await CodeArena(f, key).GetAsync(new Uri("/api/code-arena/config", UriKind.Relative)));
+        var signedIn = await web.JsonAsync(await web.GetAsync("/api/chat/config"));
+        // The same models, each loaded or not and seeing pictures or not, and the same thinking levels and default as the web's.
+        Assert.Equal(signedIn.GetProperty("models").ToString(), config.GetProperty("models").ToString());
+        Assert.Equal(signedIn.GetProperty("presets").ToString(), config.GetProperty("presets").ToString());
+        Assert.Equal("medium", config.GetProperty("defaultThinking").GetString());
+        Assert.True(config.GetProperty("models").EnumerateArray().First().TryGetProperty("loaded", out _));
+    }
+
+    [Fact]
+    public async Task The_key_uploads_and_reads_the_person_s_own_files_and_nothing_else_of_the_chat()
+    {
+        await using var f = NewApp();
+        var (web, key) = await PersonAsync(f);
+        var (other, otherKey) = await PersonAsync(f);
+        var arena = CodeArena(f, key);
+
+        using var form = new MultipartFormDataContent();
+        var part = new ByteArrayContent("notes for the model"u8.ToArray());
+        part.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+        form.Add(part, "file", "notes.txt");
+        var made = await arena.PostAsync(new Uri("/api/chat/attachments", UriKind.Relative), form);
+        await StatusAssert.Is(HttpStatusCode.OK, made);
+        var id = (await Json(made)).GetProperty("id").GetGuid();
+        Assert.Equal("notes for the model", await arena.GetStringAsync(new Uri($"/api/chat/attachments/{id}/content", UriKind.Relative)));
+        // The person's own, signed in on the web too.
+        Assert.Equal("notes for the model", await (await web.GetAsync($"/api/chat/attachments/{id}/content")).Content.ReadAsStringAsync());
+
+        // Another person's key, or theirs signed in, does not reach it; nor does no key, or one that is not a key.
+        await StatusAssert.Is(HttpStatusCode.NotFound, await CodeArena(f, otherKey).GetAsync(new Uri($"/api/chat/attachments/{id}/content", UriKind.Relative)));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await other.GetAsync($"/api/chat/attachments/{id}/content"));
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await CodeArena(f, null).GetAsync(new Uri($"/api/chat/attachments/{id}/content", UriKind.Relative)));
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await CodeArena(f, "sk-not-a-key").GetAsync(new Uri($"/api/chat/attachments/{id}/content", UriKind.Relative)));
+        // The key opens no other route of the chat's.
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await arena.GetAsync(new Uri("/api/chat/conversations", UriKind.Relative)));
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await arena.GetAsync(new Uri("/api/chat/config", UriKind.Relative)));
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await arena.GetAsync(new Uri("/api/account/mcp", UriKind.Relative)));
+    }
+
+    [Fact]
+    public async Task Files_attached_in_Code_Arena_are_the_question_s_attachments_on_the_web_the_person_s_own_only()
+    {
+        await using var f = NewApp();
+        var (web, key) = await PersonAsync(f);
+        var (_, otherKey) = await PersonAsync(f);
+        async Task<Guid> UploadAsync(string withKey, string name)
+        {
+            using var form = new MultipartFormDataContent();
+            var part = new ByteArrayContent(System.Text.Encoding.UTF8.GetBytes("the text of " + name));
+            part.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+            form.Add(part, "file", name);
+            return (await Json(await CodeArena(f, withKey).PostAsync(new Uri("/api/chat/attachments", UriKind.Relative), form))).GetProperty("id").GetGuid();
+        }
+        var mine = await UploadAsync(key, "mine.txt");
+        var theirs = await UploadAsync(otherKey, "theirs.txt");
+        var arena = CodeArena(f, key);
+        var id = await ChatAsync(arena, "20261016-1200-files1");
+        await SendAsync(arena, id, null, [
+            new { role = "user", content = "read these", attachments = new[] { new { id = mine, name = "mine.txt", kind = "text", contentType = "text/plain" }, new { id = theirs, name = "theirs.txt", kind = "text", contentType = "text/plain" } } },
+            Answer("Read."),
+        ]);
+        var question = (await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{id}"))).GetProperty("messages")[0];
+        Assert.Equal("read these", question.GetProperty("content").GetString());
+        Assert.Equal(["mine.txt"], question.GetProperty("attachments").EnumerateArray().Select(a => a.GetProperty("fileName").GetString()));
+    }
+
+    [Fact]
     public async Task A_quote_crosses_the_sync_both_ways_as_its_own_field_not_in_the_content()
     {
         await using var f = NewApp();

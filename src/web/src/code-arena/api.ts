@@ -1,6 +1,6 @@
 import { api } from '@/lib/api'
 import { blank, reduce, type LiveState } from '@/pages/chat/live'
-import type { ChatEvent, Message } from '@/pages/chat/types'
+import type { Attachment, ChatEvent, ChatTool, Message } from '@/pages/chat/types'
 import type { Piece } from './bridge'
 
 /** What code-arena web says of itself: the folder, the model, the mode, the session open now. */
@@ -58,6 +58,17 @@ export interface CodeState {
   completion?: { model: string } | null
   arenaTools: boolean
   tools: { local: number; servers: { name: string; count: number }[] }
+  /** The Tools menu: Arena's tools (as its chat has them) and each other server's, on or off in this session. */
+  toolGroups?: ToolGroup[]
+  /** Their definitions are past the budget: the model loads those it needs (load_tools). */
+  toolsOnDemand?: boolean
+}
+
+/** A group of remote tools, in the shape of the web chat's tools, with whether it is on in this session and loaded. */
+export interface ToolGroup extends ChatTool {
+  on: boolean
+  loaded: boolean
+  functions: number
 }
 
 /** The session's sync with its chat in Arena. */
@@ -197,7 +208,8 @@ export const historyQuery = {
 }
 
 /** compactAt: 0 compacts only when a request would not fit; null follows the Arena account's again. */
-export const changeSettings = (body: { mode?: Mode; model?: string; thinking?: string | null; compactAt?: number | null; compactTarget?: number }) => api<CodeState>('/api/settings', { body })
+export const changeSettings = (body: { mode?: Mode; model?: string; thinking?: string | null; compactAt?: number | null; compactTarget?: number; tools?: string[] }) =>
+  api<CodeState>('/api/settings', { body })
 
 /** Where the session's threshold comes from, as the gauge and the Context dialog say it. */
 export function compactWho(state: Pick<CodeState, 'compactAtSource'>): string {
@@ -225,9 +237,19 @@ export const openWebChat = (id: string) => api<CodeSession>('/api/sessions/web',
 /** Sends Arena each session of this folder it never had: how many went, and what kept the others back. */
 export const sendAllSessions = () => api<{ sent: number; failed: string[] }>('/api/sessions/send-all', { body: {} })
 export const stopTurn = () => api('/api/stop', { body: {} })
+/** What a question is asked again with: its new words and quote (edited), shorter or longer, another model or thinking, the files put back first. */
+export interface AgainBody {
+  question: string
+  text?: string
+  quote?: string | null
+  length?: 'shorter' | 'longer'
+  model?: string
+  thinking?: string
+  files?: boolean
+}
 /** A message for after the answer being written (at once when none is), with the lines chosen in the editor and the part of an answer it quotes. */
-export const queueMessage = (text: string, context?: Piece[], quote?: string) =>
-  api<{ queued: number }>('/api/queue', { body: { text, ...(context?.length && { context }), ...(quote && { quote }) } })
+export const queueMessage = (text: string, context?: Piece[], quote?: string, attachments?: Attachment[]) =>
+  api<{ queued: number }>('/api/queue', { body: { text, ...(context?.length && { context }), ...(quote && { quote }), ...(attachments?.length && { attachments }) } })
 // A body, so it goes as JSON: code-arena web refuses any other call that changes something.
 export const clearQueue = () => api('/api/queue', { method: 'DELETE', body: {} })
 export const answerApproval = (id: string, answer: 'allow' | 'always' | 'deny') => api('/api/approvals', { body: { id, answer } })

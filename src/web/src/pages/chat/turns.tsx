@@ -286,6 +286,69 @@ export function QuestionTurn({
   )
 }
 
+/** What an answer can be asked again with: as it was, shorter or longer than it, another model, or other thinking. */
+export interface AgainChange {
+  model?: string
+  thinking?: string
+  length?: 'shorter' | 'longer'
+}
+
+/**
+ * Answer again, as the chat offers it under an answer: the same, Shorter or Longer (<code>lengths</code>: the answer had
+ * words), with another model loaded, or with other thinking. <code>more</code>: items of the caller's own, at the end.
+ */
+export function AnswerAgainMenu({ config, busy, lengths, onAgain, more }: { config: ChatConfig; busy: boolean; lengths: boolean; onAgain: (change?: AgainChange) => void; more?: ReactNode }) {
+  return (
+    <DropdownMenu>
+      <Tooltip content="Answer again">
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon-sm" className="size-7" disabled={busy} aria-label="Answer again">
+            <RefreshCw />
+          </Button>
+        </DropdownMenuTrigger>
+      </Tooltip>
+      <DropdownMenuContent align="start">
+        <DropdownMenuItem onSelect={() => onAgain()}>
+          <RefreshCw /> Answer again
+        </DropdownMenuItem>
+        {lengths && (
+          <>
+            <DropdownMenuItem onSelect={() => onAgain({ length: 'shorter' })}>
+              <ChevronsDownUp /> Shorter
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onAgain({ length: 'longer' })}>
+              <ChevronsUpDown /> Longer
+            </DropdownMenuItem>
+          </>
+        )}
+        {config.models.filter((mo) => mo.loaded).length > 1 && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>With another model</DropdownMenuLabel>
+            {config.models.filter((mo) => mo.loaded).map((mo) => (
+              <DropdownMenuItem key={mo.name} onSelect={() => onAgain({ model: mo.name })}>
+                {mo.name}
+              </DropdownMenuItem>
+            ))}
+          </>
+        )}
+        {config.presets.length > 0 && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>With thinking</DropdownMenuLabel>
+            {config.presets.map((p) => (
+              <DropdownMenuItem key={p.level} onSelect={() => onAgain({ thinking: p.level })}>
+                {p.label}
+              </DropdownMenuItem>
+            ))}
+          </>
+        )}
+        {more}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 export function AnswerTurn({
   answer,
   siblings,
@@ -389,54 +452,7 @@ export function AnswerTurn({
         )}
         {feedbackIn && last && !last.id.startsWith('local-') && <FeedbackButtons key={last.id} chatId={feedbackIn} message={last} />}
         {text && <ReadAloud text={text} />}
-        {onRegenerate && question && (
-          <DropdownMenu>
-            <Tooltip content="Answer again">
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon-sm" className="size-7" disabled={busy} aria-label="Answer again">
-                  <RefreshCw />
-                </Button>
-              </DropdownMenuTrigger>
-            </Tooltip>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem onSelect={() => onRegenerate(question)}>
-                <RefreshCw /> Answer again
-              </DropdownMenuItem>
-              {last && text && (
-                <>
-                  <DropdownMenuItem onSelect={() => onRegenerate(question, { length: 'shorter', answerId: last.id })}>
-                    <ChevronsDownUp /> Shorter
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => onRegenerate(question, { length: 'longer', answerId: last.id })}>
-                    <ChevronsUpDown /> Longer
-                  </DropdownMenuItem>
-                </>
-              )}
-              {config.models.filter((mo) => mo.loaded).length > 1 && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuLabel>With another model</DropdownMenuLabel>
-                  {config.models.filter((mo) => mo.loaded).map((mo) => (
-                    <DropdownMenuItem key={mo.name} onSelect={() => onRegenerate(question, { model: mo.name })}>
-                      {mo.name}
-                    </DropdownMenuItem>
-                  ))}
-                </>
-              )}
-              {config.presets.length > 0 && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuLabel>With thinking</DropdownMenuLabel>
-                  {config.presets.map((p) => (
-                    <DropdownMenuItem key={p.level} onSelect={() => onRegenerate(question, { thinking: p.level })}>
-                      {p.label}
-                    </DropdownMenuItem>
-                  ))}
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+        {onRegenerate && question && <AnswerAgainMenu config={config} busy={busy} lengths={!!(last && text)} onAgain={(o) => onRegenerate(question, o?.length && last ? { ...o, answerId: last.id } : o)} />}
         {onFork && last && !last.toolCalls?.length && !last.id.startsWith('local-') && (
           <Tooltip content="Fork into a new chat from here">
             <Button variant="ghost" size="icon-sm" className="size-7" disabled={busy} onClick={() => onFork(last.id)} aria-label="Fork from here">

@@ -10,6 +10,15 @@ import { fromSession, keptOutput, reduceCode, type CodeSession, type CodeState, 
 import { App } from './app'
 import { getCommand } from './commands'
 
+// An upload goes by XMLHttpRequest (for its progress), which has no server in tests.
+vi.mock('@/pages/chat/api', async (original) => ({
+  ...(await original<typeof import('@/pages/chat/api')>()),
+  uploadFile: vi.fn(async (file: File, onProgress: (p: number) => void) => {
+    onProgress(1)
+    return { id: `att-${file.name}`, fileName: file.name, size: file.size, truncated: false, kind: file.type.startsWith('image/') ? 'image' : 'text', contentType: file.type }
+  }),
+}))
+
 // Each tool card's arguments, as read for its line: counted, to see which cards are drawn again.
 vi.mock('@/pages/chat/tool-args', async (real) => {
   const actual = await real<typeof import('@/pages/chat/tool-args')>()
@@ -292,6 +301,81 @@ describe('Code Arena in the browser', () => {
     await userEvent.click(await screen.findByRole('menuitem', { name: /model-b/ }))
     await waitFor(() => expect(calls.filter((c) => c.path === '/api/settings').map((c) => c.body)).toContainEqual({ model: 'model-b' }))
     expect(await screen.findByRole('button', { name: 'Model: model-b' })).toBeInTheDocument()
+  })
+
+  it("turns Arena's tools on and off for the session with the web chat's Tools menu", async () => {
+    const group = (id: string, title: string, on: boolean) => ({ id, title, description: `${title}'s tools.`, icon: 'globe', onByDefault: true, askFirst: false, on, loaded: false, functions: 2 })
+    const { calls } = backend({
+      state: { toolGroups: [group('web', 'Web search', true), group('gitlab', 'GitLab', true)] },
+      extra: {
+        'POST /api/settings': (body) => ({ json: state({ toolGroups: [group('web', 'Web search', true), group('gitlab', 'GitLab', (body as { tools: string[] }).tools.includes('gitlab'))] }) }),
+      },
+    })
+    renderCode()
+    await userEvent.click(await screen.findByRole('button', { name: 'Tools: 2 of 2 on' }))
+    await userEvent.click(await screen.findByRole('switch', { name: /GitLab/ }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/settings')?.body).toEqual({ tools: ['web'] }))
+    expect(await screen.findByRole('button', { name: 'Tools: 1 of 2 on' })).toBeInTheDocument()
+  })
+
+  it('attaches files as the web chat does, when Arena takes them: shown above the box, sent with the message and shown with the question', async () => {
+    let end!: () => void
+    const over = new Promise<void>((r) => (end = r))
+    const { calls, now } = backend({
+      extra: {
+        'GET /api/chat/config': () => ({ json: { ...config, maxUploadBytes: 1_000_000 } }),
+        'POST /api/messages': () => {
+          now.state = { ...now.state, busy: true }
+          return { events: turn.slice(0, 1), until: over }
+        },
+      },
+    })
+    renderCode()
+    await userEvent.upload(await screen.findByLabelText('Attach files'), new File(['42'], 'numbers.txt', { type: 'text/plain' }))
+    const going = await screen.findByRole('list', { name: 'Files to send' })
+    expect(within(going).getByText('numbers.txt')).toBeInTheDocument()
+    await ask('What do they say?')
+    await waitFor(() =>
+      expect(calls.find((c) => c.path === '/api/messages')?.body).toEqual({
+        text: 'What do they say?',
+        attachments: [{ id: 'att-numbers.txt', fileName: 'numbers.txt', size: 2, truncated: false, kind: 'text', contentType: 'text/plain' }],
+      }),
+    )
+    // Sent: the box is empty of them, and the question shows them.
+    await waitFor(() => expect(screen.queryByRole('list', { name: 'Files to send' })).not.toBeInTheDocument())
+    expect(await screen.findByText('numbers.txt')).toBeInTheDocument()
+    now.state = { ...now.state, busy: false }
+    end()
+  })
+
+  it("asks a question again as the web chat does: Answer again under its answer (shorter, the files as they were), and Edit", async () => {
+    const { calls } = backend({
+      session: { id: 's2', messages: saved, diffs: { m2: diff }, busy: false },
+      extra: { 'POST /api/again': () => ({ events: [{ type: 'question', id: 'm0', parentId: null }] }) },
+    })
+    renderCode()
+    await userEvent.click(await screen.findByRole('button', { name: 'Answer again' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Shorter' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/again')?.body).toEqual({ question: 'm0', length: 'shorter' }))
+
+    // The turn changed a file: it can be asked again from where the files were before it.
+    await userEvent.click(await screen.findByRole('button', { name: 'Answer again' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /the files as they were/ }))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/again').map((c) => c.body)).toContainEqual({ question: 'm0', files: true }))
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit question' }))
+    const box = await screen.findByRole('textbox', { name: 'Edit your question' })
+    await userEvent.clear(box)
+    await userEvent.type(box, 'Change two to II')
+    await userEvent.click(within(box.closest('form')!).getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/again').map((c) => c.body)).toContainEqual({ question: 'm0', text: 'Change two to II', quote: null }))
+  })
+
+  it('offers no files without Arena to take them', async () => {
+    backend()
+    renderCode()
+    await screen.findByRole('textbox', { name: 'Message' })
+    expect(screen.queryByRole('button', { name: 'Attach' })).not.toBeInTheDocument()
   })
 
   it("lists this folder's sessions, newest first, and resumes one with its history", async () => {
