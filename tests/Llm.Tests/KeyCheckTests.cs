@@ -13,9 +13,9 @@ public sealed class KeyCheckTests(AppFixture app)
     private HttpClient Inside() => app.Factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("http://app:8080"), AllowAutoRedirect = false });
 
     private static async Task<(HttpStatusCode Status, JsonElement Body)> AskAsync(HttpClient http, object? body, string? credential = FakeArgus.ChatToken,
-        IEnumerable<(string, string)>? headers = null)
+        IEnumerable<(string, string)>? headers = null, string path = "/api/authz/key")
     {
-        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri("/api/authz/key", UriKind.Relative)) { Content = JsonContent.Create(body) };
+        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(path, UriKind.Relative)) { Content = JsonContent.Create(body) };
         if (credential is not null)
         {
             req.Headers.Authorization = new("Bearer", credential);
@@ -54,6 +54,34 @@ public sealed class KeyCheckTests(AppFixture app)
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.Equal(name, body.GetProperty("username").GetString());
         Assert.Equal(1, app.Gateway.KeyLookups.Count(k => k == key));
+    }
+
+    [Fact]
+    public async Task Argus_learns_which_repositories_the_apps_rules_leave_a_person()
+    {
+        var (id, name, _) = await PersonAsync();
+        var http = Inside();
+        var email = $"{name}@example.test";
+        string[] repos = ["team-a/api", "team-a/web", "team-b/core"];
+        var (status, body) = await AskAsync(http, new { email, repos }, path: "/api/authz/code");
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.True(body.GetProperty("read").GetBoolean());
+        Assert.Equal(repos, body.GetProperty("allowed").EnumerateArray().Select(r => r.GetString()));
+
+        var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
+        var rule = await admin.JsonAsync(await admin.PostAsync("/api/admin/access/rules",
+            new { effect = "Deny", subjectKind = "Person", subjectId = id, resourceKind = "repo", resource = "gitlab:team-a/*", action = "code.read" }));
+        (_, body) = await AskAsync(http, new { email, repos }, path: "/api/authz/code");
+        Assert.Equal(["team-b/core"], body.GetProperty("allowed").EnumerateArray().Select(r => r.GetString()));
+        await admin.Http.DeleteAsync(new Uri($"/api/admin/access/rules/{rule.GetProperty("id").GetGuid()}", UriKind.Relative));
+
+        // Without code.read, nothing; and only Argus, with its credential, from inside, may ask.
+        await admin.PostAsync("/api/admin/access/rules", new { effect = "Deny", subjectKind = "Person", subjectId = id, resourceKind = "feature", resource = "code.read" });
+        (_, body) = await AskAsync(http, new { email, repos }, path: "/api/authz/code");
+        Assert.False(body.GetProperty("read").GetBoolean());
+        Assert.Empty(body.GetProperty("allowed").EnumerateArray());
+        Assert.Equal(HttpStatusCode.Unauthorized, (await AskAsync(http, new { email, repos }, "wrong", path: "/api/authz/code")).Status);
+        Assert.Equal(HttpStatusCode.Forbidden, (await AskAsync(http, new { email, repos }, headers: [("X-Real-Ip", "203.0.113.9")], path: "/api/authz/code")).Status);
     }
 
     [Fact]

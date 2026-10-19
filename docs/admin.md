@@ -61,6 +61,13 @@ Owner) sees the admin pages of what they hold, and only those: a Supervisor
 role with `monitoring.read` and `logs.read` sees Monitoring, Dashboards,
 Alerts, Logs and Traces.
 
+Rules on repositories hold in Argus too, for the chat's Argus tool and for
+coding agents with an API key alike: a repository is named
+`gitlab:group/project` (or a pattern, `gitlab:team-a/*`), and Argus asks the
+app which of what GitLab lets the person read their rules leave them
+(kept five minutes). Without `code.read` they read no code. GitLab's own
+rights stay the ceiling: no rule here opens a project GitLab keeps from them.
+
 What each person may do is decided in one place, from three things:
 
 - **Permissions**: a fixed list of what can be done, in two kinds.

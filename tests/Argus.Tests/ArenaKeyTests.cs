@@ -34,6 +34,10 @@ public sealed class FakePlatform : IAsyncDisposable
     public bool Down { get; set; }
     /// <summary>How long the app takes over a key check.</summary>
     public TimeSpan KeyDelay { get; set; }
+    /// <summary>Repositories the app's rules (Admin → Access) take from everyone, by path.</summary>
+    public ConcurrentDictionary<string, byte> RulesDeny { get; } = new(StringComparer.Ordinal);
+    /// <summary>Every rules check asked: the email and the repositories it asked about.</summary>
+    public ConcurrentQueue<(string Email, string[] Repos)> RuleChecks { get; } = new();
     /// <summary>Each project's members in GitLab: (id, username, name, access level).</summary>
     public ConcurrentDictionary<long, (long Id, string Username, string Name, int Level)[]> Members { get; } = new();
     /// <summary>How long GitLab takes over each request, as a busy company GitLab does.</summary>
@@ -79,6 +83,15 @@ public sealed class FakePlatform : IAsyncDisposable
             return Keys.TryGetValue(key, out var who)
                 ? Results.Json(new { email = who.Email, username = who.Username })
                 : Results.Json(new { status = "invalid_key", error = "That API key is not valid." }, statusCode: 401);
+        });
+        _app.MapPost("/api/authz/code", async (HttpContext c) =>
+        {
+            var body = await JsonNode.ParseAsync(c.Request.Body);
+            if (c.Request.Headers.Authorization.ToString() != $"Bearer {Credential}") return Results.Json(new { status = "credential" }, statusCode: 401);
+            if (Down) return Results.Json(new { status = "down" }, statusCode: 503);
+            var repos = (body?["repos"] as JsonArray ?? []).Select(r => r!.GetValue<string>()).ToArray();
+            RuleChecks.Enqueue((body?["email"]?.ToString() ?? "", repos));
+            return Results.Json(new { read = true, allowed = repos.Where(r => !RulesDeny.ContainsKey(r)) });
         });
         // GitLab: alice keeps her email private, so only her username finds her; bob maintains both projects.
         var users = new[]
@@ -221,6 +234,19 @@ public sealed class ArenaKeyServerTests : IAsyncLifetime
         var line = Lines("tool_call").Single();
         Assert.Equal(("alice", "api_key"), (line["user"]!.ToString(), line["via"]!.ToString()));
         Assert.DoesNotContain("sk-alice", _log.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task The_apps_rules_take_a_repository_that_gitlab_lets_the_person_read()
+    {
+        _platform.RulesDeny["grp/alpha"] = 0;
+        var session = await McpCalls.Session(_http, "sk-alice");
+        var found = await McpCalls.Call(_http, "sk-alice", session, "find_symbol", new { name = "DecodeFrame" });
+        Assert.True(found["isError"]!.GetValue<bool>());
+        // Asked about what GitLab lets her read, as the app knows her.
+        var (email, repos) = Assert.Single(_platform.RuleChecks);
+        Assert.Equal("alice@corp.example", email);
+        Assert.Equal(["grp/alpha"], repos);
     }
 
     [Fact]

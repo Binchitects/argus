@@ -445,13 +445,13 @@ public sealed class PersonAccess(Func<string, string?, IReadOnlyCollection<long>
     readonly Dictionary<string, Task<Grant>> _resolving = new(StringComparer.Ordinal);
 
     /// <summary>The server's: GitLab membership read with the service credential, over the index's repository rows.</summary>
-    public static PersonAccess For(string dbPath, Lazy<MemberDirectory> directory) => new(
+    public static PersonAccess For(string dbPath, Lazy<MemberDirectory> directory, Func<string, Identity, Identity>? narrow = null) => new(
         (email, username, projects) => People.GrantFor(directory.Value, email, username, projects),
         () =>
         {
             using var conn = Db.Connect(dbPath);
             return People.Repos(conn);
-        });
+        }) { Narrow = narrow };
 
     static string Key(string email, string? username) => PyStr.Strip(email).ToLowerInvariant() + "\n" + (username ?? "").Trim().ToLowerInvariant();
 
@@ -469,8 +469,12 @@ public sealed class PersonAccess(Func<string, string?, IReadOnlyCollection<long>
         var rows = repos();
         var added = Projects(rows).Where(p => !grant.Checked.Contains(p)).ToList();
         if (added.Count > 0) grant = Extend(key, email, username, grant, added);
-        return grant.Over(rows);
+        var identity = grant.Over(rows);
+        return Narrow is null ? identity : Narrow(email, identity);
     }
+
+    /// <summary>In the platform: the app's rules (Admin → Access) narrow what GitLab lets the person read (<see cref="ArenaRules"/>).</summary>
+    public Func<string, Identity, Identity>? Narrow { get; init; }
 
     Grant Kept(string key, string email, string? username)
     {

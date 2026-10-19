@@ -39,12 +39,54 @@ public static class KeyCheck
         app.MapPost(Path, (HttpContext ctx, ILiteLlm gateway, UserManager<AppUser> users, IOptions<ArgusOptions> argus, IOptionsMonitor<ChatOptions> chat,
             TimeProvider clock, Access.AccessService access) => CheckAsync(ctx, gateway, users, access, argus.Value, chat.CurrentValue, clock, known))
             .AllowAnonymous("Argus and Laya ask whose an API key is: the key itself is checked.");
+        app.MapPost(CodePath, (HttpContext ctx, UserManager<AppUser> users, IOptions<ArgusOptions> argus, IOptionsMonitor<ChatOptions> chat, Access.AccessService access) =>
+                CodeAsync(ctx, users, access, argus.Value, chat.CurrentValue))
+            .AllowAnonymous("Argus asks which repositories a person may read by the app's rules: Argus's own credential is checked.");
     }
 
-    private static async Task<IResult> CheckAsync(HttpContext ctx, ILiteLlm gateway, UserManager<AppUser> users, Access.AccessService access, ArgusOptions argus, ChatOptions chat,
-        TimeProvider clock, ConcurrentDictionary<string, (DateTimeOffset Until, string Email)> known)
+    public const string CodePath = "/api/authz/code";
+
+    private sealed record CodeBody(string? Email, string[]? Repos);
+
+    /// <summary>
+    /// Which of Argus's repositories (by path) a person may read by the app's rules (Admin → Access: code.read, and
+    /// repository rules, on "gitlab:group/project"); GitLab's own rights stay the ceiling in Argus. No repository rules: every one.
+    /// </summary>
+    private static async Task<IResult> CodeAsync(HttpContext ctx, UserManager<AppUser> users, Access.AccessService access, ArgusOptions argus, ChatOptions chat)
     {
-        // Argus's credentials: the chat's own when set, and ARGUS_KEY (Argus takes it as both).
+        if (Caller(ctx, argus, chat) is { } refused)
+        {
+            return refused;
+        }
+        CodeBody? body;
+        try
+        {
+            body = await ctx.Request.ReadFromJsonAsync<CodeBody>(ctx.RequestAborted);
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException)
+        {
+            body = null;
+        }
+        if (string.IsNullOrWhiteSpace(body?.Email) || body.Repos is null || body.Repos.Length > 100_000)
+        {
+            return Results.Json(new { error = "Send {\"email\": \"...\", \"repos\": [\"group/project\", ...]}." }, statusCode: StatusCodes.Status400BadRequest);
+        }
+        var user = await users.FindByEmailAsync(body.Email.Trim());
+        if (user is null || user.IsDisabled)
+        {
+            return Results.Ok(new { read = false, allowed = Array.Empty<string>() });
+        }
+        var m = await access.MembershipAsync(user, ctx.RequestAborted);
+        if (!m.Has(Core.Access.Permissions.CodeRead))
+        {
+            return Results.Ok(new { read = false, allowed = Array.Empty<string>() });
+        }
+        return Results.Ok(new { read = true, allowed = body.Repos.Where(r => m.Check(Core.Access.ResourceKinds.Repo, r.Contains(':', StringComparison.Ordinal) ? r : "gitlab:" + r, Core.Access.Permissions.CodeRead).Allowed) });
+    }
+
+    /// <summary>Argus's credential, from inside the stack's network; null when it is right, else the refusal.</summary>
+    private static IResult? Caller(HttpContext ctx, ArgusOptions argus, ChatOptions chat)
+    {
         string[] credentials = [.. new[] { chat.ArgusChatToken, argus.AdminToken }.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t!)];
         if (credentials.Length == 0)
         {
@@ -57,9 +99,18 @@ public static class KeyCheck
         }
         var auth = ctx.Request.Headers.Authorization.ToString();
         var supplied = auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? auth[7..].Trim() : "";
-        if (supplied.Length == 0 || !credentials.Any(c => SecretEquals(supplied, c)))
+        return supplied.Length == 0 || !credentials.Any(c => SecretEquals(supplied, c))
+            ? Results.Json(new { status = "credential", error = "Wrong or missing credential." }, statusCode: StatusCodes.Status401Unauthorized)
+            : null;
+    }
+
+    private static async Task<IResult> CheckAsync(HttpContext ctx, ILiteLlm gateway, UserManager<AppUser> users, Access.AccessService access, ArgusOptions argus, ChatOptions chat,
+        TimeProvider clock, ConcurrentDictionary<string, (DateTimeOffset Until, string Email)> known)
+    {
+        // Argus's credentials: the chat's own when set, and ARGUS_KEY (Argus takes it as both).
+        if (Caller(ctx, argus, chat) is { } refused)
         {
-            return Results.Json(new { status = "credential", error = "Wrong or missing credential." }, statusCode: StatusCodes.Status401Unauthorized);
+            return refused;
         }
 
         Body? body;
