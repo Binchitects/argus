@@ -668,11 +668,23 @@ sha256sum -c argus-arena-5.6.1-offline.run.sha256
 sudo sh argus-arena-5.6.1-offline.run install --dir /srv/arena
 ```
 
-It checks the bundle and the host first: 4 CPU cores and 16 GB of memory,
-disk for the images and the files, Docker or Podman and compose, an NVIDIA GPU
-the engine can hand to containers (or `--cpu-only`), and the two ports free.
-`scripts/install-requirements.sh` installs what is missing, but it needs the
-network. Then it asks the domain, the admin's e-mail, where models live, the
+It checks the bundle and the host first: the system (Ubuntu, Debian, Fedora,
+RHEL and its kin, openSUSE, Arch), 4 CPU cores and 16 GB of memory, the tools
+it uses, disk for the images and the files, Docker or Podman with compose, the
+engine's daemon (and Podman's socket) running, an NVIDIA GPU with its driver and
+NVIDIA's container toolkit wired into the engine (or `--cpu-only`), the two ports
+free and open in the firewall (ufw, firewalld), the clock synchronised and the
+kernel's file-watching limits. What is not met is named with what to do; on a
+terminal it offers to put it right (unattended: `--install-requirements`):
+the system's packages, Docker's or NVIDIA's own repositories where they are in
+reach (else the system's packages), the daemon started at every boot, the
+toolkit wired into Docker (its runtime) or Podman (a CDI spec, kept current
+as the driver changes), the ports opened and the limits raised, each step
+checked again after. A missing NVIDIA driver is installed too, and the
+installer stops for the reboot it needs (exit 7: run it again after).
+`installer.sh requirements` checks a host before anything else (`--fix` puts it
+right; `scripts/install-requirements.sh` is the same). After the images load, a
+container runs `nvidia-smi` to prove the GPU reaches it. Then it asks the domain, the admin's e-mail, where models live, the
 **default models** (download them from Hugging Face once, at the first start;
 copy them from a folder, the model library's layout, with `audio.tar.gz` for the
 speech server's; or skip, and an admin downloads them later under Admin →

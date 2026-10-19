@@ -9,6 +9,9 @@
 #                                                           remove, verify, and repair without a bundle
 #
 # Commands:
+#   requirements  what this host needs (system, tools, engine and compose, its daemon, the GPU's driver
+#             and container toolkit, ports and firewall, clock, kernel limits), each named with what to
+#             do; --fix puts right what it can, as root, asking first (exit 7: reboot for the driver)
 #   install   a new installation: checks the host, loads the images, writes DIR/deploy, makes
 #             .env (secrets generated), starts the stack and waits until it is healthy (a
 #             service waiting for a model file is named, with what to do: healthy, waiting for
@@ -63,6 +66,7 @@
 #   --make-cert          a certificate of the deployment's own (scripts/make-cert.sh)
 #   --hosts              the stack's names in /etc/hosts (scripts/setup-hosts.sh; needs root)
 #   --skip-requirements  go on when a requirement is not met
+#   --install-requirements  put the requirements right without asking (on a terminal it asks)
 # remove:
 #   --purge              also the data: the volumes, deploy/ with .env and certificates, what
 #                        the installer wrote beside it, the backups, and the models when they are
@@ -175,14 +179,14 @@ confirm() {   # confirm QUESTION: yes or no (default no)
 CMD="${1:-}"
 [[ $# -gt 0 ]] && shift
 case "$CMD" in
-  install|upgrade|repair|remove|status|verify) ;;
+  install|upgrade|repair|remove|status|verify|requirements) ;;
   help|-h|--help) usage ;;
-  "") usage_error "say what to do: install, upgrade, repair, remove, status or verify" ;;
+  "") usage_error "say what to do: requirements, install, upgrade, repair, remove, status or verify" ;;
   *) usage_error "unknown command: $CMD" ;;
 esac
 DIR="" BUNDLE_ARG="" ENGINE="" PROJECT_ARG="" YES=0 DRY=0 LOG_ARG="" TIMEOUT=15
 DOMAIN_ARG="" EMAIL_ARG="" MODELS_ARG="" MODEL_ARG="" HTTP_ARG="" HTTPS_ARG="" ACME_ARG="" GITLAB_ARG="" GITLAB_TOKEN_FILE=""
-CPU_ONLY=0 LEAVE_ARG="" MAKE_CERT=0 HOSTS=0 SKIP_REQ=0 PURGE=0 CONFIRM_ARG="" FINAL_BACKUP="" ROLLBACK=0 DEFAULTS_ARG=""
+CPU_ONLY=0 LEAVE_ARG="" MAKE_CERT=0 HOSTS=0 SKIP_REQ=0 FIX_REQ=0 PURGE=0 CONFIRM_ARG="" FINAL_BACKUP="" ROLLBACK=0 DEFAULTS_ARG=""
 only() { local c; for c in "${@:2}"; do [[ $CMD == "$c" ]] && return 0; done; usage_error "$1 is for ${*:2}"; }
 value() { [[ $2 -gt 1 ]] || usage_error "$1 needs a value"; }
 while [[ $# -gt 0 ]]; do
@@ -202,16 +206,18 @@ while [[ $# -gt 0 ]]; do
     --models-dir) only "$1" install; value "$1" $#; MODELS_ARG="$2"; shift ;;
     --model) only "$1" install; value "$1" $#; MODEL_ARG="$2"; shift ;;
     --default-models) only "$1" install; value "$1" $#; DEFAULTS_ARG="$2"; shift ;;
-    --http-port) only "$1" install; value "$1" $#; HTTP_ARG="$2"; shift ;;
-    --https-port) only "$1" install; value "$1" $#; HTTPS_ARG="$2"; shift ;;
+    --http-port) only "$1" install requirements; value "$1" $#; HTTP_ARG="$2"; shift ;;
+    --https-port) only "$1" install requirements; value "$1" $#; HTTPS_ARG="$2"; shift ;;
     --acme-email) only "$1" install; value "$1" $#; ACME_ARG="$2"; shift ;;
     --gitlab-url) only "$1" install; value "$1" $#; GITLAB_ARG="$2"; shift ;;
     --gitlab-token-file) only "$1" install; value "$1" $#; GITLAB_TOKEN_FILE="$2"; shift; [[ -r "$GITLAB_TOKEN_FILE" ]] || usage_error "cannot read $GITLAB_TOKEN_FILE" ;;
-    --cpu-only) only "$1" install; CPU_ONLY=1 ;;
+    --cpu-only) only "$1" install requirements; CPU_ONLY=1 ;;
     --leave-out) only "$1" install; value "$1" $#; LEAVE_ARG="${LEAVE_ARG:+$LEAVE_ARG,}$2"; shift ;;
     --make-cert) only "$1" install; MAKE_CERT=1 ;;
     --hosts) only "$1" install; HOSTS=1 ;;
     --skip-requirements) only "$1" install; SKIP_REQ=1 ;;
+    --fix) only "$1" requirements; FIX_REQ=1 ;;
+    --install-requirements) only "$1" install; FIX_REQ=1 ;;
     --rollback) only "$1" upgrade; ROLLBACK=1 ;;
     --purge) only "$1" remove; PURGE=1 ;;
     --confirm) only "$1" remove; value "$1" $#; CONFIRM_ARG="$2"; shift ;;
@@ -489,63 +495,376 @@ finish() {
 trap finish EXIT
 
 # ================================================================== requirements
-REQ_FAIL=0 REQ_MODE=fresh
+# Each requirement is checked; one that is not met says why and, where the installer can put it right,
+# how. With --fix (requirements), or yes to the question install asks (--install-requirements when
+# unattended), it puts them right in order (the system's packages, the engine and its compose, the
+# daemon, the GPU's container toolkit, the host's settings), each step checked again after.
+REQ_FAIL=0 REQ_MODE=fresh REQ_REBOOT=0
+FIXES=()   # "description<TAB>function args": what --fix would do, in the order found
 req_bad() { bad "$*"; REQ_FAIL=$((REQ_FAIL + 1)); }
 req_host() { if [[ $REQ_MODE == fresh ]]; then req_bad "$*"; else note "$*"; fi; }
+req_fix() { FIXES+=("$1"$'\t'"$2"); }   # req_fix DESCRIPTION "FUNCTION ARGS"
 port_free() {   # nothing listens on it
   if command -v ss >/dev/null; then ! ss -Htln "sport = :$1" 2>/dev/null | grep -q .
   else ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
   fi
 }
-gpu_ready() {   # an NVIDIA GPU, and the engine can hand it to containers
-  command -v nvidia-smi >/dev/null && nvidia-smi -L 2>/dev/null | grep -q '^GPU' || return 1
+nvidia_hardware() {   # an NVIDIA card on the PCI bus, driver or not (ARENA_GPU_HARDWARE=yes|no for the tests)
+  case "${ARENA_GPU_HARDWARE:-}" in yes) return 0 ;; no) return 1 ;; esac
+  [[ -d /proc/driver/nvidia ]] && return 0
+  command -v lspci >/dev/null && lspci -nn 2>/dev/null | grep -Eiq '(vga|3d|display).*(nvidia|\[10de:)' && return 0
+  grep -qs '^0x10de$' /sys/bus/pci/devices/*/vendor
+}
+nvidia_driver() { command -v nvidia-smi >/dev/null && nvidia-smi -L 2>/dev/null | grep -q '^GPU'; }
+toolkit_wired() {   # the engine can hand the GPU to containers
   if [[ $ENGINE == podman ]]; then
-    grep -qs 'nvidia.com/gpu' /etc/cdi/*.yaml /etc/cdi/*.json /var/run/cdi/*.yaml /var/run/cdi/*.json
+    local d f=()
+    for d in ${ARENA_CDI_DIRS:-/etc/cdi /var/run/cdi}; do f+=("$d"/*.yaml "$d"/*.json); done
+    grep -qs 'nvidia.com/gpu' "${f[@]}"
   else
     E info --format '{{json .Runtimes}}' 2>/dev/null | grep -q nvidia || command -v nvidia-container-runtime-hook >/dev/null
   fi
 }
+gpu_ready() { nvidia_driver && toolkit_wired; }
 engine_root() {
   if [[ $ENGINE == podman ]]; then E info --format '{{.Store.GraphRoot}}' 2>/dev/null; else E info --format '{{.DockerRootDir}}' 2>/dev/null; fi
 }
 images_raw_kb() { bundle_images | awk -F'\t' '{ s += $5 } END { printf "%d", s / 1024 }'; }
+
+# The system's family, from os-release (ARENA_OS_RELEASE for the tests).
+OS_ID="" OS_LIKE="" OS_VERSION="" OS_NAME="" PKG=""
+read_os() {
+  local f="${ARENA_OS_RELEASE:-/etc/os-release}"
+  [[ -r "$f" ]] || f=/usr/lib/os-release
+  OS_ID="$(sed -n 's/^ID=//p' "$f" 2>/dev/null | tr -d '"')"; OS_LIKE="$(sed -n 's/^ID_LIKE=//p' "$f" 2>/dev/null | tr -d '"')"
+  OS_VERSION="$(sed -n 's/^VERSION_ID=//p' "$f" 2>/dev/null | tr -d '"')"; OS_NAME="$(sed -n 's/^PRETTY_NAME=//p' "$f" 2>/dev/null | tr -d '"')"
+  case " $OS_ID $OS_LIKE " in
+    *" debian "*|*" ubuntu "*) PKG=apt ;;
+    *" fedora "*|*" rhel "*|*" centos "*|*" rocky "*|*" almalinux "*|*" ol "*) PKG=dnf ;;
+    *" suse "*|*" opensuse "*|*" sles "*|*" opensuse-leap "*|*" opensuse-tumbleweed "*) PKG=zypper ;;
+    *" arch "*|*" manjaro "*) PKG=pacman ;;
+    *) PKG="" ;;
+  esac
+}
+# Root for a system change: root itself, or sudo (asking for its password on a terminal).
+as_root() {
+  if [[ $EUID -eq 0 ]]; then "$@"; return; fi
+  command -v sudo >/dev/null || { bad "this needs root: run the installer as root, or install sudo"; return 1; }
+  sudo "$@"
+}
+# Whether the network reaches a host (the installs need it; an air-gapped host gets the commands to run).
+reaches() { command -v curl >/dev/null && curl -fsS -o /dev/null --max-time 8 "$1" 2>/dev/null; }
+pkg_update_done=0
+pkg_install() {   # pkg_install PACKAGE...: the system's packages, its own repositories
+  case "$PKG" in
+    apt)
+      [[ $pkg_update_done -eq 1 ]] || { as_root env DEBIAN_FRONTEND=noninteractive apt-get update -qq || return 1; pkg_update_done=1; }
+      as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$@" ;;
+    dnf) as_root dnf install -y -q "$@" ;;
+    zypper) as_root zypper --non-interactive install --no-recommends "$@" ;;
+    pacman) as_root pacman -S --noconfirm --needed "$@" ;;
+    *) bad "no package manager this installer knows ($OS_NAME): install $* by hand"; return 1 ;;
+  esac
+}
+# The tools by the command they give, as each family names its package.
+tool_package() {
+  case "$1:$PKG" in
+    sha256sum:*) echo coreutils ;;
+    ss:apt|ss:pacman) echo iproute2 ;;
+    ss:*) echo iproute ;;
+    flock:*) echo util-linux ;;
+    lspci:*) echo pciutils ;;
+    *) echo "$1" ;;
+  esac
+}
+fix_tools() { local p=() t; for t in "$@"; do p+=("$(tool_package "$t")"); done; pkg_install "${p[@]}" ca-certificates; }
+
+# Docker: Docker's own repository (the engine, buildx and compose as plugins), else the system's.
+fix_docker() {
+  if reaches https://download.docker.com/linux/; then
+    case "$PKG" in
+      apt)
+        local os="$OS_ID"; [[ " $OS_LIKE " == *" ubuntu "* && $os != ubuntu ]] && os=ubuntu
+        [[ $os == ubuntu || $os == debian ]] || os=debian
+        local codename; codename="$(sed -n 's/^VERSION_CODENAME=//p' "${ARENA_OS_RELEASE:-/etc/os-release}" | tr -d '"')"
+        [[ -n "$codename" ]] || codename="$(sed -n 's/^UBUNTU_CODENAME=//p' "${ARENA_OS_RELEASE:-/etc/os-release}" | tr -d '"')"
+        pkg_install ca-certificates curl gnupg || return 1
+        as_root install -m 0755 -d /etc/apt/keyrings || return 1
+        curl -fsSL "https://download.docker.com/linux/$os/gpg" | as_root gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg || return 1
+        printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/%s %s stable\n' "$(dpkg --print-architecture)" "$os" "$codename" \
+          | as_root tee /etc/apt/sources.list.d/docker.list >/dev/null || return 1
+        pkg_update_done=0
+        pkg_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin ;;
+      dnf)
+        local repo=centos; [[ " $OS_ID $OS_LIKE " == *" fedora "* && $OS_ID == fedora ]] && repo=fedora
+        as_root dnf install -y -q dnf-plugins-core || return 1
+        as_root dnf config-manager addrepo --from-repofile="https://download.docker.com/linux/$repo/docker-ce.repo" 2>/dev/null \
+          || as_root dnf config-manager --add-repo "https://download.docker.com/linux/$repo/docker-ce.repo" || return 1
+        pkg_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin ;;
+      *) fix_docker_system ;;
+    esac
+  else
+    note "download.docker.com is out of reach: the system's own Docker packages instead"
+    fix_docker_system
+  fi
+}
+fix_docker_system() {
+  case "$PKG" in
+    apt) pkg_install docker.io && { pkg_install docker-compose-v2 2>/dev/null || pkg_install docker-compose-plugin; } ;;
+    dnf) pkg_install moby-engine docker-compose 2>/dev/null || pkg_install docker docker-compose ;;
+    zypper) pkg_install docker docker-compose ;;
+    pacman) pkg_install docker docker-compose ;;
+    *) bad "install Docker by hand: https://docs.docker.com/engine/install/"; return 1 ;;
+  esac
+}
+fix_compose() {   # Docker's compose plugin (Podman uses it too)
+  case "$PKG" in
+    apt) pkg_install docker-compose-plugin 2>/dev/null || pkg_install docker-compose-v2 ;;
+    dnf) pkg_install docker-compose-plugin 2>/dev/null || pkg_install docker-compose ;;
+    zypper|pacman) pkg_install docker-compose ;;
+    *) bad "install Docker's compose plugin by hand: https://docs.docker.com/compose/install/linux/"; return 1 ;;
+  esac
+}
+fix_podman() { pkg_install podman; }
+fix_daemon() { as_root systemctl enable --now docker && sleep 2; }
+fix_podman_socket() {   # the user's own Podman socket, kept running without a session (linger)
+  local u="${SUDO_USER:-$(id -un)}"
+  if [[ $EUID -eq 0 && -n "${SUDO_USER:-}" ]]; then
+    loginctl enable-linger "$u" 2>/dev/null
+    sudo -u "$u" XDG_RUNTIME_DIR="/run/user/$(id -u "$u")" systemctl --user enable --now podman.socket
+  else
+    systemctl --user enable --now podman.socket && { loginctl enable-linger "$u" 2>/dev/null || as_root loginctl enable-linger "$u"; }
+  fi
+}
+fix_docker_group() { as_root usermod -aG docker "${SUDO_USER:-$(id -un)}"; }
+# NVIDIA's container toolkit from NVIDIA's repository, else the system's, then wired into the engine.
+fix_toolkit() {
+  if reaches https://nvidia.github.io/libnvidia-container/gpgkey; then
+    case "$PKG" in
+      apt)
+        pkg_install ca-certificates curl gnupg || return 1
+        curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | as_root gpg --batch --yes --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg || return 1
+        curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+          | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+          | as_root tee /etc/apt/sources.list.d/nvidia-container-toolkit.list >/dev/null || return 1
+        pkg_update_done=0 ;;
+      dnf)
+        curl -fsSL https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo | as_root tee /etc/yum.repos.d/nvidia-container-toolkit.repo >/dev/null || return 1 ;;
+      zypper)
+        as_root zypper --non-interactive addrepo --refresh https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo 2>/dev/null || : ;;
+    esac
+  else
+    note "nvidia.github.io is out of reach: the system's own nvidia-container-toolkit package, if it has one"
+  fi
+  pkg_install nvidia-container-toolkit || return 1
+  fix_toolkit_wiring
+}
+fix_toolkit_wiring() {
+  if [[ $ENGINE == podman ]]; then
+    as_root mkdir -p /etc/cdi && as_root nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml >/dev/null || return 1
+    # Written again whenever the driver changes, where the toolkit ships the unit for it.
+    as_root systemctl enable --now nvidia-cdi-refresh.path >/dev/null 2>&1 || :
+  else
+    as_root nvidia-ctk runtime configure --runtime=docker >/dev/null && as_root systemctl restart docker && sleep 3
+  fi
+}
+fix_driver() {   # the driver needs a reboot after it: the installer stops and says so
+  case "$OS_ID:$PKG" in
+    ubuntu:apt) pkg_install ubuntu-drivers-common && as_root ubuntu-drivers install ;;
+    *:apt) pkg_install nvidia-driver firmware-misc-nonfree 2>/dev/null || pkg_install nvidia-driver ;;
+    fedora:dnf) bad "Fedora's NVIDIA driver comes from RPM Fusion: https://rpmfusion.org/Howto/NVIDIA (then reboot)"; return 1 ;;
+    *:dnf) pkg_install nvidia-driver nvidia-driver-cuda 2>/dev/null || { bad "the NVIDIA driver: https://docs.nvidia.com/datacenter/tesla/driver-installation-guide/"; return 1; } ;;
+    *:zypper) pkg_install nvidia-open-driver-G06-signed-kmp-default nvidia-compute-utils-G06 ;;
+    *:pacman) pkg_install nvidia-open nvidia-utils ;;
+    *) bad "install the NVIDIA driver by hand: https://www.nvidia.com/drivers"; return 1 ;;
+  esac || return 1
+  REQ_REBOOT=1
+}
+fix_sysctl() {   # fix_sysctl KEY VALUE: now and at every boot
+  printf '%s\n' "$2" | as_root tee "/proc/sys/${1//.//}" >/dev/null && printf '%s = %s\n' "$1" "$2" | as_root tee "/etc/sysctl.d/90-argus-arena-${1//./-}.conf" >/dev/null
+}
+fix_time() { as_root timedatectl set-ntp true; }
+fix_firewall() {   # fix_firewall ufw|firewalld PORT...
+  local fw=$1 p; shift
+  for p in "$@"; do
+    if [[ $fw == ufw ]]; then as_root ufw allow "$p/tcp" >/dev/null || return 1
+    else as_root firewall-cmd -q --permanent --add-port="$p/tcp" || return 1; fi
+  done
+  [[ $fw == firewalld ]] && as_root firewall-cmd -q --reload
+  return 0
+}
+
 check_requirements() {   # check_requirements fresh|upgrade
-  local cores ram_kb root free need p
+  local cores ram_kb root free need p missing=() fw v
   step "requirements"
-  REQ_MODE=$1
+  REQ_MODE=$1 REQ_FAIL=0 FIXES=()
+  read_os
+  # The system.
+  if [[ $(uname -s) != Linux ]]; then req_bad "$(uname -s): the stack runs on Linux"; fi
+  case "$(uname -m)" in x86_64|aarch64) ok "system: ${OS_NAME:-Linux} ($(uname -m))${PKG:+, packages: $PKG}" ;; *) req_bad "$(uname -m): the images are built for x86_64 and aarch64" ;; esac
+  [[ -z "$PKG" ]] && note "a system this installer does not know ($OS_ID): what is missing is said, not installed"
+  grep -qsi microsoft /proc/version && note "WSL: GPUs reach containers through Docker Desktop's WSL integration; a power cap and the DCGM exporter do not work here"
+  command -v systemctl >/dev/null || note "no systemd: start the engine yourself at boot"
+  # The machine.
   cores="$(nproc 2>/dev/null || echo 0)"
   if [[ $cores -ge 4 ]]; then ok "CPU: $cores cores"; else req_host "CPU: $cores cores; the stack needs 4 or more"; fi
   ram_kb="$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo 2>/dev/null)"; ram_kb="${ram_kb:-0}"
   if [[ $ram_kb -ge $((15 * 1024 * 1024)) ]]; then ok "memory: $(human $((ram_kb * 1024)))"; else req_host "memory: $(human $((ram_kb * 1024))); the stack needs 16 GB or more"; fi
-  if engine_works "$ENGINE"; then ok "$ENGINE: $(E --version 2>/dev/null | head -n1)"; else req_bad "$ENGINE does not answer ($ENGINE info): install it or start it"; fi
-  if E compose version >/dev/null 2>&1; then ok "compose: $(E compose version 2>/dev/null | tail -n1)"; else req_bad "$ENGINE compose does not run: Docker's compose plugin is needed (Podman uses it too)"; fi
+  # The tools the installer and the scripts use.
+  for p in tar gzip sha256sum openssl curl ss flock; do command -v "$p" >/dev/null || missing+=("$p"); done
+  if [[ ${#missing[@]} -eq 0 ]]; then ok "tools: tar, gzip, sha256sum, openssl, curl, ss, flock"
+  else
+    for p in "${missing[@]}"; do
+      case "$p" in
+        curl) note "curl is not installed: the app and Argus are asked their version from a helper container on the stack's network, not through Traefik (--fix installs it)" ;;
+        ss|flock) note "$p is not installed (--fix installs it)" ;;
+        *) req_bad "$p is not installed" ;;
+      esac
+    done
+    req_fix "install ${missing[*]} (the system's packages)" "fix_tools ${missing[*]}"
+  fi
+  # The engine, its compose, its daemon.
+  if ! command -v "$ENGINE" >/dev/null; then
+    req_bad "$ENGINE is not installed"
+    if [[ $ENGINE == docker ]]; then req_fix "install Docker Engine with its compose and buildx plugins" fix_docker; req_fix "start Docker, and at every boot" fix_daemon
+    else req_fix "install Podman" fix_podman; fi
+  elif ! engine_works "$ENGINE"; then
+    if [[ $ENGINE == docker ]] && command -v systemctl >/dev/null && ! systemctl is-active -q docker 2>/dev/null; then
+      req_bad "Docker is installed but its daemon is not running"; req_fix "start Docker, and at every boot" fix_daemon
+    elif [[ $ENGINE == docker && $EUID -ne 0 ]] && ! id -nG 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
+      req_bad "$(id -un) may not use Docker (not in the docker group; that group is as good as root)"
+      req_fix "add $(id -un) to the docker group (sign in again after)" fix_docker_group
+    else req_bad "$ENGINE does not answer ($ENGINE info)"; fi
+  else ok "$ENGINE: $(E --version 2>/dev/null | head -n1)"; fi
+  if command -v "$ENGINE" >/dev/null && E compose version >/dev/null 2>&1; then ok "compose: $(E compose version 2>/dev/null | tail -n1)"
+  elif command -v "$ENGINE" >/dev/null; then req_bad "$ENGINE compose does not run: Docker's compose plugin is needed (Podman uses it too)"; req_fix "install Docker's compose plugin" fix_compose
+  fi
   if [[ $ENGINE == podman ]]; then
     if [[ -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock" || $EUID -eq 0 ]]; then ok "Podman's socket"
-    else req_bad "Podman's socket is off: systemctl --user enable --now podman.socket"; fi
+    else req_bad "Podman's socket is off"; req_fix "start the user's Podman socket, and keep it running without a session" fix_podman_socket; fi
   fi
+  # The GPU: the card, its driver, the container toolkit wired into the engine.
   if [[ $CPU_ONLY -eq 1 ]]; then note "GPU: none asked for (--cpu-only): $GPU_SERVICES left out"
   elif [[ $1 == upgrade ]]; then :
-  elif gpu_ready; then ok "GPU: $(nvidia-smi -L 2>/dev/null | head -n1 | cut -d'(' -f1)"
-  else req_bad "no NVIDIA GPU that $ENGINE can hand to containers (driver, nvidia-smi, the container toolkit$([[ $ENGINE == podman ]] && echo ", a CDI spec: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml")): install them, or --cpu-only"
+  elif gpu_ready; then ok "GPU: $(nvidia-smi -L 2>/dev/null | head -n1 | cut -d'(' -f1)$(n=$(nvidia-smi -L 2>/dev/null | grep -c '^GPU'); [[ $n -gt 1 ]] && echo " and $((n - 1)) more")"
+  elif ! nvidia_driver; then
+    if nvidia_hardware; then
+      req_bad "an NVIDIA card is there but its driver is not (nvidia-smi does not see it): install it, or --cpu-only"
+      req_fix "install the NVIDIA driver (a reboot follows; run the installer again after it)" fix_driver
+      command -v mokutil >/dev/null && mokutil --sb-state 2>/dev/null | grep -qi enabled && note "Secure Boot is on: the driver's module must be signed, or its key enrolled at the next boot (MOK)"
+    else
+      req_bad "no NVIDIA GPU here: --cpu-only runs the stack without one (the models then run elsewhere: Admin -> Models -> Other GPU servers)"
+    fi
+  elif ! command -v nvidia-ctk >/dev/null; then
+    req_bad "the driver sees the GPU, but NVIDIA's container toolkit is not installed: containers cannot use it"
+    req_fix "install NVIDIA's container toolkit and wire it into $ENGINE" fix_toolkit
+  else
+    req_bad "NVIDIA's container toolkit is not wired into $ENGINE$([[ $ENGINE == podman ]] && echo " (no CDI spec)")"
+    req_fix "wire the container toolkit into $ENGINE$([[ $ENGINE == podman ]] && echo " (a CDI spec, kept current)")" fix_toolkit_wiring
   fi
+  # Disk.
   root="$(engine_root)"
-  if [[ -n "$root" ]]; then
+  if [[ -n "$root" && -n "$BUNDLE" ]]; then
     free="$(free_kb "$(existing_parent "$root")")"; need=$(( $(images_raw_kb) * 11 / 10 ))
     if [[ -n "$free" && $free -ge $need ]]; then ok "disk for the images: $(human $((free * 1024))) free in $root, $(human $((need * 1024))) needed"
     else req_bad "disk for the images: $(human $((${free:-0} * 1024))) free in $root, $(human $((need * 1024))) needed"; fi
   fi
-  need=$(( ( $(du -sk "$BUNDLE/models" "$BUNDLE/packs" "$BUNDLE/code-arena" "$BUNDLE/docs" 2>/dev/null | awk '{ s += $1 } END { print s + 0 }') ) * 11 / 10 + 1024 * 1024 ))
-  free="$(free_kb "$(existing_parent "$DIR")")"
-  if [[ -n "$free" && $free -ge $need ]]; then ok "disk for $DIR: $(human $((free * 1024))) free, $(human $((need * 1024))) needed"
-  else req_bad "disk for $DIR: $(human $((${free:-0} * 1024))) free, $(human $((need * 1024))) needed"; fi
-  # Taken by this stack's own Traefik when install runs again: not a problem then.
+  if [[ -n "$BUNDLE" ]]; then
+    need=$(( ( $(du -sk "$BUNDLE/models" "$BUNDLE/packs" "$BUNDLE/code-arena" "$BUNDLE/docs" 2>/dev/null | awk '{ s += $1 } END { print s + 0 }') ) * 11 / 10 + 1024 * 1024 ))
+    free="$(free_kb "$(existing_parent "$DIR")")"
+    if [[ -n "$free" && $free -ge $need ]]; then ok "disk for $DIR: $(human $((free * 1024))) free, $(human $((need * 1024))) needed"
+    else req_bad "disk for $DIR: $(human $((${free:-0} * 1024))) free, $(human $((need * 1024))) needed"; fi
+  fi
+  # Ports: taken by this stack's own Traefik when install runs again is not a problem then.
   if [[ $1 == fresh ]] && ! E ps -q --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | grep -q .; then
     for p in "$HTTP_PORT" "$HTTPS_PORT"; do
-      if port_free "$p"; then ok "port $p is free"; else req_bad "port $p is taken: --http-port / --https-port another"; fi
+      if port_free "$p"; then ok "port $p is free"
+      else
+        v="$(ss -Htlnp "sport = :$p" 2>/dev/null | sed -n 's/.*users:(("\([^"]*\)".*/\1/p' | head -n1)"
+        req_bad "port $p is taken${v:+ by $v}: --http-port / --https-port another, or stop what listens there"
+      fi
     done
+    if [[ $ENGINE == podman && $EUID -ne 0 ]] && [[ $HTTP_PORT -lt 1024 || $HTTPS_PORT -lt 1024 ]]; then
+      v="$(cat /proc/sys/net/ipv4/ip_unprivileged_port_start 2>/dev/null || echo 1024)"
+      [[ $v -le $HTTP_PORT && $v -le $HTTPS_PORT ]] || { req_bad "rootless Podman cannot listen on ports below $v: --http-port 8080 --https-port 8443, or let it"; req_fix "let users listen from port 80 (net.ipv4.ip_unprivileged_port_start=80)" "fix_sysctl net.ipv4.ip_unprivileged_port_start 80"; }
+    fi
   fi
-  for p in tar sha256sum gzip; do command -v "$p" >/dev/null || req_bad "$p is not installed"; done
-  command -v curl >/dev/null || note "curl is not installed: the app and Argus are asked their version from a helper container on the stack's network, not through Traefik"
+  # The firewall lets the ports in.
+  if command -v ufw >/dev/null && as_root_quiet ufw status 2>/dev/null | grep -q '^Status: active'; then
+    for p in "$HTTP_PORT" "$HTTPS_PORT"; do as_root_quiet ufw status 2>/dev/null | grep -Eq "^$p(/tcp)? +ALLOW" || missing+=("fw:$p"); done
+    fw=ufw
+  elif command -v firewall-cmd >/dev/null && firewall-cmd -q --state 2>/dev/null; then
+    for p in "$HTTP_PORT" "$HTTPS_PORT"; do
+      v=0
+      firewall-cmd -q --query-port="$p/tcp" 2>/dev/null && v=1
+      [[ $v -eq 0 && $p == 80 ]] && firewall-cmd -q --query-service=http 2>/dev/null && v=1
+      [[ $v -eq 0 && $p == 443 ]] && firewall-cmd -q --query-service=https 2>/dev/null && v=1
+      [[ $v -eq 1 ]] || missing+=("fw:$p")
+    done
+    fw=firewalld
+  fi
+  if [[ -n "${fw:-}" ]]; then
+    local closed=(); for p in "${missing[@]}"; do [[ $p == fw:* ]] && closed+=("${p#fw:}"); done
+    if [[ ${#closed[@]} -eq 0 ]]; then ok "the firewall ($fw) lets ports $HTTP_PORT and $HTTPS_PORT in"
+    else note "the firewall ($fw) keeps out port(s) ${closed[*]}: people elsewhere cannot reach the stack"; req_fix "open port(s) ${closed[*]} in $fw" "fix_firewall $fw ${closed[*]}"; fi
+  fi
+  # The host's settings the services need.
+  v="$(cat /proc/sys/fs/inotify/max_user_watches 2>/dev/null || echo 0)"
+  if [[ $v -ge 524288 ]]; then ok "inotify watches: $v"
+  else note "inotify watches: $v (Code Arena's file watching and the log agent want 524288)"; req_fix "raise fs.inotify.max_user_watches to 524288" "fix_sysctl fs.inotify.max_user_watches 524288"; fi
+  v="$(cat /proc/sys/fs/inotify/max_user_instances 2>/dev/null || echo 0)"
+  [[ $v -ge 512 ]] || { note "inotify instances: $v (the containers together want 512)"; req_fix "raise fs.inotify.max_user_instances to 512" "fix_sysctl fs.inotify.max_user_instances 512"; }
+  if command -v timedatectl >/dev/null; then
+    if [[ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" == yes ]]; then ok "the clock is synchronised"
+    else note "the clock is not synchronised: sign-in codes (two-factor) and certificates need the right time"; req_fix "synchronise the clock (NTP)" fix_time; fi
+  fi
+  for v in HTTPS_PROXY https_proxy HTTP_PROXY http_proxy; do
+    [[ -n "${!v:-}" ]] && { note "a proxy is set ($v): $ENGINE pulls nothing here, but the app's own downloads (models, Hugging Face) need it in .env (HTTPS_PROXY, NO_PROXY with the stack's names)"; break; }
+  done
+  if [[ $ENGINE == podman ]] && command -v getenforce >/dev/null && [[ "$(getenforce 2>/dev/null)" == Enforcing ]]; then
+    note "SELinux is enforcing: the stack's mounts are labelled for containers by podman.yml; a model folder outside DIR needs: chcon -Rt container_file_t MODELS_DIR"
+  fi
+  [[ ${#FIXES[@]} -gt 0 ]] && note "the installer can put right: $(for p in "${FIXES[@]}"; do printf '%s; ' "${p%%$'\t'*}"; done | sed 's/; $//')"
+}
+as_root_quiet() { if [[ $EUID -eq 0 ]]; then "$@"; elif sudo -n true 2>/dev/null; then sudo "$@"; else return 1; fi; }
+
+# A container sees the GPU: the toolkit hands the driver's nvidia-smi in (no image of NVIDIA's needed).
+check_gpu_passthrough() {
+  local flags out
+  [[ $CPU_ONLY -eq 1 ]] && return 0
+  [[ $ENGINE == podman ]] && flags=(--device nvidia.com/gpu=all) || flags=(--gpus all)
+  step "the GPU from a container"
+  if out="$(E run --rm --pull never --network none "${flags[@]}" -e NVIDIA_DRIVER_CAPABILITIES=utility "$HELPER" nvidia-smi -L 2>&1)" && grep -q '^GPU' <<< "$out"; then
+    ok "$(grep -c '^GPU' <<< "$out") GPU(s) reach containers: $(grep -m1 '^GPU' <<< "$out" | cut -d'(' -f1)"
+  else
+    bad "a container does not see the GPU: $(tail -n1 <<< "$out")"
+    note "installer.sh requirements --fix wires NVIDIA's container toolkit into $ENGINE; or install again with --cpu-only"
+    [[ $SKIP_REQ -eq 1 ]] && return 0
+    refuse "the GPU does not reach containers"
+  fi
+}
+
+# Puts right what check_requirements found, in order, then checks again. 0: every requirement met.
+fix_requirements() {   # fix_requirements MODE
+  local f d c n=0
+  [[ ${#FIXES[@]} -gt 0 ]] || return 0
+  step "putting the requirements right"
+  for f in "${FIXES[@]}"; do
+    d="${f%%$'\t'*}"; c="${f#*$'\t'}"
+    if [[ $DRY -eq 1 ]]; then would "$d"; continue; fi
+    say "  ...    $d"
+    # shellcheck disable=SC2086
+    if $c; then did "$d"; else bad "could not $d"; n=$((n + 1)); fi
+  done
+  [[ $DRY -eq 1 ]] && return 0
+  if [[ $REQ_REBOOT -eq 1 ]]; then
+    say "The NVIDIA driver is installed: reboot, then run the installer again (it carries on)."
+    exit 7
+  fi
+  hash -r
+  [[ $ENGINE == docker ]] && ! engine_works docker && command -v docker >/dev/null && fix_daemon >/dev/null 2>&1
+  check_requirements "$1"
+  return $(( REQ_FAIL > 0 ))
 }
 
 # ======================================================================== images
@@ -1234,6 +1553,7 @@ cmd_install() {
   if [[ $DRY -eq 1 ]]; then
     [[ -n "$BUNDLE" ]] && check_bundle
     check_requirements fresh
+    [[ $REQ_FAIL -gt 0 && ${#FIXES[@]} -gt 0 ]] && fix_requirements fresh
     [[ $REQ_FAIL -gt 0 ]] && note "$REQ_FAIL requirement(s) not met: install would stop here$([[ $SKIP_REQ -eq 1 ]] && echo " (not with --skip-requirements)")"
     step "the plan"
     would "load $(bundle_images | wc -l) images into $ENGINE (those there already kept) and tag the release's own for $PROJECT"
@@ -1258,11 +1578,20 @@ cmd_install() {
   lock; start_log
   check_bundle
   check_requirements fresh
+  if [[ $REQ_FAIL -gt 0 && ${#FIXES[@]} -gt 0 && $SKIP_REQ -eq 0 ]]; then
+    # Changing the host's system is asked for, never assumed: --install-requirements when unattended.
+    if [[ $FIX_REQ -eq 1 ]] || { [[ $YES -eq 0 && $TTY -eq 1 ]] && confirm "Put the requirements right (above), as root where needed?"; }; then
+      fix_requirements fresh || :
+    else
+      note "install-requirements puts them right: installer.sh install --install-requirements (or installer.sh requirements --fix)"
+    fi
+  fi
   if [[ $REQ_FAIL -gt 0 ]]; then
     [[ $SKIP_REQ -eq 1 ]] && note "$REQ_FAIL requirement(s) not met; going on (--skip-requirements)" || refuse "$REQ_FAIL requirement(s) not met (above); --skip-requirements goes on anyway"
   fi
   state_set status installing target "$BVERSION" engine "$ENGINE" project "$PROJECT"
   load_images fresh
+  check_gpu_passthrough
   record_images
   step "files in $DIR"
   sync_deploy install "" do
@@ -2200,7 +2529,27 @@ cmd_verify() {
   exit 6
 }
 
+# ================================================================== requirements
+cmd_requirements() {
+  HTTP_PORT="${HTTP_ARG:-$([[ $ENGINE == podman ]] && echo 8080 || echo 80)}" HTTPS_PORT="${HTTPS_ARG:-$([[ $ENGINE == podman ]] && echo 8443 || echo 443)}"
+  say "What Argus Arena needs on this host ($ENGINE)$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is changed")"
+  check_requirements fresh
+  if [[ $REQ_FAIL -eq 0 && ${#FIXES[@]} -eq 0 ]]; then say "Every requirement is met."; return 0; fi
+  if [[ $FIX_REQ -eq 1 ]]; then
+    [[ $DRY -eq 1 ]] || confirm "Put them right (above), as root where needed?" || refuse "not confirmed"
+    [[ $DRY -eq 1 ]] || start_log soft
+    fix_requirements fresh || :
+    [[ $DRY -eq 1 ]] && return 0
+  elif [[ ${#FIXES[@]} -gt 0 ]]; then
+    say "installer.sh requirements --fix puts right what it can (as root, asking first)."
+  fi
+  if [[ $REQ_FAIL -eq 0 ]]; then say "Every requirement is met."; return 0; fi
+  say "$REQ_FAIL requirement(s) not met (above)."
+  exit 3
+}
+
 case "$CMD" in
+  requirements) cmd_requirements ;;
   install) cmd_install ;;
   upgrade) cmd_upgrade ;;
   repair) cmd_repair ;;

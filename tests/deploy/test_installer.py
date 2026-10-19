@@ -593,7 +593,7 @@ class InstallerTests(unittest.TestCase):
 
     def test_A_failed_requirement_stops_install_before_anything(self):
         r = self.r.run("install", "--dir", str(self.dir), "--yes", "--domain", "arena.test",
-                       extra={"PATH": f"{self.r.s.bin}:/usr/bin:/bin", "FAKE_NO_GPU": "1"})
+                       extra={"PATH": f"{self.r.s.bin}:/usr/bin:/bin", "FAKE_NO_GPU": "1", "ARENA_GPU_HARDWARE": "no"})
         self.assertEqual(r.returncode, 3, self.output(r))
         self.assertIn("no NVIDIA GPU", r.stdout)
         self.assertIn("--cpu-only", r.stdout)
