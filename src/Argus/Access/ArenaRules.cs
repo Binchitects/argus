@@ -25,12 +25,12 @@ public sealed class ArenaRules
     readonly string _credential;
     readonly HttpClient _http;
     readonly Func<double> _now;
-    readonly Func<IReadOnlyDictionary<long, string>> _paths;
+    readonly Func<IReadOnlyDictionary<long, (string Path, long GitlabId)>> _paths;
     readonly Lock _gate = new();
-    readonly Dictionary<string, (double Until, HashSet<string> Allowed)> _cache = new(StringComparer.Ordinal);
+    readonly Dictionary<string, (double Until, bool Read, HashSet<string> Allowed)> _cache = new(StringComparer.Ordinal);
 
-    /// <param name="paths">Each repository row's path (group/project), as the index has it now.</param>
-    public ArenaRules(string url, string credential, Func<IReadOnlyDictionary<long, string>> paths, HttpClient? http = null, Func<double>? now = null)
+    /// <param name="paths">Each repository row's path (group/project) and GitLab project, as the index has it now.</param>
+    public ArenaRules(string url, string credential, Func<IReadOnlyDictionary<long, (string Path, long GitlabId)>> paths, HttpClient? http = null, Func<double>? now = null)
     {
         Url = url;
         _credential = credential;
@@ -48,31 +48,41 @@ public sealed class ArenaRules
         return new ArenaRules(new Uri(key, "/api/authz/code").ToString(), credential, () =>
         {
             using var conn = Db.Connect(dbPath);
-            return Sql.Query(conn, "SELECT id, path_with_namespace FROM repos").ToDictionary(r => r.Long("id"), r => r.Str("path_with_namespace"));
+            return Sql.Query(conn, "SELECT id, path_with_namespace, gitlab_id FROM repos").ToDictionary(r => r.Long("id"), r => (r.Str("path_with_namespace"), r.Long("gitlab_id")));
         });
     }
 
-    /// <summary>The identity with only the repositories the app's rules leave the person.</summary>
+    /// <summary>
+    /// The identity with only the repositories the app's rules leave the person: those indexed, and the merge request
+    /// tools' check of a project (MayRead), which a rule on an indexed project's path closes too. Without code.read, none.
+    /// </summary>
     public Identity Narrow(string email, Identity identity)
     {
-        if (identity.AllowedRepoIds.Count == 0) return identity;
         var paths = _paths();
-        var mine = identity.AllowedRepoIds.Where(paths.ContainsKey).Select(id => (Id: id, Path: paths[id])).ToList();
-        var allowed = Allowed(email.Trim().ToLowerInvariant(), [.. mine.Select(m => m.Path).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)]);
-        return identity with { AllowedRepoIds = [.. mine.Where(m => allowed.Contains(m.Path)).Select(m => m.Id).Order()] };
+        var known = paths.Values.Select(p => p.Path).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+        var (read, allowed) = Allowed(email.Trim().ToLowerInvariant(), known);
+        if (!read) return identity with { AllowedRepoIds = [], MayRead = static _ => false };
+        var closed = paths.Values.Where(p => !allowed.Contains(p.Path)).Select(p => p.GitlabId).ToHashSet();
+        var gitlab = identity.MayRead;
+        return identity with
+        {
+            AllowedRepoIds = [.. identity.AllowedRepoIds.Where(id => paths.TryGetValue(id, out var p) && allowed.Contains(p.Path)).Order()],
+            MayRead = project => !closed.Contains(project) && gitlab(project),
+        };
     }
 
-    HashSet<string> Allowed(string email, IReadOnlyList<string> repos)
+    (bool Read, HashSet<string> Allowed) Allowed(string email, IReadOnlyList<string> repos)
     {
         var key = email + "\n" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', repos))));
         lock (_gate)
-            if (_cache.TryGetValue(key, out var hit) && hit.Until > _now()) return hit.Allowed;
+            if (_cache.TryGetValue(key, out var hit) && hit.Until > _now()) return (hit.Read, hit.Allowed);
         using var request = new HttpRequestMessage(HttpMethod.Post, Url)
         {
             Content = new StringContent(new JsonObject { ["email"] = email, ["repos"] = new JsonArray([.. repos.Select(r => (JsonNode)r)]) }.ToJsonString(), Encoding.UTF8, "application/json"),
         };
         if (_credential.Length > 0) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _credential);
         HashSet<string> allowed;
+        bool read;
         try
         {
             using var response = _http.Send(request);
@@ -83,9 +93,8 @@ public sealed class ArenaRules
                 throw new AclDenied(CannotCheck);
             }
             var body = JsonNode.Parse(text) as JsonObject;
-            allowed = body?["read"]?.GetValue<bool>() == true
-                ? [.. (body["allowed"] as JsonArray ?? []).Select(n => n?.GetValue<string>() ?? "")]
-                : [];
+            read = body?["read"]?.GetValue<bool>() == true;
+            allowed = read ? [.. (body!["allowed"] as JsonArray ?? []).Select(n => n?.GetValue<string>() ?? "")] : [];
         }
         catch (Exception exc) when (exc is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
         {
@@ -95,8 +104,8 @@ public sealed class ArenaRules
         lock (_gate)
         {
             if (_cache.Count >= MaxCached) _cache.Clear();
-            _cache[key] = (_now() + GoodSeconds, allowed);
+            _cache[key] = (_now() + GoodSeconds, read, allowed);
         }
-        return allowed;
+        return (read, allowed);
     }
 }

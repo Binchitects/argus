@@ -33,6 +33,7 @@ public static class ToolRuntime
         public string Str(string name) => Values[name]!.GetValue<string>();
         public string? OptStr(string name) => Values.TryGetValue(name, out var v) && v is not null ? v.GetValue<string>() : null;
         public long Int(string name) => Values[name]!.GetValue<long>();
+        public long? OptInt(string name) => Values.TryGetValue(name, out var v) && v is not null ? v.GetValue<long>() : null;
         public double? OptDouble(string name) => Values.TryGetValue(name, out var v) && v is not null ? v.GetValue<double>() : null;
         public bool Bool(string name) => Values.TryGetValue(name, out var v) && v is not null && v.GetValue<bool>();
     }

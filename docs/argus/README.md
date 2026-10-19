@@ -42,7 +42,13 @@ tooling, algorithms, system design. `docs_lookup` (you know the name),
 `docs_find` (you know only the behaviour), `docs_search` + `docs_get` (you need
 the page) and `docs_verify` (check a draft you already wrote).
 
-Sixteen tools in total. Packs are licensed material — each result carries its
+**Merge requests and code at any commit.** `mr_list`, `mr_get`, `mr_diff`,
+`mr_commits`, `mr_discussions`, `ci_status`, `job_log`, `compare_refs`,
+`file_at` and `grep_at` read GitLab and the git mirrors, read-only, for any
+project the caller is a member of, indexed or not
+([below](#merge-requests-and-code-at-any-commit)).
+
+Thirty tools in total. Packs are licensed material — each result carries its
 own attribution, e.g. WDK pages are CC BY 4.0.
 
 `semantic_search`, `which_repo` and `docs_find` turn a question into a vector
@@ -741,6 +747,66 @@ like a fresh install).
 The app's **Admin → Overview** reads the same computation, so the tile, the
 dashboard line and the alert cannot disagree; `CONTRIBUTING`-style threshold changes
 belong in `.env`, not in the app.
+
+---
+
+## Merge requests and code at any commit
+
+Ten tools read a project's merge requests and its code at any commit, for a
+review or a question about a change: `mr_list`, `mr_get`, `mr_diff`,
+`mr_commits`, `mr_discussions`, `ci_status`, `job_log`, `compare_refs`,
+`file_at` and `grep_at`. Each takes `project`, the path GitLab shows
+(`group/project`, in any case) or its GitLab id.
+
+**Read-only.** Every call to GitLab is a `GET` with Argus's service token
+(`read_api`, `read_repository`), and the code that makes them has no other
+way to send one. Argus never writes to GitLab: nothing is posted, approved or
+resolved from here.
+
+**Per person, indexed or not.** Before anything is asked of GitLab, the person
+must be a member of the project at **Reporter or above**, read with the
+service token as for the code tools; a project's visibility (internal, public)
+never lets anyone else in. A project left out of the index can still be
+reviewed: its rights are checked the first time someone asks about it, and
+kept with the rest of the person's for ten minutes. A project the person may
+not read answers as one that does not exist; with access notices on
+(`ARGUS_ACCESS_NOTICES`, the default) it is named instead, with its
+maintainers, as the code tools name a repository the person cannot read.
+Nothing of the project is read either way. With GitLab down, a project not
+checked yet says that its access cannot be checked, not that it is missing.
+
+| Tool | What it reads |
+| --- | --- |
+| `mr_list` | Merge requests by state (`opened` by default), `author`, `updated_after` |
+| `mr_get` | One in full: description, reviewers, labels, merge status, `head_pipeline`, `diff_refs` and its `versions`, one per push |
+| `mr_diff` | Its files with their hunks; `path` (a file or a glob), `version`, or `since_sha` for only what a push changed in the merge request's files. Past 150,000 characters of diff, files are listed without their text |
+| `mr_commits` | Its commits, newest first |
+| `mr_discussions` | Its threads, each note's `position` (base, start and head commits, paths and lines); GitLab's own notes only with `include_system` |
+| `ci_status` | The latest pipeline of a merge request or a commit, its jobs and those that failed |
+| `job_log` | A job's last characters (20,000 by default), colours and section markers out, **secrets masked** (tokens, keys, passwords, as the app's safeguards find them) |
+| `compare_refs` | Two branches, tags or commits: from their merge base, or `straight` |
+| `file_at` | A file at a merge request's head (`iid`), a branch or tag that need not be indexed, or a commit; a line range; at most 64 KB |
+| `grep_at` | `git grep` at the same, where `search_code` cannot reach (an extended regular expression, or `fixed` text) |
+
+**Merge request heads in the mirror.** `file_at` and `grep_at` read the
+project's git mirror. A merge request's head is fetched from
+`refs/merge-requests/<iid>/head` into the mirror as `refs/arena/mr/<iid>`, one
+ref, when first needed; a branch or tag by its name. Nothing is fetched by a
+bare commit id, so the mirror holds only what the project's own refs reach. A
+project left out of the index gets a fetch-only mirror (a bare repository;
+nothing is indexed from it). The heads fetched are listed in the index
+database (`mr_refs`): one is dropped when its merge request is seen merged or
+closed, and one unused for 30 days the next time that project's mirror fetches
+a merge request.
+
+**For the app.** The same ten tools answer as `GET /review/<tool>`, the query
+string being the arguments (`/review/mr_diff?project=group/app&iid=4&path=src/a.cs`),
+with the same check and the same audit line. They take only the chat's
+credential (`ARGUS_KEY`) and the person's email in `x-llm-user-email`, from
+inside the network: through the proxy they answer `401`. A project the person
+cannot read is `404` (`403` with access notices on), GitLab not answering `502`.
+`GET /review/access?project=...&email=...` says whether that person may read
+the project (`may_read`), for the app to check who may see a review.
 
 ---
 

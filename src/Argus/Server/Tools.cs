@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json.Nodes;
 using Argus.Access;
+using Argus.CodeHosts;
 using Argus.Configuration;
 using Argus.Indexing;
 using Argus.Packs;
@@ -29,24 +30,30 @@ public sealed class AccessNotice(string message) : ToolError(message);
 public sealed class NotFoundError(string message) : ToolError(message);
 
 /// <summary>
-/// The seventeen MCP tools. Every private-code tool is
+/// The MCP tools. Every private-code tool is
 /// scoped to the caller's allowlist, audited in the sidecar database and on the
 /// log stream, and turns a storage failure into "do not retry" rather than a
-/// stack trace; the documentation tools read the installed packs.
+/// stack trace; the documentation tools read the installed packs; the merge
+/// request and commit tools (Tools.Review.cs) read GitLab and the git mirrors.
 /// </summary>
-public sealed class Tools
+public sealed partial class Tools
 {
     readonly ArgusConfig _cfg;
     readonly MemberDirectory? _notices;
+    readonly Lazy<ICodeHost> _host;
 
-    public Tools(ArgusConfig cfg)
+    /// <param name="host">Where merge requests are read: the configured GitLab, unless given.</param>
+    public Tools(ArgusConfig cfg, ICodeHost? host = null)
     {
         _cfg = cfg;
         _notices = Environment.GetEnvironmentVariable("ARGUS_ACCESS_NOTICES") != "0" ? new MemberDirectory(cfg.GitLab) : null;
+        _host = new Lazy<ICodeHost>(() => host ?? new GitLabHost(cfg.GitLab));
     }
 
     public MemberDirectory? Notices => _notices;
     string DbPath => _cfg.Index.DbPath;
+    /// <summary>The index database's path.</summary>
+    public string IndexPath => DbPath;
     string PacksDir => _cfg.PacksDir;
 
     const string IndexGone = "The index is unavailable; do not retry this query.";
@@ -402,7 +409,6 @@ public sealed class Tools
 
     // --- dispatch -------------------------------------------------------------------------
 
-    /// <summary>Run one validated call. <paramref name="identity"/> is null only for the documentation tools.</summary>
     /// <summary>The graph tools' filter, from min_confidence, layers and include_tests.</summary>
     static GraphQueries.GraphFilter Filter(ToolRuntime.Args a) =>
         GraphQueries.GraphFilter.Parse(a.OptDouble("min_confidence"), a.OptStr("layers"), a.Bool("include_tests"));
@@ -416,6 +422,7 @@ public sealed class Tools
         return args;
     }
 
+    /// <summary>Run one validated call; <paramref name="identity"/> is asked only by the tools that read private code.</summary>
     public JsonNode? Dispatch(string tool, ToolRuntime.Args a, Func<Identity> identity)
     {
         switch (tool)
@@ -428,6 +435,7 @@ public sealed class Tools
             case "docs_search": return DocsSearch(a.Str("query"), a.OptStr("lang"));
         }
         var who = identity();
+        if (ReviewTools.Contains(tool)) return DispatchReview(tool, a, who);
         return tool switch
         {
             "impact_of" => WithAudit(who, tool,

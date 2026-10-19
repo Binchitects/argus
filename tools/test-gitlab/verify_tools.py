@@ -168,6 +168,42 @@ CONTRACTS: dict[str, dict] = {
                         "kind": list, "needs_packs": True},
     "docs_contracts":  {"args": lambda c: {"source": c["path"]},      "kind": list,
                         "needs_packs": True},
+
+    # The merge request tools, each on the caller's own project and its seeded
+    # merge request (seed.py, REVIEW_MRS). Read from GitLab with the read-only
+    # service token, whether or not the project is indexed.
+    "mr_list":         {"args": lambda c: {"project": c["project"]},  "kind": list},
+    "mr_get":          {"args": lambda c: {"project": c["project"], "iid": c["mr"]},
+                        "kind": dict},
+    "mr_diff":         {"args": lambda c: {"project": c["project"], "iid": c["mr"]},
+                        "kind": dict},
+    "mr_commits":      {"args": lambda c: {"project": c["project"], "iid": c["mr"]},
+                        "kind": list},
+    "mr_discussions":  {"args": lambda c: {"project": c["project"], "iid": c["mr"],
+                                           "include_system": True}, "kind": list},
+    "ci_status":       {"args": lambda c: {"project": c["project"], "iid": c["mr"]},
+                        "kind": dict},
+    # The test GitLab has no runner, so there is no job whose log to read: the
+    # answer is the precondition refusal, declared rather than counted as covered.
+    "job_log":         {"args": lambda c: {"project": c["project"], "job_id": 1},
+                        "kind": dict, "needs_ci": True},
+    "compare_refs":    {"args": lambda c: {"project": c["project"], "from": "main",
+                                           "to": c["mr_branch"]}, "kind": dict},
+    "file_at":         {"args": lambda c: {"project": c["project"], "iid": c["mr"],
+                                           "path": c["source"]}, "kind": dict},
+    "grep_at":         {"args": lambda c: {"project": c["project"], "iid": c["mr"],
+                                           "pattern": "DecodeFrame"}, "kind": dict},
+}
+
+#: The merge request and commit tools (src/Argus/Server/Tools.Review.cs).
+REVIEW_TOOLS = {"mr_list", "mr_get", "mr_diff", "mr_commits", "mr_discussions",
+                "ci_status", "job_log", "compare_refs", "file_at", "grep_at"}
+
+#: Each project's seeded merge request: its source branch (seed.py, REVIEW_MRS).
+MR_BRANCH_BY_REPO = {
+    "eal-core": "review/frame-sum",
+    "etl-decoder": "review/pipeline-guard",
+    "driver-shim": "review/shim-only",
 }
 
 # The file each tool that takes one is pointed at, per fixture project. A path
@@ -266,7 +302,7 @@ def collect_repos(node, found: set[str]) -> set[str]:
                     if key == name or key.endswith(f"/{name}"):
                         found.add(key)
             if key in ("path_with_namespace", "repo", "repo_path",
-                       "repository") and isinstance(value, str):
+                       "repository", "project") and isinstance(value, str):
                 found.add(value)
             else:
                 collect_repos(value, found)
@@ -295,11 +331,11 @@ def error_text(call: dict) -> str:
     return "isError (no message)"
 
 
-#: Outcomes a call can have. Only ERROR is ever a defect; the middle three are
+#: Outcomes a call can have. Only ERROR is ever a defect; the middle four are
 #: the server working as designed, and naming them separately is what stops a
 #: contract suite from reporting correct refusals as breakage.
-OK, NO_ACCESS, NO_PACKS, NO_VECTORS, ERROR = (
-    "ok", "no_access", "no_packs", "no_vectors", "error")
+OK, NO_ACCESS, NO_PACKS, NO_VECTORS, NO_CI, ERROR = (
+    "ok", "no_access", "no_packs", "no_vectors", "no_ci", "error")
 
 #: The phrases the server uses to refuse. Matched on the message because that is
 #: all MCP gives a client -- there is no error code -- and each one is a sentence
@@ -308,6 +344,7 @@ REFUSAL_MARKERS = (
     (NO_ACCESS, "you cannot read"),
     (NO_PACKS, "No documentation packs are installed"),
     (NO_VECTORS, "The index is unavailable"),
+    (NO_CI, "GitLab has no job"),
 )
 
 
@@ -366,7 +403,9 @@ async def session_for(token: str) -> dict:
             # called without it.
             status = await call("index_status", {})
             rows = status["payload"] if isinstance(status["payload"], list) else []
-            ctx = {"repo_id": None, "path": None, "source": None}
+            ctx = {"repo_id": None, "path": None, "source": None, "project": None,
+                   "mr": None, "mr_branch": None}
+            merge_requests = json.loads(SEEDED.read_text(encoding="utf-8")).get("merge_requests", {})
             for row in rows:
                 if not isinstance(row, dict):
                     continue
@@ -374,7 +413,10 @@ async def session_for(token: str) -> dict:
                 if name in PATH_BY_REPO:
                     ctx = {"repo_id": row.get("repo_id"),
                            "path": PATH_BY_REPO[name],
-                           "source": SOURCE_BY_REPO[name]}
+                           "source": SOURCE_BY_REPO[name],
+                           "project": row.get("path_with_namespace"),
+                           "mr": merge_requests.get(name),
+                           "mr_branch": MR_BRANCH_BY_REPO[name]}
                     break
             out["ctx"] = ctx
             out["calls"]["index_status"] = status
@@ -487,6 +529,7 @@ async def main_async() -> int:
                        "building one needs a checkout of a real documentation repo"),
             NO_VECTORS: (f"the vector index is empty: {embed_reason()} and "
                          f"`argus embed` must have run (verify.py does it)"),
+            NO_CI: "the test GitLab registers no CI runner, so no job has a log",
         }
 
         outcomes: dict[str, dict[str, str]] = {}
@@ -499,7 +542,7 @@ async def main_async() -> int:
             outcomes[name] = outs
 
             # Wholesale precondition refusal: not covered, and declared so.
-            gate = next((o for o in (NO_PACKS, NO_VECTORS)
+            gate = next((o for o in (NO_PACKS, NO_VECTORS, NO_CI)
                          if set(outs.values()) == {o}), None)
             if gate:
                 skip(f"{name}: answers with the declared shape for every caller",
@@ -555,7 +598,7 @@ async def main_async() -> int:
         print("\n== no tool leaks a repository the caller cannot read ==")
         for name in sorted(CONTRACTS):
             spec = CONTRACTS[name]
-            if set(outcomes[name].values()) in ({NO_PACKS}, {NO_VECTORS}):
+            if set(outcomes[name].values()) in ({NO_PACKS}, {NO_VECTORS}, {NO_CI}):
                 skip(f"{name}: every repository named is one the caller may read",
                      "not covered: see the skip above")
                 continue
@@ -643,9 +686,32 @@ async def main_async() -> int:
               ("root/eal-core", "v2") in listed
               and ("root/eal-core", "main") in listed, f"{sorted(listed)}")
 
+        print("\n== the merge request tools never open driver-shim ==")
+        # By path and by GitLab id, every one of them: refused before GitLab or
+        # the mirror is asked, and nothing of the project in the refusal.
+        shim = seeded["projects"].get(UNREACHABLE)
+        shim_mr = seeded.get("merge_requests", {}).get(UNREACHABLE, 1)
+        about_shim = {
+            "mr_list": {}, "mr_get": {"iid": shim_mr}, "mr_diff": {"iid": shim_mr},
+            "mr_commits": {"iid": shim_mr}, "mr_discussions": {"iid": shim_mr},
+            "ci_status": {"iid": shim_mr}, "job_log": {"job_id": 1},
+            "compare_refs": {"from": "main", "to": MR_BRANCH_BY_REPO[UNREACHABLE]},
+            "file_at": {"iid": shim_mr, "path": "src/shim.c"},
+            "grep_at": {"iid": shim_mr, "pattern": "SHIM_ONLY"},
+        }
+        check("every merge request tool is asked about driver-shim",
+              set(about_shim) == REVIEW_TOOLS and REVIEW_TOOLS <= set(CONTRACTS))
+        for name, args in sorted(about_shim.items()):
+            for project in (f"root/{UNREACHABLE}", str(shim)):
+                res = await acall(name, {"project": project, **args})
+                body = json.dumps(res)
+                check(f"{name}: dev_alpha is refused {project}",
+                      res["err"] and "SHIM_ONLY" not in body and "Shim-only" not in body,
+                      body[:120])
+
         print("\n== the project with no members stays invisible ==")
         for name in sorted(CONTRACTS):
-            if set(outcomes[name].values()) in ({NO_PACKS}, {NO_VECTORS}):
+            if set(outcomes[name].values()) in ({NO_PACKS}, {NO_VECTORS}, {NO_CI}):
                 skip(f"{name}: never names {UNREACHABLE} for anyone",
                      "not covered: see the skip above")
                 continue

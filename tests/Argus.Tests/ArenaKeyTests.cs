@@ -243,10 +243,10 @@ public sealed class ArenaKeyServerTests : IAsyncLifetime
         var session = await McpCalls.Session(_http, "sk-alice");
         var found = await McpCalls.Call(_http, "sk-alice", session, "find_symbol", new { name = "DecodeFrame" });
         Assert.True(found["isError"]!.GetValue<bool>());
-        // Asked about what GitLab lets her read, as the app knows her.
+        // Asked about the indexed repositories, as the app knows her.
         var (email, repos) = Assert.Single(_platform.RuleChecks);
         Assert.Equal("alice@corp.example", email);
-        Assert.Equal(["grp/alpha"], repos);
+        Assert.Equal(["grp/alpha", "grp/hidden"], repos);
     }
 
     [Fact]

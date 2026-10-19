@@ -19,6 +19,14 @@ public sealed record Identity(long UserId, string Username, IReadOnlyList<long> 
 {
     /// <summary>How the person was identified, for the audit lines: api_key, gitlab_token, chat, argus_key.</summary>
     public string? Via { get; init; }
+
+    /// <summary>
+    /// Whether the person may read this GitLab project (by its GitLab id), indexed or not: what the merge
+    /// request and commit tools check, since a project left out of the index can still be reviewed. A
+    /// member at Reporter or above may; nobody else, whatever the project's visibility. Throws
+    /// <see cref="AclDenied"/> when GitLab cannot be asked and nothing recent is kept. Nobody, unless set.
+    /// </summary>
+    public Func<long, bool> MayRead { get; init; } = static _ => false;
 }
 
 /// <summary>
@@ -74,9 +82,18 @@ public static class Acl
         return (Convert.ToInt64(user["id"]!.ToString()), user["username"]!.GetValue<string>(), gitlabIds);
     }
 
+    static List<long> Ids(string? json) =>
+        json is null ? [] : (JsonNode.Parse(json) as JsonArray ?? []).Select(n => n!.GetValue<long>()).ToList();
+
+    /// <summary>The Identity of a token's access: its repository rows, and the GitLab projects it may read (indexed or not).</summary>
+    static Identity For(long userId, string username, List<long> repoIds, IEnumerable<long> gitlabIds)
+    {
+        var projects = gitlabIds.ToHashSet();
+        return new Identity(userId, username, repoIds) { MayRead = projects.Contains };
+    }
+
     static Identity FromCache(Row cached) =>
-        new(cached.Long("user_id"), cached.Str("username"),
-            (JsonNode.Parse(cached.Str("repo_ids_json")) as JsonArray ?? []).Select(n => n!.GetValue<long>()).ToList());
+        For(cached.Long("user_id"), cached.Str("username"), Ids(cached.Str("repo_ids_json")), Ids(cached.StrOrNull("gitlab_ids_json")));
 
     public static Identity Resolve(SqliteConnection conn, GitLabConfig cfg, string token, HttpClient? client = null, Func<double>? now = null)
     {
@@ -120,8 +137,9 @@ public static class Acl
         }
 
         var repoIds = MapToRepoIds(conn, gitlabIds);
-        Writes.UpsertAclCache(conn, key, userId, username, "[" + string.Join(", ", repoIds) + "]", (long)now());
-        return new Identity(userId, username, repoIds);
+        Writes.UpsertAclCache(conn, key, userId, username, "[" + string.Join(", ", repoIds) + "]", (long)now(),
+            "[" + string.Join(", ", gitlabIds.Distinct().Order()) + "]");
+        return For(userId, username, repoIds, gitlabIds);
     }
 }
 
@@ -414,7 +432,7 @@ public sealed record Grant(long UserId, string Username, IReadOnlySet<long> Chec
 {
     /// <summary>The Identity over these repository rows: the rows of the projects the person may read.</summary>
     public Identity Over(IEnumerable<(long Id, long GitlabId)> repos) =>
-        new(UserId, Username, repos.Where(r => Readable.Contains(r.GitlabId)).Select(r => r.Id).Order().ToList());
+        new(UserId, Username, repos.Where(r => Readable.Contains(r.GitlabId)).Select(r => r.Id).Order().ToList()) { MayRead = Readable.Contains };
 
     /// <summary>This, and the projects checked since.</summary>
     public Grant With(Grant more) => this with
@@ -469,8 +487,31 @@ public sealed class PersonAccess(Func<string, string?, IReadOnlyCollection<long>
         var rows = repos();
         var added = Projects(rows).Where(p => !grant.Checked.Contains(p)).ToList();
         if (added.Count > 0) grant = Extend(key, email, username, grant, added);
-        var identity = grant.Over(rows);
+        var identity = grant.Over(rows) with { MayRead = project => MayRead(email, username, project) };
         return Narrow is null ? identity : Narrow(email, identity);
+    }
+
+    /// <summary>
+    /// Whether the person may read this GitLab project: from what is kept, or, for a project not checked yet
+    /// (one left out of the index, which the merge request tools still read), asked of GitLab now and kept
+    /// with the rest. Unlike a repository indexed since, a project GitLab cannot answer for is not quietly
+    /// closed: <see cref="AclDenied"/> says that its access could not be checked.
+    /// </summary>
+    public bool MayRead(string email, string? username, long project)
+    {
+        var key = Key(email, username);
+        var grant = Kept(key, email, username);
+        if (grant.Checked.Contains(project)) return grant.Readable.Contains(project);
+        Grant more;
+        try { more = resolve(email, username, [project]); }
+        catch (AclDenied exc) when (People.Definite(exc))
+        {
+            lock (_gate) _known.Remove(key);
+            throw;
+        }
+        lock (_gate)
+            if (_known.TryGetValue(key, out var hit)) _known[key] = (hit.At, hit.Value.With(more));
+        return more.Readable.Contains(project);
     }
 
     /// <summary>In the platform: the app's rules (Admin → Access) narrow what GitLab lets the person read (<see cref="ArenaRules"/>).</summary>
