@@ -450,6 +450,7 @@ public static class IdentityWiring
         app.MapAccount();
         app.MapAdmin();
         Access.GroupEndpoints.MapGroups(app);
+        Access.AccessEndpoints.MapAccess(app);
         app.MapForwardAuth();
         app.MapKeyCheck();
         app.MapOidc();
