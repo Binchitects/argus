@@ -89,6 +89,7 @@ def compose_config(*files: str) -> dict:
     example = (DEPLOY / ".env.example").read_text()
     example = re.sub(r"^(ADMIN_PASSWORD|DB_PASSWORD|APP_KEY|ENGINE_KEY|ARGUS_KEY)=$", r"\1=parity", example, flags=re.M)
     example = re.sub(r"^GATEWAY_KEY=$", "GATEWAY_KEY=sk-parity", example, flags=re.M)
+    example = re.sub(r"^DATA_DIR=$", "DATA_DIR=/srv/arena/data", example, flags=re.M)
     with tempfile.TemporaryDirectory(prefix="parity-") as tmp:
         env_file = Path(tmp) / "parity.env"
         env_file.write_text(example)

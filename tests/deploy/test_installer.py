@@ -33,8 +33,11 @@ COMPOSE = COMPOSE.replace("volumes:\n", "  embed:\n    image: ghcr.io/ggml-org/l
 COMPOSE = COMPOSE.replace("    container_name: litellm\n", "    container_name: litellm\n    volumes: [\"./config/litellm.yaml:/app/config.yaml:ro\"]\n", 1)
 COMPOSE_OLD = COMPOSE.replace("name: arena\n", "name: arena\n# 5.2.0\n")
 COMPOSE_NEW = COMPOSE.replace("    container_name: app\n", "    container_name: app\n    environment: { NEW_KEY: \"${NEW_KEY:?set NEW_KEY}\", APP_KEY: \"${APP_KEY:?}\" }\n")
+# And its data in DATA_DIR's folders, as volumes bound there (5.2.0's were in the engine's storage).
+COMPOSE_NEW = COMPOSE_NEW.replace("volumes:\n  postgres:\n  engine:\n", "volumes:\n" + "".join(
+    f'  {v}:\n    driver_opts: {{ type: none, o: bind, device: "${{DATA_DIR:?set DATA_DIR}}/{v}" }}\n' for v in ("postgres", "engine")), 1)
 ENV_EXAMPLE_OLD = "DOMAIN=llm.localhost\nADMIN_EMAIL=admin@example.com\nMODELS_DIR=./models\nMODEL=org/repo:Q4\nADMIN_PASSWORD=\nAPP_KEY=\nDB_PASSWORD=\nGATEWAY_KEY=\nENGINE_KEY=\nARGUS_KEY=\n"
-ENV_EXAMPLE_NEW = ENV_EXAMPLE_OLD + "# A new setting\nNEW_SETTING=on\nNEW_KEY=\n# HTTP_PORT=8080\n"
+ENV_EXAMPLE_NEW = ENV_EXAMPLE_OLD + "# A new setting\nNEW_SETTING=on\nNEW_KEY=\nDATA_DIR=\n# HTTP_PORT=8080\n"
 OLD_ENV = ("DOMAIN=old.example\nADMIN_EMAIL=me@old.example\nMODELS_DIR=./models\nMODEL=lib/model.gguf\nADMIN_PASSWORD=old-admin-pass\n"
            "APP_KEY=old-app-key\nDB_PASSWORD=old-db\nGATEWAY_KEY=sk-old\nENGINE_KEY=old-engine\nARGUS_KEY=old-argus\nOLD_THING=1\n")
 
@@ -490,6 +493,11 @@ class InstallerTests(unittest.TestCase):
             self.assertGreaterEqual(len(values[key]), 24, key)
             self.assertNotIn(values[key], self.output(r) + self.logs(), key)
         self.assertTrue(values["GATEWAY_KEY"].startswith("sk-"))
+        # The data in folders of DATA_DIR on the host (its default: beside deploy/), made before it starts.
+        self.assertEqual(values["DATA_DIR"], f"{self.dir}/data")
+        for v in ("postgres", "engine"):
+            self.assertTrue((self.dir / "data" / v).is_dir(), v)
+        self.assertIn(f"data in {self.dir}/data", r.stdout)
         self.assertIn("not printed, as this run has no terminal", r.stdout)
         override = (deploy / "docker-compose.override.yml").read_text()
         self.assertIn("  llamacpp: { profiles: !override [off] }", override)
@@ -635,6 +643,12 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("kept as you changed them (9.9.9 ships them as they were): config/litellm.yaml\n", out)
         # The embedding model is not here: healthy, waiting for models.
         self.assertIn("Upgraded from 5.2.0 to 9.9.9: healthy, waiting for models (embed; below)", out)
+        # 5.2.0's data, in the engine's own volumes, moved into DATA_DIR's folders (copied, then the volumes removed).
+        self.assertIn(f"DATA_DIR={self.dir}/data\n", (deploy / ".env").read_text())
+        self.assertIn(f"2 volume(s) moved into {self.dir}/data", out)
+        for v in ("postgres", "engine"):
+            self.assertTrue((self.dir / "data" / v).is_dir(), v)
+            self.assertTrue(self.r.s.called("volume", "rm", f"arena_{v}"), v)
         self.assertFalse((deploy / "config" / "dropped.yml").exists())
         self.assertEqual((deploy / "config" / "mine.yml").read_text(), "my own\n")
         self.assertEqual((deploy / "certs" / "tls.key").read_text(), "KEY\n")
@@ -653,7 +667,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(app["image_id"], images["arena-app:9.9.9"])
         self.assertIn(old_app, [v for k, v in images.items() if k.startswith("arena-rollback:5.2.0-")])
         self.assertIn("Upgraded from 5.2.0 to 9.9.9", out)
-        self.assertIn(".env: 2 key(s) added (NEW_SETTING NEW_KEY)\n", out)
+        self.assertIn(".env: 3 key(s) added (NEW_SETTING NEW_KEY DATA_DIR)\n", out)
         self.assertIn("version=9.9.9\n", (self.dir / ".arena-install" / "state").read_text())
         self.assertFalse((self.dir / ".arena-install" / "upgrade").exists())
         # Again: nothing to do.
@@ -687,8 +701,11 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, self.output(r))
         self.assertIn("ok     app: 9.9.9 (its own /api/info)", r.stdout)
         # .env had every key already: none added, the values kept.
-        self.assertIn("  .env: 0 key(s) added\n", r.stdout)
-        self.assertTrue((deploy / ".env").read_text().endswith("export NEW_SETTING=off\nNEW_KEY = mine\n"))
+        self.assertIn("  .env: 1 key(s) added (DATA_DIR)\n", r.stdout)
+        env = (deploy / ".env").read_text()
+        # Theirs kept as they wrote them; only DATA_DIR, which this release adds, after them.
+        self.assertIn("export NEW_SETTING=off\nNEW_KEY = mine\n", env)
+        self.assertTrue(env.rstrip().endswith(f"DATA_DIR={self.dir}/data"), env)
         Path(str(self.r.s.log) + ".info-asks").unlink(missing_ok=True)
 
     def test_A_failed_upgrade_rolls_back_files_images_and_data(self):
@@ -802,7 +819,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, self.output(r))
         out = r.stdout
         self.assertIn("the upgrade changed these, and they were changed here since: .env.example", out)
-        self.assertIn("would  take out of .env the keys the upgrade added: NEW_KEY NEW_SETTING", out)
+        self.assertIn("would  take out of .env the keys the upgrade added: DATA_DIR NEW_KEY NEW_SETTING", out)
         self.assertIn(".env: changed since the upgrade, and the data goes back to a backup taken with 5.2.0's: DB_PASSWORD", out)
         self.assertIn("would  put back 5.2.0's values in .env: DB_PASSWORD", out)
         self.assertIn(".env: left as they are now: DOMAIN MY_SETTING", out)

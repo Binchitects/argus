@@ -15,7 +15,8 @@ Three places, each with one job:
 |---|---|
 | `DOMAIN` | the address: `https://DOMAIN`, `gateway.DOMAIN`, `argus.DOMAIN` |
 | `ADMIN_EMAIL` | the first admin's email |
-| `MODELS_DIR` | where models live (a fast disk, writable by uid 1000) |
+| `MODELS_DIR` | where models live (a fast disk, writable by uid 1000); one that holds models already is used as it is |
+| `DATA_DIR` | where the stack's data lives: an absolute folder on the host, a folder in it per volume (the database, indexes, the speech server's models, metrics, logs) |
 | `MODEL` | the first chat model: `owner/repo:QUANT` on Hugging Face, or a file in `MODELS_DIR`, added (and kept loaded) once its files are in `MODELS_DIR`. Empty: none |
 | `DEFAULT_MODELS` | `download`: the app downloads the default models (`MODEL`, pictures, video, embedding, speech) once, at its first start. Empty: it downloads nothing on its own (an admin does under Admin → Models → Default models, or the files are copied in) |
 | `ADMIN_PASSWORD` | the first admin's password; only used while nobody exists |

@@ -33,7 +33,7 @@ class RequirementsTests(unittest.TestCase):
             if found:
                 (self.sys / tool).symlink_to(found)
         # sudo logs what it is asked; what would change the host is not run (the rest is).
-        self.fake("sudo", 'echo "sudo $*" >> "$CALLS"\ncase "$1" in tee|mkdir|install|gpg|loginctl|usermod) cat >/dev/null 2>&1; exit 0 ;; esac\nexec "$@"')
+        self.fake("sudo", 'echo "sudo $*" >> "$CALLS"\ncase "$1" in tee|gpg) cat >/dev/null 2>&1; exit 0 ;; mkdir|install|loginctl|usermod) exit 0 ;; esac\nexec "$@"')
         # No GPU, unless a test puts one in.
         self.fake("nvidia-smi", 'exit 9')
         self.fake("systemctl", 'echo "systemctl $*" >> "$CALLS"')

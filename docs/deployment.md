@@ -61,6 +61,21 @@ Once `MODEL`'s files are in `MODELS_DIR` (however they came), the app adds it
 under **Admin → Models** with the settings that fit this machine, and keeps it
 loaded. **Admin → Models** shows the downloads as they go. `MODELS_DIR` must be
 writable by uid 1000 (the app's user): create it yourself before the first `up`.
+A folder that holds models already is used as it is: nothing is moved.
+
+The stack's data (the database, Argus's indexes, the speech server's models,
+metrics and logs, the engine's presets) lives in folders of **`DATA_DIR`** on the
+host, one per volume (`DATA_DIR/postgres`, `DATA_DIR/argus`, ...), not in the
+engine's own storage: `DATA_DIR` in `.env` is an absolute folder, and each
+folder must be there before `up` (the installer asks where, and makes them with
+their services' owners). Compose still names them as volumes, so
+`scripts/backup.sh` backs them up and restores them the same way. An upgrade
+from a release that kept them in the engine's storage moves them into
+`DATA_DIR` (copied, checked, then the engine's copies removed; the upgrade's
+backup holds them too), and a rollback restores them from that backup. To move
+`DATA_DIR` later: stop the stack (`docker compose down`), move the folder,
+remove the volumes (`docker volume rm arena_postgres ...`: the folders stay),
+set `DATA_DIR` in `.env`, and `up -d`.
 
 The addresses, all on port 443:
 

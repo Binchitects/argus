@@ -80,3 +80,6 @@ config/app/pending.env.tmp
 config/engine/*
 !config/engine/README.md
 config/app/applied-*
+
+# The stack's data, when DATA_DIR is the deploy folder's own data/.
+data/

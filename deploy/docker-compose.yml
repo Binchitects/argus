@@ -396,18 +396,32 @@ networks:
   # Between the app and Laya only: internal, so no way out of the stack.
   laya: { internal: true }
 
+# The stack's data lives in folders of DATA_DIR on the host, one per volume (the installer asks where,
+# and makes them with their services' owners); compose names them as volumes, so backups and
+# restores reach them the same way. DATA_DIR is an absolute folder (a bind needs one).
 volumes:
   acme:
+    driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/acme" }
   postgres:
+    driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/postgres" }
   engine:
+    driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/engine" }
   directory:
+    driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/directory" }
   sandbox:
+    driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/sandbox" }
   argus:
+    driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/argus" }
   audio:
+    driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/audio" }
   prometheus:
+    driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/prometheus" }
   alertmanager:
+    driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/alertmanager" }
   loki:
+    driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/loki" }
   power-limits:
+    driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/power-limits" }
   # What the picture and video servers say they do (services/sd-serve.sh), every 2 s: kept in memory, theirs to write.
   media-status:
     driver_opts: { type: tmpfs, device: tmpfs, o: "uid=65534,gid=65534,mode=0755,size=64m" }

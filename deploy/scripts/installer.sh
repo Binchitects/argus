@@ -49,6 +49,8 @@
 #                        30s: seconds)
 # install:
 #   --domain NAME  --admin-email ADDRESS  --models-dir DIR  --model FILE|REPO:QUANT  --acme-email ADDRESS
+#   --data-dir DIR       where the stack's data lives, on the host (default DIR/data); install and upgrade
+#                        (an upgrade from a release that kept it in the engine's storage moves it there)
 #   --default-models download|skip|DIR   the default models (the chat model, pictures, video, speech;
 #                        the app never fetches them on its own): download them from Hugging Face
 #                        once, at the app's first start (DEFAULT_MODELS=download in .env; needs the
@@ -185,7 +187,7 @@ case "$CMD" in
   *) usage_error "unknown command: $CMD" ;;
 esac
 DIR="" BUNDLE_ARG="" ENGINE="" PROJECT_ARG="" YES=0 DRY=0 LOG_ARG="" TIMEOUT=15
-DOMAIN_ARG="" EMAIL_ARG="" MODELS_ARG="" MODEL_ARG="" HTTP_ARG="" HTTPS_ARG="" ACME_ARG="" GITLAB_ARG="" GITLAB_TOKEN_FILE=""
+DOMAIN_ARG="" EMAIL_ARG="" MODELS_ARG="" DATA_ARG="" MODEL_ARG="" HTTP_ARG="" HTTPS_ARG="" ACME_ARG="" GITLAB_ARG="" GITLAB_TOKEN_FILE=""
 CPU_ONLY=0 LEAVE_ARG="" MAKE_CERT=0 HOSTS=0 SKIP_REQ=0 FIX_REQ=0 PURGE=0 CONFIRM_ARG="" FINAL_BACKUP="" ROLLBACK=0 DEFAULTS_ARG=""
 only() { local c; for c in "${@:2}"; do [[ $CMD == "$c" ]] && return 0; done; usage_error "$1 is for ${*:2}"; }
 value() { [[ $2 -gt 1 ]] || usage_error "$1 needs a value"; }
@@ -204,6 +206,7 @@ while [[ $# -gt 0 ]]; do
     --domain) only "$1" install; value "$1" $#; DOMAIN_ARG="$2"; shift ;;
     --admin-email) only "$1" install; value "$1" $#; EMAIL_ARG="$2"; shift ;;
     --models-dir) only "$1" install; value "$1" $#; MODELS_ARG="$2"; shift ;;
+    --data-dir) only "$1" install upgrade; value "$1" $#; DATA_ARG="$2"; shift; [[ "$DATA_ARG" == /* ]] || usage_error "--data-dir is an absolute folder" ;;
     --model) only "$1" install; value "$1" $#; MODEL_ARG="$2"; shift ;;
     --default-models) only "$1" install; value "$1" $#; DEFAULTS_ARG="$2"; shift ;;
     --http-port) only "$1" install requirements; value "$1" $#; HTTP_ARG="$2"; shift ;;
@@ -399,6 +402,49 @@ read_settings() {
   case "$MODELS_DIR" in /*) ;; *) MODELS_DIR="$DEPLOY/${MODELS_DIR#./}" ;; esac
   BACKUP_DIR="$(env_get BACKUP_DIR)"; BACKUP_DIR="${BACKUP_DIR:-./backups}"
   case "$BACKUP_DIR" in /*) ;; *) BACKUP_DIR="$DEPLOY/${BACKUP_DIR#./}" ;; esac
+  DATA_DIR="$(env_get DATA_DIR)"
+}
+
+# The stack's data: a folder of DATA_DIR per volume, as docker-compose.yml binds them.
+DATA_DIR=""
+data_volumes() { sed -n 's/.*device: "\${DATA_DIR[^}]*}\/\([a-z0-9-]*\)".*/\1/p' "${1:-$DEPLOY}/docker-compose.yml" 2>/dev/null; }
+make_data_dirs() {   # make_data_dirs plan|do: DATA_DIR and a folder in it for each volume
+  local v made=0
+  [[ -n "$DATA_DIR" ]] || return 0
+  for v in $(data_volumes); do
+    [[ -d "$DATA_DIR/$v" ]] && continue
+    if [[ $1 == plan ]]; then would "make $DATA_DIR/$v"; continue; fi
+    (umask 077; mkdir -p "$DATA_DIR/$v") || die "cannot make $DATA_DIR/$v"
+    made=$((made + 1))
+  done
+  [[ $1 == do && $made -gt 0 ]] && did "$made folder(s) for the data in $DATA_DIR"
+  [[ $1 == do ]] && chmod 711 "$DATA_DIR" 2>/dev/null
+  return 0
+}
+# The device a volume is bound to; empty for a volume of the engine's own storage.
+volume_device() { E volume inspect --format '{{index .Options "device"}}' "$1" 2>/dev/null; }
+# Volumes of an earlier release, in the engine's own storage, moved into DATA_DIR: copied (owners
+# and modes kept), checked, then removed, so compose makes them again bound to DATA_DIR. The stack
+# is stopped (the upgrade's backup holds them too).
+move_volumes() {   # move_volumes plan|do
+  local v vol dev n=0 have want
+  for v in $(data_volumes); do
+    vol="${PROJECT}_$v"
+    volume_exists "$vol" || continue
+    dev="$(volume_device "$vol")"
+    [[ "$dev" == "$DATA_DIR/$v" ]] && continue
+    if [[ $1 == plan ]]; then would "move the $v volume${dev:+ (now bound to $dev)} into $DATA_DIR/$v"; continue; fi
+    mkdir -p "$DATA_DIR/$v" || die "cannot make $DATA_DIR/$v"
+    if [[ -n "$(ls -A "$DATA_DIR/$v" 2>/dev/null)" ]]; then die "$DATA_DIR/$v is not empty: the $v volume is not moved over it (empty it, or set DATA_DIR to another folder in .env)"; fi
+    in_helper -v "$vol:/from:ro" -v "$DATA_DIR/$v:/to" "$HELPER" sh -c 'cp -a /from/. /to/' || die "copying the $v volume into $DATA_DIR/$v failed (disk full?)"
+    have="$(in_helper -v "$vol:/v:ro" "$HELPER" sh -c 'find /v | wc -l; du -sk /v | cut -f1' 2>/dev/null | paste -sd' ')"
+    want="$(in_helper -v "$DATA_DIR/$v:/v:ro" "$HELPER" sh -c 'find /v | wc -l; du -sk /v | cut -f1' 2>/dev/null | paste -sd' ')"
+    [[ "${have%% *}" == "${want%% *}" ]] || die "the copy of the $v volume in $DATA_DIR/$v does not match it (${have%% *} files there, ${want%% *} here): the volume is kept; run upgrade again"
+    E volume rm "$vol" >/dev/null || die "the $v volume is copied into $DATA_DIR/$v but could not be removed: $ENGINE volume rm $vol, then upgrade again"
+    n=$((n + 1))
+  done
+  [[ $1 == do && $n -gt 0 ]] && did "$n volume(s) moved into $DATA_DIR (the engine's own copies removed; the backup holds them too)"
+  return 0
 }
 
 # What the app and Argus say of themselves: through Traefik on this host with curl (never through
@@ -1129,7 +1175,8 @@ merge_env() {   # merge_env plan|do (the release's .env.example and compose file
     fi
     for key in "${add[@]}"; do
       def="${key#*$'\t'}"; key="${key%%$'\t'*}"
-      if [[ "$def" == @secret ]]; then val="$(gen_secret)"; [[ $key == GATEWAY_KEY ]] && val="sk-$val"; else val="$def"; fi
+      if [[ $key == DATA_DIR ]]; then val="$DATA_DIR"; def="$DATA_DIR"
+      elif [[ "$def" == @secret ]]; then val="$(gen_secret)"; [[ $key == GATEWAY_KEY ]] && val="sk-$val"; else val="$def"; fi
       [[ $1 == do ]] && printf '%s=%s\n' "$key" "$val" >> "$tmp"
       ENV_ADDED+=("$key")
       [[ $1 == do && -n "$ENV_ADDED_FILE" ]] && echo "$key" >> "$ENV_ADDED_FILE"
@@ -1158,7 +1205,7 @@ ADMIN_PASSWORD_NEW="" NEW_GITLAB="" NEW_GITLAB_TOKEN="" NO_GITLAB=0
 make_env() {
   local env="$DEPLOY/.env" tmp key line val model example="$DEPLOY/.env.example"
   local -A V=()
-  V[DOMAIN]="$NEW_DOMAIN"; V[ADMIN_EMAIL]="$NEW_EMAIL"; V[MODELS_DIR]="$NEW_MODELS_DIR"; V[MODEL]="$NEW_MODEL"
+  V[DOMAIN]="$NEW_DOMAIN"; V[ADMIN_EMAIL]="$NEW_EMAIL"; V[MODELS_DIR]="$NEW_MODELS_DIR"; V[MODEL]="$NEW_MODEL"; V[DATA_DIR]="$DATA_DIR"
   V[DEFAULT_MODELS]="$([[ "${NEW_DEFAULTS:-}" == download ]] && echo download)"
   # Every key compose cannot start without gets a secret of its own (the gateway's starts with sk-).
   for key in DB_PASSWORD APP_KEY ENGINE_KEY ARGUS_KEY $(required_keys "$DEPLOY"); do [[ -n "${V[$key]:-}" ]] || V[$key]="$(gen_secret)"; done
@@ -1187,7 +1234,7 @@ make_env() {
     if [[ "${V[DEFAULT_MODELS]}" == download ]] && ! grep -q '^DEFAULT_MODELS=' "$example"; then echo "DEFAULT_MODELS=download"; fi
   ) > "$tmp" || die "cannot write $tmp"
   mv -f "$tmp" "$env" && chmod 600 "$env" || die "writing $env failed"
-  did ".env written (0600): DOMAIN=$NEW_DOMAIN, MODELS_DIR=$NEW_MODELS_DIR, MODEL=${NEW_MODEL:-none yet}$([[ "${NEW_DEFAULTS:-}" == download ]] && echo ", DEFAULT_MODELS=download")${NEW_GITLAB:+, GITLAB_URL=$NEW_GITLAB and its token}; the secrets generated, none printed"
+  did ".env written (0600): DOMAIN=$NEW_DOMAIN, MODELS_DIR=$NEW_MODELS_DIR, DATA_DIR=$DATA_DIR, MODEL=${NEW_MODEL:-none yet}$([[ "${NEW_DEFAULTS:-}" == download ]] && echo ", DEFAULT_MODELS=download")${NEW_GITLAB:+, GITLAB_URL=$NEW_GITLAB and its token}; the secrets generated, none printed"
 }
 
 # docker-compose.override.yml for this host, when it has none: what it leaves out, and the
@@ -1290,7 +1337,7 @@ place_models() {   # place_models plan|do
   fi
   [[ $absent -eq 0 && ${#carried[@]} -eq 0 ]] && ok "models: every model the bundle lists is in $MODELS_DIR"
   # Docker runs the app as uid 1000: it writes there. (Rootless Podman runs it as you.)
-  if [[ $1 == do && $ENGINE == docker && $EUID -eq 0 && "$(stat -c %u "$MODELS_DIR")" != 1000 ]]; then
+  if [[ $1 == do && $ENGINE == docker && $EUID -eq 0 && ${MODELS_HAD:-0} -eq 0 && "$(stat -c %u "$MODELS_DIR")" != 1000 ]]; then
     chown -R 1000:1000 "$MODELS_DIR" && did "$MODELS_DIR is uid 1000's, the app's"
   fi
   return 0
@@ -1436,6 +1483,8 @@ fix_permissions() {   # fix_permissions plan|do -> FIX_FAILED, FIX_FOUND (owners
   if [[ $ENGINE == docker && -d "$MODELS_DIR" && "$(stat -c %u "$MODELS_DIR")" != 1000 ]]; then
     FIX_FOUND=$((FIX_FOUND + 1))
     if [[ $1 == plan ]]; then would "give $MODELS_DIR to uid 1000 (the app writes there)"
+    elif [[ ${MODELS_HAD:-0} -gt 0 ]] && ! confirm "$MODELS_DIR holds $MODELS_HAD model file(s) of its own: give it to uid 1000, so the app can download into it too? (no: the app reads them, and downloads fail)"; then
+      note "$MODELS_DIR stays as it is: the app reads its models; to let it download there: sudo chown -R 1000:1000 $MODELS_DIR"
     elif [[ $EUID -eq 0 ]] && chown -R 1000:1000 "$MODELS_DIR"; then did "$MODELS_DIR is now uid 1000's (the app writes there)"
     else bad "$MODELS_DIR is not uid 1000's and the app writes there: sudo chown -R 1000:1000 $MODELS_DIR"; FIX_FAILED=1; fi
   fi
@@ -1512,10 +1561,12 @@ cmd_install() {
   if [[ $again -eq 1 && -f "$DEPLOY/.env" ]]; then
     read_settings
     NEW_DOMAIN="$DOMAIN" NEW_HTTP="$HTTP_PORT" NEW_HTTPS="$HTTPS_PORT" NEW_MODELS_DIR="$(env_get MODELS_DIR)" NEW_MODEL="$(env_get MODEL)" NEW_EMAIL="$(env_get ADMIN_EMAIL)"
+    [[ -n "$DATA_DIR" ]] || DATA_DIR="${DATA_ARG:-$DIR/data}"
   else
     NEW_DOMAIN="$(ask "The address people open (DOMAIN)" "${DOMAIN_ARG:-llm.localhost}")"
     NEW_EMAIL="$(ask "The admin's e-mail" "${EMAIL_ARG:-admin@example.com}")"
-    NEW_MODELS_DIR="$(ask "Where models live (MODELS_DIR)" "${MODELS_ARG:-./models}")"
+    NEW_MODELS_DIR="$(ask "Where models live (MODELS_DIR; a folder that holds models already is used as it is)" "${MODELS_ARG:-./models}")"
+    DATA_DIR="$(ask "Where the stack's data lives: the database, indexes, metrics, logs (DATA_DIR, an absolute folder)" "${DATA_ARG:-$DIR/data}")"
     # The bundle's first chat model, when it carries the file.
     s="$(bundle_get model)"; [[ -n "$s" ]] && bundle_model_files | grep -qxF "$s" || s=""
     NEW_DEFAULTS="$(ask "The default models (chat, pictures, video, speech): download (from Hugging Face, once, at the first start), skip (an admin downloads them later), or a folder to copy them from" "${DEFAULTS_ARG:-skip}")"
@@ -1545,10 +1596,17 @@ cmd_install() {
   HTTP_PORT="$NEW_HTTP" HTTPS_PORT="$NEW_HTTPS" DOMAIN="$NEW_DOMAIN"
   MODELS_DIR="$NEW_MODELS_DIR"; case "$MODELS_DIR" in /*) ;; *) MODELS_DIR="$DEPLOY/${MODELS_DIR#./}" ;; esac
   BACKUP_DIR="$DEPLOY/backups"
+  [[ "$DATA_DIR" == /* && "$DATA_DIR" != / ]] || usage_error "DATA_DIR is an absolute folder (not /): $DATA_DIR"
+  DATA_DIR="${DATA_DIR%/}"
+  if [[ $again -eq 0 && -n "$(ls -A "$DATA_DIR/postgres" 2>/dev/null)" ]]; then
+    refuse "$DATA_DIR/postgres holds a database from an earlier installation, whose .env opens it: restore that .env and upgrade, or choose another DATA_DIR"
+  fi
+  # A model folder there already: its models are used as they are, nothing is moved.
+  MODELS_HAD="$(find "$MODELS_DIR" -type f \( -name '*.gguf' -o -name '*.safetensors' -o -name '*.onnx' -o -name '*.bin' \) 2>/dev/null | wc -l)"
   INSTALL_LEAVE="${leave[*]}"
 
   say "Install Argus Arena $BVERSION in $DIR ($ENGINE, project $PROJECT)$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is done")"
-  say "  https://$NEW_DOMAIN$([[ "$NEW_HTTPS" != 443 ]] && echo ":$NEW_HTTPS"), models in $MODELS_DIR${leave[*]:+, left out: ${leave[*]}}"
+  say "  https://$NEW_DOMAIN$([[ "$NEW_HTTPS" != 443 ]] && echo ":$NEW_HTTPS"), models in $MODELS_DIR$([[ ${MODELS_HAD:-0} -gt 0 ]] && echo " ($MODELS_HAD model file(s) there already, used as they are)"), data in $DATA_DIR${leave[*]:+, left out: ${leave[*]}}"
   [[ $NO_GITLAB -eq 1 ]] && note "no GitLab given (--gitlab-url, --gitlab-token-file): Argus is left out; to add it later, GITLAB_URL and GITLAB_TOKEN in .env, its line out of docker-compose.override.yml, then up -d"
   if [[ $DRY -eq 1 ]]; then
     [[ -n "$BUNDLE" ]] && check_bundle
@@ -1566,6 +1624,7 @@ cmd_install() {
     write_extras plan
     [[ -f "$DEPLOY/.env" ]] && would "keep the .env there, adding what it lacks" || would "write $DEPLOY/.env: these answers, the secrets generated (none printed; the admin's first password shown once, on the terminal)"
     write_override plan ${leave[@]+"${leave[@]}"}
+    make_data_dirs plan
     place_models plan
     fill_audio plan
     [[ $MAKE_CERT -eq 1 ]] && would "make a certificate for $NEW_DOMAIN (scripts/make-cert.sh)"
@@ -1613,6 +1672,9 @@ cmd_install() {
     if [[ $EUID -eq 0 ]]; then (cd "$DEPLOY" && bash scripts/setup-hosts.sh) || bad "scripts/setup-hosts.sh failed"
     else note "it needs root: sudo $DEPLOY/scripts/setup-hosts.sh"; fi
   fi
+  step "data"
+  make_data_dirs do
+  ok "the stack's data goes in $DATA_DIR ($(human $(( $(free_kb "$(existing_parent "$DATA_DIR")") * 1024 ))) free there)"
   step "permissions"
   fix_permissions do
   start_stack || die "the stack did not start; fix what is named above and run install again"
@@ -1985,6 +2047,12 @@ cmd_upgrade() {
   [[ $cmp == 1 ]] && refuse "$iv is installed ($src), newer than this bundle's $BVERSION: going back is a restore of the backup taken before that upgrade (upgrade --rollback with its bundle)"
   FROM="$iv"
   SNAP="$STATE/rollback/$FROM"
+  # From a release that kept the data in the engine's own storage: where it goes from now on.
+  if [[ -z "$DATA_DIR" ]]; then
+    DATA_DIR="$(ask "Where the stack's data goes from now on: the database, indexes, metrics, logs (DATA_DIR, an absolute folder)" "${DATA_ARG:-$DIR/data}")"
+    [[ "$DATA_DIR" == /* && "$DATA_DIR" != / ]] || usage_error "DATA_DIR is an absolute folder (not /): $DATA_DIR"
+    DATA_DIR="${DATA_DIR%/}"
+  fi
 
   say "Upgrade Argus Arena in $DIR from $FROM ($src) to $BVERSION ($ENGINE, project $PROJECT)$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is done")"
   # The services this bundle has no image for must be left out here.
@@ -2006,6 +2074,8 @@ cmd_upgrade() {
     step ".env"
     merge_env plan
     write_extras plan
+    make_data_dirs plan
+    move_volumes plan
     place_models plan
     fill_audio plan
     would "start $BVERSION (the app and Argus migrate their data as they start), wait until every service is healthy, check every service's version"
@@ -2076,6 +2146,12 @@ cmd_upgrade() {
     # .env as the upgrade left it (its checksum only): a rollback tells a later change from it.
     (umask 077; sha_of "$DEPLOY/.env" > "$SNAP/env-sha")
     write_extras do
+    step "data in $DATA_DIR"
+    make_data_dirs do
+    if [[ -n "$(move_volumes plan 2>/dev/null)" ]]; then
+      dc_down
+      move_volumes do
+    else ok "the data is in $DATA_DIR already"; fi
     step "models"
     place_models do
     fill_audio do
@@ -2411,6 +2487,16 @@ cmd_remove() {
   if [[ -n "$anon" ]]; then
     n=0; for f in $anon; do E volume rm "$f" >/dev/null 2>&1 && n=$((n + 1)); done
     did "$n unnamed volume(s) of those containers"
+  fi
+  if [[ $PURGE -eq 1 && -n "$DATA_DIR" && -d "$DATA_DIR" ]]; then
+    # The data's folders, while the helper image (which may write as their services' users) is there.
+    step "the data in $DATA_DIR (--purge)"
+    for f in $(data_volumes); do
+      [[ -d "$DATA_DIR/$f" ]] || continue
+      in_helper -v "$DATA_DIR:/d" "$HELPER" rm -rf "/d/$f" 2>/dev/null || rm -rf "${DATA_DIR:?}/$f" 2>/dev/null
+      [[ -d "$DATA_DIR/$f" ]] && bad "could not remove $DATA_DIR/$f" || did "$DATA_DIR/$f"
+    done
+    rmdir "$DATA_DIR" 2>/dev/null
   fi
   step "images"
   while IFS=$'\t' read -r what f why; do

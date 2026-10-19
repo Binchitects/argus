@@ -277,6 +277,19 @@ if [[ $ACTION == restore ]]; then
   fi
 
   say "==> volumes (created exactly as compose defines them, then filled)"
+  # A volume made otherwise than compose defines it now (in the engine's storage before DATA_DIR, or
+  # bound elsewhere) would stop compose at its question: its data is replaced anyway, so it goes first.
+  # A bound volume's folder stays; it is emptied and filled below.
+  for a in "$FROM"/volumes/*.tar.gz "$FROM/postgres.sql.gz"; do
+    [[ -f "$a" ]] || continue
+    vol="$(basename "$a" .tar.gz)"; [[ "$a" == */postgres.sql.gz ]] && vol=postgres
+    "$ENGINE" volume rm "${PROJECT}_${vol}" >/dev/null 2>&1 || :
+  done
+  # Bound volumes need their folders before compose makes them.
+  data_dir="$(env_get DATA_DIR)"
+  if [[ -n "$data_dir" ]]; then
+    for vol in $(sed -n 's/.*device: "\${DATA_DIR[^}]*}\/\([a-z0-9-]*\)".*/\1/p' docker-compose.yml 2>/dev/null); do mkdir -p "$data_dir/$vol" || die "cannot make $data_dir/$vol"; done
+  fi
   "$ENGINE" compose up --no-start --no-build --pull never >/dev/null 2>&1 || die "$ENGINE compose up --no-start failed"
   for a in "$FROM"/volumes/*.tar.gz; do
     [[ -f "$a" ]] || continue
