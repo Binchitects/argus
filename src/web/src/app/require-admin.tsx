@@ -6,7 +6,7 @@ import type { Me } from '@/lib/api'
 /** Admin pages: others get a plain refusal (the API refuses them too). */
 export function RequireAdmin() {
   const me = useOutletContext<Me>()
-  if (!me.isAdmin) {
+  if (!me.isAdmin && !me.permissions?.length) {
     return (
       <div className="mx-auto max-w-lg py-16">
         <h1 className="sr-only">Admins only</h1>

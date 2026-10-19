@@ -30,7 +30,7 @@ export function CommandMenu({ open, onOpenChange, me }: { open: boolean; onOpenC
 
   const commands = useMemo<Command[]>(
     () => [
-      ...visibleNavigation(me.isAdmin).flatMap((s) =>
+      ...visibleNavigation(me).flatMap((s) =>
         s.items.map((i) => ({ id: i.path, title: i.title, group: s.title, icon: i.icon, keywords: i.keywords, run: () => navigate(i.path) })),
       ),
       { id: 'account', title: 'Your account', group: 'Account', icon: UserRound, keywords: ['password', '2fa', 'api key', 'profile'], run: () => navigate('/account') },
@@ -40,7 +40,7 @@ export function CommandMenu({ open, onOpenChange, me }: { open: boolean; onOpenC
       { id: 'system', title: 'System theme', group: 'Account', icon: Monitor, keywords: ['appearance'], run: () => setPreference('system') },
       { id: 'sign-out', title: 'Sign out', group: 'Account', icon: LogOut, keywords: ['log out', 'logout'], run: () => void signOut() },
     ],
-    [me.isAdmin, navigate, setPreference, signOut],
+    [me, navigate, setPreference, signOut],
   )
 
   const matches = useMemo(

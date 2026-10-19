@@ -44,13 +44,16 @@ public static class AuthEndpoints
         {
             return Results.Unauthorized();
         }
+        var member = await access.MembershipAsync(user);
         return Results.Ok(new
         {
             id = user.Id,
             userName = user.UserName,
             displayName = user.DisplayName,
             email = user.Email,
-            isAdmin = await access.IsOwnerAsync(user),
+            isAdmin = member.IsOwner,
+            // The administrative permissions they hold (a role of theirs): which admin pages they see.
+            permissions = Core.Access.Permissions.AdminKeys.Where(member.Has),
             source = UserSources.Name(user.Source),
             twoFactorEnabled = user.TwoFactorEnabled,
             signedInAt = AppClaimsFactory.SignedInAt(principal)?.ToUnixTimeSeconds(),

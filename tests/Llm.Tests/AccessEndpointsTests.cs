@@ -44,6 +44,10 @@ public sealed class AccessEndpointsTests(AppFixture app)
         var assignment = (await admin.JsonAsync(res)).GetProperty("id").GetGuid();
         await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/access/assignments", new { roleId = role, subjectKind = "Group", subjectId = group }));
         await StatusAssert.Is(HttpStatusCode.OK, await them.GetAsync("/api/admin/models"));
+        // The web shows them the admin pages of what they hold.
+        var me = await them.JsonAsync(await them.GetAsync("/api/auth/me"));
+        Assert.Equal(["models.read"], me.GetProperty("permissions").EnumerateArray().Select(p => p.GetString()));
+        Assert.False(me.GetProperty("isAdmin").GetBoolean());
         // Only what the role holds.
         await StatusAssert.Is(HttpStatusCode.Forbidden, await them.GetAsync("/api/admin/audit"));
 

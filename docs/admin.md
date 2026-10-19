@@ -50,6 +50,17 @@ that it is not set up, and how to turn it on.
 
 ### Access: roles and rules
 
+**Admin → Access** has four tabs. **Roles**: the built-in ones and your own,
+who holds each (**Give it** to a person, a group, a directory group linked on
+the Groups page, or everyone, maybe until a date), and **New role** from the
+permission list; built-in roles cannot be changed. **Rules**: allows and
+denies on models, tools, knowledge sources, repositories and features.
+**Checker**: may this person do this, and why. **History**: every change.
+Someone who holds an administrative permission through a role (and is not an
+Owner) sees the admin pages of what they hold, and only those: a Supervisor
+role with `monitoring.read` and `logs.read` sees Monitoring, Dashboards,
+Alerts, Logs and Traces.
+
 What each person may do is decided in one place, from three things:
 
 - **Permissions**: a fixed list of what can be done, in two kinds.

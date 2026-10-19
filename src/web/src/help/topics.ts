@@ -341,6 +341,23 @@ export const topics = {
     manual: { doc: 'authentication', section: 'managing-people' },
   },
 
+  access: {
+    title: 'Access',
+    about: 'Roles say what people may run here; rules give or take a model, a tool, a knowledge source, a repository or a feature. The most specific wins: a person\'s own over their groups\', a group\'s over everyone\'s; at one level a deny wins.',
+    admin: true,
+    parts: [
+      { name: 'Roles', text: 'The built-in roles (Owner, People admin, Model admin, Billing, Auditor and the rest) and your own. Each shows who holds it: **Give it** to a person, a group (a directory group linked on the Groups page too) or everyone, maybe until a date. **New role** picks permissions from the list; a built-in role cannot be changed, only copied.' },
+      { name: 'Rules', text: 'Allows and denies of a model, a tool, a knowledge source, a repository or a feature, for a person, a group, a role or everyone. A name may be a pattern with *.' },
+      { name: 'Checker', text: 'May this person do this? Yes or no, with the rules and roles that decide it, in order.' },
+      { name: 'History', text: 'Every change to roles, who holds them and rules: when, by whom, and what.' },
+    ],
+    tasks: [
+      { title: 'Let a team lead watch the dashboards', steps: ['Press **New role**, name it (Supervisor), and tick `monitoring.read` and `logs.read`.', 'Press **Give it** on the new role and choose the person or their group.'] },
+      { title: 'Give a directory group a role', steps: ['On Groups, make a directory group with its name or DN.', 'Here, **Give it** on the role to that group: whoever the directory puts in it holds the role.'] },
+    ],
+    manual: { doc: 'admin', section: 'access-roles-and-rules' },
+  },
+
   groups: {
     title: 'Groups',
     about: 'Who may use which tools and models. An app group has the people you add; a directory group follows the company directory or the identity provider.',

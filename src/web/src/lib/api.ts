@@ -22,6 +22,8 @@ export interface Me {
   displayName: string
   email: string
   isAdmin: boolean
+  /** The administrative permissions held (a role's): which admin pages they see. */
+  permissions?: string[]
   source: 'local' | 'ldap' | 'oidc'
   twoFactorEnabled: boolean
   signedInAt: number | null

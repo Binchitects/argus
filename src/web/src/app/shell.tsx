@@ -45,7 +45,7 @@ function SignedIn({ me }: { me: Me }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
-  const sections = visibleNavigation(me.isAdmin)
+  const sections = visibleNavigation(me)
   const name = info.data?.name ?? 'Argus Arena'
 
   const location = useLocation()
@@ -271,7 +271,7 @@ function SidebarNav({ sections, collapsed, onNavigate }: { sections: NavSection[
 function Breadcrumbs() {
   const { pathname } = useLocation()
   const item = findNavItem(pathname)
-  const section = item && visibleNavigation(true).find((s) => s.items.includes(item))
+  const section = item && visibleNavigation({ isAdmin: true }).find((s) => s.items.includes(item))
   const title = pathname === '/account' ? 'Your account' : pathname === '/design' ? 'Design system' : isManual(pathname) ? 'Manual' : item?.title
   return (
     <nav aria-label="Breadcrumb" className="min-w-0">
