@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, Bot, Brain, Check, ChevronDown, Eye, FileDown, FilePen, FoldVertical, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, Share2, SlidersHorizontal, Sparkles, Trash2, Wrench } from 'lucide-react'
+import { Archive, ArchiveRestore, Bot, Brain, Check, ChevronDown, Eye, FileDown, FilePen, FoldVertical, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, Share2, SlidersHorizontal, Sparkles, Trash2, Users, Wrench } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link } from 'react-router'
@@ -221,6 +221,8 @@ export function ChatHeader({
   onMove,
   onShare,
   canvas,
+  room,
+  onMakeRoom,
 }: {
   config: ChatConfig
   settings: ChatSettings
@@ -242,6 +244,10 @@ export function ChatHeader({
   onMove?: (assistantId: string | null) => void
   /** Share the chat: a read-only link. */
   onShare?: () => void
+  /** A room: how many people it has, and its panel. */
+  room?: { people: number; here: number; onOpen: () => void }
+  /** Make the chat a room (its owner's, not a room yet). */
+  onMakeRoom?: () => void
 }) {
   return (
     <header className="flex h-12 shrink-0 items-center gap-1 border-b px-2 sm:px-3">
@@ -263,6 +269,13 @@ export function ChatHeader({
         </Link>
       )}
       <span className="ml-auto flex shrink-0 items-center gap-1">
+        {room && (
+          <Tooltip content="People in this room">
+            <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={room.onOpen} aria-label={`People in this room (${room.people}, ${room.here} here)`}>
+              <Users /> <span className="tabular-nums">{room.people}</span>
+            </Button>
+          </Tooltip>
+        )}
         <MemoryButton />
         <ChatSettingsPopover config={config} settings={settings} onChange={onChange} />
         {canvas && (
@@ -277,7 +290,7 @@ export function ChatHeader({
             <FolderOpen /> <span className="tabular-nums">{filesCount}</span>
           </Button>
         </Tooltip>
-        {chat && <ChatMenu chat={chat} onCompact={onCompact} onExport={onExport} assistant={assistant} onMove={onMove} onShare={onShare} />}
+        {chat && <ChatMenu chat={chat} onCompact={onCompact} onExport={onExport} assistant={assistant} onMove={onMove} onShare={onShare} onMakeRoom={onMakeRoom} />}
       </span>
     </header>
   )
@@ -300,6 +313,7 @@ function ChatMenu({
   assistant,
   onMove,
   onShare,
+  onMakeRoom,
 }: {
   chat: { id: string; title: string; archived: boolean }
   onCompact?: () => void
@@ -307,6 +321,7 @@ function ChatMenu({
   assistant?: HeaderAssistant | null
   onMove?: (assistantId: string | null) => void
   onShare?: () => void
+  onMakeRoom?: () => void
 }) {
   const { fork, archive, askDelete } = useChatActions(chat, true)
   const assistants = useQuery({ ...assistantsQuery, enabled: !!onMove })
@@ -329,6 +344,11 @@ function ChatMenu({
         {onShare && (
           <DropdownMenuItem onSelect={() => onShare()}>
             <Share2 /> Share
+          </DropdownMenuItem>
+        )}
+        {onMakeRoom && (
+          <DropdownMenuItem onSelect={() => onMakeRoom()}>
+            <Users /> Make it a room
           </DropdownMenuItem>
         )}
         {onMove && (

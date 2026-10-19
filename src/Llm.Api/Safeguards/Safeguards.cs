@@ -122,7 +122,8 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
             return new(false, $"A message may carry at most {o.MaxAttachmentsPerMessage} files.", "files");
         }
         var now = clock.GetUtcNow();
-        var mine = db.ChatMessages.AsNoTracking().Where(m => m.Role == "user" && db.Conversations.Any(c => c.Id == m.ConversationId && c.UserId == user.Id));
+        // Their own messages, wherever they wrote them (their chats and rooms alike).
+        var mine = db.ChatMessages.AsNoTracking().Where(m => m.Role == "user" && m.AuthorId == user.Id);
         if (o.MessagesPerMinute > 0 && await mine.CountAsync(m => m.CreatedAt > now.AddMinutes(-1), ct) >= o.MessagesPerMinute)
         {
             return new(false, $"At most {o.MessagesPerMinute} messages a minute: wait a moment and send it again.", "rate", 429);

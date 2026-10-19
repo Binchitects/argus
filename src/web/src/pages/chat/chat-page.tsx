@@ -48,6 +48,8 @@ import { CanvasOpener, useCanvasState } from './canvas-context'
 import { findQuoted, type Quote } from './quote'
 import { isReplyKey, useQuotableSelection } from './quotable'
 import { SelectionToolbar } from './selection-toolbar'
+import { NewRoomDialog, RoomPanel } from './room'
+import { typingLine, useRoomEvents } from './room-live'
 
 /** The id a question is shown under until the server gives it its own. */
 let localCount = 0
@@ -212,6 +214,12 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   }
 
   const data = loaded.data
+  // A room: a chat several people share (its people, who is here, who writes).
+  const room = data?.room ?? null
+  const roomLive = useRoomEvents(id, room, me?.id ?? '')
+  const [peopleOpen, setPeopleOpen] = useState(false)
+  const [makingRoom, setMakingRoom] = useState(false)
+  const [forPeople, setForPeople] = useState(false)
   const settings: ChatSettings = data
     ? { model: data.model, thinking: data.thinking, tools: data.tools, systemPrompt: data.systemPrompt, temperature: data.temperature, topP: data.topP, maxTokens: data.maxTokens }
     : draft
@@ -652,7 +660,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     })
   }
   /** Queues what the box holds (its files and quote); `quoted`: a question about a selection instead, with no files. */
-  const enqueue = async (text: string, quoted?: Quote): Promise<boolean> => {
+  const enqueue = async (text: string, quoted?: Quote, toPeople = false): Promise<boolean> => {
     const chat = streamingIn.current ?? id
     if (!chat) return false
     const fromBox = !quoted
@@ -663,7 +671,12 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     const withQuote = quoted ?? quote
     if (fromBox && withQuote) setQuote(null)
     try {
-      const r = await queueMessage(chat, { content: text, attachments: fromBox ? uploads.attachments.map((a) => a.id) : [], ...(withQuote ? { quote: withQuote.text } : {}) })
+      const r = await queueMessage(chat, {
+        content: text,
+        attachments: fromBox ? uploads.attachments.map((a) => a.id) : [],
+        ...(withQuote ? { quote: withQuote.text } : {}),
+        ...(toPeople ? { forPeople: true } : {}),
+      })
       if (fromBox) uploads.clear()
       setQueued(chat, r.queued)
       // The answer ended meanwhile: it went at once.
@@ -896,6 +909,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
             onMove={id ? (assistantId) => void move(assistantId) : undefined}
             onShare={id && path.length ? () => setSharing(true) : undefined}
             onCompact={canCompact ? () => void compact() : undefined}
+            room={room ? { people: room.members.length, here: roomLive.here.length, onOpen: () => setPeopleOpen(true) } : undefined}
+            onMakeRoom={id && data && !room && !data.origin ? () => setMakingRoom(true) : undefined}
           />
           {empty ? (
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">
@@ -993,7 +1008,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                       const arena = t.question ? arenaView(t.question, data?.arenas, view.arena, answering && i === lastTurn) : null
                       return (
                         <div key={t.question?.id ?? t.answer[0]?.id ?? i} className="grid gap-4">
-                          {t.question && <QuestionTurn m={t.question} siblings={tree.siblings(t.question)} busy={streaming} onSwitch={switchTo} onEdit={edit} onJumpToQuote={jumpToQuoted} />}
+                          {t.question && <QuestionTurn m={t.question} siblings={tree.siblings(t.question)} busy={streaming} onSwitch={switchTo} onEdit={room && t.question.author?.id !== me?.id ? undefined : edit} onJumpToQuote={jumpToQuoted} room={room ? { me: me?.id ?? '' } : undefined} />}
                           {arena && t.question ? (
                             <ArenaTurn
                               arena={arena}
@@ -1084,10 +1099,26 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                     Code Arena is answering in this chat: what you send waits in the queue until it is done.
                   </output>
                 )}
+                {room && (
+                  <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                    {room.answeringFor && room.answeringFor !== me?.id && <output>Arena is answering {room.members.find((m) => m.id === room.answeringFor)?.name ?? 'someone'}…</output>}
+                    {typingLine(roomLive.typingNames) && <output>{typingLine(roomLive.typingNames)}</output>}
+                    {room.role !== 'viewer' && (
+                      <label className="ml-auto flex items-center gap-1.5">
+                        <input type="checkbox" checked={forPeople} onChange={(e) => setForPeople(e.target.checked)} className="accent-primary" />
+                        Just say it (no answer)
+                      </label>
+                    )}
+                    {room.answerMode === 'mention' && <span>The model answers only when you write @Arena.</span>}
+                  </div>
+                )}
+                {room?.role === 'viewer' ? (
+                  <p className="rounded-lg border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">You read this room; its owner may let you write.</p>
+                ) : (
                 <Composer
                   streaming={streaming}
                   elsewhere={data?.codeArena && !streaming ? 'Code Arena is answering' : undefined}
-                  onSend={send}
+                  onSend={room ? (text) => enqueue(text, undefined, forPeople) : send}
                   talk={talkButton}
                   queued={queue}
                   onQueue={enqueue}
@@ -1108,6 +1139,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   focusSignal={focusBox}
                   autoFocus
                 />
+                )}
               </div>
             </>
           )}
@@ -1132,6 +1164,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
         )}
         {me?.isAdmin && <TraceSheet answerId={tracing} onClose={() => setTracing(null)} />}
         {id && <ShareDialog chatId={id} leafId={view.leaf} open={sharing} onOpenChange={setSharing} />}
+        {id && room && <RoomPanel chatId={id} room={room} me={me?.id ?? ''} open={peopleOpen} onOpenChange={setPeopleOpen} here={roomLive.here} />}
+        {id && data && !room && <NewRoomDialog open={makingRoom} onOpenChange={setMakingRoom} from={{ id, title: title ?? data.title }} />}
         {dragging && (
           <div className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary bg-primary/5 backdrop-blur-[1px]">
             <p className="flex items-center gap-2 rounded-lg bg-popover px-4 py-2 font-medium shadow-md">

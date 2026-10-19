@@ -235,6 +235,16 @@ public static class ShareEndpoints
             return true;
         }
         var key = attachmentId.ToString();
+        // A room's files: its members read them.
+        var rooms = await db.ChatMessages.AsNoTracking().Where(x => x.AttachmentsJson != null && x.AttachmentsJson.Contains(key)
+            && db.Conversations.Any(c => c.Id == x.ConversationId && c.Kind == RoomMember.Room)).Select(x => x.ConversationId).Distinct().ToListAsync(ct);
+        foreach (var room in rooms)
+        {
+            if (await RoomAccess.FindAsync(db, room, me, Need.Read, ct) is not null)
+            {
+                return true;
+            }
+        }
         var shares = await db.ChatShares.AsNoTracking()
             .Where(s => db.ChatMessages.Any(x => x.ConversationId == s.ConversationId && x.AttachmentsJson != null && x.AttachmentsJson.Contains(key)))
             .ToListAsync(ct);

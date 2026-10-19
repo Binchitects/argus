@@ -556,6 +556,40 @@ screen** (up to its last message, as it is now). Making the link copies it.
   the chat revokes it too. One link a chat.
 - Sharing and revoking are in the audit log, with the chat's id, never its words.
 
+## Rooms
+
+A room is a chat several people share. Make one with the **people** button
+beside **New chat**, or turn one of your chats into a room (the chat's
+**⋯** menu → **Make it a room**: what it said so far becomes the room's).
+Add people by name and whole groups (whoever is in the group now is in the
+room), each to **read and ask** or **only read**. Rooms show in their
+people's chat lists with a people icon. Admins choose who may make rooms
+(the `feature.rooms.create` permission, Admin → Access) and how many people
+a room holds (Settings → Chat → **Most people in a room**, 50).
+
+- **Who wrote what.** Every message shows its writer's name (never their
+  email); yours are on the right. The model reads each person's message with
+  their name in front, and is told who is in the room and whom it answers.
+- **Whoever asks pays.** An answer is its asker's: their credit, their place
+  in line, their models and tools, their safeguards and rate limits. While
+  one answer runs, the next questions wait in the room's line (20 in all, 3
+  of each person's) and each goes as its writer's.
+- **Just say it.** A message for the people only: saved, not answered. A
+  room set to **only when @Arena is named** answers only messages that write
+  `@Arena`; the rest are for its people.
+- **No one's own things.** Answers in a room use no one's memory, code
+  (Argus), knowledge, or tools that act as the person (admins' MCP servers
+  and plugins), as everyone reads them and another member's message could
+  steer them.
+- **Live.** Who has the room open, who is typing, and whom the model is
+  answering show as they happen.
+- **Roles.** The owner changes settings, adds and removes people, changes
+  their roles and hands the room over; members read, ask, attach files,
+  edit the canvas, and stop or decide on their own answers; viewers read.
+  Owners can let members invite. Anyone but the owner can leave. When an
+  owner's account is deleted the room goes to its longest-standing member;
+  what someone wrote stays after they leave, as a former member's.
+
 ## Canvas
 
 Like ChatGPT's canvas and Claude's artifacts: a document (Markdown) or code (in

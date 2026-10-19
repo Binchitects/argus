@@ -35,6 +35,9 @@ public sealed class ChatOptions
     /// <summary>What of one attachment goes into the question itself; the rest is read in parts.</summary>
     public int InlineAttachmentChars { get; set; } = 30_000;
     public long MaxUploadBytes { get; set; } = 20 * 1024 * 1024;
+
+    /// <summary>The most people a room holds, its owner and its groups' members included; 0: no limit.</summary>
+    public int RoomMostPeople { get; set; } = 50;
     public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromMinutes(15);
 
     /// <summary>Sub-agents of one answer that run at once (the Sub-agents tool); the others wait their turn.</summary>

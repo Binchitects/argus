@@ -24,6 +24,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<SafeguardMark> SafeguardMarks => Set<SafeguardMark>();
     public DbSet<AssistantFile> AssistantFiles => Set<AssistantFile>();
     public DbSet<ChatShare> ChatShares => Set<ChatShare>();
+    public DbSet<RoomMember> RoomMembers => Set<RoomMember>();
+    public DbSet<RoomGroup> RoomGroups => Set<RoomGroup>();
     public DbSet<ChatShareView> ChatShareViews => Set<ChatShareView>();
     public DbSet<Canvas> Canvases => Set<Canvas>();
     public DbSet<CanvasVersion> CanvasVersions => Set<CanvasVersion>();
@@ -96,6 +98,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(c => c.Origin).HasMaxLength(32);
             e.Property(c => c.OriginRef).HasMaxLength(128);
             e.Property(c => c.OriginPlace).HasMaxLength(1000);
+            e.Property(c => c.Kind).HasMaxLength(16);
+            e.Property(c => c.AnswerMode).HasMaxLength(16);
             e.HasIndex(c => new { c.UserId, c.Origin, c.OriginRef });
             e.HasIndex(c => new { c.UserId, c.UpdatedAt });
             e.HasOne<AppUser>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);
@@ -115,6 +119,10 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(m => m.ToolName).HasMaxLength(200);
             e.Property(m => m.Model).HasMaxLength(200);
             e.Property(m => m.SyncRef).HasMaxLength(160);
+            e.Property(m => m.Mentions).HasDefaultValueSql("'{}'::uuid[]");
+            e.HasOne<AppUser>().WithMany().HasForeignKey(m => m.AuthorId).OnDelete(DeleteBehavior.SetNull);
+            // A person's questions by when: rate limits count by author.
+            e.HasIndex(m => new { m.AuthorId, m.CreatedAt }).HasFilter("\"Role\" = 'user'");
             e.HasIndex(m => new { m.ConversationId, m.Sequence }).IsUnique();
             e.HasIndex(m => new { m.ConversationId, m.ParentId });
             // Admin → Traces: the slowest answers of a time range.
@@ -137,6 +145,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
         builder.Entity<QueuedMessage>(e =>
         {
             e.ToTable("queued_messages");
+            e.Property(q => q.Mentions).HasDefaultValueSql("'{}'::uuid[]");
+            e.HasOne<AppUser>().WithMany().HasForeignKey(q => q.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(q => new { q.ConversationId, q.Position });
             e.HasOne<Conversation>().WithMany().HasForeignKey(q => q.ConversationId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -164,6 +174,25 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasKey(x => new { x.AssistantId, x.AttachmentId });
             e.HasOne<Assistant>().WithMany().HasForeignKey(x => x.AssistantId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<ChatAttachment>().WithMany().HasForeignKey(x => x.AttachmentId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<RoomMember>(e =>
+        {
+            e.ToTable("room_members");
+            e.HasKey(x => new { x.ConversationId, x.UserId });
+            e.Property(x => x.Role).HasMaxLength(16);
+            e.Property(x => x.Notify).HasMaxLength(16);
+            e.HasIndex(x => x.UserId);
+            e.HasOne<Conversation>().WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<RoomGroup>(e =>
+        {
+            e.ToTable("room_groups");
+            e.HasKey(x => new { x.ConversationId, x.GroupId });
+            e.Property(x => x.Role).HasMaxLength(16);
+            e.HasIndex(x => x.GroupId);
+            e.HasOne<Conversation>().WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Group>().WithMany().HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<ChatShare>(e =>
         {

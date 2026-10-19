@@ -14,7 +14,9 @@ namespace Llm.Api.Chat;
 /// <summary>A message written while the chat answers, to send when the answer ends.</summary>
 /// <param name="Research">Deep research for this one.</param>
 /// <param name="Quote">The part of an earlier answer it replies to (ChatQuotes).</param>
-public sealed record QueueRequest(string? Content, Guid[]? Attachments = null, bool Research = false, string? Quote = null);
+/// <param name="ForPeople">A room's message for its people only: saved in turn, not answered.</param>
+/// <param name="Mentions">The room's members it names.</param>
+public sealed record QueueRequest(string? Content, Guid[]? Attachments = null, bool Research = false, string? Quote = null, bool ForPeople = false, Guid[]? Mentions = null);
 
 /// <summary>
 /// Messages sent while a chat answers wait here, on the server: a reload or another
@@ -22,10 +24,14 @@ public sealed record QueueRequest(string? Content, Guid[]? Attachments = null, b
 /// before it ends, however it ended (AnswerJobs asks for the next one). A message that
 /// waits after a restart goes once the app is back.
 /// </summary>
-public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJobs jobs, ILogger<QueuedMessages> logger)
+public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJobs jobs, RoomHub rooms, ILogger<QueuedMessages> logger)
 {
     /// <summary>How many may wait in one chat.</summary>
     public const int Max = 10;
+
+    /// <summary>How many may wait in a room, and of one member's.</summary>
+    public const int MaxInRoom = 20;
+    public const int MaxEachInRoom = 3;
 
     /// <summary>
     /// The chat's first queued message becomes its next question, on the branch on screen, and is
@@ -51,21 +57,29 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
                 {
                     return false;
                 }
-                // Answering: this one goes when that answer ends.
-                job = jobs.Reserve(c.Id, c.UserId);
-                if (job is null)
+                // Answering: this one goes when that answer ends. The answer is its sender's (in a room, not the owner's).
+                if (!next.ForPeople)
+                {
+                    job = jobs.Reserve(c.Id, next.UserId);
+                    if (job is null)
+                    {
+                        return false;
+                    }
+                }
+                else if (jobs.IsAnswering(c.Id))
                 {
                     return false;
                 }
                 // Its files, those still there.
                 var ids = ChatService.ParseIds(next.AttachmentsJson).ToList();
-                var kept = await db.ChatAttachments.Where(a => ids.Contains(a.Id) && a.UserId == c.UserId).Select(a => a.Id).ToListAsync();
+                var kept = await db.ChatAttachments.Where(a => ids.Contains(a.Id) && a.UserId == next.UserId).Select(a => a.Id).ToListAsync();
                 var files = ids.Where(kept.Contains).ToList();
                 var last = await db.ChatMessages.Where(m => m.ConversationId == c.Id).MaxAsync(m => (int?)m.Sequence) ?? 0;
                 var question = new ChatMessage
                 {
                     ConversationId = c.Id, ParentId = c.CurrentLeafId, Role = "user", Sequence = last + 1, Content = next.Content, Quote = next.Quote,
                     AttachmentsJson = files.Count > 0 ? JsonSerializer.Serialize(files) : null,
+                    AuthorId = next.UserId, ForPeople = next.ForPeople, Mentions = next.Mentions,
                 };
                 db.ChatMessages.Add(question);
                 db.QueuedMessages.Remove(next);
@@ -78,6 +92,13 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
                     c.Title = ChatService.TitleFrom(next.Content.Length > 0 ? next.Content : "Attached files");
                 }
                 await db.SaveChangesAsync();
+                if (job is null)
+                {
+                    // For the people only: saved, and the next in line goes.
+                    rooms.Said(c.Id, question.Id);
+                    attempt = -1;
+                    continue;
+                }
                 job.Emit(new { type = "question", id = question.Id, parentId = question.ParentId });
                 if (titled)
                 {
@@ -135,7 +156,7 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
             .Select(a => new { a.Id, a.FileName, a.Size, a.Truncated, a.Kind, a.ContentType, original = a.Kind != "image" && a.Data != null }).ToDictionaryAsync(a => a.Id, ct);
         return [.. queued.Select(q => (object)new
         {
-            q.Id, q.Content, q.Quote, q.Research, q.CreatedAt,
+            q.Id, q.Content, q.Quote, q.Research, q.CreatedAt, q.UserId, q.ForPeople,
             attachments = ChatService.ParseIds(q.AttachmentsJson).Where(files.ContainsKey).Select(a => files[a]),
         })];
     }
@@ -151,7 +172,7 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
     private static async Task<(AppUser Me, Conversation? Chat)> OwnedAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
     {
         var me = (await users.GetUserAsync(p))!;
-        return (me, await db.Conversations.SingleOrDefaultAsync(c => c.Id == id && c.UserId == me.Id, ct));
+        return (me, await RoomAccess.FindAsync(db, id, me, Need.Write, ct));
     }
 
     /// <summary>
@@ -182,10 +203,17 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
         {
             return AuthEndpoints.Problem(400, "attachment", "An attachment is missing or is not yours.");
         }
-        if (await db.QueuedMessages.CountAsync(q => q.ConversationId == id, ct) >= Max)
+        if (await db.QueuedMessages.CountAsync(q => q.ConversationId == id, ct) >= (c.IsRoom ? MaxInRoom : Max))
         {
-            return AuthEndpoints.Problem(409, "queue_full", $"{Max} messages wait in this chat already: send one now, or cancel one.");
+            return AuthEndpoints.Problem(409, "queue_full", $"{(c.IsRoom ? MaxInRoom : Max)} messages wait in this chat already: send one now, or cancel one.");
         }
+        if (c.IsRoom && await db.QueuedMessages.CountAsync(q => q.ConversationId == id && q.UserId == me.Id, ct) >= MaxEachInRoom)
+        {
+            return AuthEndpoints.Problem(409, "queue_full", $"{MaxEachInRoom} of your messages wait in this room already: wait for them to go, or cancel one.");
+        }
+        // A room on "only when @Arena is named" answers only those that name it; the rest are for its people.
+        var forPeople = c.IsRoom && (body.ForPeople || (c.AnswerMode == RoomEndpoints.MentionMode && !RoomEndpoints.NamesArena(text)));
+        var mentions = c.IsRoom ? await RoomEndpoints.MentionsAsync(db, c, body.Mentions, ct) : [];
         if (body.Research && !await registry.MayUseAsync(await access.MembershipAsync(me, ct), Tools.ResearchTool.ToolId, ct))
         {
             return AuthEndpoints.Problem(403, "research", Tools.ResearchTool.NotYours);
@@ -204,8 +232,9 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
         db.QueuedMessages.Add(new QueuedMessage
         {
             // Its secrets masked, when the person's policy masks them.
-            ConversationId = id, Content = verdict.Text ?? text, Quote = verdict.Quote ?? quote, Research = body.Research, Position = last + 1,
+            ConversationId = id, Content = verdict.Text ?? text, Quote = verdict.Quote ?? quote, Research = body.Research && !forPeople, Position = last + 1,
             AttachmentsJson = attachments.Length > 0 ? JsonSerializer.Serialize(attachments) : null,
+            UserId = me.Id, ForPeople = forPeople, Mentions = mentions,
         });
         // Writing in an archived chat brings it back to the list.
         c.ArchivedAt = null;
@@ -217,11 +246,14 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
     /// <summary>Takes a message out of line; 404 when it is not waiting any more (it went).</summary>
     private static async Task<IResult> CancelAsync(Guid id, Guid queuedId, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
     {
-        if ((await OwnedAsync(id, p, users, db, ct)).Chat is null)
+        var (me, c) = await OwnedAsync(id, p, users, db, ct);
+        if (c is null)
         {
             return Results.NotFound();
         }
-        return await db.QueuedMessages.Where(q => q.Id == queuedId && q.ConversationId == id).ExecuteDeleteAsync(ct) == 0
+        // In a room a member takes out their own; its owner, any.
+        var owner = c.UserId == me.Id;
+        return await db.QueuedMessages.Where(q => q.Id == queuedId && q.ConversationId == id && (owner || q.UserId == me.Id)).ExecuteDeleteAsync(ct) == 0
             ? AuthEndpoints.Problem(404, "not_queued", "That message is not waiting any more: it was sent.")
             : Results.NoContent();
     }
@@ -230,7 +262,9 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
     private static async Task<IResult> NowAsync(Guid id, Guid queuedId, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db,
         QueuedMessages queue, AnswerJobs jobs, CancellationToken ct)
     {
-        if ((await OwnedAsync(id, p, users, db, ct)).Chat is null)
+        var (me, c) = await OwnedAsync(id, p, users, db, ct);
+        // In a room only its owner puts one first (it stops the answer running, someone else's maybe).
+        if (c is null || c.UserId != me.Id)
         {
             return Results.NotFound();
         }

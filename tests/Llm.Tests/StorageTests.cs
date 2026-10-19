@@ -644,7 +644,11 @@ public sealed class StorageTests(AppFixture app)
         await using (var scope = f.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            db.QueuedMessages.Add(new QueuedMessage { ConversationId = chat, Content = "And this", AttachmentsJson = JsonSerializer.Serialize(new[] { waiting }) });
+            db.QueuedMessages.Add(new QueuedMessage
+            {
+                ConversationId = chat, Content = "And this", AttachmentsJson = JsonSerializer.Serialize(new[] { waiting }),
+                UserId = db.Conversations.Where(c => c.Id == chat).Select(c => c.UserId).Single(),
+            });
             await db.SaveChangesAsync();
         }
         await OlderAsync(f, TimeSpan.FromDays(30));

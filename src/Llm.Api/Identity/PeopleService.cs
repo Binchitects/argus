@@ -318,6 +318,27 @@ public sealed partial class PeopleService(
         };
     }
 
+    /// <summary>
+    /// Their rooms stay with their people: each goes to its longest-standing member (a room nobody else is in goes with
+    /// them). What they wrote there stays, as a former member's.
+    /// </summary>
+    private async Task HandOverRoomsAsync(AppUser user)
+    {
+        var rooms = await db.Conversations.Where(c => c.UserId == user.Id && c.Kind == Llm.Core.Chat.RoomMember.Room).ToListAsync();
+        foreach (var room in rooms)
+        {
+            if (await db.RoomMembers.Where(m => m.ConversationId == room.Id && m.UserId != user.Id)
+                    .OrderBy(m => m.Role == Llm.Core.Chat.RoomMember.Member ? 0 : 1).ThenBy(m => m.AddedAt).FirstOrDefaultAsync() is not { } next)
+            {
+                continue;
+            }
+            room.UserId = next.UserId;
+            db.RoomMembers.Remove(next);
+            await audit.WriteAsync("room.transfer", room.Id.ToString(), detail: "its owner's account was deleted");
+        }
+        await db.SaveChangesAsync();
+    }
+
     public async Task DeleteAsync(AppUser actor, AppUser user)
     {
         if (user.Id == actor.Id)
@@ -342,6 +363,7 @@ public sealed partial class PeopleService(
         {
             warning = ex.Message;
         }
+        await HandOverRoomsAsync(user);
         Check(await users.DeleteAsync(user));
         // Their roles and rules go with them.
         await access.RemoveSubjectAsync(actor, Llm.Core.Access.SubjectKind.Person, user.Id);

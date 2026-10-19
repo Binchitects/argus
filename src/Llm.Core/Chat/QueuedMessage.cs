@@ -16,6 +16,11 @@ public sealed class QueuedMessage
     public string? AttachmentsJson { get; set; }
     /// <summary>Deep research for this one.</summary>
     public bool Research { get; set; }
+    /// <summary>Who sent it: the answer starts as theirs (in a room, not the owner's).</summary>
+    public Guid UserId { get; set; }
+    /// <summary>A room's message for the people only: saved, not answered.</summary>
+    public bool ForPeople { get; set; }
+    public List<Guid> Mentions { get; set; } = [];
     /// <summary>Its place in line: the lowest goes next (Send now puts one first).</summary>
     public int Position { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

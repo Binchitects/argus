@@ -187,6 +187,9 @@ public sealed class ToolRegistry(
         ["argus"] = Core.Access.Permissions.CodeRead,
     };
 
+    /// <summary>A tool that reads or acts as the person who asks (their memory, code, knowledge, an admin's server or plugin): off in rooms.</summary>
+    public static bool Personal(IChatTool tool) => tool is IServerTool || tool.Id is "memory" or "argus" or "knowledge";
+
     /// <summary>Whether this person may use the tool by the rules: the tool allowed to them, and its feature held.</summary>
     public static bool Allowed(Membership member, string toolId) =>
         member.MayUse(Core.Access.ResourceKinds.Tool, toolId) && (!FeatureOf.TryGetValue(toolId, out var feature) || member.Has(feature));

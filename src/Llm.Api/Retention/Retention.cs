@@ -115,7 +115,7 @@ public sealed class Retention(AppDbContext db, AccessService access, IOptionsMon
     /// <summary>Stands in for "who did it" in the audit log when the sweep deletes.</summary>
     public static readonly AppUser Sweeper = new() { Id = Guid.Empty, UserName = "retention" };
 
-    /// <summary>The person's files older than the cutoff that no chat of theirs (hidden ones too) and no project uses.</summary>
+    /// <summary>The person's files older than the cutoff that no chat of theirs (hidden ones too), no message of theirs (in a room) and no project uses.</summary>
     private async Task<int> EraseUnusedFilesAsync(Guid userId, DateTimeOffset cutoff, CancellationToken ct)
     {
         var candidates = await db.ChatAttachments.AsNoTracking().Where(a => a.UserId == userId && a.CreatedAt < cutoff && !db.AssistantFiles.Any(f => f.AttachmentId == a.Id))
@@ -125,7 +125,7 @@ public sealed class Retention(AppDbContext db, AccessService access, IOptionsMon
             return 0;
         }
         var lists = await db.ChatMessages.AsNoTracking()
-            .Where(m => m.AttachmentsJson != null && db.Conversations.IgnoreQueryFilters().Any(c => c.Id == m.ConversationId && c.UserId == userId))
+            .Where(m => m.AttachmentsJson != null && (m.AuthorId == userId || db.Conversations.IgnoreQueryFilters().Any(c => c.Id == m.ConversationId && c.UserId == userId)))
             .Select(m => m.AttachmentsJson).ToListAsync(ct);
         var used = lists.SelectMany(ChatService.ParseIds).ToHashSet();
         var unused = candidates.Where(id => !used.Contains(id)).ToList();

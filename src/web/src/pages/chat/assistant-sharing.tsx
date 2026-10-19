@@ -38,10 +38,10 @@ export function GroupChecklist({ chosen, known = [], onChange, label }: { chosen
   )
 }
 
-type Person = Named & { userName: string }
+export type Person = Named & { userName: string }
 
 /** Choosing people by name: two letters find them. */
-function PeoplePicker({ chosen, onChange }: { chosen: Person[]; onChange: (people: Person[]) => void }) {
+export function PeoplePicker({ chosen, onChange, label = 'People who may edit it' }: { chosen: Person[]; onChange: (people: Person[]) => void; label?: string }) {
   const id = useId()
   const [q, setQ] = useState('')
   const term = q.trim()
@@ -54,7 +54,7 @@ function PeoplePicker({ chosen, onChange }: { chosen: Person[]; onChange: (peopl
   return (
     <div className="grid gap-2">
       {chosen.length > 0 && (
-        <ul className="flex flex-wrap gap-1.5" aria-label="People who may edit it">
+        <ul className="flex flex-wrap gap-1.5" aria-label={label}>
           {chosen.map((p) => (
             <li key={p.id} className="flex items-center gap-1 rounded-full border bg-muted/40 py-0.5 pr-1 pl-2.5 text-sm">
               <span className="max-w-48 truncate">{p.name}</span>

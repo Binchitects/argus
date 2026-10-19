@@ -50,6 +50,13 @@ public sealed class Conversation
     /// keeps the person's messages in the chat's queue meanwhile, and they go when Code Arena's turn ends. Null: it is not.
     /// </summary>
     public DateTimeOffset? CodeArenaTurnUntil { get; set; }
+    /// <summary>"room": a chat several people share (<see cref="RoomMember"/>); null: the owner's own.</summary>
+    public string? Kind { get; set; }
+    /// <summary>A room's: "every" (every message is answered, unless sent to people only) or "mention" (only when @Arena is named).</summary>
+    public string? AnswerMode { get; set; }
+    /// <summary>A room's members may invite others, not only its owner.</summary>
+    public bool MembersInvite { get; set; }
+    public bool IsRoom => Kind == RoomMember.Room;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<ChatMessage> Messages { get; set; } = [];
@@ -128,7 +135,41 @@ public sealed class ChatMessage
     public string? Summary { get; set; }
     /// <summary>For a message from Code Arena: its place there (session:index), so a message sent twice is known as one.</summary>
     public string? SyncRef { get; set; }
+    /// <summary>Who wrote it (a question) or whose question it answers (an answer, a tool's turn); null: a former member, or from before v5.9.</summary>
+    public Guid? AuthorId { get; set; }
+    /// <summary>A room's message for the people only: the model does not answer it.</summary>
+    public bool ForPeople { get; set; }
+    /// <summary>The members it names (@name).</summary>
+    public List<Guid> Mentions { get; set; } = [];
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>A person in a room (a chat with members), beside its owner (the conversation's own person).</summary>
+public sealed class RoomMember
+{
+    public const string Room = "room";
+    public const string Owner = "owner";
+    public const string Member = "member";
+    public const string Viewer = "viewer";
+
+    public Guid ConversationId { get; set; }
+    public Guid UserId { get; set; }
+    /// <summary>"member" (reads and asks) or "viewer" (reads).</summary>
+    public string Role { get; set; } = Member;
+    public Guid? AddedById { get; set; }
+    public DateTimeOffset AddedAt { get; set; } = DateTimeOffset.UtcNow;
+    /// <summary>What they have read up to.</summary>
+    public DateTimeOffset? LastReadAt { get; set; }
+    /// <summary>"all", "mentions" (mentions and answers to them) or "none".</summary>
+    public string Notify { get; set; } = "mentions";
+}
+
+/// <summary>A group in a room: whoever is in it now is in the room, with this role.</summary>
+public sealed class RoomGroup
+{
+    public Guid ConversationId { get; set; }
+    public Guid GroupId { get; set; }
+    public string Role { get; set; } = RoomMember.Member;
 }
 
 /// <summary>

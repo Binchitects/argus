@@ -733,6 +733,9 @@ namespace Llm.Core.Data.Migrations
                     b.Property<string>("AttachmentsJson")
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("AuthorId")
+                        .HasColumnType("uuid");
+
                     b.Property<int?>("CachedTokens")
                         .HasColumnType("integer");
 
@@ -766,6 +769,15 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<string>("Error")
                         .HasColumnType("text");
+
+                    b.Property<bool>("ForPeople")
+                        .HasColumnType("boolean");
+
+                    b.PrimitiveCollection<List<Guid>>("Mentions")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid[]")
+                        .HasDefaultValueSql("'{}'::uuid[]");
 
                     b.Property<string>("Model")
                         .HasMaxLength(200)
@@ -823,6 +835,9 @@ namespace Llm.Core.Data.Migrations
                     b.HasIndex("AnswerId");
 
                     b.HasIndex("CreatedAt");
+
+                    b.HasIndex("AuthorId", "CreatedAt")
+                        .HasFilter("\"Role\" = 'user'");
 
                     b.HasIndex("ConversationId", "ParentId");
 
@@ -902,6 +917,10 @@ namespace Llm.Core.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("AnswerMode")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.Property<DateTimeOffset?>("ArchivedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -924,6 +943,10 @@ namespace Llm.Core.Data.Migrations
                     b.Property<Guid?>("ForkedFromId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Kind")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.PrimitiveCollection<List<string>>("LoadedTools")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -932,6 +955,9 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<int?>("MaxTokens")
                         .HasColumnType("integer");
+
+                    b.Property<bool>("MembersInvite")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("Model")
                         .HasMaxLength(200)
@@ -1483,6 +1509,15 @@ namespace Llm.Core.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("ForPeople")
+                        .HasColumnType("boolean");
+
+                    b.PrimitiveCollection<List<Guid>>("Mentions")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid[]")
+                        .HasDefaultValueSql("'{}'::uuid[]");
+
                     b.Property<int>("Position")
                         .HasColumnType("integer");
 
@@ -1492,11 +1527,70 @@ namespace Llm.Core.Data.Migrations
                     b.Property<bool>("Research")
                         .HasColumnType("boolean");
 
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("UserId");
 
                     b.HasIndex("ConversationId", "Position");
 
                     b.ToTable("queued_messages", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.RoomGroup", b =>
+                {
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("GroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("ConversationId", "GroupId");
+
+                    b.HasIndex("GroupId");
+
+                    b.ToTable("room_groups", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.RoomMember", b =>
+                {
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("AddedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AddedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("LastReadAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Notify")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("ConversationId", "UserId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("room_members", (string)null);
                 });
 
             modelBuilder.Entity("Llm.Core.Chat.SafeguardMark", b =>
@@ -2974,6 +3068,11 @@ namespace Llm.Core.Data.Migrations
 
             modelBuilder.Entity("Llm.Core.Chat.ChatMessage", b =>
                 {
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("AuthorId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("Llm.Core.Chat.Conversation", null)
                         .WithMany("Messages")
                         .HasForeignKey("ConversationId")
@@ -3097,6 +3196,42 @@ namespace Llm.Core.Data.Migrations
                     b.HasOne("Llm.Core.Chat.Conversation", null)
                         .WithMany()
                         .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.RoomGroup", b =>
+                {
+                    b.HasOne("Llm.Core.Chat.Conversation", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Llm.Core.Access.Group", null)
+                        .WithMany()
+                        .HasForeignKey("GroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.RoomMember", b =>
+                {
+                    b.HasOne("Llm.Core.Chat.Conversation", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

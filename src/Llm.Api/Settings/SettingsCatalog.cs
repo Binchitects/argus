@@ -134,6 +134,8 @@ public static class SettingsCatalog
             { Default = "80", Unit = "%", Min = 0, Max = 95, Optional = false, Pattern = "0|[2-8][0-9]|9[0-5]", PatternHelp = "0, or 20 to 95" },
         new("Chat:MaxUploadBytes", Chat, "Largest attachment", "Per file.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "20971520", Unit = "bytes", Min = 1048576, Max = 104857600, Optional = false },
+        new("Chat:RoomMostPeople", Chat, "Most people in a room", "A room (a chat several people share) holds at most this many people, its owner and its groups' members included. 0: no limit. Who may make rooms: the feature.rooms.create permission (Admin → Access).", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "50", Min = 0, Max = 10000, Optional = false },
         new("Chat:MaxAttachmentChars", Chat, "Text kept per attachment", "Longer files are cut to this many characters and marked \"cut to fit\". The model reads what does not fit in the question in parts.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "1000000", Min = 1000, Max = 5000000, Optional = false },
         new("Chat:InlineAttachmentChars", Chat, "Text of an attachment in the question", "What of each attachment goes into the question itself. The model reads the rest in parts (the Reading files tool), so a long file does not fill the context.", SettingType.WholeNumber, SettingScope.Live)

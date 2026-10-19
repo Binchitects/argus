@@ -38,9 +38,11 @@ public sealed partial class AnswerJobs : IHostedService, IDisposable
     private readonly Replicas replicas;
     private readonly ILogger<AnswerJobs> logger;
 
-    public AnswerJobs(IServiceScopeFactory scopes, AnswerGate gate, Replicas replicas, ILogger<AnswerJobs> logger)
+    private readonly RoomHub rooms;
+
+    public AnswerJobs(IServiceScopeFactory scopes, AnswerGate gate, Replicas replicas, RoomHub rooms, ILogger<AnswerJobs> logger)
     {
-        (this.scopes, this.gate, this.replicas, this.logger) = (scopes, gate, replicas, logger);
+        (this.scopes, this.gate, this.replicas, this.rooms, this.logger) = (scopes, gate, replicas, rooms, logger);
         replicas.On(StopTopic, id => Guid.TryParse(id, out var c) && Stop(c));
         replicas.On(HurryTopic, id => Guid.TryParse(id, out var c) && HurryHere(c));
     }
@@ -214,7 +216,13 @@ public sealed partial class AnswerJobs : IHostedService, IDisposable
     public Job? Reserve(Guid conversation, Guid person)
     {
         var job = new Job(conversation, person);
-        return _jobs.TryAdd(conversation, job) ? job : null;
+        if (!_jobs.TryAdd(conversation, job))
+        {
+            return null;
+        }
+        // A room's people see who is being answered.
+        rooms.Answering(conversation, person);
+        return job;
     }
 
     /// <summary>Gives the chat back when its answer never started (the question was refused).</summary>
@@ -222,6 +230,7 @@ public sealed partial class AnswerJobs : IHostedService, IDisposable
     {
         _jobs.TryRemove(new KeyValuePair<Guid, Job>(job.Conversation, job));
         job.End();
+        rooms.Answered(job.Conversation);
     }
 
     /// <summary>The answer this chat is writing, if any.</summary>
@@ -339,6 +348,7 @@ public sealed partial class AnswerJobs : IHostedService, IDisposable
         {
             var (outcome, error, watched) = job.Ending();
             _jobs.TryRemove(new KeyValuePair<Guid, Job>(job.Conversation, job));
+            rooms.Answered(job.Conversation);
             try
             {
                 // The next message queued in this chat starts before this answer's watchers are let go,

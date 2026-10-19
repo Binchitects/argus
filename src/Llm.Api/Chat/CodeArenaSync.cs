@@ -185,7 +185,7 @@ public static class CodeArenaSync
             return refusal!;
         }
         var take = Math.Clamp(limit, 1, 200);
-        var chats = await db.Conversations.AsNoTracking().Where(c => c.UserId == me.Id && c.ArchivedAt == null && (before == null || c.UpdatedAt < before))
+        var chats = await db.Conversations.AsNoTracking().Where(c => c.UserId == me.Id && c.Kind == null && c.ArchivedAt == null && (before == null || c.UpdatedAt < before))
             .OrderByDescending(c => c.UpdatedAt).Take(take + 1)
             .Select(c => new { c.Id, c.Title, c.Origin, c.OriginRef, c.OriginPlace, c.Model, c.UpdatedAt, c.CodeArenaTurnUntil })
             .ToListAsync(http.RequestAborted);

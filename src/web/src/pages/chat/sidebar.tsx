@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Archive, ArchiveRestore, ArrowLeft, ChevronRight, GitFork, LayoutGrid, MessageSquarePlus, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, SquareTerminal, Trash2 } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowLeft, ChevronRight, GitFork, LayoutGrid, MessageSquarePlus, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, SquareTerminal, Trash2, Users } from 'lucide-react'
 import { useId, useState, type ReactNode } from 'react'
 import { Link, NavLink } from 'react-router'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -15,6 +15,7 @@ import { useChatActions } from './chat-actions'
 import { ChatSearch } from './chat-search'
 import { bucket } from './format'
 import { useListFolds } from './list-folds'
+import { NewRoomDialog } from './room'
 import type { ConversationSummary } from './types'
 
 /**
@@ -26,6 +27,7 @@ import type { ConversationSummary } from './types'
 export function ChatList({ activeId, activeAssistant, onNew, onNavigate, foldable = false }: { activeId?: string; activeAssistant?: string; onNew: () => void; onNavigate?: () => void; foldable?: boolean }) {
   const [search, setSearch] = useState('')
   const [archived, setArchived] = useState(false)
+  const [makingRoom, setMakingRoom] = useState(false)
   const list = useQuery(listQuery(search.trim(), archived))
   const folds = useListFolds()
   const folded = foldable && folds.listFolded
@@ -60,9 +62,16 @@ export function ChatList({ activeId, activeAssistant, onNew, onNavigate, foldabl
               <ArrowLeft /> All chats
             </Button>
           ) : (
-            <Button onClick={onNew} className="min-w-0 flex-1 justify-start">
-              <MessageSquarePlus /> New chat
-            </Button>
+            <>
+              <Button onClick={onNew} className="min-w-0 flex-1 justify-start">
+                <MessageSquarePlus /> New chat
+              </Button>
+              <Tooltip content="New room: a chat several people share">
+                <Button variant="outline" size="icon" onClick={() => setMakingRoom(true)} aria-label="New room">
+                  <Users />
+                </Button>
+              </Tooltip>
+            </>
           )}
         </div>
         {folded ? (
@@ -108,6 +117,7 @@ export function ChatList({ activeId, activeAssistant, onNew, onNavigate, foldabl
           )}
         </>
       )}
+      <NewRoomDialog open={makingRoom} onOpenChange={setMakingRoom} />
     </nav>
   )
 }
@@ -186,6 +196,12 @@ function ChatItem({ chat, active, archived, onNavigate }: { chat: ConversationSu
           <>
             <span className="mr-1.5 inline-block size-1.5 animate-pulse rounded-full bg-primary align-middle" aria-hidden="true" />
             <span className="sr-only">Answering: </span>
+          </>
+        )}
+        {chat.isRoom && (
+          <>
+            <Users className="mr-1.5 inline size-3.5 align-[-2px] text-muted-foreground" aria-hidden="true" />
+            <span className="sr-only">Room: </span>
           </>
         )}
         {chat.origin === 'code-arena' && (

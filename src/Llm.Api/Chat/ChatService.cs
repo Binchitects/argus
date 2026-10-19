@@ -132,7 +132,7 @@ public sealed partial class ChatService(
             var refused = new ChatMessage
             {
                 ConversationId = conversation.Id, ParentId = question.Id, Role = "assistant", Sequence = sequence, Model = modelName,
-                Status = MessageStatus.Failed, Error = refusal,
+                Status = MessageStatus.Failed, Error = refusal, AuthorId = user.Id,
             };
             refused.AnswerId = refused.Id;
             db.ChatMessages.Add(refused);
@@ -192,6 +192,12 @@ public sealed partial class ChatService(
         // Deep research: asked for with the composer's switch, or (below) started by the model with the Deep research tool.
         var research = overrides.Research;
         IReadOnlyList<ToolChoice> allowed = model?.Tools != false || research ? await registry.ForAsync(await access.MembershipAsync(user, ct), ct) : [];
+        if (conversation.IsRoom)
+        {
+            // A room's answers are read by all its people: no tool that reads as the asker (their memory, their code, their
+            // knowledge, servers that act as them), which another member's message could also steer.
+            allowed = [.. allowed.Where(t => !ToolRegistry.Personal(t.Tool))];
+        }
         if (research && allowed.All(t => t.Tool.Id != ResearchTool.ToolId))
         {
             // Asked for before an admin took deep research away from this person (a message queued then): a plain answer.
@@ -244,7 +250,7 @@ public sealed partial class ChatService(
         var compactAt = user.CompactAt ?? chat.CurrentValue.CompactAt;
         var offersTools = tools.Count > 0 && chat.CurrentValue.MaxToolRounds > 0;
         var lengthNote = AnswerLengths.Note(user.AnswerLength);
-        var memory = await memories.NoteAsync(user, ct);
+        var memory = conversation.IsRoom ? null : await memories.NoteAsync(user, ct);
         var (messages, imagesDropped, systemParts, budget) = await BuildHistoryAsync(conversation, question, model, modelName, helper, email, demand.Notes(), runs.ContainsKey("read_file"),
             lengthNote, memory, new HistoryFit(compactAt, offersTools ? demand.Request().ToJsonString().Length : 0), emit, ct);
         // Said on the person's turn (models follow it more closely there), at the prompt's end (the
@@ -344,7 +350,7 @@ public sealed partial class ChatService(
 
         for (var round = 0; ; round++)
         {
-            var msg = new ChatMessage { ConversationId = conversation.Id, ParentId = parent, Role = "assistant", Sequence = ++next, Model = modelName };
+            var msg = new ChatMessage { ConversationId = conversation.Id, ParentId = parent, Role = "assistant", Sequence = ++next, Model = modelName, AuthorId = user.Id };
             answerId ??= msg.Id;
             msg.AnswerId = answerId;
             db.ChatMessages.Add(msg);
@@ -665,7 +671,7 @@ public sealed partial class ChatService(
                 ends |= outcome.EndsAnswer;
                 var result = new ChatMessage
                 {
-                    ConversationId = conversation.Id, ParentId = parent, Role = "tool", Sequence = ++next, ToolCallId = id, ToolName = name,
+                    ConversationId = conversation.Id, ParentId = parent, Role = "tool", Sequence = ++next, ToolCallId = id, ToolName = name, AuthorId = user.Id,
                     Content = text, Status = declined ? MessageStatus.Declined : isError ? MessageStatus.Failed : MessageStatus.Complete,
                     DurationMs = (int)took.Elapsed.TotalMilliseconds,
                     AttachmentsJson = outcome.Files is { Count: > 0 } made ? JsonSerializer.Serialize(made.Select(f => f.Id)) : null,
@@ -1354,6 +1360,45 @@ public sealed partial class ChatService(
     /// <summary>The words around a compaction's summary in the system message.</summary>
     private const string SummaryIntro = "\n\nThe earlier part of this conversation was compacted: its messages are not shown, this summary stands for them.\n<summary>\n";
 
+    /// <summary>The names of the people who wrote on this branch of a room.</summary>
+    private async Task<Dictionary<Guid, string>> RoomAuthorsAsync(IEnumerable<ChatMessage> stored, CancellationToken ct)
+    {
+        var ids = stored.Where(m => m.AuthorId is not null).Select(m => m.AuthorId!.Value).ToHashSet();
+        return await db.Users.AsNoTracking().Where(u => ids.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => string.IsNullOrWhiteSpace(u.DisplayName) ? u.UserName! : u.DisplayName, ct);
+    }
+
+    private async Task<List<string>> RoomPeopleNamesAsync(Conversation conversation, CancellationToken ct) =>
+        [.. (await RoomAccess.PeopleAsync(db, conversation, ct)).Select(x => string.IsNullOrWhiteSpace(x.Person.DisplayName) ? x.Person.UserName! : x.Person.DisplayName)];
+
+    /// <summary>What the model is told of a room: who is in it, how their turns read, and whom it answers.</summary>
+    public static string RoomNote(IReadOnlyList<string> people, string? asking) =>
+        $"This chat is a room several people share: {string.Join(", ", people)}. Each person's message starts with their name in brackets; " +
+        "some are said to the others, not to you. " + (asking is null ? "Answer the last message." : $"You are answering {asking}, who wrote the last message.") +
+        " Do not start your answer with a name in brackets.";
+
+    /// <summary>
+    /// A room's turns as chat templates take them: people's messages one after another (one said to the others, then a
+    /// question) go as one turn, as some templates need the person's and the model's turns to take turns.
+    /// </summary>
+    public static List<(JsonObject Turn, long Weight, ChatMessage Source)> RoomTurns(List<(JsonObject Turn, long Weight, ChatMessage Source)> turns)
+    {
+        var merged = new List<(JsonObject Turn, long Weight, ChatMessage Source)>();
+        foreach (var t in turns)
+        {
+            if (merged.Count > 0 && merged[^1].Turn["role"]?.GetValue<string>() == "user" && t.Turn["role"]?.GetValue<string>() == "user"
+                && merged[^1].Turn["content"] is JsonValue before && t.Turn["content"] is JsonValue now)
+            {
+                var last = merged[^1];
+                last.Turn["content"] = before.GetValue<string>() + "\n\n" + now.GetValue<string>();
+                merged[^1] = (last.Turn, last.Weight + t.Weight, t.Source);
+                continue;
+            }
+            merged.Add(t);
+        }
+        return merged;
+    }
+
     /// <summary>
     /// The branch as the model reads it: from its newest summary on (Compaction.cs), compacted first when the request would
     /// fill the person's share of the context or would not fit at all, and trimmed from the oldest end as a last resort.
@@ -1379,6 +1424,8 @@ public sealed partial class ChatService(
         var imagesDropped = false;
         var mask = await safeguards.MaskerAsync(email, ct);
 
+        // A room: each person's turn says who wrote it.
+        var authors = conversation.IsRoom ? await RoomAuthorsAsync(stored, ct) : null;
         var turns = new List<(JsonObject Turn, long Weight, ChatMessage Source)>();
         foreach (var m in stored.Skip(from))
         {
@@ -1387,6 +1434,10 @@ public sealed partial class ChatService(
                 case "user":
                     // A quoted part of an earlier answer first, then the question, then its files.
                     var text = new StringBuilder(ChatQuotes.ForModel(m.Quote is null ? null : mask(m.Quote), mask(m.Content)));
+                    if (authors is not null)
+                    {
+                        text.Insert(0, $"[{(m.AuthorId is { } a ? authors.GetValueOrDefault(a) : null) ?? "Former member"}]: ");
+                    }
                     var images = new List<ChatAttachment>();
                     var heard = new List<JsonObject>();
                     var mediaWeight = 0L;
@@ -1452,8 +1503,17 @@ public sealed partial class ChatService(
             }
         }
 
+        if (authors is not null)
+        {
+            turns = RoomTurns(turns);
+        }
         var system = $"Today is {DateTimeOffset.UtcNow.ToString("dddd d MMMM yyyy", CultureInfo.InvariantCulture)} (UTC)." + "\n\n" + PreviewNote +
             (lengthNote is null ? "" : "\n\n" + lengthNote);
+        if (authors is not null)
+        {
+            var asking = question.AuthorId is { } who ? authors.GetValueOrDefault(who) : null;
+            system += "\n\n" + RoomNote(await RoomPeopleNamesAsync(conversation, ct), asking);
+        }
         var baseLength = system.Length;
         if (!string.IsNullOrWhiteSpace(toolInstructions))
         {

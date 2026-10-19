@@ -41,8 +41,8 @@ public static partial class CanvasEndpoints
     private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;
 
     /// <summary>A canvas of one of the person's chats, tracked; null when it is not theirs.</summary>
-    private static Task<Canvas?> OwnedAsync(AppDbContext db, Guid id, AppUser me, CancellationToken ct) =>
-        db.Canvases.SingleOrDefaultAsync(c => c.Id == id && db.Conversations.Any(x => x.Id == c.ConversationId && x.UserId == me.Id), ct);
+    private static async Task<Canvas?> OwnedAsync(AppDbContext db, Guid id, AppUser me, CancellationToken ct, Need need = Need.Write) =>
+        await db.Canvases.SingleOrDefaultAsync(c => c.Id == id, ct) is { } canvas && await RoomAccess.FindAsync(db, canvas.ConversationId, me, need, ct) is not null ? canvas : null;
 
     private static object Shape(Canvas c, bool content) => new
     {
@@ -54,7 +54,7 @@ public static partial class CanvasEndpoints
     private static async Task<IResult> ListAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, Canvases canvases, CancellationToken ct)
     {
         var me = await Me(p, users);
-        if (!await db.Conversations.AnyAsync(c => c.Id == id && c.UserId == me.Id, ct))
+        if (await RoomAccess.FindAsync(db, id, me, Need.Read, ct) is null)
         {
             return Results.NotFound();
         }
@@ -64,7 +64,7 @@ public static partial class CanvasEndpoints
     private static async Task<IResult> CreateAsync(Guid id, NewCanvas body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, Canvases canvases, CancellationToken ct)
     {
         var me = await Me(p, users);
-        if (!await db.Conversations.AnyAsync(c => c.Id == id && c.UserId == me.Id, ct))
+        if (await RoomAccess.FindAsync(db, id, me, Need.Write, ct) is null)
         {
             return Results.NotFound();
         }
@@ -82,7 +82,7 @@ public static partial class CanvasEndpoints
     private static async Task<IResult> GetAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
     {
         var me = await Me(p, users);
-        return await OwnedAsync(db, id, me, ct) is { } c ? Results.Ok(Shape(c, true)) : Results.NotFound();
+        return await OwnedAsync(db, id, me, ct, Need.Read) is { } c ? Results.Ok(Shape(c, true)) : Results.NotFound();
     }
 
     private static async Task<IResult> SaveAsync(Guid id, CanvasSave body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, Canvases canvases, CancellationToken ct)

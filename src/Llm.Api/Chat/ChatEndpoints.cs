@@ -132,15 +132,17 @@ public static partial class ChatEndpoints
 
     private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;
 
-    private static Task<Conversation?> Owned(AppDbContext db, Guid id, AppUser me) =>
-        db.Conversations.SingleOrDefaultAsync(c => c.Id == id && c.UserId == me.Id);
+    /// <summary>The chat, when <paramref name="me"/> may do <paramref name="need"/> to it (its owner, or a room's member: RoomAccess).</summary>
+    private static Task<Conversation?> Owned(AppDbContext db, Guid id, AppUser me, Need need) => RoomAccess.FindAsync(db, id, me, need);
 
     /// <summary>The person's chats, newest first; archived ones only when asked for.</summary>
     private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs, string? q = null, bool archived = false,
         Guid? assistant = null)
     {
         var me = await Me(p, users);
-        var query = db.Conversations.AsNoTracking().Where(c => c.UserId == me.Id && (archived ? c.ArchivedAt != null : c.ArchivedAt == null));
+        // Their own chats, and the rooms they are in.
+        var rooms = await RoomAccess.RoomsOfAsync(db, me);
+        var query = db.Conversations.AsNoTracking().Where(c => (c.UserId == me.Id || rooms.Contains(c.Id)) && (archived ? c.ArchivedAt != null : c.ArchivedAt == null));
         if (assistant is { } aid)
         {
             query = query.Where(c => c.AssistantId == aid);
@@ -150,11 +152,12 @@ public static partial class ChatEndpoints
             query = query.Where(c => EF.Functions.ILike(c.Title, "%" + q.Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal) + "%"));
         }
         var list = await query.OrderByDescending(c => c.UpdatedAt).Take(300)
-            .Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.AssistantId, c.Origin, c.OriginPlace, c.CodeArenaTurnUntil }).ToListAsync();
+            .Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.AssistantId, c.Origin, c.OriginPlace, c.CodeArenaTurnUntil, c.Kind, mine = c.UserId == me.Id }).ToListAsync();
         var now = DateTimeOffset.UtcNow;
         return Results.Ok(list.Select(c => new
         {
             c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.AssistantId, c.Origin, c.OriginPlace, answering = jobs.IsAnswering(c.Id), codeArena = c.CodeArenaTurnUntil > now,
+            isRoom = c.Kind == RoomMember.Room, c.mine,
         }));
     }
 
@@ -294,7 +297,7 @@ public static partial class ChatEndpoints
         CancellationToken ct)
     {
         var me = await Me(p, users);
-        if (await Owned(db, id, me) is not { } c)
+        if (await Owned(db, id, me, Need.Read) is not { } c)
         {
             return Results.NotFound();
         }
@@ -307,7 +310,7 @@ public static partial class ChatEndpoints
         // The person's thumbs, and the arena's answers without their models until voted on.
         var quality = await Quality.ChatQuality.ForAsync(db, me.Id, id, messages, ct);
         return Results.Ok(Shape(c, tools, forkedFrom, await MessagesAsync(db, messages, ct, quality), jobs.IsAnswering(id), assistant, quality.Arenas,
-            await QueuedMessages.ListAsync(db, id, ct)));
+            await QueuedMessages.ListAsync(db, id, ct), c.IsRoom ? await RoomEndpoints.BriefAsync(db, c, me, jobs, ct) : null));
     }
 
     /// <summary>
@@ -319,9 +322,14 @@ public static partial class ChatEndpoints
         var ids = messages.SelectMany(m => ChatService.ParseIds(m.AttachmentsJson)).ToHashSet();
         var files = await db.ChatAttachments.AsNoTracking().Where(a => ids.Contains(a.Id))
             .Select(a => new { a.Id, a.FileName, a.Size, a.Truncated, a.Kind, a.ContentType, original = a.Kind != "image" && a.Data != null }).ToDictionaryAsync(a => a.Id, ct);
+        // Who wrote each (a room's people), by name only: never their email.
+        var authors = messages.Where(m => m.AuthorId is not null).Select(m => m.AuthorId!.Value).ToHashSet();
+        var names = await db.Users.AsNoTracking().Where(u => authors.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => string.IsNullOrWhiteSpace(u.DisplayName) ? u.UserName! : u.DisplayName, ct);
         return messages.Select(m => (object)new
         {
             m.Id, m.ParentId, m.Role, m.Content, m.Quote, m.Reasoning, m.ToolName, m.ToolCallId,
+            author = m.AuthorId is { } a ? new { id = a, name = names.GetValueOrDefault(a) ?? "Former member" } : null,
+            m.ForPeople, m.Mentions,
             toolCalls = m.ToolCallsJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(m.ToolCallsJson),
             attachments = ChatService.ParseIds(m.AttachmentsJson).Where(files.ContainsKey).Select(a => files[a]),
             details = (quality is null ? m.DetailsJson : quality.Details(m)) is { } details ? JsonSerializer.Deserialize<JsonElement>(details) : (JsonElement?)null,
@@ -340,9 +348,11 @@ public static partial class ChatEndpoints
     /// <param name="arenas">The chat's comparisons of two models (arena mode).</param>
     /// <param name="queued">Messages waiting for the answer to end (QueuedMessages).</param>
     private static object Shape(Conversation c, IReadOnlyList<string> tools, object? forkedFrom, IEnumerable<object> messages, bool answering, object? assistant = null,
-        object? arenas = null, IEnumerable<object>? queued = null) =>
+        object? arenas = null, IEnumerable<object>? queued = null, object? room = null) =>
         new
         {
+            // A room's: the person's role, its people and its settings (RoomEndpoints).
+            room,
             c.Id, c.Title, c.Thinking, tools, useArgus = tools.Contains("argus"), c.Model, c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens,
             c.CurrentLeafId, c.ArchivedAt, forkedFrom, assistant, c.CreatedAt, c.UpdatedAt, answering, messages, arenas = arenas ?? Array.Empty<object>(), queued = queued ?? [],
             c.Origin, c.OriginPlace,
@@ -354,7 +364,7 @@ public static partial class ChatEndpoints
         ToolRegistry registry, AccessService access, ModelPolicy policy, SmallModel small, CancellationToken ct)
     {
         var me = await Me(p, users);
-        if (await Owned(db, id, me) is not { } c)
+        if (await Owned(db, id, me, Need.Manage) is not { } c)
         {
             return Results.NotFound();
         }
@@ -398,7 +408,7 @@ public static partial class ChatEndpoints
     private static async Task<IResult> ForkAsync(Guid id, ForkRequest? body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db)
     {
         var me = await Me(p, users);
-        if (await Owned(db, id, me) is not { } c)
+        if (await Owned(db, id, me, Need.Read) is not { } c)
         {
             return Results.NotFound();
         }
@@ -423,13 +433,18 @@ public static partial class ChatEndpoints
     }
 
     /// <summary>Yes or no to a tool call waiting for the person ("ask before running").</summary>
-    private static async Task<IResult> DecideAsync(Guid id, string callId, ToolDecision body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ToolApprovals approvals,
+    private static async Task<IResult> DecideAsync(Guid id, string callId, ToolDecision body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ToolApprovals approvals, AnswerJobs jobs,
         CancellationToken ct)
     {
         var me = await Me(p, users);
-        if (await Owned(db, id, me) is null)
+        if (await Owned(db, id, me, Need.Write) is not { } room)
         {
             return Results.NotFound();
+        }
+        // In a room, the answer is its asker's: they (or the room's owner) decide on it.
+        if (room.IsRoom && room.UserId != me.Id && jobs.Find(id)?.Person != me.Id)
+        {
+            return AuthEndpoints.Problem(403, "not_yours", "That answer is someone else's in this room: they (or the room's owner) decide on it.");
         }
         return await approvals.DecideAnywhereAsync(id, callId, body.Allow, ct)
             ? Results.NoContent()
@@ -440,7 +455,7 @@ public static partial class ChatEndpoints
     private static async Task<IResult> LeafAsync(Guid id, LeafChange body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db)
     {
         var me = await Me(p, users);
-        if (await Owned(db, id, me) is not { } c)
+        if (await Owned(db, id, me, Need.Manage) is not { } c)
         {
             return Results.NotFound();
         }
@@ -463,7 +478,7 @@ public static partial class ChatEndpoints
     private static async Task<IResult> DeleteAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, Retention.Retention retention)
     {
         var me = await Me(p, users);
-        if (await Owned(db, id, me) is null)
+        if (await Owned(db, id, me, Need.Manage) is null)
         {
             return Results.NotFound();
         }
@@ -476,7 +491,7 @@ public static partial class ChatEndpoints
         Safeguards.Safeguards safeguards, ModelPolicy policy, ChatModels models, SmallModel small, ToolRegistry registry, AccessService access)
     {
         var me = await Me(http.User, users);
-        if (await Owned(db, id, me) is not { } c)
+        if (await Owned(db, id, me, Need.Write) is not { } c)
         {
             http.Response.StatusCode = StatusCodes.Status404NotFound;
             return;
@@ -535,7 +550,7 @@ public static partial class ChatEndpoints
             var first = next == 0;
             var question = new ChatMessage
             {
-                ConversationId = c.Id, ParentId = parent, Role = "user", Sequence = next + 1, Content = text, Quote = quote,
+                ConversationId = c.Id, ParentId = parent, Role = "user", Sequence = next + 1, Content = text, Quote = quote, AuthorId = me.Id,
                 AttachmentsJson = attachments.Length > 0 ? JsonSerializer.Serialize(attachments) : null,
             };
             db.ChatMessages.Add(question);
@@ -554,7 +569,7 @@ public static partial class ChatEndpoints
     private static async Task RegenerateAsync(Guid id, HttpContext http, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs, IOptionsMonitor<ChatOptions> chat, ChatModels models)
     {
         var me = await Me(http.User, users);
-        if (await Owned(db, id, me) is not { } c)
+        if (await Owned(db, id, me, Need.Write) is not { } c)
         {
             http.Response.StatusCode = StatusCodes.Status404NotFound;
             return;
@@ -667,6 +682,10 @@ public static partial class ChatEndpoints
             throw;
         }
         job.Emit(new { type = "question", id = question.Id, parentId = question.ParentId });
+        if (c.IsRoom)
+        {
+            http.RequestServices.GetRequiredService<RoomHub>().Said(c.Id, question.Id);
+        }
         if (titled)
         {
             job.Emit(new { type = "title", title = c.Title });
@@ -689,7 +708,7 @@ public static partial class ChatEndpoints
     private static async Task CompactAsync(Guid id, HttpContext http, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs)
     {
         var me = await Me(http.User, users);
-        if (await Owned(db, id, me) is not { } c)
+        if (await Owned(db, id, me, Need.Write) is not { } c)
         {
             http.Response.StatusCode = StatusCodes.Status404NotFound;
             return;
@@ -718,7 +737,7 @@ public static partial class ChatEndpoints
     private static async Task WatchAsync(Guid id, HttpContext http, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs)
     {
         var me = await Me(http.User, users);
-        if (await Owned(db, id, me) is null)
+        if (await Owned(db, id, me, Need.Read) is null)
         {
             http.Response.StatusCode = StatusCodes.Status404NotFound;
             return;
@@ -735,9 +754,14 @@ public static partial class ChatEndpoints
     private static async Task<IResult> StopAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs, CancellationToken ct)
     {
         var me = await Me(p, users);
-        if (await Owned(db, id, me) is null)
+        if (await Owned(db, id, me, Need.Write) is not { } room)
         {
             return Results.NotFound();
+        }
+        // In a room, the answer is its asker's: they (or the room's owner) decide on it.
+        if (room.IsRoom && room.UserId != me.Id && jobs.Find(id)?.Person != me.Id)
+        {
+            return AuthEndpoints.Problem(403, "not_yours", "That answer is someone else's in this room: they (or the room's owner) decide on it.");
         }
         return await jobs.StopAnywhereAsync(id, ct) ? Results.Accepted() : AuthEndpoints.Problem(409, "not_answering", "This chat is not answering.");
     }
@@ -746,7 +770,7 @@ public static partial class ChatEndpoints
     private static async Task<IResult> SummaryAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ChatService chat, CancellationToken ct)
     {
         var me = await Me(p, users);
-        if (await Owned(db, id, me) is not { } c)
+        if (await Owned(db, id, me, Need.Read) is not { } c)
         {
             return Results.NotFound();
         }
@@ -768,7 +792,7 @@ public static partial class ChatEndpoints
     private static async Task<IResult> StampAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs, QueuedMessages queue, CancellationToken ct)
     {
         var me = await Me(p, users);
-        var c = await db.Conversations.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && x.UserId == me.Id, ct);
+        var c = await RoomAccess.FindAsync(db, id, me, Need.Read, ct);
         if (c is null)
         {
             return Results.NotFound();
@@ -790,9 +814,14 @@ public static partial class ChatEndpoints
     private static async Task<IResult> HurryAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs, CancellationToken ct)
     {
         var me = await Me(p, users);
-        if (await Owned(db, id, me) is null)
+        if (await Owned(db, id, me, Need.Write) is not { } room)
         {
             return Results.NotFound();
+        }
+        // In a room, the answer is its asker's: they (or the room's owner) decide on it.
+        if (room.IsRoom && room.UserId != me.Id && jobs.Find(id)?.Person != me.Id)
+        {
+            return AuthEndpoints.Problem(403, "not_yours", "That answer is someone else's in this room: they (or the room's owner) decide on it.");
         }
         return await jobs.HurryAnywhereAsync(id, ct) ? Results.Accepted() : AuthEndpoints.Problem(409, "not_answering", "This chat is not answering.");
     }

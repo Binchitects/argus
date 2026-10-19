@@ -27,7 +27,7 @@ public static partial class ChatEndpoints
     {
         var ct = http.RequestAborted;
         var me = await Me(http.User, users);
-        if (await Owned(db, id, me) is not { } c)
+        if (await Owned(db, id, me, Need.Write) is not { } c)
         {
             http.Response.StatusCode = StatusCodes.Status404NotFound;
             return;
@@ -112,7 +112,7 @@ public static partial class ChatEndpoints
             var first = next == 0;
             var question = new ChatMessage
             {
-                ConversationId = c.Id, ParentId = parent, Role = "user", Sequence = next + 1, Content = text, Quote = quote,
+                ConversationId = c.Id, ParentId = parent, Role = "user", Sequence = next + 1, Content = text, Quote = quote, AuthorId = me.Id,
                 AttachmentsJson = attachments.Length > 0 ? JsonSerializer.Serialize(attachments) : null,
             };
             db.ChatMessages.Add(question);

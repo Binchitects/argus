@@ -199,9 +199,10 @@ public sealed class QueuedMessagesTests(AppFixture app)
         {
             // As a restart leaves them: waiting, with no answer running.
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var owner = db.Conversations.Where(c => c.Id == id).Select(c => c.UserId).Single();
             db.QueuedMessages.AddRange(
-                new QueuedMessage { ConversationId = id, Content = "Left waiting", Position = 1 },
-                new QueuedMessage { ConversationId = id, Content = "And after it", Position = 2 });
+                new QueuedMessage { ConversationId = id, Content = "Left waiting", Position = 1, UserId = owner },
+                new QueuedMessage { ConversationId = id, Content = "And after it", Position = 2, UserId = owner });
             await db.SaveChangesAsync();
         }
         Assert.Equal(["Left waiting", "And after it"], Queued(await ConversationAsync(b, id)));

@@ -160,6 +160,7 @@ export function QuestionTurn({
   onSwitch,
   onEdit,
   onJumpToQuote,
+  room,
 }: {
   m: Message
   siblings: Message[]
@@ -167,6 +168,8 @@ export function QuestionTurn({
   onSwitch: (id: string) => void
   onEdit?: (m: Message, text: string, quote: string | null) => void
   onJumpToQuote?: (m: Message) => boolean
+  /** In a room: whose it is (the person's own on the right, others' on the left, with their names). */
+  room?: { me: string }
 }) {
   const [editing, setEditing] = useState<string | null>(null)
   const [editQuote, setEditQuote] = useState<Quote | null>(null)
@@ -184,7 +187,18 @@ export function QuestionTurn({
   const typed = m.files ? m.content : typedOf(m.content)
   const files = m.files ?? attachedOf(m.content)
   return (
-    <section className="group/q flex animate-enter scroll-mt-4 flex-col items-end gap-1 outline-none" aria-label="You" data-question={m.id} tabIndex={-1}>
+    <section
+      className={cn('group/q flex animate-enter scroll-mt-4 flex-col gap-1 outline-none', room && m.author?.id !== room.me ? 'items-start' : 'items-end')}
+      aria-label={room ? (m.author?.id === room.me ? 'You' : (m.author?.name ?? 'Former member')) : 'You'}
+      data-question={m.id}
+      tabIndex={-1}
+    >
+      {room && (
+        <p className="px-1 text-xs text-muted-foreground">
+          {m.author?.id === room.me ? 'You' : (m.author?.name ?? 'Former member')}
+          {m.forPeople && <span> · to the room</span>}
+        </p>
+      )}
       {m.attachments.length > 0 && (
         <ul className="flex max-w-[85%] flex-wrap justify-end gap-2" aria-label="Attachments">
           {m.attachments.map((a) =>

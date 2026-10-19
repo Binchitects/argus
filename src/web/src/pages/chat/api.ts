@@ -50,7 +50,7 @@ export interface QueueState {
 }
 
 /** Queues a message to send when the answer ends (at once when the chat is not answering). */
-export const queueMessage = (id: string, body: { content: string; attachments: string[]; quote?: string }) =>
+export const queueMessage = (id: string, body: { content: string; attachments: string[]; quote?: string; forPeople?: boolean }) =>
   api<QueueState>(`/api/chat/conversations/${id}/queue`, { body })
 
 /** Takes a queued message out of line. */
@@ -169,3 +169,41 @@ export const sharedQuery = (shareId: string) => ({
 
 /** Where a shared chat opens. */
 export const shareUrl = (shareId: string) => `${window.location.origin}/shared/${shareId}`
+
+/** Makes a room: a new one with these people, or (from) one of the person's chats as it is. */
+export const createRoom = (body: { title?: string; userIds?: string[]; groupIds?: string[]; role?: 'member' | 'viewer'; from?: string }) =>
+  api<{ id: string; title: string }>('/api/rooms', { body })
+
+export const addToRoom = (id: string, body: { userIds?: string[]; groupIds?: string[]; role?: 'member' | 'viewer' }) => api(`/api/rooms/${id}/members`, { body })
+
+export const removeFromRoom = (id: string, userId: string) => api(`/api/rooms/${id}/members/${userId}`, { method: 'DELETE' })
+
+export const removeGroupFromRoom = (id: string, groupId: string) => api(`/api/rooms/${id}/groups/${groupId}`, { method: 'DELETE' })
+
+export const setRoomRole = (id: string, userId: string, role: 'member' | 'viewer') => api(`/api/rooms/${id}/members/${userId}`, { method: 'PUT', body: { role } })
+
+export const handOverRoom = (id: string, userId: string) => api(`/api/rooms/${id}/owner`, { method: 'PUT', body: { userId } })
+
+export const updateRoom = (id: string, body: { answerMode?: 'every' | 'mention'; membersInvite?: boolean }) => api(`/api/rooms/${id}`, { method: 'PATCH', body })
+
+export const roomTyping = (id: string) => api(`/api/rooms/${id}/typing`, { body: {} })
+
+/** A room's live events (who writes, who is being answered, who is here), until aborted. */
+export type RoomEvent =
+  | { type: 'message'; id: string }
+  | { type: 'answering'; by: string }
+  | { type: 'answered' }
+  | { type: 'typing'; by: string }
+  | { type: 'presence'; here: string[] }
+  | { type: 'members' }
+  | { type: 'settings' }
+
+export const watchRoom = (id: string, on: (e: RoomEvent) => void, signal: AbortSignal) =>
+  streamChat(`/api/rooms/${id}/events`, null, on as unknown as (e: ChatEvent) => void, signal)
+
+/** People to add: by name or username (never their email). */
+export const sharingPeopleQuery = (q: string) => ({
+  queryKey: ['sharing', 'people', q] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ id: string; name: string; userName: string }[]>(`/api/sharing/people?q=${encodeURIComponent(q)}`, { signal }),
+  enabled: q.trim().length > 0,
+})

@@ -74,6 +74,10 @@ export interface Message {
   parentId: string | null
   role: 'user' | 'assistant' | 'tool'
   content: string
+  /** Who wrote it (a question) or whose question it answers; null in a room: a former member. */
+  author?: { id: string; name: string } | null
+  /** A room's message for its people only: not answered. */
+  forPeople?: boolean
   /** A question: the part of an earlier answer it quotes (its Markdown), shown above it; the model reads it before the question. */
   quote?: string | null
   reasoning: string | null
@@ -210,6 +214,23 @@ export interface ConversationSummary {
   originPlace?: string | null
   /** Code Arena is answering in it: what the person sends waits in the queue until its turn ends. */
   codeArena?: boolean
+  /** A room: a chat several people share. */
+  isRoom?: boolean
+  /** The person's own (false: a room they are in). */
+  mine?: boolean
+}
+
+export type RoomRole = 'owner' | 'member' | 'viewer'
+
+/** A room's people and settings, as the chat page shows them. */
+export interface RoomBrief {
+  role: RoomRole
+  answerMode: 'every' | 'mention'
+  membersInvite: boolean
+  /** Whose question is being answered now. */
+  answeringFor?: string | null
+  members: { id: string; name: string; role: RoomRole }[]
+  groups: { id: string; name: string; role: RoomRole }[]
 }
 
 export type Reach = 'Private' | 'Groups' | 'Company'
@@ -321,6 +342,8 @@ export interface Conversation extends ConversationSummary {
   messages: Message[]
   /** The chat's comparisons of two models. */
   arenas?: ArenaMatch[]
+  /** A room's people and settings (null: the person's own chat). */
+  room?: RoomBrief | null
   /** Messages sent while it answered, waiting on the server for their turn, first in line first. */
   queued?: QueuedMessage[]
 }
@@ -329,6 +352,9 @@ export interface Conversation extends ConversationSummary {
 export interface QueuedMessage {
   id: string
   content: string
+  /** Who sent it (in a room, maybe someone else). */
+  userId?: string
+  forPeople?: boolean
   quote?: string | null
   attachments: Attachment[]
   createdAt: string
