@@ -332,8 +332,12 @@ class SecretsAndRoutesTests(unittest.TestCase):
         lists = re.findall(r'range list ((?:"[^"]+" ?)+)', ingress)
         helm_app = set(re.findall(r'"([^"]+)"', lists[0]))
         self.assertEqual(traefik_app, helm_app)
-        speech_rule = re.search(r"^\s+gateway-speech:\n\s+rule: (.*)$", routes, re.M).group(1)
-        self.assertEqual(set(re.findall(r"Path\(`([^`]+)`\)", speech_rule)), set(re.findall(r'"([^"]+)"', lists[1])))
+        # The gateway's paths the app takes (speech and pictures, and asking a model through the key's line).
+        gateway = set()
+        for name in ("gateway-speech", "gateway-completions"):
+            rule = re.search(rf"^\s+{name}:\n\s+rule: (.*)$", routes, re.M).group(1)
+            gateway |= set(re.findall(r"Path\(`([^`]+)`\)", rule))
+        self.assertEqual(gateway, set(re.findall(r'"([^"]+)"', lists[1])))
 
 
 class StaticReaderTests(unittest.TestCase):

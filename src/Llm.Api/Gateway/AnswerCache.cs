@@ -403,6 +403,7 @@ public static class AnswerCacheEndpoints
         services.Configure<AnswerCacheOptions>(config.GetSection("Gateway"));
         services.AddSingleton<AnswerCacheState>();
         services.AddScoped<AnswerCache>();
+        services.AddSingleton<KeyLine>();
         services.AddHttpClient(AnswerCache.Client, (sp, c) =>
         {
             c.BaseAddress = new Uri(sp.GetRequiredService<IOptions<LiteLlmOptions>>().Value.Url);
@@ -420,6 +421,13 @@ public static class AnswerCacheEndpoints
             .AllowAnonymous("Traefik's health check of the answer cache: its mode only.");
         app.MapPost("/v1/chat/completions", ProxyAsync).AllowAnonymous("The OpenAI-style API: the API key is checked.").DisableAntiforgery();
         app.MapPost("/chat/completions", ProxyAsync).AllowAnonymous("The OpenAI-style API: the API key is checked.").DisableAntiforgery();
+        // The other ways agents ask (Anthropic's messages, OpenAI's responses and completions): through the
+        // key's line too, not cached.
+        foreach (var path in new[] { "/v1/messages", "/messages", "/v1/responses", "/responses", "/v1/completions", "/completions" })
+        {
+            // A browser's preflight (OPTIONS) is passed on as it is.
+            app.MapMethods(path, ["POST", "OPTIONS"], ProxyAsync).AllowAnonymous("The OpenAI- and Anthropic-style API: the API key is checked.").DisableAntiforgery();
+        }
 
         var me = app.MapGroup("/api/account/answer-cache").PersonOnly();
         me.MapGet("", MineAsync);
@@ -476,7 +484,7 @@ public static class AnswerCacheEndpoints
         return Results.Ok(Mine(me, options.CurrentValue));
     }
 
-    private static async Task ProxyAsync(HttpContext http, AnswerCache cache, IHttpClientFactory factory)
+    private static async Task ProxyAsync(HttpContext http, AnswerCache cache, IHttpClientFactory factory, KeyLine line)
     {
         var ct = http.RequestAborted;
         var request = http.Request;
@@ -487,11 +495,14 @@ public static class AnswerCacheEndpoints
         }
         var auth = request.Headers.Authorization.ToString();
         var key = auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? auth[7..].Trim() : null;
+        // Anthropic's clients send the key as x-api-key.
+        key ??= request.Headers["x-api-key"].ToString() is { Length: > 0 } x ? x.Trim() : null;
+        var completions = request.Path.Value?.EndsWith("/chat/completions", StringComparison.Ordinal) == true;
         var control = request.Headers.CacheControl.ToString();
         byte[]? body = null;
         JsonObject? json = null;
         CacheLookup? lookup = null;
-        if (cache.Options.On && key is { Length: > 0 } && request.ContentLength is > 0 and <= MostCachedRequest && !control.Contains("no-store", StringComparison.OrdinalIgnoreCase))
+        if (completions && cache.Options.On && key is { Length: > 0 } && request.ContentLength is > 0 and <= MostCachedRequest && !control.Contains("no-store", StringComparison.OrdinalIgnoreCase))
         {
             body = new byte[request.ContentLength.Value];
             var read = 0;
@@ -528,7 +539,16 @@ public static class AnswerCacheEndpoints
             return;
         }
 
-        using var forward = new HttpRequestMessage(HttpMethod.Post, new Uri(request.Path + request.QueryString, UriKind.Relative))
+        // The key's turn: as many at once as it may have, the rest waiting in order (never refused at once).
+        using var place = key is { Length: > 0 } ? await line.EnterAsync(key, ct) : null;
+        if (key is { Length: > 0 } && place is null)
+        {
+            http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            http.Response.Headers.RetryAfter = "30";
+            await http.Response.WriteAsJsonAsync(new { error = new { message = $"This API key's requests waited longer than {line.Timeout.TotalMinutes:0} minutes for their turn: {line.Places} are answered at once. Try again in a moment.", type = "rate_limit_error", code = "429" } }, ct);
+            return;
+        }
+        using var forward = new HttpRequestMessage(new HttpMethod(request.Method), new Uri(request.Path + request.QueryString, UriKind.Relative))
         {
             Content = body is not null ? new ByteArrayContent(body) : new StreamContent(request.Body),
         };

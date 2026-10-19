@@ -22,10 +22,11 @@ http:
       service: litellm
       middlewares: [secure]
       tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}
-    # Chat completions with keys go by the app while its answer cache is on
-    # (Settings → API keys), and straight to LiteLLM otherwise or when the app is down.
+    # The requests that ask a model with a key go by the app: each key's line (as many answered at
+    # once as Chat:ApiRequestsPerKey, the rest waiting their turn rather than refused) and the answer
+    # cache; straight to LiteLLM when the app is down.
     gateway-completions:
-      rule: Host(`gateway.{{ $domain }}`) && (Path(`/v1/chat/completions`) || Path(`/chat/completions`))
+      rule: Host(`gateway.{{ $domain }}`) && (Path(`/v1/chat/completions`) || Path(`/chat/completions`) || Path(`/v1/messages`) || Path(`/messages`) || Path(`/v1/responses`) || Path(`/responses`) || Path(`/v1/completions`) || Path(`/completions`))
       service: completions
       middlewares: [secure]
       tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}

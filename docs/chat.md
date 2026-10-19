@@ -986,9 +986,14 @@ their turn:
   Wan2.2-TI2V-5B just now: … loads again as soon as it is done"), then goes on.
 - **Each conversation keeps its slot** in the engine, so the next turn reads
   only what is new from the cache (see [admin.md](admin.md#the-token-cache)).
-- **API keys** (Qwen Code, IDEs, scripts) have at most two requests at once
-  (API requests at once, per key); a third at the same time gets HTTP 429 and
-  can retry. It applies to every key, within seconds of a change.
+- **API keys** (coding agents, IDEs, scripts) have four requests answered at
+  once (API requests at once, per key); more wait their turn in the order they
+  came and are answered as one ends, never refused at once, so an agent that
+  sends several at the same time (sub-agents, tools side by side) is not slowed
+  by retries. Only a request that waits past ten minutes (API request's longest
+  wait) gets HTTP 429 with `Retry-After`. It holds for the OpenAI-style
+  (`/v1/chat/completions`, `/v1/responses`, `/v1/completions`) and the
+  Anthropic-style (`/v1/messages`) requests alike, within seconds of a change.
 - **Rate limits** hold each key to so many requests and tokens a minute, when
   an admin sets them: the company's (Settings → API keys), a group's, or a
   person's own. Past one, a request gets HTTP 429 with `Retry-After` and the

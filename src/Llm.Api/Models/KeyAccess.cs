@@ -16,8 +16,12 @@ namespace Llm.Api.Models;
 /// </summary>
 public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, ChatModels models, ILiteLlm gateway, IOptionsMonitor<ChatOptions> chat, Access.AccessService access)
 {
-    /// <summary>Requests a key may have at once; null: no limit.</summary>
-    public int? MaxParallel => chat.CurrentValue.ApiRequestsPerKey > 0 ? chat.CurrentValue.ApiRequestsPerKey : null;
+    /// <summary>
+    /// LiteLLM's own limit of a key's requests at once; null: none. The app's line (KeyLine) holds a key to
+    /// Chat:ApiRequestsPerKey and has the rest wait their turn; LiteLLM's limit, four times that, is the
+    /// safety net for what reaches it without the app (its failover, the paths it does not take).
+    /// </summary>
+    public int? MaxParallel => chat.CurrentValue.ApiRequestsPerKey > 0 ? chat.CurrentValue.ApiRequestsPerKey * 4 : null;
 
     /// <summary>LiteLLM's word for "no model": an empty list would mean every model.</summary>
     public const string NoModels = "no-default-models";

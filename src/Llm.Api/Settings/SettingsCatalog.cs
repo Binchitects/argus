@@ -158,8 +158,10 @@ public static class SettingsCatalog
             { Default = "0", Min = 0, Max = 256, Optional = false },
         new("Chat:QueueTimeout", Chat, "Longest wait in line", "An answer that has waited this long for its turn gives up and says the model is busy.", SettingType.Duration, SettingScope.Live)
             { Default = "00:10:00", Unit = "minutes", Min = 1, Max = 120, Optional = false },
-        new("Chat:ApiRequestsPerKey", Chat, "API requests at once, per key", "Requests one API key (Qwen Code, an IDE, a script) may have at the gateway at once; more are refused (HTTP 429) until one ends. 0: no limit.", SettingType.WholeNumber, SettingScope.Live)
-            { Default = "2", Min = 0, Max = 64, Optional = false },
+        new("Chat:ApiRequestsPerKey", Chat, "API requests at once, per key", "Requests one API key (a coding agent, an IDE, a script) has answered at once; more wait their turn, in order, and go on as one ends (not refused). 0: no limit.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "4", Min = 0, Max = 64, Optional = false },
+        new("Chat:ApiQueueTimeout", Chat, "API request's longest wait", "How long one API key's request waits for its turn (above) before it is refused with 429.", SettingType.Duration, SettingScope.Live)
+            { Default = "00:10:00", Unit = "minutes", Min = 1, Max = 120, Optional = false },
         new("Gateway:AnswerCache", Api, "Answer cache", "A repeated identical request to /v1/chat/completions with the same API key and model is answered from the app's database instead of the model: it costs nothing, and the response says x-arena-cache: hit. For pipelines and FAQ bots that ask the same thing; the chat never uses it. opt-in: each person turns it on for their key (Your account → API key); all: every key; off: every request goes to the model.", SettingType.Choice, SettingScope.Live)
             { Default = "off", Options = ["off", "opt-in", "all"], Optional = false },
         new("Gateway:AnswerCacheTtl", Api, "Keep cached answers for", "An answer older than this is asked of the model again.", SettingType.Duration, SettingScope.Live)

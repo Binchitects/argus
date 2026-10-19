@@ -120,21 +120,22 @@ public sealed class FairUseTests(AppFixture app)
     }
 
     [Fact]
-    public async Task Api_keys_carry_a_limit_of_requests_at_once_and_follow_a_change_to_it()
+    public async Task Api_keys_carry_the_gateways_safety_limit_and_follow_a_change_to_it()
     {
         var gateway = new FakeGateway();
         await using var f = app.Create(app.ConnectionStringFor("fairkeys_" + Guid.NewGuid().ToString("N")[..8]), gateway);
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var name = "k" + Guid.NewGuid().ToString("N")[..10];
         await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" });
-        Assert.Equal(2, gateway.KeysOf($"{name}@example.test").Single().MaxParallel);
+        // The app's line answers 4 at once and has the rest wait; LiteLLM's own limit is the net behind it.
+        Assert.Equal(16, gateway.KeysOf($"{name}@example.test").Single().MaxParallel);
 
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative),
             new { changes = new[] { new { key = "Chat:ApiRequestsPerKey", value = "5" } } }));
-        for (var i = 0; i < 100 && gateway.KeysOf($"{name}@example.test").Single().MaxParallel != 5; i++)
+        for (var i = 0; i < 100 && gateway.KeysOf($"{name}@example.test").Single().MaxParallel != 20; i++)
         {
             await Task.Delay(100);
         }
-        Assert.Equal(5, gateway.KeysOf($"{name}@example.test").Single().MaxParallel);
+        Assert.Equal(20, gateway.KeysOf($"{name}@example.test").Single().MaxParallel);
     }
 }

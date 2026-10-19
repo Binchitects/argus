@@ -278,12 +278,12 @@ def main():
     rec("key", "key gets a completion from the model", code == 200 and bool(content.strip()), f"HTTP {code}")
     code, _ = api_key_call("sk-not-a-real-key")
     rec("key", "an invalid key is refused", code in (400, 401, 403), f"HTTP {code}")
-    # Fair use: a key has at most Chat:ApiRequestsPerKey requests at once (2 by
-    # default); a third at the same time is refused, and nothing else is.
+    # Fair use: a key has Chat:ApiRequestsPerKey requests answered at once (4 by
+    # default); more wait their turn and are answered too, never refused at once.
     from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(3) as pool:
-        codes = sorted(c for c, _ in pool.map(lambda _: chat(key, "Count from 1 to 60, one number per line.", max_tokens=200), range(3)))
-    rec("key", "a key's third request at once is refused (429), the first two answered", codes == [200, 200, 429], f"{codes}")
+    with ThreadPoolExecutor(6) as pool:
+        codes = sorted(c for c, _ in pool.map(lambda _: chat(key, "Count from 1 to 30, one number per line.", max_tokens=120), range(6)))
+    rec("key", "a key's six requests at once are all answered, those beyond its places in turn", codes == [200] * 6, f"{codes}")
     # Access per model (Admin -> Models): given to admins only, a model leaves
     # the person's key (the app keeps each key's model list at the gateway) and
     # is refused; given back, it returns.

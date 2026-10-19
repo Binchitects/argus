@@ -70,8 +70,11 @@ public sealed class ChatOptions
     /// <summary>Longest an answer waits in line before it gives up.</summary>
     public TimeSpan QueueTimeout { get; set; } = TimeSpan.FromMinutes(10);
 
-    /// <summary>Requests one API key may have at the gateway at once (LiteLLM refuses more with 429); 0: no limit.</summary>
-    public int ApiRequestsPerKey { get; set; } = 2;
+    /// <summary>Requests one API key has answered at once; more wait their turn (KeyLine); 0: no limit.</summary>
+    public int ApiRequestsPerKey { get; set; } = 4;
+
+    /// <summary>Longest one API key's request waits for its turn before it is refused (429).</summary>
+    public TimeSpan ApiQueueTimeout { get; set; } = TimeSpan.FromMinutes(10);
 
     /// <summary>GitLab as people's browsers reach it, for links from Argus's answers; empty: ARGUS_GITLAB_URL.</summary>
     public string? GitlabLinkUrl { get; set; }
