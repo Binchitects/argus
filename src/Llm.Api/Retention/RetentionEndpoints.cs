@@ -15,7 +15,7 @@ public static class RetentionEndpoints
 {
     public static void MapRetention(this IEndpointRouteBuilder app)
     {
-        var admin = app.MapGroup("/api/admin/people/{id:guid}").RequirePermissions(Llm.Core.Access.Permissions.ExportPerson, Llm.Core.Access.Permissions.LegalHoldManage);
+        var admin = app.MapGroup("/api/admin/people/{id:guid}").RequirePermissions(Llm.Core.Access.Permissions.ExportPerson, Llm.Core.Access.Permissions.LegalHoldManage).ScopedToGroups();
         admin.MapPut("/legal-hold", HoldAsync);
         admin.MapGet("/export", AdminExportAsync);
         app.MapGet("/api/account/export", OwnExportAsync).PersonOnly();

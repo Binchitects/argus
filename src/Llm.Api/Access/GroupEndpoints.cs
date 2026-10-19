@@ -39,7 +39,7 @@ public static class GroupEndpoints
 
     public static void MapGroups(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/groups").RequirePermissions(Llm.Core.Access.Permissions.PeopleRead, Llm.Core.Access.Permissions.GroupsManage);
+        var g = app.MapGroup("/api/admin/groups").RequirePermissions(Llm.Core.Access.Permissions.PeopleRead, Llm.Core.Access.Permissions.GroupsManage).ScopedToGroups();
         g.MapGet("", ListAsync);
         g.MapPost("", CreateAsync);
         g.MapGet("/directory", DirectoryAsync);
@@ -52,9 +52,13 @@ public static class GroupEndpoints
         g.MapDelete("/{id:guid}/members/{userId:guid}", RemoveMemberAsync);
     }
 
-    private static async Task<IResult> ListAsync(AppDbContext db)
+    private static async Task<IResult> ListAsync(AppDbContext db, HttpContext http)
     {
         var groups = await db.Groups.AsNoTracking().OrderBy(x => x.Name).ToListAsync();
+        if (http.Items[EndpointAccess.ReachItem] is AccessService.Reach reach)
+        {
+            groups = [.. groups.Where(x => reach.Groups.Contains(x.Id))];
+        }
         var counts = await db.GroupMembers.AsNoTracking().GroupBy(m => m.GroupId).Select(x => new { x.Key, n = x.Count() }).ToDictionaryAsync(x => x.Key, x => x.n);
         var directoryPeople = groups.Any(x => x.Directory is not null)
             ? await db.Users.AsNoTracking().Where(u => u.DirectoryGroups.Count > 0).Select(u => u.DirectoryGroups).ToListAsync()

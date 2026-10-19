@@ -289,6 +289,8 @@ function GiveDialog({ role, onClose }: { role: AccessOverview['roles'][number]; 
   const [kind, setKind] = useState<SubjectKind>('Group')
   const [id, setId] = useState('')
   const [until, setUntil] = useState('')
+  const [only, setOnly] = useState('all')
+  const groups = useQuery(groupsQuery)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const give = async () => {
@@ -296,7 +298,13 @@ function GiveDialog({ role, onClose }: { role: AccessOverview['roles'][number]; 
     setError(null)
     try {
       await api('/api/admin/access/assignments', {
-        body: { roleId: role.id, subjectKind: kind, subjectId: kind === 'Everyone' ? null : id, expiresAt: until ? new Date(until).toISOString() : null },
+        body: {
+          roleId: role.id,
+          subjectKind: kind,
+          subjectId: kind === 'Everyone' ? null : id,
+          expiresAt: until ? new Date(until).toISOString() : null,
+          ...(only !== 'all' && { scope: { groups: [only], repos: [] } }),
+        },
       })
       await queryClient.invalidateQueries({ queryKey: ['admin', 'access'] })
       onClose()
@@ -316,6 +324,21 @@ function GiveDialog({ role, onClose }: { role: AccessOverview['roles'][number]; 
         <div className="grid gap-4">
           {error && <Alert variant="destructive">{error}</Alert>}
           <SubjectPicker kind={kind} setKind={setKind} id={id} setId={setId} />
+          <Field label="Over" hint="A team manager: the role reaches only that group's people (People admin, Billing).">
+            <Select value={only} onValueChange={setOnly}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Everyone</SelectItem>
+                {(groups.data ?? []).map((g) => (
+                  <SelectItem key={g.id} value={g.id}>
+                    Only the members of {g.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
           <Field label="Until" hint="Empty: until it is taken.">
             <Input type="date" value={until} onChange={(e) => setUntil(e.target.value)} />
           </Field>

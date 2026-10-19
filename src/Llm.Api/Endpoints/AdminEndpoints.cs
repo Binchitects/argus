@@ -18,7 +18,7 @@ public static class AdminEndpoints
 
     public static void MapAdmin(this IEndpointRouteBuilder app)
     {
-        var admin = app.MapGroup("/api/admin").RequirePermissions(Llm.Core.Access.Permissions.PeopleRead, Llm.Core.Access.Permissions.PeopleManage);
+        var admin = app.MapGroup("/api/admin").RequirePermissions(Llm.Core.Access.Permissions.PeopleRead, Llm.Core.Access.Permissions.PeopleManage).ScopedToGroups();
         admin.MapGet("/people", ListAsync);
         admin.MapPost("/people", CreateAsync);
         admin.MapGet("/people/{id:guid}", GetAsync);
@@ -122,11 +122,15 @@ public static class AdminEndpoints
         }
     }
 
-    private static async Task<IResult> ListAsync(AppDbContext db, Access.AccessService access, Ledger ledger)
+    private static async Task<IResult> ListAsync(AppDbContext db, Access.AccessService access, Ledger ledger, HttpContext http)
     {
         var spending = await ledger.ReadAsync();
         var warning = spending.Problem;
         var people = await db.Users.AsNoTracking().OrderBy(u => u.UserName).ToListAsync();
+        if (http.Items[Access.EndpointAccess.ReachItem] is Access.AccessService.Reach reach)
+        {
+            people = [.. people.Where(u => reach.People.Contains(u.Id))];
+        }
         var memberships = await access.MembershipsAsync(people);
         return Results.Ok(new
         {

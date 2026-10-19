@@ -57,6 +57,51 @@ public static class EndpointAccess
         return group;
     }
 
+    /// <summary>Where a list route finds whom a role held for some groups reaches (<see cref="AccessService.Reach"/>); absent: everyone.</summary>
+    public const string ReachItem = "access.reach";
+
+    /// <summary>
+    /// A role held for some groups only (People admin for the ML team: a team manager) reaches only them: a person or a
+    /// group outside is not there (404); a list shows only theirs (<see cref="ReachItem"/>); anything else (making
+    /// people or groups, changing who is in a group, the directory's moves) is for those who manage everyone (403).
+    /// </summary>
+    public static RouteGroupBuilder ScopedToGroups(this RouteGroupBuilder group)
+    {
+        group.AddEndpointFilter(async (ctx, next) =>
+        {
+            var http = ctx.HttpContext;
+            var endpoint = http.GetEndpoint();
+            if (endpoint?.Metadata.GetMetadata<PermissionMetadata>()?.Permission is not { } permission
+                || await http.RequestServices.GetRequiredService<UserManager<Core.Identity.AppUser>>().GetUserAsync(http.User) is not { } me
+                || await http.RequestServices.GetRequiredService<AccessService>().ReachAsync(me, permission, http.RequestAborted) is not { } reach)
+            {
+                return await next(ctx);
+            }
+            var pattern = ((endpoint as RouteEndpoint)?.RoutePattern.RawText ?? "").TrimEnd('/');
+            var read = HttpMethods.IsGet(http.Request.Method) || HttpMethods.IsHead(http.Request.Method);
+            if (http.Request.RouteValues.TryGetValue("id", out var raw) && Guid.TryParse(raw?.ToString(), out var id))
+            {
+                var inReach = pattern.Contains("/people/", StringComparison.Ordinal) ? reach.People.Contains(id)
+                    : pattern.Contains("/groups/", StringComparison.Ordinal) && reach.Groups.Contains(id);
+                if (!inReach)
+                {
+                    return Results.NotFound();
+                }
+                if (read || !pattern.Contains("/members", StringComparison.Ordinal))
+                {
+                    return await next(ctx);
+                }
+            }
+            else if (read && (pattern.EndsWith("/people", StringComparison.Ordinal) || pattern.EndsWith("/groups", StringComparison.Ordinal)))
+            {
+                http.Items[ReachItem] = reach;
+                return await next(ctx);
+            }
+            return Endpoints.AuthEndpoints.Problem(403, "scope", "Your role covers some groups only: this is for an admin who manages everyone.");
+        });
+        return group;
+    }
+
     /// <summary>Any person signed in; what they reach is their own.</summary>
     public static TBuilder PersonOnly<TBuilder>(this TBuilder builder) where TBuilder : IEndpointConventionBuilder =>
         builder.RequireAuthorization().WithMetadata(new PersonOnlyMetadata());

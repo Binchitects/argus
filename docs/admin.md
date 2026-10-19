@@ -61,6 +61,12 @@ Owner) sees the admin pages of what they hold, and only those: a Supervisor
 role with `monitoring.read` and `logs.read` sees Monitoring, Dashboards,
 Alerts, Logs and Traces.
 
+A role given **over** one group (a team manager: People admin or Billing
+for the members of one group) reaches only that group and its people: the
+People and Groups pages list only them, anyone else is not there, and making
+people or groups, or changing who is in a group, stays with admins who
+manage everyone.
+
 Rules on repositories hold in Argus too, for the chat's Argus tool and for
 coding agents with an API key alike: a repository is named
 `gitlab:group/project` (or a pattern, `gitlab:team-a/*`), and Argus asks the

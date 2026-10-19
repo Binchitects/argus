@@ -98,4 +98,38 @@ public sealed class AccessEndpointsTests(AppFixture app)
         Assert.True((await admin.JsonAsync(await admin.GetAsync($"/api/admin/access/check?person={person}&permission=feature.web_search"))).GetProperty("allowed").GetBoolean());
         await StatusAssert.Is(HttpStatusCode.NotFound, await admin.Http.DeleteAsync(new Uri($"/api/admin/access/rules/{rule}", UriKind.Relative)));
     }
+
+    [Fact]
+    public async Task A_people_admin_for_one_group_reaches_its_members_only()
+    {
+        var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
+        async Task<(Guid Id, string Name, string Password)> PersonAsync()
+        {
+            var name = "as" + Guid.NewGuid().ToString("N")[..10];
+            var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+            return (made.GetProperty("id").GetGuid(), name, made.GetProperty("password").GetString()!);
+        }
+        var manager = await PersonAsync();
+        var member = await PersonAsync();
+        var outsider = await PersonAsync();
+        var team = (await admin.JsonAsync(await admin.PostAsync("/api/admin/groups", new { name = Unique("Team") }))).GetProperty("id").GetGuid();
+        var other = (await admin.JsonAsync(await admin.PostAsync("/api/admin/groups", new { name = Unique("Other") }))).GetProperty("id").GetGuid();
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.PostAsync($"/api/admin/groups/{team}/members", new { userIds = new[] { member.Id } }));
+        var overview = await admin.JsonAsync(await admin.GetAsync("/api/admin/access"));
+        var peopleAdmin = overview.GetProperty("roles").EnumerateArray().Single(r => r.GetProperty("key").GetString() == "people-admin").GetProperty("id").GetGuid();
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/access/assignments",
+            new { roleId = peopleAdmin, subjectKind = "Person", subjectId = manager.Id, scope = new { groups = new[] { team } } }));
+
+        var them = await new TestBrowser(app.Factory).SignedInAsync(manager.Name, manager.Password);
+        var listed = (await them.JsonAsync(await them.GetAsync("/api/admin/people"))).GetProperty("people").EnumerateArray().Select(p => p.GetProperty("id").GetGuid()).ToList();
+        Assert.Equal([member.Id], listed);
+        Assert.Equal([team], (await them.JsonAsync(await them.GetAsync("/api/admin/groups"))).EnumerateArray().Select(g => g.GetProperty("id").GetGuid()));
+        await StatusAssert.Is(HttpStatusCode.OK, await them.GetAsync($"/api/admin/people/{member.Id}"));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await them.GetAsync($"/api/admin/people/{outsider.Id}"));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await them.GetAsync($"/api/admin/groups/{other}"));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await them.PostAsync($"/api/admin/people/{outsider.Id}/password"));
+        // Making people, or putting someone in their group to reach them, is for an admin who manages everyone.
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await them.PostAsync("/api/admin/people", new { userName = "x" + Guid.NewGuid().ToString("N")[..8], email = "x@example.test" }));
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await them.PostAsync($"/api/admin/groups/{team}/members", new { userIds = new[] { outsider.Id } }));
+    }
 }

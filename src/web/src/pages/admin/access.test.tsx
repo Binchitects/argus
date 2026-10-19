@@ -43,7 +43,7 @@ describe('access', () => {
 
     await userEvent.click(screen.getAllByRole('button', { name: 'Give it' })[1])
     dialog = await screen.findByRole('dialog', { name: 'Give Supervisor' })
-    await userEvent.click(within(dialog).getByRole('combobox'))
+    await userEvent.click(within(dialog).getAllByRole('combobox')[0])
     await userEvent.click(await screen.findByRole('option', { name: 'Interns' }))
     await userEvent.click(within(dialog).getByRole('button', { name: 'Give it' }))
     await waitFor(() => expect(calls.find((c) => c.path.endsWith('/assignments'))?.body).toEqual({ roleId: 'r2', subjectKind: 'Group', subjectId: 'g1', expiresAt: null }))

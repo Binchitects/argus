@@ -300,6 +300,31 @@ public sealed class AccessService(AppDbContext db, AccessSnapshotCache cache, IO
         }
     }
 
+    /// <summary>The groups, and the people in them, a role held for some groups only reaches.</summary>
+    public sealed record Reach(IReadOnlySet<Guid> Groups, IReadOnlySet<Guid> People);
+
+    /// <summary>
+    /// Whom the person's <paramref name="permission"/> reaches: null when it is held for everyone (or as Owner);
+    /// otherwise the groups of the roles' scopes and their members (directory members too). Empty: no one.
+    /// </summary>
+    public async Task<Reach?> ReachAsync(AppUser user, string permission, CancellationToken ct = default)
+    {
+        var m = await MembershipAsync(user, ct);
+        if (m.Snapshot.ScopesOf(m.Principal, permission, m.Now) is not { } scopes)
+        {
+            return null;
+        }
+        var groups = scopes.SelectMany(x => x.Groups).ToHashSet();
+        var people = (await db.GroupMembers.AsNoTracking().Where(x => groups.Contains(x.GroupId)).Select(x => x.UserId).ToListAsync(ct)).ToHashSet();
+        var directory = await db.Groups.AsNoTracking().Where(g => groups.Contains(g.Id) && g.Directory != null).Select(g => g.Directory!).ToListAsync(ct);
+        if (directory.Count > 0)
+        {
+            var listed = await db.Users.AsNoTracking().Where(u => u.DirectoryGroups.Count > 0).Select(u => new { u.Id, u.DirectoryGroups }).ToListAsync(ct);
+            people.UnionWith(listed.Where(u => directory.Any(d => InDirectoryGroup(u.DirectoryGroups, d))).Select(u => u.Id));
+        }
+        return new Reach(groups, people);
+    }
+
     /// <summary>Gives or takes the Owner role, the person's own (not through a group).</summary>
     public async Task SetOwnerAsync(AppUser? actor, AppUser user, bool owner, CancellationToken ct = default)
     {
