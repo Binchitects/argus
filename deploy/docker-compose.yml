@@ -359,6 +359,19 @@ services:
     image: utkuozdemir/nvidia_gpu_exporter:1.3.2
     container_name: gpu-exporter
 
+  # Data-centre GPU detail (PCIe and NVLink throughput, SM and tensor activity, XID, ECC and retired pages)
+  # for the GPU Hardware dashboard's DCGM section. Bare-metal Linux only (not WSL2), and its image is on
+  # NVIDIA's registry (nvcr.io): COMPOSE_PROFILES=dcgm turns it on; the installer offers it where it can.
+  dcgm-exporter:
+    <<: [*service, *gpu]
+    image: ${DCGM_EXPORTER_IMAGE:-nvcr.io/nvidia/k8s/dcgm-exporter:4.6.0-4.8.3-ubuntu22.04}
+    container_name: dcgm-exporter
+    profiles: [dcgm]
+    cap_add: [SYS_ADMIN]
+    environment:
+      DCGM_EXPORTER_LISTEN: ":9400"
+      DCGM_EXPORTER_KUBERNETES: "false"
+
   cpu-temp-exporter:
     <<: *service
     image: python:3.13-slim

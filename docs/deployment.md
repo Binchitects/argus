@@ -23,6 +23,7 @@ setup scripts.
 | `laya` | typed decisions on the CPU (the chat's Decide tool, Code Arena's look at commands); **off** until `COMPOSE_PROFILES=laya` ([below](#laya)) |
 | `searxng` | the chat's web search |
 | `prometheus`, `alertmanager`, `loki`, `promtail`, `node-exporter`, `gpu-exporter`, `cpu-temp-exporter` | what the app's dashboards, logs and alerts read |
+| `dcgm-exporter` (profile `dcgm`, off by default) | NVIDIA DCGM's data-centre GPU detail for the GPU Hardware dashboard: PCIe and NVLink throughput, SM and tensor activity, XID errors, ECC and retired pages. Bare-metal Linux only, from NVIDIA's registry (`nvcr.io`); `COMPOSE_PROFILES=dcgm` in `.env` turns it on. Without it the dashboard's GPU detail section (clocks, throttling, PCIe link, fans, ECC) still comes from `gpu-exporter` |
 | `power-limits` | GPU and CPU power caps from `.env`, kept applied (privileged) |
 
 ## Deploy
@@ -357,6 +358,7 @@ how). **no**: missing, with the reason.
 | `node-exporter`, `cpu-temp-exporter` | yes | yes | yes: the `host-exporters` DaemonSet (`monitoring.hostExporters`) |
 | `promtail` | yes | differs: Podman's socket for Docker's | no: the cluster's log agent ships the pods' logs to Loki |
 | `gpu-exporter` | yes | yes, CDI | no: the cluster's (NVIDIA's DCGM exporter); until Prometheus scrapes one, `GpuExporterDown` fires |
+| `dcgm-exporter` | profile `dcgm` | profile `dcgm`, CDI | no: the cluster's (NVIDIA's GPU Operator runs it) |
 | `power-limits` | yes | no: it writes the host's `/sys` | no: privileged; the cluster's |
 | **Volumes** | | | |
 | model library | `MODELS_DIR` | the same | the `arena-models` claim (ReadWriteMany across nodes) or `persistence.models.existingClaim` |

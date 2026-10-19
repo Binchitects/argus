@@ -41,6 +41,12 @@ scrape_configs:
       - targets: ["gpu-exporter:9835"]
         labels: { tier: optional, component: gpu }
 
+  # The dcgm profile's exporter (docker-compose.yml); down without the profile, which no alert minds.
+  - job_name: dcgm
+    static_configs:
+      - targets: ["dcgm-exporter:9400"]
+        labels: { tier: optional, component: gpu }
+
   - job_name: cpu-temp
     static_configs:
       - targets: ["cpu-temp-exporter:9110"]

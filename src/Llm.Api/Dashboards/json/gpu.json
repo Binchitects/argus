@@ -41,7 +41,9 @@
         },
         "overrides": []
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
     },
     {
       "type": "gauge",
@@ -50,11 +52,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 6, "w": 6, "x": 6, "y": 1 },
       "targets": [
-        {
-          "refId": "A",
-          "expr": "nvidia_smi_memory_used_bytes / nvidia_smi_memory_total_bytes * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "{{gpu}}"
-        }
+        { "refId": "A", "expr": "nvidia_smi_memory_used_bytes / nvidia_smi_memory_total_bytes * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}}" }
       ],
       "fieldConfig": {
         "defaults": {
@@ -72,7 +70,9 @@
         },
         "overrides": []
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
     },
     {
       "type": "gauge",
@@ -99,7 +99,9 @@
         },
         "overrides": []
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
     },
     {
       "type": "stat",
@@ -148,10 +150,7 @@
         { "refId": "B", "expr": "nvidia_smi_memory_total_bytes * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "total {{gpu}}" }
       ],
       "fieldConfig": {
-        "defaults": {
-          "unit": "bytes",
-          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never" }
-        },
+        "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never" } },
         "overrides": []
       },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
@@ -173,7 +172,9 @@
         "overrides": [
           {
             "matcher": { "id": "byRegexp", "options": "temp.*" },
-            "properties": [{ "id": "unit", "value": "celsius" }]
+            "properties": [
+              { "id": "unit", "value": "celsius" }
+            ]
           },
           {
             "matcher": { "id": "byRegexp", "options": "power.*" },
@@ -188,15 +189,126 @@
     },
     {
       "type": "row",
-      "title": "DCGM exporter (needs the dcgm profile, bare-metal Linux only; empty without it)",
+      "title": "GPU detail (nvidia-smi exporter: clocks, throttling, PCIe, fans, ECC)",
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "SM and memory clocks",
+      "description": "The clocks now against their maximum. A clock well below its maximum under load means the GPU is held back (see Throttling).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "targets": [
+        { "refId": "A", "expr": "nvidia_smi_clocks_current_sm_clock_hz * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}} SM" },
+        { "refId": "B", "expr": "nvidia_smi_clocks_max_sm_clock_hz * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}} SM max" },
+        { "refId": "C", "expr": "nvidia_smi_clocks_current_memory_clock_hz * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}} memory" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "hertz" },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Throttling",
+      "description": "Seconds per second the GPU spent slowed down, by reason: the power cap, heat (software or hardware) or a hardware brake. Zero is healthy; a steady power cap under load means the power limit is the bottleneck.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "targets": [
+        { "refId": "A", "expr": "rate(nvidia_smi_clocks_event_reasons_counters_sw_power_cap_seconds[5m]) * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}} power cap" },
+        { "refId": "B", "expr": "rate(nvidia_smi_clocks_event_reasons_counters_sw_thermal_slowdown_seconds[5m]) * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}} thermal (software)" },
+        { "refId": "C", "expr": "rate(nvidia_smi_clocks_event_reasons_counters_hw_thermal_slowdown_seconds[5m]) * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}} thermal (hardware)" },
+        { "refId": "D", "expr": "rate(nvidia_smi_clocks_event_reasons_counters_hw_power_brake_slowdown_seconds[5m]) * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}} power brake" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "min": 0, "max": 1 },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Power against its limit",
+      "description": "Power drawn, the limit enforced now, and the most the card allows.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "targets": [
+        { "refId": "A", "expr": "nvidia_smi_power_draw_watts * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}} drawn" },
+        { "refId": "B", "expr": "nvidia_smi_enforced_power_limit_watts * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}} limit" },
+        { "refId": "C", "expr": "nvidia_smi_power_max_limit_watts * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}} card max" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "watt" },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "PCIe link",
+      "description": "The PCIe generation and width the GPU runs at now against its maximum. A lower generation or width than the slot allows halves transfers between GPUs and to the CPU (multi-GPU models, KV offload).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "targets": [
+        { "refId": "A", "expr": "nvidia_smi_pcie_link_gen_current * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}} generation" },
+        { "refId": "B", "expr": "nvidia_smi_pcie_link_gen_max * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}} generation max" },
+        { "refId": "C", "expr": "nvidia_smi_pcie_link_width_current * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}} lanes" },
+        { "refId": "D", "expr": "nvidia_smi_pcie_link_width_max * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}} lanes max" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none" },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Fan, memory bandwidth and video engines",
+      "description": "Fan speed, how busy the memory bus is (LLM answers are bound by it), and the encoder and decoder (video).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "targets": [
+        { "refId": "A", "expr": "nvidia_smi_fan_speed_ratio * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}} fan" },
+        { "refId": "B", "expr": "nvidia_smi_utilization_memory_ratio * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}} memory bus" },
+        { "refId": "C", "expr": "nvidia_smi_utilization_encoder_ratio * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}} encoder" },
+        { "refId": "D", "expr": "nvidia_smi_utilization_decoder_ratio * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}} decoder" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "min": 0, "max": 1 },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Uncorrected memory errors",
+      "description": "Uncorrected ECC errors since the driver loaded (volatile) and over the card's life (aggregate). Any rise is a reason to drain the GPU and check it; cards without ECC show nothing.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
+      "targets": [
+        { "refId": "A", "expr": "nvidia_smi_ecc_errors_uncorrected_volatile_sram_secded * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}} since load" },
+        { "refId": "B", "expr": "nvidia_smi_ecc_errors_uncorrected_aggregate_sram_secded * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)", "legendFormat": "{{gpu}} lifetime" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none" },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "type": "row",
+      "title": "DCGM exporter (profile dcgm: data-centre detail, bare-metal Linux with NVIDIA's registry reachable; empty without it)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 48 },
       "collapsed": true,
       "panels": [
         {
           "type": "timeseries",
           "title": "DCGM: SM utilisation",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 49 },
           "targets": [
             { "refId": "A", "expr": "DCGM_FI_DEV_GPU_UTIL", "legendFormat": "gpu {{gpu}}" }
           ],
@@ -210,7 +322,7 @@
           "type": "timeseries",
           "title": "DCGM: framebuffer used",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 49 },
           "targets": [
             { "refId": "A", "expr": "DCGM_FI_DEV_FB_USED * 1024 * 1024", "legendFormat": "used {{gpu}}" },
             { "refId": "B", "expr": "DCGM_FI_DEV_FB_FREE * 1024 * 1024", "legendFormat": "free {{gpu}}" }
@@ -225,7 +337,7 @@
           "type": "timeseries",
           "title": "DCGM: temperature, power, SM clock",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 32 },
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 57 },
           "targets": [
             { "refId": "A", "expr": "DCGM_FI_DEV_GPU_TEMP", "legendFormat": "temp {{gpu}}" },
             { "refId": "B", "expr": "DCGM_FI_DEV_POWER_USAGE", "legendFormat": "power {{gpu}}" },
@@ -236,6 +348,103 @@
             "overrides": []
           },
           "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true } }
+        },
+        {
+          "type": "timeseries",
+          "title": "DCGM: PCIe throughput",
+          "description": "Bytes per second over PCIe, each way (profiling metrics: data-centre and RTX PRO cards).",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 65 },
+          "targets": [
+            { "refId": "A", "expr": "DCGM_FI_PROF_PCIE_TX_BYTES", "legendFormat": "GPU {{gpu}} sent" },
+            { "refId": "B", "expr": "DCGM_FI_PROF_PCIE_RX_BYTES", "legendFormat": "GPU {{gpu}} received" }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "Bps" },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+        },
+        {
+          "type": "timeseries",
+          "title": "DCGM: SM active, occupancy and tensor cores",
+          "description": "How much of the time the streaming multiprocessors work, how full they are, and how busy the tensor cores are (profiling metrics).",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 65 },
+          "targets": [
+            { "refId": "A", "expr": "DCGM_FI_PROF_SM_ACTIVE", "legendFormat": "GPU {{gpu}} SM active" },
+            { "refId": "B", "expr": "DCGM_FI_PROF_SM_OCCUPANCY", "legendFormat": "GPU {{gpu}} occupancy" },
+            { "refId": "C", "expr": "DCGM_FI_PROF_PIPE_TENSOR_ACTIVE", "legendFormat": "GPU {{gpu}} tensor" },
+            { "refId": "D", "expr": "DCGM_FI_PROF_DRAM_ACTIVE", "legendFormat": "GPU {{gpu}} memory" }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "percentunit", "min": 0, "max": 1 },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+        },
+        {
+          "type": "timeseries",
+          "title": "DCGM: XID errors",
+          "description": "The last XID error code the driver logged for each GPU (0: none). An XID is the driver saying the GPU faulted.",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 73 },
+          "targets": [
+            { "refId": "A", "expr": "DCGM_FI_DEV_XID_ERRORS", "legendFormat": "GPU {{gpu}}" }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "none" },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+        },
+        {
+          "type": "timeseries",
+          "title": "DCGM: ECC and retired pages",
+          "description": "Double-bit ECC errors since the driver loaded, and memory pages retired or remapped for errors.",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 73 },
+          "targets": [
+            { "refId": "A", "expr": "DCGM_FI_DEV_ECC_DBE_VOL_TOTAL", "legendFormat": "GPU {{gpu}} double-bit" },
+            { "refId": "B", "expr": "DCGM_FI_DEV_RETIRED_DBE", "legendFormat": "GPU {{gpu}} retired pages" },
+            { "refId": "C", "expr": "DCGM_FI_DEV_UNCORRECTABLE_REMAPPED_ROWS", "legendFormat": "GPU {{gpu}} remapped rows" }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "none" },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+        },
+        {
+          "type": "timeseries",
+          "title": "DCGM: NVLink throughput",
+          "description": "Bytes per second over NVLink (cards that have it; PCIe-only cards show nothing).",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 81 },
+          "targets": [
+            { "refId": "A", "expr": "DCGM_FI_PROF_NVLINK_TX_BYTES", "legendFormat": "GPU {{gpu}} sent" },
+            { "refId": "B", "expr": "DCGM_FI_PROF_NVLINK_RX_BYTES", "legendFormat": "GPU {{gpu}} received" }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "Bps" },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+        },
+        {
+          "type": "timeseries",
+          "title": "DCGM: clock throttle reasons",
+          "description": "The reasons the clocks are held back now, as DCGM's bit mask (0: none).",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 81 },
+          "targets": [
+            { "refId": "A", "expr": "DCGM_FI_DEV_CLOCK_THROTTLE_REASONS", "legendFormat": "GPU {{gpu}}" }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "none" },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
         }
       ]
     }
