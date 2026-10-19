@@ -358,6 +358,30 @@ export const topics = {
     manual: { doc: 'admin', section: 'access-roles-and-rules' },
   },
 
+  code: {
+    title: 'Code',
+    about: 'Reviews of merge requests by the model, and the code assistant. Both read the code with your own GitLab access, through Argus, and write nothing to GitLab.',
+    parts: [
+      { name: 'Merge requests', text: 'A project by its path (group/project): its open, merged or all merge requests. **Review** starts a review; a branch without a merge request can be reviewed against the one it goes into.' },
+      { name: 'Ask about code', text: 'A question about a project, a branch or a merge request: answered in a chat with Argus, which reads the code as you may.' },
+      { name: 'Reviews', text: 'Yours, and those of rooms you are in, with their verdict and how many findings are still open.' },
+    ],
+    tasks: [{ title: 'Review a merge request', steps: ['Type the project\'s path and press **Show**.', 'Press **Review** beside the merge request.', 'Read the findings when it is ready; the bell says so.'] }],
+    manual: { doc: 'chat', section: 'code-review' },
+  },
+
+  review: {
+    title: 'A review',
+    about: 'One review: what the change does, its risk and verdict, the CI, and the findings on its lines, each checked by a second pass.',
+    parts: [
+      { name: 'Findings', text: 'Each on a file and line, with its severity, why it matters and a fix. **Resolved** or **Dismiss** keeps track; ones a second check doubts are listed apart, with why.' },
+      { name: 'Discuss in a room', text: 'A room with the review in it, for the people you add; the model answers there when someone writes @Arena.' },
+      { name: 'Review again', text: 'After new commits: reads only what came after the last review.' },
+    ],
+    tasks: [{ title: 'Talk a review over with the team', steps: ['Press **Discuss in a room**.', 'Add the people in the room\'s **People** panel.', 'Write @Arena in the room to ask the model about it.'] }],
+    manual: { doc: 'chat', section: 'code-review' },
+  },
+
   groups: {
     title: 'Groups',
     about: 'Who may use which tools and models. An app group has the people you add; a directory group follows the company directory or the identity provider.',

@@ -142,6 +142,27 @@ public sealed class FakeModel : HttpMessageHandler
             chunks = [Delta(new JsonObject { ["content"] = said }), Finish("stop"), Usage(80, 0, 12)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
+        // Code review: a finding on each diff's first added line that says "[bug]", refuted when it says "[harmless]"; then a summary.
+        var system0 = messages[0]!["content"]?.GetValue<string>() ?? "";
+        if (system0.StartsWith("You review code changes", StringComparison.Ordinal))
+        {
+            var hit = lastUser.Split('\n').FirstOrDefault(l => l.Contains("[bug]", StringComparison.Ordinal) && l.Length > 5 && int.TryParse(l[..5].Trim(), out _));
+            var findings = hit is null ? "[]"
+                : $$"""[{"line": {{int.Parse(hit[..5].Trim(), System.Globalization.CultureInfo.InvariantCulture)}}, "severity": "major", "category": "bug", "title": "Off by one{{(hit.Contains("[harmless]", StringComparison.Ordinal) ? " (harmless)" : "")}}", "body": "The loop reads one past the end.", "suggestion": "for (i = 0; i < n; i++)"}]""";
+            chunks = [Delta(new JsonObject { ["content"] = $"```json\n{{\"findings\": {findings}}}\n```" }), Finish("stop"), Usage(300, 0, 40)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
+        if (system0.StartsWith("You check another reviewer's finding", StringComparison.Ordinal))
+        {
+            var real = !lastUser.Contains("(harmless)", StringComparison.Ordinal);
+            chunks = [Delta(new JsonObject { ["content"] = $$"""{"real": {{(real ? "true" : "false")}}, "why": "{{(real ? "The diff shows it." : "The caller checks the bound.")}}"}""" }), Finish("stop"), Usage(200, 0, 20)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
+        if (system0.StartsWith("You write the summary of a code review", StringComparison.Ordinal))
+        {
+            chunks = [Delta(new JsonObject { ["content"] = "The change parses headers.\n\nLook at the loop first.\n{\"verdict\": \"changes\", \"risk\": \"medium\"}" }), Finish("stop"), Usage(250, 0, 30)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
         // A chat's title: "Title: <the message's first three words>."
         if (messages[0]!["content"]?.GetValue<string>().StartsWith("You name conversations", StringComparison.Ordinal) == true)
         {

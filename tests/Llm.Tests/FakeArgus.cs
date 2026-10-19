@@ -97,6 +97,9 @@ public sealed class FakeArgus : HttpMessageHandler
 
     public List<(string Method, string? Email, string? Session, JsonElement? Params)> McpCalls { get; } = [];
 
+    /// <summary>Tools answered with this structured content (JSON), by name: the merge request tools a review reads.</summary>
+    public System.Collections.Concurrent.ConcurrentDictionary<string, string> Answers { get; } = new();
+
     /// <summary>Argus's MCP endpoint, as the chat sees it: the chat token, the person's email, a session.</summary>
     private HttpResponseMessage Mcp(HttpRequestMessage request, JsonElement? body)
     {
@@ -122,6 +125,8 @@ public sealed class FakeArgus : HttpMessageHandler
         {
             "initialize" => $$$"""{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"argus","version":"2.9.0"},"instructions":"{{{Instructions}}}"}""",
             "tools/list" => """{"tools":[{"name":"find_symbol","description":"Find where a symbol is defined","inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}}]}""",
+            "tools/call" when Answers.TryGetValue(p.GetProperty("name").GetString()!, out var answer) =>
+                $$"""{"content":[{"type":"text","text":"(structured)"}],"structuredContent":{{answer}},"isError":false}""",
             "tools/call" => p.GetProperty("arguments").GetProperty("name").GetString() == "SecretThing"
                 ? """{"content":[{"type":"text","text":"Nothing you have access to matches this, but it does exist in 1 repository you cannot read:\n- secret/vault (2 matches) -- maintainers: alice\nTell the person asking that they do not have access, and that they can ask a maintainer listed above to add them in GitLab with at least Reporter access. Argus picks the change up within 10 minutes."}],"isError":false}"""
                 // As FastMCP answers a list: one text block per row, and the list itself as structuredContent.

@@ -26,6 +26,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ChatShare> ChatShares => Set<ChatShare>();
     public DbSet<RoomMember> RoomMembers => Set<RoomMember>();
     public DbSet<RoomGroup> RoomGroups => Set<RoomGroup>();
+    public DbSet<Code.CodeReview> CodeReviews => Set<Code.CodeReview>();
+    public DbSet<Code.ReviewFinding> ReviewFindings => Set<Code.ReviewFinding>();
     public DbSet<ChatShareView> ChatShareViews => Set<ChatShareView>();
     public DbSet<Canvas> Canvases => Set<Canvas>();
     public DbSet<CanvasVersion> CanvasVersions => Set<CanvasVersion>();
@@ -174,6 +176,36 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasKey(x => new { x.AssistantId, x.AttachmentId });
             e.HasOne<Assistant>().WithMany().HasForeignKey(x => x.AssistantId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<ChatAttachment>().WithMany().HasForeignKey(x => x.AttachmentId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Code.CodeReview>(e =>
+        {
+            e.ToTable("code_reviews");
+            e.Property(x => x.Project).HasMaxLength(500);
+            e.Property(x => x.FromRef).HasMaxLength(300);
+            e.Property(x => x.ToRef).HasMaxLength(300);
+            e.Property(x => x.Title).HasMaxLength(500);
+            e.Property(x => x.WebUrl).HasMaxLength(1000);
+            e.Property(x => x.HeadSha).HasMaxLength(64);
+            e.Property(x => x.Status).HasMaxLength(16);
+            e.Property(x => x.Step).HasMaxLength(200);
+            e.Property(x => x.Verdict).HasMaxLength(16);
+            e.Property(x => x.Risk).HasMaxLength(16);
+            e.Property(x => x.Model).HasMaxLength(200);
+            e.HasIndex(x => new { x.UserId, x.CreatedAt });
+            e.HasIndex(x => new { x.Project, x.Iid });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Conversation>().WithMany().HasForeignKey(x => x.RoomId).OnDelete(DeleteBehavior.SetNull);
+            e.HasMany(x => x.Findings).WithOne().HasForeignKey(f => f.ReviewId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Code.ReviewFinding>(e =>
+        {
+            e.ToTable("review_findings");
+            e.Property(x => x.Path).HasMaxLength(1000);
+            e.Property(x => x.Severity).HasMaxLength(16);
+            e.Property(x => x.Category).HasMaxLength(32);
+            e.Property(x => x.Title).HasMaxLength(300);
+            e.Property(x => x.State).HasMaxLength(16);
+            e.HasIndex(x => x.ReviewId);
         });
         builder.Entity<RoomMember>(e =>
         {

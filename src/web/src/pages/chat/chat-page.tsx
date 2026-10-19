@@ -782,8 +782,24 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     }
   }
 
-  // Opened at a message (a search result): onto its branch, then to it, marked for a moment.
+  // Opened with a question to ask (the code assistant's ?ask=): sent once, when the chat is there and empty.
   const [params, setParams] = useSearchParams()
+  const askOnce = useRef(false)
+  const toAsk = params.get('ask')
+  useEffect(() => {
+    if (!toAsk || askOnce.current || !id || !data || streaming || data.messages.length > 0) return
+    askOnce.current = true
+    setParams(
+      (p) => {
+        p.delete('ask')
+        return p
+      },
+      { replace: true },
+    )
+    void send(toAsk, [])
+  })
+
+  // Opened at a message (a search result): onto its branch, then to it, marked for a moment.
   const switchingTo = useRef<string | null>(null)
   const at = params.get('at')
   useEffect(() => {

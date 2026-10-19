@@ -327,6 +327,8 @@ public static class IdentityWiring
         ArenaMcp.McpEndpoints.AddArenaMcp(services, config);
         // Answers outlive the page that asked: they run here, and a page re-attaches.
         services.AddSingleton<Chat.RoomHub>();
+        services.AddSingleton<Code.ReviewEngine>();
+        services.AddHostedService(sp => sp.GetRequiredService<Code.ReviewEngine>());
         services.AddSingleton<Chat.AnswerJobs>();
         services.AddHostedService(sp => sp.GetRequiredService<Chat.AnswerJobs>());
         services.AddSingleton<Chat.QueuedMessages>();
@@ -453,6 +455,7 @@ public static class IdentityWiring
         Access.GroupEndpoints.MapGroups(app);
         Access.AccessEndpoints.MapAccess(app);
         Chat.RoomEndpoints.MapRooms(app);
+        Code.CodeEndpoints.MapCode(app);
         app.MapForwardAuth();
         app.MapKeyCheck();
         app.MapOidc();

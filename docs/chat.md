@@ -590,6 +590,40 @@ a room holds (Settings → Chat → **Most people in a room**, 50).
   owner's account is deleted the room goes to its longest-standing member;
   what someone wrote stays after they leave, as a former member's.
 
+## Code review
+
+**Code** (in the sidebar) reviews merge requests with the model and answers
+questions about code. Both read the code through Argus with **your own**
+GitLab access (Reporter or above on the project, and the rules of Admin →
+Access), and write nothing to GitLab: no comments, no approvals.
+
+- **A review.** Type a project's path (group/project) and press **Show**:
+  its merge requests. **Review** reads the merge request (its description,
+  its diff, its CI) and reviews each file on its own, the lines numbered as
+  in the new file, for bugs, security holes, data loss, races, error
+  handling, edge cases, performance and missing tests. Every finding is then
+  put to a second pass told to refute it: those it could not refute are the
+  findings; those it doubts are listed apart, with why. A summary says what
+  the change does file by file, what to look at first, its risk and a
+  verdict (looks good, comments, changes suggested). The bell says when it
+  is ready. A branch without a merge request is reviewed against the one it
+  goes into.
+- **Findings** sit on a file and line, with a severity (critical, major,
+  minor, nit), why it matters and a fix. Mark them **Resolved** or
+  **Dismiss** them.
+- **Review again** after new commits: it reads only what came after the last
+  review's head.
+- **Discuss in a room** makes a room with the review in it (its summary and
+  findings). Add people from the room's **People** panel; they see the review
+  too. The model answers there when someone writes `@Arena`.
+- **Who pays.** A review's requests are its person's, on the chat credit,
+  tagged `review`. Three of a person's reviews run at once at most. Who may
+  review: the `review.run` permission; who may ask about code: `code.read`
+  (Admin → Access).
+- **Ask about code** opens a chat with Argus on and the question in it, about
+  the project shown: Argus reads the code, the merge requests, CI and any
+  commit, as you may.
+
 ## Canvas
 
 Like ChatGPT's canvas and Claude's artifacts: a document (Markdown) or code (in
