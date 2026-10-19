@@ -25,12 +25,12 @@ public static class MemoryEndpoints
     {
         var me = app.MapGroup("/api/account/memories").PersonOnly();
         me.MapGet("", ListAsync);
-        me.MapPost("", AddAsync);
-        me.MapPut("/settings", SwitchAsync);
-        me.MapPut("/{id:guid}", EditAsync);
+        me.MapPost("", AddAsync).RequirePermission(Llm.Core.Access.Permissions.Memory);
+        me.MapPut("/settings", SwitchAsync).RequirePermission(Llm.Core.Access.Permissions.Memory);
+        me.MapPut("/{id:guid}", EditAsync).RequirePermission(Llm.Core.Access.Permissions.Memory);
         me.MapDelete("/{id:guid}", DeleteAsync);
         me.MapDelete("", DeleteAllAsync);
-        me.MapPost("/offers/{messageId:guid}", DecideAsync);
+        me.MapPost("/offers/{messageId:guid}", DecideAsync).RequirePermission(Llm.Core.Access.Permissions.Memory);
     }
 
     private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;

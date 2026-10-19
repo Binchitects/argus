@@ -42,7 +42,7 @@ public static class AssistantEndpoints
         g.MapPost("", CreateAsync);
         g.MapGet("/{id:guid}", GetAsync);
         g.MapPatch("/{id:guid}", UpdateAsync);
-        g.MapPut("/{id:guid}/sharing", ShareAsync);
+        g.MapPut("/{id:guid}/sharing", ShareAsync).RequirePermission(Llm.Core.Access.Permissions.AssistantsShare);
         g.MapDelete("/{id:guid}", DeleteAsync);
         g.MapPost("/{id:guid}/files", AddFileAsync);
         g.MapDelete("/{id:guid}/files/{attachmentId:guid}", RemoveFileAsync);

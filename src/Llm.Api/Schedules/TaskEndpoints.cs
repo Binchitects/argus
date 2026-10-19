@@ -33,11 +33,11 @@ public static class TaskEndpoints
     {
         var g = app.MapGroup("/api/tasks").PersonOnly();
         g.MapGet("", ListAsync);
-        g.MapPost("", AddAsync);
-        g.MapPatch("/{id:guid}", UpdateAsync);
+        g.MapPost("", AddAsync).RequirePermission(Llm.Core.Access.Permissions.Tasks);
+        g.MapPatch("/{id:guid}", UpdateAsync).RequirePermission(Llm.Core.Access.Permissions.Tasks);
         g.MapDelete("/{id:guid}", RemoveAsync);
-        g.MapPost("/{id:guid}/run", RunAsync);
-        g.MapPost("/{id:guid}/secret", SecretAsync);
+        g.MapPost("/{id:guid}/run", RunAsync).RequirePermission(Llm.Core.Access.Permissions.Tasks);
+        g.MapPost("/{id:guid}/secret", SecretAsync).RequirePermission(Llm.Core.Access.Permissions.Tasks);
         // Events that run a task: anyone may post, only with its secret.
         app.MapPost("/api/hooks/{id:guid}", HookAsync).AllowAnonymous("A task's webhook: its secret id in the address, and its signature, are checked.").DisableAntiforgery();
         g.MapGet("/{id:guid}/runs", RunsAsync);

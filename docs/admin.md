@@ -58,6 +58,14 @@ What each person may do is decided in one place, from three things:
   (`feature.chat`, `feature.api_keys`, `feature.code_arena`,
   `feature.pictures` and the rest, and `code.read`, `review.run`) come from
   the **Member** role, which everyone holds, and rules may give or take them.
+  Taken from someone: `feature.chat` stops new chats and messages;
+  `feature.code_arena` refuses Code Arena; `feature.web_search` takes the web
+  and research tools; `feature.pictures`, `feature.video` and
+  `feature.speech` take those tools, the speech routes and those models from
+  their API keys; `feature.memory`, `feature.tasks`, `feature.share_links`
+  and `feature.assistants.share` stop new memories, tasks, share links and
+  sharing assistants; `code.read` takes the Argus tool. What they already
+  have stays theirs to read and delete.
 - **Roles**: named sets of permissions. The built-in ones are **Owner**
   (everything), **People admin**, **Model admin**, **Billing**, **Auditor**
   (every `.read`, never a change), **Argus admin**, **Room moderator**,

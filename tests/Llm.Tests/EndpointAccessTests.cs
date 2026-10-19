@@ -88,6 +88,50 @@ public sealed partial class EndpointAccessTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_feature_taken_from_a_person_is_refused_where_it_is_needed_and_its_tools_go()
+    {
+        var routes = Routes().Where(r => r.Permission is { } p && Permissions.IsFeature(p) && r.Method != "*").ToList();
+        Assert.Contains(routes, r => r.Permission == Permissions.Chat);
+        Assert.Contains(routes, r => r.Permission == Permissions.Memory);
+        var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
+        var name = "ef" + Guid.NewGuid().ToString("N")[..10];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+        Membership member;
+        await using (var scope = app.Factory.Services.CreateAsyncScope())
+        {
+            var access = scope.ServiceProvider.GetRequiredService<AccessService>();
+            var users = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<Llm.Core.Identity.AppUser>>();
+            var person = (await users.FindByNameAsync(name))!;
+            Assert.True(Llm.Api.Chat.Tools.ToolRegistry.Allowed(await access.MembershipAsync(person), "web"));
+            foreach (var feature in Permissions.FeatureKeys)
+            {
+                await access.SetFeatureAsync(null, person, feature, on: false);
+            }
+            member = await access.MembershipAsync(person);
+        }
+        Assert.All(Llm.Api.Chat.Tools.ToolRegistry.FeatureOf.Keys, tool => Assert.False(Llm.Api.Chat.Tools.ToolRegistry.Allowed(member, tool)));
+        Assert.True(Llm.Api.Chat.Tools.ToolRegistry.Allowed(member, "calculator"));
+        var browser = await new TestBrowser(app.Factory).SignedInAsync(name, made.GetProperty("password").GetString()!);
+        var wrong = new List<string>();
+        foreach (var r in routes)
+        {
+            using var request = new HttpRequestMessage(new HttpMethod(r.Method), Path(r.Pattern));
+            if (r.Method is not ("GET" or "HEAD" or "DELETE"))
+            {
+                request.Content = JsonContent.Create(new { });
+            }
+            if ((await browser.Http.SendAsync(request)).StatusCode != HttpStatusCode.Forbidden)
+            {
+                wrong.Add($"{r.Method} {r.Pattern} ({r.Permission})");
+            }
+        }
+        Assert.True(wrong.Count == 0, "Reached without the feature:\n" + string.Join('\n', wrong));
+        // What is their own stays theirs: the list of their chats, their memories.
+        await StatusAssert.Is(HttpStatusCode.OK, await browser.GetAsync("/api/chat/conversations"));
+        await StatusAssert.Is(HttpStatusCode.OK, await browser.GetAsync("/api/account/memories"));
+    }
+
+    [Fact]
     public async Task A_role_reaches_the_reads_of_its_permissions_and_no_others()
     {
         var routes = Routes().Where(r => r.Method == "GET" && r.Permission is { } p && !Permissions.IsFeature(p) && !r.Pattern.Contains('{', StringComparison.Ordinal)).ToList();

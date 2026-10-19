@@ -149,7 +149,15 @@ public static class CodeArenaSync
         try
         {
             var caller = await people.FromHeaderAsync(http.Request.Headers.Authorization.ToString() is { Length: > 0 } a ? a : null, http.RequestAborted);
-            return caller.User is { } me ? (me, null) : (null, AuthEndpoints.Problem(401, "key", caller.Refusal ?? McpPeople.NoKey));
+            if (caller.User is not { } me)
+            {
+                return (null, AuthEndpoints.Problem(401, "key", caller.Refusal ?? McpPeople.NoKey));
+            }
+            // Code Arena is a feature of its own (Admin → Access).
+            var access = http.RequestServices.GetRequiredService<Access.AccessService>();
+            return (await access.MayAsync(me, Core.Access.Permissions.CodeArena, http.RequestAborted))
+                ? (me, null)
+                : (null, AuthEndpoints.Problem(403, "feature", "Code Arena is not among what you may use: ask an admin."));
         }
         catch (GatewayException)
         {

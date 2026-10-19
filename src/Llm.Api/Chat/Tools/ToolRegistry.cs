@@ -175,9 +175,25 @@ public sealed class ToolRegistry(
         ? new OpenApiTool(server, client, auth.Value.DataKey, chat.CurrentValue.ToolCallTimeout) { People = people }
         : new McpServerTool(server, client, auth.Value.DataKey, chat.CurrentValue.ToolCallTimeout) { People = people };
 
+    /// <summary>The feature permission a built-in tool also needs (Admin → Access): the web, pictures, video, speech, memory, code.</summary>
+    public static readonly IReadOnlyDictionary<string, string> FeatureOf = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["web"] = Core.Access.Permissions.WebSearch,
+        [ResearchTool.ToolId] = Core.Access.Permissions.WebSearch,
+        ["image"] = Core.Access.Permissions.Pictures,
+        ["video"] = Core.Access.Permissions.Video,
+        ["speech"] = Core.Access.Permissions.Speech,
+        ["memory"] = Core.Access.Permissions.Memory,
+        ["argus"] = Core.Access.Permissions.CodeRead,
+    };
+
+    /// <summary>Whether this person may use the tool by the rules: the tool allowed to them, and its feature held.</summary>
+    public static bool Allowed(Membership member, string toolId) =>
+        member.MayUse(Core.Access.ResourceKinds.Tool, toolId) && (!FeatureOf.TryGetValue(toolId, out var feature) || member.Has(feature));
+
     /// <summary>The tools this person may use now: on, allowed to them, and available.</summary>
     public async Task<IReadOnlyList<ToolChoice>> ForAsync(Membership member, CancellationToken ct = default) =>
-        [.. (await AllAsync(ct)).Where(t => t.Setting.Enabled && t.Unavailable is null && member.MayUse(Core.Access.ResourceKinds.Tool, t.Tool.Id))];
+        [.. (await AllAsync(ct)).Where(t => t.Setting.Enabled && t.Unavailable is null && Allowed(member, t.Tool.Id))];
 
     /// <summary>Whether this person may use the tool now: on, allowed to them, and available.</summary>
     public async Task<bool> MayUseAsync(Membership member, string toolId, CancellationToken ct = default) => (await ForAsync(member, ct)).Any(t => t.Tool.Id == toolId);

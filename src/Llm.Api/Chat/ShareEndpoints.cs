@@ -30,7 +30,7 @@ public static class ShareEndpoints
     {
         var mine = app.MapGroup("/api/chat/conversations/{id:guid}/share").PersonOnly();
         mine.MapGet("", GetAsync);
-        mine.MapPut("", PutAsync);
+        mine.MapPut("", PutAsync).RequirePermission(Llm.Core.Access.Permissions.ShareLinks);
         mine.MapDelete("", RevokeAsync);
         var g = app.MapGroup("/api/shared").PersonOnly();
         g.MapGet("/{shareId:guid}", OpenAsync);

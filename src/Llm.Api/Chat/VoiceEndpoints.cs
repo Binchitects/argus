@@ -59,7 +59,7 @@ public static class VoiceEndpoints
         var me = app.MapGroup("/api/account/voice").PersonOnly();
         me.MapGet("", MineAsync);
         me.MapPatch("", ChooseAsync);
-        me.MapPost("/try", TryAsync);
+        me.MapPost("/try", TryAsync).RequirePermission(Llm.Core.Access.Permissions.Speech);
         // Settings → Speech: the voices to choose the company's from, and a sample of one before it reads for everyone.
         var company = app.MapGroup("/api/admin/speech").RequirePermissions(Llm.Core.Access.Permissions.SettingsRead, Llm.Core.Access.Permissions.SettingsManage);
         company.MapGet("/voices", OfferedAsync);

@@ -143,7 +143,7 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
     public static void MapQueue(IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/api/chat/conversations/{id:guid}/queue").PersonOnly();
-        g.MapPost("", AddAsync);
+        g.MapPost("", AddAsync).RequirePermission(Llm.Core.Access.Permissions.Chat);
         g.MapDelete("/{queuedId:guid}", CancelAsync);
         g.MapPost("/{queuedId:guid}/now", NowAsync);
     }
