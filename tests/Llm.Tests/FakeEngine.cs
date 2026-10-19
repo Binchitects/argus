@@ -49,6 +49,12 @@ public sealed class FakeEngine : HttpMessageHandler
     private readonly HashSet<string> _stopping = [];
     public List<(string Method, string Path, string? Model)> Calls { get; } = [];
 
+    /// <summary>A slot written to disk or read back (slot-save-path): save or restore, the slot, the file, in order.</summary>
+    public List<(string Action, int Slot, string File)> SlotFiles { get; } = [];
+
+    /// <summary>The files on "disk", by model: a restore of one not there fails, as the engine's does.</summary>
+    private readonly HashSet<string> _saved = [];
+
     public void Reset(string? presetsFile)
     {
         lock (_status)
@@ -150,9 +156,33 @@ public sealed class FakeEngine : HttpMessageHandler
         {
             await Task.Delay(SlotsDelay, cancellationToken);
         }
-        var model = request.Content is null
+        var sent = request.Content is null ? null : JsonNode.Parse(await request.Content.ReadAsStringAsync(cancellationToken));
+        var model = sent is null
             ? System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query)["model"]
-            : JsonNode.Parse(await request.Content.ReadAsStringAsync(cancellationToken))?["model"]?.GetValue<string>();
+            : sent["model"]?.GetValue<string>();
+        if (path.StartsWith("/slots/", StringComparison.Ordinal) && int.TryParse(path[7..], out var slotId) && model is not null)
+        {
+            var action = System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query)["action"] ?? "";
+            var file = sent?["filename"]?.GetValue<string>() ?? "";
+            lock (_status)
+            {
+                Calls.Add((request.Method.Method, path, model));
+                if (_status.GetValueOrDefault(model) != "loaded")
+                {
+                    return Json(HttpStatusCode.BadRequest, """{"error":{"message":"model is not loaded"}}""");
+                }
+                if (action == "restore" && !_saved.Contains(model + "/" + file))
+                {
+                    return Json(HttpStatusCode.BadRequest, """{"error":{"message":"failed to restore slot, could not open file"}}""");
+                }
+                if (action == "save")
+                {
+                    _saved.Add(model + "/" + file);
+                }
+                SlotFiles.Add((action, slotId, file));
+                return Json(HttpStatusCode.OK, new JsonObject { ["id_slot"] = slotId, ["filename"] = file }.ToJsonString());
+            }
+        }
         lock (_status)
         {
             Calls.Add((request.Method.Method, path, model));

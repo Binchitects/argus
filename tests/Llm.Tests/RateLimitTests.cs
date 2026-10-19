@@ -96,8 +96,8 @@ public sealed class RateLimitTests(AppFixture app)
             Assert.Equal(JsonValueKind.Null, limits.GetProperty(name).GetProperty("value").ValueKind);
             Assert.Equal("none", limits.GetProperty(name).GetProperty("from").GetString());
         }
-        // Requests at once, per key, as before.
-        Assert.Equal(2, limits.GetProperty("atOnce").GetInt32());
+        // Requests answered at once, per key (Chat:ApiRequestsPerKey); the rest wait their turn.
+        Assert.Equal(4, limits.GetProperty("atOnce").GetInt32());
         // The keys' list (the home page's credit card reads it too) does not read the gateway's request log.
         Assert.False((await me.JsonAsync(await me.GetAsync("/api/account/keys"))).TryGetProperty("limits", out _));
     }

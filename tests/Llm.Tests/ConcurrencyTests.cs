@@ -595,6 +595,40 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
     }
 
     [Fact]
+    public async Task A_conversation_whose_slot_goes_to_another_is_kept_on_disk_and_read_back_when_it_returns()
+    {
+        await using var f = NewApp(new Dictionary<string, string?> { ["Chat:SmallModel"] = Big });
+        var slots = f.Services.GetRequiredService<SlotTable>();
+        await EventuallyAsync(() => slots.Count(Big) == 4, "the slot table knows the model's 4 slots");
+        // Each model's caches have a folder on the engine's disk, and the engine is told how much it may keep, how long.
+        var presets = await File.ReadAllTextAsync(Path.Combine(_dir, "config", "models.ini"));
+        Assert.Contains($"slot-save-path = /kvcache/{Llm.Api.Models.KvCache.FolderOf(Big)}\n", presets, StringComparison.Ordinal);
+        Assert.Equal("gb=200\ndays=0\n", await File.ReadAllTextAsync(Path.Combine(_dir, "config", "kvcache")));
+
+        var b = await PersonAsync(f);
+        // Four conversations on three conversation slots (the fourth is the side requests'): the fourth takes the slot
+        // of the one used least lately, which is written to disk first.
+        var chats = new List<Guid>();
+        for (var i = 0; i < 4; i++)
+        {
+            chats.Add(await ChatAsync(b, Big));
+        }
+        var tag = Guid.NewGuid().ToString("N")[..6];
+        lock (app.Engine.SlotFiles) { app.Engine.SlotFiles.Clear(); }
+        for (var i = 0; i < 4; i++)
+        {
+            Assert.Contains(await AskAsync(b, chats[i], $"[{tag}-{i}] Hello"), e => e.GetProperty("type").GetString() == "done");
+        }
+        var first = Llm.Api.Models.KvCache.FileOf(chats[0]);
+        Assert.Contains(app.Engine.SlotFiles, x => x.Action == "save" && x.File == first);
+        // The first comes back: into a slot that does not hold it, its file read back first (and the one there kept).
+        Assert.Contains(await AskAsync(b, chats[0], $"[{tag}-0b] Again"), e => e.GetProperty("type").GetString() == "done");
+        Assert.Contains(app.Engine.SlotFiles, x => x.Action == "restore" && x.File == first);
+        var restored = app.Engine.SlotFiles.FindLastIndex(x => x.Action == "restore" && x.File == first);
+        Assert.Contains(app.Engine.SlotFiles.Take(restored), x => x.Action == "save" && x.Slot == app.Engine.SlotFiles[restored].Slot && x.File != first);
+    }
+
+    [Fact]
     public async Task Each_sub_agent_keeps_a_slot_of_its_own_for_its_steps_off_the_side_one()
     {
         await using var f = NewApp(new Dictionary<string, string?> { ["Auth:DataKey"] = "a-data-key-for-slot-tests" });

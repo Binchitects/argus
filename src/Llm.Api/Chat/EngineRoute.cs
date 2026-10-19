@@ -180,6 +180,7 @@ public sealed partial class EngineRoute
             await ReadyAsync(model, ct);
             Tell(model);
             sending.Lease = await LeaseAsync(model, conversation, ct);
+            await KeepOnDiskAsync(model, sending.Lease, conversation, ct);
             return sending;
         }
         catch
@@ -188,6 +189,46 @@ public sealed partial class EngineRoute
             throw;
         }
     }
+
+    /// <summary>
+    /// The disk tier of the conversations' caches (KvCache): the conversation that held the slot until now is written to
+    /// disk before this request takes it, and this conversation's file, when it has one and comes into a slot that does
+    /// not hold it, is read back into it. Neither failing stops the request: it reads its prompt as it would without.
+    /// </summary>
+    private async Task KeepOnDiskAsync(string model, SlotTable.Lease lease, Guid? conversation, CancellationToken ct)
+    {
+        if (options.Value.KvCacheGb <= 0 || lease.Slot is not { } slot)
+        {
+            return;
+        }
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        limit.CancelAfter(TimeSpan.FromMinutes(2));
+        if (lease.Left is { } left)
+        {
+            try
+            {
+                await client.SaveSlotAsync(model, slot, Models.KvCache.FileOf(left), limit.Token);
+            }
+            catch (Exception ex) when (ex is Models.EngineException or OperationCanceledException && !ct.IsCancellationRequested)
+            {
+                LogKeepFailed(logger, model, slot, ex.Message);
+            }
+        }
+        if (lease.Arrived && conversation is { } c)
+        {
+            try
+            {
+                await client.RestoreSlotAsync(model, slot, Models.KvCache.FileOf(c), limit.Token);
+            }
+            catch (Exception ex) when (ex is Models.EngineException or OperationCanceledException && !ct.IsCancellationRequested)
+            {
+                // None kept yet (its first turn, or it was taken out for the size), or the model changed: read as usual.
+            }
+        }
+    }
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Keeping slot {Slot} of {Model} on disk failed: {Why}")]
+    private static partial void LogKeepFailed(ILogger logger, string model, int slot, string why);
 
     /// <summary>The slot for a request to <paramref name="model"/>, a model of this engine ready for it.</summary>
     private async Task<SlotTable.Lease> LeaseAsync(string model, Guid? conversation, CancellationToken ct)

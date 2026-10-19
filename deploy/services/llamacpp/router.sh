@@ -4,6 +4,8 @@
 #
 #   /presets/keep  the models kept loaded, one a line (loaded at start)
 #   /presets/max   how many may be loaded at once, those kept included (2)
+#   /presets/kvcache  how much the conversations' caches on disk (/kvcache, KV_CACHE_DIR) may
+#                  hold (gb=) and for how long after their last use (days=; 0: for ever)
 #
 # Presets are read only when llama-server starts, so a change to the list (or
 # to max) restarts it here; keeping or unloading a model does not. A model that
@@ -24,11 +26,30 @@ kept() {
 
 until [ -f "$models" ]; do echo "router: waiting for the app's model list"; sleep 10; done
 
+# The conversations' caches on disk: within their size and age, the least lately used first out
+# (a restore reads a file, which marks it used). Every ten minutes, beside the engine.
+kv_keep() {
+  [ -d /kvcache ] || return 0
+  gb=$(sed -n 's/^gb=//p' /presets/kvcache 2>/dev/null); days=$(sed -n 's/^days=//p' /presets/kvcache 2>/dev/null)
+  [ "${days:-0}" -gt 0 ] 2>/dev/null && find /kvcache -type f -name '*.bin' -mtime +"$days" -atime +"$days" -delete 2>/dev/null
+  [ "${gb:-0}" -gt 0 ] 2>/dev/null || return 0
+  limit=$((gb * 1024 * 1024))
+  used=$(du -sk /kvcache 2>/dev/null | cut -f1)
+  [ "${used:-0}" -gt "$limit" ] || return 0
+  find /kvcache -type f -name '*.bin' -printf '%A@ %k %p\n' 2>/dev/null | sort -n | while read -r _ kb path; do
+    [ "$used" -le "$limit" ] && break
+    rm -f "$path" && used=$((used - kb))
+  done
+}
+( while true; do kv_keep; sleep 600; done ) &
+
 pid=
 trap 'if [ -n "$pid" ]; then kill -TERM "$pid" 2>/dev/null; wait "$pid"; fi; exit 0' TERM INT
 while true; do
   seen=$(stamp)
   echo "router: $(grep -c '^\[' "$models") model(s), up to $(max) at once; kept loaded: $(kept | tr '\n' ' ')"
+  # Each model's folder for its conversations' caches, which the engine writes but does not make.
+  sed -n 's/^slot-save-path = //p' "$models" | while IFS= read -r d; do mkdir -p "$d"; done
   # The key goes by the environment (LLAMA_API_KEY), not the command line, where ps shows it to anyone in the container.
   LLAMA_API_KEY="$key" /app/llama-server --models-preset "$models" --models-max "$(max)" --models-autoload --host 0.0.0.0 --port 8080 &
   pid=$!

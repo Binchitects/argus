@@ -484,7 +484,30 @@ public static class AnswerCacheEndpoints
         return Results.Ok(Mine(me, options.CurrentValue));
     }
 
-    private static async Task ProxyAsync(HttpContext http, AnswerCache cache, IHttpClientFactory factory, KeyLine line)
+    /// <summary>The longest request read here to pin an agent's session to a slot; a larger one goes as it is.</summary>
+    private const int MostPinnedRequest = 64 * 1024 * 1024;
+
+    /// <summary>
+    /// An agent's session through an API key, as the engine's slots know conversations: its key, its model, and how its
+    /// conversation starts (the system prompt and the first question), which stay the same from turn to turn.
+    /// </summary>
+    public static Guid? SessionOf(string key, JsonObject request)
+    {
+        if (request["model"] is not JsonValue mv || !mv.TryGetValue<string>(out var model) || request["messages"] is not JsonArray messages)
+        {
+            return null;
+        }
+        var start = messages.OfType<JsonObject>().Take(2).Select(m => m["content"]?.ToJsonString() ?? "").ToList();
+        if (start.Count < 2)
+        {
+            // One message: no session to speak of yet.
+            return null;
+        }
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\u0001', [key, model, .. start])));
+        return new Guid(hash.AsSpan(0, 16));
+    }
+
+    private static async Task ProxyAsync(HttpContext http, AnswerCache cache, IHttpClientFactory factory, KeyLine line, Chat.EngineRoute route)
     {
         var ct = http.RequestAborted;
         var request = http.Request;
@@ -529,6 +552,30 @@ public static class AnswerCacheEndpoints
                 lookup = await cache.LookupAsync(key, json, read: !control.Contains("no-cache", StringComparison.OrdinalIgnoreCase), ct);
             }
         }
+        // An agent's chat completions to a model of this engine: read whole (when not already), to pin its session.
+        if (completions && body is null && key is { Length: > 0 } && request.ContentLength is > 0 and <= MostPinnedRequest)
+        {
+            body = new byte[request.ContentLength.Value];
+            var got = 0;
+            int r;
+            while (got < body.Length && (r = await request.Body.ReadAsync(body.AsMemory(got), ct)) > 0)
+            {
+                got += r;
+            }
+            if (got < body.Length)
+            {
+                http.Response.StatusCode = StatusCodes.Status400BadRequest;
+                return;
+            }
+            try
+            {
+                json = JsonNode.Parse(body) as JsonObject;
+            }
+            catch (JsonException)
+            {
+                // Not JSON: the gateway says what is wrong with it.
+            }
+        }
         var streamed = json?["stream"] is JsonValue s && s.TryGetValue<bool>(out var on) && on;
         if (lookup?.Answer is { } kept)
         {
@@ -548,6 +595,16 @@ public static class AnswerCacheEndpoints
             await http.Response.WriteAsJsonAsync(new { error = new { message = $"This API key's requests waited longer than {line.Timeout.TotalMinutes:0} minutes for their turn: {line.Places} are answered at once. Try again in a moment.", type = "rate_limit_error", code = "429" } }, ct);
             return;
         }
+        // The agent's session goes back to the engine slot that holds its start (and its cache, from disk when it lost it),
+        // as a chat's conversation does: each turn reads only what is new.
+        using var sending = completions && key is { Length: > 0 } && json?["model"] is JsonValue pm && pm.TryGetValue<string>(out var pinned) && SessionOf(key, json) is { } session
+            ? await route.TakeAsync(pinned, session, ct)
+            : null;
+        if (sending?.Slot is { } slotId && json is not null)
+        {
+            json["id_slot"] = slotId;
+            body = Encoding.UTF8.GetBytes(json.ToJsonString());
+        }
         using var forward = new HttpRequestMessage(new HttpMethod(request.Method), new Uri(request.Path + request.QueryString, UriKind.Relative))
         {
             Content = body is not null ? new ByteArrayContent(body) : new StreamContent(request.Body),
@@ -563,7 +620,11 @@ public static class AnswerCacheEndpoints
         {
             forward.Content.Headers.TryAddWithoutValidation("Content-Type", type);
         }
-        if (request.ContentLength is { } length)
+        if (body is not null)
+        {
+            forward.Content.Headers.ContentLength = body.Length;
+        }
+        else if (request.ContentLength is { } length)
         {
             forward.Content.Headers.ContentLength = length;
         }

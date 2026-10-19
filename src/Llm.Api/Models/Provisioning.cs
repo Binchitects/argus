@@ -30,6 +30,8 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
     private bool _speechAsked;
     /// <summary>MODEL's files were said to be missing (once, until they come).</summary>
     private bool _toldMissing;
+    /// <summary>One run at a time: the background round and an admin's (or the installer's) would add the model twice.</summary>
+    private readonly SemaphoreSlim _running = new(1, 1);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -70,6 +72,25 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
     /// that run, the speech server's models, and MODEL's files. Returns what was started.
     /// </summary>
     public async Task<IReadOnlyList<string>> RunAsync(bool download, CancellationToken ct)
+    {
+        await _running.WaitAsync(ct);
+        try
+        {
+            return await RunOnceAsync(download, ct);
+        }
+        finally
+        {
+            _running.Release();
+        }
+    }
+
+    public override void Dispose()
+    {
+        _running.Dispose();
+        base.Dispose();
+    }
+
+    private async Task<IReadOnlyList<string>> RunOnceAsync(bool download, CancellationToken ct)
     {
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();

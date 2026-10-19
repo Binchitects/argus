@@ -40,11 +40,17 @@ spec:
             - { name: config, mountPath: /router.sh, subPath: router.sh }
             - { name: models, mountPath: /library, readOnly: true }
             - { name: engine, mountPath: /presets, readOnly: true }
+            - { name: kvcache, mountPath: /kvcache }
             - { name: shm, mountPath: /dev/shm }
       volumes:
         - { name: config, configMap: { name: arena-config, defaultMode: 0555 } }
         {{- include "arena.claim" (list "models" (include "arena.modelsClaim" .)) | nindent 8 }}
         {{- include "arena.claim" (list "engine" "arena-engine") | nindent 8 }}
+        {{- if .Values.llamacpp.kvCacheClaim }}
+        - { name: kvcache, persistentVolumeClaim: { claimName: {{ .Values.llamacpp.kvCacheClaim | quote }} } }
+        {{- else }}
+        - { name: kvcache, emptyDir: { sizeLimit: {{ .Values.llamacpp.kvCacheSize | quote }} } }
+        {{- end }}
         - { name: shm, emptyDir: { medium: Memory, sizeLimit: 2Gi } }
 ---
 apiVersion: v1

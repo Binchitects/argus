@@ -38,12 +38,18 @@ public sealed class SlotTable(TimeProvider clock)
     public sealed record Seen(int Count, IReadOnlySet<int> Busy, long Asked);
 
     /// <summary>A slot taken for one request (or none: <see cref="Slot"/> null); give it back by disposing it.</summary>
-    public sealed class Lease(SlotTable table, string? model, int? slot) : IDisposable
+    public sealed class Lease(SlotTable table, string? model, int? slot, Guid? left = null, bool arrived = false) : IDisposable
     {
         private int _released;
 
         /// <summary>The slot to send as id_slot; null: send none, the engine chooses.</summary>
         public int? Slot { get; } = slot;
+
+        /// <summary>The conversation whose start the slot held until now, another's (its cache may be kept on disk before it goes).</summary>
+        public Guid? Left { get; } = left;
+
+        /// <summary>Whether the conversation comes into a slot that did not hold its start (its cache on disk may be read back into it).</summary>
+        public bool Arrived { get; } = arrived;
 
         public void Dispose()
         {
@@ -134,11 +140,16 @@ public sealed class SlotTable(TimeProvider clock)
                 // than wait behind it: one no conversation holds first, then the one used least recently.
                 slot = Idle(own) ? own
                     : Enumerable.Range(0, m.Count).Where(Idle).OrderBy(i => m.Holder[i] is null ? 0 : 1).ThenBy(i => m.Used[i]).Cast<int?>().FirstOrDefault();
+                Guid? gone = null;
                 if (slot is { } s)
                 {
                     // What a conversation kept there is gone.
+                    gone = m.Holder[s];
                     m.Holder[s] = null;
+                    m.Busy[s]++;
+                    m.Used[s] = clock.GetTimestamp();
                 }
+                return new Lease(this, model, slot, gone);
             }
             else
             {
@@ -147,6 +158,8 @@ public sealed class SlotTable(TimeProvider clock)
                 slot = own >= 0 && Idle(own) ? own
                     : Enumerable.Range(0, m.Count).Where(i => i != side && Idle(i)).OrderBy(i => m.Used[i]).Cast<int?>().FirstOrDefault()
                     ?? (side is { } last && Idle(last) ? last : null);
+                Guid? left = null;
+                var arrived = false;
                 if (slot is { } s && own != s)
                 {
                     if (own >= 0)
@@ -154,15 +167,17 @@ public sealed class SlotTable(TimeProvider clock)
                         // It moves: what it left there is another conversation's start now, as far as choosing goes.
                         m.Holder[own] = null;
                     }
+                    left = m.Holder[s];
+                    arrived = true;
                     m.Holder[s] = c;
                 }
+                if (slot is { } taken)
+                {
+                    m.Busy[taken]++;
+                    m.Used[taken] = clock.GetTimestamp();
+                }
+                return new Lease(this, model, slot, left, arrived);
             }
-            if (slot is { } taken)
-            {
-                m.Busy[taken]++;
-                m.Used[taken] = clock.GetTimestamp();
-            }
-            return new Lease(this, model, slot);
         }
     }
 

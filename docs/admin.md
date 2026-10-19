@@ -454,6 +454,23 @@ only what is new. A model has as many slots as its **Answers at once**.
   fast as 32 in every test, for an eighth of the RAM. `cache-reuse` (moving
   matching chunks into place) does not work for these models; llama.cpp says
   so in its log and goes without.
+- **Conversations' caches on disk** (Settings → Engine: **Disk for
+  conversations' caches**, 200 GB by default, and **Keep conversations'
+  caches for**, for ever by default). Below the engine's RAM cache, on
+  `KV_CACHE_DIR` (a fast disk, an NVMe; `DATA_DIR/kvcache` by default): when a
+  conversation's slot goes to another, the app has the engine write what the
+  slot holds (its prompt read, its state, checkpoints and all) to a file of
+  its own first; when the conversation comes back to a slot that does not hold
+  it, that file is read back into the slot before its turn, so the engine reads
+  only what is new, however long after, and across the engine's restarts (a
+  long conversation comes back in seconds instead of minutes). It holds for
+  chats, sub-agents and **agents through API keys** alike: an agent's session
+  is known by its key, its model and how its conversation starts (the system
+  prompt and the first question), and goes back to its slot each turn as a
+  chat does. The engine's script keeps the folder within its size and age,
+  the least lately used first out; a file that cannot be read back (the
+  model changed) is skipped, and the prompt read as it would be without.
+  Turning it on or off restarts the engine.
 - The model's **More engine options** can set each of these otherwise
   (`cache-idle-slots = true`, `ctx-checkpoints = 8`, `cache-reuse = 0`).
 - **Its card says what the cache keeps and costs**, for example "Token cache:

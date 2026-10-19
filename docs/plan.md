@@ -1269,3 +1269,27 @@ what each repository is for.
 **Later**: Code Arena's sandbox on Windows; real platforms (Slack, Teams,
 SAML, Confluence, SharePoint, Helm on a cluster); Laya's routing quality;
 deep research under six minutes; a model menu in the chat's tools.
+
+**v6.0** (the person's asks of 2026-10-19)
+1. Operational roles: team manager (a group's manager: its people, their
+   credit and limits, its models and tools, its reports), supervisor
+   (monitoring: dashboards, alerts, logs, the stack's state, read-only), and
+   others the Access page makes from permissions; operational duties handed
+   to them (taking alerts, loading models, running backups, answering
+   requests for access) with an audit of what each did. Builds on v5.9's
+   access control.
+2. A 3D model generator tool: Blender run headless in a sandbox of its own
+   (no network, limits on CPU, memory and time), driven by the model with
+   Blender's Python (and text- or image-to-3D models where one is loaded);
+   the result (.glb, .blend, renders) shown in the chat with a 3D viewer.
+   Needs a yes: Blender's image or package.
+3. A planning tool: plans with steps, owners, dates and dependencies that the
+   chat makes and keeps up to date, shown as a board and a timeline, shared in
+   rooms.
+4. Other providers in Code Arena: providers' APIs by key (Anthropic, OpenAI,
+   Gemini, OpenRouter...) through the gateway; and a person's own
+   subscription (Claude Pro/Max, ChatGPT Plus/Pro) only through the
+   providers' own agents (Claude Code, Codex CLI, Gemini CLI) run inside Code
+   Arena under the person's own sign-in (Agent Client Protocol), since the
+   providers' terms do not let other apps use a subscription's credentials.
+

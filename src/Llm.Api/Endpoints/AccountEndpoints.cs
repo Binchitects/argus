@@ -212,7 +212,7 @@ public static class AccountEndpoints
         CancellationToken ct)
     {
         var user = (await users.GetUserAsync(p))!;
-        return Results.Ok(await rateLimits.ViewAsync(user, await gateway.KeysAsync(user.Email!, ct), keyAccess.MaxParallel, ct));
+        return Results.Ok(await rateLimits.ViewAsync(user, await gateway.KeysAsync(user.Email!, ct), keyAccess.AtOnce, ct));
     }
 
     private static string Group(string key)

@@ -21,6 +21,9 @@ public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, Ch
     /// Chat:ApiRequestsPerKey and has the rest wait their turn; LiteLLM's limit, four times that, is the
     /// safety net for what reaches it without the app (its failover, the paths it does not take).
     /// </summary>
+    /// <summary>A key's requests answered at once (Chat:ApiRequestsPerKey; the rest wait their turn); null: no limit.</summary>
+    public int? AtOnce => chat.CurrentValue.ApiRequestsPerKey > 0 ? chat.CurrentValue.ApiRequestsPerKey : null;
+
     public int? MaxParallel => chat.CurrentValue.ApiRequestsPerKey > 0 ? chat.CurrentValue.ApiRequestsPerKey * 4 : null;
 
     /// <summary>LiteLLM's word for "no model": an empty list would mean every model.</summary>
@@ -29,10 +32,23 @@ public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, Ch
     /// <summary>The list a person's keys carry: empty (every model) when nothing is kept from them.</summary>
     public async Task<IReadOnlyList<string>> ListForAsync(AppUser user, CancellationToken ct = default)
     {
-        var all = (await models.AllAsync(ct)).Select(m => m.Name).ToList();
+        var every = await models.AllAsync(ct);
+        var all = every.Select(m => m.Name).ToList();
         var allowed = await policy.AllowedAsync(user, all, ct);
+        // Pictures, video and speech are features of their own (Admin → Access): their models go with them.
+        var member = await access.MembershipAsync(user, ct);
+        allowed.ExceptWith(every.Where(m => FeatureOf(m.Mode) is { } feature && !member.Has(feature)).Select(m => m.Name));
         return allowed.Count == all.Count ? [] : allowed.Count == 0 ? [NoModels] : [.. all.Where(allowed.Contains)];
     }
+
+    /// <summary>The feature permission a gateway model of this mode needs; null: chat's own.</summary>
+    public static string? FeatureOf(string mode) => mode switch
+    {
+        "image_generation" => Core.Access.Permissions.Pictures,
+        "video_generation" => Core.Access.Permissions.Video,
+        "audio_speech" or "audio_transcription" => Core.Access.Permissions.Speech,
+        _ => null,
+    };
 
     /// <summary>Each person's keys blocked while they are disabled or have no API access, unblocked otherwise; returns how many changed.</summary>
     public async Task<int> BlocksAsync(CancellationToken ct = default)

@@ -203,7 +203,7 @@ public static class AdminEndpoints
                 groups,
                 directoryGroups = u.DirectoryGroups,
                 keys = keys.Select(k => new { alias = k.Alias, preview = k.Preview, spend = k.Spend, blocked = k.Blocked, createdAt = k.CreatedAt }),
-                limits = await rateLimits.ViewAsync(u, keys, keyAccess.MaxParallel),
+                limits = await rateLimits.ViewAsync(u, keys, keyAccess.AtOnce),
                 warning,
             });
         });

@@ -54,3 +54,24 @@ public sealed class KeyLineTests
         }
     }
 }
+
+/// <summary>An agent's session through an API key, as the engine's slots know it: the same start, the same session.</summary>
+public sealed class AgentSessionTests
+{
+    private static System.Text.Json.Nodes.JsonObject Request(string model, params string[] contents) =>
+        new() { ["model"] = model, ["messages"] = new System.Text.Json.Nodes.JsonArray([.. contents.Select((c, i) => (System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject { ["role"] = i == 0 ? "system" : "user", ["content"] = c })]) };
+
+    [Fact]
+    public void Turns_of_one_session_share_it_and_another_start_key_or_model_is_another()
+    {
+        var first = AnswerCacheEndpoints.SessionOf("sk-a", Request("m", "You are a coding agent.", "Fix the build"));
+        var later = AnswerCacheEndpoints.SessionOf("sk-a", Request("m", "You are a coding agent.", "Fix the build", "Done. What next?", "Run the tests"));
+        Assert.NotNull(first);
+        Assert.Equal(first, later);
+        Assert.NotEqual(first, AnswerCacheEndpoints.SessionOf("sk-a", Request("m", "You are a coding agent.", "Write the docs")));
+        Assert.NotEqual(first, AnswerCacheEndpoints.SessionOf("sk-b", Request("m", "You are a coding agent.", "Fix the build")));
+        Assert.NotEqual(first, AnswerCacheEndpoints.SessionOf("sk-a", Request("n", "You are a coding agent.", "Fix the build")));
+        // One message is no session yet.
+        Assert.Null(AnswerCacheEndpoints.SessionOf("sk-a", Request("m", "Hello")));
+    }
+}

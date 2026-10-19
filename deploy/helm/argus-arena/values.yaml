@@ -96,6 +96,10 @@ litellm:
 llamacpp:
   enabled: true
   gpus: 1
+  # Conversations' caches on disk (Engine:KvCacheGb): a claim on a fast local disk (an NVMe), kept across restarts;
+  # empty: an emptyDir of this size, lost when the pod moves.
+  kvCacheClaim: ""
+  kvCacheSize: 200Gi
   resources: { requests: { cpu: "4", memory: 16Gi } }
   nodeSelector: {}
   tolerations: []

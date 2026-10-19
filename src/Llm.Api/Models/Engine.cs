@@ -50,6 +50,16 @@ public sealed class EngineOptions
     /// one coming back reads from there what it had, not its whole history again. 8 as llama.cpp's own; 0: none.
     /// </summary>
     public int SessionCacheGb { get; set; } = 8;
+
+    /// <summary>
+    /// The disk (KV_CACHE_DIR, an NVMe) the engine keeps conversations' caches on, in GB: a conversation (a chat, an agent's
+    /// session through an API key) whose slot went to another is written there, and read back into a slot when it comes
+    /// back, however long after, the engine restarted or not, instead of its whole history being read again. 0: none.
+    /// </summary>
+    public int KvCacheGb { get; set; } = 200;
+
+    /// <summary>How long a conversation's cache is kept on disk after it was last used, in days; 0: for ever (only the size limit takes the oldest).</summary>
+    public int KvCacheDays { get; set; }
 }
 
 /// <summary>A model in the engine's list, and whether it is loaded.</summary>
@@ -80,6 +90,14 @@ public sealed class EngineClient(HttpClient http, IOptions<EngineOptions> option
     public Task LoadAsync(string name, CancellationToken ct = default) => SendAsync(HttpMethod.Post, "/models/load", new JsonObject { ["model"] = name }, ct);
 
     public Task UnloadAsync(string name, CancellationToken ct = default) => SendAsync(HttpMethod.Post, "/models/unload", new JsonObject { ["model"] = name }, ct);
+
+    /// <summary>Writes what a slot of <paramref name="model"/> holds into its folder on disk (KvCache), as <paramref name="file"/>.</summary>
+    public Task SaveSlotAsync(string model, int slot, string file, CancellationToken ct = default) =>
+        SendAsync(HttpMethod.Post, $"/slots/{slot}?action=save", new JsonObject { ["model"] = model, ["filename"] = file }, ct);
+
+    /// <summary>Reads a conversation's file back into a slot of <paramref name="model"/>; the engine reuses it as far as the next prompt starts the same.</summary>
+    public Task RestoreSlotAsync(string model, int slot, string file, CancellationToken ct = default) =>
+        SendAsync(HttpMethod.Post, $"/slots/{slot}?action=restore", new JsonObject { ["model"] = model, ["filename"] = file }, ct);
 
     /// <summary>
     /// A loaded model's slots as the engine has them (llama-server's /slots): how many, and which are

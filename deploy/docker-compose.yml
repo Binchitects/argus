@@ -158,6 +158,8 @@ services:
       - ./services/llamacpp/router.sh:/router.sh:ro
       - ${MODELS_DIR:-./models}:/library
       - engine:/presets:ro
+      # Conversations' caches on disk (Engine:KvCacheGb): a fast disk, NVMe.
+      - ${KV_CACHE_DIR:-${DATA_DIR:?set DATA_DIR in .env}/kvcache}:/kvcache
     ulimits: { memlock: -1 }
     shm_size: 2gb
     deploy:

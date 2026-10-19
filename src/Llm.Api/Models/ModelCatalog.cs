@@ -498,7 +498,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// fits itself to the GPU leaves it free there.
     /// </param>
     public static string Preset(LocalModel m, string library, int? threads = null, ModelProfile? profile = null, int? sessionCacheGb = null,
-        (int? Gpu, int Mb)? pictureRoom = null)
+        (int? Gpu, int Mb)? pictureRoom = null, bool kvDisk = false)
     {
         var own = ExtraValues(m.ExtraPreset);
         var sb = new StringBuilder();
@@ -612,6 +612,12 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         {
             sb.Append(CultureInfo.InvariantCulture, $"cache-ram = {Math.Max(0, gb) * 1024}\n");
         }
+        // Conversations' caches on disk (Engine:KvCacheGb): the app has a slot written there when another takes it, and
+        // read back when its conversation returns (KvCache). A folder a model, by its name.
+        if (kvDisk)
+        {
+            sb.Append("slot-save-path = ").Append(KvCache.EngineDir).Append('/').Append(KvCache.FolderOf(m.Name)).Append('\n');
+        }
         foreach (var raw in (m.ExtraPreset ?? "").Split('\n'))
         {
             var line = raw.Trim();
@@ -679,8 +685,10 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         }
         var text = "# Written by the app (Admin -> Models). The engine restarts when this changes.\n\n" +
             string.Join("\n", models.Select(m => Preset(m, options.Value.EngineLibraryDir, options.Value.Threads, profiles.GetValueOrDefault(m.File), options.Value.SessionCacheGb,
-                pictureRoom)));
+                pictureRoom, options.Value.KvCacheGb > 0)));
         Write(PresetsFile, text);
+        // How much of the disk the conversations' caches may take, and for how long: the engine's script keeps to it.
+        Write(KvCache.ControlFile, $"gb={Math.Max(0, options.Value.KvCacheGb)}\ndays={Math.Max(0, options.Value.KvCacheDays)}\n");
     }
 
     /// <summary>
@@ -899,7 +907,8 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             return;
         }
         Directory.CreateDirectory(Dir);
-        var temp = path + ".tmp";
+        // A temp file of its own: the watcher and an admin's save may write at once.
+        var temp = $"{path}.{Guid.NewGuid():N}.tmp";
         File.WriteAllText(temp, text);
         if (!OperatingSystem.IsWindows())
         {
