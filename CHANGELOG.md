@@ -12,6 +12,37 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v6.0.1 (2026-10-21)
+
+### :rocket: Epics and highlights
+
+- **3D models that work for any model**: the 3D tool builds a model from
+  parts the model describes (`make_3d_parts`), so even a small model gets a
+  house, a room or a person right instead of writing Blender code that
+  fails. People are one part (`figure`): a skinned, smoothed body with a
+  face, hands, hair and clothes, in poses (standing, walking, waving,
+  sitting...), any height, build and body shape; trees too (round, pine,
+  palm, bush); and organic shapes (capsule, lathe, extrude, tube, 3D text,
+  smoothing)
+- **Textures, shaders and lights**: patterns Blender draws (brick, tiles,
+  shingles, wood, stone, concrete, grass, marble, brushed metal...) at their
+  real size; textures made as images first (`make_texture`) from a pattern,
+  from a description the picture model draws, or from a photo, with
+  roughness and normal maps; glass, metal, ceramic and glowing shaders;
+  lights as parts (point, spot, area, sun) and lighting for the pictures
+  (day, studio, night)
+- **A 3D viewer in the chat**: a `.glb` opens in the answer, turned with
+  the mouse, a finger or the arrow keys and zoomed; a model with lights can
+  be seen by its own lights. The `.glb` carries its textures (patterns baked
+  into images), glass, glow and lights
+
+### :bug: Bugs fixed
+
+- The 3D tool's pictures were skipped when the chat had a picture of its
+  own; a model's pictures are framed to fit it
+- The model no longer pastes Blender code into its answer when a script
+  fails
+
 ## v6.0.0 (2026-10-21)
 
 ### :rocket: Epics and highlights
