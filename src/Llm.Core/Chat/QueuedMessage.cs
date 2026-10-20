@@ -21,6 +21,8 @@ public sealed class QueuedMessage
     /// <summary>A room's message for the people only: saved, not answered.</summary>
     public bool ForPeople { get; set; }
     public List<Guid> Mentions { get; set; } = [];
+    /// <summary>The message it replies to (a room's).</summary>
+    public Guid? ReplyToId { get; set; }
     /// <summary>Its place in line: the lowest goes next (Send now puts one first).</summary>
     public int Position { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

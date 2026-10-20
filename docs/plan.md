@@ -1298,3 +1298,16 @@ these, and v5.9's leftovers)
    Arena under the person's own sign-in (Agent Client Protocol), since the
    providers' terms do not let other apps use a subscription's credentials.
 
+**v6.0, part 5** (the person's asks of 2026-10-20)
+1. Rooms: reply to a message and @mention people and the model; the model
+   answers only a message that mentions it or replies to one of its answers
+   (the reply is the prompt, with the answer it replies to); people
+   mentioned or replied to hear it in their bell.
+2. Code Arena compacts before the answer's output would reach the model's
+   window, not only when the prompt is full.
+3. Code Arena takes a screenshot (the screen, a window, or the page it
+   previews) and passes it to the model.
+4. Access in far more detail: permissions per page and per action (each admin
+   area's read, change and delete apart), per model, tool and knowledge
+   source actions, rooms, reviews, plans and API keys.
+

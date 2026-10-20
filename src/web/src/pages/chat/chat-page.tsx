@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Archive, ArrowDown, Code2, FileUp, GitFork, Lightbulb, Lock, MessageSquare, Search, Sparkles, SquareTerminal } from 'lucide-react'
+import { Archive, ArrowDown, Code2, FileUp, GitFork, Lightbulb, Lock, MessageSquare, Reply, Search, Sparkles, SquareTerminal, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
@@ -49,7 +49,7 @@ import { findQuoted, type Quote } from './quote'
 import { isReplyKey, useQuotableSelection } from './quotable'
 import { SelectionToolbar } from './selection-toolbar'
 import { NewRoomDialog, RoomPanel } from './room'
-import { typingLine, useRoomEvents } from './room-live'
+import { mentionsIn, typingLine, useRoomEvents } from './room-live'
 
 /** The id a question is shown under until the server gives it its own. */
 let localCount = 0
@@ -217,9 +217,15 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   // A room: a chat several people share (its people, who is here, who writes).
   const room = data?.room ?? null
   const roomLive = useRoomEvents(id, room, me?.id ?? '')
+  /** Who wrote the message a room's message replies to, and its start. */
+  const replyOf = (messageId: string) => {
+    const m = data?.messages.find((x) => x.id === messageId)
+    return m ? { name: m.role === 'assistant' ? 'Arena' : (m.author?.name ?? 'Former member'), text: m.content.slice(0, 120) } : null
+  }
   const [peopleOpen, setPeopleOpen] = useState(false)
   const [makingRoom, setMakingRoom] = useState(false)
-  const [forPeople, setForPeople] = useState(false)
+  // In a room: the message the next one replies to.
+  const [replyTo, setReplyTo] = useState<Message | null>(null)
   const settings: ChatSettings = data
     ? { model: data.model, thinking: data.thinking, tools: data.tools, systemPrompt: data.systemPrompt, temperature: data.temperature, topP: data.topP, maxTokens: data.maxTokens }
     : draft
@@ -660,7 +666,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     })
   }
   /** Queues what the box holds (its files and quote); `quoted`: a question about a selection instead, with no files. */
-  const enqueue = async (text: string, quoted?: Quote, toPeople = false): Promise<boolean> => {
+  const enqueue = async (text: string, quoted?: Quote, inRoom?: { replyTo?: string; mentions?: string[] }): Promise<boolean> => {
     const chat = streamingIn.current ?? id
     if (!chat) return false
     const fromBox = !quoted
@@ -675,7 +681,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
         content: text,
         attachments: fromBox ? uploads.attachments.map((a) => a.id) : [],
         ...(withQuote ? { quote: withQuote.text } : {}),
-        ...(toPeople ? { forPeople: true } : {}),
+        ...(inRoom?.replyTo ? { replyTo: inRoom.replyTo } : {}),
+        ...(inRoom?.mentions?.length ? { mentions: inRoom.mentions } : {}),
       })
       if (fromBox) uploads.clear()
       setQueued(chat, r.queued)
@@ -1024,7 +1031,17 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                       const arena = t.question ? arenaView(t.question, data?.arenas, view.arena, answering && i === lastTurn) : null
                       return (
                         <div key={t.question?.id ?? t.answer[0]?.id ?? i} className="grid gap-4">
-                          {t.question && <QuestionTurn m={t.question} siblings={tree.siblings(t.question)} busy={streaming} onSwitch={switchTo} onEdit={room && t.question.author?.id !== me?.id ? undefined : edit} onJumpToQuote={jumpToQuoted} room={room ? { me: me?.id ?? '' } : undefined} />}
+                          {t.question && (
+                            <QuestionTurn
+                              m={t.question}
+                              siblings={tree.siblings(t.question)}
+                              busy={streaming}
+                              onSwitch={switchTo}
+                              onEdit={room && t.question.author?.id !== me?.id ? undefined : edit}
+                              onJumpToQuote={jumpToQuoted}
+                              room={room ? { me: me?.id ?? '', replyOf, onReply: room.role === 'viewer' ? undefined : setReplyTo } : undefined}
+                            />
+                          )}
                           {arena && t.question ? (
                             <ArenaTurn
                               arena={arena}
@@ -1067,6 +1084,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                               onDecide={(callId, allow) => void decide(callId, allow)}
                               research={answering && i === lastTurn && !!view.research}
                               onTrace={me?.isAdmin ? setTracing : undefined}
+                              onReply={room && room.role !== 'viewer' ? setReplyTo : undefined}
                               busy={streaming}
                               feedbackIn={id}
                               onCompact={canCompact && i === lastTurn ? () => void compact() : undefined}
@@ -1119,13 +1137,18 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                     {room.answeringFor && room.answeringFor !== me?.id && <output>Arena is answering {room.members.find((m) => m.id === room.answeringFor)?.name ?? 'someone'}…</output>}
                     {typingLine(roomLive.typingNames) && <output>{typingLine(roomLive.typingNames)}</output>}
-                    {room.role !== 'viewer' && (
-                      <label className="ml-auto flex items-center gap-1.5">
-                        <input type="checkbox" checked={forPeople} onChange={(e) => setForPeople(e.target.checked)} className="accent-primary" />
-                        Just say it (no answer)
-                      </label>
-                    )}
-                    {room.answerMode === 'mention' && <span>The model answers only when you write @Arena.</span>}
+                    {room.role !== 'viewer' && !replyTo && <span className="ml-auto">The model answers when you write @Arena or reply to one of its answers; @Name tells a person.</span>}
+                  </div>
+                )}
+                {room && replyTo && (
+                  <div className="mb-2 flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-xs">
+                    <Reply className="size-3.5 shrink-0" aria-hidden="true" />
+                    <span className="min-w-0 flex-1 truncate">
+                      Replying to {replyTo.role === 'assistant' ? 'Arena (the model answers)' : (replyTo.author?.name ?? 'Former member')}: {replyTo.content.slice(0, 140)}
+                    </span>
+                    <Button variant="ghost" size="icon-sm" className="size-6" onClick={() => setReplyTo(null)} aria-label="Not a reply">
+                      <X />
+                    </Button>
                   </div>
                 )}
                 {room?.role === 'viewer' ? (
@@ -1134,7 +1157,15 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                 <Composer
                   streaming={streaming}
                   elsewhere={data?.codeArena && !streaming ? 'Code Arena is answering' : undefined}
-                  onSend={room ? (text) => enqueue(text, undefined, forPeople) : send}
+                  onSend={
+                    room
+                      ? async (text) => {
+                          const sent = await enqueue(text, undefined, { replyTo: replyTo?.id, mentions: mentionsIn(text, room.members, me?.id ?? '') })
+                          if (sent) setReplyTo(null)
+                          return sent
+                        }
+                      : send
+                  }
                   talk={talkButton}
                   queued={queue}
                   onQueue={enqueue}
@@ -1193,3 +1224,4 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     </CanvasOpener>
   )
 }
+

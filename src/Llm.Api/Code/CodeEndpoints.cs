@@ -230,7 +230,7 @@ public static class CodeEndpoints
         {
             return AuthEndpoints.Problem(409, "running", "The review is not done yet.");
         }
-        var room = new Conversation { UserId = me.Id, Title = $"Review: {r.Project} {r.Title}"[..Math.Min(200, $"Review: {r.Project} {r.Title}".Length)], Kind = RoomMember.Room, AnswerMode = RoomEndpoints.MentionMode };
+        var room = new Conversation { UserId = me.Id, Title = $"Review: {r.Project} {r.Title}"[..Math.Min(200, $"Review: {r.Project} {r.Title}".Length)], Kind = RoomMember.Room };
         db.Conversations.Add(room);
         var text = $"**Review of {r.Project} {r.Title}** ({ReviewEngine.VerdictText(r.Verdict)}, {r.Risk} risk) — [open the review](/code/reviews/{r.Id})" +
             (r.WebUrl is { } url ? $" · [in GitLab]({url})" : "") + "\n\n" + (r.Summary ?? "") + "\n\n" +

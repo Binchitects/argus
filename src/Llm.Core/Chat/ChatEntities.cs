@@ -52,8 +52,6 @@ public sealed class Conversation
     public DateTimeOffset? CodeArenaTurnUntil { get; set; }
     /// <summary>"room": a chat several people share (<see cref="RoomMember"/>); null: the owner's own.</summary>
     public string? Kind { get; set; }
-    /// <summary>A room's: "every" (every message is answered, unless sent to people only) or "mention" (only when @Arena is named).</summary>
-    public string? AnswerMode { get; set; }
     /// <summary>A room's members may invite others, not only its owner.</summary>
     public bool MembersInvite { get; set; }
     public bool IsRoom => Kind == RoomMember.Room;
@@ -141,6 +139,8 @@ public sealed class ChatMessage
     public bool ForPeople { get; set; }
     /// <summary>The members it names (@name).</summary>
     public List<Guid> Mentions { get; set; } = [];
+    /// <summary>The message it replies to (a room's): a reply to one of the model's answers is a question to it.</summary>
+    public Guid? ReplyToId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 

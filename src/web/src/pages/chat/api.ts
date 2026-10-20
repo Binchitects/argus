@@ -50,7 +50,7 @@ export interface QueueState {
 }
 
 /** Queues a message to send when the answer ends (at once when the chat is not answering). */
-export const queueMessage = (id: string, body: { content: string; attachments: string[]; quote?: string; forPeople?: boolean }) =>
+export const queueMessage = (id: string, body: { content: string; attachments: string[]; quote?: string; mentions?: string[]; replyTo?: string }) =>
   api<QueueState>(`/api/chat/conversations/${id}/queue`, { body })
 
 /** Takes a queued message out of line. */
@@ -184,7 +184,7 @@ export const setRoomRole = (id: string, userId: string, role: 'member' | 'viewer
 
 export const handOverRoom = (id: string, userId: string) => api(`/api/rooms/${id}/owner`, { method: 'PUT', body: { userId } })
 
-export const updateRoom = (id: string, body: { answerMode?: 'every' | 'mention'; membersInvite?: boolean }) => api(`/api/rooms/${id}`, { method: 'PATCH', body })
+export const updateRoom = (id: string, body: { membersInvite?: boolean }) => api(`/api/rooms/${id}`, { method: 'PATCH', body })
 
 export const roomTyping = (id: string) => api(`/api/rooms/${id}/typing`, { body: {} })
 

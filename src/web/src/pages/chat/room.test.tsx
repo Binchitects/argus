@@ -21,7 +21,6 @@ const msg = (id: string, parentId: string | null, role: Message['role'], over: P
 
 const brief = (over: Partial<RoomBrief> = {}): RoomBrief => ({
   role: 'member',
-  answerMode: 'every',
   membersInvite: false,
   answeringFor: null,
   members: [
@@ -58,10 +57,13 @@ describe('rooms', () => {
     expect(screen.getByRole('region', { name: 'Olivia' })).toHaveTextContent('to the room')
     expect(screen.getByRole('region', { name: 'You' })).toBeInTheDocument()
 
-    await userEvent.click(screen.getByLabelText('Just say it (no answer)'))
-    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'Back in five')
+    // A reply to a person, naming another: sent with what it replies to and whom it names.
+    await userEvent.click(screen.getByRole('button', { name: 'Reply to Olivia' }))
+    expect(screen.getByText(/Replying to Olivia/)).toBeInTheDocument()
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'Yes @olivia')
     await userEvent.keyboard('{Enter}')
-    await waitFor(() => expect(calls.find((c) => c.path === '/api/chat/conversations/r1/queue')?.body).toEqual({ content: 'Back in five', attachments: [], forPeople: true }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/chat/conversations/r1/queue')?.body).toEqual({ content: 'Yes @olivia', attachments: [], replyTo: 'q1', mentions: ['o1'] }))
+    expect(screen.queryByText(/Replying to Olivia/)).toBeNull()
 
     await userEvent.click(screen.getByRole('button', { name: /People in this room \(2/ }))
     const panel = await screen.findByRole('dialog', { name: 'People in this room' })

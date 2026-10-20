@@ -78,6 +78,8 @@ export interface Message {
   author?: { id: string; name: string } | null
   /** A room's message for its people only: not answered. */
   forPeople?: boolean
+  /** A room's message it replies to. */
+  replyToId?: string | null
   /** A question: the part of an earlier answer it quotes (its Markdown), shown above it; the model reads it before the question. */
   quote?: string | null
   reasoning: string | null
@@ -225,7 +227,6 @@ export type RoomRole = 'owner' | 'member' | 'viewer'
 /** A room's people and settings, as the chat page shows them. */
 export interface RoomBrief {
   role: RoomRole
-  answerMode: 'every' | 'mention'
   membersInvite: boolean
   /** Whose question is being answered now. */
   answeringFor?: string | null

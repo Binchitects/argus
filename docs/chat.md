@@ -574,9 +574,11 @@ a room holds (Settings → Chat → **Most people in a room**, 50).
   in line, their models and tools, their safeguards and rate limits. While
   one answer runs, the next questions wait in the room's line (20 in all, 3
   of each person's) and each goes as its writer's.
-- **Just say it.** A message for the people only: saved, not answered. A
-  room set to **only when @Arena is named** answers only messages that write
-  `@Arena`; the rest are for its people.
+- **The model answers when asked.** It answers a message that names it
+  (`@Arena`) or replies to one of its answers (the reply goes to it with the
+  answer it replies to); everything else is for the people. Reply to any
+  message with its **Reply** button; `@Name` (a person's name, or its first
+  word) tells them, and a reply tells the one replied to: both in the bell.
 - **No one's own things.** Answers in a room use no one's memory, code
   (Argus), knowledge, or tools that act as the person (admins' MCP servers
   and plugins), as everyone reads them and another member's message could
@@ -631,7 +633,7 @@ Access), and write nothing to GitLab: no comments, no approvals.
   review's head.
 - **Discuss in a room** makes a room with the review in it (its summary and
   findings). Add people from the room's **People** panel; they see the review
-  too. The model answers there when someone writes `@Arena`.
+  too. The model answers there when someone writes `@Arena` or replies to it.
 - **Who pays.** A review's requests are its person's, on the chat credit,
   tagged `review`. Three of a person's reviews run at once at most. Who may
   review: the `review.run` permission; who may ask about code: `code.read`

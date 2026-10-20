@@ -340,7 +340,7 @@ public static partial class ChatEndpoints
         {
             m.Id, m.ParentId, m.Role, m.Content, m.Quote, m.Reasoning, m.ToolName, m.ToolCallId,
             author = m.AuthorId is { } a ? new { id = a, name = names.GetValueOrDefault(a) ?? "Former member" } : null,
-            m.ForPeople, m.Mentions,
+            m.ForPeople, m.Mentions, m.ReplyToId,
             toolCalls = m.ToolCallsJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(m.ToolCallsJson),
             attachments = ChatService.ParseIds(m.AttachmentsJson).Where(files.ContainsKey).Select(a => files[a]),
             details = (quality is null ? m.DetailsJson : quality.Details(m)) is { } details ? JsonSerializer.Deserialize<JsonElement>(details) : (JsonElement?)null,
@@ -516,6 +516,12 @@ public static partial class ChatEndpoints
             await Problem(http, 400, "empty", "Write a message first.");
             return;
         }
+        // A room's message reaches the model only when it names it; the page sends the rest (and replies) through the room's line.
+        if (c.IsRoom && !RoomEndpoints.NamesArena(text))
+        {
+            await Problem(http, 400, "room", "In a room the model answers a message that names @Arena or replies to one of its answers: send it to the room.");
+            return;
+        }
         var quote = ChatQuotes.Clean(body.Quote);
         if (ChatQuotes.Check(quote) is { } tooLong)
         {
@@ -558,7 +564,7 @@ public static partial class ChatEndpoints
         await RunAsync(http, c, me, db, jobs, new AnswerOverrides(Research: body.Research, Again: body.Spoken ? Talk.Note : null), async () =>
         {
             var next = await db.ChatMessages.Where(m => m.ConversationId == c.Id).MaxAsync(m => (int?)m.Sequence) ?? 0;
-            var first = next == 0;
+            var first = next == 0 && !c.IsRoom;
             var question = new ChatMessage
             {
                 ConversationId = c.Id, ParentId = parent, Role = "user", Sequence = next + 1, Content = text, Quote = quote, AuthorId = me.Id,

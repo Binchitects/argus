@@ -56,3 +56,12 @@ export function typingLine(names: string[]) {
   if (names.length === 1) return `${names[0]} is typing…`
   return `${names.slice(0, -1).join(', ')} and ${names.at(-1)} are typing…`
 }
+
+/** The room's people a message names: @ and their name (or its first word), any case; never the writer. */
+export function mentionsIn(text: string, members: { id: string; name: string }[], me: string): string[] {
+  const lower = text.toLowerCase()
+  return members
+    .filter((m) => m.id !== me)
+    .filter((m) => [m.name, m.name.split(/\s+/)[0]].some((n) => n && new RegExp(`(^|\\s)@${n.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\b|$)`).test(lower)))
+    .map((m) => m.id)
+}

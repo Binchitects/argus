@@ -229,15 +229,6 @@ export function RoomPanel({ chatId, room, me, open, onOpenChange, here }: { chat
           {owner && (
             <section className="grid gap-3" aria-label="Settings">
               <h3 className="text-sm font-medium">Settings</h3>
-              <Segmented
-                label="The model answers"
-                value={room.answerMode}
-                onChange={(answerMode) => void act(updateRoom(chatId, { answerMode }))}
-                options={[
-                  { value: 'every', label: 'Every message' },
-                  { value: 'mention', label: 'Only when @Arena is named' },
-                ]}
-              />
               <div className="flex items-center gap-2 text-sm">
                 <Checkbox id="room-members-invite" checked={room.membersInvite} onCheckedChange={(on) => void act(updateRoom(chatId, { membersInvite: on === true }))} />
                 <label htmlFor="room-members-invite">Members may invite others</label>

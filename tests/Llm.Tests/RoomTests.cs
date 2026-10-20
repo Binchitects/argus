@@ -53,17 +53,19 @@ public sealed class RoomTests(AppFixture app)
         // Only the owner invites, unless they let members.
         await StatusAssert.Is(HttpStatusCode.Forbidden, await member.PostAsync($"/api/rooms/{room}/members", new { userIds = new[] { viewerId } }));
 
-        await SendAsync(owner, room, new { content = "Shall we launch Friday?" });
-        await SendAsync(member, room, new { content = "What could go wrong?" });
+        // Said to the people: not answered. Named @Arena: answered, as the one who asked.
+        await StatusAssert.Is(HttpStatusCode.OK, await owner.PostAsync($"/api/chat/conversations/{room}/queue", new { content = "Shall we launch Friday?" }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await member.PostAsync($"/api/chat/conversations/{room}/messages", new { content = "Not to the model" }));
+        await SendAsync(member, room, new { content = "@Arena what could go wrong?" });
         // The member's question goes as theirs: their email to the gateway, their name in the room's history.
         var asked = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == memberEmail).Body["messages"]!.AsArray();
         Assert.Contains("room several people share", asked[0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
         Assert.Contains("You are answering Ben", asked[0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
-        Assert.StartsWith("[Ben]: What could go wrong?", asked[^1]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
-        Assert.Contains(asked, m => m!["content"] is JsonValue v && v.GetValue<string>().StartsWith("[Olivia]: Shall we", StringComparison.Ordinal));
+        Assert.Contains("[Olivia]: Shall we launch Friday?", asked[^1]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Contains("[Ben]: @Arena what could go wrong?", asked[^1]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
 
         var seen = await MessagesAsync(viewer, room);
-        Assert.Equal(["Olivia", "Olivia", "Ben", "Ben"], seen.Select(m => m.GetProperty("author").GetProperty("name").GetString()));
+        Assert.Equal(["Olivia", "Ben", "Ben"], seen.Select(m => m.GetProperty("author").GetProperty("name").GetString()));
         var shape = await viewer.JsonAsync(await viewer.GetAsync($"/api/chat/conversations/{room}"));
         Assert.Equal("viewer", shape.GetProperty("room").GetProperty("role").GetString());
         Assert.Equal(3, shape.GetProperty("room").GetProperty("members").GetArrayLength());
@@ -86,35 +88,48 @@ public sealed class RoomTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.NoContent, await owner.Http.DeleteAsync(new Uri($"/api/rooms/{room}/members/{memberId}", UriKind.Relative)));
         await StatusAssert.Is(HttpStatusCode.NotFound, await member.GetAsync($"/api/chat/conversations/{room}"));
         // What they wrote stays.
-        Assert.Contains(await MessagesAsync(owner, room), m => m.GetProperty("content").GetString() == "What could go wrong?");
+        Assert.Contains(await MessagesAsync(owner, room), m => m.GetProperty("content").GetString() == "@Arena what could go wrong?");
     }
 
     [Fact]
-    public async Task People_only_messages_are_not_answered_and_on_mention_only_at_arena_is()
+    public async Task The_model_answers_a_mention_or_a_reply_to_it_and_people_hear_their_mentions_and_replies()
     {
         var admin = await AdminAsync();
         var (_, _, owner) = await PersonAsync(admin, "Ola");
         var (memberId, memberEmail, member) = await PersonAsync(admin, "Bo");
         var room = (await owner.JsonAsync(await owner.PostAsync("/api/rooms", new { title = "Ops", userIds = new[] { memberId } }))).GetProperty("id").GetGuid();
+        var asked = () => app.Model.Requests.Count(r => r.Body["user"]!.GetValue<string>() == memberEmail);
 
-        var before = app.Model.Requests.Count(r => r.Body["user"]!.GetValue<string>() == memberEmail);
-        await StatusAssert.Is(HttpStatusCode.OK, await member.PostAsync($"/api/chat/conversations/{room}/queue", new { content = "Coffee first", forPeople = true }));
-        await EventuallyAsync(async () => (await MessagesAsync(owner, room)).Any(m => m.GetProperty("content").GetString() == "Coffee first"));
-        var said = (await MessagesAsync(owner, room)).Single(m => m.GetProperty("content").GetString() == "Coffee first");
-        Assert.True(said.GetProperty("forPeople").GetBoolean());
+        await StatusAssert.Is(HttpStatusCode.OK, await owner.PostAsync($"/api/chat/conversations/{room}/queue", new { content = "Coffee first, @Bo?", mentions = new[] { memberId } }));
+        await EventuallyAsync(async () => (await MessagesAsync(owner, room)).Any(m => m.GetProperty("content").GetString() == "Coffee first, @Bo?"));
+        var coffee = (await MessagesAsync(owner, room)).Single(m => m.GetProperty("content").GetString() == "Coffee first, @Bo?");
+        Assert.True(coffee.GetProperty("forPeople").GetBoolean());
+        Assert.Contains("Ola mentioned you in Ops", await (await member.GetAsync("/api/notifications")).Content.ReadAsStringAsync(), StringComparison.Ordinal);
 
-        await StatusAssert.Is(HttpStatusCode.NoContent, await owner.Http.PatchAsJsonAsync(new Uri($"/api/rooms/{room}", UriKind.Relative), new { answerMode = "mention" }));
-        await StatusAssert.Is(HttpStatusCode.NotFound, await member.Http.PatchAsJsonAsync(new Uri($"/api/rooms/{room}", UriKind.Relative), new { answerMode = "every" }));
-        await StatusAssert.Is(HttpStatusCode.OK, await member.PostAsync($"/api/chat/conversations/{room}/queue", new { content = "Anyone there?" }));
+        // A reply to a person: for the people, and it tells them.
+        var before = asked();
+        await StatusAssert.Is(HttpStatusCode.OK, await member.PostAsync($"/api/chat/conversations/{room}/queue", new { content = "Yes please", replyTo = coffee.GetProperty("id").GetGuid() }));
+        await EventuallyAsync(async () => (await MessagesAsync(owner, room)).Any(m => m.GetProperty("content").GetString() == "Yes please"));
+        var bell = await (await owner.GetAsync("/api/notifications")).Content.ReadAsStringAsync();
+        Assert.True(bell.Contains("Bo replied to you in Ops", StringComparison.Ordinal), bell);
+
+        // @Arena: answered.
         await StatusAssert.Is(HttpStatusCode.OK, await member.PostAsync($"/api/chat/conversations/{room}/queue", new { content = "@Arena what time is it?" }));
         await EventuallyAsync(async () => (await MessagesAsync(owner, room)).Any(m => m.GetProperty("role").GetString() == "assistant"));
-        Assert.Equal(before + 1, app.Model.Requests.Count(r => r.Body["user"]!.GetValue<string>() == memberEmail));
-        var messages = await MessagesAsync(owner, room);
-        Assert.True(messages.Single(m => m.GetProperty("content").GetString() == "Anyone there?").GetProperty("forPeople").GetBoolean());
-        // The two people's messages before the answer go as one turn.
+        Assert.Equal(before + 1, asked());
+        var answer = (await MessagesAsync(owner, room)).Last(m => m.GetProperty("role").GetString() == "assistant");
+        Assert.Equal("Yes please", (await MessagesAsync(owner, room)).Single(m => m.GetProperty("content").GetString() == "Yes please").GetProperty("content").GetString());
+
+        // A reply to the model's answer: a question to it, with the answer it replies to.
+        await StatusAssert.Is(HttpStatusCode.OK, await member.PostAsync($"/api/chat/conversations/{room}/queue", new { content = "Say it shorter", replyTo = answer.GetProperty("id").GetGuid() }));
+        await EventuallyAsync(() => Task.FromResult(asked() == before + 2));
         var last = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == memberEmail).Body["messages"]!.AsArray();
-        Assert.Equal(["system", "user"], last.Select(m => m!["role"]!.GetValue<string>()));
-        Assert.Contains("[Bo]: Anyone there?", last[1]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+        var question = last[^1]!["content"]!.GetValue<string>();
+        Assert.Contains("Say it shorter", question, StringComparison.Ordinal);
+        Assert.Contains(answer.GetProperty("content").GetString()![..10], question, StringComparison.Ordinal);
+        var reply = (await MessagesAsync(owner, room)).Single(m => m.GetProperty("content").GetString() == "Say it shorter");
+        Assert.Equal(answer.GetProperty("id").GetGuid(), reply.GetProperty("replyToId").GetGuid());
+        Assert.False(reply.GetProperty("forPeople").GetBoolean());
     }
 
     [Fact]
@@ -126,7 +141,7 @@ public sealed class RoomTests(AppFixture app)
         var (bId, _, _) = await PersonAsync(admin, "Bea");
         var room = (await owner.JsonAsync(await owner.PostAsync("/api/rooms", new { title = "Team", userIds = new[] { aId } }))).GetProperty("id").GetGuid();
         await owner.PostAsync($"/api/rooms/{room}/members", new { userIds = new[] { bId } });
-        await SendAsync(owner, room, new { content = "Hello all" });
+        await SendAsync(owner, room, new { content = "@Arena hello all" });
         // The owner cannot just leave.
         await StatusAssert.Is(HttpStatusCode.BadRequest, await owner.Http.DeleteAsync(new Uri($"/api/rooms/{room}/members/{ownerId}", UriKind.Relative)));
         await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.DeleteAsync(new Uri($"/api/admin/people/{ownerId}", UriKind.Relative)));

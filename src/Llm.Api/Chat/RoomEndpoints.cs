@@ -18,22 +18,21 @@ public sealed record RoomPeople(Guid[]? UserIds = null, Guid[]? GroupIds = null,
 /// <summary>A new room: its title and first people; or, with <paramref name="From"/>, one of the person's chats made into a room.</summary>
 public sealed record NewRoom(string? Title = null, Guid[]? UserIds = null, Guid[]? GroupIds = null, string? Role = null, Guid? From = null);
 
-/// <summary>A room's settings: "every" or "mention" (answered only when @Arena is named), and whether its members may invite.</summary>
-public sealed record RoomChange(string? AnswerMode = null, bool? MembersInvite = null);
+/// <summary>A room's settings: whether its members may invite.</summary>
+public sealed record RoomChange(bool? MembersInvite = null);
 
 public sealed record RoomRole(string Role);
 
 public sealed record RoomOwner(Guid UserId);
 
 /// <summary>
-/// Rooms: chats several people share. Whoever asks pays for the answer and their rules apply to it; every message
+/// Rooms: chats several people share. The model answers only a message that names it (@Arena) or replies to one of
+/// its answers; the rest are the people's. Whoever asks pays for the answer and their rules apply to it; every message
 /// says who wrote it; the room's people see one another write and the answers come, live (RoomHub). Every chat
 /// route checks room access (RoomAccess); these are the room's own: making one, its people, its settings, its events.
 /// </summary>
 public static partial class RoomEndpoints
 {
-    public const string EveryMode = "every";
-    public const string MentionMode = "mention";
     private static readonly TimeSpan Heartbeat = TimeSpan.FromSeconds(15);
 
     public static void MapRooms(this IEndpointRouteBuilder app)
@@ -59,7 +58,7 @@ public static partial class RoomEndpoints
     [GeneratedRegex(@"(^|\s)@arena\b", RegexOptions.IgnoreCase)]
     private static partial Regex ArenaNamed();
 
-    /// <summary>Whether a message names the model (@Arena): a room on "mention" answers only those.</summary>
+    /// <summary>Whether a message names the model (@Arena): in a room, the model answers those and replies to its answers.</summary>
     public static bool NamesArena(string text) => ArenaNamed().IsMatch(text);
 
     /// <summary>Of the people a message names, those in the room.</summary>
@@ -73,6 +72,23 @@ public static partial class RoomEndpoints
         return [.. (await RoomAccess.PeopleAsync(db, c, ct)).Select(x => x.Person.Id).Where(asked.Contains)];
     }
 
+    /// <summary>The people a message mentions, and the one whose message it replies to, hear it in their bell (never its writer).</summary>
+    public static async Task TellAsync(Notifications.Notifier notifier, Conversation c, AppUser me, IEnumerable<Guid> mentions, ChatMessage? repliedTo, string text,
+        CancellationToken ct)
+    {
+        var name = NameOf(me);
+        var said = text.Length > 300 ? text[..300] + "…" : text;
+        var told = new HashSet<Guid> { me.Id };
+        foreach (var person in mentions.Where(told.Add))
+        {
+            await notifier.SendAsync(person, new Notifications.News("room", $"{name} mentioned you in {c.Title}", said, $"/chat/{c.Id}"), ct);
+        }
+        if (repliedTo is { Role: "user", AuthorId: { } author } && told.Add(author))
+        {
+            await notifier.SendAsync(author, new Notifications.News("room", $"{name} replied to you in {c.Title}", said, $"/chat/{c.Id}"), ct);
+        }
+    }
+
     /// <summary>What the chat page shows of a room: the person's role, its people (who is here, who is typing), its groups and settings.</summary>
     public static async Task<object> BriefAsync(AppDbContext db, Conversation c, AppUser me, AnswerJobs jobs, CancellationToken ct)
     {
@@ -83,7 +99,6 @@ public static partial class RoomEndpoints
         return new
         {
             role,
-            answerMode = c.AnswerMode ?? EveryMode,
             c.MembersInvite,
             answeringFor = jobs.Find(c.Id)?.Person,
             members = people.Select(x => new { id = x.Person.Id, name = NameOf(x.Person), role = x.Role }),
@@ -192,7 +207,6 @@ public static partial class RoomEndpoints
             c.Title = title.Trim()[..Math.Min(200, title.Trim().Length)];
         }
         c.Kind = RoomMember.Room;
-        c.AnswerMode ??= EveryMode;
         c.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
         if (await AddPeopleAsync(db, c, me, body.UserIds, body.GroupIds, role, chat.CurrentValue.RoomMostPeople, notifier, ct) is { } refused)
@@ -209,14 +223,6 @@ public static partial class RoomEndpoints
         if (await RoomAccess.FindAsync(db, id, me, Need.Manage, ct) is not { IsRoom: true } c)
         {
             return Results.NotFound();
-        }
-        if (body.AnswerMode is { } mode)
-        {
-            if (mode is not (EveryMode or MentionMode))
-            {
-                return AuthEndpoints.Problem(400, "answer_mode", "Answer every message (every), or only when @Arena is named (mention).");
-            }
-            c.AnswerMode = mode;
         }
         c.MembersInvite = body.MembersInvite ?? c.MembersInvite;
         await db.SaveChangesAsync(ct);

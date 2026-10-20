@@ -852,6 +852,9 @@ namespace Llm.Core.Data.Migrations
                     b.Property<string>("Reasoning")
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("ReplyToId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Role")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -973,10 +976,6 @@ namespace Llm.Core.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
-
-                    b.Property<string>("AnswerMode")
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
 
                     b.Property<DateTimeOffset?>("ArchivedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1580,6 +1579,9 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<string>("Quote")
                         .HasColumnType("text");
+
+                    b.Property<Guid?>("ReplyToId")
+                        .HasColumnType("uuid");
 
                     b.Property<bool>("Research")
                         .HasColumnType("boolean");

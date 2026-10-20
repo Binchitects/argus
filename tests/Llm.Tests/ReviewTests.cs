@@ -79,7 +79,7 @@ public sealed class ReviewTests(AppFixture app)
         var room = (await me.JsonAsync(await me.PostAsync($"/api/code/reviews/{id}/room"))).GetProperty("id").GetGuid();
         var chat = await me.JsonAsync(await me.GetAsync($"/api/chat/conversations/{room}"));
         Assert.Contains("Review of g/app !7 Count faster", chat.GetProperty("messages")[0].GetProperty("content").GetString(), StringComparison.Ordinal);
-        Assert.Equal("mention", chat.GetProperty("room").GetProperty("answerMode").GetString());
+
         await me.PostAsync($"/api/rooms/{room}/members", new { userIds = new[] { (await other.JsonAsync(await other.GetAsync("/api/auth/me"))).GetProperty("id").GetGuid() } });
         Assert.Equal("resolved", (await other.JsonAsync(await other.GetAsync($"/api/code/reviews/{id}"))).GetProperty("findings")[0].GetProperty("state").GetString());
 

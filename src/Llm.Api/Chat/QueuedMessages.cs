@@ -14,9 +14,9 @@ namespace Llm.Api.Chat;
 /// <summary>A message written while the chat answers, to send when the answer ends.</summary>
 /// <param name="Research">Deep research for this one.</param>
 /// <param name="Quote">The part of an earlier answer it replies to (ChatQuotes).</param>
-/// <param name="ForPeople">A room's message for its people only: saved in turn, not answered.</param>
 /// <param name="Mentions">The room's members it names.</param>
-public sealed record QueueRequest(string? Content, Guid[]? Attachments = null, bool Research = false, string? Quote = null, bool ForPeople = false, Guid[]? Mentions = null);
+/// <param name="ReplyTo">A room's message it replies to: a reply to one of the model's answers is a question to it.</param>
+public sealed record QueueRequest(string? Content, Guid[]? Attachments = null, bool Research = false, string? Quote = null, Guid[]? Mentions = null, Guid? ReplyTo = null);
 
 /// <summary>
 /// Messages sent while a chat answers wait here, on the server: a reload or another
@@ -79,14 +79,15 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
                 {
                     ConversationId = c.Id, ParentId = c.CurrentLeafId, Role = "user", Sequence = last + 1, Content = next.Content, Quote = next.Quote,
                     AttachmentsJson = files.Count > 0 ? JsonSerializer.Serialize(files) : null,
-                    AuthorId = next.UserId, ForPeople = next.ForPeople, Mentions = next.Mentions,
+                    AuthorId = next.UserId, ForPeople = next.ForPeople, Mentions = next.Mentions, ReplyToId = next.ReplyToId,
                 };
                 db.ChatMessages.Add(question);
                 db.QueuedMessages.Remove(next);
                 c.CurrentLeafId = question.Id;
                 c.ArchivedAt = null;
                 c.UpdatedAt = DateTimeOffset.UtcNow;
-                var titled = last == 0;
+                // A room keeps the name it was given.
+                var titled = last == 0 && !c.IsRoom;
                 if (titled)
                 {
                     c.Title = ChatService.TitleFrom(next.Content.Length > 0 ? next.Content : "Attached files");
@@ -181,7 +182,7 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
     /// </summary>
     private static async Task<IResult> AddAsync(Guid id, QueueRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db,
         Safeguards.Safeguards safeguards, ModelPolicy policy, ChatModels models, QueuedMessages queue, AnswerJobs jobs, Tools.ToolRegistry registry, Access.AccessService access,
-        CancellationToken ct)
+        Notifications.Notifier notifier, CancellationToken ct)
     {
         var (me, c) = await OwnedAsync(id, p, users, db, ct);
         if (c is null)
@@ -211,8 +212,23 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
         {
             return AuthEndpoints.Problem(409, "queue_full", $"{MaxEachInRoom} of your messages wait in this room already: wait for them to go, or cancel one.");
         }
-        // A room on "only when @Arena is named" answers only those that name it; the rest are for its people.
-        var forPeople = c.IsRoom && (body.ForPeople || (c.AnswerMode == RoomEndpoints.MentionMode && !RoomEndpoints.NamesArena(text)));
+        // In a room the model answers only a message that names it (@Arena) or replies to one of its answers; the rest
+        // are for the people. A reply to an answer carries the answer to the model, as a quote does.
+        ChatMessage? repliedTo = null;
+        if (body.ReplyTo is { } replyId)
+        {
+            repliedTo = await db.ChatMessages.AsNoTracking().SingleOrDefaultAsync(m => m.Id == replyId && m.ConversationId == id, ct);
+            if (repliedTo is null || !c.IsRoom)
+            {
+                return AuthEndpoints.Problem(400, "reply", "That message is not in this room.");
+            }
+        }
+        var toModel = !c.IsRoom || RoomEndpoints.NamesArena(text) || repliedTo is { Role: "assistant" };
+        var forPeople = !toModel;
+        if (repliedTo is { Role: "assistant" } answer && quote is null)
+        {
+            quote = ChatQuotes.Cut(answer.Content);
+        }
         var mentions = c.IsRoom ? await RoomEndpoints.MentionsAsync(db, c, body.Mentions, ct) : [];
         if (body.Research && !await registry.MayUseAsync(await access.MembershipAsync(me, ct), Tools.ResearchTool.ToolId, ct))
         {
@@ -234,11 +250,15 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
             // Its secrets masked, when the person's policy masks them.
             ConversationId = id, Content = verdict.Text ?? text, Quote = verdict.Quote ?? quote, Research = body.Research && !forPeople, Position = last + 1,
             AttachmentsJson = attachments.Length > 0 ? JsonSerializer.Serialize(attachments) : null,
-            UserId = me.Id, ForPeople = forPeople, Mentions = mentions,
+            UserId = me.Id, ForPeople = forPeople, Mentions = mentions, ReplyToId = repliedTo?.Id,
         });
         // Writing in an archived chat brings it back to the list.
         c.ArchivedAt = null;
         await db.SaveChangesAsync(ct);
+        if (c.IsRoom)
+        {
+            await RoomEndpoints.TellAsync(notifier, c, me, mentions, repliedTo, text, ct);
+        }
         await queue.StartNextAsync(id);
         return Results.Ok(new { queued = await ListAsync(db, id, ct), answering = jobs.IsAnswering(id) });
     }

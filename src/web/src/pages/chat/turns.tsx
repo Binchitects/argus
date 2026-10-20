@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, FileCode2, FileText, FoldVertical, GitFork, Info, Pencil, RefreshCw, Square, Telescope, TextQuote, Timer } from 'lucide-react'
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, FileCode2, FileText, FoldVertical, GitFork, Info, Pencil, RefreshCw, Reply, Square, Telescope, TextQuote, Timer } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -168,8 +168,8 @@ export function QuestionTurn({
   onSwitch: (id: string) => void
   onEdit?: (m: Message, text: string, quote: string | null) => void
   onJumpToQuote?: (m: Message) => boolean
-  /** In a room: whose it is (the person's own on the right, others' on the left, with their names). */
-  room?: { me: string }
+  /** In a room: whose it is (the person's own on the right, others' on the left, with their names), what it replies to, and replying to it. */
+  room?: { me: string; replyOf?: (id: string) => { name: string; text: string } | null; onReply?: (m: Message) => void }
 }) {
   const [editing, setEditing] = useState<string | null>(null)
   const [editQuote, setEditQuote] = useState<Quote | null>(null)
@@ -197,6 +197,14 @@ export function QuestionTurn({
         <p className="px-1 text-xs text-muted-foreground">
           {m.author?.id === room.me ? 'You' : (m.author?.name ?? 'Former member')}
           {m.forPeople && <span> · to the room</span>}
+        </p>
+      )}
+      {room && m.replyToId && room.replyOf?.(m.replyToId) && (
+        <p className="flex max-w-[85%] items-center gap-1 truncate px-1 text-xs text-muted-foreground">
+          <Reply className="size-3 shrink-0" aria-hidden="true" />
+          <span className="truncate">
+            {room.replyOf(m.replyToId)!.name}: {room.replyOf(m.replyToId)!.text}
+          </span>
         </p>
       )}
       {m.attachments.length > 0 && (
@@ -263,6 +271,13 @@ export function QuestionTurn({
         <div className="flex items-center opacity-100 transition-opacity focus-within:opacity-100 sm:opacity-0 sm:group-hover/q:opacity-100 [@media(hover:none)]:opacity-100">
           <Branches siblings={siblings} current={m} onSwitch={onSwitch} label="Question" />
           <CopyButton text={m.content} label="Copy question" />
+          {room?.onReply && (
+            <Tooltip content="Reply">
+              <Button variant="ghost" size="icon-sm" className="size-7" onClick={() => room.onReply!(m)} aria-label={`Reply to ${m.author?.name ?? 'this message'}`}>
+                <Reply />
+              </Button>
+            </Tooltip>
+          )}
           {onEdit && (
             <Tooltip content="Edit: a new version, the old one stays">
               <Button
@@ -376,6 +391,7 @@ export function AnswerTurn({
   feedbackIn,
   onCompact,
   onQuote,
+  onReply,
 }: {
   answer: Message[]
   siblings: Message[]
@@ -417,6 +433,8 @@ export function AnswerTurn({
   onCompact?: () => void
   /** Puts part of this answer (chosen by keyboard, in a dialog) above the message box as a quote. */
   onQuote?: (quote: Quote) => void
+  /** In a room: reply to this answer (a question to the model about it). */
+  onReply?: (m: Message) => void
 }) {
   const [quoting, setQuoting] = useState(false)
   const results = new Map(answer.filter((m) => m.role === 'tool').map((m) => [m.toolCallId, m]))
@@ -440,6 +458,13 @@ export function AnswerTurn({
       <div className="mt-1 flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
         <Branches siblings={siblings} current={first} onSwitch={onSwitch} label="Answer" />
         <CopyButton text={text} label="Copy answer" />
+        {onReply && (
+          <Tooltip content="Reply: ask the model about this answer">
+            <Button variant="ghost" size="icon-sm" className="size-7" onClick={() => onReply(answer.findLast((x) => x.role === 'assistant') ?? first)} aria-label="Reply to this answer">
+              <Reply />
+            </Button>
+          </Tooltip>
+        )}
         {onQuote && text && (
           <>
             <Tooltip content="Quote part of this answer…">
