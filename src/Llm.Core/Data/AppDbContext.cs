@@ -27,6 +27,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<RoomMember> RoomMembers => Set<RoomMember>();
     public DbSet<RoomGroup> RoomGroups => Set<RoomGroup>();
     public DbSet<Code.CodeReview> CodeReviews => Set<Code.CodeReview>();
+    public DbSet<Plans.Plan> Plans => Set<Plans.Plan>();
+    public DbSet<Plans.PlanStep> PlanSteps => Set<Plans.PlanStep>();
     public DbSet<Code.ReviewFinding> ReviewFindings => Set<Code.ReviewFinding>();
     public DbSet<ChatShareView> ChatShareViews => Set<ChatShareView>();
     public DbSet<Canvas> Canvases => Set<Canvas>();
@@ -176,6 +178,27 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasKey(x => new { x.AssistantId, x.AttachmentId });
             e.HasOne<Assistant>().WithMany().HasForeignKey(x => x.AssistantId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<ChatAttachment>().WithMany().HasForeignKey(x => x.AttachmentId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Plans.Plan>(e =>
+        {
+            e.ToTable("plans");
+            e.Property(x => x.Title).HasMaxLength(200);
+            e.Property(x => x.Goal).HasMaxLength(4000);
+            e.HasIndex(x => new { x.UserId, x.UpdatedAt });
+            e.HasIndex(x => x.ConversationId);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Conversation>().WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Steps).WithOne().HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Plans.PlanStep>(e =>
+        {
+            e.ToTable("plan_steps");
+            e.Property(x => x.Title).HasMaxLength(300);
+            e.Property(x => x.Notes).HasMaxLength(4000);
+            e.Property(x => x.Owner).HasMaxLength(120);
+            e.Property(x => x.Status).HasMaxLength(16);
+            e.Property(x => x.DependsOn).HasDefaultValueSql("'{}'::integer[]");
+            e.HasIndex(x => new { x.PlanId, x.Number }).IsUnique();
         });
         builder.Entity<Code.CodeReview>(e =>
         {

@@ -590,6 +590,22 @@ a room holds (Settings → Chat → **Most people in a room**, 50).
   owner's account is deleted the room goes to its longest-standing member;
   what someone wrote stays after they leave, as a former member's.
 
+## Plans
+
+The **Plans** tool (in the chat's Tools menu) makes and keeps plans: a title,
+a goal, and steps, each with an owner, a status (to do, doing, blocked,
+done), start and due dates, and the steps it waits for. Ask the chat to plan
+something and say who does what by when; later say what changed, and it
+changes the plan. It refuses steps that wait for one another in a circle and
+dates that end before they start, and warns about a step that starts before
+what it waits for is due, or one overdue and not done.
+
+Every plan opens under **Plans** (in the sidebar, and from the answer that
+made it) as a **board**, a column per status, where a click moves a step on
+and a new step can be added; and a **timeline**, each step from its start to
+its due date. A plan made in a room is its people's to see and move along;
+the chat reads it as people left it.
+
 ## Code review
 
 **Code** (in the sidebar) reviews merge requests with the model and answers

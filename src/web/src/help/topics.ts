@@ -358,6 +358,26 @@ export const topics = {
     manual: { doc: 'admin', section: 'access-roles-and-rules' },
   },
 
+  plans: {
+    title: 'Plans',
+    about: 'Plans the chat made with its Plans tool: steps with owners, dates and what each waits for. Yours, and those of rooms you are in.',
+    parts: [{ name: 'The list', text: 'Each plan, newest change first, with how many of its steps are done. A row opens it.' }],
+    tasks: [{ title: 'Make a plan', steps: ['In a chat, turn on **Plans** in the Tools menu.', 'Ask it to plan something; tell it who does what and by when.', 'Open the plan from the answer.'] }],
+    manual: { doc: 'chat', section: 'plans' },
+  },
+
+  plan: {
+    title: 'A plan',
+    about: 'One plan as a board (a column per status) and a timeline (each step from its start to its due date). The chat keeps it up to date; you move steps along here.',
+    parts: [
+      { name: 'Board', text: 'To do, Doing, Blocked and Done. A step\'s buttons move it to another column; **A new step** adds one.' },
+      { name: 'Timeline', text: 'Each dated step as a bar from its start to its due date, coloured by its status.' },
+      { name: 'Warnings', text: 'What does not fit: a step that starts before what it waits for is due, or one overdue and not done.' },
+    ],
+    tasks: [{ title: 'Change the plan by talking', steps: ['Open **Its chat**.', 'Say what changed ("Ben is away next week, move his steps").', 'The chat changes the plan; the board shows it.'] }],
+    manual: { doc: 'chat', section: 'plans' },
+  },
+
   code: {
     title: 'Code',
     about: 'Reviews of merge requests by the model, and the code assistant. Both read the code with your own GitLab access, through Argus, and write nothing to GitLab.',

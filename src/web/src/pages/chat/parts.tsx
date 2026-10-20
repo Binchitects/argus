@@ -1,4 +1,5 @@
-import { AlertTriangle, AudioLines, Brain, Calculator, Check, ChevronRight, CircleX, Clapperboard, Clock, Download, FilePen, FileText, FolderTree, Globe, Image as ImageIcon, ListTree, Loader2, Network, Scale, Search, ShieldQuestion, ShieldX, SquareTerminal, Telescope, TextSearch, Wrench, Zap, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, AudioLines, Brain, Calculator, Check, ChevronRight, CircleX, Clapperboard, Clock, Download, FilePen, FileText, FolderTree, Globe, Image as ImageIcon, ListChecks, ListTree, Loader2, Network, Scale, Search, ShieldQuestion, ShieldX, SquareTerminal, Telescope, TextSearch, Wrench, Zap, type LucideIcon } from 'lucide-react'
+import { Link } from 'react-router'
 import { Collapsible } from 'radix-ui'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { useNow } from './use-now'
@@ -257,6 +258,11 @@ export const ToolCard = memo(function ToolCard({
           </div>
         </Collapsible.Content>
       </Collapsible.Root>
+      {result && !failed && call.function.name.startsWith('plan_') && planLink(value) && (
+        <Link to={planLink(value)!} className="mt-2 inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring">
+          <ListChecks className="size-4" aria-hidden="true" /> Open the plan: board and timeline
+        </Link>
+      )}
       {waiting && onDecide && (
         <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
           <ShieldQuestion className="size-4 shrink-0 text-warning-ink" aria-hidden="true" />
@@ -365,4 +371,10 @@ export function NoticeLine({ text }: { text: string }) {
       {text}
     </output>
   )
+}
+
+/** A plan tool's result: where the plan opens. */
+function planLink(value: unknown): string | null {
+  const link = value && typeof value === 'object' ? (value as { link?: unknown }).link : null
+  return typeof link === 'string' && link.startsWith('/plans/') ? link : null
 }

@@ -303,6 +303,7 @@ public static class IdentityWiring
         services.Configure<Chat.Tools.BlenderOptions>(config.GetSection("Blender"));
         services.AddSingleton<Chat.Tools.BlenderClient>();
         services.AddScoped<Chat.Tools.BlenderTool>();
+        services.AddScoped<Plans.PlansTool>();
         services.Configure<Chat.Tools.WebOptions>(config.GetSection("Web"));
         services.Configure<Plugins.PluginOptions>(config.GetSection("Plugins"));
         services.Configure<Schedules.GitLabOptions>(config.GetSection("GitLab"));
@@ -468,6 +469,7 @@ public static class IdentityWiring
         Access.AccessEndpoints.MapAccess(app);
         Chat.RoomEndpoints.MapRooms(app);
         Code.CodeEndpoints.MapCode(app);
+        Plans.PlanEndpoints.MapPlans(app);
         app.MapForwardAuth();
         app.MapKeyCheck();
         app.MapOidc();

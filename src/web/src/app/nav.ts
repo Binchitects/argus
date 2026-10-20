@@ -1,4 +1,4 @@
-import { Activity, GitPullRequest, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Plug, ScrollText, Settings, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Wrench, type LucideIcon } from 'lucide-react'
+import { Activity, GitPullRequest, ListChecks, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Plug, ScrollText, Settings, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Wrench, type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
   title: string
@@ -24,6 +24,7 @@ export const navigation: NavSection[] = [
       { title: 'Chat', path: '/chat', icon: MessageSquare, keywords: ['conversation', 'ask', 'model', 'argus'] },
       { title: 'Assistants', path: '/assistants', icon: Bot, keywords: ['gpts', 'gems', 'projects', 'instructions', 'knowledge', 'shared', 'team'] },
       { title: 'Prompts', path: '/prompts', icon: SquareSlash, keywords: ['prompt library', 'slash commands', 'templates', 'snippets', 'saved prompts'] },
+      { title: 'Plans', path: '/plans', icon: ListChecks, keywords: ['plan', 'board', 'timeline', 'gantt', 'steps', 'project', 'kanban'] },
       { title: 'Code', path: '/code', icon: GitPullRequest, keywords: ['review', 'merge request', 'mr', 'gitlab', 'diff', 'code assistant', 'branch'] },
       { title: 'Scheduled tasks', path: '/tasks', icon: CalendarClock, keywords: ['schedule', 'cron', 'daily', 'weekly', 'report', 'digest', 'webhook', 'email', 'notification'] },
       { title: 'Usage & cost', path: '/usage', icon: BarChart3, keywords: ['tokens', 'spend', 'credit', 'budget'] },
