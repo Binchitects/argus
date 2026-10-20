@@ -12,6 +12,70 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v6.0.0 (2026-10-21)
+
+### :rocket: Epics and highlights
+
+- **Any hardware, any engine**: vLLM beside llama.cpp behind one engine
+  interface, and servers the app does not run (SGLang, Ollama, a cloud);
+  placement for any machine, from CPU only to eight GPUs of any vendor;
+  several copies of a model with fallbacks; vLLM's KV cache in RAM, on disk
+  or in a shared store (LMCache); media jobs borrow only their own GPU while
+  vLLM models sleep. Admin → Models adds vLLM models. The `arena-vllm` image
+  builds where vLLM's own cannot be pulled
+- **Durable at scale**: API keys wait their turn behind the chat, at the
+  gateway and inside vLLM; the gateway runs as several replicas sharing their
+  counts in Valkey (`ha.yml`), a deleted key stopping on every replica within
+  ten seconds; Postgres can be put back to any second with pgBackRest
+  (`pitr.yml`), with a restore drill
+- **Operational roles**: Team manager (a group's people, credit, limits,
+  models and tools, its reports), Supervisor (monitoring, read-only) and
+  Operator (alerts, models, backups); people ask for a role on their account
+  page and access managers answer
+- **Access in detail**: every broad permission has its parts (people's
+  passwords, keys and limits; each settings group; models' downloads,
+  servers and hours; plugins' install and configure; storage cleanup...),
+  each route asks for its own, and a broad one still holds its parts. More
+  features can be taken: Python, canvas, 3D, plans, research, compare,
+  uploads, assistants, prompts, export, knowledge, choosing a model
+- **Rooms**: reply to a message and @mention people and the model; the
+  model answers only `@Arena` or a reply to one of its answers (the reply is
+  the prompt, with the answer it replies to); people mentioned or replied to
+  hear it in their bell
+
+### :sparkles: New features & Enhancements
+
+- **3D models**: the chat's 3D tool has the model write a Blender script and
+  runs it with Blender 4.5 LTS headless in a sandbox of its own (no network,
+  8 GB, 4 CPUs, 4 minutes): `model.glb` and two pictures come back
+  (`COMPOSE_PROFILES=3d`)
+- **Plans**: the chat's Plans tool makes plans with steps, owners, dates and
+  dependencies and keeps them up to date; the Plans page shows a board and a
+  timeline, and a room's plans are its people's
+- **Code review as a tool**: a chat, a coding agent through Arena MCP or
+  Code Arena starts a review of a merge request or branch and reads its
+  verdict and findings; Code Arena's `/review [BASE]` reviews local changes
+- **Code Arena**: keeps room for answers as long as its longest and carries
+  on an answer cut at the output limit, compacting first when needed; takes
+  screenshots for the model (a page through a headless browser, or the
+  screen); runs the person's own coding agents (Claude Code, Codex, Gemini
+  CLI, on their own subscriptions) with `/agent` and `ask_agent`; cloud
+  providers by the company's key (Admin → Models → servers has presets for
+  OpenAI, Anthropic, Gemini, OpenRouter, DeepSeek, Mistral, Groq, Together,
+  xAI)
+- **Argus links repositories by what they talk to while they run**:
+  services in compose and Kubernetes files, Kafka topics, databases, service
+  URLs, OpenAPI titles, and what owners declare in Backstage and Pact
+- **Alerts for vLLM engines and their GPUs**; load-test scripts for 50, 100
+  and 300 people; a bring-up check and runbook for a multi-GPU server
+
+### :arrow_up: Deps updates
+
+- System.Security.Cryptography.Pkcs and Xml 10.0.13 (past the versions
+  NuGet's audit flags)
+- Blender 4.5.14 LTS (the 3D sandbox), Valkey 8.1, pgBackRest (in the
+  Postgres image), vLLM on python:3.13-slim
+
 ## v5.9.0 (2026-10-20)
 
 ### :rocket: Epics and highlights

@@ -1311,3 +1311,69 @@ these, and v5.9's leftovers)
    area's read, change and delete apart), per model, tool and knowledge
    source actions, rooms, reviews, plans and API keys.
 
+
+## v6.0.0 — Any engine, durable, operational roles, access in detail (2026-10-21)
+
+Released with parts 1-5 above. Still to do from it, carried below: the
+vLLM image checked on a real GPU server (bring-up, smoke test per model,
+numbers), the load tests at 50, 100 and 300 people there, DCGM's image
+(unreachable from here); room invite links and export; bulk access changes
+with a dry run; scheduled and automatic reviews; GitHub, Gitea and plain git
+for reviews; `argus graph-eval` and what each repository is for; a 3D viewer
+in the chat (three.js needs a yes).
+
+## Next (after v6.0.0): v6.1 — Safeguards, plugins and tools, in one release
+
+The person's asks of 2026-10-21: "much more effort on safeguards and plugin
+system", "more customization on tools", all in one version.
+
+**Safeguards**
+1. Rules, not only switches: an ordered list of safeguard rules, each a
+   detector (secrets, personal data by kind, blocked words and patterns, a
+   denied topic the model judges, prompt injection and jailbreaks, file types
+   and sizes, a document's classification label, links and domains), where it
+   applies (questions, answers, files, tool calls and their results, the API;
+   chat, rooms, Code Arena), to whom (everyone, groups, people) and with
+   which models (a cloud provider stricter than the company's own), and an
+   action (block, mask, warn and let the person go on, ask for a reason, log
+   only, send to a safer model).
+2. Answers checked too: secrets, personal data, blocked words and denied
+   topics in what the model says, as it streams.
+3. A monitor mode for every rule (it records what it would have done) and a
+   test bench: paste a text, see which rules fire and why.
+4. Events and review: every rule that fired, by whom, where and what it did
+   (never the secret), with charts; a person may ask for a refused message to
+   be reviewed, and an admin allows it, confirms it, or turns the rule into an
+   exception.
+5. Tools held: web domains allowed or denied, tool results read for
+   injection, rate limits per tool and per person.
+
+**Plugins**
+1. A plugin brings more than tools: prompts, assistants, skills (Code Arena
+   and the chat), safeguard rules and detectors, scheduled tasks, and its own
+   settings page; its manifest says which permissions it asks for, and the
+   admin grants them at install.
+2. Versions and updates: a plugin's updates from its catalog, shown with
+   what changed and what new permissions they ask for; roll back to the
+   version before; pin a version.
+3. Per group: which groups have a plugin, and its settings per group.
+4. Health and logs: each plugin's calls, errors and time, its server's state,
+   a check now; a plugin turned off when it keeps failing.
+5. A plugin's code run safely: an MCP server shipped in the plugin runs in
+   the sandbox (no network but its own hosts, limits), so a plugin need not
+   be hosted elsewhere.
+6. A starter template and a check for authors (`arena plugin check`).
+
+**Tools**
+1. Each tool's functions apart: on or off, asking first or not, per
+   function.
+2. A tool's name, description and instructions to the model overridden by
+   the admin; its arguments' defaults and fixed values (the web's domains,
+   Python's time, a picture's size, which model draws).
+3. Settings per group: a tool on, off, on by default or asking first for one
+   group and not another; quotas per tool.
+4. Toolsets: named sets of tools a chat, an assistant or a group starts
+   with.
+5. Tools made without code: an HTTP request tool from a form, and a prompt
+   tool (a prompt run on a model of the admin's choice), tested from the
+   page.
