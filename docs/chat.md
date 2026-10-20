@@ -650,16 +650,28 @@ Access), and write nothing to GitLab: no comments, no approvals.
 ## 3D models
 
 The **3D models** tool (Admin → Tools; the 3D sandbox runs with
-`COMPOSE_PROFILES=3d`) has the model write a Blender script and runs it with
-Blender 4.5 LTS headless, in a sandbox of its own: no network, a read-only
-system, each run as its own user, 8 GB of memory, 4 CPUs and 4 minutes at
-most. It starts from an empty scene; what the script builds comes back as
-`model.glb` (glTF: any 3D viewer, game engine or slicer opens it) and two
-pictures of it, front and three-quarter, shown in the answer. Ask for a
-`.blend`, `.stl` or `.obj`, or for renders of your own, and the script
-writes those too. The model looks at the pictures and runs again to fix what
-is wrong. The chat's files are in the run's folder (a reference picture,
-measurements).
+`COMPOSE_PROFILES=3d`) runs Blender 4.5 LTS headless in a sandbox of its own:
+no network, a read-only system, each run as its own user, 8 GB of memory,
+4 CPUs and 4 minutes at most. The model builds what you ask for in one of
+two ways:
+
+- **From parts** (`make_3d_parts`, the first choice): a list of simple
+  shapes (box, cylinder, cone, sphere, torus, plane, gable roof, wedge,
+  pyramid), each with a size in metres, where its bottom sits, a turn, a
+  colour (a name such as brick, wood, glass, or #rrggbb), rounded edges, and
+  repeats for rows of windows or fence posts. The tool writes the Blender
+  script itself, so even a small model gets a house, a table or a robot
+  right.
+- **A script** (`make_3d`): Blender's Python for what shapes cannot do
+  (modifiers, booleans, curves). The same `part(...)` and `material(...)`
+  helpers are there in the script.
+
+What it builds comes back as `model.glb` (glTF: any 3D viewer, game engine
+or slicer opens it) and two pictures of it, front and three-quarter, shown
+in the answer. Ask for a `.blend`, `.stl` or `.obj`, or for renders of your
+own, and the script writes those too. The model looks at the pictures and
+runs again to fix what is wrong; it does not paste code into its answer. The
+chat's files are in the run's folder (a reference picture, measurements).
 
 ## Canvas
 

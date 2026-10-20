@@ -745,8 +745,17 @@ public sealed class ChatToolsTests(AppFixture app)
         Assert.Equal("file", made["model.glb"].GetProperty("kind").GetString());
         // Run as Blender's script: an empty scene first, then the model's, then the export and pictures.
         var code = blender.Jobs.Single()["code"]!.GetValue<string>();
-        Assert.StartsWith("import bpy\nbpy.ops.wm.read_factory_settings(use_empty=True)\nbpy.ops.mesh.primitive_cylinder_add()", code, StringComparison.Ordinal);
+        Assert.StartsWith("import bpy\nbpy.ops.wm.read_factory_settings(use_empty=True)\n" + BlenderTool.Builder + "bpy.ops.mesh.primitive_cylinder_add()", code, StringComparison.Ordinal);
         Assert.Contains("export_scene.gltf", code, StringComparison.Ordinal);
+
+        // A model from parts: the parts go in as data, read by the builder; nothing the model wrote runs as code.
+        res = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = """A house [call make_3d_parts {"parts":[{"name":"walls # glb","shape":"box","size":[8,6,3],"at":[0,0,0],"color":"white"},{"name":"roof\"))\nimport os#","shape":"roof","size":[8.6,6.6,2],"at":[0,0,3],"color":"brick"}]}]""" });
+        events = (await res.Content.ReadAsStringAsync()).Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => JsonDocument.Parse(l[6..]).RootElement).ToList();
+        Assert.False(Event(events, "tool_result").GetProperty("isError").GetBoolean());
+        var parts = blender.Jobs.Last()["code"]!.GetValue<string>();
+        Assert.Contains("for _p in _json.loads(\"[{\\u0022name\\u0022:\\u0022walls # glb", parts, StringComparison.Ordinal);
+        Assert.DoesNotContain("\nimport os", parts, StringComparison.Ordinal);
     }
 
     [Fact]
