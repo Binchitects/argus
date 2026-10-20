@@ -326,7 +326,7 @@ export const ToolCard = memo(function ToolCard({
       )}
       {made.filter((f) => isModel(f.fileName)).map((f) => (
         <Suspense key={f.id} fallback={<p className="mt-2 text-sm text-muted-foreground">Loading the 3D viewer…</p>}>
-          <ModelViewer url={attachmentUrl(f.id)} fileName={f.fileName} />
+          <ModelViewer url={downloadUrl(f.id)} fileName={f.fileName} />
         </Suspense>
       ))}
       {made.length > 0 && (

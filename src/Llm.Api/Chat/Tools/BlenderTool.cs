@@ -321,7 +321,9 @@ public sealed partial class BlenderTool(BlenderClient blender, AppDbContext db, 
     /// <summary>Blender's own lines (its banner, "Fra:" progress) left out: the script's prints and errors stay.</summary>
     private static string Blenders(string stdout) =>
         string.Join('\n', stdout.Split('\n').Where(l => !l.StartsWith("Fra:", StringComparison.Ordinal) && !l.StartsWith("Blender ", StringComparison.Ordinal)
-            && !l.StartsWith("Read prefs", StringComparison.Ordinal) && !l.StartsWith("Saved:", StringComparison.Ordinal) && !l.Contains("Time: ", StringComparison.Ordinal)));
+            && !l.StartsWith("Read prefs", StringComparison.Ordinal) && !l.StartsWith("Saved:", StringComparison.Ordinal) && !l.Contains("Time: ", StringComparison.Ordinal)
+            && !l.Contains("| INFO: ", StringComparison.Ordinal) && !l.StartsWith("INFO Draco", StringComparison.Ordinal) && !l.StartsWith("Info: Baking map saved", StringComparison.Ordinal)
+            && l.Length > 0));
 
     /// <summary>Headless OpenGL's complaints (no window to draw in), which mean nothing for a render, left out.</summary>
     private static string Quiet(string stderr) =>

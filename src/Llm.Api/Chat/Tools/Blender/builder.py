@@ -12,7 +12,10 @@ _NAMED = {"red": "#c0392b", "green": "#3a8f3a", "blue": "#2e6fbf", "yellow": "#e
           "beige": "#d8c8a8", "wood": "#9c6b3f", "brick": "#9e4a35", "glass": "#a8d0e6", "stone": "#9a9890", "gold": "#d4af37",
           "silver": "#c0c0c0", "darkgrey": "#4a4a4a", "darkgray": "#4a4a4a", "lightgrey": "#cfcfcf", "lightgray": "#cfcfcf",
           "sky": "#87ceeb", "grass": "#4f7f32", "sand": "#d9c48f", "water": "#3d7fa6", "concrete": "#a3a19b", "slate": "#4b5560",
-          "terracotta": "#c4673f", "cream": "#f3e9d2", "navy": "#1f2f57", "teal": "#2a8c88", "olive": "#6b7a35", "copper": "#b87333"}
+          "terracotta": "#c4673f", "cream": "#f3e9d2", "navy": "#1f2f57", "teal": "#2a8c88", "olive": "#6b7a35", "copper": "#b87333",
+          # A pattern's own colour, when a part names the pattern as its colour.
+          "shingles": "#9a4f3c", "tiles": "#d9d4c7", "marble": "#eeeeec", "metal": "#b5b5b5", "plaster": "#e6e0d4", "fabric": "#5a6b8c",
+          "checker": "#e0e0e0", "noise": "#8a8a8a"}
 _MATERIALS = {}
 PATTERNS = ("brick", "tiles", "shingles", "checker", "wood", "stone", "concrete", "plaster", "grass", "marble", "metal", "fabric", "noise")
 SHADERS = ("matte", "plastic", "metal", "mirror", "glass", "light", "ceramic", "rubber")
@@ -30,6 +33,11 @@ def _rgba(color):
     except ValueError:
         r, g, b = 0.54, 0.54, 0.54
     return (r ** 2.2, g ** 2.2, b ** 2.2, 1.0)
+
+
+def _known(color):
+    c = str(color or "").strip().lower()
+    return c in _NAMED or (c.startswith("#") and len(c) in (4, 7))
 
 
 def _shade(rgba, f):
@@ -211,6 +219,8 @@ def _images(m, files, size=2.0, units=None):
 
 def material(color="grey", metallic=0.0, roughness=None, glass=False, texture=None, texture_size=None, color2=None, shader=None, glow=0.0, units=1.0):
     # One material: a colour, or a texture (a pattern's name, or a texture's images), with a shader. The same ones are shared.
+    if texture and str(texture).lower() in PATTERNS and not _known(color):
+        color = str(texture).lower()
     key = (str(color), float(metallic or 0), roughness, bool(glass), str(texture), texture_size, str(color2), str(shader), float(glow or 0), units)
     if key in _MATERIALS:
         return _MATERIALS[key]

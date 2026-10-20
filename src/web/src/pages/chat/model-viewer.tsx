@@ -178,25 +178,24 @@ class Scene {
 
   static async create(gl: WebGL2RenderingContext, canvas: HTMLCanvasElement, model: GltfModel): Promise<Scene> {
     const program = link(gl, vertex, fragment)
-    const textures = await Promise.all(
-      model.images.map(async (blob) => {
-        const t = gl.createTexture()!
-        gl.bindTexture(gl.TEXTURE_2D, t)
-        try {
-          const bitmap = await createImageBitmap(blob, { colorSpaceConversion: 'none' })
-          gl.texImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, gl.RGBA, gl.UNSIGNED_BYTE, bitmap)
-          gl.generateMipmap(gl.TEXTURE_2D)
-          bitmap.close()
-        } catch {
-          gl.texImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([200, 200, 200, 255]))
-        }
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT)
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-        return t
-      }),
-    )
+    // Decoded first, all at once; then each bound and filled in turn (a texture bound before an await is not the one bound after it).
+    const bitmaps = await Promise.all(model.images.map((blob) => createImageBitmap(blob, { colorSpaceConversion: 'none' }).catch(() => null)))
+    const textures = bitmaps.map((bitmap) => {
+      const t = gl.createTexture()!
+      gl.bindTexture(gl.TEXTURE_2D, t)
+      if (bitmap) {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, gl.RGBA, gl.UNSIGNED_BYTE, bitmap)
+        bitmap.close()
+      } else {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([200, 200, 200, 255]))
+      }
+      gl.generateMipmap(gl.TEXTURE_2D)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+      return t
+    })
     const drawn = model.meshes.map((m): Drawn => {
       const vao = gl.createVertexArray()!
       gl.bindVertexArray(vao)
