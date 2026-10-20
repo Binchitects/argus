@@ -31,6 +31,7 @@ internal sealed class Repl(Runtime rt)
         ("/thinking [level]", "show or set thinking: default, off, low, medium, high, xhigh"),
         ("/tools [on|off NAME]", "the tools this session has; turn a group of Arena's or a server's tools on or off in it"),
         ("/todo", "the to-do list"),
+        ("/agent [NAME TASK]", "your own coding agents (Claude Code, Codex, Gemini CLI: your subscriptions), or hand one a task"),
         ("/compact", "summarize the conversation to free the model's window"),
         ("/compact-at [% [%]]", "show or set when it compacts itself (80% of the window, off, or your Arena account's) and what it keeps (25%)"),
         ("/context", "how full the model's window is"),
@@ -584,6 +585,9 @@ internal sealed class Repl(Runtime rt)
             case "/todo":
                 Ui.Line(LocalTools.RenderTodos(rt.Context.Todos, Ui));
                 break;
+            case "/agent":
+                await AgentCommandAsync(arg, ct);
+                break;
             case "/compact":
                 using (var key = rt.Env.Cancel.BeginTurn())
                 using (var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, key.Token))
@@ -748,6 +752,50 @@ internal sealed class Repl(Runtime rt)
                 break;
         }
         return true;
+    }
+
+    /// <summary>
+    /// /agent: the person's own coding agents here; /agent NAME TASK runs one on the task, its output shown as it comes,
+    /// and what it said goes into the conversation, so the model knows it.
+    /// </summary>
+    private async Task AgentCommandAsync(string arg, CancellationToken ct)
+    {
+        var agents = ProviderAgents.Available(rt.Config, rt.Env.Env);
+        var space = arg.IndexOf(' ', StringComparison.Ordinal);
+        if (arg.Trim().Length == 0 || space < 0)
+        {
+            if (agents.Count == 0)
+            {
+                Ui.Info("No coding agent of yours is here: install Claude Code (claude), Codex CLI (codex) or Gemini CLI (gemini), sign in with your subscription, and they show here.");
+                return;
+            }
+            foreach (var (name, line) in agents)
+            {
+                Ui.Line($"{name}: {(ProviderAgents.About.TryGetValue(name, out var about) ? about : string.Join(' ', line))}");
+            }
+            Ui.Info("/agent NAME TASK hands one a task; the model may too (ask_agent).");
+            return;
+        }
+        var (agent, task) = (arg[..space].Trim(), arg[(space + 1)..].Trim());
+        using var key = rt.Env.Cancel.BeginTurn();
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, key.Token);
+        try
+        {
+            var result = await ProviderAgents.RunAsync(agents, agent, task, rt.Context.Workspace.Root, linked.Token, l => Ui.Line(Ui.Dim(l)));
+            if (result.Error)
+            {
+                Ui.Error(Fmt.Head(result.Text, 6, 300));
+            }
+            rt.Agent.Remember($"(The person had {agent} do: {task})\n\n{result.Text}");
+        }
+        catch (OperationCanceledException) when (linked.IsCancellationRequested)
+        {
+            Ui.Warn($"Stopped {agent}.");
+        }
+        finally
+        {
+            rt.Env.Cancel.EndTurn();
+        }
     }
 
     private void MemoryCommand(string arg)

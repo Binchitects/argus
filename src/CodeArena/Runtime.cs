@@ -319,6 +319,10 @@ internal sealed partial class Runtime : IAsyncDisposable
         var tools = LocalTools.All(Config.Shell);
         tools.Add(LocalTools.SubAgentTool());
         tools.Add(Screenshots.Tool(Env.Env));
+        if (ProviderAgents.Tool(Config, Env.Env) is { } agents)
+        {
+            tools.Add(agents);
+        }
         tools.Add(MemoryStore.RememberTool());
         tools.Add(SessionSearch.Tool());
         if (Extensions.Skills.Count > 0)

@@ -163,6 +163,7 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/thinking [level]` | `default`, `off`, `low`, `medium`, `high`, `xhigh` (sent as the chat sends it, through `chat_template_kwargs`); `default` is the web chat's default level when Arena says one (`DEFAULT_THINKING`), else the model's own |
 | `/tools [on\|off NAME]` | the tools of the session, which ask, which are off and which are loaded when needed; `on` or `off` a group of Arena's or a server's tools in this session (by its name, its title or one of its functions) |
 | `/todo` | the to-do list |
+| `/agent [NAME TASK]` | your own coding agents (below); with a name and a task, run one on it: its output shows as it comes, and what it said goes into the conversation |
 | `/compact` | summarize the conversation now |
 | `/compact-at [% [%]]` | show or set when the session compacts itself and what it keeps (below); `off` for only when a request would not fit, `account` for your Arena account's, `default` for that and 25 |
 | `/context` | how full the model's window is |
@@ -1297,8 +1298,25 @@ On the person's machine:
 | `stop_command` | stops a command run with no time limit; it always asks the person first, `yolo` too |
 | `git` | status, diff, log, show, blame, branch: reading only (commits go through `run_shell`), inside the working directory: `diff --no-index` is refused, and so is a file outside it named anywhere in the arguments (`blame --contents FILE`, `-S FILE`), by name or through a link that leads out. It never asks, so the repository's own settings run nothing in it: no fsmonitor, hook, clean or smudge filter, merge driver (`--remerge-diff`), text conversion (so not `status -v`), external diff or signature checker, no submodule looked into (their changes are not shown), and no network (a partial clone does not fetch). Nor do they send it elsewhere: a work tree other than the folder that holds `.git` (`core.worktree`), or a `.git` that leads to another repository's folder, is refused (a worktree of another checkout and a submodule, which git made so, are read), and a `blame.ignoreRevsFile` outside is not read. The file list `grep` and `glob` (and the IDE's search and quick open) take from git is read the same way |
 | `screenshot` | a picture of a web page (`url`, at `width` × `height`, 1280 × 800 by default: the app you build, on its dev server) through a headless Chrome, Edge, Chromium or Brave (`CODE_ARENA_BROWSER` names one); without `url`, the whole screen (grim, gnome-screenshot, spectacle, ImageMagick or scrot on Linux; screencapture on macOS; PowerShell on Windows). The picture goes to the model after the result (one that sees pictures; another is told it cannot). It asks first, as a command does |
+| `ask_agent` | hands a task to one of the person's own coding agents (below), which runs it in the working directory; what it prints comes back. Offered when one is installed; it asks first, as a command does |
 | `todo_write` | the to-do list the person sees (`/todo`) |
 | `task` | a sub-agent (below) |
+
+**Your own subscriptions.** Claude Code (`claude`, a Claude Pro or Max
+subscription), Codex CLI (`codex`, ChatGPT Plus or Pro) and Gemini CLI
+(`gemini`) work beside Code Arena when installed and signed in on the machine
+(each once, in a terminal, the provider's own way: `claude` then `/login`,
+`codex login`, `gemini`). Code Arena never reads, keeps or relays those
+sign-ins: it runs the provider's program on a task, non-interactively, in the
+working directory, and reads what it prints, so the provider's terms and
+limits apply as when you run it. `/agent` lists them; `/agent claude fix the
+failing test` runs one; the model may hand one a task too (`ask_agent`), when
+you ask for it or for a second opinion. `"agents"` in the config sets their
+command lines (`{"claude": ["claude", "-p", "--permission-mode",
+"acceptEdits"]}`), adds another, or turns one off (`[]`). Providers' APIs by
+key (OpenAI, Anthropic, Gemini, OpenRouter...) come through Arena instead:
+an admin adds them under Admin → Models → Other servers and providers, and
+their models are in Code Arena's model list with the rest.
 
 **Arena's tools** come from `https://DOMAIN/mcp` with the person's key: the
 same tools as the chat, with the same rights and the same audit, as that

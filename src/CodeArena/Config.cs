@@ -170,6 +170,12 @@ internal sealed class Config
     public int? Context { get; set; }
     /// <summary>The shell run_shell uses (default: bash or sh; cmd.exe on Windows).</summary>
     public string? Shell { get; set; }
+    /// <summary>
+    /// Providers' own agents the model may hand a task to (ask_agent), each the command line before the task: by default
+    /// claude (Claude Code), codex (Codex CLI) and gemini (Gemini CLI), as found on PATH, signed in with the person's own
+    /// subscription. "agents": {"claude": ["claude", "-p", "--permission-mode", "acceptEdits"]}; an empty list turns one off.
+    /// </summary>
+    public Dictionary<string, List<string>> Agents { get; set; } = [];
     /// <summary>The shell the IDE's terminals start (default: $SHELL, else bash or sh; PowerShell on Windows).</summary>
     public string? TerminalShell { get; set; }
     /// <summary>Directories the tools may use besides the working directory.</summary>
@@ -280,6 +286,13 @@ internal sealed class Config
         config.Mode = raw.Str("mode");
         config.Context = raw.Int("context");
         config.Shell = raw.Str("shell");
+        config.Agents = raw["agents"] switch
+        {
+            null => [],
+            JsonObject agents => agents.ToDictionary(a => a.Key, a => a.Value is JsonArray line ? line.Select(x => x?.ToString() ?? "").ToList()
+                : throw new InvalidOperationException($"\"agents\" in {file}: each is a command line, a list: {{\"claude\": [\"claude\", \"-p\"]}}.")),
+            _ => throw new InvalidOperationException($"\"agents\" in {file} is an object: {{\"claude\": [\"claude\", \"-p\"]}}."),
+        };
         config.TerminalShell = raw.Str("terminalShell");
         config.AutoCommit = raw.Bool("autoCommit") ?? true;
         config.Completion = raw.Bool("completion") ?? true;
@@ -414,6 +427,7 @@ internal sealed class Config
         Set("mode", Mode);
         Set("context", Context);
         Set("shell", Shell);
+        Set("agents", Agents.Count == 0 ? null : new JsonObject(Agents.Select(a => KeyValuePair.Create(a.Key, (JsonNode?)new JsonArray([.. a.Value.Select(x => (JsonNode)x)])))));
         Set("terminalShell", TerminalShell);
         Set("autoCommit", AutoCommit ? null : false);
         Set("completion", Completion ? null : false);

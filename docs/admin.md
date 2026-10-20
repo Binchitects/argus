@@ -376,8 +376,12 @@ would be with them.
   chosen, and the image server's share only on the first. Two models kept side
   by side run best on different GPUs. The `.env` model runs on all of them
   unless `LLAMACPP_EXTRA_ARGS` has `--device CUDA1`.
-- **Other GPU servers.** Another machine's OpenAI-compatible engine (llama.cpp,
-  vLLM, SGLang, another gateway) serves models beside this one's. **Add a
+- **Other servers and providers.** Another machine's OpenAI-compatible engine
+  (llama.cpp, vLLM, SGLang, another gateway), or a cloud provider's API with
+  the company's key (OpenAI, Anthropic, Google Gemini, OpenRouter, DeepSeek,
+  Mistral, Groq, Together, xAI: the buttons fill in the address), serves models
+  beside this one's: to the chat, API keys and Code Arena, priced and allowed
+  like any model. **Add a
   server** takes its address (usually ending in `/v1`) and its API key,
   **finds its models** (with the window each reports), and the admin chooses
   which the gateway serves, under which names, with their context, longest

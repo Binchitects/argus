@@ -58,7 +58,7 @@ export function ServersSection({ onChanged }: { onChanged: () => void }) {
     <Card className="mb-4">
       <CardHeader className="flex flex-row flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
-          <CardTitle className="text-base">Other GPU servers</CardTitle>
+          <CardTitle className="text-base">Other servers and providers</CardTitle>
           <CardDescription>
             Another machine's OpenAI-compatible engine: the gateway serves the models you choose from it beside this machine's, to the chat, API keys and agents. A model named like one here is a
             second copy of it: each request goes to the least busy copy, never past the requests a copy serves at once.
@@ -190,6 +190,19 @@ function priceError(prices: Pick['prices'], k: (typeof priceKeys)[number]): stri
 /** A typed price: empty for the default, else the number (one with an error blocks the save). */
 const price = (text: string) => (text.trim() === '' ? null : Number(text))
 
+/** Cloud providers' OpenAI-compatible APIs: their models through the gateway, by the company's key. */
+const providers: { name: string; url: string }[] = [
+  { name: 'OpenAI', url: 'https://api.openai.com/v1' },
+  { name: 'Anthropic', url: 'https://api.anthropic.com/v1' },
+  { name: 'Google Gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai' },
+  { name: 'OpenRouter', url: 'https://openrouter.ai/api/v1' },
+  { name: 'DeepSeek', url: 'https://api.deepseek.com/v1' },
+  { name: 'Mistral', url: 'https://api.mistral.ai/v1' },
+  { name: 'Groq', url: 'https://api.groq.com/openai/v1' },
+  { name: 'Together', url: 'https://api.together.xyz/v1' },
+  { name: 'xAI', url: 'https://api.x.ai/v1' },
+]
+
 function ServerForm({ saved, onDone }: { saved: RemoteServer | null; onDone: () => void }) {
   const queryClient = useQueryClient()
   const [name, setName] = useState(saved?.name ?? '')
@@ -248,8 +261,29 @@ function ServerForm({ saved, onDone }: { saved: RemoteServer | null; onDone: () 
     >
       <DialogHeader>
         <DialogTitle>{saved ? `Edit ${saved.name}` : 'Add a server'}</DialogTitle>
-        <DialogDescription>Its OpenAI-compatible API: llama.cpp, vLLM, SGLang, or another gateway. Find its models, then choose which the gateway serves, and under which names.</DialogDescription>
+        <DialogDescription>Its OpenAI-compatible API: llama.cpp, vLLM, SGLang, another gateway, or a provider's (OpenAI, Anthropic, Gemini, OpenRouter...) with the company's key. Find its models, then choose which the gateway serves, and under which names.</DialogDescription>
       </DialogHeader>
+      {!saved && (
+        <fieldset className="flex flex-wrap items-center gap-1.5 text-sm">
+          <legend className="sr-only">A provider</legend>
+          <span className="text-muted-foreground">A provider:</span>
+          {providers.map((p) => (
+            <Button
+              key={p.name}
+              type="button"
+              size="sm"
+              variant={baseUrl === p.url ? 'secondary' : 'outline'}
+              className="h-7"
+              onClick={() => {
+                setBaseUrl(p.url)
+                setName((now) => now || p.name)
+              }}
+            >
+              {p.name}
+            </Button>
+          ))}
+        </fieldset>
+      )}
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Name">
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="GPU box 2" required />

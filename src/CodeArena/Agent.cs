@@ -279,6 +279,13 @@ internal sealed class Agent
     }
 
     /// <summary>A message added to the conversation: an answer with its tokens; a note (<paramref name="kind"/>) is Code Arena's own word to the model.</summary>
+    /// <summary>What happened outside a turn (the person ran their own agent): in the conversation and the session, so the model knows it.</summary>
+    public void Remember(string said)
+    {
+        Add(new JsonObject { ["role"] = "user", ["content"] = said }, kind: "note");
+        Add(new JsonObject { ["role"] = "assistant", ["content"] = "Noted." }, kind: "note");
+    }
+
     private void Add(JsonObject message, TokenUsage? usage = null, string? kind = null)
     {
         Messages.Add(message);

@@ -515,7 +515,7 @@ export const topics = {
       { name: 'The engine', text: 'How many models it holds, which are kept loaded, and how full each GPU would be.' },
       { name: 'Each model', text: 'Its state (loaded, loading, not loaded, could not load), **Keep loaded**, **Load**, **Unload**, **Edit**, and who may use it.' },
       { name: 'Working hours', text: 'Other models kept loaded at some hours: a small fast one by day, the big one at night.' },
-      { name: 'Other GPU servers', text: 'Another machine\'s OpenAI-compatible engine, whose models the gateway serves beside these.' },
+      { name: 'Other servers and providers', text: 'Another machine\'s OpenAI-compatible engine, or a provider\'s API (OpenAI, Anthropic, Gemini, OpenRouter...) with the company\'s key: their models the gateway serves beside these, to the chat, API keys and Code Arena.' },
       { name: 'Find on Hugging Face', text: 'Search GGUF models, see whether they fit this machine, and download them into the library. **Downloads** shows the progress.' },
       { name: 'Add a model', text: 'One dialog for every kind: choose a file from the model library or a model the speech server has, and it is taken as what it is (a chat, picture, video or speech model), which you can change. A chat model\'s form shows what fits this machine. **Edit** on a card opens the same dialog.' },
     ],

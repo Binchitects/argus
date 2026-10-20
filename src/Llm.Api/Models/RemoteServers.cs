@@ -53,6 +53,12 @@ public sealed class RemoteServerClient(IHttpClientFactory http, IDataProtectionP
         if (!string.IsNullOrEmpty(apiKey))
         {
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            // Anthropic lists its models by its own header (its chat answers take the bearer, as OpenAI's).
+            if (req.RequestUri!.Host.EndsWith("anthropic.com", StringComparison.OrdinalIgnoreCase))
+            {
+                req.Headers.Add("x-api-key", apiKey);
+                req.Headers.Add("anthropic-version", "2023-06-01");
+            }
         }
         HttpResponseMessage res;
         try
