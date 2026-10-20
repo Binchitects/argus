@@ -22,7 +22,7 @@ class VllmImageTests(unittest.TestCase):
 
     def test_vllm_and_its_base_are_pinned_and_lmcache_is_optional(self):
         self.assertRegex(self.text, r"(?m)^ARG VLLM_VERSION=\d+\.\d+\.\d+$")
-        self.assertRegex(self.text, r"(?m)^ARG CUDA_IMAGE=nvcr\.io/nvidia/cuda:\d+\.\d+\.\d+-runtime-ubuntu\d+\.\d+$")
+        self.assertRegex(self.text, r"(?m)^ARG BASE_IMAGE=python:3\.\d+-slim$")
         self.assertRegex(self.text, r"(?m)^ARG LMCACHE_VERSION=$")
         self.assertIn('"vllm==${VLLM_VERSION}"', self.text)
         self.assertIn('if [ -n "${LMCACHE_VERSION}" ]', self.text)

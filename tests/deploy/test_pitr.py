@@ -42,7 +42,7 @@ class PitrScriptTests(unittest.TestCase):
         self.assertIn("arena-restore-drill-", r.stdout)
         # Never the stack's volume, container or port.
         self.assertNotRegex(r.stdout, r"arena_postgres|\b-p\b|--publish|postgres:/var/lib")
-        self.assertIn("/backup:ro", r.stdout)
+        self.assertIn("/pgbackrest:/pgbackrest:ro", r.stdout)
 
 
 class PitrComposeTests(unittest.TestCase):
@@ -62,10 +62,10 @@ class PitrComposeTests(unittest.TestCase):
                                  capture_output=True, text=True, timeout=120)
         self.assertEqual(0, out.returncode, out.stderr[-1500:])
         self.assertIn("archive_command=pgbackrest --stanza=arena archive-push %p", out.stdout)
-        self.assertIn("target: /backup", out.stdout)
+        self.assertIn("target: /pgbackrest", out.stdout)
         self.assertIn("dockerfile: postgres.Dockerfile", out.stdout)
         conf = (deploy / "config" / "pgbackrest" / "pgbackrest.conf").read_text()
-        self.assertIn("repo1-path=/backup/pgbackrest", conf)
+        self.assertIn("repo1-path=/pgbackrest", conf)
         self.assertIn("[arena]", conf)
         self.assertRegex((deploy / "services" / "postgres.Dockerfile").read_text(), r"ARG POSTGRES_IMAGE=pgvector/pgvector:0\.8\.0-pg16")
 

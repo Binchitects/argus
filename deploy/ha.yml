@@ -5,7 +5,7 @@
 #   docker compose -f docker-compose.yml -f ha.yml up -d          # with scale.yml for app replicas too
 #
 # Traefik and the app reach the replicas by the service's name (Docker's DNS answers with each);
-# one that is down drops out of the answers. Valkey's image is ECR's mirror of Docker's library:
+# one that is down drops out of the answers. Valkey's image is from Valkey's own registry on ECR:
 # approve it first (VALKEY_IMAGE to use another).
 
 services:

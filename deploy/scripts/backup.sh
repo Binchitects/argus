@@ -159,6 +159,9 @@ if [[ $ACTION == pitr ]]; then
   [[ ${PITR_TYPE:-} == full || ${PITR_TYPE:-} == diff ]] || die "--pitr takes full or diff"
   "$ENGINE" compose exec -T postgres sh -c 'command -v pgbackrest' > /dev/null 2>&1 \
     || die "the postgres container has no pgBackRest: run it with pitr.yml (docker compose -f docker-compose.yml -f pitr.yml up -d postgres)"
+  # The repository on the backup disk is Postgres's own (the folder is the host user's): made so, the first time.
+  "$ENGINE" compose exec -T -u root postgres chown postgres:postgres /pgbackrest \
+    || die "could not make /pgbackrest Postgres's in the container"
   "$ENGINE" compose exec -T -u postgres postgres pgbackrest --stanza=arena stanza-create > /dev/null 2>&1 || true
   say "pitr: a $PITR_TYPE backup"
   "$ENGINE" compose exec -T -u postgres postgres pgbackrest --stanza=arena --type="$PITR_TYPE" backup || die "pgBackRest failed (its log: /var/log/pgbackrest in the container)"

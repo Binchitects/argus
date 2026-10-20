@@ -56,7 +56,7 @@ images:
   nodeExporter: { repository: prom/node-exporter, tag: v1.9.0 }
   # The CPU temperature exporter's (services/cpu-temp-exporter, from the chart's files).
   python: { repository: python, tag: 3.13-slim }
-  valkey: { repository: public.ecr.aws/docker/library/valkey, tag: 8.1-alpine }
+  valkey: { repository: public.ecr.aws/valkey/valkey, tag: 8.1-alpine }
   # vLLM (vllm.enabled): an image you have (NGC's, or arena-vllm built from deploy/services/vllm.Dockerfile and
   # pushed to your registry); nothing is pulled while it is off (docs/multi-gpu-server.md §6).
   vllm: { repository: nvcr.io/nvidia/vllm, tag: 26.09-py3 }
@@ -98,7 +98,7 @@ litellm:
   resources: { requests: { cpu: 250m, memory: 1Gi } }
 
 # Valkey: the gateway replicas' shared counts (and LMCache's shared store, engines.lmcacheRemote).
-# Its image is ECR's mirror of Docker's library; a cache, so one replica and no persistence is enough.
+# Its image is Valkey's own registry on ECR; a cache, so one replica and no persistence is enough.
 valkey:
   enabled: false
   resources: { requests: { cpu: 100m, memory: 256Mi } }

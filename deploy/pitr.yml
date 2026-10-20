@@ -29,7 +29,8 @@ services:
       - max_wal_senders=3
     volumes:
       - ./config/pgbackrest/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+      # Its own folder of the backup disk: the backup folder itself is its owner's alone (0700).
       - type: bind
-        source: ${BACKUP_DIR:-./backups}
-        target: /backup
+        source: ${BACKUP_DIR:-./backups}/pgbackrest
+        target: /pgbackrest
         bind: { create_host_path: true }

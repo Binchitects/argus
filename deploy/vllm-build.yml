@@ -3,8 +3,8 @@
 #   docker compose -f docker-compose.yml -f vllm-build.yml --profile vllm build vllm
 #   docker compose -f docker-compose.yml -f vllm-build.yml --profile vllm up -d vllm
 #
-# The build downloads the CUDA base (nvcr.io) and vLLM's wheels (PyPI), about 8-12 GB: approve it
-# first. VLLM_VERSION and LMCACHE_VERSION (empty: none) choose what goes in.
+# The build downloads vLLM's wheels (PyPI; PyTorch and its CUDA libraries with them), about 6-10 GB:
+# approve it first. VLLM_VERSION and LMCACHE_VERSION (empty: none) choose what goes in.
 
 services:
   vllm:

@@ -33,10 +33,10 @@ printf 'restore-drill: restoring to %s into %s (scratch; the stack is not touche
 # A scratch volume of its own, never the stack's; read-only repository; no published port.
 run "$ENGINE" volume create "$NAME"
 trap 'run "$ENGINE" rm -f "$NAME" > /dev/null 2>&1; run "$ENGINE" volume rm "$NAME" > /dev/null 2>&1' EXIT
-run "$ENGINE" run --rm -u postgres -v "$NAME:/var/lib/postgresql/data" -v "$BACKUP_DIR:/backup:ro" \
+run "$ENGINE" run --rm -u postgres -v "$NAME:/var/lib/postgresql/data" -v "$BACKUP_DIR/pgbackrest:/pgbackrest:ro" \
   -v "$ROOT/config/pgbackrest/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro" --entrypoint pgbackrest "$IMAGE" \
   --stanza=arena --type=time "--target=$TARGET" --target-action=promote --archive-mode=off restore || exit 1
-run "$ENGINE" run -d --name "$NAME" -u postgres -v "$NAME:/var/lib/postgresql/data" -v "$BACKUP_DIR:/backup:ro" \
+run "$ENGINE" run -d --name "$NAME" -u postgres -v "$NAME:/var/lib/postgresql/data" -v "$BACKUP_DIR/pgbackrest:/pgbackrest:ro" \
   -v "$ROOT/config/pgbackrest/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro" "$IMAGE" postgres -c archive_mode=off || exit 1
 if [[ $DRY == 1 ]]; then exit 0; fi
 for _ in $(seq 1 60); do "$ENGINE" exec "$NAME" pg_isready -U arena -d litellm > /dev/null 2>&1 && break; sleep 2; done

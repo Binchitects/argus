@@ -154,11 +154,11 @@ services:
 
   # Valkey: the gateway's shared counts when it runs as several replicas (ha.yml), and LMCache's
   # shared store (LMCACHE_REMOTE). Off until asked for: COMPOSE_PROFILES=ha (its image comes from
-  # ECR's mirror of Docker's library, not pulled while the profile is off). On the stack's network
+  # Valkey's own registry on ECR, not pulled while the profile is off). On the stack's network
   # only, never published; append-only, so a restart keeps the counts.
   valkey:
     <<: *service
-    image: ${VALKEY_IMAGE:-public.ecr.aws/docker/library/valkey:8.1-alpine}
+    image: ${VALKEY_IMAGE:-public.ecr.aws/valkey/valkey:8.1-alpine}
     container_name: valkey
     profiles: [ha]
     command: [valkey-server, --appendonly, "yes", --save, ""]

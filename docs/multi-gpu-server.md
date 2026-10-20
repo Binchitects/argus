@@ -371,7 +371,7 @@ Docker Hub is blocked here. The registry probe (`/v2/`, headers only) gave:
 | LMCache | `pip install lmcache==0.5.6` into the same image (Docker Hub `lmcache/vllm-openai` blocked) | about 0.2–0.5 GB | Must match the torch/vLLM ABI; build and smoke-test together. |
 | SGLang (optional, later) | `pip install "sglang[all]"` (Docker Hub `lmsysorg/sglang` blocked) | about 5–8 GB | Not in the first phase. |
 | DCGM exporter | `nvcr.io/nvidia/k8s/dcgm-exporter:<pinned>` | about 0.5–1 GB | Replaces or joins `nvidia_gpu_exporter`. |
-| Valkey/Redis | `public.ecr.aws/docker/library/valkey` or `/redis:7.x-alpine` (ECR mirror of Docker official images) | about 15–40 MB | For LiteLLM shared state and the optional LMCache remote tier. |
+| Valkey/Redis | `public.ecr.aws/valkey/valkey:8.1-alpine` (Valkey's own registry on ECR; the Docker-library mirror has none) | about 15–40 MB | For LiteLLM shared state and the optional LMCache remote tier. |
 | pgBackRest | apt inside a Postgres image FROM `pgvector/pgvector:0.8.0-pg16` (cached) | about 50 MB | Compose PITR. |
 | Kubernetes later | GPU Operator (nvcr.io), CloudNativePG `ghcr.io/cloudnative-pg/*`, llm-d images (ghcr/quay, verify), KEDA (ghcr) | about 1–3 GB together | Only when going multi-server. |
 | NCCL tests (bring-up) | build `nccl-tests` from GitHub source in the vLLM image | small | For `all_reduce_perf`. |
@@ -470,7 +470,7 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
     - `vllm` service (profile `vllm`, `shm_size`, `ipc: host` or a large shm, memlock, the `engine` and `vllm-status` volumes), and the `arena-vllm` Dockerfile with pinned vLLM (plus optional LMCache).
     - Helm `vllm` Deployment(s) with values `gpus`, `nodeSelector`, `shmSize`, `kvcache` PV; update `check-chart.py`.
     - Tests: `check-chart.py` and compose config lint.
-    - **Done**: the `vllm` service, its profile, shm, memlock, the `engine` and `vllm-status` volumes and the Helm Deployments came with item 6; now `deploy/services/vllm.Dockerfile` (arena-vllm: vLLM 0.31.0 from PyPI on `nvcr.io/nvidia/cuda:13.0.1-runtime-ubuntu24.04`, LMCache by `LMCACHE_VERSION`, the supervisor inside) and `deploy/vllm-build.yml` to build it with compose. Not built or pulled. Tests: `tests/deploy/test_vllm_image.py`, `check-chart.py`, the parity test.
+    - **Done**: the `vllm` service, its profile, shm, memlock, the `engine` and `vllm-status` volumes and the Helm Deployments came with item 6; now `deploy/services/vllm.Dockerfile` (arena-vllm: vLLM 0.31.0 from PyPI on `python:3.13-slim` (its wheels bring CUDA), LMCache by `LMCACHE_VERSION`, the supervisor inside) and `deploy/vllm-build.yml` to build it with compose. Not built or pulled. Tests: `tests/deploy/test_vllm_image.py`, `check-chart.py`, the parity test.
 13. **Metrics and alerts.**
     - The app writes vLLM targets to `file_sd`; optional DCGM exporter; alert rules (§5.7); dashboard panels.
     - Tests: `audit-dashboards.py`, and rule unit tests with `promtool test rules` if available.
