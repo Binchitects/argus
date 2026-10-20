@@ -35,7 +35,7 @@ public sealed class PlanTests(AppFixture app)
         var room = (await owner.JsonAsync(await owner.PostAsync("/api/rooms", new { title = "Launch", userIds = new[] { otherId } }))).GetProperty("id").GetGuid();
         await owner.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{room}", UriKind.Relative), new { tools = new[] { "plans" } });
 
-        var made = await CallAsync(owner, room, """Plan it [call plan_make {"title": "Launch", "goal": "Live by December", "steps": [{"title": "Design", "owner": "Ann", "start": "2026-11-01", "due": "2026-11-10"}, {"title": "Build", "owner": "Ben", "start": "2026-11-05", "due": "2026-11-25", "depends_on": [1]}]}]""");
+        var made = await CallAsync(owner, room, """@Arena plan it [call plan_make {"title": "Launch", "goal": "Live by December", "steps": [{"title": "Design", "owner": "Ann", "start": "2026-11-01", "due": "2026-11-10"}, {"title": "Build", "owner": "Ben", "start": "2026-11-05", "due": "2026-11-25", "depends_on": [1]}]}]""");
         Assert.False(made.GetProperty("isError").GetBoolean(), made.GetProperty("text").GetString());
         var plan = JsonDocument.Parse(made.GetProperty("text").GetString()!).RootElement;
         var id = plan.GetProperty("id").GetGuid();
@@ -51,9 +51,9 @@ public sealed class PlanTests(AppFixture app)
         Assert.Contains((await other.JsonAsync(await other.GetAsync("/api/plans"))).EnumerateArray(), p => p.GetProperty("id").GetGuid() == id && p.GetProperty("done").GetInt32() == 1);
 
         // The chat reads it as people left it, and changes it; a circle is refused.
-        var shown = JsonDocument.Parse((await CallAsync(owner, room, """Where are we [call plan_show {}]""")).GetProperty("text").GetString()!).RootElement;
+        var shown = JsonDocument.Parse((await CallAsync(owner, room, """@Arena where are we [call plan_show {}]""")).GetProperty("text").GetString()!).RootElement;
         Assert.Equal("done", shown.GetProperty("steps")[0].GetProperty("status").GetString());
-        var circle = await CallAsync(owner, room, """Fix [call plan_change {"steps": [{"number": 1, "depends_on": [2]}]}]""");
+        var circle = await CallAsync(owner, room, """@Arena fix [call plan_change {"steps": [{"number": 1, "depends_on": [2]}]}]""");
         Assert.True(circle.GetProperty("isError").GetBoolean());
         Assert.Contains("in a circle", circle.GetProperty("text").GetString(), StringComparison.Ordinal);
         await StatusAssert.Is(HttpStatusCode.BadRequest, await other.Http.PatchAsJsonAsync(new Uri($"/api/plans/{id}/steps/2", UriKind.Relative), new { due = "2026-10-01" }));
