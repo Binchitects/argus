@@ -8,6 +8,11 @@ namespace CodeArena.Tests;
 /// <summary>What the fake model says to one request: text, tool calls, reasoning.</summary>
 public sealed record Reply(string Text, (string Name, string Args)[] Calls, string? Reasoning = null)
 {
+    /// <summary>Why the answer ended ("length": cut at the output limit); null: stop, or tool_calls.</summary>
+    public string? Finish { get; init; }
+    /// <summary>The answer's tokens, as the usage says.</summary>
+    public int Completion { get; init; } = 7;
+
     public static Reply Say(string text, string? reasoning = null) => new(text, [], reasoning);
     public static Reply Call(params (string Name, string Args)[] calls) => new("", calls);
 }
@@ -275,7 +280,7 @@ public sealed class FakeGateway : FakeServer
         }
         await WriteEvent(ctx, new JsonObject
         {
-            ["choices"] = new JsonArray(new JsonObject { ["index"] = 0, ["delta"] = new JsonObject(), ["finish_reason"] = reply.Calls.Length > 0 ? "tool_calls" : "stop" }),
+            ["choices"] = new JsonArray(new JsonObject { ["index"] = 0, ["delta"] = new JsonObject(), ["finish_reason"] = reply.Finish ?? (reply.Calls.Length > 0 ? "tool_calls" : "stop") }),
         }.ToJsonString());
         var prompt = body.Length / 4;
         await WriteEvent(ctx, new JsonObject
@@ -283,7 +288,7 @@ public sealed class FakeGateway : FakeServer
             ["choices"] = new JsonArray(),
             ["usage"] = new JsonObject
             {
-                ["prompt_tokens"] = prompt, ["completion_tokens"] = 7, ["total_tokens"] = prompt + 7,
+                ["prompt_tokens"] = prompt, ["completion_tokens"] = reply.Completion, ["total_tokens"] = prompt + reply.Completion,
                 ["prompt_tokens_details"] = new JsonObject { ["cached_tokens"] = prompt / 2 },
             },
         }.ToJsonString());

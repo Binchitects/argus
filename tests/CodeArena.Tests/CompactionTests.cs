@@ -318,4 +318,25 @@ public sealed class CompactionTests : IDisposable
         _gateway.Dispose();
         _mcp.Dispose();
     }
+
+    [Fact]
+    public async Task An_answer_cut_at_the_output_limit_is_kept_and_carried_on_and_a_cut_tool_call_is_done_again()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        var asked = 0;
+        _gateway.Answer = req => Summarizing(req) ? Reply.Say("SUMMARY.") : ++asked switch
+        {
+            1 => Reply.Say("The first half of a long answer") with { Finish = "length", Completion = 6_000 },
+            2 => Reply.Say("and its end."),
+            _ => Reply.Say("done"),
+        };
+        await using var rt = await StartAsync(h);
+        await rt.Agent.RunAsync("write a long answer", new Spend(), CancellationToken.None);
+        Assert.Equal(2, asked);
+        var second = _gateway.Requests.Where(r => !Summarizing(r)).ElementAt(1);
+        Assert.Contains("Carry on exactly where it stopped", FakeGateway.Last(second), StringComparison.Ordinal);
+        Assert.Contains(FakeGateway.History(second), m => m["content"]?.ToString() == "The first half of a long answer");
+        // An answer that long keeps room for the next ones like it (at most a third of the window).
+        Assert.True(rt.Agent.Limit <= rt.Model.Context - 6_000, $"{rt.Agent.Limit}");
+    }
 }

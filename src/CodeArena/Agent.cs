@@ -516,6 +516,7 @@ internal sealed class Agent
         }
         var last = "";
         var interrupted = 0;
+        var cut = 0;
         var overflowed = false;
         var waitedForCache = false;
         for (var step = 0; step < MaxSteps; step++)
@@ -584,6 +585,39 @@ internal sealed class Agent
                 Session?.Usage(usage);
                 _knownTokens = usage.Prompt + usage.Completion;
                 Learn(_sentChars, usage.Prompt);
+                // The room the next answers get grows to the longest one yet: compaction comes before a long answer is cut.
+                _longestAnswer = Math.Max(_longestAnswer, usage.Completion);
+            }
+            if (answer.FinishReason == "length" && cut < MaxCuts && (answer.Text.Length > 0 || answer.ToolCalls.Count > 0))
+            {
+                // Cut at the output limit (the window filled, or the model's longest answer): what came is kept, the
+                // conversation compacted when the window is why, and the model carries on where it stopped. A tool
+                // call cut half-way cannot run: it is dropped, and the model asked to do it in smaller parts.
+                cut++;
+                var calls = answer.ToolCalls.Count > 0;
+                var kept = (JsonObject)answer.Message.DeepClone();
+                kept.Remove("tool_calls");
+                if (kept.Str("content") is { Length: > 0 })
+                {
+                    Add(kept, answer.Usage);
+                }
+                var windowFull = answer.Usage is { } u && u.Prompt + u.Completion >= Model.Context * 0.9;
+                Warn(calls
+                    ? "The model's tool call was cut at its output limit: it does it again in smaller parts."
+                    : windowFull ? "The answer reached the end of the model's window: compacting, then the model carries on." : "The answer reached the model's output limit: the model carries on.");
+                Add(new JsonObject
+                {
+                    ["role"] = "user",
+                    ["content"] = calls
+                        ? "(Your tool call was cut by the output limit before it ended, so it did not run. Do it again in smaller parts: write a large file in several edits, run fewer things at once.)"
+                        : "(Your answer was cut by the output limit: it is above. Carry on exactly where it stopped, without repeating it.)",
+                }, kind: "note");
+                if (windowFull || calls)
+                {
+                    await CompactAsync(force: true, ct);
+                }
+                last = answer.Text;
+                continue;
             }
             if (answer.FinishReason == GatewayClient.Interrupted)
             {
@@ -975,8 +1009,19 @@ internal sealed class Agent
     /// <summary>The most a request may hold, in tokens: the window less the room the answer needs.</summary>
     public long Limit => Model.Context - Reserve;
 
-    /// <summary>The room left for the answer: the model's longest answer as the gateway says (4,096 when it does not), at most an eighth of the window.</summary>
-    private long Reserve => Math.Min(Model.Info.MaxOutput is > 0 and var most ? most : DefaultReserve, Model.Context / 8);
+    /// <summary>
+    /// The room left for the answer: the model's longest answer as the gateway says (4,096 when it does not), at most an
+    /// eighth of the window; or, when this session's answers have been longer, the longest of them and a fifth more (at
+    /// most a third of the window), so the conversation is compacted before an answer like it would be cut.
+    /// </summary>
+    private long Reserve => Math.Max(Math.Min(Model.Info.MaxOutput is > 0 and var most ? most : DefaultReserve, Model.Context / 8),
+        Math.Min((long)(_longestAnswer * 1.2), Model.Context / 3));
+
+    /// <summary>The longest answer of this session, in tokens.</summary>
+    private long _longestAnswer;
+
+    /// <summary>The most times one turn carries on after an answer was cut.</summary>
+    public const int MaxCuts = 3;
 
     private const int DefaultReserve = 4_096;
 

@@ -114,7 +114,12 @@ before it. Each tool call is a line (`● edit_file src/app.py`), with its resul
 under it: a diff for an edit, the last lines of a command's output, a count for
 a search. Each turn ends with its tokens and the share read from the cache
 (`12.4k in (81% cached) · 310 out · 3 requests`) and how full the model's
-window is (`context 18.2k / 131k (14%), compacts at 80%`). **Ctrl+C** stops the turn and
+window is (`context 18.2k / 131k (14%), compacts at 80%`). The session keeps room in the
+window for the answer: the model's longest answer (at most an eighth of the window), or the
+longest answer of this session and a fifth more (at most a third), so it compacts before a
+long answer would be cut. An answer cut anyway at the output limit is kept and the model
+carries on where it stopped (compacting first when the window was why); a tool call cut
+half-way is done again in smaller parts. **Ctrl+C** stops the turn and
 keeps what was said; at the prompt it clears what is typed, and on an empty
 prompt twice leaves. What is typed while a turn runs is kept: a line ended with
 Enter is sent as the next message when the turn ends, and a line begun waits in
