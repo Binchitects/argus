@@ -304,6 +304,7 @@ public static class IdentityWiring
         services.AddSingleton<Chat.Tools.BlenderClient>();
         services.AddScoped<Chat.Tools.BlenderTool>();
         services.AddScoped<Plans.PlansTool>();
+        services.AddScoped<Code.ReviewTool>();
         services.Configure<Chat.Tools.WebOptions>(config.GetSection("Web"));
         services.Configure<Plugins.PluginOptions>(config.GetSection("Plugins"));
         services.Configure<Schedules.GitLabOptions>(config.GetSection("GitLab"));

@@ -32,6 +32,7 @@ internal sealed class Repl(Runtime rt)
         ("/tools [on|off NAME]", "the tools this session has; turn a group of Arena's or a server's tools on or off in it"),
         ("/todo", "the to-do list"),
         ("/agent [NAME TASK]", "your own coding agents (Claude Code, Codex, Gemini CLI: your subscriptions), or hand one a task"),
+        ("/review [BASE]", "review the changes not yet committed, or this branch's over BASE (main...): findings by file and line, and a verdict"),
         ("/compact", "summarize the conversation to free the model's window"),
         ("/compact-at [% [%]]", "show or set when it compacts itself (80% of the window, off, or your Arena account's) and what it keeps (25%)"),
         ("/context", "how full the model's window is"),
@@ -588,6 +589,15 @@ internal sealed class Repl(Runtime rt)
             case "/agent":
                 await AgentCommandAsync(arg, ct);
                 break;
+            // The project's or the person's own /review command, when there is one, goes first (default: below).
+            case "/review" when rt.Extensions.Expand(input) is null:
+                if (arg.Length > 0 && (arg.StartsWith('-') || arg.Any(char.IsWhiteSpace)))
+                {
+                    Ui.Error("/review takes one branch or commit to compare with, e.g. /review main.");
+                    break;
+                }
+                await TurnAsync(ReviewPrompt(arg), ct);
+                break;
             case "/compact":
                 using (var key = rt.Env.Cancel.BeginTurn())
                 using (var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, key.Token))
@@ -752,6 +762,23 @@ internal sealed class Repl(Runtime rt)
                 break;
         }
         return true;
+    }
+
+    /// <summary>
+    /// /review: a turn that reviews the changes with the git tool, as the Code page's reviews do: findings on lines, each
+    /// one the model tried to refute first, and a verdict; nothing changed.
+    /// </summary>
+    public static string ReviewPrompt(string baseRef)
+    {
+        var what = baseRef.Length == 0
+            ? "the changes not yet committed (staged and not). Read them with the git tool: git status, then git diff HEAD"
+            : $"what this branch has over {baseRef}, and what is not yet committed. Read them with the git tool: git log --oneline {baseRef}..HEAD, git diff {baseRef}...HEAD, then git diff HEAD";
+        return $"Review {what}. " +
+            "For each changed file, read enough of the file around each change (and the code it calls or is called by) to judge it. " +
+            "Look for bugs, security problems, broken edge cases, races, missing error handling, performance traps and missing tests; not style a formatter would fix. " +
+            "Before you report a finding, try to refute it by reading the code it depends on, and leave out what you refuted. " +
+            "Report the findings by severity (critical, major, minor, nit), each as file:line, what is wrong, why it matters, and the fix. " +
+            "End with a verdict: looks good, comments, or changes needed. Do not change any file.";
     }
 
     /// <summary>

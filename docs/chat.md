@@ -641,6 +641,11 @@ Access), and write nothing to GitLab: no comments, no approvals.
 - **Ask about code** opens a chat with Argus on and the question in it, about
   the project shown: Argus reads the code, the merge requests, CI and any
   commit, as you may.
+- **The Code review tool** (Admin → Tools) lets a chat, a coding agent
+  through Arena MCP, or Code Arena start a review: "review g/app !7" runs
+  the same review, waits for it (up to 15 minutes, its steps shown) and
+  answers with the verdict and the findings it kept; `review_get` reads one
+  again. The review is on the Code page too. Off in rooms (it reads as you).
 
 ## 3D models
 

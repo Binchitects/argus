@@ -163,6 +163,7 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/thinking [level]` | `default`, `off`, `low`, `medium`, `high`, `xhigh` (sent as the chat sends it, through `chat_template_kwargs`); `default` is the web chat's default level when Arena says one (`DEFAULT_THINKING`), else the model's own |
 | `/tools [on\|off NAME]` | the tools of the session, which ask, which are off and which are loaded when needed; `on` or `off` a group of Arena's or a server's tools in this session (by its name, its title or one of its functions) |
 | `/todo` | the to-do list |
+| `/review [BASE]` | reviews the changes not yet committed, or this branch's over BASE (`/review main`): the model reads them with git, tries to refute each finding before it reports it, and ends with a verdict; it changes nothing. A `/review` command of the project's or your own goes first |
 | `/agent [NAME TASK]` | your own coding agents (below); with a name and a task, run one on it: its output shows as it comes, and what it said goes into the conversation |
 | `/compact` | summarize the conversation now |
 | `/compact-at [% [%]]` | show or set when the session compacts itself and what it keeps (below); `off` for only when a request would not fit, `account` for your Arena account's, `default` for that and 25 |

@@ -90,6 +90,41 @@ public sealed class ReviewTests(AppFixture app)
     }
 
     [Fact]
+    public async Task The_chat_reviews_a_merge_request_with_its_tool_and_reads_the_review_again()
+    {
+        GitLab();
+        var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (_, email, me) = await PersonAsync(admin);
+        var chat = (await me.JsonAsync(await me.PostAsync("/api/chat/conversations", new { title = "Review" }))).GetProperty("id").GetGuid();
+        await me.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{chat}", UriKind.Relative), new { tools = new[] { "reviews" } });
+        var before = app.Argus.McpCalls.Count;
+
+        var done = await ToolAsync(me, chat, """Review it [call review_merge_request {"project": "g/app", "iid": "!7"}]""");
+        Assert.False(done.GetProperty("isError").GetBoolean(), done.GetProperty("text").GetString());
+        var review = JsonDocument.Parse(done.GetProperty("text").GetString()!).RootElement;
+        Assert.Equal("changes", review.GetProperty("verdict").GetString());
+        // The finding the second pass refuted is left out, and counted.
+        Assert.Equal(["count.c"], review.GetProperty("findings").EnumerateArray().Select(f => f.GetProperty("path").GetString()));
+        Assert.Equal(1, review.GetProperty("doubted").GetInt32());
+        Assert.Contains(app.Argus.McpCalls.Skip(before), c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "mr_diff" && c.Email == email);
+
+        var again = await ToolAsync(me, chat, $$"""Again [call review_get {"id": "{{review.GetProperty("id").GetString()}}"}]""");
+        Assert.Equal(review.GetProperty("summary").GetString(), JsonDocument.Parse(again.GetProperty("text").GetString()!).RootElement.GetProperty("summary").GetString());
+        var (_, _, other) = await PersonAsync(admin);
+        var theirs = (await other.JsonAsync(await other.PostAsync("/api/chat/conversations", new { title = "Peek" }))).GetProperty("id").GetGuid();
+        await other.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{theirs}", UriKind.Relative), new { tools = new[] { "reviews" } });
+        Assert.True((await ToolAsync(other, theirs, $$"""Peek [call review_get {"id": "{{review.GetProperty("id").GetString()}}"}]""")).GetProperty("isError").GetBoolean());
+    }
+
+    private static async Task<JsonElement> ToolAsync(TestBrowser b, Guid chat, string text)
+    {
+        var res = await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = text });
+        return (await res.Content.ReadAsStringAsync()).Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => JsonDocument.Parse(l[6..]).RootElement)
+            .Single(e => e.GetProperty("type").GetString() == "tool_result");
+    }
+
+    [Fact]
     public void A_diff_is_numbered_as_the_new_file_and_cut_into_parts_at_its_hunks()
     {
         var numbered = ReviewEngine.Numbered("@@ -4,2 +10,3 @@\n a\n-b\n+c\n+d\n");
