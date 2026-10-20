@@ -23,6 +23,8 @@ internal sealed record ToolResult(string Text, bool Error = false)
     public string? Display { get; init; }
     /// <summary>The file an edit changed, for the web interface's diff.</summary>
     public FileChange? Change { get; init; }
+    /// <summary>Pictures for the model (a screenshot): they follow the tool's result as a message of their own.</summary>
+    public JsonArray? Pictures { get; init; }
 }
 
 /// <summary>A file as an edit found it (null: it was new) and as it left it.</summary>

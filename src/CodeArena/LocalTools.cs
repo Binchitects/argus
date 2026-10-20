@@ -204,7 +204,7 @@ internal static class LocalTools
 
     private static string Plural(int n, string one, string? many = null) => $"{n} {(n == 1 ? one : many ?? one + "s")}";
 
-    private static JsonObject Schema(string json) => (JsonObject)JsonNode.Parse(json)!;
+    internal static JsonObject Schema(string json) => (JsonObject)JsonNode.Parse(json)!;
 
     private static string Required(JsonObject a, string name) =>
         a.Str(name) is { Length: > 0 } v ? v : throw new ToolError($"{name} is required.");

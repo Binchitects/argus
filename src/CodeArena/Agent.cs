@@ -173,6 +173,8 @@ internal sealed class Agent
     /// its cache. Null: none (a sub-agent, whose prompt says it all).
     /// </summary>
     public Func<string>? Note { get; init; }
+    /// <summary>Whether the model sees pictures (a screenshot goes to it as one, else it is told it cannot see it).</summary>
+    public Func<bool>? Sees { get; init; }
     public SessionStore? Session { get; set; }
     public Spend Total { get; init; } = new();
     /// <summary>0 for the main agent, 1 for a sub-agent (indented, not streamed).</summary>
@@ -927,6 +929,15 @@ internal sealed class Agent
                 text = text[..(limit * 2 / 3)] + $"\n\n… ({text.Length - limit:N0} characters cut: ask for less, e.g. a line range or a narrower search) …\n\n" + text[^(limit / 3)..];
             }
             Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = planned[i].Id, ["content"] = text });
+        }
+        // Pictures a tool took (a screenshot) follow the results, as the person's message: a tool's result is text only.
+        var pictures = results.Where(r => r.Pictures is { Count: > 0 }).SelectMany(r => r.Pictures!).ToList();
+        if (pictures.Count > 0)
+        {
+            Add(Sees?.Invoke() ?? Model.Info.Vision
+                ? new JsonObject { ["role"] = "user", ["content"] = new JsonArray([new JsonObject { ["type"] = "text", ["text"] = "(The picture the tool took.)" }, .. pictures.Select(p => p!.DeepClone())]) }
+                : new JsonObject { ["role"] = "user", ["content"] = "(The tool took a picture, but this model cannot see pictures: choose one that can, or describe what to check.)" },
+                kind: "note");
         }
         ct.ThrowIfCancellationRequested();
     }

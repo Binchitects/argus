@@ -318,6 +318,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         Jobs.Ended += printer.Ended;
         var tools = LocalTools.All(Config.Shell);
         tools.Add(LocalTools.SubAgentTool());
+        tools.Add(Screenshots.Tool(Env.Env));
         tools.Add(MemoryStore.RememberTool());
         tools.Add(SessionSearch.Tool());
         if (Extensions.Skills.Count > 0)
@@ -443,6 +444,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             Model = Model,
             SystemPrompt = () => SystemPrompt.Build(inputs),
             Note = () => SystemPrompt.Note(inputs),
+            Sees = () => Sees(Model.Info),
             Total = Total,
             Stream = !Ui.Quiet,
             Compaction = Compaction,
