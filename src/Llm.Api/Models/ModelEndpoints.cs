@@ -42,7 +42,15 @@ public static class ModelEndpoints
 {
     public static void MapModels(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/models").RequirePermissions(Llm.Core.Access.Permissions.ModelsRead, Llm.Core.Access.Permissions.ModelsManage);
+        var g = app.MapGroup("/api/admin/models").RequirePermissions(Llm.Core.Access.Permissions.ModelsRead, Llm.Core.Access.Permissions.ModelsManage, new Dictionary<string, string>
+        {
+            ["POST /api/admin/models"] = Llm.Core.Access.Permissions.ModelsAdd,
+            ["PATCH /api/admin/models/{name}"] = Llm.Core.Access.Permissions.ModelsEdit,
+            ["DELETE /api/admin/models/{name}"] = Llm.Core.Access.Permissions.ModelsDelete,
+            ["PUT /api/admin/models/{name}/keep"] = Llm.Core.Access.Permissions.ModelsEdit,
+            ["PUT /api/admin/models/{name}/access"] = Llm.Core.Access.Permissions.ModelsAccess,
+            ["POST /api/admin/models/advice"] = Llm.Core.Access.Permissions.ModelsRead,
+        });
         g.MapGet("", ListAsync);
         MediaModelEndpoints.Map(g);
         g.MapGet("/library", LibraryAsync);

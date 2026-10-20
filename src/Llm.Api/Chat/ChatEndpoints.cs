@@ -177,6 +177,10 @@ public static partial class ChatEndpoints
     {
         var me = await Me(p, users);
         var membership = await access.MembershipAsync(me, ct);
+        if (body.Model is { Length: > 0 } && !membership.Has(Llm.Core.Access.Permissions.ModelChoice))
+        {
+            return AuthEndpoints.Problem(403, "model", "Choosing the chat's model is not among what you may do: the company's default answers.");
+        }
         var allowed = await registry.ForAsync(membership, ct);
         Assistant? assistant = null;
         if (body.AssistantId is { } aid)
@@ -378,6 +382,10 @@ public static partial class ChatEndpoints
         if (await Owned(db, id, me, Need.Manage) is not { } c)
         {
             return Results.NotFound();
+        }
+        if (body.Model is { Length: > 0 } && !await access.MayAsync(me, Llm.Core.Access.Permissions.ModelChoice, ct))
+        {
+            return AuthEndpoints.Problem(403, "model", "Choosing the chat's model is not among what you may do: the company's default answers.");
         }
         if (body.Title is { } title)
         {
@@ -894,10 +902,15 @@ public static partial class ChatEndpoints
     }
 
     private static async Task<IResult> UploadAsync(HttpRequest request, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, IOptionsMonitor<ChatOptions> monitor,
-        Media media, Safeguards.Safeguards safeguards, Storage.StorageQuotas quotas)
+        Media media, Safeguards.Safeguards safeguards, Storage.StorageQuotas quotas, AccessService access)
     {
         var options = monitor.CurrentValue;
         var me = await Me(p, users);
+        // Attaching files is a feature of its own (Admin → Access); this route takes Code Arena's key too, so it checks here.
+        if (!await access.MayAsync(me, Llm.Core.Access.Permissions.Uploads, request.HttpContext.RequestAborted))
+        {
+            return AuthEndpoints.Problem(403, "feature", "Attaching files is not among what you may do: ask an admin.");
+        }
         // The setting, not Kestrel's 30 MB default, decides the size (plus room for the form around the file).
         if (request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
         {

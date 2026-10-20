@@ -37,7 +37,17 @@ public static class StorageEndpoints
 
     public static void MapStorage(IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/storage").RequirePermissions(Llm.Core.Access.Permissions.StorageManage, Llm.Core.Access.Permissions.StorageManage);
+        var g = app.MapGroup("/api/admin/storage").RequirePermissions(Llm.Core.Access.Permissions.StorageManage, Llm.Core.Access.Permissions.StorageManage, new Dictionary<string, string>
+        {
+            ["GET /api/admin/storage"] = Llm.Core.Access.Permissions.StorageRead,
+            ["GET /api/admin/storage/files"] = Llm.Core.Access.Permissions.StorageRead,
+            ["GET /api/admin/storage/files/{id:guid}/download"] = Llm.Core.Access.Permissions.StorageRead,
+            ["GET /api/admin/storage/people"] = Llm.Core.Access.Permissions.StorageRead,
+            ["GET /api/admin/storage/cleanups/{kind}"] = Llm.Core.Access.Permissions.StorageRead,
+            ["POST /api/admin/storage/files/delete"] = Llm.Core.Access.Permissions.StorageDelete,
+            ["PUT /api/admin/storage/people/{id:guid}/quota"] = Llm.Core.Access.Permissions.StorageQuota,
+            ["POST /api/admin/storage/cleanups/{kind}"] = Llm.Core.Access.Permissions.StorageCleanup,
+        });
         // ?fresh: every folder measured again now (Measure again), not as measured in the last two minutes.
         g.MapGet("/", async (bool? fresh, StorageReport report, CancellationToken ct) => Results.Ok(await report.BuildAsync(fresh is true, ct)));
         g.MapGet("/files", ListAsync);

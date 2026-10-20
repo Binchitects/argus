@@ -100,6 +100,25 @@ What each person may do is decided in one place, from three things:
   and `feature.assistants.share` stop new memories, tasks, share links and
   sharing assistants; `code.read` takes the Argus tool. What they already
   have stays theirs to read and delete.
+- **Parts of permissions.** Each broad administrative permission has parts a
+  role can hold alone: `people.manage` holds `people.create`, `people.edit`,
+  `people.delete`, `people.passwords` (passwords, two-factor, signing out),
+  `people.keys` (keys and API access) and `people.limits`; `groups.manage`
+  holds create, edit, delete, members and policies; `access.manage` holds
+  roles, assign, rules and requests; `models.manage` holds add, edit, delete,
+  download, servers, hours and access (`models.load` apart); `tools.manage`,
+  `plugins.manage`, `knowledge.manage` (read, add, edit, sync, delete) and
+  `storage.manage` (read, cleanup, delete, quota) theirs; `settings.manage`
+  one per group of settings (`settings.chat`, `settings.models`,
+  `settings.safeguards`, `settings.tools`, `settings.integrations`,
+  `settings.data`, `settings.gateway`, `settings.argus`, `settings.branding`,
+  `settings.restart`); `signin.manage` the directory, company sign-in and
+  moves; `argus.manage` repos, index, packs and webhook; `logs.read` holds
+  `traces.read`. Holding any administrative permission of an area lets one
+  read that area (who resets passwords sees the people). Features have more
+  parts too: Python, the canvas, 3D models, plans, deep research, comparing
+  models, attaching files, making assistants, saving prompts, exporting one's
+  own data, company knowledge, and choosing the chat's model.
 - **Roles**: named sets of permissions. The built-in ones are **Owner**
   (everything), **People admin**, **Model admin**, **Billing**, **Auditor**
   (every `.read`, never a change), **Argus admin**, **Room moderator**,

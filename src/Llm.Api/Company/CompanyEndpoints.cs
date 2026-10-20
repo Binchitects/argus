@@ -40,7 +40,12 @@ public static partial class CompanyEndpoints
         auth.MapGet("/callback", CallbackAsync);
         MapSaml(auth);
 
-        var admin = app.MapGroup("/api/admin/company-sign-in").RequirePermissions(Llm.Core.Access.Permissions.SettingsRead, Llm.Core.Access.Permissions.SignInManage);
+        var admin = app.MapGroup("/api/admin/company-sign-in").RequirePermissions(Llm.Core.Access.Permissions.SettingsRead, Llm.Core.Access.Permissions.SignInManage, new Dictionary<string, string>
+        {
+            ["POST /api/admin/company-sign-in/test"] = Llm.Core.Access.Permissions.SignInSso,
+            ["POST /api/admin/company-sign-in/scim-token"] = Llm.Core.Access.Permissions.SignInSso,
+            ["DELETE /api/admin/company-sign-in/scim-token"] = Llm.Core.Access.Permissions.SignInSso,
+        });
         admin.MapGet("", StatusAsync);
         // Tries the provider before it is saved: the form's values over the current ones.
         admin.MapPost("/test", (Dictionary<string, string?> form, IOptionsMonitor<CompanySignInOptions> current, CompanyIdp idp, SamlIdp saml, CancellationToken ct) =>

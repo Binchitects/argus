@@ -22,6 +22,9 @@ public static class EndpointAccess
 {
     public const string PolicyPrefix = "permission:";
 
+    /// <summary>Every finer permission a group named for a route, so a test can see each named route exists (a typo would leave it broad).</summary>
+    public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> Parts = new(StringComparer.Ordinal);
+
     /// <summary>The person signed in (a session, not a key) must hold <paramref name="permission"/>; else 403.</summary>
     public static TBuilder RequirePermission<TBuilder>(this TBuilder builder, string permission) where TBuilder : IEndpointConventionBuilder
     {
@@ -36,11 +39,19 @@ public static class EndpointAccess
     /// A group's routes need <paramref name="read"/> to look (GET and HEAD) and <paramref name="write"/> to change anything,
     /// unless a route says otherwise itself (<see cref="RequirePermission"/>, <see cref="PersonOnly"/>, an anonymous reason).
     /// </summary>
-    public static RouteGroupBuilder RequirePermissions(this RouteGroupBuilder group, string read, string write)
+    /// <param name="parts">
+    /// Finer permissions for some of the group's routes, by "METHOD /the/whole/route/{id:guid}" (one of the broad
+    /// permission's parts: people.passwords for a password's reset), in place of <paramref name="write"/>.
+    /// </param>
+    public static RouteGroupBuilder RequirePermissions(this RouteGroupBuilder group, string read, string write, IReadOnlyDictionary<string, string>? parts = null)
     {
-        foreach (var permission in new[] { read, write }.Where(p => !Core.Access.Permissions.IsKnown(p)))
+        foreach (var permission in new[] { read, write }.Concat(parts?.Values ?? []).Where(p => !Core.Access.Permissions.IsKnown(p)))
         {
             throw new ArgumentException($"{permission} is not in the permission catalog.", nameof(read));
+        }
+        foreach (var (route, permission) in parts ?? new Dictionary<string, string>())
+        {
+            Parts[route] = permission;
         }
         // After each route's own conventions, so a route's own permission is the one it needs, not both.
         ((IEndpointConventionBuilder)group).Finally(b =>
@@ -51,6 +62,14 @@ public static class EndpointAccess
             }
             var methods = b.Metadata.OfType<HttpMethodMetadata>().SelectMany(m => m.HttpMethods).ToList();
             var permission = methods.Count > 0 && methods.All(m => HttpMethods.IsGet(m) || HttpMethods.IsHead(m)) ? read : write;
+            var route = "/" + ((b as RouteEndpointBuilder)?.RoutePattern.RawText ?? "").Trim('/');
+            foreach (var method in methods)
+            {
+                if (parts is not null && parts.TryGetValue($"{method} {route}", out var part))
+                {
+                    permission = part;
+                }
+            }
             b.Metadata.Add(new AuthorizeAttribute(PolicyPrefix + permission));
             b.Metadata.Add(new PermissionMetadata(permission));
         });

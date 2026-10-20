@@ -27,7 +27,17 @@ public static partial class AccessEndpoints
 {
     public static void MapAccess(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/access").RequirePermissions(Permissions.AccessRead, Permissions.AccessManage);
+        var g = app.MapGroup("/api/admin/access").RequirePermissions(Permissions.AccessRead, Permissions.AccessManage, new Dictionary<string, string>
+        {
+            ["POST /api/admin/access/roles"] = Llm.Core.Access.Permissions.AccessRoles,
+            ["PATCH /api/admin/access/roles/{id:guid}"] = Llm.Core.Access.Permissions.AccessRoles,
+            ["DELETE /api/admin/access/roles/{id:guid}"] = Llm.Core.Access.Permissions.AccessRoles,
+            ["POST /api/admin/access/assignments"] = Llm.Core.Access.Permissions.AccessAssign,
+            ["DELETE /api/admin/access/assignments/{id:guid}"] = Llm.Core.Access.Permissions.AccessAssign,
+            ["POST /api/admin/access/rules"] = Llm.Core.Access.Permissions.AccessRules,
+            ["DELETE /api/admin/access/rules/{id:guid}"] = Llm.Core.Access.Permissions.AccessRules,
+            ["POST /api/admin/access/requests/{id:guid}/decide"] = Llm.Core.Access.Permissions.AccessRequests,
+        });
         g.MapGet("", OverviewAsync);
         g.MapPost("/roles", CreateRoleAsync);
         g.MapPatch("/roles/{id:guid}", UpdateRoleAsync);
@@ -60,7 +70,7 @@ public static partial class AccessEndpoints
         return Results.Ok(new
         {
             s.Version,
-            permissions = Permissions.All.Select(p => new { p.Key, p.Area, p.Description, p.Admin }),
+            permissions = Permissions.All.Select(p => new { p.Key, p.Area, p.Description, p.Admin, p.Parent }),
             resourceKinds = ResourceKinds.Actions.Select(k => new { kind = k.Key, actions = k.Value }),
             roles = s.Roles.OrderBy(r => !r.BuiltIn).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase).Select(r => new
             {

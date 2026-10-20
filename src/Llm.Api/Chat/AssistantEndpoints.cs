@@ -39,7 +39,7 @@ public static class AssistantEndpoints
     {
         var g = app.MapGroup("/api/assistants").PersonOnly();
         g.MapGet("", ListAsync);
-        g.MapPost("", CreateAsync);
+        g.MapPost("", CreateAsync).RequirePermission(Llm.Core.Access.Permissions.AssistantsCreate);
         g.MapGet("/{id:guid}", GetAsync);
         g.MapPatch("/{id:guid}", UpdateAsync);
         g.MapPut("/{id:guid}/sharing", ShareAsync).RequirePermission(Llm.Core.Access.Permissions.AssistantsShare);

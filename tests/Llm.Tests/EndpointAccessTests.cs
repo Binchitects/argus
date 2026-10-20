@@ -165,6 +165,35 @@ public sealed partial class EndpointAccessTests(AppFixture app)
     }
 
     [Fact]
+    public void Every_finer_permission_a_group_names_is_on_a_route_that_needs_it()
+    {
+        var routes = Routes();
+        Assert.NotEmpty(EndpointAccess.Parts);
+        foreach (var (route, permission) in EndpointAccess.Parts)
+        {
+            var (method, pattern) = (route[..route.IndexOf(' ', StringComparison.Ordinal)], route[(route.IndexOf(' ', StringComparison.Ordinal) + 1)..]);
+            Assert.True(routes.Any(r => r.Method == method && r.Pattern.TrimEnd('/') == pattern && r.Permission == permission), $"{route} needs {permission}: no such route has it");
+        }
+    }
+
+    [Fact]
+    public void A_broad_permission_holds_its_parts_and_acting_in_an_area_reads_it()
+    {
+        var people = new AccessRole { Key = "x", Name = "X", Permissions = [Permissions.PeopleManage] };
+        Assert.True(AccessSnapshot.Gives(people, Permissions.PeoplePasswords));
+        Assert.True(AccessSnapshot.Gives(people, Permissions.PeopleRead));
+        Assert.False(AccessSnapshot.Gives(people, Permissions.GroupsCreate));
+        var resets = new AccessRole { Key = "y", Name = "Y", Permissions = [Permissions.PeoplePasswords] };
+        Assert.True(AccessSnapshot.Gives(resets, Permissions.PeopleRead));
+        Assert.False(AccessSnapshot.Gives(resets, Permissions.PeopleDelete));
+        Assert.False(AccessSnapshot.Gives(resets, Permissions.PeopleManage));
+        // A feature is never read into: Member's chat gives no admin reading.
+        var member = new AccessRole { Key = "z", Name = "Z", Permissions = [Permissions.Chat] };
+        Assert.False(AccessSnapshot.Gives(member, Permissions.PeopleRead));
+        Assert.All(Permissions.All.Where(p => p.Parent is not null), p => Assert.True(Permissions.IsKnown(p.Parent!), p.Key));
+    }
+
+    [Fact]
     public void Each_built_in_role_holds_exactly_its_permissions()
     {
         var roles = BuiltInRoles.All.ToDictionary(r => r.Key, r => new AccessRole { Key = r.Key, Name = r.Name, BuiltIn = true, Permissions = [.. r.Permissions] });
@@ -176,7 +205,13 @@ public sealed partial class EndpointAccessTests(AppFixture app)
             var world = new AccessSnapshot(1, roles.Values, [new AccessAssignment { RoleId = roles[role.Key].Id, SubjectKind = SubjectKind.Person, SubjectId = person }], []);
             foreach (var p in Permissions.All)
             {
-                Assert.True(role.Permissions.Contains(p.Key) == world.Check(Principal.Of(person), p.Key, now).Allowed, $"{role.Name} and {p.Key}");
+                // A role gives what it names, the parts of what it names, and the reading of the areas it acts in.
+                var gives = AccessSnapshot.Gives(roles[role.Key], p.Key);
+                Assert.True(gives == world.Check(Principal.Of(person), p.Key, now).Allowed, $"{role.Name} and {p.Key}");
+                if (role.Permissions.Contains(p.Key))
+                {
+                    Assert.True(gives, $"{role.Name} names {p.Key}");
+                }
             }
         }
         Assert.All(BuiltInRoles.Find(BuiltInRoles.Auditor)!.Permissions, p => Assert.EndsWith(".read", p, StringComparison.Ordinal));

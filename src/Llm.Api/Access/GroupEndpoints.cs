@@ -39,7 +39,16 @@ public static class GroupEndpoints
 
     public static void MapGroups(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/groups").RequirePermissions(Llm.Core.Access.Permissions.PeopleRead, Llm.Core.Access.Permissions.GroupsManage).ScopedToGroups();
+        var g = app.MapGroup("/api/admin/groups").RequirePermissions(Llm.Core.Access.Permissions.PeopleRead, Llm.Core.Access.Permissions.GroupsManage, new Dictionary<string, string>
+        {
+            ["POST /api/admin/groups"] = Llm.Core.Access.Permissions.GroupsCreate,
+            ["PUT /api/admin/groups/{id:guid}/policies"] = Llm.Core.Access.Permissions.GroupsPolicies,
+            ["PATCH /api/admin/groups/{id:guid}"] = Llm.Core.Access.Permissions.GroupsEdit,
+            ["DELETE /api/admin/groups/{id:guid}"] = Llm.Core.Access.Permissions.GroupsDelete,
+            ["POST /api/admin/groups/{id:guid}/members"] = Llm.Core.Access.Permissions.GroupsMembers,
+            ["DELETE /api/admin/groups/{id:guid}/members/{userId:guid}"] = Llm.Core.Access.Permissions.GroupsMembers,
+            ["GET /api/admin/groups/chargeback"] = Llm.Core.Access.Permissions.BillingRead,
+        }).ScopedToGroups();
         g.MapGet("", ListAsync);
         g.MapPost("", CreateAsync);
         g.MapGet("/directory", DirectoryAsync);

@@ -18,7 +18,7 @@ public static class RetentionEndpoints
         var admin = app.MapGroup("/api/admin/people/{id:guid}").RequirePermissions(Llm.Core.Access.Permissions.ExportPerson, Llm.Core.Access.Permissions.LegalHoldManage).ScopedToGroups();
         admin.MapPut("/legal-hold", HoldAsync);
         admin.MapGet("/export", AdminExportAsync);
-        app.MapGet("/api/account/export", OwnExportAsync).PersonOnly();
+        app.MapGet("/api/account/export", OwnExportAsync).RequirePermission(Llm.Core.Access.Permissions.Export);
         // How long the person's chats are kept, and what their files take of their room, for the account page.
         app.MapGet("/api/account/data", async (ClaimsPrincipal p, UserManager<AppUser> users, Retention retention, Storage.StorageQuotas quotas, CancellationToken ct) =>
         {

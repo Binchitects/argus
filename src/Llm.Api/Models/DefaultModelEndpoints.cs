@@ -20,7 +20,10 @@ public static class DefaultModelEndpoints
 
     public static void MapDefaultModels(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/models/defaults").RequirePermissions(Llm.Core.Access.Permissions.ModelsRead, Llm.Core.Access.Permissions.ModelsManage);
+        var g = app.MapGroup("/api/admin/models/defaults").RequirePermissions(Llm.Core.Access.Permissions.ModelsRead, Llm.Core.Access.Permissions.ModelsManage, new Dictionary<string, string>
+        {
+            ["POST /api/admin/models/defaults"] = Llm.Core.Access.Permissions.ModelsDownload,
+        });
         g.MapGet("", async (Provisioning setup, CancellationToken ct) => Results.Ok(await setup.ListAsync(ct)));
         g.MapPost("", async (Provisioning setup, Audit audit, CancellationToken ct) =>
         {

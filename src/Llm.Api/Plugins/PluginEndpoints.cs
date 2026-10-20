@@ -32,7 +32,15 @@ public static class PluginEndpoints
 {
     public static void MapPlugins(this IEndpointRouteBuilder app)
     {
-        var admin = app.MapGroup("/api/admin/plugins").RequirePermissions(Llm.Core.Access.Permissions.PluginsManage, Llm.Core.Access.Permissions.PluginsManage);
+        var admin = app.MapGroup("/api/admin/plugins").RequirePermissions(Llm.Core.Access.Permissions.PluginsManage, Llm.Core.Access.Permissions.PluginsManage, new Dictionary<string, string>
+        {
+            ["GET /api/admin/plugins"] = Llm.Core.Access.Permissions.PluginsRead,
+            ["POST /api/admin/plugins/preview"] = Llm.Core.Access.Permissions.PluginsInstall,
+            ["POST /api/admin/plugins/install"] = Llm.Core.Access.Permissions.PluginsInstall,
+            ["PATCH /api/admin/plugins/{id:guid}"] = Llm.Core.Access.Permissions.PluginsConfigure,
+            ["POST /api/admin/plugins/{id:guid}/update"] = Llm.Core.Access.Permissions.PluginsInstall,
+            ["DELETE /api/admin/plugins/{id:guid}"] = Llm.Core.Access.Permissions.PluginsRemove,
+        });
         admin.MapGet("", ListAsync);
         admin.MapPost("/preview", PreviewAsync);
         admin.MapPost("/install", InstallAsync);

@@ -1,3 +1,4 @@
+using Llm.Core.Access;
 namespace Llm.Api.Settings;
 
 /// <summary>
@@ -362,6 +363,27 @@ public static class SettingsCatalog
 
 
     ];
+
+    /// <summary>
+    /// The permission that changes a setting, by its group on the page: each group's part of settings.manage, and the
+    /// directory's and company sign-in's under signin.manage.
+    /// </summary>
+    public static string PermissionOf(SettingDefinition d) => d.Group switch
+    {
+        Branding => Permissions.SettingsBranding,
+        SignIn => Permissions.SignInManage,
+        Directory => Permissions.SignInDirectory,
+        CompanySignIn or Oidc or Saml => Permissions.SignInSso,
+        Chat => Permissions.SettingsChat,
+        Model or PricesGroup or Speech => Permissions.SettingsModels,
+        Argus => Permissions.SettingsArgus,
+        Tools or PluginsGroup or ArenaMcp => Permissions.SettingsTools,
+        Schedules or Mail or NotificationsGroup or BotsGroup => Permissions.SettingsIntegrations,
+        Safeguards => Permissions.SettingsSafeguards,
+        Knowledge or Retention or StorageGroup => Permissions.SettingsData,
+        Api => Permissions.SettingsGateway,
+        _ => Permissions.SettingsManage,
+    };
 
     public static readonly IReadOnlyDictionary<string, SettingDefinition> ByKey =
         All.ToDictionary(d => d.Key, StringComparer.Ordinal);

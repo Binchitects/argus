@@ -28,7 +28,7 @@ public static class PromptEndpoints
     {
         var g = app.MapGroup("/api/prompts").PersonOnly();
         g.MapGet("", ListAsync);
-        g.MapPost("", CreateAsync);
+        g.MapPost("", CreateAsync).RequirePermission(Llm.Core.Access.Permissions.PromptsCreate);
         g.MapPut("/{id:guid}", UpdateAsync);
         g.MapDelete("/{id:guid}", DeleteAsync);
     }

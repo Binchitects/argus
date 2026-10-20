@@ -37,7 +37,7 @@ public static class QualityEndpoints
         var chat = app.MapGroup("/api/chat").PersonOnly();
         chat.MapPut("/conversations/{id:guid}/messages/{messageId:guid}/feedback", RateAsync);
         chat.MapDelete("/conversations/{id:guid}/messages/{messageId:guid}/feedback", UnrateAsync);
-        chat.MapPost("/conversations/{id:guid}/compare", ChatEndpoints.CompareAsync);
+        chat.MapPost("/conversations/{id:guid}/compare", ChatEndpoints.CompareAsync).RequirePermission(Llm.Core.Access.Permissions.Compare);
         chat.MapPost("/arena/{id:guid}/vote", VoteAsync);
         app.MapGet("/api/arena/leaderboard", LeaderboardAsync).PersonOnly();
 

@@ -18,7 +18,25 @@ public static class AdminEndpoints
 
     public static void MapAdmin(this IEndpointRouteBuilder app)
     {
-        var admin = app.MapGroup("/api/admin").RequirePermissions(Llm.Core.Access.Permissions.PeopleRead, Llm.Core.Access.Permissions.PeopleManage).ScopedToGroups();
+        var admin = app.MapGroup("/api/admin").RequirePermissions(Llm.Core.Access.Permissions.PeopleRead, Llm.Core.Access.Permissions.PeopleManage, new Dictionary<string, string>
+        {
+            ["POST /api/admin/people"] = Llm.Core.Access.Permissions.PeopleCreate,
+            ["PATCH /api/admin/people/{id:guid}"] = Llm.Core.Access.Permissions.PeopleEdit,
+            ["POST /api/admin/people/{id:guid}/password"] = Llm.Core.Access.Permissions.PeoplePasswords,
+            ["POST /api/admin/people/{id:guid}/key"] = Llm.Core.Access.Permissions.PeopleKeys,
+            ["PUT /api/admin/people/{id:guid}/credits"] = Llm.Core.Access.Permissions.CreditsManage,
+            ["PUT /api/admin/people/{id:guid}/credits/{kind}"] = Llm.Core.Access.Permissions.CreditsManage,
+            ["PUT /api/admin/people/{id:guid}/api"] = Llm.Core.Access.Permissions.PeopleKeys,
+            ["PUT /api/admin/people/{id:guid}/limits"] = Llm.Core.Access.Permissions.PeopleLimits,
+            ["POST /api/admin/people/{id:guid}/2fa/reset"] = Llm.Core.Access.Permissions.PeoplePasswords,
+            ["POST /api/admin/people/{id:guid}/sign-out"] = Llm.Core.Access.Permissions.PeoplePasswords,
+            ["DELETE /api/admin/people/{id:guid}"] = Llm.Core.Access.Permissions.PeopleDelete,
+            ["GET /api/admin/audit"] = Llm.Core.Access.Permissions.AuditRead,
+            ["GET /api/admin/sign-in"] = Llm.Core.Access.Permissions.SettingsRead,
+            ["POST /api/admin/ldap/moves/plan"] = Llm.Core.Access.Permissions.SignInMoves,
+            ["POST /api/admin/ldap/moves"] = Llm.Core.Access.Permissions.SignInMoves,
+            ["POST /api/admin/ldap/sync"] = Llm.Core.Access.Permissions.SignInDirectory,
+        }).ScopedToGroups();
         admin.MapGet("/people", ListAsync);
         admin.MapPost("/people", CreateAsync);
         admin.MapGet("/people/{id:guid}", GetAsync);

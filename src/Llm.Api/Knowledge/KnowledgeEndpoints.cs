@@ -29,7 +29,17 @@ public static class KnowledgeEndpoints
 
     public static void MapKnowledge(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/knowledge").RequirePermissions(Llm.Core.Access.Permissions.KnowledgeManage, Llm.Core.Access.Permissions.KnowledgeManage);
+        var g = app.MapGroup("/api/admin/knowledge").RequirePermissions(Llm.Core.Access.Permissions.KnowledgeManage, Llm.Core.Access.Permissions.KnowledgeManage, new Dictionary<string, string>
+        {
+            ["GET /api/admin/knowledge"] = Llm.Core.Access.Permissions.KnowledgeRead,
+            ["GET /api/admin/knowledge/{id:guid}/documents"] = Llm.Core.Access.Permissions.KnowledgeRead,
+            ["POST /api/admin/knowledge"] = Llm.Core.Access.Permissions.KnowledgeAdd,
+            ["PATCH /api/admin/knowledge/{id:guid}"] = Llm.Core.Access.Permissions.KnowledgeEdit,
+            ["POST /api/admin/knowledge/{id:guid}/sync"] = Llm.Core.Access.Permissions.KnowledgeSync,
+            ["POST /api/admin/knowledge/test"] = Llm.Core.Access.Permissions.KnowledgeSync,
+            ["POST /api/admin/knowledge/{id:guid}/test"] = Llm.Core.Access.Permissions.KnowledgeSync,
+            ["DELETE /api/admin/knowledge/{id:guid}"] = Llm.Core.Access.Permissions.KnowledgeDelete,
+        });
         g.MapGet("", ListAsync);
         g.MapPost("", CreateAsync);
         g.MapPatch("/{id:guid}", UpdateAsync);

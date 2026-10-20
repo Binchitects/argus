@@ -53,7 +53,19 @@ public static class OperationsEndpoints
             CancellationToken ct) => Results.Ok(await ProbeAllAsync(f, s.Value, a.Value, d.Value, media, ct)));
         g.MapGet("/people.csv", PeopleCsvAsync);
 
-        var argus = g.MapGroup("/argus").RequirePermissions(Llm.Core.Access.Permissions.ArgusRead, Llm.Core.Access.Permissions.ArgusManage);
+        var argus = g.MapGroup("/argus").RequirePermissions(Llm.Core.Access.Permissions.ArgusRead, Llm.Core.Access.Permissions.ArgusManage, new Dictionary<string, string>
+        {
+            ["POST /api/admin/argus/webhook"] = Llm.Core.Access.Permissions.ArgusWebhook,
+            ["DELETE /api/admin/argus/webhook"] = Llm.Core.Access.Permissions.ArgusWebhook,
+            ["POST /api/admin/argus/index"] = Llm.Core.Access.Permissions.ArgusIndex,
+            ["POST /api/admin/argus/repos/discover"] = Llm.Core.Access.Permissions.ArgusRepos,
+            ["PATCH /api/admin/argus/repos/{gitlabId:long}"] = Llm.Core.Access.Permissions.ArgusRepos,
+            ["POST /api/admin/argus/repos/batch"] = Llm.Core.Access.Permissions.ArgusRepos,
+            ["POST /api/admin/argus/repos/{gitlabId:long}/index/remove"] = Llm.Core.Access.Permissions.ArgusIndex,
+            ["PUT /api/admin/argus/repos/settings"] = Llm.Core.Access.Permissions.ArgusRepos,
+            ["PUT /api/admin/argus/schedule"] = Llm.Core.Access.Permissions.ArgusIndex,
+            ["POST /api/admin/argus/packs/{action}"] = Llm.Core.Access.Permissions.ArgusPacks,
+        });
         argus.MapGet("/status", (ArgusAdmin a, CancellationToken ct) => Relay(() => a.GetAsync("index/status", ct), a));
         // The GitLab webhook: on a push or a merge, the repository's index is brought up to date.
         argus.MapGet("/webhook", (ArgusWebhook w, ArgusAdmin a, CancellationToken ct) => Relay(async () => (JsonNode?)await w.ViewAsync(ct), a));

@@ -207,13 +207,14 @@ function RoleDialog({ data, role, onClose }: { data: AccessOverview; role: Acces
             <fieldset key={area} className="grid gap-1.5">
               <legend className="mb-1 text-sm font-medium">{area}</legend>
               {data.permissions
-                .filter((p) => p.area === area)
+                .filter((p) => p.area === area && !p.parent)
+                .flatMap((p) => [p, ...data.permissions.filter((c) => c.parent === p.key)])
                 .map((p) => (
-                  <div key={p.key} className="flex items-start gap-2 text-sm">
+                  <div key={p.key} className={`flex items-start gap-2 text-sm ${p.parent ? 'ml-6' : ''}`}>
                     <Checkbox
                       id={`perm-${p.key}`}
-                      checked={held.has(p.key)}
-                      disabled={readOnly}
+                      checked={held.has(p.key) || (!!p.parent && held.has(p.parent))}
+                      disabled={readOnly || (!!p.parent && held.has(p.parent))}
                       onCheckedChange={(on) => {
                         const next = new Set(held)
                         if (on) next.add(p.key)

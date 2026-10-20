@@ -19,7 +19,7 @@ public static class TraceEndpoints
 {
     public static void MapTraces(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/traces").RequirePermissions(Llm.Core.Access.Permissions.LogsRead, Llm.Core.Access.Permissions.LogsRead);
+        var g = app.MapGroup("/api/admin/traces").RequirePermissions(Llm.Core.Access.Permissions.TracesRead, Llm.Core.Access.Permissions.TracesRead);
         g.MapGet("", ListAsync);
         g.MapGet("/{id:guid}", GetAsync);
     }

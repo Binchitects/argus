@@ -10,7 +10,7 @@ export interface Subject {
 
 export interface AccessOverview {
   version: number
-  permissions: { key: string; area: string; description: string; admin: boolean }[]
+  permissions: { key: string; area: string; description: string; admin: boolean; parent?: string | null }[]
   resourceKinds: { kind: string; actions: string[] }[]
   roles: {
     id: string

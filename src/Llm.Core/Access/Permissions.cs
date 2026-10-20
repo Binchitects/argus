@@ -2,7 +2,8 @@ namespace Llm.Core.Access;
 
 /// <summary>One permission of the catalog: its key, the area it belongs to on the role editor, and what it lets a person do.</summary>
 /// <param name="Admin">An administrative permission (only a role gives it); otherwise a feature permission, which rules may also give or take per person or group.</param>
-public sealed record PermissionInfo(string Key, string Area, string Description, bool Admin);
+/// <param name="Parent">The broader permission that holds this one too: a role holding <c>people.manage</c> may do each of its parts.</param>
+public sealed record PermissionInfo(string Key, string Area, string Description, bool Admin, string? Parent = null);
 
 /// <summary>
 /// The fixed catalog of what a person may do. Administrative permissions come only from the roles
@@ -46,6 +47,64 @@ public static class Permissions
     public const string RoomsModerate = "rooms.moderate";
     public const string ReviewsAdmin = "reviews.admin";
 
+    // The parts of the broader permissions above: a role may hold one part alone (each one's Parent holds it too).
+    public const string PeopleCreate = "people.create";
+    public const string PeopleEdit = "people.edit";
+    public const string PeopleDelete = "people.delete";
+    public const string PeoplePasswords = "people.passwords";
+    public const string PeopleKeys = "people.keys";
+    public const string PeopleLimits = "people.limits";
+    public const string GroupsCreate = "groups.create";
+    public const string GroupsEdit = "groups.edit";
+    public const string GroupsDelete = "groups.delete";
+    public const string GroupsMembers = "groups.members";
+    public const string GroupsPolicies = "groups.policies";
+    public const string AccessRoles = "access.roles";
+    public const string AccessAssign = "access.assign";
+    public const string AccessRules = "access.rules";
+    public const string AccessRequests = "access.requests";
+    public const string ModelsAdd = "models.add";
+    public const string ModelsEdit = "models.edit";
+    public const string ModelsDelete = "models.delete";
+    public const string ModelsDownload = "models.download";
+    public const string ModelsServers = "models.servers";
+    public const string ModelsHours = "models.hours";
+    public const string ModelsAccess = "models.access";
+    public const string ToolsRead = "tools.read";
+    public const string ToolsEdit = "tools.edit";
+    public const string ToolsAccess = "tools.access";
+    public const string PluginsRead = "plugins.read";
+    public const string PluginsInstall = "plugins.install";
+    public const string PluginsConfigure = "plugins.configure";
+    public const string PluginsRemove = "plugins.remove";
+    public const string KnowledgeRead = "knowledge.read";
+    public const string KnowledgeAdd = "knowledge.add";
+    public const string KnowledgeEdit = "knowledge.edit";
+    public const string KnowledgeSync = "knowledge.sync";
+    public const string KnowledgeDelete = "knowledge.delete";
+    public const string SettingsBranding = "settings.branding";
+    public const string SettingsChat = "settings.chat";
+    public const string SettingsModels = "settings.models";
+    public const string SettingsTools = "settings.tools";
+    public const string SettingsSafeguards = "settings.safeguards";
+    public const string SettingsIntegrations = "settings.integrations";
+    public const string SettingsData = "settings.data";
+    public const string SettingsGateway = "settings.gateway";
+    public const string SettingsArgus = "settings.argus";
+    public const string SettingsRestart = "settings.restart";
+    public const string SignInDirectory = "signin.directory";
+    public const string SignInSso = "signin.sso";
+    public const string SignInMoves = "signin.moves";
+    public const string TracesRead = "traces.read";
+    public const string StorageRead = "storage.read";
+    public const string StorageCleanup = "storage.cleanup";
+    public const string StorageDelete = "storage.delete";
+    public const string StorageQuota = "storage.quota";
+    public const string ArgusRepos = "argus.repos";
+    public const string ArgusIndex = "argus.index";
+    public const string ArgusPacks = "argus.packs";
+    public const string ArgusWebhook = "argus.webhook";
+
     public const string Chat = "feature.chat";
     public const string ApiKeys = "feature.api_keys";
     public const string CodeArena = "feature.code_arena";
@@ -61,6 +120,18 @@ public static class Permissions
     public const string CodeRead = "code.read";
     public const string ReviewRun = "review.run";
     public const string ReviewPolicy = "review.policy";
+    public const string Python = "feature.python";
+    public const string Canvas = "feature.canvas";
+    public const string ThreeD = "feature.3d";
+    public const string Plans = "feature.plans";
+    public const string Research = "feature.research";
+    public const string Compare = "feature.compare";
+    public const string Uploads = "feature.uploads";
+    public const string AssistantsCreate = "feature.assistants.create";
+    public const string PromptsCreate = "feature.prompts";
+    public const string Export = "feature.export";
+    public const string Knowledge = "feature.knowledge";
+    public const string ModelChoice = "feature.model_choice";
 
     public static readonly IReadOnlyList<PermissionInfo> All =
     [
@@ -99,6 +170,63 @@ public static class Permissions
         new(RoomsModerate, "Rooms and reviews", "List rooms, remove members and delete rooms (not read them).", true),
         new(ReviewsAdmin, "Rooms and reviews", "Manage every project's reviews.", true),
 
+        new(PeopleCreate, "People and groups", "Add people.", true, PeopleManage),
+        new(PeopleEdit, "People and groups", "Change people's names, emails and sources.", true, PeopleManage),
+        new(PeopleDelete, "People and groups", "Delete people (their chats and files go with them).", true, PeopleManage),
+        new(PeoplePasswords, "People and groups", "Reset people's passwords and two-factor sign-in, and sign them out.", true, PeopleManage),
+        new(PeopleKeys, "People and groups", "Make people's API keys anew, and turn their API access on and off.", true, PeopleManage),
+        new(PeopleLimits, "People and groups", "Set people's API rate limits.", true, PeopleManage),
+        new(GroupsCreate, "People and groups", "Make groups (app and directory groups).", true, GroupsManage),
+        new(GroupsEdit, "People and groups", "Rename groups and change their priority.", true, GroupsManage),
+        new(GroupsDelete, "People and groups", "Delete groups.", true, GroupsManage),
+        new(GroupsMembers, "People and groups", "Choose app groups' members.", true, GroupsManage),
+        new(GroupsPolicies, "People and groups", "Set groups' retention, credit, safeguards and rate limits.", true, GroupsManage),
+        new(AccessRoles, "Access", "Make, change and delete custom roles.", true, AccessManage),
+        new(AccessAssign, "Access", "Give and take roles.", true, AccessManage),
+        new(AccessRules, "Access", "Add and remove allow and deny rules.", true, AccessManage),
+        new(AccessRequests, "Access", "Answer people's requests for access.", true, AccessManage),
+        new(ModelsAdd, "Models, tools and knowledge", "Add models from the library.", true, ModelsManage),
+        new(ModelsEdit, "Models, tools and knowledge", "Change models' settings and keep them loaded.", true, ModelsManage),
+        new(ModelsDelete, "Models, tools and knowledge", "Remove models.", true, ModelsManage),
+        new(ModelsDownload, "Models, tools and knowledge", "Download models from Hugging Face and fetch the default ones.", true, ModelsManage),
+        new(ModelsServers, "Models, tools and knowledge", "Add and change other GPU servers.", true, ModelsManage),
+        new(ModelsHours, "Models, tools and knowledge", "Set models' hours.", true, ModelsManage),
+        new(ModelsAccess, "Models, tools and knowledge", "Choose who may use each model.", true, ModelsManage),
+        new(ToolsRead, "Models, tools and knowledge", "See the chat's tools and MCP servers.", true, ToolsManage),
+        new(ToolsEdit, "Models, tools and knowledge", "Turn tools on and off, and set how they ask.", true, ToolsManage),
+        new(ToolsAccess, "Models, tools and knowledge", "Choose who may use each tool.", true, ToolsManage),
+        new(PluginsRead, "Models, tools and knowledge", "See the plugins and the catalog.", true, PluginsManage),
+        new(PluginsInstall, "Models, tools and knowledge", "Install and update plugins.", true, PluginsManage),
+        new(PluginsConfigure, "Models, tools and knowledge", "Set plugins' settings and who may use them.", true, PluginsManage),
+        new(PluginsRemove, "Models, tools and knowledge", "Remove plugins.", true, PluginsManage),
+        new(KnowledgeRead, "Models, tools and knowledge", "See the knowledge sources and their documents.", true, KnowledgeManage),
+        new(KnowledgeAdd, "Models, tools and knowledge", "Add knowledge sources.", true, KnowledgeManage),
+        new(KnowledgeEdit, "Models, tools and knowledge", "Change knowledge sources and who may read them.", true, KnowledgeManage),
+        new(KnowledgeSync, "Models, tools and knowledge", "Read knowledge sources again now, and test them.", true, KnowledgeManage),
+        new(KnowledgeDelete, "Models, tools and knowledge", "Remove knowledge sources.", true, KnowledgeManage),
+        new(SettingsBranding, "Settings", "Change the branding settings.", true, SettingsManage),
+        new(SettingsChat, "Settings", "Change the chat's settings.", true, SettingsManage),
+        new(SettingsModels, "Settings", "Change the model, engine, prices and speech settings.", true, SettingsManage),
+        new(SettingsTools, "Settings", "Change Python, the web, plugins' and Arena MCP's settings.", true, SettingsManage),
+        new(SettingsSafeguards, "Settings", "Change the safeguards.", true, SettingsManage),
+        new(SettingsIntegrations, "Settings", "Change email, notifications, scheduled tasks and chat bots' settings.", true, SettingsManage),
+        new(SettingsData, "Settings", "Change retention, storage and company knowledge settings.", true, SettingsManage),
+        new(SettingsGateway, "Settings", "Change the API keys' settings.", true, SettingsManage),
+        new(SettingsArgus, "Settings", "Change Argus's settings.", true, SettingsManage),
+        new(SettingsRestart, "Settings", "Restart the app to apply settings.", true, SettingsManage),
+        new(SignInDirectory, "Settings", "Set up the company directory (LDAP) and sync it.", true, SignInManage),
+        new(SignInSso, "Settings", "Set up company sign-in (OIDC, SAML) and SCIM.", true, SignInManage),
+        new(SignInMoves, "Settings", "Move local accounts to the directory.", true, SignInManage),
+        new(TracesRead, "Oversight", "Read the answers' traces.", true, LogsRead),
+        new(StorageRead, "Data", "See stored files and disk use.", true, StorageManage),
+        new(StorageCleanup, "Data", "Run clean-ups.", true, StorageManage),
+        new(StorageDelete, "Data", "Delete people's stored files.", true, StorageManage),
+        new(StorageQuota, "Data", "Set people's storage quotas.", true, StorageManage),
+        new(ArgusRepos, "Argus", "Choose Argus's repositories and their branches.", true, ArgusManage),
+        new(ArgusIndex, "Argus", "Index repositories now and set the schedule.", true, ArgusManage),
+        new(ArgusPacks, "Argus", "Install and remove knowledge packs.", true, ArgusManage),
+        new(ArgusWebhook, "Argus", "Set GitLab's webhook.", true, ArgusManage),
+
         new(Chat, "Features", "Use the chat.", false),
         new(ApiKeys, "Features", "Have API keys (coding agents, IDEs, scripts).", false),
         new(CodeArena, "Features", "Use Code Arena.", false),
@@ -114,6 +242,18 @@ public static class Permissions
         new(CodeRead, "Code", "Ask about the company's code (Argus) and use the code assistant.", false),
         new(ReviewRun, "Code", "Start reviews of merge requests and branches.", false),
         new(ReviewPolicy, "Code", "Set a project's automatic reviews.", false),
+        new(Python, "Features", "Run Python in the sandbox (data, charts, files).", false),
+        new(Canvas, "Features", "Write documents and code with the canvas.", false),
+        new(ThreeD, "Features", "Make 3D models.", false),
+        new(Plans, "Features", "Make and keep plans.", false),
+        new(Research, "Features", "Run deep research.", false),
+        new(Compare, "Features", "Compare two models' answers.", false),
+        new(Uploads, "Features", "Attach files to messages.", false),
+        new(AssistantsCreate, "Features", "Make assistants.", false),
+        new(PromptsCreate, "Features", "Save prompts and slash commands.", false),
+        new(Export, "Features", "Export their own data and chats.", false),
+        new(Knowledge, "Features", "Search company knowledge from the chat.", false),
+        new(ModelChoice, "Features", "Choose the chat's model (else the company's default answers).", false),
     ];
 
     private static readonly Dictionary<string, PermissionInfo> ByKey = All.ToDictionary(p => p.Key, StringComparer.Ordinal);
@@ -127,6 +267,12 @@ public static class Permissions
 
     /// <summary>Every administrative permission.</summary>
     public static IEnumerable<string> AdminKeys => All.Where(p => p.Admin).Select(p => p.Key);
+
+    /// <summary>The broader permission that holds this one, if any.</summary>
+    public static string? ParentOf(string key) => ByKey.GetValueOrDefault(key)?.Parent;
+
+    /// <summary>The permission's area word ("people" of people.passwords): holding any of an area's permissions lets one read the area.</summary>
+    public static string AreaOf(string key) => key[..Math.Max(0, key.IndexOf('.'))];
 
     /// <summary>Every feature permission.</summary>
     public static IEnumerable<string> FeatureKeys => All.Where(p => !p.Admin).Select(p => p.Key);

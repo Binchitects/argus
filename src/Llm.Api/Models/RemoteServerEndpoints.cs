@@ -28,7 +28,13 @@ public static class RemoteServerEndpoints
 {
     public static void MapRemoteServers(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/servers").RequirePermissions(Llm.Core.Access.Permissions.ModelsRead, Llm.Core.Access.Permissions.ModelsManage);
+        var g = app.MapGroup("/api/admin/servers").RequirePermissions(Llm.Core.Access.Permissions.ModelsRead, Llm.Core.Access.Permissions.ModelsManage, new Dictionary<string, string>
+        {
+            ["POST /api/admin/servers/probe"] = Llm.Core.Access.Permissions.ModelsServers,
+            ["POST /api/admin/servers"] = Llm.Core.Access.Permissions.ModelsServers,
+            ["PATCH /api/admin/servers/{id:guid}"] = Llm.Core.Access.Permissions.ModelsServers,
+            ["DELETE /api/admin/servers/{id:guid}"] = Llm.Core.Access.Permissions.ModelsServers,
+        });
         g.MapGet("", ListAsync);
         g.MapPost("/probe", ProbeAsync);
         g.MapPost("", AddAsync);

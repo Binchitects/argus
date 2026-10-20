@@ -22,7 +22,14 @@ public static class HuggingFaceEndpoints
 {
     public static void MapHuggingFace(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/models/hf").RequirePermissions(Llm.Core.Access.Permissions.ModelsRead, Llm.Core.Access.Permissions.ModelsManage);
+        var g = app.MapGroup("/api/admin/models/hf").RequirePermissions(Llm.Core.Access.Permissions.ModelsRead, Llm.Core.Access.Permissions.ModelsManage, new Dictionary<string, string>
+        {
+            ["POST /api/admin/models/hf/downloads"] = Llm.Core.Access.Permissions.ModelsDownload,
+            ["POST /api/admin/models/hf/downloads/{id:guid}/pause"] = Llm.Core.Access.Permissions.ModelsDownload,
+            ["POST /api/admin/models/hf/downloads/{id:guid}/resume"] = Llm.Core.Access.Permissions.ModelsDownload,
+            ["DELETE /api/admin/models/hf/downloads/{id:guid}"] = Llm.Core.Access.Permissions.ModelsDownload,
+            ["POST /api/admin/models/hf/speech"] = Llm.Core.Access.Permissions.ModelsDownload,
+        });
         g.MapGet("/search", SearchAsync);
         g.MapGet("/repo", RepoAsync);
         g.MapGet("/downloads", ListAsync);

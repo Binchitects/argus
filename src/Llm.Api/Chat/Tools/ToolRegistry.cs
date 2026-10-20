@@ -179,7 +179,12 @@ public sealed class ToolRegistry(
     public static readonly IReadOnlyDictionary<string, string> FeatureOf = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["web"] = Core.Access.Permissions.WebSearch,
-        [ResearchTool.ToolId] = Core.Access.Permissions.WebSearch,
+        [ResearchTool.ToolId] = Core.Access.Permissions.Research,
+        ["python"] = Core.Access.Permissions.Python,
+        ["canvas"] = Core.Access.Permissions.Canvas,
+        [BlenderTool.ToolId] = Core.Access.Permissions.ThreeD,
+        [Plans.PlansTool.ToolId] = Core.Access.Permissions.Plans,
+        ["knowledge"] = Core.Access.Permissions.Knowledge,
         ["image"] = Core.Access.Permissions.Pictures,
         ["video"] = Core.Access.Permissions.Video,
         ["speech"] = Core.Access.Permissions.Speech,

@@ -107,7 +107,7 @@ public sealed class AccessSnapshot(long version, IEnumerable<AccessRole> roles, 
                 : Decision.Yes($"role Owner via {owner.Via}");
         }
         var found = new List<Match>();
-        foreach (var h in held.Where(h => h.Role.Permissions.Contains(permission)))
+        foreach (var h in held.Where(h => Gives(h.Role, permission)))
         {
             found.Add(new Match(h.Level, 0, 0, null, h));
         }
@@ -122,6 +122,28 @@ public sealed class AccessSnapshot(long version, IEnumerable<AccessRole> roles, 
         return Decide(found);
     }
 
+    /// <summary>
+    /// Whether a role gives a permission: it names it, or the broader one that holds it (people.manage holds
+    /// people.passwords); and an area's ".read" to whoever may do anything else of the area administratively (who
+    /// resets passwords sees the people).
+    /// </summary>
+    public static bool Gives(AccessRole role, string permission)
+    {
+        for (var key = (string?)permission; key is not null; key = Permissions.ParentOf(key))
+        {
+            if (role.Permissions.Contains(key))
+            {
+                return true;
+            }
+        }
+        if (permission.EndsWith(".read", StringComparison.Ordinal) && !Permissions.IsFeature(permission))
+        {
+            var area = Permissions.AreaOf(permission);
+            return role.Permissions.Any(k => Permissions.AreaOf(k) == area && Permissions.Find(k) is { Admin: true });
+        }
+        return false;
+    }
+
     /// <summary>The scopes a permission comes with: null when one of the person's roles gives it unscoped (or they are Owner); otherwise each scope it is held under.</summary>
     public IReadOnlyList<AccessScope>? ScopesOf(Principal p, string permission, DateTimeOffset now)
     {
@@ -129,7 +151,7 @@ public sealed class AccessSnapshot(long version, IEnumerable<AccessRole> roles, 
         {
             return [];
         }
-        var giving = RolesOf(p, now).Where(h => h.Role.Key == BuiltInRoles.Owner || h.Role.Permissions.Contains(permission)).ToList();
+        var giving = RolesOf(p, now).Where(h => h.Role.Key == BuiltInRoles.Owner || Gives(h.Role, permission)).ToList();
         if (giving.Any(h => h.Scope is null) || (Permissions.IsFeature(permission) && Check(p, permission, now).Allowed))
         {
             return null;

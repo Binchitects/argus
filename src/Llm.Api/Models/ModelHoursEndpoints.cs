@@ -21,7 +21,12 @@ public static class ModelHoursEndpoints
 {
     public static void MapModelHours(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/model-hours").RequirePermissions(Llm.Core.Access.Permissions.ModelsRead, Llm.Core.Access.Permissions.ModelsManage);
+        var g = app.MapGroup("/api/admin/model-hours").RequirePermissions(Llm.Core.Access.Permissions.ModelsRead, Llm.Core.Access.Permissions.ModelsManage, new Dictionary<string, string>
+        {
+            ["POST /api/admin/model-hours"] = Llm.Core.Access.Permissions.ModelsHours,
+            ["PATCH /api/admin/model-hours/{id:guid}"] = Llm.Core.Access.Permissions.ModelsHours,
+            ["DELETE /api/admin/model-hours/{id:guid}"] = Llm.Core.Access.Permissions.ModelsHours,
+        });
         g.MapGet("", ListAsync);
         g.MapPost("", AddAsync);
         g.MapPatch("/{id:guid}", UpdateAsync);
