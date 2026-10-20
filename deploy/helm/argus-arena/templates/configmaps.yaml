@@ -5,8 +5,9 @@ metadata:
   name: arena-config
   labels: {{- include "arena.labels" . | nindent 4 }}
 data:
+  {{- /* With Valkey (several gateway replicas) the keys' counts live there too: litellm-ha.yaml. */}}
   litellm.yaml: |-
-{{ .Files.Get "files/litellm.yaml" | indent 4 }}
+{{ .Files.Get (ternary "files/litellm-ha.yaml" "files/litellm.yaml" .Values.valkey.enabled) | indent 4 }}
   argus.yaml: |-
 {{ .Files.Get "files/argus.yaml" | indent 4 }}
   searxng.yml: |-

@@ -84,3 +84,15 @@ class HaTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HaConfigTests(unittest.TestCase):
+    def test_the_ha_gateway_config_is_the_plain_one_plus_its_counts_in_valkey(self):
+        plain = (DEPLOY / "config" / "litellm.yaml").read_text()
+        ha = (DEPLOY / "config" / "litellm-ha.yaml").read_text()
+        added = "\n".join(line for line in ha.splitlines()[1:] if line not in plain.splitlines())
+        self.assertIn("supported_call_types: []", added)
+        self.assertIn("host: os.environ/REDIS_HOST", added)
+        # Nothing of the plain config is missing from it.
+        self.assertTrue(all(line in ha.splitlines() for line in plain.splitlines()))
+        self.assertIn("litellm-ha.yaml", (DEPLOY / "ha.yml").read_text())

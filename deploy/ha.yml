@@ -18,5 +18,7 @@ services:
     environment:
       REDIS_HOST: valkey
       REDIS_PORT: "6379"
+    # The gateway's config with its counts in Valkey (config/litellm-ha.yaml).
+    volumes: !override [./config/litellm-ha.yaml:/app/arena.yaml:ro]
     depends_on:
       valkey: { condition: service_started }
