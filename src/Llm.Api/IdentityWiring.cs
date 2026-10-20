@@ -368,7 +368,13 @@ public static class IdentityWiring
         services.AddHostedService(sp => sp.GetRequiredService<Schedules.Scheduler>());
         services.AddSingleton<Models.ModelHoursState>();
         services.AddScoped<Models.ModelHours>();
-        services.AddHttpClient<Models.EngineClient>(c => c.Timeout = TimeSpan.FromSeconds(30));
+        // The engines: llama.cpp's router, the vLLM supervisors, the servers the app does not run, and all of them as one.
+        services.AddHttpClient(Models.LlamaCppBackend.Client, c => c.Timeout = TimeSpan.FromSeconds(30));
+        services.AddHttpClient(Models.VllmBackend.Client, c => c.Timeout = TimeSpan.FromSeconds(10));
+        services.AddSingleton<Models.LlamaCppBackend>();
+        services.AddSingleton<Models.VllmBackends>();
+        services.AddSingleton<Models.ExternalBackend>();
+        services.AddSingleton<Models.EngineClient>();
         services.AddSingleton<Models.EngineState>();
         services.AddSingleton<Models.ModelLibrary>();
         services.AddSingleton<Models.HardwareProbe>();

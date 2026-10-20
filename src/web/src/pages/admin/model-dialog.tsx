@@ -9,6 +9,8 @@ import { api } from '@/lib/api'
 import { formatValue } from '@/lib/format'
 import { MediaModelSection, type LibraryRow, type SavedMediaModel, type SpeechRow } from './media-model-form'
 import { roleLabel, type MediaMode } from './media-modes'
+import { useSnapshots, type EngineInstance, type EngineModel } from './engine-api'
+import { VllmModelSection } from './engine-fields'
 import { ChatModelSection, type ChatModelSlot, type SavedModel } from './model-form'
 import { kindLabel, summary, type LibraryFile } from './model-profile'
 
@@ -130,6 +132,7 @@ export function ModelDialog({
   gpus = [],
   onClose,
   chatSlot,
+  instances = [],
 }: {
   open: ModelDialogOpen
   /** Chat models can be added: the llama.cpp engine runs. */
@@ -138,6 +141,8 @@ export function ModelDialog({
   onClose: () => void
   /** Fields another component mounts in the chat model's section. */
   chatSlot?: ChatModelSlot
+  /** The engine instances: vLLM's take a snapshot as a chat model. */
+  instances?: EngineInstance[]
 }) {
   const edit = 'edit' in open ? open.edit : null
   const [kind, setKind] = useState<ModelDialogKind>(() =>
@@ -160,7 +165,18 @@ export function ModelDialog({
   const library = useQuery({ queryKey: ['admin', 'models', 'library'], queryFn: ({ signal }) => api<LibraryFile[]>('/api/admin/models/library', { signal }) })
   const mediaFiles = useQuery({ queryKey: ['admin', 'models', 'media', 'files'], queryFn: ({ signal }) => api<LibraryRow[]>('/api/admin/models/media/files', { signal }) })
   const speech = useQuery({ queryKey: ['admin', 'models', 'media', 'speech'], queryFn: ({ signal }) => api<SpeechRow[]>('/api/admin/models/media/speech', { signal }), retry: false })
-  const all = choices(library.data ?? [], mediaFiles.data ?? [], speech.data ?? [])
+  const snapshots = useSnapshots()
+  // vLLM's models: the library's Hugging Face snapshots, chat models of their own engine.
+  const vllm = instances.some((i) => i.kind === 'vllm')
+  const all = [
+    ...choices(library.data ?? [], mediaFiles.data ?? [], speech.data ?? []),
+    ...(vllm ? (snapshots.data ?? []) : []).map((s) => ({
+      value: fileValue(s.path), label: `${s.path} · ${formatValue(s.size, 'bytes')} · vLLM${s.complete ? '' : ` · ${s.why}`}`, group: 'chat' as const, kind: 'chat' as const,
+      why: null, role: '', title: 'vLLM snapshot',
+    })),
+  ]
+  const snapshot = source && 'file' in source && (snapshots.data ?? []).some((s) => s.path === source.file) ? source.file : null
+  const vllmModel = edit?.kind === 'chat' && (edit.model as EngineModel).engineKind === 'vllm' ? (edit.model as EngineModel) : null
   const value = sourceValue(source)
   const found = all.find((c) => c.value === value)
   // A picture or video model's other file (a text encoder, a decoder) belongs to either: it reads as the one being added.
@@ -267,7 +283,9 @@ export function ModelDialog({
       {choice && !mismatch && choice.group === 'parts' && <Alert title={choice.title}>{choice.why} It is put in among the files below, by its role.</Alert>}
       {!edit && <p className="-mt-2 text-xs text-muted-foreground">{kindDescription[kind]}</p>}
 
-      {kind === 'chat' ? (
+      {kind === 'chat' && (vllmModel || snapshot) ? (
+        <VllmModelSection saved={vllmModel} snapshot={vllmModel?.file ?? snapshot ?? ''} gpus={gpus} instances={instances} onClose={onClose} />
+      ) : kind === 'chat' ? (
         <ChatModelSection
           saved={edit?.kind === 'chat' ? edit.model : null}
           file={source && 'file' in source ? source.file : ''}

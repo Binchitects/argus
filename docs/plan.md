@@ -1244,7 +1244,7 @@ tools, scheduled and automatic reviews, GitHub, Gitea and plain git.
 6. Code Arena's chat with every capability of the web chat (the parity
    design), as far as it is done.
 
-**v5.10: any hardware, any engine, any runtime** (branch mgpu/engines)
+**v6.0, part 1: any hardware, any engine, any runtime** (was v5.10; branch mgpu/engines, merged into main 2026-10-20)
 1. Placement for any machine (CPU only to 8 GPUs, NVIDIA, AMD, Vulkan,
    Metal), vLLM beside llama.cpp, external servers (SGLang, Ollama, a cloud),
    several copies of a model, fallbacks, sleep instead of unload for media.
@@ -1254,7 +1254,7 @@ tools, scheduled and automatic reviews, GitHub, Gitea and plain git.
 4. Needs a yes: the vLLM image (NGC or built), AMD images. Needs the real
    server: the bring-up check, a smoke test per model, the numbers.
 
-**v5.11: durable at scale**
+**v6.0, part 2: durable at scale** (was v5.11)
 1. A fair queue for API keys (429 with Retry-After) and the engine's
    priorities; LiteLLM as several replicas with Valkey; answers that survive
    an app replica's restart.
@@ -1263,8 +1263,8 @@ tools, scheduled and automatic reviews, GitHub, Gitea and plain git.
 3. DCGM and vLLM metrics, alerts; load tests at 50, 100 and 300 people.
 4. Needs a yes: Valkey, pgBackRest.
 
-**v5.12: Argus at run time and on the real estate** (carried from after
-v5.6.0): service names to hosts, gRPC, topics and queues, HTTP routes,
+**v6.0, part 3: Argus at run time and on the real estate** (was v5.12, carried
+from after v5.6.0): service names to hosts, gRPC, topics and queues, HTTP routes,
 OpenAPI, shared databases, Backstage and Pact as declared links; the
 remaining precision work; `argus graph-eval` on the company's repositories;
 what each repository is for.
@@ -1273,7 +1273,9 @@ what each repository is for.
 SAML, Confluence, SharePoint, Helm on a cluster); Laya's routing quality;
 deep research under six minutes; a model menu in the chat's tools.
 
-**v6.0** (the person's asks of 2026-10-19)
+**v6.0, part 4** (the person's asks of 2026-10-19; on 2026-10-20 they asked
+that the next release be v6.0 with the rest of the plan in it: parts 1-3 above,
+these, and v5.9's leftovers)
 1. Operational roles: team manager (a group's manager: its people, their
    credit and limits, its models and tools, its reports), supervisor
    (monitoring: dashboards, alerts, logs, the stack's state, read-only), and

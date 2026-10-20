@@ -37,9 +37,15 @@ spec:
             {{- include "arena.secretEnv" (list $ "Database__Password" "DB_PASSWORD") | nindent 12 }}
             {{- include "arena.secretEnv" (list $ "Gateway__MasterKey" "GATEWAY_KEY") | nindent 12 }}
             {{- include "arena.secretEnv" (list $ "Engine__ApiKey" "ENGINE_KEY") | nindent 12 }}
-            - { name: Engine__Enabled, value: {{ .Values.llamacpp.enabled | quote }} }
+            - { name: Engine__Enabled, value: {{ or .Values.llamacpp.enabled .Values.vllm.enabled | quote }} }
+            - { name: Engine__LlamaCpp, value: {{ .Values.llamacpp.enabled | quote }} }
             - { name: Engine__FirstModel, value: {{ .Values.model | quote }} }
             - { name: Engine__DefaultModels, value: {{ .Values.defaultModels | default "" | quote }} }
+            # Engines and GPUs: llama.cpp's backend, and the GPU the picture server and the embedder run on.
+            - { name: Engine__Backend, value: {{ .Values.engines.backend | quote }} }
+            - { name: Engine__MediaGpu, value: {{ .Values.engines.mediaGpu | quote }} }
+            - { name: Engine__EmbedGpu, value: {{ .Values.engines.embedGpu | quote }} }
+            - { name: Engine__LmcacheRemote, value: {{ .Values.engines.lmcacheRemote | quote }} }
             {{- include "arena.secretEnv" (list $ "Argus__AdminToken" "ARGUS_KEY") | nindent 12 }}
             - { name: Argus__GitlabUrl, value: {{ .Values.gitlab.url | quote }} }
             {{- include "arena.optionalSecretEnv" (list $ "HuggingFace__Token" "HF_TOKEN") | nindent 12 }}
@@ -60,6 +66,7 @@ spec:
             - { name: models, mountPath: /library }
             - { name: engine, mountPath: /engine-config }
             - { name: media-status, mountPath: /media-status, readOnly: true }
+            - { name: vllm-status, mountPath: /vllm-status, readOnly: true }
             - { name: directory, mountPath: /directory }
             - { name: sandbox, mountPath: /sandbox }
             {{- if and (not .Values.postgresql.enabled) .Values.externalDatabase.caSecret }}
@@ -70,6 +77,7 @@ spec:
         {{- include "arena.claim" (list "models" (include "arena.modelsClaim" .)) | nindent 8 }}
         {{- include "arena.claim" (list "engine" "arena-engine") | nindent 8 }}
         {{- include "arena.claim" (list "media-status" "arena-media-status") | nindent 8 }}
+        {{- include "arena.claim" (list "vllm-status" "arena-vllm-status") | nindent 8 }}
         {{- include "arena.claim" (list "directory" "arena-directory") | nindent 8 }}
         {{- include "arena.claim" (list "sandbox" "arena-sandbox") | nindent 8 }}
         {{- if and (not .Values.postgresql.enabled) .Values.externalDatabase.caSecret }}

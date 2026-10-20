@@ -419,75 +419,114 @@ A realistic first set is Flash-Next NVFP4, gpt-oss-120b, and one flagship. That 
    - `tools/fake-vllm/` (Python stdlib): `/health`, `/v1/models`, streaming `/v1/chat/completions` with configurable TTFT and tok/s, `/metrics` using the real `vllm:*` names, `/sleep` and `/wake_up`, a load delay, and a `--fail` mode.
    - Plus `deploy/fake-gpu.yml`, a compose overlay that runs it as `vllm`.
    - Tests: a script self-test.
+   - **Done**: `tools/fake-vllm/fake_vllm.py` (and a `vllm` wrapper with the same command line), `deploy/fake-gpu.yml`, `tests/deploy/test_fake_vllm.py`.
 2. **Hardware fake and `GpuPlan`.**
    - Replace `Hardware.ImageReserve` (the GPU-0 assumption) with `GpuPlan`: everything resident per GPU (llama.cpp `Devices`, media `gpu`, embedder, future vLLM groups).
    - `KeptPlan` / `GpuUse` derive from it.
    - Tests: a fake 4 × 96 GB `Hardware`; layouts A, B and C validate, and over-commit is refused.
+   - **Done**, vendor-neutral: `Models/GpuPlan.cs`; `GpuDevice` has a vendor, a backend and free memory; `Hardware.Reserves` puts the picture server on its own GPU (its model's, else `MEDIA_GPU`, else the first) and the embedder on `EMBED_GPU`; `HardwareProbe` reads Prometheus, else the hardware file `deploy/services/gpu-probe.py` writes (`nvidia-smi`, `rocm-smi`, or none), and `LLAMACPP_BACKEND=cpu` is a machine without GPUs; llama.cpp's presets name GPUs for its backend (`CUDA0`, `ROCm0`, `Vulkan0`, `SYCL0`, `MTL0`). Tests: `GpuPlanTests` over six fake machines (`FakeHardware`: CPU only, 1 × 24 GB, 2 mixed NVIDIA, 4 × 96 GB, 8 × 80 GB, AMD 2 × 192 GB), `tests/deploy/test_gpu_probe.py`.
 3. **`EngineKind` on `LocalModel`** (EF migration; per your preference, no compatibility shim).
    - `ModelCatalog` writes `models.ini` only for llamacpp models. The other fields are listed in §3.3.
    - Tests: the catalog output for llama.cpp is unchanged.
+   - **Done**: migration `EngineKinds`; `LocalModel` has `EngineKind`, `Engine` (the instance, for several machines), `Replicas`, `GpuMemoryUtilization`, `Quantization`, `SpecDecode`, `KvCpuGb`, `Sleep`, `Fallback`; `Parallel` is vLLM's `--max-num-seqs`, `KvType` its `--kv-cache-dtype`, `Devices` its GPU set. `Llm.Core/Models/EngineKinds.cs` says what each kind can do (llama.cpp, vLLM, and external servers, which the app registers but does not run); the API refuses a setting the kind lacks (`ModelAdvisor.KindProblems`). Tests: `EngineKindTests`.
 4. **HF snapshot models in the library.**
    - `ModelDownloads` fetches safetensors, config and tokenizer (skipping `original/`, `metal/`, GGUF), showing the size first.
    - `ModelLibrary` recognises `hf/<org>/<repo>@rev`.
    - Tests: a fake HF server (the existing HuggingFace test pattern).
+   - **Done**: `HuggingFace.SnapshotOf` (safetensors, JSON, tokenizer and template files; never `original/`, `metal/`, GGUF or other formats), the repository view's `snapshot` (size first), `snapshot: true` downloads into `hf/<org>/<repo>@<rev>`, `ModelLibrary.Snapshots()` / `Snapshot()` (whole or why not), `GET /api/admin/models/library/snapshots`. Tests: `HuggingFaceTests` with `FakeHuggingFace.SnapshotRepo`.
 5. **`VllmAdvisor`.**
    - Weights bytes from the safetensors index; KV per token from `config.json` (full vs. linear vs. sliding layers, KV heads, head dim, MLA).
    - TP validity, recommended `max-model-len` and `max-num-seqs`, `gpu-memory-utilization`, and the RAM for the KV tier and sleep.
    - Tests: fixtures are the real `config.json` files of Qwen3.8-Flash-Next, Qwen3.5-397B, Qwen3-235B, gpt-oss-120b and DeepSeek-V4-Flash, with expected numbers from §2.
+   - **Done**: `Models/VllmAdvisor.cs` reads full, sliding, linear (gated delta net state), MLA and compressed (DeepSeek V4, marked approximate) attention; checks TP against the attention and KV heads; keeps 3 GiB a GPU for vLLM itself and at least an eighth of a copy's share for its cache; **proposes GPUs for whatever machine it finds** (the smallest TP that fits, alike GPUs of a backend vLLM runs on, the most room first beside what is kept there), which a save keeps when the admin chose none; refuses GPUs that cannot hold it, a context that does not fit, memory kept for others; counts RAM for sleep and the CPU tier. Kept vLLM models are strict residents in the kept plan. Fixtures in `tests/Llm.Tests/Resources/vllm` (the six configs, with each index's total size). On four 96 GB cards: Flash-Next FP8 at TP=4 about 14M tokens, NVFP4 at TP=2 about 3.7M, Qwen3.5-397B at TP=4 about 7M and about 160 answers of 32K, Qwen3-235B at TP=4 about 1.2M, gpt-oss-120b on one GPU about 22 GiB of cache, DeepSeek-V4-Flash proposed at TP=4. (Figures are in GiB of the cards' 97,887 MiB; §2's are rounder.)
 6. **vLLM supervisor.**
    - `deploy/services/vllm/supervisor.sh`: reconcile `/presets/vllm/models.json`; per-entry `CUDA_VISIBLE_DEVICES` and port; status files; drain on SIGTERM; backoff; secrets passed by environment (`VLLM_API_KEY`), never on the command line.
    - Tests: run it with `vllm` pointed at fake-vllm; add, remove, change and crash cases.
+   - **Done**: `deploy/services/vllm/supervisor.sh` with `vllm-helper.py` (JSON and HTTP, standard library): per-model `CUDA_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES`, non-blocking drains, backoff that grows through a crash loop and resets after five stable minutes or a change, sleep and wake from the desired state, a heartbeat and `hardware.json` (gpu-probe.py), and entries that put a key or the supervisor's own options on the command line refused. Runtimes: compose `vllm` service (profile `vllm`, `VLLM_IMAGE`), `podman.yml` (CDI), `rocm.yml` (AMD for both), `fake-gpu.yml` (the supervisor with fake-vllm, no GPU), Helm `vllm.enabled` / `vllm.instances` / `vllm.fake` / `gpuResource`, the `vllm-status` volume or claim, and the chart's copies (`check-chart.py`). Tests: `tests/deploy/test_vllm_supervisor.py`, `test_runtime_parity.py` with the vLLM profile and `vllm.enabled`.
 7. **`IEngineBackend`.**
    - Extract `LlamaCppBackend` from `EngineClient`; add `VllmBackend` (desired state, status, health, metrics-based capacity).
    - `EngineWatcher` iterates the backends.
    - Tests: Testcontainers with fake-vllm.
+   - **Done**: `IEngineBackend` (list, load, unload, sleep, capacity, health) with `LlamaCppBackend` (the router API, as before), `VllmBackend` (presets.json the app writes per instance, models.json the desired state, the supervisor's status and heartbeat, `/metrics`) and `ExternalBackend` (Other GPU servers: registered and checked, never managed). `EngineClient` is every engine as one: each model goes to the engine that lists it; llama.cpp failing fails the whole as before, a vLLM instance down only lists its models unloaded and says why. `Engine:Vllm` lists the vLLM instances (one named `vllm` by default; another machine is another entry with its host and shared folders); `Engine:LlamaCpp` false runs vLLM alone. The watcher writes each instance's presets (ports kept stable), Prometheus targets per vLLM process, and each model's place on the GPUs; vLLM models take none of llama.cpp's places (Models loaded at once). Tests: `VllmBackendTests` (unit, the engines as one, and the real supervisor with fake-vllm in a `python:3.13-slim` container).
 8. **`EngineRoute` per GPU set.**
    - Room is made only among models sharing the target GPUs.
    - vLLM is "busy" from metrics, with no slot pinning (`TokenCache` for vLLM).
    - Tests: the existing EngineRoute tests, parameterised, plus multi-GPU cases.
+   - **Done**: a vLLM model asked for is started by the app (its processes into the desired state, woken if asleep, waited for up to `Engine:VllmStartWait`, the chat told why it waits); its room is memory on its GPUs (`EngineRoute.Fits`, GpuPlan over the places the watcher keeps), made only by idle spare models on the GPUs it is short on, never from one busy by its metrics; llama.cpp's places (Models loaded at once) count llama.cpp's models only, in the route, the policy, an admin's Load and Keep. `TokenCache.OfVllm`: prefix caching, no pinned slots, the CPU tier, hit rate, cache use and queue from metrics. The existing llama.cpp route tests pass unchanged. Tests: `EngineRouteGpuTests`.
 9. **Gateway registration.**
    - vLLM models go to LiteLLM with `api_base` per port, `max_parallel_requests` from `max-num-seqs`, and **fallbacks** per model.
    - Two replicas register as `name@i` with app-side conversation affinity.
    - Tests: the generated LiteLLM config, and a fallback when fake-vllm is down.
+   - **Done**: each copy registers at `http://HOST:PORT/v1` with `max_parallel_requests` = its `--max-num-seqs`, the copies a pool under the model's name, and each copy under `NAME@i` too (`llm_app_replica_of`: in no list, not the chat's, not the keys' pickers); `llm_app_fallbacks` names the fallback. The chat keeps a conversation on one copy (`EngineRoute.Copy`, by its id, the same on every app replica), sends `fallbacks` with each request (LiteLLM's own, for a failure mid-answer), and goes to the fallback at once when the model cannot answer (its engine down, failed, no room); an API key is told which model answers in its place. The gateway's own fallbacks (`router_settings.fallbacks`, through LiteLLM's `/config/update`, kept in its database for every proxy replica) are written from the models' fallbacks, so an API key's request fails over too. An API key's request for a vLLM model that is not running never waits inside the gateway's check: with a fallback it goes on (the gateway fails over at once); without, the model is started when its GPUs have room and the key is told to retry in a minute or two. LiteLLM turns a guardrail's refusal into HTTP 400 (its generic guardrail has no status of its own), so the reason, not the status, says when to retry. Tests: `VllmGatewayTests`, `LiteLlmClientTests`.
 10. **`GpuShare` per GPU with sleep.**
     - Lending is scoped to the media server's GPU. A vLLM model on it **sleeps**, or unloads when sleep is off or fails; it wakes afterwards.
     - Tests: fake-vllm `/sleep` and `/wake_up`, and the media status fakes.
+    - **Done**: a lending carries its GPUs (`GpuShare.GpusOf`: the media model's GPU, else `MEDIA_GPU`, else the first; every GPU when the machine is not known, as before); only models on them make room: a vLLM model that may sleep sleeps (kept loaded or not; a TP group sleeps whole), one that may not or whose sleep fails unloads unless kept, a llama.cpp model unloads unless kept; models on other GPUs keep loading and answering (`EngineState.Blocks`); when the job ends the sleepers wake and the unloaded kept or default ones load again. Tests: `GpuShareTests` (four GPUs, video on GPU 3).
 11. **Admin → Models UI.**
     - Engine kind, GPU picker, vLLM options, per-GPU bars, cache hit rate, phase (loading, sleeping, draining).
     - Tests: Playwright against fake 4-GPU hardware and fake-vllm.
+    - **Done**: `pages/admin/engine-fields.tsx` (the vLLM model's section: snapshot, engine, GPUs by vendor and size, copies, share, quantisation, cache type, context, answers at once, speculative decoding, CPU tier, sleep, fallback, the advisor's fit and proposal), `engine-slot.tsx` (llama.cpp's engine and fallback, mounted through `ChatModelSection`'s `slot`), `engine-api.ts`; the dialog offers the library's snapshots; model cards show Asleep and Draining; GPU bars name a vendor other than NVIDIA; an engine that is not running is said. Tests: Vitest (`engine-fields.test.tsx`); Playwright not added (no browser run here).
 12. **Compose and Helm.**
     - `vllm` service (profile `vllm`, `shm_size`, `ipc: host` or a large shm, memlock, the `engine` and `vllm-status` volumes), and the `arena-vllm` Dockerfile with pinned vLLM (plus optional LMCache).
     - Helm `vllm` Deployment(s) with values `gpus`, `nodeSelector`, `shmSize`, `kvcache` PV; update `check-chart.py`.
     - Tests: `check-chart.py` and compose config lint.
+    - **Done**: the `vllm` service, its profile, shm, memlock, the `engine` and `vllm-status` volumes and the Helm Deployments came with item 6; now `deploy/services/vllm.Dockerfile` (arena-vllm: vLLM 0.31.0 from PyPI on `nvcr.io/nvidia/cuda:13.0.1-runtime-ubuntu24.04`, LMCache by `LMCACHE_VERSION`, the supervisor inside) and `deploy/vllm-build.yml` to build it with compose. Not built or pulled. Tests: `tests/deploy/test_vllm_image.py`, `check-chart.py`, the parity test.
 13. **Metrics and alerts.**
     - The app writes vLLM targets to `file_sd`; optional DCGM exporter; alert rules (§5.7); dashboard panels.
     - Tests: `audit-dashboards.py`, and rule unit tests with `promtool test rules` if available.
+    - **Done**: the app already writes each vLLM process to `file_sd` (item 7); `rules/engines.yml`: cache over 95% by model (vLLM v1's `kv_cache_usage_perc`, replacing the old rule on its former name), requests waiting inside vLLM for 2 minutes, preemption, an engine restart loop, GPU Xid and ECC errors, low PCIe traffic while busy (DCGM); an optional DCGM exporter (compose profile `dcgm`, CDI on Podman; a cluster's own on Kubernetes) scraped as optional. Tests: `EngineAlertTests` (`promtool test rules` in the stack's Prometheus image). Dashboard panels are not added yet.
 14. **KV tier.**
     - `KvTier = none | cpu(GB) | lmcache(cpu GB, disk GB, remote)`. The app writes the `OffloadingConnector` config or the `lmcache-<model>.yaml`, and the advisor counts RAM and disk.
     - Tests: generated arguments and files; fake-vllm accepts them.
+    - **Done**: `KvTier` (`cpu`: vLLM's OffloadingConnector with `KvCpuGb`; `lmcache`: `LMCacheConnectorV1`, its `lmcache-<copy>.yaml` written beside the presets with RAM, a disk tier under `/kvcache` (`KvDiskGb`, `KVCACHE_DIR` on compose, `vllm.kvcacheClaim` on Helm) and the stack's shared store (`LMCACHE_REMOTE` / `engines.lmcacheRemote`), named to the process by `LMCACHE_CONFIG_FILE` in its environment); the advisor counts the RAM and warns of the disk; the form offers it (migration `KvTiers`). Tests: `VllmBackendTests`, `test_vllm_supervisor.py` (the tier reaches the fake server; no secret rides in its environment).
 15. **Fair queue for API keys and engine priority.**
     - The guardrail admits through the gate; 429 with Retry-After; group priority passed to vLLM `priority`; shrink admission on waiting or KV pressure.
     - Tests: `scale-test.py` scenarios against fake-vllm.
+    - **Done**, within what LiteLLM allows: its generic guardrail can only block, which LiteLLM answers with HTTP 400 (no 429 or Retry-After of the app's own; LiteLLM's per-key limits keep their 429), so the refusal's text says to try again in 30 seconds. An API key's request is refused while more chat answers wait for a llama.cpp model than it has places (the chat's fair line is not jumped), or while requests wait inside a vLLM model beyond a quarter of its places or its cache is full. vLLM runs with `--scheduling-policy priority` and the chat's requests carry `priority: -1`, ahead of API keys' (0). Tests: `VllmGatewayTests`, `VllmBackendTests`; the `scale-test.py` scenarios belong with item 18.
 16. **LiteLLM HA.**
     - Valkey service (ECR mirror image); `router_settings.redis_*`; LiteLLM replicas in `scale.yml`; Traefik health checks.
     - Tests: `scale-test.py` with 2 LiteLLM replicas; the limits stay global.
+    - **Done**: `valkey` (compose profile `ha`, image from ECR's mirror, not pulled; Helm `valkey.enabled`), `deploy/ha.yml` (`LITELLM_REPLICAS` gateway replicas behind the service's name, `REDIS_HOST`/`REDIS_PORT`), `router_settings.redis_host/redis_port` read from the environment (unset: each replica counts alone, as before). Traefik reaches the replicas through Docker's DNS, so no health check is added. Tests: `tests/deploy/test_ha.py`, the parity test with the profile and `valkey.enabled`; the 2-replica `scale-test.py` run needs a running stack.
 17. **Postgres PITR.**
     - pgBackRest in the Postgres image, WAL archive to `BACKUP_DIR`/NAS/S3, `backup.sh --pitr`, and a restore drill (`scripts/restore-drill.sh` restores to a timestamp in a scratch container and checks it).
     - Docs in `deployment.md` "Backups".
     - Tests: the drill runs in CI.
+    - **Done**: `deploy/services/postgres.Dockerfile` (arena-postgres: pgvector's image with pgBackRest from apt; not built), `deploy/pitr.yml` (WAL archiving, the repository on `BACKUP_DIR`), `config/pgbackrest/pgbackrest.conf`, `backup.sh --pitr full|diff`, `scripts/restore-drill.sh`, docs in deployment.md. Tests: `tests/deploy/test_pitr.py` (the scripts with fake docker, never the stack's volume; pitr.yml as compose reads it). The drill against real images, in CI or on the host, needs the image built.
 18. **Load-test extensions.**
     - `multiuser-bench.py` `--ramp`, `--prefix-share`, `--return-after`, `--kill-engine`; `scale-test.py` at 50, 100 and 300 users; JSON baselines.
     - Tests: CI on fake-vllm. Real numbers come on the hardware.
+    - **Done**: `multiuser-bench.py` scenarios `ramp` (`--ramp 1,2,4,8` or `1..16`: aggregate tok/s, TTFT p50/p95, queue wait), `prefixshare` (`--prefix-share N`: the share of prompt tokens from the cache), `returnafter` (`--return-after S`, `--evict-with N`), `killengine` (`--kill-engine CMD`: failures and seconds to recovery, not counted as the run's errors), and `--compare BASELINE.json`; `scale-test.py --users 50,100,300` runs steps one after another and counts API keys held back by the fair gate apart from failures. Tests: `tests/deploy/test_multiuser_bench.py` against fake-vllm (CI: `python3 -m unittest discover -s tests/deploy`). The 50/100/300-user runs and real numbers need a running stack and the hardware.
 19. **Hardware bring-up runbook and check.**
     - `deploy/scripts/gpu-check.sh`: driver ≥ R580, `nvidia-smi topo -m`, a P2P test, NCCL `all_reduce_perf`, memlock and shm, power caps, MIG state.
     - `docs/deployment.md` "Multi-GPU server" section; `docs/architecture.md` engines and GpuPlan.
     - **Needs the hardware:** run it, then a smoke test of each chosen model on the pinned vLLM (FP8 first, then NVFP4), then step 18 for real numbers. Tune TP=2×2 vs. TP=4 and the KV tier from those results.
+    - **Done** (what can be without the hardware): `deploy/scripts/gpu-check.sh` (read only; NVIDIA and AMD; driver, GPUs, ECC, MIG, P2P matrix, socket topology, power caps, NCCL with `--nccl`, memlock, shm) and the bring-up runbook in deployment.md ("Multi-GPU server: bring-up"). Tests: `tests/deploy/test_gpu_check.py` with fake `nvidia-smi` and `rocm-smi`. Running it, the smoke tests and the numbers wait for the server.
 20. **Later, multi-server.**
     - Helm: one Deployment per engine group, GPU Operator, CloudNativePG, llm-d scheduler, KEDA autoscaling, per-node weight staging; SGLang backend if a model needs it.
 
 Commits 1–18 can be built and tested on today's 3090 box: llama.cpp keeps running there, and vLLM is the fake. Commit 19 is the first that needs the new server.
 
+**Progress (2026-10-16):** items 1–19 are done on branch `mgpu/engines` as far as they can be without the server, generalised past it: any number of GPUs (none included), any vendor, several engine machines, and Docker, Podman and Kubernetes alike (below). Each item says what is done and what waits; item 19's runs and item 20 need the hardware and a second server.
+
 ---
+
+## Supported configurations
+
+What the code handles, how it was checked, and what still needs the real hardware. **Tested** means automated tests run it
+(fakes where the hardware is missing); **live** means it ran on a real machine.
+
+| Configuration | Status |
+|---|---|
+| One NVIDIA GPU (today's RTX 3090), llama.cpp | Live, unchanged: the same room, presets and lending as before (tested too: `GpuPlanTests`, the model and GPU-sharing suites). |
+| CPU only (`LLAMACPP_BACKEND=cpu`, or a hardware file with no GPU) | Tested with fakes: the advisor places models in RAM, GPUs are refused, vLLM says it needs GPUs. Needs a real CPU-only host to verify speed. |
+| Several NVIDIA GPUs of different sizes, llama.cpp | Tested with fakes (2 mixed, 4 × 96 GB, 8 × 80 GB): placement per GPU, the picture server on its own GPU, presets `CUDA0,…`. Needs real hardware. |
+| AMD GPUs (ROCm), llama.cpp and vLLM | Tested with fakes (2 × 192 GB, `rocm-smi` read by `gpu-probe.py`, presets `ROCm0,…`, compose `rocm.yml`, Helm `gpuResource: amd.com/gpu`). Needs real hardware and the ROCm images (not pulled). |
+| Intel or other GPUs through Vulkan or SYCL, llama.cpp | The presets name them (`Vulkan0`, `SYCL0`); a hardware file with their sizes gives the advisor its figures. Untested on hardware; no probe reads them yet (write the hardware file by hand). vLLM does not run there. |
+| Apple Metal | llama.cpp on the Mac itself, outside containers: add it as another GPU server (an external engine) or point `Engine:Url` at it; presets name `MTL0`. Untested. |
+| vLLM on 1 to 8 or more NVIDIA GPUs, tensor parallel 1/2/4/8, copies | Tested with fakes (the advisor on real model configs, the supervisor with fake-vllm in a container, room per GPU set, sleep for media, the gateway pool). Needs the server and a vLLM image (not pulled). |
+| Several engine machines | vLLM: one `Engine:Vllm` entry per machine (its host, and its folders on storage both see), or one Helm `vllm.instances` entry per node. llama.cpp: the one router (others are external engines). Tested in configuration only. |
+| External OpenAI-compatible servers (another vLLM, SGLang, TGI, Ollama, a cloud) | Registered and health-checked, not managed (Admin → Models → Other GPU servers). Tested with fakes. |
+| Docker Compose, rootless Podman (CDI), Kubernetes (Helm) | The vllm service, its supervisor and status, fake-gpu and AMD mapping in all three; checked by `test_runtime_parity.py`, `docker compose config`, `podman compose config`, `check-chart.py`, `helm template`. |
 
 ## Repo facts this design builds on
 - Multi-GPU support already in the code:

@@ -146,7 +146,7 @@ public sealed class ModelStateChatNoModelTests(AppFixture app) : IDisposable
         var f = app.Create(app.ConnectionStringFor("nomodel_" + Guid.NewGuid().ToString("N")[..8]), gateway, settings, s =>
         {
             s.AddHttpClient<GatewayChat>().ConfigurePrimaryHttpMessageHandler(() => router);
-            s.AddHttpClient<EngineClient>().ConfigurePrimaryHttpMessageHandler(() => engine);
+            s.AddHttpClient(LlamaCppBackend.Client).ConfigurePrimaryHttpMessageHandler(() => engine);
         });
         using var scope = f.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();

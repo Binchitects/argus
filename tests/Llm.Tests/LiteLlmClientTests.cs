@@ -20,6 +20,9 @@ public sealed class LiteLlmClientTests
         /// <summary>What /key/list answers.</summary>
         public string KeyList { get; set; } = """{"keys":[]}""";
 
+        /// <summary>What /model/info answers.</summary>
+        public string ModelInfo { get; set; } = """{"data":[]}""";
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             var body = request.Content is null ? default : JsonDocument.Parse(await request.Content.ReadAsStringAsync(ct)).RootElement;
@@ -34,6 +37,7 @@ public sealed class LiteLlmClientTests
                 "/end_user/info" => EndUser!,
                 "/key/info" => KeyInfo!,
                 "/key/list" => KeyList,
+                "/model/info" => ModelInfo,
                 "/budget/new" => """{"budget_id":"b-new"}""",
                 _ => "{}",
             };
@@ -45,6 +49,32 @@ public sealed class LiteLlmClientTests
     {
         var recorder = new Recorder();
         return (new LiteLlmClient(new HttpClient(recorder) { BaseAddress = new Uri("http://litellm:4000") }), recorder);
+    }
+
+    [Fact]
+    public async Task Fallbacks_go_to_the_gateways_router_settings()
+    {
+        var (client, recorder) = Create();
+        await client.SetFallbacksAsync(new Dictionary<string, IReadOnlyList<string>> { ["flash"] = ["qwen"], ["none"] = [] });
+        var (path, body) = Assert.Single(recorder.Calls);
+        Assert.Equal("/config/update", path);
+        Assert.Equal("""{"router_settings":{"fallbacks":[{"flash":["qwen"]}]}}""", body.GetRawText());
+    }
+
+    [Fact]
+    public async Task A_vllm_models_copies_under_their_own_names_are_in_no_list()
+    {
+        var (client, recorder) = Create();
+        recorder.ModelInfo = """
+            {"data":[
+              {"model_name":"flash","model_info":{"mode":"chat","max_input_tokens":65536,"llm_app_pool":2}},
+              {"model_name":"flash","model_info":{"mode":"chat","max_input_tokens":65536,"llm_app_pool":2}},
+              {"model_name":"flash@0","model_info":{"mode":"chat","llm_app_replica_of":"flash"}},
+              {"model_name":"flash@1","model_info":{"mode":"chat","llm_app_replica_of":"flash"}}]}
+            """;
+        var models = await client.ModelsAsync();
+        Assert.Equal(["flash"], models.Select(m => m.Name));
+        Assert.Equal(65536, models[0].Context);
     }
 
     [Fact]

@@ -37,6 +37,9 @@ ALLOWED: dict[tuple[str, str, str], str] = {
     ("env", "app", "Storage__BackupsKept"): "backups are backup.sh's (compose); a cluster backs up its own volumes",
     ("env", "app", "Stack__Acme"): "Traefik's Let's Encrypt (compose); the Ingress takes a TLS Secret",
     ("env", "app", "Engine__Enabled"): "Helm can leave the engine out (llamacpp.enabled); compose always runs it",
+    ("env", "litellm", "REDIS_HOST"): "the gateway's shared counts: ha.yml on compose, valkey.enabled on Helm",
+    ("env", "litellm", "REDIS_PORT"): "as REDIS_HOST",
+    ("env", "app", "Engine__LlamaCpp"): "Helm can run vLLM without llama.cpp (llamacpp.enabled false); compose always runs llama.cpp",
     ("env", "app", "Modules__imagegen"): "Helm says outright which modules run; compose's app looks the names up",
     ("env", "app", "Modules__videogen"): "as Modules__imagegen",
     ("env", "app", "Modules__audio"): "as Modules__imagegen",
@@ -44,11 +47,11 @@ ALLOWED: dict[tuple[str, str, str], str] = {
     ("env", "app", "Database__RootCertificate"): "externalDatabase.caSecret; compose sets it in the override",
     ("env", "litellm", "DB_PASSWORD"): "Kubernetes builds DATABASE_URL from it ($(DB_PASSWORD)); compose interpolates",
     ("env", "postgres", "PGDATA"): "a volume's root is not empty on some storage (lost+found)",
-    ("env", "llamacpp", "LLAMA_CACHE"): "the chart mounts the library read only in the engine; engine/GPU work",
     # Mounts.
     ("mount", "app", "/backups"): "backup.sh's backups, for Admin -> Storage: compose only",
     ("mount", "app", "/db-ca"): "externalDatabase.caSecret; compose mounts the CA in the override",
     ("mount", "llamacpp", "/dev/shm"): "compose's shm_size, as an emptyDir in memory",
+    ("mount", "vllm", "/dev/shm"): "compose's shm_size, as an emptyDir in memory",
     ("mount", "imagegen", "/tmp"): "the chart gives every read-only pod a /tmp; compose's imagegen needs none",
     ("mount", "prometheus", "/tmp"): "the scrape tokens' files: an emptyDir in the chart, the container's own /tmp in compose",
 }
@@ -80,7 +83,7 @@ _configs: dict[tuple[str, ...], dict] = {}
 
 
 def compose_config(*files: str) -> dict:
-    """The stack as compose resolves it, with Laya's profile on (every module), from .env.example's placeholders."""
+    """The stack as compose resolves it, with the Laya and vLLM profiles on (every module), from .env.example's placeholders."""
     if files in _configs:
         return _configs[files]
     cmd = compose_command()
@@ -94,7 +97,7 @@ def compose_config(*files: str) -> dict:
         env_file = Path(tmp) / "parity.env"
         env_file.write_text(example)
         env = {k: v for k, v in os.environ.items() if not k.startswith(("COMPOSE_", "DOCKER_HOST"))}
-        env.update({"COMPOSE_PROFILES": "laya", "PODMAN_COMPOSE_WARNING_LOGS": "false"})
+        env.update({"COMPOSE_PROFILES": "laya,vllm,ha", "PODMAN_COMPOSE_WARNING_LOGS": "false"})
         args = [*cmd, "--env-file", str(env_file)]
         for f in files:
             args += ["-f", str(DEPLOY / f)]
@@ -127,7 +130,7 @@ def helm_rendered() -> dict[str, dict[str, set[str]]] | None:
         return None
     if helm is None:
         return None
-    on = ["laya.enabled=true", "videogen.enabled=true", "argus.packLibraryClaim=packs"]
+    on = ["laya.enabled=true", "videogen.enabled=true", "vllm.enabled=true", "valkey.enabled=true", "argus.packLibraryClaim=packs"]
     out: dict[str, dict[str, set[str]]] = {}
     # This chart's Postgres, and an external one with a CA of its own: together, every variable a pod can be given.
     # The output holds the Secret it made up: it is read here and never printed.

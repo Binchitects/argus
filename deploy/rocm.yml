@@ -1,0 +1,33 @@
+# AMD GPUs (ROCm): the same stack, with the engines given /dev/kfd and /dev/dri instead of NVIDIA's
+# device requests, and images built for ROCm. Docker and Podman alike (on Podman, after podman.yml).
+#
+#   docker compose -f docker-compose.yml -f rocm.yml up -d
+#   podman compose -f docker-compose.yml -f podman.yml -f rocm.yml up -d
+#
+# The images are not pulled until you start them; check each exists for your ROCm before you do
+# (docs/deployment.md, "Supported configurations"): LLAMACPP_ROCM_IMAGE, VLLM_IMAGE (a ROCm vLLM),
+# SDCPP_GPU_IMAGE (stable-diffusion.cpp on Vulkan, which runs on AMD). The app names the GPUs
+# ROCm0, ROCm1... in llama.cpp's presets and reads them from rocm-smi (services/gpu-probe.py).
+x-amd: &amd
+  deploy: !reset {}
+  devices: !override [/dev/kfd, /dev/dri]
+  group_add: [video, render]
+
+services:
+  app:
+    environment:
+      Engine__Backend: rocm
+  llamacpp:
+    <<: *amd
+    image: ${LLAMACPP_ROCM_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-rocm}
+  vllm:
+    <<: *amd
+  imagegen:
+    <<: *amd
+    image: ${SDCPP_GPU_IMAGE:-ghcr.io/leejet/stable-diffusion.cpp:master-vulkan}
+  videogen:
+    <<: *amd
+    image: ${SDCPP_GPU_IMAGE:-ghcr.io/leejet/stable-diffusion.cpp:master-vulkan}
+  # nvidia-smi's exporter has nothing to read here: the GPUs come from the vLLM supervisor's probe.
+  gpu-exporter:
+    profiles: [off]

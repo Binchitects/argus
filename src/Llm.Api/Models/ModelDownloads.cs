@@ -239,7 +239,8 @@ public sealed partial class ModelDownloads : BackgroundService
         // The admin who started it hears how it ended (it can take hours).
         if (d.State is "done" or "failed" && await scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<Llm.Core.Identity.AppUser>>().FindByNameAsync(d.CreatedBy) is { } who)
         {
-            var files = string.Join(", ", d.Files.Select(f => Path.GetFileName(f.Path)));
+            // A snapshot for vLLM is many files: it is named by its folder.
+            var files = d.Dir.StartsWith("hf/", StringComparison.Ordinal) ? $"The snapshot {d.Dir}" : string.Join(", ", d.Files.Select(f => Path.GetFileName(f.Path)));
             await scope.ServiceProvider.GetRequiredService<Notifications.Notifier>().SendAsync(who.Id, d.State == "done"
                 ? new Notifications.News("download", $"Downloaded {d.Repo}", d.Kind == "speech" ? "The speech server has it: add it under Models." : $"{files} is in the model library: add it under Models.", "/admin/models", $"download:{d.Id}")
                 : new Notifications.News("download", $"Download of {d.Repo} failed", d.Error, "/admin/models"), CancellationToken.None);

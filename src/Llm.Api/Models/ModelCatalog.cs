@@ -101,6 +101,24 @@ public sealed class EngineState(TimeProvider clock)
     /// <summary>The model for small steps (Settings → Model), as the watcher last worked it out; null: none of the engine's.</summary>
     public string? Small { get; set; }
 
+    /// <summary>
+    /// Where a model sits, for room-making per GPU: its engine's kind, what it keeps on each of its GPUs (a vLLM model its
+    /// share, a llama.cpp model its estimate spread over its GPUs), its fallback, and its copies.
+    /// </summary>
+    public sealed record ModelPlace(string Kind, IReadOnlyDictionary<int, long> PerGpu, string? Fallback = null, int Replicas = 1);
+
+    /// <summary>Each engine model's place (the watcher keeps it, with <see cref="Hardware"/>).</summary>
+    public IReadOnlyDictionary<string, ModelPlace> Places { get; set; } = new Dictionary<string, ModelPlace>(StringComparer.Ordinal);
+
+    /// <summary>The machine as the watcher last read it (with the servers' reserves); null: not known.</summary>
+    public Hardware? Hardware { get; set; }
+
+    /// <summary>A model's engine kind (EngineKinds); llama.cpp's for one the app did not add (the .env model).</summary>
+    public string KindOf(string model) => Places.TryGetValue(model, out var p) ? p.Kind : EngineKinds.LlamaCpp;
+
+    /// <summary>Whether a model counts against llama.cpp's places (Models loaded at once): the router's own models only.</summary>
+    public bool Counted(string model) => KindOf(model) == EngineKinds.LlamaCpp;
+
     /// <summary>An admin unloaded it (Admin → Models): it is not loaded again by itself until it loads once more.</summary>
     public void Dropped(string model) => _dropped[model] = true;
 
@@ -378,9 +396,20 @@ public sealed class EngineState(TimeProvider clock)
 
     /// <summary>
     /// The GPU lent to a picture or video job (<see cref="GpuShare"/>): its model, what it makes ("picture", "video"), since
-    /// when, and until when at most (should the replica that holds it stop without giving it back).
+    /// when, until when at most (should the replica that holds it stop without giving it back), and which GPUs (the media
+    /// server's; null: every one, as on a machine whose GPUs are not known).
     /// </summary>
-    public sealed record Lending(string Media, string Kind, DateTimeOffset Since, DateTimeOffset Until);
+    public sealed record Lending(string Media, string Kind, DateTimeOffset Since, DateTimeOffset Until, IReadOnlyCollection<int>? Gpus = null);
+
+    /// <summary>
+    /// Whether the lending keeps <paramref name="model"/> from loading: it sits on a lent GPU (or its GPUs are not known, or
+    /// every GPU is lent). A model on other GPUs loads as ever.
+    /// </summary>
+    public bool Blocks(string model) =>
+        Lent is { } lent && (lent.Gpus is not { Count: > 0 } gpus || !Places.TryGetValue(model, out var p) || p.PerGpu.Count == 0 || p.PerGpu.Keys.Any(gpus.Contains));
+
+    /// <summary>Whether every GPU is lent (no chat model loads at all).</summary>
+    public bool LentAll => Lent is { Gpus: not { Count: > 0 } };
 
     private volatile Lending? _lent;
 
@@ -410,7 +439,7 @@ public sealed class EngineState(TimeProvider clock)
 /// (config/engine/targets.json), and keeps the gateway's list in step.
 /// </summary>
 public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOptions<EngineOptions> options, ModelLibrary library, ChatModels chatModels,
-    RemoteServerClient remote, ModelHoursState hours, Modules modules, MediaControl media, IOptionsMonitor<PriceOptions> prices, ILogger<ModelCatalog> logger)
+    RemoteServerClient remote, ModelHoursState hours, Modules modules, MediaControl media, IOptionsMonitor<PriceOptions> prices, VllmBackends vllm, ILogger<ModelCatalog> logger)
 {
     public const string PresetsFile = "models.ini";
     public const string KeepFile = "keep";
@@ -497,8 +526,9 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// The GPU memory a picture model kept loaded takes beside the chat models, and its GPU (null: the first): a model that
     /// fits itself to the GPU leaves it free there.
     /// </param>
+    /// <param name="backend">The backend llama.cpp drives the GPUs with (Engine:Backend): it names them (CUDA0, ROCm0, Vulkan0...).</param>
     public static string Preset(LocalModel m, string library, int? threads = null, ModelProfile? profile = null, int? sessionCacheGb = null,
-        (int? Gpu, int Mb)? pictureRoom = null, bool kvDisk = false)
+        (int? Gpu, int Mb)? pictureRoom = null, bool kvDisk = false, string? backend = null)
     {
         var own = ExtraValues(m.ExtraPreset);
         var sb = new StringBuilder();
@@ -535,10 +565,10 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
                 sb.Append("fit-target = ").Append(target).Append('\n');
             }
         }
-        if (Hardware.ParseDevices(m.Devices) is { Count: > 0 } devices)
+        if (Hardware.ParseDevices(m.Devices) is { Count: > 0 } devices && Hardware.DevicePrefix(backend) is { } prefix)
         {
-            // CUDA numbers GPUs as nvidia-smi does: the engine runs with CUDA_DEVICE_ORDER=PCI_BUS_ID.
-            sb.Append("device = ").Append(string.Join(',', devices.Select(d => "CUDA" + d.ToString(inv)))).Append('\n');
+            // CUDA numbers GPUs as nvidia-smi does (the engine runs with CUDA_DEVICE_ORDER=PCI_BUS_ID), ROCm as rocm-smi does.
+            sb.Append("device = ").Append(string.Join(',', devices.Select(d => prefix + d.ToString(inv)))).Append('\n');
         }
         if (threads is > 0)
         {
@@ -672,7 +702,8 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// <summary>Writes the presets for the engine; it restarts when they change.</summary>
     public async Task WritePresetsAsync(CancellationToken ct = default)
     {
-        var models = await db.LocalModels.AsNoTracking().OrderBy(m => m.Name).ToListAsync(ct);
+        // llama.cpp's models only: the other kinds have their own engines' desired state.
+        var models = await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.LlamaCpp).OrderBy(m => m.Name).ToListAsync(ct);
         // Each file's profile: its attention decides the checkpoints, its training the YaRN stretch.
         var profiles = models.Count > 0 ? library.List().ToDictionary(e => e.File.Path, e => e.Profile, StringComparer.Ordinal) : [];
         // A picture model kept loaded runs beside the chat models: those that fit themselves to the GPU leave it its room.
@@ -681,11 +712,11 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             && await db.MediaModels.AsNoTracking().Where(x => x.Kept && x.Mode == MediaModes.Image).OrderBy(x => x.Name).FirstOrDefaultAsync(ct) is { } picture
             && GpuShare.NeedMb(picture) is { } need)
         {
-            pictureRoom = (picture.Gpu, need);
+            pictureRoom = (picture.Gpu ?? options.Value.MediaGpu, need);
         }
         var text = "# Written by the app (Admin -> Models). The engine restarts when this changes.\n\n" +
             string.Join("\n", models.Select(m => Preset(m, options.Value.EngineLibraryDir, options.Value.Threads, profiles.GetValueOrDefault(m.File), options.Value.SessionCacheGb,
-                pictureRoom, options.Value.KvCacheGb > 0)));
+                pictureRoom, options.Value.KvCacheGb > 0, options.Value.Backend)));
         Write(PresetsFile, text);
         // How much of the disk the conversations' caches may take, and for how long: the engine's script keeps to it.
         Write(KvCache.ControlFile, $"gb={Math.Max(0, options.Value.KvCacheGb)}\ndays={Math.Max(0, options.Value.KvCacheDays)}\n");
@@ -706,16 +737,188 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// <summary>How many models the engine may hold at once (it restarts when this changes).</summary>
     public void WriteMax() => Write(MaxFile, options.Value.ModelsMax.ToString(CultureInfo.InvariantCulture) + "\n");
 
-    /// <summary>Prometheus scrapes each loaded model's metrics (/metrics?model=NAME).</summary>
+    /// <summary>
+    /// Prometheus scrapes each loaded model's metrics: llama.cpp's (/metrics?model=NAME on the router), and each vLLM
+    /// process's own (HOST:PORT/metrics, its vllm:* names), labelled with its model and engine.
+    /// </summary>
     public void WriteTargets(IEnumerable<string> loaded)
     {
         var host = new Uri(options.Value.Url).Authority;
-        var targets = new JsonArray([.. loaded.Select(m => (JsonNode)new JsonObject
+        var targets = new JsonArray();
+        foreach (var m in loaded)
         {
-            ["targets"] = new JsonArray(host),
-            ["labels"] = new JsonObject { ["model"] = m, ["tier"] = "optional", ["component"] = "inference" },
-        })]);
+            if (vllm.Find(m) is { } backend)
+            {
+                foreach (var e in backend.Presets().Where(e => e.Model == m))
+                {
+                    targets.Add(new JsonObject
+                    {
+                        ["targets"] = new JsonArray($"{backend.Host}:{e.Port}"),
+                        ["labels"] = new JsonObject { ["model"] = m, ["replica"] = e.Name, ["engine"] = backend.Name, ["tier"] = "optional", ["component"] = "inference" },
+                    });
+                }
+                continue;
+            }
+            targets.Add(new JsonObject
+            {
+                ["targets"] = new JsonArray(host),
+                ["labels"] = new JsonObject { ["model"] = m, ["tier"] = "optional", ["component"] = "inference" },
+            });
+        }
         Write(TargetsFile, targets.ToJsonString());
+    }
+
+    /// <summary>
+    /// `vllm serve`'s arguments for a model on <paramref name="tp"/> GPUs: its snapshot, tensor parallel size, context,
+    /// answers at once, share of each GPU, cache type, prefix caching, and what it chose of quantisation, sleep mode,
+    /// speculative decoding, a CPU tier for its cache (the OffloadingConnector) and default sampling. Never a key, a host
+    /// or a port: the supervisor owns those (and refuses an entry that sets them).
+    /// </summary>
+    public static IReadOnlyList<string> VllmArgs(LocalModel m, string library, int tp)
+    {
+        var inv = CultureInfo.InvariantCulture;
+        var root = library.TrimEnd('/');
+        var args = new List<string>
+        {
+            root + "/" + m.File, "--tensor-parallel-size", tp.ToString(inv), "--max-model-len", m.Context.ToString(inv),
+            "--max-num-seqs", Math.Max(1, m.Parallel).ToString(inv),
+            "--gpu-memory-utilization", (m.GpuMemoryUtilization ?? VllmAdvisor.DefaultUtilization).ToString("0.###", inv),
+            "--kv-cache-dtype", m.KvType, "--enable-prefix-caching",
+            // The chat's requests (priority -1) go ahead of API keys' (0) inside the engine: people waiting on an answer first.
+            "--scheduling-policy", "priority",
+        };
+        if (m.Quantization is { Length: > 0 } q)
+        {
+            args.AddRange(["--quantization", q]);
+        }
+        if (m.Sleep)
+        {
+            args.Add("--enable-sleep-mode");
+        }
+        if (m.SpecDecode is "mtp" or "eagle3")
+        {
+            var spec = new JsonObject { ["method"] = m.SpecDecode, ["num_speculative_tokens"] = m.DraftMax };
+            if (m.SpecDecode == "eagle3" && m.DraftHead is { Length: > 0 } draft)
+            {
+                spec["model"] = root + "/" + draft;
+            }
+            args.AddRange(["--speculative-config", spec.ToJsonString()]);
+        }
+        if (m.KvTier == "lmcache")
+        {
+            // LMCache: its tiers in its own file (LMCacheConfig), named to the process by LMCACHE_CONFIG_FILE.
+            args.AddRange(["--kv-transfer-config", new JsonObject { ["kv_connector"] = "LMCacheConnectorV1", ["kv_role"] = "kv_both" }.ToJsonString()]);
+        }
+        else if (m.KvCpuGb is > 0 and var gb)
+        {
+            args.AddRange(["--kv-transfer-config", new JsonObject
+            {
+                ["kv_connector"] = "OffloadingConnector", ["kv_role"] = "kv_both",
+                ["kv_connector_extra_config"] = new JsonObject { ["block_size"] = 64, ["cpu_bytes_to_use"] = (long)gb << 30 },
+            }.ToJsonString()]);
+        }
+        var sampling = new JsonObject();
+        if (m.Temperature is { } t) { sampling["temperature"] = t; }
+        if (m.TopP is { } p) { sampling["top_p"] = p; }
+        if (m.TopK is { } k) { sampling["top_k"] = k; }
+        if (m.MinP is { } mp) { sampling["min_p"] = mp; }
+        if (m.PresencePenalty is { } pp) { sampling["presence_penalty"] = pp; }
+        if (sampling.Count > 0)
+        {
+            args.AddRange(["--override-generation-config", sampling.ToJsonString()]);
+        }
+        return args;
+    }
+
+    /// <summary>
+    /// A vLLM model's processes on its engine: one per copy (NAME, or NAME@0, NAME@1... with several), each on its run of
+    /// the model's GPUs, on the port it had (a model added never moves another), else the lowest free one.
+    /// </summary>
+    /// <summary>
+    /// LMCache's configuration for a model's copy (LMCACHE_CONFIG_FILE): its RAM tier, its disk tier under /kvcache (the
+    /// engine's NVMe; it survives a restart), and the stack's remote store (Engine:LmcacheRemote, a Valkey) when there is one.
+    /// </summary>
+    public static string LmcacheConfig(LocalModel m, string copy, string? remote)
+    {
+        var inv = CultureInfo.InvariantCulture;
+        var sb = new StringBuilder("# Written by the app (Admin -> Models). LMCache reads it as its process starts.\n");
+        sb.Append("chunk_size: 256\n");
+        sb.Append(inv, $"local_cpu: {(m.KvCpuGb is > 0 ? "true" : "false")}\nmax_local_cpu_size: {m.KvCpuGb ?? 0}\n");
+        if (m.KvDiskGb is > 0 and var disk)
+        {
+            sb.Append(inv, $"local_disk: \"file:///kvcache/{copy}/\"\nmax_local_disk_size: {disk}\n");
+        }
+        if (remote is { Length: > 0 } r)
+        {
+            sb.Append(inv, $"remote_url: \"{r}\"\nremote_serde: \"naive\"\n");
+        }
+        return sb.ToString();
+    }
+
+    public static IReadOnlyList<VllmEntry> VllmEntries(LocalModel m, string library, IReadOnlyDictionary<string, int> ports, ISet<int> taken, int firstPort,
+        string? presets = null)
+    {
+        var replicas = Math.Max(1, m.Replicas);
+        var gpus = Hardware.ParseDevices(m.Devices) ?? [];
+        var groups = gpus.Count >= replicas ? VllmAdvisor.Groups(gpus, replicas) : [.. Enumerable.Range(0, replicas).Select(_ => (IReadOnlyList<int>)[])];
+        var entries = new List<VllmEntry>();
+        for (var i = 0; i < replicas; i++)
+        {
+            var name = replicas == 1 ? m.Name : $"{m.Name}@{i.ToString(CultureInfo.InvariantCulture)}";
+            if (!ports.TryGetValue(name, out var port) || !taken.Add(port))
+            {
+                port = firstPort;
+                while (!taken.Add(port))
+                {
+                    port++;
+                }
+            }
+            // LMCache's file, as the engine sees the presets (/presets/INSTANCE).
+            var env = m.KvTier == "lmcache" && presets is not null
+                ? new Dictionary<string, string>(StringComparer.Ordinal) { ["LMCACHE_CONFIG_FILE"] = $"{presets.TrimEnd('/')}/lmcache-{name}.yaml" } : null;
+            entries.Add(new VllmEntry(m.Name, name, port, groups[i], false, VllmArgs(m, library, Math.Max(1, groups[i].Count)), Math.Max(1, m.Parallel), env));
+        }
+        return entries;
+    }
+
+    /// <summary>
+    /// Each vLLM engine's presets (its models, as processes), and its desired state brought in step: a model's new settings
+    /// reach its running processes (the supervisor restarts them), a model gone is no longer run. Whether each sleeps is kept.
+    /// </summary>
+    public async Task WriteVllmPresetsAsync(CancellationToken ct = default)
+    {
+        var models = await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.Vllm).OrderBy(m => m.CreatedAt).ThenBy(m => m.Name).ToListAsync(ct);
+        foreach (var backend in vllm.All)
+        {
+            var mine = models.Where(m => (m.Engine is null && backend == vllm.All[0]) || m.Engine == backend.Name).ToList();
+            var before = backend.Presets();
+            if (mine.Count == 0 && before.Count == 0 && backend.Desired().Count == 0)
+            {
+                // Nothing to say to an engine with no models (a stack without vLLM writes nothing).
+                continue;
+            }
+            var ports = before.ToDictionary(e => e.Name, e => e.Port, StringComparer.Ordinal);
+            var taken = new HashSet<int>();
+            // The ports of models that keep theirs first: one added never takes another's.
+            var entries = new List<VllmEntry>();
+            foreach (var m in mine.OrderBy(m => ports.ContainsKey(m.Replicas > 1 ? m.Name + "@0" : m.Name) ? 0 : 1))
+            {
+                var made = VllmEntries(m, options.Value.EngineLibraryDir, ports, taken, backend.FirstPort, $"/presets/{backend.Name}");
+                entries.AddRange(made);
+                if (m.KvTier == "lmcache")
+                {
+                    foreach (var e in made)
+                    {
+                        backend.WriteText($"lmcache-{e.Name}.yaml", LmcacheConfig(m, e.Name, options.Value.LmcacheRemote));
+                    }
+                }
+            }
+            backend.Write(VllmBackend.PresetsFile, entries);
+            var desired = backend.Desired();
+            var wanted = desired.Select(d => d.Model).ToHashSet(StringComparer.Ordinal);
+            var asleep = desired.Where(d => d.Sleep).Select(d => d.Model).ToHashSet(StringComparer.Ordinal);
+            backend.Write(VllmBackend.DesiredFile, entries.Where(e => wanted.Contains(e.Model)).Select(e => e with { Sleep = asleep.Contains(e.Model) }));
+        }
     }
 
     /// <summary>
@@ -731,7 +934,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         var wanted = new Dictionary<string, (string Name, JsonObject Params, JsonObject Info)>(StringComparer.Ordinal);
         // Each chat model on each server first, with what makes it this one and the requests it serves at once.
         var deployments = new List<(string Name, JsonObject Params, JsonObject Info, object?[] Print, int? Slots)>();
-        foreach (var m in await db.LocalModels.AsNoTracking().ToListAsync(ct))
+        foreach (var m in await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.LlamaCpp).ToListAsync(ct))
         {
             // What its projector reads: pictures, sound (an omni model's), or both.
             var projector = m.Projector is { Length: > 0 } p ? library.Find(p)?.Profile.Projector ?? new ProjectorInfo(true, false, null, null) : null;
@@ -743,6 +946,41 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             Prices(litellm, price);
             deployments.Add((m.Name, litellm, info, ["local", m.Name, m.File, m.Context, m.Parallel, m.MaxOutput, m.Projector, projector?.Audio, m.Tools, m.Thinking,
                 price.Input, price.CachedInput, price.Output], m.Parallel));
+        }
+        // vLLM's models: each copy at its own port, never sent more at once than its answers at once (--max-num-seqs), a pool when
+        // there are several; each copy also under its own name (NAME@i, kept out of every list) for the chat to keep a conversation
+        // on one; and the fallback that answers while it cannot.
+        foreach (var m in await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.Vllm).ToListAsync(ct))
+        {
+            if (vllm.For(m.Engine) is not { } backend || backend.Presets().Where(e => e.Model == m.Name).ToList() is not { Count: > 0 } entries)
+            {
+                continue;
+            }
+            var vision = VllmAdvisor.Read(library.FullPath(m.File))?.Vision == true;
+            var info = Info(m.Context, Math.Min(m.MaxOutput ?? DefaultMaxOutput(m.Context), m.Context), vision, m.Tools, m.Thinking);
+            if (m.Fallback is { Length: > 0 } fallback)
+            {
+                info["llm_app_fallbacks"] = new JsonArray(fallback);
+            }
+            var price = TokenPrice.Of(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, defaults);
+            foreach (var e in entries)
+            {
+                var litellm = new JsonObject
+                {
+                    ["model"] = "openai/" + e.Name, ["api_base"] = $"http://{backend.Host}:{e.Port}/v1", ["api_key"] = "os.environ/ENGINE_API_KEY",
+                    ["max_parallel_requests"] = Math.Max(1, m.Parallel),
+                };
+                Prices(litellm, price);
+                object?[] print = ["vllm", m.Name, e.Name, backend.Host, e.Port, m.Context, m.Parallel, m.MaxOutput, vision, m.Tools, m.Thinking, m.Fallback,
+                    price.Input, price.CachedInput, price.Output];
+                deployments.Add((m.Name, litellm, (JsonObject)info.DeepClone(), print, Math.Max(1, m.Parallel)));
+                if (entries.Count > 1)
+                {
+                    var own = (JsonObject)info.DeepClone();
+                    own["llm_app_replica_of"] = m.Name;
+                    wanted[Fingerprint([.. print, "replica"])] = (e.Name, (JsonObject)litellm.DeepClone(), own);
+                }
+            }
         }
         foreach (var server in await db.RemoteServers.AsNoTracking().ToListAsync(ct))
         {
@@ -784,6 +1022,16 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         {
             await gateway.AddModelAsync(w.Name, w.Params, w.Info, fingerprint, ct);
             LogRegistered(logger, w.Name);
+        }
+        // The fallbacks, at the gateway itself: an API key's request whose model fails (its engine restarts) goes on to it.
+        var fallbacks = (await db.LocalModels.AsNoTracking().Where(m => m.Fallback != null).Select(m => new { m.Name, m.Fallback }).ToListAsync(ct))
+            .ToDictionary(m => m.Name, m => (IReadOnlyList<string>)[m.Fallback!], StringComparer.Ordinal);
+        var said = string.Join(';', fallbacks.OrderBy(f => f.Key, StringComparer.Ordinal).Select(f => f.Key + "=" + f.Value[0]));
+        // Nothing set and nothing to set (a stack without fallbacks): the gateway's settings are left untouched.
+        if ((GivenFallbacks.TryGetValue(gateway, out var given) ? given : "") != said)
+        {
+            await gateway.SetFallbacksAsync(fallbacks, ct);
+            GivenFallbacks.AddOrUpdate(gateway, said);
         }
         chatModels.Forget();
     }
@@ -883,6 +1131,9 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// <summary>The longest answer when none is set: half the context, at most 32,768 tokens.</summary>
     public static int DefaultMaxOutput(int context) => Math.Max(ModelAdvisor.MinOutput, Math.Min(32768, context / 2 / 1024 * 1024));
 
+    /// <summary>The fallbacks each gateway was last given (by any catalog of this replica): set again only when they change, and at start.</summary>
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ILiteLlm, string> GivenFallbacks = [];
+
     private static string Fingerprint(params object?[] parts) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('|', parts.Select(p => Convert.ToString(p, CultureInfo.InvariantCulture))))))[..16];
 
@@ -962,8 +1213,9 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
     /// makes room: EngineRoute). One that failed to load does too once its wait is over (EngineState.MayAsk).
     /// </summary>
     public bool OnRequest(string model, IReadOnlySet<string> onEngine) =>
-        onEngine.Contains(model) && !Loaded(model, onEngine) && (engine.StatusOf(model) is "unloaded" or "loading" or "unloading" || engine.MayAsk(model))
-        && ((engine.Held.Contains(model) && !engine.WasDropped(model)) || PlaceLeft);
+        onEngine.Contains(model) && !Loaded(model, onEngine) && (engine.StatusOf(model) is "unloaded" or "loading" or "unloading" or "sleeping" || engine.MayAsk(model))
+        // A vLLM model's room is its GPUs' memory, made or refused as it is asked for (EngineRoute), not one of llama.cpp's places.
+        && ((engine.Held.Contains(model) && !engine.WasDropped(model)) || PlaceLeft || !engine.Counted(model));
 
     /// <summary>
     /// Whether the engine has a place for any other model: the places of those that never make room (the models kept
@@ -974,7 +1226,7 @@ public sealed class ModelPolicy(AppDbContext db, AccessService access, EngineSta
 
     /// <summary>The models whose places are taken or kept for them: kept loaded, the one new chats use, the one for small steps, loaded instead of one.</summary>
     private List<string> Holders =>
-        [.. catalog.Kept().Concat(engine.Held.Where(h => !engine.WasDropped(h))).Distinct(StringComparer.Ordinal)];
+        [.. catalog.Kept().Concat(engine.Held.Where(h => !engine.WasDropped(h))).Distinct(StringComparer.Ordinal).Where(engine.Counted)];
 
     /// <summary>Whether a model can answer: loaded, or loaded on request.</summary>
     public bool Ready(string model, IReadOnlySet<string> onEngine) => Loaded(model, onEngine) || OnRequest(model, onEngine);

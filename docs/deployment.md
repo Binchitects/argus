@@ -363,13 +363,16 @@ how). **no**: missing, with the reason.
 | `web`, `app` | yes | differs: the app runs as the container's root, which is you | yes, two replicas by default |
 | `postgres` (or external) | yes | yes | yes (a StatefulSet, or `externalDatabase`) |
 | `litellm` | yes | yes | yes |
-| `llamacpp` | yes, every GPU | yes, CDI; no locked-memory limit | differs: `llamacpp.gpus` whole GPUs; the library read only, so no `LLAMA_CACHE` (a preset's `hf-repo` is fetched again); no `ENGINE_RAM_PROTECT` |
+| `llamacpp` | yes, every GPU | yes, CDI; no locked-memory limit | differs: `llamacpp.gpus` whole GPUs (`gpuResource`: `nvidia.com/gpu` or `amd.com/gpu`); no `ENGINE_RAM_PROTECT` |
+| `vllm` | off (`COMPOSE_PROFILES=vllm`, `VLLM_IMAGE`), every GPU; `fake-gpu.yml`: the fake vLLM, no GPU | the same, CDI; no locked-memory limit | off (`vllm.enabled`); a Deployment per `vllm.instances` entry with its GPUs and node; `vllm.fake` |
 | `embed`, `audio`, `searxng` | yes | yes | yes |
 | `argus` | yes | yes | yes |
 | `imagegen`, `videogen` | yes, every GPU | yes, CDI | differs: whole GPUs each; `videogen` off by default |
 | `sandbox` | yes | yes | differs: no network by a NetworkPolicy (the CNI must enforce it); no `pids_limit` (the node's pod PID limit) |
 | `laya` | off (`COMPOSE_PROFILES=laya`) | the same | off (`laya.enabled`); a NetworkPolicy for compose's internal network |
 | `prometheus`, `alertmanager`, `loki` | yes | yes | yes |
+| `valkey` (the gateway's shared counts, LMCache's shared store) | off (`COMPOSE_PROFILES=ha`; `ha.yml` runs `LITELLM_REPLICAS` gateway replicas on it) | the same | off (`valkey.enabled`, with `litellm.replicas`) |
+| `dcgm-exporter` | off (`COMPOSE_PROFILES=dcgm`) | the same, CDI | no: the cluster's (GPU Operator) |
 | `node-exporter`, `cpu-temp-exporter` | yes | yes | yes: the `host-exporters` DaemonSet (`monitoring.hostExporters`) |
 | `promtail` | yes | differs: Podman's socket for Docker's | no: the cluster's log agent ships the pods' logs to Loki |
 | `gpu-exporter` | yes | yes, CDI | no: the cluster's (NVIDIA's DCGM exporter); until Prometheus scrapes one, `GpuExporterDown` fires |
@@ -378,14 +381,14 @@ how). **no**: missing, with the reason.
 | **Volumes** | | | |
 | model library | `MODELS_DIR` | the same | the `arena-models` claim (ReadWriteMany across nodes) or `persistence.models.existingClaim` |
 | `engine`, `directory`, `sandbox` | volumes | the same | claims, ReadWriteMany across nodes |
-| `media-status` | in memory (tmpfs) | the same | differs: a small claim, kept on disk |
+| `media-status`, `vllm-status` | in memory (tmpfs) | the same | differs: small claims, kept on disk |
 | `argus`, `audio`, `prometheus`, `alertmanager`, `loki`, `postgres` | volumes | the same | claims, kept when the release goes |
 | `acme`, the certificates | Traefik's | the same | differs: the TLS Secret (`ingress.tlsSecret`) |
 | the pack library | `packs/` or `ARGUS_PACK_LIBRARY_DIR` | the same | `argus.packLibraryClaim` (empty: none) |
 | `/backups` in the app | `BACKUP_DIR`, read only | the same | no: backups are the cluster's |
 | **Configuration and scripts** | | | |
 | `litellm.yaml` (its 960 s timeouts), `argus.yaml`, `searxng.yml`, `alertmanager.yml`, `loki.yml`, `prometheus/` and its rules | mounted from `config/` | the same | the same files, from the chart's copies |
-| `services/llamacpp/router.sh` (the engine key by `LLAMA_API_KEY`), `services/sd-serve.sh`, `services/cpu-temp-exporter` | mounted | the same | the same files, from the chart's copies |
+| `services/llamacpp/router.sh` (the engine key by `LLAMA_API_KEY`), `services/sd-serve.sh`, `services/cpu-temp-exporter`, `services/vllm/` (the key by `VLLM_API_KEY`), `services/gpu-probe.py`, `tools/fake-vllm` | mounted | the same | the same files, from the chart's copies |
 | `promtail.yml`, `traefik/routes.yml` | mounted | the same | no: the cluster's log agent; the Ingress |
 | `services/power-limits.sh` | mounted | no | no |
 | **Secrets** | `.env` | `.env` | the `arena-secrets` Secret, made at install and kept (or `existingSecret`): the same keys |
@@ -393,11 +396,89 @@ how). **no**: missing, with the reason.
 | **Backup and restore** | `scripts/backup.sh` | `scripts/backup.sh --podman` (with `podman.yml`) | no: the cluster's volume snapshots and a `pg_dumpall` |
 | **Install and upgrade** | `installer.sh`, `scripts/upgrade-test.py` | `installer.sh --podman` | `helm install` / `helm upgrade`; the app and Argus migrate as they start; no upgrade test |
 | **Features** | | | |
-| media borrowing the GPU from idle chat models | yes: every server sees every GPU | yes | differs: each pod has its own GPUs, so a picture never needs to borrow; one GPU shared needs the device plugin's time-slicing |
+| media borrowing the GPU from idle chat models | yes: every server sees every GPU | yes | differs: each pod has its own GPUs, so a picture never needs to borrow; one GPU shared needs the device plugin's time-slicing (a vLLM model put to sleep frees its memory only for pods that share its GPU) |
+| AMD GPUs (ROCm) | `rocm.yml`: `/dev/kfd` and `/dev/dri`, ROCm images | `rocm.yml` after `podman.yml` | `gpuResource: amd.com/gpu`, ROCm images, `engines.backend: rocm` |
 | Argus checks agents' API keys with the app | yes | yes | yes |
 | answer cache for API keys, speech and pictures by the app | yes, with fallback to LiteLLM while the app is down | yes | differs: no answer cache; speech and pictures fail while no app pod is ready ([Helm](#helm)) |
 | TLS | Let's Encrypt (`ACME_EMAIL`) or a certificate of your own | the same | a TLS Secret (cert-manager through `ingress.annotations`); no certificate alerts (they read Traefik's metrics) |
 | app replicas | `scale.yml`, `APP_REPLICAS` | the same | `app.replicas` |
+
+## Engines and GPUs
+
+- **llama.cpp** runs on whatever GPUs the machine has (`LLAMACPP_BACKEND`:
+  `cuda`, `rocm`, `vulkan`, `sycl`, `metal`, or `cpu`); the presets name the
+  GPUs for its backend (`CUDA0`, `ROCm0`...).
+- **vLLM** is off until asked for: `COMPOSE_PROFILES=vllm` with `VLLM_IMAGE`
+  set to a vLLM image you have (none is pulled while the profile is off; Docker
+  Hub's is blocked here, see [multi-gpu-server.md](multi-gpu-server.md) §6),
+  `podman.yml` on Podman (CDI), `vllm.enabled` on Kubernetes (one Deployment per
+  `vllm.instances` entry, each with its GPUs and node). Its supervisor
+  (`services/vllm/supervisor.sh`) runs one `vllm serve` per model the app
+  wants, on that model's GPUs, from the app's desired state in the `engine`
+  volume; it says what each does in `vllm-status`. The key goes by
+  `VLLM_API_KEY`, never a command line. Models come from the library's Hugging
+  Face snapshots (Admin → Models → Hugging Face, *snapshot*).
+- **Without a big GPU**, `fake-gpu.yml` (compose and Podman) or `vllm.fake`
+  (Helm) runs the real supervisor over the fake vLLM (`tools/fake-vllm`), on
+  the python image the stack already has, with no GPU.
+- **AMD GPUs**: `rocm.yml` after the compose files (and after `podman.yml` on
+  Podman) gives the engines `/dev/kfd` and `/dev/dri` and ROCm images
+  (`LLAMACPP_ROCM_IMAGE`, `VLLM_IMAGE`, `SDCPP_GPU_IMAGE`: check each exists
+  for your ROCm first); Helm: `gpuResource: amd.com/gpu`, ROCm images,
+  `engines.backend: rocm`. GPUs are read by `services/gpu-probe.py`
+  (`rocm-smi`) into the hardware file the app reads.
+- **The picture server and the embedder** go on any GPU (`MEDIA_GPU`,
+  `EMBED_GPU`; a picture model's own GPU first) or the CPU; the app charges
+  their memory to that GPU only, and lends only that GPU to a job short of
+  room (a vLLM model there sleeps, then wakes).
+- **Several machines**: one `Engine__Vllm__N__Name`/`Host`/`ConfigDir`/`StatusDir`
+  per vLLM machine (its folders on storage both machines see), or a Helm
+  `vllm.instances` entry per node; servers the app does not run are added under
+  Admin → Models → Other GPU servers.
+
+### Multi-GPU server: bring-up
+
+In this order, on the new server (each step's details in
+[multi-gpu-server.md](multi-gpu-server.md)):
+
+1. **Hardware and firmware.** All GPUs on one CPU socket's PCIe root complex or
+   behind one Gen5 switch; `iommu=pt`, ACS off on the switch; redundant power,
+   208–240 V. Pin the NVIDIA driver (R580 or newer) so the distribution does not
+   upgrade it; install nvidia-container-toolkit with CDI
+   (`nvidia-ctk cdi generate`; AMD: `amd-ctk`, or `rocm.yml`).
+2. **`scripts/gpu-check.sh`** (read only): driver, GPUs, ECC and MIG, peer to
+   peer between every pair, no pair across sockets, power caps, locked memory and
+   shared memory. With nccl-tests built: `--nccl /path/to/all_reduce_perf`
+   (about 40–50 GB/s bus bandwidth over PCIe Gen5 with P2P). Fix every FAIL
+   before going on.
+3. **The engine image** (approve the download): NGC's vLLM image as `VLLM_IMAGE`,
+   or build arena-vllm (`vllm-build.yml`); `COMPOSE_PROFILES=vllm`. Without the
+   image, `fake-gpu.yml` runs the whole path on the fake vLLM first.
+4. **The models** (approve each snapshot's size, shown before it downloads):
+   Admin → Models → Hugging Face → *snapshot*. A realistic first set is about
+   450–500 GB.
+5. **Add each as a vLLM model**, its GPUs left to the advisor's proposal unless
+   you choose; FP8 checkpoints first, NVFP4 only once one passes its smoke test
+   on the pinned vLLM. Load it, ask it a question in the chat, and read its log
+   under Admin → Models if it fails.
+6. **Measure**: `scripts/multiuser-bench.py --scenarios ramp,prefixshare,returnafter
+   --ramp 1..64 --json run.json`, then again with another setting (TP=2×2 against
+   TP=4, a CPU or LMCache tier) and `--compare run.json`. Keep the JSON of each.
+7. **Durability**: `COMPOSE_PROFILES=ha` with `ha.yml` for gateway replicas,
+   `pitr.yml` for Postgres with point-in-time recovery, the `dcgm` profile for
+   per-GPU errors and PCIe throughput.
+
+### Supported configurations
+
+| Configuration | Status |
+|---|---|
+| One NVIDIA GPU (this host's RTX 3090), llama.cpp | Live and unchanged |
+| CPU only; several NVIDIA GPUs of mixed sizes; 4 × 96 GB; 8 × 80 GB; AMD 2 × 192 GB | Placement and advice tested with fake machines; needs real hardware to verify |
+| vLLM (CUDA, ROCm), tensor parallel, copies, sleep for media | Tested with the fake vLLM and the real supervisor in a container; needs the hardware and a vLLM image |
+| Vulkan, SYCL, Metal (llama.cpp) | Presets name them; untested on hardware |
+| Docker, Podman, Kubernetes | The same engine services, checked by `tests/deploy/test_runtime_parity.py`, `check-chart.py` and `helm template` |
+
+The full list, with what each needs: [multi-gpu-server.md](multi-gpu-server.md), "Supported configurations".
 
 ## Models
 
@@ -587,6 +668,21 @@ volumes.
   `--down` removes it later.
 - It refuses the live project's name, and every volume it removes must carry
   its own.
+
+### Point-in-time recovery (PITR)
+
+`pitr.yml` runs the stack's Postgres with pgBackRest (`arena-postgres`, built
+once from the pgvector image already on the host with Debian's pgbackrest
+package: approve the build first): every WAL segment is archived to
+`BACKUP_DIR/pgbackrest` as it is written, so the database can be put back to
+any second. `scripts/backup.sh --pitr full` (weekly) and `--pitr diff`
+(daily) take the backups (four full ones are kept, with their WAL);
+`scripts/restore-drill.sh [--to "YYYY-MM-DD HH:MM:SS+00"]` restores the
+repository to a moment into a scratch container and volume of its own,
+starts it and checks the databases and their people, and never touches the
+stack's Postgres (`--dry-run` says what it would do). The logical dump above
+stays the second line. On Kubernetes, use CloudNativePG with barman-cloud
+backups (an `externalDatabase`), not this file.
 
 ## Rollback
 

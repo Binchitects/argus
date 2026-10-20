@@ -199,6 +199,9 @@ public sealed class ScaleOutTests(AppFixture app)
 
         // "Answer now" from B.
         answering = SendAsync(onA, chat, "Think hard [ponder]");
+        // "Answer now" before the model starts thinking turns the thinking off from the start (no thought is cut short): once
+        // it thinks (ten seconds of it), it is cut.
+        await Task.Delay(TimeSpan.FromSeconds(2));
         await PostUntilAsync(onB, $"/api/chat/conversations/{chat}/hurry", new { }, HttpStatusCode.Accepted);
         var events = await answering;
         Assert.Contains(events, e => e.GetProperty("type").GetString() == "thought" && e.TryGetProperty("cutShort", out var cut) && cut.GetBoolean());

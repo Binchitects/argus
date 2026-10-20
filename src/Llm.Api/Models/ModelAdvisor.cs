@@ -3,24 +3,37 @@ using Llm.Core.Models;
 
 namespace Llm.Api.Models;
 
-/// <summary>The machine the engine runs on, as Prometheus sees it.</summary>
-/// <param name="GpuReserved">What the driver keeps for itself.</param>
-/// <param name="ImageReserve">What the image server may take (IMAGEGEN_MAX_VRAM) when it runs.</param>
+/// <summary>
+/// The machine the engines run on, whatever it has: no GPU at all (CPU only), one, or many, of one vendor or several,
+/// of different sizes. Read from Prometheus or from an engine's hardware file (<see cref="HardwareProbe"/>).
+/// </summary>
+/// <param name="GpuReserved">What the drivers keep for themselves.</param>
 /// <param name="RamReserve">RAM kept for everything else (LLAMACPP_RAM_RESERVE_GB).</param>
-/// <param name="PowerLimit">The GPU's power cap in watts (GPU_POWER_LIMIT_W), and <paramref name="PowerDefault"/> its own.</param>
-/// <param name="Devices">Each GPU, by nvidia-smi's index (the engine's CUDA0, CUDA1... in the same order).</param>
-public sealed record Hardware(string? GpuName, int Gpus, long GpuTotal, long GpuReserved, long ImageReserve, long RamTotal, long RamReserve,
-    double? PowerLimit = null, double? PowerDefault = null, IReadOnlyList<GpuDevice>? Devices = null)
+/// <param name="PowerLimit">The GPUs' lowest power cap in watts (GPU_POWER_LIMIT_W), and <paramref name="PowerDefault"/> their own.</param>
+/// <param name="Devices">Each GPU, by its index as its vendor's tool numbers it (the engine's CUDA0, ROCm0... in the same order).</param>
+/// <param name="Reserves">
+/// What the servers beside the chat models keep on each GPU, by index: the picture server (on the GPU it runs on, not
+/// always the first), the embedder when it runs on a GPU. <see cref="GpuPlan"/> counts them as residents.
+/// </param>
+public sealed record Hardware(string? GpuName, int Gpus, long GpuTotal, long GpuReserved, long RamTotal, long RamReserve,
+    double? PowerLimit = null, double? PowerDefault = null, IReadOnlyList<GpuDevice>? Devices = null, IReadOnlyList<GpuReserve>? Reserves = null)
 {
     /// <summary>What llama.cpp's fit leaves free on each GPU (its --fit-target, 1024 MiB).</summary>
     public const long FitMargin = 1024L << 20;
 
-    public long GpuForModels => Math.Max(0, GpuTotal - GpuReserved - ImageReserve - (FitMargin * Math.Max(1, Gpus)));
+    /// <summary>What the other servers keep on these GPUs (on all of them when <see cref="Devices"/> is not known).</summary>
+    public long ReservedForOthers => Reserves is not { Count: > 0 } r ? 0
+        : Devices is { Count: > 0 } d ? r.Where(x => d.Any(g => g.Index == x.Gpu)).Sum(x => x.Bytes) : r.Sum(x => x.Bytes);
+
+    public long GpuForModels => Gpus == 0 ? 0 : Math.Max(0, GpuTotal - GpuReserved - ReservedForOthers - (FitMargin * Gpus));
     public long RamForModels => Math.Max(0, RamTotal - RamReserve);
 
+    /// <summary>A machine with no GPU: everything runs from RAM.</summary>
+    public static Hardware CpuOnly(long ramTotal, long ramReserve) => new(null, 0, 0, 0, ramTotal, ramReserve, Devices: []);
+
     /// <summary>
-    /// The machine as a model placed on these GPUs sees it (null or empty: all). The image
-    /// server runs on the first GPU, so only a model that uses it gives up its share.
+    /// The machine as a model placed on these GPUs sees it (null or empty: all): their memory, and the reserves of only
+    /// the other servers that run on them.
     /// </summary>
     public Hardware On(IReadOnlyCollection<int>? indices)
     {
@@ -35,10 +48,24 @@ public sealed record Hardware(string? GpuName, int Gpus, long GpuTotal, long Gpu
         }
         return this with
         {
-            GpuName = chosen[0].Name, Gpus = chosen.Count, GpuTotal = chosen.Sum(d => d.Total), GpuReserved = chosen.Sum(d => d.Reserved),
-            ImageReserve = chosen.Any(d => d.Index == all[0].Index) ? ImageReserve : 0, Devices = chosen,
+            GpuName = chosen[0].Name, Gpus = chosen.Count, GpuTotal = chosen.Sum(d => d.Total), GpuReserved = chosen.Sum(d => d.Reserved), Devices = chosen,
+            Reserves = Reserves?.Where(r => chosen.Any(d => d.Index == r.Gpu)).ToList(),
         };
     }
+
+    /// <summary>
+    /// llama.cpp's name for a GPU of this backend (its --device list: CUDA0, ROCm0, Vulkan0, SYCL0, MTL0); null for
+    /// the CPU backend, which places nothing on a GPU.
+    /// </summary>
+    public static string? DevicePrefix(string? backend) => (backend ?? "cuda").ToLowerInvariant() switch
+    {
+        "rocm" or "hip" => "ROCm",
+        "vulkan" => "Vulkan",
+        "sycl" => "SYCL",
+        "metal" => "MTL",
+        "cpu" => null,
+        _ => "CUDA",
+    };
 
     /// <summary>A model's GPUs from its setting ("0,1"); null: all (or a setting that is not a list of indices).</summary>
     public static IReadOnlyList<int>? ParseDevices(string? devices)
@@ -56,8 +83,15 @@ public sealed record Hardware(string? GpuName, int Gpus, long GpuTotal, long Gpu
     }
 }
 
-/// <summary>One GPU: its index as nvidia-smi numbers it, its name, and its memory.</summary>
-public sealed record GpuDevice(int Index, string Name, long Total, long Reserved);
+/// <summary>What a server beside the chat models keeps on a GPU: the picture server, the embedder.</summary>
+public sealed record GpuReserve(int Gpu, string Name, long Bytes);
+
+/// <summary>
+/// One GPU: its index as its vendor's tool numbers it (nvidia-smi, rocm-smi), its name, its memory, who made it
+/// ("nvidia", "amd", "intel", "apple", or another), the backend engines drive it with ("cuda", "rocm", "vulkan",
+/// "sycl", "metal"), and its free memory when the source says it.
+/// </summary>
+public sealed record GpuDevice(int Index, string Name, long Total, long Reserved, string Vendor = "nvidia", string Backend = "cuda", long? Free = null);
 
 public sealed record Bounds(int Min, int Max);
 
@@ -69,7 +103,11 @@ public sealed record ModelLimits(
 
 /// <summary>Settings to start from: the fastest that fit this machine, as far as the estimate tells.</summary>
 public sealed record ModelRecommendation(
-    int Context, int MaxOutput, int Parallel, string KvType, int? Ubatch, bool Mtp, string? DraftHead, int DraftMax, string? Projector, bool Thinking, bool Tools);
+    int Context, int MaxOutput, int Parallel, string KvType, int? Ubatch, bool Mtp, string? DraftHead, int DraftMax, string? Projector, bool Thinking, bool Tools)
+{
+    /// <summary>The GPUs proposed for it on this machine ("0,1"); null: llama.cpp's own choice (all of them).</summary>
+    public string? Devices { get; init; }
+}
 
 /// <summary>
 /// Where the model's bytes go with these settings. <see cref="Fit"/>: "gpu" (all of it on the GPU),
@@ -81,8 +119,11 @@ public sealed record MemoryEstimate(
     long RamWeights, long RamCache, long RamTotal, long? RamBudget,
     int GpuLayers, int Layers, int ExpertLayersInRam, int MoeLayers, string Fit, bool Approximate);
 
-/// <summary>What one GPU would hold of the models kept loaded: its budget for models, their estimate, and which they are.</summary>
-public sealed record GpuUse(int Index, string Name, long Budget, long Need, IReadOnlyList<string> Models);
+/// <summary>
+/// What one GPU would hold (<see cref="GpuPlan"/>): its room (its memory less the driver's share and llama.cpp's margin),
+/// what its residents need of it, and which they are: chat models, vLLM groups, the picture server, the embedder.
+/// </summary>
+public sealed record GpuUse(int Index, string Name, long Budget, long Need, IReadOnlyList<string> Models, string Vendor = "nvidia", long Total = 0);
 
 /// <summary>Whether the models kept loaded fit together, and how full each GPU would be.</summary>
 public sealed record KeptPlan(IReadOnlyList<ModelProblem> Problems, IReadOnlyList<GpuUse> Gpus)
@@ -178,6 +219,88 @@ public static class ModelAdvisor
         return new ModelAdvice(p, limits, recommended, estimate, problems, hw);
     }
 
+    /// <summary>The token cache types vLLM takes (--kv-cache-dtype).</summary>
+    public static readonly string[] VllmCacheTypes = ["fp8", "fp8_e4m3", "fp8_e5m2", "auto"];
+
+    /// <summary>
+    /// The settings a model has that its engine's kind does not (EngineKinds): llama.cpp runs one copy on its GPUs, without
+    /// vLLM's share of each GPU, quantisation, speculative decoding by EAGLE, or a CPU tier; vLLM has none of llama.cpp's
+    /// placement by layers, experts in RAM, prompt step, YaRN, extra preset lines or projector file.
+    /// </summary>
+    public static IReadOnlyList<ModelProblem> KindProblems(LocalModel m)
+    {
+        var problems = new List<ModelProblem>();
+        var kind = EngineKinds.Of(m.EngineKind);
+        if (kind is null)
+        {
+            problems.Add(new("engineKind", $"There is no engine kind {m.EngineKind}.", true));
+            return problems;
+        }
+        void No(bool set, string field, string what)
+        {
+            if (set)
+            {
+                problems.Add(new(field, $"{kind.Label} has no {what}.", true));
+            }
+        }
+        No(m.Replicas != 1 && !kind.Replicas, "replicas", "copies of one model (one copy runs on its GPUs)");
+        No(m.Replicas < 1 || m.Replicas > 8, "replicas", "fewer than 1 or more than 8 copies");
+        if (kind.Kind == EngineKinds.LlamaCpp)
+        {
+            No(m.GpuMemoryUtilization is not null, "gpuMemoryUtilization", "share of each GPU to set (it fits itself to what is free)");
+            No(m.Quantization is not null, "quantization", "quantisation to choose (the GGUF file has its own)");
+            No(m.SpecDecode is not null, "specDecode", "speculative decoding but its own MTP (Draft tokens)");
+            No(m.KvCpuGb is > 0 || m.KvTier is not null || m.KvDiskGb is > 0, "kvCpuGb", "tiers for its token cache to set (it keeps conversations that lost their slot in RAM by itself)");
+        }
+        else
+        {
+            No(m.Placement == "manual", "placement", "placement by hand (it holds every layer on its GPUs)");
+            No(m.CpuMoe > 0, "cpuMoe", "experts in RAM");
+            No(m.Ubatch is not null, "ubatch", "prompt step to set");
+            No(m.Yarn, "yarn", "YaRN switch here (its config says how far it stretches)");
+            No(m.ExtraPreset is not null, "extra", "llama.cpp preset lines");
+            No(m.Projector is not null, "projector", "projector file (a model that sees has it in its folder)");
+            No(m.Mtp, "mtp", "llama.cpp's MTP switch: choose speculative decoding (mtp or eagle3) instead");
+            if (!VllmCacheTypes.Contains(m.KvType))
+            {
+                problems.Add(new("kvType", $"vLLM's token cache is {string.Join(", ", VllmCacheTypes)}.", true));
+            }
+            if (m.GpuMemoryUtilization is < 0.1 or > 0.98)
+            {
+                problems.Add(new("gpuMemoryUtilization", "The share of each GPU is 0.10 to 0.98.", true));
+            }
+            if (m.SpecDecode is not (null or "mtp" or "eagle3"))
+            {
+                problems.Add(new("specDecode", "Speculative decoding is mtp (the model's own layers) or eagle3 (with a draft model).", true));
+            }
+            else if (m.SpecDecode == "eagle3" && m.DraftHead is null)
+            {
+                problems.Add(new("draftHead", "EAGLE-3 needs its draft model: a snapshot folder in the library.", true));
+            }
+            if (m.KvCpuGb is < 0 or > 4096)
+            {
+                problems.Add(new("kvCpuGb", "The CPU tier is 0 to 4,096 GB.", true));
+            }
+            if (m.KvTier is not (null or "cpu" or "lmcache"))
+            {
+                problems.Add(new("kvTier", "The cache's tier is cpu (vLLM's own) or lmcache.", true));
+            }
+            if (m.KvDiskGb is > 0 && m.KvTier != "lmcache")
+            {
+                problems.Add(new("kvDiskGb", "A disk tier needs LMCache (the cache's tier: lmcache).", true));
+            }
+            if (m.KvDiskGb is < 0 or > 65536)
+            {
+                problems.Add(new("kvDiskGb", "The disk tier is 0 to 65,536 GB.", true));
+            }
+            if (m.Parallel is < 1 or > 1024)
+            {
+                problems.Add(new("parallel", "Answers at once (max-num-seqs) are 1 to 1,024.", true));
+            }
+        }
+        return problems;
+    }
+
     private static bool Compatible(ModelProfile model, ModelProfile projector) =>
         projector.Projector?.ProjectionDim is not { } dim || model.EmbeddingLength is not { } embd || dim == embd;
 
@@ -266,25 +389,22 @@ public static class ModelAdvisor
     }
 
     /// <summary>
-    /// Whether the models kept loaded fit together. Each one's estimate (alone, on its GPUs)
-    /// is spread over its GPUs by what each has for models. Their caches and buffers must
-    /// fit the GPUs and RAM together, or one would not load; past that, a GPU asked for more
-    /// than it has means the last to load puts layers in RAM, and RAM asked for more means
-    /// weights page in from disk: slower, not broken.
+    /// Whether the models kept loaded fit together, beside <paramref name="others"/> (vLLM groups, which take their share
+    /// whatever they hold) and the servers' reserves, by <see cref="GpuPlan"/>. Each llama.cpp model's estimate (alone, on
+    /// its GPUs) is spread over its GPUs by what each has for models. Their caches and buffers must fit the GPUs and RAM
+    /// together, or one would not load; past that, a GPU asked for more than it has means the last to load puts layers in
+    /// RAM, and RAM asked for more means weights page in from disk: slower, not broken.
     /// </summary>
-    public static KeptPlan PlanKept(IReadOnlyList<(LocalModel Model, LibraryEntry? File)> kept, IReadOnlyList<LibraryEntry> library, Hardware? hw)
+    public static KeptPlan PlanKept(IReadOnlyList<(LocalModel Model, LibraryEntry? File)> kept, IReadOnlyList<LibraryEntry> library, Hardware? hw,
+        IReadOnlyList<Resident>? others = null, long othersRam = 0)
     {
         var problems = new List<ModelProblem>();
-        if (hw is null || kept.Count == 0)
+        if (hw is null || (kept.Count == 0 && others is not { Count: > 0 }))
         {
             return new KeptPlan(problems, []);
         }
-        var devices = hw.Devices is { Count: > 0 } d ? d : [new GpuDevice(0, hw.GpuName ?? "GPU", hw.GpuTotal, hw.GpuReserved)];
-        var budget = devices.ToDictionary(x => x.Index,
-            x => Math.Max(0, x.Total - x.Reserved - Hardware.FitMargin - (x.Index == devices[0].Index ? hw.ImageReserve : 0)));
-        var need = devices.ToDictionary(x => x.Index, _ => 0L);
-        var users = devices.ToDictionary(x => x.Index, _ => new List<string>());
-        long buffers = 0, ram = 0;
+        var residents = new List<Resident>(others ?? []);
+        long buffers = 0, ram = othersRam;
         foreach (var (m, file) in kept)
         {
             if (file is null)
@@ -296,31 +416,25 @@ public static class ModelAdvisor
             {
                 continue;
             }
-            var on = Hardware.ParseDevices(m.Devices);
-            var mine = devices.Where(x => on is null || on.Contains(x.Index)).ToList();
-            var capacity = mine.Sum(x => budget[x.Index]);
-            foreach (var x in mine)
-            {
-                need[x.Index] += capacity > 0 ? (long)(e.GpuTotal * ((double)budget[x.Index] / capacity)) : e.GpuTotal / mine.Count;
-                users[x.Index].Add(m.Name);
-            }
+            residents.Add(GpuPlan.Spread(m.Name, "llamacpp", hw, Hardware.ParseDevices(m.Devices), e.GpuTotal));
             buffers += e.GpuCache + e.GpuCompute + e.RamCache;
             ram += e.RamTotal;
         }
-        var gpus = devices.Select(x => new GpuUse(x.Index, x.Name, budget[x.Index], need[x.Index], users[x.Index])).ToList();
+        if (residents.Count > 0)
+        {
+            residents.AddRange(GpuPlan.Reserved(hw));
+        }
+        var plan = GpuPlan.Of(hw, residents);
         if (buffers > hw.GpuForModels + hw.RamForModels)
         {
             problems.Add(new("memory", $"Together their caches and buffers need {G(buffers)}, and the GPUs and RAM have {G(hw.GpuForModels + hw.RamForModels)} for models: one would not load. Keep fewer loaded, or give them smaller contexts.", true));
         }
-        foreach (var g in gpus.Where(g => g.Need > g.Budget))
-        {
-            problems.Add(new("memory", $"On GPU {g.Index} ({g.Name}) they would use about {G(g.Need)} of its {G(g.Budget)}: the last to load puts layers in RAM and answers slower. Place them on different GPUs, or keep fewer loaded.", false));
-        }
+        problems.AddRange(plan.Problems);
         if (ram > hw.RamForModels)
         {
             problems.Add(new("memory", $"Together they keep about {G(ram)} in RAM, which has {G(hw.RamForModels)} for models: weights page in from disk and answers slow down.", false));
         }
-        return new KeptPlan(problems, gpus);
+        return new KeptPlan(problems, plan.Gpus);
     }
 
     private static void MemoryProblems(MemoryEstimate e, bool manual, List<ModelProblem> problems)

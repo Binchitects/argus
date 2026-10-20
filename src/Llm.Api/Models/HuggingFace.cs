@@ -32,9 +32,15 @@ public sealed record HfFile(string Path, long Size, string? Sha256);
 /// </summary>
 public sealed record HfGguf(string Name, string? Quant, long Size, IReadOnlyList<HfFile> Files, bool Projector);
 
-/// <summary>A repository's details: its revision, licence, what GGUF says of the model, and its GGUF files grouped as models.</summary>
+/// <summary>
+/// What vLLM needs of a repository: its safetensors weights, config and tokenizer, and how big that is, the parts vLLM never
+/// reads left out (original/ and metal/ copies, GGUF files, other weight formats, the read-me), and how much that leaves out.
+/// </summary>
+public sealed record HfSnapshot(long Size, IReadOnlyList<HfFile> Files, long Skipped);
+
+/// <summary>A repository's details: its revision, licence, what GGUF says of the model, its GGUF files grouped as models, and its snapshot for vLLM.</summary>
 public sealed record HfRepo(string Id, string Sha, bool Gated, string? License, string? Architecture, long? Parameters, int? Context,
-    long Downloads, long Likes, string? LastModified, IReadOnlyList<HfGguf> Models, IReadOnlyList<HfFile> Weights);
+    long Downloads, long Likes, string? LastModified, IReadOnlyList<HfGguf> Models, IReadOnlyList<HfFile> Weights, HfSnapshot? Snapshot = null);
 
 /// <summary>Hugging Face's API: searching GGUF models, a repository's files, and downloading one (with resume).</summary>
 public sealed partial class HuggingFace(HttpClient http, IOptionsMonitor<HuggingFaceOptions> options)
@@ -112,8 +118,35 @@ public sealed partial class HuggingFace(HttpClient http, IOptionsMonitor<Hugging
         return new HfRepo(id, sha, info["gated"] is JsonValue g && (g.TryGetValue<bool>(out var b) ? b : g.TryGetValue<string>(out var s) && s.Length > 0),
             info["cardData"]?["license"]?.ToString(), gguf?["architecture"]?.GetValue<string>(), gguf?["total"] is { } total ? Long(total) : null,
             gguf?["context_length"] is { } ctx ? (int)Long(ctx) : null, Long(info["downloads"]), Long(info["likes"]), info["lastModified"]?.GetValue<string>(),
-            Group(files), [.. files.Where(f => Weights.Any(e => f.Path.EndsWith(e, StringComparison.OrdinalIgnoreCase))).OrderBy(f => f.Path, StringComparer.Ordinal)]);
+            Group(files), [.. files.Where(f => Weights.Any(e => f.Path.EndsWith(e, StringComparison.OrdinalIgnoreCase))).OrderBy(f => f.Path, StringComparer.Ordinal)],
+            SnapshotOf(files));
     }
+
+    /// <summary>The files of a snapshot vLLM loads: weights, config, tokenizer and chat template.</summary>
+    private static readonly string[] SnapshotKinds = [".safetensors", ".json", ".model", ".tiktoken", ".txt", ".jinja"];
+
+    /// <summary>The folders vLLM never reads: the original checkpoint's copy, Apple's, and the like.</summary>
+    private static readonly string[] SkippedFolders = ["original/", "metal/"];
+
+    /// <summary>
+    /// What vLLM needs of these files (<see cref="HfSnapshot"/>); null without safetensors weights or a config.json at the
+    /// repository's root.
+    /// </summary>
+    public static HfSnapshot? SnapshotOf(IReadOnlyList<HfFile> files)
+    {
+        bool Wanted(HfFile f) => !SkippedFolders.Any(d => f.Path.StartsWith(d, StringComparison.Ordinal) || f.Path.Contains("/" + d, StringComparison.Ordinal))
+            && SnapshotKinds.Any(e => f.Path.EndsWith(e, StringComparison.OrdinalIgnoreCase))
+            && !System.IO.Path.GetFileName(f.Path).StartsWith('.');
+        var chosen = files.Where(Wanted).OrderBy(f => f.Path, StringComparer.Ordinal).ToList();
+        if (!chosen.Any(f => f.Path == "config.json") || !chosen.Any(f => f.Path.EndsWith(".safetensors", StringComparison.OrdinalIgnoreCase)))
+        {
+            return null;
+        }
+        return new HfSnapshot(chosen.Sum(f => f.Size), chosen, files.Except(chosen).Sum(f => f.Size));
+    }
+
+    /// <summary>Where a repository's snapshot lands in the library: hf/ORG/REPO@REVISION, the revision being the commit it is taken at.</summary>
+    public static string SnapshotDir(string repo, string sha) => $"hf/{repo}@{sha}";
 
     /// <summary>A repository's details, its current revision, and every file in it.</summary>
     public async Task<(JsonObject Info, string Sha, IReadOnlyList<HfFile> Files)> TreeAsync(string id, CancellationToken ct)

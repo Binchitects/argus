@@ -149,6 +149,12 @@ public sealed partial class EngineRoute
         /// <summary>The slot to send as id_slot; null: send none.</summary>
         public int? Slot => Lease?.Slot;
 
+        /// <summary>
+        /// The model to send the request to in place of the one asked for: one copy of a vLLM model (NAME@i, the same for the
+        /// whole conversation), or its fallback while it cannot answer; null: the one asked for.
+        /// </summary>
+        public string? Model { get; internal set; }
+
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _ended, 1) == 0)
@@ -164,7 +170,9 @@ public sealed partial class EngineRoute
     /// null. The model is in use from now until the request ends (it is disposed): a look for room for another does not
     /// unload it meanwhile.
     /// </summary>
-    public async Task<Sending> TakeAsync(string? model, Guid? conversation, CancellationToken ct)
+    public Task<Sending> TakeAsync(string? model, Guid? conversation, CancellationToken ct) => TakeAsync(model, conversation, true, ct);
+
+    private async Task<Sending> TakeAsync(string? model, Guid? conversation, bool mayFallBack, CancellationToken ct)
     {
         if (!Ours(model))
         {
@@ -181,7 +189,21 @@ public sealed partial class EngineRoute
             Tell(model);
             sending.Lease = await LeaseAsync(model, conversation, ct);
             await KeepOnDiskAsync(model, sending.Lease, conversation, ct);
+            // A model of several copies: a conversation stays on one, where its prefix is cached.
+            if (engine.Places.TryGetValue(model, out var place) && place.Replicas > 1 && conversation is { } c)
+            {
+                sending.Model = $"{model}@{Copy(c, place.Replicas).ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+            }
             return sending;
+        }
+        catch (ChatGatewayException ex) when (ex.NotLoaded && mayFallBack && FallbackOf(model) is { } fallback)
+        {
+            // It cannot answer now (failed, restarting, no room): its fallback does.
+            sending.Dispose();
+            LogFallback(logger, model, fallback, ex.Message);
+            var other = await TakeAsync(fallback, conversation, false, ct);
+            other.Model ??= fallback;
+            return other;
         }
         catch
         {
@@ -229,6 +251,12 @@ public sealed partial class EngineRoute
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Keeping slot {Slot} of {Model} on disk failed: {Why}")]
     private static partial void LogKeepFailed(ILogger logger, string model, int slot, string why);
+    /// <summary>The copy a conversation stays on: by its id, the same on every replica of the app.</summary>
+    public static int Copy(Guid conversation, int copies) => (int)(BitConverter.ToUInt32(conversation.ToByteArray(), 0) % (uint)Math.Max(1, copies));
+
+    /// <summary>The model that answers for <paramref name="model"/> while it cannot (Admin → Models), or null.</summary>
+    public string? FallbackOf(string? model) =>
+        model is not null && engine.Places.TryGetValue(model, out var p) && p.Fallback is { Length: > 0 } f && f != model ? f : null;
 
     /// <summary>The slot for a request to <paramref name="model"/>, a model of this engine ready for it.</summary>
     private async Task<SlotTable.Lease> LeaseAsync(string model, Guid? conversation, CancellationToken ct)
@@ -257,6 +285,10 @@ public sealed partial class EngineRoute
         {
             return null;
         }
+        if (!engine.Counted(model))
+        {
+            return await StartForKeyAsync(model, ct);
+        }
         try
         {
             // Wanted before anything is looked at, as TakeAsync counts its own; and again once let through.
@@ -264,13 +296,116 @@ public sealed partial class EngineRoute
             await ReadyAsync(model, ct);
             Want(model);
             Tell(model);
-            return null;
+            return LineFull(model);
         }
         catch (ChatGatewayException ex) when (ex.NotLoaded)
         {
-            return ex.Message;
+            // An API key names its model itself: it is told which answers in its place.
+            return FallbackOf(model) is { } fallback ? $"{ex.Message} {fallback} answers in its place: send the request to {fallback}." : ex.Message;
         }
     }
+
+    /// <summary>
+    /// An API key's request for a vLLM model, answered at once (an API client does not wait minutes inside the gateway's
+    /// check): loaded, it goes; else it is started when its GPUs have room now (one look, no waiting), and the request goes
+    /// on to the gateway when the model has a fallback (the gateway's fallbacks answer while it starts) or is refused saying
+    /// when to try again.
+    /// </summary>
+    private async Task<string?> StartForKeyAsync(string model, CancellationToken ct)
+    {
+        Want(model);
+        var status = await StatusAsync(model, ct);
+        if (status == "loaded")
+        {
+            Tell(model);
+            return await PressureAsync(model, ct);
+        }
+        var fallback = FallbackOf(model);
+        string why;
+        if (engine.Lent is { } lent && engine.Blocks(model))
+        {
+            why = $"{model} waits while its GPU makes a {lent.Kind} with {lent.Media}.";
+        }
+        else if (status is "loading" or "unloading")
+        {
+            why = $"{model} is starting.";
+        }
+        else if (engine.StatusOf(model) == "failed" && !engine.MayAsk(model))
+        {
+            why = $"{model} could not be started just now.";
+        }
+        else
+        {
+            IReadOnlyList<EngineModel> models;
+            try
+            {
+                var asked = engine.Asking();
+                models = engine.Seen(await client.ModelsAsync(ct), asked);
+            }
+            catch (EngineException ex)
+            {
+                return fallback is null ? $"{model} cannot be started now: {ex.Message}" : null;
+            }
+            var room = await LookGpusAsync(model, models, TimeSpan.Zero, ct);
+            if (room is Room.Free or Room.Made)
+            {
+                try
+                {
+                    await client.LoadAsync(model, ct);
+                    LogStarting(logger, model);
+                    why = $"{model} is starting (a large model takes a few minutes).";
+                }
+                catch (EngineException ex)
+                {
+                    _coming.TryRemove(model, out _);
+                    why = $"{model} cannot be started now: {ex.Message}";
+                }
+            }
+            else
+            {
+                why = $"{model} has no room on its GPUs now: the models there are answering or kept loaded.";
+            }
+        }
+        // With a fallback, the gateway's fallbacks answer (it reaches the model, fails at once, and goes on); without, say when.
+        return fallback is not null ? null : $"{why} Try again in a minute or two.";
+    }
+
+    /// <summary>
+    /// Admission for an API key's request to a loaded vLLM model, by what the engine says of itself: refused (to try again
+    /// shortly) while requests already wait inside it beyond a quarter of its places, or its token cache is nearly full. The
+    /// app queues fairly where it can see the line; vLLM's own queue is not let grow by API keys, and the chat's requests
+    /// go ahead of theirs inside it (priority).
+    /// </summary>
+    private async Task<string?> PressureAsync(string model, CancellationToken ct)
+    {
+        if (await client.CapacityAsync(model, Quick, ct) is not { } c)
+        {
+            return null;
+        }
+        if (c.Waiting > Math.Max(2, c.Count / 4))
+        {
+            return $"{model} is busy: {c.Waiting} requests wait inside it. Try again in 30 seconds.";
+        }
+        if (c.KvUsage >= 0.97)
+        {
+            return $"{model}'s token cache is full. Try again in 30 seconds.";
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// For an API key's request to a llama.cpp model: refused (to try again shortly) while more people wait in the chat's line
+    /// for it than it has places. The chat's line is fair (AnswerGate); an API key does not jump it.
+    /// </summary>
+    private string? LineFull(string model)
+    {
+        var (_, waiting) = gate.Now(model);
+        var places = gate.PlacesOf(model);
+        return places > 0 && waiting > places ? $"{model} is busy: {waiting} answers of the chat wait for it. Try again in 30 seconds." : null;
+    }
+
+    /// <summary>The kind of engine a model runs on (EngineKinds); llama.cpp's for one not known.</summary>
+    public string KindOf(string? model) => model is null ? Llm.Core.Models.EngineKinds.LlamaCpp : engine.KindOf(model);
 
     /// <summary>
     /// The engine was told to unload <paramref name="model"/> (an admin's Unload, working hours that ended): it counts as
@@ -321,6 +456,72 @@ public sealed partial class EngineRoute
             // This request has the engine load it again: a try, after which the next wait is longer.
             engine.Tried(model);
         }
+        try
+        {
+            await StartAsync(model, ct);
+        }
+        catch (ChatGatewayException)
+        {
+            // It did not start: the place it was given on its GPUs is free again.
+            _coming.TryRemove(model, out _);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// A vLLM model is started by the app (llama.cpp's router loads a model a request names by itself): its processes into
+    /// its engine's desired state, woken if it slept, then waited for until it is ready (a large model takes minutes; the
+    /// chat says why it waits), at most Engine:VllmStartWait. One that fails to start is refused, as one llama.cpp failed.
+    /// </summary>
+    private async Task StartAsync(string model, CancellationToken ct)
+    {
+        if (engine.Counted(model) || await StatusAsync(model, ct) == "loaded")
+        {
+            return;
+        }
+        try
+        {
+            await client.LoadAsync(model, ct);
+        }
+        catch (EngineException ex)
+        {
+            throw new ChatGatewayException($"{model} cannot be started now: {ex.Message}", 503) { NotLoaded = true };
+        }
+        var told = false;
+        // Real time: the engine's.
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        while (waited.Elapsed < options.Value.VllmStartWait)
+        {
+            string? status;
+            try
+            {
+                var asked = engine.Asking();
+                status = engine.Seen(await client.ModelsAsync(ct), asked).FirstOrDefault(m => m.Name == model)?.Status;
+            }
+            catch (EngineException)
+            {
+                status = null;
+            }
+            if (status == "loaded")
+            {
+                return;
+            }
+            if (status == "failed")
+            {
+                throw new ChatGatewayException($"{model} could not be started (its engine's log says why under Admin → Models). Choose another model.", 503) { NotLoaded = true };
+            }
+            if (!told)
+            {
+                told = true;
+                LogStarting(logger, model);
+                if (Waiting.Value is { } say)
+                {
+                    await say($"{model} is starting on its GPUs: a large model takes a few minutes.");
+                }
+            }
+            await Task.Delay(TimeSpan.FromSeconds(1), ct);
+        }
+        throw new ChatGatewayException($"{model} did not start within {options.Value.VllmStartWait.TotalMinutes:0} minutes. Choose another model, or ask an admin.", 503) { NotLoaded = true };
     }
 
     /// <summary>
@@ -337,7 +538,7 @@ public sealed partial class EngineRoute
     private async Task WhileLentAsync(string model, CancellationToken ct)
     {
         var told = false;
-        while (engine.Lent is { } lent && engine.StatusOf(model) is not ("loaded" or "loading"))
+        while (engine.Lent is { } lent && engine.Blocks(model) && engine.StatusOf(model) is not ("loaded" or "loading"))
         {
             if (!told)
             {
@@ -354,14 +555,19 @@ public sealed partial class EngineRoute
 
     /// <summary>
     /// Room on the GPU for a picture or video job (<paramref name="media"/>, which makes a <paramref name="kind"/>): each loaded
-    /// chat model not in <paramref name="kept"/> unloads once it is idle, through the same engine call an admin's Unload uses,
-    /// waiting <paramref name="wait"/> at most for those in use. Each one unloaded goes in <paramref name="made"/> at once: a
-    /// job stopped meanwhile gives those back.
+    /// chat model on <paramref name="gpus"/> (null: any) makes room once it is idle, waiting <paramref name="wait"/> at most for
+    /// those in use. A vLLM model that may sleep sleeps (its weights to RAM: back in seconds), kept loaded or not, and goes in
+    /// <paramref name="slept"/>; any other not in <paramref name="kept"/> unloads, through the same engine call an admin's Unload
+    /// uses, and goes in <paramref name="made"/> at once: a job stopped meanwhile gives those back. A vLLM model whose sleep
+    /// fails unloads instead. A model on other GPUs is never touched (a vLLM group sleeps whole: all its GPUs free).
     /// </summary>
-    public async Task MakeRoomAsync(string media, string kind, IReadOnlyCollection<string> kept, TimeSpan wait, ICollection<string> made, CancellationToken ct)
+    public async Task MakeRoomAsync(string media, string kind, IReadOnlyCollection<string> kept, TimeSpan wait, ICollection<string> made, CancellationToken ct,
+        IReadOnlyCollection<int>? gpus = null, ICollection<string>? slept = null)
     {
         // Real time: the job waits for it, whatever the app's clock says.
         var waited = System.Diagnostics.Stopwatch.StartNew();
+        // Kept models whose sleep was refused: they stay as they are, and are not waited for.
+        var stays = new HashSet<string>(StringComparer.Ordinal);
         while (true)
         {
             IReadOnlyList<EngineModel> models;
@@ -376,8 +582,10 @@ public sealed partial class EngineRoute
                 LogRoomFailed(logger, "the engine's models", ex.Message);
                 return;
             }
-            // Loading ones too: a request let through before the GPU was lent; each is unloaded once it has loaded and is idle.
-            var spares = models.Where(m => m.Status is "loaded" or "loading" && !kept.Contains(m.Name)).ToList();
+            bool OnLent(string name) => gpus is not { Count: > 0 } || !engine.Places.TryGetValue(name, out var p) || p.PerGpu.Count == 0 || p.PerGpu.Keys.Any(gpus.Contains);
+            bool Sleeps(string name) => slept is not null && !engine.Counted(name) && engine.Places.ContainsKey(name);
+            // Loading ones too: a request let through before the GPU was lent; each makes room once it has loaded and is idle.
+            var spares = models.Where(m => m.Status is "loaded" or "loading" && OnLent(m.Name) && !stays.Contains(m.Name) && (!kept.Contains(m.Name) || Sleeps(m.Name))).ToList();
             if (spares.Count == 0)
             {
                 return;
@@ -390,6 +598,31 @@ public sealed partial class EngineRoute
                 if (InUse(spare) || await ViewAsync(spare, ct) is not { } view || view.Seen is { Busy.Count: > 0 })
                 {
                     continue;
+                }
+                if (Sleeps(spare))
+                {
+                    // Asleep: its weights in RAM, its GPUs free, back in seconds when the job ends.
+                    try
+                    {
+                        if (!slept!.Contains(spare))
+                        {
+                            await client.SleepAsync(spare, true, ct);
+                            LogSlept(logger, spare, media);
+                            slept.Add(spare);
+                        }
+                        continue;
+                    }
+                    catch (EngineException ex) when (!kept.Contains(spare))
+                    {
+                        // It may not sleep (or could not): it unloads instead.
+                        LogRoomFailed(logger, spare, ex.Message);
+                    }
+                    catch (EngineException ex)
+                    {
+                        LogRoomFailed(logger, spare, ex.Message);
+                        stays.Add(spare);
+                        continue;
+                    }
                 }
                 // Unloaded from now on for every request; one that came for it meanwhile keeps it.
                 engine.Unloading(spare, $"making room for {media} (a {kind})");
@@ -544,7 +777,7 @@ public sealed partial class EngineRoute
                 return;
             }
         }
-        if (status is not ("unloaded" or "failed" or "unloading"))
+        if (status is not ("unloaded" or "failed" or "unloading" or "sleeping"))
         {
             return;
         }
@@ -558,9 +791,12 @@ public sealed partial class EngineRoute
             if (room == Room.None)
             {
                 LogFull(logger, model);
-                throw new ChatGatewayException($"{model} cannot be loaded now: each place in the engine is taken by, or kept for, "
-                    + $"{string.Join(", ", engine.Held.Where(h => h != model))} (kept loaded, loaded by an admin, or used by everyone). "
-                    + "Choose a model that is loaded, or ask an admin to raise Models loaded at once.", 503) { NotLoaded = true };
+                throw new ChatGatewayException(engine.Counted(model)
+                    ? $"{model} cannot be loaded now: each place in the engine is taken by, or kept for, "
+                        + $"{string.Join(", ", engine.Held.Where(h => h != model))} (kept loaded, loaded by an admin, or used by everyone). "
+                        + "Choose a model that is loaded, or ask an admin to raise Models loaded at once."
+                    : $"{model} cannot be loaded now: its GPUs are held by models that never make room (kept loaded, or used by everyone). "
+                        + "Choose a model that is loaded, or ask an admin to place it on other GPUs.", 503) { NotLoaded = true };
             }
             if (clock.GetUtcNow() >= until)
             {
@@ -592,13 +828,120 @@ public sealed partial class EngineRoute
         }
         var now = clock.GetUtcNow();
         var models = engine.Now.Models;
+        if (!engine.Counted(model))
+        {
+            // A vLLM model: whether its GPUs have room beside what is up there now.
+            return Fits(model, [.. models.Where(m => m.Status is "loaded" or "loading" or "unloading").Select(m => m.Name)]).Fits;
+        }
+        models = [.. models.Where(m => engine.Counted(m.Name))];
         bool Up(string name) => models.FirstOrDefault(m => m.Name == name)?.Status is "loaded" or "loading";
-        var held = engine.Held;
+        var held = engine.Held.Where(engine.Counted).ToList();
         // A model still stopping takes its place until it has stopped.
         var up = models.Count(m => m.Status is "loaded" or "loading" or "unloading" && m.Name != model);
         var reserved = held.Count(h => h != model && !Up(h) && !engine.WasDropped(h) && models.Any(m => m.Name == h));
-        var coming = _coming.Count(c => c.Key != model && now - c.Value < OnItsWay && !Up(c.Key) && !held.Contains(c.Key));
+        var coming = _coming.Count(c => c.Key != model && now - c.Value < OnItsWay && !Up(c.Key) && !held.Contains(c.Key) && engine.Counted(c.Key));
         return up + reserved + coming < options.Value.ModelsMax;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="model"/>'s GPUs hold it beside the models <paramref name="up"/> and the servers' reserves
+    /// (GpuPlan, by the places the watcher worked out), and on which of its GPUs it is short. A model without figures fits.
+    /// </summary>
+    public (bool Fits, IReadOnlyList<int> Short) Fits(string model, IReadOnlyCollection<string> up)
+    {
+        var places = engine.Places;
+        if (engine.Hardware is not { } hw || !places.TryGetValue(model, out var me) || me.PerGpu.Count == 0)
+        {
+            return (true, []);
+        }
+        var residents = up.Where(n => n != model && places.ContainsKey(n))
+            .Select(n => new Resident(n, places[n].Kind, places[n].PerGpu, places[n].Kind == Llm.Core.Models.EngineKinds.Vllm))
+            .Concat(GpuPlan.Reserved(hw)).Append(new Resident(model, me.Kind, me.PerGpu, true));
+        var shortOn = GpuPlan.Of(hw, residents).Gpus.Where(g => me.PerGpu.ContainsKey(g.Index) && g.Need > g.Budget).Select(g => g.Index).ToList();
+        return (shortOn.Count == 0, shortOn);
+    }
+
+    /// <summary>
+    /// Room for a model whose room is GPU memory (vLLM's) by one look: free when its GPUs hold it beside what is up there,
+    /// else made by unloading idle models that may make room and sit on the GPUs it is short on (only those: a model on other
+    /// GPUs never goes for it), smallest first; Busy while those are in use or stopping; None when every model there never
+    /// makes room.
+    /// </summary>
+    private async Task<Room> LookGpusAsync(string model, IReadOnlyList<EngineModel> models, TimeSpan quiet, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        // A model asleep keeps nothing on its GPUs; one stopping keeps its memory until it has stopped.
+        var up = models.Where(m => m.Status is "loaded" or "loading" or "unloading" && m.Name != model).Select(m => m.Name)
+            .Concat(_coming.Where(c => c.Key != model && now - c.Value < OnItsWay).Select(c => c.Key)).Distinct(StringComparer.Ordinal).ToList();
+        var (fits, shortOn) = Fits(model, up);
+        if (fits)
+        {
+            Coming(model);
+            return Room.Free;
+        }
+        var places = engine.Places;
+        bool Touches(string n) => places.TryGetValue(n, out var p) && p.PerGpu.Keys.Any(shortOn.Contains);
+        var loaded = models.Where(m => m.Status == "loaded").Select(m => m.Name).ToList();
+        var spares = engine.Spare.Where(s => loaded.Contains(s) && Touches(s)).ToList();
+        if (spares.Count == 0)
+        {
+            // Only models that never make room there, unless one is on its way in or out (wait for it).
+            return up.Any(n => Touches(n) && models.FirstOrDefault(m => m.Name == n)?.Status is not "loaded") ? Room.Busy : Room.None;
+        }
+        foreach (var spare in spares)
+        {
+            if (!await IdleAsync(spare, ct))
+            {
+                _quiet.TryRemove(spare, out _);
+                continue;
+            }
+            if (clock.GetUtcNow() - _quiet.GetOrAdd(spare, clock.GetUtcNow()) < quiet)
+            {
+                continue;
+            }
+            if (!await UnloadForAsync(spare, model, ct))
+            {
+                continue;
+            }
+            up.Remove(spare);
+            if (Fits(model, up).Fits)
+            {
+                Coming(model);
+                return Room.Made;
+            }
+        }
+        return Room.Busy;
+    }
+
+    /// <summary>Unloads an idle model to make room for <paramref name="model"/>: true when the engine was told; one asked for meanwhile keeps it.</summary>
+    private async Task<bool> UnloadForAsync(string spare, string model, CancellationToken ct)
+    {
+        engine.Unloading(spare, $"making room for {model}");
+        Interlocked.MemoryBarrier();
+        if (InUse(spare))
+        {
+            engine.NotUnloading(spare);
+            _quiet.TryRemove(spare, out _);
+            return false;
+        }
+        LogRoom(logger, spare, model);
+        try
+        {
+            await client.UnloadAsync(spare, ct);
+        }
+        catch (Exception ex) when (ex is EngineException or OperationCanceledException)
+        {
+            engine.NotUnloading(spare);
+            if (ex is OperationCanceledException)
+            {
+                throw;
+            }
+            LogRoomFailed(logger, spare, ex.Message);
+            return false;
+        }
+        replicas.Tell(UnloadingTopic, spare);
+        _quiet.TryRemove(spare, out _);
+        return true;
     }
 
     /// <summary>
@@ -623,6 +966,13 @@ public sealed partial class EngineRoute
         {
             return Room.Free;
         }
+        if (!engine.Counted(model))
+        {
+            // vLLM: room is memory on its GPUs, made only among the models there.
+            return await LookGpusAsync(model, models, quiet, ct);
+        }
+        // llama.cpp's places hold its own models: the router's --models-max knows no others.
+        models = [.. models.Where(m => engine.Counted(m.Name))];
         // A place just given to another model whose request is on its way (the engine does not load it yet) is taken.
         var now = clock.GetUtcNow();
         foreach (var (name, at) in _coming.Where(c => now - c.Value >= OnItsWay || Up(c.Key)))
@@ -633,8 +983,8 @@ public sealed partial class EngineRoute
         {
             _wanted.TryRemove(new KeyValuePair<string, DateTimeOffset>(name, at));
         }
-        var held = engine.Held;
-        var coming = _coming.Keys.Count(k => k != model && !held.Contains(k));
+        var held = engine.Held.Where(engine.Counted).ToList();
+        var coming = _coming.Keys.Count(k => k != model && !held.Contains(k) && engine.Counted(k));
         // A model still stopping takes its place until it has stopped: a request let through meanwhile would have the engine
         // unload another to load it.
         var others = models.Where(m => m.Status is "loaded" or "loading" or "unloading" && m.Name != model).ToList();
@@ -674,31 +1024,10 @@ public sealed partial class EngineRoute
                 continue;
             }
             // Unloaded from now on for every request; one that came for it meanwhile keeps it.
-            engine.Unloading(spare, $"making room for {model}");
-            Interlocked.MemoryBarrier();
-            if (InUse(spare))
+            if (!await UnloadForAsync(spare, model, ct))
             {
-                engine.NotUnloading(spare);
-                _quiet.TryRemove(spare, out _);
                 continue;
             }
-            LogRoom(logger, spare, model);
-            try
-            {
-                await client.UnloadAsync(spare, ct);
-            }
-            catch (Exception ex) when (ex is EngineException or OperationCanceledException)
-            {
-                engine.NotUnloading(spare);
-                if (ex is OperationCanceledException)
-                {
-                    throw;
-                }
-                LogRoomFailed(logger, spare, ex.Message);
-                continue;
-            }
-            replicas.Tell(UnloadingTopic, spare);
-            _quiet.TryRemove(spare, out _);
             if (--needed == 0)
             {
                 Coming(model);
@@ -756,6 +1085,25 @@ public sealed partial class EngineRoute
             {
                 return new AdminRoom(null, [], replaced);
             }
+            if (!engine.Counted(model))
+            {
+                // vLLM: room on its GPUs, made among the idle models there that may make room.
+                var room = await LookGpusAsync(model, models, TimeSpan.Zero, ct);
+                if (room is Room.Free or Room.Made)
+                {
+                    Coming(model, "loaded by an admin");
+                    return new AdminRoom(null, []);
+                }
+                if (room == Room.None || waited.Elapsed >= AdminWait)
+                {
+                    var (_, shortOn) = Fits(model, [.. models.Where(m => m.Status is "loaded" or "loading" or "unloading").Select(m => m.Name)]);
+                    return new AdminRoom($"GPU{(shortOn.Count == 1 ? "" : "s")} {string.Join(", ", shortOn)} lack the room for {model}: the models there "
+                        + (room == Room.None ? "never make room (kept loaded, or used by everyone). Unload one, or place it on other GPUs." : "are answering. Try again in a moment."), []);
+                }
+                await Task.Delay(TimeSpan.FromSeconds(1), ct);
+                continue;
+            }
+            models = [.. models.Where(m => engine.Counted(m.Name))];
             var now = clock.GetUtcNow();
             // A place given to a model whose request has reached the engine (it loaded) or never came is free again.
             foreach (var (name, at) in _coming.Where(c => c.Key != model && (now - c.Value >= OnItsWay || Up(c.Key))))
@@ -895,6 +1243,15 @@ public sealed partial class EngineRoute
         }
         return _wanted.TryGetValue(model, out var at) && clock.GetUtcNow() - (at > since ? at : since) < Starting;
     }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Putting {Spare} to sleep, idle, to make room for {Model}")]
+    private static partial void LogSlept(ILogger logger, string spare, string model);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "{Model} cannot answer now ({Why}): its fallback {Fallback} answers")]
+    private static partial void LogFallback(ILogger logger, string model, string fallback, string why);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Starting {Model} on vLLM for a request")]
+    private static partial void LogStarting(ILogger logger, string model);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Unloading {Spare}, idle, to make room for {Model}")]
     private static partial void LogRoom(ILogger logger, string spare, string model);

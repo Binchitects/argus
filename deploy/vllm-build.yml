@@ -1,0 +1,17 @@
+# The vllm engine from arena-vllm, built here (services/vllm.Dockerfile) instead of an image you have:
+#
+#   docker compose -f docker-compose.yml -f vllm-build.yml --profile vllm build vllm
+#   docker compose -f docker-compose.yml -f vllm-build.yml --profile vllm up -d vllm
+#
+# The build downloads the CUDA base (nvcr.io) and vLLM's wheels (PyPI), about 8-12 GB: approve it
+# first. VLLM_VERSION and LMCACHE_VERSION (empty: none) choose what goes in.
+
+services:
+  vllm:
+    image: arena-vllm:${VLLM_VERSION:-0.31.0}
+    build:
+      context: ./services
+      dockerfile: vllm.Dockerfile
+      args:
+        VLLM_VERSION: ${VLLM_VERSION:-0.31.0}
+        LMCACHE_VERSION: ${LMCACHE_VERSION:-}

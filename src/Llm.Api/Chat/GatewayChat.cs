@@ -66,7 +66,23 @@ public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFacto
     /// </summary>
     public async IAsyncEnumerable<StreamEvent> StreamAsync(JsonObject request, string personEmail, Guid? conversation, [EnumeratorCancellation] CancellationToken ct)
     {
-        using var slot = await route.TakeAsync(request["model"] is JsonValue v && v.TryGetValue<string>(out var model) ? model : null, conversation, ct);
+        var asked = request["model"] is JsonValue v && v.TryGetValue<string>(out var model) ? model : null;
+        using var slot = await route.TakeAsync(asked, conversation, ct);
+        if (slot.Model is { } routed)
+        {
+            // One copy of the model (the conversation's), or its fallback.
+            request["model"] = routed;
+        }
+        if (route.KindOf(asked) == Llm.Core.Models.EngineKinds.Vllm && request["priority"] is null)
+        {
+            // Inside vLLM the chat goes ahead of API keys (their requests carry none: 0).
+            request["priority"] = -1;
+        }
+        if (route.FallbackOf(asked) is { } fallback && slot.Model != fallback)
+        {
+            // Should the model fail mid-way (its engine restarts), the gateway asks its fallback.
+            request["fallbacks"] = new JsonArray(fallback);
+        }
         if (slot.Slot is { } id)
         {
             request["id_slot"] = id;

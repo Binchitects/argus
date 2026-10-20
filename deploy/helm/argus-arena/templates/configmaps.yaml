@@ -21,6 +21,16 @@ data:
 {{ .Files.Get "files/sd-serve.sh" | indent 4 }}
   cpu-temp-exporter.py: |-
 {{ .Files.Get "files/cpu-temp-exporter.py" | indent 4 }}
+  vllm-supervisor.sh: |-
+{{ .Files.Get "files/vllm-supervisor.sh" | indent 4 }}
+  vllm-helper.py: |-
+{{ .Files.Get "files/vllm-helper.py" | indent 4 }}
+  gpu-probe.py: |-
+{{ .Files.Get "files/gpu-probe.py" | indent 4 }}
+  fake_vllm.py: |-
+{{ .Files.Get "files/fake_vllm.py" | indent 4 }}
+  fake-vllm: |-
+{{ .Files.Get "files/fake-vllm" | indent 4 }}
 ---
 apiVersion: v1
 kind: ConfigMap

@@ -56,8 +56,27 @@ the host's hardware monitor.
 **Named volumes**, prefixed with the project (`arena`): `postgres`, `argus`,
 `engine`, `directory`, `audio`, `sandbox`, `prometheus`, `loki`,
 `alertmanager`, `acme`, `power-limits` ([configuration.md](configuration.md)
-says what each holds). **Models** are in `MODELS_DIR` on the host, read by every
-server and written only by the app.
+says what each holds), and the in-memory `media-status` and `vllm-status`.
+**Models** are in `MODELS_DIR` on the host, read by every server and written
+only by the app.
+
+**Engines and GPUs.** The app drives every engine through one interface
+(`IEngineBackend`: list, load, unload, sleep, capacity, health) and never
+through a Docker socket: llama.cpp's router by its HTTP API and the presets
+it writes into `engine` (`models.ini`, `keep`, `max`); each vLLM engine by the
+files it writes into `engine/<name>/` (`presets.json`, every model as its
+processes; `models.json`, the desired state) and the status its supervisor
+writes into `vllm-status/<name>/` (`services/vllm/supervisor.sh`, which runs
+one `vllm serve` per model on its own GPUs); the picture and video servers by
+their control files (`services/sd-serve.sh`); other machines' OpenAI-compatible
+servers by registering and checking them. On Kubernetes the same files live on
+claims. `GpuPlan` is the one owner of placement: everything resident on every
+GPU (llama.cpp models spread over theirs, vLLM groups at their share, the
+picture server and the embedder on the GPU each runs on) for whatever machine
+there is: no GPU, one, or many of any vendor ([multi-gpu-server.md](multi-gpu-server.md),
+"Supported configurations"). Room for a model is made only among the models on
+its GPUs; a picture job borrows only its server's GPU, and vLLM models there
+sleep for it.
 
 ## 5. Authentication
 

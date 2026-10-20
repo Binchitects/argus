@@ -102,6 +102,7 @@ public sealed partial class EngineWatcher : BackgroundService
                 {
                     catalog.WriteMax();
                     await catalog.WritePresetsAsync(stoppingToken);
+                    await catalog.WriteVllmPresetsAsync(stoppingToken);
                     await catalog.SyncGatewayAsync(stoppingToken);
                     nextSync = DateTimeOffset.UtcNow.AddMinutes(1);
                 }
@@ -112,7 +113,9 @@ public sealed partial class EngineWatcher : BackgroundService
                 loading = models.Any(m => m.Status == "loading");
                 string? Status(string name) => models.FirstOrDefault(m => m.Name == name)?.Status;
                 // Never more than the engine holds at once: past that, each load would unload another kept model.
-                var kept = catalog.Kept().Where(k => Status(k) is not null).Take(options.Value.ModelsMax).ToList();
+                // vLLM's kept models take no place of llama.cpp's: their room is their GPUs' memory (EngineRoute).
+                var kept = catalog.Kept().Where(k => Status(k) is not null && state.Counted(k)).Take(options.Value.ModelsMax)
+                    .Concat(catalog.Kept().Where(k => Status(k) is not null && !state.Counted(k))).ToList();
                 if (lead && before is { } was && (was.Window != hours.Window?.Id || (hours.Window is not null && !was.Kept.SequenceEqual(kept))))
                 {
                     // Working hours began, ended or changed: the models only they kept make room (not on the app's
@@ -138,14 +141,19 @@ public sealed partial class EngineWatcher : BackgroundService
                 // The model new chats use, and those that never make room for another (EngineRoute).
                 var small = scope.ServiceProvider.GetRequiredService<SmallModel>().Name;
                 var usual = await UsualAsync(scope.ServiceProvider, hours.Window?.DefaultModel, small, Status, stoppingToken);
-                var held = Held(kept, usual, small, options.Value.ModelsMax, Status, state.LoadedInstead);
+                // llama.cpp's places are held as before; a vLLM model kept, new chats' or the small steps' never makes room either,
+                // but takes none of those places.
+                var held = Held([.. kept.Where(state.Counted)], usual is { } u && state.Counted(u) ? usual : null, small is { } s && state.Counted(s) ? small : null,
+                        options.Value.ModelsMax, Status, [.. state.LoadedInstead.Where(state.Counted)])
+                    .Concat(kept.Append(usual).Append(small).Concat(state.LoadedInstead).OfType<string>().Where(n => !state.Counted(n) && Status(n) is not null))
+                    .Distinct(StringComparer.Ordinal).ToList();
                 state.Default = usual;
                 state.Small = small;
                 var names = models.Where(m => m.Status == "loaded").Select(m => m.Name).ToList();
                 // What each model serves at once: its line's places, and the slots conversations keep; and which may make room.
                 await CapacityAsync(scope.ServiceProvider, true, names, held, stoppingToken);
-                // While the GPU is lent to a picture or video job, no chat model loads: the job gives the room back when it ends.
-                if (lead && !loading && state.Lent is null)
+                // While a GPU is lent to a picture or video job, no chat model on it loads: the job gives the room back when it ends.
+                if (lead && !loading && !state.LentAll)
                 {
                     // One at a time, each through the app's room-making (an idle model that may make room unloads first), never
                     // by the engine's own choice of the model used least recently, which may be another that never makes room.
@@ -153,8 +161,8 @@ public sealed partial class EngineWatcher : BackgroundService
                     // kill while it was being stopped, which is not broken (EngineState.MayRetry). One the engine keeps
                     // unloading by its own choice to load another waits too (EngineState.MayReload): it holds fewer models
                     // than Models loaded at once says, and two would push each other out for ever.
-                    var keptNext = kept.FirstOrDefault(k => Status(k) == "unloaded" && Reload(k)) ?? kept.FirstOrDefault(state.MayRetry);
-                    var askedNext = models.FirstOrDefault(m => m.Status == "unloaded" && state.StillAsked(m.Name) && Reload(m.Name))?.Name;
+                    var keptNext = kept.FirstOrDefault(k => Status(k) == "unloaded" && !state.Blocks(k) && Reload(k)) ?? kept.FirstOrDefault(k => !state.Blocks(k) && state.MayRetry(k));
+                    var askedNext = models.FirstOrDefault(m => m.Status == "unloaded" && !state.Blocks(m.Name) && state.StillAsked(m.Name) && Reload(m.Name))?.Name;
                     if (keptNext is { } next)
                     {
                         if (await route.RoomForAsync(next, TimeSpan.Zero, stoppingToken))
@@ -169,7 +177,7 @@ public sealed partial class EngineWatcher : BackgroundService
                         LogAsked(logger, asked2);
                         loading = await LoadAsync(asked2, "loaded by an admin, again after the engine restarted", stoppingToken);
                     }
-                    else if (options.Value.ModelsMax >= 2 && usual is { } back && held.Contains(back) && !state.WasDropped(back)
+                    else if (options.Value.ModelsMax >= 2 && usual is { } back && held.Contains(back) && !state.WasDropped(back) && !state.Blocks(back)
                         && ((Status(back) == "unloaded" && Reload(back)) || state.MayRetry(back))
                         && await route.RoomForAsync(back, EngineRoute.Quiet, stoppingToken))
                     {
@@ -178,7 +186,7 @@ public sealed partial class EngineWatcher : BackgroundService
                         LogBack(logger, back);
                         loading = await LoadAsync(back, "the model new chats use", stoppingToken);
                     }
-                    else if (options.Value.ModelsMax >= 2 && small is { } helper && helper != usual && !state.WasDropped(helper)
+                    else if (options.Value.ModelsMax >= 2 && small is { } helper && helper != usual && !state.WasDropped(helper) && !state.Blocks(helper)
                         && ((Status(helper) == "unloaded" && Reload(helper)) || state.MayRetry(helper))
                         && await route.RoomForAsync(helper, held.Contains(helper) ? EngineRoute.Quiet : SmallQuiet, stoppingToken))
                     {
@@ -383,22 +391,67 @@ public sealed partial class EngineWatcher : BackgroundService
     private async Task CapacityAsync(IServiceProvider services, bool onEngine, IReadOnlyList<string> loaded, IReadOnlyCollection<string> held, CancellationToken ct)
     {
         var db = services.GetRequiredService<Llm.Core.Data.AppDbContext>();
-        var models = onEngine ? await db.LocalModels.AsNoTracking().Select(m => new { m.Name, m.Parallel, m.File }).ToListAsync(ct) : [];
+        var models = onEngine ? await db.LocalModels.AsNoTracking().ToListAsync(ct) : [];
         var remote = (await db.RemoteServers.AsNoTracking().ToListAsync(ct)).SelectMany(s => s.Models).Select(m => (m.Name, m.Parallel));
-        var (places, slots) = Capacity(models.Select(m => (m.Name, m.Parallel)), remote);
+        // A vLLM model serves its answers at once in each copy; it has no slots a conversation keeps (any request reuses any cached prefix).
+        var (places, slots) = Capacity(models.Select(m => (m.Name, m.EngineKind == Llm.Core.Models.EngineKinds.Vllm ? m.Parallel * Math.Max(1, m.Replicas) : m.Parallel)), remote);
+        foreach (var m in models.Where(m => m.EngineKind == Llm.Core.Models.EngineKinds.Vllm))
+        {
+            slots.Remove(m.Name);
+        }
         gate.SetPlaces(places);
         slotTable.SetModels(slots, loaded.ToHashSet(StringComparer.Ordinal));
         // Read again only when the models, what is loaded or what is held changed: the library's files are listed for their sizes.
+        var hw = onEngine ? await services.GetRequiredService<HardwareProbe>().GetAsync(ct) : null;
         var spareFor = string.Join(',', loaded.Order(StringComparer.Ordinal)) + "|" + string.Join(',', held.Order(StringComparer.Ordinal)) + "|"
-            + string.Join(',', models.Select(m => m.Name + "=" + m.File).Order(StringComparer.Ordinal));
+            + string.Join(',', models.Select(m => m.Name + "=" + m.File + "@" + m.UpdatedAt.ToUnixTimeMilliseconds()).Order(StringComparer.Ordinal)) + "|" + hw;
         if (onEngine && spareFor != _spareFor)
         {
-            var files = services.GetRequiredService<ModelLibrary>().List().ToDictionary(e => e.File.Path, e => e.File.Size, StringComparer.Ordinal);
+            state.Places = PlacesOf(models, hw, services.GetRequiredService<ModelLibrary>());
+            state.Hardware = hw;
+            var library = services.GetRequiredService<ModelLibrary>();
+            var files = library.List().ToDictionary(e => e.File.Path, e => e.File.Size, StringComparer.Ordinal);
             var sizes = models.Where(m => files.ContainsKey(m.File)).ToDictionary(m => m.Name, m => files[m.File], StringComparer.Ordinal);
+            // A vLLM model's size is its snapshot's weights: the quickest to load again goes first, whatever its engine.
+            foreach (var m in models.Where(m => m.EngineKind == Llm.Core.Models.EngineKinds.Vllm && library.Snapshot(m.File) is { Complete: true }))
+            {
+                sizes[m.Name] = VllmAdvisor.WeightBytes(library.FullPath(m.File));
+            }
             state.Held = held;
             state.Spare = SpareOf(loaded, held, sizes);
             _spareFor = spareFor;
         }
+    }
+
+    /// <summary>
+    /// Where each model sits on the GPUs, for room-making per GPU set (EngineRoute): a vLLM model its share of each of its
+    /// GPUs (all of its copies'), a llama.cpp model its estimate (advisor) spread over its GPUs (all of them when it names
+    /// none), nothing for a model whose figures are not known.
+    /// </summary>
+    public static IReadOnlyDictionary<string, EngineState.ModelPlace> PlacesOf(IReadOnlyList<Llm.Core.Models.LocalModel> models, Hardware? hw, ModelLibrary library)
+    {
+        var places = new Dictionary<string, EngineState.ModelPlace>(StringComparer.Ordinal);
+        var entries = hw is null ? [] : library.List();
+        foreach (var m in models)
+        {
+            IReadOnlyDictionary<int, long> perGpu = new Dictionary<int, long>();
+            if (hw is not null && m.EngineKind == Llm.Core.Models.EngineKinds.Vllm && Hardware.ParseDevices(m.Devices) is { Count: > 0 } gpus)
+            {
+                perGpu = GpuPlan.Share(m.Name, hw, gpus, m.GpuMemoryUtilization ?? VllmAdvisor.DefaultUtilization).PerGpu;
+            }
+            else if (hw is not null && m.EngineKind == Llm.Core.Models.EngineKinds.LlamaCpp && entries.FirstOrDefault(e => e.File.Path == m.File) is { } file
+                && ModelAdvisor.Advise(m, file, entries, hw).Estimate is { Fit: not "unknown" } e)
+            {
+                perGpu = GpuPlan.Spread(m.Name, "llamacpp", hw, Hardware.ParseDevices(m.Devices), e.GpuTotal).PerGpu;
+            }
+            else if (Hardware.ParseDevices(m.Devices) is { Count: > 0 } named)
+            {
+                // Its size not known: at least where it sits.
+                perGpu = named.ToDictionary(g => g, _ => 0L);
+            }
+            places[m.Name] = new EngineState.ModelPlace(m.EngineKind, perGpu, m.Fallback, Math.Max(1, m.Replicas));
+        }
+        return places;
     }
 
     /// <summary>Without the llama.cpp engine, the other GPU servers' models still reach the gateway: every minute.</summary>

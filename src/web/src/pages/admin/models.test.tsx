@@ -60,7 +60,7 @@ function advice(body: { file: string; context?: number }) {
       gpuLayers: 65, layers: 64, expertLayersInRam: 0, moeLayers: 0, fit: 'gpu', approximate: false,
     },
     problems: over ? [{ field: 'context', message: 'It was trained for 262,144 tokens of context. Stretch it with YaRN (up to 1,048,576), or choose at most 262,144.', error: true }] : [],
-    hardware: { gpuName: 'NVIDIA GeForce RTX 3090', gpus: 1, gpuTotal: 25.7e9, imageReserve: 2.1e9, ramTotal: 66e9, gpuForModels: 22.5e9, ramForModels: 57e9 },
+    hardware: { gpuName: 'NVIDIA GeForce RTX 3090', gpus: 1, gpuTotal: 25.7e9, reserves: [{ gpu: 0, name: 'the picture server', bytes: 2.1e9 }], ramTotal: 66e9, gpuForModels: 22.5e9, ramForModels: 57e9 },
   }
 }
 

@@ -298,6 +298,34 @@ would be with them.
   as what it is. The app needs the library writable by its user (`LLM_UID`) and,
   for gated repositories, `HF_TOKEN` of an account that accepted their terms.
   A download is refused when the disk would keep less than 2 GB free.
+- **Snapshots for vLLM.** A repository with safetensors weights and a
+  `config.json` also offers its **snapshot** (`snapshot` in
+  `GET /api/admin/models/hf/repo`), with its size shown before anything is
+  downloaded and what it leaves out: the `original/` and `metal/` copies, GGUF
+  files, other weight formats and the read-me, which vLLM never reads (for
+  `openai/gpt-oss-120b` that is about two thirds of the repository). It
+  downloads (`POST /api/admin/models/hf/downloads` with `snapshot: true`) into
+  `<library>/hf/<owner>/<repository>@<revision>/`, every file at the same
+  commit and checked as above. `GET /api/admin/models/library/snapshots` lists
+  the snapshots with their size and whether each is whole (its config, its
+  weights, every shard its index names, nothing still downloading); only a
+  whole one can be a vLLM model.
+- **vLLM models** (`engineKind: vllm` on `POST /api/admin/models`; the form's
+  fields come with the next step): a snapshot, its GPUs (empty: the ones the
+  advisor proposes for this machine, kept on save), copies (`replicas`, each on
+  its run of the GPUs; a conversation stays on one), its share of each GPU
+  (`gpuMemoryUtilization`, 0.90), quantisation, speculative decoding (`mtp`,
+  or `eagle3` with a draft snapshot), a CPU tier for its cache (`kvCpuGb`),
+  whether it may sleep, and a `fallback` model. **Answers at once** is its
+  `--max-num-seqs` and the cache type its `--kv-cache-dtype` (fp8). A setting
+  its kind does not have is refused, as are GPUs that cannot hold it, a context
+  that does not fit, or a share kept for another model kept loaded there.
+  `POST /api/admin/models/advice` with `engineKind: vllm` shows its fit,
+  cache and recommended context and answers at once. It loads when asked for
+  (a large one takes minutes, and the chat says why it waits), making room only
+  among idle models on its GPUs; it takes none of llama.cpp's places (Models
+  loaded at once). The models list shows each engine (`engine.instances`) and
+  why one is not running.
 - **Load** loads a model now, beside the kept ones (refused when every place is
   kept). At the limit the app makes room for it, as for a request: an idle model
   that may make room unloads first, and is waited for until it has stopped. When
@@ -382,9 +410,16 @@ would be with them.
   vocabulary); a vision projector only one made for its width; thinking and
   tools only when its chat template has them. The API runs the same checks on
   save.
-- **It starts from what fits this machine.** The GPU memory and RAM come from
-  Prometheus (the `smi` profile's exporter), less what the image server may take
-  (`IMAGEGEN_MAX_VRAM`) and the 1 GiB llama.cpp keeps free. The form estimates
+- **It starts from what fits this machine**, whatever it has: no GPU, one, or
+  several of any size and vendor. The GPU memory and RAM come from Prometheus
+  (the NVIDIA exporter), else from the hardware file an engine writes
+  (`services/gpu-probe.py`: `nvidia-smi` or `rocm-smi`); with `LLAMACPP_BACKEND=cpu`
+  the models have no GPU and run from RAM. Each GPU's room is its memory less
+  what the servers beside the chat models keep **on that GPU** (the picture
+  server, `IMAGEGEN_MAX_VRAM`, on its model's GPU, else `MEDIA_GPU`, else the
+  first; the embedder on `EMBED_GPU` when it has one) and the 1 GiB llama.cpp
+  keeps free. The GPUs a model runs on are named for llama.cpp's backend
+  (`CUDA0`, `ROCm0`, `Vulkan0`, `SYCL0`, `MTL0`). The form estimates
   weights, cache and buffers as it is filled in (within 1% of llama.cpp's own
   estimate for dense and hybrid models, measured), and recommends the largest
   context that keeps the model on the GPU (a mixture of experts: its experts in

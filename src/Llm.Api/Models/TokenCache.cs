@@ -19,8 +19,21 @@ namespace Llm.Api.Models;
 /// <param name="CheckpointBytes">The RAM one checkpoint takes, from the file's profile; null when unknown.</param>
 /// <param name="RamBytes">The RAM every slot's checkpoints take at most, together.</param>
 /// <param name="SessionBytes">The RAM kept for the conversations that lost their slot (cache-ram), at most; 0: none; null: llama.cpp's own.</param>
-public sealed record TokenCache(int Slots, int? SideSlot, bool Pinned, bool KeepsIdle, int? Checkpoints, long? CheckpointBytes, long? RamBytes, long? SessionBytes = null)
+/// <param name="PrefixCache">vLLM: any request reuses any cached prefix (no slot of its own); see <paramref name="HitRate"/>.</param>
+/// <param name="HitRate">vLLM: the share of prompt tokens read from its cache lately (its metrics); null: not known.</param>
+/// <param name="GpuUsage">vLLM: how full its cache on the GPUs is (0 to 1).</param>
+/// <param name="Running">vLLM: requests it runs now, and <paramref name="Waiting"/> those it queues.</param>
+public sealed record TokenCache(int Slots, int? SideSlot, bool Pinned, bool KeepsIdle, int? Checkpoints, long? CheckpointBytes, long? RamBytes, long? SessionBytes = null,
+    bool PrefixCache = false, double? HitRate = null, double? GpuUsage = null, int? Running = null, int? Waiting = null)
 {
+    /// <summary>
+    /// A vLLM model's cache: its answers at once in every copy share automatic prefix caching (no slots to pin), its CPU tier
+    /// (the RAM it keeps conversations in, KvCpuGb a copy), and what its metrics say now (<paramref name="now"/>; null when not loaded).
+    /// </summary>
+    public static TokenCache OfVllm(LocalModel m, EngineCapacity? now) =>
+        new(Math.Max(1, m.Parallel) * Math.Max(1, m.Replicas), null, false, true, null, null, null,
+            m.KvCpuGb is > 0 and var gb ? ((long)gb << 30) * Math.Max(1, m.Replicas) : 0, true, now?.PrefixHitRate, now?.KvUsage, now?.Running, now?.Waiting);
+
     /// <summary>Checkpoints a slot keeps unless the model's extra lines say otherwise (llama.cpp's own is 32).</summary>
     public const int DefaultCheckpoints = 4;
 

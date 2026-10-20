@@ -18,6 +18,17 @@ own key -- and runs scenarios rather than a sweep:
   isolation   each person's prompt carries a secret; neither answer may
               contain the other's
   prefix      the same long prompt twice, then from the other person
+  ramp        --ramp 1,2,4,8 (or 1..16, doubling): that many at once at each step; aggregate
+              tok/s, time to first token p50/p95, and how long the first waited
+  prefixshare --prefix-share N people, one long system prompt, each their own question:
+              how much of each prompt the engine read from its cache
+  returnafter --return-after S: a long conversation, then N others' long prompts and S
+              seconds, then its next turn: what a CPU or LMCache tier keeps for it
+  killengine  --kill-engine "CMD" run 2 s into a burst (docker restart vllm): failed
+              requests, and the seconds until one is answered again
+
+--compare BASELINE.json prints this run's ramp against a stored one (a JSON per run, to
+compare settings: KV tier, TP=2x2 against TP=4, FP8 against NVFP4).
 
 Per request it records time to first token, decode speed (tokens after the
 first, over the time they took), and wall time. Standard library only.
@@ -29,6 +40,7 @@ first, over the time they took), and wall time. Standard library only.
 
 import argparse
 import json
+import subprocess
 import ssl
 import statistics
 import sys
@@ -177,6 +189,12 @@ def main():
                    help="size of the long document in 'longpaste' and 'prefix'")
     p.add_argument("--scenarios", default="single,parallel,staggered,longpaste,overflow,isolation,prefix")
     p.add_argument("--json", default="")
+    p.add_argument("--ramp", default="1,2,4,8", help="concurrency steps: 1,2,4,8 or 1..16 (doubling)")
+    p.add_argument("--prefix-share", type=int, default=8, help="people sharing one long system prompt")
+    p.add_argument("--return-after", type=float, default=30, help="seconds before the conversation comes back")
+    p.add_argument("--evict-with", type=int, default=6, help="others' long prompts sent meanwhile, to push it out of the GPU cache")
+    p.add_argument("--kill-engine", default="", help="a command that restarts the engine (killengine scenario)")
+    p.add_argument("--compare", default="", help="a baseline JSON of an earlier run")
     args = p.parse_args()
 
     ctx = ssl.create_default_context(cafile=args.ca) if args.ca else ssl._create_unverified_context()
@@ -257,6 +275,100 @@ def main():
         for label, key in (("A cold", args.key_a), ("A repeat", args.key_a), ("B same prompt", args.key_b)):
             report("prefix", launch([(S(label, key, doc, 40, temperature=0), 0)]))
 
+    def pct(vals, q):
+        vals = sorted(v for v in vals if v is not None)
+        return vals[min(len(vals) - 1, int(round(q * (len(vals) - 1))))] if vals else None
+
+    if "ramp" in wanted:
+        steps = []
+        if ".." in args.ramp:
+            lo, hi = (int(x) for x in args.ramp.split(".."))
+            n = max(1, lo)
+            while n <= hi:
+                steps.append(n)
+                n *= 2
+        else:
+            steps = [int(x) for x in args.ramp.split(",") if x.strip()]
+        print(f"\n[ramp] {', '.join(map(str, steps))} at once")
+        for n in steps:
+            t0 = time.perf_counter()
+            streams = launch([(S(f"{n}x #{i}", args.key_a if i % 2 == 0 else args.key_b, ESSAY), 0) for i in range(n)])
+            wall = time.perf_counter() - t0
+            rows = [s.row() for s in streams]
+            ok = [r for r in rows if r["ok"]]
+            tokens = sum((r["completion_tokens"] or 0) for r in ok)
+            step = {"concurrency": n, "ok": len(ok), "failed": n - len(ok), "aggregate_tok_s": tokens / wall if wall else None,
+                    "ttft_p50_s": pct([r["ttft_s"] for r in ok], 0.5), "ttft_p95_s": pct([r["ttft_s"] for r in ok], 0.95),
+                    "queue_wait_s": max((r["ttft_s"] or 0) for r in ok) - min((r["ttft_s"] or 0) for r in ok) if ok else None}
+            results.setdefault("ramp", []).append(step)
+            results.setdefault("ramp_requests", []).extend(rows)
+            print(f"  {n:>3} at once  {fmt(step['aggregate_tok_s'], ' tok/s'):>12}  ttft p50 {fmt(step['ttft_p50_s'], 's', 2)}  "
+                  f"p95 {fmt(step['ttft_p95_s'], 's', 2)}  failed {step['failed']}", flush=True)
+
+    if "prefixshare" in wanted:
+        n = args.prefix_share
+        system = f"[{uuid.uuid4()}] You answer questions about this reference.\n" + filler(args.paste_words // 2)
+        print(f"\n[prefixshare] {n} people, one ~{args.paste_words // 2}-word system prompt")
+        # One first, so the prefix is in the cache; then everyone at once.
+        report("prefixshare", launch([(S("first", args.key_a, system + "\n\nQuestion 0: which region is first?", 40, 0), 0)]))
+        rows = report("prefixshare", launch([(S(f"person {i}", args.key_a if i % 2 else args.key_b,
+                                                  system + f"\n\nQuestion {i + 1}: which owner team appears in section {i}?", 40, 0), 0)
+                                                for i in range(n)]))
+        prompt = sum(r["prompt_tokens"] or 0 for r in rows)
+        cached = sum(r["cached_tokens"] or 0 for r in rows)
+        results["prefixshare_hit"] = cached / prompt if prompt else None
+        print(f"    prompt tokens read from the cache: {fmt(100 * cached / prompt if prompt else None, '%', 0)}")
+
+    if "returnafter" in wanted:
+        print(f"\n[returnafter] a conversation comes back after {args.evict_with} others' long prompts and {args.return_after:.0f} s")
+        doc = f"[{uuid.uuid4()}]\n" + filler(args.paste_words)
+        report("returnafter", launch([(S("turn 1", args.key_a, doc + "\n\nWhich region appears most often?", 40, 0), 0)]))
+        launch([(S(f"other {i}", args.key_b, f"[{uuid.uuid4()}]\n" + filler(args.paste_words) + "\n\nOne word.", 8, 0), 0)
+                for i in range(args.evict_with)])
+        time.sleep(max(0.0, args.return_after))
+        rows = report("returnafter", launch([(S("turn 2", args.key_a, doc + "\n\nWhich region appears most often?", 40, 0), 0)]))
+        r = rows[0]
+        results["returnafter_cached"] = (r["cached_tokens"] or 0) / r["prompt_tokens"] if r["prompt_tokens"] else None
+        print(f"    on its return: {fmt(r['ttft_s'], 's', 2)} to the first token, "
+              f"{fmt(100 * results['returnafter_cached'] if results['returnafter_cached'] is not None else None, '%', 0)} of its prompt from a cache")
+
+    if "killengine" in wanted:
+        if not args.kill_engine:
+            print("\n[killengine] skipped: --kill-engine names no command")
+        else:
+            print(f"\n[killengine] a burst, and `{args.kill_engine}` 2 s into it")
+            burst = [(S(f"burst #{i}", args.key_a if i % 2 else args.key_b, ESSAY, 120), 0) for i in range(4)]
+            killer = threading.Thread(target=lambda: (time.sleep(2), subprocess.run(args.kill_engine, shell=True, timeout=600)))
+            killer.start()
+            rows = report("killengine_requests", launch(burst))
+            killer.join()
+            t0 = time.perf_counter()
+            recovered = None
+            while time.perf_counter() - t0 < 900:
+                probe = S("probe", args.key_a, "Say hello.", 8)
+                probe.run()
+                if probe.t_first is not None and not probe.error:
+                    recovered = time.perf_counter() - t0
+                    break
+                time.sleep(1)
+            results["killengine"] = {"failed": sum(1 for r in rows if not r["ok"]), "recovered_s": recovered}
+            print(f"    failed during the restart: {results['killengine']['failed']}, answering again after {fmt(recovered, 's', 1)}")
+
+    if args.compare and "ramp" in results:
+        try:
+            with open(args.compare) as f:
+                base = {s["concurrency"]: s for s in json.load(f).get("ramp", [])}
+        except (OSError, json.JSONDecodeError) as e:
+            base = {}
+            print(f"  (no baseline: {e})")
+        if base:
+            print("\n=== against the baseline ===")
+            for s in results["ramp"]:
+                b = base.get(s["concurrency"])
+                if b and b.get("aggregate_tok_s") and s.get("aggregate_tok_s"):
+                    print(f"  {s['concurrency']:>3} at once  {100 * s['aggregate_tok_s'] / b['aggregate_tok_s']:.0f}% of the baseline's tok/s, "
+                          f"ttft p95 {fmt(s['ttft_p95_s'], 's', 2)} against {fmt(b.get('ttft_p95_s'), 's', 2)}")
+
     # Summary: the comparison people actually want.
     def med(name, field, label_prefix=""):
         vals = [r[field] for r in results.get(name, []) if r["ok"] and r[field] is not None
@@ -270,7 +382,8 @@ def main():
     if single_d and par_d:
         print(f"  per-person speed kept: {100 * par_d / single_d:.0f}%   "
               f"combined output: {2 * par_d:.1f} tok/s ({2 * par_d / single_d:.2f}x one person)")
-    errors = [r for rows in results.values() if isinstance(rows, list) for r in rows
+    # Requests failing while the engine restarts on purpose (killengine) are its measure, not errors.
+    errors = [r for name, rows in results.items() if isinstance(rows, list) and name not in ("killengine", "killengine_requests") for r in rows
               if isinstance(r, dict) and r.get("error")]
     print(f"  failed requests: {len(errors)}")
 

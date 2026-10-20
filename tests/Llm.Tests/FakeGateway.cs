@@ -189,6 +189,11 @@ public sealed class FakeGateway : ILiteLlm
         Check();
         var id = Guid.NewGuid().ToString();
         Managed[id] = (name, fingerprint, litellmParams, modelInfo);
+        if (modelInfo["llm_app_replica_of"] is not null)
+        {
+            // As LiteLlmClient lists them: a copy under its own name is in no list.
+            return Task.CompletedTask;
+        }
         var listed = new GatewayModel(name, modelInfo["max_input_tokens"]?.GetValue<int>(), modelInfo["max_output_tokens"]?.GetValue<int>(),
             modelInfo["supports_vision"]?.GetValue<bool>() ?? false, true, true, null, null, null);
         _listed[id] = listed;
@@ -196,6 +201,16 @@ public sealed class FakeGateway : ILiteLlm
         {
             Models.Add(listed);
         }
+        return Task.CompletedTask;
+    }
+
+    /// <summary>The fallbacks the app set last (router_settings.fallbacks).</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>>? Fallbacks { get; private set; }
+
+    public Task SetFallbacksAsync(IReadOnlyDictionary<string, IReadOnlyList<string>> fallbacks, CancellationToken ct = default)
+    {
+        Check();
+        Fallbacks = fallbacks;
         return Task.CompletedTask;
     }
 

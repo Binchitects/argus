@@ -88,6 +88,13 @@ services:
       Engine__ApiKey: ${ENGINE_KEY:?set ENGINE_KEY in .env}
       Engine__FirstModel: ${MODEL:-}
       Engine__DefaultModels: ${DEFAULT_MODELS:-}
+      # Engines and GPUs: llama.cpp's backend (cuda, rocm, vulkan, sycl, metal, cpu), and the GPU the
+      # picture server and the embedder run on (empty: the first, and the CPU).
+      Engine__Backend: ${LLAMACPP_BACKEND:-cuda}
+      Engine__MediaGpu: ${MEDIA_GPU:-}
+      Engine__EmbedGpu: ${EMBED_GPU:-}
+      # LMCache's remote store for the vLLM models' token cache (redis://valkey:6379 with the valkey profile); empty: none.
+      Engine__LmcacheRemote: ${LMCACHE_REMOTE:-}
       Argus__AdminToken: ${ARGUS_KEY:?set ARGUS_KEY in .env}
       Argus__GitlabUrl: ${GITLAB_URL:-}
       HuggingFace__Token: ${HF_TOKEN:-}
@@ -99,6 +106,8 @@ services:
       - ${MODELS_DIR:-./models}:/library
       - engine:/engine-config
       - media-status:/media-status:ro
+      # What the vLLM supervisor says of its models and GPUs (services/vllm/supervisor.sh).
+      - vllm-status:/vllm-status:ro
       - directory:/directory
       - sandbox:/sandbox
       # scripts/backup.sh's backups, for Admin -> Storage: their sizes and how each ended.
@@ -143,6 +152,18 @@ services:
     volumes: [./config/litellm.yaml:/app/arena.yaml:ro]
     depends_on: { postgres: { condition: service_healthy, required: false } }
 
+  # Valkey: the gateway's shared counts when it runs as several replicas (ha.yml), and LMCache's
+  # shared store (LMCACHE_REMOTE). Off until asked for: COMPOSE_PROFILES=ha (its image comes from
+  # ECR's mirror of Docker's library, not pulled while the profile is off). On the stack's network
+  # only, never published; append-only, so a restart keeps the counts.
+  valkey:
+    <<: *service
+    image: ${VALKEY_IMAGE:-public.ecr.aws/docker/library/valkey:8.1-alpine}
+    container_name: valkey
+    profiles: [ha]
+    command: [valkey-server, --appendonly, "yes", --save, ""]
+    volumes: [valkey:/data]
+
   # The chat models (Admin -> Models), loaded and unloaded live.
   llamacpp:
     <<: [*service, *gpu]
@@ -170,6 +191,39 @@ services:
           # the model's layers and experts held in RAM stay there instead of being read from disk again after
           # an idle spell (a first answer that seems stuck). 0: none.
           memory: ${ENGINE_RAM_PROTECT:-0}
+
+  # vLLM (Admin -> Models, engine vLLM): one `vllm serve` per model the app wants, each on its own
+  # GPUs (services/vllm/supervisor.sh follows the app's /presets/vllm/models.json). Off until asked
+  # for: COMPOSE_PROFILES=vllm, with VLLM_IMAGE a vLLM image you have (docs/multi-gpu-server.md §6;
+  # nothing is pulled while the profile is off). fake-gpu.yml runs it with the fake vLLM instead.
+  vllm:
+    <<: [*service, *gpu]
+    image: ${VLLM_IMAGE:-nvcr.io/nvidia/vllm:26.09-py3}
+    container_name: vllm
+    profiles: [vllm]
+    entrypoint: [/bin/sh, /vllm/supervisor.sh]
+    environment:
+      ENGINE_KEY: ${ENGINE_KEY}
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+      # This engine's name: its desired state and status are /presets/vllm and /status/vllm.
+      VLLM_PRESETS: /presets/vllm
+      VLLM_STATUS: /status/vllm
+      # The vLLM to run (fake-gpu.yml: tools/fake-vllm's).
+      VLLM_BIN: ${VLLM_BIN:-vllm}
+      # Snapshots come from the library, never fetched by vLLM itself.
+      HF_HUB_OFFLINE: "1"
+    volumes:
+      - ./services/vllm:/vllm:ro
+      - ./services/gpu-probe.py:/gpu-probe.py:ro
+      - ../tools/fake-vllm:/fake-vllm:ro
+      - ${MODELS_DIR:-./models}:/library:ro
+      - engine:/presets:ro
+      - vllm-status:/status
+      # LMCache's disk tier (a model's KV tier on disk): fast local NVMe, kept across restarts.
+      - ${KVCACHE_DIR:-./kvcache}:/kvcache
+    ulimits: { memlock: -1 }
+    # Tensor parallel ranks talk through shared memory (NCCL).
+    shm_size: ${VLLM_SHM:-16gb}
 
   # Embeddings for Argus and the app's company knowledge, on the CPU. The app fetches the file into MODELS_DIR/embed.
   embed:
@@ -427,3 +481,7 @@ volumes:
   # What the picture and video servers say they do (services/sd-serve.sh), every 2 s: kept in memory, theirs to write.
   media-status:
     driver_opts: { type: tmpfs, device: tmpfs, o: "uid=65534,gid=65534,mode=0755,size=64m" }
+  valkey:
+  # What the vLLM supervisor says of its models (and the GPUs it sees), every 2 s: in memory, its to write.
+  vllm-status:
+    driver_opts: { type: tmpfs, device: tmpfs, o: "mode=0755,size=64m" }

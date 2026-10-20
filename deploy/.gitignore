@@ -7,6 +7,9 @@
 models/*
 !models/.gitkeep
 
+# LMCache's disk tier (KVCACHE_DIR): a cache, rebuilt as it is used
+kvcache/
+
 # Volume backups contain .env and database dumps. The folder itself is kept:
 # the app mounts it (Admin -> Storage), and a folder Docker had to create
 # would be root's, which scripts/backup.sh run as you could not use.

@@ -1,0 +1,22 @@
+# The gateway as several replicas that share their counts in Valkey: least-busy routing, each
+# deployment's max_parallel_requests and the API keys' rate and token limits stay global, so a
+# vLLM model is never sent more at once than it serves (docs/multi-gpu-server.md §5.2).
+#
+#   docker compose -f docker-compose.yml -f ha.yml up -d          # with scale.yml for app replicas too
+#
+# Traefik and the app reach the replicas by the service's name (Docker's DNS answers with each);
+# one that is down drops out of the answers. Valkey's image is ECR's mirror of Docker's library:
+# approve it first (VALKEY_IMAGE to use another).
+
+services:
+  valkey:
+    profiles: !reset []
+  litellm:
+    container_name: !reset null
+    deploy:
+      replicas: ${LITELLM_REPLICAS:-2}
+    environment:
+      REDIS_HOST: valkey
+      REDIS_PORT: "6379"
+    depends_on:
+      valkey: { condition: service_started }

@@ -4,7 +4,9 @@ using System.Net;
 using System.Text;
 using Llm.Api.Chat;
 using Llm.Api.Models;
+using Llm.Core.Models;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
@@ -50,7 +52,10 @@ public sealed class GpuShareTests(AppFixture app) : IDisposable
         /// <summary>The generations each server started, in order, with where each decoded.</summary>
         public ConcurrentQueue<string> Started { get; } = new();
 
-        public long Free => 24_000 - (engine.StatusOf(Chat) == "loaded" ? 20_500 : 0);
+        public long Free => FreeOf?.Invoke() ?? 24_000 - (engine.StatusOf(Chat) == "loaded" ? 20_500 : 0);
+
+        /// <summary>The media GPU's free memory, when a test's machine says it otherwise.</summary>
+        public Func<long>? FreeOf { get; set; }
 
         public string? PhaseOf(string server) => _runs.TryGetValue(server, out var r) ? r.Phase : null;
 
@@ -116,7 +121,7 @@ public sealed class GpuShareTests(AppFixture app) : IDisposable
     }
 
     /// <summary>An app with the engine (the chat model loaded, not kept: the one new chats use), both media servers, and their script.</summary>
-    private async Task<Setup> NewAsync()
+    private async Task<Setup> NewAsync(IDictionary<string, string?>? more = null, Action<IServiceCollection>? services = null)
     {
         var config = Path.Combine(_dir, "config");
         var status = Path.Combine(_dir, "status");
@@ -124,14 +129,20 @@ public sealed class GpuShareTests(AppFixture app) : IDisposable
         app.Engine.Reset(Path.Combine(config, "models.ini"));
         app.Engine.Max = 2;
         var serve = new FakeServe(config, status, app.Engine);
-        var f = app.Create(app.ConnectionStringFor("gpushare_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?>
+        var settings = new Dictionary<string, string?>
         {
             ["Engine:Enabled"] = "true", ["Engine:ApiKey"] = FakeEngine.Key, ["Engine:ConfigDir"] = config, ["Engine:LibraryDir"] = Path.Combine(_dir, "library"),
             ["Engine:MediaStatusDir"] = status, ["Engine:ModelsMax"] = "2", ["Modules:imagegen"] = "true", ["Modules:videogen"] = "true", ["Replicas:Enabled"] = "false",
-        }, s =>
+        };
+        foreach (var (k, v) in more ?? new Dictionary<string, string?>())
+        {
+            settings[k] = v;
+        }
+        var f = app.Create(app.ConnectionStringFor("gpushare_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), settings, s =>
         {
             s.AddHttpClient(MediaControl.Client).ConfigurePrimaryHttpMessageHandler(() => serve);
             s.AddHttpClient("probe").ConfigurePrimaryHttpMessageHandler(() => serve);
+            services?.Invoke(s);
         });
         var running = new CancellationTokenSource();
         var ticking = Task.Run(async () =>
@@ -352,5 +363,101 @@ public sealed class GpuShareTests(AppFixture app) : IDisposable
         Assert.Equal([Chat], videoHold.Unloaded);
         // The picture's job over, the server runs the one kept loaded.
         await UntilAsync(() => File.ReadAllText(Path.Combine(_dir, "config", "imagegen.conf")).Contains("model=FLUX-8", StringComparison.Ordinal), "the picture server runs FLUX-8");
+    }
+
+    [Fact]
+    public async Task On_a_machine_of_four_gpus_only_the_media_servers_gpu_is_lent_its_vllm_model_sleeps_and_wakes_and_the_others_stay()
+    {
+        // Four GPUs; the video server on GPU 3, where flash (vLLM) runs; other (vLLM) on GPUs 0-1; the chat model (llama.cpp) on GPU 2.
+        var hardware = Path.Combine(_dir, "hardware.json");
+        File.WriteAllText(hardware, $$"""{"ram_bytes": {{1L << 40}}, "gpus": [{{string.Join(',', Enumerable.Range(0, 4).Select(i =>
+            $$"""{"index": {{i}}, "name": "GPU", "vendor": "nvidia", "backend": "cuda", "total_bytes": {{97887L << 20}}}"""))}}]}""");
+        var library = Path.Combine(_dir, "library");
+        foreach (var n in new[] { "flash", "other" })
+        {
+            var dir = Path.Combine(library, "hf", "org", n + "@r");
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, "config.json"), """{"num_hidden_layers":4,"num_attention_heads":4,"num_key_value_heads":4,"head_dim":64,"max_position_embeddings":131072}""");
+            File.WriteAllText(Path.Combine(dir, "model.safetensors"), "w");
+        }
+        var config = Path.Combine(_dir, "config");
+        var vllm = new FakeVllm(Path.Combine(config, "vllm"), Path.Combine(_dir, "vllm-status", "vllm"));
+        await using var s = await NewAsync(new Dictionary<string, string?>
+        {
+            ["Engine:HardwareFile"] = hardware, ["Engine:VllmStatusDir"] = Path.Combine(_dir, "vllm-status"),
+        }, services => services.AddHttpClient(VllmBackend.Client).ConfigurePrimaryHttpMessageHandler(() => vllm));
+        // GPU 3's free memory: what flash leaves while it is awake.
+        s.Serve.FreeOf = () => vllm.Phase("flash") == "ready" ? 2_000 : 80_000;
+        using var ticking = new CancellationTokenSource();
+        var ticks = Task.Run(async () =>
+        {
+            while (!ticking.IsCancellationRequested)
+            {
+                vllm.Tick();
+                await Task.Delay(100);
+            }
+        });
+        try
+        {
+            await using (var scope = s.App.Services.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+                LocalModel V(string name, string devices) => new()
+                {
+                    Name = name, File = $"hf/org/{name}@r", EngineKind = EngineKinds.Vllm, KvType = "fp8", Context = 8192, Parallel = 8, Devices = devices,
+                };
+                db.LocalModels.AddRange(V("flash", "3"), V("other", "0,1"), new LocalModel { Name = Chat, File = "chat/Chat.gguf", Devices = "2" });
+                (await db.MediaModels.SingleAsync(m => m.Name == Video)).Gpu = 3;
+                await db.SaveChangesAsync();
+                var catalog = scope.ServiceProvider.GetRequiredService<ModelCatalog>();
+                await catalog.WritePresetsAsync();
+                await catalog.WriteVllmPresetsAsync();
+            }
+            await s.Media.RefreshAsync(CancellationToken.None);
+            var watcher = s.App.Services.GetRequiredService<EngineWatcher>();
+            var engines = s.App.Services.GetRequiredService<EngineClient>();
+            await UntilAsync(() =>
+            {
+                watcher.Wake();
+                return s.State.StatusOf("flash") == "unloaded" && s.State.Places.TryGetValue(Chat, out var p) && p.PerGpu.ContainsKey(2);
+            }, "the watcher sees the vLLM models and every model's place");
+            await engines.LoadAsync("flash");
+            await engines.LoadAsync("other");
+            await UntilAsync(() =>
+            {
+                watcher.Wake();
+                return s.State.StatusOf("flash") == "loaded" && s.State.StatusOf("other") == "loaded" && s.State.LoadedSince("flash") is not null
+                    && s.State.LoadedSince(Chat) is not null && s.Media.StatusOf("videogen") is { FreeMb: 2_000 };
+            }, "both vLLM models loaded, and the video server's GPU short");
+
+            using var deadline = new CancellationTokenSource(Deadline);
+            var video = s.Media.Find(Video)!;
+            Assert.Equal([3], s.Gpu.GpusOf(video));
+            var hold = await s.Gpu.HoldAsync(video, deadline.Token);
+            // flash, on GPU 3, sleeps; the chat model on GPU 2 and other on GPUs 0-1 are not touched.
+            Assert.Equal(["flash"], hold.Slept);
+            Assert.Empty(hold.Unloaded);
+            await UntilAsync(() => vllm.Phase("flash") == "sleeping", "flash asleep");
+            Assert.Equal("loaded", app.Engine.StatusOf(Chat));
+            Assert.Equal("ready", vllm.Phase("other"));
+            Assert.Equal([3], s.State.Lent!.Gpus);
+            Assert.Contains(s.Gpu.Recent, h => h.Text == $"Made room for {Video} (a video) on GPU 3: put to sleep flash (asleep).");
+            // A model on other GPUs loads as ever while GPU 3 is lent; flash waits.
+            Assert.False(s.State.Blocks("other"));
+            Assert.False(s.State.Blocks(Chat));
+            Assert.True(s.State.Blocks("flash"));
+
+            // Done: flash wakes, the same processes.
+            await hold.DisposeAsync();
+            await UntilAsync(() => vllm.Phase("flash") == "ready", "flash awake");
+            Assert.Equal(["flash sleep", "flash wake"], vllm.Sleeps);
+            Assert.Contains(s.Gpu.Recent, h => h.Text == $"Gave the room back after {Video}: woke flash.");
+            Assert.Null(s.State.Lent);
+        }
+        finally
+        {
+            await ticking.CancelAsync();
+            await ticks;
+        }
     }
 }

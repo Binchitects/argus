@@ -322,6 +322,14 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(m => m.KvType).HasMaxLength(20);
             e.Property(m => m.Placement).HasMaxLength(10).HasDefaultValue("auto");
             e.Property(m => m.Devices).HasMaxLength(100);
+            e.Property(m => m.EngineKind).HasMaxLength(20).HasDefaultValue(EngineKinds.LlamaCpp);
+            e.Property(m => m.Engine).HasMaxLength(100);
+            e.Property(m => m.Replicas).HasDefaultValue(1);
+            e.Property(m => m.Quantization).HasMaxLength(40);
+            e.Property(m => m.SpecDecode).HasMaxLength(20);
+            e.Property(m => m.Sleep).HasDefaultValue(true);
+            e.Property(m => m.Fallback).HasMaxLength(100);
+            e.Property(m => m.KvTier).HasMaxLength(20);
             e.Property(m => m.DraftHead).HasMaxLength(1000);
             e.Property(m => m.DraftMax).HasDefaultValue(3);
             e.Property(m => m.ExtraPreset).HasMaxLength(4000);
