@@ -19,6 +19,8 @@ public static class Filters
         // Manifests: what a repository provides and uses (Links.cs); no symbols.
         [".csproj"] = "msbuild", [".fsproj"] = "msbuild", [".vbproj"] = "msbuild", [".props"] = "msbuild", [".targets"] = "msbuild",
         [".gradle"] = "gradle", [".toml"] = "toml", [".yml"] = "yaml", [".yaml"] = "yaml", [".cfg"] = "ini",
+        // Configuration: what a service talks to while it runs (Links.Runtime): addresses, topics, databases, Pact contracts.
+        [".json"] = "json", [".properties"] = "properties", [".env"] = "dotenv",
     };
 
     /// <summary>Manifests known by their whole name.</summary>
@@ -28,6 +30,7 @@ public static class Filters
         ["packages.config"] = "nugetconfig", ["Dockerfile"] = "dockerfile", ["Containerfile"] = "dockerfile", ["build.gradle.kts"] = "gradle",
         ["tsconfig.json"] = "tsconfig", ["tsconfig.base.json"] = "tsconfig", ["jsconfig.json"] = "tsconfig",
         ["Directory.Packages.props"] = "msbuild", ["Directory.Build.props"] = "msbuild",
+        [".env"] = "dotenv", [".env.example"] = "dotenv",
     };
 
     public static readonly HashSet<string> HeaderExtensions = new(StringComparer.Ordinal) { ".h", ".hpp", ".hxx", ".inl" };

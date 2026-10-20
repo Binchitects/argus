@@ -673,4 +673,49 @@ public sealed class GraphTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.Equal(["data/jobs/main.go@1"], Affected("round/round.go"));
         Assert.Equal("cs Acme.Money", Queries.ImpactOf(all, ix.Conn, lib, "src/Round.cs")["by_repo"]!["web/shop"]![0]!["via"]!.ToString());
     }
+
+    [Fact]
+    public void What_a_service_talks_to_while_it_runs_is_read_from_its_files()
+    {
+        Assert.Equal([("provides", "runtime:database", "orders"), ("provides", "runtime:service", "orders")],
+            Decls("docker-compose.yml", "services:\n  orders:\n    build: .\n    environment:\n      POSTGRES_DB: orders\n  postgres:\n    image: postgres:16\n"));
+        Assert.Contains(("provides", "runtime:service", "billing"),
+            Decls("deploy/k8s/svc.yaml", "apiVersion: v1\nkind: Deployment\nmetadata:\n  name: x\n---\napiVersion: v1\nkind: Service\nmetadata:\n  name: billing\nspec: {}\n"));
+        Assert.Equal([("provides", "runtime:service", "payments")], Decls("chart/Chart.yaml", "apiVersion: v2\nname: payments\nversion: 1.0.0\n"));
+        Assert.Contains(("uses", "runtime:service", "orders"), Decls("src/Client.cs", "var http = new HttpClient { BaseAddress = new Uri(\"http://orders:8080/\") };"));
+        Assert.Contains(("uses", "runtime:service", "billing"), Decls("src/app.py", "requests.get('http://billing.prod.svc.cluster.local/api')"));
+        Assert.Contains(("uses", "runtime:service", "inventory"), Decls("main.go", "conn, _ := grpc.Dial(\"inventory:50051\")"));
+        // A public address is nobody's service here.
+        Assert.DoesNotContain(Decls("src/x.py", "requests.get('https://github.com/a/b'); requests.get('http://localhost:3000')"), d => d.Kind == "runtime:service");
+        Assert.Contains(("uses", "runtime:topic", "orders.created"), Decls("src/Listener.java", "@KafkaListener(topics = \"orders.created\") void on(String m) {}"));
+        Assert.Contains(("provides", "runtime:topic", "orders.created"), Decls("src/Emit.java", "producer.send(new ProducerRecord<>(\"orders.created\", key, value));"));
+        Assert.Contains(("uses", "runtime:database", "orders"), Decls("appsettings.json", "{\"ConnectionStrings\": {\"Db\": \"Host=db;Database=orders;Username=app\"}}"));
+        Assert.Contains(("uses", "runtime:service", "orders"), Decls("pacts/web-orders.json", "{\"consumer\": {\"name\": \"web\"}, \"provider\": {\"name\": \"orders\"}, \"interactions\": []}"));
+        var backstage = Decls("catalog-info.yaml", "apiVersion: backstage.io/v1alpha1\nkind: Component\nmetadata:\n  name: web\nspec:\n  dependsOn:\n    - component:orders\n  consumesApis: [orders-api]\n");
+        Assert.Contains(("provides", "runtime:service", "web"), backstage);
+        Assert.Contains(("uses", "runtime:service", "orders"), backstage);
+        Assert.Contains(("uses", "runtime:api", "orders-api"), backstage);
+        Assert.Contains(("provides", "runtime:api", "orders-api"), Decls("api/openapi.yaml", "openapi: 3.0.0\ninfo:\n  title: Orders API\n  version: 1.0\n"));
+    }
+
+    [Fact]
+    public void Repositories_are_linked_by_what_they_talk_to_at_run_time_and_what_their_owners_declare()
+    {
+        using var ix = new TestIndex();
+        var orders = ix.Repo(1, "shop/orders");
+        var web = ix.Repo(2, "shop/web");
+        var reports = ix.Repo(3, "shop/reports");
+        Index(ix,
+            (orders, "docker-compose.yml", "services:\n  orders:\n    build: .\n"),
+            (orders, "src/Emit.java", "producer.send(new ProducerRecord<>(\"orders.created\", k, v));"),
+            (web, "src/api.ts", "const base = 'http://orders:8080/api';"),
+            (web, "pacts/web-orders.json", "{\"consumer\": {\"name\": \"web\"}, \"provider\": {\"name\": \"orders\"}}"),
+            (reports, "src/Listener.java", "@KafkaListener(topics = \"orders.created\") void on(String m) {}"));
+        Graph.RebuildLinks(ix.Conn);
+        var edges = Argus.Util.Sql.Query(ix.Conn, "SELECT from_repo_id AS f, to_repo_id AS t, layer, kinds FROM repo_edges")
+            .Select(r => (r.Long("f"), r.Long("t"), r.Str("layer"), r.Str("kinds"))).ToList();
+        Assert.Contains(edges, e => e.Item1 == web && e.Item2 == orders && e.Item3 == "runtime" && e.Item4.Contains("runtime:service", StringComparison.Ordinal));
+        Assert.Contains(edges, e => e.Item1 == web && e.Item2 == orders && e.Item3 == "declared");
+        Assert.Contains(edges, e => e.Item1 == reports && e.Item2 == orders && e.Item3 == "runtime" && e.Item4.Contains("runtime:topic", StringComparison.Ordinal));
+    }
 }

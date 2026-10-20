@@ -19,6 +19,23 @@ layer:
 | declared | `declared` | what its owners say it depends on |
 | history | `cochange` | what changes with it; never walked by default |
 
+## What it talks to while it runs
+
+The runtime layer comes from configuration and code, matched by name (lower
+case):
+
+| Kind | Provided by | Used by |
+|---|---|---|
+| `runtime:service` | a compose service it builds (`build:`), a Kubernetes `Service`, a Helm chart's name, a Backstage component | an address whose host is a service's name (`http://orders:8080`, `grpc://orders`, `orders.shop.svc.cluster.local`), a gRPC target in code (`"orders:50051"`) |
+| `runtime:topic` | a Kafka producer (`new ProducerRecord("t"…)`, `producer.produce("t"…)`, `producer.send({ topic: 't' })`) | a consumer (`@KafkaListener(topics = "t")`, `subscribe(["t"])`) |
+| `runtime:database` | a database its compose file makes (`POSTGRES_DB`, `MYSQL_DATABASE`…) | a connection string (`Database=x`, `postgres://…/x`, `jdbc:…/x`) |
+| `runtime:api` | an OpenAPI document's title, Backstage `providesApis` | Backstage `consumesApis` |
+
+What owners declare is the `declared` layer: Backstage's `dependsOn` and
+`consumesApis`, and a Pact contract's provider (in the consumer's
+repository). `.json`, `.properties` and `.env` files are read for these
+(no symbols). A public address (with a domain) is nobody's service here.
+
 ## How sure a link is
 
 Each kind has a prior, by how its name matched:

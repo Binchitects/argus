@@ -45,6 +45,8 @@ public static class LinkKinds
             "ci" => ("image:ci", Ci),
             _ => ("image:deploy", Deploy),
         },
+        // What its owners declare (a Backstage dependsOn, a Pact contract) about what it talks to.
+        _ when declKind.StartsWith("runtime:", StringComparison.Ordinal) && form == "declared" => ("declared", Declared),
         _ when declKind.StartsWith("runtime:", StringComparison.Ordinal) => (declKind, Runtime),
         _ when declKind.StartsWith("declared", StringComparison.Ordinal) => ("declared", Declared),
         "cochange" => ("cochange", History),

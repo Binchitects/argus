@@ -67,6 +67,7 @@ public static partial class Links
     public static readonly HashSet<string> ManifestLangs = new(StringComparer.Ordinal)
     {
         "msbuild", "npm", "gomod", "maven", "gradle", "cargo", "toml", "yaml", "gitmodules", "dockerfile", "ini", "nugetconfig", "tsconfig",
+        "json", "properties", "dotenv",
     };
 
     public static List<Decl> Extract(string path, string? lang, string content)
@@ -112,6 +113,7 @@ public static partial class Links
                 case "rust": Matches(RustUse(), content, "cargo", output, lower: true, join: m => m.Groups["crate"].Value.Replace('_', '-')); break;
                 case "proto": Proto(path, content, output); break;
             }
+            Runtime(path, name, lang, content, output);
         }
         catch (Exception e) when (e is JsonException or RegexMatchTimeoutException or ArgumentException)
         {
@@ -615,4 +617,192 @@ public static partial class Links
     private static partial Regex PrivateRegistry();
     [GeneratedRegex(@"^\s*FROM\s+(?:--platform=\S+\s+)?(?<image>\S+)", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
     private static partial Regex DockerFrom();
+
+    // --- What a service talks to while it runs ----------------------------------------------------
+
+    /// <summary>
+    /// Runtime links: the services, APIs, topics and databases a repository provides (a compose service it builds, a
+    /// Kubernetes Service, a Helm chart, a Backstage component, an OpenAPI document's title, a database its compose
+    /// file makes) and those it talks to (a service's host in an address: http://orders:8080, grpc://orders,
+    /// orders.svc.cluster.local, "orders:50051"; a Kafka topic it consumes; a database in a connection string), and
+    /// what its owners declare (Backstage's dependsOn and consumesApis, a Pact contract's provider). Names are matched
+    /// as written, lower case: the same name on both sides links the two.
+    /// </summary>
+    static void Runtime(string path, string fileName, string? lang, string content, List<Decl> output)
+    {
+        if (lang is null || content.Length > 2_000_000) return;
+        var lower = fileName.ToLowerInvariant();
+        if (lang == "yaml")
+        {
+            if (ComposeName().IsMatch(lower)) ComposeServices(content, output);
+            if (content.Contains("kind: Service", StringComparison.Ordinal)) KubeServices(content, output);
+            if (fileName == "Chart.yaml" && ChartName().Match(content) is { Success: true } chart)
+                output.Add(new Decl(Provides, "runtime:service", chart.Groups["name"].Value.ToLowerInvariant(), LineAt(content, chart.Index)));
+            if (lower is "catalog-info.yaml" or "catalog-info.yml") Backstage(content, output);
+        }
+        if (lang is "yaml" or "json" && OpenApiTitle(lower, content) is { } api)
+            output.Add(new Decl(Provides, "runtime:api", api.Name, api.Line));
+        if (lang == "json" && content.Contains("\"consumer\"", StringComparison.Ordinal) && content.Contains("\"provider\"", StringComparison.Ordinal)
+            && PactProvider().Match(content) is { Success: true } pact)
+            output.Add(new Decl(Uses, "runtime:service", pact.Groups["name"].Value.ToLowerInvariant(), LineAt(content, pact.Index), "declared"));
+        // Addresses of services by their names (inside the cluster or the compose network: no dots, or .svc).
+        foreach (Match m in ServiceUrl().Matches(content))
+        {
+            var host = m.Groups["host"].Value.ToLowerInvariant();
+            if (!NotAService.Contains(host)) output.Add(new Decl(Uses, "runtime:service", host, LineAt(content, m.Index)));
+        }
+        if (lang is not ("yaml" or "json" or "dotenv" or "properties" or "text" or "markdown"))
+        {
+            foreach (Match m in HostPort().Matches(content))
+            {
+                var host = m.Groups["host"].Value.ToLowerInvariant();
+                if (!NotAService.Contains(host)) output.Add(new Decl(Uses, "runtime:service", host, LineAt(content, m.Index)));
+            }
+            Matches(KafkaConsume(), content, "runtime:topic", output, lower: true);
+            Matches(KafkaProduce(), content, "runtime:topic", output, lower: true, role: Provides);
+        }
+        Matches(DatabaseName(), content, "runtime:database", output, lower: true);
+    }
+
+    /// <summary>Host names that are never a service of the estate's.</summary>
+    static readonly HashSet<string> NotAService = new(StringComparer.Ordinal)
+    {
+        "localhost", "example", "host", "hostname", "server", "your-host", "myhost", "0", "127", "proxy", "foo", "bar", "test",
+    };
+
+    /// <summary>A compose file's services that are built here (build:): the ones this repository provides.</summary>
+    static void ComposeServices(string content, List<Decl> output)
+    {
+        var lines = content.Split('\n');
+        var inServices = false;
+        string? current = null;
+        var currentLine = 0;
+        var built = false;
+        void Flush()
+        {
+            if (current is not null && built) output.Add(new Decl(Provides, "runtime:service", current.ToLowerInvariant(), currentLine));
+        }
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i].TrimEnd('\r');
+            if (line.StartsWith("services:", StringComparison.Ordinal)) { inServices = true; continue; }
+            if (!inServices) continue;
+            if (line.Length > 0 && !char.IsWhiteSpace(line[0]) && !line.StartsWith('#')) { Flush(); inServices = false; current = null; continue; }
+            if (ComposeService().Match(line) is { Success: true } svc)
+            {
+                Flush();
+                (current, currentLine, built) = (svc.Groups["name"].Value, i + 1, false);
+                continue;
+            }
+            if (current is not null && line.TrimStart().StartsWith("build:", StringComparison.Ordinal)) built = true;
+            if (current is not null && ComposeDb().Match(line) is { Success: true } db)
+                output.Add(new Decl(Provides, "runtime:database", db.Groups["name"].Value.Trim('"', '\'').ToLowerInvariant(), i + 1));
+        }
+        Flush();
+    }
+
+    /// <summary>Each Kubernetes Service document's name.</summary>
+    static void KubeServices(string content, List<Decl> output)
+    {
+        var offset = 0;
+        foreach (var doc in content.Split("\n---"))
+        {
+            if (KubeKindService().IsMatch(doc) && KubeMetaName().Match(doc) is { Success: true } m)
+                output.Add(new Decl(Provides, "runtime:service", m.Groups["name"].Value.ToLowerInvariant(), LineAt(content, offset + m.Index)));
+            offset += doc.Length + 4;
+        }
+    }
+
+    /// <summary>A Backstage entity: the component (or API) it is, and what it depends on and consumes.</summary>
+    static void Backstage(string content, List<Decl> output)
+    {
+        if (KubeMetaName().Match(content) is { Success: true } me && BackstageKind().Match(content) is { Success: true } kind)
+            output.Add(new Decl(Provides, kind.Groups["kind"].Value.Equals("API", StringComparison.OrdinalIgnoreCase) ? "runtime:api" : "runtime:service",
+                me.Groups["name"].Value.ToLowerInvariant(), LineAt(content, me.Index)));
+        foreach (Match m in BackstageList().Matches(content))
+        {
+            var key = m.Groups["key"].Value;
+            foreach (Match item in BackstageItem().Matches(m.Groups["items"].Value))
+            {
+                var name = item.Groups["name"].Value.ToLowerInvariant();
+                var line = LineAt(content, m.Index);
+                switch (key)
+                {
+                    case "dependsOn": output.Add(new Decl(Uses, name.StartsWith("api:", StringComparison.Ordinal) ? "runtime:api" : "runtime:service", name[(name.IndexOf(':') + 1)..], line, "declared")); break;
+                    case "consumesApis": output.Add(new Decl(Uses, "runtime:api", name[(name.IndexOf(':') + 1)..], line, "declared")); break;
+                    case "providesApis": output.Add(new Decl(Provides, "runtime:api", name[(name.IndexOf(':') + 1)..], line)); break;
+                }
+            }
+        }
+    }
+
+    /// <summary>An OpenAPI (or Swagger) document's title: the API this repository provides, by that name.</summary>
+    static (string Name, long Line)? OpenApiTitle(string fileName, string content)
+    {
+        if (!(fileName.Contains("openapi", StringComparison.Ordinal) || fileName.Contains("swagger", StringComparison.Ordinal))
+            && !OpenApiHead().IsMatch(content.Length > 400 ? content[..400] : content))
+            return null;
+        return OpenApiTitleRe().Match(content) is { Success: true } m ? (Slug(m.Groups["title"].Value), LineAt(content, m.Index)) : null;
+    }
+
+    static string Slug(string title) => SlugRe().Replace(title.Trim().ToLowerInvariant(), "-").Trim('-');
+
+    [GeneratedRegex(@"^(?:docker-)?compose(?:\.[\w.-]+)?\.ya?ml$")]
+    private static partial Regex ComposeName();
+
+    [GeneratedRegex(@"^  (?<name>[a-z0-9][a-z0-9_.-]*):\s*(?:#.*)?$")]
+    private static partial Regex ComposeService();
+
+    [GeneratedRegex(@"(?:POSTGRES_DB|MYSQL_DATABASE|MARIADB_DATABASE|MONGO_INITDB_DATABASE)\s*[:=]\s*(?<name>[""']?[A-Za-z0-9_-]+[""']?)")]
+    private static partial Regex ComposeDb();
+
+    [GeneratedRegex(@"^\s*kind:\s*Service\s*$", RegexOptions.Multiline)]
+    private static partial Regex KubeKindService();
+
+    [GeneratedRegex(@"metadata:\s*\n(?:[ \t]+[^\n]*\n)*?[ \t]+name:\s*[""']?(?<name>[a-z0-9][a-z0-9.-]*)[""']?")]
+    private static partial Regex KubeMetaName();
+
+    [GeneratedRegex(@"^name:\s*[""']?(?<name>[a-z0-9][a-z0-9.-]*)[""']?\s*$", RegexOptions.Multiline)]
+    private static partial Regex ChartName();
+
+    [GeneratedRegex(@"^kind:\s*(?<kind>Component|API|System)\s*$", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    private static partial Regex BackstageKind();
+
+    [GeneratedRegex(@"^\s+(?<key>dependsOn|consumesApis|providesApis):\s*(?<items>(?:\[[^\]]*\])|(?:\n\s+-\s*[^\n]+)+)", RegexOptions.Multiline)]
+    private static partial Regex BackstageList();
+
+    [GeneratedRegex(@"(?:^|[\[,\-\s])\s*[""']?(?<name>[A-Za-z]+:[A-Za-z0-9/._-]+|[A-Za-z0-9._-]+)[""']?")]
+    private static partial Regex BackstageItem();
+
+    [GeneratedRegex(@"^\s*[""']?(?:openapi|swagger)[""']?\s*:", RegexOptions.Multiline)]
+    private static partial Regex OpenApiHead();
+
+    [GeneratedRegex(@"[""']?title[""']?\s*:\s*[""']?(?<title>[^""'\n]{2,80})[""']?")]
+    private static partial Regex OpenApiTitleRe();
+
+    [GeneratedRegex(@"[^a-z0-9]+")]
+    private static partial Regex SlugRe();
+
+    [GeneratedRegex(@"""provider""\s*:\s*\{\s*""name""\s*:\s*""(?<name>[^""]{1,100})""")]
+    private static partial Regex PactProvider();
+
+    /// <summary>An address whose host is a service's name: no dots (the compose network), or a cluster's .svc name.</summary>
+    [GeneratedRegex(@"(?:https?|grpcs?|wss?)://(?:[^@/\s""']+@)?(?<host>[a-z][a-z0-9-]{1,62})(?:\.[a-z0-9-]+\.svc(?:\.cluster\.local)?)?(?=:\d|/|[""'\s]|$)")]
+    private static partial Regex ServiceUrl();
+
+    /// <summary>A gRPC target or a connection's "host:port" in code, the host a bare service name.</summary>
+    [GeneratedRegex(@"[""'](?<host>[a-z][a-z0-9-]{2,62}):(?<port>[1-9][0-9]{1,4})[""']")]
+    private static partial Regex HostPort();
+
+    /// <summary>A Kafka topic consumed: Spring's @KafkaListener, a consumer's subscribe, Node's consumer.subscribe({ topic }).</summary>
+    [GeneratedRegex(@"(?:@KafkaListener\s*\([^)]*topics\s*=\s*\{?\s*""(?<name>[\w.-]+)""|\.subscribe\(\s*(?:\[|List\.of\(|Arrays\.asList\(|\{\s*topics?\s*:\s*\[?)?\s*[""'](?<name>[\w.-]+)[""'])")]
+    private static partial Regex KafkaConsume();
+
+    /// <summary>A Kafka topic produced: new ProducerRecord("t"...), producer.produce("t"...), producer.send({ topic: 't' }).</summary>
+    [GeneratedRegex(@"(?:new\s+ProducerRecord(?:<[^>]*>)?\(\s*""(?<name>[\w.-]+)""|producer\.produce\(\s*[""'](?<name>[\w.-]+)[""']|producer\.send\(\s*\{\s*topic\s*:\s*[""'](?<name>[\w.-]+)[""'])")]
+    private static partial Regex KafkaProduce();
+
+    /// <summary>A database in a connection string: Database=x; postgres://.../x; jdbc:postgresql://.../x; mongodb://.../x.</summary>
+    [GeneratedRegex(@"(?:(?:Database|Initial Catalog)\s*=\s*(?<name>[A-Za-z0-9_-]+)|(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|jdbc:\w+)://[^/\s""']+/(?<name>[A-Za-z0-9_-]+))")]
+    private static partial Regex DatabaseName();
 }
