@@ -8,6 +8,8 @@ _LOOK = globals().get("LOOK", "auto")
 _LIGHTING = globals().get("LIGHTING", "day")
 _new = set(_os.listdir(".")) - globals().get("_ARENA_INPUTS", set())
 _sc = _bpy.context.scene
+# Parents and moves the script made take effect before the model is measured.
+_bpy.context.view_layer.update()
 _meshes = [o for o in _sc.objects if o.type in {"MESH", "CURVE", "SURFACE", "META", "FONT"} and not o.hide_render]
 _want_glb = bool(_meshes) and not any(f.lower().endswith((".glb", ".gltf")) for f in _new)
 _want_png = bool(_meshes) and not any(f.lower().endswith((".png", ".jpg")) for f in _new)
@@ -130,7 +132,7 @@ if _want_glb:
             _main = _me.uv_layers.active
             _uv = _me.uv_layers.new(name="bake")
             for _l in _me.uv_layers:
-                _l.active_render = _l.name == _main.name
+                _l.active_render = _l.name == (_main.name if _main else "bake")
             _me.uv_layers.active = _uv
             for _x in _sc.objects:
                 _x.select_set(False)

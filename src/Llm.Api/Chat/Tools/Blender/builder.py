@@ -19,7 +19,8 @@ _NAMED = {"red": "#c0392b", "green": "#3a8f3a", "blue": "#2e6fbf", "yellow": "#e
 _MATERIALS = {}
 PATTERNS = ("brick", "tiles", "shingles", "checker", "wood", "stone", "concrete", "plaster", "grass", "marble", "metal", "fabric", "noise")
 SHADERS = ("matte", "plastic", "metal", "mirror", "glass", "light", "ceramic", "rubber")
-SHAPES = ("box", "cylinder", "cone", "sphere", "torus", "plane", "roof", "wedge", "pyramid", "light")
+SHAPES = ("box", "cylinder", "cone", "sphere", "torus", "plane", "roof", "wedge", "pyramid", "capsule", "lathe", "extrude", "tube", "text", "tree",
+          "light", "figure")
 LIGHTS = ("point", "spot", "area", "sun")
 _WARM = {"warm": "#ffd6a0", "daylight": "#fff4e5", "cool": "#d6e6ff", "candle": "#ffb46b"}
 
@@ -358,6 +359,10 @@ def part(spec=None, **kw):
     at = [float(x) for x in (s.get("at") or s.get("position") or [0, 0, 0])]
     turn = [math.radians(float(x)) for x in (s.get("turn") or s.get("rotation") or [0, 0, 0])]
     name = str(s.get("name") or shape)
+    if shape == "figure":
+        return figure(s)
+    if shape == "tree":
+        return tree(s)
     if shape == "light":
         return light(s.get("kind", "point"), at, s.get("color", "warm"), s.get("power"), turn, name, s.get("size"), s.get("repeat"))
     rep = s.get("repeat") or {}
@@ -369,8 +374,27 @@ def part(spec=None, **kw):
     for i in range(count):
         x, y, z = (at[0] + step[0] * i, at[1] + step[1] * i, at[2] + step[2] * i)
         sx, sy, sz = (size[0] or 1, size[1] or 1, size[2] or 1)
-        if shape in ("roof", "wedge"):
-            ob = bpy.data.objects.new(name, _roof_mesh(name) if shape == "roof" else _wedge_mesh(name))
+        if shape in ("roof", "wedge", "capsule", "lathe", "extrude", "tube", "text"):
+            if shape == "roof":
+                me = _roof_mesh(name)
+            elif shape == "wedge":
+                me = _wedge_mesh(name)
+            elif shape == "capsule":
+                me = _capsule_mesh(name, size)
+                sx = sy = sz = 1.0
+            elif shape == "lathe":
+                me = _lathe_mesh(name, s.get("profile"))
+                sx = sy = sz = 1.0
+            elif shape == "extrude":
+                me = _extrude_mesh(name, s.get("outline"), size[2] or 0.1)
+                sx = sy = sz = 1.0
+            elif shape == "tube":
+                me = _tube_mesh(name, s.get("path"), (size[0] or 0.05) / 2)
+                sx = sy = sz = 1.0
+            else:
+                me = _text_mesh(name, str(s.get("text") or name), size[2] or 0.3, size[1] or 0.05)
+                sx = sy = sz = 1.0
+            ob = bpy.data.objects.new(name, me)
             bpy.context.scene.collection.objects.link(ob)
             ob.location = (x, y, z)
         else:
@@ -405,7 +429,198 @@ def part(spec=None, **kw):
             mod.width = float(s["bevel"])
             mod.segments = 3
             mod.limit_method = "ANGLE"
+        smooth = int(s.get("smooth") or 0)
+        if smooth > 0 or shape in ("sphere", "capsule", "lathe", "tube", "torus", "cylinder", "cone"):
+            for poly in ob.data.polygons:
+                poly.use_smooth = True
+            if shape in ("cylinder", "cone"):
+                # Round sides smooth, flat ends flat.
+                ob.data.set_sharp_from_angle(angle=math.radians(40)) if hasattr(ob.data, "set_sharp_from_angle") else None
+        if smooth > 0:
+            sub = ob.modifiers.new("smooth", "SUBSURF")
+            sub.levels = sub.render_levels = max(1, min(smooth, 3))
         made.append(ob)
+    return made
+
+
+def _capsule_mesh(name, size):
+    # A pill: a cylinder with round ends, size [x, y, height]; its bottom at z = 0.
+    sx, sy, h = (size[0] or 0.2), (size[1] or size[0] or 0.2), (size[2] or 0.5)
+    r = min(sx, sy) / 2
+    bm = bmesh.new()
+    bmesh.ops.create_uvsphere(bm, u_segments=32, v_segments=17, radius=r)
+    stretch = max(h / 2 - r, 0)
+    for v in bm.verts:
+        v.co.z += stretch if v.co.z > 1e-6 else -stretch if v.co.z < -1e-6 else 0
+        v.co.x *= sx / (2 * r)
+        v.co.y *= sy / (2 * r)
+        v.co.z += max(h / 2, r)
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    return me
+
+
+def _lathe_mesh(name, profile, steps=48):
+    # A profile turned round the z axis: [[radius, height], ...] from the bottom up (a vase, a bottle, a column, a lamp).
+    pts = [(max(float(p[0]), 0.0), float(p[1])) for p in (profile or [])]
+    if len(pts) < 2:
+        raise ValueError("a lathe needs a profile of at least two [radius, height] points")
+    verts, faces, rings = [], [], []
+    for r, z in pts:
+        if r < 1e-6:
+            rings.append([len(verts)])
+            verts.append((0, 0, z))
+        else:
+            ring = []
+            for i in range(steps):
+                a = 2 * math.pi * i / steps
+                ring.append(len(verts))
+                verts.append((r * math.cos(a), r * math.sin(a), z))
+            rings.append(ring)
+    for lo, hi in zip(rings, rings[1:]):
+        if len(lo) == 1 and len(hi) == 1:
+            continue
+        for i in range(steps):
+            j = (i + 1) % steps
+            if len(lo) == 1:
+                faces.append((lo[0], hi[j], hi[i]))
+            elif len(hi) == 1:
+                faces.append((lo[i], lo[j], hi[0]))
+            else:
+                faces.append((lo[i], lo[j], hi[j], hi[i]))
+    # Open ends closed.
+    if len(rings[0]) > 1:
+        faces.append(tuple(reversed(rings[0])))
+    if len(rings[-1]) > 1:
+        faces.append(tuple(rings[-1]))
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(verts, [], faces)
+    me.update()
+    return me
+
+
+def _extrude_mesh(name, outline, height):
+    # An outline [[x, y], ...] (a room's plan, a sign, a slab of any shape) raised by its height.
+    pts = [(float(p[0]), float(p[1])) for p in (outline or [])]
+    if len(pts) < 3:
+        raise ValueError("an extrude needs an outline of at least three [x, y] points")
+    if sum(pts[i][0] * pts[(i + 1) % len(pts)][1] - pts[(i + 1) % len(pts)][0] * pts[i][1] for i in range(len(pts))) < 0:
+        pts.reverse()
+    n = len(pts)
+    verts = [(x, y, 0.0) for x, y in pts] + [(x, y, float(height)) for x, y in pts]
+    faces = [tuple(reversed(range(n))), tuple(range(n, 2 * n))] + [(i, (i + 1) % n, n + (i + 1) % n, n + i) for i in range(n)]
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(verts, [], faces)
+    me.update()
+    return me
+
+
+def _to_mesh(curve_ob):
+    bpy.context.view_layer.update()
+    deps = bpy.context.evaluated_depsgraph_get()
+    me = bpy.data.meshes.new_from_object(curve_ob.evaluated_get(deps))
+    data = curve_ob.data
+    bpy.data.objects.remove(curve_ob)
+    bpy.data.curves.remove(data)
+    return me
+
+
+def _tube_mesh(name, path, radius):
+    # A round tube along a path [[x, y, z], ...], smoothed through its points (a pipe, a cable, a handle, a branch).
+    pts = [tuple(float(c) for c in p) for p in (path or [])]
+    if len(pts) < 2:
+        raise ValueError("a tube needs a path of at least two [x, y, z] points")
+    cu = bpy.data.curves.new(name, "CURVE")
+    cu.dimensions = "3D"
+    cu.bevel_depth = radius
+    cu.bevel_resolution = 4
+    cu.use_fill_caps = True
+    sp = cu.splines.new("NURBS" if len(pts) > 2 else "POLY")
+    sp.points.add(len(pts) - 1)
+    for p, co in zip(sp.points, pts):
+        p.co = (co[0], co[1], co[2], 1)
+    if len(pts) > 2:
+        sp.use_endpoint_u = True
+        sp.order_u = 3
+    ob = bpy.data.objects.new(name, cu)
+    bpy.context.scene.collection.objects.link(ob)
+    return _to_mesh(ob)
+
+
+def _text_mesh(name, text, height, depth):
+    # Letters standing up, facing -y: height is a capital's, depth how thick they are; centred on x.
+    cu = bpy.data.curves.new(name, "FONT")
+    cu.body = text[:200]
+    cu.size = height * 1.4
+    cu.extrude = depth / 2
+    cu.align_x = "CENTER"
+    ob = bpy.data.objects.new(name, cu)
+    bpy.context.scene.collection.objects.link(ob)
+    me = _to_mesh(ob)
+    me.transform(Matrix.Rotation(math.radians(90), 4, "X") @ Matrix.Translation((0, 0, depth / 2)))
+    return me
+
+
+def tree(spec=None, **kw):
+    # A tree: kind round (a broadleaf), pine, palm or bush; size [crown width, _, height]; at, colours.
+    s = dict(spec or {}, **kw)
+    kind = str(s.get("kind", "round")).lower()
+    size = [float(x) for x in (s.get("size") or [3, 3, 5])]
+    w, h = (size[0] or 3), (size[2] or 5)
+    at = [float(x) for x in (s.get("at") or [0, 0, 0])]
+    name = str(s.get("name") or "tree")
+    bark = material(s.get("trunk_color", "#5b4130"), roughness=0.9, texture="wood", texture_size=0.5)
+    leaf = material(s.get("color", "#3f7a35" if kind != "pine" else "#2f5d34"), roughness=0.8, texture="grass", texture_size=0.3)
+    made = []
+    def add(o, m):
+        o.data.materials.append(m)
+        made.append(o)
+    if kind == "palm":
+        path = [(at[0], at[1], at[2]), (at[0] + 0.2 * h * 0.1, at[1], at[2] + h * 0.5), (at[0] + 0.35 * h * 0.1, at[1], at[2] + h)]
+        trunk = bpy.data.objects.new(f"{name}-trunk", _tube_mesh(f"{name}-trunk", path, h * 0.025))
+        bpy.context.scene.collection.objects.link(trunk)
+        add(trunk, bark)
+        top = path[-1]
+        for i in range(8):
+            a = 2 * math.pi * i / 8
+            tip = (top[0] + math.cos(a) * w / 2, top[1] + math.sin(a) * w / 2, top[2] - h * 0.12)
+            midp = (top[0] + math.cos(a) * w / 4, top[1] + math.sin(a) * w / 4, top[2] + h * 0.04)
+            frond = bpy.data.objects.new(f"{name}-leaf", _tube_mesh(f"{name}-leaf", [top, midp, tip], w * 0.04))
+            frond.data.transform(Matrix.Identity(4))
+            bpy.context.scene.collection.objects.link(frond)
+            add(frond, leaf)
+    else:
+        trunk_h = h * (0.35 if kind == "round" else 0.25 if kind == "pine" else 0.1)
+        trunk = bpy.data.objects.new(f"{name}-trunk", _lathe_mesh(f"{name}-trunk", [[w * 0.06, 0], [w * 0.045, trunk_h * 0.6], [w * 0.035, trunk_h + h * 0.2], [0, trunk_h + h * 0.21]], 16))
+        bpy.context.scene.collection.objects.link(trunk)
+        trunk.location = at
+        add(trunk, bark)
+        if kind == "pine":
+            layers = 4
+            for i in range(layers):
+                f = 1 - i / layers
+                bpy.ops.mesh.primitive_cone_add(radius1=w / 2 * f + 0.1, radius2=0, depth=(h - trunk_h) / layers * 1.6, vertices=24,
+                                                location=(at[0], at[1], at[2] + trunk_h + (h - trunk_h) * (i / layers) + (h - trunk_h) / layers * 0.8))
+                add(bpy.context.active_object, leaf)
+        else:
+            # A crown of a few overlapping lumps, bumpy.
+            crown_z = at[2] + trunk_h + (h - trunk_h) / 2
+            lumps = [(0, 0, 0, 0.5), (0.25, 0.1, -0.1, 0.36), (-0.22, -0.12, -0.05, 0.36), (0.05, -0.25, 0.12, 0.32), (-0.08, 0.24, 0.15, 0.3)]
+            for dx, dy, dz, r in lumps[: (5 if kind == "round" else 3)]:
+                bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=3, radius=1)
+                o = bpy.context.active_object
+                o.data.transform(Matrix.Diagonal((w * r, w * r, (h - trunk_h) * r * 1.1, 1)))
+                o.location = (at[0] + dx * w, at[1] + dy * w, crown_z + dz * (h - trunk_h))
+                d = o.modifiers.new("bumps", "DISPLACE")
+                t = bpy.data.textures.new("leaves", "CLOUDS")
+                t.noise_scale = 0.35
+                d.texture, d.strength = t, w * 0.06
+                for poly in o.data.polygons:
+                    poly.use_smooth = True
+                add(o, leaf)
+    for o in made:
+        box_uv(o)
     return made
 
 
@@ -526,3 +741,295 @@ def make_texture(name, pattern=None, image=None, color="grey", color2=None, size
             bpy.data.objects.remove(ob)
     print(f"Texture {name}: {', '.join(files.values())}; one image covers {span[0]:.2f} x {span[1]:.2f} m.")
     return span
+
+
+# --- a human figure: a skeleton Blender's skin modifier covers and subdivision smooths, then a face, hair and clothes ---
+
+# Joints for a 1.75 m person standing, in metres; front is -y. Each pose moves some of them.
+_JOINTS = {
+    "pelvis": (0, 0, 0.95), "waist": (0, 0.005, 1.08), "chest": (0, 0.01, 1.28), "neck": (0, 0.01, 1.47), "head": (0, 0, 1.55),
+    "hip.L": (0.095, 0, 0.92), "knee.L": (0.1, -0.01, 0.5), "ankle.L": (0.1, 0.02, 0.08), "heel.L": (0.1, 0.05, 0.03), "toe.L": (0.11, -0.13, 0.025),
+    "shoulder.L": (0.185, 0.02, 1.41), "elbow.L": (0.25, 0.04, 1.13), "wrist.L": (0.28, 0.0, 0.88), "hand.L": (0.29, -0.01, 0.82),
+}
+
+
+def _mirror(j):
+    out = dict(j)
+    for k, v in j.items():
+        if k.endswith(".L"):
+            out[k[:-2] + ".R"] = (-v[0], v[1], v[2])
+    return out
+
+
+def _posed(pose):
+    j = dict(_JOINTS)
+    if pose == "t-pose":
+        j.update({"elbow.L": (0.47, 0.02, 1.41), "wrist.L": (0.72, 0.0, 1.41), "hand.L": (0.8, -0.0, 1.41)})
+    elif pose == "arms-up":
+        j.update({"elbow.L": (0.24, 0.02, 1.68), "wrist.L": (0.26, 0.0, 1.93), "hand.L": (0.265, -0.01, 2.0)})
+    j = _mirror(j)
+    if pose == "waving":
+        j.update({"elbow.R": (-0.4, 0.03, 1.36), "wrist.R": (-0.45, -0.01, 1.6), "hand.R": (-0.46, -0.02, 1.68)})
+    elif pose == "walking":
+        j.update({"knee.L": (0.1, -0.16, 0.52), "ankle.L": (0.1, -0.2, 0.1), "heel.L": (0.1, -0.17, 0.05), "toe.L": (0.11, -0.36, 0.03),
+                  "knee.R": (-0.1, 0.1, 0.5), "ankle.R": (-0.1, 0.24, 0.13), "heel.R": (-0.1, 0.27, 0.09), "toe.R": (-0.11, 0.12, 0.03),
+                  "elbow.L": (0.24, 0.12, 1.14), "wrist.L": (0.26, 0.18, 0.9), "hand.L": (0.265, 0.19, 0.83),
+                  "elbow.R": (-0.24, -0.08, 1.14), "wrist.R": (-0.26, -0.2, 0.92), "hand.R": (-0.265, -0.23, 0.86)})
+    elif pose == "sitting":
+        for s, x in (("L", 0.1), ("R", -0.1)):
+            j.update({f"hip.{s}": (x * 0.95, 0, 0.5), f"knee.{s}": (x, -0.42, 0.52), f"ankle.{s}": (x, -0.44, 0.08),
+                      f"heel.{s}": (x, -0.41, 0.03), f"toe.{s}": (x * 1.1, -0.58, 0.025)})
+        j.update({"pelvis": (0, 0.02, 0.53), "waist": (0, 0.03, 0.66), "chest": (0, 0.04, 0.86), "neck": (0, 0.04, 1.05), "head": (0, 0.03, 1.13),
+                  "shoulder.L": (0.185, 0.05, 0.99), "elbow.L": (0.23, -0.02, 0.73), "wrist.L": (0.2, -0.27, 0.62), "hand.L": (0.19, -0.33, 0.6),
+                  "shoulder.R": (-0.185, 0.05, 0.99), "elbow.R": (-0.23, -0.02, 0.73), "wrist.R": (-0.2, -0.27, 0.62), "hand.R": (-0.19, -0.33, 0.6)})
+    return j
+
+
+# The bones, each a joint to another, and what each one is for clothes.
+_BONES = [("pelvis", "waist", "hips"), ("waist", "chest", "torso"), ("chest", "neck", "torso"), ("neck", "head", "neck"),
+          ("pelvis", "hip.L", "hips"), ("hip.L", "knee.L", "thigh"), ("knee.L", "ankle.L", "shin"), ("ankle.L", "heel.L", "foot"), ("ankle.L", "toe.L", "foot"),
+          ("pelvis", "hip.R", "hips"), ("hip.R", "knee.R", "thigh"), ("knee.R", "ankle.R", "shin"), ("ankle.R", "heel.R", "foot"), ("ankle.R", "toe.R", "foot"),
+          ("chest", "shoulder.L", "torso"), ("shoulder.L", "elbow.L", "upperarm"), ("elbow.L", "wrist.L", "forearm"), ("wrist.L", "hand.L", "hand"),
+          ("chest", "shoulder.R", "torso"), ("shoulder.R", "elbow.R", "upperarm"), ("elbow.R", "wrist.R", "forearm"), ("wrist.R", "hand.R", "hand")]
+
+# Skin radii (x, y) at each joint, average build.
+_RADII = {"pelvis": (0.15, 0.1), "waist": (0.128, 0.098), "chest": (0.16, 0.108), "neck": (0.06, 0.058), "head": (0.055, 0.055),
+          "hip": (0.088, 0.088), "knee": (0.056, 0.056), "ankle": (0.036, 0.036), "heel": (0.036, 0.032), "toe": (0.042, 0.022),
+          "shoulder": (0.062, 0.062), "elbow": (0.044, 0.044), "wrist": (0.03, 0.024), "hand": (0.034, 0.016)}
+
+_HAIR = ("short", "long", "bun", "ponytail", "curly", "bald", "none")
+_POSES = ("standing", "t-pose", "waving", "walking", "sitting", "arms-up")
+
+
+def _seg_dist(p, a, b):
+    ab = [b[i] - a[i] for i in range(3)]
+    ap = [p[i] - a[i] for i in range(3)]
+    t = max(0.0, min(1.0, sum(ab[i] * ap[i] for i in range(3)) / max(sum(c * c for c in ab), 1e-9)))
+    return math.dist(p, [a[i] + ab[i] * t for i in range(3)]), t
+
+
+def figure(spec=None, **kw):
+    # A person: height (metres), build (slim, average, heavy), body (masculine, feminine), pose (standing, t-pose, waving,
+    # walking, sitting, arms-up), skin (a colour), shirt, sleeves (long, short, none), trousers, legs (long, shorts, skirt),
+    # shoes, hair (short, long, bun, ponytail, curly, bald), hair_color, eyes (a colour), at, turn, name.
+    s = dict(spec or {}, **kw)
+    height = float(s.get("height") or (s.get("size") or [0, 0, 1.75])[2] or 1.75)
+    k = height / 1.75
+    build = str(s.get("build", "average")).lower()
+    body = str(s.get("body", "masculine")).lower()
+    pose = str(s.get("pose", "standing")).lower()
+    pose = pose if pose in _POSES else "standing"
+    hair = str(s.get("hair", "short")).lower()
+    hair = hair if hair in _HAIR else "short"
+    name = str(s.get("name") or "person")
+    at = [float(x) for x in (s.get("at") or [0, 0, 0])]
+    turn = [math.radians(float(x)) for x in (s.get("turn") or [0, 0, 0])]
+    fat = {"slim": 0.85, "heavy": 1.3, "athletic": 1.05}.get(build, 1.0)
+    fem = body.startswith("fem")
+    joints = _posed(pose)
+    if fem:
+        for side, sign in (("L", 1), ("R", -1)):
+            x, y, z = joints[f"shoulder.{side}"]
+            joints[f"shoulder.{side}"] = (x * 0.9, y, z)
+            x, y, z = joints[f"hip.{side}"]
+            joints[f"hip.{side}"] = (x * 1.08, y, z)
+    names = list(joints)
+    mesh = bpy.data.meshes.new(f"{name}-body")
+    verts = [tuple(c * k for c in joints[n]) for n in names]
+    edges = [(names.index(a), names.index(b)) for a, b, _ in _BONES]
+    mesh.from_pydata(verts, edges, [])
+    ob = bpy.data.objects.new(f"{name}-body", mesh)
+    bpy.context.scene.collection.objects.link(ob)
+    skin = ob.modifiers.new("skin", "SKIN")
+    skin.use_smooth_shade = True
+    for i, n in enumerate(names):
+        r = _RADII[n.split(".")[0]]
+        f = fat if n.split(".")[0] in ("pelvis", "waist", "chest", "hip", "knee", "shoulder", "elbow") else (1 + (fat - 1) * 0.5)
+        if fem and n == "pelvis":
+            r = (r[0] * 1.1, r[1] * 1.05)
+        if fem and n == "chest":
+            r = (r[0] * 0.92, r[1] * 1.12)
+        if fem and n == "waist":
+            r = (r[0] * 0.9, r[1] * 0.95)
+        mesh.skin_vertices[0].data[i].radius = (r[0] * f * k, r[1] * f * k)
+        mesh.skin_vertices[0].data[i].use_root = n == "pelvis"
+    sub = ob.modifiers.new("smooth", "SUBSURF")
+    sub.levels = sub.render_levels = 3
+    bpy.context.view_layer.objects.active = ob
+    for x in bpy.context.scene.objects:
+        x.select_set(False)
+    ob.select_set(True)
+    bpy.ops.object.modifier_apply(modifier="skin")
+    bpy.ops.object.modifier_apply(modifier="smooth")
+    for p in ob.data.polygons:
+        p.use_smooth = True
+    box_uv(ob)
+    # Clothes by where each face is: the bone it is nearest, and how far along it.
+    colours = {
+        "skin": material(s.get("skin", "#e0b49a"), roughness=0.55),
+        "shirt": material(s.get("shirt", "#3b6ea8"), roughness=0.8, texture="fabric" if s.get("fabric", True) else None),
+        "trousers": material(s.get("trousers", "#2b2f3a"), roughness=0.8, texture="fabric" if s.get("fabric", True) else None),
+        "shoes": material(s.get("shoes", "#2a1d15"), roughness=0.4),
+    }
+    order = list(colours)
+    for m in colours.values():
+        ob.data.materials.append(m)
+    sleeves = str(s.get("sleeves", "short")).lower()
+    legs = str(s.get("legs", "long")).lower()
+    bones = [(tuple(c * k for c in joints[a]), tuple(c * k for c in joints[b]), what) for a, b, what in _BONES]
+    waist_z = joints["waist"][2] * k - 0.04 * k
+    neck_z = joints["neck"][2] * k
+    trunk = [(a, b) for a, b, w in bones if w in ("torso", "hips")][:3]
+    for p in ob.data.polygons:
+        c = p.center
+        best, along, what = 9.0, 0.0, "torso"
+        for a, b, w in bones:
+            d, t = _seg_dist(c, a, b)
+            if d < best:
+                best, along, what = d, t, w
+        # The body's side under an arm is the body's, not the arm's.
+        if what in ("upperarm", "forearm") and min(_seg_dist(c, a, b)[0] for a, b in trunk) < 0.175 * k * fat:
+            what = "torso"
+        if what in ("torso",):
+            part_ = "shirt" if c.z > waist_z or legs == "dress" else "trousers"
+            # The collar: the neck above it is skin.
+            if c.z > neck_z - 0.015 * k and abs(c.x - joints["neck"][0] * k) < 0.075 * k * fat:
+                part_ = "skin"
+        elif what == "hips":
+            part_ = "shirt" if legs == "dress" else "trousers"
+        elif what == "upperarm":
+            part_ = "shirt" if sleeves in ("short", "long") and (sleeves == "long" or along < 0.55) else "skin"
+        elif what == "forearm":
+            part_ = "shirt" if sleeves == "long" and along < 0.92 else "skin"
+        elif what == "thigh":
+            part_ = "skin" if legs in ("skirt", "dress") else "trousers"
+            if legs == "shorts" and along > 0.7:
+                part_ = "skin"
+        elif what == "shin":
+            part_ = "trousers" if legs == "long" else "skin"
+        elif what == "foot":
+            part_ = "shoes"
+        else:
+            part_ = "skin"
+        if what in ("shin",) and along > 0.85:
+            part_ = "shoes"
+        p.material_index = order.index(part_)
+    made = [ob]
+    if legs in ("skirt", "dress"):
+        # A skirt flares from the waist (a dress from under the arms) to the knees.
+        top = joints["chest"][2] * k if legs == "dress" else waist_z
+        knee = (joints["knee.L"][2] + (0.06 if legs == "skirt" else -0.04)) * k
+        cx, cy = joints["pelvis"][0] * k, joints["pelvis"][1] * k
+        bpy.ops.mesh.primitive_cone_add(radius1=0.27 * k * fat, radius2=0.165 * k * fat, depth=top - knee, vertices=48, end_fill_type="NOTHING")
+        sk = bpy.context.active_object
+        sk.name = f"{name}-{legs}"
+        sk.data.transform(Matrix.Diagonal((1.0, 0.8, 1.0, 1.0)))
+        sk.location = (cx, cy, (top + knee) / 2)
+        sk.modifiers.new("thick", "SOLIDIFY").thickness = 0.01 * k
+        for poly in sk.data.polygons:
+            poly.use_smooth = True
+        box_uv(sk)
+        sk.data.materials.append(colours["shirt" if legs == "dress" else "trousers"])
+        made.append(sk)
+    # The head: a smooth egg on the neck, its face towards -y.
+    hz = joints["head"][2] * k
+    hx, hy = joints["head"][0] * k, joints["head"][1] * k
+    # A child's head is larger for its height.
+    hs = 1 + max(0.0, 1.6 - height) * 0.45
+    head_c = (hx, hy, hz + 0.085 * k * hs)
+    def piece(shape, size, centre, colour, smooth=True, turn_=(0, 0, 0), nm="face"):
+        bpy.ops.mesh.primitive_uv_sphere_add(radius=0.5, segments=32, ring_count=16) if shape == "sphere" else bpy.ops.mesh.primitive_cylinder_add(radius=0.5, depth=1, vertices=24)
+        o = bpy.context.active_object
+        o.name = f"{name}-{nm}"
+        o.data.transform(Matrix.Diagonal((size[0] * k, size[1] * k, size[2] * k, 1.0)))
+        o.location = centre
+        o.rotation_euler = turn_
+        if smooth:
+            for poly in o.data.polygons:
+                poly.use_smooth = True
+        box_uv(o)
+        o.data.materials.append(colour)
+        made.append(o)
+        return o
+    skin_m = colours["skin"]
+    head = piece("sphere", (0.155 * hs, 0.19 * hs, 0.225 * hs), head_c, skin_m, nm="head")
+    # A jaw: the lower face narrower and forward.
+    bm = bmesh.new()
+    bm.from_mesh(head.data)
+    for v in bm.verts:
+        if v.co.z < -0.02 * k:
+            f = 1 - min(1, (-v.co.z - 0.02 * k) / (0.09 * k)) * 0.28
+            v.co.x *= f
+            if v.co.y < 0:
+                v.co.y *= 1 + (1 - f) * 0.3
+    bm.to_mesh(head.data)
+    bm.free()
+    def fpiece(shape, size, centre, colour, **kw):
+        return piece(shape, tuple(v * hs for v in size), centre, colour, **kw)
+    kf = k * hs
+    fy = hy - 0.093 * kf
+    eye_col = material(s.get("eyes", "#4a6a8a"), roughness=0.2)
+    white = material("#f4f1ea", roughness=0.15)
+    dark = material("#1b1210", roughness=0.4)
+    for sx in (-1, 1):
+        ex = hx + sx * 0.033 * kf
+        fpiece("sphere", (0.026, 0.02, 0.022), (ex, fy + 0.008 * kf, head_c[2] + 0.012 * kf), white, nm="eye")
+        fpiece("sphere", (0.013, 0.008, 0.013), (ex, fy - 0.0015 * kf, head_c[2] + 0.012 * kf), eye_col, nm="iris")
+        fpiece("sphere", (0.006, 0.004, 0.006), (ex, fy - 0.004 * kf, head_c[2] + 0.012 * kf), dark, nm="pupil")
+        fpiece("sphere", (0.034, 0.008, 0.007), (ex, fy - 0.0, head_c[2] + 0.036 * kf), material(s.get("hair_color", "#3a2618"), roughness=0.7), turn_=(0, sx * 0.12, 0), nm="brow")
+        fpiece("sphere", (0.016, 0.035, 0.052), (hx + sx * 0.077 * kf, hy + 0.0, head_c[2] + 0.0), skin_m, nm="ear")
+    fpiece("sphere", (0.024, 0.04, 0.05), (hx, fy - 0.012 * kf, head_c[2] - 0.012 * kf), skin_m, turn_=(-0.25, 0, 0), nm="nose")
+    fpiece("sphere", (0.05, 0.016, 0.014), (hx, fy + 0.008 * kf, head_c[2] - 0.052 * kf), material(s.get("lips", "#b5645a"), roughness=0.45), nm="lips")
+    hair_m = material(s.get("hair_color", "#3a2618"), roughness=0.65, texture="fabric")
+    if hair not in ("bald", "none"):
+        cap = fpiece("sphere", (0.168, 0.2, 0.2), (hx, hy + 0.006 * kf, head_c[2] + 0.032 * kf), hair_m, nm="hair")
+        bm = bmesh.new()
+        bm.from_mesh(cap.data)
+        # The fringe and the back: the cap cut above the brows in front, lower at the back and sides.
+        doomed = [v for v in bm.verts if v.co.z < (0.012 * kf if v.co.y < -0.03 * kf else -0.05 * kf)]
+        bmesh.ops.delete(bm, geom=doomed, context="VERTS")
+        bm.to_mesh(cap.data)
+        bm.free()
+        sol = cap.modifiers.new("thick", "SOLIDIFY")
+        sol.thickness = 0.012 * kf
+        if hair == "curly":
+            disp = cap.modifiers.new("curls", "DISPLACE")
+            tex = bpy.data.textures.new("curls", "VORONOI")
+            tex.noise_scale = 0.02
+            disp.texture, disp.strength = tex, 0.012 * kf
+        if hair == "long":
+            fpiece("sphere", (0.17, 0.08, 0.3), (hx, hy + 0.075 * kf, head_c[2] - 0.13 * kf), hair_m, nm="hair-back")
+        elif hair == "ponytail":
+            fpiece("sphere", (0.06, 0.06, 0.22), (hx, hy + 0.12 * kf, head_c[2] - 0.06 * kf), hair_m, turn_=(0.35, 0, 0), nm="ponytail")
+        elif hair == "bun":
+            fpiece("sphere", (0.08, 0.08, 0.075), (hx, hy + 0.09 * kf, head_c[2] + 0.07 * kf), hair_m, nm="bun")
+    # Fingers on each hand, a thumb towards the front.
+    for side, sx in (("L", 1), ("R", -1)):
+        w = [c * k for c in joints[f"wrist.{side}"]]
+        h = [c * k for c in joints[f"hand.{side}"]]
+        d = [h[i] - w[i] for i in range(3)]
+        n = math.sqrt(sum(c * c for c in d)) or 1
+        d = [c / n for c in d]
+        for i, off in enumerate((-0.018, -0.006, 0.006, 0.018)):
+            base = (h[0] + sx * 0.0, h[1] + off * k, h[2])
+            length = (0.07, 0.08, 0.075, 0.06)[i] * k
+            tip = [base[j] + d[j] * length for j in range(3)]
+            mid = [(base[j] + tip[j]) / 2 for j in range(3)]
+            f = piece("cylinder", (0.016, 0.016, length / k), mid, skin_m, nm="finger")
+            f.rotation_euler = _mu_track(d)
+        thumb_base = (w[0] + d[0] * 0.03 * k, w[1] - 0.025 * k, w[2] + d[2] * 0.03 * k)
+        f = piece("cylinder", (0.018, 0.018, 0.055), (thumb_base[0], thumb_base[1] - 0.02 * k, thumb_base[2] - 0.01 * k), skin_m, nm="thumb")
+        f.rotation_euler = _mu_track((d[0] * 0.5, -0.8, d[2] * 0.5))
+    # The whole person moved and turned as one: parented to an empty.
+    root = bpy.data.objects.new(name, None)
+    bpy.context.scene.collection.objects.link(root)
+    for o in made:
+        o.parent = root
+    root.location = at
+    root.rotation_euler = turn
+    return made
+
+
+def _mu_track(direction):
+    from mathutils import Vector
+    return Vector(direction).to_track_quat("Z", "Y").to_euler()

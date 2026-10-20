@@ -91,8 +91,11 @@ public sealed partial class BlenderTool(BlenderClient blender, AppDbContext db, 
                     ["properties"] = new JsonObject
                     {
                         ["name"] = Schema.Text("What the part is: walls, roof, door, window-left, lamp..."),
-                        ["shape"] = Choice("roof: a gable roof, its ridge along x; wedge: a ramp rising towards +y; light: a light (kind, power), not a solid.",
-                            "box", "cylinder", "cone", "sphere", "torus", "plane", "roof", "wedge", "pyramid", "light"),
+                        ["shape"] = Choice("figure: a whole person (face, hair, hands, clothes; the person fields); tree: a tree (kind); roof: a gable roof, its ridge " +
+                            "along x; wedge: a ramp rising towards +y; capsule: a pill; lathe: a profile turned round (vases, bottles, columns, lamp posts); extrude: an " +
+                            "outline raised by its height (floor plans, slabs, signs of any shape); tube: a round tube along a path (pipes, rails, handles, cables); text: " +
+                            "3D letters; light: a light (kind, power), not a solid.",
+                            "box", "cylinder", "cone", "sphere", "torus", "plane", "roof", "wedge", "pyramid", "capsule", "lathe", "extrude", "tube", "text", "figure", "tree", "light"),
                         ["size"] = Vector("[x, y, z]: width, depth, height in metres (a cylinder's or sphere's x and y are its diameters; an area light's x and y)."),
                         ["at"] = Vector("[x, y, z]: where the middle of the part's bottom sits (a light: where it is). A part on top of another starts at that one's height."),
                         ["turn"] = Vector("[x, y, z] rotation in degrees (optional; aims a spot or sun light)."),
@@ -106,7 +109,26 @@ public sealed partial class BlenderTool(BlenderClient blender, AppDbContext db, 
                         ["glow"] = Number("Light the surface gives off, 0 to 20 (a lamp's bulb, a screen) (optional)."),
                         ["glass"] = new JsonObject { ["type"] = "boolean", ["description"] = "See-through, for windows (the same as shader glass)." },
                         ["bevel"] = Number("Rounded edges, in metres (optional)."),
-                        ["kind"] = Choice("A light's kind: point (a bulb), spot (points down; turn aims it), area (a panel), sun.", "point", "spot", "area", "sun"),
+                        ["smooth"] = new JsonObject { ["type"] = "integer", ["description"] = "1 to 3: rounds the part off (organic shapes: rocks, cushions, bodies) (optional)." },
+                        ["profile"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "number" } }, ["description"] = "lathe: [[radius, height], ...] from the bottom up, in metres." },
+                        ["outline"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "number" } }, ["description"] = "extrude: [[x, y], ...] the outline, in metres; size's z is its height." },
+                        ["path"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "number" } }, ["description"] = "tube: [[x, y, z], ...] points it passes through, from at; size's x is its thickness." },
+                        ["text"] = Schema.Text("text: the words; size's z is the letters' height, y their depth."),
+                        ["pose"] = Choice("figure: the pose.", "standing", "walking", "waving", "sitting", "t-pose", "arms-up"),
+                        ["height"] = Number("figure: the person's height in metres (1.75 an adult, 1.2 a child)."),
+                        ["build"] = Choice("figure: build.", "slim", "average", "athletic", "heavy"),
+                        ["body"] = Choice("figure: body shape.", "masculine", "feminine"),
+                        ["skin"] = Schema.Text("figure: skin colour (#rrggbb)."),
+                        ["shirt"] = Schema.Text("figure: the top's colour."),
+                        ["sleeves"] = Choice("figure: the top's sleeves.", "long", "short", "none"),
+                        ["trousers"] = Schema.Text("figure: trousers', shorts' or skirt's colour."),
+                        ["legs"] = Choice("figure: what covers the legs (a dress is the top's colour).", "long", "shorts", "skirt", "dress"),
+                        ["shoes"] = Schema.Text("figure: shoes' colour."),
+                        ["hair"] = Choice("figure: hair.", "short", "long", "bun", "ponytail", "curly", "bald"),
+                        ["hair_color"] = Schema.Text("figure: hair colour."),
+                        ["eyes"] = Schema.Text("figure: eye colour."),
+                        ["kind"] = Choice("A light's kind: point (a bulb), spot (points down; turn aims it), area (a panel), sun; a tree's: round, pine, palm, bush.",
+                            "point", "spot", "area", "sun", "round", "pine", "palm", "bush"),
                         ["power"] = Number("A light's power in watts (a bulb 60-200, a room's area light 200-1000); a sun's strength 1-10."),
                         ["repeat"] = new JsonObject
                         {
@@ -140,8 +162,10 @@ public sealed partial class BlenderTool(BlenderClient blender, AppDbContext db, 
                 "Builds a 3D model from its parts and gives it to the person: the model (.glb, with its textures and lights) and pictures of it. Each part is a simple " +
                 "shape (box, cylinder, cone, sphere, torus, plane, roof, wedge, pyramid) with a size, where its bottom sits, a turn, a colour, and optionally a " +
                 "texture (brick, wood, tiles, grass... or one made with make_texture) and a shader (glass, metal, light...); lights are parts too (shape light). " +
+                "People are one part each (shape figure: a detailed person with a face, hair, hands and clothes, in a pose); trees too (shape tree). " +
                 "For a house: walls (box, texture brick), a roof (roof, texture shingles) on top of them, a door and windows (thin boxes on the walls' faces; " +
-                "windows shader glass), a chimney, a lamp. The easiest way to make a model: use it first.",
+                "windows shader glass), a chimney, a lamp. For round things turned on a lathe (a vase, a bottle, a column) use lathe; for shapes of any outline " +
+                "use extrude; for pipes and rails use tube. The easiest way to make a model: use it first.",
                 PartsSchema(), "parts"),
             Schema.Function("make_texture",
                 "Makes a texture as images, for parts to use by its name: its colour, its roughness and its bumps (a normal map), and a preview of it on a sphere " +
@@ -151,7 +175,8 @@ public sealed partial class BlenderTool(BlenderClient blender, AppDbContext db, 
             Schema.Function("make_3d",
                 "Runs a Blender 4.5 Python script (bpy) headless in a sandbox with no network, starting from an empty scene. " +
                 "part(shape=..., size=[x, y, z], at=[x, y, z], turn=[x, y, z], color=..., texture=..., shader=...) and light(kind, at, color, power) are defined " +
-                "for you, as in make_3d_parts, with material(color, metallic, roughness, texture=..., shader=...) and make_texture(name, pattern=...); use them, " +
+                "for you, as in make_3d_parts (figure(...) a person, tree(...) a tree), with material(color, metallic, roughness, texture=..., shader=...) and " +
+                "make_texture(name, pattern=...); use them, " +
                 "and bpy for more (modifiers: bevel, subdivision, array, boolean, mirror, screw; bmesh; curves; your own shader nodes). Set LOOK = 'realistic' " +
                 "or LIGHTING = 'studio' at the top to change the pictures. Unless the script writes them itself, the scene comes back as model.glb (patterns " +
                 "baked into images) and two pictures; write model.blend (bpy.ops.wm.save_as_mainfile), an .stl or .obj, or your own renders when asked. " +
@@ -159,7 +184,8 @@ public sealed partial class BlenderTool(BlenderClient blender, AppDbContext db, 
                 new JsonObject { ["script"] = Schema.Text("The whole Blender Python script.") }, "script"),
         ],
         "When the person asks for a 3D model, object, scene or printable part, make it with make_3d_parts (simple shapes) or make_3d (a script, for " +
-        "what shapes cannot do). Work in metres, centred at the origin, resting on z = 0; name the parts and give them colours, and textures and " +
+        "what shapes cannot do). A person is one part, shape figure (never build people from boxes and spheres); a tree is shape tree. " +
+        "Work in metres, centred at the origin, resting on z = 0, real sizes (a door 2 m high, a person 1.75 m); name the parts and give them colours, and textures and " +
         "shaders where they help (brick walls, wood floors, glass windows, metal handles, lamps that light). For a texture no pattern gives, or one the " +
         "person describes, make it first with make_texture (prompt), then use its name. Look at the pictures that come back and fix what is wrong with " +
         "another run. Never paste a script or the parts into your answer: the person wants the model, not code. When a script fails twice, build the " +
