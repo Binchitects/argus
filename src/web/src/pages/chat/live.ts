@@ -133,6 +133,12 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
       // Answering again: no longer waiting (for its line, or for the GPU).
       return { ...state, messages, queued: null }
     }
+    case 'replace': {
+      // The safeguards masked part of the answer so far, or withheld it: the text as it now stands.
+      const a = lastAssistant()
+      if (a) a.content = e.text
+      return { ...state, messages }
+    }
     case 'usage': {
       const a = lastAssistant()
       if (a)

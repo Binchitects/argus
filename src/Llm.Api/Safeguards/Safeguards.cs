@@ -274,6 +274,24 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
         return masks.Count == 0 ? t => t : t => masks.Aggregate(t, (text, rule) => Findings.Mask(text, Spans(rule, text), f => Marker(rule, f)));
     }
 
+    /// <summary>Whether any rule looks at this stage for this person and model (none: the text need not be read at all).</summary>
+    public async Task<bool> WatchesAsync(string stage, AppUser? user, string? model, CancellationToken ct) =>
+        O.Enabled && (await ApplicableAsync(stage, user, model, ct)).Count > 0;
+
+    /// <summary>
+    /// What a tool is sent (tool_call) or brings back (tool_result), through their rules: null and the text as it may go, or why
+    /// it may not. Nothing is asked of the person, who did not write it.
+    /// </summary>
+    public async Task<(string? Refused, string Text)> CheckToolAsync(string stage, AppUser user, string? model, Guid conversationId, string tool, string text, CancellationToken ct)
+    {
+        if (!O.Enabled || text.Length == 0)
+        {
+            return (null, text);
+        }
+        var result = await RunAsync(new RuleRun(stage, text) { User = user, Model = model, ConversationId = conversationId, What = tool, ModelChecks = stage == "tool_result" }, ct);
+        return result.Blocked ? (result.Reason, text) : (null, result.Text);
+    }
+
     /// <summary>The rules that apply to this stage, person and model, in their order.</summary>
     private async Task<List<SafeguardRule>> ApplicableAsync(string stage, AppUser? user, string? model, CancellationToken ct)
     {
@@ -366,7 +384,11 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
                         // Not let through unread when the rule would block: nothing is wrong with the text, so no strike either.
                         if (rule.Action == "block" && !rule.Monitor)
                         {
-                            return result with { Blocked = true, Kind = "check", Status = 503, Reason = $"This {run.What} was not sent: the safeguards could not read it first. {ex.Message}" };
+                            return result with
+                            {
+                                Blocked = true, Kind = "check", Status = 503,
+                                Reason = run.Stage == "api" ? $"The request was refused: the safeguards could not read it first. {ex.Message}" : $"This {run.What} was not sent: the safeguards could not read it first. {ex.Message}",
+                            };
                         }
                         judged = [];
                     }
@@ -586,6 +608,14 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
     private string Refused(SafeguardRule rule, RuleRun run, string detail)
     {
         var what = run.What.Replace("{", "(", StringComparison.Ordinal).Replace("}", ")", StringComparison.Ordinal);
+        if (run.Stage == "answer")
+        {
+            return $"This answer was withheld by your organisation's safeguards ({rule.Name}: {detail}).";
+        }
+        if (run.Stage is "tool_call" or "tool_result")
+        {
+            return $"Your organisation's safeguards refused {(run.Stage == "tool_call" ? "this call to" : "what came back from")} {what} ({rule.Name}: {detail}).";
+        }
         return rule.Detector switch
         {
             "secrets" or "pii" when run.Stage == "file" => $"{what} was not attached: it holds {detail}. Remove it from the file and attach it again.",
@@ -629,7 +659,8 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
         };
         await audit.WriteAsync("safeguard.refused", name, success: false, detail: $"{rule.Name}: {auditDetail}", actor: run.User);
         LogRefused(logger, name, rule.Detector, detail);
-        if (run.User is not { } user || !rule.Strike)
+        // A strike is for what the person wrote, not for what a model or a tool did.
+        if (run.User is not { } user || !rule.Strike || run.Stage is "answer" or "tool_call" or "tool_result")
         {
             return (reason, KindOf(rule), 400, ev.Id);
         }

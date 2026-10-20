@@ -17,6 +17,101 @@ public sealed class ToolSetting
     public bool OnByDefault { get; set; } = true;
     /// <summary>Each call waits for the person to allow it.</summary>
     public bool AskFirst { get; set; }
+
+    /// <summary>The name and description people see, instead of the tool's own; null: its own.</summary>
+    public string? Title { get; set; }
+    public string? Description { get; set; }
+    /// <summary>The admin's words to the model about the tool: added to its own, or in place of them.</summary>
+    public string? Instructions { get; set; }
+    public bool ReplaceInstructions { get; set; }
+    /// <summary>Its functions (by their own names) the model is not offered.</summary>
+    public List<string> DisabledFunctions { get; set; } = [];
+    /// <summary>Its functions whose every call waits for the person to allow it.</summary>
+    public List<string> AskFirstFunctions { get; set; } = [];
+    /// <summary>
+    /// Per function, as JSON: {"function": {"description": "...", "fixed": {"arg": value}, "defaults": {"arg": value}}}. A fixed
+    /// argument is always sent as the admin set it (and the model is not offered it); a default fills one the model left out.
+    /// </summary>
+    public string? FunctionsJson { get; set; }
+    /// <summary>Calls one person may make in a day; null or 0: no limit.</summary>
+    public int? CallsPerDay { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>A tool's settings for one group's members, over the company's: on in new chats, asking first, calls a day.</summary>
+public sealed class ToolGroupSetting
+{
+    public required string ToolId { get; set; }
+    public Guid GroupId { get; set; }
+    public bool? OnByDefault { get; set; }
+    public bool? AskFirst { get; set; }
+    public int? CallsPerDay { get; set; }
+}
+
+/// <summary>One call of a tool: by whom, which function, how long, and whether it failed (its error, short). For quotas, health and numbers.</summary>
+public sealed class ToolCall
+{
+    public long Id { get; set; }
+    public required string ToolId { get; set; }
+    public required string Function { get; set; }
+    public Guid? UserId { get; set; }
+    public DateTimeOffset At { get; set; } = DateTimeOffset.UtcNow;
+    public int DurationMs { get; set; }
+    public bool Failed { get; set; }
+    public string? Error { get; set; }
+}
+
+/// <summary>A named set of tools a chat starts with, or switches to (Admin → Tools → Toolsets); for everyone, or some groups.</summary>
+public sealed class Toolset
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public required string Name { get; set; }
+    public string? Description { get; set; }
+    public List<string> Tools { get; set; } = [];
+    /// <summary>The groups that see it; empty: everyone.</summary>
+    public List<Guid> Groups { get; set; } = [];
+    /// <summary>New chats of these groups' members start with it.</summary>
+    public List<Guid> DefaultFor { get; set; } = [];
+    /// <summary>The plugin that brought it, when one did.</summary>
+    public string? Plugin { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// A tool an admin made without code (Admin → Tools → New tool): an HTTP request to an address the admin fixed, its
+/// parameters filling its path, query or body; or a prompt run on a model of the admin's choice.
+/// </summary>
+public sealed class CustomTool
+{
+    public const string Http = "http";
+    public const string Prompt = "prompt";
+
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public required string Name { get; set; }
+    public required string Kind { get; set; }
+    public string Title { get; set; } = "";
+    /// <summary>What it does, for the model (and people).</summary>
+    public string Description { get; set; } = "";
+    /// <summary>Its parameters, as JSON: [{"name", "type" (string, number, boolean), "description", "required"}].</summary>
+    public string ParametersJson { get; set; } = "[]";
+    // http
+    public string? Method { get; set; }
+    /// <summary>The address, its parameters as {name} in the path or query; the scheme and host are fixed.</summary>
+    public string? UrlTemplate { get; set; }
+    /// <summary>Headers as JSON {"name": "value"}, encrypted (Settings crypto): keys and tokens.</summary>
+    public string? HeadersEncrypted { get; set; }
+    /// <summary>The body, a JSON template with {name} placeholders; null: none.</summary>
+    public string? BodyTemplate { get; set; }
+    /// <summary>The part of a JSON answer to keep (a dotted path: data.items); null: all of it.</summary>
+    public string? ResultPath { get; set; }
+    /// <summary>Calls that change something wait for the person.</summary>
+    public bool AskFirst { get; set; }
+    // prompt
+    public string? Model { get; set; }
+    public string? PromptTemplate { get; set; }
+    public string? SystemPrompt { get; set; }
+    public Guid? CreatedById { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
@@ -43,6 +138,10 @@ public sealed class McpServer
     public string? Manifest { get; set; }
     /// <summary>The admin's values for the plugin's settings, as JSON; a secret's value is encrypted (Settings crypto).</summary>
     public string? PluginSettings { get; set; }
+    /// <summary>What the admin granted the plugin at install (and at updates that asked for more).</summary>
+    public List<string> PluginPermissions { get; set; } = [];
+    /// <summary>Kept at its version: no update is offered.</summary>
+    public bool PluginPinned { get; set; }
     /// <summary>"api_key" or "oauth2": each person connects their own account, and calls go as them; null: one key for everyone (the header).</summary>
     public string? PersonAuth { get; set; }
     /// <summary>Functions (their own names, without the prefix) that change something: each call asks the person first.</summary>
@@ -79,4 +178,17 @@ public sealed class PersonCredential
     /// <summary>Who the service says it is, when it says (for the person's own page).</summary>
     public string? Account { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>A version of a plugin as it was installed: its files, so it can be put back (rollback).</summary>
+public sealed class PluginRelease
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid ServerId { get; set; }
+    public required string Version { get; set; }
+    /// <summary>Every file the version named, as JSON {"name": "text"}.</summary>
+    public required string FilesJson { get; set; }
+    public List<string> Permissions { get; set; } = [];
+    public Guid? InstalledById { get; set; }
+    public DateTimeOffset InstalledAt { get; set; } = DateTimeOffset.UtcNow;
 }

@@ -168,6 +168,46 @@ access was off has a deny of `feature.api_keys`. A folder's and a website's
 documents are read by whom the rules on their source allow, decided at each
 search.
 
+### Customizing tools
+
+On each card in **Admin → Tools**, **Customize**:
+
+- **What people see**: a name and description of your own.
+- **Words to the model**: when to use it, what to avoid, house rules; added to
+  the tool's own words, or in their place.
+- **Each function**: offered or not, asking the person first or not, a
+  description of your own, **fixed arguments** (always sent as you set them,
+  and not offered to the model: a project, a region, a limit) and **default
+  arguments** (filled when the model leaves them out).
+- **Calls a day, per person**; past it, the model is told to answer without
+  it.
+- **For some groups**: on in new chats, asking first, calls a day, over the
+  company's (on in new chats if a group says so; asking first only if every
+  group of theirs does; the most calls a day of their groups).
+- **Try a function**: called as you, with the saved settings.
+
+Each card shows the tool's calls this week, how many failed, and their time.
+A server's, a plugin's or your own tool that fails 25 calls in a row is
+turned off, and the admins hear of it (Settings → Chat → **Turn off a failing
+tool**).
+
+**Toolsets** (the page's header): named sets of tools, for everyone or some
+groups. People switch a chat to one in its **Tools** menu; a group's new chats
+can start with one.
+
+**New tool** makes a tool without code:
+
+- **An HTTP request**: its method and address (the host is fixed; the
+  model's arguments fill only `{name}` places in its path and query, escaped),
+  headers kept encrypted and never shown again (a key, a token), a JSON body
+  with `{name}` inside its strings, and the part of a JSON answer to keep
+  (`data.items`). Mark one that changes something to ask the person first.
+- **A prompt on a model**: a prompt with `{name}` places and a system prompt,
+  run on the model you choose; its answer is the tool's result.
+
+**Try it** runs the form's tool before it is saved. Once made, it is a card
+like the others: on or off, for whom, customized.
+
 ### Safeguards
 
 **Admin → Safeguards** holds the rules that guard what goes to the models and

@@ -130,7 +130,7 @@ public static partial class ChatEndpoints
             // The tools this person may use; a chat turns them on and off.
             tools = tools.Select(t => new
             {
-                id = t.Tool.Id, title = t.Tool.Title, description = t.Tool.Description, icon = t.Tool.Icon,
+                id = t.Tool.Id, title = ToolRegistry.TitleOf(t), description = ToolRegistry.DescriptionOf(t), icon = t.Tool.Icon,
                 onByDefault = t.Setting.OnByDefault, askFirst = t.Setting.AskFirst,
             }),
             // For links from Argus's answers to the code (Argus reads the same GitLab).
@@ -199,7 +199,14 @@ public static partial class ChatEndpoints
         {
             return problem;
         }
-        if (ApplyTools(c, body.Tools, body.UseArgus, allowed) is { } refused)
+        // No tools asked for: a toolset meant for one of the person's groups is where a new chat starts (Admin → Tools → Toolsets).
+        var tools = body.Tools;
+        if (tools is null && assistant is null && membership.Groups.Count > 0
+            && (await db.Toolsets.AsNoTracking().OrderBy(t => t.Name).ToListAsync(ct)).FirstOrDefault(t => t.DefaultFor.Any(membership.Groups.Contains)) is { } start)
+        {
+            tools = [.. start.Tools.Where(id => allowed.Any(a => a.Tool.Id == id))];
+        }
+        if (ApplyTools(c, tools, body.UseArgus, allowed) is { } refused)
         {
             return refused;
         }

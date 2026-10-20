@@ -455,6 +455,9 @@ export const topics = {
       { name: 'Add a server or API', text: 'An MCP server by its address, or an API by its OpenAPI document. It is tested before it is added; its key is stored encrypted and never shown.' },
       { name: 'Its certificate', text: 'For https: check it (the default), trust a CA you paste, or do not check. A test that meets an untrusted certificate says why.' },
       { name: 'Longest call', text: 'For a server whose tools run long: up to 24 hours.' },
+      { name: 'Customize', text: 'A name and words of your own, each function on or off and asking first, fixed and default arguments, calls a day per person, and settings for some groups; **Try a function** calls it as you.' },
+      { name: 'Toolsets', text: 'Named sets of tools people switch a chat to; a group\'s new chats can start with one.' },
+      { name: 'New tool', text: 'A tool without code: an HTTP request to an address you fix, or a prompt on a model you choose. **Try it** before saving.' },
     ],
     tasks: [
       { title: 'Add an MCP server', steps: ['Press **Add a server or API** and choose **MCP server**.', 'Give it a name, its address, and its key as a header if it needs one.', 'Test it, then save. Choose who may use it.'] },
@@ -469,7 +472,8 @@ export const topics = {
     about: 'Ready-made tools for the chat: an API or an MCP server with its sign-in. Installed, each is a tool under Tools, where you choose who may use it.',
     admin: true,
     parts: [
-      { name: 'Installed', text: 'Your plugins, with **Settings**, **Who may use it** and **Remove**.' },
+      { name: 'Installed', text: 'Your plugins, with **Settings**, **Who may use it**, **Health** (calls, failures and time this week), **Check now**, **Update to …**, **Back to …** the version before, **Pin this version** and **Remove**.' },
+      { name: 'Make a plugin and Check a plugin', text: 'A starter plugin with every part, and a check of a plugin\'s zip that says what would stop it installing and what it would ask for.' },
       { name: 'Catalog', text: 'Plugins that come with the app, or from a catalog set under Settings → Plugins. **Install** adds one.' },
       { name: 'Upload a zip and From an address', text: 'Install one that is not in the catalog. With its SHA-256, only that exact file is installed.' },
     ],

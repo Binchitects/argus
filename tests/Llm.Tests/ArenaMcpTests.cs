@@ -382,7 +382,7 @@ public sealed class ArenaMcpTests(AppFixture app)
         {
             await w.WriteAsync("name: desk\nversion: 1.0.0\ntitle: Desk\ntools: { mcp: \"https://tools.example.test/mcp\" }\nauth: { per_person: api_key, header: X-Api-Key, value: \"{token}\" }\n");
         }
-        var installed = await admin.JsonAsync(await admin.PostAsync("/api/admin/plugins/install", new { zip = Convert.ToBase64String(buffer.ToArray()) }));
+        var installed = await admin.JsonAsync(await admin.PostAsync("/api/admin/plugins/install", new { accept = true, zip = Convert.ToBase64String(buffer.ToArray()) }));
         var toolId = installed.GetProperty("toolId").GetString()!;
         var (person, _, _, key) = await PersonAsync(f);
         await StatusAssert.Is(HttpStatusCode.NoContent,

@@ -53,11 +53,11 @@ public sealed class PluginTests(AppFixture app)
         Assert.Contains(listed.GetProperty("catalog").EnumerateArray(), e => e.GetProperty("name").GetString() == "gitlab-issues" && e.GetProperty("source").GetString() == "app");
 
         // Its settings are checked; the secret is kept encrypted and never shown.
-        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/plugins/install", new { name = "gitlab-issues", settings = new { gitlab_url = "https://gitlab.test" } }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/plugins/install", new { accept = true, name = "gitlab-issues", settings = new { gitlab_url = "https://gitlab.test" } }));
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/plugins/install",
-            new { name = "gitlab-issues", settings = new { gitlab_url = "https://gitlab.test", client_id = "app-id", client_secret = "app-secret" } }));
+            new { accept = true, name = "gitlab-issues", settings = new { gitlab_url = "https://gitlab.test", client_id = "app-id", client_secret = "app-secret" } }));
         var toolId = made.GetProperty("toolId").GetString()!;
-        await StatusAssert.Is(HttpStatusCode.Conflict, await admin.PostAsync("/api/admin/plugins/install", new { name = "gitlab-issues", settings = new { } }));
+        await StatusAssert.Is(HttpStatusCode.Conflict, await admin.PostAsync("/api/admin/plugins/install", new { accept = true, name = "gitlab-issues", settings = new { } }));
         var installed = (await admin.JsonAsync(await admin.GetAsync("/api/admin/plugins"))).GetProperty("installed").EnumerateArray().Single();
         Assert.Equal("https://gitlab.test/api/v4", installed.GetProperty("url").GetString());
         Assert.DoesNotContain("app-secret", installed.ToString(), StringComparison.Ordinal);
@@ -120,7 +120,7 @@ public sealed class PluginTests(AppFixture app)
         await using var f = NewApp();
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/plugins/install",
-            new { name = "gitlab-issues", settings = new { gitlab_url = "https://gitlab.test", client_id = "app-id", client_secret = "app-secret" } }));
+            new { accept = true, name = "gitlab-issues", settings = new { gitlab_url = "https://gitlab.test", client_id = "app-id", client_secret = "app-secret" } }));
         var toolId = made.GetProperty("toolId").GetString()!;
         var (b, _) = await PersonAsync(f);
         var go = await b.GetAsync($"/api/account/connections/{Uri.EscapeDataString(toolId)}/connect");
@@ -181,7 +181,7 @@ public sealed class PluginTests(AppFixture app)
             Add("pets/plugin.yaml", "name: pets\nversion: 2.0.0\ntitle: Pets\ntools: { openapi: openapi.yaml, url: \"https://pets.test/v1\" }\nauth: { per_person: api_key, header: X-Api-Key, value: \"{token}\", help: Your pet store key. }\n");
             Add("pets/openapi.yaml", FakeMcp.PetsSpec);
         }
-        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/plugins/install", new { zip = Convert.ToBase64String(buffer.ToArray()) }));
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/plugins/install", new { accept = true, zip = Convert.ToBase64String(buffer.ToArray()) }));
         var toolId = made.GetProperty("toolId").GetString()!;
 
         var (b, _) = await PersonAsync(f);

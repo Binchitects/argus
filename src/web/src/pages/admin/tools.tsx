@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Pencil, Plug, PlugZap, Plus, Trash2, Wrench } from 'lucide-react'
+import { Layers, Pencil, Plug, PlugZap, Plus, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
@@ -20,6 +20,8 @@ import { toolIcon } from '../chat/tools'
 import { AccessPicker, type Audience } from './access-picker'
 import { tlsBody, type CertificateProblem, type Tls, type TlsCheck } from './tls'
 import { CertificateRefused, TlsCaLine, TlsChoice, TlsWarning } from './tls-choice'
+import { CustomizeDialog, CustomToolDialog, ToolsetsDialog, UsageLine } from './tool-customize'
+import { customToolsQuery, usageQuery, type CustomToolRow, type ToolUsage } from './tool-customize-api'
 
 
 interface ToolRow {
@@ -28,7 +30,17 @@ interface ToolRow {
   description: string
   icon: string
   unavailable: string | null
-  setting: { enabled: boolean; audience: Audience; onByDefault: boolean; askFirst: boolean; groups: { id: string; name: string }[] }
+  custom: boolean
+  setting: {
+    enabled: boolean
+    audience: Audience
+    onByDefault: boolean
+    askFirst: boolean
+    groups: { id: string; name: string }[]
+    shownAs: string | null
+    customized: boolean
+    callsPerDay: number | null
+  }
   server: {
     id: string
     name: string
@@ -81,31 +93,53 @@ const toolsQuery = {
 
 export function ToolsPage() {
   const tools = useQuery(toolsQuery)
+  const usage = useQuery(usageQuery)
+  const customs = useQuery(customToolsQuery)
   const [editing, setEditing] = useState<ToolRow['server'] | 'new' | null>(null)
+  const [customizing, setCustomizing] = useState<string | null>(null)
+  const [making, setMaking] = useState<CustomToolRow | 'new' | null>(null)
+  const [sets, setSets] = useState(false)
   if (tools.isPending) return <PageSkeleton />
   if (tools.error) return <QueryError error={tools.error} retry={() => tools.refetch()} />
   return (
     <>
       <PageHeader
         title="Tools"
-        description="What the chat's model may call, and for whom. Turn a tool off, give it to some groups only, have it ask before each call, or add an MCP server or an API."
+        description="What the chat's model may call, and for whom. Turn a tool off, give it to some groups only, have it ask before each call, customize it, or add an MCP server, an API, or a tool of your own."
         actions={
-          <Button onClick={() => setEditing('new')}>
-            <Plus /> Add a server or API
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => setSets(true)}>
+              <Layers /> Toolsets
+            </Button>
+            <Button variant="outline" onClick={() => setMaking('new')}>
+              <Plus /> New tool
+            </Button>
+            <Button onClick={() => setEditing('new')}>
+              <Plus /> Add a server or API
+            </Button>
+          </div>
         }
       />
       <div className="stagger grid gap-4 xl:grid-cols-2 min-[2200px]:grid-cols-3">
         {tools.data.map((t) => (
-          <ToolCard key={t.id} tool={t} onEdit={() => setEditing(t.server)} />
+          <ToolCard
+            key={t.id}
+            tool={t}
+            usage={usage.data?.find((u) => u.toolId === t.id)}
+            onEdit={() => (t.custom ? setMaking(customs.data?.find((c) => c.toolId === t.id) ?? null) : setEditing(t.server))}
+            onCustomize={() => setCustomizing(t.id)}
+          />
         ))}
       </div>
       <ServerDialog server={editing} onClose={() => setEditing(null)} />
+      {customizing && <CustomizeDialog toolId={customizing} onClose={() => setCustomizing(null)} />}
+      {making && <CustomToolDialog tool={making === 'new' ? null : making} onClose={() => setMaking(null)} />}
+      {sets && <ToolsetsDialog tools={tools.data.map((t) => ({ id: t.id, title: t.title }))} onClose={() => setSets(false)} />}
     </>
   )
 }
 
-function ToolCard({ tool, onEdit }: { tool: ToolRow; onEdit: () => void }) {
+function ToolCard({ tool, usage, onEdit, onCustomize }: { tool: ToolRow; usage: ToolUsage | undefined; onEdit: () => void; onCustomize: () => void }) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const Icon = toolIcon[tool.icon] ?? Wrench
@@ -116,7 +150,7 @@ function ToolCard({ tool, onEdit }: { tool: ToolRow; onEdit: () => void }) {
     onError: (e) => toast.error(errorMessage(e)),
   })
   const remove = useMutation({
-    mutationFn: () => api(`/api/admin/tools/servers/${tool.server!.id}`, { method: 'DELETE' }),
+    mutationFn: () => api(tool.custom ? `/api/admin/tools/custom/${tool.id.slice('custom:'.length)}` : `/api/admin/tools/servers/${tool.server!.id}`, { method: 'DELETE' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'tools'] }),
     onError: (e) => toast.error(errorMessage(e)),
   })
@@ -132,9 +166,14 @@ function ToolCard({ tool, onEdit }: { tool: ToolRow; onEdit: () => void }) {
         <div className="min-w-0 flex-1">
           <CardTitle className="flex flex-wrap items-center gap-2">
             {tool.title}
-            <Badge variant={tool.server ? 'outline' : 'secondary'}>{tool.server ? (tool.server.kind === 'openapi' ? 'API' : 'MCP server') : 'Built in'}</Badge>
+            <Badge variant={tool.server || tool.custom ? 'outline' : 'secondary'}>{tool.custom ? 'Your own' : tool.server ? (tool.server.kind === 'openapi' ? 'API' : 'MCP server') : 'Built in'}</Badge>
+            {tool.setting.customized && <Badge variant="outline">Customized</Badge>}
           </CardTitle>
-          <CardDescription>{tool.description}</CardDescription>
+          <CardDescription>
+            {tool.description}
+            {tool.setting.shownAs && <span className="block text-xs">People see it as {tool.setting.shownAs}.</span>}
+          </CardDescription>
+          <UsageLine usage={usage} />
         </div>
         <Switch checked={tool.setting.enabled} onCheckedChange={(enabled) => set({ enabled })} aria-label={`${tool.title} on`} />
       </CardHeader>
@@ -185,11 +224,16 @@ function ToolCard({ tool, onEdit }: { tool: ToolRow; onEdit: () => void }) {
             <Switch checked={tool.setting.askFirst} onCheckedChange={(askFirst) => set({ askFirst })} />
           </Label>
         </div>
-        {tool.server && (
-          <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={onCustomize}>
+            <SlidersHorizontal /> Customize
+          </Button>
+          {(tool.server || tool.custom) && (
             <Button variant="outline" size="sm" onClick={onEdit}>
               <Pencil /> Edit
             </Button>
+          )}
+          {(tool.server || tool.custom) && (
             <Button
               variant="outline"
               size="sm"
@@ -200,8 +244,8 @@ function ToolCard({ tool, onEdit }: { tool: ToolRow; onEdit: () => void }) {
             >
               <Trash2 /> Remove
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </CardContent>
     </Card>
   )

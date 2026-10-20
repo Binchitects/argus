@@ -57,6 +57,8 @@ public sealed class SafeguardRule
     /// <summary>injection (and topic): the model reads the text too, beside the patterns.</summary>
     public bool ModelCheck { get; set; }
 
+    /// <summary>The plugin that brought it (its name); it goes when the plugin does.</summary>
+    public string? Plugin { get; set; }
     public Guid? CreatedById { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
@@ -118,6 +120,7 @@ public static class SafeguardTables
             e.Property(x => x.Action).HasMaxLength(20);
             e.Property(x => x.Message).HasMaxLength(2000);
             e.Property(x => x.RerouteModel).HasMaxLength(200);
+            e.Property(x => x.Plugin).HasMaxLength(100);
             e.HasIndex(x => x.Order);
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.CreatedById).OnDelete(DeleteBehavior.SetNull);
         });

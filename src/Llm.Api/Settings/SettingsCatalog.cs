@@ -127,6 +127,8 @@ public static class SettingsCatalog
 
         new("Chat:MaxToolRounds", Chat, "Tool calls per answer", "How many rounds of tool use (Argus searches) one answer may take before it must answer.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "8", Min = 1, Max = 32, Optional = false },
+        new("Tools:DisableAfterFailures", Chat, "Turn off a failing tool", "Failed calls in a row after which a server's, a plugin's or an admin's own tool is turned off, and the admins hear of it (Admin → Tools turns it back on). 0: never.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "25", Min = 0, Max = 10_000 },
         new("Chat:ToolTextChars", Chat, "Tool definitions sent whole up to", "Past this many characters of tool definitions, a chat gets in full only the tools it has loaded, and a line for each of the others that the model loads when a question needs it (it stays loaded in that chat). Saves thousands of tokens before the first answer of every chat. 0: always every tool whole.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "6000", Unit = "characters", Min = 0, Max = 500000, Optional = false },
         new("Chat:ToolResultChars", Chat, "Tool result the model reads whole up to", "A longer result (an MCP server's, a file's) goes to the model as its start, and the whole of it becomes a file in the chat that the model reads on with read_file: every later step reads the results again, so one huge result would fill each of them. 0: always whole.", SettingType.WholeNumber, SettingScope.Live)

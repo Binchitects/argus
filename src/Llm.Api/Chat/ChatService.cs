@@ -165,7 +165,7 @@ public sealed partial class ChatService(
             IToolRun run;
             try
             {
-                run = await choice.Tool.StartAsync(new ToolContext(user, email, conversation, progress) { Agents = (parts, token) => AgentsAsync(parts, kit, token) }, ct);
+                run = await registry.StartAsync(choice, new ToolContext(user, email, conversation, progress) { Agents = (parts, token) => AgentsAsync(parts, kit, token) }, ct);
             }
             catch (McpException ex)
             {
@@ -277,6 +277,8 @@ public sealed partial class ChatService(
         var delegations = 0;
         // Each round's cost at the model's prices now (the gateway was given the same); every round and tool call names the answer.
         var price = await prices.ForAsync(modelName, ct);
+        // Rules on answers (Admin → Safeguards): read as they stream, the quick ones every so often and all of them at the end.
+        var watchAnswers = await safeguards.WatchesAsync("answer", user, modelName, ct);
         Guid? answerId = null;
 
         // The model started deep research (the Deep research tool, allowed): from its next round this answer is one, as if asked
@@ -417,6 +419,36 @@ public sealed partial class ChatService(
             string? finish = null;
             var retried = false;
             var content = new StringBuilder();
+            var withheld = false;
+            var checkedAt = 0;
+            // The answer so far through the answer rules: masked in place (the page shows it again), or withheld.
+            async Task<bool> GuardAsync(bool final)
+            {
+                checkedAt = content.Length;
+                var said = content.ToString();
+                var guarded = await safeguards.RunAsync(new Safeguards.RuleRun("answer", said)
+                {
+                    User = user, Model = modelName, ConversationId = conversation.Id, What = "answer", ModelChecks = final, Record = final,
+                }, CancellationToken.None);
+                if (guarded.Blocked)
+                {
+                    content.Clear().Append(guarded.Reason);
+                    await emit(new { type = "replace", text = guarded.Reason });
+                    return true;
+                }
+                if (guarded.Text != said)
+                {
+                    if (!final)
+                    {
+                        // What was masked is recorded once, as it is masked.
+                        await safeguards.RunAsync(new Safeguards.RuleRun("answer", said) { User = user, Model = modelName, ConversationId = conversation.Id, What = "answer", ModelChecks = false }, CancellationToken.None);
+                    }
+                    content.Clear().Append(guarded.Text);
+                    checkedAt = content.Length;
+                    await emit(new { type = "replace", text = guarded.Text });
+                }
+                return false;
+            }
             var reasoning = new StringBuilder();
             var calls = new SortedDictionary<int, (string? Id, string? Name, StringBuilder Args)>();
             var clock = Stopwatch.StartNew();
@@ -469,6 +501,10 @@ public sealed partial class ChatService(
                             }
                             content.Append(c.Text);
                             await emit(new { type = "content", text = c.Text });
+                            if (watchAnswers && content.Length - checkedAt >= 200 && await GuardAsync(final: false))
+                            {
+                                withheld = true;
+                            }
                             break;
                         case ToolCallDelta t:
                             EndThinking();
@@ -485,12 +521,12 @@ public sealed partial class ChatService(
                             finish = f.Reason;
                             break;
                     }
-                    if (cut)
+                    if (cut || withheld)
                     {
                         break;
                     }
                 }
-                if (!cut)
+                if (!cut || withheld)
                 {
                     break;
                 }
@@ -553,6 +589,12 @@ public sealed partial class ChatService(
             {
                 // Not the answer's own limit: the context ran out while it wrote. The next message compacts by the usual rules.
                 await emit(new { type = "notice", kind = "cut_at_context", text = "The answer reached the end of the model's context. The chat is compacted before your next message." });
+            }
+            // The whole answer through the answer rules, the model's checks too; withheld, it ends here, its tool calls not run.
+            if (watchAnswers && content.Length > 0 && (withheld || await GuardAsync(final: true)))
+            {
+                withheld = true;
+                calls.Clear();
             }
             Keep(MessageStatus.Complete);
             await emit(new
@@ -634,9 +676,18 @@ public sealed partial class ChatService(
                     }
                     else
                     {
-                        took.Restart();
-                        progress.CallId = id;
-                        outcome = await target.Run.CallAsync(name, args, ct);
+                        // What the call sends, through the rules on tool calls (a secret in a search, a link refused): refused, or masked.
+                        var (refusedCall, guardedArgs) = await safeguards.CheckToolAsync("tool_call", user, modelName, conversation.Id, name, rawArgs, ct);
+                        if (refusedCall is not null)
+                        {
+                            outcome = new ToolResult(refusedCall + " Do not try it again.", IsError: true);
+                        }
+                        else
+                        {
+                            took.Restart();
+                            progress.CallId = id;
+                            outcome = await target.Run.CallAsync(name, guardedArgs == rawArgs ? args : Arguments(guardedArgs), ct);
+                        }
                     }
                 }
                 catch (JsonException)
@@ -666,6 +717,11 @@ public sealed partial class ChatService(
                 {
                     db.ChatAttachments.Add(kept.File);
                     outcome = outcome with { Text = kept.Text, Files = [.. outcome.Files ?? [], kept.File] };
+                }
+                // What came back, through the rules on tools' results (instructions hidden in a page, secrets in a file...).
+                if (!loading && known && !outcome.IsError && await safeguards.CheckToolAsync("tool_result", user, modelName, conversation.Id, name, outcome.Text, ct) is var (resultRefused, resultText))
+                {
+                    outcome = resultRefused is not null ? outcome with { Text = $"[{resultRefused}]", IsError = true } : outcome with { Text = resultText };
                 }
                 var (text, isError) = (outcome.Text, outcome.IsError);
                 ends |= outcome.EndsAnswer;
@@ -860,13 +916,16 @@ public sealed partial class ChatService(
     /// </summary>
     private static async Task<Dictionary<string, IToolRun>> AgentToolsAsync(IServiceProvider services, AgentKit kit, HashSet<string> toolIds, CancellationToken ct)
     {
-        var all = await services.GetRequiredService<ToolRegistry>().AllAsync(ct);
+        var registry = services.GetRequiredService<ToolRegistry>();
+        var all = await registry.AllAsync(ct);
         var runs = new Dictionary<string, IToolRun>(StringComparer.Ordinal);
-        foreach (var tool in all.Where(t => toolIds.Contains(t.Tool.Id)).Select(t => t.Tool))
+        foreach (var choice in all.Where(t => toolIds.Contains(t.Tool.Id)))
         {
             try
             {
-                var run = await tool.StartAsync(new ToolContext(kit.User, kit.Email, kit.Conversation, kit.Progress), ct);
+                // This scope's tool, with the person's settings the answer has (their groups' over the company's).
+                var setting = kit.Runs.Values.Select(r => r.Choice).FirstOrDefault(c => c.Tool.Id == choice.Tool.Id)?.Setting ?? choice.Setting;
+                var run = await registry.StartAsync(choice with { Setting = setting }, new ToolContext(kit.User, kit.Email, kit.Conversation, kit.Progress), ct);
                 foreach (var name in run.Functions.OfType<JsonObject>().Select(f => f["function"]?["name"]?.GetValue<string>()).OfType<string>())
                 {
                     runs.TryAdd(name, run);
@@ -998,11 +1057,13 @@ public sealed partial class ChatService(
                 var took = Stopwatch.StartNew();
                 await using var scope = scopes.CreateAsyncScope();
                 var own = await AgentToolsAsync(scope.ServiceProvider, kit, toolIds, ct);
+                // Its own safeguards too: sub-agents check their calls side by side, each with a database context of its own.
+                var guard = scope.ServiceProvider.GetRequiredService<Safeguards.Safeguards>();
                 // Its own tools on demand: what the answer has loaded, and load_tools for the rest.
                 var demand = new OnDemandTools(new JsonArray([.. usable.Select(u => u.DeepClone())]), kit.Runs, notes, kit.Demand?.Loaded, chat.CurrentValue.ToolTextChars);
                 var run = await AgentAsync(part, kit, own, demand,
                     doing => kit.Progress.ReportAsync(new McpProgress(done, parts.Count, $"{part.Title}: {doing}")),
-                    e => Say(new { type = "agent", id = callId, index, e.Event, e.Text, e.Call, e.IsError, e.Files }), ct);
+                    e => Say(new { type = "agent", id = callId, index, e.Event, e.Text, e.Call, e.IsError, e.Files }), guard, ct);
                 var finished = Interlocked.Increment(ref done);
                 var ms = (int)took.Elapsed.TotalMilliseconds;
                 var usage = new JsonObject { ["prompt"] = run.Usage.Prompt, ["cached"] = run.Usage.Cached, ["completion"] = run.Usage.Completion };
@@ -1051,7 +1112,7 @@ public sealed partial class ChatService(
 
     /// <summary>One sub-agent: its own little answer loop, kept out of the chat (only its result goes to the model).</summary>
     private async Task<AgentRun> AgentAsync(AgentTask part, AgentKit kit, Dictionary<string, IToolRun> own, OnDemandTools demand, Func<string, Task> say,
-        Func<AgentStep, Task> step, CancellationToken ct)
+        Func<AgentStep, Task> step, Safeguards.Safeguards guard, CancellationToken ct)
     {
         var preamble = $"Today is {DateTimeOffset.UtcNow.ToString("dddd d MMMM yyyy", CultureInfo.InvariantCulture)} (UTC).\n\n" +
             "You are a sub-agent: an assistant gave you one part of a larger task, and does the other parts elsewhere. Do only this part, with " +
@@ -1176,7 +1237,13 @@ public sealed partial class ChatService(
                     else
                     {
                         demand.Load([name]);
-                        var outcome = await target.CallAsync(name, Arguments(raw), ct);
+                        // A sub-agent's calls and what they bring back are held by the same rules as the answer's own.
+                        var (refusedCall, guardedArgs) = await guard.CheckToolAsync("tool_call", kit.User, kit.Model, kit.Conversation.Id, name, raw, ct);
+                        var outcome = refusedCall is not null ? new ToolResult(refusedCall + " Do not try it again.", IsError: true) : await target.CallAsync(name, Arguments(guardedArgs), ct);
+                        if (refusedCall is null && !outcome.IsError && await guard.CheckToolAsync("tool_result", kit.User, kit.Model, kit.Conversation.Id, name, outcome.Text, ct) is var (resultRefused, resultText))
+                        {
+                            outcome = resultRefused is not null ? outcome with { Text = $"[{resultRefused}]", IsError = true } : outcome with { Text = resultText };
+                        }
                         await AuditPluginAsync(kit.Runs.TryGetValue(name, out var chosen) ? chosen.Choice.Tool : null, name, outcome, kit.User, false);
                         (result, isError) = (outcome.Text, outcome.IsError);
                         spent += outcome.Cost ?? 0;

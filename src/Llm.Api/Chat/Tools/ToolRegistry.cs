@@ -150,7 +150,7 @@ public sealed record ToolChoice(IChatTool Tool, ToolSetting Setting, string? Una
 public sealed class ToolRegistry(
     AppDbContext db, ArgusTool argus, ImageTool image, VideoTool video, SpeechTool speech, CalculatorTool calculator, TimeTool time, FilesTool files, CanvasTool canvas, PythonTool python, WebTool web, AskTool ask, AgentsTool agents, MemoryTool memory,
     IHttpClientFactory http, IOptions<AuthOptions> auth, IOptionsMonitor<ChatOptions> chat, Plugins.PersonCredentials people, Knowledge.KnowledgeTool knowledge, LayaTool laya,
-    ResearchTool research, BlenderTool blender, Plans.PlansTool plans, Code.ReviewTool reviews)
+    ResearchTool research, BlenderTool blender, Plans.PlansTool plans, Code.ReviewTool reviews, GatewayChat gateway, ToolUsage usage)
 {
     public const string McpClient = "mcp";
 
@@ -158,7 +158,9 @@ public sealed class ToolRegistry(
     {
         var settings = await db.ToolSettings.AsNoTracking().ToDictionaryAsync(s => s.ToolId, ct);
         var servers = await db.McpServers.AsNoTracking().OrderBy(s => s.Name).ToListAsync(ct);
-        IEnumerable<IChatTool> tools = [argus, knowledge, python, web, research, image, video, speech, calculator, time, files, canvas, blender, plans, reviews, ask, agents, memory, laya, .. servers.Select(Server)];
+        var customs = await db.CustomTools.AsNoTracking().OrderBy(t => t.Name).ToListAsync(ct);
+        IEnumerable<IChatTool> tools = [argus, knowledge, python, web, research, image, video, speech, calculator, time, files, canvas, blender, plans, reviews, ask, agents, memory, laya,
+            .. servers.Select(Server), .. customs.Select(t => CustomTools.For(t, http, gateway, auth.Value.DataKey))];
         var all = new List<ToolChoice>();
         foreach (var tool in tools)
         {
@@ -201,8 +203,50 @@ public sealed class ToolRegistry(
         member.MayUse(Core.Access.ResourceKinds.Tool, toolId) && (!FeatureOf.TryGetValue(toolId, out var feature) || member.Has(feature));
 
     /// <summary>The tools this person may use now: on, allowed to them, and available.</summary>
-    public async Task<IReadOnlyList<ToolChoice>> ForAsync(Membership member, CancellationToken ct = default) =>
-        [.. (await AllAsync(ct)).Where(t => t.Setting.Enabled && t.Unavailable is null && Allowed(member, t.Tool.Id))];
+    /// <summary>
+    /// The tools this person may use, each with their settings: the company's, and their groups' over them (on in new chats when
+    /// a group says so; asking first only when every group that says asks; the most calls a day of their groups).
+    /// </summary>
+    public async Task<IReadOnlyList<ToolChoice>> ForAsync(Membership member, CancellationToken ct = default)
+    {
+        var mine = member.Groups.Count == 0 ? [] : await db.ToolGroupSettings.AsNoTracking().Where(g => member.Groups.Contains(g.GroupId)).ToListAsync(ct);
+        return [.. (await AllAsync(ct)).Where(t => t.Setting.Enabled && t.Unavailable is null && Allowed(member, t.Tool.Id))
+            .Select(t => mine.Where(g => g.ToolId == t.Tool.Id).ToList() is { Count: > 0 } groups ? t with { Setting = ForGroups(t.Setting, groups) } : t)];
+    }
+
+    /// <summary>A tool's settings for a person in these groups.</summary>
+    public static ToolSetting ForGroups(ToolSetting company, IReadOnlyList<ToolGroupSetting> groups)
+    {
+        var on = groups.Where(g => g.OnByDefault is not null).Select(g => g.OnByDefault!.Value).ToList();
+        var ask = groups.Where(g => g.AskFirst is not null).Select(g => g.AskFirst!.Value).ToList();
+        var calls = groups.Where(g => g.CallsPerDay is not null).Select(g => g.CallsPerDay!.Value).ToList();
+        return new ToolSetting
+        {
+            ToolId = company.ToolId, Enabled = company.Enabled, Title = company.Title, Description = company.Description, Instructions = company.Instructions,
+            ReplaceInstructions = company.ReplaceInstructions, DisabledFunctions = company.DisabledFunctions, AskFirstFunctions = company.AskFirstFunctions,
+            FunctionsJson = company.FunctionsJson, UpdatedAt = company.UpdatedAt,
+            OnByDefault = on.Count > 0 ? on.Any(x => x) : company.OnByDefault,
+            AskFirst = ask.Count > 0 ? ask.All(x => x) : company.AskFirst,
+            // 0 is no limit: the most of all.
+            CallsPerDay = calls.Count > 0 ? (calls.Contains(0) ? 0 : calls.Max()) : company.CallsPerDay,
+        };
+    }
+
+    /// <summary>
+    /// The tool made ready for one answer or call, as the admin customized it (functions, descriptions, fixed arguments, asking
+    /// first, calls a day), each call recorded. Every chat, sub-agent and Arena MCP call starts its tools here.
+    /// </summary>
+    public async Task<IToolRun> StartAsync(ToolChoice choice, ToolContext context, CancellationToken ct)
+    {
+        var run = await choice.Tool.StartAsync(context, ct);
+        var userId = context.User.Id;
+        return new CustomizedRun(run, choice.Setting, choice.Tool.Id, userId, usage, token => usage.TodayAsync(db, userId, choice.Tool.Id, token));
+    }
+
+    /// <summary>The name and description people see: the admin's, or the tool's own.</summary>
+    public static string TitleOf(ToolChoice c) => c.Setting.Title is { Length: > 0 } t ? t : c.Tool.Title;
+
+    public static string DescriptionOf(ToolChoice c) => c.Setting.Description is { Length: > 0 } d ? d : c.Tool.Description;
 
     /// <summary>Whether this person may use the tool now: on, allowed to them, and available.</summary>
     public async Task<bool> MayUseAsync(Membership member, string toolId, CancellationToken ct = default) => (await ForAsync(member, ct)).Any(t => t.Tool.Id == toolId);

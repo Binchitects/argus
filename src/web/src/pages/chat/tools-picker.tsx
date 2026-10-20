@@ -1,7 +1,9 @@
+import { useQuery } from '@tanstack/react-query'
 import { ShieldQuestion, Wrench } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Switch } from '@/components/ui/switch'
+import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { toolIcon } from './tools'
 import type { ChatTool } from './types'
@@ -25,6 +27,7 @@ export function ToolsPicker({ tools, value, onChange }: { tools: ChatTool[]; val
           <p className="text-sm font-medium">Tools in this chat</p>
           <p className="text-xs text-muted-foreground">The model calls them when a question needs them.</p>
         </div>
+        <Toolsets tools={tools} value={value} onChange={onChange} />
         <ul className="max-h-80 divide-y overflow-y-auto">
           {tools.map((t) => {
             const Icon = toolIcon[t.icon] ?? Wrench
@@ -48,5 +51,39 @@ export function ToolsPicker({ tools, value, onChange }: { tools: ChatTool[]; val
         </ul>
       </PopoverContent>
     </Popover>
+  )
+}
+
+interface Toolset {
+  id: string
+  name: string
+  description: string | null
+  tools: string[]
+  isDefault: boolean
+}
+
+/** The toolsets meant for the person: one press switches the chat to that set of tools. */
+function Toolsets({ tools, value, onChange }: { tools: ChatTool[]; value: string[]; onChange: (tools: string[]) => void }) {
+  const sets = useQuery({ queryKey: ['chat', 'toolsets'], queryFn: ({ signal }) => api<Toolset[]>('/api/chat/toolsets', { signal }), staleTime: 60_000 })
+  if (!sets.data?.length) return null
+  const same = (s: Toolset) => s.tools.length === value.length && s.tools.every((t) => value.includes(t))
+  return (
+    <fieldset className="flex flex-wrap gap-1.5 border-b px-3 py-2">
+      <legend className="sr-only">Toolsets</legend>
+      {sets.data.map((s) => (
+        <Button
+          key={s.id}
+          type="button"
+          size="sm"
+          variant={same(s) ? 'secondary' : 'outline'}
+          className="h-7 px-2 text-xs"
+          aria-pressed={same(s)}
+          title={s.description ?? s.tools.map((id) => tools.find((t) => t.id === id)?.title ?? id).join(', ')}
+          onClick={() => onChange(s.tools.filter((id) => tools.some((t) => t.id === id)))}
+        >
+          {s.name}
+        </Button>
+      ))}
+    </fieldset>
   )
 }

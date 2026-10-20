@@ -18,8 +18,19 @@ namespace Llm.Api.Plugins;
 /// <summary>Installs a plugin: by its name from a catalog, from its zip's address (with its SHA-256), or its zip itself (base64).</summary>
 /// <param name="Tls">How its server's certificate is checked (Admin → Tools' choice); null: against the system's CAs.</param>
 /// <param name="TlsCa">The CA to trust (PEM), with <see cref="TlsCheck.OwnCa"/>.</param>
+/// <param name="Accept">The admin grants what the plugin asks for (its permissions, shown by preview).</param>
 public sealed record InstallRequest(string? Name = null, string? Url = null, string? Sha256 = null, string? Zip = null, Dictionary<string, string?>? Settings = null,
-    TlsCheck? Tls = null, string? TlsCa = null);
+    TlsCheck? Tls = null, string? TlsCa = null, bool Accept = false);
+
+/// <param name="Accept">The admin grants what the new version asks for beyond what was granted.</param>
+/// <param name="Zip">The new version as a zip (base64), for a plugin that is in no catalog; null: from its catalog.</param>
+public sealed record UpdateRequest(bool Accept = false, string? Zip = null);
+
+public sealed record RollbackRequest(string? Version = null);
+
+public sealed record PinRequest(bool Pinned);
+
+public sealed record CheckRequest(string Zip);
 
 /// <param name="Tls">How its server's certificate is checked; null: unchanged.</param>
 /// <param name="TlsCa">The CA to trust (PEM), with <see cref="TlsCheck.OwnCa"/>; null: the one kept.</param>
@@ -40,6 +51,12 @@ public static class PluginEndpoints
             ["PATCH /api/admin/plugins/{id:guid}"] = Llm.Core.Access.Permissions.PluginsConfigure,
             ["POST /api/admin/plugins/{id:guid}/update"] = Llm.Core.Access.Permissions.PluginsInstall,
             ["DELETE /api/admin/plugins/{id:guid}"] = Llm.Core.Access.Permissions.PluginsRemove,
+            ["POST /api/admin/plugins/{id:guid}/rollback"] = Llm.Core.Access.Permissions.PluginsInstall,
+            ["POST /api/admin/plugins/{id:guid}/pin"] = Llm.Core.Access.Permissions.PluginsInstall,
+            ["GET /api/admin/plugins/{id:guid}/health"] = Llm.Core.Access.Permissions.PluginsRead,
+            ["POST /api/admin/plugins/{id:guid}/check"] = Llm.Core.Access.Permissions.PluginsRead,
+            ["GET /api/admin/plugins/template"] = Llm.Core.Access.Permissions.PluginsRead,
+            ["POST /api/admin/plugins/check"] = Llm.Core.Access.Permissions.PluginsRead,
         });
         admin.MapGet("", ListAsync);
         admin.MapPost("/preview", PreviewAsync);
@@ -47,6 +64,12 @@ public static class PluginEndpoints
         admin.MapPatch("/{id:guid}", SettingsAsync);
         admin.MapPost("/{id:guid}/update", UpdateAsync);
         admin.MapDelete("/{id:guid}", RemoveAsync);
+        admin.MapPost("/{id:guid}/rollback", RollbackAsync);
+        admin.MapPost("/{id:guid}/pin", PinAsync);
+        admin.MapGet("/{id:guid}/health", HealthAsync);
+        admin.MapPost("/{id:guid}/check", CheckNowAsync);
+        admin.MapGet("/template", () => Results.File(PluginTemplate.Zip(), "application/zip", "plugin-template.zip"));
+        admin.MapPost("/check", CheckAsync);
 
         var me = app.MapGroup("/api/account/connections").PersonOnly();
         me.MapGet("", ConnectionsAsync);
@@ -59,7 +82,12 @@ public static class PluginEndpoints
     private static async Task<IResult> ListAsync(PluginCatalog catalog, AppDbContext db, CancellationToken ct)
     {
         var installed = await db.McpServers.AsNoTracking().Where(s => s.Plugin != null).OrderBy(s => s.Name).ToListAsync(ct);
+        var ids = installed.Select(s => s.Id).ToList();
+        var releases = await db.PluginReleases.AsNoTracking().Where(r => ids.Contains(r.ServerId)).OrderByDescending(r => r.InstalledAt)
+            .Select(r => new { r.ServerId, r.Version, r.InstalledAt }).ToListAsync(ct);
         var (entries, problem) = await catalog.ListAsync(ct);
+        // A newer version in a catalog, unless the plugin is pinned at its own.
+        string? Newer(McpServer s) => !s.PluginPinned && entries.FirstOrDefault(e => e.Name == s.Plugin) is { } e && PluginManifest.CompareVersions(e.Version, s.PluginVersion ?? "0") > 0 ? e.Version : null;
         return Results.Ok(new
         {
             problem,
@@ -72,6 +100,8 @@ public static class PluginEndpoints
             {
                 s.Id, toolId = McpServerTool.Prefix + s.Id, plugin = s.Plugin, title = s.Name, version = s.PluginVersion, s.Url, personAuth = s.PersonAuth,
                 writes = s.Writes, settings = PluginInstaller.View(s), tls = s.Tls, tlsCa = s.TlsCa, tlsCaNames = ServerTls.CaNames(s.TlsCa),
+                permissions = s.PluginPermissions, pinned = s.PluginPinned, update = Newer(s),
+                releases = releases.Where(r => r.ServerId == s.Id).Select(r => new { r.Version, r.InstalledAt }),
             }),
         });
     }
@@ -115,20 +145,35 @@ public static class PluginEndpoints
                 return AuthEndpoints.Problem(400, "plugin", ex.Message);
             }
         }
+        var permissions = PluginContent.Permissions(package);
         return Results.Ok(new
         {
-            m.Name, m.Version, m.Title, m.Description, m.PersonAuth, m.Help, m.Writes, operations, mcp = m.Mcp,
+            m.Name, m.Version, m.Title, m.Description, m.PersonAuth, m.Help, m.Writes, operations, mcp = m.Mcp, m.Author, m.Homepage,
             settings = m.Settings.Select(x => new { x.Key, x.Title, x.Type, x.Required, x.Help }),
             prompts = (package.Prompts ?? []).Select(x => new { x.Name, x.Title }),
+            assistants = package.Assistants.Select(a => new { a.Name, a.Description }),
+            rules = package.Rules.Select(r => new { r.Name, r.Detector, r.Action }),
+            toolsets = m.Toolsets.Select(t => new { t.Name, t.Description }),
+            permissions, needsYes = PluginContent.NeedingYes(permissions).Any(),
         });
     }
 
-    private static async Task<IResult> InstallAsync(InstallRequest body, PluginCatalog catalog, AppDbContext db, Audit audit, IOptions<AuthOptions> auth, CancellationToken ct)
+    /// <summary>Asked for a yes the admin did not give: what the plugin asks for, to show them.</summary>
+    private static IResult AskYes(IEnumerable<PluginGrant> permissions, string what) =>
+        Results.Json(new { status = "accept", error = $"{what} asks for more than adding tools: grant it to go on.", permissions }, statusCode: 409);
+
+    private static async Task<IResult> InstallAsync(InstallRequest body, PluginCatalog catalog, AppDbContext db, Audit audit, IOptions<AuthOptions> auth,
+        UserManager<AppUser> users, ClaimsPrincipal principal, CancellationToken ct)
     {
         var (found, failed) = await PackageAsync(body, catalog, ct);
         if (found is not { } package)
         {
             return failed!;
+        }
+        var permissions = PluginContent.Permissions(package);
+        if (PluginContent.NeedingYes(permissions).Any() && !body.Accept)
+        {
+            return AskYes(permissions, package.Manifest.Title);
         }
         if (await db.McpServers.AnyAsync(s => s.Plugin == package.Manifest.Name, ct))
         {
@@ -148,10 +193,14 @@ public static class PluginEndpoints
         {
             server.Name = $"{package.Manifest.Title} {n}";
         }
+        server.PluginPermissions = [.. permissions.Select(p => p.Key)];
         db.McpServers.Add(server);
         await db.SaveChangesAsync(ct);
+        var adminId = (await users.GetUserAsync(principal))?.Id;
+        db.PluginReleases.Add(PluginContent.Release(server, package, adminId));
         await Chat.PromptLibrary.SyncAsync(db, server, package, ct);
-        await audit.WriteAsync("plugin.install", package.Manifest.Name, detail: $"{package.Manifest.Version}, {server.Url}");
+        await PluginContent.SyncAsync(db, server, package, adminId, ct);
+        await audit.WriteAsync("plugin.install", package.Manifest.Name, detail: $"{package.Manifest.Version}, {server.Url}; granted {string.Join(", ", server.PluginPermissions)}");
         await ServerTls.AuditAsync(audit, server, TlsCheck.System, null);
         return Results.Created($"/api/admin/plugins/{server.Id}", new { server.Id, toolId = McpServerTool.Prefix + server.Id });
     }
@@ -178,28 +227,144 @@ public static class PluginEndpoints
         return Results.NoContent();
     }
 
-    private static async Task<IResult> UpdateAsync(Guid id, PluginCatalog catalog, AppDbContext db, Audit audit, IOptions<AuthOptions> auth, CancellationToken ct)
+    private static async Task<IResult> UpdateAsync(Guid id, UpdateRequest? body, PluginCatalog catalog, AppDbContext db, Audit audit, IOptions<AuthOptions> auth,
+        UserManager<AppUser> users, ClaimsPrincipal principal, CancellationToken ct)
     {
         if (await db.McpServers.SingleOrDefaultAsync(s => s.Id == id && s.Plugin != null, ct) is not { } server)
         {
             return Results.NotFound();
         }
+        if (server.PluginPinned)
+        {
+            return AuthEndpoints.Problem(409, "pinned", $"{server.Name} is pinned at {server.PluginVersion}: unpin it to update.");
+        }
         try
         {
-            var package = await catalog.GetAsync(server.Plugin!, ct);
-            var was = server.PluginVersion;
-            if (PluginInstaller.Apply(server, package, new Dictionary<string, string?>(), auth.Value.DataKey) is { } problem)
+            var package = body?.Zip is { Length: > 0 } zip ? PluginCatalog.FromZip(Convert.FromBase64String(zip)) : await catalog.GetAsync(server.Plugin!, ct);
+            if (package.Manifest.Name != server.Plugin)
             {
-                return AuthEndpoints.Problem(400, "settings", $"The new version needs its settings: {problem}");
+                return AuthEndpoints.Problem(400, "plugin", $"The zip is {package.Manifest.Name}, not {server.Plugin}.");
             }
-            await db.SaveChangesAsync(ct);
-            await Chat.PromptLibrary.SyncAsync(db, server, package, ct);
-            await audit.WriteAsync("plugin.update", server.Plugin, detail: $"{was} → {server.PluginVersion}");
-            return Results.Ok(new { version = server.PluginVersion });
+            return await InstallVersionAsync(server, package, body?.Accept == true, "plugin.update", db, audit, auth, users, principal, ct);
         }
-        catch (Exception ex) when (ex is PluginCatalog.PluginException or PluginManifest.ManifestException or HttpRequestException or TaskCanceledException)
+        catch (Exception ex) when (ex is PluginCatalog.PluginException or PluginManifest.ManifestException or HttpRequestException or TaskCanceledException or FormatException)
         {
             return AuthEndpoints.Problem(400, "plugin", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Another version in place of the installed one, its settings kept: what it asks for beyond what was granted needs the
+    /// admin's yes; its content follows it, and the version is kept to go back to.
+    /// </summary>
+    private static async Task<IResult> InstallVersionAsync(McpServer server, PluginPackage package, bool accept, string action, AppDbContext db, Audit audit,
+        IOptions<AuthOptions> auth, UserManager<AppUser> users, ClaimsPrincipal principal, CancellationToken ct)
+    {
+        var permissions = PluginContent.Permissions(package);
+        var more = permissions.Where(p => !server.PluginPermissions.Contains(p.Key)).ToList();
+        if (PluginContent.NeedingYes(more).Any() && !accept)
+        {
+            return AskYes(more, $"{package.Manifest.Title} {package.Manifest.Version}");
+        }
+        var was = server.PluginVersion;
+        if (PluginInstaller.Apply(server, package, new Dictionary<string, string?>(), auth.Value.DataKey) is { } problem)
+        {
+            return AuthEndpoints.Problem(400, "settings", $"The version needs its settings: {problem}");
+        }
+        server.PluginPermissions = [.. permissions.Select(p => p.Key)];
+        var adminId = (await users.GetUserAsync(principal))?.Id;
+        db.PluginReleases.Add(PluginContent.Release(server, package, adminId));
+        await db.SaveChangesAsync(ct);
+        await Chat.PromptLibrary.SyncAsync(db, server, package, ct);
+        await PluginContent.SyncAsync(db, server, package, adminId, ct);
+        await audit.WriteAsync(action, server.Plugin, detail: $"{was} → {server.PluginVersion}{(more.Count > 0 ? $"; granted {string.Join(", ", more.Select(p => p.Key))}" : "")}");
+        return Results.Ok(new { version = server.PluginVersion, granted = more });
+    }
+
+    /// <summary>Back to a version installed before (the one before this, or the one named), from the files kept with it.</summary>
+    private static async Task<IResult> RollbackAsync(Guid id, RollbackRequest body, AppDbContext db, Audit audit, IOptions<AuthOptions> auth,
+        UserManager<AppUser> users, ClaimsPrincipal principal, CancellationToken ct)
+    {
+        if (await db.McpServers.SingleOrDefaultAsync(s => s.Id == id && s.Plugin != null, ct) is not { } server)
+        {
+            return Results.NotFound();
+        }
+        var releases = await db.PluginReleases.AsNoTracking().Where(r => r.ServerId == id).OrderByDescending(r => r.InstalledAt).ToListAsync(ct);
+        var target = body.Version is { Length: > 0 } v ? releases.FirstOrDefault(r => r.Version == v) : releases.FirstOrDefault(r => r.Version != server.PluginVersion);
+        if (target is null)
+        {
+            return AuthEndpoints.Problem(404, "version", "There is no earlier version kept to go back to.");
+        }
+        var files = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(target.FilesJson) ?? [];
+        // Going back grants nothing new: it asks only for what that version had.
+        return await InstallVersionAsync(server, PluginCatalog.FromFiles(files), accept: true, "plugin.rollback", db, audit, auth, users, principal, ct);
+    }
+
+    private static async Task<IResult> PinAsync(Guid id, PinRequest body, AppDbContext db, Audit audit, CancellationToken ct)
+    {
+        if (await db.McpServers.SingleOrDefaultAsync(s => s.Id == id && s.Plugin != null, ct) is not { } server)
+        {
+            return Results.NotFound();
+        }
+        server.PluginPinned = body.Pinned;
+        await db.SaveChangesAsync(ct);
+        await audit.WriteAsync(body.Pinned ? "plugin.pin" : "plugin.unpin", server.Plugin, detail: server.PluginVersion);
+        return Results.NoContent();
+    }
+
+    /// <summary>How the plugin's tool has been doing: calls, failures and time over a week, the last error, failures in a row, whether it is on.</summary>
+    private static async Task<IResult> HealthAsync(Guid id, AppDbContext db, ToolUsage usage, CancellationToken ct)
+    {
+        if (await db.McpServers.AsNoTracking().SingleOrDefaultAsync(s => s.Id == id && s.Plugin != null, ct) is not { } server)
+        {
+            return Results.NotFound();
+        }
+        var toolId = McpServerTool.Prefix + id;
+        var since = DateTimeOffset.UtcNow.AddDays(-7);
+        var calls = await db.ToolCalls.AsNoTracking().Where(c => c.ToolId == toolId && c.At >= since).Select(c => new { c.At, c.Failed, c.DurationMs, c.Error, c.Function }).ToListAsync(ct);
+        var setting = await db.ToolSettings.AsNoTracking().SingleOrDefaultAsync(s => s.ToolId == toolId, ct);
+        var lastFailure = calls.Where(c => c.Failed).MaxBy(c => c.At);
+        return Results.Ok(new
+        {
+            on = setting?.Enabled ?? true, calls = calls.Count, failed = calls.Count(c => c.Failed),
+            averageMs = calls.Count > 0 ? (int)calls.Average(c => c.DurationMs) : 0,
+            failuresInARow = usage.FailuresInARow(toolId),
+            lastError = lastFailure is null ? null : new { lastFailure.Error, lastFailure.At, lastFailure.Function },
+            lastCall = calls.Count > 0 ? calls.Max(c => c.At) : (DateTimeOffset?)null,
+        });
+    }
+
+    /// <summary>Its server reached now, as the admin: how many functions it offers, or why it cannot be reached.</summary>
+    private static async Task<IResult> CheckNowAsync(Guid id, ToolRegistry registry, UserManager<AppUser> users, ClaimsPrincipal principal, CancellationToken ct)
+    {
+        var toolId = McpServerTool.Prefix + id;
+        if ((await registry.AllAsync(ct)).FirstOrDefault(t => t.Tool.Id == toolId) is not { } choice)
+        {
+            return Results.NotFound();
+        }
+        var me = (await users.GetUserAsync(principal))!;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var run = await choice.Tool.StartAsync(new ToolContext(me, me.Email ?? "", new Conversation { UserId = me.Id, Title = "Admin → Plugins" }), ct);
+            return Results.Ok(new { ok = true, functions = run.Functions.Count, ms = clock.ElapsedMilliseconds });
+        }
+        catch (Exception ex) when (ex is Chat.McpException or HttpRequestException or TaskCanceledException or InvalidOperationException)
+        {
+            return Results.Ok(new { ok = false, error = ex.Message, ms = clock.ElapsedMilliseconds });
+        }
+    }
+
+    /// <summary>A plugin's zip checked as installing would, and more: its problems (it would not install) and warnings, what it brings and asks for.</summary>
+    private static IResult CheckAsync(CheckRequest body)
+    {
+        try
+        {
+            return Results.Ok(PluginTemplate.Check(PluginCatalog.FromZip(Convert.FromBase64String(body.Zip))));
+        }
+        catch (Exception ex) when (ex is PluginCatalog.PluginException or PluginManifest.ManifestException or FormatException)
+        {
+            return Results.Ok(new { ok = false, problems = new[] { ex is FormatException ? "The zip is not base64." : ex.Message }, warnings = Array.Empty<string>() });
         }
     }
 
@@ -211,6 +376,7 @@ public static class PluginEndpoints
             return Results.NotFound();
         }
         var toolId = McpServerTool.Prefix + id;
+        await PluginContent.RemoveAsync(db, server.Plugin!, ct);
         db.McpServers.Remove(server);
         await db.ToolSettings.Where(s => s.ToolId == toolId).ExecuteDeleteAsync(ct);
         await db.PersonCredentials.Where(c => c.ToolId == toolId).ExecuteDeleteAsync(ct);

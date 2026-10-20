@@ -516,6 +516,9 @@ namespace Llm.Core.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<string>("Plugin")
+                        .HasColumnType("text");
+
                     b.Property<int>("Reach")
                         .HasColumnType("integer");
 
@@ -1058,6 +1061,86 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("conversations", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Chat.CustomTool", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("AskFirst")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("BodyTemplate")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("HeadersEncrypted")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<string>("Method")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<string>("Model")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.Property<string>("ParametersJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("PromptTemplate")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ResultPath")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("SystemPrompt")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UrlTemplate")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedById");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("custom_tools", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Chat.KnowledgeChunk", b =>
                 {
                     b.Property<long>("Id")
@@ -1329,6 +1412,13 @@ namespace Llm.Core.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.PrimitiveCollection<List<string>>("PluginPermissions")
+                        .IsRequired()
+                        .HasColumnType("text[]");
+
+                    b.Property<bool>("PluginPinned")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("PluginSettings")
                         .HasColumnType("text");
 
@@ -1481,6 +1571,43 @@ namespace Llm.Core.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("person_credentials", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.PluginRelease", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("FilesJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("InstalledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("InstalledById")
+                        .HasColumnType("uuid");
+
+                    b.PrimitiveCollection<List<string>>("Permissions")
+                        .IsRequired()
+                        .HasColumnType("text[]");
+
+                    b.Property<Guid>("ServerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InstalledById");
+
+                    b.HasIndex("ServerId", "InstalledAt");
+
+                    b.ToTable("plugin_releases", (string)null);
                 });
 
             modelBuilder.Entity("Llm.Core.Chat.PushSubscription", b =>
@@ -1895,6 +2022,74 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("task_events", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Chat.ToolCall", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DurationMs")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<bool>("Failed")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Function")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ToolId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ToolId", "At");
+
+                    b.HasIndex("UserId", "ToolId", "At");
+
+                    b.ToTable("tool_calls", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.ToolGroupSetting", b =>
+                {
+                    b.Property<string>("ToolId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid>("GroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool?>("AskFirst")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("CallsPerDay")
+                        .HasColumnType("integer");
+
+                    b.Property<bool?>("OnByDefault")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("ToolId", "GroupId");
+
+                    b.HasIndex("GroupId");
+
+                    b.ToTable("tool_group_settings", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Chat.ToolSetting", b =>
                 {
                     b.Property<string>("ToolId")
@@ -1904,11 +2099,37 @@ namespace Llm.Core.Data.Migrations
                     b.Property<bool>("AskFirst")
                         .HasColumnType("boolean");
 
+                    b.PrimitiveCollection<List<string>>("AskFirstFunctions")
+                        .IsRequired()
+                        .HasColumnType("text[]");
+
+                    b.Property<int?>("CallsPerDay")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.PrimitiveCollection<List<string>>("DisabledFunctions")
+                        .IsRequired()
+                        .HasColumnType("text[]");
+
                     b.Property<bool>("Enabled")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("FunctionsJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Instructions")
+                        .HasColumnType("text");
+
                     b.Property<bool>("OnByDefault")
                         .HasColumnType("boolean");
+
+                    b.Property<bool>("ReplaceInstructions")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Title")
+                        .HasColumnType("text");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1916,6 +2137,48 @@ namespace Llm.Core.Data.Migrations
                     b.HasKey("ToolId");
 
                     b.ToTable("tool_settings", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.Toolset", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.PrimitiveCollection<List<Guid>>("DefaultFor")
+                        .IsRequired()
+                        .HasColumnType("uuid[]");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.PrimitiveCollection<List<Guid>>("Groups")
+                        .IsRequired()
+                        .HasColumnType("uuid[]");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Plugin")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.PrimitiveCollection<List<string>>("Tools")
+                        .IsRequired()
+                        .HasColumnType("text[]");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("toolsets", (string)null);
                 });
 
             modelBuilder.Entity("Llm.Core.Code.CodeReview", b =>
@@ -3106,6 +3369,10 @@ namespace Llm.Core.Data.Migrations
                         .IsRequired()
                         .HasColumnType("uuid[]");
 
+                    b.Property<string>("Plugin")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<string>("RerouteModel")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
@@ -3686,6 +3953,14 @@ namespace Llm.Core.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Llm.Core.Chat.CustomTool", b =>
+                {
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedById")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
             modelBuilder.Entity("Llm.Core.Chat.KnowledgeChunk", b =>
                 {
                     b.HasOne("Llm.Core.Chat.KnowledgeDocument", null)
@@ -3740,6 +4015,20 @@ namespace Llm.Core.Data.Migrations
                     b.HasOne("Llm.Core.Identity.AppUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.PluginRelease", b =>
+                {
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("InstalledById")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Llm.Core.Chat.McpServer", null)
+                        .WithMany()
+                        .HasForeignKey("ServerId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
@@ -3843,6 +4132,23 @@ namespace Llm.Core.Data.Migrations
                     b.HasOne("Llm.Core.Chat.ScheduledTask", null)
                         .WithMany()
                         .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.ToolCall", b =>
+                {
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.ToolGroupSetting", b =>
+                {
+                    b.HasOne("Llm.Core.Access.Group", null)
+                        .WithMany()
+                        .HasForeignKey("GroupId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

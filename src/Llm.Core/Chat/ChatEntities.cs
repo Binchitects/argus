@@ -255,6 +255,8 @@ public sealed class Assistant
     public List<Guid> EditorGroups { get; set; } = [];
     /// <summary>How many chats were started with it, by anyone (deleted ones too).</summary>
     public int ChatsStarted { get; set; }
+    /// <summary>The plugin that brought it (its name); it goes when the plugin does.</summary>
+    public string? Plugin { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

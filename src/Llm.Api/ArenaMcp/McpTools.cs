@@ -97,7 +97,7 @@ public sealed partial class McpTools(
         var wait = TimeSpan.FromSeconds(Math.Max(1, options.CurrentValue.ListWaitSeconds));
         using var waiting = CancellationTokenSource.CreateLinkedTokenSource(ct);
         waiting.CancelAfter(wait);
-        var early = served.Where(c => Remote(c.Tool)).ToDictionary(c => c.Tool.Id, c => AttemptAsync(c, t => c.Tool.StartAsync(context, t), wait, waiting.Token, ct));
+        var early = served.Where(c => Remote(c.Tool)).ToDictionary(c => c.Tool.Id, c => AttemptAsync(c, t => registry.StartAsync(c, context, t), wait, waiting.Token, ct));
         foreach (var choice in served.Where(c => SignsIn(c.Tool)))
         {
             if (choice.Tool is McpServerTool server)
@@ -107,7 +107,7 @@ public sealed partial class McpTools(
             }
             else
             {
-                early[choice.Tool.Id] = Task.FromResult(await AttemptAsync(choice, t => choice.Tool.StartAsync(context, t), wait, waiting.Token, ct));
+                early[choice.Tool.Id] = Task.FromResult(await AttemptAsync(choice, t => registry.StartAsync(choice, context, t), wait, waiting.Token, ct));
             }
         }
         var slow = false;
@@ -116,7 +116,7 @@ public sealed partial class McpTools(
         var refused = new Dictionary<Llm.Core.Access.CreditKind, string?>();
         foreach (var choice in served)
         {
-            var (run, failure) = early.TryGetValue(choice.Tool.Id, out var started) ? await started : await AttemptAsync(choice, t => choice.Tool.StartAsync(context, t), wait, ct, ct);
+            var (run, failure) = early.TryGetValue(choice.Tool.Id, out var started) ? await started : await AttemptAsync(choice, t => registry.StartAsync(choice, context, t), wait, ct, ct);
             if (run is null)
             {
                 unavailable.Add($"{choice.Tool.Title} ({failure})");
@@ -255,7 +255,7 @@ public sealed partial class McpTools(
             IToolRun run;
             try
             {
-                run = await choice.Tool.StartAsync(context, ct);
+                run = await registry.StartAsync(choice, context, ct);
             }
             catch (McpException ex)
             {

@@ -301,6 +301,10 @@ public static class IdentityWiring
         services.AddSingleton<Chat.Tools.SandboxClient>();
         services.AddScoped<Chat.Tools.PythonTool>();
         services.Configure<Chat.Tools.BlenderOptions>(config.GetSection("Blender"));
+        services.Configure<Chat.Tools.ToolOptions>(config.GetSection("Tools"));
+        services.AddSingleton<Chat.Tools.ToolUsage>();
+        services.AddHostedService(sp => sp.GetRequiredService<Chat.Tools.ToolUsage>());
+        services.AddHttpClient(Chat.Tools.CustomTools.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(30));
         services.AddSingleton<Chat.Tools.BlenderClient>();
         services.AddScoped<Chat.Tools.BlenderTool>();
         services.AddScoped<Plans.PlansTool>();
@@ -495,6 +499,7 @@ public static class IdentityWiring
         Chat.CanvasEndpoints.MapCanvases(app);
         Chat.QueuedMessages.MapQueue(app);
         Chat.Tools.ToolEndpoints.MapTools(app);
+        Chat.Tools.ToolCustomizationEndpoints.MapToolCustomization(app);
         Plugins.PluginEndpoints.MapPlugins(app);
         ArenaMcp.McpEndpoints.MapArenaMcp(app);
         Knowledge.KnowledgeEndpoints.MapKnowledge(app);

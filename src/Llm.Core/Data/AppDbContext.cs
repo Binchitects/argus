@@ -38,6 +38,11 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Group> Groups => Set<Group>();
     public DbSet<GroupMember> GroupMembers => Set<GroupMember>();
     public DbSet<ToolSetting> ToolSettings => Set<ToolSetting>();
+    public DbSet<ToolGroupSetting> ToolGroupSettings => Set<ToolGroupSetting>();
+    public DbSet<ToolCall> ToolCalls => Set<ToolCall>();
+    public DbSet<Toolset> Toolsets => Set<Toolset>();
+    public DbSet<CustomTool> CustomTools => Set<CustomTool>();
+    public DbSet<PluginRelease> PluginReleases => Set<PluginRelease>();
     public DbSet<McpServer> McpServers => Set<McpServer>();
     public DbSet<PersonCredential> PersonCredentials => Set<PersonCredential>();
     public DbSet<LocalModel> LocalModels => Set<LocalModel>();
@@ -319,6 +324,53 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
         AccessTables.Configure(builder);
         Safeguards.SafeguardTables.Configure(builder);
 
+        builder.Entity<ToolGroupSetting>(e =>
+        {
+            e.ToTable("tool_group_settings");
+            e.HasKey(t => new { t.ToolId, t.GroupId });
+            e.Property(t => t.ToolId).HasMaxLength(100);
+            e.HasOne<Llm.Core.Access.Group>().WithMany().HasForeignKey(t => t.GroupId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<ToolCall>(e =>
+        {
+            e.ToTable("tool_calls");
+            e.Property(t => t.ToolId).HasMaxLength(100);
+            e.Property(t => t.Function).HasMaxLength(200);
+            e.Property(t => t.Error).HasMaxLength(500);
+            e.HasIndex(t => new { t.ToolId, t.At });
+            e.HasIndex(t => new { t.UserId, t.ToolId, t.At });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(t => t.UserId).OnDelete(DeleteBehavior.SetNull);
+        });
+        builder.Entity<Toolset>(e =>
+        {
+            e.ToTable("toolsets");
+            e.Property(t => t.Name).HasMaxLength(100);
+            e.Property(t => t.Description).HasMaxLength(500);
+            e.Property(t => t.Plugin).HasMaxLength(100);
+            e.HasIndex(t => t.Name).IsUnique();
+        });
+        builder.Entity<CustomTool>(e =>
+        {
+            e.ToTable("custom_tools");
+            e.Property(t => t.Name).HasMaxLength(60);
+            e.HasIndex(t => t.Name).IsUnique();
+            e.Property(t => t.Kind).HasMaxLength(10);
+            e.Property(t => t.Title).HasMaxLength(100);
+            e.Property(t => t.Description).HasMaxLength(2000);
+            e.Property(t => t.Method).HasMaxLength(10);
+            e.Property(t => t.UrlTemplate).HasMaxLength(2000);
+            e.Property(t => t.ResultPath).HasMaxLength(200);
+            e.Property(t => t.Model).HasMaxLength(200);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(t => t.CreatedById).OnDelete(DeleteBehavior.SetNull);
+        });
+        builder.Entity<PluginRelease>(e =>
+        {
+            e.ToTable("plugin_releases");
+            e.Property(x => x.Version).HasMaxLength(50);
+            e.HasIndex(x => new { x.ServerId, x.InstalledAt });
+            e.HasOne<McpServer>().WithMany().HasForeignKey(x => x.ServerId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.InstalledById).OnDelete(DeleteBehavior.SetNull);
+        });
         builder.Entity<ToolSetting>(e =>
         {
             e.ToTable("tool_settings");

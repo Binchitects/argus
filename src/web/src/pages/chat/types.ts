@@ -397,6 +397,7 @@ export type ChatEvent =
   | { type: 'reasoning'; text: string }
   | { type: 'thought'; ms: number; cutShort?: boolean }
   | { type: 'content'; text: string }
+  | { type: 'replace'; text: string }
   | { type: 'usage'; prompt: number | null; cached: number | null; completion: number | null; cost?: number | null; thinkingMs: number | null; durationMs: number | null; context?: ContextFill | null }
   | { type: 'tool_call'; id: string; name: string; arguments: string; tool?: string | null }
   | { type: 'approval'; id: string; name: string; arguments: string; tool: string; title: string }

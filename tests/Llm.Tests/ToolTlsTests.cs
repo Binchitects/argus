@@ -440,7 +440,7 @@ public sealed class ToolTlsTests(AppFixture app)
         await using var f = NewApp(NewDatabase());
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/plugins/install",
-            new { name = "gitlab-issues", settings = new { gitlab_url = tls.Url(""), client_id = "app-id", client_secret = "app-secret" } }));
+            new { accept = true, name = "gitlab-issues", settings = new { gitlab_url = tls.Url(""), client_id = "app-id", client_secret = "app-secret" } }));
         var id = made.GetProperty("id").GetGuid();
         var toolId = made.GetProperty("toolId").GetString()!;
         Assert.Empty(await AuditAsync(admin, "tool.server_tls"));

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -146,5 +147,42 @@ public sealed class SafeguardRulesTests(AppFixture app)
         Assert.Contains(news, n => n.GetProperty("title").GetString() == "Your message may be sent");
         var mine = (await b.JsonAsync(await b.GetAsync("/api/safeguards/mine"))).EnumerateArray().ToList();
         Assert.Contains(mine, e => e.GetProperty("review").GetString() == "allowed");
+    }
+
+    private static List<JsonElement> Events(string sse) => [.. sse.Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+        .Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => JsonDocument.Parse(l[6..]).RootElement)];
+
+    [Fact]
+    public async Task Answers_are_masked_or_withheld_and_what_tools_send_and_bring_back_is_held_by_their_rules()
+    {
+        await using var f = NewApp();
+        var (admin, b, _) = await PeopleAsync(f);
+        await RuleAsync(admin, new { name = "Emails in answers", detector = "pii", stages = new[] { "answer" }, action = "mask", kinds = new[] { "email" } });
+        var chat = await ChatAsync(b);
+
+        // The answer repeats the address: the page is told the text as it stands, and the chat keeps it masked.
+        var res = await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "ana@example.com says hi" });
+        var events = Events(await res.Content.ReadAsStringAsync());
+        Assert.Contains(events, e => e.GetProperty("type").GetString() == "replace" && e.GetProperty("text").GetString() == "Answer to: [email] says");
+        var kept = (await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{chat}"))).GetProperty("messages").EnumerateArray().Last().GetProperty("content").GetString();
+        Assert.Equal("Answer to: [email] says", kept);
+
+        // A tool call that sends a refused link is not run; a result a rule refuses does not reach the model.
+        await RuleAsync(admin, new { name = "No evil", detector = "links", stages = new[] { "tool_call" }, action = "block", domains = new[] { "evil.example" } });
+        await RuleAsync(admin, new { name = "No fours", detector = "words", stages = new[] { "tool_result" }, action = "block", patterns = "re:\\b4\\b" });
+        await admin.Http.PutAsJsonAsync(new Uri("/api/admin/tools/calculator", UriKind.Relative), new { enabled = true, onByDefault = true, askFirst = false });
+        var tools = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { tools = new[] { "calculator" } }))).GetProperty("id").GetGuid();
+        var call = Events(await (await b.PostAsync($"/api/chat/conversations/{tools}/messages", new { content = """Go [call calculate {"expression":"https://evil.example/x"}]""" })).Content.ReadAsStringAsync());
+        var refusedCall = call.Single(e => e.GetProperty("type").GetString() == "tool_result");
+        Assert.True(refusedCall.GetProperty("isError").GetBoolean());
+        Assert.Contains("refused this call to calculate", refusedCall.GetProperty("text").GetString(), StringComparison.Ordinal);
+        var result = Events(await (await b.PostAsync($"/api/chat/conversations/{tools}/messages", new { content = """Sum [call calculate {"expression":"2+2"}]""" })).Content.ReadAsStringAsync())
+            .Single(e => e.GetProperty("type").GetString() == "tool_result");
+        Assert.Contains("refused what came back from calculate", result.GetProperty("text").GetString(), StringComparison.Ordinal);
+
+        // A rule on answers withholds one whole, and its tool calls do not run.
+        await RuleAsync(admin, new { name = "No answers to", detector = "words", stages = new[] { "answer" }, action = "block", patterns = "answer to" });
+        var withheld = Events(await (await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "hello" })).Content.ReadAsStringAsync());
+        Assert.Contains(withheld, e => e.GetProperty("type").GetString() == "replace" && e.GetProperty("text").GetString()!.StartsWith("This answer was withheld", StringComparison.Ordinal));
     }
 }

@@ -53,9 +53,14 @@ public static class ToolEndpoints
         return Results.Ok((await registry.AllAsync(ct)).Select(t => (t, who: AccessService.AudienceOf(snapshot, ResourceKinds.Tool, t.Tool.Id))).Select(x => new
         {
             id = x.t.Tool.Id, title = x.t.Tool.Title, description = x.t.Tool.Description, icon = x.t.Tool.Icon, unavailable = x.t.Unavailable,
+            custom = x.t.Tool.Id.StartsWith(CustomTools.Prefix, StringComparison.Ordinal),
             setting = new
             {
                 x.t.Setting.Enabled, x.who.Audience, x.t.Setting.OnByDefault, x.t.Setting.AskFirst,
+                // What the admin customized, for the card to say so.
+                shownAs = x.t.Setting.Title, customized = x.t.Setting.Title is not null || x.t.Setting.Instructions is not null || x.t.Setting.DisabledFunctions.Count > 0
+                    || x.t.Setting.AskFirstFunctions.Count > 0 || x.t.Setting.FunctionsJson is not null || x.t.Setting.CallsPerDay is not null,
+                x.t.Setting.CallsPerDay,
                 groups = x.who.Groups.Where(groups.ContainsKey).Select(g => new { id = g, name = groups[g] }),
             },
             server = x.t.Tool is IServerTool m ? new

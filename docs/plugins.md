@@ -2,10 +2,10 @@
 
 Ready-made tools for the chat. A plugin is a folder with a `plugin.yaml` and
 the files it names: an API (its OpenAPI document) or an MCP server, how its
-calls sign in, which calls change something, the settings an admin fills in,
-and prompts it adds to the library. **No plugin code runs in the app**: its
-tools are a remote MCP server, or an API the app calls with each operation's
-arguments.
+calls sign in, which calls change something, the settings an admin fills in;
+and what else it brings: prompts for the library, assistants, safeguard rules
+and toolsets. **No plugin code runs in the app**: its tools are a remote MCP
+server, or an API the app calls with each operation's arguments.
 
 Installed, a plugin is a tool like any other in **Admin → Tools**: on or off,
 for everyone or some groups, on in new chats, asking before each call. Its
@@ -20,8 +20,12 @@ own writes always ask first.
 - a catalog's, when **Settings → Plugins → Plugin catalog** names one (below).
 
 **Install** first says what the plugin does (its operations or its MCP
-server, how people sign in, what asks first, the prompts it adds), then asks
-for its settings. A
+server, how people sign in, what asks first, the prompts it adds) and what
+installing **grants** it: the hosts its calls go to, people's own accounts,
+the calls that change things, and the prompts, assistants, safeguard rules
+and toolsets it adds. A plugin that asks for more than adding tools installs
+only with the admin's yes (**Install and grant**); the grant is kept and
+audited. Then it asks for its settings. A
 secret setting is stored encrypted (under `APP_KEY`) and never shown again.
 **Upload a zip** and **From an address** (with its SHA-256, so only that exact
 file installs) take a plugin from outside the catalog.
@@ -34,10 +38,19 @@ audited as `tool.server_tls`). It applies to the plugin's MCP server or API,
 and to its OAuth token address when that is on the same server (same host and
 port), never to a host either redirects to (not followed); an update keeps it.
 
-**Update** appears when the catalog has another version; the settings stay,
-and its prompts become the new version's. **Remove** takes its tool out of
-every chat, its prompts out of the library, and forgets everyone's connected
-accounts for it.
+**Update to …** appears when a catalog has a newer version (compared part by
+part, 1.10.0 after 1.9.2); the settings stay, and its prompts, assistants,
+rules and toolsets become the new version's. A version that asks for more
+than was granted waits for the admin's yes. **Pin this version** keeps it
+where it is: no update is offered until it is unpinned. Every version
+installed is kept, its files with it: **Back to …** puts the one before back
+(its settings kept, nothing new granted). **Health** shows its calls, failures
+and time over the last week, the last error and failures in a row; **Check
+now** reaches its server as you. A plugin's tool that fails 25 calls in a row
+is turned off, and the admins hear of it (Settings → Chat → **Turn off a
+failing tool**; 0: never). **Remove** takes its tool out of every chat, its
+prompts out of the library, its assistants, rules and toolsets away, and
+forgets everyone's connected accounts for it.
 
 Every install, update, settings change, connection and call is in the audit
 log (`plugin.*`).
@@ -89,6 +102,39 @@ settings:
 
 With `per_person: none`, a `token` setting (a secret) is the one key for
 everyone, sent as `header: value`.
+
+What else a plugin may bring, each a file in the plugin:
+
+```yaml
+author: Your team                      # shown before installing
+homepage: https://example.com/weather-desk
+assistants: [assistants/forecaster.yaml]
+safeguards: [safeguards/rules.yaml]
+toolsets:
+  - name: Weather
+    description: The weather desk and the web.
+    tools: [self, web]                 # self: the plugin's own tool; others by their ids
+```
+
+- **An assistant** (`assistants/*.yaml`): `name`, `description`,
+  `instructions`, `starters`, `tools` (`self` and others; none: the plugin's
+  own), `model`, `icon`, `color`. It is for everyone; nobody changes it, and
+  it goes with the plugin.
+- **Safeguard rules** (`safeguards/*.yaml`): one rule, or `rules:` with
+  several, each as Admin → Safeguards takes it (`name`, `detector`, `stages`,
+  `action`, and the detector's fields: `patterns`, `kinds`, `topics`,
+  `domains`...). They come **in monitor mode**: an admin makes them bite.
+- **A toolset**: a named set of tools people switch a chat to.
+
+## Making a plugin
+
+**Admin → Plugins → Make a plugin** downloads a starter plugin with every
+part (an API document, settings, a prompt, an assistant, a rule, a toolset).
+Change it, zip the folder, and **Check a plugin** reads the zip as installing
+would, without installing it: what would stop it (a file it names that is
+missing, an API document with no operations, a `{placeholder}` that is not a
+setting) and what looks wrong (a version not like 1.2.3, plain http, `writes`
+naming no operation), and what it would ask for.
 
 ## Prompts
 

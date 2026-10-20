@@ -165,7 +165,7 @@ public static class SafeguardEndpoints
         return r.Message?.Length > 2000 ? "The message is at most 2,000 characters." : null;
     }
 
-    private static void Apply(SafeguardRule rule, RuleRequest r)
+    public static void Apply(SafeguardRule rule, RuleRequest r)
     {
         rule.Name = r.Name.Trim();
         rule.Description = string.IsNullOrWhiteSpace(r.Description) ? null : r.Description.Trim();

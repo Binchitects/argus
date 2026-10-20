@@ -17,8 +17,19 @@ public sealed class PluginOptions
     public string? CatalogKey { get; set; }
 }
 
-/// <summary>A plugin's files: its manifest (and its text), its OpenAPI document when its tools are one, and the prompts it adds.</summary>
-public sealed record PluginPackage(PluginManifest Manifest, string ManifestText, string? Spec, IReadOnlyList<Chat.PluginPrompt>? Prompts = null);
+/// <summary>An assistant a plugin brings (assistants/*.yaml): for everyone, with the plugin's tool among its own.</summary>
+public sealed record PluginAssistant(string Name, string? Description, string? Instructions, string[] Starters, string[] Tools, string? Model, string? Icon, string? Color);
+
+/// <summary>
+/// A plugin's files: its manifest (and its text), its OpenAPI document when its tools are one, the prompts, assistants and
+/// safeguard rules it adds; and every file it names, by name, so an earlier version can be put back as it was.
+/// </summary>
+public sealed record PluginPackage(PluginManifest Manifest, string ManifestText, string? Spec, IReadOnlyList<Chat.PluginPrompt>? Prompts = null)
+{
+    public IReadOnlyList<PluginAssistant> Assistants { get; init; } = [];
+    public IReadOnlyList<Safeguards.RuleRequest> Rules { get; init; } = [];
+    public IReadOnlyDictionary<string, string> Files { get; init; } = new Dictionary<string, string>();
+}
 
 /// <summary>A plugin a catalog offers: what it is, and where its zip is (with its SHA-256), or the folder it is in.</summary>
 public sealed record CatalogEntry(string Name, string Version, string Title, string Description, string Source, string? Url, string? Sha256, string? PersonAuth);
@@ -121,8 +132,21 @@ public sealed class PluginCatalog(IOptionsMonitor<PluginOptions> options, IHttpC
         }
     }
 
-    private static PluginPackage Read(Func<string, string?> file)
+    /// <summary>A package from the files kept with an installed version (its release).</summary>
+    public static PluginPackage FromFiles(IReadOnlyDictionary<string, string> files) => Read(name => files.GetValueOrDefault(name));
+
+    private static PluginPackage Read(Func<string, string?> read)
     {
+        var kept = new Dictionary<string, string>(StringComparer.Ordinal);
+        string? file(string name)
+        {
+            var text = read(name);
+            if (text is not null)
+            {
+                kept[name] = text;
+            }
+            return text;
+        }
         var text = file(PluginManifest.FileName) ?? throw new PluginException($"There is no {PluginManifest.FileName}.");
         var manifest = PluginManifest.Parse(text);
         string? spec = null;
@@ -135,7 +159,55 @@ public sealed class PluginCatalog(IOptionsMonitor<PluginOptions> options, IHttpC
         {
             throw new PluginException($"The prompt /{twice.Key} is in the plugin twice.");
         }
-        return new PluginPackage(manifest, text, spec, prompts);
+        var assistants = manifest.Assistants.Select(f => Assistant(f, file(f) ?? throw new PluginException($"The plugin has no {f}, which its manifest names."))).ToList();
+        var rules = manifest.Safeguards.SelectMany(f => Rules(f, file(f) ?? throw new PluginException($"The plugin has no {f}, which its manifest names."))).ToList();
+        return new PluginPackage(manifest, text, spec, prompts) { Assistants = assistants, Rules = rules, Files = kept };
+    }
+
+    private static JsonObject Yaml(string file, string text)
+    {
+        try
+        {
+            return Chat.Tools.OpenApi.Parse(text);
+        }
+        catch (Chat.Tools.OpenApi.SpecException ex)
+        {
+            throw new PluginException($"{file}: {ex.Message.Replace("OpenAPI document", "file", StringComparison.Ordinal)}");
+        }
+    }
+
+    private static string? S(JsonNode? n) => n is JsonValue v && v.TryGetValue<string>(out var s) && s.Trim().Length > 0 ? s.Trim() : null;
+
+    private static string[] List(JsonNode? n) => [.. (n as JsonArray ?? []).Select(S).OfType<string>()];
+
+    private static PluginAssistant Assistant(string file, string text)
+    {
+        var a = Yaml(file, text);
+        return new PluginAssistant(S(a["name"]) ?? throw new PluginException($"{file}: an assistant needs a name."), S(a["description"]), S(a["instructions"]),
+            List(a["starters"]), List(a["tools"]), S(a["model"]), S(a["icon"]), S(a["color"]));
+    }
+
+    /// <summary>A rules file: one rule, or "rules:" with several; each as Admin → Safeguards takes it.</summary>
+    private static IEnumerable<Safeguards.RuleRequest> Rules(string file, string text)
+    {
+        var doc = Yaml(file, text);
+        foreach (var r in doc["rules"] is JsonArray many ? many.OfType<JsonObject>() : [doc])
+        {
+            Safeguards.RuleRequest rule;
+            try
+            {
+                rule = System.Text.Json.JsonSerializer.Deserialize<Safeguards.RuleRequest>(r, System.Text.Json.JsonSerializerOptions.Web) ?? throw new PluginException($"{file}: a rule is empty.");
+            }
+            catch (System.Text.Json.JsonException ex)
+            {
+                throw new PluginException($"{file}: {ex.Message}");
+            }
+            if (Safeguards.SafeguardEndpoints.Invalid(rule) is { } wrong)
+            {
+                throw new PluginException($"{file}, {rule.Name}: {wrong}");
+            }
+            yield return rule;
+        }
     }
 
     private async Task<List<CatalogEntry>> RemoteAsync(string url, CancellationToken ct)

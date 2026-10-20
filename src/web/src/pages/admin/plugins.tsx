@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Blocks, Download, Link2, RefreshCw, Settings2, Trash2, Upload } from 'lucide-react'
+import { Activity, Blocks, ClipboardCheck, Download, FileCode2, Link2, Pin, PinOff, RefreshCw, RotateCcw, Settings2, Trash2, Upload } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -14,7 +14,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
-import { api, errorMessage } from '@/lib/api'
+import { api, ApiError, errorMessage } from '@/lib/api'
 import { tlsBody, type Tls, type TlsCheck } from './tls'
 import { TlsCaLine, TlsChoice, TlsWarning } from './tls-choice'
 
@@ -45,7 +45,18 @@ interface Plugins {
     tls: TlsCheck
     tlsCa: string | null
     tlsCaNames: string[]
+    /** What the admin granted it. */
+    permissions?: string[]
+    pinned?: boolean
+    /** A newer version in a catalog (none while pinned). */
+    update?: string | null
+    releases?: { version: string; installedAt: string }[]
   }[]
+}
+
+interface Permission {
+  key: string
+  text: string
 }
 
 interface Preview {
@@ -61,6 +72,29 @@ interface Preview {
   settings: SettingView[]
   /** The prompts it adds to the library (Workspace → Prompts). */
   prompts?: { name: string; title: string }[]
+  /** What installing it grants it, each in a sentence; needsYes: more than adding tools. */
+  permissions?: Permission[]
+  needsYes?: boolean
+  author?: string | null
+}
+
+/** A plugin's zip checked as installing would: what stops it, what looks wrong, what it brings. */
+interface CheckReport {
+  ok: boolean
+  problems: string[]
+  warnings: string[]
+  name?: string
+  version?: string
+  title?: string
+  permissions?: Permission[]
+}
+
+/** The zip as base64, for the API. */
+async function base64(f: File) {
+  const bytes = new Uint8Array(await f.arrayBuffer())
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return btoa(binary)
 }
 
 /** Where a plugin comes from: its name in a catalog, its zip's address (and SHA-256), or the zip itself. */
@@ -74,7 +108,9 @@ export function PluginsPage() {
   const [installing, setInstalling] = useState<Source | null>(null)
   const [editing, setEditing] = useState<Plugins['installed'][number] | null>(null)
   const [fromUrl, setFromUrl] = useState(false)
+  const [report, setReport] = useState<CheckReport | null>(null)
   const file = useRef<HTMLInputElement>(null)
+  const checkFile = useRef<HTMLInputElement>(null)
   if (plugins.isPending) return <PageSkeleton />
   if (plugins.error) return <QueryError error={plugins.error} retry={() => plugins.refetch()} />
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['admin', 'plugins'] })
@@ -95,12 +131,34 @@ export function PluginsPage() {
                 const f = e.target.files?.[0]
                 e.target.value = ''
                 if (!f) return
-                const bytes = new Uint8Array(await f.arrayBuffer())
-                let binary = ''
-                for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
-                setInstalling({ zip: btoa(binary) })
+                setInstalling({ zip: await base64(f) })
               }}
             />
+            <input
+              ref={checkFile}
+              type="file"
+              accept=".zip,application/zip"
+              className="hidden"
+              aria-label="Plugin zip to check"
+              onChange={async (e) => {
+                const f = e.target.files?.[0]
+                e.target.value = ''
+                if (!f) return
+                try {
+                  setReport(await api<CheckReport>('/api/admin/plugins/check', { body: { zip: await base64(f) } }))
+                } catch (err) {
+                  toast.error(errorMessage(err))
+                }
+              }}
+            />
+            <Button variant="outline" asChild>
+              <a href="/api/admin/plugins/template" download="plugin-template.zip">
+                <FileCode2 /> Make a plugin
+              </a>
+            </Button>
+            <Button variant="outline" onClick={() => checkFile.current?.click()}>
+              <ClipboardCheck /> Check a plugin
+            </Button>
             <Button variant="outline" onClick={() => file.current?.click()}>
               <Upload /> Upload a zip
             </Button>
@@ -121,7 +179,7 @@ export function PluginsPage() {
           ) : (
             <div className="grid gap-4 xl:grid-cols-2">
               {plugins.data.installed.map((p) => (
-                <InstalledCard key={p.id} plugin={p} newer={plugins.data.catalog.find((c) => c.name === p.plugin && c.version !== p.version)?.version ?? null} onEdit={() => setEditing(p)} onChanged={refresh} />
+                <InstalledCard key={p.id} plugin={p} onEdit={() => setEditing(p)} onChanged={refresh} />
               ))}
             </div>
           )}
@@ -165,18 +223,80 @@ export function PluginsPage() {
       <InstallDialog source={installing} onClose={() => setInstalling(null)} onDone={refresh} />
       <SettingsDialog plugin={editing} onClose={() => setEditing(null)} onDone={refresh} />
       <UrlDialog open={fromUrl} onClose={() => setFromUrl(false)} onChosen={(s) => setInstalling(s)} />
+      <ReportDialog report={report} onClose={() => setReport(null)} />
     </>
   )
 }
 
-function InstalledCard({ plugin, newer, onEdit, onChanged }: { plugin: Plugins['installed'][number]; newer: string | null; onEdit: () => void; onChanged: () => void }) {
+/** What a plugin asks for beyond what was granted: the admin's yes, asked here. */
+function useGrant() {
   const confirm = useConfirm()
+  return async (e: unknown, title: string) => {
+    const asks = e instanceof ApiError && e.status === 'accept' ? ((e.data as { permissions?: Permission[] } | undefined)?.permissions ?? []) : null
+    if (!asks) return false
+    return confirm({
+      title: `${title} asks for more`,
+      description: (
+        <ul className="grid list-disc gap-1 pl-4">
+          {asks.map((p) => (
+            <li key={p.key}>{p.text}</li>
+          ))}
+        </ul>
+      ),
+      confirm: 'Grant it',
+    })
+  }
+}
+
+interface Health {
+  on: boolean
+  calls: number
+  failed: number
+  averageMs: number
+  failuresInARow: number
+  lastError: { error: string | null; at: string; function: string } | null
+  lastCall: string | null
+}
+
+function InstalledCard({ plugin, onEdit, onChanged }: { plugin: Plugins['installed'][number]; onEdit: () => void; onChanged: () => void }) {
+  const confirm = useConfirm()
+  const grant = useGrant()
+  const [showHealth, setShowHealth] = useState(false)
+  const health = useQuery({ queryKey: ['admin', 'plugins', plugin.id, 'health'], queryFn: ({ signal }) => api<Health>(`/api/admin/plugins/${plugin.id}/health`, { signal }), enabled: showHealth })
+  // Asked for more than was granted: the admin's yes, then the same update with it.
   const update = useMutation({
-    mutationFn: () => api<{ version: string }>(`/api/admin/plugins/${plugin.id}/update`, { body: {} }),
+    mutationFn: async (accept: boolean): Promise<{ version: string } | null> => {
+      try {
+        return await api<{ version: string }>(`/api/admin/plugins/${plugin.id}/update`, { body: { accept } })
+      } catch (e) {
+        if (!accept && (await grant(e, plugin.title))) return api<{ version: string }>(`/api/admin/plugins/${plugin.id}/update`, { body: { accept: true } })
+        if (e instanceof ApiError && e.status === 'accept') return null
+        throw e
+      }
+    },
     onSuccess: (v) => {
+      if (!v) return
       toast.success(`${plugin.title} is now ${v.version}`)
       onChanged()
     },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  const rollback = useMutation({
+    mutationFn: (version: string) => api<{ version: string }>(`/api/admin/plugins/${plugin.id}/rollback`, { body: { version } }),
+    onSuccess: (v) => {
+      toast.success(`${plugin.title} is back at ${v.version}`)
+      onChanged()
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  const pin = useMutation({
+    mutationFn: () => api(`/api/admin/plugins/${plugin.id}/pin`, { body: { pinned: !plugin.pinned } }),
+    onSuccess: onChanged,
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  const check = useMutation({
+    mutationFn: () => api<{ ok: boolean; functions?: number; error?: string; ms: number }>(`/api/admin/plugins/${plugin.id}/check`, { body: {} }),
+    onSuccess: (r) => (r.ok ? toast.success(`${plugin.title} answers`, { description: `${r.functions} functions, in ${r.ms} ms.` }) : toast.error(`${plugin.title} does not answer`, { description: r.error })),
     onError: (e) => toast.error(errorMessage(e)),
   })
   const remove = useMutation({
@@ -184,12 +304,14 @@ function InstalledCard({ plugin, newer, onEdit, onChanged }: { plugin: Plugins['
     onSuccess: onChanged,
     onError: (e) => toast.error(errorMessage(e)),
   })
+  const earlier = (plugin.releases ?? []).filter((r) => r.version !== plugin.version)
   return (
     <Card aria-label={plugin.title}>
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center gap-2">
           {plugin.title} <Badge variant="secondary">{plugin.version}</Badge>
           {plugin.personAuth && <Badge variant="outline">{signIn[plugin.personAuth]}</Badge>}
+          {plugin.pinned && <Badge variant="outline">Pinned</Badge>}
         </CardTitle>
         <CardDescription className="font-mono text-xs break-all">{plugin.url}</CardDescription>
       </CardHeader>
@@ -201,6 +323,26 @@ function InstalledCard({ plugin, newer, onEdit, onChanged }: { plugin: Plugins['
           </div>
         )}
         {plugin.writes.length > 0 && <p className="text-xs text-muted-foreground">Asks first before: {plugin.writes.join(', ')} (and any call that changes something).</p>}
+        {!!plugin.permissions?.length && <p className="text-xs text-muted-foreground">Granted: {plugin.permissions.join(', ')}.</p>}
+        {showHealth && (
+          <div className="grid gap-1 rounded-lg border bg-muted/30 p-3 text-xs" aria-live="polite">
+            {!health.data ? (
+              'Reading its health…'
+            ) : (
+              <>
+                <p>
+                  {health.data.on ? 'On' : <span className="text-destructive-ink">Off</span>} · {health.data.calls} calls this week · {health.data.failed} failed · {(health.data.averageMs / 1000).toFixed(1)} s on average
+                  {health.data.failuresInARow > 0 && <span className="text-destructive-ink"> · {health.data.failuresInARow} failed in a row</span>}
+                </p>
+                {health.data.lastError && (
+                  <p className="text-muted-foreground">
+                    Last error ({health.data.lastError.function}, {new Date(health.data.lastError.at).toLocaleString()}): {health.data.lastError.error}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        )}
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={onEdit}>
             <Settings2 /> Settings
@@ -208,17 +350,34 @@ function InstalledCard({ plugin, newer, onEdit, onChanged }: { plugin: Plugins['
           <Button variant="outline" size="sm" asChild>
             <Link to="/admin/tools">Who may use it</Link>
           </Button>
-          {newer && (
-            <Button variant="outline" size="sm" loading={update.isPending} onClick={() => update.mutate()}>
-              <RefreshCw /> Update to {newer}
+          <Button variant="outline" size="sm" aria-pressed={showHealth} onClick={() => setShowHealth((v) => !v)}>
+            <Activity /> Health
+          </Button>
+          <Button variant="outline" size="sm" loading={check.isPending} onClick={() => check.mutate()}>
+            Check now
+          </Button>
+          {plugin.update && (
+            <Button variant="outline" size="sm" loading={update.isPending} onClick={() => update.mutate(false)}>
+              <RefreshCw /> Update to {plugin.update}
             </Button>
           )}
+          {earlier.length > 0 && (
+            <Button variant="outline" size="sm" loading={rollback.isPending} onClick={async () => {
+              if (await confirm({ title: `Back to ${earlier[0]!.version}?`, description: `${plugin.title} goes back to the version installed ${new Date(earlier[0]!.installedAt).toLocaleDateString()}, its settings kept.`, confirm: 'Go back' }))
+                rollback.mutate(earlier[0]!.version)
+            }}>
+              <RotateCcw /> Back to {earlier[0]!.version}
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={() => pin.mutate()} aria-pressed={plugin.pinned}>
+            {plugin.pinned ? <PinOff /> : <Pin />} {plugin.pinned ? 'Unpin' : 'Pin this version'}
+          </Button>
           <Button
             variant="outline"
             size="sm"
             className="text-destructive-ink"
             onClick={async () => {
-              if (await confirm({ title: `Remove ${plugin.title}?`, description: 'Its tools leave every chat at once, and everyone’s connected accounts for it are forgotten.', confirm: 'Remove', destructive: true }))
+              if (await confirm({ title: `Remove ${plugin.title}?`, description: 'Its tools leave every chat at once, everyone’s connected accounts for it are forgotten, and its assistants, rules and toolsets go too.', confirm: 'Remove', destructive: true }))
                 remove.mutate()
             }}
           >
@@ -227,6 +386,52 @@ function InstalledCard({ plugin, newer, onEdit, onChanged }: { plugin: Plugins['
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+/** A plugin's zip checked: what would stop it installing, what looks wrong, and what it would ask for. */
+function ReportDialog({ report, onClose }: { report: CheckReport | null; onClose: () => void }) {
+  return (
+    <Dialog open={report !== null} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{report?.ok ? `${report.title ?? 'The plugin'} ${report.version ?? ''} would install` : 'The plugin would not install'}</DialogTitle>
+          <DialogDescription>Checked as installing would, without installing anything.</DialogDescription>
+        </DialogHeader>
+        {report && (
+          <div className="grid gap-3 text-sm">
+            {report.problems.length > 0 && (
+              <Alert variant="destructive">
+                <ul className="list-disc pl-4">
+                  {report.problems.map((p) => (
+                    <li key={p}>{p}</li>
+                  ))}
+                </ul>
+              </Alert>
+            )}
+            {report.warnings.length > 0 && (
+              <Alert variant="warning">
+                <ul className="list-disc pl-4">
+                  {report.warnings.map((w) => (
+                    <li key={w}>{w}</li>
+                  ))}
+                </ul>
+              </Alert>
+            )}
+            {!!report.permissions?.length && (
+              <div>
+                <p className="font-medium">It would ask for</p>
+                <ul className="list-disc pl-4 text-muted-foreground">
+                  {report.permissions.map((p) => (
+                    <li key={p.key}>{p.text}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -259,7 +464,7 @@ function InstallDialog({ source, onClose, onDone }: { source: Source | null; onC
   const [tls, setTls] = useState<Tls>({ tls: 'System', tlsCa: '' })
   const [error, setError] = useState<string | null>(null)
   const install = useMutation({
-    mutationFn: () => api('/api/admin/plugins/install', { body: { ...source, settings: values, ...tlsBody(tls) } }),
+    mutationFn: () => api('/api/admin/plugins/install', { body: { ...source, settings: values, ...tlsBody(tls), ...(preview.data?.needsYes ? { accept: true } : {}) } }),
     onSuccess: () => {
       toast.success(`${preview.data?.title} installed`, { description: 'It is on for everyone: choose who may use it in Admin → Tools.' })
       setValues({})
@@ -304,6 +509,16 @@ function InstallDialog({ source, onClose, onDone }: { source: Source | null; onC
               {p.writes.length > 0 && <li>Asks the person first before: {p.writes.join(', ')}.</li>}
               {!!p.prompts?.length && <li>Adds prompts for whoever may use it: {p.prompts.map((x) => `/${x.name} (${x.title})`).join(', ')}.</li>}
             </ul>
+            {!!p.permissions?.length && (
+              <div className="grid gap-1 rounded-lg border p-3 text-sm">
+                <p className="font-medium">Installing it grants it</p>
+                <ul className="list-disc pl-4 text-muted-foreground">
+                  {p.permissions.map((x) => (
+                    <li key={x.key}>{x.text}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <SettingsFields settings={p.settings} values={values} onChange={(k, v) => setValues({ ...values, [k]: v })} />
             <TlsChoice name="install-tls" value={tls} onChange={setTls} />
             <DialogFooter>
@@ -311,7 +526,7 @@ function InstallDialog({ source, onClose, onDone }: { source: Source | null; onC
                 Cancel
               </Button>
               <Button type="submit" loading={install.isPending}>
-                Install
+                {p.needsYes ? 'Install and grant' : 'Install'}
               </Button>
             </DialogFooter>
           </form>

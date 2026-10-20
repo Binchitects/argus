@@ -92,7 +92,7 @@ public sealed class PromptTests(AppFixture app)
         var preview = await admin.JsonAsync(await admin.PostAsync("/api/admin/plugins/preview", new { name = "gitlab-issues" }));
         Assert.Equal("triage", preview.GetProperty("prompts").EnumerateArray().Single().GetProperty("name").GetString());
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/plugins/install",
-            new { name = "gitlab-issues", settings = new { gitlab_url = "https://gitlab.test", client_id = "app-id", client_secret = "app-secret" } }));
+            new { accept = true, name = "gitlab-issues", settings = new { gitlab_url = "https://gitlab.test", client_id = "app-id", client_secret = "app-secret" } }));
         var toolId = made.GetProperty("toolId").GetString()!;
 
         var (b, _) = await PersonAsync(f);

@@ -8,6 +8,9 @@ namespace Llm.Api.Plugins;
 /// <param name="Type">"text", "url" or "secret" (stored encrypted, never shown again).</param>
 public sealed record PluginSetting(string Key, string Title, string Type, bool Required, string? Help);
 
+/// <summary>A toolset a plugin brings: its name, and its tools ("self" is the plugin's own; others by their ids: web, python...).</summary>
+public sealed record PluginToolset(string Name, string? Description, string[] Tools);
+
 /// <summary>Where a person signs in to the plugin's service, as a template ({setting} filled in).</summary>
 public sealed record PluginOAuth(string Authorize, string Token, string[] Scopes);
 
@@ -15,8 +18,8 @@ public sealed record PluginOAuth(string Authorize, string Token, string[] Scopes
 /// A plugin's manifest (plugin.yaml): what it is, where its tools are (an OpenAPI document in
 /// the plugin, or an MCP server), how calls authenticate (one key for everyone, or each person's
 /// own API key or OAuth account), which functions change something (they ask first), and the
-/// settings an admin fills in, and the prompts it adds to the library (Markdown files in the
-/// plugin). No plugin code runs in the app.
+/// settings an admin fills in; and what else it brings: prompts for the library (Markdown files),
+/// assistants and safeguard rules (YAML files), and toolsets. No plugin code runs in the app.
 /// </summary>
 public sealed partial record PluginManifest(
     string Name, string Version, string Title, string Description,
@@ -24,6 +27,12 @@ public sealed partial record PluginManifest(
     string? PersonAuth, string Header, string Value, PluginOAuth? OAuth, string? Help,
     string[] Writes, PluginSetting[] Settings, string[] Prompts)
 {
+    public string[] Assistants { get; init; } = [];
+    public string[] Safeguards { get; init; } = [];
+    public PluginToolset[] Toolsets { get; init; } = [];
+    public string? Author { get; init; }
+    public string? Homepage { get; init; }
+
     public const string FileName = "plugin.yaml";
 
     public sealed class ManifestException(string message) : Exception(message);
@@ -87,10 +96,40 @@ public sealed partial record PluginManifest(
         {
             throw new ManifestException($"The prompt {outside} must be a file inside the plugin.");
         }
+        string[] Files(string key)
+        {
+            string[] files = [.. (doc[key] as JsonArray ?? []).Select(Str).OfType<string>()];
+            return files.FirstOrDefault(f => f.Contains("..", StringComparison.Ordinal) || Path.IsPathRooted(f)) is { } outside
+                ? throw new ManifestException($"{outside} must be a file inside the plugin.")
+                : files;
+        }
+        var toolsets = (doc["toolsets"] as JsonArray ?? []).OfType<JsonObject>().Select(t => new PluginToolset(
+            Str(t["name"]) ?? throw new ManifestException("A toolset has no name."), Str(t["description"]),
+            [.. (t["tools"] as JsonArray ?? []).Select(Str).OfType<string>()])).ToArray();
         return new PluginManifest(name, Str(doc["version"]) ?? "0", Str(doc["title"]) ?? name, Str(doc["description"]) ?? "",
             openapi, mcp, Str(tools["url"]) ?? mcp ?? "",
             person, Str(auth["header"]) ?? "Authorization", Str(auth["value"]) ?? "Bearer {token}", oauth, Str(auth["help"]),
-            [.. (doc["writes"] as JsonArray ?? []).Select(Str).OfType<string>()], settings, prompts);
+            [.. (doc["writes"] as JsonArray ?? []).Select(Str).OfType<string>()], settings, prompts)
+        {
+            Assistants = Files("assistants"), Safeguards = Files("safeguards"), Toolsets = toolsets, Author = Str(doc["author"]), Homepage = Str(doc["homepage"]),
+        };
+    }
+
+    /// <summary>"1.10.0" over "1.9.2": versions compared part by part, numbers as numbers.</summary>
+    public static int CompareVersions(string a, string b)
+    {
+        var x = a.TrimStart('v').Split('.', '-', '+');
+        var y = b.TrimStart('v').Split('.', '-', '+');
+        for (var i = 0; i < Math.Max(x.Length, y.Length); i++)
+        {
+            var (p, q) = (i < x.Length ? x[i] : "0", i < y.Length ? y[i] : "0");
+            var c = int.TryParse(p, out var m) && int.TryParse(q, out var n) ? m.CompareTo(n) : string.CompareOrdinal(p, q);
+            if (c != 0)
+            {
+                return c;
+            }
+        }
+        return 0;
     }
 
     /// <summary>"{gitlab_url}/api/v4" with the settings' values put in.</summary>
