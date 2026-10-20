@@ -663,15 +663,36 @@ two ways:
   script itself, so even a small model gets a house, a table or a robot
   right.
 - **A script** (`make_3d`): Blender's Python for what shapes cannot do
-  (modifiers, booleans, curves). The same `part(...)` and `material(...)`
-  helpers are there in the script.
+  (modifiers, booleans, curves, shader nodes of its own). The same `part()`,
+  `light()`, `material()` and `make_texture()` helpers are there.
 
-What it builds comes back as `model.glb` (glTF: any 3D viewer, game engine
-or slicer opens it) and two pictures of it, front and three-quarter, shown
-in the answer. Ask for a `.blend`, `.stl` or `.obj`, or for renders of your
-own, and the script writes those too. The model looks at the pictures and
-runs again to fix what is wrong; it does not paste code into its answer. The
-chat's files are in the run's folder (a reference picture, measurements).
+**Textures and shaders.** A part takes a pattern Blender draws (brick,
+tiles, shingles, checker, wood, stone, concrete, plaster, grass, marble,
+brushed metal, fabric, noise) at its real size, or a texture made before,
+and a shader: matte, plastic, metal, mirror, glass (see-through), ceramic,
+rubber, or light (it glows). **Textures as images** (`make_texture`): from a
+pattern, from a description the picture model draws ("weathered oak
+planks", with the person's picture permission and credit), or from a picture
+in the chat; the tool bakes its colour, roughness and bumps (a normal map)
+into images, with a preview on a sphere and a cube. Parts then use the
+texture by its name. The texture images of patterns tile without a seam.
+
+**Lights.** Lights are parts too: a point light (a bulb), a spot (turn aims
+it), an area light (a panel) or a sun, with a colour (warm, daylight, cool,
+candle or #rrggbb) and a power in watts. The pictures are taken in daylight
+(a sky and the sun), in a studio (soft light from three sides) or at night
+(only the model's own lights).
+
+**What comes back.** `model.glb` (glTF: its textures, glass, glow and lights
+in it; patterns are baked into images) opens in the chat's **3D viewer**:
+drag or use the arrow keys to turn it, scroll, pinch or + and - to zoom; a
+model with lights can be seen by its own lights alone. Two pictures, front
+and three-quarter, are shown in the answer: quick flat colours for a plain
+model, realistic (Cycles) when it has textures, glass or lights. Ask for a
+`.blend`, `.stl` or `.obj`, or for renders of your own, and the script
+writes those too. The model looks at the pictures and runs again to fix what
+is wrong; it does not paste code into its answer. The chat's files are in
+the run's folder (a reference picture, measurements, textures).
 
 ## Canvas
 

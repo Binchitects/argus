@@ -1,7 +1,7 @@
 import { AlertTriangle, AudioLines, Brain, Calculator, Check, ChevronRight, CircleX, Clapperboard, Clock, Download, FilePen, FileText, FolderTree, Globe, Image as ImageIcon, ListChecks, ListTree, Loader2, Network, Scale, Search, ShieldQuestion, ShieldX, SquareTerminal, Telescope, TextSearch, Wrench, Zap, type LucideIcon } from 'lucide-react'
 import { Link } from 'react-router'
 import { Collapsible } from 'radix-ui'
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useNow } from './use-now'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,10 @@ import type { ToolRunning } from './live'
 import type { AgentWork, Message, ToolCall } from './types'
 import { MediaPlayer } from './media'
 import { isMedia } from './sound'
+
+/** The 3D viewer, loaded when a model is shown. */
+const ModelViewer = lazy(() => import('./model-viewer'))
+const isModel = (fileName: string) => /\.glb$/i.test(fileName)
 
 
 /**
@@ -320,6 +324,11 @@ export const ToolCard = memo(function ToolCard({
           ))}
         </ul>
       )}
+      {made.filter((f) => isModel(f.fileName)).map((f) => (
+        <Suspense key={f.id} fallback={<p className="mt-2 text-sm text-muted-foreground">Loading the 3D viewer…</p>}>
+          <ModelViewer url={attachmentUrl(f.id)} fileName={f.fileName} />
+        </Suspense>
+      ))}
       {made.length > 0 && (
         <ul className="stagger mt-2 flex flex-wrap gap-2" aria-label="Files made">
           {made.map((f) => (

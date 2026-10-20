@@ -739,7 +739,7 @@ public sealed class ChatToolsTests(AppFixture app)
         var result = Event(events, "tool_result");
         Assert.False(result.GetProperty("isError").GetBoolean());
         var output = JsonDocument.Parse(result.GetProperty("text").GetString()!).RootElement;
-        Assert.Equal(["model.glb (to download)", "view-front.png (shown as a picture)"], output.GetProperty("files_given_to_the_person").EnumerateArray().Select(x => x.GetString()));
+        Assert.Equal(["model.glb (opens in the 3D viewer)", "view-front.png (shown as a picture)"], output.GetProperty("files_given_to_the_person").EnumerateArray().Select(x => x.GetString()));
         var made = result.GetProperty("attachments").EnumerateArray().ToDictionary(a => a.GetProperty("fileName").GetString()!);
         Assert.Equal("image", made["view-front.png"].GetProperty("kind").GetString());
         Assert.Equal("file", made["model.glb"].GetProperty("kind").GetString());
@@ -756,6 +756,20 @@ public sealed class ChatToolsTests(AppFixture app)
         var parts = blender.Jobs.Last()["code"]!.GetValue<string>();
         Assert.Contains("for _p in _json.loads(\"[{\\u0022name\\u0022:\\u0022walls # glb", parts, StringComparison.Ordinal);
         Assert.DoesNotContain("\nimport os", parts, StringComparison.Ordinal);
+        Assert.Contains("LOOK = \"auto\"\nLIGHTING = \"day\"\n", parts, StringComparison.Ordinal);
+
+        // A texture as images first, from a pattern; a texture from a description needs a picture model, and there is none here.
+        res = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = """Bricks [call make_texture {"name":"Red Brick!","pattern":"brick","color":"brick","size":2}]""" });
+        events = (await res.Content.ReadAsStringAsync()).Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => JsonDocument.Parse(l[6..]).RootElement).ToList();
+        var texture = Event(events, "tool_result");
+        Assert.False(texture.GetProperty("isError").GetBoolean(), texture.GetProperty("text").GetString());
+        Assert.Contains("texture \"red-brick\"", texture.GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.Contains("make_texture(\"red-brick\", pattern=\"brick\", color=\"brick\", color2=None, size=2, resolution=1024)", blender.Jobs.Last()["code"]!.GetValue<string>(), StringComparison.Ordinal);
+        res = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = """Oak [call make_texture {"name":"oak","prompt":"weathered oak planks"}]""" });
+        events = (await res.Content.ReadAsStringAsync()).Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => JsonDocument.Parse(l[6..]).RootElement).ToList();
+        Assert.True(Event(events, "tool_result").GetProperty("isError").GetBoolean());
     }
 
     [Fact]

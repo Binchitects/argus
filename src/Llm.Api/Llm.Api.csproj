@@ -23,6 +23,8 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Models\engine-options.txt" LogicalName="engine-options.txt" />
+    <EmbeddedResource Include="Chat\Tools\Blender\builder.py" LogicalName="blender-builder.py" />
+    <EmbeddedResource Include="Chat\Tools\Blender\epilogue.py" LogicalName="blender-epilogue.py" />
     <!-- The dashboards go into the image at /dashboards (Dockerfile), not beside the app. -->
     <Content Remove="Dashboards\json\**" />
     <None Include="Dashboards\json\**" />
