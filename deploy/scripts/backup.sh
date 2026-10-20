@@ -89,7 +89,7 @@ case "$COPY_DIR" in ""|/*) ;; *) COPY_DIR="$ROOT/${COPY_DIR#./}" ;; esac
 
 # Named volumes that are caches or models, not state; media-status is what the picture and video
 # servers say they do now (rewritten every 2 seconds, in memory).
-SKIP_VOLUMES=" audio acme sandbox postgres media-status vllm-status valkey "
+SKIP_VOLUMES=" audio acme sandbox blender postgres media-status vllm-status valkey "
 LOG_VOLUMES=" loki prometheus alertmanager "
 
 ACTION=backup; FROM=""; WITH_CONFIG=0; VERIFY_DIR=""; YES=0

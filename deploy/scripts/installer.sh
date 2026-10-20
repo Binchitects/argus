@@ -98,7 +98,7 @@ HELPER=python:3.13-slim
 EMBED_FILE=embed/nomic-embed-text-v1.5.f16.gguf
 GPU_SERVICES="llamacpp imagegen videogen gpu-exporter power-limits"
 # The services' users, for the volumes they write: repair puts a wrong owner right.
-VOLUME_OWNERS="engine:1000:1000 directory:1000:1000 sandbox:1000:1000 audio:1000:1000 argus:10001:10001 loki:10001:10001 prometheus:65534:65534 alertmanager:65534:65534"
+VOLUME_OWNERS="engine:1000:1000 directory:1000:1000 sandbox:1000:1000 blender:1000:1000 audio:1000:1000 argus:10001:10001 loki:10001:10001 prometheus:65534:65534 alertmanager:65534:65534"
 # .env and this script decide these, not the caller's shell.
 unset COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME COMPOSE_ENV_FILES
 export PODMAN_COMPOSE_WARNING_LOGS=false
@@ -2012,7 +2012,7 @@ finish_rollback() {
 backup_need_kb() {
   local vol total=0 kb
   for vol in $(dc config --volumes 2>/dev/null); do
-    case " audio acme sandbox " in *" $vol "*) continue ;; esac
+    case " audio acme sandbox blender " in *" $vol "*) continue ;; esac
     volume_exists "${PROJECT}_$vol" || continue
     kb="$(in_helper -v "${PROJECT}_$vol:/v:ro" "$HELPER" du -sk /v 2>/dev/null | cut -f1)"
     total=$((total + ${kb:-0}))

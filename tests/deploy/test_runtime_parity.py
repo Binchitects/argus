@@ -83,7 +83,7 @@ _configs: dict[tuple[str, ...], dict] = {}
 
 
 def compose_config(*files: str) -> dict:
-    """The stack as compose resolves it, with the Laya and vLLM profiles on (every module), from .env.example's placeholders."""
+    """The stack as compose resolves it, with the Laya, vLLM, HA and 3D profiles on (every module), from .env.example's placeholders."""
     if files in _configs:
         return _configs[files]
     cmd = compose_command()
@@ -97,7 +97,7 @@ def compose_config(*files: str) -> dict:
         env_file = Path(tmp) / "parity.env"
         env_file.write_text(example)
         env = {k: v for k, v in os.environ.items() if not k.startswith(("COMPOSE_", "DOCKER_HOST"))}
-        env.update({"COMPOSE_PROFILES": "laya,vllm,ha", "PODMAN_COMPOSE_WARNING_LOGS": "false"})
+        env.update({"COMPOSE_PROFILES": "laya,vllm,ha,3d", "PODMAN_COMPOSE_WARNING_LOGS": "false"})
         args = [*cmd, "--env-file", str(env_file)]
         for f in files:
             args += ["-f", str(DEPLOY / f)]
@@ -130,7 +130,7 @@ def helm_rendered() -> dict[str, dict[str, set[str]]] | None:
         return None
     if helm is None:
         return None
-    on = ["laya.enabled=true", "videogen.enabled=true", "vllm.enabled=true", "valkey.enabled=true", "argus.packLibraryClaim=packs"]
+    on = ["laya.enabled=true", "blender.enabled=true", "videogen.enabled=true", "vllm.enabled=true", "valkey.enabled=true", "argus.packLibraryClaim=packs"]
     out: dict[str, dict[str, set[str]]] = {}
     # This chart's Postgres, and an external one with a CA of its own: together, every variable a pod can be given.
     # The output holds the Secret it made up: it is read here and never printed.

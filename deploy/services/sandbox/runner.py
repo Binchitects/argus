@@ -47,9 +47,35 @@ OWNER_GID = int(os.environ.get("SANDBOX_OWNER_GID", str(OWNER_UID)))
 MAX_TIMEOUT = int(os.environ.get("SANDBOX_MAX_TIMEOUT", "300"))
 MEMORY_MB = int(os.environ.get("SANDBOX_JOB_MEMORY_MB", "3072"))
 MAX_FILE_MB = 64
-MAX_OUT_FILES, MAX_OUT_FILE_MB, MAX_OUT_TOTAL_MB = 20, 16, 32
+MAX_OUT_FILES = 20
+MAX_OUT_FILE_MB = int(os.environ.get("SANDBOX_MAX_OUT_FILE_MB", "16"))
+MAX_OUT_TOTAL_MB = int(os.environ.get("SANDBOX_MAX_OUT_TOTAL_MB", "32"))
 MAX_STREAM = 64 * 1024
 FIRST_UID = 20000
+# What a job's code is: Python (the sandbox), or a Blender script (the 3D sandbox, SANDBOX_RUN=blender: run by
+# Blender headless, in the background, with no window and no add-ons of the person's).
+RUN_KIND = os.environ.get("SANDBOX_RUN", "python")
+BLENDER = os.environ.get("SANDBOX_BLENDER", "/opt/blender/blender")
+
+# The 3D sandbox's child: the limits (no address-space limit: Blender reserves far more than it uses, and the
+# container's memory limit holds it), then Blender in the background running the code, saved as .main.py (a dot file:
+# not given back).
+BLENDER_PRELUDE = r"""
+import os, resource, sys
+cpu, fsize = int(sys.argv[1]), int(sys.argv[2])
+for what, value in ((resource.RLIMIT_CPU, cpu), (resource.RLIMIT_FSIZE, fsize), (resource.RLIMIT_NOFILE, 512),
+                    (resource.RLIMIT_NPROC, 256), (resource.RLIMIT_CORE, 0)):
+    resource.setrlimit(what, (value, value))
+try:
+    with open("/proc/self/oom_score_adj", "w") as f:
+        f.write("1000")
+except OSError:
+    pass
+with open(".main.py", "w", encoding="utf-8") as f:
+    f.write(sys.stdin.read())
+blender = sys.argv[3]
+os.execv(blender, [blender, "--background", "--factory-startup", "--python-exit-code", "1", "--python", ".main.py"])
+"""
 
 # Runs in the child, as the job's user: the limits first (hard ones too, so the
 # code cannot raise them), then the code from stdin under the name main.py.
@@ -176,8 +202,11 @@ def run_job(slot, job_id):
         out_path, err_path = os.path.join(PRIVATE, f"{slot}.out"), os.path.join(PRIVATE, f"{slot}.err")
         # The streams are files in the runner's own directory, handed to the child open.
         with open(out_path, "wb") as out, open(err_path, "wb") as err:
+            command = ([sys.executable, "-I", "-c", BLENDER_PRELUDE, str(timeout + 1), str(MAX_FILE_MB * 1024 * 1024), BLENDER]
+                       if RUN_KIND == "blender" else
+                       [sys.executable, "-I", "-c", PRELUDE, str(timeout + 1), str(MEMORY_MB * 1024 * 1024), str(MAX_FILE_MB * 1024 * 1024)])
             proc = subprocess.Popen(
-                [sys.executable, "-I", "-c", PRELUDE, str(timeout + 1), str(MEMORY_MB * 1024 * 1024), str(MAX_FILE_MB * 1024 * 1024)],
+                command,
                 cwd=work, env=env, stdin=subprocess.PIPE, stdout=out, stderr=err,
                 user=uid, group=uid, extra_groups=[], start_new_session=True, close_fds=True)
             try:

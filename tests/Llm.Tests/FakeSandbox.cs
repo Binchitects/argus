@@ -86,6 +86,12 @@ public sealed class FakeSandbox : IAsyncDisposable
         {
             await File.WriteAllBytesAsync(Path.Combine(draft, "files", "data.bin"), [0, 1, 2, 3, 0, 255]);
         }
+        if (code.Contains("# glb", StringComparison.Ordinal))
+        {
+            // As the 3D sandbox leaves a model: its glTF and a picture of it.
+            await File.WriteAllBytesAsync(Path.Combine(draft, "files", "model.glb"), [0x67, 0x6C, 0x54, 0x46, 2, 0, 0, 0]);
+            await File.WriteAllBytesAsync(Path.Combine(draft, "files", "view-front.png"), Png);
+        }
         var pages = code.Contains("# pages", StringComparison.Ordinal);
         if (pages)
         {

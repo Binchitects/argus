@@ -42,6 +42,7 @@ images:
   web: { repository: arena-web, tag: "" }
   argus: { repository: arena-argus, tag: "" }
   sandbox: { repository: arena-sandbox, tag: "" }
+  blender: { repository: arena-blender, tag: "" }
   laya: { repository: arena-laya, tag: "" }
   postgres: { repository: pgvector/pgvector, tag: 0.8.0-pg16 }
   litellm: { repository: ghcr.io/berriai/litellm, tag: main-stable }
@@ -178,6 +179,11 @@ sandbox:
   enabled: true
   resources: { limits: { cpu: "2", memory: 4Gi } }
 
+# The chat's 3D models: Blender headless, as the sandbox is (no network, a read-only root), with more room.
+blender:
+  enabled: false
+  resources: { limits: { cpu: "4", memory: 8Gi } }
+
 # The chat's web search.
 searxng:
   enabled: true
@@ -218,6 +224,7 @@ persistence:
   vllmStatus: { size: 64Mi }
   directory: { size: 1Gi }
   sandbox: { size: 10Gi }
+  blender: { size: 10Gi }
 
 ingress:
   enabled: true

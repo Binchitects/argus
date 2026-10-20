@@ -110,6 +110,7 @@ services:
       - vllm-status:/vllm-status:ro
       - directory:/directory
       - sandbox:/sandbox
+      - blender:/blender
       # scripts/backup.sh's backups, for Admin -> Storage: their sizes and how each ended.
       # Read only: they hold .env and the compose files a restore puts back, so the app
       # never changes or deletes them (scripts/backup.sh --prune removes old ones).
@@ -328,6 +329,27 @@ services:
     tmpfs: ["/work:size=1g,mode=0711", "/tmp:size=64m,mode=0700"]
     volumes: [sandbox:/jobs]
 
+  # The chat's 3D models: Blender headless, as the sandbox is (no network, a read-only root, each run its
+  # own user), with more memory and time. Off unless COMPOSE_PROFILES names 3d.
+  blender:
+    <<: *service
+    build: { context: ./services, dockerfile: blender/Dockerfile }
+    image: arena-blender
+    container_name: blender
+    profiles: [3d]
+    init: true
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, KILL]
+    security_opt: [no-new-privileges:true]
+    environment: { SANDBOX_SLOTS: "1", SANDBOX_MAX_TIMEOUT: "600" }
+    pids_limit: 512
+    mem_limit: 8g
+    cpus: 4
+    tmpfs: ["/work:size=4g,mode=0711", "/tmp:size=1g,mode=0700"]
+    volumes: [blender:/jobs]
+
   # Laya: typed decisions (a text and questions in, probabilities out) for the chat's
   # Decide tool and Code Arena, on the CPU. Off unless COMPOSE_PROFILES names laya. The
   # app fetches its two checkpoints into MODELS_DIR/laya; it reads them, and reaches
@@ -466,6 +488,8 @@ volumes:
     driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/directory" }
   sandbox:
     driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/sandbox" }
+  blender:
+    driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/blender" }
   argus:
     driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/argus" }
   audio:

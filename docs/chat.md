@@ -624,6 +624,20 @@ Access), and write nothing to GitLab: no comments, no approvals.
   the project shown: Argus reads the code, the merge requests, CI and any
   commit, as you may.
 
+## 3D models
+
+The **3D models** tool (Admin → Tools; the 3D sandbox runs with
+`COMPOSE_PROFILES=3d`) has the model write a Blender script and runs it with
+Blender 4.5 LTS headless, in a sandbox of its own: no network, a read-only
+system, each run as its own user, 8 GB of memory, 4 CPUs and 4 minutes at
+most. It starts from an empty scene; what the script builds comes back as
+`model.glb` (glTF: any 3D viewer, game engine or slicer opens it) and two
+pictures of it, front and three-quarter, shown in the answer. Ask for a
+`.blend`, `.stl` or `.obj`, or for renders of your own, and the script
+writes those too. The model looks at the pictures and runs again to fix what
+is wrong. The chat's files are in the run's folder (a reference picture,
+measurements).
+
 ## Canvas
 
 Like ChatGPT's canvas and Claude's artifacts: a document (Markdown) or code (in

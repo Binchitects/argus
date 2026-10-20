@@ -300,6 +300,9 @@ public static class IdentityWiring
         services.Configure<Chat.Tools.SandboxOptions>(config.GetSection("Sandbox"));
         services.AddSingleton<Chat.Tools.SandboxClient>();
         services.AddScoped<Chat.Tools.PythonTool>();
+        services.Configure<Chat.Tools.BlenderOptions>(config.GetSection("Blender"));
+        services.AddSingleton<Chat.Tools.BlenderClient>();
+        services.AddScoped<Chat.Tools.BlenderTool>();
         services.Configure<Chat.Tools.WebOptions>(config.GetSection("Web"));
         services.Configure<Plugins.PluginOptions>(config.GetSection("Plugins"));
         services.Configure<Schedules.GitLabOptions>(config.GetSection("GitLab"));

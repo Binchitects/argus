@@ -726,6 +726,30 @@ public sealed class ChatToolsTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_3d_model_is_made_with_blender_in_its_sandbox_and_comes_back_as_a_glb_and_pictures()
+    {
+        await using var blender = new FakeSandbox();
+        await using var f = NewApp(settings: new() { ["Blender:Dir"] = blender.Dir });
+        var (b, _, _) = await PersonAsync(f);
+        Assert.Contains("3d", await ToolsInConfigAsync(b));
+        var id = await NewChatAsync(b, new { });
+        var res = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = """A cup [call make_3d {"script":"bpy.ops.mesh.primitive_cylinder_add()  # glb"}]""" });
+        var events = (await res.Content.ReadAsStringAsync()).Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => JsonDocument.Parse(l[6..]).RootElement).ToList();
+        var result = Event(events, "tool_result");
+        Assert.False(result.GetProperty("isError").GetBoolean());
+        var output = JsonDocument.Parse(result.GetProperty("text").GetString()!).RootElement;
+        Assert.Equal(["model.glb (to download)", "view-front.png (shown as a picture)"], output.GetProperty("files_given_to_the_person").EnumerateArray().Select(x => x.GetString()));
+        var made = result.GetProperty("attachments").EnumerateArray().ToDictionary(a => a.GetProperty("fileName").GetString()!);
+        Assert.Equal("image", made["view-front.png"].GetProperty("kind").GetString());
+        Assert.Equal("file", made["model.glb"].GetProperty("kind").GetString());
+        // Run as Blender's script: an empty scene first, then the model's, then the export and pictures.
+        var code = blender.Jobs.Single()["code"]!.GetValue<string>();
+        Assert.StartsWith("import bpy\nbpy.ops.wm.read_factory_settings(use_empty=True)\nbpy.ops.mesh.primitive_cylinder_add()", code, StringComparison.Ordinal);
+        Assert.Contains("export_scene.gltf", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Python_runs_in_the_sandbox_with_the_chats_files_and_what_it_writes_comes_back()
     {
         await using var sandbox = new FakeSandbox();

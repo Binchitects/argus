@@ -36,7 +36,7 @@ Three places, each with one job:
 | `HTTP_PORT`, `HTTPS_PORT` | optional: other ports than 80 and 443 (rootless Podman) |
 | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_SSL_MODE` | optional: an external Postgres instead of the stack's (`postgres`, 5432, `arena`, `prefer`); `DB_SSL_MODE` is `disable`, `prefer` or `require` ([deployment.md](deployment.md#external-postgres)) |
 | `APP_REPLICAS` | optional, with `scale.yml`: how many app replicas run behind Traefik (2) ([deployment.md](deployment.md#scale-out)) |
-| `COMPOSE_PROFILES` | optional: `laya` runs Laya, the one module off by default ([deployment.md](deployment.md#laya)) |
+| `COMPOSE_PROFILES` | optional, comma-separated: `laya` runs Laya ([deployment.md](deployment.md#laya)); `3d` runs the 3D sandbox (Blender, for the chat's 3D models tool); `dcgm`, `vllm` and `ha` as in [multi-gpu-server.md](multi-gpu-server.md) |
 | `GPU_POWER_LIMIT_W`, `CPU_POWER_LIMIT_W` | optional: power caps, kept applied |
 | `ENGINE_RAM_PROTECT` | optional: RAM the host keeps for the engine under memory pressure (`40g`; cgroup `memory.low`, never a limit, so nothing is killed for it): the model's layers and experts held in RAM stay there instead of being read from disk again after an idle spell. About the RAM part of the model new chats use, and well under the host's RAM. Empty or 0: none ([admin.md](admin.md#a-model-bigger-than-ram-and-the-gpu)) |
 | `XDG_RUNTIME_DIR` | Podman only, from your shell (not `.env`): where Promtail finds the Podman socket |

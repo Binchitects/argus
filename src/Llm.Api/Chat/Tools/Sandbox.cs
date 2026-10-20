@@ -49,11 +49,18 @@ public sealed record SandboxResult(
 /// network at all (services/sandbox/runner.py has the protocol).
 /// </summary>
 public sealed class SandboxClient(IOptionsMonitor<SandboxOptions> options, TimeProvider clock)
+    : JobRunner(() => options.CurrentValue.Dir, "The Python sandbox", "Turn on the sandbox profile (Settings → Deployment) and apply it.", clock);
+
+/// <summary>
+/// A sandbox's jobs through its folder (services/sandbox/runner.py): written in, the result read back. The Python
+/// sandbox's and the 3D sandbox's (Blender) alike.
+/// </summary>
+public abstract class JobRunner(Func<string> dir, string name, string howToStart, TimeProvider clock)
 {
     /// <summary>Longest a job may wait for a free slot, beyond its own time.</summary>
     private static readonly TimeSpan QueueAllowance = TimeSpan.FromMinutes(3);
 
-    private string Dir => options.CurrentValue.Dir;
+    private string Dir => dir();
 
     /// <summary>Why the sandbox cannot run code now, or null.</summary>
     public string? Unavailable()
@@ -63,14 +70,14 @@ public sealed class SandboxClient(IOptionsMonitor<SandboxOptions> options, TimeP
         {
             if (!File.Exists(heartbeat))
             {
-                return "The Python sandbox is not running. Turn on the sandbox profile (Settings → Deployment) and apply it.";
+                return $"{name} is not running. {howToStart}";
             }
             var at = JsonDocument.Parse(File.ReadAllText(heartbeat)).RootElement.GetProperty("at").GetDouble();
-            return clock.GetUtcNow().ToUnixTimeMilliseconds() / 1000.0 - at > 20 ? "The Python sandbox stopped answering." : null;
+            return clock.GetUtcNow().ToUnixTimeMilliseconds() / 1000.0 - at > 20 ? $"{name} stopped answering." : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidOperationException)
         {
-            return "The Python sandbox cannot be reached.";
+            return $"{name} cannot be reached.";
         }
     }
 
