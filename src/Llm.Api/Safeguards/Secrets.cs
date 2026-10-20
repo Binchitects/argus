@@ -24,8 +24,17 @@ public static partial class Secrets
         ("Slack token", Slack, 0),
         ("Slack webhook", SlackHook, 0),
         ("API key", SkKey, 0),
+        ("Google API key", GoogleKey, 0),
+        ("Stripe key", Stripe, 0),
+        ("Hugging Face token", HuggingFace, 0),
+        ("npm token", Npm, 0),
+        ("JSON web token", Jwt, 0),
+        ("Azure storage key", AzureKey, 1),
         ("password", UrlPassword, 1),
     ];
+
+    /// <summary>Every kind it finds, for a rule that looks for some of them.</summary>
+    public static IEnumerable<string> AllKinds => Shapes.Select(s => s.Kind).Distinct();
 
     private static readonly HashSet<string> NotSecrets = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -148,6 +157,24 @@ public static partial class Secrets
 
     [GeneratedRegex(@"(?<![A-Za-z0-9_\-])sk-(?:proj-|svcacct-|admin-|ant-)?[A-Za-z0-9_\-]{20,}", RegexOptions.CultureInvariant, 1000)]
     private static partial Regex SkKey();
+
+    [GeneratedRegex(@"\bAIza[0-9A-Za-z_\-]{35}\b", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex GoogleKey();
+
+    [GeneratedRegex(@"\b(?:sk|rk)_(?:live|test)_[0-9A-Za-z]{24,}\b", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex Stripe();
+
+    [GeneratedRegex(@"\bhf_[A-Za-z0-9]{30,}\b", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex HuggingFace();
+
+    [GeneratedRegex(@"\bnpm_[A-Za-z0-9]{36}\b", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex Npm();
+
+    [GeneratedRegex(@"\beyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex Jwt();
+
+    [GeneratedRegex(@"AccountKey=([A-Za-z0-9+/]{40,}={0,2})", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex AzureKey();
 
     [GeneratedRegex(@"\b[a-z][a-z0-9+.\-]*://[^\s/:@""']+:([^\s/@""']{3,})@", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase, 1000)]
     private static partial Regex UrlPassword();

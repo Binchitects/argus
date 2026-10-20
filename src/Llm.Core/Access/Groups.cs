@@ -42,18 +42,6 @@ public sealed class Group
     /// <summary>The label its spend is charged to in the monthly chargeback report.</summary>
     public string? CostCentre { get; set; }
 
-    /// <summary>Secret scanning for members: refuse, mask or off; null: the company's setting.</summary>
-    public string? SecretScanning { get; set; }
-
-    /// <summary>Personal data masked for members: mask or off; null: the company's setting.</summary>
-    public string? RedactPii { get; set; }
-
-    /// <summary>The model's check of members' messages: check or off; null: the company's setting.</summary>
-    public string? Moderation { get; set; }
-
-    /// <summary>Whether the blocked words apply to members; null: they do.</summary>
-    public bool? BlockedPatterns { get; set; }
-
     /// <summary>Requests a minute each member's API key may send to the gateway; null: the company's setting, 0: no limit. A person in several groups gets the highest.</summary>
     public int? RequestsPerMinute { get; set; }
 

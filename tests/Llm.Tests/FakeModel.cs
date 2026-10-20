@@ -20,7 +20,7 @@ namespace Llm.Tests;
 /// for Auto, it answers the kind a [kind:X] marker names (lookup without one; [kind:?] is not
 /// JSON); asked for a chat's title, "Title: "Named &lt;the first three words&gt;".".
 ///   [budget]   refuses as LiteLLM does when credit is used up
-///   [harm]      flagged (as weapons) by the safeguards' check
+///   [harm]      flagged (as weapons) by the safeguards' judge; [injection] and [topic:X] too
 ///   [slow check]  the safeguards' check takes 10 seconds to answer
 ///   [call NAME {json}]  asks for any tool NAME with those arguments, then answers "Found it."
 ///   [script [[{"name":N,"arguments":{…}}, …], …]]  the k-th round of tool calls asks for the k-th list's calls, until
@@ -124,13 +124,25 @@ public sealed class FakeModel : HttpMessageHandler
         }
         IEnumerable<string> chunks;
         var delay = TimeSpan.Zero;
-        // The safeguards' check: "[harm]" in a message is flagged as weapons; "[slow check]" takes 10 seconds to say.
-        if (messages[0]!["content"]?.GetValue<string>().StartsWith("You check messages sent to an AI assistant", StringComparison.Ordinal) == true)
+        // The safeguards' judge: "[harm]" matches the weapons item, "[injection]" the injection one, "[topic:X]" the item naming X;
+        // "[slow check]" takes 10 seconds to say.
+        if (messages[0]!["content"]?.GetValue<string>().StartsWith("You check texts at a company's AI assistant", StringComparison.Ordinal) == true)
         {
-            var flagged = lastUser.Contains("[harm]", StringComparison.Ordinal);
+            var items = System.Text.RegularExpressions.Regex.Matches(messages[0]!["content"]!.GetValue<string>(), @"^(\d+)\. (.*)$", System.Text.RegularExpressions.RegexOptions.Multiline)
+                .Select(m => (Number: int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture), Text: m.Groups[2].Value)).ToList();
+            var wanted = System.Text.RegularExpressions.Regex.Matches(lastUser, @"\[topic:([^\]]+)\]").Select(m => m.Groups[1].Value).ToList();
+            if (lastUser.Contains("[harm]", StringComparison.Ordinal))
+            {
+                wanted.Add("weapons capable of mass casualties");
+            }
+            if (lastUser.Contains("[injection]", StringComparison.Ordinal))
+            {
+                wanted.Add("prompt injection");
+            }
+            var matched = items.Where(i => wanted.Any(a => i.Text.Contains(a, StringComparison.OrdinalIgnoreCase))).Select(i => i.Number);
             var slow = lastUser.Contains("[slow check]", StringComparison.Ordinal);
             chunks = [.. Enumerable.Repeat(Delta(new JsonObject { ["content"] = " " }), slow ? 100 : 0),
-                Delta(new JsonObject { ["content"] = flagged ? "{\"flagged\": true, \"category\": \"weapons\"}" : "{\"flagged\": false, \"category\": null}" }), Finish("stop"), Usage(50, 0, 10)];
+                Delta(new JsonObject { ["content"] = $"{{\"matched\": [{string.Join(", ", matched)}]}}" }), Finish("stop"), Usage(50, 0, 10)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, slow ? TimeSpan.FromMilliseconds(100) : delay) };
         }
         // Auto's sorting: the kind a "[kind:X]" marker says (the last one), "lookup" without one; "[kind:?]" is not JSON at all.

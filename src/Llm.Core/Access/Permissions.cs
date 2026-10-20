@@ -46,8 +46,11 @@ public static class Permissions
     public const string ArgusExplore = "argus.explore";
     public const string RoomsModerate = "rooms.moderate";
     public const string ReviewsAdmin = "reviews.admin";
+    public const string SafeguardsRead = "safeguards.read";
+    public const string SafeguardsManage = "safeguards.manage";
 
     // The parts of the broader permissions above: a role may hold one part alone (each one's Parent holds it too).
+    public const string SafeguardsReview = "safeguards.review";
     public const string PeopleCreate = "people.create";
     public const string PeopleEdit = "people.edit";
     public const string PeopleDelete = "people.delete";
@@ -158,6 +161,9 @@ public static class Permissions
         new(LogsRead, "Oversight", "Read the stack's logs and the answers' traces.", true),
         new(MonitoringRead, "Oversight", "See the monitoring dashboards, the quality reports and the stack's state.", true),
         new(AlertsManage, "Oversight", "Set alert rules and where they go.", true),
+        new(SafeguardsRead, "Safeguards", "See the safeguard rules, what they did, and try texts on the test bench.", true),
+        new(SafeguardsManage, "Safeguards", "Make, change, order and remove safeguard rules.", true),
+        new(SafeguardsReview, "Safeguards", "Answer people's requests to review a refusal.", true, SafeguardsManage),
         new(RetentionManage, "Data", "Set how long chats are kept.", true),
         new(LegalHoldManage, "Data", "Place and lift legal holds.", true),
         new(ExportPerson, "Data", "Export a person's data (eDiscovery).", true),
@@ -296,6 +302,7 @@ public static class BuiltInRoles
     public const string TeamManager = "team-manager";
     public const string Supervisor = "supervisor";
     public const string Operator = "operator";
+    public const string SafetyOfficer = "safety-officer";
 
     public static readonly IReadOnlyList<BuiltInRole> All =
     [
@@ -317,6 +324,8 @@ public static class BuiltInRoles
             [Permissions.MonitoringRead, Permissions.LogsRead, Permissions.UsageRead, Permissions.AuditRead, Permissions.ModelsRead]),
         new(Operator, "Operator", "Runs the service day to day: takes alerts, loads and unloads models, cleans up storage, reads logs and dashboards.",
             [Permissions.MonitoringRead, Permissions.LogsRead, Permissions.AlertsManage, Permissions.ModelsRead, Permissions.ModelsLoad, Permissions.StorageManage]),
+        new(SafetyOfficer, "Safety officer", "The safeguards: their rules, what they did, and people's requests to review a refusal; reads the audit log.",
+            [Permissions.SafeguardsRead, Permissions.SafeguardsManage, Permissions.AuditRead]),
         new(Member, "Member", "The features everyone has: held by everyone.", [.. Permissions.FeatureKeys]),
     ];
 

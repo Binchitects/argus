@@ -1,4 +1,4 @@
-import { Activity, GitPullRequest, ListChecks, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Plug, ScrollText, Settings, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Wrench, type LucideIcon } from 'lucide-react'
+import { Activity, GitPullRequest, ListChecks, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Plug, ScrollText, Settings, ShieldAlert, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Wrench, type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
   title: string
@@ -38,6 +38,7 @@ export const navigation: NavSection[] = [
     items: [
       { title: 'Overview', path: '/admin', icon: LayoutDashboard, keywords: ['status', 'health', 'services'], permission: 'monitoring.read' },
       { title: 'People', path: '/admin/people', icon: Users, keywords: ['users', 'accounts', 'credit', 'keys'], permission: 'people.read' },
+      { title: 'Safeguards', path: '/admin/safeguards', icon: ShieldAlert, keywords: ['guardrails', 'dlp', 'secrets', 'personal data', 'pii', 'blocked words', 'moderation', 'jailbreak', 'prompt injection', 'review', 'refused'], permission: 'safeguards.read' },
       { title: 'Access', path: '/admin/access', icon: ShieldCheck, keywords: ['roles', 'permissions', 'rules', 'who may', 'deny', 'allow', 'check'], permission: 'access.read' },
       { title: 'Groups', path: '/admin/groups', icon: UsersRound, keywords: ['teams', 'access', 'directory groups', 'permissions'], permission: 'people.read' },
       { title: 'Sign-in', path: '/admin/sign-in', icon: KeyRound, keywords: ['ldap', 'directory', 'active directory', '2fa'], permission: 'settings.read' },

@@ -19,27 +19,10 @@ public sealed class SafeguardOptions
     public int ImagesPerDay { get; set; } = 100;
     public int ResearchPerDay { get; set; } = 20;
 
-    /// <summary>
-    /// Words, phrases or patterns a message may not contain, separated by ";" or new lines: a phrase matches
-    /// as whole words, ignoring case; "re:" starts a regular expression.
-    /// </summary>
-    public string? BlockedPatterns { get; set; }
+    /// <summary>The model that reads texts for the topic and injection rules; empty: the model the text is for.</summary>
+    public string? CheckModel { get; set; }
 
-    /// <summary>off, or check: the model reads each message first and refuses one asking for harm in <see cref="ModerationCategories"/>.</summary>
-    public string Moderation { get; set; } = "off";
-
-    public string ModerationCategories { get; set; } = "violence,self-harm,sexual-minors,weapons,malware,hate";
-
-    /// <summary>off, or mask: e-mail addresses, phone and card numbers, IBANs in messages reach the model masked (the chat keeps them).</summary>
-    public string RedactPii { get; set; } = "off";
-
-    /// <summary>
-    /// Secrets in messages and files (private keys, cloud and service tokens, passwords): refuse (the message
-    /// or file is not taken), mask (it goes with each secret replaced by a marker), or off.
-    /// </summary>
-    public string SecretScanning { get; set; } = "refuse";
-
-    /// <summary>API keys' requests pass the same checks (secrets, blocked words, the model's check, personal data): the gateway asks the app before each one.</summary>
+    /// <summary>API keys' requests pass the API rules: the gateway asks the app before each one.</summary>
     public bool CheckApi { get; set; } = true;
 
     /// <summary>What the web gives the model is marked as data, never instructions to follow (against prompt injection).</summary>

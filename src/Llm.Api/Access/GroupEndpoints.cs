@@ -21,16 +21,12 @@ public sealed record MembersRequest(Guid[] UserIds);
 /// <param name="Credits">What the group may spend a month, kind by kind (the chat, API keys, pictures, video, speech).</param>
 /// <param name="CreditPerMember">The credits are each member's, not shared.</param>
 /// <param name="CostCentre">The label its spend is charged to (the chargeback report).</param>
-/// <param name="SecretScanning">refuse, mask or off.</param>
-/// <param name="RedactPii">mask or off.</param>
-/// <param name="Moderation">check or off.</param>
-/// <param name="BlockedPatterns">Whether the blocked words apply.</param>
 /// <param name="RequestsPerMinute">Requests a minute each member's API key may send; 0: no limit.</param>
 /// <param name="TokensPerMinute">Tokens a minute each member's API key may use; 0: no limit.</param>
 public sealed record PoliciesRequest(int? RetentionDays = null, CreditsRequest? Credits = null, bool CreditPerMember = false, string? CostCentre = null,
-    string? SecretScanning = null, string? RedactPii = null, string? Moderation = null, bool? BlockedPatterns = null, int? RequestsPerMinute = null, int? TokensPerMinute = null);
+    int? RequestsPerMinute = null, int? TokensPerMinute = null);
 
-/// <summary>Groups for access rules, retention, credit, safeguards and API keys' rate limits: app groups whose members are chosen here, and directory groups.</summary>
+/// <summary>Groups for access rules, retention, credit and API keys' rate limits: app groups whose members are chosen here, and directory groups.</summary>
 public static class GroupEndpoints
 {
     private const string ScimOwned = "The company's identity provider decides this group's name and members (SCIM).";
@@ -118,7 +114,7 @@ public static class GroupEndpoints
             policies = new
             {
                 group.RetentionDays, credits = CreditsRequest.Of(group), group.CreditPerMember, group.CostCentre,
-                group.SecretScanning, group.RedactPii, group.Moderation, group.BlockedPatterns, group.RequestsPerMinute, group.TokensPerMinute,
+                group.RequestsPerMinute, group.TokensPerMinute,
             },
             spentThisMonth = month is null ? (decimal?)null : people.Sum(u => month.Total(u.Email ?? "")),
             spentByKind = Kinds(k => people.Sum(u => month!.Of(u.Email ?? "", k))),
@@ -274,27 +270,16 @@ public static class GroupEndpoints
         {
             return AuthEndpoints.Problem(400, "cost_centre", "A cost centre is at most 100 characters.");
         }
-        if ((Invalid(body.SecretScanning, Safeguards.Safeguards.SecretLevels) ?? Invalid(body.RedactPii, Safeguards.Safeguards.PiiLevels) ??
-            Invalid(body.Moderation, Safeguards.Safeguards.ModerationLevels)) is { } bad)
-        {
-            return AuthEndpoints.Problem(400, "safeguards", $"\"{bad}\" is not one of the choices.");
-        }
         group.RetentionDays = body.RetentionDays;
         credits.Apply(group);
         group.CreditPerMember = Credits.Any(group) && body.CreditPerMember;
         group.CostCentre = Clean(body.CostCentre);
-        group.SecretScanning = Clean(body.SecretScanning);
-        group.RedactPii = Clean(body.RedactPii);
-        group.Moderation = Clean(body.Moderation);
-        group.BlockedPatterns = body.BlockedPatterns;
         group.RequestsPerMinute = body.RequestsPerMinute;
         group.TokensPerMinute = body.TokensPerMinute;
         await db.SaveChangesAsync();
         await audit.WriteAsync("group.policies", group.Name, detail: Describe(group));
         keys.Wake();
         return Results.NoContent();
-
-        static string? Invalid(string? value, string[] levels) => string.IsNullOrWhiteSpace(value) || levels.Contains(value.Trim()) ? null : value;
     }
 
     /// <summary>The policies in a line, for the audit log.</summary>
@@ -303,10 +288,6 @@ public static class GroupEndpoints
         $"chats kept {(g.RetentionDays is { } d ? $"{d} days" : "as the company's")}",
         $"credit {(Credits.Any(g) ? CreditsRequest.Of(g).Describe() + (g.CreditPerMember ? ", each member's" : ", shared") : "none")}",
         g.CostCentre is { } cc ? $"cost centre {cc}" : null,
-        g.SecretScanning is { } s ? $"secrets {s}" : null,
-        g.RedactPii is { } p ? $"personal data {p}" : null,
-        g.Moderation is { } m ? $"model's check {m}" : null,
-        g.BlockedPatterns is { } b ? $"blocked words {(b ? "on" : "off")}" : null,
         g.RequestsPerMinute is { } r ? $"requests a minute {(r == 0 ? "no limit" : r.ToString("N0", CultureInfo.InvariantCulture))}" : null,
         g.TokensPerMinute is { } t ? $"tokens a minute {(t == 0 ? "no limit" : t.ToString("N0", CultureInfo.InvariantCulture))}" : null,
     }.OfType<string>());

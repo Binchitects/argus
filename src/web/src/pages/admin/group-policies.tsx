@@ -1,12 +1,12 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
+import { Link } from 'react-router'
 import { Segmented } from '@/components/app/segmented'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { money } from '@/lib/format'
@@ -14,32 +14,7 @@ import { maxRequests, maxTokens, parseLimit } from '@/lib/rate-limits'
 import { noPolicies, type GroupDetail, type GroupPolicies } from './groups-api'
 import { creditKinds, parseCredit, type CreditKind, type Credits } from './people-api'
 
-/** Radix's Select takes no empty value: this one stands for "the company's setting". */
-const company = 'company'
-
-const choices = {
-  secretScanning: [
-    ['refuse', 'Refuse the message or file'],
-    ['mask', 'Mask each secret'],
-    ['off', 'Let them through'],
-  ],
-  redactPii: [
-    ['mask', 'Mask it'],
-    ['off', 'As written'],
-  ],
-  moderation: [
-    ['check', 'Check each message'],
-    ['off', 'No check'],
-  ],
-  blockedPatterns: [
-    ['on', 'Apply them'],
-    ['off', 'Not for this group'],
-  ],
-} as const
-
-type Choice = keyof typeof choices
-
-/** A group's retention, credit, cost centre, safeguards and API keys' rate limits: one form, saved together. */
+/** A group's retention, credit, cost centre and API keys' rate limits: one form, saved together. Safeguards for a group are rules (Admin → Safeguards). */
 export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
   const queryClient = useQueryClient()
   const p = group.policies ?? noPolicies
@@ -51,12 +26,6 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
   const [costCentre, setCostCentre] = useState(p.costCentre ?? '')
   const [requests, setRequests] = useState(p.requestsPerMinute === null || p.requestsPerMinute === undefined ? '' : String(p.requestsPerMinute))
   const [tokens, setTokens] = useState(p.tokensPerMinute === null || p.tokensPerMinute === undefined ? '' : String(p.tokensPerMinute))
-  const [checks, setChecks] = useState<Record<Choice, string>>({
-    secretScanning: p.secretScanning ?? company,
-    redactPii: p.redactPii ?? company,
-    moderation: p.moderation ?? company,
-    blockedPatterns: p.blockedPatterns === null ? company : p.blockedPatterns ? 'on' : 'off',
-  })
   const [error, setError] = useState<string | null>(null)
   const save = useMutation({
     mutationFn: (body: GroupPolicies) => api(`/api/admin/groups/${group.id}/policies`, { method: 'PUT', body }),
@@ -66,7 +35,6 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
     },
     onError: (e) => setError(errorMessage(e)),
   })
-  const pick = (c: Choice) => (checks[c] === company ? null : checks[c])
   const submit = () => {
     setError(null)
     const d = days.trim()
@@ -84,10 +52,6 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
       credits: c as Credits,
       creditPerMember: limited && perMember === 'member',
       costCentre: costCentre.trim() || null,
-      secretScanning: pick('secretScanning') as GroupPolicies['secretScanning'],
-      redactPii: pick('redactPii') as GroupPolicies['redactPii'],
-      moderation: pick('moderation') as GroupPolicies['moderation'],
-      blockedPatterns: checks.blockedPatterns === company ? null : checks.blockedPatterns === 'on',
       requestsPerMinute: r,
       tokensPerMinute: t,
     })
@@ -97,7 +61,7 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
     <Card>
       <CardHeader>
         <CardTitle>Policies</CardTitle>
-        <CardDescription>For the members: how long their chats are kept, what they may spend, which safeguards apply, and how much their API keys may use a minute. Empty or the company&apos;s setting: Admin → Settings decides.</CardDescription>
+        <CardDescription>For the members: how long their chats are kept, what they may spend, and how much their API keys may use a minute. Empty or the company&apos;s setting: Admin → Settings decides.</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-5">
         {error && <Alert variant="destructive">{error}</Alert>}
@@ -144,13 +108,9 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
             )}
           </div>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <ChoiceField label="Secrets in messages and files" choice="secretScanning" value={checks.secretScanning} onChange={(v) => setChecks({ ...checks, secretScanning: v })} />
-          <ChoiceField label="Personal data" choice="redactPii" value={checks.redactPii} onChange={(v) => setChecks({ ...checks, redactPii: v })} />
-          <ChoiceField label="The model checks each message" choice="moderation" value={checks.moderation} onChange={(v) => setChecks({ ...checks, moderation: v })} />
-          <ChoiceField label="Blocked words" choice="blockedPatterns" value={checks.blockedPatterns} onChange={(v) => setChecks({ ...checks, blockedPatterns: v })} />
-        </div>
-        <p className="text-xs text-muted-foreground">A person in several groups gets the strictest of the groups that set a safeguard. They apply in the chat and to API keys alike.</p>
+        <p className="text-xs text-muted-foreground">
+          Safeguards for this group&apos;s members are rules under <Link to="/admin/safeguards" className="underline underline-offset-2">Admin → Safeguards</Link>, each for some groups or everyone.
+        </p>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Requests a minute, per key" hint="Each member's API key, at the gateway; past it, HTTP 429. 0: no limit. Empty: the company's setting.">
             <Input inputMode="numeric" value={requests} onChange={(e) => setRequests(e.target.value)} placeholder="the company's setting" />
@@ -167,25 +127,5 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
         </Button>
       </CardFooter>
     </Card>
-  )
-}
-
-function ChoiceField({ label, choice, value, onChange }: { label: string; choice: Choice; value: string; onChange: (v: string) => void }) {
-  return (
-    <Field label={label}>
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={company}>The company&apos;s setting</SelectItem>
-          {choices[choice].map(([v, text]) => (
-            <SelectItem key={v} value={v}>
-              {text}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </Field>
   )
 }

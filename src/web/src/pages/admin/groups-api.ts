@@ -40,10 +40,6 @@ export interface GroupPolicies {
   credits: Credits
   creditPerMember: boolean
   costCentre: string | null
-  secretScanning: 'refuse' | 'mask' | 'off' | null
-  redactPii: 'mask' | 'off' | null
-  moderation: 'check' | 'off' | null
-  blockedPatterns: boolean | null
   /** Each member's API key, a minute: null is the company's setting, 0 no limit. */
   requestsPerMinute: number | null
   tokensPerMinute: number | null
@@ -54,10 +50,6 @@ export const noPolicies: GroupPolicies = {
   credits: { chat: null, api: null, pictures: null, video: null, speech: null },
   creditPerMember: false,
   costCentre: null,
-  secretScanning: null,
-  redactPii: null,
-  moderation: null,
-  blockedPatterns: null,
   requestsPerMinute: null,
   tokensPerMinute: null,
 }

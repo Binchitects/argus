@@ -47,13 +47,9 @@ public sealed class SafeguardsTests(AppFixture app)
     [Fact]
     public async Task Blocked_words_and_the_models_check_refuse_a_message_tell_the_admins_and_enough_suspend_the_account()
     {
-        await using var f = NewApp(new()
-        {
-            ["Safeguards:BlockedPatterns"] = "project falcon; re:\\bsecret-\\d+\\b",
-            ["Safeguards:Moderation"] = "check",
-            ["Safeguards:StrikesToSuspend"] = "2",
-            ["Safeguards:RefusalMessage"] = "Not here.",
-        });
+        await using var f = NewApp(new() { ["Safeguards:StrikesToSuspend"] = "2", ["Safeguards:RefusalMessage"] = "Not here." });
+        await SafeguardTestRules.ChangeAsync(f, SafeguardTestRules.BlockedWords, r => (r.Enabled, r.Patterns) = (true, "project falcon; re:\\bsecret-\\d+\\b"));
+        await SafeguardTestRules.CheckHarmAsync(f);
         var (admin, b, name) = await PeopleAsync(f);
         var chat = await ChatAsync(b);
         // A word inside another is not the phrase.
@@ -76,7 +72,8 @@ public sealed class SafeguardsTests(AppFixture app)
     [Fact]
     public async Task Personal_data_reaches_the_model_masked_and_the_chat_keeps_it_as_written()
     {
-        await using var f = NewApp(new() { ["Safeguards:RedactPii"] = "mask" });
+        await using var f = NewApp([]);
+        await SafeguardTestRules.ChangeAsync(f, SafeguardTestRules.PersonalData, r => r.Enabled = true);
         var (_, b, _) = await PeopleAsync(f);
         var chat = await ChatAsync(b);
         const string text = "Mail ana@example.com or call +98 912 345 6789; card 4111 1111 1111 1111, on 2026-10-03.";
@@ -92,12 +89,10 @@ public sealed class SafeguardsTests(AppFixture app)
     [Fact]
     public async Task A_blocked_word_or_secret_in_a_quote_is_refused_or_masked_like_the_message()
     {
-        await using var f = NewApp(new()
-        {
-            ["Safeguards:BlockedPatterns"] = "project falcon",
-            ["Safeguards:SecretScanning"] = "mask",
-            ["Safeguards:RedactPii"] = "mask",
-        });
+        await using var f = NewApp([]);
+        await SafeguardTestRules.ChangeAsync(f, SafeguardTestRules.BlockedWords, r => (r.Enabled, r.Patterns) = (true, "project falcon"));
+        await SafeguardTestRules.ChangeAsync(f, SafeguardTestRules.Secrets, r => r.Action = "mask");
+        await SafeguardTestRules.ChangeAsync(f, SafeguardTestRules.PersonalData, r => r.Enabled = true);
         var (_, b, _) = await PeopleAsync(f);
         var chat = await ChatAsync(b);
         // The quote is the person's words: a blocked word in it refuses the message as one in the message would.
@@ -119,10 +114,11 @@ public sealed class SafeguardsTests(AppFixture app)
     [Fact]
     public void Blocked_patterns_match_whole_words_and_regular_expressions_and_a_bad_one_blocks_nothing()
     {
-        Assert.Equal("falcon", Safeguards.Blocked("the Falcon flies", "eagle; falcon"));
-        Assert.Null(Safeguards.Blocked("falconry", "falcon"));
-        Assert.Equal("re:\\d{4}-\\d{4}", Safeguards.Blocked("code 1234-5678", "re:\\d{4}-\\d{4}"));
-        Assert.Null(Safeguards.Blocked("anything", "re:(unclosed"));
+        Assert.Equal(["falcon"], Words.Find("the Falcon flies", "eagle; falcon").Select(f => f.Kind));
+        Assert.Empty(Words.Find("falconry", "falcon"));
+        Assert.Equal(["re:\\d{4}-\\d{4}"], Words.Find("code 1234-5678", "re:\\d{4}-\\d{4}").Select(f => f.Kind));
+        Assert.Empty(Words.Find("anything", "re:(unclosed"));
+        Assert.NotNull(Words.Invalid("re:(unclosed"));
         // Only a number that passes the Luhn check is a card number.
         Assert.DoesNotContain("[card number]", Pii.Mask("4111 1111 1111 1112"), StringComparison.Ordinal);
     }

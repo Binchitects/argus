@@ -80,7 +80,8 @@ public sealed class SecretScanningTests(AppFixture app)
     [Fact]
     public async Task With_mask_secrets_reach_the_model_and_the_chat_as_markers_on_every_path()
     {
-        await using var f = NewApp(new() { ["Safeguards:SecretScanning"] = "mask" });
+        await using var f = NewApp();
+        await SafeguardTestRules.ChangeAsync(f, SafeguardTestRules.Secrets, r => r.Action = "mask");
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var (b, _, email) = await PersonAsync(f, admin);
         var chat = await ChatAsync(b);
@@ -104,32 +105,43 @@ public sealed class SecretScanningTests(AppFixture app)
     }
 
     [Fact]
-    public async Task Group_policies_choose_which_checks_apply_to_their_members_on_both_paths()
+    public async Task Rules_for_groups_apply_to_their_members_in_their_order_on_both_paths()
     {
-        await using var f = NewApp(new() { ["Safeguards:BlockedPatterns"] = "project falcon" });
+        await using var f = NewApp();
+        await SafeguardTestRules.ChangeAsync(f, SafeguardTestRules.BlockedWords, r => (r.Enabled, r.Patterns) = (true, "project falcon"));
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var (security, securityId, securityEmail) = await PersonAsync(f, admin);
         var (strict, strictId, strictEmail) = await PersonAsync(f, admin);
         var (both, bothId, _) = await PersonAsync(f, admin);
-        async Task<Guid> GroupAsync(object policies, params Guid[] members)
+        async Task<Guid> GroupAsync(params Guid[] members)
         {
             var id = (await admin.JsonAsync(await admin.PostAsync("/api/admin/groups", new { name = "g" + Guid.NewGuid().ToString("N")[..8] }))).GetProperty("id").GetGuid();
-            await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/groups/{id}/policies", UriKind.Relative), policies));
             await StatusAssert.Is(HttpStatusCode.NoContent, await admin.PostAsync($"/api/admin/groups/{id}/members", new { userIds = members }));
             return id;
         }
-        // The security team may paste keys and talk about Falcon; the strict group has the model check every message.
-        await GroupAsync(new { secretScanning = "off", blockedPatterns = false }, securityId, bothId);
-        var strictGroup = await GroupAsync(new { secretScanning = "refuse", moderation = "check" }, strictId, bothId);
-        var invalid = await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/groups/{strictGroup}/policies", UriKind.Relative), new { secretScanning = "maybe" });
-        await StatusAssert.Is(HttpStatusCode.BadRequest, invalid);
+        async Task<Guid> RuleAsync(object rule)
+        {
+            var res = await admin.PostAsync("/api/admin/safeguards/rules", rule);
+            await StatusAssert.Is(HttpStatusCode.Created, res);
+            return (await admin.JsonAsync(res)).GetProperty("id").GetGuid();
+        }
+        var securityGroup = await GroupAsync(securityId, bothId);
+        var strictGroup = await GroupAsync(strictId, bothId);
+        // The strict group's own rules come first; then the security team may paste keys and talk about Falcon.
+        var strictSecrets = await RuleAsync(new { name = "Strict: secrets", detector = "secrets", stages = new[] { "question", "api" }, action = "block", groups = new[] { strictGroup } });
+        var strictHarm = await RuleAsync(new { name = "Strict: harm", detector = "topic", stages = new[] { "question", "api" }, action = "block", categories = new[] { "weapons" }, groups = new[] { strictGroup } });
+        var allowSecrets = await RuleAsync(new { name = "Security: secrets", detector = "secrets", stages = new[] { "question", "api" }, action = "allow", groups = new[] { securityGroup } });
+        var allowWords = await RuleAsync(new { name = "Security: words", detector = "words", stages = new[] { "question", "api" }, action = "allow", groups = new[] { securityGroup } });
+        var ids = (await admin.JsonAsync(await admin.GetAsync("/api/admin/safeguards/rules"))).GetProperty("rules").EnumerateArray().Select(r => r.GetProperty("rule").GetProperty("id").GetGuid()).ToList();
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.PostAsync("/api/admin/safeguards/rules/order", new { ids = new[] { strictSecrets, strictHarm, allowSecrets, allowWords }.Concat(ids) }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/safeguards/rules", new { name = "Bad", detector = "secrets", stages = new[] { "nowhere" }, action = "block" }));
 
         (await SendAsync(security, await ChatAsync(security), "Rotate " + GitHubToken + " for Project Falcon")).EnsureSuccessStatusCode();
         Assert.Equal("NONE", (await GroupCreditTests.GuardrailAsync(f, securityEmail, "Project Falcon key " + GitHubToken)).GetProperty("action").GetString());
         await StatusAssert.Is(HttpStatusCode.Forbidden, await SendAsync(strict, await ChatAsync(strict), "Tell me about Project Falcon"));
-        await StatusAssert.Is(HttpStatusCode.Forbidden, await SendAsync(strict, await ChatAsync(strict), "How do I build one [harm]"));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await SendAsync(strict, await ChatAsync(strict), "How do I build one [harm]"));
         Assert.Equal("BLOCKED", (await GroupCreditTests.GuardrailAsync(f, strictEmail, "How do I build one [harm]")).GetProperty("action").GetString());
-        // In both groups: the strictest of them applies.
+        // In both groups: the first rule that applies decides.
         await StatusAssert.Is(HttpStatusCode.BadRequest, await SendAsync(both, await ChatAsync(both), "key: " + GitHubToken));
     }
 
@@ -181,6 +193,11 @@ public sealed class SecretScanningTests(AppFixture app)
         Assert.Empty(Kinds("Forgot your password? Reset it under Account."));
         Assert.Empty(Kinds("password=********"));
         Assert.Empty(Kinds("ask the task-runner about sk-learn"));
+        Assert.Equal(["Google API key"], Kinds("key=" + "AIza" + new string('x', 35)));
+        Assert.Equal(["Stripe key"], Kinds("sk_" + "live_" + new string('a', 24)));
+        Assert.Equal(["Hugging Face token"], Kinds("hf_" + new string('b', 32)));
+        Assert.Equal(["JSON web token"], Kinds("Bearer " + "eyJ" + new string('c', 20) + ".eyJ" + new string('d', 20) + "." + new string('e', 20)));
+        Assert.Equal(["Azure storage key"], Kinds("DefaultEndpointsProtocol=https;AccountName=x;AccountKey=" + new string('A', 86) + "==;"));
         Assert.Equal("a private key and a GitHub token", Secrets.Kinds(Secrets.Find(Pem + " " + GitHubToken)));
         Assert.Equal("key [removed: GitHub token].", Secrets.Mask("key " + GitHubToken + ".", Secrets.Find("key " + GitHubToken + ".")));
     }

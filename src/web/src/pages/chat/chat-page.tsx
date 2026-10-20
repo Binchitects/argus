@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { toast } from '@/components/ui/toaster'
 import { api, ApiError, errorMessage, infoQuery, type Me } from '@/lib/api'
+import { refusalEvent, safeguardQuestion, type SafeguardAnswer, type SafeguardQuestion } from './safeguard'
+import { AskReview, SafeguardAsk } from './safeguard-dialogs'
 import { useMedia } from '@/lib/use-media'
 import { cn } from '@/lib/utils'
 import { archiveChat, assistantQuery, cancelQueued, chatModel, configQuery, conversationQuery, forkChat, hurryChat, queueMessage, sendQueuedNow, stampQuery, stopChat, streamChat } from './api'
@@ -163,6 +165,10 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   const wide = useMedia('(min-width: 1280px)')
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // A refusal a safeguard can review, shown with the error; a rule's question, waiting for the person.
+  const [refused, setRefused] = useState<string | null>(null)
+  const [asking, setAsking] = useState<{ question: SafeguardQuestion; answer: (a: SafeguardAnswer) => void } | null>(null)
+  const safeguardHit = useRef<SafeguardQuestion | null>(null)
   const abort = useRef<AbortController | null>(null)
   /** The chat an answer is streaming in: known before the route says so, when a new chat's first answer starts. */
   const streamingIn = useRef<string | null>(null)
@@ -414,6 +420,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       setStreaming(true)
       streamingIn.current = conversationId
       setError(null)
+      setRefused(null)
       setAtBottom(true)
       const controller = new AbortController()
       abort.current = controller
@@ -443,7 +450,10 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
         // The page left: the answer goes on without it, and nothing here is shown any more.
         if (controller.signal.reason === leaving) return true
         wasStopped = err instanceof DOMException && err.name === 'AbortError'
-        if (!wasStopped)
+        // A rule that asks the person first: the sender asks, and sends again.
+        safeguardHit.current = safeguardQuestion(err)
+        if (!wasStopped && !safeguardHit.current) setRefused(refusalEvent(err))
+        if (!wasStopped && !safeguardHit.current)
           setError(err instanceof ApiError ? err.message : received ? 'The answer was interrupted.' : 'The message did not reach the server. It is back in the box below: send it again.')
       } finally {
         watched.current = liveRef.current?.leaf ?? watched.current
@@ -585,7 +595,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       ...(talkTurn ? { spoken: true } : {}),
       ...(withQuote ? { quote: withQuote.text } : {}),
     }
-    const sent = await run(conversationId, versus ? 'compare' : 'messages', body, withQuestion(view, localId, parent, text, attachments, withQuote?.text), localId, (e) => {
+    const watch = (e: ChatEvent) => {
       if (e.type === 'question' && fromBox) uploads.clear()
       talkTurn?.watch(e)
       // Two answers to a comparison: neither is read aloud.
@@ -594,7 +604,19 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
         const said = s?.messages.find((m) => m.id === s.current)?.content
         if (said) speak(said).catch((err) => toast.error(errorMessage(err)))
       }
-    })
+    }
+    let sent = await run(conversationId, versus ? 'compare' : 'messages', body, withQuestion(view, localId, parent, text, attachments, withQuote?.text), localId, watch)
+    // A safeguard asks first (send it anyway? why?): asked here, and sent again with the person's answer.
+    const question = !sent ? safeguardHit.current : null
+    if (question) {
+      safeguardHit.current = null
+      const answer = await new Promise<SafeguardAnswer>((resolve) => setAsking({ question, answer: resolve }))
+      setAsking(null)
+      if (answer.go) {
+        const again = newLocalId()
+        sent = await run(conversationId, versus ? 'compare' : 'messages', { ...body, acknowledged: question.rules, justification: answer.justification }, withQuestion(view, again, parent, text, attachments, withQuote?.text), again, watch)
+      }
+    }
     // Not sent: it goes back into the box with its quote, and Compare stays on for it.
     if (!sent && versus) setCompare(versus)
     if (!sent && fromBox && withQuote) setQuote((now) => now ?? withQuote)
@@ -961,8 +983,10 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                 {error && (
                   <Alert variant="destructive" className="mb-3">
                     {error}
+                    {refused && <AskReview eventId={refused} />}
                   </Alert>
                 )}
+                {asking && <SafeguardAsk question={asking.question} onAnswer={asking.answer} />}
                 <TalkBar state={talk.state} onEnd={talk.end} />
                 <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} compare={comparePicker} talk={talkButton} history={history} autoFocus big />
                 <div className={cn('stagger mt-4 grid gap-2', starters ? 'sm:grid-cols-2' : 'sm:grid-cols-3')} aria-label={starters ? 'Conversation starters' : undefined}>
@@ -1105,7 +1129,13 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                         Compacting the chat: summarizing it so the next answers read the summary…
                       </output>
                     )}
-                    {error && <Alert variant="destructive">{error}</Alert>}
+                    {error && (
+                      <Alert variant="destructive">
+                        {error}
+                        {refused && <AskReview eventId={refused} />}
+                      </Alert>
+                    )}
+                    {asking && <SafeguardAsk question={asking.question} onAnswer={asking.answer} />}
                   </div>
                 </div>
                 <QuestionRail questions={turns.flatMap((t) => (t.question ? [t.question] : []))} active={readingQuestion} onJump={jumpTo} gutter={gutter} />

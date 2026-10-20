@@ -22,6 +22,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Assistant> Assistants => Set<Assistant>();
     public DbSet<QueuedMessage> QueuedMessages => Set<QueuedMessage>();
     public DbSet<SafeguardMark> SafeguardMarks => Set<SafeguardMark>();
+    public DbSet<Safeguards.SafeguardRule> SafeguardRules => Set<Safeguards.SafeguardRule>();
+    public DbSet<Safeguards.SafeguardEvent> SafeguardEvents => Set<Safeguards.SafeguardEvent>();
     public DbSet<AssistantFile> AssistantFiles => Set<AssistantFile>();
     public DbSet<ChatShare> ChatShares => Set<ChatShare>();
     public DbSet<RoomMember> RoomMembers => Set<RoomMember>();
@@ -304,9 +306,6 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(g => g.ExternalId).HasMaxLength(255);
             e.HasIndex(g => g.Name).IsUnique();
             e.Property(g => g.CostCentre).HasMaxLength(100);
-            e.Property(g => g.SecretScanning).HasMaxLength(10);
-            e.Property(g => g.RedactPii).HasMaxLength(10);
-            e.Property(g => g.Moderation).HasMaxLength(10);
         });
         builder.Entity<GroupMember>(e =>
         {
@@ -318,6 +317,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
         });
 
         AccessTables.Configure(builder);
+        Safeguards.SafeguardTables.Configure(builder);
 
         builder.Entity<ToolSetting>(e =>
         {

@@ -1063,53 +1063,63 @@ one of the webhook hosts, as a task's.
 
 ## Safeguards
 
-Under **Settings → Safeguards** an admin sets what keeps the chat from being
-abused or used to harm; each part can be turned off, and all of them with
-**Safeguards on**:
+Safeguards keep the chat from being abused or used to harm. **Limits per
+person** are under **Settings → Safeguards**: the longest message and files
+per message; messages a minute (20) and a day; pictures a day (100) and deep
+research answers a day (20). Past one, the message is refused with what to do
+instead (HTTP 429). **Safeguards on** turns everything off when unticked.
 
-- **Limits per person**: the longest message and files per message; messages a
-  minute (20) and a day; pictures a day (100) and deep research answers a day
-  (20). Past one, the message is refused with what to do instead (HTTP 429).
-- **Secrets in messages and files** (refuse by default): private keys (PEM
-  blocks), cloud and service tokens (AWS `AKIA…`, GitHub `ghp_`/`github_pat_`,
-  GitLab `glpat-`, Slack `xox…`, `sk-` keys) and passwords in obvious places
-  (`password=…`, a connection string's `Password=…;`, `user:password@` in an
-  address). **refuse**: the message is not sent, or the file not attached, and
-  the person is told what kind was found. **mask**: it goes with each secret
-  replaced by `[removed: GitHub token]`, in the chat as well as to the model.
-  **off**: as written. A placeholder (`$DB_PASSWORD`, `<password>`, `***`) or a
-  name in code (`config.password`) is not a secret. Each one found is in the
-  audit log by its kind, never the secret (`safeguard.refused`,
-  `safeguard.secret_masked`). A refused secret is not a strike: it is an
-  accident, not abuse.
-- **Blocked words and patterns**: phrases matched as whole words, ignoring
-  case, or regular expressions (`re:`). A message with one is refused.
-- **The model checks each message** (off by default): before answering, the
-  chat's model (the model for small steps, when one is set) reads the message
-  as a classifier and refuses one asking for harm in the chosen categories
-  (violence, self-harm, sexual content involving minors, mass-casualty
-  weapons, malware, hate, fraud); learning, safety, news and fiction stay
-  allowed. When the check cannot run, the message goes.
-- **Mask personal data** (off by default): e-mail addresses, phone and card
-  numbers (Luhn-checked) and IBANs reach the model masked; the chat keeps them.
-- **The web's content is marked as data**, so the model never follows
-  instructions hidden in a page (prompt injection).
-- A refused message is in the audit log (`safeguard.refused`) and, by default,
-  in the admins' bell; **Refusals that suspend an account** (off by default)
-  disables an account after that many in a day.
+Everything else is **rules** (Admin → Safeguards; see the admin manual): each
+looks for secrets, personal data, words, a topic the model judges, prompt
+injection, links or files, in questions, files, answers, tool calls and
+results or API requests, for everyone or some groups and people, with some
+models or all, and blocks, masks, warns, asks for a reason, logs, sends the
+question to another model, or allows. The app starts with these:
 
-**Per group** (Admin → Groups → a group → Policies): secrets, personal data, the
-model's check and blocked words can each be set for the group's members; the
-company's setting applies otherwise. A person in several groups gets the
-strictest of the groups that set one (refuse over mask over off). So the
-security team can paste keys while everyone else cannot, or one team has every
-message checked.
+- **Secrets in what people send** (on): private keys (PEM blocks), cloud and
+  service tokens (AWS `AKIA…`, GitHub `ghp_`/`github_pat_`, GitLab `glpat-`,
+  Slack `xox…`, `sk-` keys, Google `AIza…`, Stripe, Hugging Face, npm, JSON web
+  tokens, Azure storage keys) and passwords in obvious places (`password=…`, a
+  connection string's `Password=…;`, `user:password@` in an address). The
+  message is not sent, or the file not attached, and the person is told what
+  kind was found. Set it to **Mask** and it goes with each secret replaced by
+  `[removed: GitHub token]`, in the chat as well as to the model. A
+  placeholder (`$DB_PASSWORD`, `<password>`, `***`) or a name in code
+  (`config.password`) is not a secret. Each one found is audited by its kind,
+  never the secret. A refused secret is not a strike: it is an accident, not
+  abuse.
+- **Personal data to the model** (off): e-mail addresses, phone and card
+  numbers (Luhn-checked), IBANs, IP addresses and social security numbers
+  reach the model masked; the chat keeps them as written.
+- **Blocked words** (off until it has words): phrases matched as whole words,
+  ignoring case, or regular expressions (`re:`).
+- **Harmful requests** (off): the model reads the message first and refuses
+  one asking for harm (violence, self-harm, sexual content involving minors,
+  mass-casualty weapons, malware, hate, fraud); learning, safety, news and
+  fiction stay allowed.
+- **Jailbreaks** and **Prompt injection in what tools bring** (monitor only):
+  record messages that try to get round the assistant's rules, and
+  instructions hidden in pages and tool results, until an admin turns them on.
+
+**When a rule asks you.** A **Warn** rule shows what it found and asks
+**Send it anyway?**; one that **asks for a reason** waits for yours, which is
+recorded. Either way the message is back in the box if you keep it.
+
+**When a message is refused**, the sentence says why. **Ask for a review**
+under it sends your reason to the people who look after the safeguards; if
+they allow it, you may send the same message again within a day, and you hear
+either way in your bell. A refusal that counts as a strike is in the audit
+log and the admins' bell; **Refusals that suspend an account** (Settings,
+off by default) disables an account after that many in a day.
+
+**The web's content is marked as data**, so the model never follows
+instructions hidden in a page (prompt injection).
 
 **On the API path too** (Check API requests too, on by default): before each
 request with an API key, the gateway asks the app (its guardrail,
-`config/litellm.yaml`). Secrets are looked for in all of the request's text;
-the blocked words and the model's check read its last question; personal data
-is masked when the policy says so. A refused request gets the gateway's error
+`config/litellm.yaml`). The rules that look at API requests read all of the
+request's text; the model's checks read its last question; a warning cannot be
+answered there, so it is taken as said. A refused request gets the gateway's error
 with the same sentence the chat shows. The chat's limits per person (length, messages a
 minute) are the chat's only: keys have their own, requests at once and the rate
 limits (requests and tokens a minute), and the chat is held to none of those.
@@ -1350,7 +1360,7 @@ use and edit one); a new chat takes `assistantId`.
 | "You have no picture credit: an admin sets it under People" (or chat, API, video, speech; "under Groups" for a group's) | an admin set that credit to $0 and nothing was spent | an admin sets a credit, or no limit, under People (or Groups) |
 | "… has used its chat credit for this month" or "You have used your chat credit as a member of …" | a group's credit of that kind is spent | an admin raises it under Admin → Groups → the group → Policies |
 | "Your API access is off" | an admin took it (People → the person → API access) | an admin gives it back; the chat is not affected |
-| "This message was not sent: it holds a private key." | secret scanning found a secret | remove it (a placeholder will do) and send again |
+| "This message was not sent: it holds a private key." | the secrets rule found a secret | remove it (a placeholder will do) and send again |
 | "The message did not reach the server" | the network or TLS failed before the server got it | the text is back in the box; send again |
 | "This chat is already answering" | one answer at a time per chat | stop it, or wait |
 | "This conversation is longer than the model can read" | the question and its attachments alone do not fit | start a new chat, or attach less |

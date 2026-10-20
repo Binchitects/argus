@@ -250,25 +250,17 @@ public static class SettingsCatalog
             { Default = "100", Min = 0, Max = 100_000 },
         new("Safeguards:ResearchPerDay", Safeguards, "Deep research per day, per person", "Each one is several sub-agents reading the web for minutes. 0: no limit.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "20", Min = 0, Max = 10_000 },
-        new("Safeguards:BlockedPatterns", Safeguards, "Blocked words and patterns", "A message with one is refused. Separate them with ; — a phrase matches as whole words, ignoring case; re: starts a regular expression (e.g. re:\\bproject falcon\\b).", SettingType.Text, SettingScope.Live)
-            { Max = 20_000 },
-        new("Safeguards:Moderation", Safeguards, "The model checks each message", "check: before answering, the chat's model reads the message as a classifier and refuses one asking for harm in the categories below (learning, safety, news and fiction stay allowed). It adds a short call to every message. off: no check.", SettingType.Choice, SettingScope.Live)
-            { Default = "off", Options = ["off", "check"], Optional = false },
-        new("Safeguards:ModerationCategories", Safeguards, "Categories it refuses", "What the check looks for.", SettingType.Choices, SettingScope.Live)
-            { Default = "violence,self-harm,sexual-minors,weapons,malware,hate", Options = ["violence", "self-harm", "sexual-minors", "weapons", "malware", "hate", "fraud"] },
-        new("Safeguards:RedactPii", Safeguards, "Mask personal data", "mask: e-mail addresses, phone and card numbers and IBANs in messages reach the model masked; the chat keeps them as written. off: as written.", SettingType.Choice, SettingScope.Live)
-            { Default = "off", Options = ["off", "mask"], Optional = false },
         new("Safeguards:UntrustedToolResults", Safeguards, "Mark the web's content as data", "What web search and pages bring, and the passages company knowledge finds, is marked so the model never follows instructions hidden in it (prompt injection).", SettingType.Boolean, SettingScope.Live)
             { Default = "true", Optional = false },
         new("Safeguards:StrikesToSuspend", Safeguards, "Refusals that suspend an account", "Refused messages in a day after which the account is disabled (an admin turns it back on under People). 0: never.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "0", Min = 0, Max = 1000 },
         new("Safeguards:NotifyAdmins", Safeguards, "Tell the admins of each refusal", "In their bell; the audit log keeps every one (safeguard.refused).", SettingType.Boolean, SettingScope.Live)
             { Default = "true", Optional = false },
-        new("Safeguards:RefusalMessage", Safeguards, "What a refused message says", "Shown to the person whose message was refused by a blocked word or the check.", SettingType.Text, SettingScope.Live)
+        new("Safeguards:RefusalMessage", Safeguards, "What a refused message says", "Shown to the person whose message a rule refused, unless the rule says its own.", SettingType.Text, SettingScope.Live)
             { Default = "This message was not sent: it goes against your organisation's rules for the assistant. Ask an admin if you think it should be allowed.", Max = 500 },
-        new("Safeguards:SecretScanning", Safeguards, "Secrets in messages and files", "Private keys, cloud and service tokens (AWS, GitHub, GitLab, Slack, sk- keys) and passwords (password=..., connection strings, user:password@ in an address). refuse: the message or file is not taken, and the person is told what kind was found. mask: it goes with each secret replaced by a marker. Each one found is audited by its kind, never the secret. A group can set its own (Admin → Groups).", SettingType.Choice, SettingScope.Live)
-            { Default = "refuse", Options = ["refuse", "mask", "off"], Optional = false },
-        new("Safeguards:CheckApi", Safeguards, "Check API requests too", "API keys' requests pass the same checks: secrets, blocked words, the model's check (on the last question) and personal data. The gateway asks the app before each one (its guardrail in config/litellm.yaml). Credit applies either way.", SettingType.Boolean, SettingScope.Live)
+        new("Safeguards:CheckModel", Safeguards, "The model that judges", "The model that reads texts for the topic and injection rules (Admin → Safeguards), once a text for all of them. A small, quick model is best. Empty: the model the text is for.", SettingType.Text, SettingScope.Live)
+            { Max = 200 },
+        new("Safeguards:CheckApi", Safeguards, "Check API requests too", "API keys' requests pass the rules that apply to the API stage (Admin → Safeguards): secrets, personal data. The gateway asks the app before each one (its guardrail in config/litellm.yaml). Credit applies either way.", SettingType.Boolean, SettingScope.Live)
             { Default = "true", Optional = false },
 
         // ---------------------------------------------------------------- retention, live --

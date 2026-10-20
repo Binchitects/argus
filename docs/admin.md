@@ -25,7 +25,7 @@ heading, and has a box above it that keeps the rows holding what is typed.
 |---|---|
 | **Overview** | Services up, people and admins, this month's spend, who is at or past a credit of their own, the code index's health, and the certificate the site serves. When the index is stale it says how many repositories, which ones, and *why* when the last run's exit code tells (GitLab unreachable, a token that cannot list every repository, ctags missing). The certificate (from Traefik's metrics in Prometheus) shows the days until it expires and who issued it (your own, or Let's Encrypt); within 30 days it says what to do, and it says so when Traefik serves its own default (browsers warn). |
 | **People** | Add, search, and per person: credits (one per kind), API access, rate limits for their API keys, a new API key, password and 2FA resets, admin role, disable, sign out everywhere, legal hold, an export of their data, delete. With the company directory on, **Move to the directory** moves the local accounts selected to directory sign-in, keeping everything of theirs ([authentication.md](authentication.md#moving-local-accounts-to-the-directory)). **Export CSV** downloads everyone with this month's spend and credit of each kind, and whether they have API access. |
-| **Groups** | App groups (the people you add), directory groups (whoever the company directory or the identity provider's groups claim puts in them, by name or DN) and SCIM groups (made and filled by the identity provider; their name and members are changed there). Tools and models are given to groups. Per group: how long members' chats are kept, credits a month, one per kind (shared or each member's), a cost centre, which safeguards apply, and the requests and tokens a minute each member's API key may use. A group's **priority in the answers' line** (-10 to 10, 0 for everyone) decides who goes first when the model is busy: higher first, and within one priority the line stays fair (fewest answers running, then served longest ago). Someone in several groups takes the highest. A change is audited. Below the list, the monthly **Chargeback** report. See [Retention, legal hold and exports](#retention-legal-hold-and-exports), [Credits](#credits) and [Rate limits for API keys](#rate-limits-for-api-keys). |
+| **Groups** | App groups (the people you add), directory groups (whoever the company directory or the identity provider's groups claim puts in them, by name or DN) and SCIM groups (made and filled by the identity provider; their name and members are changed there). Tools and models are given to groups. Per group: how long members' chats are kept, credits a month, one per kind (shared or each member's), a cost centre, and the requests and tokens a minute each member's API key may use. A group's **priority in the answers' line** (-10 to 10, 0 for everyone) decides who goes first when the model is busy: higher first, and within one priority the line stays fair (fewest answers running, then served longest ago). Someone in several groups takes the highest. A change is audited. Below the list, the monthly **Chargeback** report. See [Retention, legal hold and exports](#retention-legal-hold-and-exports), [Credits](#credits) and [Rate limits for API keys](#rate-limits-for-api-keys). |
 | **Tools** | What the chat's model may call: Argus, Python (the sandbox), the web (off until you turn it on and allow sites), image generation, the calculator, date and time, reading long files in parts, the canvas (documents and code beside the chat, changed by the model part by part), questions for the person (the model asks with choices instead of guessing), sub-agents (the model splits a task into parts done side by side), memory (the model remembers what each person asks it to; off for everyone under **Settings → Chat → Memory**, and nobody but the person sees their memories), **Decide (Laya)** (typed questions about a text answered with probabilities by the Laya decision model on the CPU; offered only while the `laya` module runs and has a checkpoint loaded, and otherwise says why: [chat.md](chat.md#decide-laya)), **Deep research** (a plan, sub-agents that search the web, and a report with its sources: it runs only through this tool: only those who may use it see it in the chat's **Tools**; on in a chat, the model starts one when asked, and **Ask before each run** has the chat ask the person first. As installed, and after an upgrade from v5.2.0 or earlier, it is on for everyone, on in new chats and asks first, so everyone keeps it until you change that; the deep research a day per person is under **Settings → Safeguards**: [chat.md](chat.md#what-it-does)), and the MCP servers and APIs you add. An **API** is added by its OpenAPI 3 document (JSON or YAML, pasted or fetched from its address): each operation becomes a function, its parameters and JSON body the arguments, and a call that changes something (POST, PUT, PATCH, DELETE) always asks the person first. **Read it** lists the operations before you add it. Per tool: on or off, who may use it (everyone, admins, or chosen groups), on in new chats, ask before each call. An MCP server is tested before it is added; its key is stored encrypted and never shown. **Its certificate (https)**, per server or API: **Check the certificate** (the default: the CAs the app's system trusts), **Trust this CA** (a CA's certificate in PEM, pasted or from a file: a company CA, its issuing CA alone, or a self-signed server's own certificate; the chain must lead to it, each certificate up to it within its dates, and the name must still match; a server that does not send its issuing CA needs it given too, with the root in one bundle, or alone), or **Do not check** (any certificate is accepted; the form and the tool's card warn). When **Test** or **Read it** meets a certificate it does not trust, it says why (self-signed, issued by a CA it does not trust, for another name, not meant for a server, expired or not yet valid, it or a CA in its chain), who issued it, for which names, its dates and fingerprint, and offers both choices there; **Read it** checks the API's address too, even when its document was pasted. A secure connection that fails for another reason (no https at that address, a server that speaks only an old TLS version, no cipher in common) says so instead, as the chat does: no certificate choice helps there. The choice applies to everything sent to that server (its tools listed and called, long calls, an API's document fetched from its address, its calls, and a plugin's OAuth token address on the same server), never to anything else: with **Trust this CA** or **Do not check**, a redirect is followed only on the same host, and one to another host is not (the test or the call ends with its `HTTP 3xx`), so nothing is sent there; each change is audited (`tool.server_tls`, the CA by name and fingerprint). A server whose tools run long can have its own **Longest call** (up to 24 hours; otherwise **Settings → Chat → Longest tool call**, an hour). The same choices decide what [Arena MCP](mcp.md) serves each person's own agent (`mcp.call` in the audit log). |
 | **Knowledge** | Company knowledge the chat searches: GitLab projects or groups (their wikis and issues, read by each project's members), Confluence spaces and SharePoint or OneDrive sites and libraries (read by whom Confluence or SharePoint lets read, and the groups you choose where they cannot tell), folders mounted under `/knowledge`, and websites (read by the groups you choose). Confluence and SharePoint take an account's token or an app's secret, stored encrypted, and have **Test connection**. Per source: the last sync's state and errors, documents and passages, who may read it and what is mirrored, **Sync now**, its documents, **Settings**, remove. Needs the embedder. See [knowledge.md](knowledge.md). |
 | **Storage** | What takes room and where: the disks (the host's, and the folders the app mounts), each database and its largest tables, the chat's files by kind and by person, the model library and what uses each model, Argus's index and packs, backups, logs and metrics, how each grew, and how long each is kept. The chat's files to find, download and delete; clean-ups that show what would go first; each person's room for files. See [Storage](#storage) below. |
@@ -167,6 +167,59 @@ became its rules (admins only: an allow for Owner), and a person whose API
 access was off has a deny of `feature.api_keys`. A folder's and a website's
 documents are read by whom the rules on their source allow, decided at each
 search.
+
+### Safeguards
+
+**Admin → Safeguards** holds the rules that guard what goes to the models and
+what comes back. Each rule:
+
+- **looks for** one thing: secrets (private keys, cloud and service tokens,
+  passwords; some kinds or all), personal data (e-mail addresses, phone and
+  card numbers, IBANs, IP addresses, social security numbers), words and
+  patterns, topics the model judges (built-in harms, or topics you describe:
+  "legal advice: what someone should do in their own legal matter"), prompt
+  injection (its usual signs and hidden text, and the model's reading if you
+  tick it), links (domains refused, or only some allowed), or files (types
+  and size);
+- **looks** at questions, attached files, answers, what goes to tools and
+  what tools bring back, and API keys' requests (the gateway asks before
+  each one);
+- applies to **everyone**, or to some **groups and people**, and to some
+  **models** or all (`@external` names every model on another server or
+  provider: personal data can be masked for cloud models only);
+- **does** one thing: **Block** (the person is told why and may ask for a
+  review; a strike counts towards suspension and rings the admins' bell),
+  **Mask** (a marker in place of what was found; secrets are never stored,
+  the rest is masked on its way to the model and kept as written in the
+  chat), **Warn** (the person confirms before it goes), **Ask for a reason**
+  (recorded with the event), **Log only**, **Send to another model** (the
+  company's own, say), or **Allow** (exempts what it covers from the rules of
+  its detector below it: a group that may paste keys, a team that may name a
+  project). **Monitor only** records what a rule would have done and does
+  nothing: try a rule for a week before it bites.
+
+Rules run top to bottom (the arrows move them); the first Block ends it.
+The model reads a text once for every topic and injection rule together
+(Settings → Safeguards → **The model that judges**: a small model is best);
+when it cannot be loaded, a text a rule would block waits rather than going
+unread. Start from a **template**: secrets, secrets in answers, personal data
+to cloud models, classification labels, harmful requests, legal and medical
+advice, jailbreaks, prompt injection in tool results, file-sharing sites,
+programs, competitors.
+
+The **Test bench** shows which rules fire for a text and what they would do,
+without sending or recording anything. **What they did** lists every time a
+rule acted (who, where, the rule, the kinds it found, never a secret or
+personal data, and a little of the text for words, topics, links and
+injection), with a chart of the last 30 days. **Reviews** has people's
+requests to review a refusal: **Allow it** (the same message passes that rule
+for a day) or **Keep it refused**, with a note; they hear either way.
+
+Who may: `safeguards.read` sees it all and uses the bench,
+`safeguards.manage` changes the rules, `safeguards.review` answers reviews;
+the **Safety officer** role has them, with the audit log. The limits on
+messages, files, pictures and deep research per person stay under Settings →
+Safeguards.
 
 ### Models
 

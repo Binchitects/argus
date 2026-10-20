@@ -468,6 +468,7 @@ public static class IdentityWiring
         app.MapAdmin();
         Access.GroupEndpoints.MapGroups(app);
         Access.AccessEndpoints.MapAccess(app);
+        Safeguards.SafeguardEndpoints.MapSafeguards(app);
         Chat.RoomEndpoints.MapRooms(app);
         Code.CodeEndpoints.MapCode(app);
         Plans.PlanEndpoints.MapPlans(app);

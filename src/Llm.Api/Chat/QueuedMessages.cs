@@ -3,6 +3,7 @@ using Llm.Api.Access;
 using System.Text.Json;
 using Llm.Api.Endpoints;
 using Llm.Api.Models;
+using Llm.Api.Safeguards;
 using Llm.Core.Chat;
 using Llm.Core.Data;
 using Llm.Core.Identity;
@@ -16,7 +17,8 @@ namespace Llm.Api.Chat;
 /// <param name="Quote">The part of an earlier answer it replies to (ChatQuotes).</param>
 /// <param name="Mentions">The room's members it names.</param>
 /// <param name="ReplyTo">A room's message it replies to: a reply to one of the model's answers is a question to it.</param>
-public sealed record QueueRequest(string? Content, Guid[]? Attachments = null, bool Research = false, string? Quote = null, Guid[]? Mentions = null, Guid? ReplyTo = null);
+public sealed record QueueRequest(string? Content, Guid[]? Attachments = null, bool Research = false, string? Quote = null, Guid[]? Mentions = null, Guid? ReplyTo = null,
+    Guid[]? Acknowledged = null, string? Justification = null);
 
 /// <summary>
 /// Messages sent while a chat answers wait here, on the server: a reload or another
@@ -105,7 +107,7 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
                 {
                     job.Emit(new { type = "title", title = c.Title });
                 }
-                jobs.Start(job, question.Id, new AnswerOverrides(Research: next.Research));
+                jobs.Start(job, question.Id, new AnswerOverrides(Model: next.Model, Research: next.Research));
                 return true;
             }
             catch (DbUpdateConcurrencyException)
@@ -235,10 +237,11 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
             return AuthEndpoints.Problem(403, "research", Tools.ResearchTool.NotYours);
         }
         var model = c.Model ?? (await policy.ForAsync(me, await models.ListAsync(ct), ct)).Default?.Name;
-        var verdict = await safeguards.CheckMessageAsync(me, text, attachments.Length, body.Research, model, ct, quote);
+        var verdict = await safeguards.CheckMessageAsync(me, text, attachments.Length, body.Research, model, ct, quote,
+            new SendContext(body.Acknowledged, body.Justification, c.Id));
         if (!verdict.Allowed)
         {
-            return AuthEndpoints.Problem(verdict.Status, $"safeguard_{verdict.Kind}", verdict.Reason!);
+            return Safeguards.Safeguards.Problem(verdict);
         }
         if (body.Research)
         {
@@ -250,7 +253,7 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
             // Its secrets masked, when the person's policy masks them.
             ConversationId = id, Content = verdict.Text ?? text, Quote = verdict.Quote ?? quote, Research = body.Research && !forPeople, Position = last + 1,
             AttachmentsJson = attachments.Length > 0 ? JsonSerializer.Serialize(attachments) : null,
-            UserId = me.Id, ForPeople = forPeople, Mentions = mentions, ReplyToId = repliedTo?.Id,
+            UserId = me.Id, ForPeople = forPeople, Mentions = mentions, ReplyToId = repliedTo?.Id, Model = verdict.Model,
         });
         // Writing in an archived chat brings it back to the list.
         c.ArchivedAt = null;

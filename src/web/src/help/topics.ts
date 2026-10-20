@@ -358,6 +358,23 @@ export const topics = {
     manual: { doc: 'admin', section: 'access-roles-and-rules' },
   },
 
+  safeguards: {
+    title: 'Safeguards',
+    about: 'Rules that look at questions, attached files, answers, what goes to tools and comes back, and API keys\' requests, and block, mask, warn, ask for a reason, log or send to another model. They run top to bottom.',
+    admin: true,
+    parts: [
+      { name: 'Rules', text: 'Each rule looks for one thing (secrets, personal data, words, a topic the model judges, prompt injection, links, files), where, for whom (everyone, or groups and people) and with which models (`@external`: every model on another provider). **Allow** above another rule of the same detector exempts what it covers; **Monitor only** records what it would do. Start **from a template**.' },
+      { name: 'Test bench', text: 'Paste a text and see which rules fire and what they would do; nothing is sent or recorded.' },
+      { name: 'What they did', text: 'Every time a rule acted, day by day and one by one: who, where, the rule, what it found (kinds, never a secret or personal data) and a little of the text for words, topics, links and injection.' },
+      { name: 'Reviews', text: 'People ask for a refusal to be reviewed, with why. **Allow it**: the same message passes that rule for a day; **Keep it refused**. They hear either way.' },
+    ],
+    tasks: [
+      { title: 'Keep personal data from cloud models', steps: ['Choose the template **Personal data to cloud models**.', 'Keep **Models** as `@external` and save: the company\'s own models still see it.'] },
+      { title: 'Try a rule before it bites', steps: ['Make it with **Monitor only**.', 'Watch **What they did** for a week, then switch it to **Enforce**.'] },
+    ],
+    manual: { doc: 'admin', section: 'safeguards' },
+  },
+
   plans: {
     title: 'Plans',
     about: 'Plans the chat made with its Plans tool: steps with owners, dates and what each waits for. Yours, and those of rooms you are in.',

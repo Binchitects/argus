@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Llm.Api.Models;
+using Llm.Api.Safeguards;
 using Llm.Core.Chat;
 using Llm.Core.Data;
 using Llm.Core.Identity;
@@ -96,10 +97,16 @@ public static partial class ChatEndpoints
         {
             pair = [pair[1], pair[0]];
         }
-        var verdict = await safeguards.CheckMessageAsync(me, text, attachments.Length, false, pair[0], ct, quote);
-        if (!verdict.Allowed)
+        // The rules for both models: a rule for one (a cloud provider's) holds the comparison.
+        var verdict = await safeguards.CheckMessageAsync(me, text, attachments.Length, false, pair[0], ct, quote, new SendContext(ConversationId: c.Id));
+        if (verdict.Allowed && verdict.Model is null)
         {
-            await Problem(http, verdict.Status, $"safeguard_{verdict.Kind}", verdict.Reason!);
+            var other = await safeguards.CheckMessageAsync(me, text, attachments.Length, false, pair[1], ct, quote, new SendContext(ConversationId: c.Id));
+            verdict = other.Allowed ? verdict : other;
+        }
+        if (!verdict.Allowed || verdict.Model is not null)
+        {
+            await Safeguards.Safeguards.Problem(verdict.Allowed ? new Verdict(false, "A safeguard sends this message to one model only: ask it in a chat.", "reroute") : verdict).ExecuteAsync(http);
             return;
         }
         // Its secrets masked, when the person's policy masks them.

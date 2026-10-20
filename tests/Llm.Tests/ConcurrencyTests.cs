@@ -1077,8 +1077,9 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
     public async Task With_a_place_left_beside_it_the_model_for_small_steps_never_makes_room_and_a_message_is_never_let_through_unread()
     {
         var clock = new MovableClock(DateTimeOffset.UtcNow);
-        await using var f = NewApp(new Dictionary<string, string?> { ["Engine:ModelsMax"] = "3", ["Chat:SmallModel"] = "tiny-small", ["Safeguards:Moderation"] = "check" },
+        await using var f = NewApp(new Dictionary<string, string?> { ["Engine:ModelsMax"] = "3", ["Chat:SmallModel"] = "tiny-small" },
             parallel: 1, clock: clock, others: [("tiny-small", 1), ("tiny-b", 1), ("tiny-c", 1), ("tiny-d", 1)]);
+        await SafeguardTestRules.CheckHarmAsync(f);
         app.Engine.Max = 3;
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var state = f.Services.GetRequiredService<EngineState>();
@@ -1147,8 +1148,9 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
     {
         // As a v5.2.0 installation that set a model for small steps and never saved Models loaded at once (now 2).
         var clock = new MovableClock(DateTimeOffset.UtcNow);
-        await using var f = NewApp(new Dictionary<string, string?> { ["Chat:SmallModel"] = "tiny-small", ["Safeguards:Moderation"] = "check" }, parallel: 1, clock: clock,
+        await using var f = NewApp(new Dictionary<string, string?> { ["Chat:SmallModel"] = "tiny-small" }, parallel: 1, clock: clock,
             others: [("tiny-small", 1), ("tiny-b", 1)]);
+        await SafeguardTestRules.CheckHarmAsync(f);
         var state = f.Services.GetRequiredService<EngineState>();
         var engine = f.Services.GetRequiredService<EngineClient>();
         var watcher = f.Services.GetRequiredService<EngineWatcher>();
@@ -1172,7 +1174,7 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         var tag = Guid.NewGuid().ToString("N")[..6];
         Assert.Contains(await AskAsync(b, await ChatAsync(b, Big), $"[{tag}] Hello there"), e => e.GetProperty("type").GetString() == "done");
         var check = app.Model.Requests.Select(r => r.Body).Single(body => body.ToJsonString().Contains(tag, StringComparison.Ordinal)
-            && body["messages"]![0]!["content"]!.ToJsonString().Contains("You check messages", StringComparison.Ordinal));
+            && body["messages"]![0]!["content"]!.ToJsonString().Contains("You check texts", StringComparison.Ordinal));
         Assert.Equal(Big, check["model"]!.GetValue<string>());
         Assert.Equal("loaded", app.Engine.StatusOf("tiny-b"));
         Assert.Equal(1, app.Engine.CallsTo("/models/unload"));
@@ -1477,7 +1479,8 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
     public async Task A_model_a_request_was_just_let_through_to_does_not_make_room_before_that_request_has_ended()
     {
         var clock = new MovableClock(DateTimeOffset.UtcNow);
-        await using var f = NewApp(new Dictionary<string, string?> { ["Safeguards:Moderation"] = "check" }, parallel: 1, clock: clock, others: [("tiny-a", 1), ("tiny-b", 1)]);
+        await using var f = NewApp(new Dictionary<string, string?>(), parallel: 1, clock: clock, others: [("tiny-a", 1), ("tiny-b", 1)]);
+        await SafeguardTestRules.CheckHarmAsync(f);
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var state = f.Services.GetRequiredService<EngineState>();
         await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/models/tiny-a/load"));

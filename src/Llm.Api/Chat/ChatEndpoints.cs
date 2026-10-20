@@ -44,8 +44,10 @@ public sealed record SpeechRequest(string? Text, string? Context = null);
 /// <param name="Research">Deep research: the answer plans, has sub-agents search the web, and writes a sourced report.</param>
 /// <param name="Spoken">Said aloud in Talk: the answer is read aloud as it is written, so it is asked for in spoken sentences.</param>
 /// <param name="Quote">The part of an earlier answer the person replies to (ChatQuotes): the model reads it before the question.</param>
+/// <param name="Acknowledged">Safeguard rules the person goes on past: they confirmed a warning, or gave their reason.</param>
+/// <param name="Justification">The person's reason, for a rule that asks for one.</param>
 public sealed record NewMessage(string Content, Guid[]? Attachments = null, Guid? ParentId = null, bool Root = false, bool Research = false, bool Spoken = false,
-    string? Quote = null);
+    string? Quote = null, Guid[]? Acknowledged = null, string? Justification = null);
 
 /// <summary>Compact the branch down to this message (default: the end of the branch on screen).</summary>
 public sealed record CompactRequest(Guid? MessageId = null);
@@ -553,13 +555,15 @@ public static partial class ChatEndpoints
             await Problem(http, 403, "research", ResearchTool.NotYours);
             return;
         }
-        // Safeguards first: limits, blocked words, and (when on) the model's check: the small model's when there is one.
-        var model = (await small.ForAsync(me, http.RequestAborted))?.Name ?? (c.Model is { } chosen && chosen != SmallModel.Auto ? chosen : null)
+        // Safeguards first: limits and the rules, for the model that answers; the small model reads it when a rule asks.
+        var answering = (c.Model is { } chosen && chosen != SmallModel.Auto ? chosen : null)
             ?? (await policy.ForAsync(me, await models.ListAsync(http.RequestAborted), http.RequestAborted)).Default?.Name;
-        var verdict = await safeguards.CheckMessageAsync(me, text, attachments.Length, body.Research, model, http.RequestAborted, quote);
+        var judge = (await small.ForAsync(me, http.RequestAborted))?.Name ?? answering;
+        var verdict = await safeguards.CheckMessageAsync(me, text, attachments.Length, body.Research, answering, http.RequestAborted, quote,
+            new Safeguards.SendContext(body.Acknowledged, body.Justification, c.Id, judge));
         if (!verdict.Allowed)
         {
-            await Problem(http, verdict.Status, $"safeguard_{verdict.Kind}", verdict.Reason!);
+            await Safeguards.Safeguards.Problem(verdict).ExecuteAsync(http);
             return;
         }
         if (body.Research)
@@ -569,7 +573,8 @@ public static partial class ChatEndpoints
         // Its secrets masked, when the person's policy masks them.
         text = verdict.Text ?? text;
         quote = verdict.Quote ?? quote;
-        await RunAsync(http, c, me, db, jobs, new AnswerOverrides(Research: body.Research, Again: body.Spoken ? Talk.Note : null), async () =>
+        // A rule may send the question to another model (the company's own, for one that holds personal data).
+        await RunAsync(http, c, me, db, jobs, new AnswerOverrides(Model: verdict.Model, Research: body.Research, Again: body.Spoken ? Talk.Note : null), async () =>
         {
             var next = await db.ChatMessages.Where(m => m.ConversationId == c.Id).MaxAsync(m => (int?)m.Sequence) ?? 0;
             var first = next == 0 && !c.IsRoom;
@@ -930,6 +935,11 @@ public static partial class ChatEndpoints
         {
             return AuthEndpoints.Problem(413, "quota", full);
         }
+        // The file rules on its name and size first, whatever kind it is.
+        if (await safeguards.CheckFileAsync(me, Path.GetFileName(file.FileName), "", request.HttpContext.RequestAborted, file.Length) is { Allowed: false } refused)
+        {
+            return Safeguards.Safeguards.Problem(refused);
+        }
         using var ms = new MemoryStream();
         await file.CopyToAsync(ms);
         if (Attachments.ImageType(file.FileName, ms.ToArray()) is { } imageType)
@@ -966,10 +976,10 @@ public static partial class ChatEndpoints
         {
             var (text, truncated, converted) = Attachments.Extract(file.FileName, file.ContentType ?? "", ms.ToArray(), options.MaxAttachmentChars);
             // Secrets in the file: refused, or masked (and then its original, which still holds them, is not kept).
-            var verdict = await safeguards.CheckFileAsync(me, Path.GetFileName(file.FileName), text, request.HttpContext.RequestAborted);
+            var verdict = await safeguards.CheckFileAsync(me, Path.GetFileName(file.FileName), text, request.HttpContext.RequestAborted, file.Length);
             if (!verdict.Allowed)
             {
-                return AuthEndpoints.Problem(verdict.Status, $"safeguard_{verdict.Kind}", verdict.Reason!);
+                return Safeguards.Safeguards.Problem(verdict);
             }
             if (verdict.Text is { } masked)
             {

@@ -77,7 +77,8 @@ public sealed class SmallModelTests(AppFixture app)
     [Fact]
     public async Task With_a_small_model_sub_agents_titles_compaction_and_the_check_go_to_it_and_the_answer_to_the_chats_model()
     {
-        await using var f = NewApp(new() { ["Safeguards:Moderation"] = "check" });
+        await using var f = NewApp();
+        await SafeguardTestRules.CheckHarmAsync(f);
         var (b, _, email) = await PersonAsync(f);
         var id = await NewChatAsync(b, new { tools = new[] { "agents", "calculator" } });
 
@@ -112,8 +113,8 @@ public sealed class SmallModelTests(AppFixture app)
         Assert.Equal(Small, ModelOf(titled));
         Assert.False(titled["chat_template_kwargs"]!["enable_thinking"]!.GetValue<bool>());
         // The safeguards' check read the message on the small model.
-        Assert.All(RequestsOf(email, "You check messages"), r => Assert.Equal(Small, ModelOf(r)));
-        Assert.NotEmpty(RequestsOf(email, "You check messages"));
+        Assert.All(RequestsOf(email, "You check texts"), r => Assert.Equal(Small, ModelOf(r)));
+        Assert.NotEmpty(RequestsOf(email, "You check texts"));
 
         // Later questions keep their title; a compaction is the small model's summary.
         await SendAsync(b, id, "And a second question");
@@ -142,7 +143,7 @@ public sealed class SmallModelTests(AppFixture app)
         Assert.All(later.Where(e => Type(e) == "agent" && e.GetProperty("event").GetString() == "done"), e => Assert.Equal(Main, e.GetProperty("model").GetString()));
         Assert.Single(later, e => Type(e) == "title");
         Assert.Single(RequestsOf(email, "You name conversations"));
-        Assert.Equal(Main, ModelOf(RequestsOf(email, "You check messages").Last()));
+        Assert.Equal(Main, ModelOf(RequestsOf(email, "You check texts").Last()));
     }
 
     /// <summary>A branch of old exchanges on screen, each question <paramref name="chars"/> long.</summary>
