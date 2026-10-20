@@ -12,6 +12,52 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v6.1.0 (2026-10-21)
+
+### :rocket: Epics and highlights
+
+- **Safeguard rules** (Admin → Safeguards): an ordered list of rules, each
+  a detector (secrets, personal data, words and patterns, topics the model
+  judges, prompt injection, links, files), where it looks (questions, files,
+  answers as they stream, what goes to tools and what comes back, API keys'
+  requests), for everyone or some groups and people, with some models or all
+  (`@external`: every model on another provider), and an action: block,
+  mask, warn (the person confirms), ask for a reason (recorded), log, send to
+  another model, or allow. Monitor mode for every rule, a test bench, what
+  the rules did day by day, and reviews: a refused person asks, an admin
+  allows (the same message passes for a day) or keeps it refused. Templates
+  to start from; the Safety officer role. The old switches and the groups'
+  safeguard settings become rules
+- **Tools as the admin makes them**: each tool's name and words, each
+  function on or off and asking first, fixed and default arguments, calls a
+  day per person, settings per group, and its use this week; a server's or
+  plugin's tool that keeps failing is turned off and the admins hear.
+  **Toolsets** for chats and for a group's new chats. **Tools without
+  code**: an HTTP request to an address the admin fixes, or a prompt on a
+  model, tried before they are offered
+- **Plugins that bring more**: assistants, safeguard rules (in monitor
+  mode) and toolsets besides tools; what a plugin asks for is granted at
+  install (and at an update that asks for more); every version is kept to go
+  back to; a version can be pinned; each plugin's health; a starter plugin
+  and a check for authors; an update from a zip
+
+### :sparkles: New features & Enhancements
+
+- More secrets found: Google API keys, Stripe keys, Hugging Face and npm
+  tokens, JSON web tokens, Azure storage keys; personal data now covers IP
+  addresses and social security numbers
+- The chat asks the person when a rule warns or wants a reason, and a
+  refused message has **Ask for a review**; an answer a rule masks or
+  withholds changes on screen as it streams
+
+### :boom: Breaking changes & Deprecations
+
+- Settings → Safeguards no longer has the secret, personal data, blocked
+  words and model check switches, and groups no longer have safeguard
+  settings: they are rules under Admin → Safeguards (converted on upgrade)
+- Installing a plugin that brings more than tools needs the admin's yes
+  (`accept` in the API)
+
 ## v6.0.1 (2026-10-21)
 
 ### :rocket: Epics and highlights

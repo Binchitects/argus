@@ -163,7 +163,7 @@ function CustomizeForm({ data, onDone }: { data: Customization; onDone: () => vo
                 Asks first
               </Tick>
             </div>
-            <p className="text-xs text-muted-foreground">{f.description}</p>
+            <p className="line-clamp-3 text-xs text-muted-foreground" title={f.description ?? undefined}>{f.description}</p>
             {!off.includes(f.name) && (
               <div className="grid gap-2 sm:grid-cols-3">
                 <Input aria-label={`${f.name}: description for the model`} placeholder="Its description, for the model" value={fns[f.name]?.description ?? ''} onChange={(e) => setFns((x) => ({ ...x, [f.name]: { ...x[f.name]!, description: e.target.value } }))} />

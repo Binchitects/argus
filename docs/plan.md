@@ -1377,3 +1377,11 @@ system", "more customization on tools", all in one version.
 5. Tools made without code: an HTTP request tool from a form, and a prompt
    tool (a prompt run on a model of the admin's choice), tested from the
    page.
+
+## v6.1.0 — Safeguards, plugins and tools (2026-10-21)
+
+Released with the plan above, except: a plugin's own MCP server run in the
+sandbox (a plugin still names a server hosted elsewhere), plugin settings per
+group, and plugins that bring skills or scheduled tasks. These, and v6.0's
+leftovers, are what comes next.
+
