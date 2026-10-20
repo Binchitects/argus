@@ -662,6 +662,18 @@ two ways:
   repeats for rows of windows or fence posts. The tool writes the Blender
   script itself, so even a small model gets a house, a table or a robot
   right.
+- **People, trees and organic shapes.** A person is one part (`figure`):
+  a body Blender skins over a skeleton and smooths, with a face (eyes with
+  irises, brows, nose, lips, ears), hands with fingers, hair (short, long,
+  bun, ponytail, curly, bald) and clothes coloured where they belong (a top
+  with long, short or no sleeves; trousers, shorts, a skirt or a dress;
+  shoes), in a pose (standing, walking, waving, sitting, T-pose, arms up),
+  any height (a child's head is larger for its height), build and body
+  shape. A tree is one part too (round, pine, palm, bush). Organic and
+  turned shapes: capsule, lathe (a profile turned round: a vase, a bottle,
+  a column, a lamp post), extrude (any outline raised: a floor plan, a
+  sign), tube (along a path: a pipe, a rail, a handle), 3D text, and
+  `smooth` to round any part off.
 - **A script** (`make_3d`): Blender's Python for what shapes cannot do
   (modifiers, booleans, curves, shader nodes of its own). The same `part()`,
   `light()`, `material()` and `make_texture()` helpers are there.

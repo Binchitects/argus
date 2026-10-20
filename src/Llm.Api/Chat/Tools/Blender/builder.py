@@ -902,7 +902,10 @@ def figure(spec=None, **kw):
         elif what == "forearm":
             part_ = "shirt" if sleeves == "long" and along < 0.92 else "skin"
         elif what == "thigh":
-            part_ = "skin" if legs in ("skirt", "dress") else "trousers"
+            # Under a skirt the upper leg takes its colour (nothing pokes through in skin), the knee is bare.
+            part_ = ("shirt" if legs == "dress" else "trousers") if legs not in ("skirt", "dress") or along < 0.6 else "skin"
+            if legs not in ("skirt", "dress"):
+                part_ = "trousers"
             if legs == "shorts" and along > 0.7:
                 part_ = "skin"
         elif what == "shin":
@@ -917,14 +920,23 @@ def figure(spec=None, **kw):
     made = [ob]
     if legs in ("skirt", "dress"):
         # A skirt flares from the waist (a dress from under the arms) to the knees.
-        top = joints["chest"][2] * k if legs == "dress" else waist_z
-        knee = (joints["knee.L"][2] + (0.06 if legs == "skirt" else -0.04)) * k
+        top = waist_z + 0.03 * k
+        knee = (joints["knee.L"][2] + (0.06 if legs == "skirt" else -0.12)) * k
         cx, cy = joints["pelvis"][0] * k, joints["pelvis"][1] * k
-        bpy.ops.mesh.primitive_cone_add(radius1=0.27 * k * fat, radius2=0.165 * k * fat, depth=top - knee, vertices=48, end_fill_type="NOTHING")
-        sk = bpy.context.active_object
-        sk.name = f"{name}-{legs}"
-        sk.data.transform(Matrix.Diagonal((1.0, 0.8, 1.0, 1.0)))
-        sk.location = (cx, cy, (top + knee) / 2)
+        waist_r = _RADII["waist"][0] * (0.9 if fem else 1.0) * k * fat
+        hip_z = joints["hip.L"][2] * k - top
+        # Round the waist, out over the hips, flaring to the hem: a profile turned round, a little flatter front to back.
+        profile = [[0.27 * k * fat, knee - top], [0.235 * k * fat, hip_z - 0.08 * k], [0.215 * k * fat, hip_z + 0.02 * k], [waist_r * 1.1, 0.0]]
+        sk = bpy.data.objects.new(f"{name}-{legs}", _lathe_mesh(f"{name}-{legs}", profile))
+        bpy.context.scene.collection.objects.link(sk)
+        sk.data.polygons.foreach_set("use_smooth", [True] * len(sk.data.polygons))
+        bm = bmesh.new()
+        bm.from_mesh(sk.data)
+        bmesh.ops.delete(bm, geom=[f for f in bm.faces if len(f.verts) > 4], context="FACES_ONLY")
+        bm.to_mesh(sk.data)
+        bm.free()
+        sk.data.transform(Matrix.Diagonal((1.0, 0.82, 1.0, 1.0)))
+        sk.location = (cx, cy, top)
         sk.modifiers.new("thick", "SOLIDIFY").thickness = 0.01 * k
         for poly in sk.data.polygons:
             poly.use_smooth = True
@@ -978,7 +990,7 @@ def figure(spec=None, **kw):
         fpiece("sphere", (0.006, 0.004, 0.006), (ex, fy - 0.004 * kf, head_c[2] + 0.012 * kf), dark, nm="pupil")
         fpiece("sphere", (0.034, 0.008, 0.007), (ex, fy - 0.0, head_c[2] + 0.036 * kf), material(s.get("hair_color", "#3a2618"), roughness=0.7), turn_=(0, sx * 0.12, 0), nm="brow")
         fpiece("sphere", (0.016, 0.035, 0.052), (hx + sx * 0.077 * kf, hy + 0.0, head_c[2] + 0.0), skin_m, nm="ear")
-    fpiece("sphere", (0.024, 0.04, 0.05), (hx, fy - 0.012 * kf, head_c[2] - 0.012 * kf), skin_m, turn_=(-0.25, 0, 0), nm="nose")
+    fpiece("sphere", (0.02, 0.028, 0.042), (hx, fy - 0.004 * kf, head_c[2] - 0.014 * kf), skin_m, turn_=(-0.25, 0, 0), nm="nose")
     fpiece("sphere", (0.05, 0.016, 0.014), (hx, fy + 0.008 * kf, head_c[2] - 0.052 * kf), material(s.get("lips", "#b5645a"), roughness=0.45), nm="lips")
     hair_m = material(s.get("hair_color", "#3a2618"), roughness=0.65, texture="fabric")
     if hair not in ("bald", "none"):

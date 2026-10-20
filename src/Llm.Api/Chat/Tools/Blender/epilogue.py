@@ -106,9 +106,14 @@ if _want_png:
     _cam = _bpy.data.objects.new("_tool_camera", _bpy.data.cameras.new("_tool_camera"))
     _sc.collection.objects.link(_cam)
     _sc.camera = _cam
+    # Far enough that the whole model, as a ball round it, fits the picture's narrower side, with a margin.
+    _cam.data.lens = 50
+    _half = _math.atan(18 / 50 * min(1.0, _sc.render.resolution_y / _sc.render.resolution_x))
+    _distance = (_size / 2) / _math.sin(_half) * 1.05
+    _cam.data.clip_start, _cam.data.clip_end = _distance / 100, _distance * 10
     for _name, _yaw, _pitch in (("front", 0.0, 0.15), ("three-quarter", 0.8, 0.45)):
         _dir = _mu.Vector((_math.sin(_yaw) * _math.cos(_pitch), -_math.cos(_yaw) * _math.cos(_pitch), _math.sin(_pitch)))
-        _cam.location = _mid + _dir * _size * 1.6
+        _cam.location = _mid + _dir * _distance
         _cam.rotation_euler = (_mid - _cam.location).to_track_quat("-Z", "Y").to_euler()
         _sc.render.filepath = _os.path.abspath(f"view-{_name}.png")
         _bpy.ops.render.render(write_still=True)
