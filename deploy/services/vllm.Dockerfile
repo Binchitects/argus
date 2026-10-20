@@ -23,10 +23,13 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends gcc libc6-dev ca-certificates procps \
  && rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m venv /opt/vllm \
- && /opt/vllm/bin/pip install --no-cache-dir "vllm==${VLLM_VERSION}" \
- && if [ -n "${LMCACHE_VERSION}" ]; then /opt/vllm/bin/pip install --no-cache-dir "lmcache==${LMCACHE_VERSION}"; fi \
- && /opt/vllm/bin/vllm --version
+# Checked by its metadata: `vllm --version` looks for a GPU, which a build has none of. pip's cache is kept
+# between builds (a cache mount, not in the image): a build that fails late does not fetch 6 GB again.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m venv /opt/vllm \
+ && /opt/vllm/bin/pip install "vllm==${VLLM_VERSION}" \
+ && if [ -n "${LMCACHE_VERSION}" ]; then /opt/vllm/bin/pip install "lmcache==${LMCACHE_VERSION}"; fi \
+ && /opt/vllm/bin/python -c "import importlib.metadata as m; print('vllm', m.version('vllm'))"
 
 ENV PATH=/opt/vllm/bin:${PATH} \
     HF_HUB_OFFLINE=1 \
