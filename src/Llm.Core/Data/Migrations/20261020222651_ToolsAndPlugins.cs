@@ -17,7 +17,8 @@ namespace Llm.Core.Data.Migrations
                 name: "AskFirstFunctions",
                 table: "tool_settings",
                 type: "text[]",
-                nullable: false);
+                nullable: false,
+                defaultValueSql: "'{}'::text[]");
 
             migrationBuilder.AddColumn<int>(
                 name: "CallsPerDay",
@@ -35,7 +36,8 @@ namespace Llm.Core.Data.Migrations
                 name: "DisabledFunctions",
                 table: "tool_settings",
                 type: "text[]",
-                nullable: false);
+                nullable: false,
+                defaultValueSql: "'{}'::text[]");
 
             migrationBuilder.AddColumn<string>(
                 name: "FunctionsJson",
@@ -79,7 +81,8 @@ namespace Llm.Core.Data.Migrations
                 name: "PluginPermissions",
                 table: "mcp_servers",
                 type: "text[]",
-                nullable: false);
+                nullable: false,
+                defaultValueSql: "'{}'::text[]");
 
             migrationBuilder.AddColumn<bool>(
                 name: "PluginPinned",
