@@ -128,3 +128,31 @@ public sealed class AccessMeta
     public int Id { get; set; } = 1;
     public long Version { get; set; }
 }
+
+/// <summary>
+/// A person's request for access: a role, a feature, or a resource (a model, a tool, a knowledge source, a repository),
+/// with why. Those who hold access.manage answer it; a yes makes the assignment or rule, for the person themselves.
+/// </summary>
+public sealed class AccessRequest
+{
+    public const string Pending = "pending";
+    public const string Approved = "approved";
+    public const string Denied = "denied";
+
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid UserId { get; set; }
+    /// <summary>A role asked for, by its id.</summary>
+    public Guid? RoleId { get; set; }
+    /// <summary>Or a resource (feature, model, tool, knowledge_source, repo) and its name.</summary>
+    public string? ResourceKind { get; set; }
+    public string? Resource { get; set; }
+    public string Reason { get; set; } = "";
+    public string Status { get; set; } = Pending;
+    public Guid? DecidedById { get; set; }
+    public DateTimeOffset? DecidedAt { get; set; }
+    /// <summary>The answer's words to the person.</summary>
+    public string? Note { get; set; }
+    /// <summary>Until when a yes holds; null: until taken away.</summary>
+    public DateTimeOffset? Until { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}

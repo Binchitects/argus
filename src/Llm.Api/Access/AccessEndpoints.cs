@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Llm.Api.Endpoints;
+using Llm.Api.Identity;
 using Llm.Core.Access;
 using Llm.Core.Data;
 using Llm.Core.Identity;
@@ -38,7 +39,18 @@ public static partial class AccessEndpoints
         // A read: it changes nothing, so access.read is enough.
         g.MapGet("/check", CheckAsync);
         g.MapGet("/history", HistoryAsync);
+        g.MapGet("/requests", RequestsAsync);
+        g.MapPost("/requests/{id:guid}/decide", DecideAsync);
+
+        // A person asks for access; those who hold access.manage answer (above).
+        var mine = app.MapGroup("/api/access-requests").PersonOnly();
+        mine.MapGet("", MyRequestsAsync);
+        mine.MapPost("", AskAsync);
+        mine.MapGet("/roles", AskableRolesAsync);
     }
+
+    /// <summary>The most requests of one person's that wait at once.</summary>
+    public const int MostPending = 5;
 
     private static object Subject(AccessSnapshot s, SubjectKind kind, Guid? id) => new { kind, id, name = s.Describe(kind, id) };
 
@@ -315,5 +327,151 @@ public static partial class AccessEndpoints
         var actors = rows.Where(r => r.ActorId is not null).Select(r => r.ActorId!.Value).Distinct().ToList();
         var names = await db.Users.AsNoTracking().Where(u => actors.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.UserName, ct);
         return Results.Ok(rows.Select(r => new { r.Id, r.At, r.Kind, actor = r.ActorId is { } a ? names.GetValueOrDefault(a) ?? a.ToString() : null, r.Before, r.After, r.BulkId }));
+    }
+
+    /// <summary>The roles a person may ask for: all but Owner and Member (everyone holds Member; Owner is given, not asked for).</summary>
+    private static async Task<IResult> AskableRolesAsync(AppDbContext db, CancellationToken ct) =>
+        Results.Ok(await db.AccessRoles.AsNoTracking().Where(r => r.Key != BuiltInRoles.Owner && r.Key != BuiltInRoles.Member)
+            .OrderBy(r => r.Name).Select(r => new { r.Id, r.Name, r.Description }).ToListAsync(ct));
+
+    private static async Task<IResult> MyRequestsAsync(System.Security.Claims.ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
+    {
+        var me = (await users.GetUserAsync(p))!;
+        var names = await db.AccessRoles.AsNoTracking().ToDictionaryAsync(r => r.Id, r => r.Name, ct);
+        var list = await db.AccessRequests.AsNoTracking().Where(r => r.UserId == me.Id).OrderByDescending(r => r.CreatedAt).Take(50).ToListAsync(ct);
+        return Results.Ok(list.Select(r => new { r.Id, role = r.RoleId is { } id ? names.GetValueOrDefault(id) : null, r.ResourceKind, r.Resource, r.Reason, r.Status, r.Note, r.Until, r.CreatedAt, r.DecidedAt }));
+    }
+
+    public sealed record AskRequest(Guid? RoleId = null, string? ResourceKind = null, string? Resource = null, string? Reason = null);
+
+    private static async Task<IResult> AskAsync(AskRequest body, System.Security.Claims.ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access,
+        Notifications.Notifier notifier, Audit audit, CancellationToken ct)
+    {
+        var me = (await users.GetUserAsync(p))!;
+        var reason = (body.Reason ?? "").Trim();
+        if (reason.Length is 0 or > 2000)
+        {
+            return Refused("Say why you need it (up to 2,000 characters).");
+        }
+        string what;
+        if (body.RoleId is { } roleId)
+        {
+            if (await db.AccessRoles.AsNoTracking().SingleOrDefaultAsync(r => r.Id == roleId, ct) is not { } role || role.Key is BuiltInRoles.Owner or BuiltInRoles.Member)
+            {
+                return Refused("Ask for one of the roles listed.");
+            }
+            what = $"the role {role.Name}";
+        }
+        else if (body.ResourceKind is { } kind && ResourceKinds.Actions.ContainsKey(kind) && body.Resource?.Trim() is { Length: > 0 and <= 300 } resource)
+        {
+            if (kind == ResourceKinds.Feature && !Permissions.IsFeature(resource))
+            {
+                return Refused($"{resource} is not a feature.");
+            }
+            what = $"{kind.Replace('_', ' ')} {resource}";
+        }
+        else
+        {
+            return Refused("Ask for a role, or for a feature, model, tool, knowledge source or repository by its name.");
+        }
+        if (await db.AccessRequests.CountAsync(r => r.UserId == me.Id && r.Status == AccessRequest.Pending, ct) >= MostPending)
+        {
+            return AuthEndpoints.Problem(429, "pending", $"{MostPending} of your requests wait already: wait for an answer.");
+        }
+        var request = new AccessRequest { UserId = me.Id, RoleId = body.RoleId, ResourceKind = body.RoleId is null ? body.ResourceKind : null, Resource = body.RoleId is null ? body.Resource!.Trim() : null, Reason = reason };
+        db.AccessRequests.Add(request);
+        await db.SaveChangesAsync(ct);
+        await audit.WriteAsync("access.request", what);
+        // To everyone who may answer it.
+        var people = await db.Users.AsNoTracking().Where(u => !u.IsDisabled).ToListAsync(ct);
+        foreach (var (id, m) in await access.MembershipsAsync(people, ct))
+        {
+            if (id != me.Id && m.Has(Permissions.AccessManage))
+            {
+                await notifier.SendAsync(id, new Notifications.News("access", $"{(string.IsNullOrWhiteSpace(me.DisplayName) ? me.UserName : me.DisplayName)} asks for {what}", reason, "/admin/access?tab=requests"), ct);
+            }
+        }
+        return Results.Created($"/api/access-requests/{request.Id}", new { request.Id });
+    }
+
+    private static async Task<IResult> RequestsAsync(AppDbContext db, string? status, CancellationToken ct)
+    {
+        var q = db.AccessRequests.AsNoTracking();
+        q = string.IsNullOrEmpty(status) || status == "all" ? q : q.Where(r => r.Status == status);
+        var list = await q.OrderByDescending(r => r.CreatedAt).Take(300).ToListAsync(ct);
+        var ids = list.Select(r => r.UserId).Concat(list.Where(r => r.DecidedById != null).Select(r => r.DecidedById!.Value)).Distinct().ToList();
+        var who = await db.Users.AsNoTracking().Where(u => ids.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => string.IsNullOrWhiteSpace(u.DisplayName) ? u.UserName! : u.DisplayName, ct);
+        var roles = await db.AccessRoles.AsNoTracking().ToDictionaryAsync(r => r.Id, r => r.Name, ct);
+        return Results.Ok(list.Select(r => new
+        {
+            r.Id, person = new { id = r.UserId, name = who.GetValueOrDefault(r.UserId) }, role = r.RoleId is { } id ? roles.GetValueOrDefault(id) : null,
+            r.ResourceKind, r.Resource, r.Reason, r.Status, r.Note, r.Until, r.CreatedAt, r.DecidedAt,
+            decidedBy = r.DecidedById is { } d ? who.GetValueOrDefault(d) : null,
+        }));
+    }
+
+    public sealed record RequestAnswer(bool Approve, string? Note = null, DateTimeOffset? Until = null);
+
+    /// <summary>
+    /// A yes makes it so for the person themselves (the role held; the resource or feature allowed, their own deny of it
+    /// taken away), until a date when given; a no says why. Both reach the person's bell, and the history.
+    /// </summary>
+    private static async Task<IResult> DecideAsync(Guid id, RequestAnswer body, AccessService access, AppDbContext db, Notifications.Notifier notifier, HttpContext http,
+        TimeProvider clock, CancellationToken ct)
+    {
+        if (await db.AccessRequests.SingleOrDefaultAsync(r => r.Id == id, ct) is not { } request)
+        {
+            return Results.NotFound();
+        }
+        if (request.Status != AccessRequest.Pending)
+        {
+            return AuthEndpoints.Problem(409, "answered", "That request was answered already.");
+        }
+        if (body.Until is { } until && until <= clock.GetUtcNow())
+        {
+            return Refused("That date has passed.");
+        }
+        var me = await http.RequestServices.GetRequiredService<UserManager<AppUser>>().GetUserAsync(http.User);
+        var result = await RunAsync(access, http, async edit =>
+        {
+            var row = await edit.Db.AccessRequests.SingleAsync(r => r.Id == id, ct);
+            row.Status = body.Approve ? AccessRequest.Approved : AccessRequest.Denied;
+            row.Note = string.IsNullOrWhiteSpace(body.Note) ? null : body.Note.Trim()[..Math.Min(2000, body.Note.Trim().Length)];
+            row.Until = body.Approve ? body.Until : null;
+            row.DecidedById = me?.Id;
+            row.DecidedAt = clock.GetUtcNow();
+            edit.Changed("request", null, new { row.Id, row.UserId, row.RoleId, row.ResourceKind, row.Resource, row.Status });
+            if (!body.Approve)
+            {
+                return;
+            }
+            if (row.RoleId is { } roleId)
+            {
+                if (!await edit.Db.AccessAssignments.AnyAsync(a => a.RoleId == roleId && a.SubjectKind == SubjectKind.Person && a.SubjectId == row.UserId, ct))
+                {
+                    edit.Add(new AccessAssignment { RoleId = roleId, SubjectKind = SubjectKind.Person, SubjectId = row.UserId, ExpiresAt = body.Until });
+                }
+                return;
+            }
+            var kind = row.ResourceKind!;
+            var action = ResourceKinds.Actions[kind][0];
+            foreach (var deny in await edit.Db.AccessRules.Where(r => r.SubjectKind == SubjectKind.Person && r.SubjectId == row.UserId && r.ResourceKind == kind
+                && r.Resource == row.Resource && r.Effect == RuleEffect.Deny).ToListAsync(ct))
+            {
+                edit.Remove(deny);
+            }
+            edit.Add(new AccessRule
+            {
+                Effect = RuleEffect.Allow, SubjectKind = SubjectKind.Person, SubjectId = row.UserId, ResourceKind = kind, Resource = row.Resource!, Action = action,
+                ExpiresAt = body.Until, Note = "Asked for: " + row.Reason[..Math.Min(200, row.Reason.Length)],
+            });
+        }, body.Approve ? "access.request.approve" : "access.request.deny", id.ToString(), () => Results.NoContent(), ct);
+        if (result is IStatusCodeHttpResult { StatusCode: 204 })
+        {
+            var asked = request.RoleId is { } r ? $"the role {(await db.AccessRoles.AsNoTracking().Where(x => x.Id == r).Select(x => x.Name).SingleOrDefaultAsync(ct))}" : $"{request.ResourceKind} {request.Resource}";
+            await notifier.SendAsync(request.UserId, new Notifications.News("access", body.Approve ? $"You have {asked} now" : $"Your request for {asked} was declined",
+                body.Note, "/account"), ct);
+        }
+        return result;
     }
 }

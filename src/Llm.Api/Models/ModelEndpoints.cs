@@ -51,8 +51,9 @@ public static class ModelEndpoints
         g.MapPost("", AddAsync);
         g.MapPatch("/{name}", UpdateAsync);
         g.MapDelete("/{name}", RemoveAsync);
-        g.MapPost("/{name}/load", LoadAsync);
-        g.MapPost("/{name}/unload", UnloadAsync);
+        // Loading and unloading is an operator's duty too, without changing the models (models.load).
+        g.MapPost("/{name}/load", LoadAsync).RequirePermission(Llm.Core.Access.Permissions.ModelsLoad);
+        g.MapPost("/{name}/unload", UnloadAsync).RequirePermission(Llm.Core.Access.Permissions.ModelsLoad);
         g.MapPut("/{name}/keep", KeepAsync);
         g.MapPut("/{name}/access", AccessAsync);
     }

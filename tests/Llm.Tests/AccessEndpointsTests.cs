@@ -132,4 +132,40 @@ public sealed class AccessEndpointsTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.Forbidden, await them.PostAsync("/api/admin/people", new { userName = "x" + Guid.NewGuid().ToString("N")[..8], email = "x@example.test" }));
         await StatusAssert.Is(HttpStatusCode.Forbidden, await them.PostAsync($"/api/admin/groups/{team}/members", new { userIds = new[] { outsider.Id } }));
     }
+
+    [Fact]
+    public async Task A_person_asks_for_a_role_an_access_manager_says_yes_and_the_bell_tells_them()
+    {
+        var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
+        var name = "rq" + Guid.NewGuid().ToString("N")[..10];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+        var them = await new TestBrowser(app.Factory).SignedInAsync(name, made.GetProperty("password").GetString()!);
+
+        var roles = (await them.JsonAsync(await them.GetAsync("/api/access-requests/roles"))).EnumerateArray().ToList();
+        Assert.DoesNotContain(roles, r => r.GetProperty("name").GetString() == "Owner");
+        var supervisor = roles.Single(r => r.GetProperty("name").GetString() == "Supervisor").GetProperty("id").GetGuid();
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await them.PostAsync("/api/access-requests", new { roleId = supervisor }));
+        await StatusAssert.Is(HttpStatusCode.Created, await them.PostAsync("/api/access-requests", new { roleId = supervisor, reason = "I am on call this month." }));
+        await StatusAssert.Is(HttpStatusCode.Created, await them.PostAsync("/api/access-requests", new { resourceKind = "feature", resource = "feature.video", reason = "For the demo." }));
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await them.GetAsync("/api/admin/access/requests"));
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await them.GetAsync("/api/admin/alerts"));
+
+        var pending = (await admin.JsonAsync(await admin.GetAsync("/api/admin/access/requests?status=pending"))).EnumerateArray()
+            .Where(r => r.GetProperty("person").GetProperty("name").GetString() == name).ToList();
+        Assert.Equal(2, pending.Count);
+        var forRole = pending.Single(r => r.GetProperty("role").GetString() == "Supervisor").GetProperty("id").GetGuid();
+        var forVideo = pending.Single(r => r.GetProperty("resource").GetString() == "feature.video").GetProperty("id").GetGuid();
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.PostAsync($"/api/admin/access/requests/{forRole}/decide", new { approve = true }));
+        await StatusAssert.Is(HttpStatusCode.Conflict, await admin.PostAsync($"/api/admin/access/requests/{forRole}/decide", new { approve = false }));
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.PostAsync($"/api/admin/access/requests/{forVideo}/decide", new { approve = false, note = "Not this quarter." }));
+
+        var me = await them.JsonAsync(await them.GetAsync("/api/auth/me"));
+        Assert.Contains("monitoring.read", me.GetProperty("permissions").EnumerateArray().Select(p => p.GetString()));
+        var mine = (await them.JsonAsync(await them.GetAsync("/api/access-requests"))).EnumerateArray().ToList();
+        Assert.Equal(["approved", "denied"], mine.OrderBy(r => r.GetProperty("role").ValueKind == JsonValueKind.Null).Select(r => r.GetProperty("status").GetString()));
+        var bell = await them.GetAsync("/api/notifications");
+        var text = await bell.Content.ReadAsStringAsync();
+        Assert.Contains("You have the role Supervisor now", text, StringComparison.Ordinal);
+        Assert.Contains("Not this quarter.", text, StringComparison.Ordinal);
+    }
 }

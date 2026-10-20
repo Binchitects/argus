@@ -67,6 +67,16 @@ People and Groups pages list only them, anyone else is not there, and making
 people or groups, or changing who is in a group, stays with admins who
 manage everyone.
 
+**Requests for access.** Anyone can ask for a role or for a model, tool,
+feature or knowledge source they cannot use (Your account → **Ask for
+access**, with why). Everyone who holds `access.manage` hears of it in their
+bell and answers under Access → **Requests**: a yes makes it so for that
+person (a role they hold, or an allow of the resource, their own deny of it
+taken away), maybe until a date; a no can say why. Either way the person's
+bell says so, and the History tab and the audit log keep who answered. The
+audit log can show what one person did (`?actor=` their id): the duties
+handed out, and how each was done.
+
 Rules on repositories hold in Argus too, for the chat's Argus tool and for
 coding agents with an API key alike: a repository is named
 `gitlab:group/project` (or a pattern, `gitlab:team-a/*`), and Argus asks the
@@ -93,7 +103,10 @@ What each person may do is decided in one place, from three things:
 - **Roles**: named sets of permissions. The built-in ones are **Owner**
   (everything), **People admin**, **Model admin**, **Billing**, **Auditor**
   (every `.read`, never a change), **Argus admin**, **Room moderator**,
-  **Review admin** and **Member**. A role is held by a person, by a group (an
+  **Review admin**, **Team manager** (a group's people, their credit and
+  limits, its spend; given over a group), **Supervisor** (dashboards, alerts,
+  logs, usage and the audit log, read-only), **Operator** (takes alerts, loads
+  and unloads models, cleans up storage) and **Member**. A role is held by a person, by a group (an
   app group, a directory group linked to one, or a SCIM group) or by
   everyone, maybe until a date.
 - **Rules**: allow or deny one action on a resource (a model, a tool, a

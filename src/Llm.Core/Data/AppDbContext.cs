@@ -50,6 +50,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<AccessRole> AccessRoles => Set<AccessRole>();
     public DbSet<AccessAssignment> AccessAssignments => Set<AccessAssignment>();
     public DbSet<AccessRule> AccessRules => Set<AccessRule>();
+    public DbSet<AccessRequest> AccessRequests => Set<AccessRequest>();
     public DbSet<AccessChange> AccessChanges => Set<AccessChange>();
     public DbSet<AccessMeta> AccessMeta => Set<AccessMeta>();
     public DbSet<Memory> Memories => Set<Memory>();
@@ -178,6 +179,19 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasKey(x => new { x.AssistantId, x.AttachmentId });
             e.HasOne<Assistant>().WithMany().HasForeignKey(x => x.AssistantId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<ChatAttachment>().WithMany().HasForeignKey(x => x.AttachmentId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<AccessRequest>(e =>
+        {
+            e.ToTable("access_requests");
+            e.Property(x => x.ResourceKind).HasMaxLength(32);
+            e.Property(x => x.Resource).HasMaxLength(300);
+            e.Property(x => x.Reason).HasMaxLength(2000);
+            e.Property(x => x.Status).HasMaxLength(16);
+            e.Property(x => x.Note).HasMaxLength(2000);
+            e.HasIndex(x => new { x.Status, x.CreatedAt });
+            e.HasIndex(x => x.UserId);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AccessRole>().WithMany().HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<Plans.Plan>(e =>
         {

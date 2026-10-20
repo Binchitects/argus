@@ -37,11 +37,12 @@ export function AccessPage() {
       ) : !access.data ? (
         <Skeleton className="h-64" />
       ) : (
-        <Tabs defaultValue="roles">
+        <Tabs defaultValue={new URLSearchParams(window.location.search).get('tab') ?? 'roles'}>
           <TabsList>
             <TabsTrigger value="roles">Roles</TabsTrigger>
             <TabsTrigger value="rules">Rules</TabsTrigger>
             <TabsTrigger value="check">Checker</TabsTrigger>
+            <TabsTrigger value="requests">Requests</TabsTrigger>
             <TabsTrigger value="history">History</TabsTrigger>
           </TabsList>
           <TabsContent value="roles" className="mt-4">
@@ -52,6 +53,9 @@ export function AccessPage() {
           </TabsContent>
           <TabsContent value="check" className="mt-4">
             <Checker data={access.data} />
+          </TabsContent>
+          <TabsContent value="requests" className="mt-4">
+            <Requests />
           </TabsContent>
           <TabsContent value="history" className="mt-4">
             <History />
@@ -695,5 +699,90 @@ function History() {
         </li>
       ))}
     </ul>
+  )
+}
+
+interface AccessRequestRow {
+  id: string
+  person: { id: string; name: string }
+  role: string | null
+  resourceKind: string | null
+  resource: string | null
+  reason: string
+  status: 'pending' | 'approved' | 'denied'
+  note: string | null
+  createdAt: string
+  decidedBy: string | null
+}
+
+/** People's requests for access: a yes makes it so for them (until a date, when given); a no says why. */
+function Requests() {
+  const queryClient = useQueryClient()
+  const [status, setStatus] = useState<'pending' | 'all'>('pending')
+  const [notes, setNotes] = useState<Record<string, string>>({})
+  const requests = useQuery({
+    queryKey: ['admin', 'access', 'requests', status],
+    queryFn: ({ signal }) => api<AccessRequestRow[]>(`/api/admin/access/requests?status=${status}`, { signal }),
+  })
+  const decide = async (id: string, approve: boolean) => {
+    try {
+      await api(`/api/admin/access/requests/${id}/decide`, { body: { approve, note: notes[id] || null } })
+      toast.success(approve ? 'Given' : 'Declined')
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'access'] })
+    } catch (e) {
+      toast.error(errorMessage(e))
+    }
+  }
+  return (
+    <div className="grid gap-4">
+      <Segmented
+        label="Requests"
+        value={status}
+        onChange={setStatus}
+        options={[
+          { value: 'pending', label: 'Waiting' },
+          { value: 'all', label: 'All' },
+        ]}
+      />
+      {requests.error ? (
+        <QueryError error={requests.error} retry={() => requests.refetch()} />
+      ) : !requests.data ? (
+        <Skeleton className="h-24" />
+      ) : requests.data.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{status === 'pending' ? 'Nobody waits for an answer.' : 'No requests yet.'}</p>
+      ) : (
+        <ul className="grid gap-3" aria-label="Access requests">
+          {requests.data.map((r) => (
+            <li key={r.id} className="grid gap-2 rounded-lg border p-4 text-sm">
+              <p className="flex flex-wrap items-center gap-2">
+                <span className="font-medium">{r.person.name}</span> asks for
+                <Badge variant="outline">{r.role ? `role ${r.role}` : `${r.resourceKind?.replace('_', ' ')} ${r.resource}`}</Badge>
+                <span className="text-xs text-muted-foreground">{new Date(r.createdAt).toLocaleString()}</span>
+                {r.status !== 'pending' && (
+                  <Badge variant={r.status === 'approved' ? 'success' : 'destructive'}>
+                    {r.status === 'approved' ? 'Given' : 'Declined'}
+                    {r.decidedBy ? ` by ${r.decidedBy}` : ''}
+                  </Badge>
+                )}
+              </p>
+              <p className="text-muted-foreground">{r.reason}</p>
+              {r.status === 'pending' ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input value={notes[r.id] ?? ''} onChange={(e) => setNotes({ ...notes, [r.id]: e.target.value })} placeholder="A word to them (optional)" aria-label={`A word to ${r.person.name}`} className="h-8 max-w-sm" />
+                  <Button size="sm" onClick={() => void decide(r.id, true)}>
+                    <Check /> Give it
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => void decide(r.id, false)}>
+                    <X /> Decline
+                  </Button>
+                </div>
+              ) : (
+                r.note && <p className="text-xs text-muted-foreground">“{r.note}”</p>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }

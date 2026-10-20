@@ -27,6 +27,7 @@ import { useTheme, type ThemePreference } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { setWidth, useWidth, type WidthPreference } from '@/lib/width'
 import { YourData } from './account-data'
+import { AskForAccess } from './account-access'
 import { VoiceSection } from './account-voice'
 
 export function AccountPage() {
@@ -47,6 +48,7 @@ export function AccountPage() {
         <div className="grid content-start gap-6">
           <Connections />
           <PushDevices />
+          <AskForAccess />
           {me.source === 'oidc' ? (
             <Card>
               <CardHeader>

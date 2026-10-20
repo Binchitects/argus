@@ -245,9 +245,14 @@ public static class AdminEndpoints
         });
     }
 
-    private static async Task<IResult> AuditAsync(AppDbContext db, int take = 200, long? before = null)
+    /// <param name="actor">Only what this person did (their duties, as Admin → Access hands them out).</param>
+    private static async Task<IResult> AuditAsync(AppDbContext db, int take = 200, long? before = null, Guid? actor = null)
     {
         var q = db.AuditEvents.AsNoTracking();
+        if (actor is { } who)
+        {
+            q = q.Where(e => e.ActorId == who);
+        }
         if (before is { } b)
         {
             q = q.Where(e => e.Id < b);

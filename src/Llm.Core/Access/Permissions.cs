@@ -147,6 +147,9 @@ public static class BuiltInRoles
     public const string RoomModerator = "room-moderator";
     public const string ReviewAdmin = "review-admin";
     public const string Member = "member";
+    public const string TeamManager = "team-manager";
+    public const string Supervisor = "supervisor";
+    public const string Operator = "operator";
 
     public static readonly IReadOnlyList<BuiltInRole> All =
     [
@@ -162,6 +165,12 @@ public static class BuiltInRoles
             [Permissions.ArgusRead, Permissions.ArgusManage, Permissions.ArgusExplore]),
         new(RoomModerator, "Room moderator", "Lists rooms, removes members and deletes rooms, without reading them.", [Permissions.RoomsModerate]),
         new(ReviewAdmin, "Review admin", "Every project's reviews and automatic reviews.", [Permissions.ReviewsAdmin, Permissions.ReviewPolicy]),
+        new(TeamManager, "Team manager", "A group's manager: its people, their credit and limits, its spend and usage. Given over a group, it reaches only that group.",
+            [Permissions.PeopleRead, Permissions.PeopleManage, Permissions.PeopleDisable, Permissions.CreditsManage, Permissions.BillingRead, Permissions.UsageRead]),
+        new(Supervisor, "Supervisor", "Watches the service: dashboards, alerts, logs, traces, usage and the audit log; changes nothing.",
+            [Permissions.MonitoringRead, Permissions.LogsRead, Permissions.UsageRead, Permissions.AuditRead, Permissions.ModelsRead]),
+        new(Operator, "Operator", "Runs the service day to day: takes alerts, loads and unloads models, cleans up storage, reads logs and dashboards.",
+            [Permissions.MonitoringRead, Permissions.LogsRead, Permissions.AlertsManage, Permissions.ModelsRead, Permissions.ModelsLoad, Permissions.StorageManage]),
         new(Member, "Member", "The features everyone has: held by everyone.", [.. Permissions.FeatureKeys]),
     ];
 
