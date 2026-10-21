@@ -76,6 +76,18 @@ function runsOn(t: Task) {
   return `${describe(t.cron)} · ${t.timeZone}`
 }
 
+/** A scheduled task a plugin offers, to add to one's own. */
+interface TaskTemplate {
+  id: string
+  name: string
+  description: string | null
+  prompt: string
+  cron: string
+  tools: string[]
+  plugin: string
+  pluginTitle: string | null
+}
+
 interface TasksView {
   enabled: boolean
   perPerson: number
@@ -101,6 +113,8 @@ export function TasksPage() {
     refetchInterval: (q) => (q.state.data?.tasks.some((t) => t.running) ? 3000 : 30_000),
   })
   const [editing, setEditing] = useState<Task | 'new' | null>(null)
+  const [starting, setStarting] = useState<TaskTemplate | null>(null)
+  const templates = useQuery({ queryKey: ['tasks', 'templates'], queryFn: ({ signal }) => api<TaskTemplate[]>('/api/tasks/templates', { signal }) })
   const [connect, setConnect] = useState<{ name: string; url: string; secret: string; gitlab: boolean } | null>(null)
   const rotate = useMutation({
     mutationFn: (t: Task) => api<{ hookToken: string }>(`/api/tasks/${t.id}/secret`, { method: 'POST' }),
@@ -226,14 +240,47 @@ export function TasksPage() {
           ))}
         </div>
       )}
-      <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
+      {!!templates.data?.length && view.enabled && (
+        <section className="mt-8 grid gap-3" aria-label="From plugins">
+          <h2 className="text-lg font-semibold">From plugins</h2>
+          <ul className="grid gap-2 xl:grid-cols-2">
+            {templates.data.map((t) => (
+              <li key={t.id} className="flex items-start gap-3 rounded-lg border p-3 text-sm">
+                <span className="grid min-w-0 flex-1 gap-0.5">
+                  <span className="font-medium">{t.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {t.pluginTitle ?? t.plugin} · {describe(t.cron)}
+                  </span>
+                  {t.description && <span className="text-muted-foreground">{t.description}</span>}
+                </span>
+                <Button size="sm" variant="outline" disabled={view.tasks.length >= view.perPerson} onClick={() => setStarting(t)}>
+                  <Plus /> Add
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      <Dialog
+        open={editing !== null || starting !== null}
+        onOpenChange={(o) => {
+          if (!o) {
+            setEditing(null)
+            setStarting(null)
+          }
+        }}
+      >
         <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-2xl">
-          {editing !== null && (
+          {(editing !== null || starting !== null) && (
             <TaskForm
-              key={editing === 'new' ? 'new' : editing.id}
-              saved={editing === 'new' ? null : editing}
+              key={starting ? `template-${starting.id}` : editing === 'new' ? 'new' : editing!.id}
+              saved={editing === 'new' || editing === null ? null : editing}
+              start={starting ?? undefined}
               view={view}
-              onClose={() => setEditing(null)}
+              onClose={() => {
+                setEditing(null)
+                setStarting(null)
+              }}
               onSaved={async (made) => {
                 await changed()
                 if (made?.hookToken && made.hookUrl) setConnect({ name: made.name, url: made.hookUrl, secret: made.hookToken, gitlab: made.trigger === 'gitlab' })
@@ -296,14 +343,14 @@ function LastRun({ run }: { run: Run }) {
 
 const DEFAULT = '(default)'
 
-function TaskForm({ saved, view, onClose, onSaved }: { saved: Task | null; view: TasksView; onClose: () => void; onSaved: (made?: Task) => Promise<unknown> }) {
+function TaskForm({ saved, start, view, onClose, onSaved }: { saved: Task | null; start?: TaskTemplate; view: TasksView; onClose: () => void; onSaved: (made?: Task) => Promise<unknown> }) {
   const config = useQuery(configQuery)
   const [form, setForm] = useState({
-    name: saved?.name ?? '',
-    prompt: saved?.prompt ?? '',
+    name: saved?.name ?? start?.name ?? '',
+    prompt: saved?.prompt ?? start?.prompt ?? '',
     timeZone: saved?.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC',
     model: saved?.model ?? '',
-    tools: saved?.tools ?? null,
+    tools: saved?.tools ?? (start?.tools.length ? start.tools : null),
     sameChat: saved?.sameChat ?? false,
     email: saved?.email ?? false,
     webhook: '',
@@ -311,7 +358,7 @@ function TaskForm({ saved, view, onClose, onSaved }: { saved: Task | null; view:
     events: saved?.events ?? ['merge_request'],
     replyInGitLab: saved?.replyInGitLab ?? false,
   })
-  const [schedule, setSchedule] = useState<Schedule>(saved ? scheduleOf(saved.cron) : blankSchedule)
+  const [schedule, setSchedule] = useState<Schedule>(saved ? scheduleOf(saved.cron) : start ? scheduleOf(start.cron) : blankSchedule)
   const [error, setError] = useState<string | null>(null)
   const tools = config.data?.tools ?? []
   const toolsOn = form.tools ?? tools.filter((t) => t.onByDefault).map((t) => t.id)

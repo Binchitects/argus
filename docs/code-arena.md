@@ -1592,6 +1592,10 @@ too. `/commands` lists what was found.
   `description` in its front matter). The prompt lists each skill's name and
   what it is for; the model loads one with its `skill` tool when the task needs
   it, and the files beside it one by one.
+- **Skills from Arena's plugins**: the skills the plugins you may use bring
+  (Admin → Plugins), kept in the config folder's `plugin-skills/` and written
+  anew at each start when Arena answers (kept as they were when it does not).
+  The project's and your own skills of the same name win over them.
 
 ## Kept rules and the sandbox
 

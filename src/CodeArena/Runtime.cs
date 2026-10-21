@@ -300,6 +300,21 @@ internal sealed partial class Runtime : IAsyncDisposable
         Permissions.Workspace = Workspace;
         Memory = new MemoryStore(Env.Paths, project);
         _memory = Memory.ForPrompt();
+        // The skills Arena's plugins bring, kept with the person's (the ones kept before when Arena does not answer).
+        if (await ChatSync.PluginSkillsAsync(Config, Http, AccountWait, ct) is { } brought)
+        {
+            try
+            {
+                foreach (var problem in PluginSkills.Keep(Env.Paths, brought))
+                {
+                    Ui.Warn(problem);
+                }
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                Ui.Warn($"The plugins' skills could not be kept in {PluginSkills.Folder(Env.Paths)}: {e.Message}");
+            }
+        }
         Extensions = Extensions.Load(Env.Paths, project);
         foreach (var problem in Extensions.Problems)
         {

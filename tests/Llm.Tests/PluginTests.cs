@@ -248,4 +248,62 @@ public sealed class PluginTests(AppFixture app)
         Assert.Equal("[]", await (await admin.GetAsync($"/api/admin/plugins/{id}/groups")).Content.ReadAsStringAsync());
         Assert.Equal("company-key", await KeyOfAsync(vet));
     }
+
+    [Fact]
+    public async Task A_plugin_offers_scheduled_tasks_to_add_and_skills_for_Code_Arena_to_those_who_may_use_it()
+    {
+        await using var f = NewApp();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        using var buffer = new MemoryStream();
+        using (var zip = new System.IO.Compression.ZipArchive(buffer, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+        {
+            void Add(string name, string text)
+            {
+                using var w = new StreamWriter(zip.CreateEntry(name).Open());
+                w.Write(text);
+            }
+            Add("vet/plugin.yaml", "name: vet\nversion: 1.0.0\ntitle: Vet\ntools: { openapi: openapi.yaml, url: \"https://pets.test/v1\" }\n" +
+                "tasks:\n  - { name: Morning pets, description: The pets to see today., prompt: List today's pets., cron: \"0 8 * * 1-5\" }\n" +
+                "skills: [skills/pet-care]\n");
+            Add("vet/openapi.yaml", FakeMcp.PetsSpec);
+            Add("vet/skills/pet-care/SKILL.md", "---\nname: pet-care\ndescription: How to look after a pet.\n---\nFeed it twice a day.\n");
+            Add("vet/skills/pet-care/food/cats.md", "Fish.\n");
+        }
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/plugins/install", new { accept = true, zip = Convert.ToBase64String(buffer.ToArray()) }));
+        var toolId = made.GetProperty("toolId").GetString()!;
+        var name = "v" + Guid.NewGuid().ToString("N")[..10];
+        var person = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+        var b = await new TestBrowser(f).SignedInAsync(name, person.GetProperty("password").GetString()!);
+
+        // The task, to add to one's own: its question, when, and the plugin's tool.
+        var template = (await b.JsonAsync(await b.GetAsync("/api/tasks/templates"))).EnumerateArray().Single();
+        Assert.Equal(("Morning pets", "0 8 * * 1-5", "Vet"), (template.GetProperty("name").GetString(), template.GetProperty("cron").GetString(), template.GetProperty("pluginTitle").GetString()));
+        Assert.Equal([toolId], template.GetProperty("tools").EnumerateArray().Select(t => t.GetString()));
+
+        // The skill, as Code Arena reads it with the person's key.
+        using var arena = f.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://{AppFixture.Domain}"), HandleCookies = false });
+        arena.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", person.GetProperty("apiKey").GetString());
+        var skills = JsonDocument.Parse(await arena.GetStringAsync(new Uri("/api/code-arena/skills", UriKind.Relative))).RootElement.GetProperty("skills");
+        var skill = skills.EnumerateArray().Single();
+        Assert.Equal(("pet-care", "How to look after a pet.", "vet"), (skill.GetProperty("name").GetString(), skill.GetProperty("description").GetString(), skill.GetProperty("plugin").GetString()));
+        Assert.Equal("Fish.\n", skill.GetProperty("files").GetProperty("food/cats.md").GetString());
+
+        // A tool turned off brings neither.
+        await using (var scope = f.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.ToolSettings.Where(t => t.ToolId == toolId).ExecuteDeleteAsync();
+            db.ToolSettings.Add(new Llm.Core.Chat.ToolSetting { ToolId = toolId, Enabled = false });
+            await db.SaveChangesAsync();
+        }
+        Assert.Empty((await b.JsonAsync(await b.GetAsync("/api/tasks/templates"))).EnumerateArray());
+        Assert.Empty(JsonDocument.Parse(await arena.GetStringAsync(new Uri("/api/code-arena/skills", UriKind.Relative))).RootElement.GetProperty("skills").EnumerateArray());
+
+        // Removed, the plugin takes its tasks with it.
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.DeleteAsync(new Uri($"/api/admin/plugins/{made.GetProperty("id").GetGuid()}", UriKind.Relative)));
+        await using (var scope = f.Services.CreateAsyncScope())
+        {
+            Assert.False(await scope.ServiceProvider.GetRequiredService<AppDbContext>().TaskTemplates.AnyAsync());
+        }
+    }
 }

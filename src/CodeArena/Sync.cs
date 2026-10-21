@@ -914,6 +914,10 @@ internal sealed class ChatSync : IAsyncDisposable
     public static Task<JsonObject?> ChatConfigAsync(Config config, HttpClient http, TimeSpan limit, CancellationToken ct) =>
         AccountReadAsync(config, http, "/api/code-arena/config", limit, ct);
 
+    /// <summary>The skills the person's plugins bring, from Arena (read with the key); null when it does not say or cannot be reached within <paramref name="limit"/>.</summary>
+    public static Task<JsonObject?> PluginSkillsAsync(Config config, HttpClient http, TimeSpan limit, CancellationToken ct) =>
+        AccountReadAsync(config, http, "/api/code-arena/skills", limit, ct);
+
     /// <summary>A JSON object of the account's from Arena, read with the key; null when there is no Arena, it refuses, or it does not answer within <paramref name="limit"/>.</summary>
     private static async Task<JsonObject?> AccountReadAsync(Config config, HttpClient http, string path, TimeSpan limit, CancellationToken ct)
     {

@@ -48,6 +48,24 @@ public sealed class ScheduledTask
 }
 
 /// <summary>
+/// A scheduled task a plugin offers (its manifest's tasks:): people add it to their own tasks from Tasks → From plugins,
+/// and change it there as any of theirs. Gone with the plugin; the tasks made from it stay.
+/// </summary>
+public sealed class TaskTemplate
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid ServerId { get; set; }
+    public required string Plugin { get; set; }
+    public required string Name { get; set; }
+    public string? Description { get; set; }
+    public required string Prompt { get; set; }
+    public required string Cron { get; set; }
+    /// <summary>Its tools by id (the plugin's own as mcp:{id}); empty: the tools on in new chats.</summary>
+    public List<string> Tools { get; set; } = [];
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
 /// An event that came for a task while a run of it was going: it runs after that one, in
 /// order. Kept in the database, so whichever replica the event reached, the one free next
 /// takes it, and only one does.

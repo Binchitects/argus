@@ -29,7 +29,13 @@ public sealed record PluginPackage(PluginManifest Manifest, string ManifestText,
     public IReadOnlyList<PluginAssistant> Assistants { get; init; } = [];
     public IReadOnlyList<Safeguards.RuleRequest> Rules { get; init; } = [];
     public IReadOnlyDictionary<string, string> Files { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>Its Code Arena skills: each folder's name (as its SKILL.md names it) and its files, by their path in the folder.</summary>
+    public IReadOnlyList<PluginSkill> Skills { get; init; } = [];
 }
+
+/// <summary>A Code Arena skill a plugin brings: its name and description (from its SKILL.md) and its files, by their path in its folder.</summary>
+public sealed record PluginSkill(string Name, string Description, IReadOnlyDictionary<string, string> Files);
 
 /// <summary>A plugin a catalog offers: what it is, and where its zip is (with its SHA-256), or the folder it is in.</summary>
 public sealed record CatalogEntry(string Name, string Version, string Title, string Description, string Source, string? Url, string? Sha256, string? PersonAuth);
@@ -55,7 +61,10 @@ public sealed class PluginCatalog(IOptionsMonitor<PluginOptions> options, IHttpC
         {
             if (File.Exists(Path.Combine(dir, PluginManifest.FileName)))
             {
-                found.Add(Read(name => File.Exists(Path.Combine(dir, name)) ? File.ReadAllText(Path.Combine(dir, name)) : null));
+                found.Add(Read(name => File.Exists(Path.Combine(dir, name)) ? File.ReadAllText(Path.Combine(dir, name)) : null,
+                    folder => System.IO.Directory.Exists(Path.Combine(dir, folder))
+                        ? System.IO.Directory.EnumerateFiles(Path.Combine(dir, folder), "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(dir, f).Replace('\\', '/'))
+                        : []));
             }
         }
         return found;
@@ -124,7 +133,8 @@ public sealed class PluginCatalog(IOptionsMonitor<PluginOptions> options, IHttpC
             var manifest = zip.Entries.Where(e => e.Name == PluginManifest.FileName).OrderBy(e => e.FullName.Length).FirstOrDefault()
                 ?? throw new PluginException($"The zip has no {PluginManifest.FileName}.");
             var root = manifest.FullName[..^PluginManifest.FileName.Length];
-            return Read(name => zip.GetEntry(root + name) is { } entry && entry.Length < MaxZipBytes ? new StreamReader(entry.Open(), Encoding.UTF8).ReadToEnd() : null);
+            return Read(name => zip.GetEntry(root + name) is { } entry && entry.Length < MaxZipBytes ? new StreamReader(entry.Open(), Encoding.UTF8).ReadToEnd() : null,
+                folder => zip.Entries.Where(e => e.FullName.StartsWith(root + folder + "/", StringComparison.Ordinal) && !e.FullName.EndsWith('/')).Select(e => e.FullName[root.Length..]));
         }
         catch (InvalidDataException)
         {
@@ -133,9 +143,14 @@ public sealed class PluginCatalog(IOptionsMonitor<PluginOptions> options, IHttpC
     }
 
     /// <summary>A package from the files kept with an installed version (its release).</summary>
-    public static PluginPackage FromFiles(IReadOnlyDictionary<string, string> files) => Read(name => files.GetValueOrDefault(name));
+    public static PluginPackage FromFiles(IReadOnlyDictionary<string, string> files) =>
+        Read(name => files.GetValueOrDefault(name), folder => files.Keys.Where(k => k.StartsWith(folder + "/", StringComparison.Ordinal)));
 
-    private static PluginPackage Read(Func<string, string?> read)
+    /// <summary>The most one skill's files may hold, and the most files it may have.</summary>
+    public const int MostSkillChars = 1_000_000, MostSkillFiles = 100;
+
+    /// <param name="list">The files under a folder of the plugin, by their names in it (for its skills).</param>
+    private static PluginPackage Read(Func<string, string?> read, Func<string, IEnumerable<string>> list)
     {
         var kept = new Dictionary<string, string>(StringComparer.Ordinal);
         string? file(string name)
@@ -161,7 +176,63 @@ public sealed class PluginCatalog(IOptionsMonitor<PluginOptions> options, IHttpC
         }
         var assistants = manifest.Assistants.Select(f => Assistant(f, file(f) ?? throw new PluginException($"The plugin has no {f}, which its manifest names."))).ToList();
         var rules = manifest.Safeguards.SelectMany(f => Rules(f, file(f) ?? throw new PluginException($"The plugin has no {f}, which its manifest names."))).ToList();
-        return new PluginPackage(manifest, text, spec, prompts) { Assistants = assistants, Rules = rules, Files = kept };
+        var skills = new List<PluginSkill>();
+        foreach (var folder in manifest.Skills)
+        {
+            var names = list(folder).Order(StringComparer.Ordinal).ToList();
+            if (!names.Contains(folder + "/SKILL.md"))
+            {
+                throw new PluginException($"The skill {folder} has no SKILL.md.");
+            }
+            if (names.Count > MostSkillFiles)
+            {
+                throw new PluginException($"The skill {folder} has more than {MostSkillFiles} files.");
+            }
+            var files = names.ToDictionary(n => n[(folder.Length + 1)..], n => file(n) ?? "", StringComparer.Ordinal);
+            if (files.Values.Sum(f => f.Length) > MostSkillChars)
+            {
+                throw new PluginException($"The skill {folder} is larger than {MostSkillChars / 1_000_000} MB.");
+            }
+            var (skillName, description) = SkillHead(files["SKILL.md"], Path.GetFileName(folder));
+            if (skills.Any(x => x.Name == skillName))
+            {
+                throw new PluginException($"The skill {skillName} is in the plugin twice.");
+            }
+            skills.Add(new PluginSkill(skillName, description, files));
+        }
+        return new PluginPackage(manifest, text, spec, prompts) { Assistants = assistants, Rules = rules, Files = kept, Skills = skills };
+    }
+
+    /// <summary>A SKILL.md's name and description, from its front matter (name: and description:), else its folder and first line.</summary>
+    public static (string Name, string Description) SkillHead(string text, string folder)
+    {
+        string? name = null, description = null;
+        var lines = text.Replace("\r\n", "\n").Split('\n');
+        var body = 0;
+        if (lines.Length > 0 && lines[0].Trim() == "---")
+        {
+            for (var i = 1; i < lines.Length; i++)
+            {
+                if (lines[i].Trim() == "---")
+                {
+                    body = i + 1;
+                    break;
+                }
+                var colon = lines[i].IndexOf(':', StringComparison.Ordinal);
+                if (colon > 0 && lines[i][..colon].Trim() is var key && key is "name" or "description")
+                {
+                    var value = lines[i][(colon + 1)..].Trim().Trim('"', '\'');
+                    if (key == "name") name = value;
+                    else description = value;
+                }
+            }
+        }
+        name = (name ?? folder).ToLowerInvariant();
+        if (!System.Text.RegularExpressions.Regex.IsMatch(name, "^[a-z0-9][a-z0-9-]{0,63}$"))
+        {
+            throw new PluginException($"\"{name}\" is not a skill name: lowercase letters, digits and dashes.");
+        }
+        return (name, description ?? lines.Skip(body).Select(l => l.Trim().TrimStart('#').Trim()).FirstOrDefault(l => l.Length > 0) ?? name);
     }
 
     private static JsonObject Yaml(string file, string text)

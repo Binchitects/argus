@@ -86,7 +86,7 @@ internal sealed record Skill(string Name, string Description, string Instruction
 /// <summary>
 /// The person's and the project's own commands, sub-agents and skills: Markdown files under .arena/ in the project and in
 /// the config folder; those written for Claude Code (.claude/) and Qwen Code (.qwen/) are read too. The project's win over
-/// the person's of the same name.
+/// the person's of the same name, and both over the skills Arena's plugins bring (PluginSkills).
 /// </summary>
 internal sealed class Extensions
 {
@@ -100,7 +100,9 @@ internal sealed class Extensions
 
     /// <summary>The folders read, the project's first (they win).</summary>
     private static IEnumerable<string> Folders(AppPaths paths, string projectRoot, string kind) =>
-        ProjectFolders.Select(f => Path.Combine(projectRoot, f, kind)).Append(Path.Combine(paths.ConfigDir, kind));
+        ProjectFolders.Select(f => Path.Combine(projectRoot, f, kind)).Append(Path.Combine(paths.ConfigDir, kind))
+            // The skills Arena's plugins bring come last: the project's and the person's own of the same name win.
+            .Concat(kind == "skills" ? [PluginSkills.Folder(paths)] : []);
 
     public static Extensions Load(AppPaths paths, string projectRoot)
     {

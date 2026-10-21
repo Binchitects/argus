@@ -112,6 +112,26 @@ public static class CodeArenaSync
         g.MapGet("/attachments/{id:guid}", AttachmentAsync);
         g.MapGet("/preferences", PreferencesAsync);
         g.MapGet("/config", ConfigAsync);
+        g.MapGet("/skills", SkillsAsync);
+    }
+
+    /// <summary>
+    /// The skills the person's plugins bring (each a SKILL.md and the files beside it), for Code Arena to keep with theirs: only
+    /// the plugins whose tool they may use. Its own and the project's skills of the same name win there.
+    /// </summary>
+    private static async Task<IResult> SkillsAsync(HttpContext http, McpPeople people, ToolRegistry registry, AccessService access, AppDbContext db)
+    {
+        var (me, refusal) = await CallerAsync(http, people);
+        if (me is null)
+        {
+            return refusal!;
+        }
+        var usable = (await registry.ForAsync(await access.MembershipAsync(me, http.RequestAborted), http.RequestAborted)).Select(t => t.Tool.Id).ToHashSet();
+        var skills = await Plugins.PluginContent.SkillsAsync(db, usable, http.RequestAborted);
+        return Results.Ok(new
+        {
+            skills = skills.Select(s => new { s.Skill.Name, s.Skill.Description, s.Plugin, s.Version, files = s.Skill.Files }),
+        });
     }
 
     /// <summary>

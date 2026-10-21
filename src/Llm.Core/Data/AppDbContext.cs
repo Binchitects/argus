@@ -54,6 +54,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ModelWindow> ModelWindows => Set<ModelWindow>();
     public DbSet<ModelDownload> ModelDownloads => Set<ModelDownload>();
     public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
+    public DbSet<TaskTemplate> TaskTemplates => Set<TaskTemplate>();
     public DbSet<ScheduledRun> ScheduledRuns => Set<ScheduledRun>();
     public DbSet<TaskEvent> TaskEvents => Set<TaskEvent>();
     public DbSet<Notification> Notifications => Set<Notification>();
@@ -490,6 +491,15 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.BaseUrl).HasMaxLength(1000);
             e.Property(x => x.ApiKeyProtected).HasMaxLength(4000);
             e.OwnsMany(x => x.Models, m => m.ToJson());
+        });
+        builder.Entity<TaskTemplate>(e =>
+        {
+            e.ToTable("task_templates");
+            e.Property(x => x.Plugin).HasMaxLength(50);
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.Property(x => x.Cron).HasMaxLength(100);
+            e.HasIndex(x => new { x.Plugin, x.Name }).IsUnique();
+            e.HasOne<McpServer>().WithMany().HasForeignKey(x => x.ServerId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<ScheduledTask>(e =>
         {

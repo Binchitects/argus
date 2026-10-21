@@ -11,6 +11,9 @@ public sealed record PluginSetting(string Key, string Title, string Type, bool R
 /// <summary>A toolset a plugin brings: its name, and its tools ("self" is the plugin's own; others by their ids: web, python...).</summary>
 public sealed record PluginToolset(string Name, string? Description, string[] Tools);
 
+/// <summary>A scheduled task a plugin offers: people add it to their own tasks (Tasks → From plugins), its question, when, and its tools ("self" is the plugin's).</summary>
+public sealed record PluginTask(string Name, string? Description, string Prompt, string Cron, string[] Tools);
+
 /// <summary>Where a person signs in to the plugin's service, as a template ({setting} filled in).</summary>
 public sealed record PluginOAuth(string Authorize, string Token, string[] Scopes);
 
@@ -30,6 +33,9 @@ public sealed partial record PluginManifest(
     public string[] Assistants { get; init; } = [];
     public string[] Safeguards { get; init; } = [];
     public PluginToolset[] Toolsets { get; init; } = [];
+    public PluginTask[] Tasks { get; init; } = [];
+    /// <summary>Code Arena skills: folders in the plugin, each with its SKILL.md and the files beside it.</summary>
+    public string[] Skills { get; init; } = [];
     public string? Author { get; init; }
     public string? Homepage { get; init; }
 
@@ -106,12 +112,28 @@ public sealed partial record PluginManifest(
         var toolsets = (doc["toolsets"] as JsonArray ?? []).OfType<JsonObject>().Select(t => new PluginToolset(
             Str(t["name"]) ?? throw new ManifestException("A toolset has no name."), Str(t["description"]),
             [.. (t["tools"] as JsonArray ?? []).Select(Str).OfType<string>()])).ToArray();
+        var tasks = (doc["tasks"] as JsonArray ?? []).OfType<JsonObject>().Select(t =>
+        {
+            var task = Str(t["name"]) ?? throw new ManifestException("A task has no name.");
+            var cron = Str(t["cron"]) ?? throw new ManifestException($"The task {task} says no cron (when it runs).");
+            if (Schedules.Cron.Parse(cron).Problem is { } wrong)
+            {
+                throw new ManifestException($"The task {task}'s cron: {wrong}");
+            }
+            return new PluginTask(task, Str(t["description"]), Str(t["prompt"]) ?? throw new ManifestException($"The task {task} has no prompt."), cron,
+                [.. (t["tools"] as JsonArray ?? []).Select(Str).OfType<string>()]);
+        }).ToArray();
+        if (tasks.GroupBy(x => x.Name).FirstOrDefault(g => g.Count() > 1) is { } twiceTask)
+        {
+            throw new ManifestException($"The task {twiceTask.Key} is there twice.");
+        }
         return new PluginManifest(name, Str(doc["version"]) ?? "0", Str(doc["title"]) ?? name, Str(doc["description"]) ?? "",
             openapi, mcp, Str(tools["url"]) ?? mcp ?? "",
             person, Str(auth["header"]) ?? "Authorization", Str(auth["value"]) ?? "Bearer {token}", oauth, Str(auth["help"]),
             [.. (doc["writes"] as JsonArray ?? []).Select(Str).OfType<string>()], settings, prompts)
         {
             Assistants = Files("assistants"), Safeguards = Files("safeguards"), Toolsets = toolsets, Author = Str(doc["author"]), Homepage = Str(doc["homepage"]),
+            Tasks = tasks, Skills = [.. Files("skills").Select(f => f.Trim('/'))],
         };
     }
 

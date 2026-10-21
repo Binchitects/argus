@@ -263,4 +263,32 @@ public sealed class ContextTests : IDisposable
             Directory.Delete(tools, recursive: true);
         }
     }
+
+    [Fact]
+    public void The_skills_Arenas_plugins_bring_are_kept_and_read_after_the_projects_and_the_persons()
+    {
+        var project = Project((".arena/skills/release/SKILL.md", "---\nname: release\ndescription: The project's release\n---\nTag it."));
+        var answer = JsonNode.Parse("""
+            {"skills": [
+              {"name": "pet-care", "description": "Pets", "plugin": "vet", "version": "1", "files": {"SKILL.md": "---\nname: pet-care\ndescription: How to look after a pet\n---\nFeed it.", "food/cats.md": "Fish."}},
+              {"name": "release", "plugin": "vet", "files": {"SKILL.md": "---\nname: release\ndescription: The plugin's release\n---\nShip it."}},
+              {"name": "sly", "plugin": "vet", "files": {"SKILL.md": "Sly.", "../../escape.md": "out", "/etc/x": "out"}},
+              {"name": "Bad Name", "files": {"SKILL.md": "x"}}
+            ]}
+            """)!.AsObject();
+        var problems = PluginSkills.Keep(Paths, answer);
+        Assert.Equal(3, problems.Count);
+        Assert.Equal("Fish.", File.ReadAllText(Path.Combine(PluginSkills.Folder(Paths), "pet-care", "food", "cats.md")));
+        Assert.False(File.Exists(Path.Combine(_root, "escape.md")));
+        Assert.False(File.Exists(Path.Combine(Paths.ConfigDir, "escape.md")));
+
+        var x = Extensions.Load(Paths, project);
+        Assert.Equal("How to look after a pet", x.Skills.Single(k => k.Name == "pet-care").Description);
+        // The project's own wins over the plugin's of the same name.
+        Assert.Equal("The project's release", x.Skills.Single(k => k.Name == "release").Description);
+
+        // Arena no longer brings it: gone.
+        PluginSkills.Keep(Paths, JsonNode.Parse("""{"skills": []}""")!.AsObject());
+        Assert.DoesNotContain(Extensions.Load(Paths, project).Skills, k => k.Name == "pet-care");
+    }
 }

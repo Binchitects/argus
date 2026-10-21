@@ -127,6 +127,13 @@ toolsets:
   - name: Weather
     description: The weather desk and the web.
     tools: [self, web]                 # self: the plugin's own tool; others by their ids
+tasks:
+  - name: Morning forecast
+    description: Today's weather for the office, before people arrive.
+    prompt: What is the weather today at the office, and should we expect delays?
+    cron: "0 7 * * 1-5"
+    tools: [self]                      # none: the plugin's own
+skills: [skills/storm-report]          # folders, each a SKILL.md and the files beside it
 ```
 
 - **An assistant** (`assistants/*.yaml`): `name`, `description`,
@@ -138,6 +145,16 @@ toolsets:
   `action`, and the detector's fields: `patterns`, `kinds`, `topics`,
   `domains`...). They come **in monitor mode**: an admin makes them bite.
 - **A toolset**: a named set of tools people switch a chat to.
+- **A scheduled task**: offered under **Tasks → From plugins** to the people
+  who may use the plugin's tool. **Add** opens a new task with its name,
+  question, schedule and tools filled in; once added it is theirs (runs as
+  them, changed or removed as any of theirs) and stays if the plugin goes.
+- **A Code Arena skill**: a folder with its `SKILL.md` (front matter `name`
+  and `description`, as agentskills.io's) and the files beside it, up to 100
+  files and 1 MB. Code Arena keeps the skills of the plugins its person may
+  use under its config folder's `plugin-skills/`, written anew at each start
+  when Arena answers (kept as they were when it does not); the project's and
+  the person's own skills of the same name win.
 
 ## Making a plugin
 

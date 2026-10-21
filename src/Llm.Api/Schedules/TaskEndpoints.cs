@@ -33,6 +33,7 @@ public static class TaskEndpoints
     {
         var g = app.MapGroup("/api/tasks").PersonOnly();
         g.MapGet("", ListAsync);
+        g.MapGet("/templates", TemplatesAsync);
         g.MapPost("", AddAsync).RequirePermission(Llm.Core.Access.Permissions.Tasks);
         g.MapPatch("/{id:guid}", UpdateAsync).RequirePermission(Llm.Core.Access.Permissions.Tasks);
         g.MapDelete("/{id:guid}", RemoveAsync);
@@ -51,6 +52,17 @@ public static class TaskEndpoints
     }
 
     private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;
+
+    /// <summary>The scheduled tasks the person's plugins offer (those whose tool they may use), to add to their own.</summary>
+    private static async Task<IResult> TemplatesAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ToolRegistry registry, AccessService access, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        var usable = (await registry.ForAsync(await access.MembershipAsync(me, ct), ct)).Select(t => t.Tool.Id).ToHashSet();
+        var templates = await db.TaskTemplates.AsNoTracking().OrderBy(t => t.Plugin).ThenBy(t => t.Name).ToListAsync(ct);
+        var names = await db.McpServers.AsNoTracking().Where(s => s.Plugin != null).ToDictionaryAsync(s => s.Id, s => s.Name, ct);
+        return Results.Ok(templates.Where(t => usable.Contains(McpServerTool.Prefix + t.ServerId))
+            .Select(t => new { t.Id, t.Name, t.Description, t.Prompt, t.Cron, Tools = t.Tools.Where(usable.Contains), t.Plugin, pluginTitle = names.GetValueOrDefault(t.ServerId) }));
+    }
 
     private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, Mailer mailer,
         TimeProvider clock, IOptionsMonitor<ScheduleOptions> options, IOptions<AuthOptions> auth, GitLabBot bot, CancellationToken ct)

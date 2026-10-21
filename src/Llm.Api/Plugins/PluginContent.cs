@@ -129,7 +129,60 @@ public static class PluginContent
             row.Tools = [.. Tools(t.Tools.Length > 0 ? t.Tools : ["self"])];
         }
         db.Toolsets.RemoveRange(sets.Where(x => package.Manifest.Toolsets.All(t => t.Name != x.Name)));
+
+        // The scheduled tasks it offers: people add them to their own (Tasks → From plugins).
+        var templates = await db.TaskTemplates.Where(t => t.Plugin == plugin).ToListAsync(ct);
+        foreach (var t in package.Manifest.Tasks)
+        {
+            var row = templates.FirstOrDefault(x => x.Name == t.Name);
+            if (row is null)
+            {
+                row = new TaskTemplate { Plugin = plugin, ServerId = server.Id, Name = t.Name, Prompt = t.Prompt, Cron = t.Cron };
+                db.TaskTemplates.Add(row);
+            }
+            row.ServerId = server.Id;
+            row.Description = t.Description;
+            row.Prompt = t.Prompt;
+            row.Cron = t.Cron;
+            row.Tools = [.. Tools(t.Tools.Length > 0 ? t.Tools : ["self"])];
+            row.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+        db.TaskTemplates.RemoveRange(templates.Where(x => package.Manifest.Tasks.All(t => t.Name != x.Name)));
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// The Code Arena skills of the plugins this person may use (their tool allowed to them), from each one's version
+    /// installed: a name two plugins use is the first's by plugin name.
+    /// </summary>
+    public static async Task<List<(PluginSkill Skill, string Plugin, string Version)>> SkillsAsync(AppDbContext db, IReadOnlyCollection<string> usable, CancellationToken ct)
+    {
+        var servers = await db.McpServers.AsNoTracking().Where(s => s.Plugin != null).OrderBy(s => s.Plugin).ToListAsync(ct);
+        var found = new List<(PluginSkill, string, string)>();
+        foreach (var server in servers.Where(s => usable.Contains(McpServerTool.Prefix + s.Id)))
+        {
+            if (server.Manifest is null || PluginManifest.Parse(server.Manifest).Skills.Length == 0)
+            {
+                continue;
+            }
+            var release = await db.PluginReleases.AsNoTracking().Where(r => r.ServerId == server.Id).OrderByDescending(r => r.InstalledAt).FirstOrDefaultAsync(ct);
+            if (release is null || JsonSerializer.Deserialize<Dictionary<string, string>>(release.FilesJson) is not { } files)
+            {
+                continue;
+            }
+            try
+            {
+                foreach (var skill in PluginCatalog.FromFiles(files).Skills.Where(k => found.All(f => f.Item1.Name != k.Name)))
+                {
+                    found.Add((skill, server.Plugin!, release.Version));
+                }
+            }
+            catch (Exception ex) when (ex is PluginCatalog.PluginException or PluginManifest.ManifestException)
+            {
+                continue;
+            }
+        }
+        return found;
     }
 
     /// <summary>Everything the plugin brought, gone with it.</summary>
@@ -138,6 +191,7 @@ public static class PluginContent
         await db.Assistants.Where(a => a.Plugin == plugin).ExecuteDeleteAsync(ct);
         await db.SafeguardRules.Where(r => r.Plugin == plugin).ExecuteDeleteAsync(ct);
         await db.Toolsets.Where(t => t.Plugin == plugin).ExecuteDeleteAsync(ct);
+        await db.TaskTemplates.Where(t => t.Plugin == plugin).ExecuteDeleteAsync(ct);
     }
 
     /// <summary>The version installed, kept so it can be put back.</summary>
