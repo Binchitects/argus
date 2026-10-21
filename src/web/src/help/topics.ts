@@ -395,6 +395,14 @@ export const topics = {
     manual: { doc: 'chat', section: 'plans' },
   },
 
+  'room-join': {
+    title: 'Join a room',
+    about: 'An invite link to a room: the room, its owner, how many are in it and the role you join with (member: read and write; viewer: read).',
+    parts: [{ name: 'Join the room', text: 'You join, and the room opens; its owner hears. A link that expired, was used up or stopped says so: ask for a new one.' }],
+    tasks: [{ title: 'Make a link for others', steps: ['In the room, open **People**.', 'Under **Invite links**, choose the role, how long it works and for how many, and press **Make a link**.', 'Copy it then: it is shown once.'] }],
+    manual: { doc: 'chat', section: 'rooms' },
+  },
+
   code: {
     title: 'Code',
     about: 'Reviews of merge requests by the model, and the code assistant. Both read the code with your own GitLab access, through Argus, and write nothing to GitLab.',

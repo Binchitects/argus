@@ -591,6 +591,15 @@ a room holds (Settings → Chat → **Most people in a room**, 50).
   Owners can let members invite. Anyone but the owner can leave. When an
   owner's account is deleted the room goes to its longest-standing member;
   what someone wrote stays after they leave, as a former member's.
+- **Invite links.** In the room's **People** panel, whoever may invite makes
+  a link: people join as members or viewers, for 1 to 30 days, for a number
+  of people or anyone. The link is shown once (copy it then); the list shows
+  each link still working, how many joined, and **Stop this link**. Opening
+  one, signed in, shows the room, its owner and the role it gives, and
+  **Join the room**; the owner hears when someone joins.
+- **Export.** **Markdown** or **JSON** in the **People** panel: the room's
+  title, its people, and every message with who wrote it and when (the
+  model's answers by their model). For anyone in the room who may export.
 
 ## Plans
 

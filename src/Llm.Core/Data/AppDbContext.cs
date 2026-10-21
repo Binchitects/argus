@@ -28,6 +28,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ChatShare> ChatShares => Set<ChatShare>();
     public DbSet<RoomMember> RoomMembers => Set<RoomMember>();
     public DbSet<RoomGroup> RoomGroups => Set<RoomGroup>();
+    public DbSet<RoomInvite> RoomInvites => Set<RoomInvite>();
     public DbSet<Code.CodeReview> CodeReviews => Set<Code.CodeReview>();
     public DbSet<Plans.Plan> Plans => Set<Plans.Plan>();
     public DbSet<Plans.PlanStep> PlanSteps => Set<Plans.PlanStep>();
@@ -259,6 +260,16 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(x => x.UserId);
             e.HasOne<Conversation>().WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<RoomInvite>(e =>
+        {
+            e.ToTable("room_invites");
+            e.Property(x => x.TokenHash).HasMaxLength(64);
+            e.HasIndex(x => x.TokenHash).IsUnique();
+            e.Property(x => x.Role).HasMaxLength(16);
+            e.HasIndex(x => x.ConversationId);
+            e.HasOne<Conversation>().WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.CreatedById).OnDelete(DeleteBehavior.SetNull);
         });
         builder.Entity<RoomGroup>(e =>
         {

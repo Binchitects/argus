@@ -16,6 +16,7 @@ import { toast } from '@/components/ui/toaster'
 import { errorMessage } from '@/lib/api'
 import { addToRoom, conversationQuery, createRoom, handOverRoom, removeFromRoom, removeGroupFromRoom, setRoomRole, updateRoom } from './api'
 import { GroupChecklist, PeoplePicker, type Person } from './assistant-sharing'
+import { InviteLinks, RoomExport } from './room-links'
 import type { RoomBrief } from './types'
 
 type Role = 'member' | 'viewer'
@@ -226,6 +227,8 @@ export function RoomPanel({ chatId, room, me, open, onOpenChange, here }: { chat
               </div>
             </section>
           )}
+          {mayInvite && <InviteLinks chatId={chatId} owner={owner} />}
+          <RoomExport chatId={chatId} />
           {owner && (
             <section className="grid gap-3" aria-label="Settings">
               <h3 className="text-sm font-medium">Settings</h3>

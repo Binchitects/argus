@@ -152,4 +152,63 @@ public sealed class RoomTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.NoContent, await a.Http.PutAsJsonAsync(new Uri($"/api/rooms/{room}/owner", UriKind.Relative), new { userId = bId }));
         Assert.Equal("member", (await a.JsonAsync(await a.GetAsync($"/api/chat/conversations/{room}"))).GetProperty("room").GetProperty("role").GetString());
     }
+
+    [Fact]
+    public async Task An_invite_link_lets_people_join_as_it_says_until_it_is_used_up_or_stopped_and_the_room_exports_with_who_wrote_what()
+    {
+        var admin = await AdminAsync();
+        var (_, _, owner) = await PersonAsync(admin, "Olga");
+        var (anaId, _, ana) = await PersonAsync(admin, "Ana");
+        var (_, _, ben) = await PersonAsync(admin, "Ben");
+        var (_, _, cy) = await PersonAsync(admin, "Cy");
+        var room = (await owner.JsonAsync(await owner.PostAsync("/api/rooms", new { title = "Launch plans" }))).GetProperty("id").GetGuid();
+
+        // A link for one viewer; a member who may not invite cannot make one.
+        var made = await owner.JsonAsync(await owner.PostAsync($"/api/rooms/{room}/invites", new { role = "viewer", days = 2, uses = 1 }));
+        var token = made.GetProperty("token").GetString()!;
+        Assert.Equal($"/rooms/join/{token}", made.GetProperty("link").GetString());
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await owner.PostAsync($"/api/rooms/{room}/invites", new { days = 90 }));
+
+        var preview = await ana.JsonAsync(await ana.GetAsync($"/api/rooms/join/{token}"));
+        Assert.Equal(("Launch plans", "Olga", "viewer", false), (preview.GetProperty("title").GetString(), preview.GetProperty("owner").GetString(), preview.GetProperty("role").GetString(), preview.GetProperty("inside").GetBoolean()));
+        var joined = await ana.JsonAsync(await ana.PostAsync($"/api/rooms/join/{token}"));
+        Assert.True(joined.GetProperty("joined").GetBoolean());
+        var brief = (await owner.JsonAsync(await owner.GetAsync($"/api/rooms/{room}"))).GetProperty("brief");
+        Assert.Contains(brief.GetProperty("members").EnumerateArray(), x => x.GetProperty("id").GetGuid() == anaId && x.GetProperty("role").GetString() == "viewer");
+
+        // Used up: nobody else joins with it; a new one, stopped, works no more either.
+        await StatusAssert.Is(HttpStatusCode.NotFound, await ben.PostAsync($"/api/rooms/join/{token}"));
+        var second = await owner.JsonAsync(await owner.PostAsync($"/api/rooms/{room}/invites", new { }));
+        Assert.Single((await owner.JsonAsync(await owner.GetAsync($"/api/rooms/{room}/invites"))).EnumerateArray());
+        await StatusAssert.Is(HttpStatusCode.NoContent, await owner.Http.DeleteAsync(new Uri($"/api/rooms/{room}/invites/{second.GetProperty("id").GetGuid()}", UriKind.Relative)));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await cy.PostAsync($"/api/rooms/join/{second.GetProperty("token").GetString()}"));
+
+        // The export: every message with who wrote it.
+        await SendAsync(owner, room, new { content = "@Arena what is the launch date?" });
+        var md = await (await ana.GetAsync($"/api/rooms/{room}/export")).Content.ReadAsStringAsync();
+        Assert.StartsWith("# Launch plans", md, StringComparison.Ordinal);
+        Assert.Contains("## Olga,", md, StringComparison.Ordinal);
+        Assert.Contains("## Arena (", md, StringComparison.Ordinal);
+        var json = await ana.JsonAsync(await ana.GetAsync($"/api/rooms/{room}/export?format=json"));
+        Assert.Equal(["Olga", "Arena (Qwen3.8-Flash-Next)"], json.GetProperty("messages").EnumerateArray().Select(m => m.GetProperty("author").GetString()));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await ben.GetAsync($"/api/rooms/{room}/export"));
+    }
+
+    [Fact]
+    public async Task Past_the_rooms_size_nobody_of_those_asked_for_is_added()
+    {
+        await using var f = app.Create(app.ConnectionStringFor("roomsize_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?> { ["Chat:RoomMostPeople"] = "2" });
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        async Task<Guid> PersonIdAsync()
+        {
+            var user = "rs" + Guid.NewGuid().ToString("N")[..8];
+            return (await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = user, email = $"{user}@example.test" }))).GetProperty("id").GetGuid();
+        }
+        var room = (await admin.JsonAsync(await admin.PostAsync("/api/rooms", new { title = "Small" }))).GetProperty("id").GetGuid();
+        var refused = await admin.PostAsync($"/api/rooms/{room}/members", new { userIds = new[] { await PersonIdAsync(), await PersonIdAsync() } });
+        await StatusAssert.Is(HttpStatusCode.BadRequest, refused);
+        var members = (await admin.JsonAsync(await admin.GetAsync($"/api/rooms/{room}"))).GetProperty("brief").GetProperty("members").EnumerateArray().ToList();
+        Assert.Single(members);
+    }
 }
+

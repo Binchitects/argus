@@ -164,6 +164,27 @@ public sealed class RoomMember
     public string Notify { get; set; } = "mentions";
 }
 
+/// <summary>
+/// A link that lets whoever opens it join a room (signed in), with a role, until it expires, is used up, or is revoked. Only
+/// its token's SHA-256 is kept: the link is shown once.
+/// </summary>
+public sealed class RoomInvite
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid ConversationId { get; set; }
+    public required string TokenHash { get; set; }
+    public string Role { get; set; } = RoomMember.Member;
+    public Guid? CreatedById { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset ExpiresAt { get; set; }
+    /// <summary>How many people may join with it; null: any number until it expires.</summary>
+    public int? MaxUses { get; set; }
+    public int Uses { get; set; }
+    public DateTimeOffset? RevokedAt { get; set; }
+
+    public bool Usable(DateTimeOffset now) => RevokedAt is null && ExpiresAt > now && (MaxUses is null || Uses < MaxUses);
+}
+
 /// <summary>A group in a room: whoever is in it now is in the room, with this role.</summary>
 public sealed class RoomGroup
 {

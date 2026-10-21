@@ -49,6 +49,12 @@ public static partial class RoomEndpoints
         g.MapGet("/{id:guid}/events", EventsAsync);
         g.MapPost("/{id:guid}/typing", TypingAsync);
         g.MapPost("/{id:guid}/read", ReadAsync);
+        g.MapPost("/{id:guid}/invites", InviteAsync);
+        g.MapGet("/{id:guid}/invites", InvitesAsync);
+        g.MapDelete("/{id:guid}/invites/{inviteId:guid}", RevokeAsync);
+        g.MapGet("/join/{token}", JoinPreviewAsync);
+        g.MapPost("/join/{token}", JoinAsync);
+        g.MapGet("/{id:guid}/export", ExportAsync).RequirePermission(Core.Access.Permissions.Export);
     }
 
     private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;
@@ -137,6 +143,8 @@ public static partial class RoomEndpoints
         {
             return AuthEndpoints.Problem(400, "groups", "A group of those is not here.");
         }
+        // Added and counted in one transaction: past the room's size, nobody is added.
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
         var had = await db.RoomMembers.Where(m => m.ConversationId == c.Id).ToListAsync(ct);
         var added = new List<Guid>();
         foreach (var user in ids)
@@ -166,8 +174,11 @@ public static partial class RoomEndpoints
         await db.SaveChangesAsync(ct);
         if (most > 0 && (await RoomAccess.PeopleAsync(db, c, ct)).Count > most)
         {
+            await tx.RollbackAsync(ct);
+            db.ChangeTracker.Clear();
             return AuthEndpoints.Problem(400, "too_many", $"A room holds at most {most} people.");
         }
+        await tx.CommitAsync(ct);
         foreach (var user in added)
         {
             await notifier.SendAsync(user, new Notifications.News("room", $"{NameOf(me)} added you to {c.Title}", null, $"/chat/{c.Id}"), ct);

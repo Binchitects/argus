@@ -38,6 +38,7 @@ export const routes: RouteObject[] = [
           { path: 'assistants', ...lazy(() => import('@/pages/assistants').then((m) => ({ Component: m.AssistantsPage }))) },
           { path: 'prompts', ...lazy(() => import('@/pages/prompts').then((m) => ({ Component: m.PromptsPage }))) },
           { path: 'plans', ...lazy(() => import('@/pages/plans').then((m) => ({ Component: m.PlansPage }))) },
+          { path: 'rooms/join/:token', ...lazy(() => import('@/pages/room-join').then((m) => ({ Component: m.RoomJoinPage }))) },
           { path: 'plans/:id', ...lazy(() => import('@/pages/plans').then((m) => ({ Component: m.PlanPage }))) },
           { path: 'code', ...lazy(() => import('@/pages/code/code').then((m) => ({ Component: m.CodePage }))) },
           { path: 'code/reviews/:id', ...lazy(() => import('@/pages/code/review').then((m) => ({ Component: m.ReviewPage }))) },

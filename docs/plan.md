@@ -1385,3 +1385,24 @@ sandbox (a plugin still names a server hosted elsewhere), plugin settings per
 group, and plugins that bring skills or scheduled tasks. These, and v6.0's
 leftovers, are what comes next.
 
+
+## Next (after v6.1.0): v6.2 — what v6.0 and v6.1 left
+
+One item at a time, each tested, committed, pushed and deployed:
+
+1. Rooms: invite links (a role, an expiry, how many may use it; revoked
+   at any time) and a room's export (Markdown and JSON, who wrote each
+   message).
+2. Access: changes to many people at once (roles, groups, features) with a
+   dry run that says what would change before anything does.
+3. Reviews: automatic reviews of merge requests as they open and change (by
+   project, from Argus's webhook or a schedule), and scheduled ones.
+4. Reviews beyond GitLab: GitHub and Gitea through Argus, read-only as for
+   GitLab.
+5. Argus: `argus graph-eval` on the company's repositories, and what each
+   repository is for (a line from its README and code, kept with the graph).
+6. Plugins: settings per group, plugins that bring scheduled tasks and Code
+   Arena skills, and a plugin's own MCP server run in the sandbox.
+7. Load tests at 50, 100 and 300 people where the stack can take them (the
+   scripts are in deploy/scripts); vLLM on a real GPU server when there is
+   one.
