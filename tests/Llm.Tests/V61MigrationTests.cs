@@ -14,7 +14,7 @@ namespace Llm.Tests;
 public sealed class V61MigrationTests(AppFixture app)
 {
     /// <summary>A row with the given values, every other required column filled with its type's empty value.</summary>
-    private static async Task InsertAsync(NpgsqlConnection conn, string table, Dictionary<string, object> values)
+    internal static async Task InsertAsync(NpgsqlConnection conn, string table, Dictionary<string, object> values)
     {
         await using var columns = new NpgsqlCommand(
             "select column_name, data_type, udt_name from information_schema.columns where table_name = @t and is_nullable = 'NO' and column_default is null", conn);
@@ -44,7 +44,7 @@ public sealed class V61MigrationTests(AppFixture app)
             }
         }
         var names = all.Keys.ToList();
-        await using var insert = new NpgsqlCommand($"insert into {table} ({string.Join(", ", names.Select(n => $"\"{n}\""))}) values ({string.Join(", ", names.Select((_, i) => $"@p{i}"))})", conn);
+        await using var insert = new NpgsqlCommand($"insert into \"{table}\" ({string.Join(", ", names.Select(n => $"\"{n}\""))}) values ({string.Join(", ", names.Select((_, i) => $"@p{i}"))})", conn);
         for (var i = 0; i < names.Count; i++)
         {
             insert.Parameters.AddWithValue($"p{i}", all[names[i]]);

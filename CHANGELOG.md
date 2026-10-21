@@ -12,6 +12,55 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v6.2.0 (2026-10-21)
+
+### :rocket: Epics and highlights
+
+- **Automatic reviews** (Code → Automatic reviews): a project's merge
+  requests reviewed as they open and get new commits, from GitLab's webhook
+  to the rule's own address and a look at the open ones every few minutes
+  (only into the branches named, drafts when ready, only what changed since
+  the last review); a branch reviewed against another on a schedule, skipped
+  when it has not moved; each review posted in a room if the rule has one.
+  Read with the rule's person's access, at their cost, at most so many a day
+- **GitHub and Gitea pull requests**, reviewed as merge requests are:
+  `github:owner/repo` and `gitea:owner/repo`, read through Argus with each
+  person's own read-only token, linked once in Account → Code hosts (checked,
+  kept encrypted, never shown again): their rights there are all that is read
+- **Plugins that bring more, and run their own server**: a group's own
+  values for a plugin's settings (another key, another address); scheduled
+  tasks people add to their own; Code Arena skills kept with theirs; and a
+  plugin's own MCP server, in Python, run in the sandbox with no network,
+  with a helper for authors
+
+### :sparkles: New features & Enhancements
+
+- Rooms: invite links (members or viewers, how long, for how many; stopped
+  at any time) and the room's export as Markdown or JSON with who wrote each
+  message
+- Access → Many people: roles, groups, features and accounts changed for
+  many people at once, with a dry run that says person by person what would
+  change, then made as one change in the history
+- Argus: `argus graph-eval` measures the repository links against what their
+  owners know (precision by tier, layer and kind, recall, calibration, what
+  is wrong and missed) and writes calibrated priors the next rebuild uses;
+  each repository has a line saying what it is for (README, manifest or
+  code; or an admin's words), in the overview and the system map
+- `deploy/scripts/people-load.py`: 50, 100 or 300 people signing in,
+  chatting and reading answers, with p50/p95/p99 per step and every
+  failure; results in testing.md
+
+### :bug: Bugs fixed
+
+- An office of 300 behind one address signing in within a minute was
+  refused 180 times: the sign-in flood guard is now 600 a minute per address
+  and a setting (`Auth__SignInsPerMinute`)
+
+### :boom: Breaking changes & Deprecations
+
+- The Argus client's sessions are opened for a person by id and email
+  (their linked code host tokens go with them)
+
 ## v6.1.0 (2026-10-21)
 
 ### :rocket: Epics and highlights

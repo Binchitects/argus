@@ -1386,23 +1386,31 @@ group, and plugins that bring skills or scheduled tasks. These, and v6.0's
 leftovers, are what comes next.
 
 
-## Next (after v6.1.0): v6.2 — what v6.0 and v6.1 left
+## v6.2.0 — Automatic reviews, GitHub and Gitea, plugins that run their own server (2026-10-21)
 
-One item at a time, each tested, committed, pushed and deployed:
+Released with every item of its plan: room invite links and export; access
+for many people with a dry run; automatic and scheduled reviews; GitHub and
+Gitea pull requests through Argus with each person's own token; `argus
+graph-eval` and what each repository is for; plugin settings per group,
+plugin tasks and Code Arena skills, a plugin's own MCP server in the
+sandbox; people load tests at 50, 100 and 300 (testing.md, S12), which found
+the sign-in flood guard too tight for an office behind one address (now 600 a
+minute). Left: vLLM on a real GPU server (none here), and what is below.
 
-1. Rooms: invite links (a role, an expiry, how many may use it; revoked
-   at any time) and a room's export (Markdown and JSON, who wrote each
-   message).
-2. Access: changes to many people at once (roles, groups, features) with a
-   dry run that says what would change before anything does.
-3. Reviews: automatic reviews of merge requests as they open and change (by
-   project, from Argus's webhook or a schedule), and scheduled ones.
-4. Reviews beyond GitLab: GitHub and Gitea through Argus, read-only as for
-   GitLab.
-5. Argus: `argus graph-eval` on the company's repositories, and what each
-   repository is for (a line from its README and code, kept with the graph).
-6. Plugins: settings per group, plugins that bring scheduled tasks and Code
-   Arena skills, and a plugin's own MCP server run in the sandbox.
-7. Load tests at 50, 100 and 300 people where the stack can take them (the
-   scripts are in deploy/scripts); vLLM on a real GPU server when there is
-   one.
+
+## Next (after v6.2.0)
+
+1. The vLLM image on a real GPU server: bring-up, a smoke test per model,
+   numbers, and the people load tests there; DCGM's image.
+2. `argus graph-eval` with the owners' links of the company's repositories
+   (the tool is ready; their file is needed), and the priors calibrated from
+   it.
+3. Reviews: plain git repositories (an address and a read-only deploy key),
+   comparing two refs on Gitea (through a copy Argus keeps), and GitHub's and
+   Gitea's webhooks for automatic reviews.
+4. The chat's default model with more answers at once, or a second copy,
+   where people wait for it (100 people asking on one slot waited up to a
+   minute).
+5. Carried: Code Arena's sandbox on Windows; real platforms (Slack, Teams,
+   SAML, Confluence, SharePoint, Helm on a cluster); Laya's routing quality;
+   deep research under six minutes.
