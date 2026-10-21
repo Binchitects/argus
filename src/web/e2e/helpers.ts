@@ -11,13 +11,15 @@ export const noObserve = !!process.env.E2E_NO_OBSERVE
  * Collects console errors, including Content-Security-Policy violations.
  * Ignored: expected 401s (the signed-out check), ERR_CERT_VERIFIER_CHANGED,
  * which an installed Chrome logs when it reloads its certificate store mid-run,
- * and without a gateway, its 502s.
+ * the service worker's script refused over the stack's own certificate (a
+ * browser registers one only over a certificate it trusts; ignoreHTTPSErrors
+ * does not reach it), and without a gateway, its 502s.
  */
 export function watchConsole(page: Page): string[] {
   const errors: string[] = []
   page.on('console', (m) => {
     const t = m.text()
-    if (m.type() !== 'error' || t.includes('401') || t.includes('ERR_CERT_VERIFIER_CHANGED') || (noGateway && t.includes('502'))) return
+    if (m.type() !== 'error' || t.includes('401') || t.includes('ERR_CERT_VERIFIER_CHANGED') || t.includes('SSL certificate error occurred when fetching the script') || (noGateway && t.includes('502'))) return
     errors.push(`${t} (${m.location().url || 'no url'})`)
   })
   page.on('pageerror', (e) => errors.push(e.message))
