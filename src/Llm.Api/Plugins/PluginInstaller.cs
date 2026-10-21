@@ -55,7 +55,7 @@ public static class PluginInstaller
         server.PluginSettings = values.ToJsonString();
         var plain = Values(server, dataKey);
         var url = PluginManifest.Fill(manifest.Url, plain);
-        if (!(Uri.TryCreate(url, UriKind.Absolute, out var address) && address.Scheme is "http" or "https"))
+        if (manifest.Sandbox is null && !(Uri.TryCreate(url, UriKind.Absolute, out var address) && address.Scheme is "http" or "https"))
         {
             return $"The plugin's address ({url}) is not an http(s) URL: check its settings.";
         }

@@ -30,6 +30,9 @@ public sealed record PluginPackage(PluginManifest Manifest, string ManifestText,
     public IReadOnlyList<Safeguards.RuleRequest> Rules { get; init; } = [];
     public IReadOnlyDictionary<string, string> Files { get; init; } = new Dictionary<string, string>();
 
+    /// <summary>Its own MCP server's files, run in the sandbox (server.py and those beside it), by name; empty for other plugins.</summary>
+    public IReadOnlyDictionary<string, string> SandboxFiles { get; init; } = new Dictionary<string, string>();
+
     /// <summary>Its Code Arena skills: each folder's name (as its SKILL.md names it) and its files, by their path in the folder.</summary>
     public IReadOnlyList<PluginSkill> Skills { get; init; } = [];
 }
@@ -200,7 +203,28 @@ public sealed class PluginCatalog(IOptionsMonitor<PluginOptions> options, IHttpC
             }
             skills.Add(new PluginSkill(skillName, description, files));
         }
-        return new PluginPackage(manifest, text, spec, prompts) { Assistants = assistants, Rules = rules, Files = kept, Skills = skills };
+        var server = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (manifest.Sandbox is { } own)
+        {
+            foreach (var path in list(own).Order(StringComparer.Ordinal))
+            {
+                var inside = path[(own.Length + 1)..];
+                if (inside.Contains('/', StringComparison.Ordinal))
+                {
+                    throw new PluginException($"The sandbox's server is files side by side in {own}: {inside} is in a folder of its own.");
+                }
+                server[inside] = file(path) ?? "";
+            }
+            if (!server.ContainsKey("server.py"))
+            {
+                throw new PluginException($"The sandbox's server has no {own}/server.py.");
+            }
+            if (server.Count > MostSkillFiles || server.Values.Sum(f => f.Length) > MostSkillChars)
+            {
+                throw new PluginException($"The sandbox's server is more than {MostSkillFiles} files or {MostSkillChars / 1_000_000} MB.");
+            }
+        }
+        return new PluginPackage(manifest, text, spec, prompts) { Assistants = assistants, Rules = rules, Files = kept, Skills = skills, SandboxFiles = server };
     }
 
     /// <summary>A SKILL.md's name and description, from its front matter (name: and description:), else its folder and first line.</summary>

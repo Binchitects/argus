@@ -166,6 +166,49 @@ missing, an API document with no operations, a `{placeholder}` that is not a
 setting) and what looks wrong (a version not like 1.2.3, plain http, `writes`
 naming no operation), and what it would ask for.
 
+## A server of its own, in the sandbox
+
+A plugin can bring its own MCP server, written in Python, instead of an
+address: `tools: { sandbox: mcp }` names a folder in the plugin with its
+`server.py` and the files beside it (side by side, up to 100 files and
+1 MB). It runs in the Python sandbox: no network, a read-only root, its own
+user, killed at its time limit (the sandbox's, or the server's own call
+limit). Each list of its tools and each call is one short run: the app gives
+it its files and its settings (`settings.json`), writes `initialize` and the
+one request on its input, and reads the answers until it ends. Its list is
+kept for the version installed. It needs the sandbox running (the `sandbox`
+profile); otherwise the tool says so.
+
+```yaml
+name: units
+version: 1.0.0
+title: Units
+tools: { sandbox: mcp }
+settings:
+  - { key: precision, title: Digits, type: text }
+```
+
+`mcp/server.py`, with the helper the sandbox has:
+
+```python
+from sandbox_tools.mcp_server import Server
+
+server = Server("units", instructions="Lengths between metres and feet.")
+
+@server.tool("Converts a length.", {"value": {"type": "number"}, "unit": {"type": "string", "enum": ["m", "ft"]}})
+def convert(value, unit):
+    digits = int(server.settings.get("precision", "2"))
+    return f"{value * 3.28084:.{digits}f} ft" if unit == "m" else f"{value / 3.28084:.{digits}f} m"
+
+server.run()
+```
+
+What a function returns is the call's text (anything else is sent as JSON);
+an exception is the call's error, which the model reads. It can use what the
+sandbox has (pandas, numpy, the document and picture tools...) and nothing
+from the network. Its writes ask first, and who may use it is set as for any
+tool.
+
 ## Prompts
 
 `prompts:` lists Markdown files in the plugin. Each is a prompt of the library

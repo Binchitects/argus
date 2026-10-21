@@ -150,7 +150,8 @@ public sealed record ToolChoice(IChatTool Tool, ToolSetting Setting, string? Una
 public sealed class ToolRegistry(
     AppDbContext db, ArgusTool argus, ImageTool image, VideoTool video, SpeechTool speech, CalculatorTool calculator, TimeTool time, FilesTool files, CanvasTool canvas, PythonTool python, WebTool web, AskTool ask, AgentsTool agents, MemoryTool memory,
     IHttpClientFactory http, IOptions<AuthOptions> auth, IOptionsMonitor<ChatOptions> chat, Plugins.PersonCredentials people, Knowledge.KnowledgeTool knowledge, LayaTool laya,
-    ResearchTool research, BlenderTool blender, Plans.PlansTool plans, Code.ReviewTool reviews, GatewayChat gateway, ToolUsage usage)
+    ResearchTool research, BlenderTool blender, Plans.PlansTool plans, Code.ReviewTool reviews, GatewayChat gateway, ToolUsage usage,
+    SandboxClient sandbox, IServiceScopeFactory scopes, IOptionsMonitor<SandboxOptions> sandboxOptions)
 {
     public const string McpClient = "mcp";
 
@@ -173,7 +174,9 @@ public sealed class ToolRegistry(
     public IServerTool Server(McpServer server) => Server(server, ServerClients.For(http, server));
 
     /// <param name="client">The connection to use: a test's, with the form's certificate check.</param>
-    public IServerTool Server(McpServer server, HttpClient client) => server.Spec is { Length: > 0 }
+    public IServerTool Server(McpServer server, HttpClient client) =>
+        server.Url.StartsWith(Plugins.PluginManifest.SandboxScheme, StringComparison.Ordinal) ? new SandboxServerTool(server, sandbox, scopes, auth.Value.DataKey, sandboxOptions)
+        : server.Spec is { Length: > 0 }
         ? new OpenApiTool(server, client, auth.Value.DataKey, chat.CurrentValue.ToolCallTimeout) { People = people }
         : new McpServerTool(server, client, auth.Value.DataKey, chat.CurrentValue.ToolCallTimeout) { People = people };
 

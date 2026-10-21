@@ -116,18 +116,70 @@ public sealed class FakeSandbox : IAsyncDisposable
         {
             await File.WriteAllTextAsync(Path.Combine(draft, "files", "canvas.pdf"), $"%PDF-1.7\n% from {new FileInfo(Path.Combine(job, "files", "canvas.docx")).Length} bytes\n%%EOF\n");
         }
+        var served = await ServeMcpAsync(code, job);
         var fail = code.Contains("# fail", StringComparison.Ordinal);
         await File.WriteAllTextAsync(Path.Combine(draft, "result.json"), new JsonObject
         {
             ["exit_code"] = fail ? 1 : cancelled ? -9 : 0, ["timed_out"] = false, ["cancelled"] = cancelled,
-            ["stdout"] = $"given: {string.Join(",", given)}\nfirst line: {code.Split('\n')[0]}\n" + (pages ? $"{{\"total\": {DocumentPages}, \"error\": null}}\n" : "")
-                + (media ? "{\"seconds\": 4.0, \"sound\": true, \"frames\": 2}\n" : ""), ["stdout_cut"] = false,
+            ["stdout"] = served ?? ($"given: {string.Join(",", given)}\nfirst line: {code.Split('\n')[0]}\n" + (pages ? $"{{\"total\": {DocumentPages}, \"error\": null}}\n" : "")
+                + (media ? "{\"seconds\": 4.0, \"sound\": true, \"frames\": 2}\n" : "")), ["stdout_cut"] = false,
             ["stderr"] = fail ? "Traceback (most recent call last):\n  File \"main.py\", line 1\nValueError: bad\n" : "", ["stderr_cut"] = false,
             ["killed"] = null, ["error"] = null, ["skipped_files"] = new JsonArray(), ["duration_ms"] = 12,
             ["files"] = new JsonArray([.. Directory.GetFiles(Path.Combine(draft, "files")).Select(f => (JsonNode)Path.GetFileName(f))]),
         }.ToJsonString());
         Directory.Delete(job, recursive: true);
         Directory.Move(draft, Path.Combine(Dir, "out", id));
+    }
+
+    /// <summary>The settings.json each plugin server's job was given.</summary>
+    public List<string> McpSettings { get; } = [];
+
+    /// <summary>
+    /// A plugin's own MCP server's job (Chat/Tools/SandboxServerTool): answered as its server.py would, a units converter
+    /// (sandbox_tools/mcp_server.py's example): initialize, tools/list, tools/call of convert (boom fails). Null for any other job.
+    /// </summary>
+    private async Task<string?> ServeMcpAsync(string code, string job)
+    {
+        var input = System.Text.RegularExpressions.Regex.Match(code, @"sys\.stdin = io\.StringIO\((""(?:[^""\\]|\\.)*"")\)");
+        if (!code.Contains("runpy.run_path('server.py'", StringComparison.Ordinal) || !input.Success || !File.Exists(Path.Combine(job, "files", "server.py")))
+        {
+            return null;
+        }
+        lock (McpSettings)
+        {
+            McpSettings.Add(File.ReadAllText(Path.Combine(job, "files", "settings.json")));
+        }
+        var lines = new System.Text.StringBuilder();
+        foreach (var line in System.Text.Json.JsonSerializer.Deserialize<string>(input.Groups[1].Value)!.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var m = JsonNode.Parse(line)!.AsObject();
+            if (m["id"] is not { } id)
+            {
+                continue;
+            }
+            JsonNode result = m["method"]!.GetValue<string>() switch
+            {
+                "initialize" => new JsonObject { ["protocolVersion"] = "2025-06-18", ["capabilities"] = new JsonObject(), ["instructions"] = "Lengths between metres and feet." },
+                "tools/list" => new JsonObject
+                {
+                    ["tools"] = new JsonArray(
+                        new JsonObject
+                        {
+                            ["name"] = "convert", ["description"] = "Converts a length.",
+                            ["inputSchema"] = new JsonObject { ["type"] = "object", ["properties"] = new JsonObject { ["value"] = new JsonObject { ["type"] = "number" }, ["unit"] = new JsonObject { ["type"] = "string" } }, ["required"] = new JsonArray("value", "unit") },
+                        },
+                        new JsonObject { ["name"] = "boom", ["description"] = "Fails.", ["inputSchema"] = new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() } }),
+                },
+                "tools/call" when m["params"]!["name"]!.GetValue<string>() == "convert" => new JsonObject
+                {
+                    ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = $"{m["params"]!["arguments"]!["value"]!.GetValue<double>() * 3.28084:0.00} ft" }), ["isError"] = false,
+                },
+                _ => new JsonObject { ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = "ValueError: boom" }), ["isError"] = true },
+            };
+            lines.Append(new JsonObject { ["jsonrpc"] = "2.0", ["id"] = id.DeepClone(), ["result"] = result }.ToJsonString()).Append('\n');
+        }
+        await Task.Yield();
+        return lines.ToString();
     }
 
     public async ValueTask DisposeAsync()

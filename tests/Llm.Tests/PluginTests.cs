@@ -306,4 +306,54 @@ public sealed class PluginTests(AppFixture app)
             Assert.False(await scope.ServiceProvider.GetRequiredService<AppDbContext>().TaskTemplates.AnyAsync());
         }
     }
+
+    [Fact]
+    public async Task A_plugins_own_server_runs_in_the_sandbox_with_its_settings_one_job_a_call()
+    {
+        await using var sandbox = new FakeSandbox();
+        await using var f = app.Create(app.ConnectionStringFor("plugins_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
+            new Dictionary<string, string?> { ["Auth:DataKey"] = "a-data-key-for-plugin-tests", ["Sandbox:Dir"] = sandbox.Dir });
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        byte[] Zip(params (string Name, string Text)[] files)
+        {
+            using var buffer = new MemoryStream();
+            using (var zip = new System.IO.Compression.ZipArchive(buffer, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+            {
+                foreach (var (name, text) in files)
+                {
+                    using var w = new StreamWriter(zip.CreateEntry(name).Open());
+                    w.Write(text);
+                }
+            }
+            return buffer.ToArray();
+        }
+        const string manifest = "name: units\nversion: 1.0.0\ntitle: Units\ntools: { sandbox: mcp }\nsettings:\n  - { key: precision, title: Digits, type: text }\n";
+        // A server is a folder with its server.py.
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/plugins/install",
+            new { accept = true, zip = Convert.ToBase64String(Zip(("units/plugin.yaml", manifest), ("units/mcp/other.py", "x = 1\n"))) }));
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/plugins/install", new
+        {
+            accept = true, settings = new { precision = "2" },
+            zip = Convert.ToBase64String(Zip(("units/plugin.yaml", manifest), ("units/mcp/server.py", "from sandbox_tools.mcp_server import Server\n"), ("units/mcp/lengths.py", "FEET = 3.28084\n"))),
+        }));
+        var toolId = made.GetProperty("toolId").GetString()!;
+        var installed = (await admin.JsonAsync(await admin.GetAsync("/api/admin/plugins"))).GetProperty("installed").EnumerateArray().Single();
+        Assert.Equal("sandbox:units", installed.GetProperty("url").GetString());
+
+        var (b, _) = await PersonAsync(f);
+        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false, tools = new[] { toolId } }))).GetProperty("id").GetGuid();
+        var events = await SendAsync(b, chat, """[call units__convert {"value": 2, "unit": "m"}]""");
+        Assert.Equal("6.56 ft", Event(events, "tool_result").GetProperty("text").GetString());
+        var failed = Event(await SendAsync(b, chat, """[call units__boom {}]"""), "tool_result");
+        Assert.True(failed.GetProperty("isError").GetBoolean());
+
+        // Its files and its settings went in, each time; its list once.
+        lock (sandbox.Jobs)
+        {
+            var jobs = sandbox.Jobs.Where(j => j["code"]!.GetValue<string>().Contains("runpy.run_path('server.py'", StringComparison.Ordinal)).ToList();
+            Assert.Equal(3, jobs.Count);
+            Assert.All(jobs, j => Assert.Equal(["lengths.py", "server.py", "settings.json"], j["files"]!.AsArray().Select(x => x!.GetValue<string>()).Order()));
+        }
+        Assert.All(sandbox.McpSettings, s => Assert.Equal("""{"precision":"2"}""", s));
+    }
 }

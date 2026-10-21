@@ -34,6 +34,11 @@ public sealed partial record PluginManifest(
     public string[] Safeguards { get; init; } = [];
     public PluginToolset[] Toolsets { get; init; } = [];
     public PluginTask[] Tasks { get; init; } = [];
+    /// <summary>The plugin's own MCP server, run in the sandbox: a folder in the plugin with its server.py (and the files beside it).</summary>
+    public string? Sandbox { get; init; }
+
+    /// <summary>The address of a server run in the sandbox: sandbox:{plugin}.</summary>
+    public const string SandboxScheme = "sandbox:";
     /// <summary>Code Arena skills: folders in the plugin, each with its SKILL.md and the files beside it.</summary>
     public string[] Skills { get; init; } = [];
     public string? Author { get; init; }
@@ -63,9 +68,15 @@ public sealed partial record PluginManifest(
         var tools = doc["tools"] as JsonObject ?? throw new ManifestException("The manifest says no tools (tools: openapi: or mcp:).");
         var openapi = Str(tools["openapi"]);
         var mcp = Str(tools["mcp"]);
-        if ((openapi is null) == (mcp is null))
+        var sandbox = Str(tools["sandbox"])?.Trim('/');
+        if (new[] { openapi, mcp, sandbox }.Count(x => x is not null) != 1)
         {
-            throw new ManifestException("The tools are an OpenAPI document in the plugin (tools: openapi: file) or an MCP server (tools: mcp: address): one of them.");
+            throw new ManifestException("The tools are an OpenAPI document in the plugin (tools: openapi: file), an MCP server (tools: mcp: address), " +
+                "or the plugin's own MCP server run in the sandbox (tools: sandbox: folder): one of them.");
+        }
+        if (sandbox is not null && (sandbox.Length == 0 || sandbox.Contains("..", StringComparison.Ordinal) || Path.IsPathRooted(sandbox)))
+        {
+            throw new ManifestException("The sandbox's server must be a folder inside the plugin.");
         }
         if (openapi is not null && (openapi.Contains("..", StringComparison.Ordinal) || Path.IsPathRooted(openapi)))
         {
@@ -128,12 +139,12 @@ public sealed partial record PluginManifest(
             throw new ManifestException($"The task {twiceTask.Key} is there twice.");
         }
         return new PluginManifest(name, Str(doc["version"]) ?? "0", Str(doc["title"]) ?? name, Str(doc["description"]) ?? "",
-            openapi, mcp, Str(tools["url"]) ?? mcp ?? "",
+            openapi, mcp, sandbox is not null ? SandboxScheme + name : Str(tools["url"]) ?? mcp ?? "",
             person, Str(auth["header"]) ?? "Authorization", Str(auth["value"]) ?? "Bearer {token}", oauth, Str(auth["help"]),
             [.. (doc["writes"] as JsonArray ?? []).Select(Str).OfType<string>()], settings, prompts)
         {
             Assistants = Files("assistants"), Safeguards = Files("safeguards"), Toolsets = toolsets, Author = Str(doc["author"]), Homepage = Str(doc["homepage"]),
-            Tasks = tasks, Skills = [.. Files("skills").Select(f => f.Trim('/'))],
+            Tasks = tasks, Skills = [.. Files("skills").Select(f => f.Trim('/'))], Sandbox = sandbox,
         };
     }
 
