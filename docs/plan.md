@@ -1398,19 +1398,114 @@ the sign-in flood guard too tight for an office behind one address (now 600 a
 minute). Left: vLLM on a real GPU server (none here), and what is below.
 
 
-## Next (after v6.2.0)
+## Next: v6.3 to v6.8 — a headline in every release
+
+Asked 2026-10-21: the features had become plumbing; each release should have
+something worth showing. So each release below has a theme, two headline
+features that can be shown in a minute, and smaller ones that go with them.
+Groundwork (the list at the end) goes in between, not instead. One item at
+a time, each tested, committed, pushed and deployed. A download (an image, a
+model) waits for a yes, with its name, source and size.
+
+### v6.3 — "Show me": the model sees what you see
+
+1. **Show your screen.** In Talk or in a chat, **Share screen** (a window, a
+   tab or the whole screen, as the browser offers): each question takes what
+   is on it now and goes to a model that sees. "What is wrong with this
+   chart?", "Which button do I press?", a spoken walk through a dashboard.
+   Nothing is recorded but the frames sent, kept with the question; a frame
+   the safeguards' file and PII rules refuse is not sent.
+2. **Napkin to app.** A whiteboard in the chat: draw with the mouse, a pen
+   or a finger, or photograph a paper sketch, and ask: the model turns it
+   into a running preview (a page or a React component), a diagram
+   (Mermaid), a 3D scene, or a table. Draw over the result to change it.
+3. **The browser agent.** A chat tool that drives a real browser in its own
+   container (Chromium, no access to the stack's network, sites only through
+   an allow-list proxy): it opens pages, reads, clicks and types to do a
+   task, while the chat shows its screen live; the person can take over at
+   any moment. It asks first before anything that sends a form, buys, posts
+   or deletes, and never enters a password or a card (the person does).
+   Needs a yes: the Playwright image (mcr.microsoft.com/playwright, about
+   2 GB).
+
+### v6.4 — Apps: what the chat builds, people use
+
+1. **Arena Apps.** A preview published as an app at its own link in the
+   company: a gallery, versions, **Remix** to make one's own. An app may ask
+   the model (`arena.ask`, as the person using it: their credit, their
+   safeguards, their tools) and keep its data (`arena.store`, per app,
+   shared or per person). Who may open it: everyone, groups, people.
+2. **Ask your data.** Read-only databases an admin connects (PostgreSQL,
+   MySQL, SQL Server; who may ask which tables): a question becomes SQL,
+   shown and explained, run as a read-only role, and answered with a table
+   and a chart. **Pin** a chart to a dashboard that refreshes on its
+   schedule and can be shared to groups or posted to a room.
+3. **Decks.** "Make a deck about…": slides with the company's look (an admin
+   uploads a template), charts from the data and pictures from the picture
+   model, shown in the browser, changed by asking ("a slide on costs after
+   the third"), downloaded as .pptx and PDF.
+
+### v6.5 — Agents that do the work
+
+1. **Agent Studio.** Workflows on a canvas: a trigger (a schedule, a
+   webhook, a GitLab event, a room message, a form), steps (ask a model, a
+   tool, a condition, a loop over items, a person's approval), and outputs
+   (a room, an email, a merge request comment, a file). Every run kept with
+   a timeline to replay it step by step. Templates from the tasks and
+   reviews people have today.
+2. **Fix it.** On a review finding, an issue or a failed pipeline: an agent
+   takes the code in the sandbox, makes the change, runs the tests, and shows
+   the diff; with the person's own linked GitLab or GitHub token (never
+   Argus's), it opens the merge request as them.
+3. **Panel.** Several assistants in a room discuss a question from their
+   roles (the expert, the critic, the one who says no), the moderator writes
+   the verdict with who said what.
+
+### v6.6 — Studio: pictures, video and 3D, finished
+
+1. **Video studio.** From a script or a question: a storyboard, each shot
+   from the video model, a narration in the person's voice, captions and a
+   music bed, cut into one MP4; any shot made again on its own.
+2. **Image studio.** Edit a picture by painting over the part to change
+   (FLUX.2's editing with references), make variations, enlarge, take the
+   background away, and make a picture move (a short video from it).
+3. **3D, made real.** STL and 3MF for printing, a turntable video of any
+   model, and figures that move (a walk, a wave) exported with their
+   animation.
+
+### v6.7 — Everyone, in every language
+
+1. **Rooms in every language.** Each member reads the room in their own
+   language and writes in theirs; the others read it in theirs, the original
+   a click away. Voice in rooms with live captions, translated too.
+2. **Meetings.** Record one in the browser or upload it: who spoke when, the
+   transcript, the decisions and the action items, each made a task with its
+   owner and a reminder; then ask the meeting. Needs a yes: a speaker
+   diarization model.
+3. **Arena on the phone.** Installable (PWA): share a file or a page from
+   any app to a chat, push notifications, Talk on the lock screen's
+   shortcut, works with a poor connection (what is sent waits).
+
+### v6.8 — A model of your own
+
+1. **Model lab.** Teach a small model the company's words on the local GPU
+   (a LoRA from chosen knowledge sources, prompts and good answers), then
+   compare it with the model it came from in blind battles, and give it to
+   people with one click. Needs a yes: the training libraries.
+2. **Evals.** Test sets for assistants, prompts and models, run on every
+   change (a new model, a new prompt), scored by rules or a judge model,
+   with what got worse shown first.
+
+### Groundwork, in between
 
 1. The vLLM image on a real GPU server: bring-up, a smoke test per model,
    numbers, and the people load tests there; DCGM's image.
-2. `argus graph-eval` with the owners' links of the company's repositories
-   (the tool is ready; their file is needed), and the priors calibrated from
-   it.
-3. Reviews: plain git repositories (an address and a read-only deploy key),
-   comparing two refs on Gitea (through a copy Argus keeps), and GitHub's and
-   Gitea's webhooks for automatic reviews.
+2. `argus graph-eval` with the owners' links of the company's repositories,
+   and the priors calibrated from it.
+3. Reviews: plain git repositories, comparing two refs on Gitea, and
+   GitHub's and Gitea's webhooks for automatic reviews.
 4. The chat's default model with more answers at once, or a second copy,
-   where people wait for it (100 people asking on one slot waited up to a
-   minute).
+   where people wait for it.
 5. Carried: Code Arena's sandbox on Windows; real platforms (Slack, Teams,
    SAML, Confluence, SharePoint, Helm on a cluster); Laya's routing quality;
    deep research under six minutes.
