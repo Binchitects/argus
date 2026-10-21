@@ -41,7 +41,8 @@ public sealed partial class ReviewEngine(IServiceScopeFactory scopes, ILogger<Re
         {
             await using var scope = scopes.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            await db.CodeReviews.Where(r => r.Status == CodeReview.Running || r.Status == CodeReview.Queued)
+            // An automatic review still waiting its turn waits on; the rule's next look starts it.
+            await db.CodeReviews.Where(r => r.Status == CodeReview.Running || (r.Status == CodeReview.Queued && r.RuleId == null))
                 .ExecuteUpdateAsync(s => s.SetProperty(r => r.Status, CodeReview.Failed).SetProperty(r => r.Error, "The app restarted while it ran: review it again."), cancellationToken);
         }
         catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException or Npgsql.NpgsqlException)
@@ -82,6 +83,13 @@ public sealed partial class ReviewEngine(IServiceScopeFactory scopes, ILogger<Re
             var (description, files, ci) = await ReadAsync(session, review, previous, ct);
             review.Ci = ci;
             review.Files = files.Count;
+            if (files.Count == 0 && review.RuleId is not null && previous is not null)
+            {
+                // An automatic look at something that has not changed since: nothing to say, nothing kept.
+                db.CodeReviews.Remove(review);
+                await db.SaveChangesAsync(ct);
+                return;
+            }
             if (files.Count == 0)
             {
                 review.Verdict = "looks_good";
@@ -138,6 +146,10 @@ public sealed partial class ReviewEngine(IServiceScopeFactory scopes, ILogger<Re
         review.FinishedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
         await NotifyAsync(services, review, ct);
+        if (review.RuleId is not null && review.RoomId is { } room)
+        {
+            await services.GetRequiredService<AutoReviews>().PostAsync(db, review, room, ct);
+        }
     }
 
     private static async Task NotifyAsync(IServiceProvider services, CodeReview review, CancellationToken ct) =>
@@ -210,6 +222,12 @@ public sealed partial class ReviewEngine(IServiceScopeFactory scopes, ILogger<Re
         {
             changes = await CallAsync(session, "compare_refs", new JsonObject { ["project"] = review.Project, ["from"] = review.FromRef, ["to"] = review.ToRef }, ct);
             review.Title = $"{review.ToRef} over {review.FromRef}";
+            // Its head is the last commit: a scheduled review again of a branch that has not moved has nothing new to read.
+            review.HeadSha = (changes["commits"] as JsonArray)?.LastOrDefault()?["sha"]?.ToString();
+            if (previous is not null && previous.HeadSha is { Length: > 0 } head && head == review.HeadSha)
+            {
+                return ($"What {review.ToRef} has over {review.FromRef}.", [], null);
+            }
             description = $"What {review.ToRef} has over {review.FromRef}.\nCommits:\n" +
                 string.Join('\n', (changes["commits"] as JsonArray ?? []).Select(c => "- " + c?["title"]));
         }

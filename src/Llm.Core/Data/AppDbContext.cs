@@ -33,6 +33,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Plans.Plan> Plans => Set<Plans.Plan>();
     public DbSet<Plans.PlanStep> PlanSteps => Set<Plans.PlanStep>();
     public DbSet<Code.ReviewFinding> ReviewFindings => Set<Code.ReviewFinding>();
+    public DbSet<Code.ReviewRule> ReviewRules => Set<Code.ReviewRule>();
     public DbSet<ChatShareView> ChatShareViews => Set<ChatShareView>();
     public DbSet<Canvas> Canvases => Set<Canvas>();
     public DbSet<CanvasVersion> CanvasVersions => Set<CanvasVersion>();
@@ -235,11 +236,30 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Verdict).HasMaxLength(16);
             e.Property(x => x.Risk).HasMaxLength(16);
             e.Property(x => x.Model).HasMaxLength(200);
+            e.Property(x => x.Trigger).HasMaxLength(16);
             e.HasIndex(x => new { x.UserId, x.CreatedAt });
             e.HasIndex(x => new { x.Project, x.Iid });
+            e.HasIndex(x => new { x.RuleId, x.CreatedAt });
+            e.HasOne<Code.ReviewRule>().WithMany().HasForeignKey(x => x.RuleId).OnDelete(DeleteBehavior.SetNull);
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Conversation>().WithMany().HasForeignKey(x => x.RoomId).OnDelete(DeleteBehavior.SetNull);
             e.HasMany(x => x.Findings).WithOne().HasForeignKey(f => f.ReviewId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Code.ReviewRule>(e =>
+        {
+            e.ToTable("review_rules");
+            e.Property(x => x.Project).HasMaxLength(500);
+            e.Property(x => x.Branch).HasMaxLength(300);
+            e.Property(x => x.Base).HasMaxLength(300);
+            e.Property(x => x.Cron).HasMaxLength(100);
+            e.Property(x => x.TimeZone).HasMaxLength(100);
+            e.Property(x => x.SecretHash).HasMaxLength(64);
+            e.Property(x => x.LastError).HasMaxLength(1000);
+            e.Property(x => x.TargetBranches).HasDefaultValueSql("'{}'::text[]");
+            e.HasIndex(x => x.UserId);
+            e.HasIndex(x => x.Project);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Conversation>().WithMany().HasForeignKey(x => x.RoomId).OnDelete(DeleteBehavior.SetNull);
         });
         builder.Entity<Code.ReviewFinding>(e =>
         {

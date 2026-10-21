@@ -14,6 +14,7 @@ import { Field } from '@/components/ui/field'
 import { Input, Textarea } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { errorMessage } from '@/lib/api'
+import { AutoReviews } from './auto-reviews'
 import { askCode, mergeRequestsQuery, reviewsQuery, startReview, verdictLabel, type ReviewBrief } from './api'
 
 /** A review's state in a word or two, with its verdict once done. */
@@ -167,6 +168,7 @@ export function CodePage() {
           </CardContent>
         </Card>
       </div>
+      <AutoReviews />
       <h2 className="mt-8 mb-3 text-lg font-semibold">Reviews</h2>
       {reviews.error ? (
         <QueryError error={reviews.error} retry={() => reviews.refetch()} />
@@ -185,7 +187,10 @@ export function CodePage() {
                   <span className="block truncate font-medium">
                     {r.project} {r.title}
                   </span>
-                  <span className="block text-xs text-muted-foreground">{new Date(r.createdAt).toLocaleString()}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {new Date(r.createdAt).toLocaleString()}
+                    {r.trigger && ` · ${r.trigger === 'schedule' ? 'scheduled' : 'automatic'}`}
+                  </span>
                 </span>
                 {r.status === 'done' && open > 0 && <span className="text-xs text-muted-foreground">{open} open</span>}
                 <ReviewState r={r} />

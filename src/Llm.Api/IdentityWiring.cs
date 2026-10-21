@@ -341,6 +341,8 @@ public static class IdentityWiring
         services.AddSingleton<Chat.RoomHub>();
         services.AddSingleton<Code.ReviewEngine>();
         services.AddHostedService(sp => sp.GetRequiredService<Code.ReviewEngine>());
+        services.AddSingleton<Code.AutoReviews>();
+        services.AddHostedService(sp => sp.GetRequiredService<Code.AutoReviews>());
         services.AddSingleton<Chat.AnswerJobs>();
         services.AddHostedService(sp => sp.GetRequiredService<Chat.AnswerJobs>());
         services.AddSingleton<Chat.QueuedMessages>();
@@ -476,6 +478,7 @@ public static class IdentityWiring
         Safeguards.SafeguardEndpoints.MapSafeguards(app);
         Chat.RoomEndpoints.MapRooms(app);
         Code.CodeEndpoints.MapCode(app);
+        Code.ReviewRuleEndpoints.MapReviewRules(app);
         Plans.PlanEndpoints.MapPlans(app);
         app.MapForwardAuth();
         app.MapKeyCheck();

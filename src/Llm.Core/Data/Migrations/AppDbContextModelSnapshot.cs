@@ -2287,6 +2287,9 @@ namespace Llm.Core.Data.Migrations
                     b.Property<Guid?>("RoomId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("RuleId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -2308,6 +2311,10 @@ namespace Llm.Core.Data.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("character varying(300)");
 
+                    b.Property<string>("Trigger")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
@@ -2324,6 +2331,8 @@ namespace Llm.Core.Data.Migrations
                     b.HasIndex("RoomId");
 
                     b.HasIndex("Project", "Iid");
+
+                    b.HasIndex("RuleId", "CreatedAt");
 
                     b.HasIndex("UserId", "CreatedAt");
 
@@ -2390,6 +2399,89 @@ namespace Llm.Core.Data.Migrations
                     b.HasIndex("ReviewId");
 
                     b.ToTable("review_findings", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Code.ReviewRule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Base")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Branch")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<int>("CheckMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("CheckedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Cron")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<bool>("MergeRequests")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("MostPerDay")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("NextRunAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Project")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid?>("RoomId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SecretHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<bool>("SkipDrafts")
+                        .HasColumnType("boolean");
+
+                    b.PrimitiveCollection<List<string>>("TargetBranches")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasDefaultValueSql("'{}'::text[]");
+
+                    b.Property<string>("TimeZone")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Project");
+
+                    b.HasIndex("RoomId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("review_rules", (string)null);
                 });
 
             modelBuilder.Entity("Llm.Core.Data.Setting", b =>
@@ -4223,6 +4315,11 @@ namespace Llm.Core.Data.Migrations
                         .HasForeignKey("RoomId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("Llm.Core.Code.ReviewRule", null)
+                        .WithMany()
+                        .HasForeignKey("RuleId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("Llm.Core.Identity.AppUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")
@@ -4235,6 +4332,20 @@ namespace Llm.Core.Data.Migrations
                     b.HasOne("Llm.Core.Code.CodeReview", null)
                         .WithMany("Findings")
                         .HasForeignKey("ReviewId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Code.ReviewRule", b =>
+                {
+                    b.HasOne("Llm.Core.Chat.Conversation", null)
+                        .WithMany()
+                        .HasForeignKey("RoomId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

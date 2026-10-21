@@ -410,9 +410,13 @@ export const topics = {
     parts: [
       { name: 'Merge requests', text: 'A project by its path (group/project): its open, merged or all merge requests. **Review** starts a review; a branch without a merge request can be reviewed against the one it goes into.' },
       { name: 'Ask about code', text: 'A question about a project, a branch or a merge request: answered in a chat with Argus, which reads the code as you may.' },
+      { name: 'Automatic reviews', text: 'A project whose merge requests are reviewed as they open and get new commits (GitLab\'s webhook, and a look every few minutes), and a branch reviewed on a schedule. Read with your access, at your cost; each review can go to a room.' },
       { name: 'Reviews', text: 'Yours, and those of rooms you are in, with their verdict and how many findings are still open.' },
     ],
-    tasks: [{ title: 'Review a merge request', steps: ['Type the project\'s path and press **Show**.', 'Press **Review** beside the merge request.', 'Read the findings when it is ready; the bell says so.'] }],
+    tasks: [
+      { title: 'Review a merge request', steps: ['Type the project\'s path and press **Show**.', 'Press **Review** beside the merge request.', 'Read the findings when it is ready; the bell says so.'] },
+      { title: 'Review a project automatically', steps: ['Under **Automatic reviews**, press **A project** and type its path.', 'Choose the branches, how often to look, and a room if the team should see each review.', 'Press **Review automatically**, then put the URL and the secret token in the project\'s GitLab webhook (Merge request events).'] },
+    ],
     manual: { doc: 'chat', section: 'code-review' },
   },
 

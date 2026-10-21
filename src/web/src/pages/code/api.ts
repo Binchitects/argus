@@ -16,6 +16,10 @@ export interface ReviewBrief {
   createdAt: string
   finishedAt: string | null
   error: string | null
+  /** The project's automatic reviews that started it; null: a person did. */
+  ruleId?: string | null
+  /** webhook, check or schedule: what started an automatic one. */
+  trigger?: 'webhook' | 'check' | 'schedule' | null
 }
 
 export interface Finding {
@@ -89,3 +93,44 @@ export const reviewRoom = (id: string) => api<{ id: string }>(`/api/code/reviews
 export const askCode = (body: { question: string; project?: string; ref?: string; iid?: number }) => api<{ id: string; message: string }>('/api/code/ask', { body })
 
 export const verdictLabel: Record<NonNullable<ReviewBrief['verdict']>, string> = { looks_good: 'Looks good', comments: 'Comments', changes: 'Changes suggested' }
+
+/** A project's automatic reviews (Code → Automatic reviews). */
+export interface ReviewRule {
+  id: string
+  project: string
+  enabled: boolean
+  mergeRequests: boolean
+  targetBranches: string[]
+  skipDrafts: boolean
+  checkMinutes: number
+  branch: string | null
+  base: string | null
+  cron: string | null
+  timeZone: string
+  roomId: string | null
+  mostPerDay: number
+  checkedAt: string | null
+  nextRunAt: string | null
+  lastError: string | null
+  createdAt: string
+  by: string | null
+  today: number
+  hookUrl: string
+}
+
+export type RuleChange = Partial<Pick<ReviewRule, 'project' | 'enabled' | 'mergeRequests' | 'targetBranches' | 'skipDrafts' | 'checkMinutes' | 'branch' | 'base' | 'cron' | 'timeZone' | 'roomId' | 'mostPerDay'>>
+
+export const rulesQuery = {
+  queryKey: ['code', 'rules'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<ReviewRule[]>('/api/code/rules', { signal }),
+}
+
+export const addRule = (body: RuleChange) => api<{ rule: ReviewRule; secret: string }>('/api/code/rules', { body })
+
+export const changeRule = (id: string, body: RuleChange) => api<ReviewRule>(`/api/code/rules/${id}`, { method: 'PUT', body })
+
+export const removeRule = (id: string) => api(`/api/code/rules/${id}`, { method: 'DELETE' })
+
+export const newRuleSecret = (id: string) => api<{ secret: string }>(`/api/code/rules/${id}/secret`, { body: {} })
+
+export const checkRule = (id: string) => api<{ said: string[] }>(`/api/code/rules/${id}/check`, { body: {} })

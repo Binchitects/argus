@@ -44,4 +44,32 @@ describe('code', () => {
     await userEvent.click(within(findings).getByRole('button', { name: 'Resolved' }))
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ state: 'resolved' }))
   })
+
+  it('reviews a project automatically and shows the webhook secret once', async () => {
+    const rule = { id: 'r1', project: 'g/app', enabled: true, mergeRequests: true, targetBranches: ['main'], skipDrafts: true, checkMinutes: 15, branch: null, base: null, cron: null, timeZone: 'UTC', roomId: null, mostPerDay: 20, checkedAt: null, nextRunAt: null, lastError: null, createdAt: '2026-10-21T00:00:00Z', by: 'Mo', today: 2, hookUrl: 'https://arena.test/api/hooks/reviews/r1' }
+    let rules: object[] = []
+    const calls = fakeApi(member, {
+      'GET /api/code/reviews': () => ({ json: [{ review: { ...brief, ruleId: 'r1', trigger: 'webhook' }, open: 1, mine: true }] }),
+      'GET /api/code/rules': () => ({ json: rules }),
+      'GET /api/chat/conversations': () => ({ json: [{ id: 'room1', title: 'Team', updatedAt: '2026-10-21T00:00:00Z', isRoom: true }] }),
+      'POST /api/code/rules': () => {
+        rules = [rule]
+        return { json: { rule, secret: 's3cret' } }
+      },
+      'POST /api/code/rules/r1/check': () => ({ json: { said: ['!7: reviewed already'] } }),
+    })
+    renderApp('/code')
+    expect(await screen.findByText(/automatic/)).toBeInTheDocument()
+    await userEvent.click(await screen.findByRole('button', { name: 'A project' }))
+    const form = screen.getByRole('form', { name: 'Add automatic reviews' })
+    await userEvent.type(within(form).getByLabelText('Project'), 'g/app')
+    await userEvent.type(within(form).getByLabelText('Into branches'), 'main')
+    await userEvent.click(within(form).getByRole('button', { name: 'Review automatically' }))
+    expect(await screen.findByLabelText('Webhook Secret token')).toHaveValue('s3cret')
+    expect(calls.find((c) => c.path === '/api/code/rules' && c.method === 'POST')?.body).toEqual({ project: 'g/app', targetBranches: ['main'], skipDrafts: true, checkMinutes: 15 })
+    const list = await screen.findByRole('list', { name: 'Automatic reviews' })
+    expect(within(list).getByText(/Merge requests into main, not drafts · looked at every 15 min/)).toBeInTheDocument()
+    await userEvent.click(within(list).getByRole('button', { name: /Look now/ }))
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/code/rules/r1/check')).toBe(true))
+  })
 })

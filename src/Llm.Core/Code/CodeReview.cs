@@ -44,8 +44,12 @@ public sealed class CodeReview
     public int PromptTokens { get; set; }
     public int CompletionTokens { get; set; }
     public string? Error { get; set; }
-    /// <summary>The room it is discussed in, once someone opened one.</summary>
+    /// <summary>The room it is discussed in, once someone opened one (or the automatic review's room).</summary>
     public Guid? RoomId { get; set; }
+    /// <summary>The project's automatic reviews that started it; null: a person did.</summary>
+    public Guid? RuleId { get; set; }
+    /// <summary>What started an automatic one: webhook, check (the look at open merge requests) or schedule; null: a person.</summary>
+    public string? Trigger { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? FinishedAt { get; set; }
     public List<ReviewFinding> Findings { get; set; } = [];
@@ -77,4 +81,48 @@ public sealed class ReviewFinding
     public string State { get; set; } = Open;
     public Guid? DecidedById { get; set; }
     public DateTimeOffset? DecidedAt { get; set; }
+}
+
+/// <summary>
+/// A project's automatic reviews, set by a person who may (review.policy): merge requests reviewed as they open and get
+/// new commits (from GitLab's webhook to the rule's address, and a regular look at the open ones), and a scheduled review
+/// of what a branch has over another. They read the code with that person's read-only access and cost them, as their own
+/// reviews do; each finished one is posted in the rule's room, if it has one.
+/// </summary>
+public sealed class ReviewRule
+{
+    public const string ByWebhook = "webhook";
+    public const string ByCheck = "check";
+    public const string BySchedule = "schedule";
+
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    /// <summary>Whose access reads the code, and whose cost the reviews are.</summary>
+    public Guid UserId { get; set; }
+    /// <summary>The project's path (group/project).</summary>
+    public required string Project { get; set; }
+    public bool Enabled { get; set; } = true;
+    /// <summary>Merge requests are reviewed as they open and get new commits.</summary>
+    public bool MergeRequests { get; set; } = true;
+    /// <summary>Only merge requests into these branches; empty: into any.</summary>
+    public List<string> TargetBranches { get; set; } = [];
+    /// <summary>Draft merge requests wait until they are ready.</summary>
+    public bool SkipDrafts { get; set; } = true;
+    /// <summary>How often the open merge requests are looked at for new commits, in minutes; 0: only by the webhook.</summary>
+    public int CheckMinutes { get; set; } = 15;
+    /// <summary>A scheduled review of what <see cref="Branch"/> has over <see cref="Base"/>, on <see cref="Cron"/> in <see cref="TimeZone"/>.</summary>
+    public string? Branch { get; set; }
+    public string? Base { get; set; }
+    public string? Cron { get; set; }
+    public string TimeZone { get; set; } = "UTC";
+    /// <summary>The room each finished review is posted in; null: none (the person is told).</summary>
+    public Guid? RoomId { get; set; }
+    /// <summary>The most reviews it starts in a day, as a ceiling on its cost.</summary>
+    public int MostPerDay { get; set; } = 20;
+    /// <summary>The webhook's secret, as its SHA-256 (hex): GitLab sends it in X-Gitlab-Token.</summary>
+    public string? SecretHash { get; set; }
+    public DateTimeOffset? CheckedAt { get; set; }
+    public DateTimeOffset? NextRunAt { get; set; }
+    /// <summary>Why its last look or run did not start reviews, if it did not.</summary>
+    public string? LastError { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

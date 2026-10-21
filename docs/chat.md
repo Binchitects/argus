@@ -656,6 +656,38 @@ Access), and write nothing to GitLab: no comments, no approvals.
   answers with the verdict and the findings it kept; `review_get` reads one
   again. The review is on the Code page too. Off in rooms (it reads as you).
 
+### Automatic reviews
+
+**Code → Automatic reviews → A project** reviews a project's merge requests
+as they open and get new commits, without anyone pressing Review:
+
+- **As they open and change.** GitLab says so at once through a webhook: in
+  the project's **Settings → Webhooks**, the rule's URL, its secret token
+  (shown once; **New webhook secret** makes another) and **Merge request
+  events**. The rule also looks at the open merge requests every few
+  minutes (**Look every**, 5 to 1,440; 0: the webhook only), which catches
+  what a webhook missed; **Look now** does it at once and says, for each,
+  what it did. A merge request is reviewed when its newest commit is one no
+  review read yet; a review again reads only what came after.
+- **Which.** Only merge requests into the branches named (empty: any), and
+  drafts wait until they are ready (unless you say otherwise). Only those
+  changed after the rule was made: it does not review the backlog.
+- **A scheduled review of a branch.** A branch, the branch it is compared
+  with, and when (cron, at most hourly, in your time zone): "develop over
+  main, `0 6 * * 1-5`" reviews what develop has over main each weekday
+  morning, and skips the run when develop has not moved.
+- **Where it goes.** Each review is in your list (marked automatic or
+  scheduled); with a room chosen, each finished one is posted there by you,
+  and the room's people see the review.
+- **Cost and limits.** It reads with your read access and its requests are
+  yours, tagged `review`, as your own reviews. A rule starts at most its
+  reviews a day (20 unless changed; then it waits for tomorrow, and says
+  so), two of a rule's run at once and the others wait their turn; they do
+  not hold up the reviews you start. A rule stops (and says why) when you
+  may no longer review or set automatic reviews. Setting them is the
+  `review.policy` feature, which everyone has unless an admin denies it;
+  a reviews admin sees and changes everyone's rules.
+
 ## 3D models
 
 The **3D models** tool (Admin → Tools; the 3D sandbox runs with

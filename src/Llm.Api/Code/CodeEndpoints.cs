@@ -96,7 +96,7 @@ public static class CodeEndpoints
 
     private static object Brief(CodeReview r) => new
     {
-        r.Id, r.Project, r.Iid, r.FromRef, r.ToRef, r.Title, r.WebUrl, r.Status, r.Step, r.Verdict, r.Risk, r.Files, r.CreatedAt, r.FinishedAt, r.Error,
+        r.Id, r.Project, r.Iid, r.FromRef, r.ToRef, r.Title, r.WebUrl, r.Status, r.Step, r.Verdict, r.Risk, r.Files, r.CreatedAt, r.FinishedAt, r.Error, r.RuleId, r.Trigger,
     };
 
     /// <summary>The person's reviews, and those of the rooms they are in; newest first.</summary>
@@ -143,7 +143,8 @@ public static class CodeEndpoints
         {
             return AuthEndpoints.Problem(400, "change", "Review a merge request (its number), or what one branch has over another (from and to).");
         }
-        if (await db.CodeReviews.CountAsync(r => r.UserId == me.Id && (r.Status == CodeReview.Queued || r.Status == CodeReview.Running), ct) >= 3)
+        // Automatic reviews wait their own turn: they do not hold up the person's.
+        if (await db.CodeReviews.CountAsync(r => r.UserId == me.Id && r.RuleId == null && (r.Status == CodeReview.Queued || r.Status == CodeReview.Running), ct) >= 3)
         {
             return AuthEndpoints.Problem(429, "busy", "Three of your reviews are running: wait for one to end.");
         }
@@ -232,16 +233,22 @@ public static class CodeEndpoints
         }
         var room = new Conversation { UserId = me.Id, Title = $"Review: {r.Project} {r.Title}"[..Math.Min(200, $"Review: {r.Project} {r.Title}".Length)], Kind = RoomMember.Room };
         db.Conversations.Add(room);
-        var text = $"**Review of {r.Project} {r.Title}** ({ReviewEngine.VerdictText(r.Verdict)}, {r.Risk} risk) — [open the review](/code/reviews/{r.Id})" +
-            (r.WebUrl is { } url ? $" · [in GitLab]({url})" : "") + "\n\n" + (r.Summary ?? "") + "\n\n" +
-            string.Join('\n', r.Findings.Where(f => f.Verified != false).Select(f => $"- **{f.Severity}** `{f.Path}{(f.Line is { } l ? $":{l}" : "")}` {f.Title}"));
-        var message = new ChatMessage { ConversationId = room.Id, Role = "user", Sequence = 1, Content = text.Length > 60_000 ? text[..60_000] : text, AuthorId = me.Id, ForPeople = true };
+        var message = new ChatMessage { ConversationId = room.Id, Role = "user", Sequence = 1, Content = RoomText(r, "Review"), AuthorId = me.Id, ForPeople = true };
         db.ChatMessages.Add(message);
         room.CurrentLeafId = message.Id;
         r.RoomId = room.Id;
         await db.SaveChangesAsync(ct);
         hub.Said(room.Id, message.Id);
         return Results.Ok(new { id = room.Id });
+    }
+
+    /// <summary>A review as a room's message: its verdict and risk, the summary, and the findings that held.</summary>
+    public static string RoomText(CodeReview r, string label)
+    {
+        var text = $"**{label} of {r.Project} {r.Title}** ({ReviewEngine.VerdictText(r.Verdict)}, {r.Risk} risk) — [open the review](/code/reviews/{r.Id})" +
+            (r.WebUrl is { } url ? $" · [in GitLab]({url})" : "") + "\n\n" + (r.Summary ?? "") + "\n\n" +
+            string.Join('\n', r.Findings.Where(f => f.Verified != false).Select(f => $"- **{f.Severity}** `{f.Path}{(f.Line is { } l ? $":{l}" : "")}` {f.Title}"));
+        return text.Length > 60_000 ? text[..60_000] : text;
     }
 
     private static async Task<IResult> DeleteAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
