@@ -118,6 +118,9 @@ public sealed class CustomTool
 /// <summary>An MCP server, or an API by its OpenAPI document, that an admin added: its tools become a tool in the chat.</summary>
 public sealed class McpServer
 {
+    /// <summary>A copy, to be used as it is for one person (a group's settings over the plugin's): never saved.</summary>
+    public McpServer Copy() => (McpServer)MemberwiseClone();
+
     public Guid Id { get; set; } = Guid.CreateVersion7();
     public required string Name { get; set; }
     public string? Description { get; set; }
@@ -178,6 +181,18 @@ public sealed class PersonCredential
     /// <summary>Who the service says it is, when it says (for the person's own page).</summary>
     public string? Account { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// A plugin's settings for one group: its values over the plugin's own (another key, another address), for the group's
+/// people. Kept as the plugin keeps its own (secrets encrypted); a setting it leaves out is the plugin's.
+/// </summary>
+public sealed class PluginGroupSetting
+{
+    public Guid ServerId { get; set; }
+    public Guid GroupId { get; set; }
+    public string SettingsJson { get; set; } = "{}";
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 /// <summary>A version of a plugin as it was installed: its files, so it can be put back (rollback).</summary>

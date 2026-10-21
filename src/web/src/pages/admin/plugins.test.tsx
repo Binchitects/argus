@@ -86,6 +86,35 @@ describe('admin plugins', () => {
   })
 })
 
+describe('plugin settings for groups', () => {
+  it('gives a group its own key, the others keeping the plugin’s', async () => {
+    const installed = {
+      id: 's1', toolId: 'mcp:s1', plugin: 'pets', title: 'Pets', version: '1', url: 'https://pets.test/v1', personAuth: null, writes: [],
+      settings: [{ key: 'token', title: 'Key', type: 'secret', required: true, help: null, value: null, set: true }], tls: 'System', tlsCa: null, tlsCaNames: [],
+    }
+    let rows: object[] = []
+    const calls = fakeApi(admin, {
+      'GET /api/admin/plugins': () => ({ json: { problem: null, catalog: [], installed: [installed] } }),
+      'GET /api/admin/groups': () => ({ json: [{ id: 'g1', name: 'Vets', members: 2 }, { id: 'g2', name: 'Shop', members: 3 }] }),
+      'GET /api/admin/plugins/s1/groups': () => ({ json: rows }),
+      'PUT /api/admin/plugins/s1/groups/g1': () => {
+        rows = [{ groupId: 'g1', name: 'Vets', settings: [{ key: 'token', title: 'Key', type: 'secret', help: null, value: null, set: true }] }]
+        return { json: rows[0] }
+      },
+    })
+    renderApp('/admin/plugins')
+    const card = await screen.findByRole('region', { name: 'Pets' })
+    await userEvent.click(within(card).getByRole('button', { name: /For groups/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Pets: for groups' })
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'Another group' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Vets' }))
+    await userEvent.type(within(dialog).getByLabelText('Key'), 'vets-key')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save for the group' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ settings: { token: 'vets-key' } }))
+    expect(await within(dialog).findByRole('list', { name: 'Groups with their own settings' })).toHaveTextContent('Vets')
+  })
+})
+
 describe('account connections', () => {
   it('connects with a key, or sends the person to sign in', async () => {
     let connected = false

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, Blocks, ClipboardCheck, Download, FileCode2, Link2, Pin, PinOff, RefreshCw, RotateCcw, Settings2, Trash2, Upload } from 'lucide-react'
+import { Activity, Blocks, ClipboardCheck, Download, FileCode2, Link2, Pin, PinOff, RefreshCw, RotateCcw, Settings2, Trash2, Upload, Users } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -15,6 +15,7 @@ import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
 import { api, ApiError, errorMessage } from '@/lib/api'
+import { PluginGroupsDialog } from './plugin-groups'
 import { tlsBody, type Tls, type TlsCheck } from './tls'
 import { TlsCaLine, TlsChoice, TlsWarning } from './tls-choice'
 
@@ -262,6 +263,7 @@ function InstalledCard({ plugin, onEdit, onChanged }: { plugin: Plugins['install
   const confirm = useConfirm()
   const grant = useGrant()
   const [showHealth, setShowHealth] = useState(false)
+  const [forGroups, setForGroups] = useState(false)
   const health = useQuery({ queryKey: ['admin', 'plugins', plugin.id, 'health'], queryFn: ({ signal }) => api<Health>(`/api/admin/plugins/${plugin.id}/health`, { signal }), enabled: showHealth })
   // Asked for more than was granted: the admin's yes, then the same update with it.
   const update = useMutation({
@@ -347,6 +349,11 @@ function InstalledCard({ plugin, onEdit, onChanged }: { plugin: Plugins['install
           <Button variant="outline" size="sm" onClick={onEdit}>
             <Settings2 /> Settings
           </Button>
+          {plugin.settings.length > 0 && (
+            <Button variant="outline" size="sm" onClick={() => setForGroups(true)}>
+              <Users /> For groups
+            </Button>
+          )}
           <Button variant="outline" size="sm" asChild>
             <Link to="/admin/tools">Who may use it</Link>
           </Button>
@@ -385,6 +392,7 @@ function InstalledCard({ plugin, onEdit, onChanged }: { plugin: Plugins['install
           </Button>
         </div>
       </CardContent>
+      <PluginGroupsDialog plugin={plugin} open={forGroups} onClose={() => setForGroups(false)} />
     </Card>
   )
 }

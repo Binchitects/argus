@@ -55,6 +55,19 @@ forgets everyone's connected accounts for it.
 Every install, update, settings change, connection and call is in the audit
 log (`plugin.*`).
 
+### Settings for a group
+
+**For groups** on a plugin's card gives a group its own values for the
+plugin's settings: another key for one department's account, another address
+for a team's own server. The group's people use them; everyone else uses the
+plugin's. A setting the group leaves empty is the plugin's, and emptying all
+of them (or the bin) gives the group the plugin's own again. A group's
+secrets are kept encrypted and never shown, as the plugin's are. Someone in
+several groups gets each setting from the first of them by name that sets
+it. The plugin's address and its one key are made from those values for
+each call; a key each person connects themselves (Your account →
+Connections) is still theirs.
+
 ## Each person's own account
 
 A plugin that signs in **per person** (`per_person: oauth2` or `api_key`)

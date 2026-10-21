@@ -67,6 +67,9 @@ public static class PluginEndpoints
         admin.MapPost("/{id:guid}/rollback", RollbackAsync);
         admin.MapPost("/{id:guid}/pin", PinAsync);
         admin.MapGet("/{id:guid}/health", HealthAsync);
+        admin.MapGet("/{id:guid}/groups", GroupsAsync);
+        admin.MapPut("/{id:guid}/groups/{groupId:guid}", GroupSettingsAsync);
+        admin.MapDelete("/{id:guid}/groups/{groupId:guid}", GroupRemoveAsync);
         admin.MapPost("/{id:guid}/check", CheckNowAsync);
         admin.MapGet("/template", () => Results.File(PluginTemplate.Zip(), "application/zip", "plugin-template.zip"));
         admin.MapPost("/check", CheckAsync);
@@ -224,6 +227,65 @@ public static class PluginEndpoints
         await db.SaveChangesAsync(ct);
         await audit.WriteAsync("plugin.settings", server.Plugin);
         await ServerTls.AuditAsync(audit, server, was, wasCa);
+        return Results.NoContent();
+    }
+
+    /// <summary>The groups with their own values for the plugin's settings.</summary>
+    private static async Task<IResult> GroupsAsync(Guid id, AppDbContext db, CancellationToken ct)
+    {
+        if (await db.McpServers.AsNoTracking().SingleOrDefaultAsync(s => s.Id == id && s.Plugin != null, ct) is not { } server)
+        {
+            return Results.NotFound();
+        }
+        var rows = await db.PluginGroupSettings.AsNoTracking().Where(g => g.ServerId == id)
+            .Join(db.Groups.AsNoTracking(), s => s.GroupId, g => g.Id, (s, g) => new { s.GroupId, g.Name, s.SettingsJson, s.UpdatedAt }).ToListAsync(ct);
+        return Results.Ok(rows.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(r => new { r.GroupId, r.Name, r.UpdatedAt, settings = PluginInstaller.GroupView(server, r.SettingsJson) }));
+    }
+
+    /// <summary>A group's own values for the plugin's settings: given, they are the group's; empty, that setting is the plugin's again.</summary>
+    private static async Task<IResult> GroupSettingsAsync(Guid id, Guid groupId, PluginSettingsRequest body, AppDbContext db, Audit audit, IOptions<AuthOptions> auth, CancellationToken ct)
+    {
+        if (await db.McpServers.AsNoTracking().SingleOrDefaultAsync(s => s.Id == id && s.Plugin != null, ct) is not { } server)
+        {
+            return Results.NotFound();
+        }
+        if (await db.Groups.AsNoTracking().SingleOrDefaultAsync(g => g.Id == groupId, ct) is not { } group)
+        {
+            return AuthEndpoints.Problem(400, "group", "No such group.");
+        }
+        var row = await db.PluginGroupSettings.SingleOrDefaultAsync(g => g.ServerId == id && g.GroupId == groupId, ct);
+        var saved = row is null ? [] : JsonNode.Parse(row.SettingsJson) as JsonObject ?? [];
+        if (PluginInstaller.ApplyGroup(PluginManifest.Parse(server.Manifest!), saved, body.Settings, auth.Value.DataKey, out var values) is { } problem)
+        {
+            return AuthEndpoints.Problem(400, "settings", problem);
+        }
+        if (values.Count == 0)
+        {
+            if (row is not null)
+            {
+                db.PluginGroupSettings.Remove(row);
+            }
+        }
+        else
+        {
+            row ??= db.PluginGroupSettings.Add(new PluginGroupSetting { ServerId = id, GroupId = groupId }).Entity;
+            row.SettingsJson = values.ToJsonString();
+            row.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+        await db.SaveChangesAsync(ct);
+        await audit.WriteAsync("plugin.group_settings", server.Plugin, detail: $"{group.Name}: {(values.Count == 0 ? "the plugin's own" : string.Join(", ", values.Select(v => v.Key)))}");
+        return Results.Ok(new { groupId, group.Name, settings = PluginInstaller.GroupView(server, values.ToJsonString()) });
+    }
+
+    private static async Task<IResult> GroupRemoveAsync(Guid id, Guid groupId, AppDbContext db, Audit audit, CancellationToken ct)
+    {
+        var removed = await db.PluginGroupSettings.Where(g => g.ServerId == id && g.GroupId == groupId).ExecuteDeleteAsync(ct);
+        if (removed == 0)
+        {
+            return Results.NotFound();
+        }
+        await audit.WriteAsync("plugin.group_settings", id.ToString(), detail: "removed");
         return Results.NoContent();
     }
 

@@ -780,7 +780,7 @@ public static class Commands
             Out.WriteLine($"{state,-12} {counts.GetValueOrDefault(state)}");
         Out.WriteLine($"{"edges",-12} {edges}");
         foreach (var state in new[] { "linked_pairs", "strong_edges", "likely_edges", "weak_edges", "resolved", "internal", "ambiguous", "settled:manifest", "settled:file",
-                     "settled:graph", "settled:name", "candidate", "unconfirmed", "test", "external" })
+                     "settled:graph", "settled:name", "candidate", "unconfirmed", "test", "external", "described" })
             Out.WriteLine($"{state,-16} {linked.GetValueOrDefault(state)}");
         return 0;
     }

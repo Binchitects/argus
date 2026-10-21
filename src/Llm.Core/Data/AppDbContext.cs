@@ -45,6 +45,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Toolset> Toolsets => Set<Toolset>();
     public DbSet<CustomTool> CustomTools => Set<CustomTool>();
     public DbSet<PluginRelease> PluginReleases => Set<PluginRelease>();
+    public DbSet<PluginGroupSetting> PluginGroupSettings => Set<PluginGroupSetting>();
     public DbSet<McpServer> McpServers => Set<McpServer>();
     public DbSet<PersonCredential> PersonCredentials => Set<PersonCredential>();
     public DbSet<LocalModel> LocalModels => Set<LocalModel>();
@@ -393,6 +394,14 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(t => t.ResultPath).HasMaxLength(200);
             e.Property(t => t.Model).HasMaxLength(200);
             e.HasOne<AppUser>().WithMany().HasForeignKey(t => t.CreatedById).OnDelete(DeleteBehavior.SetNull);
+        });
+        builder.Entity<PluginGroupSetting>(e =>
+        {
+            e.ToTable("plugin_group_settings");
+            e.HasKey(x => new { x.ServerId, x.GroupId });
+            e.HasIndex(x => x.GroupId);
+            e.HasOne<McpServer>().WithMany().HasForeignKey(x => x.ServerId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Group>().WithMany().HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<PluginRelease>(e =>
         {

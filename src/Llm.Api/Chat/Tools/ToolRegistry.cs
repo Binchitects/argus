@@ -210,8 +210,36 @@ public sealed class ToolRegistry(
     public async Task<IReadOnlyList<ToolChoice>> ForAsync(Membership member, CancellationToken ct = default)
     {
         var mine = member.Groups.Count == 0 ? [] : await db.ToolGroupSettings.AsNoTracking().Where(g => member.Groups.Contains(g.GroupId)).ToListAsync(ct);
-        return [.. (await AllAsync(ct)).Where(t => t.Setting.Enabled && t.Unavailable is null && Allowed(member, t.Tool.Id))
-            .Select(t => mine.Where(g => g.ToolId == t.Tool.Id).ToList() is { Count: > 0 } groups ? t with { Setting = ForGroups(t.Setting, groups) } : t)];
+        var choices = (await AllAsync(ct)).Where(t => t.Setting.Enabled && t.Unavailable is null && Allowed(member, t.Tool.Id))
+            .Select(t => mine.Where(g => g.ToolId == t.Tool.Id).ToList() is { Count: > 0 } groups ? t with { Setting = ForGroups(t.Setting, groups) } : t).ToList();
+        return await WithGroupPluginsAsync(member, choices, ct);
+    }
+
+    /// <summary>The plugins the person's groups set their own values for (another key, another address): each as their groups set it.</summary>
+    private async Task<IReadOnlyList<ToolChoice>> WithGroupPluginsAsync(Membership member, List<ToolChoice> choices, CancellationToken ct)
+    {
+        if (member.Groups.Count == 0)
+        {
+            return choices;
+        }
+        var theirs = await db.PluginGroupSettings.AsNoTracking().Where(g => member.Groups.Contains(g.GroupId))
+            .Join(db.Groups.AsNoTracking(), s => s.GroupId, g => g.Id, (s, g) => new { s.ServerId, s.SettingsJson, g.Name }).ToListAsync(ct);
+        if (theirs.Count == 0)
+        {
+            return choices;
+        }
+        var ids = theirs.Select(t => t.ServerId).Distinct().ToList();
+        var servers = await db.McpServers.AsNoTracking().Where(s => ids.Contains(s.Id)).ToDictionaryAsync(s => s.Id, ct);
+        return [.. choices.Select(c =>
+        {
+            if (!c.Tool.Id.StartsWith(McpServerTool.Prefix, StringComparison.Ordinal) || !Guid.TryParse(c.Tool.Id[McpServerTool.Prefix.Length..], out var id)
+                || !servers.TryGetValue(id, out var server))
+            {
+                return c;
+            }
+            var settings = theirs.Where(t => t.ServerId == id).OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase).Select(t => t.SettingsJson).ToList();
+            return c with { Tool = Server(Plugins.PluginInstaller.ForGroups(server, settings, auth.Value.DataKey)) };
+        })];
     }
 
     /// <summary>A tool's settings for a person in these groups.</summary>

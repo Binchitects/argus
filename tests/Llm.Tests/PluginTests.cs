@@ -193,4 +193,59 @@ public sealed class PluginTests(AppFixture app)
         Assert.Contains(app.Mcp.PetCalls, c => c.Key == "persons-own-key");
         await StatusAssert.Is(HttpStatusCode.NoContent, await b.Http.DeleteAsync(new Uri($"/api/account/connections/{Uri.EscapeDataString(toolId)}", UriKind.Relative)));
     }
+
+    [Fact]
+    public async Task A_groups_own_settings_are_what_its_people_use_and_the_plugins_own_for_everyone_else()
+    {
+        await using var f = NewApp();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        using var buffer = new MemoryStream();
+        using (var zip = new System.IO.Compression.ZipArchive(buffer, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+        {
+            void Add(string name, string text)
+            {
+                using var w = new StreamWriter(zip.CreateEntry(name).Open());
+                w.Write(text);
+            }
+            Add("shared-pets/plugin.yaml", "name: shared-pets\nversion: 1.0.0\ntitle: Shared pets\ntools: { openapi: openapi.yaml, url: \"https://pets.test/v1\" }\n" +
+                "auth: { header: X-Api-Key, value: \"{token}\" }\nsettings:\n  - { key: token, title: Key, type: secret, required: true }\n");
+            Add("shared-pets/openapi.yaml", FakeMcp.PetsSpec);
+        }
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/plugins/install",
+            new { accept = true, zip = Convert.ToBase64String(buffer.ToArray()), settings = new { token = "company-key" } }));
+        var toolId = made.GetProperty("toolId").GetString()!;
+        var id = made.GetProperty("id").GetGuid();
+        var vets = (await admin.JsonAsync(await admin.PostAsync("/api/admin/groups", new { name = "Vets" }))).GetProperty("id").GetGuid();
+        var (vet, _) = await PersonAsync(f);
+        var (other, _) = await PersonAsync(f);
+        var vetId = (await vet.JsonAsync(await vet.GetAsync("/api/auth/me"))).GetProperty("id").GetGuid();
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.PostAsync($"/api/admin/groups/{vets}/members", new { userIds = new[] { vetId } }));
+
+        // The group's own key, kept encrypted and never shown.
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/plugins/{id}/groups/{vets}", UriKind.Relative), new { settings = new { colour = "red" } }));
+        var saved = await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/plugins/{id}/groups/{vets}", UriKind.Relative), new { settings = new { token = "vets-key" } });
+        await StatusAssert.Is(HttpStatusCode.OK, saved);
+        var listed = await (await admin.GetAsync($"/api/admin/plugins/{id}/groups")).Content.ReadAsStringAsync();
+        Assert.Contains("\"name\":\"Vets\"", listed, StringComparison.Ordinal);
+        Assert.DoesNotContain("vets-key", listed, StringComparison.Ordinal);
+
+        async Task<string?> KeyOfAsync(TestBrowser b)
+        {
+            var before = app.Mcp.PetCalls.Count;
+            var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false, tools = new[] { toolId } }))).GetProperty("id").GetGuid();
+            var read = Event(await SendAsync(b, chat, """[call shared_pets__list_pets {"limit":1}]"""), "tool_result");
+            Assert.StartsWith("HTTP 200", read.GetProperty("text").GetString(), StringComparison.Ordinal);
+            lock (app.Mcp.PetCalls)
+            {
+                return app.Mcp.PetCalls.Skip(before).Last().Key;
+            }
+        }
+        Assert.Equal("vets-key", await KeyOfAsync(vet));
+        Assert.Equal("company-key", await KeyOfAsync(other));
+
+        // Emptied, the setting is the plugin's again, for the group too.
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/plugins/{id}/groups/{vets}", UriKind.Relative), new { settings = new { token = "" } }));
+        Assert.Equal("[]", await (await admin.GetAsync($"/api/admin/plugins/{id}/groups")).Content.ReadAsStringAsync());
+        Assert.Equal("company-key", await KeyOfAsync(vet));
+    }
 }

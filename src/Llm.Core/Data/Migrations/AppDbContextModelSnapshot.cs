@@ -1573,6 +1573,28 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("person_credentials", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Chat.PluginGroupSetting", b =>
+                {
+                    b.Property<Guid>("ServerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("GroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SettingsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("ServerId", "GroupId");
+
+                    b.HasIndex("GroupId");
+
+                    b.ToTable("plugin_group_settings", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Chat.PluginRelease", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4156,6 +4178,21 @@ namespace Llm.Core.Data.Migrations
                     b.HasOne("Llm.Core.Identity.AppUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.PluginGroupSetting", b =>
+                {
+                    b.HasOne("Llm.Core.Access.Group", null)
+                        .WithMany()
+                        .HasForeignKey("GroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Llm.Core.Chat.McpServer", null)
+                        .WithMany()
+                        .HasForeignKey("ServerId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
