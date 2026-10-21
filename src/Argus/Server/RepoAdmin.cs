@@ -58,6 +58,7 @@ public static partial class ArgusServer
                 " WHERE r.branch = r.default_branch AND f.lang IS NOT NULL GROUP BY r.gitlab_id, f.lang")
             .GroupBy(r => r.Long("gitlab_id"))
             .ToDictionary(g => g.Key, g => g.OrderByDescending(r => r.Long("n")).ThenBy(r => r.Str("lang"), StringComparer.Ordinal).ToList());
+        var purposes = Purposes.All(conn);
         var staleAfter = Metrics.StaleAfter();
         var now = NowSeconds();
         var fallback = Choices.DefaultSchedule(conn);
@@ -114,6 +115,9 @@ public static partial class ArgusServer
                 })]),
                 ["language"] = langs.Select(l => l.Str("lang")).FirstOrDefault(l => l is not ("markdown" or "text")) is { } main
                     ? LanguageNames.GetValueOrDefault(main, main) : null,
+                // What it is for (its README, manifest or code; or as an admin put it).
+                ["purpose"] = purposes.TryGetValue(c.GitlabId, out var purpose) ? purpose.Text : null,
+                ["purpose_source"] = purposes.TryGetValue(c.GitlabId, out var from) ? from.Source : null,
                 ["schedule"] = c.Schedule, ["schedule_words"] = schedule.Words, ["schedule_kind"] = schedule.Kind.ToString().ToLowerInvariant(),
                 // One GitLab no longer lists is not run by its schedule: it cannot be fetched.
                 ["next_run_at"] = Choices.Listed(c, listedAt) && Choices.NextRun(c, schedule, zone, lastRun, now)?.ToUnixTimeSeconds() is { } next
@@ -225,9 +229,17 @@ public static partial class ArgusServer
                 if (!ReadSchedule(body["schedule"], true, out var s, out var problem)) return Json(new JsonObject { ["error"] = problem }, 400);
                 schedule = s;
             }
+            string? purpose = body.ContainsKey("purpose") ? body["purpose"]?.ToString() ?? "" : null;
+            if (purpose is { Length: > 1000 } || purpose?.Contains('\n', StringComparison.Ordinal) == true)
+                return Json(new JsonObject { ["error"] = "what it is for is one line of up to 200 characters" }, 400);
             using var conn = Db.Open(cfg.Index.DbPath);
             if (Choices.Find(conn, gitlabId) is not { } before) return Json(new JsonObject { ["error"] = "no such repository" }, 404);
             var now = NowSeconds();
+            if (purpose is not null)
+            {
+                Purposes.Set(conn, gitlabId, purpose, now);
+                RepoLog.Note(conn, gitlabId, purpose.Trim().Length == 0 ? "An admin gave what it is for back to its README and code." : $"An admin said what it is for: {Purposes.Clean(purpose)}");
+            }
             if (branches is not null)
             {
                 Choices.Set(conn, gitlabId, null, branches, now);

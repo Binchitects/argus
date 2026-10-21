@@ -265,4 +265,18 @@ describe('repository schedules', () => {
     expect(scheduleWords('hours:1')).toBe('Every hour')
     expect(scheduleWords('', 'Every 6 hours')).toBe('Same as all (every 6 hours)')
   })
+
+  it('shows what each repository is for, and an admin says it in their own words', async () => {
+    const rows = [repo(1, 'team-a/eal-core', { purpose: 'Decodes frames from the radios.', purpose_source: 'readme' })]
+    const calls = fakeApi(admin, routes({ 'GET /api/admin/argus/repos': () => view(rows), 'PATCH /api/admin/argus/repos/1': () => ({ json: { status: 'saved' } }) }))
+    renderApp('/admin/indexing')
+    const c = await card()
+    expect(await within(c).findByText('Decodes frames from the radios.')).toBeInTheDocument()
+    await userEvent.click(within(rowOf(c, 'team-a/eal-core')).getByRole('button', { name: 'More for team-a/eal-core' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /What it is for…/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'What team-a/eal-core is for' })
+    await userEvent.type(within(dialog).getByLabelText('What it is for'), 'The radios’ frame decoder.')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.find((x) => x.method === 'PATCH')?.body).toEqual({ purpose: 'The radios’ frame decoder.' }))
+  })
 })

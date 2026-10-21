@@ -678,6 +678,87 @@ public static class Commands
         return 0;
     }
 
+    /// <summary>
+    /// The graph measured against what the owners know (Store/GraphEval): precision and recall of the links between the
+    /// repositories they judged, by tier, layer and kind, whether confidences mean what they say, what it got wrong and
+    /// missed; and calibrated priors, written where the index reads them with --write-priors (and used at once with --apply).
+    /// </summary>
+    public static int GraphEvalCommand(ArgusConfig cfg, string truthPath, bool asJson, bool writePriors, bool apply)
+    {
+        string text;
+        try { text = truthPath == "-" ? Console.In.ReadToEnd() : File.ReadAllText(truthPath); }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+        {
+            Err.WriteLine($"could not read {truthPath}: {exc.Message}");
+            return 2;
+        }
+        var truth = Truth.Parse(text);
+        JsonObject report;
+        using (var conn = Db.Open(cfg.Index.DbPath))
+        {
+            report = GraphEval.Run(conn, truth);
+        }
+        if (asJson) Out.WriteLine(report.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        else WriteReport(report);
+        if (writePriors)
+        {
+            var path = LinkKinds.PriorsPath(cfg.Index.DbPath);
+            var priors = report["priors"]!.AsObject();
+            if (priors.Count == 0)
+            {
+                Err.WriteLine($"no kind has {GraphEval.FewestForPrior} judged links yet: no priors written");
+                return truth.Problems.Count > 0 ? 1 : 0;
+            }
+            File.WriteAllText(path, priors.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }) + "\n");
+            Err.WriteLine($"{priors.Count} calibrated priors written to {path}");
+            if (apply)
+            {
+                using var conn = Db.Open(cfg.Index.DbPath);
+                var stats = Graph.RebuildLinks(conn);
+                Err.WriteLine($"links rebuilt with them: {stats.GetValueOrDefault("linked_pairs")} linked pairs, {stats.GetValueOrDefault("strong_edges")} strong, " +
+                              $"{stats.GetValueOrDefault("likely_edges")} likely, {stats.GetValueOrDefault("weak_edges")} weak");
+            }
+            else Err.WriteLine("they are used from the next index pass (or argus resolve)");
+        }
+        return truth.Problems.Count > 0 ? 1 : 0;
+    }
+
+    static void WriteReport(JsonObject r)
+    {
+        static string Pct(JsonNode? n) => n is null ? "-" : (n.GetValue<double>() * 100).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "%";
+        foreach (var p in r["problems"]!.AsArray()) Err.WriteLine(p!.GetValue<string>());
+        if (r["unknown_repos"]!.AsArray().Count > 0)
+            Err.WriteLine($"not in the index (left out): {string.Join(", ", r["unknown_repos"]!.AsArray().Select(u => u!.GetValue<string>()))}");
+        var pairs = r["pairs"]!;
+        Out.WriteLine($"judged {r["judged_repos"]} repositories, {r["confirmed_links"]} links the owners confirm");
+        Out.WriteLine($"links walked {pairs["walked"]}: {pairs["right"]} right, {pairs["wrong"]} wrong, {pairs["missed"]} missed");
+        Out.WriteLine($"precision {Pct(pairs["precision"])}  recall {Pct(pairs["recall"])}  f1 {Pct(pairs["f1"])}");
+        foreach (var section in new[] { "by_tier", "by_layer" })
+        {
+            Out.WriteLine();
+            Out.WriteLine(section.Replace('_', ' '));
+            foreach (var (key, v) in r[section]!.AsObject()) Out.WriteLine($"  {key,-12} {v!["links"],6} links  {Pct(v["precision"]),7} right");
+        }
+        Out.WriteLine();
+        Out.WriteLine("by kind (how its name matched)            links   right   prior  suggested");
+        foreach (var k in r["by_kind"]!.AsArray())
+            Out.WriteLine($"  {$"{k!["kind"]} ({k["how"]})",-40} {k["links"],5} {Pct(k["precision"]),7} {k["prior"],7}  {k["suggested"]?.ToString() ?? "-"}");
+        Out.WriteLine();
+        Out.WriteLine("calibration (confidence: what it says, what is so)");
+        foreach (var b in r["calibration"]!.AsArray())
+            Out.WriteLine($"  {b!["from"]}-{b["to"]}  {b["links"],6} links  says {Pct(b["mean_confidence"]),7}  is {Pct(b["observed"]),7}");
+        foreach (var (title, key) in new[] { ("wrong (walked, not confirmed)", "wrong"), ("missed (confirmed, not walked)", "missed") })
+        {
+            var rows = r[key]!.AsArray();
+            if (rows.Count == 0) continue;
+            Out.WriteLine();
+            Out.WriteLine(title);
+            foreach (var w in rows)
+                Out.WriteLine($"  {w!["from"]} -> {w["to"]}" + (key == "wrong" ? $"  {w["layer"]} {w["confidence"]} {w["kinds"]}{(w["owners_say_no"]!.GetValue<bool>() ? "  (owners say no)" : "")}"
+                    : w["seen_at"] is { } seen ? $"  (seen at {seen})" : "  (not seen)"));
+        }
+    }
+
     public static int ResolveCommand(ArgusConfig cfg)
     {
         Dictionary<string, long> counts;

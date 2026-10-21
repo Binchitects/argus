@@ -156,6 +156,8 @@ public static partial class Graph
     /// </summary>
     public static Dictionary<string, long> RebuildLinks(SqliteConnection conn)
     {
+        // Priors calibrated against what owners confirmed (argus graph-eval --write-priors), when there are some.
+        var calibrated = LinkKinds.ReadPriors(conn.DataSource);
         var repos = Sql.Query(conn, "SELECT id, gitlab_id, lower(path_with_namespace) AS path, branch, default_branch FROM repos ORDER BY id")
             .Select(r => new RepoRow(r.Long("id"), r.Long("gitlab_id"), r.Str("path"), r.Str("branch") == r.Str("default_branch")))
             .ToList();
@@ -269,7 +271,7 @@ public static partial class Graph
             var (kind, layer) = LinkKinds.Of(declKind, form);
             var key = (from.Id, defaultRow[to], kind, matched);
             var store = candidate ? candidateEvidence : evidence;
-            var prior = LinkKinds.Prior(kind, how, settled);
+            var prior = LinkKinds.Prior(kind, how, settled, calibrated);
             how = settled ?? how;
             if (!store.TryGetValue(key, out var ev))
             {
@@ -480,6 +482,8 @@ public static partial class Graph
         stats["candidate_links"] = (long)(Sql.Scalar(conn, "SELECT COUNT(*) FROM repo_links WHERE tier = 'candidate'") ?? 0L);
         stats["linked_pairs"] = (long)(Sql.Scalar(conn,
             "SELECT COUNT(*) FROM (SELECT DISTINCT from_repo_id, to_repo_id FROM repo_edges WHERE confidence >= ? AND layer <> 'history')", LinkKinds.Walked) ?? 0L);
+        // What each repository is for, kept with the graph.
+        stats["described"] = Purposes.Refresh(conn, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
         Sql.Exec(conn, "INSERT OR REPLACE INTO argus_meta (key, value) VALUES ('graph_stats', ?)",
             new JsonObject(stats.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))).ToJsonString());
         tx.Commit();

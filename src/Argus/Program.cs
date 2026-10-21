@@ -11,7 +11,7 @@ public static class Program
     const string Prog = "argus";
 
     static readonly string[] Commands_ =
-        ["embed", "index", "backup", "kpi", "status", "verify", "resolve", "serve", "flush-acl", "pack", "user", "healthcheck"];
+        ["embed", "index", "backup", "kpi", "status", "verify", "resolve", "graph-eval", "serve", "flush-acl", "pack", "user", "healthcheck"];
 
     static readonly string[] PackCommands = ["build", "list", "install", "info", "remove", "update", "index"];
 
@@ -43,6 +43,11 @@ public static class Program
             .Flag("--quiet", "Say nothing when the draft is clean")
             .Flag("--claude-hook", "Run as a Claude Code Stop hook: read the hook payload on stdin, check the last answer in its transcript, block only on a contradiction"),
         "resolve" => new ArgSpec($"{Prog} resolve").Opt("--config", required: true),
+        "graph-eval" => new ArgSpec($"{Prog} graph-eval").Opt("--config", required: true)
+            .Opt("--truth", "What the owners know: FROM -> TO [layer] and FROM !-> TO, one per line (- for stdin)", required: true)
+            .Flag("--json", "Emit the whole report as JSON")
+            .Flag("--write-priors", $"Write the calibrated priors where the index reads them ({Argus.Store.LinkKinds.PriorsFile} beside it, or ARGUS_LINK_PRIORS)")
+            .Flag("--apply", "With --write-priors: rebuild the links with them now (as argus resolve)"),
         "serve" => new ArgSpec($"{Prog} serve").Opt("--config", required: true)
             .Flag("--stdio", "Serve MCP over stdin/stdout instead of HTTP. Credential comes from ARGUS_TOKEN.")
             .Opt("--host", $"Bind address (default: {Cli.Commands.DefaultServeHost})")
@@ -215,6 +220,8 @@ public static class Program
                     return Cli.Commands.Backup(cfg, a.Req("out"), a.Get("config"));
                 case "resolve":
                     return Cli.Commands.ResolveCommand(cfg);
+                case "graph-eval":
+                    return Cli.Commands.GraphEvalCommand(cfg, a.Req("truth"), a.Flag("json"), a.Flag("write_priors"), a.Flag("apply"));
                 case var u when u.StartsWith("user ", StringComparison.Ordinal):
                     return Cli.Commands.UserCommand(cfg, u["user ".Length..], a);
                 default:

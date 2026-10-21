@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CalendarClock, CircleCheck, CircleX, Eraser, GitBranch, Loader2, MoreHorizontal, RefreshCw, RotateCw, ScrollText, Trash2 } from 'lucide-react'
+import { CalendarClock, CircleCheck, CircleX, Eraser, FileText, GitBranch, Loader2, MoreHorizontal, RefreshCw, RotateCw, ScrollText, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -63,6 +63,9 @@ export interface RepoRow {
   next_run_at: number | null
   last_run_at: number | null
   state: RepoState
+  /** What it is for, in a line: from its README, manifest or code, or as an admin put it (owner). */
+  purpose?: string | null
+  purpose_source?: 'readme' | 'manifest' | 'code' | 'owner' | null
   /** What went wrong on its last run, when something did. */
   problem: string | null
   /** Where the run going now is with it. */
@@ -145,6 +148,7 @@ export function RepositoriesCard({ gitlabUrl, running = false }: { gitlabUrl: st
   // When the app's scheduled pass comes next (in this platform the app starts the passes).
   const pass = useQuery({ queryKey: ['admin', 'argus', 'schedule'], queryFn: ({ signal }) => api<{ nextRuns: string[] }>('/api/admin/argus/schedule', { signal }) })
   const [branchesOf, setBranchesOf] = useState<RepoRow | null>(null)
+  const [purposeOf, setPurposeOf] = useState<RepoRow | null>(null)
   const [logOf, setLogOf] = useState<RepoRow | null>(null)
   const [scheduleOf, setScheduleOf] = useState<RepoRow[] | 'all' | null>(null)
   const [addBranchesTo, setAddBranchesTo] = useState<RepoRow[] | null>(null)
@@ -307,6 +311,11 @@ export function RepositoriesCard({ gitlabUrl, running = false }: { gitlabUrl: st
               {r.language && ' · '}
               {r.language && <span title={r.languages.map((l) => `${l.name}: ${l.files.toLocaleString()} files`).join('\n')}>{r.language}</span>}
             </span>
+            {r.purpose && (
+              <span className="block text-xs [overflow-wrap:anywhere]" title={r.purpose_source === 'owner' ? 'As an admin put it' : `From its ${r.purpose_source}`}>
+                {r.purpose}
+              </span>
+            )}
           </span>
           <span className="flex flex-wrap items-center gap-1">
             <Badge variant="secondary" className="font-mono">
@@ -366,6 +375,9 @@ export function RepositoriesCard({ gitlabUrl, running = false }: { gitlabUrl: st
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setBranchesOf(r)}>
                 <GitBranch /> Branches…
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setPurposeOf(r)}>
+                <FileText /> What it is for…
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem disabled={view?.running || !r.included || r.indexed.length === 0} onSelect={() => void askRemoveIndex(r, false)}>
@@ -570,6 +582,9 @@ export function RepositoriesCard({ gitlabUrl, running = false }: { gitlabUrl: st
         <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-2xl">
           {branchesOf && <BranchesForm key={branchesOf.gitlab_id} repo={branchesOf} onClose={() => setBranchesOf(null)} onSaved={changed} />}
         </DialogContent>
+      </Dialog>
+      <Dialog open={purposeOf !== null} onOpenChange={(o) => !o && setPurposeOf(null)}>
+        <DialogContent>{purposeOf && <PurposeForm key={purposeOf.gitlab_id} repo={purposeOf} onClose={() => setPurposeOf(null)} onSaved={changed} />}</DialogContent>
       </Dialog>
       <Dialog open={logOf !== null} onOpenChange={(o) => !o && setLogOf(null)}>
         <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-3xl">{logOf && <RepoLogView gitlabId={logOf.gitlab_id} repo={logOf.repo} />}</DialogContent>
@@ -830,6 +845,53 @@ function AddBranchesForm({ rows, pending, error, onCancel, onSubmit }: { rows: R
 }
 
 /** A repository's branches as GitLab has them now (with their latest commits): which are indexed, and patterns for the rest. */
+/** What a repository is for, in a line: as an admin puts it (kept over the passes), or given back to its README and code. */
+function PurposeForm({ repo, onClose, onSaved }: { repo: RepoRow; onClose: () => void; onSaved: () => Promise<unknown> }) {
+  const [text, setText] = useState(repo.purpose_source === 'owner' ? (repo.purpose ?? '') : '')
+  const [error, setError] = useState<string | null>(null)
+  const save = useMutation({
+    mutationFn: (purpose: string) => api(`/api/admin/argus/repos/${repo.gitlab_id}`, { method: 'PATCH', body: { purpose } }),
+    onSuccess: async () => {
+      await onSaved()
+      onClose()
+    },
+    onError: (e) => setError(errorMessage(e)),
+  })
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>What {repo.repo} is for</DialogTitle>
+        <DialogDescription>
+          One line, for the system map and the overview the chat and coding agents read. {repo.purpose && repo.purpose_source !== 'owner' ? `Now, from its ${repo.purpose_source}: ${repo.purpose}` : ''}
+        </DialogDescription>
+      </DialogHeader>
+      <form
+        className="grid gap-4"
+        onSubmit={(e) => {
+          e.preventDefault()
+          setError(null)
+          save.mutate(text.trim())
+        }}
+      >
+        {error && <Alert variant="destructive">{error}</Alert>}
+        <Field label="What it is for" hint="Kept over the index passes until you give it back.">
+          <Input value={text} maxLength={200} onChange={(e) => setText(e.target.value)} placeholder="Invoices and payments for every product." />
+        </Field>
+        <DialogFooter>
+          {repo.purpose_source === 'owner' && (
+            <Button type="button" variant="outline" onClick={() => save.mutate('')}>
+              Give back to its README
+            </Button>
+          )}
+          <Button type="submit" loading={save.isPending} disabled={!text.trim()}>
+            Save
+          </Button>
+        </DialogFooter>
+      </form>
+    </>
+  )
+}
+
 function BranchesForm({ repo, onClose, onSaved }: { repo: RepoRow; onClose: () => void; onSaved: () => Promise<unknown> }) {
   const remote = useQuery({ queryKey: ['admin', 'argus', 'branches', repo.gitlab_id], queryFn: ({ signal }) => api<RemoteBranch[]>(`/api/admin/argus/repos/${repo.gitlab_id}/branches`, { signal }) })
   const names = new Set(remote.data?.map((b) => b.name) ?? [])

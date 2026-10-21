@@ -84,6 +84,7 @@ one-liner in [`deploy/argus-standalone/README.md`](../../../deploy/argus-standal
 | `ARGUS_INDEX_INTERVAL` | `900` | seconds between index passes; `0` = only on demand. A repository with a schedule of its own (Repositories → Schedule) is left to it |
 | `ARGUS_INDEX_SCHEDULER` | on | `off` stops running the repositories' own schedules (every N hours, daily, weekly) |
 | `ARGUS_INDEX_STALE_AFTER` | `3600` | seconds without a pass before a repository is reported stale |
+| `ARGUS_LINK_PRIORS` | `link-priors.json` beside the index | calibrated link priors (`argus graph-eval --write-priors`), read by each rebuild of the links; none there: the built-in ones |
 | `ARGUS_GITHUB_API` | `https://api.github.com` | GitHub's API for `github:owner/repo` pull requests (a GitHub Enterprise API, or `off`); read with each person's own token, which the app passes in `x-llm-github-token` |
 | `ARGUS_GITEA_URL` | empty | your Gitea for `gitea:owner/repo` pull requests; read with each person's own token (`x-llm-gitea-token`) |
 | `ARGUS_WEBHOOK_TOKEN` | empty | GitLab push webhook secret for `/hook/gitlab`; empty = no webhook route |

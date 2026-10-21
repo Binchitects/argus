@@ -54,7 +54,8 @@ Each kind has a prior, by how its name matched:
 | a co-change | 0.45 |
 
 A code link that rests on one file is less sure: its prior × 0.85. The priors
-are starting values, to be calibrated against links that owners confirm.
+are starting values, calibrated against links that owners confirm (below,
+"Measuring it").
 
 A link is **strong** at 0.85 or more, **likely** at 0.5 or more, and **weak**
 below. A pair of repositories is linked per layer by the noisy-OR of its
@@ -94,12 +95,62 @@ Each link keeps:
 - `provider`: where the other repository declares the name.
 - `candidates`: the repositories that provide the name, when it is unsure.
 
+## Measuring it against what owners know
+
+`argus graph-eval --config CONFIG --truth FILE` measures the links against
+what the repositories' owners know. The file has one link per line (`#` for
+comments):
+
+```
+# billing's owners: it builds on core, and deploys with the base image.
+group/billing -> group/core
+group/billing -> platform/base-image deploy
+# and it does not use the old ledger, whatever a file says.
+group/billing !-> group/ledger
+```
+
+Every repository on the left of a line is **judged**: its owners listed all
+of its links, so a link the graph walks from it that the file does not name
+is counted wrong. The report gives:
+
+- the pairs walked (0.5 or more, every layer but history) that are right,
+  wrong and missed, with precision, recall and F1;
+- precision by tier, by layer, and by kind and how its name matched, each
+  with its prior;
+- calibration: for each band of confidence, the confidence it says and the
+  share that is right;
+- the wrong links (the most confident first, "owners say no" where the file
+  says so) and the missed ones (with the best confidence at which the graph
+  saw them, if it did);
+- a calibrated prior for each kind with 5 or more judged links: its share
+  of right links, drawn toward its prior as if it had 4 more links at it.
+
+`--json` gives the whole report. `--write-priors` writes the calibrated
+priors to `link-priors.json` beside the index (or to `ARGUS_LINK_PRIORS`);
+each index pass (and `argus resolve`) reads them, each replacing that kind's
+built-in prior; `--apply` rebuilds the links with them at once. Deleting the
+file goes back to the built-in priors.
+
+## What each repository is for
+
+Each repository has a line saying what it is for, kept with the graph
+(`repo_purpose`) and written again after each pass: its README's first
+sentence that says something (not a heading, badge, image, table, code or
+comment), else its package's description (`package.json`, a `.csproj`,
+`pyproject.toml`, `setup.cfg`, `setup.py`, `Cargo.toml`, `pom.xml`,
+`composer.json`), else what its code is ("A C# service of 120 files (src/,
+tests/)."). An admin can say it in their own words (Admin → Indexing → a
+repository → What it is for): that line stays over the passes until it is
+given back. `overview` gives it as `purpose`, and `system_map`'s hubs as
+`what`.
+
 ## Tables
 
 | Table | Holds |
 |---|---|
 | `repo_links` | each way one repository uses another: kind, name, layer, scope, how its name matched, how many provide it, confidence, tier, files, evidence |
 | `repo_edges` | each pair per layer: scope, confidence (the noisy-OR), tier, files, kinds |
+| `repo_purpose` | what each repository is for, by its GitLab id: the line, where it came from (readme, manifest, code, owner) |
 | `file_links` | which file makes each code or package link, by the name it uses, so a symbol is searched only where it can be used |
 
 A query walks `repo_edges` of scope `main`, every layer but history, at 0.5

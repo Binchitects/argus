@@ -347,7 +347,7 @@ public static class GraphQueries
             hubs.Add(new JsonObject
             {
                 ["repo"] = estate.Name(id), ["used_by"] = usedBy[id], ["uses"] = uses[id], ["layer"] = layerOf[id],
-                ["what"] = Purpose(conn, id),
+                ["what"] = Purposes.OfRepo(conn, id),
             });
         }
         var layers = new JsonArray();
@@ -386,23 +386,6 @@ public static class GraphQueries
     }
 
     static string GroupOf(string path) => path.Contains('/') ? path[..path.LastIndexOf('/')] : "";
-
-    /// <summary>What a repository is, in its README's first sentence that says something.</summary>
-    static string? Purpose(SqliteConnection conn, long repoId)
-    {
-        var row = Sql.One(conn,
-            "SELECT content FROM files WHERE repo_id = ? AND lower(path) LIKE 'readme%' ORDER BY length(path) LIMIT 1", repoId);
-        if (row is null) return null;
-        foreach (var raw in row.Str("content").Split('\n'))
-        {
-            var line = raw.Trim();
-            if (line.Length < 12 || line.StartsWith('#') || line.StartsWith('!') || line.StartsWith('[') || line.StartsWith('<') || line.StartsWith("```", StringComparison.Ordinal)) continue;
-            var stop = line.IndexOf(". ", StringComparison.Ordinal);
-            var sentence = stop > 0 ? line[..(stop + 1)] : line;
-            return sentence.Length <= 200 ? sentence : sentence[..197] + "…";
-        }
-        return null;
-    }
 
     /// <summary>Each repository's layer (0: uses nothing in the estate; n: one more than the highest it uses), with cycles counted as one.</summary>
     static (Dictionary<long, int> Layer, List<List<long>> Cycles) Layers(HashSet<long> nodes, List<Edge> edges)

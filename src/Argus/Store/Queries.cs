@@ -888,6 +888,7 @@ public static class Queries
         {
             var repoId = row.Long("repo_id");
             var item = row.ToJson();
+            item["purpose"] = Purposes.OfRepo(conn, repoId);
             item["readme"] = ReadmeFor(conn, repoId);
             item["layout"] = Layout(conn, repoId);
             var langs = new JsonArray();

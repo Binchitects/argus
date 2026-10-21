@@ -60,9 +60,9 @@ public static class LinkKinds
     /// bare name); include (a header found file by file); settled:* (a name several repositories provide, chosen by what
     /// else the user has: a package reference, the same file's other uses, its other links), from how its name matched.
     /// </summary>
-    public static double Prior(string kind, string how, string? settled = null)
+    public static double Prior(string kind, string how, string? settled = null, IReadOnlyDictionary<string, double>? calibrated = null)
     {
-        var prior = kind switch
+        var prior = calibrated is not null && (calibrated.TryGetValue($"{kind}|{how}", out var own) || calibrated.TryGetValue(kind, out own)) ? own : kind switch
         {
             _ when kind.StartsWith("package:", StringComparison.Ordinal) => kind == "package:git" ? 0.95 : 0.97,
             "repository" => 0.95,
@@ -88,6 +88,47 @@ public static class LinkKinds
             "settled:graph" => prior * 0.70,
             _ => prior,
         };
+    }
+
+    /// <summary>Where calibrated priors are read from: ARGUS_LINK_PRIORS, else link-priors.json beside the index.</summary>
+    public const string PriorsEnv = "ARGUS_LINK_PRIORS";
+    public const string PriorsFile = "link-priors.json";
+
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime Stamp, IReadOnlyDictionary<string, double> Values)> Read = new();
+
+    /// <summary>The priors file for an index (its database's path).</summary>
+    public static string PriorsPath(string dbPath) =>
+        Environment.GetEnvironmentVariable(PriorsEnv) is { Length: > 0 } own ? own : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(dbPath)) ?? ".", PriorsFile);
+
+    /// <summary>
+    /// The calibrated priors for an index, when its file is there ({"kind": 0.9, "kind|how": 0.6}: each replaces that
+    /// kind's built-in prior, the one for how its name matched first); read again when it changes; none (the built-in
+    /// ones) when it is not, or cannot be read.
+    /// </summary>
+    public static IReadOnlyDictionary<string, double> ReadPriors(string dbPath)
+    {
+        var path = PriorsPath(dbPath);
+        if (!File.Exists(path)) return new Dictionary<string, double>();
+        var stamp = File.GetLastWriteTimeUtc(path);
+        if (Read.TryGetValue(path, out var kept) && kept.Stamp == stamp) return kept.Values;
+        try
+        {
+            var values = new Dictionary<string, double>(StringComparer.Ordinal);
+            if (System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path)) is System.Text.Json.Nodes.JsonObject o)
+            {
+                foreach (var (key, value) in o)
+                {
+                    if (value is System.Text.Json.Nodes.JsonValue v && v.TryGetValue<double>(out var p) && p is > 0 and <= 1) values[key] = p;
+                }
+            }
+            Read[path] = (stamp, values);
+            return values;
+        }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            Console.Error.WriteLine($"link priors in {path} could not be read ({exc.Message}): the built-in ones are used");
+            return new Dictionary<string, double>();
+        }
     }
 
     /// <summary>strong (0.85 or more), likely (0.5 or more), weak; a candidate is a name several provide that nothing settled.</summary>
