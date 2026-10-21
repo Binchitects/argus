@@ -99,7 +99,7 @@ public sealed partial class AutoReviews(IServiceScopeFactory scopes, ReviewEngin
     /// <summary>The open merge requests of the rule's project, as its person may read them: those changed since the rule was made.</summary>
     private static async Task<List<JsonObject>> OpenAsync(IServiceProvider services, ReviewRule rule, AppUser owner, CancellationToken ct)
     {
-        var session = await services.GetRequiredService<ArgusMcp>().ConnectAsync(owner.Email!, ct);
+        var session = await services.GetRequiredService<ArgusMcp>().ConnectAsync(owner.Id, owner.Email!, ct);
         var args = new JsonObject { ["project"] = rule.Project, ["state"] = "opened", ["limit"] = 100, ["updated_after"] = rule.CreatedAt.UtcDateTime.ToString("O", CultureInfo.InvariantCulture) };
         var (text, isError) = await session.CallAsync("mr_list", args, null, ct);
         if (isError)
@@ -443,7 +443,7 @@ public static class ReviewRuleEndpoints
         // The person must read the project: a rule reads it as them.
         try
         {
-            var session = await argus.ConnectAsync(me.Email!, ct);
+            var session = await argus.ConnectAsync(me.Id, me.Email!, ct);
             var (text, isError) = await session.CallAsync("mr_list", new JsonObject { ["project"] = project, ["state"] = "opened", ["limit"] = 1 }, null, ct);
             if (isError)
             {

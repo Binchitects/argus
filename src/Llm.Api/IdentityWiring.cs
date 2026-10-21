@@ -479,6 +479,7 @@ public static class IdentityWiring
         Chat.RoomEndpoints.MapRooms(app);
         Code.CodeEndpoints.MapCode(app);
         Code.ReviewRuleEndpoints.MapReviewRules(app);
+        Code.CodeHostLinks.MapCodeHostLinks(app);
         Plans.PlanEndpoints.MapPlans(app);
         app.MapForwardAuth();
         app.MapKeyCheck();

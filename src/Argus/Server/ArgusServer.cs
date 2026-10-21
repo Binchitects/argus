@@ -6,6 +6,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Argus.Access;
+using Argus.CodeHosts;
 using Argus.Configuration;
 using Argus.Packs;
 using Argus.Platform;
@@ -315,12 +316,13 @@ public static partial class ArgusServer
     /// and one member list per indexed project, one after another, so connecting took minutes on a
     /// large or slow GitLab and the coding agents gave up on it.
     /// </summary>
-    static Caller Person(PersonAccess access, string email, string? username, string via)
+    static Caller Person(PersonAccess access, string email, string? username, string via, IReadOnlyDictionary<string, string>? hostTokens = null)
     {
         email = PyStr.Strip(email);
         if (email.Length == 0) throw new AclDenied("No email is known for this person, so access is denied.");
         access.Warm(email, username);
-        return new Caller("person:" + email.ToLowerInvariant(), string.IsNullOrWhiteSpace(username) ? email : username, via, () => access.Resolve(email, username));
+        return new Caller("person:" + email.ToLowerInvariant(), string.IsNullOrWhiteSpace(username) ? email : username, via,
+            () => hostTokens is { Count: > 0 } ? access.Resolve(email, username) with { HostTokens = hostTokens } : access.Resolve(email, username));
     }
 
     /// <param name="keys">In the platform (ARGUS_KEY_CHECK_URL): Arena API keys checked with the app, and no GitLab tokens.</param>
@@ -448,7 +450,10 @@ public static partial class ArgusServer
         var email = PyStr.Strip(ctx.Request.Headers[ChatEmailHeader].ToString());
         if (email.Length == 0)
             throw new AclDenied("The chat client did not say who is asking, so access is denied.");
-        return Person(access, email, People.UsernameForEmail(Environment.GetEnvironmentVariable(UsersFileEnv), email), "chat");
+        // The person's own GitHub and Gitea tokens, which only the app (inside the network) passes.
+        var tokens = ForeignHosts.Kinds.Select(k => (k, PyStr.Strip(ctx.Request.Headers[ForeignHosts.TokenHeader(k)].ToString())))
+            .Where(t => t.Item2.Length > 0).ToDictionary(t => t.k, t => t.Item2);
+        return Person(access, email, People.UsernameForEmail(Environment.GetEnvironmentVariable(UsersFileEnv), email), "chat", tokens);
     }
 
     /// <summary>Where the gate leaves the <see cref="Caller"/> for the request.</summary>
@@ -499,6 +504,26 @@ public static partial class ArgusServer
                 return Json(new JsonObject { ["project"] = project, ["known"] = null, ["may_read"] = false, ["reason"] = exc.Message });
             }
             catch (Exception exc) { return Failed(exc); }
+        });
+
+        // Who the person's own GitHub or Gitea token is (the app checks one as it is linked); 403 when the host refuses it.
+        app.MapGet(ReviewPrefix + "host_user", async (HttpContext ctx) =>
+        {
+            var caller = (Caller)ctx.Items[CallerItem]!;
+            var kind = ctx.Request.Query["kind"].ToString();
+            if (!ForeignHosts.Kinds.Contains(kind)) return Json(new JsonObject { ["error"] = "kind is github or gitea" }, 400);
+            if (ForeignHosts.ApiUrl(kind) is not { } api) return Json(new JsonObject { ["error"] = $"{ForeignHosts.Title(kind)} is not set up for Argus here." }, 404);
+            if (!caller.Identity.HostTokens.TryGetValue(kind, out var token)) return Json(new JsonObject { ["error"] = $"No {ForeignHosts.Title(kind)} token came with the request." }, 400);
+            try
+            {
+                var login = await Task.Run(() => ForeignHosts.For(kind, api, token).Whoami(), ctx.RequestAborted);
+                return Json(new JsonObject { ["kind"] = kind, ["login"] = login });
+            }
+            catch (CodeHostError exc) when (exc.Status is 401 or 403)
+            {
+                return Json(new JsonObject { ["error"] = $"{ForeignHosts.Title(kind)} does not take this token." }, 403);
+            }
+            catch (CodeHostError exc) { return Json(new JsonObject { ["error"] = exc.Message }, 502); }
         });
 
         app.MapGet(ReviewPrefix + "{tool}", async (HttpContext ctx, string tool) =>

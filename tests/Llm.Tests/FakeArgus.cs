@@ -26,6 +26,12 @@ public sealed class FakeArgus : HttpMessageHandler
         {
             return Mcp(request, body);
         }
+        if (path == "/review/host_user")
+        {
+            // A person's GitHub token, as Argus checks it with GitHub: only this one is taken.
+            var good = request.Headers.Authorization?.Parameter == ChatToken && request.Headers.TryGetValues(Llm.Api.Chat.ArgusMcp.TokenHeader("github"), out var gh) && gh.Single() == GoodGitHubToken;
+            return good ? Json(HttpStatusCode.OK, """{"kind":"github","login":"octocat"}""") : Json(HttpStatusCode.Forbidden, """{"error":"GitHub does not take this token."}""");
+        }
         Calls.Add((request.Method.Method, request.RequestUri.PathAndQuery, token, body));
         if (token != Token)
         {
@@ -97,6 +103,12 @@ public sealed class FakeArgus : HttpMessageHandler
 
     public List<(string Method, string? Email, string? Session, JsonElement? Params)> McpCalls { get; } = [];
 
+    /// <summary>The GitHub token Argus takes in these tests (as a person's own, linked in Account → Code hosts).</summary>
+    public const string GoodGitHubToken = "ghp-test-token-read-only";
+
+    /// <summary>Each MCP request's GitHub token header, by the person's email (null: none came).</summary>
+    public System.Collections.Concurrent.ConcurrentQueue<(string? Email, string? GitHub)> HostTokens { get; } = new();
+
     /// <summary>Tools answered with this structured content (JSON), by name: the merge request tools a review reads.</summary>
     public System.Collections.Concurrent.ConcurrentDictionary<string, string> Answers { get; } = new();
 
@@ -112,6 +124,7 @@ public sealed class FakeArgus : HttpMessageHandler
         var session = request.Headers.TryGetValues("mcp-session-id", out var s) ? s.Single() : null;
         var method = body!.Value.GetProperty("method").GetString()!;
         McpCalls.Add((method, email, session, body.Value.TryGetProperty("params", out var p) ? p : null));
+        HostTokens.Enqueue((email, request.Headers.TryGetValues(Llm.Api.Chat.ArgusMcp.TokenHeader("github"), out var gt) ? gt.Single() : null));
         if (auth != ChatToken)
         {
             return Json(HttpStatusCode.Unauthorized, """{"error":"unknown token"}""");

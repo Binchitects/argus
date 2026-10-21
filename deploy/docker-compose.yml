@@ -265,6 +265,9 @@ services:
       ARGUS_GITLAB_PASSWORD: ${GITLAB_PASSWORD:-}
       ARGUS_GITLAB_LDAP: ${GITLAB_LDAP:-}
       ARGUS_GITLAB_VERIFY: ${GITLAB_VERIFY_TLS:-true}
+      # Pull requests on GitHub (or GitHub Enterprise's API, or off) and Gitea, read with each person's own token.
+      ARGUS_GITHUB_API: ${GITHUB_API_URL:-}
+      ARGUS_GITEA_URL: ${GITEA_URL:-}
       ARGUS_USERS_FILE: /directory/users.yml
       ARGUS_EMBED_URL: http://embed:8080
       ARGUS_PACK_LIBRARY: /pack-library

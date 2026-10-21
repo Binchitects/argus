@@ -17,6 +17,13 @@ gitlab:
   # Password mode with an LDAP account: "" tries GitLab's own sign-in, then each LDAP one; a provider (ldapmain) only it; off never.
   ldap: ""
 
+# Pull requests on GitHub and Gitea, read with each person's own read-only token (Account -> Code hosts).
+codeHosts:
+  # "" is github.com; a GitHub Enterprise API (https://github.example.com/api/v3); "off" for none.
+  githubApi: ""
+  # Your Gitea (https://gitea.example.com); "" for none.
+  giteaUrl: ""
+
 # Secrets: left empty, each is made once (randAlphaNum) and kept across upgrades (looked up in the
 # release's Secret). For GitOps tools that cannot look up, set them here or name an existingSecret
 # with the keys ADMIN_PASSWORD, DB_PASSWORD, APP_KEY, ENGINE_KEY, ARGUS_KEY, GATEWAY_KEY (sk-...),

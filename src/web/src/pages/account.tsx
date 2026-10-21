@@ -28,6 +28,7 @@ import { cn } from '@/lib/utils'
 import { setWidth, useWidth, type WidthPreference } from '@/lib/width'
 import { YourData } from './account-data'
 import { AskForAccess } from './account-access'
+import { CodeHosts } from './account-code-hosts'
 import { VoiceSection } from './account-voice'
 
 export function AccountPage() {
@@ -47,6 +48,7 @@ export function AccountPage() {
         </div>
         <div className="grid content-start gap-6">
           <Connections />
+          <CodeHosts />
           <PushDevices />
           <AskForAccess />
           {me.source === 'oidc' ? (

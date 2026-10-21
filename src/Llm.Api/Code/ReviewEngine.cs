@@ -78,7 +78,7 @@ public sealed partial class ReviewEngine(IServiceScopeFactory scopes, ILogger<Re
             review.Status = CodeReview.Running;
             await StepAsync(db, review, "Reading the change", ct);
             var argus = services.GetRequiredService<ArgusMcp>();
-            var session = await argus.ConnectAsync(user.Email!, ct);
+            var session = await argus.ConnectAsync(user.Id, user.Email!, ct);
             var previous = review.PreviousId is { } p ? await db.CodeReviews.AsNoTracking().SingleOrDefaultAsync(r => r.Id == p, ct) : null;
             var (description, files, ci) = await ReadAsync(session, review, previous, ct);
             review.Ci = ci;

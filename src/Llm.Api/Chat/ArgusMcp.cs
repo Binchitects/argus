@@ -5,6 +5,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Llm.Api.Operations;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Chat;
@@ -483,18 +484,69 @@ public static class Mcp
 /// email beside it, accepted only from inside the network. Argus answers with
 /// that person's GitLab access.
 /// </summary>
-public sealed class ArgusMcp(HttpClient http, IOptions<ArgusOptions> argus, IOptionsMonitor<ChatOptions> chat)
+public sealed class ArgusMcp(HttpClient http, IOptions<ArgusOptions> argus, IOptionsMonitor<ChatOptions> chat, IServiceScopeFactory scopes, IOptions<Identity.AuthOptions> auth)
 {
     public const string EmailHeader = "x-llm-user-email";
+    /// <summary>A person's own GitHub or Gitea token, kept as a person credential "codehost:github" or "codehost:gitea".</summary>
+    public const string CodeHostPrefix = "codehost:";
+    public static readonly string[] CodeHosts = ["github", "gitea"];
+
+    /// <summary>The header Argus reads a person's own token for that host from (src/Argus/CodeHosts/ForeignHosts.cs).</summary>
+    public static string TokenHeader(string kind) => $"x-llm-{kind}-token";
 
     /// <summary>The chat's credential at Argus: its own when set, else ARGUS_KEY (Argus takes it as both).</summary>
     private string? Token => chat.CurrentValue.ArgusChatToken is { Length: > 0 } own ? own : argus.Value.AdminToken;
 
     public bool Enabled => !string.IsNullOrWhiteSpace(argus.Value.Url) && !string.IsNullOrWhiteSpace(Token);
 
-    public Task<McpSession> ConnectAsync(string email, CancellationToken ct) =>
-        Mcp.ConnectAsync(http, new Uri(argus.Value.Url.TrimEnd('/') + "/mcp"),
-            new Dictionary<string, string> { ["Authorization"] = "Bearer " + Token, [EmailHeader] = email }, "Argus", ct, chat.CurrentValue.ToolCallTimeout);
+    /// <summary>A session as the person: their email, and their own GitHub and Gitea tokens when they linked them (Account → Code hosts).</summary>
+    public async Task<McpSession> ConnectAsync(Guid userId, string email, CancellationToken ct)
+    {
+        var headers = new Dictionary<string, string> { ["Authorization"] = "Bearer " + Token, [EmailHeader] = email };
+        foreach (var (kind, token) in await CodeHostTokensAsync(userId, ct))
+        {
+            headers[TokenHeader(kind)] = token;
+        }
+        return await Mcp.ConnectAsync(http, new Uri(argus.Value.Url.TrimEnd('/') + "/mcp"), headers, "Argus", ct, chat.CurrentValue.ToolCallTimeout);
+    }
+
+    /// <summary>The person's own code host tokens, decrypted: { "github": "...", "gitea": "..." }; none without APP_DATA_KEY.</summary>
+    public async Task<Dictionary<string, string>> CodeHostTokensAsync(Guid userId, CancellationToken ct)
+    {
+        if (auth.Value.DataKey is not { Length: > 0 } key)
+        {
+            return [];
+        }
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<Core.Data.AppDbContext>();
+        var saved = await db.PersonCredentials.AsNoTracking().Where(c => c.UserId == userId && c.ToolId.StartsWith(CodeHostPrefix)).ToListAsync(ct);
+        return saved.Where(c => CodeHosts.Contains(c.ToolId[CodeHostPrefix.Length..]))
+            .Select(c => (Kind: c.ToolId[CodeHostPrefix.Length..], Token: Settings.SettingsCrypto.Decrypt(c.SecretEncrypted, key)))
+            .Where(t => t.Token is { Length: > 0 }).ToDictionary(t => t.Kind, t => t.Token!);
+    }
+
+    /// <summary>Who a GitHub or Gitea token is, asked of Argus (which reads the host); else why not.</summary>
+    public async Task<(string? Login, string? Problem)> HostUserAsync(string email, string kind, string token, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{argus.Value.Url.TrimEnd('/')}/review/host_user?kind={Uri.EscapeDataString(kind)}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token);
+        request.Headers.Add(EmailHeader, email);
+        request.Headers.Add(TokenHeader(kind), token);
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(30));
+            using var response = await http.SendAsync(request, timeout.Token);
+            var answer = JsonNode.Parse(await response.Content.ReadAsStringAsync(timeout.Token));
+            return response.IsSuccessStatusCode && answer?["login"]?.GetValue<string>() is { Length: > 0 } login
+                ? (login, null)
+                : (null, answer?["error"]?.GetValue<string>() ?? $"Argus answered {(int)response.StatusCode}.");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            return (null, "Argus could not be reached: try again in a moment.");
+        }
+    }
 
     /// <summary>Argus's words when something exists but the person cannot read it (src/Argus/Access/Acl.cs).</summary>
     public const string NoAccessMarker = "Nothing you have access to matches this";

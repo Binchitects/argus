@@ -656,6 +656,31 @@ Access), and write nothing to GitLab: no comments, no approvals.
   answers with the verdict and the findings it kept; `review_get` reads one
   again. The review is on the Code page too. Off in rooms (it reads as you).
 
+### GitHub and Gitea
+
+Pull requests on GitHub and Gitea are reviewed as merge requests are, by
+naming the project `github:owner/repo` or `gitea:owner/repo` (on the Code
+page, to the review tool, in an automatic review's rule):
+
+- **Your own token.** Link a read-only token once in **Account → Code
+  hosts**: GitHub's fine-grained token with *Contents*, *Pull requests* and
+  *Metadata* read (or a classic one with `repo` read), Gitea's with
+  *repository: read*. It is checked as it is linked (the account it is
+  shows), kept encrypted, never shown again, and passed to Argus with your
+  requests only: what you may read there is what is read. Argus only reads.
+- **What is read.** The pull request, its files and diff, its commits, its
+  conversation and its CI (GitHub Actions runs and jobs; Gitea's commit
+  statuses). A review again reads only what came after on GitHub; Gitea's
+  API cannot compare two commits, so there it reads the whole diff again.
+  Comparing two branches is GitHub's and GitLab's only; `grep_at` is
+  GitLab's only (Argus keeps copies of GitLab projects alone).
+- **Setting it up.** GitHub.com works as it is; a GitHub Enterprise API
+  (`GITHUB_API_URL`, or `off`) and your Gitea (`GITEA_URL`) are set in
+  `deploy/.env` (Helm: `codeHosts`).
+- **Automatic reviews** of a GitHub or Gitea project look at its open pull
+  requests every few minutes as the rule's person (their token); GitLab's
+  webhook is GitLab's only.
+
 ### Automatic reviews
 
 **Code → Automatic reviews → A project** reviews a project's merge requests

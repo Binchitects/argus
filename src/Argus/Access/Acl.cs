@@ -27,6 +27,12 @@ public sealed record Identity(long UserId, string Username, IReadOnlyList<long> 
     /// <see cref="AclDenied"/> when GitLab cannot be asked and nothing recent is kept. Nobody, unless set.
     /// </summary>
     public Func<long, bool> MayRead { get; init; } = static _ => false;
+
+    /// <summary>
+    /// The person's own read-only tokens at GitHub and Gitea ("github", "gitea"), when the app passed them: their
+    /// projects there are read with these, so what they may read there is all Argus reads. Never logged.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> HostTokens { get; init; } = new Dictionary<string, string>();
 }
 
 /// <summary>

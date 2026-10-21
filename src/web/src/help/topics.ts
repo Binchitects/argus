@@ -408,7 +408,7 @@ export const topics = {
     title: 'Code',
     about: 'Reviews of merge requests by the model, and the code assistant. Both read the code with your own GitLab access, through Argus, and write nothing to GitLab.',
     parts: [
-      { name: 'Merge requests', text: 'A project by its path (group/project): its open, merged or all merge requests. **Review** starts a review; a branch without a merge request can be reviewed against the one it goes into.' },
+      { name: 'Merge requests', text: 'A project by its path (group/project): its open, merged or all merge requests. **Review** starts a review; a branch without a merge request can be reviewed against the one it goes into. GitHub and Gitea projects are github:owner/repo and gitea:owner/repo, once your token is linked in **Account → Code hosts**.' },
       { name: 'Ask about code', text: 'A question about a project, a branch or a merge request: answered in a chat with Argus, which reads the code as you may.' },
       { name: 'Automatic reviews', text: 'A project whose merge requests are reviewed as they open and get new commits (GitLab\'s webhook, and a look every few minutes), and a branch reviewed on a schedule. Read with your access, at your cost; each review can go to a room.' },
       { name: 'Reviews', text: 'Yours, and those of rooms you are in, with their verdict and how many findings are still open.' },

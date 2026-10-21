@@ -144,7 +144,7 @@ public sealed class ArgusTool(ArgusMcp argus) : IChatTool
 
     public async Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct)
     {
-        var session = await argus.ConnectAsync(context.Email, ct);
+        var session = await argus.ConnectAsync(context.User.Id, context.Email, ct);
         var functions = Mcp.ToOpenAiTools(await session.ToolsAsync(ct));
         return new LocalRun(functions, session.Instructions, async (name, args, token) =>
         {

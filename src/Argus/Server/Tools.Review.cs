@@ -35,7 +35,45 @@ public sealed partial class Tools
     ICodeHost Host => _host.Value;
 
     /// <summary>A project Argus knows (listed by GitLab, indexed or not): its GitLab id, path, default branch and clone URL.</summary>
-    public sealed record KnownProject(long GitlabId, string Path, string DefaultBranch, string HttpUrl);
+    /// <param name="Kind">gitlab, github or gitea.</param>
+    /// <param name="Name">On GitHub and Gitea, owner/repo (its <paramref name="Path"/> is "github:owner/repo").</param>
+    public sealed record KnownProject(long GitlabId, string Path, string DefaultBranch, string HttpUrl, string Kind = "gitlab", string? Name = null)
+    {
+        public bool Foreign => Kind != "gitlab";
+        public string HostTitle => ForeignHosts.Title(Kind);
+    }
+
+    /// <summary>The host the project is on: GitLab with Argus's service credential, or GitHub or Gitea with the person's own token.</summary>
+    ICodeHost HostOf(KnownProject p, Identity who)
+    {
+        if (!p.Foreign) return Host;
+        var host = ForeignHosts.For(p.Kind, ForeignHosts.ApiUrl(p.Kind)!, who.HostTokens[p.Kind]);
+        host.Remember(p.GitlabId, p.Name!);
+        return host;
+    }
+
+    /// <summary>A GitHub or Gitea repository the person may read, with their own token there; else why not.</summary>
+    static KnownProject ForeignReadable(Identity who, string kind, string name)
+    {
+        var title = ForeignHosts.Title(kind);
+        if (ForeignHosts.ApiUrl(kind) is not { } api)
+            throw new NotFoundError($"{title} is not set up for Argus here, so {kind}:{name} cannot be read. An admin sets it ({(kind == ForeignHosts.Gitea ? ForeignHosts.GiteaUrlEnv : ForeignHosts.GitHubApiEnv)}).");
+        if (!who.HostTokens.TryGetValue(kind, out var token))
+            throw new AccessNotice($"Reading {title} needs your own {title} token: link a read-only one in Arena (Account → Code hosts), then ask again.");
+        ForeignRepo? repo;
+        try { repo = ForeignHosts.For(kind, api, token).Repo(name); }
+        catch (CodeHostError exc) when (exc.Status is 401 or 403)
+        {
+            throw new AccessNotice($"{title} refused your token for {name}: link one that can read it (Account → Code hosts).");
+        }
+        catch (CodeHostError exc)
+        {
+            throw new HostUnavailable($"{title} could not answer for {name} ({exc.Message}). This is not something a different query fixes; tell the person asking.", exc);
+        }
+        return repo is null
+            ? throw new NotFoundError($"{title} has no repository {name} that your token can read. Give it as {kind}:owner/repo.")
+            : new KnownProject(repo.Id, $"{kind}:{repo.FullName}", repo.DefaultBranch, repo.CloneUrl, kind, repo.FullName);
+    }
 
     static long Now() => DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
@@ -58,6 +96,7 @@ public sealed partial class Tools
     /// </summary>
     public KnownProject Readable(Identity who, string project)
     {
+        if (ForeignHosts.Split(PyStr.Strip(project)) is { } foreign) return ForeignReadable(who, foreign.Kind, foreign.Name);
         var known = RunReadonly(conn => FindProject(conn, project));
         // Asked outside the index's connection: GitLab may be asked here, and may be unwell.
         if (known is not null && who.MayRead(known.GitlabId)) return known;
@@ -83,20 +122,23 @@ public sealed partial class Tools
     /// A call to GitLab about <paramref name="what"/> (said without an article: "merge request !4 in group/app"):
     /// a 404 says what was not found, a 400 what GitLab refused, and any other failure not to retry.
     /// </summary>
-    static T Hosted<T>(string what, Func<T> call)
+    static T Hosted<T>(KnownProject p, string what, Func<T> call)
     {
+        var host = p.HostTitle;
         try { return call(); }
-        catch (CodeHostError exc) when (exc.Status == 404) { throw new NotFoundError($"GitLab has no {what}."); }
-        catch (CodeHostError exc) when (exc.Status == 400) { throw new ToolError($"GitLab refused the request for {what}: {exc.Message}", exc); }
+        catch (CodeHostError exc) when (exc.Status == 404) { throw new NotFoundError($"{host} has no {what}."); }
+        catch (CodeHostError exc) when (exc.Status is 400 or 501) { throw new ToolError($"{host} refused the request for {what}: {exc.Message}", exc); }
+        catch (CodeHostError exc) when (exc.Status == 403 && p.Foreign) { throw new AccessNotice($"{exc.Message}."); }
         catch (CodeHostError exc)
         {
-            throw new HostUnavailable($"GitLab could not answer for {what} ({exc.Message}). This is not something a different query fixes; tell the person asking.", exc);
+            throw new HostUnavailable($"{host} could not answer for {what} ({exc.Message}). This is not something a different query fixes; tell the person asking.", exc);
         }
     }
 
     /// <summary>Forget the kept heads of merge requests no longer open (best effort: a failure here never fails the answer).</summary>
     void ForgetClosed(KnownProject p, IEnumerable<ChangeRequest> changes)
     {
+        if (p.Foreign) return;
         try
         {
             var closed = changes.Where(c => !c.Open).Select(c => c.Number).ToList();
@@ -162,7 +204,7 @@ public sealed partial class Tools
         state = PyStr.Strip(state).ToLowerInvariant();
         if (state is not ("opened" or "closed" or "merged" or "locked" or "all"))
             throw new ToolError($"state is one of opened, closed, merged, locked, all; not {PyStr.Repr(state)}.");
-        var changes = Hosted($"merge requests of {p.Path}", () => Host.ListChanges(p.GitlabId, state, updatedAfter, author, (int)Math.Clamp(limit, 1, 100)));
+        var changes = Hosted(p, $"merge requests of {p.Path}", () => HostOf(p, who).ListChanges(p.GitlabId, state, updatedAfter, author, (int)Math.Clamp(limit, 1, 100)));
         ForgetClosed(p, changes);
         return Arr(changes.Select(c => (JsonNode?)c.ToSummary()));
     }
@@ -170,9 +212,9 @@ public sealed partial class Tools
     public JsonNode MrGet(Identity who, string project, long iid)
     {
         var p = Readable(who, project);
-        var change = Hosted($"merge request !{iid} in {p.Path}", () => Host.GetChange(p.GitlabId, iid))
+        var change = Hosted(p, $"merge request !{iid} in {p.Path}", () => HostOf(p, who).GetChange(p.GitlabId, iid))
                      ?? throw new NotFoundError($"GitLab has no merge request !{iid} in {p.Path}.");
-        var versions = Hosted($"versions of !{iid} in {p.Path}", () => Host.Versions(p.GitlabId, iid));
+        var versions = Hosted(p, $"versions of !{iid} in {p.Path}", () => HostOf(p, who).Versions(p.GitlabId, iid));
         ForgetClosed(p, [change]);
         var o = change.ToJson(DescriptionBudget);
         o["project"] = p.Path;
@@ -184,28 +226,34 @@ public sealed partial class Tools
     {
         var p = Readable(who, project);
         if (sinceSha is not null && version is not null) throw new ToolError("Give since_sha or version, not both.");
-        var change = Hosted($"merge request !{iid} in {p.Path}", () => Host.GetChange(p.GitlabId, iid))
+        var change = Hosted(p, $"merge request !{iid} in {p.Path}", () => HostOf(p, who).GetChange(p.GitlabId, iid))
                      ?? throw new NotFoundError($"GitLab has no merge request !{iid} in {p.Path}.");
         IReadOnlyList<FileDiff> files;
         var o = new JsonObject { ["project"] = p.Path, ["iid"] = iid };
+        if (sinceSha is not null && p.Kind == ForeignHosts.Gitea)
+        {
+            // Gitea cannot compare two commits: the whole diff, said so.
+            o["since_sha_ignored"] = "Gitea's API cannot compare two commits, so this is the whole diff.";
+            sinceSha = null;
+        }
         if (sinceSha is not null)
         {
             var since = CheckRev("since_sha", sinceSha);
             var head = change.Refs?.HeadSha ?? change.Sha ?? throw new NotFoundError($"merge request !{iid} has no head commit yet.");
             // What the merge request's own files became since that commit: a straight diff, so a commit of the
             // target branch merged in meanwhile is not shown as the author's.
-            var touched = Hosted($"diff of !{iid} in {p.Path}", () => Host.Diff(p.GitlabId, iid)).SelectMany(f => new[] { f.OldPath, f.NewPath }).ToHashSet(StringComparer.Ordinal);
-            var compared = Hosted($"comparison of {since} with {head} in {p.Path}", () => Host.Compare(p.GitlabId, since, head, straight: true));
+            var touched = Hosted(p, $"diff of !{iid} in {p.Path}", () => HostOf(p, who).Diff(p.GitlabId, iid)).SelectMany(f => new[] { f.OldPath, f.NewPath }).ToHashSet(StringComparer.Ordinal);
+            var compared = Hosted(p, $"comparison of {since} with {head} in {p.Path}", () => HostOf(p, who).Compare(p.GitlabId, since, head, straight: true));
             files = compared.Diffs.Where(f => touched.Contains(f.NewPath) || touched.Contains(f.OldPath)).ToList();
             o["since_sha"] = since;
             o["head_sha"] = head;
         }
         else
         {
-            files = Hosted(version is null ? $"diff of !{iid} in {p.Path}" : $"version {version} of !{iid} in {p.Path}", () => Host.Diff(p.GitlabId, iid, version));
+            files = Hosted(p, version is null ? $"diff of !{iid} in {p.Path}" : $"version {version} of !{iid} in {p.Path}", () => HostOf(p, who).Diff(p.GitlabId, iid, version));
             if (version is not null)
             {
-                var v = Hosted($"versions of !{iid} in {p.Path}", () => Host.Versions(p.GitlabId, iid)).FirstOrDefault(x => x.Id == version);
+                var v = Hosted(p, $"versions of !{iid} in {p.Path}", () => HostOf(p, who).Versions(p.GitlabId, iid)).FirstOrDefault(x => x.Id == version);
                 o["version"] = version;
                 if (v is not null) o["diff_refs"] = new DiffRefs(v.BaseSha, v.StartSha, v.HeadSha).ToJson();
             }
@@ -220,13 +268,13 @@ public sealed partial class Tools
     public JsonNode MrCommits(Identity who, string project, long iid)
     {
         var p = Readable(who, project);
-        return Arr(Hosted($"merge request !{iid} in {p.Path}", () => Host.Commits(p.GitlabId, iid)).Select(c => (JsonNode?)c.ToJson()));
+        return Arr(Hosted(p, $"merge request !{iid} in {p.Path}", () => HostOf(p, who).Commits(p.GitlabId, iid)).Select(c => (JsonNode?)c.ToJson()));
     }
 
     public JsonNode MrDiscussions(Identity who, string project, long iid, bool includeSystem)
     {
         var p = Readable(who, project);
-        var threads = Hosted($"merge request !{iid} in {p.Path}", () => Host.Discussions(p.GitlabId, iid));
+        var threads = Hosted(p, $"merge request !{iid} in {p.Path}", () => HostOf(p, who).Discussions(p.GitlabId, iid));
         return Arr(threads.Where(d => includeSystem || !d.System).Select(d => (JsonNode?)new JsonObject
         {
             ["id"] = d.Id, ["resolvable"] = d.Resolvable, ["resolved"] = d.Resolved,
@@ -242,10 +290,12 @@ public sealed partial class Tools
         if (iid is null && string.IsNullOrWhiteSpace(sha)) throw new ToolError("Give iid (a merge request) or sha (a commit).");
         var commit = sha is null ? null : CheckRev("sha", sha);
         var what = iid is { } n ? $"merge request !{n} in {p.Path}" : $"commit {commit} in {p.Path}";
-        var pipelines = Hosted(what, () => Host.Pipelines(p.GitlabId, iid, commit));
+        // One host for both calls: Gitea's jobs are the statuses of the commit its pipeline was read for.
+        var host = HostOf(p, who);
+        var pipelines = Hosted(p, what, () => host.Pipelines(p.GitlabId, iid, commit));
         if (pipelines.Count == 0) return new JsonObject { ["project"] = p.Path, ["pipeline"] = null, ["note"] = $"No pipeline ran for {what}." };
         var latest = pipelines[0];
-        var jobs = Hosted($"jobs of pipeline {latest.Id} in {p.Path}", () => Host.Jobs(p.GitlabId, latest.Id));
+        var jobs = Hosted(p, $"jobs of pipeline {latest.Id} in {p.Path}", () => host.Jobs(p.GitlabId, latest.Id));
         return new JsonObject
         {
             ["project"] = p.Path,
@@ -270,7 +320,7 @@ public sealed partial class Tools
     public JsonNode JobLog(Identity who, string project, long jobId, long tailChars)
     {
         var p = Readable(who, project);
-        var log = Hosted($"job {jobId} in {p.Path}", () => Host.JobLog(p.GitlabId, jobId)) ?? throw new NotFoundError($"Job {jobId} in {p.Path} has no log.");
+        var log = Hosted(p, $"job {jobId} in {p.Path}", () => HostOf(p, who).JobLog(p.GitlabId, jobId)) ?? throw new NotFoundError($"Job {jobId} in {p.Path} has no log.");
         // Masked whole, then cut: a secret the cut runs through is still taken out.
         var clean = SecretMask.Mask(CleanLog(log));
         var tail = (int)Math.Clamp(tailChars, 1_000, 200_000);
@@ -287,7 +337,7 @@ public sealed partial class Tools
         var p = Readable(who, project);
         var a = CheckRev("from", from);
         var b = CheckRev("to", to);
-        var compared = Hosted($"comparison of {a} with {b} in {p.Path}", () => Host.Compare(p.GitlabId, a, b, straight));
+        var compared = Hosted(p, $"comparison of {a} with {b} in {p.Path}", () => HostOf(p, who).Compare(p.GitlabId, a, b, straight));
         var (rows, omitted) = Budgeted(compared.Diffs.Where(f => PathMatches(f, path)));
         var o = new JsonObject
         {
@@ -339,22 +389,24 @@ public sealed partial class Tools
         FileAtCommit? found;
         try
         {
+            // GitHub and Gitea have no mirror here: their API, as the person.
+            if (p.Foreign) throw new GitError($"{p.Path} is read through {p.HostTitle}'s API");
             string mirror;
             (mirror, sha, label) = At(p, rev, iid);
             found = CodeAt.Show(mirror, sha, file);
         }
         catch (Exception exc) when (exc is GitError or IOException or System.ComponentModel.Win32Exception)
         {
-            // No mirror to read (git failed, or is missing): GitLab's API, at the merge request's head or the ref asked.
-            Console.Error.WriteLine($"file_at reads {p.Path} through GitLab's API: {exc.Message}");
+            // No mirror to read (git failed, or is missing): the host's API, at the merge request's head or the ref asked.
+            if (!p.Foreign) Console.Error.WriteLine($"file_at reads {p.Path} through GitLab's API: {exc.Message}");
             label = iid is { } n ? $"!{n}" : CheckRev("ref", rev ?? p.DefaultBranch);
             sha = iid is { } m
                 ? rev is null
-                    ? Hosted($"merge request !{m} in {p.Path}", () => Host.GetChange(p.GitlabId, m))?.Sha ?? throw new NotFoundError($"GitLab has no merge request !{m} in {p.Path}.")
+                    ? Hosted(p, $"merge request !{m} in {p.Path}", () => HostOf(p, who).GetChange(p.GitlabId, m))?.Sha ?? throw new NotFoundError($"{p.HostTitle} has no merge request !{m} in {p.Path}.")
                     : CheckRev("ref", rev)
                 : label;
             var at = sha;
-            var text = Hosted($"{file} at {label} in {p.Path}", () => Host.FileAt(p.GitlabId, at, file));
+            var text = Hosted(p, $"{file} at {label} in {p.Path}", () => HostOf(p, who).FileAt(p.GitlabId, at, file));
             found = text is null ? null : new FileAtCommit(text, Encoding.UTF8.GetByteCount(text), text.Contains('\0'), false);
         }
         if (found is null) throw new NotFoundError($"{p.Path} has no file {PyStr.Repr(file)} at {label} ({PyStr.Prefix(sha, 12)}).");
@@ -383,6 +435,7 @@ public sealed partial class Tools
     public JsonNode GrepAt(Identity who, string project, string pattern, string? rev, long? iid, string? path, bool ignoreCase, bool fixedText, long limit)
     {
         var p = Readable(who, project);
+        if (p.Foreign) throw new ToolError($"grep_at searches Argus's copies of GitLab projects; {p.Path} has none: read its files with file_at.");
         if (string.IsNullOrEmpty(pattern) || pattern.Length > 500) throw new ToolError("pattern is 1 to 500 characters.");
         var pathspec = string.IsNullOrWhiteSpace(path) ? null : PyStr.Strip(path);
         try

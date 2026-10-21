@@ -70,7 +70,7 @@ export function CodePage() {
 
   return (
     <>
-      <PageHeader title="Code" description="Review merge requests with the model, and ask about your code. It reads with your own GitLab access, and writes nothing to GitLab." />
+      <PageHeader title="Code" description="Review merge requests with the model, and ask about your code. It reads with your own access (GitLab, and GitHub or Gitea once linked in your account), and writes nothing there." />
       {error && (
         <Alert variant="destructive" className="mb-4">
           {error}
@@ -80,7 +80,7 @@ export function CodePage() {
         <Card>
           <CardHeader>
             <CardTitle>Merge requests</CardTitle>
-            <CardDescription>A project by its path, as in GitLab (group/project).</CardDescription>
+            <CardDescription>A project by its path: group/project in GitLab, github:owner/repo or gitea:owner/repo (link your token in your account first).</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
             <form

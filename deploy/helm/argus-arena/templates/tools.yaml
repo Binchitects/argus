@@ -41,6 +41,8 @@ spec:
             {{- include "arena.optionalSecretEnv" (list $ "ARGUS_GITLAB_PASSWORD" "GITLAB_PASSWORD") | nindent 12 }}
             - { name: ARGUS_GITLAB_VERIFY, value: {{ .Values.gitlab.verifyTls | quote }} }
             - { name: ARGUS_GITLAB_LDAP, value: {{ .Values.gitlab.ldap | quote }} }
+            - { name: ARGUS_GITHUB_API, value: {{ .Values.codeHosts.githubApi | quote }} }
+            - { name: ARGUS_GITEA_URL, value: {{ .Values.codeHosts.giteaUrl | quote }} }
             - { name: ARGUS_USERS_FILE, value: /directory/users.yml }
             - { name: ARGUS_EMBED_URL, value: "http://embed:8080" }
             - { name: ARGUS_APP, value: "off" }

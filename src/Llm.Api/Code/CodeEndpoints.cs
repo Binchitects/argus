@@ -57,7 +57,7 @@ public static class CodeEndpoints
         }
         try
         {
-            var session = await argus.ConnectAsync(me.Email!, ct);
+            var session = await argus.ConnectAsync(me.Id, me.Email!, ct);
             var (text, isError) = await session.CallAsync(tool, args, null, ct);
             if (isError)
             {
@@ -242,11 +242,15 @@ public static class CodeEndpoints
         return Results.Ok(new { id = room.Id });
     }
 
+    /// <summary>The host a project is on, by its name: github:owner/repo, gitea:owner/repo, else GitLab.</summary>
+    public static string HostOf(string project) =>
+        project.StartsWith("github:", StringComparison.OrdinalIgnoreCase) ? "GitHub" : project.StartsWith("gitea:", StringComparison.OrdinalIgnoreCase) ? "Gitea" : "GitLab";
+
     /// <summary>A review as a room's message: its verdict and risk, the summary, and the findings that held.</summary>
     public static string RoomText(CodeReview r, string label)
     {
         var text = $"**{label} of {r.Project} {r.Title}** ({ReviewEngine.VerdictText(r.Verdict)}, {r.Risk} risk) — [open the review](/code/reviews/{r.Id})" +
-            (r.WebUrl is { } url ? $" · [in GitLab]({url})" : "") + "\n\n" + (r.Summary ?? "") + "\n\n" +
+            (r.WebUrl is { } url ? $" · [in {HostOf(r.Project)}]({url})" : "") + "\n\n" + (r.Summary ?? "") + "\n\n" +
             string.Join('\n', r.Findings.Where(f => f.Verified != false).Select(f => $"- **{f.Severity}** `{f.Path}{(f.Line is { } l ? $":{l}" : "")}` {f.Title}"));
         return text.Length > 60_000 ? text[..60_000] : text;
     }
