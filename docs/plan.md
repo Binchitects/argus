@@ -1407,6 +1407,8 @@ Groundwork (the list at the end) goes in between, not instead. One item at
 a time, each tested, committed, pushed and deployed. A download (an image, a
 model) waits for a yes, with its name, source and size.
 
+Released: **v6.3.0** (2026-10-21), all three items below.
+
 ### v6.3 — "Show me": the model sees what you see
 
 1. **Show your screen.** In Talk or in a chat, **Share screen** (a window, a

@@ -145,17 +145,19 @@ public sealed class Cdp : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await _closing.CancelAsync();
+        // Closed first: cancelling the receiving aborts the socket, and a close after that fails.
         try
         {
             if (_socket.State == WebSocketState.Open)
             {
-                await _socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, CancellationToken.None);
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                await _socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, timeout.Token);
             }
         }
-        catch (Exception ex) when (ex is WebSocketException or ObjectDisposedException)
+        catch (Exception ex) when (ex is WebSocketException or ObjectDisposedException or OperationCanceledException)
         {
         }
+        await _closing.CancelAsync();
         _socket.Dispose();
         _sending.Dispose();
         _closing.Dispose();

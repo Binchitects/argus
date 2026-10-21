@@ -12,6 +12,38 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v6.3.0 (2026-10-21)
+
+"Show me": the model sees what you see, builds what you draw, and works a
+browser while you watch.
+
+### :rocket: Epics and highlights
+
+- **The browser agent**: with **Browser** on in a chat's Tools, the model
+  drives a real browser (Chromium, in its own container) to do a task on
+  websites: it opens pages, clicks, types, scrolls and reads, each step
+  shown as a picture of the screen (and given to a model that sees). The
+  chat's browser is live above the box; **Take over** hands it to you (the
+  agent waits) and **Hand it back** lets it go on. Anything that sends or
+  changes something on a site asks you first; it never types a password or
+  a card number. It reaches only public sites on the admin's lists, through
+  the app, never your network; each chat has its own cookies
+- **Napkin to app**: **Sketch** opens a whiteboard in the chat (on a photo
+  or the shared screen too); one click makes the drawing a running page, a
+  React component, a diagram, a 3D scene or a table, and a page opens
+  running when the answer is done
+- **Show your screen**: share a window, a tab or the screen, and each
+  question (typed or said in Talk) takes a picture of it for a model that
+  sees; nothing else is recorded
+
+### :sparkles: New features & Enhancements
+
+- A tool's pictures can go to a model that sees, after the step's results
+  (the browser's screen)
+- Settings → Tools: **Sites the browser agent may open** and **Sites the
+  browser agent never opens**; the `feature.browser` permission
+- The `browser` compose profile (`COMPOSE_PROFILES=browser`)
+
 ## v6.2.0 (2026-10-21)
 
 ### :rocket: Epics and highlights
