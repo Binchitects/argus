@@ -493,12 +493,20 @@ public sealed class FloodGuardTests(AppFixture app)
     [Fact]
     public async Task A_flood_of_sign_in_requests_gets_a_readable_429()
     {
+        // 600 a minute by default: an office of 300 behind one address signs in within a minute.
+        Assert.Equal(600, new Llm.Api.Identity.AuthOptions().SignInsPerMinute);
+        await using var f = app.Create(app.ConnectionStringFor("flood_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
+            new Dictionary<string, string?> { ["Auth:SignInsPerMinute"] = "20" });
         var ip = "192.0.2.200";
         HttpResponseMessage last = null!;
-        for (var i = 0; i < 125; i++)
+        for (var i = 0; i < 21; i++)
         {
             // Unknown names, each once: the per-account throttle never engages, only the flood guard.
-            last = await new TestBrowser(app.Factory, ip).LoginAsync($"flood-{i}", "x");
+            last = await new TestBrowser(f, ip).LoginAsync($"flood-{i}", "x");
+            if (i == 19)
+            {
+                Assert.NotEqual(System.Net.HttpStatusCode.TooManyRequests, last.StatusCode);
+            }
         }
         Assert.Equal(System.Net.HttpStatusCode.TooManyRequests, last.StatusCode);
         Assert.Equal("60", last.Headers.RetryAfter?.ToString());

@@ -28,6 +28,13 @@ public sealed class AuthOptions
     public TimeSpan SessionMax { get; set; } = TimeSpan.FromHours(12);
     public TimeSpan RememberMe { get; set; } = TimeSpan.FromDays(30);
 
+    /// <summary>
+    /// Sign-ins (and their second factors) one address may send a minute: a flood guard only, guessing is stopped per account
+    /// (LoginThrottle, lockout). An office signing in at 9:00 behind one NAT address needs room: 300 people within a minute
+    /// were refused 180 times at 120 (deploy/scripts/people-load.py).
+    /// </summary>
+    public int SignInsPerMinute { get; set; } = 600;
+
     /// <summary>How often a session is re-checked against the account (disabled, password reset, role change).</summary>
     public TimeSpan SessionRecheck { get; set; } = TimeSpan.FromMinutes(1);
 

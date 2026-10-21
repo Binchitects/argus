@@ -514,7 +514,7 @@ set by hand is changed by hand.
 | Guessing one account | 5 failures for one name from one address in 10 minutes ban that pair for 12 hours; colleagues behind the same NAT are unaffected |
 | Password spraying | 50 failures from one address in 10 minutes ban the address for 1 hour |
 | Guessing from many addresses | 10 failures on an account lock it for 15 minutes, counted atomically so parallel guesses cannot slip past |
-| Floods | 120 sign-in requests per minute per address, the directory's test and try included |
+| Floods | 600 sign-in requests per minute per address (`Auth__SignInsPerMinute`: an office of 300 behind one address signs in within a minute), the directory's test and try included |
 | Guessing through the directory's checks | a password typed in **Test the settings** for another service account, or in **Try a person's sign-in**, counts as a sign-in does |
 | Sessions | 1 hour idle, 12 hours absolute (no action extends that), 30 days with "keep me signed in"; re-checked against the account every minute |
 | Cross-site requests | every state change needs an `X-Requested-With` header, which another site cannot send; the SAML Reply URL, which the provider's page posts to, is guarded by the signature and the request this browser made |

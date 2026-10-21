@@ -176,10 +176,13 @@ public static class IdentityWiring
         {
             o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
             // A flood guard only: guessing is stopped by LoginThrottle and account lockout.
-            // Generous, because a whole office signing in at 9:00 shares one NAT address.
+            // Generous, because a whole office signing in at 9:00 shares one NAT address (Auth:SignInsPerMinute).
             o.AddPolicy("sign-in", ctx => RateLimitPartition.GetFixedWindowLimiter(
                 ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-                _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1) }));
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = Math.Max(10, ctx.RequestServices.GetRequiredService<IOptions<AuthOptions>>().Value.SignInsPerMinute), Window = TimeSpan.FromMinutes(1),
+                }));
             o.OnRejected = async (ctx, ct) =>
             {
                 ctx.HttpContext.Response.Headers.RetryAfter = "60";
