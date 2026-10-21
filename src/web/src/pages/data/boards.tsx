@@ -9,7 +9,7 @@ import { Segmented } from '@/components/app/segmented'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { useConfirm } from '@/components/ui/confirm'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -292,45 +292,45 @@ export function BoardPage() {
           {pins.map((p) => (
             <li key={p.id}>
               <Card className="h-full">
-                <CardHeader className="flex-row items-start gap-2 space-y-0">
-                  <div className="min-w-0 flex-1">
-                    <CardTitle className="truncate text-base">{p.title}</CardTitle>
-                    <CardDescription className="truncate text-xs">
-                      {p.source ?? 'A database'} · {refreshLabels[p.refresh]}
-                      {p.ranAt ? ` · as of ${new Date(p.ranAt).toLocaleString()}` : ''}
-                    </CardDescription>
-                  </div>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon-sm" aria-label={`More for ${p.title}`}>
-                        <MoreHorizontal />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      {p.result && (
-                        <DropdownMenuItem onSelect={() => setPosting(p)}>
-                          <MessagesSquare /> Post to a room
-                        </DropdownMenuItem>
-                      )}
-                      {board.mine && (
-                        <>
-                          <DropdownMenuItem onSelect={() => refresh.mutate(p.id)}>
-                            <RefreshCw /> Run it now
+                <CardHeader>
+                  <CardTitle className="min-w-0 truncate text-base">{p.title}</CardTitle>
+                  <CardDescription className="min-w-0 truncate text-xs">
+                    {p.source ?? 'A database'} · {refreshLabels[p.refresh]}
+                    {p.ranAt ? ` · as of ${new Date(p.ranAt).toLocaleString()}` : ''}
+                  </CardDescription>
+                  <CardAction>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon-sm" aria-label={`More for ${p.title}`}>
+                          <MoreHorizontal />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        {p.result && (
+                          <DropdownMenuItem onSelect={() => setPosting(p)}>
+                            <MessagesSquare /> Post to a room
                           </DropdownMenuItem>
-                          {(['hourly', 'daily', 'off'] as const)
-                            .filter((r) => r !== p.refresh)
-                            .map((r) => (
-                              <DropdownMenuItem key={r} onSelect={() => schedule.mutate({ pin: p.id, every: r })}>
-                                Run again: {refreshLabels[r].toLowerCase()}
-                              </DropdownMenuItem>
-                            ))}
-                          <DropdownMenuItem onSelect={() => remove.mutate(p.id)} className="text-destructive-ink">
-                            <Trash2 /> Take it off the board
-                          </DropdownMenuItem>
-                        </>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                        )}
+                        {board.mine && (
+                          <>
+                            <DropdownMenuItem onSelect={() => refresh.mutate(p.id)}>
+                              <RefreshCw /> Run it now
+                            </DropdownMenuItem>
+                            {(['hourly', 'daily', 'off'] as const)
+                              .filter((r) => r !== p.refresh)
+                              .map((r) => (
+                                <DropdownMenuItem key={r} onSelect={() => schedule.mutate({ pin: p.id, every: r })}>
+                                  Run again: {refreshLabels[r].toLowerCase()}
+                                </DropdownMenuItem>
+                              ))}
+                            <DropdownMenuItem onSelect={() => remove.mutate(p.id)} className="text-destructive-ink">
+                              <Trash2 /> Take it off the board
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </CardAction>
                 </CardHeader>
                 <CardContent className="grid gap-2">
                   {p.error && <Alert variant="destructive">{p.error}</Alert>}

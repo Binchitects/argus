@@ -91,7 +91,7 @@ public sealed partial class DataQuestions(AppDbContext db, AccessService access,
             {{Shape}}
 
             Write the tables with their schema (public.orders). Give the columns short names people read ("Orders", "Month"). At most {{s.MostRows}} rows, in a sensible order.
-            One figure: one row and one column, chart "number". Change over time: the date, week or month first, chart "line". A few groups compared: chart "bar". A list: chart "table".
+            One figure: one row and one column, chart "number". Change over time: one date column first (date_trunc('month', placed_at)::date as "Month"), chart "line". A few groups compared: chart "bar". A list: chart "table".
             If the tables cannot answer the question, set "sql" to "" and say why in "explanation".
             """;
     }

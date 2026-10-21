@@ -7,7 +7,7 @@ import { Segmented } from '@/components/app/segmented'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { useConfirm } from '@/components/ui/confirm'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -92,15 +92,15 @@ export function DataSourcesPage() {
           {sources.data.map((s) => (
             <li key={s.id}>
               <Card className="h-full">
-                <CardHeader className="flex-row items-start gap-2 space-y-0">
-                  <div className="min-w-0 flex-1">
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <Database className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                      <span className="truncate">{s.name}</span>
-                    </CardTitle>
-                    <CardDescription className="truncate font-mono text-xs">{s.where}</CardDescription>
-                  </div>
-                  <Badge variant="outline">{s.reach === 'company' ? 'Everyone' : `${s.groupIds.length} ${s.groupIds.length === 1 ? 'group' : 'groups'}`}</Badge>
+                <CardHeader>
+                  <CardTitle className="flex min-w-0 items-center gap-2 text-base">
+                    <Database className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    <span className="truncate">{s.name}</span>
+                  </CardTitle>
+                  <CardDescription className="min-w-0 truncate font-mono text-xs">{s.where}</CardDescription>
+                  <CardAction>
+                    <Badge variant="outline">{s.reach === 'company' ? 'Everyone' : `${s.groupIds.length} ${s.groupIds.length === 1 ? 'group' : 'groups'}`}</Badge>
+                  </CardAction>
                 </CardHeader>
                 <CardContent className="grid gap-3 text-sm">
                   {s.description && <p className="text-muted-foreground">{s.description}</p>}
