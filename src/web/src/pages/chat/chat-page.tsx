@@ -12,7 +12,9 @@ import { refusalEvent, safeguardQuestion, type SafeguardAnswer, type SafeguardQu
 import { AskReview, SafeguardAsk } from './safeguard-dialogs'
 import { useMedia } from '@/lib/use-media'
 import { cn } from '@/lib/utils'
-import { archiveChat, assistantQuery, cancelQueued, chatModel, configQuery, conversationQuery, forkChat, hurryChat, queueMessage, sendQueuedNow, stampQuery, stopChat, streamChat } from './api'
+import { archiveChat, assistantQuery, cancelQueued, chatModel, configQuery, conversationQuery, forkChat, hurryChat, queueMessage, sendQueuedNow, stampQuery, stopChat, streamChat, uploadFile } from './api'
+import { useScreenShare } from './screen'
+import { ScreenBar, ScreenButton } from './screen-share'
 import { AssistantIcon } from './assistant-icon'
 import { Composer } from './composer'
 import { answerRoom, contextOf } from './context'
@@ -173,6 +175,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   /** The chat an answer is streaming in: known before the route says so, when a new chat's first answer starts. */
   const streamingIn = useRef<string | null>(null)
   const uploads = useUploads(config.maxUploadBytes)
+  // Show your screen: each question takes a picture of what is on it.
+  const share = useScreenShare()
   const [filesOpen, setFilesOpen] = useState(false)
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   /** How a file that can run is shown, and whether the panel takes half the page (for a preview). */
@@ -557,6 +561,17 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
    * `talkTurn`: said in Talk, which hears the answer's events and its end, and reads it aloud. From the box, the quote above
    * it goes with the message (and comes back if it is not sent); `quoted`: one asked about from the selection's toolbar.
    */
+  /** The picture of the shared screen, taken now, with the question's files; the question goes without it when it cannot be taken. */
+  const withFrame = async (files: Attachment[]): Promise<Attachment[]> => {
+    if (!share.sharing) return files
+    try {
+      const file = await share.frame()
+      return file ? [...files, await uploadFile(file, () => undefined)] : files
+    } catch (e) {
+      toast.error(errorMessage(e, 'The picture of your screen could not be sent: the question goes without it.'))
+      return files
+    }
+  }
   const send = async (text: string, files?: Attachment[], talkTurn?: TalkTurn, quoted?: Quote): Promise<boolean> => {
     const fromBox = files === undefined
     // Compare too: two models answer this message, side by side.
@@ -582,7 +597,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     }
     const parent = view.leaf
     const localId = newLocalId()
-    const attachments = files ?? uploads.attachments
+    // A shared screen: what is on it now goes with the question.
+    const attachments = await withFrame(files ?? uploads.attachments)
     // Asked by voice: answered aloud.
     const aloud = aloudToo && attachments.some((a) => a.fileName.startsWith(voicePrefix))
     // The files went with the question once the server has it: the box is free for the next one while the answer streams.
@@ -701,7 +717,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     try {
       const r = await queueMessage(chat, {
         content: text,
-        attachments: fromBox ? uploads.attachments.map((a) => a.id) : [],
+        attachments: fromBox ? (await withFrame(uploads.attachments)).map((a) => a.id) : [],
         ...(withQuote ? { quote: withQuote.text } : {}),
         ...(inRoom?.replyTo ? { replyTo: inRoom.replyTo } : {}),
         ...(inRoom?.mentions?.length ? { mentions: inRoom.mentions } : {}),
@@ -778,7 +794,12 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     onInterrupt: () => void stop(),
     readAloud: aloudToo,
   })
-  const talkButton = <TalkButton state={talk.state} onStart={() => void talk.start()} onEnd={talk.end} />
+  const talkButton = (
+    <>
+      <ScreenButton share={share} />
+      <TalkButton state={talk.state} onStart={() => void talk.start()} onEnd={talk.end} />
+    </>
+  )
 
   const edit = (m: Message, text: string, quoted: string | null) => {
     if (!id) return
@@ -987,6 +1008,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   </Alert>
                 )}
                 {asking && <SafeguardAsk question={asking.question} onAnswer={asking.answer} />}
+                <ScreenBar share={share} sees={model?.vision ?? false} />
                 <TalkBar state={talk.state} onEnd={talk.end} />
                 <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} compare={comparePicker} talk={talkButton} history={history} autoFocus big />
                 <div className={cn('stagger mt-4 grid gap-2', starters ? 'sm:grid-cols-2' : 'sm:grid-cols-3')} aria-label={starters ? 'Conversation starters' : undefined}>
@@ -1156,6 +1178,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                     <ArrowDown />
                   </Button>
                 )}
+                <ScreenBar share={share} sees={model?.vision ?? false} />
                 <TalkBar state={talk.state} onEnd={talk.end} />
                 {data?.codeArena && !streaming && (
                   <output className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground">

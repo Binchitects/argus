@@ -884,6 +884,27 @@ chat. The browser asks for the microphone once.
   it would answer with a model of its own, outside the chat's history, tools
   and credit.
 
+### Show your screen
+
+**Share your screen** (the screen button beside Talk) lets the model see what
+you see: a window, a browser tab or the whole screen, as the browser offers
+when you press it.
+
+- **Each question takes a picture of it.** While a screen is shared, every
+  question you send, typed or said in Talk, takes what is on the screen at
+  that moment (a JPEG, at most 1600 pixels a side, named for when it was
+  taken) and sends it with the question, as an attached picture. "What is
+  wrong with this chart?", "Which button saves this?", or a spoken walk
+  through a dashboard, one question at a time.
+- **Nothing else is recorded.** Between questions nothing is taken or sent.
+  The pictures are the question's attachments: kept with it, shown in the
+  thread, checked by the safeguards' file rules like any file.
+- **The bar above the box** shows what is shared, a live view of it, and
+  **Stop**; the browser's own **Stop sharing** stops it too.
+- **A model that sees.** A chat whose model cannot see pictures gets their
+  names only, and the bar says so: choose a model that sees (the picker says
+  which). Phones' browsers cannot share a screen, so the button is not there.
+
 ### Your voice
 
 **Your account → Voice** sets how the chat hears you and reads to you. Each
