@@ -772,6 +772,30 @@ writes those too. The model looks at the pictures and runs again to fix what
 is wrong; it does not paste code into its answer. The chat's files are in
 the run's folder (a reference picture, measurements, textures).
 
+## Sketch: napkin to app
+
+**Sketch** (the pen button in the box) opens a whiteboard: draw what you mean,
+roughly, with the mouse, a pen (it presses harder for a thicker line) or a
+finger, then choose what it should become.
+
+- **The board.** Black, red, blue or green ink, thin or thick, an eraser,
+  **Undo** and **Clear**. **Draw on a picture** puts a photo (a paper sketch,
+  a screenshot of a page you want changed) under the ink; while you share
+  your screen, **Draw on the shared screen** puts what is on it now.
+- **Make it**: **A page** (a working web page: one HTML block with its CSS
+  and JavaScript, laid out as drawn, its buttons and fields working), **A
+  React component**, **A diagram** (Mermaid: the boxes, arrows and labels
+  drawn), **A 3D scene** (with the 3D tool, the shapes where they are
+  drawn) or **A table**. The sketch goes as a picture with the question, at
+  once, to the chat's model (one that sees: the picker says which).
+- **It opens running.** A page or a component the answer gives opens in the
+  Files panel's preview as soon as the answer is done; a diagram is drawn in
+  the answer.
+- **Change it by drawing.** The chat keeps its drawing while the page is
+  open: open **Sketch** again, draw on it (or on a screenshot of the result)
+  and ask again. **Attach it** instead puts the sketch in the box, for a
+  question of your own words.
+
 ## Canvas
 
 Like ChatGPT's canvas and Claude's artifacts: a document (Markdown) or code (in

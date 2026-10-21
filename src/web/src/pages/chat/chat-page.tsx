@@ -15,6 +15,9 @@ import { cn } from '@/lib/utils'
 import { archiveChat, assistantQuery, cancelQueued, chatModel, configQuery, conversationQuery, forkChat, hurryChat, queueMessage, sendQueuedNow, stampQuery, stopChat, streamChat, uploadFile } from './api'
 import { useScreenShare } from './screen'
 import { ScreenBar, ScreenButton } from './screen-share'
+import { SketchButton } from './sketch'
+import type { SketchAsk } from './sketch-prompts'
+import { toBlocks } from './markdown-blocks'
 import { AssistantIcon } from './assistant-icon'
 import { Composer } from './composer'
 import { answerRoom, contextOf } from './context'
@@ -561,6 +564,31 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
    * `talkTurn`: said in Talk, which hears the answer's events and its end, and reads it aloud. From the box, the quote above
    * it goes with the message (and comes back if it is not sent); `quoted`: one asked about from the selection's toolbar.
    */
+  const [pendingPreview, setPendingPreview] = useState<string | null>(null)
+  /** Napkin to app: the sketch and what it should become, asked at once; a page or a component it gives opens running. */
+  const askSketch = async (file: File, ask: SketchAsk) => {
+    let attachment: Attachment
+    try {
+      attachment = await uploadFile(file, () => undefined)
+    } catch (e) {
+      toast.error(errorMessage(e, 'The sketch could not be sent.'))
+      return
+    }
+    // The answer as it streams: its page or component, if it gives one.
+    let answer = ''
+    const sent = await send(ask.prompt, [attachment], undefined, undefined, (e) => {
+      if (e.type === 'content') answer += e.text
+    })
+    if (!sent) return
+    const block = toBlocks(answer).find((b) => b.kind === 'code' && (b.preview === 'html' || b.preview === 'react'))
+    if (block?.kind === 'code') {
+      setPendingPreview(block.code)
+      setFileView('preview')
+      setPanelWide(true)
+      setFilesOpen(true)
+      canvas.setOpen(false)
+    }
+  }
   /** The picture of the shared screen, taken now, with the question's files; the question goes without it when it cannot be taken. */
   const withFrame = async (files: Attachment[]): Promise<Attachment[]> => {
     if (!share.sharing) return files
@@ -572,7 +600,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       return files
     }
   }
-  const send = async (text: string, files?: Attachment[], talkTurn?: TalkTurn, quoted?: Quote): Promise<boolean> => {
+  /** `onEvent`: hears the answer's events as they come (a sketch's question reads the code it gets). */
+  const send = async (text: string, files?: Attachment[], talkTurn?: TalkTurn, quoted?: Quote, onEvent?: (e: ChatEvent) => void): Promise<boolean> => {
     const fromBox = files === undefined
     // Compare too: two models answer this message, side by side.
     const versus = fromBox ? compare : null
@@ -614,6 +643,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     const watch = (e: ChatEvent) => {
       if (e.type === 'question' && fromBox) uploads.clear()
       talkTurn?.watch(e)
+      onEvent?.(e)
       // Two answers to a comparison: neither is read aloud.
       if (e.type === 'done' && aloud && !versus) {
         const s = liveRef.current
@@ -796,6 +826,13 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   })
   const talkButton = (
     <>
+      <SketchButton
+        chatKey={id ?? 'new'}
+        busy={streaming}
+        onAsk={(f, a) => void askSketch(f, a)}
+        onAttach={(f) => uploads.add([f])}
+        screenFrame={share.sharing ? share.frame : undefined}
+      />
       <ScreenButton share={share} />
       <TalkButton state={talk.state} onStart={() => void talk.start()} onEnd={talk.end} />
     </>
@@ -895,6 +932,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     setFilesOpen(true)
     canvas.setOpen(false)
   }
+  // A sketch's page or component: shown running as soon as the chat lists it (until another file is chosen).
+  const sketched = pendingPreview ? [...files].reverse().find((x) => x.kind === 'code' && x.code === pendingPreview)?.key : undefined
 
   if (id && loaded.isPending) return <div className="p-6"><PageSkeleton /></div>
   if (id && loaded.error) return <div className="p-6"><QueryError error={loaded.error} retry={() => loaded.refetch()} /></div>
@@ -905,8 +944,9 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     <FilesPanel
       files={files}
       title={title}
-      selected={selectedFile}
+      selected={sketched ?? selectedFile}
       onSelect={(key) => {
+        setPendingPreview(null)
         setSelectedFile(key)
         setFileView('preview')
       }}
