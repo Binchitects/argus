@@ -17,6 +17,7 @@ What runs today, what it leaves out, and the tests that would close the gap.
 | **Restore and rollback** | `scripts/restore-test.sh [--from DIR]`, `scripts/rollback-test.sh FROM_TAG TO_TAG` | a backup restores into a throwaway project beside the live one, with its people, chats, settings and spend; a release rolls back by restoring the backup taken before the upgrade | a host with the stack's images |
 | **Clients** | `scripts/clients-check.py` | the API as developers use it: OpenAI and Anthropic protocols, streaming, tool calls, spend per key, Argus over MCP, Qwen Code and DeepSeek Harness through the API and MCP | a running stack |
 | **Scale** | `scripts/scale-test.py` | many people at once: the chat's queue (and no answer carrying another's secret), every key at once, a burst of sandbox jobs | a running stack |
+| **People** | `scripts/people-load.py` | 50, 100 or 300 people arriving over a ramp: sign in, lists, a new chat, a streamed answer, the chat read back; p50/p95/p99 and every failure by kind | a running stack |
 | **Functional** | `scripts/functional-test.py` | what a person does: sign-in, provisioning, key rotation, budget exhaustion and restoration, password reset, per-person billing, access per model, fair use, a key's rate limit (refused past it, seen by the person, the chat not held to it), dashboards and logs for admins only | a running stack |
 | **Sandbox** | `scripts/sandbox-check.py` | the running sandbox's isolation: no network, no reading others' runs, limits bind, nothing outlives a run | a running stack |
 | **Dashboard audit** | `scripts/audit-dashboards.py` | every panel's queries in the app: no errors, no values out of range | a running stack |
@@ -190,6 +191,27 @@ One RTX-class GPU serving Qwen3.8-Flash-Next (IQ4_XS), the sandbox on 2 slots:
 Nothing failed or was refused: the fair-use queue serves everyone in turn
 instead. What grows with people is the wait, about linearly with the engine's
 slots; more slots (`LLAMACPP_PARALLEL`) or a second engine shorten it.
+
+### S12 — People in the app at once (`scripts/people-load.py`), 2026-10-21
+
+Each person signs in, opens the chat list, starts a chat, asks and reads the
+streamed answer, reads the chat back; they arrive over a ramp. One RTX 3090,
+the chat's default model Qwen3-4B (Q4_K_M) on **one** slot, through Traefik
+and TLS:
+
+| people | arriving over | questions | result |
+|---|---|---|---|
+| 50 | 60 s | 2 each | no failures; first words p50 0.09 s, p95 0.50 s; whole answer p95 1.0 s; 45 of 100 shown a queue |
+| 100 | 60 s | 2 each | no failures; first words p50 1.7 s, **p95 58.5 s**; 190 of 200 queued: 3.3 questions a second on a model that answers 1.5 a second (one slot) |
+| 300 | 180 s | 1 each | no failures; first words p95 0.30 s, whole answer p95 0.87 s |
+| 300 | 180 s | 2, no model | no failures; every step (sign in, lists, new chat, read) under 0.1 s at p99 |
+| 300 | 60 s | 1, no model | 180 sign-ins refused (HTTP 429) at the old flood guard, 120 a minute per address; **none** at 600 (`Auth__SignInsPerMinute`, now the default) |
+
+The app's own work stays under a tenth of a second at 300 people. What grows
+is the line for the model, as fast as the questions outrun its slots: more
+slots for the chat's model (Admin → Models → *Answers at once*), or a second
+copy, shorten it. Run it with `--no-chat` for the app alone; the people it
+makes (`loadtest-…`) are taken away at the end unless `--keep`.
 
 ### S10 — Migrations and upgrades
 
@@ -394,6 +416,7 @@ E2E_ARGUS_USER=dev_beta E2E_ARGUS_PASSWORD=<theirs> E2E_PASSWORD=... E2E_CHAT=1 
 # many people at once: the chat's fair-use queue (and no answer carrying another
 # person's secret), every person's API key at once, a burst of sandbox jobs
 ./scripts/scale-test.py --users 12 --sandbox-jobs 24
+./scripts/people-load.py --people 100 --ramp 60 --turns 2
 
 # upgrade: an old release from zero (fresh volumes), data in, this checkout over
 # it; and this checkout from zero. The live stack goes down meanwhile (volumes kept)
