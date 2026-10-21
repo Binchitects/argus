@@ -15,19 +15,35 @@ addEventListener('securitypolicyviolation',function(e){var u=e.blockedURI||e.vio
 })();</script>`
 
 /**
- * A page as the preview runs it: the reporter first, and the libraries it would
+ * window.arena, for the code: its calls go to the page around it (postMessage) and come back answered (ArenaReply).
+ * ask(prompt, { system, model }) is the model's answer as text; store.get/set/remove/keys keep JSON for the app,
+ * everyone's, or the person's own with { mine: true } last; user.name is who uses it.
+ */
+export function arenaBridge(user: string): string {
+  return `(function(){var p=window.parent,n=0,w={};
+addEventListener('message',function(e){var d=e.data;if(e.source!==p||!d||d.type!=='arena-reply'||!w[d.id])return;var c=w[d.id];delete w[d.id];if(d.ok)c[0](d.value);else c[1](new Error(d.error||'arena failed'))});
+function call(m,a){return new Promise(function(ok,no){var id=++n;w[id]=[ok,no];p.postMessage({type:'arena',id:id,method:m,args:a},'*')})}
+function mine(o){return !!(o&&typeof o==='object'&&o.mine===true)}
+window.arena={ask:function(t,o){o=o||{};return call('ask',{prompt:String(t),system:o.system?String(o.system):undefined,model:o.model?String(o.model):undefined})},
+store:{get:function(k,o){return call('store.get',{key:String(k),mine:mine(o)})},set:function(k,v,o){return call('store.set',{key:String(k),value:v,mine:mine(o)})},remove:function(k,o){return call('store.remove',{key:String(k),mine:mine(o)})},keys:function(o){return call('store.keys',{mine:mine(o)})}},
+user:{name:${JSON.stringify(user).replace(/</g, '\\u003c')}}};})();`
+}
+
+/**
+ * A page as the preview runs it: the reporter and window.arena first, and the libraries it would
  * fetch from a CDN (Tailwind, Mermaid) served from here instead.
  */
-export function rewriteHtml(html: string, assets: { tailwind: string; mermaid: string }): string {
+export function rewriteHtml(html: string, assets: { tailwind: string; mermaid: string }, user = ''): string {
   const local = html
     .replace(/<script\b([^>]*?)\bsrc=["']https?:\/\/cdn\.tailwindcss\.com[^"']*["']([^>]*)>/gi, `<script$1src="${assets.tailwind}"$2>`)
     .replace(/<script\b([^>]*?)\bsrc=["']https?:\/\/[^"']*@tailwindcss\/browser[^"']*["']([^>]*)>/gi, `<script$1src="${assets.tailwind}"$2>`)
     .replace(/<script\b([^>]*?)\bsrc=["']https?:\/\/[^"']*\/mermaid(?:@[^/"']*)?\/dist\/mermaid(?:\.min)?\.js["']([^>]*)>/gi, `<script$1src="${assets.mermaid}"$2>`)
+  const first = reporter + `<script>${arenaBridge(user)}</script>`
   const head = /<head\b[^>]*>/i.exec(local)
-  if (head) return local.slice(0, head.index + head[0].length) + reporter + local.slice(head.index + head[0].length)
+  if (head) return local.slice(0, head.index + head[0].length) + first + local.slice(head.index + head[0].length)
   const doctype = /^\s*<!doctype[^>]*>/i.exec(local)
-  if (doctype) return doctype[0] + reporter + local.slice(doctype[0].length)
-  return reporter + local
+  if (doctype) return doctype[0] + first + local.slice(doctype[0].length)
+  return first + local
 }
 
 /** The modules a component imports. */

@@ -30,18 +30,28 @@ export function previewKindOf(rawLang: string | null | undefined, name: string |
  * Messages between the chat and the runner. Drawn inline (a diagram in an answer),
  * the runner fits its content and reports its height, so the frame grows to fit.
  */
-export type ToRunner = { type: 'render'; kind: PreviewKind; code: string; theme: 'light' | 'dark'; inline?: boolean }
+export type ToRunner = { type: 'render'; kind: PreviewKind; code: string; theme: 'light' | 'dark'; inline?: boolean; user?: string }
+/**
+ * A call of window.arena from the code (ask, store.get/set/remove/keys): the page around it answers with an
+ * ArenaReply of the same id. The code has no network: this is its only way to the server.
+ */
+export type ArenaCall = { type: 'arena'; id: number; method: string; args: Record<string, unknown> }
+export type ArenaReply = { type: 'arena-reply'; id: number; ok: boolean; value?: unknown; error?: string }
 export type FromRunner =
   | { type: 'ready' }
   | { type: 'rendered' }
   | { type: 'error'; message: string }
   | { type: 'blocked'; uri: string }
   | { type: 'size'; height: number }
+  | ArenaCall
 
 export function isFromRunner(data: unknown): data is FromRunner {
-  const d = data as { type?: unknown; height?: unknown } | null
+  const d = data as { type?: unknown; height?: unknown; id?: unknown; method?: unknown; args?: unknown } | null
   const t = d?.type
-  return t === 'ready' || t === 'rendered' || t === 'error' || t === 'blocked' || (t === 'size' && typeof d?.height === 'number' && Number.isFinite(d.height))
+  return (
+    t === 'ready' || t === 'rendered' || t === 'error' || t === 'blocked' || (t === 'size' && typeof d?.height === 'number' && Number.isFinite(d.height))
+    || (t === 'arena' && typeof d?.id === 'number' && typeof d.method === 'string' && typeof d.args === 'object' && d.args !== null)
+  )
 }
 
 export function isToRunner(data: unknown): data is ToRunner {

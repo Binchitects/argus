@@ -165,6 +165,31 @@ export const topics = {
     manual: { doc: 'chat', section: 'prompts-and-slash-commands' },
   },
 
+  apps: {
+    title: 'Apps',
+    about: 'What the chat built, published to use: a page or a React component at its own link. It asks the model and keeps its data as the person using it.',
+    parts: [
+      { name: 'The apps', text: 'Those you may open: yours, your groups\', and everyone\'s, the most used first. **Mine** shows only yours.' },
+      { name: 'Publishing one', text: 'In a chat, open a page or a component in the Files panel\'s preview and press **Publish as app**: a name, a line about it, and who may open it (only you, some groups, everyone).' },
+    ],
+    tasks: [
+      { title: 'Make an app for your team', steps: ['Ask the chat to build it: "a page where the team votes on the lunch place, the results kept for everyone".', 'Open its **Preview** in the Files panel and try it: it already asks the model and keeps its data while the page is open.', 'Press **Publish as app**, choose **Some groups** and your team, and **Publish**.', 'Copy its link and share it.'] },
+    ],
+    manual: { doc: 'chat', section: 'apps' },
+  },
+
+  'app-page': {
+    title: 'An app',
+    about: 'An app running, as its person uses it: it asks the model with your credit and your safeguards, and keeps its data (everyone\'s, or yours).',
+    parts: [
+      { name: 'Remix', text: 'Makes it yours: a copy only you open, to change in a chat.' },
+      { name: 'Change and Versions', text: 'For its owner: its name, words and who may open it; every version of its code, and putting an old one back.' },
+      { name: 'Copy link', text: 'Its address, to share with whoever may open it.' },
+    ],
+    tasks: [{ title: 'Make it your own', steps: ['Press **Remix**: a copy that is yours, only you open it.', 'Open the chat it came from, or a new one, and ask for the change with its code.', 'Publish the new version from its preview.'] }],
+    manual: { doc: 'chat', section: 'apps' },
+  },
+
   tasks: {
     title: 'Scheduled tasks',
     about: 'Questions asked for you on a schedule or on an event, with your model and tools: a morning digest, a weekly report, a review of each merge request.',

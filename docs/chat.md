@@ -807,6 +807,35 @@ my details", "check our status page and the vendor's for an outage".
   settings (Admin → Tools). It is off in rooms, as it acts as you. It needs
   the `browser` profile (`COMPOSE_PROFILES=browser` in `deploy/.env`).
 
+## Apps
+
+What the chat builds can be published as an app: a page or a React
+component, at its own link, for you, some groups or everyone.
+
+- **Built in the chat.** Ask for it ("a page where the team votes on where
+  to eat, the votes kept for everyone"). Its code is a preview in the Files
+  panel, running as it will run as an app.
+- **What an app can do.** It runs in the preview's sandbox: no network.
+  Through `window.arena` it asks the model (`await arena.ask(prompt, {
+  system })`, the answer as text) and keeps its data (`arena.store.get`,
+  `set`, `remove` and `keys`, JSON, everyone's, or each person's own with
+  `{ mine: true }`); `arena.user.name` is who uses it. In a chat's preview
+  the store lasts until the page reloads; published, it is kept.
+- **As the person using it.** Each question an app asks goes to the model
+  as the person using it: their default model (or the model for small
+  steps, with `{ model: 'small' }`), their credit, their safeguards (the
+  question's and the answer's rules); at most 300 a day for each person.
+- **Publish as app** (above the preview): a name, a line about it, and who
+  may open it: **Only me**, **Some groups** (yours, or any for those who may
+  share with any group), or **Everyone**. It gets its link to share.
+- **Workspace → Apps** lists the apps you may open, the most used first.
+  An app's page runs it full size, with **Copy link** and **Remix** (a copy
+  of your own, private, to change); its owner has **Change** (its name,
+  words and who may open it), **Versions** (every version of its code, an
+  old one put back as the newest) and **Delete** (its link and data go).
+- **Who publishes**: the `feature.apps` permission (everyone, unless an
+  admin denies it). Opening an app needs only to be one who may.
+
 ## Sketch: napkin to app
 
 **Sketch** (the pen button in the box) opens a whiteboard: draw what you mean,

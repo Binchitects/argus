@@ -108,7 +108,11 @@ public sealed partial class ChatService(
         "A React component (jsx or tsx) is shown from its default export and may import only react, react-dom and lucide-react; style it with Tailwind classes. " +
         "A mermaid block is drawn as a diagram in the answer itself: use one for a workflow, an architecture, a sequence, a data flow or states. " +
         "In Mermaid, quote any label with punctuation (A[\"parse(input)\"]) and give each diagram an accTitle line; " +
-        "a pie shows its values with \"pie showData\" (there is no donut), and a state diagram's choice is \"state Name <<choice>>\".";
+        "a pie shows its values with \"pie showData\" (there is no donut), and a state diagram's choice is \"state Name <<choice>>\". " +
+        "A page or component may use window.arena (its only way to the server): await arena.ask(prompt, { system }) returns the model's answer as text; " +
+        "await arena.store.get(key), arena.store.set(key, value), arena.store.remove(key) and arena.store.keys() keep JSON for the app, everyone's " +
+        "(pass { mine: true } as the last argument for each person's own); arena.user.name is the person using it. " +
+        "Published from its preview (Publish as app), it is an app people open at its own link.";
 
     /// <summary>The answer's clock, for its trace (one answer per scope).</summary>
     private AnswerClock? _answerClock;

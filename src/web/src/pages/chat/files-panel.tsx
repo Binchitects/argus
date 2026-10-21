@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Download, ExternalLink, FileArchive, FileCode2, FileDown, FileSearch, FileText, Image as ImageIcon, Maximize2, Minimize2, Play, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { AppWindow, ArrowLeft, Download, ExternalLink, FileArchive, FileCode2, FileDown, FileSearch, FileText, Image as ImageIcon, Maximize2, Minimize2, Play, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -40,8 +40,11 @@ export function FilesPanel({
   wide,
   onWide,
   title,
+  onPublish,
 }: {
   files: FileItem[]
+  /** Publish as app: a page or a component the chat wrote, published at its own link. */
+  onPublish?: (what: { code: string; kind: 'html' | 'react'; name: string }) => void
   /** The chat's title: the zip of all files is named after it. */
   title?: string | null
   selected: string | null
@@ -95,6 +98,13 @@ export function FilesPanel({
             <Tooltip content="Download all as a zip">
               <Button variant="ghost" size="icon-sm" onClick={downloadAll} loading={zipping} aria-label={`Download all ${files.length} files as a zip`}>
                 <FileArchive />
+              </Button>
+            </Tooltip>
+          )}
+          {onPublish && current?.kind === 'code' && (kind === 'html' || kind === 'react') && (
+            <Tooltip content="Publish as app: at its own link, for you, some groups or everyone">
+              <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => onPublish({ code: current.code, kind, name: current.name })} aria-label="Publish as app">
+                <AppWindow /> <span className="hidden @md:inline">Publish</span>
               </Button>
             </Tooltip>
           )}

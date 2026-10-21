@@ -1,29 +1,52 @@
 import { RotateCw, ShieldAlert, TriangleAlert } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
+import { errorMessage, meQuery } from '@/lib/api'
 import { useTheme } from '@/lib/theme'
-import { isFromRunner, previewLabels, type PreviewKind, type ToRunner } from '@/preview/kind'
+import { isFromRunner, previewLabels, type ArenaReply, type PreviewKind, type ToRunner } from '@/preview/kind'
+import { previewArena, type ArenaHandler } from '../apps/arena-host'
 
 /**
  * Code the model wrote, running: in a frame whose page (/preview.html) the
  * server sandboxes into an origin of its own, with no network. The frame is
  * sandboxed here too, so neither side alone makes it safe.
  */
-export function LivePreview({ kind, code, name }: { kind: PreviewKind; code: string; name: string }) {
+/**
+ * `arena`: how its window.arena calls are answered (a published app's own); by default a chat's preview: asked as the
+ * person, its store kept in the page.
+ */
+export function LivePreview({ kind, code, name, arena, className }: { kind: PreviewKind; code: string; name: string; arena?: ArenaHandler; className?: string }) {
   const { resolved } = useTheme()
   const [run, setRun] = useState(0)
+  const me = useQuery(meQuery)
+  const user = me.data?.displayName || me.data?.userName || ''
   // A new version, theme or run is a new frame, with its own state.
-  return <Frame key={`${run}:${resolved}:${kind}:${hash(code)}`} kind={kind} code={code} name={name} theme={resolved} onRunAgain={() => setRun((r) => r + 1)} />
+  return (
+    <Frame key={`${run}:${resolved}:${kind}:${hash(code)}`} kind={kind} code={code} name={name} theme={resolved} user={user} arena={arena} className={className} onRunAgain={() => setRun((r) => r + 1)} />
+  )
 }
 
-function Frame({ kind, code, name, theme, onRunAgain }: { kind: PreviewKind; code: string; name: string; theme: 'light' | 'dark'; onRunAgain: () => void }) {
+function Frame({ kind, code, name, theme, user, arena, className, onRunAgain }: {
+  kind: PreviewKind
+  code: string
+  name: string
+  theme: 'light' | 'dark'
+  user: string
+  arena?: ArenaHandler
+  className?: string
+  onRunAgain: () => void
+}) {
   const frame = useRef<HTMLIFrameElement>(null)
   const [state, setState] = useState<{ shown: boolean; errors: string[]; blocked: string[] }>({ shown: false, errors: [], blocked: [] })
+  // A preview's own arena (its store with it), made once for the frame.
+  const [own] = useState(previewArena)
+  const handle = arena ?? own
 
   // The runner's origin is opaque: there is no name to address it by but '*'. The code is no secret.
   // Sent on "ready" and again on load (whichever comes first wins; the runner draws once).
-  const send = useCallback(() => frame.current?.contentWindow?.postMessage({ type: 'render', kind, code, theme } satisfies ToRunner, '*'), [kind, code, theme])
+  const send = useCallback(() => frame.current?.contentWindow?.postMessage({ type: 'render', kind, code, theme, user } satisfies ToRunner, '*'), [kind, code, theme, user])
 
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
@@ -37,14 +60,21 @@ function Frame({ kind, code, name, theme, onRunAgain }: { kind: PreviewKind; cod
         setState((s) => (s.errors.includes(m.message) ? s : { ...s, shown: true, errors: [...s.errors, m.message].slice(-5) }))
       } else if (m.type === 'blocked') {
         setState((s) => (s.blocked.includes(m.uri) ? s : { ...s, blocked: [...s.blocked, m.uri].slice(-5) }))
+      } else if (m.type === 'arena') {
+        // window.arena: answered here, as the person using it; the frame has no other way to the server.
+        const reply = (r: Omit<ArenaReply, 'type' | 'id'>) => frame.current?.contentWindow?.postMessage({ type: 'arena-reply', id: m.id, ...r } satisfies ArenaReply, '*')
+        handle(m.method, m.args).then(
+          (value) => reply({ ok: true, value }),
+          (e: unknown) => reply({ ok: false, error: errorMessage(e, e instanceof Error ? e.message : undefined) }),
+        )
       }
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [send])
+  }, [send, handle])
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
+    <div className={className ?? 'flex min-h-0 flex-1 flex-col gap-2'}>
       <div className="relative min-h-80 flex-1 overflow-hidden rounded-lg border bg-white dark:bg-[#0b0b0c]">
         <iframe ref={frame} onLoad={send} src="/preview.html" title={`Preview of ${name}`} sandbox="allow-scripts allow-forms allow-modals" className="absolute inset-0 size-full" />
         {!state.shown && (

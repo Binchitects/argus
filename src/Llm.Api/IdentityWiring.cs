@@ -492,6 +492,7 @@ public static class IdentityWiring
         Code.ReviewRuleEndpoints.MapReviewRules(app);
         Code.CodeHostLinks.MapCodeHostLinks(app);
         Chat.Tools.Browser.BrowserEndpoints.MapBrowser(app);
+        Apps.AppEndpoints.MapApps(app);
         Plans.PlanEndpoints.MapPlans(app);
         app.MapForwardAuth();
         app.MapKeyCheck();

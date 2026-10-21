@@ -127,6 +127,7 @@ public static class Permissions
     public const string Canvas = "feature.canvas";
     public const string ThreeD = "feature.3d";
     public const string Browser = "feature.browser";
+    public const string Apps = "feature.apps";
     public const string Plans = "feature.plans";
     public const string Research = "feature.research";
     public const string Compare = "feature.compare";
@@ -253,6 +254,7 @@ public static class Permissions
         new(Canvas, "Features", "Write documents and code with the canvas.", false),
         new(ThreeD, "Features", "Make 3D models.", false),
         new(Browser, "Features", "Let the chat use a browser to do things on websites.", false),
+        new(Apps, "Features", "Publish apps the chat builds, for oneself, groups or everyone.", false),
         new(Plans, "Features", "Make and keep plans.", false),
         new(Research, "Features", "Run deep research.", false),
         new(Compare, "Features", "Compare two models' answers.", false),

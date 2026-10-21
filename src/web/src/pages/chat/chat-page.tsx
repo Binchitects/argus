@@ -14,6 +14,7 @@ import { useMedia } from '@/lib/use-media'
 import { cn } from '@/lib/utils'
 import { archiveChat, assistantQuery, cancelQueued, chatModel, configQuery, conversationQuery, forkChat, hurryChat, queueMessage, sendQueuedNow, stampQuery, stopChat, streamChat, uploadFile } from './api'
 import { useScreenShare } from './screen'
+import { PublishDialog, type ToPublish } from '../apps/publish-dialog'
 import { BrowserBar } from './browser-bar'
 import { ScreenBar, ScreenButton } from './screen-share'
 import { SketchButton } from './sketch'
@@ -566,6 +567,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
    * it goes with the message (and comes back if it is not sent); `quoted`: one asked about from the selection's toolbar.
    */
   const [pendingPreview, setPendingPreview] = useState<string | null>(null)
+  // Publish as app: a page or a component from the Files panel's preview.
+  const [publishing, setPublishing] = useState<ToPublish | null>(null)
   /** Napkin to app: the sketch and what it should become, asked at once; a page or a component it gives opens running. */
   const askSketch = async (file: File, ask: SketchAsk) => {
     let attachment: Attachment
@@ -945,6 +948,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     <FilesPanel
       files={files}
       title={title}
+      onPublish={(what) => setPublishing({ ...what, conversationId: id ?? undefined })}
       selected={sketched ?? selectedFile}
       onSelect={(key) => {
         setPendingPreview(null)
@@ -1049,6 +1053,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   </Alert>
                 )}
                 {asking && <SafeguardAsk question={asking.question} onAnswer={asking.answer} />}
+                <PublishDialog what={publishing} onClose={() => setPublishing(null)} />
                 <BrowserBar chatId={id ?? null} active={toolsOnHere.includes('browser')} />
                 <ScreenBar share={share} sees={model?.vision ?? false} />
                 <TalkBar state={talk.state} onEnd={talk.end} />
@@ -1200,6 +1205,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                       </Alert>
                     )}
                     {asking && <SafeguardAsk question={asking.question} onAnswer={asking.answer} />}
+                <PublishDialog what={publishing} onClose={() => setPublishing(null)} />
                   </div>
                 </div>
                 <QuestionRail questions={turns.flatMap((t) => (t.question ? [t.question] : []))} active={readingQuestion} onJump={jumpTo} gutter={gutter} />

@@ -55,6 +55,10 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ModelDownload> ModelDownloads => Set<ModelDownload>();
     public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
     public DbSet<TaskTemplate> TaskTemplates => Set<TaskTemplate>();
+    public DbSet<Apps.ArenaApp> Apps => Set<Apps.ArenaApp>();
+    public DbSet<Apps.ArenaAppVersion> AppVersions => Set<Apps.ArenaAppVersion>();
+    public DbSet<Apps.ArenaAppData> AppData => Set<Apps.ArenaAppData>();
+    public DbSet<Apps.ArenaAppAsk> AppAsks => Set<Apps.ArenaAppAsk>();
     public DbSet<ScheduledRun> ScheduledRuns => Set<ScheduledRun>();
     public DbSet<TaskEvent> TaskEvents => Set<TaskEvent>();
     public DbSet<Notification> Notifications => Set<Notification>();
@@ -491,6 +495,42 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.BaseUrl).HasMaxLength(1000);
             e.Property(x => x.ApiKeyProtected).HasMaxLength(4000);
             e.OwnsMany(x => x.Models, m => m.ToJson());
+        });
+        builder.Entity<Apps.ArenaApp>(e =>
+        {
+            e.ToTable("apps");
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.Property(x => x.Kind).HasMaxLength(16);
+            e.Property(x => x.Reach).HasMaxLength(16);
+            e.Property(x => x.GroupIds).HasDefaultValueSql("'{}'::uuid[]");
+            e.HasIndex(x => x.OwnerId);
+            e.HasIndex(x => x.Reach);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Apps.ArenaApp>().WithMany().HasForeignKey(x => x.RemixOfId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<Conversation>().WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.SetNull);
+        });
+        builder.Entity<Apps.ArenaAppVersion>(e =>
+        {
+            e.ToTable("app_versions");
+            e.Property(x => x.Note).HasMaxLength(200);
+            e.HasIndex(x => new { x.AppId, x.Version }).IsUnique();
+            e.HasOne<Apps.ArenaApp>().WithMany().HasForeignKey(x => x.AppId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Apps.ArenaAppData>(e =>
+        {
+            e.ToTable("app_data");
+            e.HasKey(x => new { x.AppId, x.UserId, x.Key });
+            e.Property(x => x.Key).HasMaxLength(200);
+            e.HasOne<Apps.ArenaApp>().WithMany().HasForeignKey(x => x.AppId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Apps.ArenaAppAsk>(e =>
+        {
+            e.ToTable("app_asks");
+            e.Property(x => x.Model).HasMaxLength(200);
+            e.HasIndex(x => new { x.UserId, x.At });
+            e.HasOne<Apps.ArenaApp>().WithMany().HasForeignKey(x => x.AppId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<TaskTemplate>(e =>
         {

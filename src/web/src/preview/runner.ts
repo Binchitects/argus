@@ -7,7 +7,7 @@
 import tailwindUrl from '@tailwindcss/browser?url'
 import mermaidUrl from 'mermaid/dist/mermaid.min.js?url'
 import { isToRunner, type FromRunner, type PreviewKind } from './kind'
-import { compileComponent, componentOf, PreviewError, repairMermaid, rewriteHtml, type ModuleName } from './page'
+import { arenaBridge, compileComponent, componentOf, PreviewError, repairMermaid, rewriteHtml, type ModuleName } from './page'
 
 const parentWindow = window.parent
 const send = (m: FromRunner) => parentWindow.postMessage(m, '*')
@@ -16,7 +16,7 @@ let done = false
 window.addEventListener('message', (e) => {
   if (e.source !== parentWindow || done || !isToRunner(e.data)) return
   done = true // One render per load: the chat reloads the frame for a new one.
-  void render(e.data.kind, e.data.code, e.data.theme, e.data.inline === true)
+  void render(e.data.kind, e.data.code, e.data.theme, e.data.inline === true, e.data.user ?? '')
 })
 window.addEventListener('error', (e) => send({ type: 'error', message: String(e.message || e) }))
 window.addEventListener('unhandledrejection', (e) => send({ type: 'error', message: String((e.reason as Error)?.message ?? e.reason) }))
@@ -30,12 +30,12 @@ window.addEventListener('securitypolicyviolation', (e) => {
 })
 send({ type: 'ready' })
 
-async function render(kind: PreviewKind, code: string, theme: 'light' | 'dark', inline: boolean) {
+async function render(kind: PreviewKind, code: string, theme: 'light' | 'dark', inline: boolean, user: string) {
   try {
     if (kind === 'html') {
       // The page replaces this one; its own reporter (injected) keeps talking to the chat.
       document.open()
-      document.write(rewriteHtml(code, { tailwind: tailwindUrl, mermaid: mermaidUrl }))
+      document.write(rewriteHtml(code, { tailwind: tailwindUrl, mermaid: mermaidUrl }, user))
       document.close()
       send({ type: 'rendered' })
       return
@@ -64,6 +64,8 @@ async function render(kind: PreviewKind, code: string, theme: 'light' | 'dark', 
       root.innerHTML = svg
       readable(root.querySelector('svg'))
     } else {
+      // window.arena, before the component runs.
+      new Function(arenaBridge(user))()
       await component(code, root)
     }
     send({ type: 'rendered' })
