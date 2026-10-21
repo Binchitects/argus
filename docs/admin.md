@@ -50,7 +50,7 @@ that it is not set up, and how to turn it on.
 
 ### Access: roles and rules
 
-**Admin → Access** has four tabs. **Roles**: the built-in ones and your own,
+**Admin → Access** has its tabs. **Roles**: the built-in ones and your own,
 who holds each (**Give it** to a person, a group, a directory group linked on
 the Groups page, or everyone, maybe until a date), and **New role** from the
 permission list; built-in roles cannot be changed. **Rules**: allows and
@@ -60,6 +60,17 @@ Someone who holds an administrative permission through a role (and is not an
 Owner) sees the admin pages of what they hold, and only those: a Supervisor
 role with `monitoring.read` and `logs.read` sees Monitoring, Dashboards,
 Alerts, Logs and Traces.
+
+**Many people** changes many people at once: people by name and everyone in
+some groups (a directory group's members too), and up to 20 changes for each:
+give or take a role (maybe until a date), add to or take out of an app
+group, allow or deny a feature (or leave it to their roles and groups), and
+disable or enable accounts. **Dry run** says person by person what would
+change and what is so already; **Make the changes** does exactly that, as one
+change in the history. It is refused whole if it would leave nobody who
+holds Owner or take your own `access.manage` away, and it never disables
+your own account. Groups' members need `groups.members`, accounts
+`people.disable`; at most 1,000 people at once.
 
 A role given **over** one group (a team manager: People admin or Billing
 for the members of one group) reaches only that group and its people: the

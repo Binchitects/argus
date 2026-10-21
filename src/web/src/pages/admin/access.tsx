@@ -19,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { accessQuery, type AccessCheck, type AccessOverview, type Subject, type SubjectKind } from './access-api'
+import { ManyPeople } from './access-bulk'
 import { groupsQuery } from './groups-api'
 import { peopleQuery } from './people-api'
 
@@ -42,6 +43,7 @@ export function AccessPage() {
             <TabsTrigger value="roles">Roles</TabsTrigger>
             <TabsTrigger value="rules">Rules</TabsTrigger>
             <TabsTrigger value="check">Checker</TabsTrigger>
+            <TabsTrigger value="many">Many people</TabsTrigger>
             <TabsTrigger value="requests">Requests</TabsTrigger>
             <TabsTrigger value="history">History</TabsTrigger>
           </TabsList>
@@ -53,6 +55,9 @@ export function AccessPage() {
           </TabsContent>
           <TabsContent value="check" className="mt-4">
             <Checker data={access.data} />
+          </TabsContent>
+          <TabsContent value="many" className="mt-4">
+            <ManyPeople data={access.data} />
           </TabsContent>
           <TabsContent value="requests" className="mt-4">
             <Requests />

@@ -349,6 +349,7 @@ export const topics = {
       { name: 'Roles', text: 'The built-in roles (Owner, People admin, Model admin, Billing, Auditor and the rest) and your own. Each shows who holds it: **Give it** to a person, a group (a directory group linked on the Groups page too) or everyone, maybe until a date. **New role** picks permissions from the list; a built-in role cannot be changed, only copied.' },
       { name: 'Rules', text: 'Allows and denies of a model, a tool, a knowledge source, a repository or a feature, for a person, a group, a role or everyone. A name may be a pattern with *.' },
       { name: 'Checker', text: 'May this person do this? Yes or no, with the rules and roles that decide it, in order.' },
+      { name: 'Many people', text: 'People and groups, and what changes for each (roles, groups, features, accounts): **Dry run** says person by person what would change; **Make the changes** does it, as one change.' },
       { name: 'History', text: 'Every change to roles, who holds them and rules: when, by whom, and what.' },
     ],
     tasks: [
