@@ -109,11 +109,14 @@ public sealed class FakeModel : HttpMessageHandler
         Requests.Enqueue((body, request.Headers.ToDictionary(h => h.Key, h => string.Join(",", h.Value), StringComparer.OrdinalIgnoreCase)));
         var messages = body["messages"]!.AsArray();
         // A question with pictures comes as parts; its text is the text part.
-        var lastUserContent = messages.Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!;
+        // What a tool showed the model (the browser's screen) comes as a user message after the step's results: not a question.
+        static bool Shown(JsonNode? m) => m?["role"]?.GetValue<string>() == "user" && m["content"] is JsonArray p
+            && p.OfType<JsonObject>().Any(x => x["text"]?.GetValue<string>()?.StartsWith("[What the screen shows now", StringComparison.Ordinal) == true);
+        var lastUserContent = messages.Last(m => m!["role"]!.GetValue<string>() == "user" && !Shown(m))!["content"]!;
         var lastUser = lastUserContent is JsonArray parts
             ? string.Concat(parts.OfType<JsonObject>().Where(x => x["type"]?.GetValue<string>() == "text").Select(x => x["text"]!.GetValue<string>()))
             : lastUserContent.GetValue<string>();
-        var toolAnswered = messages.Last()!["role"]!.GetValue<string>() == "tool";
+        var toolAnswered = messages.Last()!["role"]!.GetValue<string>() == "tool" || Shown(messages.Last());
 
         if (lastUser.Contains("[budget]", StringComparison.Ordinal))
         {

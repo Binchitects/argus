@@ -58,6 +58,9 @@ public sealed record ToolResult(string Text, bool IsError = false, IReadOnlyList
     /// <summary>What the call spent, in dollars: the pictures, video or speech it made, its sub-agents' tokens. Null: nothing.</summary>
     public decimal? Cost { get; init; }
 
+    /// <summary>Its pictures go to a model that sees, after the step's results (the browser's screen): it reads them as the person sees them.</summary>
+    public bool SeeImages { get; init; }
+
     /// <summary>A delegate call: its sub-agents' tokens together (their model is in <see cref="Details"/>).</summary>
     public UsageReport? Usage { get; init; }
 }

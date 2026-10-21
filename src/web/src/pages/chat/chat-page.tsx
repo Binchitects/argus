@@ -14,6 +14,7 @@ import { useMedia } from '@/lib/use-media'
 import { cn } from '@/lib/utils'
 import { archiveChat, assistantQuery, cancelQueued, chatModel, configQuery, conversationQuery, forkChat, hurryChat, queueMessage, sendQueuedNow, stampQuery, stopChat, streamChat, uploadFile } from './api'
 import { useScreenShare } from './screen'
+import { BrowserBar } from './browser-bar'
 import { ScreenBar, ScreenButton } from './screen-share'
 import { SketchButton } from './sketch'
 import type { SketchAsk } from './sketch-prompts'
@@ -1048,6 +1049,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   </Alert>
                 )}
                 {asking && <SafeguardAsk question={asking.question} onAnswer={asking.answer} />}
+                <BrowserBar chatId={id ?? null} active={toolsOnHere.includes('browser')} />
                 <ScreenBar share={share} sees={model?.vision ?? false} />
                 <TalkBar state={talk.state} onEnd={talk.end} />
                 <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} compare={comparePicker} talk={talkButton} history={history} autoFocus big />
@@ -1218,6 +1220,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                     <ArrowDown />
                   </Button>
                 )}
+                <BrowserBar chatId={id ?? null} active={toolsOnHere.includes('browser')} />
                 <ScreenBar share={share} sees={model?.vision ?? false} />
                 <TalkBar state={talk.state} onEnd={talk.end} />
                 {data?.codeArena && !streaming && (

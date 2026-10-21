@@ -48,6 +48,8 @@ spec:
             - { name: Engine__LmcacheRemote, value: {{ .Values.engines.lmcacheRemote | quote }} }
             {{- include "arena.secretEnv" (list $ "Argus__AdminToken" "ARGUS_KEY") | nindent 12 }}
             - { name: Argus__GitlabUrl, value: {{ .Values.gitlab.url | quote }} }
+            # The browser agent's browser: none in the chart yet (compose's browser profile); the Browser tool says so.
+            - { name: Browser__Url, value: {{ .Values.browser.url | quote }} }
             {{- include "arena.optionalSecretEnv" (list $ "HuggingFace__Token" "HF_TOKEN") | nindent 12 }}
             # Which media servers and Laya run: said outright rather than looked up by name.
             - { name: Modules__imagegen, value: {{ .Values.imagegen.enabled | quote }} }

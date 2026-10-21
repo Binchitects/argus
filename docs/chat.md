@@ -772,6 +772,41 @@ writes those too. The model looks at the pictures and runs again to fix what
 is wrong; it does not paste code into its answer. The chat's files are in
 the run's folder (a reference picture, measurements, textures).
 
+## The browser agent
+
+**Browser** (in the chat's **Tools**, off in new chats) gives the model a real
+web browser to do a task on websites while you watch: "find the cheapest
+flight to Berlin on Friday and stop before paying", "fill in this form with
+my details", "check our status page and the vendor's for an outage".
+
+- **It browses.** It opens pages, clicks links, menus and boxes, types into
+  fields, scrolls, goes back and reads, and says what it found or did with
+  the page's address. Each step comes back as the page in words (its
+  elements numbered) and a picture of the screen, shown under the call; a
+  model that sees gets the picture too.
+- **You watch it live.** While the chat's browser is open, the bar above the
+  box shows its screen and where it is. **Watch** opens it larger.
+- **You take over.** **Take over** gives you the browser: click on the page
+  where you point, type (hidden in the box: a password or a card number is
+  yours to type), press Enter, Tab or Escape, scroll. The agent's next step
+  waits until you **Hand it back**, then goes on from where you left it.
+- **It asks before it sends.** Anything that sends or changes something on a
+  site (a form, buying, booking, posting, sending, deleting, signing up) is
+  its **browser_submit**, which asks you first (**Allow**). It never types a
+  password, a card number or another secret, and asks you to take over for
+  that part instead.
+- **Where it goes.** Only public sites on the list an admin sets (Settings →
+  Tools → **Sites the browser agent may open**, else the Web tool's sites),
+  never one on **Sites the browser agent never opens**, and never an address
+  inside your network. The browser runs in its own container that reaches
+  nothing else: every page goes through the app, which checks each site.
+- **Its own browser for each chat**: cookies and signing in stay with that
+  chat, apart from every other; it closes after 15 minutes unused, or with
+  **Close** (the X) on the bar.
+- **Who has it**: the `feature.browser` permission and the tool's own
+  settings (Admin → Tools). It is off in rooms, as it acts as you. It needs
+  the `browser` profile (`COMPOSE_PROFILES=browser` in `deploy/.env`).
+
 ## Sketch: napkin to app
 
 **Sketch** (the pen button in the box) opens a whiteboard: draw what you mean,

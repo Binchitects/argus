@@ -310,6 +310,14 @@ public static class IdentityWiring
         services.AddHttpClient(Chat.Tools.CustomTools.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(30));
         services.AddSingleton<Chat.Tools.BlenderClient>();
         services.AddScoped<Chat.Tools.BlenderTool>();
+        // The browser agent: its browser's DevTools, its sessions (one per chat), and the proxy every page goes through.
+        services.Configure<Chat.Tools.Browser.BrowserOptions>(config.GetSection("Browser"));
+        services.AddHttpClient(Chat.Tools.Browser.BrowserSessions.Client, c => c.Timeout = TimeSpan.FromSeconds(10));
+        services.AddSingleton<Chat.Tools.Browser.BrowserSessions>();
+        services.AddHostedService(sp => sp.GetRequiredService<Chat.Tools.Browser.BrowserSessions>());
+        services.AddSingleton<Chat.Tools.Browser.BrowserProxy>();
+        services.AddHostedService(sp => sp.GetRequiredService<Chat.Tools.Browser.BrowserProxy>());
+        services.AddScoped<Chat.Tools.Browser.BrowserTool>();
         services.AddScoped<Plans.PlansTool>();
         services.AddScoped<Code.ReviewTool>();
         services.Configure<Chat.Tools.WebOptions>(config.GetSection("Web"));
@@ -483,6 +491,7 @@ public static class IdentityWiring
         Code.CodeEndpoints.MapCode(app);
         Code.ReviewRuleEndpoints.MapReviewRules(app);
         Code.CodeHostLinks.MapCodeHostLinks(app);
+        Chat.Tools.Browser.BrowserEndpoints.MapBrowser(app);
         Plans.PlanEndpoints.MapPlans(app);
         app.MapForwardAuth();
         app.MapKeyCheck();

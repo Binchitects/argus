@@ -147,6 +147,10 @@ public static class SettingsCatalog
             { Default = "true", Optional = false },
         new("Web:AllowedSites", Tools, "Sites the chat may open", "Host names, comma separated: docs.python.org, *.microsoft.com (a domain and its subdomains), or * for any public site. Empty: the Web tool stays off. Addresses inside your network are never opened.", SettingType.Text, SettingScope.Live)
             { Default = "" },
+        new("Browser:Sites", Tools, "Sites the browser agent may open", "Host names, comma separated, as for the Web tool (* for any public site). Empty: the Web tool's sites. Addresses inside your network are never opened, whatever this says.", SettingType.Text, SettingScope.Live)
+            { Default = "" },
+        new("Browser:BlockedSites", Tools, "Sites the browser agent never opens", "Host names, comma separated (*.example.com for a domain and its subdomains): refused even when the sites above allow them.", SettingType.Text, SettingScope.Live)
+            { Default = "" },
         new("Plugins:CatalogUrl", PluginsGroup, "Plugin catalog", "An index.json that lists plugins to install (each zip's address and SHA-256), besides those that come with the app. Empty: only those.", SettingType.Url, SettingScope.Live),
         new("Plugins:CatalogKey", PluginsGroup, "Catalog's public key", "The publisher's ECDSA P-256 public key (PEM). When set, the catalog's index.json.sig must verify against it, or nothing is installed from it.", SettingType.Text, SettingScope.Live)
             { Max = 1000 },

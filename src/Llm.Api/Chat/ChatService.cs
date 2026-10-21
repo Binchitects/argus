@@ -627,6 +627,8 @@ public sealed partial class ChatService(
             var ends = false;
             var delegated = false;
             var loadedBefore = demand.Loaded.Count;
+            // The pictures a call shows the model (the browser's screen), given after the step's results to a model that sees.
+            List<ChatAttachment>? seen = null;
             foreach (var call in toolCalls.OfType<JsonObject>())
             {
                 var id = call["id"]!.GetValue<string>();
@@ -725,6 +727,10 @@ public sealed partial class ChatService(
                 }
                 var (text, isError) = (outcome.Text, outcome.IsError);
                 ends |= outcome.EndsAnswer;
+                if (outcome.SeeImages && outcome.Files?.Where(f => f.Kind == "image" && f.Data is not null).ToList() is { Count: > 0 } pictures)
+                {
+                    seen = pictures;
+                }
                 var result = new ChatMessage
                 {
                     ConversationId = conversation.Id, ParentId = parent, Role = "tool", Sequence = ++next, ToolCallId = id, ToolName = name, AuthorId = user.Id,
@@ -747,6 +753,16 @@ public sealed partial class ChatService(
                     details = outcome.Details,
                     attachments = (outcome.Files ?? []).Select(f => new { f.Id, f.FileName, f.Size, f.Truncated, f.Kind, f.ContentType, original = f.Kind != "image" && f.Data != null }),
                 });
+            }
+            if (seen is not null && model?.Vision == true)
+            {
+                // The latest only: older screens are history, and each picture weighs on the context.
+                var parts = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = "[What the screen shows now, after the step above]" });
+                foreach (var picture in seen)
+                {
+                    parts.Add(new JsonObject { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = $"data:{picture.ContentType};base64,{Convert.ToBase64String(picture.Data!)}" } });
+                }
+                messages.Add(new JsonObject { ["role"] = "user", ["content"] = parts });
             }
             if (delegated)
             {

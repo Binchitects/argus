@@ -17,6 +17,10 @@ gitlab:
   # Password mode with an LDAP account: "" tries GitLab's own sign-in, then each LDAP one; a provider (ldapmain) only it; off never.
   ldap: ""
 
+# The browser agent's browser (Chromium's DevTools): the chart runs none yet; point it at one you run (http://host:9222).
+browser:
+  url: ""
+
 # Pull requests on GitHub and Gitea, read with each person's own read-only token (Account -> Code hosts).
 codeHosts:
   # "" is github.com; a GitHub Enterprise API (https://github.example.com/api/v3); "off" for none.
