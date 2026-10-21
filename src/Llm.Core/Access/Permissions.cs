@@ -25,6 +25,7 @@ public static class Permissions
     public const string PluginsManage = "plugins.manage";
     public const string McpServersManage = "mcpservers.manage";
     public const string KnowledgeManage = "knowledge.manage";
+    public const string DataManage = "data.manage";
     public const string SettingsRead = "settings.read";
     public const string SettingsManage = "settings.manage";
     public const string SignInManage = "signin.manage";
@@ -128,6 +129,7 @@ public static class Permissions
     public const string ThreeD = "feature.3d";
     public const string Browser = "feature.browser";
     public const string Apps = "feature.apps";
+    public const string Data = "feature.data";
     public const string Plans = "feature.plans";
     public const string Research = "feature.research";
     public const string Compare = "feature.compare";
@@ -153,6 +155,7 @@ public static class Permissions
         new(PluginsManage, "Models, tools and knowledge", "Install, update and remove plugins.", true),
         new(McpServersManage, "Models, tools and knowledge", "Add and change MCP servers and APIs.", true),
         new(KnowledgeManage, "Models, tools and knowledge", "Add and change company knowledge sources and who may read them.", true),
+        new(DataManage, "Models, tools and knowledge", "Connect databases for people to ask, choose their tables and who may ask them, and read what was asked.", true),
         new(SettingsRead, "Settings", "See the company's settings.", true),
         new(SettingsManage, "Settings", "Change the company's settings.", true),
         new(SignInManage, "Settings", "Set up the directory, company sign-in and SCIM.", true),
@@ -255,6 +258,7 @@ public static class Permissions
         new(ThreeD, "Features", "Make 3D models.", false),
         new(Browser, "Features", "Let the chat use a browser to do things on websites.", false),
         new(Apps, "Features", "Publish apps the chat builds, for oneself, groups or everyone.", false),
+        new(Data, "Features", "Ask the databases an admin connected, and keep boards of charts.", false),
         new(Plans, "Features", "Make and keep plans.", false),
         new(Research, "Features", "Run deep research.", false),
         new(Compare, "Features", "Compare two models' answers.", false),

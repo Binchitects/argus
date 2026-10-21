@@ -167,6 +167,22 @@ public sealed class FakeModel : HttpMessageHandler
             chunks = [Delta(new JsonObject { ["content"] = $"```json\n{{\"findings\": {findings}}}\n```" }), Finish("stop"), Usage(300, 0, 40)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
+        // Ask your data: the SQL a "[sql:…]" marker in the question says, chart "[chart:…]" (table by default); asked again
+        // after a failure, the "[fix:…]" marker's SQL, else the same again. "[cannot]": no SQL, and why.
+        if (system0.StartsWith("You answer questions about a PostgreSQL database", StringComparison.Ordinal))
+        {
+            var question = messages.AsArray().First(m => m!["role"]?.GetValue<string>() == "user")!["content"]!.GetValue<string>();
+            string Marker(string name) => System.Text.RegularExpressions.Regex.Match(question, $@"\[{name}:(.*?)\](?!\])") is { Success: true } m ? m.Groups[1].Value : "";
+            var again = lastUser.StartsWith("That query failed", StringComparison.Ordinal);
+            var sql = question.Contains("[cannot]", StringComparison.Ordinal) ? "" : again && Marker("fix") is { Length: > 0 } fix ? fix : Marker("sql");
+            var said = new JsonObject
+            {
+                ["sql"] = sql, ["explanation"] = sql.Length == 0 ? "The tables say nothing about the weather." : "Counts what was asked.", ["title"] = "The answer",
+                ["chart"] = new JsonObject { ["type"] = Marker("chart") is { Length: > 0 } chart ? chart : "table" },
+            };
+            chunks = [Delta(new JsonObject { ["content"] = $"```json\n{said.ToJsonString()}\n```" }), Finish("stop"), Usage(400, 0, 40)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
         if (system0.StartsWith("You check another reviewer's finding", StringComparison.Ordinal))
         {
             var real = !lastUser.Contains("(harmless)", StringComparison.Ordinal);

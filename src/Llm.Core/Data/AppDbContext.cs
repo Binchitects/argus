@@ -59,6 +59,10 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Apps.ArenaAppVersion> AppVersions => Set<Apps.ArenaAppVersion>();
     public DbSet<Apps.ArenaAppData> AppData => Set<Apps.ArenaAppData>();
     public DbSet<Apps.ArenaAppAsk> AppAsks => Set<Apps.ArenaAppAsk>();
+    public DbSet<Insights.DataSource> DataSources => Set<Insights.DataSource>();
+    public DbSet<Insights.DataQuery> DataQueries => Set<Insights.DataQuery>();
+    public DbSet<Insights.DataBoard> DataBoards => Set<Insights.DataBoard>();
+    public DbSet<Insights.DataPin> DataPins => Set<Insights.DataPin>();
     public DbSet<ScheduledRun> ScheduledRuns => Set<ScheduledRun>();
     public DbSet<TaskEvent> TaskEvents => Set<TaskEvent>();
     public DbSet<Notification> Notifications => Set<Notification>();
@@ -531,6 +535,52 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(x => new { x.UserId, x.At });
             e.HasOne<Apps.ArenaApp>().WithMany().HasForeignKey(x => x.AppId).OnDelete(DeleteBehavior.SetNull);
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Insights.DataSource>(e =>
+        {
+            e.ToTable("data_sources");
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.HasIndex(x => x.Name).IsUnique();
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.Property(x => x.Kind).HasMaxLength(16);
+            e.Property(x => x.ConnectionProtected).HasMaxLength(8000);
+            e.Property(x => x.Notes).HasMaxLength(4000);
+            e.Property(x => x.Reach).HasMaxLength(16);
+            e.Property(x => x.Tables).HasDefaultValueSql("'{}'::text[]");
+            e.Property(x => x.GroupIds).HasDefaultValueSql("'{}'::uuid[]");
+        });
+        builder.Entity<Insights.DataQuery>(e =>
+        {
+            e.ToTable("data_queries");
+            e.Property(x => x.Question).HasMaxLength(2000);
+            e.Property(x => x.Via).HasMaxLength(16);
+            e.Property(x => x.Error).HasMaxLength(1000);
+            e.HasIndex(x => new { x.SourceId, x.At });
+            e.HasIndex(x => new { x.UserId, x.At });
+            e.HasOne<Insights.DataSource>().WithMany().HasForeignKey(x => x.SourceId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Insights.DataBoard>(e =>
+        {
+            e.ToTable("data_boards");
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.Property(x => x.Reach).HasMaxLength(16);
+            e.Property(x => x.GroupIds).HasDefaultValueSql("'{}'::uuid[]");
+            e.HasIndex(x => x.OwnerId);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Insights.DataPin>(e =>
+        {
+            e.ToTable("data_pins");
+            e.Property(x => x.Title).HasMaxLength(200);
+            e.Property(x => x.Question).HasMaxLength(2000);
+            e.Property(x => x.Refresh).HasMaxLength(16);
+            e.Property(x => x.Error).HasMaxLength(1000);
+            e.HasIndex(x => new { x.BoardId, x.Position });
+            e.HasIndex(x => new { x.Refresh, x.RanAt });
+            e.HasOne<Insights.DataBoard>().WithMany().HasForeignKey(x => x.BoardId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Insights.DataSource>().WithMany().HasForeignKey(x => x.SourceId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<TaskTemplate>(e =>
         {

@@ -318,6 +318,12 @@ public static class IdentityWiring
         services.AddSingleton<Chat.Tools.Browser.BrowserProxy>();
         services.AddHostedService(sp => sp.GetRequiredService<Chat.Tools.Browser.BrowserProxy>());
         services.AddScoped<Chat.Tools.Browser.BrowserTool>();
+        // Ask your data: one question to the model as a person (apps use it too), the databases admins connect, the boards' refresher.
+        services.AddScoped<Chat.OneQuestion>();
+        services.AddScoped<Insights.DataQuestions>();
+        services.AddScoped<Chat.Tools.DataTool>();
+        services.AddSingleton<Insights.BoardRefresher>();
+        services.AddHostedService(sp => sp.GetRequiredService<Insights.BoardRefresher>());
         services.AddScoped<Plans.PlansTool>();
         services.AddScoped<Code.ReviewTool>();
         services.Configure<Chat.Tools.WebOptions>(config.GetSection("Web"));
@@ -492,6 +498,8 @@ public static class IdentityWiring
         Code.ReviewRuleEndpoints.MapReviewRules(app);
         Code.CodeHostLinks.MapCodeHostLinks(app);
         Chat.Tools.Browser.BrowserEndpoints.MapBrowser(app);
+        Insights.DataSourceEndpoints.MapDataSources(app);
+        Insights.DataEndpoints.MapData(app);
         Apps.AppEndpoints.MapApps(app);
         Plans.PlanEndpoints.MapPlans(app);
         app.MapForwardAuth();

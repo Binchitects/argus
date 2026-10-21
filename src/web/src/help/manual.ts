@@ -15,6 +15,7 @@ import ci from '@docs/ci.md?raw'
 import codeArena from '@docs/code-arena.md?raw'
 import configuration from '@docs/configuration.md?raw'
 import cpuTemperature from '@docs/cpu-temperature.md?raw'
+import data from '@docs/data.md?raw'
 import deployment from '@docs/deployment.md?raw'
 import multiGpu from '@docs/multi-gpu-server.md?raw'
 import hermes from '@docs/hermes.md?raw'
@@ -68,6 +69,7 @@ export const manualGroups: ManualGroup[] = [
     title: 'Using it',
     docs: [
       doc('chat.md', 'Chat', 'Models, thinking, files, tools, assistants, prompts, scheduled tasks and what each person sees.', 'everyone', chat),
+      doc('data.md', 'Ask your data', 'The company\'s databases asked in words: the SQL shown and explained, charts, boards; connecting a database read only.', 'everyone', data),
       doc('integrations.md', 'Bots, email and the app', 'Slack, Mattermost and Teams bots, email in, the installed app with push notifications, the browser extension.', 'everyone', integrations),
       doc('mcp.md', 'Arena MCP', 'Your chat tools for your own agent, at /mcp, signed in with your API key.', 'everyone', mcp),
       doc('code-arena.md', 'Code Arena', 'Our own coding agent and its IDE: getting it, signing in, modes, tools and sessions.', 'everyone', codeArena),

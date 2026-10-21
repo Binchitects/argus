@@ -190,6 +190,43 @@ export const topics = {
     manual: { doc: 'chat', section: 'apps' },
   },
 
+  data: {
+    title: 'Data',
+    about: 'The company\'s databases asked in words: each answer is the SQL it ran (read only), what it means, a chart and the rows.',
+    parts: [
+      { name: 'Database', text: 'The databases an admin opened to you. **Tables** lists what can be answered: the tables, their columns and what they hold.' },
+      { name: 'An answer', text: 'What it counts in plain words, the chart (one figure, lines over time, bars) or the **Table**, and the **SQL** it ran: change it and **Run** your version.' },
+      { name: 'Ask a follow-up', text: 'The next question builds on this answer ("and by country?").' },
+      { name: 'Pin to a board', text: 'Keeps the chart on a board, run again every hour, every day, or when you refresh it.' },
+    ],
+    tasks: [
+      { title: 'Make a weekly sales chart', steps: ['Choose the database and ask: "Orders per week this quarter".', 'Check what it means and the SQL; switch to **Table** to see the rows.', 'Press **Pin to a board**, choose **A new board…**, name it, and pin it to run **Every day**.'] },
+    ],
+    manual: { doc: 'data', section: 'asking' },
+  },
+
+  boards: {
+    title: 'Boards',
+    about: 'Charts pinned from answers, each run again on its schedule as the board\'s owner. Yours, your groups\' and everyone\'s.',
+    parts: [
+      { name: 'The boards', text: 'Those you may see, the latest changed first, with how many charts each has.' },
+      { name: 'New board', text: 'An empty board: charts come onto it from answers, with **Pin to a board**.' },
+    ],
+    tasks: [{ title: 'Share a board with your team', steps: ['Open the board and press **Change**.', 'Choose **Some groups** and tick your team.', 'Save: your team finds it under Boards.'] }],
+    manual: { doc: 'data', section: 'boards' },
+  },
+
+  board: {
+    title: 'A board',
+    about: 'Its charts as they last ran. They run as its owner: those it is shared with see what the owner may ask.',
+    parts: [
+      { name: 'A chart', text: 'Its title, its database, how often it runs again, and when it last ran. Its menu: **Post to a room**, and for the owner **Run it now**, how often, and **Take it off the board**.' },
+      { name: 'Change', text: 'For its owner: its name, words, and who may see it (only you, some groups, everyone).' },
+    ],
+    tasks: [{ title: 'Post a chart to a room', steps: ['Open the chart\'s menu and choose **Post to a room**.', 'Choose the room and press **Post**: its last result goes there as a table, for the room\'s people.'] }],
+    manual: { doc: 'data', section: 'boards' },
+  },
+
   tasks: {
     title: 'Scheduled tasks',
     about: 'Questions asked for you on a schedule or on an event, with your model and tools: a morning digest, a weekly report, a review of each merge request.',
@@ -530,6 +567,19 @@ export const topics = {
     ],
     tasks: [{ title: 'Add a Confluence space', steps: ['Press **Add a source** and choose **Confluence**.', 'Give the site\'s address, a reading account and its API token, and the space keys.', 'Press **Test connection**, then add it. It syncs, and the chat finds it with the **Company knowledge** tool.'] }],
     manual: { doc: 'knowledge', section: 'sources' },
+  },
+
+  'data-sources': {
+    title: 'Data sources',
+    about: 'The databases people may ask in words (PostgreSQL), which of their tables, and who; and what was asked of them. Every query runs read only.',
+    admin: true,
+    parts: [
+      { name: 'A source', text: 'Who its connection signs in as and where, the tables open to questions, and who may ask it. **Change**, **What was asked** (the latest queries: who, the question, the SQL), **Read its tables again**, and **Remove**.' },
+      { name: 'Connect a database', text: 'A name, the connection (kept encrypted, never shown again), **Try it** to list the tables its role may read, the tables to open, what the model should know, who may ask it, and the limits on rows and seconds.' },
+      { name: 'Read only', text: 'Each query is one statement in a read-only transaction, never committed, after its plan shows it reads only the open tables. A superuser, or a role that may read the server\'s files, is refused.' },
+    ],
+    tasks: [{ title: 'Open the shop\'s orders to the sales team', steps: ['Make a role that may only read: grant select on the tables to it.', 'Press **Connect a database**, give the connection and press **Try it**.', 'Tick the orders and customers tables, note that totals are in euros, choose **Some groups** and the sales team.', 'Press **Connect**: they find it under Workspace → Data.'] }],
+    manual: { doc: 'data', section: 'connecting-a-database-admins' },
   },
 
   storage: {

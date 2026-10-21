@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { expectAccessible, watchConsole } from './helpers'
+import { expectAccessible, watchConsole } from './helpers.ts'
 
 const headers = { 'X-Requested-With': 'e2e' }
 // With a real model behind the gateway (the deployed stack): E2E_CHAT=1.

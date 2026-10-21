@@ -12,7 +12,6 @@ using Llm.Core.Data;
 using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Apps;
 
@@ -274,7 +273,7 @@ public static class AppEndpoints
     /// through their safeguards (the question's and the answer's rules), counted against the asks a day. No app: a chat's preview.
     /// </summary>
     private static async Task<IResult> AskAsync(Guid? id, AppAsk body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access,
-        Safeguards.Safeguards safeguards, GatewayChat gateway, ModelPolicy policy, ChatModels models, IOptionsMonitor<ChatOptions> chat, CancellationToken ct)
+        OneQuestion one, CancellationToken ct)
     {
         var me = await Me(p, users);
         if (id is { } appId && await OpenableAsync(appId, me, db, access, ct) is null)
@@ -291,54 +290,14 @@ public static class AppEndpoints
         {
             return AuthEndpoints.Problem(429, "asks", $"Apps asked the model {MostAsksADay} times for you today, the most a day.");
         }
-        var mine = await policy.ForAsync(me, await models.ListAsync(ct), ct);
-        var model = body.Model == "small" && chat.CurrentValue.SmallModel is { Length: > 0 } small && mine.Models.Any(m => m.Name == small) ? small : mine.Default?.Name;
-        if (model is null)
+        var system = body.System is { Length: > 10_000 } longer ? longer[..10_000] : body.System;
+        var asked = await one.AskAsync(me, prompt, system, body.Model, body.MaxTokens ?? 2000, "app", ct);
+        if (asked.Problem is null)
         {
-            return AuthEndpoints.Problem(503, "model", "No model is there for you to ask.");
+            db.AppAsks.Add(new ArenaAppAsk { AppId = id, UserId = me.Id, Model = asked.Model! });
+            await db.SaveChangesAsync(ct);
         }
-        if (await policy.RefusalAsync(me, model, ct) is { } refused)
-        {
-            return AuthEndpoints.Problem(403, "model", refused);
-        }
-        var verdict = await safeguards.CheckMessageAsync(me, prompt, 0, false, model, ct);
-        if (!verdict.Allowed)
-        {
-            return Safeguards.Safeguards.Problem(verdict);
-        }
-        var messages = new JsonArray();
-        if (body.System is { Length: > 0 } system)
-        {
-            messages.Add(new JsonObject { ["role"] = "system", ["content"] = system.Length > 10_000 ? system[..10_000] : system });
-        }
-        messages.Add(new JsonObject { ["role"] = "user", ["content"] = verdict.Text ?? prompt });
-        var request = new JsonObject
-        {
-            ["model"] = verdict.Model ?? model, ["messages"] = messages, ["stream"] = true, ["max_tokens"] = Math.Clamp(body.MaxTokens ?? 2000, 16, 4000), ["user"] = me.Email,
-            ["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = false },
-            ["metadata"] = new JsonObject { ["tags"] = new JsonArray("app") },
-        };
-        var said = new StringBuilder();
-        try
-        {
-            await foreach (var e in gateway.StreamAsync(request, me.Email!, ct))
-            {
-                if (e is ContentDelta c)
-                {
-                    said.Append(c.Text);
-                }
-            }
-        }
-        catch (ChatGatewayException ex)
-        {
-            return AuthEndpoints.Problem(502, "model", ex.Message);
-        }
-        db.AppAsks.Add(new ArenaAppAsk { AppId = id, UserId = me.Id, Model = model });
-        await db.SaveChangesAsync(ct);
-        var answer = await safeguards.RunAsync(new Safeguards.RuleRun("answer", said.ToString()) { User = me, Model = model }, ct);
-        return answer.Blocked
-            ? AuthEndpoints.Problem(answer.Status, "safeguard", answer.Reason ?? "The answer was withheld by a rule.")
-            : Results.Ok(new { text = answer.Text, model });
+        return asked.Problem ?? Results.Ok(new { text = asked.Text, model = asked.Model });
     }
 
     private static Guid Whose(bool? mine, AppUser me) => mine == true ? me.Id : Guid.Empty;

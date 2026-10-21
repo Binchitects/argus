@@ -27,6 +27,8 @@ __pycache__/
 
 # Runtime state (all rebuildable, or secret)
 data/
+# … but the web's Data pages are code.
+!src/web/src/pages/data/
 *.db
 *.db-wal
 *.db-shm
