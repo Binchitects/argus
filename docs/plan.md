@@ -1452,6 +1452,13 @@ need their drivers, a download); a deck's PDF is printed by the browser.
    model, shown in the browser, changed by asking ("a slide on costs after
    the third"), downloaded as .pptx and PDF.
 
+Released: **v6.5.0** (2026-10-22), all three items below, except: Agent
+Studio's canvas is a flow from the top down (branches and loops), not
+free-form nodes, and shares with groups, not named people; Fix it is GitLab
+only (GitHub needs the host's write API and a token of that kind), and runs
+tests only in the Python sandbox (other languages need a code sandbox image,
+a download).
+
 ### v6.5 — Agents that do the work
 
 1. **Agent Studio.** Workflows on a canvas: a trigger (a schedule, a

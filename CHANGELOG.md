@@ -12,6 +12,41 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v6.5.0 (2026-10-22)
+
+Agents that do the work: workflows that run as you, an agent that fixes the
+code and opens the merge request, and a panel that argues it out.
+
+### :rocket: Epics and highlights
+
+- **Agent Studio** (Workspace → Agent Studio): workflows on a canvas that run
+  as you. A trigger starts them: by hand, a schedule, a webhook, GitLab's
+  events, a word in a room, or a form you share. Steps ask a model (JSON
+  too), run an agent with tools, call a tool, branch (**If**), loop (**For
+  each**) and wait for your yes (**Ask me first**). What comes out goes to a
+  room, an email, a GitLab comment or a file. Every run is kept and replayed
+  step by step on the canvas; after a yes it goes on without running again
+  what ran. Templates (a morning digest, a review of each merge request, a
+  room's triage, a request form, one by one), and a scheduled task made a
+  workflow
+- **Fix it** (Code → Fix it, and on every review finding): an agent takes the
+  branch, makes the change for a finding, an issue, a failed pipeline or your
+  words, runs the tests it can, and shows the diff and each step it took;
+  **Another round** for more; then it opens the merge request as you, with
+  your own GitLab token (scope api, kept encrypted: never the app's or
+  Argus's)
+- **Ask a panel** (in the chat): the expert, the critic, the one who says no
+  and your assistants discuss a question in turns, round by round, watched
+  live; a moderator writes the verdict with who said what, into the chat or
+  room
+
+### :sparkles: New features & Enhancements
+
+- An app's `arena.ask` and Agent Studio's steps may name a model the person
+  may use
+- The `feature.studio` and `feature.fixit` permissions
+- Browser tests for Agent Studio against the real model
+
 ## v6.4.0 (2026-10-22)
 
 Apps: what the chat builds, people use; the company's data asked in words;
