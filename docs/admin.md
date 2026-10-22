@@ -924,8 +924,8 @@ the share. Prometheus's own rules still warn at 85% and 95%.
 **Files.** The chat's files and what the tools made: whose, which chat, from
 where, the kind, the size (the file, its text, a video's sound and the pages
 drawn of a document) and when. Filter by person, kind, where from, whether a
-chat still has it (in a chat, an assistant's, in a chat deleted under legal
-hold, in no chat), size and age; search by the file's name, the person or the
+chat still has it (in a chat, an assistant's, on a deck, in a chat deleted
+under legal hold, in no chat), size and age; search by the file's name, the person or the
 chat's title. What a tool made over Arena MCP is in no chat, and still the
 tool's (a picture, a video, speech). The list holds the first thousand in the order chosen; the totals
 count every match. **Download** gives the file itself, never shown in the page,
@@ -943,7 +943,7 @@ preview gives the command that removes them on the host instead.
 
 | Clean-up | What it removes |
 |---|---|
-| Files in no chat | files no chat, assistant or waiting message has, older than the age chosen (7 days by default: a younger one may be being written) |
+| Files in no chat | files no chat, assistant, deck or waiting message has, older than the age chosen (7 days by default: a younger one may be being written) |
 | Old pictures, videos and speech | what those tools made, past the age chosen (**Settings → Storage → Old generated media**, 90 days by default); the chats keep their words |
 | Files of deleted chats | chats deleted while their owner was on legal hold, once the hold is over, with their files (the hourly retention job takes them too); it shows what the holds still keep |
 | Leftovers on disk | what no database row owns: a download's `.part` file no download will finish, and Python sandbox jobs left behind (older than an hour) |

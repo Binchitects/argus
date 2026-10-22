@@ -50,7 +50,7 @@ public sealed class OneQuestion(Safeguards.Safeguards safeguards, GatewayChat ga
         }
         var request = new JsonObject
         {
-            ["model"] = verdict.Model ?? model, ["messages"] = messages, ["stream"] = true, ["max_tokens"] = Math.Clamp(maxTokens, 16, 4000), ["user"] = me.Email,
+            ["model"] = verdict.Model ?? model, ["messages"] = messages, ["stream"] = true, ["max_tokens"] = Math.Clamp(maxTokens, 16, 8000), ["user"] = me.Email,
             ["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = false },
             ["metadata"] = new JsonObject { ["tags"] = new JsonArray(tag) },
         };

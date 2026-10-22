@@ -24,6 +24,8 @@ export const routeHelp: Record<string, TopicId> = {
   '/data': 'data',
   '/data/boards': 'boards',
   '/data/boards/:id': 'board',
+  '/decks': 'decks',
+  '/decks/:id': 'deck',
   '/rooms/join/:token': 'room-join',
   '/code': 'code',
   '/code/reviews/:id': 'review',

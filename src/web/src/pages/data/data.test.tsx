@@ -117,7 +117,7 @@ describe('ask your data', () => {
     await waitFor(() => expect(within(dialog).getByRole('combobox')).toHaveTextContent('Sales room'))
     await userEvent.click(within(dialog).getByRole('button', { name: 'Post' }))
     await waitFor(() => expect(calls.some((c) => c.path === '/api/chat/conversations/r1/queue')).toBe(true))
-    const posted = (calls.find((c) => c.path === '/api/chat/conversations/r1/queue')?.body as { content: string }).content
+    const posted = (calls.find((c) => c.path === '/api/chat/conversations/r1/queue')!.body as { content: string }).content
     expect(posted).toContain('**Orders so far**')
     expect(posted).toContain('| Orders |\n| ---: |\n| 1234 |')
     expect(posted).toContain('From the board Sales week')

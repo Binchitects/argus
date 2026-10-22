@@ -130,6 +130,7 @@ public static class Permissions
     public const string Browser = "feature.browser";
     public const string Apps = "feature.apps";
     public const string Data = "feature.data";
+    public const string Decks = "feature.decks";
     public const string Plans = "feature.plans";
     public const string Research = "feature.research";
     public const string Compare = "feature.compare";
@@ -259,6 +260,7 @@ public static class Permissions
         new(Browser, "Features", "Let the chat use a browser to do things on websites.", false),
         new(Apps, "Features", "Publish apps the chat builds, for oneself, groups or everyone.", false),
         new(Data, "Features", "Ask the databases an admin connected, and keep boards of charts.", false),
+        new(Decks, "Features", "Make slide decks with the model, and download them.", false),
         new(Plans, "Features", "Make and keep plans.", false),
         new(Research, "Features", "Run deep research.", false),
         new(Compare, "Features", "Compare two models' answers.", false),

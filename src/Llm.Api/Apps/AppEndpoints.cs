@@ -291,7 +291,7 @@ public static class AppEndpoints
             return AuthEndpoints.Problem(429, "asks", $"Apps asked the model {MostAsksADay} times for you today, the most a day.");
         }
         var system = body.System is { Length: > 10_000 } longer ? longer[..10_000] : body.System;
-        var asked = await one.AskAsync(me, prompt, system, body.Model, body.MaxTokens ?? 2000, "app", ct);
+        var asked = await one.AskAsync(me, prompt, system, body.Model, Math.Min(body.MaxTokens ?? 2000, 4000), "app", ct);
         if (asked.Problem is null)
         {
             db.AppAsks.Add(new ArenaAppAsk { AppId = id, UserId = me.Id, Model = asked.Model! });

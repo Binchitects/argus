@@ -63,6 +63,9 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Insights.DataQuery> DataQueries => Set<Insights.DataQuery>();
     public DbSet<Insights.DataBoard> DataBoards => Set<Insights.DataBoard>();
     public DbSet<Insights.DataPin> DataPins => Set<Insights.DataPin>();
+    public DbSet<Decks.Deck> Decks => Set<Decks.Deck>();
+    public DbSet<Decks.DeckVersion> DeckVersions => Set<Decks.DeckVersion>();
+    public DbSet<Decks.DeckTemplate> DeckTemplates => Set<Decks.DeckTemplate>();
     public DbSet<ScheduledRun> ScheduledRuns => Set<ScheduledRun>();
     public DbSet<TaskEvent> TaskEvents => Set<TaskEvent>();
     public DbSet<Notification> Notifications => Set<Notification>();
@@ -581,6 +584,28 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(x => new { x.Refresh, x.RanAt });
             e.HasOne<Insights.DataBoard>().WithMany().HasForeignKey(x => x.BoardId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Insights.DataSource>().WithMany().HasForeignKey(x => x.SourceId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Decks.Deck>(e =>
+        {
+            e.ToTable("decks");
+            e.Property(x => x.Title).HasMaxLength(200);
+            e.HasIndex(x => new { x.OwnerId, x.UpdatedAt });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Decks.DeckTemplate>().WithMany().HasForeignKey(x => x.TemplateId).OnDelete(DeleteBehavior.SetNull);
+        });
+        builder.Entity<Decks.DeckVersion>(e =>
+        {
+            e.ToTable("deck_versions");
+            e.Property(x => x.Title).HasMaxLength(200);
+            e.Property(x => x.Note).HasMaxLength(500);
+            e.HasIndex(x => new { x.DeckId, x.Version }).IsUnique();
+            e.HasOne<Decks.Deck>().WithMany().HasForeignKey(x => x.DeckId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Decks.DeckTemplate>(e =>
+        {
+            e.ToTable("deck_templates");
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.HasIndex(x => x.Name).IsUnique();
         });
         builder.Entity<TaskTemplate>(e =>
         {

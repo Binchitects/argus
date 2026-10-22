@@ -227,6 +227,33 @@ export const topics = {
     manual: { doc: 'data', section: 'boards' },
   },
 
+  decks: {
+    title: 'Decks',
+    about: 'Slides from a few words, with charts from the company\'s data and pictures from the picture model, in the company\'s look.',
+    parts: [
+      { name: 'Make a deck about…', text: 'What it is about, in a sentence or a page; under **Look**, the company template to make it in (or the built-in look).' },
+      { name: 'Your decks', text: 'Each with its first slide, how many slides it has and when it last changed.' },
+      { name: 'Templates', text: 'For those who may change the branding: the company\'s PowerPoint templates, one the default for new decks.' },
+    ],
+    tasks: [
+      { title: 'Make a deck for a meeting', steps: ['Say what it is about in **Make a deck about…**: the subject, who it is for, the points that matter.', 'Press **Make it**: the slides open, their pictures coming one by one.', 'Change what you want by asking, then **Present**, or download it as **PowerPoint** or **PDF**.'] },
+    ],
+    manual: { doc: 'decks', section: 'making-a-deck' },
+  },
+
+  deck: {
+    title: 'A deck',
+    about: 'Its slides, the one chosen large; changed by asking or by hand; presented, printed or downloaded.',
+    parts: [
+      { name: 'Slides', text: 'Every slide, small: press one to see it large. Below it, **Change by hand**, move it up or down, copy it, add one after it, or take it out.' },
+      { name: 'Change it by asking', text: 'In words: "a slide on costs after the third", "make this slide shorter". **This slide** is the one you see.' },
+      { name: 'Present, PowerPoint, PDF', text: '**Present** fills the screen (→ and ← to move, Escape to end). **PowerPoint** is a .pptx in its template; **PDF** prints the slides, one a page (Save as PDF).' },
+      { name: 'More', text: '**Rename**, **Versions** (put an old one back), **Ask the numbers again** for charts from a database, its **Look**, and **Delete**.' },
+    ],
+    tasks: [{ title: 'Put a chart of real numbers on a slide', steps: ['Press **Change by hand** on the slide.', 'Choose the **Chart** layout, the database and what it counts ("orders per month this year").', 'Save: its numbers are asked of the database now, and again with **Ask the numbers again**.'] }],
+    manual: { doc: 'decks', section: 'changing-it' },
+  },
+
   tasks: {
     title: 'Scheduled tasks',
     about: 'Questions asked for you on a schedule or on an event, with your model and tools: a morning digest, a weekly report, a review of each merge request.',

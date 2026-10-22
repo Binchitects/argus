@@ -167,6 +167,46 @@ public sealed class FakeModel : HttpMessageHandler
             chunks = [Delta(new JsonObject { ["content"] = $"```json\n{{\"findings\": {findings}}}\n```" }), Finish("stop"), Usage(300, 0, 40)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
+        // Decks: a deck of a title slide, points (a picture), a chart and an odd layout; "[nojson]" answers in words the
+        // first time. A change appends a slide on costs to the deck it was given (each picture's fileId dropped, as small
+        // models do), or with "[retitle]" renames it.
+        if (system0.StartsWith("You make slide decks", StringComparison.Ordinal))
+        {
+            var about = messages.AsArray().First(m => m!["role"]?.GetValue<string>() == "user")!["content"]!.GetValue<string>();
+            var deck = about.Contains("[nojson]", StringComparison.Ordinal) && !lastUser.StartsWith("That was not the deck", StringComparison.Ordinal)
+                ? "Here is a lovely deck about your quarter!"
+                : """
+                  ```json
+                  {"title": "Our quarter", "slides": [
+                    {"layout": "title", "title": "Our quarter", "subtitle": "What went well", "notes": "Welcome everyone."},
+                    {"layout": "bullets", "title": "Highlights", "bullets": ["Sales grew", "Two new customers", ""], "picture": {"prompt": "A rising arrow over a city"}, "notes": "The good news first."},
+                    {"layout": "chart", "title": "Sales by region", "chart": {"type": "bar", "categories": ["North", "South"], "series": [{"name": "Sales", "values": [120, 80]}]}, "bullets": ["North leads"]},
+                    {"layout": "spiral", "title": "Next steps", "bullets": ["Hire two people"]}
+                  ]}
+                  ```
+                  """;
+            chunks = [Delta(new JsonObject { ["content"] = deck }), Finish("stop"), Usage(800, 0, 300)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
+        if (system0.StartsWith("You change slide decks", StringComparison.Ordinal))
+        {
+            var given = system0.Split('\n')[1];
+            var deck = JsonNode.Parse(given)!.AsObject();
+            foreach (var slide in deck["slides"]!.AsArray())
+            {
+                (slide!["picture"] as JsonObject)?.Remove("fileId");
+            }
+            if (lastUser.Contains("[retitle]", StringComparison.Ordinal))
+            {
+                deck["title"] = "Our quarter, again";
+            }
+            else
+            {
+                deck["slides"]!.AsArray().Add(new JsonObject { ["layout"] = "bullets", ["title"] = "Costs", ["bullets"] = new JsonArray("Rent", "Salaries") });
+            }
+            chunks = [Delta(new JsonObject { ["content"] = deck.ToJsonString() }), Finish("stop"), Usage(900, 0, 320)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
         // Ask your data: the SQL a "[sql:…]" marker in the question says, chart "[chart:…]" (table by default); asked again
         // after a failure, the "[fix:…]" marker's SQL, else the same again. "[cannot]": no SQL, and why.
         if (system0.StartsWith("You answer questions about a PostgreSQL database", StringComparison.Ordinal))

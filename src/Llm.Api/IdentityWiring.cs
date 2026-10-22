@@ -321,6 +321,8 @@ public static class IdentityWiring
         // Ask your data: one question to the model as a person (apps use it too), the databases admins connect, the boards' refresher.
         services.AddScoped<Chat.OneQuestion>();
         services.AddScoped<Insights.DataQuestions>();
+        services.AddScoped<Decks.DeckMaker>();
+        services.AddScoped<Chat.Tools.DeckTool>();
         services.AddScoped<Chat.Tools.DataTool>();
         services.AddSingleton<Insights.BoardRefresher>();
         services.AddHostedService(sp => sp.GetRequiredService<Insights.BoardRefresher>());
@@ -500,6 +502,7 @@ public static class IdentityWiring
         Chat.Tools.Browser.BrowserEndpoints.MapBrowser(app);
         Insights.DataSourceEndpoints.MapDataSources(app);
         Insights.DataEndpoints.MapData(app);
+        Decks.DeckEndpoints.MapDecks(app);
         Apps.AppEndpoints.MapApps(app);
         Plans.PlanEndpoints.MapPlans(app);
         app.MapForwardAuth();

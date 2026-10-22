@@ -518,3 +518,28 @@
   --page-max: 100%;
   --thread-max: 100%;
 }
+
+/* A deck being printed (Save as PDF): drawn off the screen at a slide's size, then alone on the paper, a slide a page. */
+.deck-print {
+  position: fixed;
+  top: 0;
+  left: -100000px;
+  width: 1280px;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+@media print {
+  body:has(> .deck-print) > :not(.deck-print) {
+    display: none !important;
+  }
+  .deck-print {
+    position: static;
+    width: auto;
+  }
+  .deck-print .deck-page {
+    width: 13.333in;
+    height: 7.5in;
+    overflow: hidden;
+    break-after: page;
+  }
+}

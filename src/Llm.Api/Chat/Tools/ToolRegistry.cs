@@ -150,7 +150,7 @@ public sealed record ToolChoice(IChatTool Tool, ToolSetting Setting, string? Una
 public sealed class ToolRegistry(
     AppDbContext db, ArgusTool argus, ImageTool image, VideoTool video, SpeechTool speech, CalculatorTool calculator, TimeTool time, FilesTool files, CanvasTool canvas, PythonTool python, WebTool web, AskTool ask, AgentsTool agents, MemoryTool memory,
     IHttpClientFactory http, IOptions<AuthOptions> auth, IOptionsMonitor<ChatOptions> chat, Plugins.PersonCredentials people, Knowledge.KnowledgeTool knowledge, LayaTool laya,
-    ResearchTool research, BlenderTool blender, Browser.BrowserTool browser, DataTool data, Plans.PlansTool plans, Code.ReviewTool reviews, GatewayChat gateway, ToolUsage usage,
+    ResearchTool research, BlenderTool blender, Browser.BrowserTool browser, DataTool data, DeckTool decks, Plans.PlansTool plans, Code.ReviewTool reviews, GatewayChat gateway, ToolUsage usage,
     SandboxClient sandbox, IServiceScopeFactory scopes, IOptionsMonitor<SandboxOptions> sandboxOptions)
 {
     public const string McpClient = "mcp";
@@ -160,7 +160,7 @@ public sealed class ToolRegistry(
         var settings = await db.ToolSettings.AsNoTracking().ToDictionaryAsync(s => s.ToolId, ct);
         var servers = await db.McpServers.AsNoTracking().OrderBy(s => s.Name).ToListAsync(ct);
         var customs = await db.CustomTools.AsNoTracking().OrderBy(t => t.Name).ToListAsync(ct);
-        IEnumerable<IChatTool> tools = [argus, knowledge, data, python, web, research, browser, image, video, speech, calculator, time, files, canvas, blender, plans, reviews, ask, agents, memory, laya,
+        IEnumerable<IChatTool> tools = [argus, knowledge, data, decks, python, web, research, browser, image, video, speech, calculator, time, files, canvas, blender, plans, reviews, ask, agents, memory, laya,
             .. servers.Select(Server), .. customs.Select(t => CustomTools.For(t, http, gateway, auth.Value.DataKey))];
         var all = new List<ToolChoice>();
         foreach (var tool in tools)
@@ -190,6 +190,7 @@ public sealed class ToolRegistry(
         [BlenderTool.ToolId] = Core.Access.Permissions.ThreeD,
         [Browser.BrowserTool.ToolId] = Core.Access.Permissions.Browser,
         [DataTool.ToolId] = Core.Access.Permissions.Data,
+        [DeckTool.ToolId] = Core.Access.Permissions.Decks,
         [Plans.PlansTool.ToolId] = Core.Access.Permissions.Plans,
         ["knowledge"] = Core.Access.Permissions.Knowledge,
         ["image"] = Core.Access.Permissions.Pictures,
@@ -201,7 +202,7 @@ public sealed class ToolRegistry(
     };
 
     /// <summary>A tool that reads or acts as the person who asks (their memory, code, knowledge, an admin's server or plugin): off in rooms.</summary>
-    public static bool Personal(IChatTool tool) => tool is IServerTool || tool.Id is "memory" or "argus" or "knowledge" or Code.ReviewTool.ToolId or Browser.BrowserTool.ToolId or DataTool.ToolId;
+    public static bool Personal(IChatTool tool) => tool is IServerTool || tool.Id is "memory" or "argus" or "knowledge" or Code.ReviewTool.ToolId or Browser.BrowserTool.ToolId or DataTool.ToolId or DeckTool.ToolId;
 
     /// <summary>Whether this person may use the tool by the rules: the tool allowed to them, and its feature held.</summary>
     public static bool Allowed(Membership member, string toolId) =>

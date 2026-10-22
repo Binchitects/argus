@@ -17,7 +17,7 @@ echarts.use([BarChart, LineChart, GridComponent, TooltipComponent, LegendCompone
 const show = (v: Cell) => (typeof v === 'number' ? v.toLocaleString('en-US', { maximumFractionDigits: 2 }) : v === null ? '—' : String(v))
 
 /** A query's result as its plan says: one figure, bars or lines (one value axis, a legend for more than one series), or the table. */
-export function DataChart({ result, chart, label, height = 280 }: { result: DataResult; chart: ChartSpec | undefined; label: string; height?: number }) {
+export function DataChart({ result, chart, label, height = 280 }: { result: DataResult; chart: ChartSpec | undefined; label: string; height?: number | string }) {
   const plan = planChart(result.columns, result.rows, chart)
   if (plan.type === 'number') {
     return (
@@ -36,7 +36,7 @@ export function DataChart({ result, chart, label, height = 280 }: { result: Data
   )
 }
 
-function Plot({ result, type, x, y, time, label, height }: { result: DataResult; type: 'bar' | 'line'; x: number; y: number[]; time: boolean; label: string; height: number }) {
+function Plot({ result, type, x, y, time, label, height }: { result: DataResult; type: 'bar' | 'line'; x: number; y: number[]; time: boolean; label: string; height: number | string }) {
   const ref = useRef<HTMLDivElement>(null)
   const { resolved } = useTheme()
 
