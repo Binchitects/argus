@@ -10,6 +10,8 @@
 
 # Not needed by any image. deploy/ holds .env, backups and the models.
 deploy/
+# Code Studio's workspaces image (deploy/services/workspaces/Dockerfile) takes its supervisor from there.
+!deploy/services/workspaces/supervisor.py
 docs/measurements/
 evals/
 clients/

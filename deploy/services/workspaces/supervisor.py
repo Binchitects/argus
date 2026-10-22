@@ -54,7 +54,9 @@ START_SECONDS = int(os.environ.get("WORKSPACES_START_SECONDS", "30"))
 
 ID = re.compile(r"^[0-9a-f]{32}$")
 BRANCH = re.compile(r"^[A-Za-z0-9._/-]{1,200}$")
-REPO = re.compile(r"^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+?(\.git)?$")
+# The code host as the app knows it (GitLab's address: https, or http inside a company's network).
+REPO = re.compile(r"^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+?(\.git)?$")
+ARENA_URL = re.compile(r"^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/.*)?$")
 
 _lock = threading.Lock()
 # id -> {"process": Popen, "port", "key", "since"}
@@ -146,11 +148,12 @@ def _env(home: str, spec: dict, key: str | None) -> dict:
 
 def _check(spec: dict) -> None:
     if not isinstance(spec.get("repo"), str) or not REPO.match(spec["repo"]):
-        raise Refused(400, "repo: the project's https address (https://host/group/project.git).")
+        raise Refused(400, "repo: the project's address (https://host/group/project.git).")
     if spec.get("branch") is not None and (not isinstance(spec["branch"], str) or not BRANCH.match(spec["branch"])):
         raise Refused(400, "branch: a branch's name.")
-    if not isinstance(spec.get("arena_url"), str) or not spec["arena_url"].startswith("https://"):
-        raise Refused(400, "arena_url: Arena's https address.")
+    # The app over the stack's own network (http://app:8080), or its public https address.
+    if not isinstance(spec.get("arena_url"), str) or not ARENA_URL.match(spec["arena_url"]):
+        raise Refused(400, "arena_url: Arena's address (http or https).")
     if not isinstance(spec.get("api_key"), str) or len(spec["api_key"]) < 16:
         raise Refused(400, "api_key: the person's key for the workspace's agent.")
 
@@ -191,6 +194,16 @@ def _listening(port: int, seconds: float) -> bool:
     return False
 
 
+def _tail(path: str, size: int = 600) -> str:
+    """The end of a log, in one line (what an engine said before it stopped)."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, os.path.getsize(path) - size))
+            return " ".join(f.read().decode("utf-8", "replace").split())
+    except OSError:
+        return ""
+
+
 def _kill_user(uid: int) -> None:
     """Every process of the workspace's user (its terminals, servers, builds), wherever they went."""
     for pid in os.listdir("/proc"):
@@ -213,12 +226,17 @@ def start(wid: str, spec: dict) -> dict:
         cloned = _clone(wid, uid, spec)
         key = secrets.token_urlsafe(32)
         home, repo = os.path.join(_folder(wid), "home"), os.path.join(_folder(wid), "repo")
-        process = subprocess.Popen([CODE_ARENA, "web", "--serve", "--port", str(port)], cwd=repo, env=_env(home, spec, key),
-                                   preexec_fn=_demote(uid), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # What the engine says (its start, its errors) is kept beside the workspace, anew at each start.
+        os.makedirs(_folder(wid), exist_ok=True)
+        log = os.path.join(_folder(wid), "engine.log")
+        with open(log, "wb") as out:
+            process = subprocess.Popen([CODE_ARENA, "web", "--serve", "--port", str(port)], cwd=repo, env=_env(home, spec, key),
+                                       preexec_fn=_demote(uid), stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT)
         if not _listening(port, START_SECONDS):
             process.kill()
             _kill_user(uid)
-            raise Refused(502, "The workspace's engine did not start.")
+            said = _tail(log)
+            raise Refused(502, "The workspace's engine did not start" + (f": {said}" if said else "."))
         _running[wid] = {"process": process, "port": port, "key": key, "since": int(time.time()), "uid": uid}
         return {"port": port, "key": key, "cloned": cloned}
 

@@ -105,7 +105,10 @@ internal sealed partial class WebRun : IAsyncDisposable
     [GeneratedRegex(@"http://127\.0\.0\.1:(?<port>\d+)/\?token=(?<token>[A-Za-z0-9_-]+)")]
     private static partial Regex Link();
 
-    /// <summary>code-arena web --serve (Code Studio's workspace): its key from CODE_ARENA_TOKEN, its port from what it printed.</summary>
+    /// <summary>
+    /// code-arena web --serve (Code Studio's workspace): its key from CODE_ARENA_TOKEN, its port from what it printed;
+    /// built without its page, as the workspaces image builds it (Arena shows the IDE).
+    /// </summary>
     public static async Task<WebRun> StartServedAsync(Harness h, string token)
     {
         var output = new StringWriter();
@@ -119,6 +122,7 @@ internal sealed partial class WebRun : IAsyncDisposable
             Env = k => h.Env.GetValueOrDefault(k),
             Cwd = h.Cwd ?? h.Work,
             Paths = h.Paths,
+            Web = WebAssets.Of(),
             Window = _ => null,
             WindowHandOff = TimeSpan.FromMilliseconds(500),
             BrowserWait = TimeSpan.FromSeconds(20),

@@ -767,8 +767,10 @@ debugger and its agent), on a project of yours that the server keeps.
   cloned once on the workspaces service; it pushes as you.
 - **Open** starts it and shows the IDE at `/code/w/…`, the whole window. Its
   engine runs as a user of its own, with limits; it has no Docker socket, and
-  its network reaches the app, the gateway and the internet, not the stack's
-  databases, engines or browser. Its agent uses a gateway key of its own,
+  its network reaches the app, the gateway, Argus (with your own key) and the
+  internet, not the stack's databases, engines or browser. What the engine
+  says as it starts is kept beside the workspace, and its end is shown when
+  it does not start. Its agent uses a gateway key of its own,
   against your credit. Only you reach it.
 - **Asleep.** A workspace unused for 30 minutes stops; its files stay, and
   **Open** wakes it. **Delete** takes its files and its key away.

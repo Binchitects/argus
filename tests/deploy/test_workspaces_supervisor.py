@@ -34,10 +34,12 @@ class Base(unittest.TestCase):
 
 
 class Asked(Base):
-    def test_a_workspace_needs_an_https_project_a_branch_name_arenas_address_and_a_key(self):
+    def test_a_workspace_needs_a_project_a_branch_name_arenas_address_and_a_key(self):
         sup._check(GOOD)
+        # The app over the stack's own network, and a company's GitLab on http.
+        sup._check({**GOOD, "arena_url": "http://app:8080", "repo": "http://gitlab.corp:8929/team/shop.git"})
         for bad, why in [({"repo": "git@host:team/shop.git"}, "repo"), ({"repo": "https://host/x; rm -rf /"}, "repo"),
-                         ({"branch": "--upload-pack=x y"}, "branch"), ({"arena_url": "http://llm"}, "arena_url"), ({"api_key": "short"}, "api_key")]:
+                         ({"branch": "--upload-pack=x y"}, "branch"), ({"arena_url": "ftp://llm"}, "arena_url"), ({"arena_url": "app:8080"}, "arena_url"), ({"api_key": "short"}, "api_key")]:
             with self.assertRaises(sup.Refused) as refused:
                 sup._check({**GOOD, **bad})
             self.assertEqual(refused.exception.status, 400)
@@ -107,13 +109,19 @@ class Started(Base):
             self.assertEqual(again["cloned"], False)
             self.assertNotEqual(again["key"], first["key"])
 
-    def test_an_engine_that_does_not_listen_is_killed_and_said(self):
+    def test_an_engine_that_does_not_listen_is_killed_and_what_it_said_is_told(self):
         engine = mock.Mock()
-        with mock.patch.object(sup, "_clone", return_value=False), mock.patch.object(sup.subprocess, "Popen", return_value=engine), \
+
+        def said(cmd, **kw):
+            kw["stdout"].write(b"\xe2\x9c\x97 Port 4100 is taken:\n  choose another\n")
+            return engine
+
+        with mock.patch.object(sup, "_clone", return_value=False), mock.patch.object(sup.subprocess, "Popen", side_effect=said), \
                 mock.patch.object(sup, "_listening", return_value=False), self.assertRaises(sup.Refused) as refused:
             sup.start(WID, GOOD)
         engine.kill.assert_called_once()
         self.assertEqual(refused.exception.status, 502)
+        self.assertEqual(str(refused.exception), "The workspace's engine did not start: \u2717 Port 4100 is taken: choose another")
 
 
 class Driven(Base):

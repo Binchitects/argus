@@ -333,7 +333,7 @@ spec:
   selector: {{- include "arena.selector" (dict "root" $ "name" "workspaces") | nindent 4 }}
   ports: [{ name: http, port: 4000, targetPort: http }]
 ---
-# The app's pods in; out to the app, the gateway, DNS and the internet (not the cluster's private addresses).
+# The app's pods in; out to the app, the gateway, Argus, DNS and the internet (not the cluster's private addresses).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -353,6 +353,8 @@ spec:
             matchLabels: {{- include "arena.selector" (dict "root" $ "name" "app") | nindent 14 }}
         - podSelector:
             matchLabels: {{- include "arena.selector" (dict "root" $ "name" "litellm") | nindent 14 }}
+        - podSelector:
+            matchLabels: {{- include "arena.selector" (dict "root" $ "name" "argus") | nindent 14 }}
     - ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
     - to:
         - ipBlock: { cidr: 0.0.0.0/0, except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16] }

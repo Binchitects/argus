@@ -594,7 +594,7 @@ export const topics = {
     title: 'A workspace',
     about: 'Code Arena\'s IDE on one of your workspaces, the whole window: its editor, terminals, search, Git, language servers, debugger and agent, all on the server.',
     parts: [
-      { name: 'Its engine', text: 'Runs as a user of its own with limits, no Docker socket, and reaches the app, the gateway and the internet only. Its agent has a key of its own at the gateway, against your credit.' },
+      { name: 'Its engine', text: 'Runs as a user of its own with limits, no Docker socket, and reaches the app, the gateway, Argus (with your key) and the internet only. Its agent has a key of its own at the gateway, against your credit.' },
       { name: 'Asleep', text: 'Unused for 30 minutes, it stops; its files stay. Opening it again wakes it.' },
     ],
     tasks: [{ title: 'Work on a project in the browser', steps: ['Under **Code Studio → New workspace**, name the project (and a branch) and press **Open it**.', 'The IDE fills the window once the workspace is up; **Open** on its card brings it back later.', 'Edit, run and commit as in Code Arena; its agent works on the same files.'] }],

@@ -15,7 +15,7 @@ namespace Llm.Api.Code.Studio;
 /// <summary>
 /// Code Studio's workspaces service (compose profile "workspaces"): where the app drives it (<see cref="Url"/>, with
 /// <see cref="Key"/>, WORKSPACES_KEY), the name its engines answer at (<see cref="EngineHost"/>), and the addresses the
-/// engines reach the app, the gateway and Argus at over the stack's own network.
+/// engines reach the app, the gateway and Argus at over the stack's own network (Argus checks the person's own key).
 /// </summary>
 public sealed class WorkspacesOptions
 {
@@ -25,7 +25,7 @@ public sealed class WorkspacesOptions
     /// <summary>The app, as the workspaces reach it (its API and the code arena's routes, with the workspace's key).</summary>
     public string ArenaUrl { get; set; } = "http://app:8080";
     public string GatewayUrl { get; set; } = "http://litellm:4000";
-    public string? ArgusUrl { get; set; }
+    public string ArgusUrl { get; set; } = "http://argus:7700/mcp";
     /// <summary>A workspace unused this long sleeps: its engine stops, its files stay.</summary>
     public TimeSpan Idle { get; set; } = TimeSpan.FromMinutes(30);
     /// <summary>The most workspaces one person keeps.</summary>
