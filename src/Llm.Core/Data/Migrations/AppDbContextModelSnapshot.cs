@@ -2501,6 +2501,74 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("toolsets", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Code.BusinessSystem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("BuiltAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("BuiltBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("CompletionTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Domain")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("Model")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Profile")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("Project")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<int>("PromptTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Step")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Summary")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Project")
+                        .IsUnique();
+
+                    b.ToTable("business_systems", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Code.CodeFix", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2866,6 +2934,9 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<int?>("EnginePort")
                         .HasColumnType("integer");
+
+                    b.Property<string>("EngineUrl")
+                        .HasColumnType("text");
 
                     b.Property<string>("Error")
                         .HasMaxLength(2000)

@@ -577,6 +577,7 @@ export const topics = {
     title: 'Code Studio',
     about: 'Your workspaces (an IDE in the browser on your projects), reviews of merge requests by the model, and the code assistant. Reviews read the code with your own GitLab access, through Argus, and write nothing to GitLab.',
     parts: [
+      { name: 'Business map', text: 'What each system does for the business, read from its code, documents, issues and wiki: Argus explains the business from it.' },
       { name: 'Workspaces', text: 'A GitLab project and branch the server keeps for you, with Code Arena\'s IDE: **Open** starts it, unused for 30 minutes it sleeps (its files stay), **Delete** takes it away. It clones and pushes with your GitLab token.' },
       { name: 'Merge requests', text: 'A project by its path (group/project): its open, merged or all merge requests. **Review** starts a review; a branch without a merge request can be reviewed against the one it goes into. GitHub and Gitea projects are github:owner/repo and gitea:owner/repo, once your token is linked in **Account → Code hosts**.' },
       { name: 'Ask about code', text: 'A question about a project, a branch or a merge request: answered in a chat with Argus, which reads the code as you may.' },
@@ -588,6 +589,19 @@ export const topics = {
       { title: 'Review a project automatically', steps: ['Under **Automatic reviews**, press **A project** and type its path.', 'Choose the branches, how often to look, and a room if the team should see each review.', 'Press **Review automatically**, then put the URL and the secret token in the project\'s GitLab webhook (Merge request events).'] },
     ],
     manual: { doc: 'chat', section: 'code-review' },
+  },
+
+  business: {
+    title: 'A business map',
+    about: 'What one system does for the business: its domain and summary, what it lets the business do, the processes step by step, the rules it enforces and why, what it deals in, whom it talks to, and the words people use. Every item says where it was read.',
+    parts: [
+      { name: 'Sources', text: 'The files and lines, documents, issues, merge requests and wiki pages each item was read from; each opens in GitLab.' },
+      { name: 'Find in the map', text: 'Narrows every part to the items that hold your words.' },
+      { name: 'Ask Argus', text: 'A chat with Argus about this system: it explains the business from the map, then shows it in the code.' },
+      { name: 'Map again', text: 'Reads the project again, with your access and at your cost: after the code, the issues or the wiki changed.' },
+    ],
+    tasks: [{ title: 'Map a system', steps: ['In **Code Studio → Business map**, type the project (group/project) and press **Map it**.', 'The map fills in as the model reads the code, the documents, the issues and the wiki.', 'Ask Argus about the business in any chat with Argus on.'] }],
+    manual: { doc: 'chat', section: 'the-business-map' },
   },
 
   workspace: {

@@ -42,6 +42,8 @@ internal sealed class Options
     /// CODE_ARENA_TOKEN, each request with it as a bearer token (Arena signs the person in and sends it); no window.
     /// </summary>
     public bool Serve { get; set; }
+    /// <summary>web --connect: this folder in Arena's Code Studio, through a tunnel dialled with the person's API key.</summary>
+    public bool Connect { get; set; }
 }
 
 /// <summary>What the program runs with: its streams, environment, folder and paths. Tests make their own.</summary>
@@ -131,6 +133,7 @@ internal static partial class Cli
               --no-open              the IDE: print the address, do not open a window
               --browser              the IDE: in a tab of your browser, not a window of its own
               --serve                the IDE for Arena's Code Studio: on every address, its key from CODE_ARENA_TOKEN
+              --connect              the IDE: this folder in Arena's Code Studio too (needs code-arena login)
           -v, --version              the version, the licence and where the source is
           -h, --help
 
@@ -265,6 +268,10 @@ internal static partial class Cli
                     break;
                 case "--serve":
                     o.Serve = true;
+                    o.NoOpen = true;
+                    break;
+                case "--connect":
+                    o.Connect = true;
                     o.NoOpen = true;
                     break;
                 case "--":
@@ -578,6 +585,18 @@ internal static partial class Cli
                     env.Out.WriteLine();
                     env.Out.WriteLine(o.Serve ? "Only with its key, as a bearer token. Ctrl+C stops it." : "Only this machine can open it, and only with the key in the address. Ctrl+C stops it.");
                     env.Out.WriteLine("The agent in this terminal instead: code-arena chat");
+                    // This folder in Code Studio too: a tunnel to Arena, with the person's key, for as long as this runs.
+                    if (o.Connect)
+                    {
+                        if (MachineFor(rt, env, app) is { } tunnel)
+                        {
+                            _ = tunnel.RunAsync(linked.Token);
+                        }
+                        else
+                        {
+                            ui.Warn("--connect needs Arena: sign in with code-arena login first. The IDE runs here meanwhile.");
+                        }
+                    }
                     using var launcher = o.NoOpen ? null : Launcher.Write(env.Paths.DataDir, app.Port, app.Address);
                     // Its own window first (config.json "window": false, or --browser, a tab instead), else a tab.
                     var window = launcher is null || o.Browser || !rt.Config.Window ? null
@@ -615,6 +634,52 @@ internal static partial class Cli
         finally
         {
             env.Cancel.EndTurn();
+        }
+    }
+
+    /// <summary>
+    /// The tunnel that puts this folder in Arena's Code Studio: Arena's address and the person's key (code-arena login),
+    /// the folder's id there (kept with the folder's state, so it is the same workspace each time), its name (the folder
+    /// on this machine), its project (origin's path, when GitLab's) and branch; null without Arena.
+    /// </summary>
+    private static MachineTunnel? MachineFor(Runtime rt, CliEnv env, WebApp app)
+    {
+        if (rt.Config.Url is not { Length: > 0 } url || !Uri.TryCreate(url.TrimEnd('/') + "/", UriKind.Absolute, out var arena) || rt.Config.ApiKey is not { Length: > 0 } key)
+        {
+            return null;
+        }
+        var state = new WorkspaceState(env.Paths.DataDir, rt.Workspace.Root);
+        var id = state.Read().Str("studioMachine") is { Length: 32 } kept ? kept : Guid.NewGuid().ToString("N");
+        state.Merge(new System.Text.Json.Nodes.JsonObject { ["studioMachine"] = id });
+        var root = SystemPrompt.GitRoot(rt.Workspace.Root);
+        var name = $"{Path.GetFileName(rt.Workspace.Root.TrimEnd(Path.DirectorySeparatorChar))} on {Environment.MachineName}";
+        return new MachineTunnel(arena, key, app.Port, app.Token, name[..Math.Min(200, name.Length)], root is null ? null : OriginProject(root),
+            root is null ? null : SystemPrompt.GitBranch(root), id, said =>
+            {
+                env.Out.WriteLine(said);
+                env.Out.Flush();
+            });
+    }
+
+    /// <summary>origin's project path (group/project) from its address (https or ssh), when it has one.</summary>
+    internal static string? OriginProject(string root)
+    {
+        try
+        {
+            var config = File.ReadAllText(Path.Combine(root, ".git", "config"));
+            var m = System.Text.RegularExpressions.Regex.Match(config, @"\[remote ""origin""\][^\[]*?url\s*=\s*(\S+)");
+            if (!m.Success)
+            {
+                return null;
+            }
+            var address = m.Groups[1].Value;
+            var path = address.Contains("://", StringComparison.Ordinal) ? new Uri(address).AbsolutePath : address[(address.IndexOf(':') + 1)..];
+            path = path.Trim('/');
+            return path.EndsWith(".git", StringComparison.Ordinal) ? path[..^4] : path;
+        }
+        catch (Exception e) when (e is IOException or UriFormatException or UnauthorizedAccessException)
+        {
+            return null;
         }
     }
 

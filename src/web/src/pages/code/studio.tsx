@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Code2, FolderGit2, Loader2, Moon, Plus, Power, Trash2 } from 'lucide-react'
+import { ArrowLeft, Code2, FolderGit2, Laptop, Loader2, Moon, Plus, Power, Trash2 } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { setIdeBase } from '@/code-arena/http'
@@ -7,13 +7,14 @@ import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Kbd } from '@/components/ui/kbd'
 import { useConfirm } from '@/components/ui/confirm'
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { errorMessage } from '@/lib/api'
-import { createWorkspace, deleteWorkspace, startWorkspace, stopWorkspace, workspacesQuery } from './api'
+import { createWorkspace, deleteWorkspace, startWorkspace, stopWorkspace, workspacesQuery, type Workspace } from './api'
 import { TokenCard } from './fixes'
 
 const when = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
@@ -83,21 +84,37 @@ export function Workspaces() {
           </Card>
         </>
       )}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Laptop className="size-4" aria-hidden="true" /> Your own machine
+          </CardTitle>
+          <CardDescription>
+            Work on a folder of your computer here: in it, run <Kbd>code-arena web --connect</Kbd> (signed in with code-arena login). It shows below while it runs; only you reach it, through Arena.
+          </CardDescription>
+        </CardHeader>
+      </Card>
       {workspaces.length > 0 && (
         <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Your workspaces">
           {workspaces.map((w) => (
             <li key={w.id} className="flex items-start gap-3 rounded-xl border bg-card p-4">
-              <FolderGit2 className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              {w.kind === 'machine' ? (
+                <Laptop className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              ) : (
+                <FolderGit2 className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              )}
               <div className="min-w-0 flex-1">
                 <Link to={`/code/w/${w.id}`} className="block truncate font-medium hover:underline">
                   {w.name}
                 </Link>
                 <p className="truncate text-xs text-muted-foreground">
-                  {w.project} · {w.branch} · used {when.format(new Date(w.usedAt))}
+                  {[w.project, w.branch].filter(Boolean).join(' · ')}
+                  {(w.project || w.branch) && ' · '}
+                  {w.kind === 'machine' ? 'connected' : 'used'} {when.format(new Date(w.usedAt))}
                 </p>
                 <div className="mt-2 flex items-center gap-2">
-                  <Badge variant={w.state === 'running' ? 'success' : w.state === 'failed' ? 'destructive' : 'secondary'}>
-                    {w.state === 'running' ? 'Running' : w.state === 'failed' ? 'Failed' : 'Asleep'}
+                  <Badge variant={w.state === 'running' || w.state === 'connected' ? 'success' : w.state === 'failed' ? 'destructive' : 'secondary'}>
+                    {stateLabel[w.state]}
                   </Badge>
                   <Button size="sm" variant="ghost" className="ml-auto" asChild>
                     <Link to={`/code/w/${w.id}`}>
@@ -109,7 +126,15 @@ export function Workspaces() {
                     variant="ghost"
                     aria-label={`Delete ${w.name}`}
                     onClick={async () => {
-                      if (await confirm({ title: `Delete ${w.name}?`, description: 'Its files on the server go, with what was not pushed.', confirm: 'Delete', destructive: true })) remove.mutate(w.id)
+                      if (
+                        await confirm({
+                          title: `Delete ${w.name}?`,
+                          description: w.kind === 'machine' ? 'It disconnects; the folder on your machine stays as it is.' : 'Its files on the server go, with what was not pushed.',
+                          confirm: 'Delete',
+                          destructive: true,
+                        })
+                      )
+                        remove.mutate(w.id)
                     }}
                   >
                     <Trash2 />
@@ -123,6 +148,8 @@ export function Workspaces() {
     </section>
   )
 }
+
+const stateLabel: Record<Workspace['state'], string> = { running: 'Running', asleep: 'Asleep', failed: 'Failed', connected: 'Connected', offline: 'Offline' }
 
 const Ide = lazy(() => import('@/code-arena/app').then((m) => ({ default: m.App })))
 
@@ -153,7 +180,8 @@ export function WorkspacePage() {
     mutationFn: () => startWorkspace(id),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: workspacesQuery.queryKey }),
   })
-  const ready = w?.state === 'running' || start.isSuccess
+  const machine = w?.kind === 'machine'
+  const ready = w?.state === 'running' || w?.state === 'connected' || start.isSuccess
   const stop = useMutation({
     mutationFn: () => stopWorkspace(id),
     onSuccess: () => {
@@ -161,9 +189,9 @@ export function WorkspacePage() {
       navigate('/code')
     },
   })
-  // Asleep or failed: started once (cloned the first time); running: opened at once.
+  // Asleep or failed: started once (cloned the first time); running: opened at once. A machine is started on itself.
   useEffect(() => {
-    if (w && w.state !== 'running' && start.isIdle) start.mutate()
+    if (w && w.kind === 'server' && w.state !== 'running' && start.isIdle) start.mutate()
   }, [w, start])
 
   return (
@@ -180,9 +208,11 @@ export function WorkspacePage() {
             {w.project} · {w.branch}
           </span>
         )}
-        <Button size="sm" variant="ghost" className="ml-auto" disabled={!ready} loading={stop.isPending} onClick={() => stop.mutate()}>
-          <Moon /> Put to sleep
-        </Button>
+        {!machine && (
+          <Button size="sm" variant="ghost" className="ml-auto" disabled={!ready} loading={stop.isPending} onClick={() => stop.mutate()}>
+            <Moon /> Put to sleep
+          </Button>
+        )}
       </header>
       <main className="min-h-0 flex-1 [&_.h-dvh]:h-full">
         {list.isPending ? (
@@ -190,6 +220,12 @@ export function WorkspacePage() {
         ) : !w ? (
           <div className="p-8">
             <Alert variant="destructive">This workspace is not yours, or it was deleted.</Alert>
+          </div>
+        ) : machine && w.state === 'offline' ? (
+          <div className="grid max-w-xl gap-3 p-8 text-sm">
+            <Alert>
+              {w.name} is not connected now. On that machine, in its folder, run <Kbd>code-arena web --connect</Kbd>: it opens here once it connects.
+            </Alert>
           </div>
         ) : start.isError ? (
           <div className="grid max-w-xl gap-3 p-8">

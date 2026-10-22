@@ -8,6 +8,7 @@ using System.Text.Json.Nodes;
 using Llm.Api.Code.Studio;
 using Llm.Api.Gateway;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
@@ -221,5 +222,155 @@ public sealed class CodeStudioTests(AppFixture app)
             _listener.Stop();
             _listener.Close();
         }
+    }
+
+    /// <summary>The app as one replica: its own address its machines' tunnels are reached at, the "workspaces" client reaching it.</summary>
+    private WebApplicationFactory<Program> MachineApp() =>
+        app.Create(app.ConnectionStringFor("machine_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?>
+        {
+            ["Auth:DataKey"] = "a-data-key-for-studio-tests", ["Workspaces:SelfUrl"] = $"https://{AppFixture.Domain}", ["Modules:workspaces"] = "false",
+        }, s => s.AddHttpClient(StudioWorkspaces.Client).ConfigurePrimaryHttpMessageHandler(sp =>
+            ((Microsoft.AspNetCore.TestHost.TestServer)sp.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>()).CreateHandler()));
+
+    /// <summary>A person with their API key (as code-arena login keeps it).</summary>
+    private static async Task<(TestBrowser Browser, string Key)> KeyedPersonAsync(WebApplicationFactory<Program> f)
+    {
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var name = "m" + Guid.NewGuid().ToString("N")[..10];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+        return (await new TestBrowser(f).SignedInAsync(name, made.GetProperty("password").GetString()!), made.GetProperty("apiKey").GetString()!);
+    }
+
+    /// <summary>
+    /// A machine's code-arena on its tunnel: answers /api/state with its folder, any other request with what was asked, and
+    /// echoes what a WebSocket sends; the paths it was asked kept.
+    /// </summary>
+    private static async Task MachineAsync(WebSocket tunnel, ConcurrentQueue<string> asked)
+    {
+        var buffer = new byte[64 * 1024];
+        using var message = new MemoryStream();
+        async Task Send(JsonObject frame) => await tunnel.SendAsync(Encoding.UTF8.GetBytes(frame.ToJsonString()), WebSocketMessageType.Text, true, CancellationToken.None);
+        try
+        {
+            while (tunnel.State == WebSocketState.Open)
+            {
+                var got = await tunnel.ReceiveAsync(buffer, CancellationToken.None);
+                if (got.MessageType == WebSocketMessageType.Close)
+                {
+                    return;
+                }
+                message.Write(buffer, 0, got.Count);
+                if (!got.EndOfMessage)
+                {
+                    continue;
+                }
+                var f = (JsonObject)JsonNode.Parse(message.ToArray())!;
+                message.SetLength(0);
+                var id = f["id"]!.GetValue<long>();
+                switch (f["t"]!.GetValue<string>())
+                {
+                    case "req":
+                        asked.Enqueue($"{f["m"]} {f["p"]}");
+                        var said = f["p"]!.GetValue<string>() == "/api/state"
+                            ? """{"folder":"/home/dana/shop"}"""
+                            : new JsonObject { ["body"] = f["b"] is JsonValue b ? Encoding.UTF8.GetString(Convert.FromBase64String(b.GetValue<string>())) : null, ["type"] = f["h"]?["Content-Type"]?.GetValue<string>() }.ToJsonString();
+                        await Send(new JsonObject { ["t"] = "res", ["id"] = id, ["s"] = 200, ["h"] = new JsonObject { ["Content-Type"] = "application/json", ["Set-Cookie"] = "kept=here" } });
+                        await Send(new JsonObject { ["t"] = "data", ["id"] = id, ["b"] = Convert.ToBase64String(Encoding.UTF8.GetBytes(said)) });
+                        await Send(new JsonObject { ["t"] = "end", ["id"] = id });
+                        break;
+                    case "ws":
+                        asked.Enqueue($"WS {f["p"]}");
+                        await Send(new JsonObject { ["t"] = "wsok", ["id"] = id });
+                        break;
+                    case "wsd":
+                        await Send(new JsonObject { ["t"] = "wsd", ["id"] = id, ["x"] = "echo: " + f["x"]!.GetValue<string>() });
+                        break;
+                }
+            }
+        }
+        catch (WebSocketException)
+        {
+        }
+    }
+
+    [Fact]
+    public async Task A_machine_connects_with_the_persons_key_and_its_folder_opens_in_Code_Studio_through_its_tunnel()
+    {
+        await using var f = MachineApp();
+        var (dana, key) = await KeyedPersonAsync(f);
+        var machine = Guid.NewGuid();
+        var client = f.Server.CreateWebSocketClient();
+        var connect = new Uri($"wss://{AppFixture.Domain}/api/code-arena/connect?id={machine:N}&name=shop%20on%20laptop&project=team%2Fshop&branch=main");
+
+        // Without a key, or with a name missing: refused.
+        client.ConfigureRequest = r => r.Headers["Authorization"] = "Bearer sk-not-a-key";
+        await Assert.ThrowsAnyAsync<Exception>(() => client.ConnectAsync(connect, CancellationToken.None));
+
+        client.ConfigureRequest = r => r.Headers["Authorization"] = $"Bearer {key}";
+        using var tunnel = await client.ConnectAsync(connect, CancellationToken.None);
+        var asked = new ConcurrentQueue<string>();
+        var serving = MachineAsync(tunnel, asked);
+
+        var listed = (await dana.JsonAsync(await dana.GetAsync("/api/studio/workspaces"))).GetProperty("workspaces").EnumerateArray().Single();
+        Assert.Equal((machine, "machine", "shop on laptop", "team/shop", "main", "connected"),
+            (listed.GetProperty("id").GetGuid(), listed.GetProperty("kind").GetString(), listed.GetProperty("name").GetString(), listed.GetProperty("project").GetString(),
+             listed.GetProperty("branch").GetString(), listed.GetProperty("state").GetString()));
+
+        // The IDE's requests reach the machine through its tunnel (by this replica's own address, with the tunnel's key), answered as it answers.
+        Assert.Equal("/home/dana/shop", (await dana.JsonAsync(await dana.GetAsync($"/api/studio/w/{machine}/state"))).GetProperty("folder").GetString());
+        var saved = await dana.JsonAsync(await dana.PostAsync($"/api/studio/w/{machine}/file?x=1", new { path = "a.txt", text = "hi" }));
+        Assert.Equal(("""{"path":"a.txt","text":"hi"}""", "application/json; charset=utf-8"), (saved.GetProperty("body").GetString(), saved.GetProperty("type").GetString()));
+        Assert.Equal(["GET /api/state", "POST /api/file?x=1"], asked);
+        // Only the headers the page needs come back (a cookie of the machine's stays there).
+        var cookies = (await dana.GetAsync($"/api/studio/w/{machine}/state")).Headers.TryGetValues("Set-Cookie", out var set) ? set : [];
+        Assert.DoesNotContain(cookies, c => c.StartsWith("kept=", StringComparison.Ordinal));
+
+        // The tunnel's relay route takes the tunnel's own key alone; its WebSockets are joined message by message.
+        await using (var scope = f.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            var row = await db.StudioWorkspaces.AsNoTracking().SingleAsync(w => w.Id == machine);
+            var tunnelKey = Llm.Api.Settings.SettingsCrypto.Decrypt(row.EngineKeyCipher!, "a-data-key-for-studio-tests")!;
+            var anyone = f.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://{AppFixture.Domain}"), HandleCookies = false });
+            await StatusAssert.Is(HttpStatusCode.NotFound, await anyone.GetAsync(new Uri($"/api/studio/tunnel/{machine:N}/api/state", UriKind.Relative)));
+            var relay = f.Server.CreateWebSocketClient();
+            relay.ConfigureRequest = r => r.Headers["Authorization"] = $"Bearer {tunnelKey}";
+            using var ws = await relay.ConnectAsync(new Uri($"wss://{AppFixture.Domain}/api/studio/tunnel/{machine:N}/api/terminals/socket?id=t1"), CancellationToken.None);
+            await ws.SendAsync(Encoding.UTF8.GetBytes("ls\r"), WebSocketMessageType.Text, true, CancellationToken.None);
+            var buffer = new byte[256];
+            var got = await ws.ReceiveAsync(buffer, CancellationToken.None);
+            Assert.Equal("echo: ls\r", Encoding.UTF8.GetString(buffer, 0, got.Count));
+            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None);
+        }
+        Assert.Contains("WS /api/terminals/socket?id=t1", asked);
+
+        // Not theirs: someone else, even with the machine's id, reaches nothing and cannot take it.
+        var (other, otherKey) = await KeyedPersonAsync(f);
+        await StatusAssert.Is(HttpStatusCode.NotFound, await other.GetAsync($"/api/studio/w/{machine}/state"));
+        var theirs = f.Server.CreateWebSocketClient();
+        theirs.ConfigureRequest = r => r.Headers["Authorization"] = $"Bearer {otherKey}";
+        await Assert.ThrowsAnyAsync<Exception>(() => theirs.ConnectAsync(connect, CancellationToken.None));
+        // Started from here: it runs on the machine.
+        await StatusAssert.Is(HttpStatusCode.Conflict, await dana.PostAsync($"/api/studio/workspaces/{machine}/start"));
+
+        // Disconnected: offline, and the IDE is told how to connect it.
+        // (Its own receive loop reads the app's answer to the close.)
+        await tunnel.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "bye", CancellationToken.None);
+        await serving;
+        JsonElement state = default;
+        for (var i = 0; i < 100; i++)
+        {
+            state = (await dana.JsonAsync(await dana.GetAsync("/api/studio/workspaces"))).GetProperty("workspaces")[0];
+            if (state.GetProperty("state").GetString() == "offline")
+            {
+                break;
+            }
+            await Task.Delay(50);
+        }
+        Assert.Equal("offline", state.GetProperty("state").GetString());
+        var offline = await dana.GetAsync($"/api/studio/w/{machine}/state");
+        await StatusAssert.Is(HttpStatusCode.Conflict, offline);
+        Assert.Contains("code-arena web --connect", await offline.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        await StatusAssert.Is(HttpStatusCode.NoContent, await dana.Http.DeleteAsync(new Uri($"/api/studio/workspaces/{machine}", UriKind.Relative)));
     }
 }

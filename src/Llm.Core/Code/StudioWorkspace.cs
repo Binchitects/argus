@@ -23,6 +23,11 @@ public sealed class StudioWorkspace
     public string? KeyAlias { get; set; }
     /// <summary>While its engine runs: its port at the workspaces service, and its key (encrypted); null when it sleeps.</summary>
     public int? EnginePort { get; set; }
+    /// <summary>
+    /// A machine's while it is connected: where its tunnel is held (the app replica it dialled, which every replica's
+    /// requests reach it through), with the tunnel's key as <see cref="EngineKeyCipher"/>; null when it is offline.
+    /// </summary>
+    public string? EngineUrl { get; set; }
     public string? EngineKeyCipher { get; set; }
     public DateTimeOffset? StartedAt { get; set; }
     /// <summary>Why it last failed to start (the clone, the engine), for the page.</summary>

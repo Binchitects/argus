@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Llm.Core.Chat;
 using Llm.Core.Data;
 using Llm.Core.Identity;
+using Microsoft.EntityFrameworkCore;
 
 namespace Llm.Api.Chat.Tools;
 
@@ -134,13 +135,32 @@ internal sealed class LocalRun(JsonArray functions, string? instructions, Func<s
     bool IToolRun.AsksFirst(string name) => AsksFirst?.Invoke(name) == true;
 }
 
-/// <summary>Argus: the organisation's code, searched with the person's own GitLab access.</summary>
-public sealed class ArgusTool(ArgusMcp argus) : IChatTool
+/// <summary>
+/// Argus: the organisation's code, searched with the person's own GitLab access, and the business behind it. With the
+/// business map (Code Studio → Business map), business_map lists the systems the person may read and what each does for
+/// the business, and business_explain finds the capabilities, entities, rules, processes and terms that answer a
+/// question, with their sources, for the model to confirm in the code, the issues and the wiki before it answers as the
+/// company's senior technical expert.
+/// </summary>
+public sealed class ArgusTool(ArgusMcp argus, AppDbContext db, Code.Business.BusinessMap map) : IChatTool
 {
+    public const string MapFunction = "business_map", ExplainFunction = "business_explain";
+
+    /// <summary>The most items business_explain gives.</summary>
+    public const int MostFound = 12;
+
     public string Id => "argus";
     public string Title => "Argus";
-    public string Description => "Searches the code you can read in GitLab: symbols, references, files and repositories.";
+    public string Description => "Knows the code you can read in GitLab and the business behind it: symbols, references, files, repositories, issues, the wiki, and what each system does for the business.";
     public string Icon => "search-code";
+
+    /// <summary>How Argus answers about the business, in every answer it is on for.</summary>
+    public const string Expert =
+        "You are also the company's technical mind: a senior engineer who knows the code and the business it serves. When a question is about the business " +
+        "(what happens when a customer does something, why a rule is the way it is, who uses a system, what a word means here), start with business_explain " +
+        "(and business_map for the systems), then confirm it in the code (semantic_search, find_symbol, get_file) and in the issues and the wiki (issue_list, " +
+        "issue_get, wiki_get) before you answer. Answer in business words first, then how the code does it, citing the files and lines, issues and wiki pages " +
+        "you read. Say plainly what you could not confirm.";
 
     public Task<string?> UnavailableAsync(CancellationToken ct) =>
         Task.FromResult(argus.Enabled ? null : "Argus is not deployed here (the argus profile), or the chat has no token for it.");
@@ -149,11 +169,68 @@ public sealed class ArgusTool(ArgusMcp argus) : IChatTool
     {
         var session = await argus.ConnectAsync(context.User.Id, context.Email, ct);
         var functions = Mcp.ToOpenAiTools(await session.ToolsAsync(ct));
-        return new LocalRun(functions, session.Instructions, async (name, args, token) =>
+        var mapped = await db.BusinessSystems.AnyAsync(b => b.Status == Core.Code.BusinessSystem.Ready, ct);
+        if (mapped)
         {
+            functions.Add(Schema.Function(MapFunction,
+                "The business map: each system you may read, what it does for the business (its domain and summary) and what it lets the business do.",
+                new JsonObject()));
+            functions.Add(Schema.Function(ExplainFunction,
+                "Finds what the business map knows about a question: the capabilities, entities, rules, processes, integrations and terms that answer it, " +
+                "each with its system and the sources it was read from (files and lines, documents, issues, merge requests, wiki pages). Confirm them in the code before you answer.",
+                new JsonObject { ["question"] = Schema.Text("The question, in the person's words.") }, "question"));
+        }
+        var instructions = string.Join("\n\n", new[] { session.Instructions, mapped ? Expert : null }.Where(x => x is { Length: > 0 }));
+        return new LocalRun(functions, instructions, async (name, args, token) =>
+        {
+            if (name == MapFunction)
+            {
+                return await BusinessMapAsync(context.User, token);
+            }
+            if (name == ExplainFunction)
+            {
+                return await ExplainAsync(context.User, Schema.Str(args, "question") ?? "", token);
+            }
             var (text, isError) = await session.CallAsync(name, args, context.Progress is { } p ? p.ReportAsync : null, token);
             return new ToolResult(text, isError);
         });
+    }
+
+    private async Task<List<Core.Code.BusinessSystem>> ReadyAsync(AppUser me, CancellationToken ct) =>
+        [.. (await map.VisibleAsync(db, argus, me, ct)).Where(b => b.Status == Core.Code.BusinessSystem.Ready)];
+
+    private async Task<ToolResult> BusinessMapAsync(AppUser me, CancellationToken ct)
+    {
+        var systems = await ReadyAsync(me, ct);
+        if (systems.Count == 0)
+        {
+            return new ToolResult("No system you may read is on the business map yet (Code Studio → Business map maps one).");
+        }
+        return new ToolResult(new JsonArray([.. systems.Select(b => (JsonNode)new JsonObject
+        {
+            ["system"] = b.Name, ["project"] = b.Project, ["domain"] = b.Domain, ["summary"] = b.Summary,
+            ["capabilities"] = new JsonArray([.. Code.Business.BusinessProfile.Read(b.Profile).Capabilities.Select(c => (JsonNode)c.Name)]),
+        })]).ToJsonString());
+    }
+
+    private async Task<ToolResult> ExplainAsync(AppUser me, string question, CancellationToken ct)
+    {
+        if (question.Trim().Length == 0)
+        {
+            return new ToolResult("Give the question.", IsError: true);
+        }
+        var found = (await ReadyAsync(me, ct))
+            .SelectMany(b => Code.Business.BusinessProfile.Read(b.Profile).Matches(question).Select(m => (System: b, m.Part, m.Title, m.Text, m.Sources, m.Score)))
+            .OrderByDescending(m => m.Score).Take(MostFound).ToList();
+        if (found.Count == 0)
+        {
+            return new ToolResult("The business map has nothing on that: look in the code (semantic_search, search_code), the issues (issue_list) and the wiki (wiki_list) instead.");
+        }
+        return new ToolResult(new JsonArray([.. found.Select(f => (JsonNode)new JsonObject
+        {
+            ["system"] = f.System.Name, ["project"] = f.System.Project, ["kind"] = f.Part, ["title"] = f.Title, ["text"] = f.Text,
+            ["sources"] = new JsonArray([.. f.Sources.Select(s => (JsonNode)$"{s.Kind} {s.Ref}")]),
+        })]).ToJsonString());
     }
 }
 

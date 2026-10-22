@@ -30,6 +30,13 @@ public sealed class WorkspacesOptions
     public TimeSpan Idle { get; set; } = TimeSpan.FromMinutes(30);
     /// <summary>The most workspaces one person keeps.</summary>
     public int MostPerPerson { get; set; } = 8;
+    /// <summary>
+    /// This replica, as the app's other replicas reach it: a machine's tunnel held here is reached through it. Unset: its
+    /// own address on the stack's network (a pod's IP, a scaled container's), on the app's port.
+    /// </summary>
+    public string? SelfUrl { get; set; }
+    /// <summary>The most machines one person connects (their own Code Arena, each folder one).</summary>
+    public int MostMachines { get; set; } = 8;
 }
 
 /// <summary>Why a workspace could not be made or started, in words for the person.</summary>
@@ -108,6 +115,10 @@ public sealed class StudioWorkspaces(AppDbContext db, IHttpClientFactory http, I
     /// </summary>
     public async Task StartAsync(StudioWorkspace workspace, AppUser me, CancellationToken ct)
     {
+        if (workspace.Kind == StudioWorkspace.Machine)
+        {
+            throw new StudioException(409, "It runs on your machine: start code-arena web --connect in its folder there.");
+        }
         if (!await EnabledAsync(ct))
         {
             throw new StudioException(503, "Workspaces on the server are not set up here (the workspaces module).");
@@ -171,9 +182,64 @@ public sealed class StudioWorkspaces(AppDbContext db, IHttpClientFactory http, I
         await db.SaveChangesAsync(ct);
     }
 
-    /// <summary>Where the IDE's requests go: the engine's base address and key, or null when it sleeps.</summary>
+    /// <summary>
+    /// Where the IDE's requests go: the engine's base address and key on the workspaces service; for a machine, the
+    /// replica holding its tunnel (its relay route) and the tunnel's key; null when it sleeps or is offline.
+    /// </summary>
     public (Uri Base, string Key)? EngineOf(StudioWorkspace workspace) =>
-        workspace.EnginePort is { } port && workspace.EngineKeyCipher is { } cipher && SettingsCrypto.Decrypt(cipher, auth.Value.DataKey) is { } key
-            ? (new Uri($"http://{options.CurrentValue.EngineHost}:{port}/"), key)
+        workspace.EngineKeyCipher is { } cipher && SettingsCrypto.Decrypt(cipher, auth.Value.DataKey) is { } key
+            ? workspace.Kind == StudioWorkspace.Machine
+                ? workspace.EngineUrl is { } at ? (new Uri($"{at.TrimEnd('/')}/api/studio/tunnel/{workspace.Id:N}/"), key) : null
+                : workspace.EnginePort is { } port ? (new Uri($"http://{options.CurrentValue.EngineHost}:{port}/"), key) : null
             : null;
+
+    /// <summary>
+    /// A machine connecting (code-arena web --connect): its workspace (one a folder, by the id Code Arena keeps for it),
+    /// made or taken again, marked connected here with a new key for its tunnel. Null when the id is another person's, or
+    /// they keep the most machines already.
+    /// </summary>
+    public async Task<(StudioWorkspace? Workspace, string? Key, string? Problem)> ConnectAsync(AppUser me, Guid id, string name, string? project, string? branch, CancellationToken ct)
+    {
+        var workspace = await db.StudioWorkspaces.SingleOrDefaultAsync(w => w.Id == id, ct);
+        if (workspace is not null && (workspace.UserId != me.Id || workspace.Kind != StudioWorkspace.Machine))
+        {
+            return (null, null, "That machine is not yours.");
+        }
+        if (workspace is null)
+        {
+            if (await db.StudioWorkspaces.CountAsync(w => w.UserId == me.Id && w.Kind == StudioWorkspace.Machine, ct) >= options.CurrentValue.MostMachines)
+            {
+                return (null, null, $"You have {options.CurrentValue.MostMachines} machines connected to Code Studio: delete one there first.");
+            }
+            workspace = new StudioWorkspace { Id = id, UserId = me.Id, Kind = StudioWorkspace.Machine };
+            db.StudioWorkspaces.Add(workspace);
+        }
+        var key = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        (workspace.Name, workspace.Project, workspace.Branch) = (name, project, branch);
+        (workspace.EngineUrl, workspace.EngineKeyCipher, workspace.EnginePort) = (options.CurrentValue.SelfUrl ?? Self.Value, SettingsCrypto.Encrypt(key, DataKey), null);
+        workspace.StartedAt = workspace.UsedAt = clock.GetUtcNow();
+        workspace.Error = null;
+        await db.SaveChangesAsync(ct);
+        return (workspace, key, null);
+    }
+
+    /// <summary>This replica's own address: its first IPv4 address that is not the loopback, on the app's port (8080).</summary>
+    private static readonly Lazy<string> Self = new(() =>
+    {
+        var address = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
+            .Where(n => n.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up && n.NetworkInterfaceType != System.Net.NetworkInformation.NetworkInterfaceType.Loopback)
+            .SelectMany(n => n.GetIPProperties().UnicastAddresses).Select(a => a.Address)
+            .FirstOrDefault(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !System.Net.IPAddress.IsLoopback(a));
+        return address is null ? "http://localhost:8080" : $"http://{address}:8080";
+    });
+
+    /// <summary>A machine's tunnel ended: offline, unless it connected again meanwhile (a new key).</summary>
+    public async Task DisconnectedAsync(Guid id, string key, CancellationToken ct)
+    {
+        if (await db.StudioWorkspaces.SingleOrDefaultAsync(w => w.Id == id, ct) is { } w && w.EngineKeyCipher is { } cipher && SettingsCrypto.Decrypt(cipher, DataKey) == key)
+        {
+            (w.EngineUrl, w.EngineKeyCipher, w.StartedAt) = (null, null, null);
+            await db.SaveChangesAsync(ct);
+        }
+    }
 }

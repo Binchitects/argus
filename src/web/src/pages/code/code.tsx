@@ -16,6 +16,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { errorMessage } from '@/lib/api'
 import { AutoReviews } from './auto-reviews'
 import { askCode, mergeRequestsQuery, reviewsQuery, startReview, verdictLabel, type ReviewBrief } from './api'
+import { BusinessMapSection } from './business'
 import { Workspaces } from './studio'
 
 /** A review's state in a word or two, with its verdict once done. */
@@ -89,6 +90,9 @@ export function CodePage() {
       )}
       <div className="mb-8">
         <Workspaces />
+      </div>
+      <div className="mb-8">
+        <BusinessMapSection />
       </div>
       <h2 className="mb-3 text-lg font-semibold">Review and ask</h2>
       <div className="grid gap-6 lg:grid-cols-2">

@@ -37,13 +37,19 @@ public static class StudioEndpoints
         g.MapPost("/workspaces/{id:guid}/stop", StopAsync);
         g.MapDelete("/workspaces/{id:guid}", DeleteAsync);
         g.Map("/w/{id:guid}/{**rest}", ProxyAsync);
+        // A machine's tunnel: dialled by its Code Arena with the person's API key, and reached by the app's replicas with its own key.
+        app.MapGet("/api/code-arena/connect", ConnectAsync).AllowAnonymous("Code Arena: the person's API key is checked here.");
+        app.Map("/api/studio/tunnel/{id:guid}/{**rest}", TunnelAsync).AllowAnonymous("The tunnel's own key is checked here.");
     }
 
     private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;
 
     private static object View(StudioWorkspace w) => new
     {
-        w.Id, w.Kind, w.Name, w.Project, w.Branch, state = w.EnginePort is not null ? "running" : w.Error is not null ? "failed" : "asleep", w.Error, w.CreatedAt, w.UsedAt,
+        w.Id, w.Kind, w.Name, w.Project, w.Branch,
+        state = w.Kind == StudioWorkspace.Machine ? (w.EngineUrl is not null ? "connected" : "offline")
+            : w.EnginePort is not null ? "running" : w.Error is not null ? "failed" : "asleep",
+        w.Error, w.CreatedAt, w.UsedAt,
     };
 
     private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, StudioWorkspaces workspaces, CancellationToken ct)
@@ -104,13 +110,15 @@ public static class StudioEndpoints
         return Results.Ok(View(w));
     }
 
-    private static async Task<IResult> DeleteAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, StudioWorkspaces workspaces, Audit audit, CancellationToken ct)
+    private static async Task<IResult> DeleteAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, StudioWorkspaces workspaces, MachineTunnels tunnels,
+        Audit audit, CancellationToken ct)
     {
         var me = await Me(p, users);
         if (await MineAsync(db, id, me, ct) is not { } w)
         {
             return Results.NotFound();
         }
+        await tunnels.CloseAsync(w.Id, "Deleted from Code Studio.");
         await workspaces.DeleteAsync(w, ct);
         await audit.WriteAsync("studio.workspace.delete", $"{w.Project}@{w.Branch}", actor: me);
         return Results.NoContent();
@@ -127,10 +135,13 @@ public static class StudioEndpoints
             http.Response.StatusCode = StatusCodes.Status404NotFound;
             return;
         }
+        var machine = w.Kind == StudioWorkspace.Machine;
         if (workspaces.EngineOf(w) is not { } engine)
         {
             http.Response.StatusCode = StatusCodes.Status409Conflict;
-            await http.Response.WriteAsJsonAsync(new { status = "asleep", error = "The workspace is asleep: start it." }, ct);
+            await http.Response.WriteAsJsonAsync(machine
+                ? new { status = "offline", error = "Your machine is not connected: run code-arena web --connect in its folder." }
+                : new { status = "asleep", error = "The workspace is asleep: start it." }, ct);
             return;
         }
         // Used now: a workspace the IDE reaches does not sleep (written a minute apart at most).
@@ -148,6 +159,8 @@ public static class StudioEndpoints
         }
         using var request = new HttpRequestMessage(new HttpMethod(http.Request.Method), target);
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", engine.Key);
+        // A machine's tunnel is held by an app replica: its own routes guard against forged forms, so it is told this is no page's.
+        request.Headers.TryAddWithoutValidation("X-Requested-With", "arena");
         if (http.Request.ContentLength is > 0 || http.Request.Headers.TransferEncoding.Count > 0)
         {
             request.Content = new StreamContent(http.Request.Body);
@@ -166,6 +179,13 @@ public static class StudioEndpoints
         try
         {
             response = await clients.CreateClient(StudioWorkspaces.Client).SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        }
+        catch (HttpRequestException) when (machine)
+        {
+            // The replica holding its tunnel went: offline until the machine dials again (Code Arena does, on its own).
+            http.Response.StatusCode = StatusCodes.Status409Conflict;
+            await http.Response.WriteAsJsonAsync(new { status = "offline", error = "Your machine's connection was lost: it connects again in a moment." }, CancellationToken.None);
+            return;
         }
         catch (HttpRequestException)
         {
@@ -203,6 +223,89 @@ public static class StudioEndpoints
                     await http.Response.Body.FlushAsync(ct);
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// A person's own machine connecting (code-arena web --connect, from the folder it opened): with their API key and
+    /// Code Studio's permission, as a WebSocket; its workspace (one a folder, by the id Code Arena keeps) is connected while
+    /// the tunnel stays open, held by this replica.
+    /// </summary>
+    private static async Task ConnectAsync(HttpContext http, ArenaMcp.McpPeople people, Access.AccessService access, StudioWorkspaces workspaces, MachineTunnels tunnels,
+        IServiceScopeFactory scopes)
+    {
+        var ct = http.RequestAborted;
+        ArenaMcp.McpCaller caller;
+        try
+        {
+            caller = await people.FromHeaderAsync(http.Request.Headers.Authorization.ToString() is { Length: > 0 } a ? a : null, ct);
+        }
+        catch (Gateway.GatewayException)
+        {
+            http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            return;
+        }
+        if (caller.User is not { } me)
+        {
+            http.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await http.Response.WriteAsJsonAsync(new { status = "key", error = caller.Refusal ?? ArenaMcp.McpPeople.NoKey }, ct);
+            return;
+        }
+        if (!(await access.MembershipAsync(me, ct)).Has(Core.Access.Permissions.CodeStudio))
+        {
+            http.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await http.Response.WriteAsJsonAsync(new { status = "permission", error = "Code Studio is not among what you may use: ask an admin." }, ct);
+            return;
+        }
+        var q = http.Request.Query;
+        if (!http.WebSockets.IsWebSocketRequest || !Guid.TryParseExact(q["id"].ToString(), "N", out var id) || q["name"].ToString().Trim() is not { Length: > 0 and <= 200 } name)
+        {
+            http.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await http.Response.WriteAsJsonAsync(new { status = "invalid", error = "Connect with code-arena web --connect: a WebSocket, its id and its name." }, ct);
+            return;
+        }
+        var project = q["project"].ToString().Trim() is { Length: > 0 and <= 300 } pr ? pr : null;
+        var branch = q["branch"].ToString().Trim() is { Length: > 0 and <= 200 } br ? br : null;
+        var (workspace, key, problem) = await workspaces.ConnectAsync(me, id, name, project, branch, ct);
+        if (workspace is null)
+        {
+            http.Response.StatusCode = StatusCodes.Status409Conflict;
+            await http.Response.WriteAsJsonAsync(new { status = "machine", error = problem }, ct);
+            return;
+        }
+        using var socket = await http.WebSockets.AcceptWebSocketAsync();
+        try
+        {
+            await tunnels.RunAsync(workspace.Id, socket, ct);
+        }
+        finally
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            await scope.ServiceProvider.GetRequiredService<StudioWorkspaces>().DisconnectedAsync(workspace.Id, key!, CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// The IDE's request (or WebSocket) through a machine's tunnel held by this replica: from the replica the page reached,
+    /// with the tunnel's own key.
+    /// </summary>
+    private static async Task TunnelAsync(Guid id, string? rest, HttpContext http, AppDbContext db, StudioWorkspaces workspaces, MachineTunnels tunnels)
+    {
+        var ct = http.RequestAborted;
+        var given = http.Request.Headers.Authorization.ToString() is { } a && a.StartsWith("Bearer ", StringComparison.Ordinal) ? a[7..] : "";
+        if (await db.StudioWorkspaces.AsNoTracking().SingleOrDefaultAsync(w => w.Id == id && w.Kind == StudioWorkspace.Machine, ct) is not { } w
+            || workspaces.EngineOf(w) is not { } engine
+            || !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(given), System.Text.Encoding.UTF8.GetBytes(engine.Key)))
+        {
+            http.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+        var path = "/" + (rest ?? "") + http.Request.QueryString;
+        var held = http.WebSockets.IsWebSocketRequest ? await tunnels.RelayAsync(id, http, path, ct) : await tunnels.ForwardAsync(id, http, path, ct);
+        if (!held)
+        {
+            http.Response.StatusCode = StatusCodes.Status409Conflict;
+            await http.Response.WriteAsJsonAsync(new { status = "offline", error = "Your machine's connection was lost: it connects again in a moment." }, ct);
         }
     }
 

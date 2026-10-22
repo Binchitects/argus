@@ -212,6 +212,20 @@ the terminal shows what the agent does (`● edit_file …`) while the page driv
 it. On another machine over SSH: `code-arena --port 8765 --no-open` there,
 `ssh -L 8765:127.0.0.1:8765 that-machine` here, and open the address printed.
 
+**In Code Studio** (`code-arena web --connect`, signed in with `code-arena
+login`): the folder shows in Arena's **Code Studio** too, as *the folder on
+this machine*, while code-arena runs, and opens there in the browser, from any
+computer you sign in to Arena on. code-arena dials Arena (a WebSocket, with
+your API key) and Code Studio's IDE reaches this run through it: each of its
+calls and WebSockets (terminals, language servers, the debugger) is answered
+by this run's own web server, with this run's own key, which never leaves the
+machine; nothing but the IDE's calls (`/api/…`) goes through. Only you reach
+it, signed in to Arena, and only while this runs; a lost connection is dialled
+again (after a second, doubling to 30). The folder keeps its place in Code
+Studio between runs (its id is kept with the folder's state); deleting it
+there disconnects it, and the folder stays as it is. Arena's operators run
+the relay: connect folders you would open on that Arena's own workspaces.
+
 The page is laid out as VS Code is, in Argus Arena's design system:
 
 - **activity bar** (the left edge): Explorer, Search, Source control (with a

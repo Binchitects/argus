@@ -112,6 +112,9 @@ public sealed class FakeArgus : HttpMessageHandler
     /// <summary>Tools answered with this structured content (JSON), by name: the merge request tools a review reads.</summary>
     public System.Collections.Concurrent.ConcurrentDictionary<string, string> Answers { get; } = new();
 
+    /// <summary>Projects nobody may read: a tool asked about one says so, as Argus does for a project the person is no member of.</summary>
+    public System.Collections.Concurrent.ConcurrentDictionary<string, bool> Unreadable { get; } = new();
+
     /// <summary>Argus's MCP endpoint, as the chat sees it: the chat token, the person's email, a session.</summary>
     private HttpResponseMessage Mcp(HttpRequestMessage request, JsonElement? body)
     {
@@ -138,6 +141,8 @@ public sealed class FakeArgus : HttpMessageHandler
         {
             "initialize" => $$$"""{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"argus","version":"2.9.0"},"instructions":"{{{Instructions}}}"}""",
             "tools/list" => """{"tools":[{"name":"find_symbol","description":"Find where a symbol is defined","inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}}]}""",
+            "tools/call" when p.GetProperty("arguments").TryGetProperty("project", out var asked) && Unreadable.ContainsKey(asked.GetString()!) =>
+                """{"content":[{"type":"text","text":"No project by that path is visible to you."}],"isError":true}""",
             "tools/call" when Answers.TryGetValue(p.GetProperty("name").GetString()!, out var answer) =>
                 $$"""{"content":[{"type":"text","text":"(structured)"}],"structuredContent":{{answer}},"isError":false}""",
             "tools/call" => p.GetProperty("arguments").GetProperty("name").GetString() == "SecretThing"

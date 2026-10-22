@@ -200,6 +200,37 @@ public sealed class FakeModel : HttpMessageHandler
             chunks = [Delta(new JsonObject { ["content"] = """{"things": [{"id": "Badge", "looks": "a red round badge"}, {"id": "star", "looks": "a dark star"}, {"id": "background", "looks": "white"}]}""" }), Finish("stop"), Usage(80, 0, 40)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
+        // The business mapper: reads the code once (find_symbol), then reports its map; "group/silent" never reports.
+        if (system0.StartsWith("You map what a project's software does for the business", StringComparison.Ordinal))
+        {
+            var read = messages.Count(m => m?["role"]?.GetValue<string>() == "tool");
+            if (lastUser.Contains("group/silent", StringComparison.Ordinal) || messages.Any(m => m?["content"] is JsonValue v && v.ToString().Contains("call report_business once with the map", StringComparison.Ordinal)))
+            {
+                chunks = [Delta(new JsonObject { ["content"] = "It sells things, I think." }), Finish("stop"), Usage(100, 0, 10)];
+            }
+            else
+            {
+                var map = new JsonObject
+                {
+                    ["name"] = "Checkout", ["domain"] = "online orders and payments", ["summary"] = "Takes customers' orders and their payments.",
+                    ["capabilities"] = new JsonArray(new JsonObject { ["name"] = "Take orders", ["description"] = "Customers place orders.", ["sources"] = new JsonArray(new JsonObject { ["kind"] = "code", ["ref"] = "src/orders.cs:10" }) }),
+                    ["entities"] = new JsonArray(new JsonObject { ["name"] = "Order", ["meaning"] = "What a customer buys; open, paid, shipped or cancelled.", ["sources"] = new JsonArray(new JsonObject { ["kind"] = "code", ["ref"] = "src/order.cs:3" }) }),
+                    ["rules"] = new JsonArray(
+                        new JsonObject { ["rule"] = "Refunds round half up", ["why"] = "Finance asked for it to match invoices.", ["sources"] = new JsonArray(new JsonObject { ["kind"] = "code", ["ref"] = "src/refund.cs:22" }, new JsonObject { ["kind"] = "issue", ["ref"] = "12" }) },
+                        new JsonObject { ["rule"] = "A guess with nothing read", ["why"] = "", ["sources"] = new JsonArray() }),
+                    ["processes"] = new JsonArray(new JsonObject { ["name"] = "A customer cancels an order", ["steps"] = new JsonArray("The page calls cancel", "Payment is refunded", "Stock is put back"), ["sources"] = new JsonArray(new JsonObject { ["kind"] = "code", ["ref"] = "src/cancel.cs:5" }) }),
+                    ["integrations"] = new JsonArray(new JsonObject { ["system"] = "Payments gateway", ["how"] = "Charges and refunds cards over HTTPS.", ["sources"] = new JsonArray(new JsonObject { ["kind"] = "doc", ["ref"] = "README.md" }) }),
+                    ["glossary"] = new JsonArray(new JsonObject { ["term"] = "Basket", ["meaning"] = "What a customer is about to buy.", ["sources"] = new JsonArray(new JsonObject { ["kind"] = "wiki", ["ref"] = "glossary" }, new JsonObject { ["kind"] = "nonsense", ["ref"] = "x" }) }),
+                };
+                var (name, args) = read == 0 ? ("find_symbol", "{\"name\":\"Order\"}") : ("report_business", map.ToJsonString());
+                chunks =
+                [
+                    Delta(new JsonObject { ["tool_calls"] = new JsonArray(new JsonObject { ["index"] = 0, ["id"] = $"call_{read}", ["type"] = "function", ["function"] = new JsonObject { ["name"] = name, ["arguments"] = args } }) }),
+                    Finish("tool_calls"), Usage(300, 0, 80),
+                ];
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
         if (system0.StartsWith("You are an animation director", StringComparison.Ordinal))
         {
             var first = !messages.Any(m => m?["role"]?.GetValue<string>() == "assistant");

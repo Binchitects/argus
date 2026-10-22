@@ -64,4 +64,23 @@ describe('code studio', () => {
     expect(calls.filter((c) => c.path === '/api/studio/workspaces/w1/start')).toHaveLength(1)
     expect(screen.getByRole('link', { name: /Code Studio/ })).toHaveAttribute('href', '/code')
   })
+
+  it('lists one’s own machine, connected or offline, and opens an offline one with how to connect it, never starting it', async () => {
+    const laptop: Workspace = { ...shop, id: 'm1', kind: 'machine', name: 'shop on laptop', branch: 'main', state: 'offline' }
+    const calls = fakeApi(member, {
+      'GET /api/code/reviews': () => ({ json: [] }),
+      'GET /api/code/rules': () => ({ json: [] }),
+      'GET /api/fixes/token': () => ({ json: { linked: true, account: 'dana', gitlab: 'https://gitlab.test' } }),
+      'GET /api/studio/workspaces': () => ({ json: { server: false, workspaces: [laptop] } }),
+    })
+    const { router } = renderApp('/code')
+    expect(await screen.findByText(/code-arena web --connect/)).toBeInTheDocument()
+    const mine = await screen.findByRole('list', { name: 'Your workspaces' })
+    expect(within(mine).getByText('Offline')).toBeInTheDocument()
+    await userEvent.click(within(mine).getByRole('link', { name: 'shop on laptop' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/code/w/m1'))
+    expect(await screen.findByText(/is not connected now/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Put to sleep' })).toBeNull()
+    expect(calls.some((c) => c.path === '/api/studio/workspaces/m1/start')).toBe(false)
+  })
 })

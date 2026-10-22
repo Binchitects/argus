@@ -1179,8 +1179,9 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         await EventuallyAsync(() => state.Spare.SequenceEqual(["tiny-b"]), "the watcher sees tiny-b loaded");
         var tag = Guid.NewGuid().ToString("N")[..6];
         Assert.Contains(await AskAsync(b, await ChatAsync(b, Big), $"[{tag}] Hello there"), e => e.GetProperty("type").GetString() == "done");
+        // The message's own check (the answer is checked too, and may hold the words: not that one).
         var check = app.Model.Requests.Select(r => r.Body).Single(body => body.ToJsonString().Contains(tag, StringComparison.Ordinal)
-            && body["messages"]![0]!["content"]!.ToJsonString().Contains("You check texts", StringComparison.Ordinal));
+            && body["messages"]![0]!["content"] is JsonValue system && system.GetValue<string>().StartsWith("You check texts at a company's AI assistant (this one is a person's message)", StringComparison.Ordinal));
         Assert.Equal(Big, check["model"]!.GetValue<string>());
         Assert.Equal("loaded", app.Engine.StatusOf("tiny-b"));
         Assert.Equal(1, app.Engine.CallsTo("/models/unload"));

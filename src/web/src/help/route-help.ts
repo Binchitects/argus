@@ -33,6 +33,7 @@ export const routeHelp: Record<string, TopicId> = {
   '/code': 'code',
   '/code/reviews/:id': 'review',
   '/code/w/:id': 'workspace',
+  '/code/business/:id': 'business',
   '/code/fixes': 'fixes',
   '/code/fixes/:id': 'fix',
   '/tasks': 'tasks',

@@ -774,10 +774,47 @@ debugger and its agent), on a project of yours that the server keeps.
   against your credit. Only you reach it.
 - **Asleep.** A workspace unused for 30 minutes stops; its files stay, and
   **Open** wakes it. **Delete** takes its files and its key away.
+- **Your own machine.** In a folder on your computer, `code-arena web
+  --connect` (signed in with `code-arena login`) puts it in Code Studio as
+  *the folder on that machine*, while it runs: **Open** shows its IDE here,
+  from any browser you sign in on, through a tunnel code-arena dials with
+  your API key ([code-arena.md](code-arena.md#the-ide)). Only you reach it;
+  offline, Code Studio says how to connect it. Deleting it there disconnects
+  it; the folder stays. With several app replicas, the one it dialled holds
+  it, and the others reach it through that one (at its own address on the
+  stack's network, or `Workspaces__SelfUrl`), with the tunnel's own key.
 - **Where.** The workspaces service runs with the `workspaces` profile
   ([deployment.md](deployment.md)); without it, Code Studio lists no
   server workspaces. It needs the `code.studio` permission, which everyone
   holds unless an admin denies it. At most 8 workspaces each.
+
+### The business map
+
+**Code Studio → Business map** keeps what each system does for the business,
+so Argus can explain the business, not only the code.
+
+- **Mapping a project.** Type its path (group/project) and press **Map
+  it**: a model, as you, with your default model and at your cost (tagged
+  `business`), reads the project with Argus's read-only tools: its README
+  and documents, its code (the things it deals in, the rules it enforces, the
+  processes across files and systems), the systems around it, and its GitLab
+  issues and wiki (`issue_list`, `issue_get`, `wiki_list`, `wiki_get`). It
+  reports the map: the system's name, domain and summary; **what it lets
+  the business do**, **processes** step by step, **rules** and why, **what
+  it deals in**, **who it talks to**, and a **glossary**. Every item names
+  where it was read (a file and line, a document, an issue, a merge request,
+  a wiki page), and opens there in GitLab; an item with no source is left
+  out. The bell says when it is ready. **Map again** reads it anew.
+- **Who sees it.** A map is shown to those Argus shows its project to (a
+  member at Reporter or above), checked as they open it; nobody else sees
+  it, or that it exists. An admin removes one (audited as `business.*`).
+- **In the chat.** With Argus on, and a map ready, Argus answers as the
+  company's senior technical expert: `business_map` lists the systems you
+  may read and what each does, and `business_explain` finds the
+  capabilities, rules, processes and terms that answer a question, with
+  their sources, which it confirms in the code, the issues and the wiki
+  before it answers, in business words first. **Ask Argus** on a map starts
+  that chat. In Code Studio's IDE, its agent has the same Argus.
 
 ## 3D models
 

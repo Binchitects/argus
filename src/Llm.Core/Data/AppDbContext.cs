@@ -71,6 +71,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Studio.WorkflowRunStep> WorkflowRunSteps => Set<Studio.WorkflowRunStep>();
     public DbSet<Code.CodeFix> CodeFixes => Set<Code.CodeFix>();
     public DbSet<Code.StudioWorkspace> StudioWorkspaces => Set<Code.StudioWorkspace>();
+    public DbSet<Code.BusinessSystem> BusinessSystems => Set<Code.BusinessSystem>();
     public DbSet<Panels.Panel> Panels => Set<Panels.Panel>();
     public DbSet<Media.MediaItem> MediaItems => Set<Media.MediaItem>();
     public DbSet<Media.MediaJob> MediaJobs => Set<Media.MediaJob>();
@@ -670,6 +671,20 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Error).HasMaxLength(2000);
             e.HasIndex(x => new { x.UserId, x.CreatedAt });
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Code.BusinessSystem>(e =>
+        {
+            e.ToTable("business_systems");
+            e.Property(b => b.Project).HasMaxLength(300);
+            e.HasIndex(b => b.Project).IsUnique();
+            e.Property(b => b.Name).HasMaxLength(200);
+            e.Property(b => b.Domain).HasMaxLength(300);
+            e.Property(b => b.Summary).HasMaxLength(4000);
+            e.Property(b => b.Profile).HasColumnType("jsonb");
+            e.Property(b => b.Status).HasMaxLength(20);
+            e.Property(b => b.Step).HasMaxLength(300);
+            e.Property(b => b.Error).HasMaxLength(2000);
+            e.Property(b => b.Model).HasMaxLength(200);
         });
         builder.Entity<Code.StudioWorkspace>(e =>
         {
