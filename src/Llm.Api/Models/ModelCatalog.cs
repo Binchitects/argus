@@ -927,8 +927,28 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// it is registered with, so a changed one is replaced and two of one name (a model here
     /// and its copy on a server) are both kept: the gateway spreads requests between them.
     /// Every model carries its prices (its own, else Settings → Prices), so every request has a cost.
+    /// One at a time on this replica (<see cref="Syncing"/>).
     /// </summary>
     public async Task SyncGatewayAsync(CancellationToken ct = default)
+    {
+        await Syncing.WaitAsync(ct);
+        try
+        {
+            await SyncAsync(ct);
+        }
+        finally
+        {
+            Syncing.Release();
+        }
+    }
+
+    /// <summary>
+    /// The syncs of this replica (the watcher's, an admin's save, a request whose model the gateway lost): two at once would
+    /// each find a model missing and both add it, and the gateway would keep both deployments.
+    /// </summary>
+    private static readonly SemaphoreSlim Syncing = new(1, 1);
+
+    private async Task SyncAsync(CancellationToken ct)
     {
         var defaults = prices.CurrentValue;
         var wanted = new Dictionary<string, (string Name, JsonObject Params, JsonObject Info)>(StringComparer.Ordinal);
@@ -1012,12 +1032,15 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             }
         }
         await MediaAsync(wanted, defaults, ct);
-        var managed = await gateway.ManagedModelsAsync(ct);
-        foreach (var old in managed.Where(g => g.Fingerprint is null || !wanted.ContainsKey(g.Fingerprint)))
+        // Each wanted deployment once: a second of the same fingerprint (two replicas synced at once) goes too.
+        var kept = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var old in await gateway.ManagedModelsAsync(ct))
         {
-            await gateway.DeleteModelAsync(old.Id, ct);
+            if (old.Fingerprint is null || !wanted.ContainsKey(old.Fingerprint) || !kept.Add(old.Fingerprint))
+            {
+                await gateway.DeleteModelAsync(old.Id, ct);
+            }
         }
-        var kept = managed.Where(g => g.Fingerprint is not null && wanted.ContainsKey(g.Fingerprint)).Select(g => g.Fingerprint!).ToHashSet(StringComparer.Ordinal);
         foreach (var (fingerprint, w) in wanted.Where(w => !kept.Contains(w.Key)))
         {
             await gateway.AddModelAsync(w.Name, w.Params, w.Info, fingerprint, ct);

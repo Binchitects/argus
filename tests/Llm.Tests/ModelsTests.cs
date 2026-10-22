@@ -259,6 +259,12 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         var first = gateway.Managed.Keys.Single();
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { temperature = 0.7 }));
         Assert.Equal(first, gateway.Managed.Keys.Single());
+        // Two replicas that synced at once each added it: the next sync keeps one of them.
+        var (name, fingerprint, litellm, info) = gateway.Managed[first];
+        await gateway.AddModelAsync(name, litellm, info, fingerprint);
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { temperature = 0.6 }));
+        Assert.Equal(fingerprint, Assert.Single(gateway.Managed.Values).Fingerprint);
+        Assert.Single(await gateway.ModelsAsync(), m => m.Name == "tiny-b");
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { parallel = 4 }));
         Assert.NotEqual(first, gateway.Managed.Keys.Single());
         Assert.Equal(4096, gateway.Managed.Values.Single().Info["max_input_tokens"]!.GetValue<int>());
