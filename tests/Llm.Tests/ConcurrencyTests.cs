@@ -667,7 +667,12 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         await using var f = NewApp(new Dictionary<string, string?> { ["Chat:AnswersPerPerson"] = "1", ["Auth:DataKey"] = "a-data-key-for-slot-tests" }, parallel: 1, others: [("tiny-small", 1)]);
         var gate = f.Services.GetRequiredService<AnswerGate>();
         var slots = f.Services.GetRequiredService<SlotTable>();
-        await EventuallyAsync(() => slots.Count(Big) == 1 && slots.Count("tiny-small") == 1, "the watcher read both models");
+        var state = f.Services.GetRequiredService<EngineState>();
+        // The watcher asks the engine for its models, then reads the slots from the database: its first round may ask before
+        // the presets name tiny-small and read after it was added. Until the engine's list has it, tiny-small is not the
+        // engine's to load, and Carol would be refused.
+        await EventuallyAsync(() => slots.Count(Big) == 1 && slots.Count("tiny-small") == 1 && state.StatusOf("tiny-small") is not null,
+            "the watcher read both models, from the database and from the engine");
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         // A tool whose server is slow to answer holds the big model's only place as long as the test wants.
         var made = await admin.PostAsync("/api/admin/tools/servers", new { name = "Slow Desk", url = "https://tools.example.test/mcp", headerName = "X-Api-Key", headerValue = FakeMcp.ApiKey });
