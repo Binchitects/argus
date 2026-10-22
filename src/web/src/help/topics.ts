@@ -259,6 +259,7 @@ export const topics = {
     about: 'Pictures from a few words; one changed by saying how (all of it, or only the part painted over), made a little different, enlarged, cut out or set moving; speech in a voice from a sample, and music.',
     parts: [
       { name: 'Describe a picture', text: 'What to draw, its **Shape** and **How many** (one, two or four). **Upload a picture** brings one of yours in to change it.' },
+      { name: 'Video', text: 'Say what a video is about: the model writes a storyboard (shots, each what is seen and what the narrator says) to change before **Make the video** draws, moves, narrates, scores and cuts it into one MP4. **Your videos** opens each storyboard again.' },
       { name: 'Speech and Music', text: 'With the studio server: **Speech** speaks your words in its own voice or **a voice from a sample** (recorded or a sound file, only when you tick that you may use it); **Music** makes a piece from a description and lyrics, 15 seconds to 2 minutes.' },
       { name: 'Your pictures and clips', text: 'Newest first; work going on shows where it will be, with what it is doing (waiting for its turn on the GPU, drawing). **Show** picks pictures or clips.' },
       { name: 'A picture, open', text: '**Change** it by saying how, all of it or only the part you paint over (**Paint the part**: brush, erase, undo); **Variations**; **Enlarge** (four times as large); **Cut out** (the background taken away); **Move** (a short clip that starts from it); **Download** or **Delete**. **Made from** opens the one it came from.' },

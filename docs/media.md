@@ -35,6 +35,27 @@ Open a picture to work on it:
 **Made from** opens the picture it came from. **Download** saves the file; **Delete**
 takes it out of the studio with its file (an upload stays in your files).
 
+## Videos
+
+**Video** (with the picture and video models) makes a short narrated video:
+
+1. Say what the video is about, and how many shots (3, 5 or 8). The model writes a
+   storyboard: a title, and for each shot what is seen (in English, for the video
+   model) and what the narrator says over it (in the language you wrote in).
+2. Read and change it: each shot's words and length (2 to 5 seconds), shots added
+   or taken out, the title, **the narrator** (your voice settings, Account → Voice,
+   or a voice from a sample you may use), and **music under it** in words.
+3. **Make the video**. Each shot is drawn by the picture model, then set moving from
+   that picture by the video model (a few minutes a shot); the narration is spoken;
+   the music is made for its length; then it is cut into one MP4 (1280 × 720): each
+   shot as long as its clip or what is said over it, captions from the narration,
+   the music quieter while the narrator speaks. The bell says when it is ready.
+
+What was made is kept with the storyboard: a changed shot is made again alone (its
+picture and clip when what is seen changes, its narration when what is said
+changes), and **Make again** on a shot draws it anew. The video is in the gallery;
+deleting the storyboard keeps it there.
+
 ## Speech and music
 
 With the **studio** module, the card at the top also makes:

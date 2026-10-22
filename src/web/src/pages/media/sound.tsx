@@ -27,7 +27,7 @@ function useStart(onStarted: () => void) {
 }
 
 /** A sample of a voice: a sound file of yours, or recorded here; uploaded as your file. */
-function VoiceSample({ value, onChange }: { value: { id: string; name: string } | null; onChange: (v: { id: string; name: string } | null) => void }) {
+export function VoiceSample({ value, onChange }: { value: { id: string; name: string } | null; onChange: (v: { id: string; name: string } | null) => void }) {
   const file = useRef<HTMLInputElement | null>(null)
   const recorder = useRef<MediaRecorder | null>(null)
   const [recording, setRecording] = useState(0)

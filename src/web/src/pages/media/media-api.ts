@@ -15,7 +15,7 @@ export interface MediaConfig {
   mostGoing: number
 }
 
-export type MediaAction = 'make' | 'edit' | 'vary' | 'enlarge' | 'move' | 'cutout' | 'speak' | 'music' | 'upload'
+export type MediaAction = 'make' | 'edit' | 'vary' | 'enlarge' | 'move' | 'cutout' | 'speak' | 'music' | 'story' | 'upload'
 
 export interface MediaItem {
   id: string
@@ -38,7 +38,7 @@ export interface MediaItem {
 
 export interface MediaJob {
   id: string
-  action: Exclude<MediaAction, 'upload'>
+  action: Exclude<MediaAction, 'upload' | 'story'>
   prompt: string | null
   sourceId: string | null
   count: number
@@ -117,8 +117,56 @@ export const actionNames: Record<MediaAction, string> = {
   cutout: 'Background taken away',
   speak: 'Spoken',
   music: 'Music',
+  story: 'A video',
   upload: 'Uploaded',
 }
+
+export interface StoryShot {
+  visual: string
+  narration: string
+  seconds: number
+  /** What was made for it, as file addresses: kept while what it came from holds. */
+  picture?: string | null
+  clip?: string | null
+  speech?: string | null
+}
+
+export interface Story {
+  id: string
+  title: string
+  brief: string
+  voiceId: string | null
+  music: string | null
+  videoItemId: string | null
+  /** The video's file address, once cut. */
+  video: string | null
+  status: 'draft' | 'making' | 'done' | 'failed'
+  phase: string | null
+  error: string | null
+  createdAt: string
+  updatedAt: string
+  shots: StoryShot[]
+}
+
+export const storiesQuery = queryOptions({
+  queryKey: ['media', 'stories'],
+  queryFn: ({ signal }) => api<Story[]>('/api/media/stories', { signal }),
+  refetchInterval: (q) => (q.state.data?.some((s) => s.status === 'making') ? 3000 : false),
+})
+
+export const storyQuery = (id: string) =>
+  queryOptions({
+    queryKey: ['media', 'stories', id],
+    queryFn: ({ signal }) => api<Story>(`/api/media/stories/${id}`, { signal }),
+    refetchInterval: (q) => (q.state.data?.status === 'making' ? 2000 : false),
+  })
+
+export const writeStory = (brief: string, shots: number) => api<Story>('/api/media/stories', { body: { brief, shots } })
+export const changeStory = (id: string, body: { title: string; shots: Pick<StoryShot, 'visual' | 'narration' | 'seconds'>[]; voiceId: string | null; consent: boolean; music: string | null }) =>
+  api<Story>(`/api/media/stories/${id}`, { method: 'PUT', body })
+export const makeStory = (id: string) => api<Story>(`/api/media/stories/${id}/make`, { method: 'POST' })
+export const againShot = (id: string, index: number) => api<Story>(`/api/media/stories/${id}/shots/${index}/again`, { method: 'POST' })
+export const removeStory = (id: string) => api<void>(`/api/media/stories/${id}`, { method: 'DELETE' })
 
 export const working: Record<MediaJob['action'], string> = {
   make: 'Drawing',

@@ -11,7 +11,8 @@ namespace Llm.Tests;
 ///   "# fail" exits 1 with a traceback; "# slow" runs until it is stopped;
 ///   "# pages" draws the pages it asks for ("first, last = 1, 20") of a document of <see cref="DocumentPages"/> pages (page-01.jpg...);
 ///   the media script (it runs ffprobe) makes sound.mp3, and for a video two frames, 4 seconds long;
-///   "# canvas pdf" turns canvas.docx into canvas.pdf (a PDF header, then the Word file's size).
+///   "# canvas pdf" turns canvas.docx into canvas.pdf (a PDF header, then the Word file's size);
+///   the media studio's cut makes story.mp4, three seconds a shot.
 /// </summary>
 public sealed class FakeSandbox : IAsyncDisposable
 {
@@ -102,7 +103,7 @@ public sealed class FakeSandbox : IAsyncDisposable
                 await File.WriteAllBytesAsync(Path.Combine(draft, "files", $"page-{n:D2}.jpg"), [0xFF, 0xD8, 0xFF, (byte)n]);
             }
         }
-        var media = code.Contains("ffprobe", StringComparison.Ordinal);
+        var media = code.Contains("ffprobe", StringComparison.Ordinal) && !code.StartsWith("# The media studio's video", StringComparison.Ordinal);
         if (media)
         {
             await File.WriteAllBytesAsync(Path.Combine(draft, "files", "sound.mp3"), [0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 0, 0, 1, 2]);
@@ -116,13 +117,22 @@ public sealed class FakeSandbox : IAsyncDisposable
         {
             await File.WriteAllTextAsync(Path.Combine(draft, "files", "canvas.pdf"), $"%PDF-1.7\n% from {new FileInfo(Path.Combine(job, "files", "canvas.docx")).Length} bytes\n%%EOF\n");
         }
+        // The media studio's cut: a video, and its length (three seconds a shot).
+        var cut = code.StartsWith("# The media studio's video", StringComparison.Ordinal);
+        string? cutReport = null;
+        if (cut)
+        {
+            var shots = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(job, "files", "story.json")))!["shots"]!.AsArray().Count;
+            await File.WriteAllBytesAsync(Path.Combine(draft, "files", "story.mp4"), [0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6F, 0x6D]);
+            cutReport = $"{{\"seconds\": {shots * 3}.0, \"starts\": [], \"error\": null}}\n";
+        }
         var served = await ServeMcpAsync(code, job);
         var fail = code.Contains("# fail", StringComparison.Ordinal);
         await File.WriteAllTextAsync(Path.Combine(draft, "result.json"), new JsonObject
         {
             ["exit_code"] = fail ? 1 : cancelled ? -9 : 0, ["timed_out"] = false, ["cancelled"] = cancelled,
             ["stdout"] = served ?? ($"given: {string.Join(",", given)}\nfirst line: {code.Split('\n')[0]}\n" + (pages ? $"{{\"total\": {DocumentPages}, \"error\": null}}\n" : "")
-                + (media ? "{\"seconds\": 4.0, \"sound\": true, \"frames\": 2}\n" : "")), ["stdout_cut"] = false,
+                + (media ? "{\"seconds\": 4.0, \"sound\": true, \"frames\": 2}\n" : "") + cutReport), ["stdout_cut"] = false,
             ["stderr"] = fail ? "Traceback (most recent call last):\n  File \"main.py\", line 1\nValueError: bad\n" : "", ["stderr_cut"] = false,
             ["killed"] = null, ["error"] = null, ["skipped_files"] = new JsonArray(), ["duration_ms"] = 12,
             ["files"] = new JsonArray([.. Directory.GetFiles(Path.Combine(draft, "files")).Select(f => (JsonNode)Path.GetFileName(f))]),

@@ -336,6 +336,7 @@ public static class IdentityWiring
         services.AddSingleton<Code.Fixes.FixRuns>();
         services.AddSingleton<Panels.PanelRuns>();
         services.AddSingleton<Media.MediaJobs>();
+        services.AddSingleton<Media.StoryRuns>();
         services.AddScoped<Chat.Tools.DataTool>();
         services.AddSingleton<Insights.BoardRefresher>();
         services.AddHostedService(sp => sp.GetRequiredService<Insights.BoardRefresher>());
@@ -520,6 +521,7 @@ public static class IdentityWiring
         Code.Fixes.FixEndpoints.MapFixes(app);
         Panels.PanelEndpoints.MapPanels(app);
         Media.MediaEndpoints.MapMedia(app);
+        Media.StoryEndpoints.MapStories(app);
         Apps.AppEndpoints.MapApps(app);
         Plans.PlanEndpoints.MapPlans(app);
         app.MapForwardAuth();

@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fakeApi, member, renderApp } from '@/test/utils'
-import { fit, type MediaConfig, type MediaItem, type MediaJob } from './media-api'
+import { fit, type MediaConfig, type MediaItem, type MediaJob, type Story } from './media-api'
 
 const config: MediaConfig = { picture: 'FLUX.2-klein-4B', video: 'Wan2.2-TI2V-5B', enlarge: true, cutout: true, voice: true, music: true, going: 0, mostGoing: 3 }
 
@@ -140,5 +140,52 @@ describe('media studio', () => {
     await userEvent.click(within(await screen.findByRole('dialog')).getByRole('tab', { name: 'Cut out' }))
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Take the background away/ }))
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST').at(-1)?.body).toEqual({ action: 'cutout', sourceId: 'i1', width: 1024, height: 768 }))
+  })
+
+  it('a storyboard is written from a few words, changed shot by shot, and made into a video', async () => {
+    let story: Story = {
+      id: 's1', title: 'The fox in winter', brief: 'A fox in winter', voiceId: null, music: 'calm piano', videoItemId: null, video: null, status: 'draft', phase: null, error: null,
+      createdAt: '', updatedAt: '1',
+      shots: [
+        { visual: 'A fox in the snow', narration: 'Snow fell.', seconds: 3 },
+        { visual: 'The fox runs', narration: 'It ran home.', seconds: 4 },
+      ],
+    }
+    const calls = fakeApi(member, {
+      'GET /api/media': () => ({ json: config }),
+      'GET /api/media/items': () => ({ json: { items: [], more: false } }),
+      'GET /api/media/jobs': () => ({ json: [] }),
+      'GET /api/media/stories': () => ({ json: [story] }),
+      'POST /api/media/stories': () => ({ status: 201, json: story }),
+      'GET /api/media/stories/s1': () => ({ json: story }),
+      'PUT /api/media/stories/s1': (body) => {
+        story = { ...story, ...(body as Partial<Story>), updatedAt: '2' }
+        return { json: story }
+      },
+      'POST /api/media/stories/s1/make': () => {
+        story = { ...story, status: 'making', phase: 'Drawing shot 1 of 2', updatedAt: '3' }
+        return { status: 202, json: story }
+      },
+    })
+    renderApp('/media')
+    await userEvent.click(await screen.findByRole('radio', { name: 'Video' }))
+    await userEvent.type(screen.getByLabelText('What the video is about'), 'A fox in winter')
+    await userEvent.click(screen.getByRole('radio', { name: '3 shots' }))
+    await userEvent.click(screen.getByRole('button', { name: /Write the storyboard/ }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/media/stories')?.body).toEqual({ brief: 'A fox in winter', shots: 3 }))
+    const dialog = await screen.findByRole('dialog')
+    const shots = within(dialog).getByRole('list', { name: 'Shots' })
+    expect(within(shots).getAllByRole('listitem')).toHaveLength(3)
+    const narration = within(shots).getAllByLabelText('What the narrator says')[1]
+    await userEvent.clear(narration)
+    await userEvent.type(narration, 'It ran all the way home.')
+    await userEvent.click(within(dialog).getByRole('button', { name: /^Make the video$/ }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/media/stories/s1/make')).toBe(true))
+    expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({
+      title: 'The fox in winter', voiceId: null, consent: false, music: 'calm piano',
+      shots: [{ visual: 'A fox in the snow', narration: 'Snow fell.', seconds: 3 }, { visual: 'The fox runs', narration: 'It ran all the way home.', seconds: 4 }],
+    })
+    expect(await within(dialog).findByText(/Drawing shot 1 of 2/)).toBeInTheDocument()
+    expect(within(dialog).getAllByLabelText('What the narrator says')[0]).toBeDisabled()
   })
 })

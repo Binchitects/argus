@@ -174,6 +174,14 @@ public sealed class FakeModel : HttpMessageHandler
             chunks = [Delta(new JsonObject { ["content"] = jsonMarker.Groups[1].Value }), Finish("stop"), Usage(100, 0, 20)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
+        // Stories: as many shots as asked ("Write N shots"), each a fox in the snow, with a line to say over it.
+        if (system0.StartsWith("You write storyboards", StringComparison.Ordinal))
+        {
+            var n = int.Parse(System.Text.RegularExpressions.Regex.Match(system0, @"Write (\d+) shots").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+            var shots = string.Join(",", Enumerable.Range(1, n).Select(i => $$$"""{"visual": "A red fox in the snow, shot {{{i}}}, slow push in", "narration": "Line {{{i}}} of the story.", "seconds": 3}"""));
+            chunks = [Delta(new JsonObject { ["content"] = $$"""Here it is: {"title": "The fox in winter", "music": "calm piano, soft strings", "shots": [{{shots}}],}""" }), Finish("stop"), Usage(200, 0, 120)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
         // Decks: a deck of a title slide, points (a picture), a chart and an odd layout; "[nojson]" answers in words the
         // first time. A change appends a slide on costs to the deck it was given (each picture's fileId dropped, as small
         // models do), or with "[retitle]" renames it.

@@ -25,6 +25,7 @@ import {
 } from './media-api'
 import { PaintLayer, type PaintHandle } from './paint'
 import { MusicForm, SpeakForm } from './sound'
+import { StoryEditor, StoryForm, StoryList } from './story'
 
 /** What a job makes, as the gallery shows it. */
 const kindOf = (action: MediaJob['action']): Shown => (action === 'move' ? 'video' : action === 'speak' || action === 'music' ? 'sound' : 'picture')
@@ -54,14 +55,19 @@ function useStart(onStarted?: () => void) {
 }
 
 /** What to make: a picture, speech or music (those the studio server has). */
-function CreateCard({ config }: { config: MediaConfig }) {
+function CreateCard({ config, onStory }: { config: MediaConfig; onStory: (id: string) => void }) {
   const [mode, setMode] = useState('picture')
-  const modes = [{ value: 'picture', label: 'Picture' }, ...(config.voice ? [{ value: 'speech', label: 'Speech' }] : []), ...(config.music ? [{ value: 'music', label: 'Music' }] : [])]
+  const modes = [
+    { value: 'picture', label: 'Picture' },
+    ...(config.video && config.picture ? [{ value: 'video', label: 'Video' }] : []),
+    ...(config.voice ? [{ value: 'speech', label: 'Speech' }] : []),
+    ...(config.music ? [{ value: 'music', label: 'Music' }] : []),
+  ]
   return (
     <Card>
       <CardContent className="grid gap-3">
         {modes.length > 1 && <Segmented label="Make" value={mode} onChange={setMode} options={modes} />}
-        {mode === 'speech' ? <SpeakForm /> : mode === 'music' ? <MusicForm /> : <MakeForm config={config} />}
+        {mode === 'video' ? <StoryForm onWritten={onStory} /> : mode === 'speech' ? <SpeakForm /> : mode === 'music' ? <MusicForm /> : <MakeForm config={config} />}
       </CardContent>
     </Card>
   )
@@ -390,6 +396,7 @@ export function MediaPage() {
   const items = useInfiniteQuery(mediaItemsQuery(kind))
   const jobs = useQuery(mediaJobsQuery)
   const [open, setOpen] = useState<string | null>(null)
+  const [story, setStory] = useState<string | null>(null)
   const [hidden, setHidden] = useState<string[]>([])
   const seen = useRef(new Map<string, MediaJob['status']>())
 
@@ -419,7 +426,7 @@ export function MediaPage() {
         description="Pictures from a few words; change one by saying how (all of it, or only the part you paint over), make variations, enlarge it, or make it move."
       />
       <div className="grid gap-4">
-        {config.data ? <CreateCard config={config.data} /> : <Skeleton className="h-40 rounded-xl" />}
+        {config.data ? <CreateCard config={config.data} onStory={setStory} /> : <Skeleton className="h-40 rounded-xl" />}
         {failed.map((j) => (
           <Alert key={j.id} variant="destructive" className="flex items-start gap-2">
             <span className="min-w-0 flex-1">{j.error}</span>
@@ -428,6 +435,7 @@ export function MediaPage() {
             </Button>
           </Alert>
         ))}
+        {config.data?.video && <StoryList onOpen={setStory} />}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-base font-semibold">Your pictures and clips</h2>
           <Segmented
@@ -465,6 +473,9 @@ export function MediaPage() {
           </Button>
         )}
       </div>
+      <Dialog open={!!story} onOpenChange={(o) => !o && setStory(null)}>
+        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-6xl">{story && config.data && <StoryEditor key={story} id={story} config={config.data} onClose={() => setStory(null)} />}</DialogContent>
+      </Dialog>
       <Dialog open={!!chosen} onOpenChange={(o) => !o && setOpen(null)}>
         <DialogContent className="sm:max-w-6xl">{chosen && config.data && <Editor key={chosen.id} item={chosen} items={all} config={config.data} onOpen={setOpen} onClose={() => setOpen(null)} />}</DialogContent>
       </Dialog>
