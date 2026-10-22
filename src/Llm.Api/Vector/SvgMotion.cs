@@ -78,6 +78,7 @@ public static partial class SvgMotion
         ("spin", "turns round and round (amount: turns a cycle)"), ("orbit", "goes round a point (origin: \"x y\")"),
         ("float", "rises and sinks gently (amount: how high)"), ("drift", "drifts slowly from side to side, as a cloud or waves (amount: how far)"),
         ("travel", "goes from one place to another, as a file sent from a laptop to a server or a car along a road (to: the part it goes to, or \"x y\"; from: the part it starts at, else where it is), appearing at the start and fading at the end each time"),
+        ("flow", "dashes run along a line or an arrow, as data flowing through it (a link between parts)"),
         ("arc", "flies from one part to another along a curve, as a thrown ball or a paper plane (to, from as travel; amount: how high the curve rises)"),
         ("jump", "jumps: crouches, springs up stretched, lands squashed and settles (amount: how high)"),
         ("land", "drops in from above and lands with a squash and a little bounce"),
@@ -275,9 +276,10 @@ public static partial class SvgMotion
                     }
                 }
                 var cls = $"m{n + 1}{(targets.Count > 1 ? $"-{i + 1}" : "")}";
-                if (kind is "draw" or "color")
+                if (kind is "draw" or "color" or "flow")
                 {
-                    foreach (var shape in targets[i].DescendantsAndSelf().Where(e => Shapes.Contains(e.Name.LocalName) || (kind == "color" && e.Name.LocalName is "text")))
+                    foreach (var shape in targets[i].DescendantsAndSelf().Where(e => (kind == "flow" ? e.Name.LocalName is "path" or "line" or "polyline" : Shapes.Contains(e.Name.LocalName))
+                        || (kind == "color" && e.Name.LocalName is "text")))
                     {
                         Classed(shape, cls);
                         if (kind == "draw")
@@ -313,9 +315,10 @@ public static partial class SvgMotion
             {
                 var cls = $"m{n + 1}-t{k}";
                 var echo = new XElement(S + "g", new XAttribute(Mark, "echo"), new XAttribute("class", cls),
-                    new XElement(S + "g", new XAttribute("opacity", N(0.5 * (1 - (k - 1.0) / count))), new XElement(S + "use", new XAttribute("href", "#" + target))));
+                    new XElement(S + "g", new XAttribute("opacity", N(0.45 * Math.Pow(1 - (k - 1.0) / count, 1.5))), new XElement(S + "use", new XAttribute("href", "#" + target))));
                 lead.Wrap.AddBeforeSelf(echo);
-                var play = lead.Play with { Delay = lead.Play.Delay + k * 0.07 };
+                // Close behind each other: a smear of its way, not a row of copies.
+                var play = lead.Play with { Delay = lead.Play.Delay + k * 0.04 };
                 css.Append(CultureInfo.InvariantCulture, $".{cls}{{animation:{play.Css()};transform-box:{lead.BoxKind};transform-origin:{lead.Origin}}}");
             }
         }
@@ -398,6 +401,7 @@ public static partial class SvgMotion
             "float" => (3.0, "ease-in-out", true, false),
             "drift" => (6.0, "ease-in-out", true, false),
             "travel" => (2.6, "cubic-bezier(.45,0,.55,1)", true, false),
+            "flow" => (0.9, "linear", true, false),
             "arc" => (2.2, "linear", true, false),
             "jump" => (1.1, "ease-in-out", true, false),
             "land" => (0.9, "ease-in", false, false),
@@ -515,6 +519,8 @@ public static partial class SvgMotion
             "float" => $"0%,100%{{{T(0, 0)}}}50%{{{T(0, -(a ?? box.H * 0.03))}}}",
             "drift" => $"0%,100%{{{T(-(a ?? box.W * 0.03), 0)}}}50%{{{T(a ?? box.W * 0.03, 0)}}}",
             "arc" when way is { } w => Arc(w, a),
+            // Dashes and gaps as long as a fiftieth and a sixtieth of the drawing, one dash and gap along each round.
+            "flow" => $"from{{stroke-dasharray:{N(box.W * 0.02)} {N(box.W * 0.016)};stroke-dashoffset:{N(box.W * 0.036)}}}to{{stroke-dasharray:{N(box.W * 0.02)} {N(box.W * 0.016)};stroke-dashoffset:0}}",
             "jump" => Jump(a ?? box.H * 0.12),
             "land" => $"0%{{transform:translate(0px,{N(-(a ?? box.H * 0.3))}px) scale(1,1);opacity:0}}55%{{transform:translate(0px,0px) scale(1.15,.85);opacity:1;animation-timing-function:ease-out}}"
                 + $"75%{{transform:translate(0px,{N(-(a ?? box.H * 0.3) * 0.08)}px) scale(.96,1.04);opacity:1}}100%{{transform:translate(0px,0px) scale(1,1);opacity:1}}",

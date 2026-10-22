@@ -41,13 +41,22 @@ public static partial class VectorJobs
                 var draw = sp.GetRequiredService<SvgDraw>();
                 await phase("Planning the picture");
                 var (scene, motion) = await draw.SplitAsync(me, job.Prompt ?? "", ct);
-                var (drawn, problem) = await draw.DrawAsync(me, scene, style, w, h, phase, ct);
-                if (drawn is null)
+                SafeSvg svg;
+                string? model = null;
+                if (style == "diagram")
                 {
-                    throw new VectorRefusedException(problem ?? "Nothing was drawn.");
+                    // Laid out by the model (its things, icons, places, arrows), drawn here clean and alike.
+                    await phase("Laying out the diagram");
+                    var (layout, why) = await sp.GetRequiredService<SvgDiagram>().LayOutAsync(me, scene, motion, ct);
+                    svg = layout is not null ? SvgSafe.Clean(SvgDiagram.Render(layout, w, h)) : throw new VectorRefusedException(why ?? "Nothing was laid out.");
+                }
+                else
+                {
+                    var (drawn, problem) = await draw.DrawAsync(me, scene, style, w, h, phase, ct);
+                    (svg, model) = drawn is not null ? (drawn.Svg, drawn.Model) : throw new VectorRefusedException(problem ?? "Nothing was drawn.");
                 }
                 await phase("Keeping it");
-                var made = await store.AddAsync(me, drawn.Svg, MediaJob.Draw, job.Prompt, "drawn", style, null, drawn.Model, ct);
+                var made = await store.AddAsync(me, svg, MediaJob.Draw, job.Prompt, "drawn", style, null, model, ct);
                 await AnimateAsync(sp, db, me, made, motion, Text(options, "animate"), phase, ct);
                 return [made];
             }

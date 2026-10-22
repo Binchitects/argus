@@ -31,16 +31,17 @@ public sealed partial class VectorTool(AppDbContext db, MediaJobs jobs, Operatio
     {
         // Illustrations are drawn by the picture server and traced in the sandbox; without them, the model draws the SVG.
         var traces = sandbox.Unavailable() is null && await modules.HasAsync("imagegen", ct);
-        var kinds = traces ? new JsonArray("illustration", "drawing") : new JsonArray("drawing");
+        var kinds = traces ? new JsonArray("illustration", "diagram", "drawing") : new JsonArray("diagram", "drawing");
         return new LocalRun(
             [
                 Schema.Function("draw_svg", "Makes a vector drawing (SVG) from a description and shows it to the person. " +
                     (traces ? "\"illustration\" (the default): a rich flat illustration, its things named as parts (a fox, the moon, stars) ready to animate; " : "") +
-                    "\"drawing\": SVG written by the model, best for icons, diagrams, logos and simple shapes. Write the description in English, concrete and visual.",
+                    "\"diagram\": clean icons on tiles with labels and arrows between them, for how something works (a laptop sends a file to a server, a pipeline, a system); "
+                    + "\"drawing\": SVG written by the model, for icons, logos and simple shapes. Write the description in English, concrete and visual.",
                     new JsonObject
                     {
                         ["description"] = Schema.Text("What the drawing shows: its subject, the things in it, colours"),
-                        ["kind"] = new JsonObject { ["type"] = "string", ["enum"] = kinds, ["description"] = traces ? "illustration (default) or drawing" : "drawing" },
+                        ["kind"] = new JsonObject { ["type"] = "string", ["enum"] = kinds, ["description"] = traces ? "illustration (default), diagram or drawing" : "diagram or drawing" },
                         ["style"] = new JsonObject
                         {
                             ["type"] = "string", ["enum"] = new JsonArray([.. SvgDraw.Styles.Select(s => (JsonNode)s.Name)]), ["description"] = "for a drawing: its style (default flat)",
@@ -67,10 +68,12 @@ public sealed partial class VectorTool(AppDbContext db, MediaJobs jobs, Operatio
         {
             return new ToolResult("Say what the drawing shows in 'description'.", IsError: true);
         }
-        var trace = traces && Schema.Str(args, "kind") != "drawing";
-        var style = Schema.Str(args, "style") is { } s && SvgDraw.Styles.Any(x => x.Name == s) ? s : "flat";
+        var kind = Schema.Str(args, "kind");
+        var trace = traces && kind is not ("drawing" or "diagram");
+        var style = kind == "diagram" ? "diagram" : Schema.Str(args, "style") is { } s && SvgDraw.Styles.Any(x => x.Name == s) ? s : "flat";
         // Moving when its words say how (animate_svg makes it move later otherwise).
-        var options = trace ? new JsonObject { ["trace"] = "illustration", ["animate"] = "auto" } : new JsonObject { ["style"] = style, ["width"] = 512, ["height"] = 512, ["animate"] = "auto" };
+        var (w, h) = style == "diagram" ? (960, 540) : (512, 512);
+        var options = trace ? new JsonObject { ["trace"] = "illustration", ["animate"] = "auto" } : new JsonObject { ["style"] = style, ["width"] = w, ["height"] = h, ["animate"] = "auto" };
         return await RunAsync(context, trace ? MediaJob.Trace : MediaJob.Draw, description, null, options, ct);
     }
 

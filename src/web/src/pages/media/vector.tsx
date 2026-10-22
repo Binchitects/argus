@@ -43,7 +43,7 @@ function useStart(onStarted?: () => void) {
  */
 export function VectorForm({ config }: { config: VectorConfig }) {
   const queryClient = useQueryClient()
-  const [how, setHow] = useState<'trace' | 'draw'>(config.drawsPictures && config.tracesPictures ? 'trace' : 'draw')
+  const [how, setHow] = useState<'trace' | 'diagram' | 'draw'>(config.drawsPictures && config.tracesPictures ? 'trace' : 'diagram')
   const [prompt, setPrompt] = useState('')
   const [style, setStyle] = useState('flat')
   const [trace, setTrace] = useState('illustration')
@@ -54,6 +54,7 @@ export function VectorForm({ config }: { config: VectorConfig }) {
   const size = shapes.find((s) => s.value === shape)!
   const hows = [
     ...(config.drawsPictures && config.tracesPictures ? [{ value: 'trace' as const, label: 'Illustration' }] : []),
+    { value: 'diagram' as const, label: 'Diagram' },
     { value: 'draw' as const, label: 'Drawn as SVG' },
   ]
   return (
@@ -64,7 +65,9 @@ export function VectorForm({ config }: { config: VectorConfig }) {
         start.mutate(
           how === 'trace'
             ? { action: 'trace', prompt: prompt.trim(), trace, animate: moving }
-            : { action: 'draw', prompt: prompt.trim(), style, width: size.width, height: size.height, animate: moving },
+            : how === 'diagram'
+              ? { action: 'draw', prompt: prompt.trim(), style: 'diagram', width: size.width * 1.5, height: size.height * 1.5, animate: moving }
+              : { action: 'draw', prompt: prompt.trim(), style, width: size.width, height: size.height, animate: moving },
         )
       }}
     >
@@ -72,7 +75,9 @@ export function VectorForm({ config }: { config: VectorConfig }) {
       <p className="text-xs text-muted-foreground">
         {how === 'trace'
           ? 'The picture model draws it flat, and it is traced into clean vector shapes: rich illustrations, logos and stickers.'
-          : 'The model writes the SVG itself, every part named: icons, diagrams and simple scenes, the best to animate part by part.'}
+          : how === 'diagram'
+            ? 'How something works, crisp and clean: icons on tiles, their labels and arrows between them, each a part that moves on its own (a file flies to a server, data flows along the arrows).'
+            : 'The model writes the SVG itself, every part named: icons and simple shapes.'}
       </p>
       <Field label="Describe it, and how it moves" hint="What is in it, and what moves how: it is drawn, then animated, in one go. Said nothing about motion, it comes gently alive.">
         <Textarea
@@ -86,6 +91,8 @@ export function VectorForm({ config }: { config: VectorConfig }) {
       <div className="flex flex-wrap items-center gap-2">
         {how === 'trace' ? (
           <Segmented label="Traced as" value={trace} onChange={setTrace} options={config.traces.map((t) => ({ value: t.name, label: t.name[0].toUpperCase() + t.name.slice(1) }))} />
+        ) : how === 'diagram' ? (
+          <Segmented label="Shape" value={shape} onChange={setShape} options={shapes.map((s) => ({ value: s.value, label: s.label }))} />
         ) : (
           <>
             <Select value={style} onValueChange={setStyle}>
@@ -93,7 +100,7 @@ export function VectorForm({ config }: { config: VectorConfig }) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {config.styles.map((s) => (
+                {config.styles.filter((s) => s.name !== 'diagram').map((s) => (
                   <SelectItem key={s.name} value={s.name}>
                     {s.name[0].toUpperCase() + s.name.slice(1)}
                   </SelectItem>

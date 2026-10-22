@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Xml.Linq;
 using Llm.Api.Vector;
 
@@ -166,7 +167,7 @@ public sealed class VectorPartsTests
         Assert.Contains("60%{transform:translate(-120px,190px) scale(0.8);opacity:0}100%{", a.Markup, StringComparison.Ordinal);
         // Its trail: three fainter copies of the sun, each a moment later on the same way.
         Assert.Equal(3, XElement.Parse(a.Markup).Descendants().Count(e => e.Name.LocalName == "use" && (string?)e.Attribute("href") == "#sun"));
-        Assert.Contains(".m3-t2{animation:k2 4s linear 0.14s infinite", a.Markup, StringComparison.Ordinal);
+        Assert.Contains(".m3-t2{animation:k2 4s linear 0.08s infinite", a.Markup, StringComparison.Ordinal);
         // The camera goes close to the road (its middle to the drawing's, twice as close) in the last beat.
         Assert.Contains("translate(-200px,-370px) scale(2)", a.Markup, StringComparison.Ordinal);
         // The birds float by themselves.
@@ -219,3 +220,60 @@ public sealed class VectorPartsTests
         Assert.DoesNotContain(issues, i => i.Contains("#bg", StringComparison.Ordinal));
     }
 }
+
+/// <summary>Diagrams: icons found by their words, laid out things drawn as tiles with their icons and labels, arrows between them.</summary>
+public sealed class SvgDiagramTests
+{
+    [Fact]
+    public void Icons_are_found_by_their_names_and_tags_and_a_name_not_there_takes_the_nearest()
+    {
+        var found = SvgDiagram.Candidates("a laptop sends a file to the server");
+        Assert.Contains("laptop", found);
+        Assert.Contains("server", found);
+        Assert.Contains("file", found);
+        Assert.Equal("server", SvgDiagram.IconOf("Server"));
+        Assert.Equal("circle", SvgDiagram.IconOf("zzqx"));
+    }
+
+    [Fact]
+    public void A_layout_is_drawn_with_each_thing_and_arrow_a_part_of_its_own_and_its_places_kept_off_the_edges()
+    {
+        var markup = SvgDiagram.Render(new DiagramLayout
+        {
+            Background = "#F1F5F9",
+            Parts = [
+                new() { Id = "Laptop", Icon = "laptop", Label = "Client", X = 0.8, Y = 0.5, Size = 0.25 },
+                new() { Id = "server", Icon = "server", Label = "Server", X = 0.2, Y = 0.5, Size = 0.25, Color = "#10B981" },
+                new() { Id = "file", Icon = "file-text", X = 0.5, Y = 1.4, Size = 0.1, Shape = "circle" },
+            ],
+            Links = [new() { From = "laptop", To = "server", Label = "upload" }, new() { From = "laptop", To = "nobody" }],
+        }, 960, 540);
+        var safe = SvgSafe.Clean(markup);
+        var root = XElement.Parse(safe.Markup);
+        var ids = root.Descendants().Select(e => (string?)e.Attribute("id")).OfType<string>().ToList();
+        Assert.Contains("laptop", ids);
+        Assert.Contains("server", ids);
+        Assert.Contains("file", ids);
+        Assert.Single(ids, i => i.StartsWith("link-", StringComparison.Ordinal));
+        Assert.Contains("Client", safe.Markup, StringComparison.Ordinal);
+        // The file asked below the canvas sits inside it; the arrow is dashed and named by its ends.
+        var file = root.Descendants().Single(e => (string?)e.Attribute("id") == "file").Elements().First();
+        Assert.True(double.Parse((string)file.Attribute("cy")!, CultureInfo.InvariantCulture) < 540);
+        Assert.Contains("stroke-dasharray", root.Descendants().Single(e => (string?)e.Attribute("id") == "link-laptop-server").ToString(), StringComparison.Ordinal);
+        // Two things laid on each other are pushed apart; a white thing is drawn in a colour that shows.
+        var crowded = XElement.Parse(SvgDiagram.Render(new DiagramLayout
+        {
+            Parts = [new() { Id = "monitor", Icon = "monitor", X = 0.6, Y = 0.5, Size = 0.2 }, new() { Id = "server", Icon = "server", X = 0.62, Y = 0.5, Size = 0.2, Color = "#FFFFFF" }],
+        }, 960, 540));
+        var tiles = crowded.Descendants().Where(e => e.Name.LocalName == "rect" && e.Parent?.Attribute("id") is not null).ToList();
+        var xs = tiles.Select(t => double.Parse((string)t.Attribute("x")!, CultureInfo.InvariantCulture)).ToList();
+        Assert.True(Math.Abs(xs[0] - xs[1]) >= 108, string.Join(", ", xs));
+        Assert.DoesNotContain("stop-color=\"#FFFFFF\"", crowded.ToString(), StringComparison.Ordinal);
+        // It moves: the file flies from the laptop to the server, the arrow's dashes run.
+        var centers = new Dictionary<string, (double X, double Y)> { ["laptop"] = (768, 270), ["server"] = (192, 270), ["file"] = (480, 510) };
+        var a = SvgMotion.Apply(safe.Markup, [new() { Target = "file", Kind = "arc", From = "laptop", To = "server" }, new() { Target = "link-laptop-server", Kind = "flow" }], centers);
+        Assert.Empty(a.Problems);
+        Assert.Contains("stroke-dashoffset", a.Markup, StringComparison.Ordinal);
+    }
+}
+

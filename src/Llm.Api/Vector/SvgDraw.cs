@@ -26,6 +26,7 @@ public sealed partial class SvgDraw(OneQuestion one, ChatModels models, SvgRende
     public static readonly IReadOnlyList<(string Name, string About)> Styles =
     [
         ("flat", "flat colours and clean geometric shapes, no outlines, a few soft shadows as darker shapes"),
+        ("diagram", "an explanatory diagram: clean icons on tiles, their labels, arrows between them (laid out by the model, drawn by the app)"),
         ("line", "line art: strokes only (stroke-linecap and stroke-linejoin round), one or two colours, no fills but the background"),
         ("isometric", "an isometric view: each block's top, left and right faces in three tones of its colour"),
         ("gradient", "soft linear and radial gradients, gentle shadows and highlights, glossy and modern"),
@@ -306,6 +307,7 @@ public sealed partial class SvgDraw(OneQuestion one, ChatModels models, SvgRende
             - Anticipation before a big move (a small squash, pulse or wiggle of what starts it), follow-through after it (a jump or pulse of what receives it, a glow, a flash of colour).
             - Secondary motion: what is near moves too, smaller (sparkles twinkle with a stagger, lights blink, a trail follows what flies).
             - Things that just live (clouds drift, stars twinkle, a creature breathes) have no start: they go on by themselves, gently, under the story.
+            - The arrows of a diagram (link-…) show the flow: their dashes run (flow) while what they carry goes.
             - Natural kinds: what is sent, carried or thrown flies from one part to the other (arc, or travel along the ground), with a trail after it; landing things jump or land; lights, the sun and the moon glow; boats sway with origin bottom and amount 5; wheels spin; eyes blink; a camera may go close to the part that matters and back.
             - A part whose own pieces are numbered (stars-1, stars-2...) moves them one after another with "stagger" on the part itself (target "stars").
             - Do what is asked: the parts named move as said; the rest may live gently, never more than the story.

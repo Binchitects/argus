@@ -297,6 +297,7 @@ public static class IdentityWiring
         services.AddScoped<Media.StudioServer>();
         services.AddScoped<Vector.SvgRender>();
         services.AddScoped<Vector.SvgDraw>();
+        services.AddScoped<Vector.SvgDiagram>();
         services.AddScoped<Vector.VectorSandbox>();
         services.AddScoped<Vector.VectorStore>();
         services.AddScoped<Chat.Tools.VectorTool>();
