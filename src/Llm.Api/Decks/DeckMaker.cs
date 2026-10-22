@@ -21,7 +21,7 @@ public sealed record MadeDeck(string Title, List<DeckSlide> Slides, IResult? Pro
 /// Decks with the model, as the person (their model, credit and safeguards): a deck from their words, a deck changed as
 /// they ask, its charts' numbers asked of the databases they may ask, its pictures from the picture model.
 /// </summary>
-public sealed class DeckMaker(OneQuestion one, DataQuestions data, ImageTool images, AppDbContext db, TimeProvider clock)
+public sealed partial class DeckMaker(OneQuestion one, DataQuestions data, ImageTool images, AppDbContext db, TimeProvider clock)
 {
     private const string Shape = """
         {"title": "the deck's title", "slides": [
@@ -67,7 +67,9 @@ public sealed class DeckMaker(OneQuestion one, DataQuestions data, ImageTool ima
     public async Task<MadeDeck> MakeAsync(AppUser me, string about, CancellationToken ct)
     {
         var system = "You make slide decks for presentations at a company: clear, short, one idea a slide, usually 6 to 10 slides.\n" + Rules(await SourcesAsync(me, ct));
-        return await AskForDeckAsync(me, about, system, ct);
+        var made = await AskForDeckAsync(me, about, system, ct);
+        DropMadeUp(made.Slides, about);
+        return made;
     }
 
     public const int MostDecks = 200;
@@ -122,11 +124,13 @@ public sealed class DeckMaker(OneQuestion one, DataQuestions data, ImageTool ima
             You change slide decks as the person asks. Here is the deck, as JSON:
             {deck.ToJsonString(DeckModel.Json)}
             {(looking is { } n ? $"They are looking at slide {n + 1}: \"this slide\" is that one." : "")}
-            Answer with the whole deck after the change. Keep everything they did not ask to change exactly as it is: the same words, and
-            each picture with its prompt and fileId, each chart with its numbers and ask.
+            Answer with the whole deck after the change. Keep everything they did not ask to change exactly as it is: the same words, the
+            same order, each picture with its prompt and fileId, each chart with its numbers and ask. Put a new slide exactly where they say.
             {Rules(await SourcesAsync(me, ct))}
             """;
-        return await AskForDeckAsync(me, change, system, ct);
+        var made = await AskForDeckAsync(me, change, system, ct);
+        DropMadeUp(made.Slides, change, slides);
+        return made;
     }
 
     private async Task<MadeDeck> AskForDeckAsync(AppUser me, string words, string system, CancellationToken ct)
@@ -150,6 +154,33 @@ public sealed class DeckMaker(OneQuestion one, DataQuestions data, ImageTool ima
             : Read(again.Text ?? "") ?? new MadeDeck("", [], AuthEndpoints.Problem(502, "deck", "The model did not answer with a deck. Ask again, perhaps in other words."));
     }
 
+    /// <summary>
+    /// Never made-up numbers: a chart that does not ask a database keeps its numbers only when each was given, in the person's
+    /// words or on the deck before; else it loses them and says why.
+    /// </summary>
+    public static void DropMadeUp(List<DeckSlide> slides, string words, IEnumerable<DeckSlide>? before = null)
+    {
+        var given = Numbers().Matches(words).Select(m => double.TryParse(m.Value.Replace(",", "", StringComparison.Ordinal), NumberStyles.Float, CultureInfo.InvariantCulture, out var d) ? d : double.NaN)
+            .Where(double.IsFinite).ToHashSet();
+        foreach (var v in (before ?? []).Select(s => s.Chart).OfType<DeckChart>().SelectMany(c => c.Series).SelectMany(x => x.Values).OfType<double>())
+        {
+            given.Add(v);
+        }
+        foreach (var chart in slides.Select(s => s.Chart).OfType<DeckChart>().Where(c => c.Ask is null && c.Series.Count > 0))
+        {
+            if (chart.Series.SelectMany(x => x.Values).OfType<double>().All(v => given.Any(g => Math.Abs(g - v) <= 1e-9 * Math.Max(1, Math.Abs(v)))))
+            {
+                continue;
+            }
+            chart.Categories = [];
+            chart.Series = [];
+            chart.Note = "The model gave this chart numbers no one gave it, so they are left out: give them, or let it ask a database.";
+        }
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"-?\d[\d,]*(\.\d+)?")]
+    private static partial System.Text.RegularExpressions.Regex Numbers();
+
     /// <summary>The model's deck JSON (in a code fence or not), its slides cleaned; null when it is not one.</summary>
     public static MadeDeck? Read(string text)
     {
@@ -161,7 +192,8 @@ public sealed class DeckMaker(OneQuestion one, DataQuestions data, ImageTool ima
         }
         try
         {
-            var o = JsonNode.Parse(text[start..(end + 1)]) as JsonObject;
+            // Read as small models write it: a trailing comma or a comment is no reason to lose the deck.
+            var o = JsonNode.Parse(text[start..(end + 1)], null, new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip }) as JsonObject;
             if (o?["slides"] is not JsonArray array || array.Count == 0)
             {
                 return null;

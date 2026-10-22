@@ -116,7 +116,8 @@ public static class DeckModel
         var series = c.Series.Where(x => x.Values.Count > 0).Take(6)
             .Select(x => new DeckSeries { Name = Cut(x.Name, 100) ?? "Values", Values = [.. x.Values.Take(categories.Count).Select(v => v is { } d && double.IsFinite(d) ? d : (double?)null)] })
             .ToList();
-        if (ask is null && (categories.Count == 0 || series.Count == 0))
+        // A chart with neither numbers nor a question is none, unless it says why it has none.
+        if (ask is null && (categories.Count == 0 || series.Count == 0) && Cut(c.Note, 1000) is null)
         {
             return null;
         }

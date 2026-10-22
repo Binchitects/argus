@@ -63,7 +63,7 @@ export function SlideView({ slide, theme, thumbnail, making, className }: { slid
 
   return (
     <div
-      className={cn('relative aspect-video w-full overflow-hidden bg-[var(--deck-paper)] text-[var(--deck-ink)] [container-type:inline-size]', className)}
+      className={cn('relative aspect-video w-full overflow-hidden bg-[var(--deck-paper)] text-start text-[var(--deck-ink)] [container-type:inline-size]', className)}
       style={style}
     >
       <div className="absolute inset-x-0 top-0 h-[0.6%] bg-[var(--deck-accent)]" aria-hidden="true" />

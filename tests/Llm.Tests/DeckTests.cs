@@ -47,7 +47,7 @@ public sealed class DeckTests(AppFixture app)
         Assert.True((await kim.JsonAsync(await kim.GetAsync("/api/decks/config"))).GetProperty("pictures").GetBoolean());
         await StatusAssert.Is(HttpStatusCode.BadRequest, await kim.PostAsync("/api/decks", new { about = "" }));
         // Not JSON the first time: asked once more.
-        var made = await kim.JsonAsync(await kim.PostAsync("/api/decks", new { about = "Our quarter for the board [nojson]" }));
+        var made = await kim.JsonAsync(await kim.PostAsync("/api/decks", new { about = "Our quarter for the board [nojson]: North sold 120, South 80" }));
         var id = made.GetProperty("id").GetGuid();
         Assert.Equal(("Our quarter", 1), (made.GetProperty("title").GetString(), made.GetProperty("version").GetInt32()));
         var slides = made.GetProperty("slides").EnumerateArray().ToList();
@@ -86,7 +86,7 @@ public sealed class DeckTests(AppFixture app)
 
         // Every version kept; one put back is the newest.
         var versions = (await kim.JsonAsync(await kim.GetAsync($"/api/decks/{id}/versions"))).EnumerateArray().Select(v => (v.GetProperty("version").GetInt32(), v.GetProperty("note").GetString())).ToList();
-        Assert.Equal([(3, "Edited"), (2, "Add a slide on costs at the end"), (1, "Our quarter for the board [nojson]")], versions);
+        Assert.Equal([(3, "Edited"), (2, "Add a slide on costs at the end"), (1, "Our quarter for the board [nojson]: North sold 120, South 80")], versions);
         var restored = await kim.JsonAsync(await kim.PostAsync($"/api/decks/{id}/versions/2/restore"));
         Assert.Equal((4, 5), (restored.GetProperty("version").GetInt32(), restored.GetProperty("slides").GetArrayLength()));
 
@@ -104,7 +104,7 @@ public sealed class DeckTests(AppFixture app)
         await using var f = NewApp(gateway);
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var kim = await PersonAsync(admin, f);
-        var id = (await kim.JsonAsync(await kim.PostAsync("/api/decks", new { about = "Our quarter" }))).GetProperty("id").GetGuid();
+        var id = (await kim.JsonAsync(await kim.PostAsync("/api/decks", new { about = "Our quarter: North 120, South 80" }))).GetProperty("id").GetGuid();
         await kim.PostAsync($"/api/decks/{id}/slides/1/picture");
 
         var response = await kim.GetAsync($"/api/decks/{id}/pptx");
@@ -198,6 +198,23 @@ public sealed class DeckTests(AppFixture app)
         var deck = (await kim.JsonAsync(await kim.GetAsync("/api/decks"))).EnumerateArray().Single();
         Assert.Equal(($"/decks/{deck.GetProperty("id").GetGuid()}", 4), (said.GetProperty("link").GetString(), said.GetProperty("slides").GetInt32()));
         Assert.Equal("Our quarter", deck.GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public void A_chart_keeps_only_numbers_someone_gave()
+    {
+        DeckSlide Chart(params double?[] values) => new() { Layout = "chart", Chart = new DeckChart { Categories = ["A", "B"], Series = [new DeckSeries { Name = "Sales", Values = [.. values] }] } };
+        var made = new List<DeckSlide> { Chart(1200, 80), Chart(45, 30), Chart(7, 9) };
+        DeckMaker.DropMadeUp(made, "North sold 1,200 and South 80 this quarter.", [Chart(7, 9)]);
+        // Given in words, and on the deck before: kept. Made up: gone, and it says so.
+        Assert.Equal([1200d, 80d], made[0].Chart!.Series[0].Values);
+        Assert.Empty(made[1].Chart!.Series);
+        Assert.StartsWith("The model gave this chart numbers no one gave it", made[1].Chart!.Note, StringComparison.Ordinal);
+        Assert.Equal([7d, 9d], made[2].Chart!.Series[0].Values);
+        // A chart that says why it has no numbers stays a chart.
+        Assert.Equal("chart", DeckModel.Clean(made[1]).Layout);
+        // Read as small models write it: a trailing comma.
+        Assert.NotNull(DeckMaker.Read("""{"title": "T", "slides": [{"layout": "title", "title": "T",},],}"""));
     }
 
     [Fact]
