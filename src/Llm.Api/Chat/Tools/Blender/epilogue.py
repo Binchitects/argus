@@ -186,3 +186,117 @@ if _want_glb:
     for _o in [o for o in _sc.objects if o.name.startswith("_tool_")]:
         _bpy.data.objects.remove(_o)
     _bpy.ops.export_scene.gltf(filepath=_os.path.abspath("model.glb"), export_format="GLB", use_selection=False, export_lights=True)
+
+# --- PRINT: model.stl and model.3mf to print it from, in millimetres, resting on the plate; how it measures and whether it is closed ---
+if globals().get("PRINT") and _meshes:
+    import bmesh as _bmesh, struct as _struct, zipfile as _zipfile
+    from xml.sax.saxutils import quoteattr as _q
+    _dg = _bpy.context.evaluated_depsgraph_get()
+    _parts = []
+    for _o in _meshes:
+        _ev = _o.evaluated_get(_dg)
+        try:
+            _me = _ev.to_mesh()
+        except RuntimeError:
+            continue
+        _me.calc_loop_triangles()
+        _verts = [_o.matrix_world @ _v.co for _v in _me.vertices]
+        _tris = [tuple(_t.vertices) for _t in _me.loop_triangles]
+        _b = _bmesh.new()
+        _b.from_mesh(_me)
+        _open = sum(1 for _e in _b.edges if not _e.is_manifold)
+        _b.free()
+        _m = _o.active_material
+        _p = _principled(_m)
+        _rgb = tuple(_p.inputs["Base Color"].default_value)[:3] if _p is not None else (tuple(_m.diffuse_color)[:3] if _m else (0.8, 0.8, 0.8))
+        if _tris:
+            _parts.append((_o.name, _verts, _tris, _open, _rgb))
+        _ev.to_mesh_clear()
+    if _parts:
+        _lo = [min(v[i] for _n, vs, _t, _x, _c in _parts for v in vs) for i in range(3)]
+        _hi = [max(v[i] for _n, vs, _t, _x, _c in _parts for v in vs) for i in range(3)]
+        _longest = max(_hi[i] - _lo[i] for i in range(3)) * 1000
+        # Its real size when it fits a printer's plate (PRINT_SIZE: the longest side in millimetres), else made smaller.
+        _want = float(globals().get("PRINT_SIZE") or (_longest if _longest <= 250 else 150))
+        _k = 1000 * (_want / _longest if _longest > 0 else 1)
+        _place = lambda v: ((v[0] - (_lo[0] + _hi[0]) / 2) * _k, (v[1] - (_lo[1] + _hi[1]) / 2) * _k, (v[2] - _lo[2]) * _k)
+        with open("model.stl", "wb") as _f:
+            _f.write(b"Argus Arena model".ljust(80, b" "))
+            _f.write(_struct.pack("<I", sum(len(t) for _n, _v, t, _x, _c in _parts)))
+            for _n, _vs, _ts, _x, _c in _parts:
+                _pv = [_place(v) for v in _vs]
+                for _a, _b2, _c2 in _ts:
+                    _p1, _p2, _p3 = _mu.Vector(_pv[_a]), _mu.Vector(_pv[_b2]), _mu.Vector(_pv[_c2])
+                    _nrm = (_p2 - _p1).cross(_p3 - _p1).normalized()
+                    _f.write(_struct.pack("<12fH", *_nrm, *_p1, *_p2, *_p3, 0))
+        _xml = ['<?xml version="1.0" encoding="UTF-8"?>',
+                '<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">', '<resources>',
+                '<basematerials id="1">']
+        _xml += [f'<base name={_q(n)} displaycolor="#{"".join(f"{min(255, max(0, round(c ** (1 / 2.2) * 255))):02X}" for c in rgb)}"/>' for n, _v, _t, _x, rgb in _parts]
+        _xml.append('</basematerials>')
+        for _i, (_n, _vs, _ts, _x, _c) in enumerate(_parts):
+            _xml.append(f'<object id="{_i + 2}" type="model" name={_q(_n)} pid="1" pindex="{_i}"><mesh><vertices>')
+            _xml += ['<vertex x="%.4f" y="%.4f" z="%.4f"/>' % _place(v) for v in _vs]
+            _xml.append('</vertices><triangles>')
+            _xml += [f'<triangle v1="{a}" v2="{b}" v3="{c}"/>' for a, b, c in _ts]
+            _xml.append('</triangles></mesh></object>')
+        _xml += ['</resources>', '<build>'] + [f'<item objectid="{_i + 2}"/>' for _i in range(len(_parts))] + ['</build>', '</model>']
+        with _zipfile.ZipFile("model.3mf", "w", _zipfile.ZIP_DEFLATED) as _z:
+            _z.writestr("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+                        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+                        '<Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>')
+            _z.writestr("_rels/.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                        '<Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>')
+            _z.writestr("3D/3dmodel.model", "\n".join(_xml))
+        _size = " × ".join(f"{(_hi[i] - _lo[i]) * _k:.1f}" for i in range(3))
+        _openparts = [n for n, _v, _t, x, _c in _parts if x]
+        print(f"Print files: model.stl and model.3mf, {_size} mm" + (f" (1:{1000 / _k:.0f} of its real size)" if abs(_k - 1000) > 1 else " (its real size)")
+              + f", {sum(len(t) for _n, _v, t, _x, _c in _parts):,} triangles. "
+              + ("Every part is closed (watertight)." if not _openparts else f"Not closed (a slicer may repair it, or close it): {', '.join(_openparts[:8])}."))
+
+# --- TURNTABLE: the model turning once round, as turntable.mp4 ---
+if globals().get("TURNTABLE") and _meshes:
+    _lo = _mu.Vector((min(min((o.matrix_world @ _mu.Vector(c))[i] for c in o.bound_box) for o in _meshes) for i in range(3)))
+    _hi = _mu.Vector((max(max((o.matrix_world @ _mu.Vector(c))[i] for c in o.bound_box) for o in _meshes) for i in range(3)))
+    _mid, _size = (_lo + _hi) / 2, max((_hi - _lo).length, 0.01)
+    if _sc.render.engine not in {"CYCLES", "BLENDER_WORKBENCH"}:
+        _sc.render.engine = "BLENDER_WORKBENCH"
+    _cycles = _sc.render.engine == "CYCLES"
+    if _cycles:
+        _sc.cycles.samples = min(_sc.cycles.samples, 8)
+    else:
+        # A light backdrop, as the pictures have (a video keeps no see-through background).
+        _sc.world = _sc.world or _bpy.data.worlds.new("_tool_world")
+        _sc.world.color = (0.92, 0.93, 0.95)
+        _sc.render.film_transparent = False
+    _sc.render.resolution_x, _sc.render.resolution_y = (480, 360) if _cycles else (640, 480)
+    _frames = 72 if _cycles else 96
+    _pivot = _bpy.data.objects.new("_tool_pivot", None)
+    _sc.collection.objects.link(_pivot)
+    _pivot.location = _mid
+    _tcam = _bpy.data.objects.new("_tool_turn", _bpy.data.cameras.new("_tool_turn"))
+    _sc.collection.objects.link(_tcam)
+    _tcam.data.lens = 50
+    _half = _math.atan(18 / 50 * min(1.0, _sc.render.resolution_y / _sc.render.resolution_x))
+    _distance = (_size / 2) / _math.sin(_half) * 1.05
+    _tcam.data.clip_start, _tcam.data.clip_end = _distance / 100, _distance * 10
+    _dir = _mu.Vector((0, -_math.cos(0.35), _math.sin(0.35)))
+    _tcam.location = _dir * _distance
+    _tcam.rotation_euler = (-_dir).to_track_quat("-Z", "Y").to_euler()
+    _tcam.parent = _pivot
+    _sc.camera = _tcam
+    _sc.frame_start, _sc.frame_end = 1, _frames
+    _sc.render.fps = 24
+    # Turning at an even speed: new keys are linear (the last frame one step short of where the first one is).
+    _bpy.context.preferences.edit.keyframe_new_interpolation_type = "LINEAR"
+    _pivot.rotation_euler = (0, 0, 0)
+    _pivot.keyframe_insert("rotation_euler", index=2, frame=1)
+    _pivot.rotation_euler = (0, 0, 2 * _math.pi * (_frames - 1) / _frames)
+    _pivot.keyframe_insert("rotation_euler", index=2, frame=_frames)
+    _sc.render.image_settings.file_format = "FFMPEG"
+    _sc.render.ffmpeg.format = "MPEG4"
+    _sc.render.ffmpeg.codec = "H264"
+    _sc.render.ffmpeg.constant_rate_factor = "MEDIUM"
+    _sc.render.filepath = _os.path.abspath("turntable.mp4")
+    _bpy.ops.render.render(animation=True)
+    print(f"Turntable: turntable.mp4, {_frames / 24:.0f} seconds.")

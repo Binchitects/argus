@@ -756,7 +756,16 @@ public sealed class ChatToolsTests(AppFixture app)
         var parts = blender.Jobs.Last()["code"]!.GetValue<string>();
         Assert.Contains("for _p in _json.loads(\"[{\\u0022name\\u0022:\\u0022walls # glb", parts, StringComparison.Ordinal);
         Assert.DoesNotContain("\nimport os", parts, StringComparison.Ordinal);
-        Assert.Contains("LOOK = \"auto\"\nLIGHTING = \"day\"\n", parts, StringComparison.Ordinal);
+        Assert.Contains("LOOK = \"auto\"\nLIGHTING = \"day\"\nPRINT = False\nPRINT_SIZE = None\nTURNTABLE = False\n", parts, StringComparison.Ordinal);
+
+        // To print, and a video of it: the print files and the turntable come back too (the video plays in the chat).
+        res = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = """A vase [call make_3d_parts {"parts":[{"name":"vase # glb","shape":"cylinder","size":[0.1,0.1,0.2],"at":[0,0,0]}],"print":true,"print_size":120,"turntable":true}]""" });
+        events = (await res.Content.ReadAsStringAsync()).Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => JsonDocument.Parse(l[6..]).RootElement).ToList();
+        var printed = Event(events, "tool_result");
+        Assert.Contains("PRINT = True\nPRINT_SIZE = 120\nTURNTABLE = True\n", blender.Jobs.Last()["code"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Contains("turntable.mp4 (plays as a video)", printed.GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.Contains("model.3mf (to download)", printed.GetProperty("text").GetString(), StringComparison.Ordinal);
 
         // A texture as images first, from a pattern; a texture from a description needs a picture model, and there is none here.
         res = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = """Bricks [call make_texture {"name":"Red Brick!","pattern":"brick","color":"brick","size":2}]""" });

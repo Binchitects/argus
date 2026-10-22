@@ -805,6 +805,16 @@ writes those too. The model looks at the pictures and runs again to fix what
 is wrong; it does not paste code into its answer. The chat's files are in
 the run's folder (a reference picture, measurements, textures).
 
+**To print it.** Ask to 3D-print it and `model.stl` and `model.3mf` come back
+too: in millimetres, centred and resting on the plate, at its real size when
+its longest side is at most 250 mm, else 150 mm long (or the size you ask
+for). The 3MF keeps each part as its own object with its colour, for printers
+of several colours. The answer says the printed size and whether every part
+is closed (watertight); a slicer repairs small gaps.
+
+**A video of it.** Ask for a turntable and `turntable.mp4` comes back: four
+seconds of the model turning once round, played in the answer.
+
 ## The browser agent
 
 **Browser** (in the chat's **Tools**, off in new chats) gives the model a real

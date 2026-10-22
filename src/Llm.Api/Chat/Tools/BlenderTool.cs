@@ -74,6 +74,9 @@ public sealed partial class BlenderTool(BlenderClient blender, AppDbContext db, 
     {
         properties["look"] = Choice("The pictures: realistic (textures, glass, lights; slower) or fast (flat colours). Default: realistic when the model has textures, glass or lights.", "auto", "realistic", "fast");
         properties["lighting"] = Choice("day (a sky and the sun, the default), studio (soft light, a plain backdrop) or night (dark: only the model's own lights).", "day", "studio", "night");
+        properties["print"] = new JsonObject { ["type"] = "boolean", ["description"] = "Also model.stl and model.3mf to 3D-print it (in millimetres, resting on the plate), when the person wants to print it." };
+        properties["print_size"] = Number("The printed model's longest side in millimetres (default: its real size when that is at most 250 mm, else 150).");
+        properties["turntable"] = new JsonObject { ["type"] = "boolean", ["description"] = "Also turntable.mp4, a few seconds of the model turning once round, when the person wants a video of it." };
     }
 
     /// <summary>make_3d_parts' parameters: the parts, each a shape (or a light) with a size, a place, a turn, a colour, a texture and a shader.</summary>
@@ -179,7 +182,8 @@ public sealed partial class BlenderTool(BlenderClient blender, AppDbContext db, 
                 "make_texture(name, pattern=...); use them, " +
                 "and bpy for more (modifiers: bevel, subdivision, array, boolean, mirror, screw; bmesh; curves; your own shader nodes). Set LOOK = 'realistic' " +
                 "or LIGHTING = 'studio' at the top to change the pictures. Unless the script writes them itself, the scene comes back as model.glb (patterns " +
-                "baked into images) and two pictures; write model.blend (bpy.ops.wm.save_as_mainfile), an .stl or .obj, or your own renders when asked. " +
+                "baked into images) and two pictures; set PRINT = True (and PRINT_SIZE, the longest side in mm) for model.stl and model.3mf to print, TURNTABLE = True " +
+                "for turntable.mp4; write model.blend (bpy.ops.wm.save_as_mainfile), an .obj, or your own renders when asked. " +
                 $"At most {options.CurrentValue.TimeoutSeconds} seconds a run. The chat's files are in the working directory. print() what you need to read.",
                 new JsonObject { ["script"] = Schema.Text("The whole Blender Python script.") }, "script"),
         ],
@@ -189,7 +193,8 @@ public sealed partial class BlenderTool(BlenderClient blender, AppDbContext db, 
         "shaders where they help (brick walls, wood floors, glass windows, metal handles, lamps that light). For a texture no pattern gives, or one the " +
         "person describes, make it first with make_texture (prompt), then use its name. Look at the pictures that come back and fix what is wrong with " +
         "another run. Never paste a script or the parts into your answer: the person wants the model, not code. When a script fails twice, build the " +
-        "model with make_3d_parts instead. Say what you made in a sentence or two; the person sees the pictures and opens the .glb in the chat's 3D viewer.",
+        "model with make_3d_parts instead. To print it, set print (STL and 3MF; say its printed size, and whether every part is closed, as the output says); " +
+        "for a video of it, set turntable. Say what you made in a sentence or two; the person sees the pictures and opens the .glb in the chat's 3D viewer.",
         async (name, args, token) =>
         {
             if (name == "make_texture")
@@ -210,7 +215,9 @@ public sealed partial class BlenderTool(BlenderClient blender, AppDbContext db, 
                     return new ToolResult("At most 500 parts: use repeat for parts that come again.", IsError: true);
                 }
                 // The parts go in as JSON, read by Python: nothing the model wrote runs as code.
-                body = $"LOOK = {Python(look)}\nLIGHTING = {Python(lighting)}\nimport json as _json\nfor _p in _json.loads({Python(parts.ToJsonString())}):\n    part(_p)\n";
+                var size = args["print_size"] is JsonValue ps && ps.TryGetValue<double>(out var mm) && mm is >= 5 and <= 2000 ? mm.ToString(System.Globalization.CultureInfo.InvariantCulture) : "None";
+                body = $"LOOK = {Python(look)}\nLIGHTING = {Python(lighting)}\nPRINT = {(Flag(args, "print") ? "True" : "False")}\nPRINT_SIZE = {size}\n" +
+                    $"TURNTABLE = {(Flag(args, "turntable") ? "True" : "False")}\nimport json as _json\nfor _p in _json.loads({Python(parts.ToJsonString())}):\n    part(_p)\n";
             }
             else
             {
@@ -315,11 +322,13 @@ public sealed partial class BlenderTool(BlenderClient blender, AppDbContext db, 
             ["timed_out"] = result.TimedOut ? $"Stopped after {options.CurrentValue.TimeoutSeconds} seconds." : null,
             ["problem"] = result.Error ?? result.Killed,
             ["next"] = failed ? onFailure : null,
-            ["files_given_to_the_person"] = made.Count > 0 ? new JsonArray([.. made.Select(a => (JsonNode)$"{a.FileName} ({(a.Kind == "image" ? "shown as a picture" : a.FileName.EndsWith(".glb", StringComparison.OrdinalIgnoreCase) ? "opens in the 3D viewer" : "to download")})")]) : null,
+            ["files_given_to_the_person"] = made.Count > 0 ? new JsonArray([.. made.Select(a => (JsonNode)$"{a.FileName} ({(a.Kind == "image" ? "shown as a picture" : a.Kind == "video" ? "plays as a video" : a.FileName.EndsWith(".glb", StringComparison.OrdinalIgnoreCase) ? "opens in the 3D viewer" : "to download")})")]) : null,
             ["files_not_kept"] = result.Skipped.Count > 0 ? $"{string.Join(", ", result.Skipped)}: too many or too large" : null,
             ["seconds"] = Math.Round(result.DurationMs / 1000.0, 1),
         }.ToJsonString(Mcp.Plain), failed, made);
     }
+
+    private static bool Flag(JsonObject args, string name) => args[name] is JsonValue v && v.TryGetValue<bool>(out var b) && b;
 
     /// <summary>A Python string literal of the text (JSON's escapes are Python's).</summary>
     private static string Python(string text) => System.Text.Json.JsonSerializer.Serialize(text);
@@ -331,6 +340,8 @@ public sealed partial class BlenderTool(BlenderClient blender, AppDbContext db, 
     private static ChatAttachment Kept(Guid userId, SandboxFile f) =>
         Attachments.ImageType(f.Name, f.Bytes) is not null
             ? PythonTool.AsAttachment(userId, f)
+            : f.Name.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase)
+            ? new ChatAttachment { UserId = userId, FileName = f.Name, Size = f.Bytes.Length, Kind = "video", Data = f.Bytes, Text = "", Origin = "tool", ContentType = "video/mp4" }
             : new ChatAttachment
             {
                 UserId = userId, FileName = f.Name, Size = f.Bytes.Length, Kind = "file", Data = f.Bytes, Text = "", Origin = "tool",
@@ -339,6 +350,7 @@ public sealed partial class BlenderTool(BlenderClient blender, AppDbContext db, 
                     ".glb" => "model/gltf-binary",
                     ".gltf" => "model/gltf+json",
                     ".stl" => "model/stl",
+                    ".3mf" => "model/3mf",
                     ".obj" => "model/obj",
                     _ => "application/octet-stream",
                 },
