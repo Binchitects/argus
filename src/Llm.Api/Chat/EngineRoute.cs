@@ -913,6 +913,53 @@ public sealed partial class EngineRoute
         return Room.Busy;
     }
 
+    /// <summary>
+    /// A llama.cpp model with a place may still lack the memory: its GPUs, by its estimate (the places the watcher worked out),
+    /// hold less than it needs beside the models up there. Then idle models that may make room and sit on the GPUs it is short
+    /// on are unloaded, smallest first, until it fits (Made); Busy while such a model is in use; null when it fits, or when
+    /// only models that never make room share its GPUs (it is tried as it is: an estimate is not the engine's word).
+    /// </summary>
+    private async Task<Room?> MemoryAsync(string model, IReadOnlyList<EngineModel> others, TimeSpan quiet, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var up = others.Select(m => m.Name).Concat(_coming.Where(c => c.Key != model && now - c.Value < OnItsWay).Select(c => c.Key)).Distinct(StringComparer.Ordinal).ToList();
+        var (fits, shortOn) = Fits(model, up);
+        if (fits)
+        {
+            return null;
+        }
+        var places = engine.Places;
+        var loaded = others.Where(m => m.Status == "loaded").Select(m => m.Name).ToList();
+        var spares = engine.Spare.Where(n => loaded.Contains(n) && places.TryGetValue(n, out var p) && p.PerGpu.Keys.Any(shortOn.Contains)).ToList();
+        if (spares.Count == 0)
+        {
+            return null;
+        }
+        foreach (var spare in spares)
+        {
+            if (!await IdleAsync(spare, ct))
+            {
+                _quiet.TryRemove(spare, out _);
+                continue;
+            }
+            if (clock.GetUtcNow() - _quiet.GetOrAdd(spare, clock.GetUtcNow()) < quiet)
+            {
+                continue;
+            }
+            if (!await UnloadForAsync(spare, model, ct))
+            {
+                continue;
+            }
+            up.Remove(spare);
+            if (Fits(model, up).Fits)
+            {
+                Coming(model);
+                return Room.Made;
+            }
+        }
+        return Room.Busy;
+    }
+
     /// <summary>Unloads an idle model to make room for <paramref name="model"/>: true when the engine was told; one asked for meanwhile keeps it.</summary>
     private async Task<bool> UnloadForAsync(string spare, string model, CancellationToken ct)
     {
@@ -996,6 +1043,11 @@ public sealed partial class EngineRoute
         var sparesUp = others.Count - heldUp;
         if (sparesUp + coming < open)
         {
+            // A place, but maybe not the memory: a model too big for its GPU beside those up there would fail to load.
+            if (await MemoryAsync(model, others, quiet, ct) is { } tight)
+            {
+                return tight;
+            }
             Coming(model);
             return Room.Free;
         }

@@ -52,7 +52,7 @@ public sealed class ChatGatewayException(string message, int? status = null) : E
 /// passes on): a conversation's turn to the slot that holds its start, a side request to the last
 /// slot first (<see cref="EngineRoute"/>, which also makes room for a model that is not loaded).
 /// </summary>
-public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFactory scopes, EngineRoute route, Models.MediaControl media)
+public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFactory scopes, EngineRoute route, Models.MediaControl media)
 {
     /// <summary>The person a request is for, as LiteLLM attributes spend (its user_header_mappings).</summary>
     public const string UserEmailHeader = "X-LLM-User-Email";
@@ -376,6 +376,19 @@ public sealed class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFacto
             var size = overflow is { PromptTokens: { } n, ContextTokens: { } m } ? $" (about {n:N0} of {m:N0} tokens)" : "";
             return $"This chat is longer than the model can read{size}. Compact it (/compact), start a new chat, or remove large attachments.";
         }
-        return "The model could not answer: " + message;
+        // The engine could not load the model: memory, most often (it needs more beside the models it keeps loaded).
+        if (FailedLoad().Match(message) is { Success: true } failed)
+        {
+            return $"{failed.Groups[1].Value} could not be loaded: most often it needs more GPU memory than is free beside the models kept loaded. "
+                + "Try again in a minute or choose another model; an admin can change its placement (Auto fits what is free) or what stays loaded, under Admin → Models.";
+        }
+        // The gateway's classes, which say nothing to the person ("litellm.InternalServerError: InternalServerError: OpenAIException - ").
+        return "The model could not answer: " + GatewayClasses().Replace(message, "").Trim();
     }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"model name=(\S+) failed to load")]
+    private static partial System.Text.RegularExpressions.Regex FailedLoad();
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"(?:\blitellm\.)?\b\w*(?:Error|Exception)\b\s*[:-]\s*")]
+    private static partial System.Text.RegularExpressions.Regex GatewayClasses();
 }
