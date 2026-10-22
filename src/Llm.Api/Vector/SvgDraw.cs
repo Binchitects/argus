@@ -175,13 +175,20 @@ public sealed partial class SvgDraw(OneQuestion one, ChatModels models, SvgRende
         {
             issues.Add($"#{off.Id} is outside the canvas (at {off.X.ToString("0", CultureInfo.InvariantCulture)},{off.Y.ToString("0", CultureInfo.InvariantCulture)}; the canvas is {width}×{height})");
         }
-        if (parts.Count > 0)
+        // A shape with no area (its points on a line) draws nothing a person sees.
+        foreach (var flat in parts.Where(p => p.Tag is "polygon" or "path" or "rect" or "ellipse" && (p.Width < Math.Max(width, height) / 400 || p.Height < Math.Max(width, height) / 400)).Take(5))
         {
-            var (x0, y0) = (Math.Max(0, parts.Min(p => p.X)), Math.Max(0, parts.Min(p => p.Y)));
-            var (x1, y1) = (Math.Min(width, parts.Max(p => p.X + p.Width)), Math.Min(height, parts.Max(p => p.Y + p.Height)));
-            if ((x1 - x0) * (y1 - y0) < width * height * 0.12)
+            issues.Add($"#{flat.Id} has no area (it is {flat.Width.ToString("0.#", CultureInfo.InvariantCulture)}×{flat.Height.ToString("0.#", CultureInfo.InvariantCulture)}): give it width and height, its points around an area");
+        }
+        // The subject without the background (a part covering most of the canvas): too small, it is lost in it.
+        var subject = parts.Where(p => p.Width * p.Height < width * height * 0.85 && p.Tag != "g").ToList();
+        if (subject.Count > 0)
+        {
+            var (x0, y0) = (Math.Max(0, subject.Min(p => p.X)), Math.Max(0, subject.Min(p => p.Y)));
+            var (x1, y1) = (Math.Min(width, subject.Max(p => p.X + p.Width)), Math.Min(height, subject.Max(p => p.Y + p.Height)));
+            if ((x1 - x0) * (y1 - y0) < width * height * 0.2)
             {
-                issues.Add("the drawing fills too little of the canvas: draw it larger, centred");
+                issues.Add($"the drawing fills too little of the canvas (its parts span {(x1 - x0).ToString("0", CultureInfo.InvariantCulture)}×{(y1 - y0).ToString("0", CultureInfo.InvariantCulture)} of {width}×{height}): draw it larger, centred, and spread the parts over the canvas");
             }
         }
         return issues;

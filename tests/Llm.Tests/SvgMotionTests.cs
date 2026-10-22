@@ -100,3 +100,39 @@ public sealed class SvgMotionTests
         Assert.Equal(new Timeline(2.4, false), a.Timeline);
     }
 }
+
+/// <summary>Traced drawings made into parts, and what is said of a drawing that is wrong.</summary>
+public sealed class VectorPartsTests
+{
+    [Fact]
+    public void A_traced_picture_has_its_background_and_its_subject_whose_shapes_can_move_one_after_another()
+    {
+        var named = Llm.Api.Vector.VectorJobs.Named("""
+            <svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+            <path d="M0 0 C40 0 60 0 100 0 C100 40 100 60 100 100 C60 100 40 100 0 100 Z" fill="#FEFEFE" transform="translate(0,0)"/>
+            <path d="M0 0 L20 0 L20 20 Z" fill="#E33" transform="translate(30,30)"/>
+            <path d="M0 0 L10 0 L10 10 Z" fill="#222" transform="translate(50,50)"/>
+            </svg>
+            """);
+        var root = XElement.Parse(named);
+        XNamespace s = SvgSafe.Svg;
+        Assert.Equal("background", (string?)root.Elements(s + "path").Single().Attribute("id"));
+        var subject = root.Elements(s + "g").Single();
+        Assert.Equal(("subject", 2), ((string?)subject.Attribute("id"), subject.Elements().Count()));
+        Assert.Equal(["shape-2", "shape-3"], subject.Elements().Select(e => (string)e.Attribute("id")!));
+        var a = SvgMotion.Apply(named, [new() { Target = "subject", Kind = "pop", Stagger = 0.1 }]);
+        Assert.Empty(a.Problems);
+        Assert.Contains(".m1-2{", a.Markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_shape_with_no_area_and_a_drawing_lost_in_its_canvas_are_said()
+    {
+        var root = XElement.Parse(SvgSafe.Clean("""<svg viewBox="0 0 640 480"><rect id="bg" width="640" height="480"/><polygon id="tree" points="0,0 10,10 20,20"/><rect id="cabin" x="300" y="350" width="50" height="50"/></svg>""").Markup);
+        IReadOnlyList<PartBox> parts = [new("bg", "rect", 0, 0, 640, 480, null, null), new("tree", "polygon", 200, 200, 200, 0.5, null, null), new("cabin", "rect", 300, 350, 50, 50, null, null)];
+        var issues = SvgDraw.Issues(root, parts, 640, 480);
+        Assert.Contains(issues, i => i.StartsWith("#tree has no area", StringComparison.Ordinal));
+        Assert.Contains(issues, i => i.StartsWith("the drawing fills too little of the canvas", StringComparison.Ordinal));
+        Assert.DoesNotContain(issues, i => i.Contains("#bg", StringComparison.Ordinal));
+    }
+}

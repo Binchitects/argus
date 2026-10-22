@@ -122,16 +122,56 @@ public static class VectorJobs
         return [await sp.GetRequiredService<VectorStore>().AddAsync(me, svg, MediaJob.Trace, job.Prompt ?? source?.Prompt, "traced", style.Name, source?.Id, null, ct)];
     }
 
-    /// <summary>A traced drawing's shapes named shape-1, shape-2... in their order (the background first): parts to pick and give motions.</summary>
+    /// <summary>
+    /// A traced drawing made into parts: its first shape, when it covers the canvas, the background (id "background"); the rest in
+    /// one group, the subject (id "subject"), in their order; each shape named shape-1, shape-2... So the subject moves as one,
+    /// or its shapes one after another (a stagger), over a background that stays.
+    /// </summary>
     public static string Named(string traced)
     {
         var root = System.Xml.Linq.XElement.Parse(SvgSafe.Clean(traced).Markup);
+        var box = SvgMotion.ViewBox(root);
+        var paths = root.Elements(SvgSafe.Svg + "path").ToList();
         var n = 0;
         foreach (var path in root.Descendants(SvgSafe.Svg + "path").Where(p => p.Attribute("id") is null))
         {
             path.SetAttributeValue("id", $"shape-{++n}");
         }
+        if (paths.Count > 1 && Covers(paths[0], box))
+        {
+            paths[0].SetAttributeValue("id", "background");
+            paths.RemoveAt(0);
+        }
+        if (paths.Count > 0)
+        {
+            var subject = new System.Xml.Linq.XElement(SvgSafe.Svg + "g", new System.Xml.Linq.XAttribute("id", "subject"));
+            paths[0].AddBeforeSelf(subject);
+            foreach (var p in paths)
+            {
+                p.Remove();
+                subject.Add(p);
+            }
+        }
         return root.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+    }
+
+    /// <summary>Whether a traced path is the whole canvas: vtracer starts with the background as a path from corner to corner.</summary>
+    private static bool Covers(System.Xml.Linq.XElement path, (double X, double Y, double W, double H) box)
+    {
+        var numbers = System.Text.RegularExpressions.Regex.Matches((string?)path.Attribute("d") ?? "", @"-?\d+(\.\d+)?")
+            .Select(m => double.Parse(m.Value, System.Globalization.CultureInfo.InvariantCulture)).ToList();
+        var (tx, ty) = Translate((string?)path.Attribute("transform"));
+        var xs = numbers.Where((_, i) => i % 2 == 0).Select(x => x + tx).ToList();
+        var ys = numbers.Where((_, i) => i % 2 == 1).Select(y => y + ty).ToList();
+        return xs.Count > 1 && ys.Count > 1 && xs.Max() - xs.Min() >= box.W * 0.95 && ys.Max() - ys.Min() >= box.H * 0.95;
+    }
+
+    private static (double X, double Y) Translate(string? transform)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(transform ?? "", @"translate\(\s*(-?[\d.]+)[\s,]+(-?[\d.]+)");
+        return m.Success
+            ? (double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture), double.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture))
+            : (0, 0);
     }
 
     /// <summary>A flat picture from the person's words by the picture model (their credit, today's pictures, its turn on the GPU), kept as their picture.</summary>
