@@ -83,12 +83,12 @@ public sealed class FlowRunner(AppDbContext db, OneQuestion one, AnswerJobs jobs
         _run.Status = status;
         _run.Error = error is { Length: > 2000 } tooLong ? tooLong[..2000] : error;
         _run.FinishedAt = status == WorkflowRun.Waiting ? null : clock.GetUtcNow();
-        if (status != WorkflowRun.Waiting)
+        // A run that went as it should says nothing (a schedule's run every hour is no news); one that failed or stopped does.
+        if (status is WorkflowRun.Failed or WorkflowRun.Stopped && !(status == WorkflowRun.Stopped && error == "Stopped."))
         {
             db.Notifications.Add(new Notification
             {
-                UserId = _workflow.OwnerId, Kind = "workflow", Title = status == WorkflowRun.Done ? $"{_workflow.Name} ran" : $"{_workflow.Name} {status}",
-                Body = error, Link = $"/studio/{_workflow.Id}?run={_run.Id}", CreatedAt = clock.GetUtcNow(),
+                UserId = _workflow.OwnerId, Kind = "workflow", Title = $"{_workflow.Name} {status}", Body = Notifications.NewsText.Plain(error), Link = $"/studio/{_workflow.Id}?run={_run.Id}", CreatedAt = clock.GetUtcNow(),
             });
         }
         await db.SaveChangesAsync(CancellationToken.None);

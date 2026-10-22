@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Llm.Api.Notifications;
 
 /// <summary>What the bell says: one line of news for a person, with where it leads.</summary>
-/// <param name="Kind">answer, task, usage, alert or download (the bell's icon).</param>
+/// <param name="Kind">answer, task, usage, alert, download, workflow, fix or review (the bell's icon).</param>
 /// <param name="Key">The news it is, once per person: given, the same news is not said twice.</param>
 public sealed record News(string Kind, string Title, string? Body = null, string? Link = null, string? Key = null);
 
@@ -23,7 +23,7 @@ public sealed class Notifier(AppDbContext db, Access.AccessService access, TimeP
         }
         var n = new Notification
         {
-            UserId = userId, Kind = news.Kind, Title = Cut(news.Title, 300), Body = news.Body is null ? null : Cut(news.Body, 2000),
+            UserId = userId, Kind = news.Kind, Title = Cut(NewsText.Plain(news.Title, 300) ?? news.Kind, 300), Body = NewsText.Plain(news.Body),
             Link = news.Link, Key = news.Key, CreatedAt = clock.GetUtcNow(),
         };
         db.Notifications.Add(n);

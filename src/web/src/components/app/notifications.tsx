@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Bell, CalendarClock, Coins, Download, MessageSquareText, X, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, Bell, BellOff, CalendarClock, Coins, Download, GitPullRequest, MessageSquareText, Workflow, Wrench, X, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,7 @@ import { toast } from '@/components/ui/toaster'
 import { api } from '@/lib/api'
 import { desktopState, setDesktop, tellDesktop, type DesktopState } from '@/lib/desktop'
 import { cn } from '@/lib/utils'
+import { sections, when } from './news'
 
 export interface NewsItem {
   id: string
@@ -26,7 +27,17 @@ interface Notifications {
   items: NewsItem[]
 }
 
-const icons: Record<string, LucideIcon> = { answer: MessageSquareText, task: CalendarClock, usage: Coins, alert: AlertTriangle, download: Download }
+/** Each kind's icon and its tint (the icon's circle). */
+const kinds: Record<string, { icon: LucideIcon; tint: string }> = {
+  answer: { icon: MessageSquareText, tint: 'bg-primary/10 text-primary' },
+  task: { icon: CalendarClock, tint: 'bg-violet-500/10 text-violet-600 dark:text-violet-400' },
+  usage: { icon: Coins, tint: 'bg-amber-500/10 text-amber-700 dark:text-amber-400' },
+  alert: { icon: AlertTriangle, tint: 'bg-destructive/10 text-destructive-ink' },
+  download: { icon: Download, tint: 'bg-muted text-muted-foreground' },
+  workflow: { icon: Workflow, tint: 'bg-teal-500/10 text-teal-700 dark:text-teal-400' },
+  fix: { icon: Wrench, tint: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' },
+  review: { icon: GitPullRequest, tint: 'bg-sky-500/10 text-sky-700 dark:text-sky-400' },
+}
 
 /**
  * The bell: answers that finished while you were away, scheduled tasks, your credit,
@@ -79,9 +90,12 @@ export function NotificationBell() {
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[22rem] max-w-[calc(100vw-1rem)] p-0" aria-label="Notifications">
+      <PopoverContent align="end" className="w-[24rem] max-w-[calc(100vw-1rem)] overflow-hidden p-0" aria-label="Notifications">
         <div className="flex items-center gap-1 border-b px-3 py-2">
-          <p className="me-auto text-sm font-medium">Notifications</p>
+          <p className="me-auto flex items-center gap-2 text-sm font-semibold">
+            Notifications
+            {unread > 0 && <span className="rounded-full bg-primary px-1.5 text-[0.6875rem] font-semibold text-primary-foreground tabular-nums">{unread}</span>}
+          </p>
           {unread > 0 && (
             <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => read.mutate(undefined)}>
               Mark all read
@@ -94,51 +108,73 @@ export function NotificationBell() {
           )}
         </div>
         {data.data?.items.length ? (
-          <ul className="max-h-96 overflow-x-hidden overflow-y-auto" aria-label="News">
-            {data.data.items.map((n) => {
-              const Icon = icons[n.kind] ?? Bell
-              return (
-                <li key={n.id} className="group relative border-b last:border-b-0">
-                  <button
-                    type="button"
-                    className={cn('flex w-full min-w-0 gap-2.5 py-2 ps-3 pe-9 text-left outline-none hover:bg-accent focus-visible:bg-accent', !n.read && 'bg-primary/5')}
-                    onClick={() => {
-                      if (!n.read) read.mutate(n.id)
-                      setOpen(false)
-                      if (n.link) void navigate(n.link)
-                    }}
-                  >
-                    <Icon className={cn('mt-0.5 size-4 shrink-0', n.kind === 'alert' ? 'text-warning-ink' : 'text-muted-foreground')} aria-hidden="true" />
-                    <span className="grid min-w-0 flex-1 gap-0.5">
-                      <span className="flex items-center gap-2 text-sm font-medium">
-                        <span dir="auto" className="truncate">
-                          {n.title}
-                        </span>
-                        {!n.read && <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-label="New" />}
-                      </span>
-                      {n.body && (
-                        <span dir="auto" className="line-clamp-2 text-xs [overflow-wrap:anywhere] text-muted-foreground">
-                          {n.body}
-                        </span>
-                      )}
-                      <span className="text-[0.6875rem] text-muted-foreground">{new Date(n.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</span>
-                    </span>
-                  </button>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="absolute end-1.5 top-1.5 size-7 opacity-60 group-hover:opacity-100 focus-visible:opacity-100"
-                    onClick={() => clear.mutate(n.id)}
-                    aria-label={`Clear: ${n.title}`}
-                  >
-                    <X />
-                  </Button>
-                </li>
-              )
-            })}
-          </ul>
+          <div className="max-h-[28rem] overflow-x-hidden overflow-y-auto overscroll-contain" aria-label="News">
+            {sections(data.data.items).map(({ name: section, groups }) => (
+              <section key={section} aria-label={section}>
+                <h3 className="sticky top-0 z-10 bg-popover/95 px-3 pt-2 pb-1 text-[0.6875rem] font-semibold tracking-wide text-muted-foreground uppercase backdrop-blur">{section}</h3>
+                <ul className="px-1.5 pb-1.5">
+                  {groups.map(({ item: n, more }) => {
+                    const kind = kinds[n.kind] ?? { icon: Bell, tint: 'bg-muted text-muted-foreground' }
+                    const Icon = kind.icon
+                    const unreadHere = !n.read || more.some((m) => !m.read)
+                    return (
+                      <li key={n.id} className="group relative">
+                        <button
+                          type="button"
+                          className={cn('flex w-full min-w-0 items-start gap-3 rounded-lg py-2 ps-2 pe-9 text-left outline-none transition-colors hover:bg-accent focus-visible:bg-accent', unreadHere && 'bg-primary/[0.04]')}
+                          onClick={() => {
+                            for (const x of [n, ...more]) if (!x.read) read.mutate(x.id)
+                            setOpen(false)
+                            if (n.link) void navigate(n.link)
+                          }}
+                        >
+                          <span className={cn('flex size-8 shrink-0 items-center justify-center rounded-full', kind.tint)} aria-hidden="true">
+                            <Icon className="size-4" />
+                          </span>
+                          <span className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)] gap-0.5">
+                            <span className="flex items-baseline gap-2">
+                              <span dir="auto" className={cn('min-w-0 flex-1 truncate text-sm', unreadHere ? 'font-semibold' : 'font-medium')}>
+                                {n.title}
+                              </span>
+                              <time dateTime={n.createdAt} title={new Date(n.createdAt).toLocaleString()} className="shrink-0 text-[0.6875rem] text-muted-foreground tabular-nums">
+                                {when(n.createdAt)}
+                              </time>
+                            </span>
+                            {n.body && (
+                              <span dir="auto" className="line-clamp-2 text-xs [overflow-wrap:anywhere] text-muted-foreground">
+                                {n.body}
+                              </span>
+                            )}
+                            {more.length > 0 && <span className="text-[0.6875rem] font-medium text-muted-foreground">+{more.length} more like it</span>}
+                          </span>
+                          {unreadHere && <span className="absolute top-3.5 left-0.5 size-1.5 rounded-full bg-primary" aria-label="New" />}
+                        </button>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="absolute end-1 top-1.5 size-7 opacity-100 transition-opacity md:opacity-0 md:group-focus-within:opacity-100 md:group-hover:opacity-100"
+                          onClick={() => {
+                            for (const x of [n, ...more]) clear.mutate(x.id)
+                          }}
+                          aria-label={`Clear: ${n.title}`}
+                        >
+                          <X />
+                        </Button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </section>
+            ))}
+          </div>
         ) : (
-          <p className="px-3 py-6 text-center text-sm text-muted-foreground">Nothing yet. Answers that finish while you are away, scheduled tasks and your credit report here.</p>
+          <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
+            <span className="flex size-10 items-center justify-center rounded-full bg-muted" aria-hidden="true">
+              <BellOff className="size-5 text-muted-foreground" />
+            </span>
+            <p className="text-sm font-medium">You are all caught up</p>
+            <p className="text-xs text-muted-foreground">Answers that finish while you are away, your tasks and workflows, fixes and your credit report here.</p>
+          </div>
         )}
         {desktop !== 'unsupported' && (
           <div className="flex items-center gap-2 border-t px-3 py-2">

@@ -385,9 +385,14 @@ public static class TaskEndpoints
     private static async Task<IResult> NotificationsAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
     {
         var me = await Me(p, users);
-        var items = await db.Notifications.AsNoTracking().Where(x => x.UserId == me.Id && !x.Cleared).OrderByDescending(x => x.CreatedAt).Take(30).ToListAsync(ct);
+        var items = await db.Notifications.AsNoTracking().Where(x => x.UserId == me.Id && !x.Cleared).OrderByDescending(x => x.CreatedAt).Take(50).ToListAsync(ct);
         var unread = await db.Notifications.CountAsync(x => x.UserId == me.Id && x.ReadAt == null && !x.Cleared, ct);
-        return Results.Ok(new { unread, items = items.Select(x => new { x.Id, x.Kind, x.Title, x.Body, x.Link, x.CreatedAt, read = x.ReadAt != null }) });
+        // Plain words, as the bell shows them (news kept before it was made plain too).
+        return Results.Ok(new
+        {
+            unread,
+            items = items.Select(x => new { x.Id, x.Kind, title = Notifications.NewsText.Plain(x.Title, 300) ?? x.Kind, body = Notifications.NewsText.Plain(x.Body), x.Link, x.CreatedAt, read = x.ReadAt != null }),
+        });
     }
 
     private static async Task<IResult> ReadAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, TimeProvider clock, CancellationToken ct)
