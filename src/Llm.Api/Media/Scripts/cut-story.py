@@ -62,9 +62,11 @@ if story.get('music'):
     parts.append(f'[{m}:a]aresample=44100,aformat=channel_layouts=stereo,volume=0.35,apad=whole_dur={total:.3f},atrim=duration={total:.3f},'
                  f'afade=t=in:d=1,afade=t=out:st={max(0.0, total - 2):.3f}:d=2[bed]')
     parts.append('[bed][key]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[ducked]')
-    parts.append('[say][ducked]amix=inputs=2:normalize=0:duration=first[mix]')
+    parts.append('[say][ducked]amix=inputs=2:normalize=0:duration=first[raw]')
 else:
-    parts.append('[said]anull[mix]')
+    parts.append('[said]anull[raw]')
+# As loud as videos are (-16 LUFS), its peaks kept below clipping.
+parts.append('[raw]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=44100[mix]')
 
 # Few threads: the sandbox allows a run 64 processes and 3 GB of address space, and each input's decoder and the
 # encoder would take a thread a core.
