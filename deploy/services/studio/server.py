@@ -8,6 +8,7 @@ a description and lyrics (ACE-Step).
     POST /v1/cutout   a picture's bytes   -> image/png, its background transparent
     POST /v1/speak    {"text", "voice", "exaggeration"}                  -> audio/mpeg
     POST /v1/music    {"prompt", "lyrics", "seconds", "steps", "seed"}    -> audio/mpeg
+    POST /v1/speakers {"audio", "segments": [[start, end]...], "speakers"} -> {"speakers": [n...], "count"}: who spoke each
 
 The weights are read from the model library (STUDIO_DIR), which the app fills
 (src/Llm.Api/Models/MediaModels.cs); nothing is fetched here (HF_HUB_OFFLINE). One model
@@ -210,6 +211,75 @@ async def cutout(request: Request):
     png = io.BytesIO()
     out.save(png, "PNG", optimize=False, compress_level=6)
     return Response(png.getvalue(), media_type="image/png")
+
+
+# Who spoke: each part's voice as Chatterbox's voice encoder hears it (on the CPU: it is small), the parts grouped by how
+# alike their voices are. Parts shorter than this take their neighbour's speaker; farther apart than DIFFERENT, two voices.
+SHORTEST = 0.8
+DIFFERENT = 0.17
+MAX_SEGMENTS = 3000
+_encoder = None
+_encoder_lock = threading.Lock()
+
+
+def _voices():
+    global _encoder
+    with _encoder_lock:
+        if _encoder is None:
+            path = os.path.join(_dir("voice"), "ve.safetensors")
+            if not os.path.isfile(path):
+                raise Refused(503, "The voice model is not in the library yet (Admin → Models → default models downloads it).")
+            from chatterbox.models.voice_encoder import VoiceEncoder
+            from safetensors.torch import load_file
+            encoder = VoiceEncoder()
+            encoder.load_state_dict(load_file(path))
+            _encoder = encoder.eval()
+        return _encoder
+
+
+@app.post("/v1/speakers")
+async def speakers(request: Request):
+    try:
+        body = await request.json()
+        raw = base64.b64decode(body.get("audio") or "", validate=False)
+        segments = [(float(s[0]), float(s[1])) for s in body.get("segments") or []]
+    except Exception:
+        return _error(400, "Send JSON: audio (base64) and segments ([start, end] in seconds).")
+    if not raw or not segments or len(segments) > MAX_SEGMENTS:
+        return _error(400, f"Send the sound and 1 to {MAX_SEGMENTS:,} segments.")
+    most = body.get("speakers")
+    try:
+        wave, rate = sf.read(io.BytesIO(raw), dtype="float32", always_2d=False)
+    except Exception:
+        return _error(400, "The sound is not one this reads (MP3, WAV, FLAC, OGG).")
+    if wave.ndim > 1:
+        wave = wave.mean(axis=1)
+    import librosa
+    from scipy.cluster.hierarchy import fcluster, linkage
+
+    if rate != 16000:
+        wave, rate = librosa.resample(wave, orig_sr=rate, target_sr=16000), 16000
+    long = [i for i, (a, b) in enumerate(segments) if b - a >= SHORTEST]
+    labels = [0] * len(segments)
+    if len(long) >= 2:
+        parts = [wave[int(segments[i][0] * rate):int(segments[i][1] * rate)] for i in long]
+        with torch.inference_mode():
+            found = _voices().embeds_from_wavs(parts, sample_rate=rate)
+        found = found / np.linalg.norm(found, axis=1, keepdims=True)
+        tree = linkage(found, method="average", metric="cosine")
+        groups = fcluster(tree, t=int(most), criterion="maxclust") if most else fcluster(tree, t=DIFFERENT, criterion="distance")
+        # Numbered in the order they first speak.
+        order = {}
+        for i, g in zip(long, groups):
+            labels[i] = order.setdefault(int(g), len(order))
+    # A short part: its neighbour's speaker (the one before, else the one after).
+    known = set(long)
+    for i in range(len(segments)):
+        if i not in known:
+            before = next((labels[j] for j in range(i - 1, -1, -1) if j in known), None)
+            after = next((labels[j] for j in range(i + 1, len(segments)) if j in known), None)
+            labels[i] = before if before is not None else (after or 0)
+    return {"speakers": labels, "count": (max(labels) + 1) if labels else 0}
 
 
 _SENTENCE = re.compile(r"(?<=[.!?…])\s+")
