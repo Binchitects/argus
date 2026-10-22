@@ -510,6 +510,7 @@ public static class IdentityWiring
         Access.AccessBulk.MapAccessBulk(app);
         Safeguards.SafeguardEndpoints.MapSafeguards(app);
         Chat.RoomEndpoints.MapRooms(app);
+        Chat.RoomTranslations.MapRoomTranslations(app);
         Code.CodeEndpoints.MapCode(app);
         Code.ReviewRuleEndpoints.MapReviewRules(app);
         Code.CodeHostLinks.MapCodeHostLinks(app);

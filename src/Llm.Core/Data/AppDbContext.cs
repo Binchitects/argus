@@ -74,6 +74,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Media.MediaItem> MediaItems => Set<Media.MediaItem>();
     public DbSet<Media.MediaJob> MediaJobs => Set<Media.MediaJob>();
     public DbSet<Media.MediaStory> MediaStories => Set<Media.MediaStory>();
+    public DbSet<MessageTranslation> MessageTranslations => Set<MessageTranslation>();
     public DbSet<ScheduledRun> ScheduledRuns => Set<ScheduledRun>();
     public DbSet<TaskEvent> TaskEvents => Set<TaskEvent>();
     public DbSet<Notification> Notifications => Set<Notification>();
@@ -699,6 +700,13 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Error).HasMaxLength(2000);
             e.HasIndex(x => new { x.OwnerId, x.Status });
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<MessageTranslation>(e =>
+        {
+            e.ToTable("message_translations");
+            e.HasKey(x => new { x.MessageId, x.Language });
+            e.Property(x => x.Language).HasMaxLength(12);
+            e.HasOne<ChatMessage>().WithMany().HasForeignKey(x => x.MessageId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<Media.MediaStory>(e =>
         {

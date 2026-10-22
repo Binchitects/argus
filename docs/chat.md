@@ -600,6 +600,14 @@ a room holds (Settings → Chat → **Most people in a room**, 50).
 - **Export.** **Markdown** or **JSON** in the **People** panel: the room's
   title, its people, and every message with who wrote it and when (the
   model's answers by their model). For anyone in the room who may export.
+- **Read in your language.** The languages button in a room's header reads
+  the room in a language of yours (Persian, German, Chinese and 17 more):
+  others' messages and the model's answers are shown translated, each with
+  **Show the original** under it; your own stay as you wrote them. Write in
+  yours: each reader reads it in theirs. A message is translated once into
+  a language, by the model for small steps, and kept for everyone who reads
+  in it; one already in that language is left as it is. The choice is your
+  browser's, for every room.
 
 ## Plans
 

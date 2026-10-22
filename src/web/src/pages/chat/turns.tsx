@@ -27,6 +27,8 @@ import { FeedbackButtons } from './feedback'
 import { compactedText, contextError } from './context'
 import type { Quote } from './quote'
 import { QuoteChip, QuotedLine, QuotePartDialog } from './quote-parts'
+import { TranslatedNote } from './read-in'
+import type { Translation } from './room-language'
 import type { AgentWork, ChatConfig, Compaction, InLine, Message } from './types'
 
 /** Where a chat was compacted: the model reads a summary of everything above instead of the messages. */
@@ -169,9 +171,11 @@ export function QuestionTurn({
   onEdit?: (m: Message, text: string, quote: string | null) => void
   onJumpToQuote?: (m: Message) => boolean
   /** In a room: whose it is (the person's own on the right, others' on the left, with their names), what it replies to, and replying to it. */
-  room?: { me: string; replyOf?: (id: string) => { name: string; text: string } | null; onReply?: (m: Message) => void }
+  room?: { me: string; replyOf?: (id: string) => { name: string; text: string } | null; onReply?: (m: Message) => void; translation?: (m: Message) => Translation | undefined }
 }) {
   const [editing, setEditing] = useState<string | null>(null)
+  const [original, setOriginal] = useState(false)
+  const translated = room?.translation?.(m)
   const [editQuote, setEditQuote] = useState<Quote | null>(null)
   const [viewing, setViewing] = useState<number | null>(null)
   const images = m.attachments.filter((a) => a.kind === 'image')
@@ -239,7 +243,12 @@ export function QuestionTurn({
       {m.quote && editing === null && <QuotedLine quote={m.quote} onJump={onJumpToQuote ? () => onJumpToQuote(m) : undefined} />}
       {editing === null ? (
         <>
-          {typed && <div dir="auto" className="max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[0.9375rem] leading-relaxed whitespace-pre-wrap text-secondary-foreground">{typed}</div>}
+          {typed && (
+            <div dir="auto" className="max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[0.9375rem] leading-relaxed whitespace-pre-wrap text-secondary-foreground">
+              {translated?.text && !original ? translated.text : typed}
+            </div>
+          )}
+          {typed && translated?.text && <TranslatedNote original={original} onToggle={() => setOriginal(!original)} />}
           {files.length > 0 && <QuestionFiles files={files} />}
         </>
       ) : (
@@ -392,6 +401,7 @@ export function AnswerTurn({
   onCompact,
   onQuote,
   onReply,
+  translation,
 }: {
   answer: Message[]
   siblings: Message[]
@@ -435,8 +445,12 @@ export function AnswerTurn({
   onQuote?: (quote: Quote) => void
   /** In a room: reply to this answer (a question to the model about it). */
   onReply?: (m: Message) => void
+  /** In a room read in another language: an answer's translation, when it has one. */
+  translation?: (id: string) => Translation | undefined
 }) {
   const [quoting, setQuoting] = useState(false)
+  // Answers shown as written though the room is read in another language.
+  const [originals, setOriginals] = useState<Set<string>>(() => new Set())
   const results = new Map(answer.filter((m) => m.role === 'tool').map((m) => [m.toolCallId, m]))
   const assistants = answer.filter((m) => m.role === 'assistant')
   const first = assistants[0]
@@ -549,8 +563,11 @@ export function AnswerTurn({
             {a.content && (
               // A finished answer's words can be selected and quoted in a reply (the same element as it was written: nothing is drawn again).
               <div data-quote-source={live ? undefined : a.id}>
-                <Markdown text={a.content} onOpenFile={onOpenFile} onPreview={onPreview} live={live && isLast} />
+                <Markdown text={(!originals.has(a.id) && translation?.(a.id)?.text) || a.content} onOpenFile={onOpenFile} onPreview={onPreview} live={live && isLast} />
               </div>
+            )}
+            {a.content && !live && translation?.(a.id)?.text && (
+              <TranslatedNote original={originals.has(a.id)} onToggle={() => setOriginals((o) => (o.has(a.id) ? new Set([...o].filter((x) => x !== a.id)) : new Set([...o, a.id])))} />
             )}
             {live && isLast && a.content && <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-primary align-middle" aria-hidden="true" />}
             {a.toolCalls?.map((t) =>

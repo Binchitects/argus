@@ -174,6 +174,18 @@ public sealed class FakeModel : HttpMessageHandler
             chunks = [Delta(new JsonObject { ["content"] = jsonMarker.Groups[1].Value }), Finish("stop"), Usage(100, 0, 20)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
+        // Rooms read in another language: each message given back as "[Language] text", or "=" for one starting "[same]".
+        if (system0.StartsWith("You translate messages of a group chat", StringComparison.Ordinal))
+        {
+            var language = System.Text.RegularExpressions.Regex.Match(system0, @"into (\w+),").Groups[1].Value;
+            var given = JsonNode.Parse(lastUser)!["messages"]!.AsArray().OfType<JsonObject>().Select(m => new JsonObject
+            {
+                ["id"] = m["id"]!.GetValue<string>(),
+                ["text"] = m["text"]!.GetValue<string>().StartsWith("[same]", StringComparison.Ordinal) ? "=" : $"[{language}] {m["text"]!.GetValue<string>()}",
+            });
+            chunks = [Delta(new JsonObject { ["content"] = new JsonObject { ["messages"] = new JsonArray([.. given]) }.ToJsonString() }), Finish("stop"), Usage(100, 0, 40)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
         // Stories: as many shots as asked ("Write N shots"), each a fox in the snow, with a line to say over it.
         if (system0.StartsWith("You write storyboards", StringComparison.Ordinal))
         {

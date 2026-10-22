@@ -1637,6 +1637,26 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("memories", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Chat.MessageTranslation", b =>
+                {
+                    b.Property<Guid>("MessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Language")
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Text")
+                        .HasColumnType("text");
+
+                    b.HasKey("MessageId", "Language");
+
+                    b.ToTable("message_translations", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Chat.Notification", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5264,6 +5284,15 @@ namespace Llm.Core.Data.Migrations
                     b.HasOne("Llm.Core.Identity.AppUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.MessageTranslation", b =>
+                {
+                    b.HasOne("Llm.Core.Chat.ChatMessage", null)
+                        .WithMany()
+                        .HasForeignKey("MessageId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

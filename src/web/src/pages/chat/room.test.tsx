@@ -84,4 +84,30 @@ describe('rooms', () => {
     expect(await screen.findByText(/You read this room/)).toBeInTheDocument()
     expect(screen.queryByRole('textbox', { name: 'Message' })).toBeNull()
   })
+
+  it('reads the room in the reader\'s language, others\' messages translated, the original a click away', async () => {
+    const calls = fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config }),
+      'GET /api/chat/conversations': () => ({ json: [{ id: 'r1', title: 'Launch', updatedAt: new Date().toISOString(), isRoom: true, mine: false }] }),
+      'GET /api/chat/conversations/r1': () => ({ json: room() }),
+      'GET /api/chat/conversations/r1/stamp': () => ({ json: { stamp: 'x', answering: false } }),
+      'GET /api/rooms/r1/events': () => ({ hang: true }),
+      'GET /api/rooms/languages': () => ({ json: [{ code: 'en', name: 'English', own: 'English' }, { code: 'fa', name: 'Persian', own: 'فارسی' }] }),
+      'POST /api/rooms/r1/translations': () => ({ json: { translations: [{ id: 'q1', text: 'اول قهوه؟', same: false }], error: null } }),
+    })
+    renderApp('/chat/r1')
+    expect(await screen.findByText('Coffee first?')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Read the room in your language' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: /فارسی/ }))
+    const olivia = screen.getByRole('region', { name: 'Olivia' })
+    expect(await within(olivia).findByText('اول قهوه؟')).toBeInTheDocument()
+    // Only others' messages are asked for; one's own stays as written.
+    expect(calls.find((c) => c.path === '/api/rooms/r1/translations')?.body).toEqual({ language: 'fa', ids: ['q1'] })
+    expect(screen.getByText('What could go wrong?')).toBeInTheDocument()
+    await userEvent.click(within(olivia).getByRole('button', { name: /Show the original/ }))
+    expect(within(olivia).getByText('Coffee first?')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Reading in Persian' })).toBeInTheDocument()
+    expect(localStorage.getItem('arena.room.readIn')).toBe('fa')
+    localStorage.removeItem('arena.room.readIn')
+  })
 })

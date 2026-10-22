@@ -330,3 +330,16 @@ public sealed class SafeguardMark
     public required string Kind { get; set; }
     public DateTimeOffset At { get; set; } = DateTimeOffset.UtcNow;
 }
+
+/// <summary>
+/// A message of a room in another language, made once and kept for everyone who reads the room in it. <see cref="Text"/>
+/// null: the message is in that language already.
+/// </summary>
+public sealed class MessageTranslation
+{
+    public Guid MessageId { get; set; }
+    /// <summary>A language's code (en, fa, de...).</summary>
+    public required string Language { get; set; }
+    public string? Text { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}

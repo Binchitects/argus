@@ -59,6 +59,7 @@ import { findQuoted, type Quote } from './quote'
 import { isReplyKey, useQuotableSelection } from './quotable'
 import { SelectionToolbar } from './selection-toolbar'
 import { NewRoomDialog, RoomPanel } from './room'
+import { useReadIn, useRoomTranslations } from './room-language'
 import { mentionsIn, typingLine, useRoomEvents } from './room-live'
 
 /** The id a question is shown under until the server gives it its own. */
@@ -265,6 +266,9 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   }, [])
   const tree = useMemo(() => new ChatTree(view.messages), [view.messages])
   const path = useMemo(() => tree.path(view.leaf), [tree, view.leaf])
+  // A room read in this reader's language: others' messages translated (once on the server, for all who read in it).
+  const [readIn, setReadIn] = useReadIn()
+  const translations = useRoomTranslations(room ? id : undefined, readIn, path, me?.id)
   const turns = toTurns(path)
   // ↑ in the box: this chat's questions, newest first, then the person's in their other chats.
   const sentHere = useMemo(() => path.flatMap((m) => (m.role === 'user' ? [m.content] : [])).reverse(), [path])
@@ -1024,7 +1028,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
             onMove={id ? (assistantId) => void move(assistantId) : undefined}
             onShare={id && path.length ? () => setSharing(true) : undefined}
             onCompact={canCompact ? () => void compact() : undefined}
-            room={room ? { people: room.members.length, here: roomLive.here.length, onOpen: () => setPeopleOpen(true) } : undefined}
+            room={room ? { people: room.members.length, here: roomLive.here.length, onOpen: () => setPeopleOpen(true), readIn: { value: readIn, onChange: setReadIn } } : undefined}
             onMakeRoom={id && data && !room && !data.origin ? () => setMakingRoom(true) : undefined}
           />
           {empty ? (
@@ -1136,7 +1140,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                               onSwitch={switchTo}
                               onEdit={room && t.question.author?.id !== me?.id ? undefined : edit}
                               onJumpToQuote={jumpToQuoted}
-                              room={room ? { me: me?.id ?? '', replyOf, onReply: room.role === 'viewer' ? undefined : setReplyTo } : undefined}
+                              room={room ? { me: me?.id ?? '', replyOf, onReply: room.role === 'viewer' ? undefined : setReplyTo, translation: (m) => translations.of(m.id) } : undefined}
                             />
                           )}
                           {arena && t.question ? (
@@ -1182,6 +1186,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                               research={answering && i === lastTurn && !!view.research}
                               onTrace={me?.isAdmin ? setTracing : undefined}
                               onReply={room && room.role !== 'viewer' ? setReplyTo : undefined}
+                              translation={room ? translations.of : undefined}
                               busy={streaming}
                               feedbackIn={id}
                               onCompact={canCompact && i === lastTurn ? () => void compact() : undefined}
