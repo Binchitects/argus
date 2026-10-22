@@ -333,7 +333,7 @@ describe('Code Arena in the browser', () => {
     renderCode()
     await userEvent.upload(await screen.findByLabelText('Attach files'), new File(['42'], 'numbers.txt', { type: 'text/plain' }))
     const going = await screen.findByRole('list', { name: 'Files to send' })
-    expect(within(going).getByText('numbers.txt')).toBeInTheDocument()
+    expect(await within(going).findByText('numbers.txt')).toBeInTheDocument()
     await ask('What do they say?')
     await waitFor(() =>
       expect(calls.find((c) => c.path === '/api/messages')?.body).toEqual({
@@ -343,7 +343,8 @@ describe('Code Arena in the browser', () => {
     )
     // Sent: the box is empty of them, and the question shows them.
     await waitFor(() => expect(screen.queryByRole('list', { name: 'Files to send' })).not.toBeInTheDocument())
-    expect(await screen.findByText('numbers.txt')).toBeInTheDocument()
+    // Asked again until it holds: the question's list re-renders as the answer comes, replacing what was found.
+    await waitFor(() => expect(screen.getByText('numbers.txt')).toBeInTheDocument())
     now.state = { ...now.state, busy: false }
     end()
   })
