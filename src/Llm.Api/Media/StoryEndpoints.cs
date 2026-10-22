@@ -69,11 +69,11 @@ public static class StoryEndpoints
     }
 
     /// <summary>Each story's video file, once cut.</summary>
-    private static async Task<Dictionary<Guid, Guid>> VideosAsync(AppDbContext db, IReadOnlyList<MediaStory> stories, CancellationToken ct)
+    private static async Task<Dictionary<Guid, Guid?>> VideosAsync(AppDbContext db, IReadOnlyList<MediaStory> stories, CancellationToken ct)
     {
         var items = stories.Select(s => s.VideoItemId).OfType<Guid>().ToList();
         var files = await db.MediaItems.AsNoTracking().Where(i => items.Contains(i.Id)).ToDictionaryAsync(i => i.Id, i => i.AttachmentId, ct);
-        return stories.Where(s => s.VideoItemId is { } v && files.ContainsKey(v)).ToDictionary(s => s.Id, s => files[s.VideoItemId!.Value]);
+        return stories.ToDictionary(s => s.Id, s => s.VideoItemId is { } v && files.TryGetValue(v, out var f) ? f : (Guid?)null);
     }
 
     private static async Task<IResult> GetAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, TimeProvider clock, CancellationToken ct)

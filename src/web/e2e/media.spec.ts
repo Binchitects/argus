@@ -54,3 +54,31 @@ test('a picture is made from words, then changed only where painted', async ({ p
     for (const i of await list()) if (!before.has(i.id)) await page.request.delete(`/api/media/items/${i.id}`, { headers })
   }
 })
+
+test('a storyboard is written from a few words and opens to be changed', async ({ page, isMobile }, info) => {
+  test.skip(!live, 'needs the deployed stack (E2E_CHAT=1)')
+  test.setTimeout(300_000)
+  const errors = watchConsole(page)
+  let story: string | null = null
+  try {
+    await page.goto('/media')
+    await page.getByRole('radio', { name: 'Video' }).click()
+    await page.getByLabel('What the video is about').fill(`A short welcome to our book club (${isMobile ? 'phone' : 'desk'}): we meet on the first Monday, read one novel a month.`)
+    await page.getByRole('radio', { name: '3 shots' }).click()
+    const written = page.waitForResponse((r) => r.url().endsWith('/api/media/stories') && r.request().method() === 'POST', { timeout: 180_000 })
+    await page.getByRole('button', { name: /Write the storyboard/ }).click()
+    story = ((await (await written).json()) as { id: string }).id
+    const dialog = page.getByRole('dialog')
+    const shots = dialog.getByRole('list', { name: 'Shots' })
+    await expect(shots.getByLabel('What the narrator says').first()).not.toHaveValue('')
+    expect(await shots.getByLabel('What is seen (in English)').count()).toBeGreaterThanOrEqual(2)
+    await expect(dialog.getByRole('button', { name: /^Make the video$/ })).toBeEnabled()
+    await screenshot(page, info, 'media-storyboard')
+    await expectAccessible(page, info, 'media-storyboard')
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('region', { name: 'Your videos' })).toBeVisible()
+    expect(errors).toEqual([])
+  } finally {
+    if (story) await page.request.delete(`/api/media/stories/${story}`, { headers })
+  }
+})

@@ -85,6 +85,9 @@ public sealed class MediaStoryTests(AppFixture app)
         Assert.Equal(("The fox in winter", "calm piano, soft strings", "draft"), (written.GetProperty("title").GetString(), written.GetProperty("music").GetString(),
             written.GetProperty("status").GetString()));
         var shots = written.GetProperty("shots").EnumerateArray().ToList();
+        // Not made yet: no video, in the list as on its own.
+        Assert.Equal(JsonValueKind.Null, written.GetProperty("video").ValueKind);
+        Assert.Equal(JsonValueKind.Null, (await b.JsonAsync(await b.GetAsync("/api/media/stories")))[0].GetProperty("video").ValueKind);
         Assert.Equal(3, shots.Count);
         Assert.Equal(("Line 2 of the story.", 3), (shots[1].GetProperty("narration").GetString(), shots[1].GetProperty("seconds").GetInt32()));
 
