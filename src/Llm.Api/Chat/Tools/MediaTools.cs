@@ -127,12 +127,9 @@ public static partial class Voices
 
 /// <summary>Short videos from the stack's video server (its video model, Admin -> Models), kept as the person's files.</summary>
 /// <remarks>The video server is not behind the gateway: each clip is booked in the gateway's request log by the app, at its price per second.</remarks>
-public sealed partial class VideoTool(IHttpClientFactory http, Operations.Modules modules, AppDbContext db, Safeguards.Safeguards safeguards, MediaControl media,
+public sealed class VideoTool(Llm.Api.Media.SdServer server, Operations.Modules modules, AppDbContext db, Safeguards.Safeguards safeguards, MediaControl media,
     Gateway.PriceBook prices, Gateway.SpendLog spendLog, ChatKey chatKey, Storage.StorageQuotas quotas, Gateway.Credit credit, ModelPolicy policy, GpuShare gpu) : IChatTool
 {
-    public const string Client = "videogen";
-
-
     public string Id => "video";
     public string Title => "Video generation";
     public string Description => "Makes short video clips from a description, with the stack's video model.";
@@ -197,10 +194,10 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
             var started = DateTimeOffset.UtcNow;
             try
             {
-                (video, type) = await GenerateAsync(model, prompt, seconds, token);
+                (video, type) = await server.VideoAsync(model, prompt, seconds, token);
                 media.Touch(model.Name);
             }
-            catch (Exception ex) when (ex is HttpRequestException or VideoException or System.Text.Json.JsonException)
+            catch (Exception ex) when (ex is HttpRequestException or Llm.Api.Media.SdServer.SdException or System.Text.Json.JsonException)
             {
                 return new ToolResult($"The video could not be made: {ex.Message}", IsError: true);
             }
@@ -218,57 +215,6 @@ public sealed partial class VideoTool(IHttpClientFactory http, Operations.Module
                 ["shown_to_the_person"] = true, ["file"] = file.FileName, ["seconds"] = seconds, ["model"] = model.Name,
             }.ToJsonString(Mcp.Plain), Files: [file]) { Cost = cost };
         });
-
-    private sealed class VideoException(string message) : Exception(message);
-
-    /// <summary>One clip: a job at the server, asked about every few seconds until it is done (or the answer stops, which cancels it).</summary>
-    private async Task<(byte[] Video, string Type)> GenerateAsync(MediaControl.Model model, string prompt, int seconds, CancellationToken ct)
-    {
-        var client = http.CreateClient(Client);
-        var m = model.Row;
-        var fps = m.Fps ?? 16;
-        // Wan takes 4n + 1 frames.
-        var frames = seconds * fps / 4 * 4 + 1;
-        var body = new JsonObject
-        {
-            ["prompt"] = prompt, ["negative_prompt"] = m.NegativePrompt ?? "blurry, distorted, low quality, watermark, text", ["width"] = m.Width ?? 640,
-            ["height"] = m.Height ?? 352, ["seed"] = -1, ["video_frames"] = frames, ["fps"] = fps, ["output_format"] = "webm",
-            ["sample_params"] = new JsonObject
-            {
-                ["sample_method"] = m.Sampler ?? "euler", ["sample_steps"] = m.Steps ?? 20, ["flow_shift"] = m.FlowShift ?? 5.0,
-                ["guidance"] = new JsonObject { ["txt_cfg"] = m.CfgScale ?? 5.0 },
-            },
-        };
-        using var submitted = await client.PostAsJsonAsync(MediaModels.VideoUrl + "/sdcpp/v1/vid_gen", body, ct);
-        var job = await submitted.Content.ReadFromJsonAsync<JsonObject>(ct);
-        if (!submitted.IsSuccessStatusCode || job?["poll_url"]?.GetValue<string>() is not { } poll)
-        {
-            throw new VideoException(job?["error"]?["message"]?.GetValue<string>() ?? $"the server answered HTTP {(int)submitted.StatusCode}");
-        }
-        try
-        {
-            while (true)
-            {
-                await Task.Delay(TimeSpan.FromSeconds(3), ct);
-                // In use while it works: not unloaded as idle under a long job.
-                media.Touch(model.Name);
-                var now = await client.GetFromJsonAsync<JsonObject>(MediaModels.VideoUrl + poll, ct);
-                switch (now?["status"]?.GetValue<string>())
-                {
-                    case "completed":
-                        var result = now["result"]!;
-                        return (Convert.FromBase64String(result["b64_json"]!.GetValue<string>()), result["mime_type"]?.GetValue<string>() ?? "video/webm");
-                    case "failed" or "cancelled":
-                        throw new VideoException(now["error"]?["message"]?.GetValue<string>() ?? "the server gave up");
-                }
-            }
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            using var _ = await client.PostAsync(MediaModels.VideoUrl + poll + "/cancel", null, CancellationToken.None);
-            throw;
-        }
-    }
 }
 
 /// <summary>A text read aloud into a sound file, by the gateway's text to speech, in the person's voice for its language.</summary>

@@ -298,7 +298,7 @@ public sealed class TokenCostTests(AppFixture app)
         var video = new FakeVideo();
         await using var f = app.Create(app.ConnectionStringFor("video_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
             new Dictionary<string, string?> { ["Modules:videogen"] = "true" },
-            services => services.AddHttpClient(Llm.Api.Chat.Tools.VideoTool.Client).ConfigurePrimaryHttpMessageHandler(() => video)
+            services => services.AddHttpClient(Llm.Api.Media.SdServer.Client).ConfigurePrimaryHttpMessageHandler(() => video)
                 .Services.AddHttpClient(MediaControl.Client).ConfigurePrimaryHttpMessageHandler(() => video));
         var (b, _, email) = await PersonAsync(f);
         var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { tools = new[] { "video" } }))).GetProperty("id").GetGuid();

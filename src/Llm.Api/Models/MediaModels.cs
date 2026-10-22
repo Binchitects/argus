@@ -12,6 +12,9 @@ public static class MediaModels
     public const string VideoDir = "video/wan2.2-ti2v-5b";
     public const string EmbedDir = "embed";
     public const string LayaDir = "laya";
+    /// <summary>The picture server's upscalers (each file in it one), and the one it has: Real-ESRGAN x4plus, as safetensors.</summary>
+    public const string UpscalerDir = "image/upscale";
+    public const string Upscaler = "RealESRGAN_x4plus.safetensors";
 
     /// <summary>What the gateway and the chat call them.</summary>
     public const string ImageModel = "FLUX.2-klein-4B";
@@ -45,6 +48,8 @@ public static class MediaModels
             new("leejet/FLUX.2-klein-4B-GGUF", "flux-2-klein-4b-Q4_0.gguf", ImageDir),
             new("unsloth/Qwen3-4B-GGUF", "Qwen3-4B-Q4_K_M.gguf", ImageDir),
             new("Comfy-Org/flux2-klein-4B", "split_files/vae/flux2-vae.safetensors", ImageDir),
+            // The media studio's Enlarge (67 MB).
+            new("Comfy-Org/Real-ESRGAN_repackaged", Upscaler, UpscalerDir),
         ]),
         ("embed",
         [

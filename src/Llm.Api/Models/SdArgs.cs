@@ -32,11 +32,15 @@ public static class SdArgs
     /// How a picture or video model's row runs: its files by role, its GPU budget, flash attention, tiling, its defaults
     /// (steps, CFG, guidance, flow shift, sampler, scheduler), then its own options; decoding where its row says ("auto": on
     /// the GPU with a budget of <see cref="MediaModel.VaeGpuGb"/> and its weights in RAM when that much (and 1 GB more) is
-    /// free as it loads, else on the CPU).
+    /// free as it loads, else on the CPU); and the folder of upscalers, when a picture server has one (it enlarges pictures).
     /// </summary>
-    public static SdModel Of(MediaModel m)
+    public static SdModel Of(MediaModel m, string? upscalers = null)
     {
         var args = new List<string>();
+        if (upscalers is not null)
+        {
+            args.AddRange(["--hires-upscalers-dir", upscalers]);
+        }
         if (m.MaxVramGb is { } vram)
         {
             args.AddRange(["--max-vram", N(vram)]);

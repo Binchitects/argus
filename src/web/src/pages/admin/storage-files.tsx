@@ -214,12 +214,12 @@ function useDeleteFiles() {
   const run = async (files: FileRow[], done: () => void) => {
     const bytes = files.reduce((a, f) => a + f.bytes, 0)
     const held = files.filter((f) => f.held).length
-    const inChats = files.filter((f) => f.state === 'chat' || f.state === 'assistant' || f.state === 'deck').length
+    const inChats = files.filter((f) => f.state === 'chat' || f.state === 'assistant' || f.state === 'deck' || f.state === 'studio').length
     const ok = await confirm({
       title: `Delete ${plural(files.length, 'file')} (${size(bytes)})?`,
       description: [
         'They are gone for good; this cannot be undone.',
-        inChats ? `${plural(inChats, 'file')} ${inChats === 1 ? 'is' : 'are'} in chats, assistants or decks: they keep their words, without the file.` : null,
+        inChats ? `${plural(inChats, 'file')} ${inChats === 1 ? 'is' : 'are'} in chats, assistants, decks or the media studio: they keep their words, without the file.` : null,
         held ? `${plural(held, 'file')} of people on legal hold ${held === 1 ? 'stays' : 'stay'}.` : null,
       ].filter(Boolean).join(' '),
       confirm: 'Delete',

@@ -610,7 +610,7 @@ public sealed class StorageTests(AppFixture app)
         gateway.Models.Add(new GatewayModel(Llm.Api.Models.MediaModels.TextToSpeech, null, null, false, false, false, null, null, null, Mode: "audio_speech"));
         var video = new NoVideo();
         await using var s = NewApp(new() { ["Storage:PersonMegabytes"] = "1", ["Modules:videogen"] = "true" }, gateway, services => services
-            .AddHttpClient(Llm.Api.Chat.Tools.VideoTool.Client).ConfigurePrimaryHttpMessageHandler(() => video)
+            .AddHttpClient(Llm.Api.Media.SdServer.Client).ConfigurePrimaryHttpMessageHandler(() => video)
             .Services.AddHttpClient(Llm.Api.Models.MediaControl.Client).ConfigurePrimaryHttpMessageHandler(() => video));
         var f = s.App;
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);

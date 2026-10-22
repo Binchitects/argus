@@ -45,6 +45,7 @@ export const routes: RouteObject[] = [
           { path: 'data/boards/:id', ...lazy(() => import('@/pages/data/boards').then((m) => ({ Component: m.BoardPage }))) },
           { path: 'decks', ...lazy(() => import('@/pages/decks/decks').then((m) => ({ Component: m.DecksPage }))) },
           { path: 'decks/:id', ...lazy(() => import('@/pages/decks/decks').then((m) => ({ Component: m.DeckPage }))) },
+          { path: 'media', ...lazy(() => import('@/pages/media/media').then((m) => ({ Component: m.MediaPage }))) },
           { path: 'studio', ...lazy(() => import('@/pages/studio/studio').then((m) => ({ Component: m.StudioPage }))) },
           { path: 'studio/:id', ...lazy(() => import('@/pages/studio/workflow').then((m) => ({ Component: m.WorkflowPage }))) },
           { path: 'rooms/join/:token', ...lazy(() => import('@/pages/room-join').then((m) => ({ Component: m.RoomJoinPage }))) },

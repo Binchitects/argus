@@ -23,6 +23,7 @@ import hermes from '@docs/hermes.md?raw'
 import integrations from '@docs/integrations.md?raw'
 import knowledge from '@docs/knowledge.md?raw'
 import mcp from '@docs/mcp.md?raw'
+import media from '@docs/media.md?raw'
 import plugins from '@docs/plugins.md?raw'
 import settings from '@docs/settings.md?raw'
 import studio from '@docs/studio.md?raw'
@@ -72,6 +73,7 @@ export const manualGroups: ManualGroup[] = [
     docs: [
       doc('chat.md', 'Chat', 'Models, thinking, files, tools, assistants, prompts, scheduled tasks and what each person sees.', 'everyone', chat),
       doc('data.md', 'Ask your data', 'The company\'s databases asked in words: the SQL shown and explained, charts, boards; connecting a database read only.', 'everyone', data),
+      doc('media.md', 'Media studio', 'Pictures from words, changed where painted, varied, enlarged and set moving.', 'everyone', media),
       doc('decks.md', 'Decks', 'Slides from a few words, changed by asking, presented, downloaded as PowerPoint or PDF; the company\'s template.', 'everyone', decks),
       doc('studio.md', 'Agent Studio', 'Workflows that do the work as you: triggers, steps, approvals, runs to replay, forms to share.', 'everyone', studio),
       doc('integrations.md', 'Bots, email and the app', 'Slack, Mattermost and Teams bots, email in, the installed app with push notifications, the browser extension.', 'everyone', integrations),

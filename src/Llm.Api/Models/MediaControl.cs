@@ -141,6 +141,12 @@ public sealed partial class MediaControl : BackgroundService
     /// <summary>A media model: what it does, the server it runs on, its id there (the speech server's), and its row.</summary>
     public sealed record Model(string Name, string Mode, string Server, string? Id, MediaModel Row);
 
+    /// <summary>Whether the picture server can enlarge pictures: its upscaler is in the library.</summary>
+    public bool CanEnlarge => File.Exists(Path.Combine(engine.Value.LibraryDir, MediaModels.UpscalerDir, MediaModels.Upscaler));
+
+    /// <summary>A picture model's server reads the upscalers' folder, once the upscaler is there.</summary>
+    private string? UpscalersFor(Model m) => m.Mode == Llm.Core.Models.MediaModes.Image && CanEnlarge ? MediaModels.UpscalerDir : null;
+
     private volatile IReadOnlyList<Model>? _models;
 
     /// <summary>Every picture, video and speech model, as last read.</summary>
@@ -620,7 +626,7 @@ public sealed partial class MediaControl : BackgroundService
         _target[server] = target.Name;
         var want = wanted is not null;
         var m = target;
-        var sd = SdArgs.Of(m.Row);
+        var sd = SdArgs.Of(m.Row, UpscalersFor(m));
         // Another model, or its settings changed: a new generation, which its script starts.
         var body = SdArgs.Conf(sd, 0, true).Split('\n', 3)[2];
         var was = _body.GetOrAdd(server, s => Body(s) ?? body);

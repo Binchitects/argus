@@ -12,8 +12,8 @@ public sealed record SpendChange(int Rows, decimal Before, decimal After, int Un
 
 /// <summary>
 /// Writes to the gateway's request log (LiteLLM_SpendLogs), where every page reads spend from (usage,
-/// credit, the dashboards, chargeback): a video clip, which the video server makes without the gateway,
-/// booked as the gateway books a picture; and past requests' cost worked out again at today's prices
+/// credit, the dashboards, chargeback): a video clip, and a picture the media studio has the picture server
+/// make itself, both made without the gateway, booked as the gateway books a picture; and past requests' cost worked out again at today's prices
 /// (CostRecalculation). Only these rows: the gateway's own running totals are left as they are.
 /// </summary>
 public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfiguration config, ILogger<SpendLog> logger)
@@ -27,12 +27,23 @@ public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfig
         ApplicationName = "llm-app spend",
     }.ConnectionString;
 
+    /// <summary>The call type of a picture the app booked (LiteLLM's own name for image generation).</summary>
+    public const string PictureCall = "aimage_generation";
+
     /// <summary>
-    /// A clip made for a person through the chat: in the log as the chat's request (its key, its person),
-    /// with its length kept so its cost can be worked out again. A log that cannot be written is logged and
-    /// left: the clip is made, and its cost is still in the chat.
+    /// A clip made for a person (in a chat or the media studio): in the log as the chat's request (its key, its person),
+    /// with its length kept so its cost can be worked out again. A log that cannot be written is logged and left: the clip
+    /// is made, and its cost is still where it was made.
     /// </summary>
-    public async Task BookVideoAsync(string email, string chatKeyHash, string model, double seconds, decimal cost, DateTimeOffset start, DateTimeOffset end, CancellationToken ct)
+    public Task BookVideoAsync(string email, string chatKeyHash, string model, double seconds, decimal cost, DateTimeOffset start, DateTimeOffset end, CancellationToken ct) =>
+        BookAsync(VideoCall, Models.MediaModels.VideoUrl, email, chatKeyHash, model, cost, start, end, new JsonObject { ["video_seconds"] = seconds }, ct);
+
+    /// <summary>Pictures made for a person by the picture server itself (the media studio: changed, enlarged), as the gateway books one.</summary>
+    public Task BookPicturesAsync(string email, string chatKeyHash, string model, int count, decimal cost, DateTimeOffset start, DateTimeOffset end, CancellationToken ct) =>
+        BookAsync(PictureCall, Models.MediaModels.ImageUrl, email, chatKeyHash, model, cost, start, end, new JsonObject { ["pictures"] = count }, ct);
+
+    private async Task BookAsync(string call, string apiBase, string email, string chatKeyHash, string model, decimal cost, DateTimeOffset start, DateTimeOffset end,
+        JsonObject metadata, CancellationToken ct)
     {
         try
         {
@@ -43,18 +54,17 @@ public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfig
                   "startTime", "endTime", model, model_group, custom_llm_provider, api_base, "user", metadata, end_user, status)
                 values (@id, @call, @key, @spend, 0, 0, 0, @start, @end, @model, @model, 'arena', @base, '', @metadata::jsonb, @email, 'success')
                 """, conn);
-            insert.Parameters.AddWithValue("id", "arena-video-" + Guid.NewGuid().ToString("N"));
-            insert.Parameters.AddWithValue("call", VideoCall);
+            insert.Parameters.AddWithValue("id", $"arena-{(call == VideoCall ? "video" : "picture")}-{Guid.NewGuid():N}");
+            insert.Parameters.AddWithValue("call", call);
             insert.Parameters.AddWithValue("key", chatKeyHash);
             insert.Parameters.AddWithValue("spend", (double)cost);
             insert.Parameters.AddWithValue("start", DateTime.SpecifyKind(start.UtcDateTime, DateTimeKind.Unspecified));
             insert.Parameters.AddWithValue("end", DateTime.SpecifyKind(end.UtcDateTime, DateTimeKind.Unspecified));
             insert.Parameters.AddWithValue("model", model);
-            insert.Parameters.AddWithValue("base", Models.MediaModels.VideoUrl);
-            insert.Parameters.AddWithValue("metadata", new JsonObject
-            {
-                ["user_api_key_alias"] = Chat.ChatKey.Alias, ["video_seconds"] = seconds, ["booked_by"] = "app",
-            }.ToJsonString());
+            insert.Parameters.AddWithValue("base", apiBase);
+            metadata["user_api_key_alias"] = Chat.ChatKey.Alias;
+            metadata["booked_by"] = "app";
+            insert.Parameters.AddWithValue("metadata", metadata.ToJsonString());
             insert.Parameters.AddWithValue("email", email);
             await insert.ExecuteNonQueryAsync(ct);
         }
@@ -142,6 +152,6 @@ public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfig
 
     public static string Money(decimal value) => value.ToString(value is > 0 and < 0.01m ? "$0.0000" : "$0.00", CultureInfo.InvariantCulture);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "A video clip's cost could not be booked in the gateway's request log: {Reason}")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "A clip's or picture's cost could not be booked in the gateway's request log: {Reason}")]
     private static partial void LogNotBooked(ILogger logger, string reason);
 }

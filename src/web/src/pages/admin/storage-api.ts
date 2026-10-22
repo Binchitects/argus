@@ -117,7 +117,7 @@ export interface StorageReport {
 }
 
 export type Origin = 'upload' | 'picture' | 'video' | 'speech' | 'tool'
-export type FileState = 'chat' | 'assistant' | 'deck' | 'deleted' | 'none'
+export type FileState = 'chat' | 'assistant' | 'deck' | 'studio' | 'deleted' | 'none'
 
 export interface FileRow {
   id: string
@@ -187,6 +187,7 @@ export const states: Record<FileState, string> = {
   chat: 'In a chat',
   assistant: "An assistant's",
   deck: 'On a deck',
+  studio: 'In the media studio',
   deleted: 'In a deleted chat',
   none: 'In no chat',
 }

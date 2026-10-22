@@ -254,6 +254,21 @@ export const topics = {
     manual: { doc: 'decks', section: 'changing-it' },
   },
 
+  media: {
+    title: 'Media studio',
+    about: 'Pictures from a few words; one changed by saying how (all of it, or only the part painted over), made a little different, enlarged, or set moving.',
+    parts: [
+      { name: 'Describe a picture', text: 'What to draw, its **Shape** and **How many** (one, two or four). **Upload a picture** brings one of yours in to change it.' },
+      { name: 'Your pictures and clips', text: 'Newest first; work going on shows where it will be, with what it is doing (waiting for its turn on the GPU, drawing). **Show** picks pictures or clips.' },
+      { name: 'A picture, open', text: '**Change** it by saying how, all of it or only the part you paint over (**Paint the part**: brush, erase, undo); **Variations**; **Enlarge** (four times as large); **Move** (a short clip that starts from it); **Download** or **Delete**. **Made from** opens the one it came from.' },
+    ],
+    tasks: [
+      { title: 'Change only part of a picture', steps: ['Open the picture and choose **Change**.', 'Press **Paint the part** and paint over what should change.', 'Say what it becomes ("a blue knitted hat") and press **Change the painted part**: the rest stays as it was.'] },
+      { title: 'Make a picture move', steps: ['Open the picture and choose **Move**.', 'Say what happens and how long; press **Make the clip**.', 'It takes a few minutes: the bell says when it is ready.'] },
+    ],
+    manual: { doc: 'media', section: 'media-studio' },
+  },
+
   studio: {
     title: 'Agent Studio',
     about: 'Workflows that do the work as you: a trigger, steps that think, decide and wait for your yes, and what they give out. Every run kept, to replay.',

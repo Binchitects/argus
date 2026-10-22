@@ -291,7 +291,8 @@ public static class IdentityWiring
         services.AddScoped<Chat.Tools.VideoTool>();
         services.AddScoped<Chat.Tools.SpeechTool>();
         services.AddScoped<Chat.Media>();
-        services.AddHttpClient(Chat.Tools.VideoTool.Client, c => c.Timeout = TimeSpan.FromMinutes(2));
+        services.AddHttpClient(Media.SdServer.Client, c => c.Timeout = TimeSpan.FromMinutes(2));
+        services.AddScoped<Media.SdServer>();
         services.AddSingleton<Chat.Tools.CalculatorTool>();
         services.AddSingleton<Chat.Tools.TimeTool>();
         services.AddSingleton<Chat.Tools.AskTool>();
@@ -332,6 +333,7 @@ public static class IdentityWiring
         services.AddScoped<Code.Fixes.FixAgent>();
         services.AddSingleton<Code.Fixes.FixRuns>();
         services.AddSingleton<Panels.PanelRuns>();
+        services.AddSingleton<Media.MediaJobs>();
         services.AddScoped<Chat.Tools.DataTool>();
         services.AddSingleton<Insights.BoardRefresher>();
         services.AddHostedService(sp => sp.GetRequiredService<Insights.BoardRefresher>());
@@ -515,6 +517,7 @@ public static class IdentityWiring
         Studio.StudioEndpoints.MapStudio(app);
         Code.Fixes.FixEndpoints.MapFixes(app);
         Panels.PanelEndpoints.MapPanels(app);
+        Media.MediaEndpoints.MapMedia(app);
         Apps.AppEndpoints.MapApps(app);
         Plans.PlanEndpoints.MapPlans(app);
         app.MapForwardAuth();

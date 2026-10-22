@@ -9,7 +9,7 @@ namespace Llm.Api.Storage;
 
 /// <summary>A file of the chat as the storage page lists it: whose, from where, in which chat, and what it takes.</summary>
 /// <param name="Origin">upload, picture, video, speech (made by those tools) or tool (Python's files, long tool results).</param>
-/// <param name="State">chat (in a chat), assistant (an assistant's file only), deck (a picture on a deck only), deleted (in chats deleted under legal hold only) or none (in no chat).</param>
+/// <param name="State">chat (in a chat), assistant (an assistant's file only), deck (a picture on a deck only), studio (in the media studio only), deleted (in chats deleted under legal hold only) or none (in no chat).</param>
 /// <param name="Bytes">What it takes: the file, its text, a video's sound track and the pages drawn of it.</param>
 /// <param name="Held">Its owner is on legal hold: it is never deleted.</param>
 public sealed record FileRow(Guid Id, Guid UserId, string Person, string? Email, string Name, string Kind, string ContentType, string Origin, string State,
@@ -71,6 +71,7 @@ public sealed class StorageFiles(AppDbContext db)
                 CASE WHEN l.id IS NOT NULL THEN 'chat'
                      WHEN EXISTS (SELECT 1 FROM project_files pf WHERE pf."AttachmentId" = a."Id") THEN 'assistant'
                      WHEN EXISTS (SELECT 1 FROM decks d WHERE d."OwnerId" = a."UserId" AND strpos(d."Slides", a."Id"::text) > 0) THEN 'deck'
+                     WHEN EXISTS (SELECT 1 FROM media_items mi WHERE mi."AttachmentId" = a."Id") THEN 'studio'
                      WHEN f.id IS NOT NULL THEN 'deleted'
                      ELSE 'none' END AS state,
                 CASE WHEN a."Origin" IS NOT NULL THEN a."Origin"
@@ -86,7 +87,7 @@ public sealed class StorageFiles(AppDbContext db)
         """;
 
     public static readonly IReadOnlySet<string> Origins = new HashSet<string>(StringComparer.Ordinal) { "upload", "picture", "video", "speech", "tool" };
-    public static readonly IReadOnlySet<string> States = new HashSet<string>(StringComparer.Ordinal) { "chat", "assistant", "deck", "deleted", "none" };
+    public static readonly IReadOnlySet<string> States = new HashSet<string>(StringComparer.Ordinal) { "chat", "assistant", "deck", "studio", "deleted", "none" };
 
     /// <summary>The files the filter finds (at most its Take, in its order), and how many it finds in all and what they take.</summary>
     public async Task<(IReadOnlyList<FileRow> Rows, Amount Total)> ListAsync(FileFilter f, CancellationToken ct)

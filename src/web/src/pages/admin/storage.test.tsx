@@ -193,7 +193,7 @@ describe('Admin → Storage', () => {
     await userEvent.click(screen.getByRole('button', { name: /Delete 3 files/ }))
     let ask = await screen.findByRole('alertdialog', { name: /Delete 3 files/ })
     expect(ask).toHaveTextContent('cannot be undone')
-    expect(ask).toHaveTextContent('2 files are in chats, assistants or decks')
+    expect(ask).toHaveTextContent('2 files are in chats, assistants, decks or the media studio')
     expect(ask).toHaveTextContent('1 file of people on legal hold stays')
     await userEvent.click(within(ask).getByRole('button', { name: 'Cancel' }))
     expect(calls.some((c) => c.method === 'POST')).toBe(false)
