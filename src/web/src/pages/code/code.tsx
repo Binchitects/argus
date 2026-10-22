@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { GitMerge, GitPullRequest, MessageSquareCode, ScanSearch } from 'lucide-react'
+import { GitMerge, GitPullRequest, MessageSquareCode, ScanSearch, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -70,7 +70,17 @@ export function CodePage() {
 
   return (
     <>
-      <PageHeader title="Code" description="Review merge requests with the model, and ask about your code. It reads with your own access (GitLab, and GitHub or Gitea once linked in your account), and writes nothing there." />
+      <PageHeader
+        title="Code"
+        description="Review merge requests with the model, and ask about your code. It reads with your own access (GitLab, and GitHub or Gitea once linked in your account), and writes nothing there; Fix it opens merge requests as you, with your own token."
+        actions={
+          <Button variant="outline" asChild>
+            <Link to="/code/fixes">
+              <Wrench /> Fix it
+            </Link>
+          </Button>
+        }
+      />
       {error && (
         <Alert variant="destructive" className="mb-4">
           {error}

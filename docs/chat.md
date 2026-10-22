@@ -713,6 +713,39 @@ as they open and get new commits, without anyone pressing Review:
   `review.policy` feature, which everyone has unless an admin denies it;
   a reviews admin sees and changes everyone's rules.
 
+### Fix it
+
+An agent makes the change for a review's finding, an issue or a failed
+pipeline, or for what you write, and opens the merge request as you when you
+say so.
+
+- **Your token.** **Code → Fix it** links your own GitLab personal access
+  token, with the `api` scope. Fix it reads the branch and opens the merge
+  request with it, as you: never with the app's account or Argus's (which
+  only read). The token is checked with GitLab, kept encrypted, and never
+  shown again.
+- **Starting one.** Press **Fix it** on a review's finding: it starts from
+  the reviewed branch. Or, under **Code → Fix it**, name the project and say
+  what to fix, in words, an issue's number (its title and text are read), or
+  a failed pipeline's (the end of its failed jobs' logs is read, and the
+  pipeline's branch is the start).
+- **The work.** The agent reads the branch's files and searches them, then
+  changes them, as you: your default model, your credit, your safeguards. It
+  runs the tests when they can run here. That is the Python sandbox: Python
+  3.13 and no network, for example `python -m unittest`. The page shows each
+  step as it is taken, then the diff, what the tests said, and the agent's
+  account. **Another round** asks for more on the same change. **Stop** ends
+  it.
+- **The merge request.** **Open the merge request as you** commits the change
+  to a new branch, `fix/…`, made from the commit it read, and opens a merge
+  request into the branch it started from, with the agent's account. It is
+  yours in GitLab from then on.
+
+At most two fixes of yours work at once, each for at most 30 minutes. Fix it
+needs the `feature.fixit` permission. Everyone holds it unless an admin
+denies it. Tests in other languages cannot run here yet: the agent says so,
+and you run them in your pipeline.
+
 ## 3D models
 
 The **3D models** tool (Admin → Tools; the 3D sandbox runs with
@@ -835,6 +868,25 @@ component, at its own link, for you, some groups or everyone.
   old one put back as the newest) and **Delete** (its link and data go).
 - **Who publishes**: the `feature.apps` permission (everyone, unless an
   admin denies it). Opening an app needs only to be one who may.
+
+## Ask a panel
+
+**Ask a panel** (beside Sketch, under the box) puts a question to several
+assistants and roles at once.
+
+- **Who sits on it.** Two to five panelists:
+  - roles: the expert, the critic, the one who says no, the user, the
+    accountant, the lawyer;
+  - assistants you may use, each with its own instructions and model.
+- **How it goes.** In each round, every panelist speaks in turn, having read
+  what was said before, and answers the others by name. There are one to
+  three rounds. The dialog shows each turn as it comes.
+- **The verdict.** A moderator writes the panel's answer, then **who said
+  what**, then where they disagree.
+- **Where it ends up.** The whole discussion and its verdict go into the
+  chat (or the room) as the answer to your question.
+
+Every turn is asked as you: your credit and your safeguards.
 
 ## Sketch: napkin to app
 

@@ -17,6 +17,7 @@ import { useScreenShare } from './screen'
 import { PublishDialog, type ToPublish } from '../apps/publish-dialog'
 import { BrowserBar } from './browser-bar'
 import { ScreenBar, ScreenButton } from './screen-share'
+import { PanelButton } from './panel'
 import { SketchButton } from './sketch'
 import type { SketchAsk } from './sketch-prompts'
 import { toBlocks } from './markdown-blocks'
@@ -838,6 +839,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
         screenFrame={share.sharing ? share.frame : undefined}
       />
       <ScreenButton share={share} />
+      <PanelButton chatId={id} />
       <TalkButton state={talk.state} onStart={() => void talk.start()} onEnd={talk.end} />
     </>
   )

@@ -69,6 +69,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Studio.Workflow> Workflows => Set<Studio.Workflow>();
     public DbSet<Studio.WorkflowRun> WorkflowRuns => Set<Studio.WorkflowRun>();
     public DbSet<Studio.WorkflowRunStep> WorkflowRunSteps => Set<Studio.WorkflowRunStep>();
+    public DbSet<Code.CodeFix> CodeFixes => Set<Code.CodeFix>();
+    public DbSet<Panels.Panel> Panels => Set<Panels.Panel>();
     public DbSet<ScheduledRun> ScheduledRuns => Set<ScheduledRun>();
     public DbSet<TaskEvent> TaskEvents => Set<TaskEvent>();
     public DbSet<Notification> Notifications => Set<Notification>();
@@ -644,6 +646,32 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Error).HasMaxLength(2000);
             e.HasIndex(x => new { x.RunId, x.Path }).IsUnique();
             e.HasOne<Studio.WorkflowRun>().WithMany().HasForeignKey(x => x.RunId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Code.CodeFix>(e =>
+        {
+            e.ToTable("code_fixes");
+            e.Property(x => x.Project).HasMaxLength(500);
+            e.Property(x => x.Branch).HasMaxLength(255);
+            e.Property(x => x.BaseSha).HasMaxLength(64);
+            e.Property(x => x.Title).HasMaxLength(300);
+            e.Property(x => x.Source).HasMaxLength(16);
+            e.Property(x => x.SourceId).HasMaxLength(64);
+            e.Property(x => x.Status).HasMaxLength(16);
+            e.Property(x => x.Step).HasMaxLength(100);
+            e.Property(x => x.Model).HasMaxLength(200);
+            e.Property(x => x.MergeRequestUrl).HasMaxLength(1000);
+            e.Property(x => x.Error).HasMaxLength(2000);
+            e.HasIndex(x => new { x.UserId, x.CreatedAt });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Panels.Panel>(e =>
+        {
+            e.ToTable("panels");
+            e.Property(x => x.Status).HasMaxLength(16);
+            e.Property(x => x.Error).HasMaxLength(2000);
+            e.HasIndex(x => new { x.UserId, x.CreatedAt });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Conversation>().WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<TaskTemplate>(e =>
         {

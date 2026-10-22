@@ -282,6 +282,31 @@ export const topics = {
     manual: { doc: 'studio', section: 'steps' },
   },
 
+  fixes: {
+    title: 'Fix it',
+    about: 'An agent makes the change for a finding, an issue, a failed pipeline or your words, runs the tests it can, and opens the merge request as you when you say so.',
+    parts: [
+      { name: 'Your GitLab token', text: 'Your own personal access token (scope api): it reads the branch and opens the merge request as you. Kept encrypted, never shown again.' },
+      { name: 'A new fix', text: 'The project, and what to fix: in words, an issue\'s number, or a failed pipeline\'s. The branch is the default one unless you name it.' },
+      { name: 'Your fixes', text: 'Each with how it went: at work, ready, failed, or its merge request open.' },
+    ],
+    tasks: [{ title: 'Fix a failed pipeline', steps: ['Link your GitLab token (scope api) once.', 'Choose **A failed pipeline**, give the project and the pipeline\'s number, and press **Fix it**.', 'Read the diff and the tests, then **Open the merge request as you**.'] }],
+    manual: { doc: 'chat', section: 'fix-it' },
+  },
+
+  fix: {
+    title: 'A fix',
+    about: 'What the agent did, step by step; the change as a diff; what the tests said; the merge request.',
+    parts: [
+      { name: 'Step by step', text: 'Each file it looked at, read, searched for, changed, and each test it ran.' },
+      { name: 'The change', text: 'The diff: what goes in red, what comes in green.' },
+      { name: 'Open the merge request as you', text: 'A new branch with the change, and a merge request into the branch it started from, with your token.' },
+      { name: 'Another round', text: 'More to do on the same change: the agent starts from what it changed.' },
+    ],
+    tasks: [{ title: 'Ask for a test too', steps: ['Under **More to do on it**, write: "add a test for the empty case".', 'Press **Another round**, and read the new diff.'] }],
+    manual: { doc: 'chat', section: 'fix-it' },
+  },
+
   tasks: {
     title: 'Scheduled tasks',
     about: 'Questions asked for you on a schedule or on an event, with your model and tools: a morning digest, a weekly report, a review of each merge request.',

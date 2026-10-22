@@ -327,6 +327,11 @@ public static class IdentityWiring
         services.AddSingleton<Studio.StudioRuns>();
         services.AddHostedService(sp => sp.GetRequiredService<Studio.StudioRuns>());
         services.AddScoped<Studio.FlowRunner>();
+        // Fix it: GitLab as the person (their own token), the agent on the branch's files, its runs in the background.
+        services.AddScoped<Code.Fixes.GitLabAsPerson>();
+        services.AddScoped<Code.Fixes.FixAgent>();
+        services.AddSingleton<Code.Fixes.FixRuns>();
+        services.AddSingleton<Panels.PanelRuns>();
         services.AddScoped<Chat.Tools.DataTool>();
         services.AddSingleton<Insights.BoardRefresher>();
         services.AddHostedService(sp => sp.GetRequiredService<Insights.BoardRefresher>());
@@ -508,6 +513,8 @@ public static class IdentityWiring
         Insights.DataEndpoints.MapData(app);
         Decks.DeckEndpoints.MapDecks(app);
         Studio.StudioEndpoints.MapStudio(app);
+        Code.Fixes.FixEndpoints.MapFixes(app);
+        Panels.PanelEndpoints.MapPanels(app);
         Apps.AppEndpoints.MapApps(app);
         Plans.PlanEndpoints.MapPlans(app);
         app.MapForwardAuth();

@@ -18,13 +18,16 @@ public sealed record Asked(string? Text, string? Model, IResult? Problem);
 public sealed class OneQuestion(Safeguards.Safeguards safeguards, GatewayChat gateway, ModelPolicy policy, ChatModels models, IOptionsMonitor<ChatOptions> chat)
 {
     /// <param name="question">The person's own words: the safeguards read these.</param>
-    /// <param name="choice">"small" for the model for small steps, when there is one and the person may use it.</param>
+    /// <param name="choice">"small" for the model for small steps, or a model's name; when the person may use it, else their default.</param>
     /// <param name="after">Turns after the question (an earlier answer and what was wrong with it), to ask again.</param>
     public async Task<Asked> AskAsync(AppUser me, string question, string? system, string? choice, int maxTokens, string tag, CancellationToken ct,
         IReadOnlyList<JsonObject>? after = null)
     {
         var mine = await policy.ForAsync(me, await models.ListAsync(ct), ct);
-        var model = choice == "small" && chat.CurrentValue.SmallModel is { Length: > 0 } small && mine.Models.Any(m => m.Name == small) ? small : mine.Default?.Name;
+        // "small": the model for small steps; a model's name (an assistant's own): that one, when the person may use it.
+        var model = choice == "small" && chat.CurrentValue.SmallModel is { Length: > 0 } small && mine.Models.Any(m => m.Name == small) ? small
+            : choice is { Length: > 0 } named && mine.Models.Any(m => m.Name == named) ? named
+            : mine.Default?.Name;
         if (model is null)
         {
             return new(null, null, AuthEndpoints.Problem(503, "model", "No model is there for you to ask."));

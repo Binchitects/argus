@@ -79,6 +79,28 @@ public sealed class FakeMcp : HttpMessageHandler
         return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
     }
 
+    /// <summary>The files of group/app's main branch, as Fix it reads them.</summary>
+    public Dictionary<string, string> FixFiles { get; } = new()
+    {
+        ["calc.py"] = "def add(a, b):\n    return a - b\n",
+        ["test_calc.py"] = "import unittest\nfrom calc import add\n\nclass AddTest(unittest.TestCase):\n    def test_add(self):\n        self.assertEqual(add(2, 3), 5)\n",
+    };
+
+    /// <summary>Files as GitLab packs a branch: a tar.gz with a top folder.</summary>
+    public static byte[] Archive(IReadOnlyDictionary<string, string> files)
+    {
+        using var m = new MemoryStream();
+        using (var gz = new System.IO.Compression.GZipStream(m, System.IO.Compression.CompressionLevel.Fastest, leaveOpen: true))
+        using (var tar = new System.Formats.Tar.TarWriter(gz, System.Formats.Tar.TarEntryFormat.Pax))
+        {
+            foreach (var (name, text) in files)
+            {
+                tar.WriteEntry(new System.Formats.Tar.PaxTarEntry(System.Formats.Tar.TarEntryType.RegularFile, $"app-sha1/{name}") { DataStream = new MemoryStream(Encoding.UTF8.GetBytes(text)) });
+            }
+        }
+        return m.ToArray();
+    }
+
     /// <summary>A GitLab at https://gitlab.test for the gitlab-issues plugin: OAuth (code "good-code") and a few issue calls, as the token's owner.</summary>
     public List<(string Method, string PathAndQuery, string? Authorization, string? Body)> GitLabCalls { get; } = [];
 
@@ -120,6 +142,28 @@ public sealed class FakeMcp : HttpMessageHandler
                 ("GET", "/api/v4/projects/7/jobs/41/trace") => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("compiling...\nerror: undefined reference to DecodeFrame\n") },
                 ("POST", "/api/v4/projects/7/merge_requests/3/notes") or ("POST", "/api/v4/projects/7/repository/commits/abc123def/comments") =>
                     Json(HttpStatusCode.Created, """{"id":99}"""),
+                _ => Json(HttpStatusCode.NotFound, """{"message":"404 Not Found"}"""),
+            };
+        }
+        // A person's own token for Fix it: reads the branch (its files packed) and opens the merge request as them.
+        if (request.Headers.TryGetValues("PRIVATE-TOKEN", out var own) && own.Single() == "person-token")
+        {
+            const string App = "/api/v4/projects/group%2Fapp";
+            var query = request.RequestUri!.Query;
+            return (request.Method.Method, path) switch
+            {
+                ("GET", "/api/v4/user") => Json(HttpStatusCode.OK, """{"username":"kim"}"""),
+                ("GET", App) => Json(HttpStatusCode.OK, """{"default_branch":"main"}"""),
+                ("GET", App + "/repository/branches/main") => Json(HttpStatusCode.OK, """{"commit":{"id":"sha1"}}"""),
+                ("GET", App + "/repository/archive.tar.gz") when query == "?sha=sha1" => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Archive(FixFiles)) },
+                ("GET", App + "/issues/5") => Json(HttpStatusCode.OK, """{"title":"add() subtracts","description":"calc.add(2, 3) gives -1."}"""),
+                ("GET", App + "/pipelines/9") => Json(HttpStatusCode.OK, """{"ref":"main"}"""),
+                ("GET", App + "/pipelines/9/jobs") => Json(HttpStatusCode.OK, """[{"id":51,"name":"unit","stage":"test"}]"""),
+                ("GET", App + "/jobs/51/trace") => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("FAIL: test_add (test_calc.AddTest)\nAssertionError: -1 != 5\n") },
+                ("GET", _) when path.StartsWith(App + "/repository/files/", StringComparison.Ordinal) =>
+                    FixFiles.ContainsKey(Uri.UnescapeDataString(path[(App + "/repository/files/").Length..])) ? Json(HttpStatusCode.OK, "{}") : Json(HttpStatusCode.NotFound, """{"message":"404 File Not Found"}"""),
+                ("POST", App + "/repository/commits") => Json(HttpStatusCode.Created, """{"id":"sha2"}"""),
+                ("POST", App + "/merge_requests") => Json(HttpStatusCode.Created, """{"iid":12,"web_url":"https://gitlab.test/group/app/-/merge_requests/12"}"""),
                 _ => Json(HttpStatusCode.NotFound, """{"message":"404 Not Found"}"""),
             };
         }

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ExternalLink, MessagesSquare, RefreshCw } from 'lucide-react'
+import { ExternalLink, MessagesSquare, RefreshCw, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -10,14 +10,14 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
-import { errorMessage } from '@/lib/api'
+import { api, errorMessage } from '@/lib/api'
 import { Markdown } from '@/pages/chat/markdown'
 import { decideFinding, reviewAgain, reviewQuery, reviewRoom, type Finding } from './api'
 import { ReviewState } from './code'
 
 const severityVariant = { critical: 'destructive', major: 'warning', minor: 'default', nit: 'secondary' } as const
 
-function FindingCard({ f, onDecide }: { f: Finding; onDecide: (state: Finding['state']) => void }) {
+function FindingCard({ f, onDecide, onFix }: { f: Finding; onDecide: (state: Finding['state']) => void; onFix: () => void }) {
   const refuted = f.verified === false
   return (
     <li className={`grid gap-2 rounded-lg border p-4 ${refuted || f.state !== 'open' ? 'opacity-70' : ''}`}>
@@ -54,6 +54,9 @@ function FindingCard({ f, onDecide }: { f: Finding; onDecide: (state: Finding['s
             <Button size="sm" variant="ghost" onClick={() => onDecide('dismissed')}>
               Dismiss
             </Button>
+            <Button size="sm" variant="ghost" onClick={onFix}>
+              <Wrench /> Fix it
+            </Button>
           </>
         ) : (
           <Button size="sm" variant="ghost" onClick={() => onDecide('open')}>
@@ -82,6 +85,16 @@ export function ReviewPage() {
       await queryClient.invalidateQueries({ queryKey: reviewQuery(id).queryKey })
     } catch (e) {
       toast.error(errorMessage(e))
+    }
+  }
+  // Fix it: an agent's change for the finding, from the branch reviewed; the person's own GitLab token is needed.
+  const fix = async (findingId: string) => {
+    try {
+      const made = await api<{ id: string }>('/api/fixes', { body: { findingId } })
+      navigate(`/code/fixes/${made.id}`)
+    } catch (e) {
+      toast.error(errorMessage(e))
+      navigate('/code/fixes')
     }
   }
   const go = async (work: () => Promise<{ id: string }>, to: (made: string) => string) => {
@@ -149,7 +162,7 @@ export function ReviewPage() {
           ) : (
             <ul className="grid gap-3" aria-label="Findings">
               {kept.map((f) => (
-                <FindingCard key={f.id} f={f} onDecide={(state) => void decide(f.id, state)} />
+                <FindingCard key={f.id} f={f} onDecide={(state) => void decide(f.id, state)} onFix={() => void fix(f.id)} />
               ))}
             </ul>
           )}
@@ -158,7 +171,7 @@ export function ReviewPage() {
               <summary className="cursor-pointer text-sm text-muted-foreground">Doubted by the second check ({doubted.length})</summary>
               <ul className="mt-3 grid gap-3" aria-label="Doubted findings">
                 {doubted.map((f) => (
-                  <FindingCard key={f.id} f={f} onDecide={(state) => void decide(f.id, state)} />
+                  <FindingCard key={f.id} f={f} onDecide={(state) => void decide(f.id, state)} onFix={() => void fix(f.id)} />
                 ))}
               </ul>
             </details>

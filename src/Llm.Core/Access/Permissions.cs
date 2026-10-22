@@ -132,6 +132,7 @@ public static class Permissions
     public const string Data = "feature.data";
     public const string Decks = "feature.decks";
     public const string Studio = "feature.studio";
+    public const string FixIt = "feature.fixit";
     public const string Plans = "feature.plans";
     public const string Research = "feature.research";
     public const string Compare = "feature.compare";
@@ -263,6 +264,7 @@ public static class Permissions
         new(Data, "Features", "Ask the databases an admin connected, and keep boards of charts.", false),
         new(Decks, "Features", "Make slide decks with the model, and download them.", false),
         new(Studio, "Features", "Build agent workflows in Agent Studio that run as oneself on a trigger.", false),
+        new(FixIt, "Features", "Let an agent change code and open merge requests as oneself (Fix it), with one's own GitLab token.", false),
         new(Plans, "Features", "Make and keep plans.", false),
         new(Research, "Features", "Run deep research.", false),
         new(Compare, "Features", "Compare two models' answers.", false),
