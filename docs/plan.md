@@ -1493,9 +1493,31 @@ and blends it back (FLUX.2-klein's masked inpainting ignored the mask).
    model, and figures that move (a walk, a wave) exported with their
    animation.
 
-### v6.7 — Everyone, in every language
+### v6.7 — Vector and motion
 
-1. **Rooms in every language.** Each member reads the room in their own
+The person asked for this release to be about high-quality SVG and animated
+SVG, and nothing else.
+
+1. **SVG you would ship.** Drawn by the model from words (icons, diagrams,
+   scenes with named parts), or from a picture: the picture model draws it
+   flat, and it is traced into clean vector shapes (vtracer), layered by
+   colour. Every SVG is made safe on the way in (no script, no outside
+   references) and checked: the model sees its own drawing rendered and
+   fixes what is wrong. Changed by asking; its code editable with a live
+   preview; optimized.
+2. **Animated SVG.** Motions that always work (fade, slide, pop, spin,
+   float, bounce, sway, pulse, wiggle, draw the lines on, colour shifts),
+   and keyframes of one's own, compiled to CSS inside the SVG. Animate by
+   words ("the wheels turn, the cloud drifts"), or pick a part on the
+   preview and give it a motion, with a timeline: play, pause, scrub, loop.
+3. **Out of the studio.** An animated SVG as a GIF, an MP4, a WebM or
+   frames, rendered by the stack's own Chromium; SVG and PNG at any size;
+   and the chat's tools draw and animate SVG too.
+
+### v6.8 — Everyone, in every language
+
+1. **Rooms in every language** (reading a room in one's language came
+   ahead, on main after v6.6.0). Each member reads the room in their own
    language and writes in theirs; the others read it in theirs, the original
    a click away. Voice in rooms with live captions, translated too.
 2. **Meetings.** Record one in the browser or upload it: who spoke when, the
@@ -1506,7 +1528,7 @@ and blends it back (FLUX.2-klein's masked inpainting ignored the mask).
    any app to a chat, push notifications, Talk on the lock screen's
    shortcut, works with a poor connection (what is sent waits).
 
-### v6.8 — A model of your own
+### v6.9 — A model of your own
 
 1. **Model lab.** Teach a small model the company's words on the local GPU
    (a LoRA from chosen knowledge sources, prompts and good answers), then
