@@ -29,13 +29,13 @@ for i, s in enumerate(shots):
     spoken = length(s['speech']) if s.get('speech') else 0.0
     # Long enough for its clip and what is said over it (with a breath after).
     d = max(clip, spoken + 0.5 if spoken else 0.0, float(s.get('seconds') or 0), 1.0)
-    inputs += ['-i', s['clip']]
-    v = len(inputs) // 2 - 1
+    inputs += ['-threads', '1', '-i', s['clip']]
+    v = len(inputs) // 4 - 1
     video.append(f'[{v}:v]scale={W}:{H}:force_original_aspect_ratio=decrease:flags=lanczos,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={FPS},'
                  f'tpad=stop_mode=clone:stop_duration={d:.3f},trim=duration={d:.3f},setpts=PTS-STARTPTS[v{i}]')
     if spoken:
-        inputs += ['-i', s['speech']]
-        a = len(inputs) // 2 - 1
+        inputs += ['-threads', '1', '-i', s['speech']]
+        a = len(inputs) // 4 - 1
         audio.append(f'[{a}:a]aresample=44100,aformat=channel_layouts=stereo,apad=whole_dur={d:.3f},atrim=duration={d:.3f}[a{i}]')
     else:
         audio.append(f'anullsrc=r=44100:cl=stereo,atrim=duration={d:.3f}[a{i}]')
@@ -56,8 +56,8 @@ font = 'Noto Sans Arabic' if story.get('rtl') else 'Noto Sans'
 style = f"FontName={font},FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H80000000,BorderStyle=3,Outline=1,Shadow=0,MarginV=36,Alignment=2"
 parts.append(f"[cut]subtitles=captions.srt:force_style='{style}'[out]" if captions else '[cut]null[out]')
 if story.get('music'):
-    inputs += ['-i', story['music']]
-    m = len(inputs) // 2 - 1
+    inputs += ['-threads', '1', '-i', story['music']]
+    m = len(inputs) // 4 - 1
     parts.append('[said]asplit=2[say][key]')
     parts.append(f'[{m}:a]aresample=44100,aformat=channel_layouts=stereo,volume=0.35,apad=whole_dur={total:.3f},atrim=duration={total:.3f},'
                  f'afade=t=in:d=1,afade=t=out:st={max(0.0, total - 2):.3f}:d=2[bed]')
@@ -66,7 +66,10 @@ if story.get('music'):
 else:
     parts.append('[said]anull[mix]')
 
-r = subprocess.run(['ffmpeg', '-v', 'error', '-y', '-threads', '4', *inputs, '-filter_complex', ';'.join(parts), '-map', '[out]', '-map', '[mix]',
-                    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart',
+# Few threads: the sandbox allows a run 64 processes and 3 GB of address space, and each input's decoder and the
+# encoder would take a thread a core.
+r = subprocess.run(['ffmpeg', '-v', 'error', '-y', '-filter_threads', '1', '-filter_complex_threads', '1', *inputs, '-filter_complex', ';'.join(parts),
+                    '-map', '[out]', '-map', '[mix]', '-c:v', 'libx264', '-threads', '2', '-x264-params', 'threads=2:lookahead-threads=1', '-preset', 'veryfast',
+                    '-crf', '23', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart',
                     '-t', f'{total:.3f}', 'story.mp4'], capture_output=True, text=True)
 print(json.dumps({'seconds': round(total, 2), 'starts': starts, 'error': r.stderr.strip()[-600:] if r.returncode else None}))
