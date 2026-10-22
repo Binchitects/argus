@@ -204,10 +204,17 @@ internal sealed partial class Reviews(Runtime rt, Problems problems)
             var line = Math.Clamp(f.Int("line") ?? 1, 1, lines);
             var end = Math.Clamp(f.Int("end_line") ?? line, line, lines);
             var (old, @new) = (f.Str("old"), f.Str("new"));
-            // A fix applies only where its text is in the file once (as the editor would find it).
-            if (old is not { Length: > 0 } || @new is null || Count(text.Replace("\r\n", "\n", StringComparison.Ordinal), old.Replace("\r\n", "\n", StringComparison.Ordinal)) != 1)
+            var plain = text.Replace("\r\n", "\n", StringComparison.Ordinal);
+            // A fix applies only where its text is in the file once (as the editor would find it); then its place is the finding's.
+            if (old is not { Length: > 0 } || @new is null || Count(plain, old.Replace("\r\n", "\n", StringComparison.Ordinal)) != 1)
             {
                 (old, @new) = (null, null);
+            }
+            else
+            {
+                var piece = old.Replace("\r\n", "\n", StringComparison.Ordinal);
+                line = plain[..plain.IndexOf(piece, StringComparison.Ordinal)].Count(c => c == '\n') + 1;
+                end = Math.Min(lines, line + piece.TrimEnd('\n').Count(c => c == '\n'));
             }
             var severity = f.Str("severity")?.Trim().ToLowerInvariant() is { } s && Severities.Contains(s) ? s : "minor";
             findings.Add(new ReviewFinding(findings.Count, Path.GetRelativePath(rt.Workspace.Root, full).Replace('\\', '/'), line, end, severity,

@@ -64,7 +64,8 @@ public sealed class ReviewTests : IDisposable
         var findings = new JsonArray(
             new JsonObject
             {
-                ["path"] = "src/cart.ts", ["line"] = 2, ["severity"] = "major", ["title"] = "reduce has no start value",
+                // A line off by one (a small model's): the fix's text says where it is.
+                ["path"] = "src/cart.ts", ["line"] = 1, ["severity"] = "major", ["title"] = "reduce has no start value",
                 ["why"] = "An empty cart throws.", ["fix"] = "Start the sum at 0.",
                 ["old"] = "  return items.reduce((s, i) => s + i.price * i.qty)\n", ["new"] = "  return items.reduce((s, i) => s + i.price * i.qty, 0)\n",
             },
@@ -97,7 +98,7 @@ public sealed class ReviewTests : IDisposable
         // Only the findings on files of the folder; worst first; a line past the end at the last; a fix kept only where it fits.
         var listed = review["findings"]!.AsArray();
         Assert.Equal(["reduce has no start value", "Name"], listed.Select(f => f!["title"]!.GetValue<string>()));
-        Assert.Equal((2, "major", "open"), (listed[0]!["line"]!.GetValue<int>(), listed[0]!["severity"]!.GetValue<string>(), listed[0]!["state"]!.GetValue<string>()));
+        Assert.Equal((2, 2, "major", "open"), (listed[0]!["line"]!.GetValue<int>(), listed[0]!["endLine"]!.GetValue<int>(), listed[0]!["severity"]!.GetValue<string>(), listed[0]!["state"]!.GetValue<string>()));
         Assert.Equal("  return items.reduce((s, i) => s + i.price * i.qty, 0)\n", listed[0]!["new"]!.GetValue<string>());
         Assert.Equal(4, listed[1]!["line"]!.GetValue<int>());
         Assert.Null(listed[1]!["old"]);

@@ -779,7 +779,8 @@ internal sealed class Repl(Runtime rt)
             "Look for bugs, security problems, broken edge cases, races, missing error handling, performance traps and missing tests; not style a formatter would fix. " +
             "Before you report a finding, try to refute it by reading the code it depends on, and leave out what you refuted. " +
             (reportTool
-                ? "When you are done, call report_review once: the verdict (looks good, comments, or changes needed), a summary, and every finding with its " +
+                ? "Read each changed file with read_file (its lines are numbered) and take each finding's line from there, not from the diff. " +
+                  "When you are done, call report_review once: the verdict (looks good, comments, or changes needed), a summary, and every finding with its " +
                   "file (relative to the working directory), its line in the file as it is now, its severity (critical, major, minor, nit), what is wrong, why it " +
                   "matters and the fix. For a small fix, also give old (the exact lines in the file now, unique in it) and new (what replaces them). Do not change any file."
                 : "Report the findings by severity (critical, major, minor, nit), each as file:line, what is wrong, why it matters, and the fix. " +
