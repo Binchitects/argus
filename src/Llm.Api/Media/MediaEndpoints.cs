@@ -14,8 +14,12 @@ namespace Llm.Api.Media;
 /// <param name="Picture">A painted edit: the picture as the page drew it, a PNG data URL (with <paramref name="Mask"/>, the same size: white where painted).</param>
 /// <param name="VoiceId">Speak: a sound file of the person's (an upload or a recording) whose voice to speak in; with <paramref name="Consent"/>.</param>
 /// <param name="Consent">Speak in a sample's voice: the person says the voice is theirs, or that they may use it.</param>
+/// <param name="Style">Draw: the drawing's style (flat, line, isometric...).</param>
+/// <param name="Trace">Trace: how the picture is traced (illustration, detailed, icon, logo).</param>
+/// <param name="Format">Export: png, gif, mp4 or webm; with <paramref name="Side"/> (the longer side, pixels), <paramref name="Fps"/> and <paramref name="Background"/> (an MP4's).</param>
 public sealed record MediaJobRequest(string? Action, string? Prompt, Guid? SourceId, int? Count, int? Width, int? Height, double? Strength, int? Seconds,
-    string? Picture, string? Mask, string? Lyrics = null, Guid? VoiceId = null, bool Consent = false, double? Exaggeration = null);
+    string? Picture, string? Mask, string? Lyrics = null, Guid? VoiceId = null, bool Consent = false, double? Exaggeration = null,
+    string? Style = null, string? Trace = null, string? Format = null, int? Side = null, int? Fps = null, string? Background = null, double? Length = null);
 
 public sealed record MediaUpload(Guid AttachmentId);
 
@@ -228,12 +232,29 @@ public static class MediaEndpoints
         {
             return AuthEndpoints.Problem(400, "prompt", $"Say it in at most {MostPromptChars:N0} characters.");
         }
-        if (action is MediaJob.Make or MediaJob.Edit or MediaJob.Speak or MediaJob.Music && string.IsNullOrEmpty(prompt))
+        if (action is MediaJob.Make or MediaJob.Edit or MediaJob.Speak or MediaJob.Music or MediaJob.Draw or MediaJob.Reshape or MediaJob.Animate && string.IsNullOrEmpty(prompt))
         {
             return AuthEndpoints.Problem(400, "prompt", action switch
             {
-                MediaJob.Make => "Describe the picture.", MediaJob.Edit => "Say what to change.", MediaJob.Speak => "Write what to say.", _ => "Describe the music.",
+                MediaJob.Make => "Describe the picture.", MediaJob.Edit or MediaJob.Reshape => "Say what to change.", MediaJob.Speak => "Write what to say.",
+                MediaJob.Draw => "Describe the drawing.", MediaJob.Animate => "Say how it moves.", _ => "Describe the music.",
             });
+        }
+        if (action == MediaJob.Trace && body.SourceId is null && string.IsNullOrEmpty(prompt))
+        {
+            return AuthEndpoints.Problem(400, "prompt", "Choose a picture to trace, or describe one to draw and trace.");
+        }
+        if (action == MediaJob.Draw && body.Style is { } style && Vector.SvgDraw.Styles.All(s => s.Name != style))
+        {
+            return AuthEndpoints.Problem(400, "style", $"A style is one of {string.Join(", ", Vector.SvgDraw.Styles.Select(s => s.Name))}.");
+        }
+        if (action == MediaJob.Trace && body.Trace is { } trace && Vector.VectorSandbox.Styles.All(s => s.Name != trace))
+        {
+            return AuthEndpoints.Problem(400, "trace", $"A tracing is one of {string.Join(", ", Vector.VectorSandbox.Styles.Select(s => s.Name))}.");
+        }
+        if (action == MediaJob.Export && !Vector.VectorJobs.Formats.Contains(body.Format ?? ""))
+        {
+            return AuthEndpoints.Problem(400, "format", $"Make it one of {string.Join(", ", Vector.VectorJobs.Formats)}.");
         }
         if (action == MediaJob.Speak && prompt!.Length > MostSpeechChars)
         {
@@ -258,8 +279,10 @@ public static class MediaEndpoints
                 return AuthEndpoints.Problem(400, "voiceId", "Choose a recording or sound file of yours for the voice.");
             }
         }
-        var module = MediaJob.OnStudio(action) ? "studio" : action == MediaJob.Move ? "videogen" : "imagegen";
-        if (!await modules.HasAsync(module, ct))
+        // Vector work needs no picture server, but for a picture drawn to be traced.
+        var module = MediaJob.OnStudio(action) ? "studio" : action == MediaJob.Move ? "videogen"
+            : MediaJob.OnVector(action) ? (action == MediaJob.Trace && body.SourceId is null ? "imagegen" : null) : "imagegen";
+        if (module is not null && !await modules.HasAsync(module, ct))
         {
             return AuthEndpoints.Problem(503, "action", module switch
             {
@@ -269,16 +292,17 @@ public static class MediaEndpoints
             });
         }
         MediaItem? source = null;
-        if (action is not (MediaJob.Make or MediaJob.Speak or MediaJob.Music))
+        var onDrawing = action is MediaJob.Reshape or MediaJob.Animate or MediaJob.Export;
+        if (action is not (MediaJob.Make or MediaJob.Speak or MediaJob.Music or MediaJob.Draw) && !(action == MediaJob.Trace && body.SourceId is null))
         {
             source = body.SourceId is { } sid ? await db.MediaItems.AsNoTracking().SingleOrDefaultAsync(i => i.Id == sid && i.OwnerId == me.Id, ct) : null;
             if (source is null)
             {
-                return AuthEndpoints.Problem(400, "sourceId", "Choose the picture to work on.");
+                return AuthEndpoints.Problem(400, "sourceId", onDrawing ? "Choose the drawing to work on." : "Choose the picture to work on.");
             }
-            if (source.Kind != MediaItem.Picture)
+            if (source.Kind != (onDrawing ? MediaItem.Vector : MediaItem.Picture))
             {
-                return AuthEndpoints.Problem(400, "sourceId", "Only a picture can be worked on this way.");
+                return AuthEndpoints.Problem(400, "sourceId", onDrawing ? "Only a vector drawing can be worked on this way." : "Only a picture can be worked on this way.");
             }
         }
         Painted? painted = null;
@@ -324,6 +348,23 @@ public static class MediaEndpoints
         if (action == MediaJob.Music && body.Lyrics?.Trim() is { Length: > 0 } lyrics)
         {
             options["lyrics"] = lyrics;
+        }
+        if (MediaJob.OnVector(action))
+        {
+            options["style"] = body.Style;
+            options["trace"] = body.Trace;
+            options["format"] = body.Format;
+            options["side"] = body.Side;
+            options["fps"] = body.Fps;
+            options["background"] = body.Background;
+            if (body.Length is { } length)
+            {
+                options["seconds"] = Math.Clamp(length, 0.2, 60);
+            }
+            if (action == MediaJob.Draw && body.Width is { } dw && body.Height is { } dh)
+            {
+                (options["width"], options["height"]) = (Math.Clamp(dw, 16, 4096), Math.Clamp(dh, 16, 4096));
+            }
         }
         if (action == MediaJob.Speak)
         {

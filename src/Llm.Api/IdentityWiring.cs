@@ -295,6 +295,10 @@ public static class IdentityWiring
         services.AddScoped<Media.SdServer>();
         services.AddHttpClient(Media.StudioServer.Client, c => c.Timeout = TimeSpan.FromMinutes(10));
         services.AddScoped<Media.StudioServer>();
+        services.AddScoped<Vector.SvgRender>();
+        services.AddScoped<Vector.SvgDraw>();
+        services.AddScoped<Vector.VectorSandbox>();
+        services.AddScoped<Vector.VectorStore>();
         services.AddSingleton<Chat.Tools.CalculatorTool>();
         services.AddSingleton<Chat.Tools.TimeTool>();
         services.AddSingleton<Chat.Tools.AskTool>();
@@ -523,6 +527,7 @@ public static class IdentityWiring
         Panels.PanelEndpoints.MapPanels(app);
         Media.MediaEndpoints.MapMedia(app);
         Media.StoryEndpoints.MapStories(app);
+        Vector.VectorEndpoints.MapVectors(app);
         Apps.AppEndpoints.MapApps(app);
         Plans.PlanEndpoints.MapPlans(app);
         app.MapForwardAuth();

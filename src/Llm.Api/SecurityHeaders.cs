@@ -14,7 +14,11 @@ public static class SecurityHeaders
             context.Response.OnStarting(() =>
             {
                 var h = context.Response.Headers;
-                h.ContentSecurityPolicy = Csp;
+                // An endpoint's own, stricter policy stands (an SVG served to be shown on its own: sandboxed).
+                if (!h.ContainsKey("Content-Security-Policy"))
+                {
+                    h.ContentSecurityPolicy = Csp;
+                }
                 h.XContentTypeOptions = "nosniff";
                 h.XFrameOptions = "DENY";
                 h["Referrer-Policy"] = "no-referrer";

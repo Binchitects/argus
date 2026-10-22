@@ -9,6 +9,8 @@ public sealed class MediaItem
     public const string Picture = "picture";
     public const string Video = "video";
     public const string Sound = "sound";
+    /// <summary>An SVG drawing, still or animated (its <see cref="MediaVector"/>).</summary>
+    public const string Vector = "vector";
 
     public Guid Id { get; set; } = Guid.CreateVersion7();
     public Guid OwnerId { get; set; }
@@ -57,8 +59,21 @@ public sealed class MediaJob
     public const string Speak = "speak";
     /// <summary>Music from a description and lyrics (the studio server).</summary>
     public const string Music = "music";
+    /// <summary>An SVG drawn by the model from words.</summary>
+    public const string Draw = "draw";
+    /// <summary>A picture traced into an SVG (drawn first by the picture model when it is words).</summary>
+    public const string Trace = "trace";
+    /// <summary>An SVG changed by the model as asked.</summary>
+    public const string Reshape = "reshape";
+    /// <summary>An SVG given motions by the model as asked.</summary>
+    public const string Animate = "animate";
+    /// <summary>An SVG made a picture or a video (PNG, GIF, MP4, WebM).</summary>
+    public const string Export = "export";
 
-    public static readonly IReadOnlyList<string> Actions = [Make, Edit, Vary, Enlarge, Move, Cutout, Speak, Music];
+    public static readonly IReadOnlyList<string> Actions = [Make, Edit, Vary, Enlarge, Move, Cutout, Speak, Music, Draw, Trace, Reshape, Animate, Export];
+
+    /// <summary>Work on vector drawings.</summary>
+    public static bool OnVector(string action) => action is Draw or Trace or Reshape or Animate or Export;
 
     /// <summary>Work the studio server does (not the picture or video server).</summary>
     public static bool OnStudio(string action) => action is Cutout or Speak or Music;
@@ -120,4 +135,37 @@ public sealed class MediaStory
     public Guid? VideoItemId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// A vector drawing of the media studio (a <see cref="MediaItem"/> of kind vector): the drawing as it stands still, the
+/// motions compiled into it, and every version kept. Its item's file is the drawing as people take it: animated, made safe.
+/// </summary>
+public sealed class MediaVector
+{
+    public Guid ItemId { get; set; }
+    /// <summary>The drawing without motions (SVG, made safe).</summary>
+    public required string Still { get; set; }
+    /// <summary>Its motions, JSON: <c>[{ target, kind, duration, delay, ... }]</c>.</summary>
+    public string Motions { get; set; } = "[]";
+    /// <summary>How long it plays once through, and whether it loops (what an export records).</summary>
+    public double Seconds { get; set; }
+    public bool Loops { get; set; }
+    /// <summary>Where it came from: drawn (by the model from words), traced (from a picture), uploaded, or written by hand.</summary>
+    public required string Source { get; set; }
+    public string? Style { get; set; }
+    public int Version { get; set; } = 1;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>A version of a vector drawing as it was: what changed it, its still drawing and its motions.</summary>
+public sealed class MediaVectorVersion
+{
+    public Guid ItemId { get; set; }
+    public int Version { get; set; }
+    /// <summary>What made this version: "drawn", "traced", "asked: …", "animated: …", "by hand", "motions".</summary>
+    public required string Change { get; set; }
+    public required string Still { get; set; }
+    public string Motions { get; set; } = "[]";
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

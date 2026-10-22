@@ -228,6 +228,50 @@ public sealed partial class BrowserSessions(IHttpClientFactory http, IOptionsMon
         await SendAsync(s, "Input.dispatchKeyEvent", new JsonObject { ["type"] = "keyUp", ["key"] = k.Code, ["code"] = k.Code, ["windowsVirtualKeyCode"] = k.Key }, ct);
     }
 
+    /// <summary>Pages that draw for the app (SVG pictures and frames) at once: each takes a little of the browser's time.</summary>
+    private readonly SemaphoreSlim _drawing = new(3, 3);
+
+    /// <summary>
+    /// A blank page of its own (its own context: no cookies, no storage, and no network at all) for drawing what the app gives
+    /// it, at this size with a see-through background; <paramref name="work"/> sends it DevTools commands. Closed after.
+    /// </summary>
+    public async Task<T> DrawingPageAsync<T>(int width, int height, Func<Func<string, JsonObject?, Task<JsonObject>>, Task<T>> work, CancellationToken ct)
+    {
+        var cdp = await CdpAsync(ct);
+        await _drawing.WaitAsync(ct);
+        string? context = null;
+        try
+        {
+            context = (await cdp.SendAsync("Target.createBrowserContext", new JsonObject { ["disposeOnDetach"] = true }, ct: ct))["browserContextId"]!.GetValue<string>();
+            var target = (await cdp.SendAsync("Target.createTarget", new JsonObject
+            {
+                ["url"] = "about:blank", ["browserContextId"] = context, ["width"] = width, ["height"] = height,
+            }, ct: ct))["targetId"]!.GetValue<string>();
+            var session = (await cdp.SendAsync("Target.attachToTarget", new JsonObject { ["targetId"] = target, ["flatten"] = true }, ct: ct))["sessionId"]!.GetValue<string>();
+            Task<JsonObject> Send(string method, JsonObject? parameters) => cdp.SendAsync(method, parameters, session, ct);
+            await Send("Emulation.setDeviceMetricsOverride", new JsonObject { ["width"] = width, ["height"] = height, ["deviceScaleFactor"] = 1, ["mobile"] = false });
+            await Send("Emulation.setDefaultBackgroundColorOverride", new JsonObject { ["color"] = new JsonObject { ["r"] = 0, ["g"] = 0, ["b"] = 0, ["a"] = 0 } });
+            await Send("Network.enable", null);
+            await Send("Network.emulateNetworkConditions", new JsonObject { ["offline"] = true, ["latency"] = 0, ["downloadThroughput"] = -1, ["uploadThroughput"] = -1 });
+            return await work(Send);
+        }
+        finally
+        {
+            if (context is not null)
+            {
+                try
+                {
+                    await cdp.SendAsync("Target.disposeBrowserContext", new JsonObject { ["browserContextId"] = context }, ct: CancellationToken.None);
+                }
+                catch (CdpException)
+                {
+                    // The browser went: its pages with it.
+                }
+            }
+            _drawing.Release();
+        }
+    }
+
     /// <summary>The page as it is now, as a JPEG (kept a moment: a live view asks often).</summary>
     public async Task<byte[]> ScreenAsync(BrowserSession s, CancellationToken ct)
     {

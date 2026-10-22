@@ -75,12 +75,13 @@ public sealed partial class MediaJobs(IServiceScopeFactory scopes, TimeProvider 
             job.Status = MediaJob.Done;
             job.Phase = null;
         }
-        catch (Exception ex) when (ex is Refused or SdServer.SdException or HttpRequestException or JsonException or InvalidDataException or TaskCanceledException)
+        catch (Exception ex) when (ex is Refused or SdServer.SdException or HttpRequestException or JsonException or InvalidDataException or TaskCanceledException
+            or Vector.VectorRefusedException or Vector.SvgException or Chat.Tools.SandboxException or Chat.Tools.Browser.CdpException)
         {
             job.Status = MediaJob.Failed;
             job.Phase = null;
-            var what = job.Action switch { MediaJob.Move => "clip", MediaJob.Speak => "speech", MediaJob.Music => "music", _ => "picture" };
-            var why = ex is Refused ? ex.Message : $"The {what} could not be made: {ex.Message}";
+            var what = job.Action switch { MediaJob.Move => "clip", MediaJob.Speak => "speech", MediaJob.Music => "music", MediaJob.Export => "export", _ when MediaJob.OnVector(job.Action) => "drawing", _ => "picture" };
+            var why = ex is Refused or Vector.VectorRefusedException ? ex.Message : $"The {what} could not be made: {ex.Message}";
             job.Error = why.Length > 2000 ? why[..2000] : why;
         }
         job.FinishedAt = clock.GetUtcNow();
@@ -88,7 +89,11 @@ public sealed partial class MediaJobs(IServiceScopeFactory scopes, TimeProvider 
         // Work that took a while is said in the bell: the person may have left the page.
         if (job.FinishedAt - started > TimeSpan.FromSeconds(45))
         {
-            var what = job.Action switch { MediaJob.Move => "clip", MediaJob.Speak => "speech", MediaJob.Music => "music", MediaJob.Cutout => "picture", _ => "pictures" };
+            var what = job.Action switch
+            {
+                MediaJob.Move => "clip", MediaJob.Speak => "speech", MediaJob.Music => "music", MediaJob.Cutout => "picture", MediaJob.Export => "export",
+                _ when MediaJob.OnVector(job.Action) => "drawing", _ => "pictures",
+            };
             await sp.GetRequiredService<Notifications.Notifier>().SendAsync(job.OwnerId, job.Status == MediaJob.Done
                 ? new Notifications.News("media", $"Your {what} {(what == "pictures" ? "are" : "is")} ready", job.Prompt, "/media")
                 : new Notifications.News("media", $"Your {what} could not be made", job.Error, "/media"), CancellationToken.None);
@@ -133,6 +138,10 @@ public sealed partial class MediaJobs(IServiceScopeFactory scopes, TimeProvider 
         if (MediaJob.OnStudio(job.Action))
         {
             return await StudioAsync(sp, db, job, me, ct);
+        }
+        if (MediaJob.OnVector(job.Action))
+        {
+            return await Vector.VectorJobs.RunAsync(sp, db, job, me, phase => PhaseAsync(db, job, phase), ct);
         }
         var video = job.Action == MediaJob.Move;
         var options = JsonNode.Parse(job.Options);

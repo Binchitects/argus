@@ -53,6 +53,11 @@ RUN apt-get update \
  && chmod -R a+rX /opt/mplconfig \
  && find / -xdev -perm /6000 -type f -exec chmod a-s {} +
 
+# Vector work (the media studio's vector studio): vtracer traces a picture into SVG shapes, resvg draws an SVG as
+# a picture. Two wheels of their own, a layer of their own.
+RUN pip install --no-cache-dir --only-binary=:all: vtracer==0.6.15 resvg-py==0.5.0 \
+ && python -c "import vtracer, resvg_py"
+
 # LibreOffice as a job can run it (soffice and libreoffice): see the script.
 COPY --chmod=755 soffice /usr/local/bin/soffice
 RUN ln -s soffice /usr/local/bin/libreoffice

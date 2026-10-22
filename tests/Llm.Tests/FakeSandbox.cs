@@ -123,6 +123,22 @@ public sealed class FakeSandbox : IAsyncDisposable
         {
             await File.WriteAllTextAsync(Path.Combine(draft, "files", "canvas.pdf"), $"%PDF-1.7\n% from {new FileInfo(Path.Combine(job, "files", "canvas.docx")).Length} bytes\n%%EOF\n");
         }
+        // Vector work: a traced picture (three shapes), a drawing drawn as a PNG, frames made a video.
+        if (code.Contains("vtracer.convert_raw_image_to_svg", StringComparison.Ordinal))
+        {
+            await File.WriteAllTextAsync(Path.Combine(draft, "files", "traced.svg"),
+                """<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"><path d="M0 0 H1024 V1024 H0Z" fill="#FFFFFF"/><path d="M200 200 H800 V800 H200Z" fill="#E33322"/><path d="M400 400 H600 V600 H400Z" fill="#222222"/></svg>""");
+        }
+        if (code.Contains("resvg_py.svg_to_bytes", StringComparison.Ordinal))
+        {
+            var size = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(job, "files", "job.json")))!;
+            await File.WriteAllBytesAsync(Path.Combine(draft, "files", "drawing.png"), PngOf(size["width"]!.GetValue<int>(), size["height"]!.GetValue<int>()));
+        }
+        if (code.Contains("palettegen", StringComparison.Ordinal))
+        {
+            var format = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(job, "files", "job.json")))!["format"]!.GetValue<string>();
+            await File.WriteAllBytesAsync(Path.Combine(draft, "files", $"drawing.{format}"), format == "gif" ? [0x47, 0x49, 0x46, 0x38, 0x39, 0x61] : [0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70]);
+        }
         // The media studio's cut: a video, and its length (three seconds a shot).
         var cut = code.StartsWith("# The media studio's video", StringComparison.Ordinal);
         string? cutReport = null;
@@ -145,6 +161,14 @@ public sealed class FakeSandbox : IAsyncDisposable
         }.ToJsonString());
         Directory.Delete(job, recursive: true);
         Directory.Move(draft, Path.Combine(Dir, "out", id));
+    }
+
+    /// <summary>A grey PNG of this size (RGB, unfiltered), as resvg would draw one.</summary>
+    private static byte[] PngOf(int width, int height)
+    {
+        var px = new byte[width * height * 4];
+        Array.Fill(px, (byte)200);
+        return Llm.Api.Media.Png.Encode(new Llm.Api.Media.Png.Image(width, height, px));
     }
 
     /// <summary>The settings.json each plugin server's job was given.</summary>

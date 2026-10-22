@@ -74,6 +74,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Media.MediaItem> MediaItems => Set<Media.MediaItem>();
     public DbSet<Media.MediaJob> MediaJobs => Set<Media.MediaJob>();
     public DbSet<Media.MediaStory> MediaStories => Set<Media.MediaStory>();
+    public DbSet<Media.MediaVector> MediaVectors => Set<Media.MediaVector>();
+    public DbSet<Media.MediaVectorVersion> MediaVectorVersions => Set<Media.MediaVectorVersion>();
     public DbSet<MessageTranslation> MessageTranslations => Set<MessageTranslation>();
     public DbSet<ScheduledRun> ScheduledRuns => Set<ScheduledRun>();
     public DbSet<TaskEvent> TaskEvents => Set<TaskEvent>();
@@ -707,6 +709,21 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasKey(x => new { x.MessageId, x.Language });
             e.Property(x => x.Language).HasMaxLength(12);
             e.HasOne<ChatMessage>().WithMany().HasForeignKey(x => x.MessageId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Media.MediaVector>(e =>
+        {
+            e.ToTable("media_vectors");
+            e.HasKey(x => x.ItemId);
+            e.Property(x => x.Source).HasMaxLength(16);
+            e.Property(x => x.Style).HasMaxLength(40);
+            e.HasOne<Media.MediaItem>().WithOne().HasForeignKey<Media.MediaVector>(x => x.ItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Media.MediaVectorVersion>(e =>
+        {
+            e.ToTable("media_vector_versions");
+            e.HasKey(x => new { x.ItemId, x.Version });
+            e.Property(x => x.Change).HasMaxLength(300);
+            e.HasOne<Media.MediaVector>().WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<Media.MediaStory>(e =>
         {

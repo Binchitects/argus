@@ -174,6 +174,25 @@ public sealed class FakeModel : HttpMessageHandler
             chunks = [Delta(new JsonObject { ["content"] = jsonMarker.Groups[1].Value }), Finish("stop"), Usage(100, 0, 20)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
+        // SVG: a drawing of a sun over hills ("[broken]" draws one that is not XML first; "[noids]" one with no ids first); a
+        // change makes the sun red; motions spin the sun ("[badpart]" names a part that is not there first).
+        if (system0.StartsWith("You are an illustrator who draws in SVG", StringComparison.Ordinal) || system0.StartsWith("You change SVG drawings", StringComparison.Ordinal))
+        {
+            var first = !messages.Any(m => m?["role"]?.GetValue<string>() == "assistant");
+            var question = messages.OfType<JsonObject>().First(m => m["role"]?.GetValue<string>() == "user")["content"]!.ToString();
+            var svg = first && question.Contains("[broken]", StringComparison.Ordinal) ? "<svg><rect></svg>"
+                : first && question.Contains("[noids]", StringComparison.Ordinal) ? "<svg viewBox=\"0 0 512 512\"><rect width=\"512\" height=\"512\" fill=\"#bfe3ff\"/><circle cx=\"256\" cy=\"200\" r=\"80\" fill=\"#ffc83d\"/><path d=\"M0 400 Q256 300 512 400 V512 H0Z\" fill=\"#5a9\"/></svg>"
+                : $$$"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect id="sky" width="512" height="512" fill="#bfe3ff"/><circle id="sun" cx="256" cy="200" r="80" fill="{{{(system0.StartsWith("You change", StringComparison.Ordinal) ? "#e33" : "#ffc83d")}}}"/><path id="hills" d="M0 400 Q256 300 512 400 V512 H0Z" fill="#5a9"/></svg>""";
+            chunks = [Delta(new JsonObject { ["content"] = "Here you are:\n" + svg }), Finish("stop"), Usage(200, 0, 300)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
+        if (system0.StartsWith("You animate SVG drawings", StringComparison.Ordinal))
+        {
+            var first = !messages.Any(m => m?["role"]?.GetValue<string>() == "assistant");
+            var target = first && lastUser.Contains("[badpart]", StringComparison.Ordinal) ? "moon" : "sun";
+            chunks = [Delta(new JsonObject { ["content"] = $$$"""{"motions": [{"target": "{{{target}}}", "kind": "spin", "duration": 4}, {"target": "hills", "kind": "fade-in"},]}""" }), Finish("stop"), Usage(200, 0, 60)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
         // Rooms read in another language: each message given back as "[Language] text", or "=" for one starting "[same]".
         if (system0.StartsWith("You translate messages of a group chat", StringComparison.Ordinal))
         {

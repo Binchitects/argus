@@ -191,6 +191,8 @@ public static class SettingsCatalog
             { Max = 100 },
         new("Chat:TranslationModel", Model, "Model that translates rooms", "A chat model's name, for reading rooms in another language: each message is translated once into a language and kept for all who read in it. A larger model translates better (dates, names, idioms). Empty: the model for small steps.", SettingType.Text, SettingScope.Live)
             { Max = 100 },
+        new("Chat:SvgModel", Model, "Model that draws SVG", "A chat model's name, for the media studio's vector drawings: drawing SVG from words, changing it as asked and planning its motions. A larger model draws better; one that sees is shown its drawing and fixes what looks wrong. Empty: each person's own model.", SettingType.Text, SettingScope.Live)
+            { Max = 100 },
         new("Media:PictureModel", Model, "Picture model the chat uses", "A picture model's name (Admin → Models), for the chat's pictures when the person does not name one. Empty: the first one they may use.", SettingType.Text, SettingScope.Live)
             { Max = 100 },
         new("Media:VideoModel", Model, "Video model the chat uses", "A video model's name, for the chat's clips. Empty: the first one they may use.", SettingType.Text, SettingScope.Live)

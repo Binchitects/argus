@@ -3632,6 +3632,74 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("media_stories", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Media.MediaVector", b =>
+                {
+                    b.Property<Guid>("ItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Loops")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Motions")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<double>("Seconds")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Still")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Style")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("ItemId");
+
+                    b.ToTable("media_vectors", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Media.MediaVectorVersion", b =>
+                {
+                    b.Property<Guid>("ItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Change")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Motions")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Still")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("ItemId", "Version");
+
+                    b.ToTable("media_vector_versions", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Models.CachedAnswer", b =>
                 {
                     b.Property<long>("Id")
@@ -5650,6 +5718,24 @@ namespace Llm.Core.Data.Migrations
                         .WithMany()
                         .HasForeignKey("VideoItemId")
                         .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("Llm.Core.Media.MediaVector", b =>
+                {
+                    b.HasOne("Llm.Core.Media.MediaItem", null)
+                        .WithOne()
+                        .HasForeignKey("Llm.Core.Media.MediaVector", "ItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Media.MediaVectorVersion", b =>
+                {
+                    b.HasOne("Llm.Core.Media.MediaVector", null)
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Llm.Core.Models.MediaModel", b =>
