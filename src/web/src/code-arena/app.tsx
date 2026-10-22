@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Blocks, Bug, CircleAlert, CircleHelp, Files, GitBranch, GitCompareArrows, Info, MessagesSquare, Search, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, Blocks, Bug, CircleAlert, CircleHelp, Files, GitBranch, GitCompareArrows, Info, MessagesSquare, ScanSearch, Search, SquareTerminal, type LucideIcon } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { toast } from '@/components/ui/toaster'
 import { Alert } from '@/components/ui/alert'
@@ -17,6 +17,7 @@ import { useCommands, type Command } from './commands'
 import { completion } from './completion'
 import { CommandPalette, recentLimit, type PaletteCommand } from './palette'
 import { ProblemsPanel } from './problems'
+import { ReviewPanel } from './review'
 import { SourceControlPanel } from './scm'
 import { EditorArea, EditorProvider } from './editor'
 import { userFile } from './editor-options'
@@ -175,7 +176,7 @@ function Unreachable({ error }: { error: unknown }) {
   )
 }
 
-type View = 'explorer' | 'search' | 'git' | 'debug' | 'extensions' | 'changes' | 'problems' | 'chat'
+type View = 'explorer' | 'search' | 'git' | 'debug' | 'extensions' | 'changes' | 'problems' | 'review' | 'chat'
 
 /** Where the panels are and how large: the person's own, kept by code-arena for every run. */
 interface Layout {
@@ -199,7 +200,7 @@ function layoutOf(saved: Record<string, unknown> | undefined): Layout {
   const layout = { ...defaults }
   if (!saved) return layout
   const view = saved.view
-  if (view === 'explorer' || view === 'search' || view === 'git' || view === 'debug' || view === 'extensions' || view === 'changes' || view === 'problems' || view === 'chat') layout.view = view
+  if (view === 'explorer' || view === 'search' || view === 'git' || view === 'debug' || view === 'extensions' || view === 'changes' || view === 'problems' || view === 'review' || view === 'chat') layout.view = view
   if (saved.panelTab === 'terminal' || saved.panelTab === 'console' || saved.panelTab === 'output') layout.panelTab = saved.panelTab
   for (const k of ['side', 'chat', 'panel'] as const) {
     const size = saved[k]
@@ -247,6 +248,7 @@ const views: { id: View; label: string; icon: LucideIcon; command: string }[] = 
   { id: 'extensions', label: 'Extensions', icon: Blocks, command: 'workbench.view.extensions' },
   { id: 'changes', label: 'Agent changes', icon: GitCompareArrows, command: 'codeArena.view.changes' },
   { id: 'problems', label: 'Problems', icon: CircleAlert, command: 'workbench.actions.view.problems' },
+  { id: 'review', label: 'Review', icon: ScanSearch, command: 'codeArena.view.review' },
   { id: 'chat', label: 'Chat', icon: MessagesSquare, command: 'codeArena.view.sessions' },
 ]
 
@@ -329,6 +331,8 @@ function Workbench({
   const [debugUsed, setDebugUsed] = useState(layout.view === 'debug')
   // The Extensions view too (it asks code-arena for VS Code's extensions on this computer then).
   const [extensionsUsed, setExtensionsUsed] = useState(layout.view === 'extensions')
+  // The Review view reads the last review once it is first shown.
+  const [reviewUsed, setReviewUsed] = useState(layout.view === 'review')
   const changes = useQuery(changesQuery)
   const [height, setHeight] = useState(() => window.innerHeight)
 
@@ -345,6 +349,7 @@ function Workbench({
       else change({ view, sideOpen: true, ...(view === 'chat' ? { chatOpen: true } : {}) })
       if (view === 'debug') setDebugUsed(true)
       if (view === 'extensions') setExtensionsUsed(true)
+      if (view === 'review') setReviewUsed(true)
       if (view === 'search') setSearchFocus((n) => n + 1)
     },
     [change, layout.sideOpen, layout.view],
@@ -906,6 +911,7 @@ function Workbench({
     { id: 'workbench.view.scm', category: 'View', title: 'Show Source Control', run: () => show('git') },
     { id: 'workbench.actions.view.problems', category: 'View', title: 'Show Problems', run: () => show('problems') },
     { id: 'codeArena.view.changes', category: 'View', title: "Show the Agent's Changes", run: () => show('changes') },
+    { id: 'codeArena.view.review', category: 'View', title: 'Show Review', run: () => show('review') },
     { id: 'codeArena.view.sessions', category: 'View', title: 'Show the Chat Sessions', run: () => show('chat') },
     { id: 'codeArena.acceptAllChanges', category: 'Code Arena', title: "Accept All the Agent's Changes", enabled: () => count > 0, run: () => void accept() },
     { id: 'workbench.action.terminal.toggleTerminal', category: 'View', title: 'Toggle Terminal', run: toggleTerminal },
@@ -1007,6 +1013,9 @@ function Workbench({
           </div>
           <div hidden={layout.view !== 'problems'} className="h-full">
             <ProblemsPanel />
+          </div>
+          <div hidden={layout.view !== 'review'} className="h-full">
+            {reviewUsed && <ReviewPanel />}
           </div>
           <div hidden={layout.view !== 'chat'} className="h-full">
             <Sessions state={state} />

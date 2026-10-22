@@ -469,6 +469,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             Compaction = Compaction,
         };
         Context.SubAgent = (description, prompt, agent, token) => RunSubAgentAsync(inputs, description, prompt, agent, token);
+        _inputs = inputs;
         Context.Progress = said =>
         {
             Notice(false, said);
@@ -1164,6 +1165,34 @@ internal sealed partial class Runtime : IAsyncDisposable
                 : $"{link.Title}: {count} tool{(count == 1 ? "" : "s")}";
         }
         return link.Describe() + (link.State == LinkState.Failed && link.Error is { } error ? $" ({Fmt.OneLine(error, 120)})" : "");
+    }
+
+    private SystemPrompt.Inputs? _inputs;
+
+    /// <summary>
+    /// A review of the changes (the IDE's Review view): a fresh agent with the reading tools and <paramref name="report"/>,
+    /// as a sub-agent is, its steps told to <paramref name="events"/>, its tokens the session's; what it said at the end.
+    /// </summary>
+    internal async Task<string> ReviewAsync(string prompt, ToolDef report, IAgentEvents events, CancellationToken ct)
+    {
+        var inputs = _inputs ?? throw new InvalidOperationException("Code Arena has not started yet.");
+        var reviewer = new Agent
+        {
+            Gateway = Gateway,
+            Tools = new ToolBox([.. Tools.ForSubAgent().All, report]),
+            Permissions = Permissions,
+            Context = new ToolContext { Workspace = Workspace, Ui = Ui, Shell = Config.Shell, Sandbox = Sandbox },
+            Ui = Ui,
+            Model = Model,
+            SystemPrompt = () => SystemPrompt.Build(inputs, subAgent: true),
+            Total = Total,
+            Depth = 1,
+            Stream = false,
+            MaxSteps = 80,
+            Compaction = Compaction,
+            Events = events,
+        };
+        return await reviewer.RunAsync(prompt, new Spend(), ct);
     }
 
     private async Task<string> RunSubAgentAsync(SystemPrompt.Inputs inputs, string description, string prompt, string? agent, CancellationToken ct)

@@ -113,6 +113,16 @@ const fakes = vi.hoisted(() => {
       return null
     }
     pushStackElement() {}
+    /** As Monaco's for plain text, matching case: each place the text is, up to a limit. */
+    findMatches(text: string, _all: boolean, _regex: boolean, _matchCase: boolean, _separators: null, _capture: boolean, limit = 999) {
+      const found: { range: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number } }[] = []
+      for (let at = this.value.indexOf(text); at >= 0 && found.length < limit; at = this.value.indexOf(text, at + 1)) {
+        const start = this.getPositionAt(at)
+        const end = this.getPositionAt(at + text.length)
+        found.push({ range: { startLineNumber: start.lineNumber, startColumn: start.column, endLineNumber: end.lineNumber, endColumn: end.column } })
+      }
+      return found
+    }
     options: Record<string, unknown> = {}
     updateOptions(o: Record<string, unknown>) {
       Object.assign(this.options, o)
@@ -763,7 +773,7 @@ describe('Code Arena, the IDE', () => {
     const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
     // The agent's changes are counted on their button.
     expect(await within(bar).findByRole('button', { name: 'Agent changes (1)' })).toBeInTheDocument()
-    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Chat', 'Terminal', 'Theme', 'Help', 'About Code Arena'])
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Chat', 'Terminal', 'Theme', 'Help', 'About Code Arena'])
     expect(within(bar).getByRole('button', { name: 'Explorer' })).toHaveAttribute('aria-pressed', 'true')
     expect(await screen.findByRole('tree', { name: 'Files' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'No file is open' })).toBeInTheDocument()
@@ -1673,6 +1683,67 @@ describe('Code Arena, the IDE', () => {
       text: "Fix the problems in this code: 2:9 TS2304 Cannot find name 'totl'.",
       context: [{ path: 'src/app.ts', startLine: 2, endLine: 2 }],
     }))
+  })
+
+  it('reviews the changes: its steps while it runs, then findings by file that open their line, apply their fix in the editor, go to the agent or are dismissed', async () => {
+    const finding = (over: Record<string, unknown>) => ({ endLine: 2, why: 'Logs the total on every load.', fix: 'Remove the log.', old: null, new: null, state: 'open', ...over })
+    const findings = [
+      finding({ index: 0, path: 'src/app.ts', line: 2, severity: 'major', title: 'Debug output left in', old: 'console.log(total)\n', new: '' }),
+      finding({ index: 1, path: 'src/app.ts', line: 1, endLine: 1, severity: 'nit', title: 'Name the constant', why: 'total of what?', fix: 'Call it cartTotal.' }),
+    ]
+    let review: Record<string, unknown> | null = null
+    const { calls } = backend({
+      'GET /api/review': () => ({ json: { review } }),
+      'POST /api/review': (body) => {
+        review = { id: 'r1', base: (body as { base?: string }).base ?? null, started: '2026-10-23T10:00:00Z', ended: null, running: true, verdict: null, summary: null, error: null, steps: ['git diff HEAD', 'read_file src/app.ts'], findings: [] }
+        return { json: { review } }
+      },
+      'POST /api/review/finding': (body) => {
+        const b = body as { index: number; state: string }
+        review = { ...review!, findings: (review!.findings as { index: number }[]).map((f) => (f.index === b.index ? { ...f, state: b.state } : f)) }
+        return { json: { review } }
+      },
+      'POST /api/messages': () => answerOnly(),
+    })
+    renderIde()
+    await openApp()
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    const panel = await screen.findByRole('complementary', { name: 'Review' })
+    await userEvent.click(within(panel).getByRole('radio', { name: 'This branch over' }))
+    expect(within(panel).getByRole('textbox', { name: 'Base branch' })).toHaveValue('main')
+    await userEvent.click(within(panel).getByRole('radio', { name: 'The changes not yet committed' }))
+    await userEvent.click(within(panel).getByRole('button', { name: 'Review' }))
+    expect(calls.find((c) => c.method === 'POST' && c.path === '/api/review')?.body).toEqual({})
+    expect(await within(panel).findByRole('list', { name: 'What the reviewer did' })).toHaveTextContent('read_file src/app.ts')
+    expect(within(panel).getByRole('button', { name: 'Stop the review' })).toBeInTheDocument()
+
+    // Done: the verdict, the summary, the findings by file, worst first.
+    review = { ...review!, running: false, ended: '2026-10-23T10:01:00Z', verdict: 'changes needed', summary: 'Adds a debug log.', findings }
+    const list = await within(panel).findByRole('list', { name: 'Findings in src/app.ts' }, { timeout: 3000 })
+    expect(within(panel).getByText('Changes needed')).toBeInTheDocument()
+    expect(within(panel).getByText('Adds a debug log.')).toBeInTheDocument()
+    expect(within(list).getAllByRole('listitem').map((l) => l.textContent)).toEqual([expect.stringContaining('Debug output left in'), expect.stringContaining('Name the constant')])
+    await userEvent.click(within(list).getByRole('button', { name: 'Unfold Name the constant' }))
+    expect(within(list).getByText('Call it cartTotal.')).toBeInTheDocument()
+    // Only a finding whose fix fits the file can be applied.
+    expect(within(list).queryByRole('button', { name: 'Apply the fix for Name the constant' })).toBeNull()
+
+    // A finding opens its line; Apply fix makes the fix in the editor (unsaved) and marks it fixed.
+    await userEvent.click(within(list).getByRole('button', { name: 'Debug output left in, major, line 2' }))
+    await waitFor(() => expect(editor().selection).toEqual({ startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 1 }))
+    await userEvent.click(within(list).getByRole('button', { name: 'Apply the fix for Debug output left in' }))
+    await waitFor(() => expect(editor().model?.value).toBe('const total = 1\n'))
+    expect(calls.find((c) => c.path === '/api/review/finding')?.body).toEqual({ index: 0, state: 'fixed' })
+    expect(await within(list).findByRole('button', { name: 'Open Debug output left in again' })).toBeInTheDocument()
+
+    // Another goes to the agent with its lines, or is dismissed.
+    await userEvent.click(within(list).getByRole('button', { name: 'Ask the agent about Name the constant' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/messages')?.body).toEqual({
+      text: 'Fix this review finding: src/app.ts:1 (nit) Name the constant. total of what? Fix: Call it cartTotal.',
+      context: [{ path: 'src/app.ts', startLine: 1, endLine: 1 }],
+    }))
+    await userEvent.click(within(list).getByRole('button', { name: 'Dismiss Name the constant' }))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/review/finding').at(-1)?.body).toEqual({ index: 1, state: 'dismissed' }))
   })
 
   it('lists what changed since the last commit, opens a file as it was and is, stages, discards and commits', async () => {
@@ -2852,7 +2923,7 @@ describe('Code Arena, the help', () => {
     await screen.findByRole('tree', { name: 'Files' })
     const seen = new Set(regionsShown())
     // Every view of the side bar, and the terminal panel, drawn once.
-    for (const name of ['Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Chat']) {
+    for (const name of ['Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Chat']) {
       await userEvent.click(within(bar).getByRole('button', { name }))
       for (const r of regionsShown()) seen.add(r)
     }

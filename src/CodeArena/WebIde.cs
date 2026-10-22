@@ -28,6 +28,7 @@ internal sealed partial class WebApp
     private Tasks _tasks = null!;
     private RunConfigs _runs = null!;
     private EditorExtensions _extensions = null!;
+    private Reviews _reviews = null!;
 
     /// <summary>The one call whose body is not JSON: a VS Code extension's .vsix, sent whole.</summary>
     private const string InstallPath = "/api/extensions/install";
@@ -46,6 +47,7 @@ internal sealed partial class WebApp
         _tasks = new Tasks(_rt.Workspace, _files, _terminals, _problems, _state, _rt.Env.Env);
         _runs = new RunConfigs(_rt.Workspace, _terminals, _tasks, _state, _rt.Env.Env);
         _extensions = new EditorExtensions(_rt.Env.Paths.DataDir, _rt.Env.Env);
+        _reviews = new Reviews(_rt, _problems);
         StartDebug();
         StartLsp();
     }
@@ -115,6 +117,24 @@ internal sealed partial class WebApp
                 case ("POST", "/api/problems/run"):
                     await res.JsonAsync(200, ProblemsJson(await _problems.RunAsync()), ct);
                     return true;
+                case ("GET", "/api/review"):
+                    await res.JsonAsync(200, _reviews.Json(), ct);
+                    return true;
+                case ("POST", "/api/review"):
+                    _reviews.Start(Body(req).Str("base"));
+                    await res.JsonAsync(200, _reviews.Json(), ct);
+                    return true;
+                case ("POST", "/api/review/stop"):
+                    _reviews.Stop();
+                    await res.JsonAsync(200, _reviews.Json(), ct);
+                    return true;
+                case ("POST", "/api/review/finding"):
+                {
+                    var body = Body(req);
+                    _reviews.Mark(body.Int("index") ?? -1, body.Str("state") ?? "");
+                    await res.JsonAsync(200, _reviews.Json(), ct);
+                    return true;
+                }
                 case ("GET", "/api/formatters"):
                     await res.JsonAsync(200, await Task.Run(() => _formatters.List(Query(req, "path"), Query(req, "language")), ct), ct);
                     return true;

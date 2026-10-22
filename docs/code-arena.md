@@ -944,6 +944,26 @@ but a linter's rule code (ruff's `F401`) or ESLint's `[Warning/…]` as a
 warning. The worst 2,000 are kept; a check that leaves something running in
 the background is not waited for.
 
+
+### Review
+
+**Review** in the activity bar has a reviewer look at **the changes not yet
+committed**, or at **this branch over** a base you name (main, origin/main, a
+commit), as `/review` does in the terminal: a fresh agent with the reading
+tools only (files, search, git, and Arena's and Argus's tools that change
+nothing) reads the changes and the code around them, tries to refute each
+finding before it keeps it, and changes nothing. Its steps show as it goes;
+**Stop the review** ends it (20 minutes at most).
+
+Then the verdict (looks good, comments, changes needed), a summary, and the
+findings by file, worst first (critical, major, minor, nit). Each opens its
+file at its line, where the editor marks it (as **Problems** list it while it
+is open: critical and major as errors, minor as warnings). Unfolded, it says
+why it matters and the fix. **Apply fix** makes the fix in the editor when
+the reviewer gave the exact text to replace and it is in the file once
+(undo takes it back; saving is yours); **Ask the agent** hands the finding
+to the chat with its lines; **Dismiss** leaves it. A finding on a file that
+is not in the folder is left out. The last review stays until the next.
 ### Code completion
 
 As you type in the editor, Code Arena asks the model for what comes next at

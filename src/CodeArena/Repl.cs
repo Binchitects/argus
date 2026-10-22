@@ -766,9 +766,10 @@ internal sealed class Repl(Runtime rt)
 
     /// <summary>
     /// /review: a turn that reviews the changes with the git tool, as the Code page's reviews do: findings on lines, each
-    /// one the model tried to refute first, and a verdict; nothing changed.
+    /// one the model tried to refute first, and a verdict; nothing changed. With <paramref name="reportTool"/> (the IDE's
+    /// Review view), the findings are reported with report_review instead of written out.
     /// </summary>
-    public static string ReviewPrompt(string baseRef)
+    public static string ReviewPrompt(string baseRef, bool reportTool = false)
     {
         var what = baseRef.Length == 0
             ? "the changes not yet committed (staged and not). Read them with the git tool: git status, then git diff HEAD"
@@ -777,8 +778,12 @@ internal sealed class Repl(Runtime rt)
             "For each changed file, read enough of the file around each change (and the code it calls or is called by) to judge it. " +
             "Look for bugs, security problems, broken edge cases, races, missing error handling, performance traps and missing tests; not style a formatter would fix. " +
             "Before you report a finding, try to refute it by reading the code it depends on, and leave out what you refuted. " +
-            "Report the findings by severity (critical, major, minor, nit), each as file:line, what is wrong, why it matters, and the fix. " +
-            "End with a verdict: looks good, comments, or changes needed. Do not change any file.";
+            (reportTool
+                ? "When you are done, call report_review once: the verdict (looks good, comments, or changes needed), a summary, and every finding with its " +
+                  "file (relative to the working directory), its line in the file as it is now, its severity (critical, major, minor, nit), what is wrong, why it " +
+                  "matters and the fix. For a small fix, also give old (the exact lines in the file now, unique in it) and new (what replaces them). Do not change any file."
+                : "Report the findings by severity (critical, major, minor, nit), each as file:line, what is wrong, why it matters, and the fix. " +
+                  "End with a verdict: looks good, comments, or changes needed. Do not change any file.");
     }
 
     /// <summary>

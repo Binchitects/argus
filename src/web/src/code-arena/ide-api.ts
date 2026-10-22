@@ -279,6 +279,46 @@ export const problemsQuery = {
 /** Runs the project's check (waits for the one running, when one is); what it found. */
 export const runCheck = () => api<CheckRun>('/api/problems/run', { body: {} })
 
+/** A review's finding: where, how bad, what and why, the fix in words, and the exact text to replace when the fix fits the file. */
+export interface ReviewFinding {
+  index: number
+  path: string
+  line: number
+  endLine: number
+  severity: 'critical' | 'major' | 'minor' | 'nit'
+  title: string
+  why: string
+  fix: string
+  old: string | null
+  new: string | null
+  state: 'open' | 'fixed' | 'dismissed'
+}
+
+/** The last review (the Review view): of the changes not yet committed, or the branch over its base; while it runs, its steps. */
+export interface ReviewRun {
+  id: string
+  base: string | null
+  started: string
+  ended: string | null
+  running: boolean
+  verdict: 'looks good' | 'comments' | 'changes needed' | null
+  summary: string | null
+  error: string | null
+  steps: string[]
+  findings: ReviewFinding[]
+}
+
+export const reviewQuery = {
+  queryKey: ['code', 'review'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ review: ReviewRun | null }>('/api/review', { signal }),
+  // While it runs: read again, for its steps and its end.
+  refetchInterval: (q: { state: { data?: { review: ReviewRun | null } } }) => (q.state.data?.review?.running ? 1000 : false),
+}
+
+export const startReview = (base: string | null) => api<{ review: ReviewRun | null }>('/api/review', { body: base ? { base } : {} })
+export const stopReview = () => api<{ review: ReviewRun | null }>('/api/review/stop', { body: {} })
+export const markFinding = (index: number, state: ReviewFinding['state']) => api<{ review: ReviewRun | null }>('/api/review/finding', { body: { index, state } })
+
 /** A file changed since the last commit: in the index (staged) and in the folder (not), as git's letters (M, A, D, R; ? untracked). */
 export interface GitFile {
   path: string

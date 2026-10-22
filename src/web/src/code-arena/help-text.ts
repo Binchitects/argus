@@ -8,7 +8,7 @@ import { modKey } from './editor-state'
  */
 
 /** The parts of the workbench. */
-export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'git' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status' | 'settings' | 'keybindings' | 'debug' | 'console' | 'extensions' | 'output'
+export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'review' | 'git' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status' | 'settings' | 'keybindings' | 'debug' | 'console' | 'extensions' | 'output'
 
 export interface PartHelp extends HelpPart {
   /** Where the manual's Code Arena page (docs/code-arena.md) tells the rest: one of its headings. */
@@ -72,6 +72,11 @@ export const parts: Record<Part, PartHelp> = {
     name: 'Problems',
     text: "The errors and warnings of the project's own check (its build, type check or linter): **Run check** runs it. Each opens the file at its line, where the editor marks it too; **Fix** asks the agent to fix it.",
     manual: 'problems',
+  },
+  review: {
+    name: 'Review',
+    text: 'A review of the changes not yet committed, or of the branch over its base, by a reviewer that reads the code and changes nothing. Its findings, worst first, open the file at their line and are marked there; **Apply fix** makes a fix that fits the file in the editor (undo takes it back), **Ask the agent** hands one over, **Dismiss** leaves it.',
+    manual: 'review',
   },
   git: {
     name: 'Source control',
@@ -211,6 +216,7 @@ export const regions: Record<string, Part> = {
   'Search the files': 'search',
   'Agent changes': 'changes',
   Problems: 'problems',
+  Review: 'review',
   'Source control': 'git',
   Sessions: 'sessions',
   Editor: 'editor',
