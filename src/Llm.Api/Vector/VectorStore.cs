@@ -105,7 +105,7 @@ public sealed class VectorStore(AppDbContext db, SvgRender render, TimeProvider 
     public async Task<IReadOnlyList<string>> ChangeAsync(MediaItem item, MediaVector vector, string still, IReadOnlyList<Motion> motions, string change, CancellationToken ct)
     {
         var safe = SvgSafe.Clean(still);
-        var centers = motions.Any(m => m.Kind == "travel") ? SvgRender.Centers(await render.PartsAsync(safe.Markup, ct)) : null;
+        var centers = motions.Any(m => SvgMotion.Measured.Contains(m.Kind)) ? SvgRender.Centers(await render.PartsAsync(safe.Markup, ct)) : null;
         var (markup, timeline, problems) = Compile(safe.Markup, motions, centers);
         var file = await db.ChatAttachments.SingleAsync(a => a.Id == item.AttachmentId, ct);
         file.Data = Encoding.UTF8.GetBytes(markup);

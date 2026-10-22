@@ -207,8 +207,9 @@ public sealed partial class SvgDraw(OneQuestion one, ChatModels models, SvgRende
     private const string Splitting = """
         You plan an animated illustration from a request. Split it into what one still picture shows, and how it moves.
         Answer with JSON only: {"scene": "…", "motion": "…"}.
-        - scene: in English, one still picture, as a short list of things: each thing, its colour, and where it is (left, right, middle, top, bottom); the things large, filling the picture, apart from each other, nothing else on the ground or around them. What goes from one thing to another is drawn once, between them, as a bold simple icon big enough to see (about a sixth of the picture). No words about time or motion (no "moving", "sending", "dragging", "trail", "sparkles as it moves").
-        - motion: in English, how each thing moves (the file goes from the laptop to the server, again and again; the server's light blinks); "" when the request says nothing about motion.
+        - scene: in English, one still picture, as a short list of things: each thing, its colour, and where it is (left, right, middle, top, bottom); the things large, filling the picture, apart from each other with empty space between them, nothing else on the ground or around them. What goes from one thing to another is drawn once, between them, as a bold simple icon big enough to see (about a sixth of the picture), touching nothing. No words about time or motion (no "moving", "sending", "dragging").
+        - The effects of motion are not drawn: no trails, glows behind, speed lines, motion lines, arrows or sparkles following a thing (the animation makes them). Small sparkles or stars that stay where they are may be drawn, apart.
+        - motion: in English, how each thing moves and the effects that go with it (the file flies from the laptop to the server with a glowing trail, again and again; the server's light blinks); "" when the request says nothing about motion.
         """;
 
     /// <summary>A request split into the still picture to draw (in English, things placed so the motion can happen) and how it moves ("" when it says not).</summary>
@@ -289,18 +290,34 @@ public sealed partial class SvgDraw(OneQuestion one, ChatModels models, SvgRende
             ? SvgRender.Describe(parts)
             : string.Join('\n', root.Descendants().Where(e => e.Attribute("id") is not null).Take(300).Select(e => $"#{(string)e.Attribute("id")!} {e.Name.LocalName}"));
         var system = $$"""
-            You animate SVG drawings with motions. Answer with JSON only: {"motions": [ … ]}, each motion:
-            {"target": "a part's id, or scene for the whole drawing", "kind": "…", "duration": seconds, "delay": seconds, "repeat": "once" | "loop" | a number,
-             "easing": "linear" | "ease-in-out" | "ease-out" | "spring" | "smooth" | "snappy", "alternate": true | false, "stagger": seconds (its own parts one after another),
-             "from": "left" | "right" | "top" | "bottom" (a slide), or a part's id (where a travel starts), "to": a part's id (where a travel goes), "amount": number, "origin": "center" | "top" | "bottom" | "left" | "right" | "x y", "color": "#hex",
+            You are an animation director. You animate SVG drawings by their parts, as a little film that plays again and again.
+            Answer with JSON only: {"cycle": seconds, "motions": [ … ]}, each motion:
+            {"target": "a part's id, or scene for the whole drawing", "kind": "…", "start": seconds into the cycle (its beat in the story; leave it out for a part that just lives on its own), "duration": seconds,
+             "delay": seconds (only for one without a start), "repeat": "once" | "loop" | a number, "easing": "linear" | "ease-in-out" | "ease-out" | "spring" | "smooth" | "snappy",
+             "alternate": true | false, "stagger": seconds (its own pieces one after another),
+             "from": "left" | "right" | "top" | "bottom" (a slide), or a part's id (where a travel or an arc starts), "to": a part's id (where a travel, an arc or the camera goes),
+             "amount": number, "origin": "center" | "top" | "bottom" | "left" | "right" | "x y", "color": "#hex",
              "keys": [{"at": 0 to 1, "x": n, "y": n, "scale": n, "rotate": degrees, "opacity": 0 to 1, "fill": "#hex"}] for kind keyframes}.
             The kinds:
             {{Motions()}}
             Distances are in the drawing's units (its viewBox is {{box.W}}×{{box.H}}). Only the parts listed exist.
-            Do what is asked, and only that: the parts named move as said, everything else stays still. No entrances unless asked (fade-in, slide-in, pop...).
-            Choose kinds that look natural: what is sent, carried or thrown goes from one part to another (travel, from and to their ids), stars twinkle (twinkle), lights, the sun and the moon glow (glow), creatures breathe (breathe), clouds and waves drift (drift), boats rock (sway with origin bottom and amount 5), leaves and flowers sway, wheels spin, eyes blink.
-            A part whose own parts are numbered (stars-1, stars-2...) moves them one after another with "stagger" on the part itself (target "stars").
-            When asked only to make it alive: entrances one after another first, then gentle loops; wheels spin, things float or sway, eyes blink, lines draw on.
+            Direct it like a good animator:
+            - Tell what was asked as a story in beats on one cycle of 3 to 6 seconds: give each beat a "start", so things happen one after another and the next begins a little before the last ends (overlap).
+            - Anticipation before a big move (a small squash, pulse or wiggle of what starts it), follow-through after it (a jump or pulse of what receives it, a glow, a flash of colour).
+            - Secondary motion: what is near moves too, smaller (sparkles twinkle with a stagger, lights blink, a trail follows what flies).
+            - Things that just live (clouds drift, stars twinkle, a creature breathes) have no start: they go on by themselves, gently, under the story.
+            - Natural kinds: what is sent, carried or thrown flies from one part to the other (arc, or travel along the ground), with a trail after it; landing things jump or land; lights, the sun and the moon glow; boats sway with origin bottom and amount 5; wheels spin; eyes blink; a camera may go close to the part that matters and back.
+            - A part whose own pieces are numbered (stars-1, stars-2...) moves them one after another with "stagger" on the part itself (target "stars").
+            - Do what is asked: the parts named move as said; the rest may live gently, never more than the story.
+            An example, for "the laptop sends a file to the server":
+            {"cycle": 4, "motions": [
+              {"target": "laptop", "kind": "pulse", "start": 0, "duration": 0.5, "amount": 0.05},
+              {"target": "file", "kind": "arc", "from": "laptop", "to": "server", "start": 0.4, "duration": 1.8},
+              {"target": "file", "kind": "trail", "amount": 4},
+              {"target": "server", "kind": "jump", "start": 2.1, "duration": 0.7, "amount": 12},
+              {"target": "server", "kind": "glow", "start": 2.1, "duration": 1.2, "color": "#7CFC9A"},
+              {"target": "sparkles", "kind": "twinkle", "stagger": 0.2}
+            ]}
             """;
         var question = $"The drawing's parts (id, kind, where, size, colour):\n{list}\n\nIts motions so far: {JsonSerializer.Serialize(kept, Lenient)}\n\nAsked: {request}\n\nAnswer with all its motions (those so far that stay, and the new ones).";
         var after = new List<JsonObject>();
@@ -317,8 +334,13 @@ public sealed partial class SvgDraw(OneQuestion one, ChatModels models, SvgRende
             List<Motion>? motions = null;
             try
             {
-                motions = start >= 0 && end > start ? JsonNode.Parse(text[start..(end + 1)], null, new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip })?["motions"]
-                    ?.Deserialize<List<Motion>>(Lenient) : null;
+                var plan = start >= 0 && end > start ? JsonNode.Parse(text[start..(end + 1)], null, new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip }) : null;
+                motions = plan?["motions"]?.Deserialize<List<Motion>>(Lenient);
+                // The story's cycle, kept with each of its beats.
+                if (motions is not null && plan?["cycle"] is JsonValue c && c.TryGetValue<double>(out var cycle) && cycle > 0)
+                {
+                    motions = [.. motions.Select(m => m.Start is null ? m : m with { Cycle = Math.Clamp(cycle, 0.5, 60) })];
+                }
             }
             catch (JsonException)
             {

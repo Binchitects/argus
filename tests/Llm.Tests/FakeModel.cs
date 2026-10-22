@@ -200,7 +200,7 @@ public sealed class FakeModel : HttpMessageHandler
             chunks = [Delta(new JsonObject { ["content"] = """{"things": [{"id": "Badge", "looks": "a red round badge"}, {"id": "star", "looks": "a dark star"}, {"id": "background", "looks": "white"}]}""" }), Finish("stop"), Usage(80, 0, 40)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
-        if (system0.StartsWith("You animate SVG drawings", StringComparison.Ordinal))
+        if (system0.StartsWith("You are an animation director", StringComparison.Ordinal))
         {
             var first = !messages.Any(m => m?["role"]?.GetValue<string>() == "assistant");
             var target = first && lastUser.Contains("[badpart]", StringComparison.Ordinal) ? "moon" : "sun";

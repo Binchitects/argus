@@ -46,6 +46,13 @@ public sealed record Motion
     public string? Origin { get; init; }
     public string? Color { get; init; }
     public IReadOnlyList<MotionKey>? Keys { get; init; }
+    /// <summary>
+    /// On the story's beat: when in the cycle it happens (seconds). Motions with a start share one cycle and happen one
+    /// after another, again each cycle; those without go on by themselves (things that just live: a float, a twinkle).
+    /// </summary>
+    public double? Start { get; init; }
+    /// <summary>The story's cycle (seconds), as its plan says; else its last motion's end and a short rest.</summary>
+    public double? Cycle { get; init; }
 }
 
 /// <summary>How long an animated drawing plays: once through, and whether it goes on (a loop) — what an export records.</summary>
@@ -70,7 +77,13 @@ public static partial class SvgMotion
         ("grow", "grows from nothing"), ("shrink", "shrinks to nothing"), ("zoom-in", "comes closer as it appears"),
         ("spin", "turns round and round (amount: turns a cycle)"), ("orbit", "goes round a point (origin: \"x y\")"),
         ("float", "rises and sinks gently (amount: how high)"), ("drift", "drifts slowly from side to side, as a cloud or waves (amount: how far)"),
-        ("travel", "goes from one place to another, as a file sent from a laptop to a server or a car along a road (to: the part it goes to, or \"x y\"; from: the part it starts at, else where it is), appearing at the start and fading at the end each time"), ("bounce", "bounces up and down"), ("sway", "rocks from side to side (amount: degrees)"),
+        ("travel", "goes from one place to another, as a file sent from a laptop to a server or a car along a road (to: the part it goes to, or \"x y\"; from: the part it starts at, else where it is), appearing at the start and fading at the end each time"),
+        ("arc", "flies from one part to another along a curve, as a thrown ball or a paper plane (to, from as travel; amount: how high the curve rises)"),
+        ("jump", "jumps: crouches, springs up stretched, lands squashed and settles (amount: how high)"),
+        ("land", "drops in from above and lands with a squash and a little bounce"),
+        ("flip", "flips round like a card, showing its back and front again"),
+        ("camera", "the view goes close to a part and back (target scene; to: the part; amount: how close, 1.6)"),
+        ("trail", "ghost copies follow the part's own move a moment behind, fading (after its travel, arc, float...; amount: how many, 4)"), ("bounce", "bounces up and down"), ("sway", "rocks from side to side (amount: degrees)"),
         ("swing", "swings from its top like a sign"), ("wave", "waves, as a hand (origin: where it turns, e.g. bottom)"),
         ("pulse", "grows a little and back"), ("heartbeat", "beats twice and rests"), ("wiggle", "wiggles"), ("shake", "shakes side to side"),
         ("breathe", "breathes: swells a little upward and back, slowly (amount: how much, 0.03)"), ("twinkle", "twinkles as a star: dims and shrinks a little and back"),
@@ -110,6 +123,7 @@ public static partial class SvgMotion
     {
         var copy = new XElement(root);
         copy.Descendants(S + "style").Where(s => s.Attribute(Mark) is not null).Remove();
+        copy.Descendants(S + "g").Where(g => (string?)g.Attribute(Mark) == "echo").Remove();
         foreach (var wrap in copy.Descendants(S + "g").Where(g => (string?)g.Attribute(Mark) == "wrap").Reverse().ToList())
         {
             wrap.ReplaceWith(wrap.Nodes());
@@ -150,6 +164,14 @@ public static partial class SvgMotion
         double once = 0, cycle = 0;
         var loops = false;
         var ids = root.DescendantsAndSelf().Where(e => e.Attribute("id") is not null).GroupBy(e => (string)e.Attribute("id")!).ToDictionary(g => g.Key, g => g.First());
+        // The story: the motions with a start, in one cycle they share (as long as its plan says, or to its last end and a rest).
+        var story = motions.Where(x => x.Start is not null && KindNames.Contains(Kind(x)) && Kind(x) != "trail").ToList();
+        var ends = story.Count > 0 ? story.Max(x => Math.Max(0, x.Start!.Value) + Timing(Kind(x), x).Duration) : 0;
+        var asked = story.Count > 0 ? story.Max(x => x.Cycle ?? 0) : 0;
+        var beat = story.Count > 0 ? Math.Clamp(asked > 0 ? Math.Max(asked, ends) : ends + 0.8, 0.5, 60) : 0;
+        var storyLoops = story.Any(x => !string.Equals((x.Repeat ?? "loop").Trim(), "once", StringComparison.OrdinalIgnoreCase));
+        var moved = new List<(int Index, string Target, string Kind, XElement Wrap, Played Play, string BoxKind, string Origin)>();
+        var trails = new List<(int Index, Motion Motion, string Target)>();
         for (var n = 0; n < motions.Count; n++)
         {
             var m = motions[n];
@@ -188,25 +210,70 @@ public static partial class SvgMotion
             var t = Timing(kind, m);
             var name = $"k{n + 1}";
             (double X0, double Y0, double X1, double Y1)? way = null;
-            if (kind == "travel")
+            if (kind is "travel" or "arc")
             {
                 if (Way(target, m, centers) is not { } found)
                 {
-                    problems.Add($"motion {n + 1}: a travel goes to a part (to: its id, one of {string.Join(", ", centers?.Keys.Take(40) ?? [])}) or a point (\"x y\"), from a part or where \"{target}\" is");
+                    problems.Add($"motion {n + 1}: a {kind} goes to a part (to: its id, one of {string.Join(", ", centers?.Keys.Take(40) ?? [])}) or a point (\"x y\"), from a part or where \"{target}\" is");
                     continue;
                 }
                 way = found;
+            }
+            else if (kind == "camera")
+            {
+                // The view: the part's middle to the drawing's, that much closer.
+                if (centers is null || !centers.TryGetValue((m.To ?? "").Trim().TrimStart('#'), out var focus))
+                {
+                    problems.Add($"motion {n + 1}: the camera goes close to a part (to: its id, one of {string.Join(", ", centers?.Keys.Take(40) ?? [])})");
+                    continue;
+                }
+                var zoom = Math.Clamp(m.Amount ?? 1.6, 1.05, 4);
+                way = (box.X + box.W / 2 - zoom * focus.X, box.Y + box.H / 2 - zoom * focus.Y, zoom, 0);
+            }
+            else if (kind == "trail")
+            {
+                // Made once the move it follows is.
+                trails.Add((n, m, target));
+                continue;
             }
             if (Frames(kind, m, box, element, way) is not { } frames)
             {
                 problems.Add($"motion {n + 1}: keyframes need at least one key (at 0 to 1)");
                 continue;
             }
-            css.Append(CultureInfo.InvariantCulture, $"@keyframes {name}{{{frames}}}");
+            var onBeat = m.Start is { } begins && beat > 0;
+            if (!onBeat)
+            {
+                css.Append(CultureInfo.InvariantCulture, $"@keyframes {name}{{{frames}}}");
+            }
             for (var i = 0; i < targets.Count; i++)
             {
-                var delay = m.Delay + i * (m.Stagger ?? 0);
-                var animation = $"{name} {N(t.Duration)}s {t.Easing} {N(delay)}s {(t.Times is { } k ? N(k) : "infinite")} {(t.Alternate ? "alternate" : "normal")} both";
+                Played play;
+                if (onBeat)
+                {
+                    // Its part of the story's cycle: still before it, its move from its start, as it ended after.
+                    var from = m.Start!.Value + i * (m.Stagger ?? 0);
+                    var piece = targets.Count > 1 ? $"{name}-{i + 1}" : name;
+                    css.Append(CultureInfo.InvariantCulture, $"@keyframes {piece}{{{Remap(frames, Math.Min(99, from / beat * 100), Math.Min(100, (from + t.Duration) / beat * 100))}}}");
+                    play = new Played(piece, beat, t.Easing, 0, storyLoops ? null : 1, false);
+                    once = Math.Max(once, beat);
+                    if (storyLoops)
+                    {
+                        loops = true;
+                        cycle = Math.Max(cycle, beat);
+                    }
+                }
+                else
+                {
+                    var delay = m.Delay + i * (m.Stagger ?? 0);
+                    play = new Played(name, t.Duration, t.Easing, delay, t.Times, t.Alternate);
+                    once = Math.Max(once, delay + t.Duration * (t.Times ?? 1));
+                    if (t.Times is null)
+                    {
+                        loops = true;
+                        cycle = Math.Max(cycle, t.Duration * (t.Alternate ? 2 : 1));
+                    }
+                }
                 var cls = $"m{n + 1}{(targets.Count > 1 ? $"-{i + 1}" : "")}";
                 if (kind is "draw" or "color")
                 {
@@ -218,7 +285,7 @@ public static partial class SvgMotion
                             Drawable(shape, box);
                         }
                     }
-                    css.Append(CultureInfo.InvariantCulture, $".{cls}{{animation:{animation}}}");
+                    css.Append(CultureInfo.InvariantCulture, $".{cls}{{animation:{play.Css()}}}");
                 }
                 else
                 {
@@ -226,15 +293,30 @@ public static partial class SvgMotion
                     targets[i].ReplaceWith(wrap);
                     wrap.Add(targets[i]);
                     var (boxKind, origin) = OriginOf(kind, m.Origin);
-                    css.Append(CultureInfo.InvariantCulture, $".{cls}{{animation:{animation};transform-box:{boxKind};transform-origin:{origin}}}");
+                    css.Append(CultureInfo.InvariantCulture, $".{cls}{{animation:{play.Css()};transform-box:{boxKind};transform-origin:{origin}}}");
+                    moved.Add((n, target, kind, wrap, play, boxKind, origin));
                 }
-                var length = delay + t.Duration * (t.Times ?? 1);
-                once = Math.Max(once, length);
-                if (t.Times is null)
-                {
-                    loops = true;
-                    cycle = Math.Max(cycle, t.Duration * (t.Alternate ? 2 : 1));
-                }
+            }
+        }
+        // Trails: ghost copies of a part (a use of it, each fainter) that make its move a moment behind it.
+        foreach (var (n, m, target) in trails)
+        {
+            var after = moved.Where(x => x.Index < n && x.Target == target && Moving.Contains(x.Kind)).ToList();
+            if (target is "scene" or "all" or "*" or "" || after.Count == 0)
+            {
+                problems.Add($"motion {n + 1}: a trail follows a part's own move (a travel, arc, float...) given before it: \"{target}\" has none");
+                continue;
+            }
+            var lead = after[^1];
+            var count = (int)Math.Clamp(Math.Round(m.Amount ?? 4), 1, 8);
+            for (var k = 1; k <= count; k++)
+            {
+                var cls = $"m{n + 1}-t{k}";
+                var echo = new XElement(S + "g", new XAttribute(Mark, "echo"), new XAttribute("class", cls),
+                    new XElement(S + "g", new XAttribute("opacity", N(0.5 * (1 - (k - 1.0) / count))), new XElement(S + "use", new XAttribute("href", "#" + target))));
+                lead.Wrap.AddBeforeSelf(echo);
+                var play = lead.Play with { Delay = lead.Play.Delay + k * 0.07 };
+                css.Append(CultureInfo.InvariantCulture, $".{cls}{{animation:{play.Css()};transform-box:{lead.BoxKind};transform-origin:{lead.Origin}}}");
             }
         }
         if (css.Length > 0)
@@ -247,6 +329,60 @@ public static partial class SvgMotion
     }
 
     private sealed record Time(double Duration, string Easing, double? Times, bool Alternate);
+
+    /// <summary>How a part plays its keyframes: its CSS animation (null times: for ever).</summary>
+    private sealed record Played(string Name, double Duration, string Easing, double Delay, double? Times, bool Alternate)
+    {
+        public string Css() => $"{Name} {N(Duration)}s {Easing} {N(Delay)}s {(Times is { } k ? N(k) : "infinite")} {(Alternate ? "alternate" : "normal")} both";
+    }
+
+    private static string Kind(Motion m) => (m.Kind ?? "").Trim().ToLowerInvariant();
+
+    /// <summary>The kinds that go between parts, by where they are (measured on the drawing).</summary>
+    public static readonly HashSet<string> Measured = new(StringComparer.OrdinalIgnoreCase) { "travel", "arc", "camera" };
+
+    /// <summary>The motions that take a part somewhere, which a trail can follow.</summary>
+    private static readonly HashSet<string> Moving = new(StringComparer.Ordinal)
+    {
+        "travel", "arc", "float", "drift", "bounce", "jump", "land", "slide-in", "slide-out", "rise", "sway", "swing", "orbit", "spin", "wave", "shake", "wiggle", "keyframes",
+    };
+
+    /// <summary>
+    /// Keyframes moved into a part of a longer cycle: what they did from 0% to 100% done from <paramref name="from"/>% to
+    /// <paramref name="to"/>%, as at their start before it and as at their end after it.
+    /// </summary>
+    public static string Remap(string frames, double from, double to)
+    {
+        var blocks = new List<(List<double> At, string Body)>();
+        var i = 0;
+        while (frames.IndexOf('{', i) is var open and >= 0 && frames.IndexOf('}', open) is var close and >= 0)
+        {
+            var at = frames[i..open].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(x => x switch { "from" => 0d, "to" => 100d, _ => double.Parse(x.TrimEnd('%'), CultureInfo.InvariantCulture) }).ToList();
+            blocks.Add((at, frames[(open + 1)..close]));
+            i = close + 1;
+        }
+        if (blocks.Count == 0)
+        {
+            return frames;
+        }
+        var first = blocks.MinBy(b => b.At.Min()).Body;
+        var last = blocks.MaxBy(b => b.At.Max()).Body;
+        var o = new StringBuilder();
+        if (from > 0)
+        {
+            o.Append(CultureInfo.InvariantCulture, $"0%{{{first}}}");
+        }
+        foreach (var (at, body) in blocks)
+        {
+            o.Append(string.Join(',', at.Select(p => N(from + p * (to - from) / 100) + "%"))).Append('{').Append(body).Append('}');
+        }
+        if (to < 100)
+        {
+            o.Append(CultureInfo.InvariantCulture, $"100%{{{last}}}");
+        }
+        return o.ToString();
+    }
 
     private static Time Timing(string kind, Motion m)
     {
@@ -262,6 +398,11 @@ public static partial class SvgMotion
             "float" => (3.0, "ease-in-out", true, false),
             "drift" => (6.0, "ease-in-out", true, false),
             "travel" => (2.6, "cubic-bezier(.45,0,.55,1)", true, false),
+            "arc" => (2.2, "linear", true, false),
+            "jump" => (1.1, "ease-in-out", true, false),
+            "land" => (0.9, "ease-in", false, false),
+            "flip" => (1.2, "ease-in-out", false, false),
+            "camera" => (4.0, "cubic-bezier(.45,0,.55,1)", false, false),
             "bounce" => (1.4, "ease-in-out", true, false),
             "sway" or "swing" => (1.2, "ease-in-out", true, true),
             "wave" => (1.2, "ease-in-out", true, false),
@@ -300,7 +441,12 @@ public static partial class SvgMotion
 
     private static (string Box, string Origin) OriginOf(string kind, string? origin)
     {
-        var o = (origin ?? (kind switch { "swing" => "top", "wave" or "breathe" => "bottom", _ => "center" })).Trim().ToLowerInvariant();
+        if (kind == "camera")
+        {
+            // The view moves in the drawing's own units: from its corner.
+            return ("view-box", "0px 0px");
+        }
+        var o = (origin ?? (kind switch { "swing" => "top", "wave" or "breathe" or "jump" or "land" => "bottom", _ => "center" })).Trim().ToLowerInvariant();
         var parts = o.Split([' ', ','], StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 2 && parts.All(p => double.TryParse(p, NumberStyles.Float, CultureInfo.InvariantCulture, out _)))
         {
@@ -368,6 +514,12 @@ public static partial class SvgMotion
             "spin" or "orbit" => $"from{{transform:rotate(0deg)}}to{{transform:rotate({N(360 * (a ?? 1))}deg)}}",
             "float" => $"0%,100%{{{T(0, 0)}}}50%{{{T(0, -(a ?? box.H * 0.03))}}}",
             "drift" => $"0%,100%{{{T(-(a ?? box.W * 0.03), 0)}}}50%{{{T(a ?? box.W * 0.03, 0)}}}",
+            "arc" when way is { } w => Arc(w, a),
+            "jump" => Jump(a ?? box.H * 0.12),
+            "land" => $"0%{{transform:translate(0px,{N(-(a ?? box.H * 0.3))}px) scale(1,1);opacity:0}}55%{{transform:translate(0px,0px) scale(1.15,.85);opacity:1;animation-timing-function:ease-out}}"
+                + $"75%{{transform:translate(0px,{N(-(a ?? box.H * 0.3) * 0.08)}px) scale(.96,1.04);opacity:1}}100%{{transform:translate(0px,0px) scale(1,1);opacity:1}}",
+            "flip" => "0%,100%{transform:scale(1,1)}25%,75%{transform:scale(0,1)}50%{transform:scale(-1,1)}",
+            "camera" when way is { } w => $"0%,100%{{transform:translate(0px,0px) scale(1)}}30%,70%{{transform:translate({N(w.X0)}px,{N(w.Y0)}px) scale({N(w.X1)})}}",
             // Appears where it starts, goes, and fades where it arrives: each time round a new one on its way.
             "travel" when way is { } w => $"0%{{{T(w.X0, w.Y0)};opacity:0}}12%{{{T(w.X0, w.Y0)};opacity:1}}82%{{{T(w.X1, w.Y1)};opacity:1}}100%{{{T(w.X1, w.Y1)};opacity:0}}",
             "bounce" => $"0%,40%,70%,100%{{{T(0, 0)};animation-timing-function:ease-out}}20%{{{T(0, -(a ?? box.H * 0.08))};animation-timing-function:ease-in}}55%{{{T(0, -(a ?? box.H * 0.08) * 0.35)};animation-timing-function:ease-in}}",
@@ -376,7 +528,8 @@ public static partial class SvgMotion
             "pulse" => $"0%,100%{{transform:scale(1)}}50%{{transform:scale({N(1 + (a ?? 0.06))})}}",
             "breathe" => $"0%,100%{{transform:scale(1,1)}}50%{{transform:scale({N(1 + (a ?? 0.03) * 0.4)},{N(1 + (a ?? 0.03))})}}",
             "twinkle" => $"0%,100%{{opacity:1;transform:scale(1)}}50%{{opacity:{N(Math.Clamp(1 - (a ?? 0.6), 0, 1))};transform:scale(.78)}}",
-            "glow" => $"0%,100%{{filter:drop-shadow(0 0 0px {Color(m.Color) ?? "#fff1a8"})}}50%{{filter:drop-shadow(0 0 {N(a ?? box.W * 0.025)}px {Color(m.Color) ?? "#fff1a8"}) brightness(1.12)}}",
+            // A light at least a hundredth of the drawing wide (a plan's "amount" may be meant as a fraction).
+            "glow" => $"0%,100%{{filter:drop-shadow(0 0 0px {Color(m.Color) ?? "#fff1a8"})}}50%{{filter:drop-shadow(0 0 {N(Math.Max(a ?? box.W * 0.025, box.W * 0.01))}px {Color(m.Color) ?? "#fff1a8"}) brightness(1.12)}}",
             "heartbeat" => $"0%,28%,70%,100%{{transform:scale(1)}}14%{{transform:scale({N(1 + (a ?? 0.15))})}}42%{{transform:scale({N(1 + (a ?? 0.15) * 0.8)})}}",
             "wiggle" => $"0%,100%{{transform:rotate(0deg)}}20%,60%{{transform:rotate({N(-(a ?? 6))}deg)}}40%,80%{{transform:rotate({N(a ?? 6)}deg)}}",
             "shake" => $"0%,100%{{{T(0, 0)}}}20%,60%{{{T(-(a ?? box.W * 0.02), 0)}}}40%,80%{{{T(a ?? box.W * 0.02, 0)}}}",
@@ -388,6 +541,35 @@ public static partial class SvgMotion
             _ => null,
         };
     }
+
+    /// <summary>
+    /// A flight along a curve: from its start up over the middle (as high as <paramref name="height"/>, else a third of the
+    /// way) down to its end, appearing at the start and fading at the end; sampled, so its speed follows the curve.
+    /// </summary>
+    private static string Arc((double X0, double Y0, double X1, double Y1) w, double? height)
+    {
+        var length = Math.Sqrt(Math.Pow(w.X1 - w.X0, 2) + Math.Pow(w.Y1 - w.Y0, 2));
+        var (cx, cy) = ((w.X0 + w.X1) / 2, Math.Min(w.Y0, w.Y1) - (height ?? Math.Max(30, length * 0.35)));
+        string At(double t, double opacity, double scale)
+        {
+            var (x, y) = ((1 - t) * (1 - t) * w.X0 + 2 * (1 - t) * t * cx + t * t * w.X1, (1 - t) * (1 - t) * w.Y0 + 2 * (1 - t) * t * cy + t * t * w.Y1);
+            return $"transform:translate({N(x)}px,{N(y)}px) scale({N(scale)});opacity:{N(opacity)}";
+        }
+        var o = new StringBuilder();
+        o.Append(CultureInfo.InvariantCulture, $"0%{{{At(0, 0, 0.8)}}}8%{{{At(0, 1, 1)}}}");
+        for (var k = 1; k <= 10; k++)
+        {
+            o.Append(CultureInfo.InvariantCulture, $"{N(8 + 80 * k / 10.0)}%{{{At(k / 10.0, 1, 1)}}}");
+        }
+        o.Append(CultureInfo.InvariantCulture, $"100%{{{At(1, 0, 0.8)}}}");
+        return o.ToString();
+    }
+
+    /// <summary>A jump as a cartoon makes it: a crouch, up stretched, down squashed, settled (its origin its feet).</summary>
+    private static string Jump(double height) =>
+        $"0%,100%{{transform:translate(0px,0px) scale(1,1)}}15%{{transform:translate(0px,0px) scale(1.12,.86);animation-timing-function:ease-out}}"
+        + $"45%{{transform:translate(0px,{N(-height)}px) scale(.92,1.1);animation-timing-function:ease-in}}70%{{transform:translate(0px,0px) scale(1.14,.84)}}"
+        + "85%{transform:translate(0px,0px) scale(.97,1.03)}";
 
     private static string? Keys(IReadOnlyList<MotionKey>? keys)
     {
@@ -493,6 +675,6 @@ public static partial class SvgMotion
         return p.Length == 4 ? (p[0], p[1], p[2], p[3]) : (0, 0, 512, 512);
     }
 
-    [System.Text.RegularExpressions.GeneratedRegex(@"^m\d+(-\d+)?$")]
+    [System.Text.RegularExpressions.GeneratedRegex(@"^m\d+(-\d+)?(-t\d+)?$")]
     private static partial System.Text.RegularExpressions.Regex Ours();
 }

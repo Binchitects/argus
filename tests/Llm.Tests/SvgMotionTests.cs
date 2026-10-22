@@ -146,6 +146,46 @@ public sealed class VectorPartsTests
     }
 
     [Fact]
+    public void A_story_s_beats_share_one_cycle_one_after_another_and_what_just_lives_goes_on_by_itself()
+    {
+        var centers = new Dictionary<string, (double X, double Y)> { ["sun"] = (320, 70), ["car"] = (180, 220), ["road"] = (200, 260) };
+        var a = SvgMotion.Apply(SvgMotionTests.Scene, [
+            new() { Target = "car", Kind = "pulse", Start = 0, Duration = 0.5, Cycle = 4 },
+            new() { Target = "sun", Kind = "arc", From = "car", To = "road", Start = 0.4, Duration = 2 },
+            new() { Target = "sun", Kind = "trail", Amount = 3 },
+            new() { Target = "road", Kind = "jump", Start = 2.2, Duration = 0.8 },
+            new() { Target = "birds", Kind = "float" },
+            new() { Target = "scene", Kind = "camera", To = "road", Start = 3, Duration = 1, Amount = 2 },
+        ], centers);
+        Assert.Empty(a.Problems);
+        // Each beat plays over the whole cycle, its move in its own part of it: the pulse in its first eighth, still after.
+        Assert.Contains(".m1{animation:k1 4s ease-in-out 0s infinite normal both", a.Markup, StringComparison.Ordinal);
+        Assert.Contains("@keyframes k1{0%,12.5%{transform:scale(1)}6.25%{transform:scale(1.06)}100%{transform:scale(1)}}", a.Markup, StringComparison.Ordinal);
+        // The arc starts where the car is, rises over the middle and ends at the road, from 10% to 60% of the cycle.
+        Assert.Contains("@keyframes k2{0%{transform:translate(-140px,150px) scale(0.8);opacity:0}10%{", a.Markup, StringComparison.Ordinal);
+        Assert.Contains("60%{transform:translate(-120px,190px) scale(0.8);opacity:0}100%{", a.Markup, StringComparison.Ordinal);
+        // Its trail: three fainter copies of the sun, each a moment later on the same way.
+        Assert.Equal(3, XElement.Parse(a.Markup).Descendants().Count(e => e.Name.LocalName == "use" && (string?)e.Attribute("href") == "#sun"));
+        Assert.Contains(".m3-t2{animation:k2 4s linear 0.14s infinite", a.Markup, StringComparison.Ordinal);
+        // The camera goes close to the road (its middle to the drawing's, twice as close) in the last beat.
+        Assert.Contains("translate(-200px,-370px) scale(2)", a.Markup, StringComparison.Ordinal);
+        // The birds float by themselves.
+        Assert.Contains(".m5{animation:k5 3s ease-in-out 0s infinite", a.Markup, StringComparison.Ordinal);
+        Assert.Equal(new Timeline(4, true), a.Timeline);
+        // Still again: no copies, no story.
+        var still = SvgMotion.Still(XElement.Parse(a.Markup)).ToString();
+        Assert.DoesNotContain("<use", still, StringComparison.Ordinal);
+        Assert.DoesNotContain("@keyframes", still, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_trail_without_a_move_to_follow_says_so()
+    {
+        var a = SvgMotion.Apply(SvgMotionTests.Scene, [new() { Target = "sun", Kind = "trail" }]);
+        Assert.Contains("a trail follows a part's own move", Assert.Single(a.Problems), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_piece_repeating_its_part_s_motion_goes_and_other_motions_stay()
     {
         var root = XElement.Parse(SvgMotionTests.Scene);
