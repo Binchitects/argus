@@ -18,7 +18,7 @@ public sealed class VectorRefusedException(string message) : Exception(message);
 /// first by the picture model, flat, when it is words); a drawing changed or animated as asked; and a drawing made a
 /// picture or a video (PNG, GIF, MP4, WebM), which goes into the gallery beside it.
 /// </summary>
-public static class VectorJobs
+public static partial class VectorJobs
 {
     /// <summary>What a picture is asked to look like when it is drawn to be traced: flat, so its shapes trace clean.</summary>
     public const string FlatStyle = "flat vector illustration, clean geometric shapes, bold solid colors, limited palette of 6 colors, no gradients, no texture, crisp edges, centered, plain white background";
@@ -115,64 +115,51 @@ public static class VectorJobs
             (source, picture) = await FlatPictureAsync(sp, db, job, me, phase, ct);
             type = "image/png";
         }
+        var (things, maps) = await ThingsAsync(sp, me, job.Prompt ?? source?.Prompt, picture, phase, ct);
         await phase("Tracing it into shapes");
-        var traced = await sp.GetRequiredService<VectorSandbox>().TraceAsync(picture, type, style, ct);
-        var svg = SvgSafe.Clean(Named(traced));
+        var svg = SvgSafe.Clean(await sp.GetRequiredService<VectorSandbox>().TraceAsync(picture, type, style, things, maps, ct));
         await phase("Keeping it");
         return [await sp.GetRequiredService<VectorStore>().AddAsync(me, svg, MediaJob.Trace, job.Prompt ?? source?.Prompt, "traced", style.Name, source?.Id, null, ct)];
     }
 
     /// <summary>
-    /// A traced drawing made into parts: its first shape, when it covers the canvas, the background (id "background"); the rest in
-    /// one group, the subject (id "subject"), in their order; each shape named shape-1, shape-2... So the subject moves as one,
-    /// or its shapes one after another (a stagger), over a background that stays.
+    /// The things in a picture that could move apart, and where each is in it: named by the model from the words it was drawn
+    /// from, found by the studio's segmenter. None when there are no words, the segmenter is not there or a step fails (the
+    /// drawing is then made of parts by its islands of shapes).
     /// </summary>
-    public static string Named(string traced)
+    private static async Task<(IReadOnlyList<Thing> Things, IReadOnlyList<byte[]> Maps)> ThingsAsync(IServiceProvider sp, AppUser me, string? words, byte[] picture,
+        Func<string, Task> phase, CancellationToken ct)
     {
-        var root = System.Xml.Linq.XElement.Parse(SvgSafe.Clean(traced).Markup);
-        var box = SvgMotion.ViewBox(root);
-        var paths = root.Elements(SvgSafe.Svg + "path").ToList();
-        var n = 0;
-        foreach (var path in root.Descendants(SvgSafe.Svg + "path").Where(p => p.Attribute("id") is null))
+        var studio = sp.GetRequiredService<StudioServer>();
+        var log = sp.GetRequiredService<ILogger<SvgDraw>>();
+        if (string.IsNullOrWhiteSpace(words) || await studio.HealthAsync(ct) is not { Segment: true })
         {
-            path.SetAttributeValue("id", $"shape-{++n}");
+            return ([], []);
         }
-        if (paths.Count > 1 && Covers(paths[0], box))
+        await phase("Finding its parts");
+        var things = await sp.GetRequiredService<SvgDraw>().ThingsAsync(me, words, ct);
+        if (things.Count == 0)
         {
-            paths[0].SetAttributeValue("id", "background");
-            paths.RemoveAt(0);
+            return ([], []);
         }
-        if (paths.Count > 0)
+        try
         {
-            var subject = new System.Xml.Linq.XElement(SvgSafe.Svg + "g", new System.Xml.Linq.XAttribute("id", "subject"));
-            paths[0].AddBeforeSelf(subject);
-            foreach (var p in paths)
-            {
-                p.Remove();
-                subject.Add(p);
-            }
+            var maps = await studio.SegmentAsync(picture, [.. things.Select(t => t.Looks)], ct);
+            Found(log, things);
+            return maps.Count == things.Count ? (things, maps) : ([], []);
         }
-        return root.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+        catch (Exception ex) when (ex is SdServer.SdException or HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            NotSegmented(log, ex);
+            return ([], []);
+        }
     }
 
-    /// <summary>Whether a traced path is the whole canvas: vtracer starts with the background as a path from corner to corner.</summary>
-    private static bool Covers(System.Xml.Linq.XElement path, (double X, double Y, double W, double H) box)
-    {
-        var numbers = System.Text.RegularExpressions.Regex.Matches((string?)path.Attribute("d") ?? "", @"-?\d+(\.\d+)?")
-            .Select(m => double.Parse(m.Value, System.Globalization.CultureInfo.InvariantCulture)).ToList();
-        var (tx, ty) = Translate((string?)path.Attribute("transform"));
-        var xs = numbers.Where((_, i) => i % 2 == 0).Select(x => x + tx).ToList();
-        var ys = numbers.Where((_, i) => i % 2 == 1).Select(y => y + ty).ToList();
-        return xs.Count > 1 && ys.Count > 1 && xs.Max() - xs.Min() >= box.W * 0.95 && ys.Max() - ys.Min() >= box.H * 0.95;
-    }
+    [LoggerMessage(Level = LogLevel.Information, Message = "A traced picture's things: {Things}")]
+    private static partial void Found(ILogger logger, IReadOnlyList<Thing> things);
 
-    private static (double X, double Y) Translate(string? transform)
-    {
-        var m = System.Text.RegularExpressions.Regex.Match(transform ?? "", @"translate\(\s*(-?[\d.]+)[\s,]+(-?[\d.]+)");
-        return m.Success
-            ? (double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture), double.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture))
-            : (0, 0);
-    }
+    [LoggerMessage(Level = LogLevel.Warning, Message = "The segmenter did not find the parts: traced by islands")]
+    private static partial void NotSegmented(ILogger logger, Exception ex);
 
     /// <summary>A flat picture from the person's words by the picture model (their credit, today's pictures, its turn on the GPU), kept as their picture.</summary>
     private static async Task<(MediaItem Item, byte[] Png)> FlatPictureAsync(IServiceProvider sp, AppDbContext db, MediaJob job, AppUser me, Func<string, Task> phase, CancellationToken ct)

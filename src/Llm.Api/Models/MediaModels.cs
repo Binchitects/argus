@@ -19,6 +19,7 @@ public static class MediaModels
     public const string CutoutDir = "studio/birefnet-lite";
     public const string VoiceDir = "studio/chatterbox";
     public const string MusicDir = "studio/ace-step";
+    public const string SegmentDir = "studio/clipseg";
     public const string StudioUrl = "http://studio:8000";
 
     /// <summary>What the gateway and the chat call them.</summary>
@@ -77,12 +78,15 @@ public static class MediaModels
         // Laya, the decision model (the laya module, off by default): English (calibrated) and multilingual, on the CPU.
         ("laya", [.. Laya("", "english"), .. Laya("multilingual/", "multilingual")]),
         // The media studio's own (the studio module, off by default): BiRefNet lite takes a picture's background away (178 MB),
-        // Chatterbox speaks in a voice from a short sample (its English model, 3.2 GB), ACE-Step makes music (8.3 GB).
+        // Chatterbox speaks in a voice from a short sample (its English model, 3.2 GB), ACE-Step makes music (8.3 GB), CLIPSeg
+        // finds the things named in a picture (603 MB, on the CPU: a traced drawing's parts).
         ("studio",
         [
             .. new[] { "model.safetensors", "birefnet.py", "BiRefNet_config.py", "config.json" }.Select(f => new ServerFile("ZhengPeng7/BiRefNet_lite", f, CutoutDir)),
             .. new[] { "t3_cfg.safetensors", "s3gen.safetensors", "ve.safetensors", "tokenizer.json", "conds.pt" }.Select(f => new ServerFile("ResembleAI/chatterbox", f, VoiceDir)),
             .. MusicFiles.Select(f => new ServerFile("ACE-Step/ACE-Step-v1-3.5B", f, MusicDir, f)),
+            .. new[] { "model.safetensors", "config.json", "preprocessor_config.json", "vocab.json", "merges.txt", "tokenizer_config.json", "special_tokens_map.json" }
+                .Select(f => new ServerFile("CIDAS/clipseg-rd64-refined", f, SegmentDir)),
         ]),
     ];
 

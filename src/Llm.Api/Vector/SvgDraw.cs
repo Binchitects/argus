@@ -12,6 +12,9 @@ namespace Llm.Api.Vector;
 /// <summary>A drawing the model made: the SVG (made safe), the model, and what was fixed on the way.</summary>
 public sealed record Drawn(SafeSvg Svg, string? Model, IReadOnlyList<string> Notes);
 
+/// <summary>A thing in a picture that moves on its own: its id in the drawing, and how it looks (what is looked for in the picture).</summary>
+public sealed record Thing(string Id, string Looks);
+
 /// <summary>
 /// SVG by the model: drawn from words in a style, changed as asked, and given motions as asked. Each answer is made safe
 /// and checked — not XML, references to nothing, parts with no names, parts off the canvas — and what is wrong goes back
@@ -201,6 +204,47 @@ public sealed partial class SvgDraw(OneQuestion one, ChatModels models, SvgRende
 
     private static readonly JsonSerializerOptions Lenient = new(JsonSerializerDefaults.Web) { AllowTrailingCommas = true, ReadCommentHandling = JsonCommentHandling.Skip, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString };
 
+    private const string Naming = """
+        You name the separate things in a picture, from the words it was drawn from, so that each can be animated on its own.
+        Answer with JSON only: {"things": [{"id": "fox", "looks": "an orange fox"}, …]}.
+        - At most six things, the main subject first. Things drawn that could move apart (a fox, the moon, a boat, waves, clouds, stars, a tree, a person), not their pieces (no eyes, no tails, no sails), not the plain background or the sky.
+        - id: one or two lowercase English words joined by a hyphen. Many of a kind together are one thing with a plural id (stars, clouds, birds).
+        - looks: the thing alone in a few English words, with its colour and shape when the words give them (a blue crescent moon, small yellow stars, a small sailboat); never what it is on, under or with.
+        """;
+
+    /// <summary>The things a picture drawn from these words has that could each move on their own (at most six), named by the model; none when it cannot say.</summary>
+    public async Task<IReadOnlyList<Thing>> ThingsAsync(AppUser me, string words, CancellationToken ct)
+    {
+        var asked = await one.AskAsync(me, $"The words: {words}", Naming, Model, 600, "svg-things", ct);
+        var text = asked.Text ?? "";
+        var (start, end) = (text.IndexOf('{'), text.LastIndexOf('}'));
+        List<Thing>? found = null;
+        try
+        {
+            found = start >= 0 && end > start
+                ? JsonNode.Parse(text[start..(end + 1)], null, new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip })?["things"]
+                    ?.Deserialize<List<Thing>>(Lenient)
+                : null;
+        }
+        catch (JsonException)
+        {
+        }
+        var seen = new HashSet<string>(["background", "scene"]);
+        return [.. (found ?? []).Where(t => t is { Id.Length: > 0, Looks.Length: > 0 }).Select(t => new Thing(ThingId(t.Id), t.Looks.Trim()[..Math.Min(120, t.Looks.Trim().Length)]))
+            .Where(t => t.Id.Length > 0 && seen.Add(t.Id)).Take(6)];
+    }
+
+    /// <summary>An id as the drawing has them: lowercase words joined by hyphens, beginning with a letter.</summary>
+    public static string ThingId(string name)
+    {
+        var id = NotIdChars().Replace(name.Trim().ToLowerInvariant(), "-").Trim('-');
+        id = id.Length > 32 ? id[..32].TrimEnd('-') : id;
+        return id.Length > 0 && char.IsAsciiLetter(id[0]) ? id : id.Length > 0 ? $"p-{id}" : "";
+    }
+
+    [GeneratedRegex("[^a-z0-9]+")]
+    private static partial Regex NotIdChars();
+
     /// <summary>Motions for a drawing as asked: the model reads its parts (where each is) and plans them; what cannot be done goes back once.</summary>
     public async Task<(IReadOnlyList<Motion>? Motions, Animated? Result, string? Problem)> AnimateAsync(AppUser me, string still, IReadOnlyList<Motion> kept, string request,
         Func<string, Task> phase, CancellationToken ct)
@@ -220,7 +264,11 @@ public sealed partial class SvgDraw(OneQuestion one, ChatModels models, SvgRende
              "keys": [{"at": 0 to 1, "x": n, "y": n, "scale": n, "rotate": degrees, "opacity": 0 to 1, "fill": "#hex"}] for kind keyframes}.
             The kinds:
             {{Motions()}}
-            Distances are in the drawing's units (its viewBox is {{box.W}}×{{box.H}}). Make it look alive and natural: entrances first (with small delays one after another), then gentle loops; wheels spin, things float or sway, eyes blink, lines draw on. Only the parts listed exist.
+            Distances are in the drawing's units (its viewBox is {{box.W}}×{{box.H}}). Only the parts listed exist.
+            Do what is asked, and only that: the parts named move as said, everything else stays still. No entrances unless asked (fade-in, slide-in, pop...).
+            Choose kinds that look natural: stars twinkle (twinkle), lights, the sun and the moon glow (glow), creatures breathe (breathe), clouds and waves drift (drift), boats rock (sway with origin bottom and amount 5), leaves and flowers sway, wheels spin, eyes blink.
+            A part whose own parts are numbered (stars-1, stars-2...) moves them one after another with "stagger" on the part itself (target "stars").
+            When asked only to make it alive: entrances one after another first, then gentle loops; wheels spin, things float or sway, eyes blink, lines draw on.
             """;
         var question = $"The drawing's parts (id, kind, where, size, colour):\n{list}\n\nIts motions so far: {JsonSerializer.Serialize(kept, Lenient)}\n\nAsked: {request}\n\nAnswer with all its motions (those so far that stay, and the new ones).";
         var after = new List<JsonObject>();

@@ -123,13 +123,20 @@ public sealed class FakeSandbox : IAsyncDisposable
         {
             await File.WriteAllTextAsync(Path.Combine(draft, "files", "canvas.pdf"), $"%PDF-1.7\n% from {new FileInfo(Path.Combine(job, "files", "canvas.docx")).Length} bytes\n%%EOF\n");
         }
-        // Vector work: a traced picture (three shapes), a drawing drawn as a PNG, frames made a video.
+        // Vector work: a traced picture (a background and two shapes, made parts: the things named with a map each, else
+        // one part), a drawing drawn as a PNG, frames made a video.
         if (code.Contains("vtracer.convert_raw_image_to_svg", StringComparison.Ordinal))
         {
+            var traceJob = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(job, "files", "job.json")))!;
+            var ids = (traceJob["ids"] as JsonArray ?? []).Select(i => i!.GetValue<string>()).ToList();
+            var named = ids.Count > 0 && Enumerable.Range(0, ids.Count).All(i => File.Exists(Path.Combine(job, "files", $"mask-{i}.png")));
+            const string Red = """<path d="M200 200 H800 V800 H200Z" fill="#E33322" stroke="#E33322" stroke-width="1.46"/>""";
+            const string Dark = """<path d="M400 400 H600 V600 H400Z" fill="#222222" stroke="#222222" stroke-width="1.46"/>""";
+            var parts = named && ids.Count > 1 ? $"""<g id="{ids[0]}">{Red}</g><g id="{ids[1]}">{Dark}</g>""" : $"""<g id="{(named ? ids[0] : "part")}">{Red}{Dark}</g>""";
             await File.WriteAllTextAsync(Path.Combine(draft, "files", "traced.svg"),
-                """<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"><path d="M0 0 H1024 V1024 H0Z" fill="#FFFFFF"/><path d="M200 200 H800 V800 H200Z" fill="#E33322"/><path d="M400 400 H600 V600 H400Z" fill="#222222"/></svg>""");
+                $"""<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"><rect id="background" width="1024" height="1024" fill="#FFFFFF"/>{parts}</svg>""");
         }
-        if (code.Contains("resvg_py.svg_to_bytes", StringComparison.Ordinal))
+        else if (code.Contains("resvg_py.svg_to_bytes", StringComparison.Ordinal))
         {
             var size = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(job, "files", "job.json")))!;
             await File.WriteAllBytesAsync(Path.Combine(draft, "files", "drawing.png"), PngOf(size["width"]!.GetValue<int>(), size["height"]!.GetValue<int>()));

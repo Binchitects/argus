@@ -186,6 +186,12 @@ public sealed class FakeModel : HttpMessageHandler
             chunks = [Delta(new JsonObject { ["content"] = "Here you are:\n" + svg }), Finish("stop"), Usage(200, 0, 300)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
+        // A picture's things, named from its words: "a red badge" has a badge and a star.
+        if (system0.StartsWith("You name the separate things in a picture", StringComparison.Ordinal))
+        {
+            chunks = [Delta(new JsonObject { ["content"] = """{"things": [{"id": "Badge", "looks": "a red round badge"}, {"id": "star", "looks": "a dark star"}, {"id": "background", "looks": "white"}]}""" }), Finish("stop"), Usage(80, 0, 40)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
         if (system0.StartsWith("You animate SVG drawings", StringComparison.Ordinal))
         {
             var first = !messages.Any(m => m?["role"]?.GetValue<string>() == "assistant");

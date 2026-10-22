@@ -105,24 +105,39 @@ public sealed class SvgMotionTests
 public sealed class VectorPartsTests
 {
     [Fact]
-    public void A_traced_picture_has_its_background_and_its_subject_whose_shapes_can_move_one_after_another()
+    public void A_traced_picture_s_things_move_as_asked_the_pieces_of_many_one_after_another()
     {
-        var named = Llm.Api.Vector.VectorJobs.Named("""
-            <svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="100" height="100">
-            <path d="M0 0 C40 0 60 0 100 0 C100 40 100 60 100 100 C60 100 40 100 0 100 Z" fill="#FEFEFE" transform="translate(0,0)"/>
-            <path d="M0 0 L20 0 L20 20 Z" fill="#E33" transform="translate(30,30)"/>
-            <path d="M0 0 L10 0 L10 10 Z" fill="#222" transform="translate(50,50)"/>
+        // As the tracing makes them: a background, a fox, the stars each a group of its own.
+        const string traced = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect id="background" width="100" height="100" fill="#FEFEFE"/>
+            <g id="fox"><path d="M30 30 L60 30 L60 90 Z" fill="#E33"/><path d="M40 40 L50 40 L50 50 Z" fill="#222"/></g>
+            <g id="stars"><g id="stars-1"><path d="M5 5 L9 5 L7 9 Z" fill="#FD3"/></g><g id="stars-2"><path d="M80 5 L84 5 L82 9 Z" fill="#37B"/></g></g>
             </svg>
-            """);
-        var root = XElement.Parse(named);
-        XNamespace s = SvgSafe.Svg;
-        Assert.Equal("background", (string?)root.Elements(s + "path").Single().Attribute("id"));
-        var subject = root.Elements(s + "g").Single();
-        Assert.Equal(("subject", 2), ((string?)subject.Attribute("id"), subject.Elements().Count()));
-        Assert.Equal(["shape-2", "shape-3"], subject.Elements().Select(e => (string)e.Attribute("id")!));
-        var a = SvgMotion.Apply(named, [new() { Target = "subject", Kind = "pop", Stagger = 0.1 }]);
+            """;
+        var a = SvgMotion.Apply(traced, [
+            new() { Target = "stars", Kind = "twinkle", Stagger = 0.4 },
+            new() { Target = "fox", Kind = "breathe" },
+            new() { Target = "fox", Kind = "glow", Color = "#ffd" },
+            new() { Target = "stars-2", Kind = "drift", Amount = 4 },
+        ]);
         Assert.Empty(a.Problems);
-        Assert.Contains(".m1-2{", a.Markup, StringComparison.Ordinal);
+        Assert.Contains(".m1-2{animation:k1 1.6s ease-in-out 0.4s infinite", a.Markup, StringComparison.Ordinal);
+        Assert.Contains("@keyframes k1{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.4;transform:scale(.78)}}", a.Markup, StringComparison.Ordinal);
+        // Breathing swells upward from its feet; a glow is a soft light of its colour.
+        Assert.Contains("transform-origin:50% 100%", a.Markup, StringComparison.Ordinal);
+        Assert.Contains("drop-shadow(0 0 2.5px #ffd)", a.Markup, StringComparison.Ordinal);
+        Assert.Contains("@keyframes k4{0%,100%{transform:translate(-4px,0px)}50%{transform:translate(4px,0px)}}", a.Markup, StringComparison.Ordinal);
+        Assert.True(a.Timeline.Loops);
+    }
+
+    [Fact]
+    public void A_thing_s_name_becomes_an_id_the_drawing_can_have()
+    {
+        Assert.Equal("fox", SvgDraw.ThingId("Fox"));
+        Assert.Equal("paper-boat", SvgDraw.ThingId(" paper  boat! "));
+        Assert.Equal("p-3-birds", SvgDraw.ThingId("3 birds"));
+        Assert.Equal("", SvgDraw.ThingId("\u263E"));
+        Assert.Equal(32, SvgDraw.ThingId(new string('a', 50)).Length);
     }
 
     [Fact]

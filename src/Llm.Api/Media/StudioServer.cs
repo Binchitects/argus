@@ -8,6 +8,7 @@ namespace Llm.Api.Media;
 /// <summary>
 /// The studio server (the studio module, services/studio): a picture's background taken away (BiRefNet lite), a text
 /// spoken in a voice from a short sample (Chatterbox), music from words (ACE-Step). Each on the GPU, one at a time there.
+/// On its CPU: where the things named are in a picture (CLIPSeg), for a traced drawing's parts.
 /// </summary>
 public sealed class StudioServer(IHttpClientFactory http)
 {
@@ -20,7 +21,7 @@ public sealed class StudioServer(IHttpClientFactory http)
 
     /// <param name="FreeMb">The GPU's free memory, as the server sees it.</param>
     /// <param name="Loaded">Its models loaded now (cutout, voice, music).</param>
-    public sealed record Health(bool Cutout, bool Voice, bool Music, long? FreeMb, IReadOnlyList<string> Loaded);
+    public sealed record Health(bool Cutout, bool Voice, bool Music, bool Segment, long? FreeMb, IReadOnlyList<string> Loaded);
 
     /// <summary>The server's name for the model a piece of work needs.</summary>
     public static string KindOf(string action) => action switch { Core.Media.MediaJob.Cutout => "cutout", Core.Media.MediaJob.Speak => "voice", _ => "music" };
@@ -35,7 +36,7 @@ public sealed class StudioServer(IHttpClientFactory http)
         {
             var h = await http.CreateClient(Client).GetFromJsonAsync<JsonObject>(MediaModels.StudioUrl + "/health", ct);
             bool Has(string kind) => h?["models"]?[kind]?.GetValue<bool>() == true;
-            return new Health(Has("cutout"), Has("voice"), Has("music"), h?["free_mb"] is JsonValue f && f.TryGetValue<long>(out var mb) ? mb : null,
+            return new Health(Has("cutout"), Has("voice"), Has("music"), Has("segment"), h?["free_mb"] is JsonValue f && f.TryGetValue<long>(out var mb) ? mb : null,
                 [.. (h?["loaded"] as JsonArray ?? []).Select(x => x?.GetValue<string>()).OfType<string>()]);
         }
         catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException or InvalidOperationException or TaskCanceledException && !ct.IsCancellationRequested)
@@ -83,6 +84,18 @@ public sealed class StudioServer(IHttpClientFactory http)
         var body = new JsonObject { ["prompt"] = prompt, ["lyrics"] = lyrics ?? "", ["seconds"] = seconds };
         using var res = await http.CreateClient(Client).PostAsJsonAsync(MediaModels.StudioUrl + "/v1/music", body, ct);
         return (await BytesAsync(res, ct), SecondsOf(res));
+    }
+
+    /// <summary>
+    /// Where each thing named is in the picture: a grey map (PNG) for each label, from its least likely point (black) to its most
+    /// likely (white), in the order asked.
+    /// </summary>
+    public async Task<IReadOnlyList<byte[]>> SegmentAsync(byte[] picture, IReadOnlyList<string> labels, CancellationToken ct)
+    {
+        var body = new JsonObject { ["picture"] = Convert.ToBase64String(picture), ["labels"] = new JsonArray([.. labels.Select(l => (JsonNode)l)]) };
+        using var res = await http.CreateClient(Client).PostAsJsonAsync(MediaModels.StudioUrl + "/v1/segment", body, ct);
+        var masks = JsonNode.Parse(await BytesAsync(res, ct))?["masks"] as JsonArray ?? [];
+        return [.. masks.Select(m => Convert.FromBase64String(m?.GetValue<string>() ?? ""))];
     }
 
     private static double SecondsOf(HttpResponseMessage res) =>

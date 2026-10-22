@@ -71,6 +71,14 @@ class Models(unittest.TestCase):
             self.assertEqual(refused.exception.status, 503)
             self.assertIn("Admin → Models", str(refused.exception))
 
+    def test_the_segmenting_model_missing_is_refused_with_how_to_get_it(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(server, "STUDIO_DIR", d), mock.patch.object(server, "_segmenter", None):
+            self.assertFalse(server._present("segment"))
+            with self.assertRaises(server.Refused) as refused:
+                server._segment_model()
+            self.assertEqual(refused.exception.status, 503)
+            self.assertIn("Admin → Models", str(refused.exception))
+
     def test_loading_one_unloads_the_other_first(self):
         with mock.patch.dict(server._loaded, {"music": object()}, clear=True), mock.patch.object(server, "_present", return_value=True), \
                 mock.patch.object(server, "_free_mb", return_value=1000):

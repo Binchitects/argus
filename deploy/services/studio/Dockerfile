@@ -1,4 +1,4 @@
-# The media studio's own models (server.py) on the GPU: BiRefNet lite, Chatterbox, ACE-Step.
+# The media studio's own models (server.py): on the GPU BiRefNet lite, Chatterbox, ACE-Step; on the CPU CLIPSeg.
 # PyTorch from PyPI (its Linux wheels bring CUDA 13); the models' own pins (older torch and
 # transformers) are not taken: they run on these. The weights are not in the image: the app
 # fetches them into the model library (MODELS_DIR/studio), and this reads them from there.

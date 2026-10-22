@@ -1,7 +1,8 @@
 """
 The media studio's own models over HTTP, on the GPU: a picture's background taken away
 (BiRefNet lite), a text spoken in the voice of a short sample (Chatterbox), and music from
-a description and lyrics (ACE-Step).
+a description and lyrics (ACE-Step). On the CPU (small): who spoke (Chatterbox's voice
+encoder) and where the things named are in a picture (CLIPSeg).
 
     GET  /health                          what is there, what is loaded, the GPU's free memory
     POST /v1/unload                       its models unloaded now (the app gives the GPU back to the chat models)
@@ -9,6 +10,7 @@ a description and lyrics (ACE-Step).
     POST /v1/speak    {"text", "voice", "exaggeration"}                  -> audio/mpeg
     POST /v1/music    {"prompt", "lyrics", "seconds", "steps", "seed"}    -> audio/mpeg
     POST /v1/speakers {"audio", "segments": [[start, end]...], "speakers"} -> {"speakers": [n...], "count"}: who spoke each
+    POST /v1/segment  {"picture", "labels": [...]}  -> {"masks": [png...], "strength": [...]}: where each thing is in a picture (scores, -10 to 6)
 
 The weights are read from the model library (STUDIO_DIR), which the app fills
 (src/Llm.Api/Models/MediaModels.cs); nothing is fetched here (HF_HUB_OFFLINE). One model
@@ -45,6 +47,8 @@ MODELS = {
     "voice": ("chatterbox", ["t3_cfg.safetensors", "s3gen.safetensors", "ve.safetensors", "tokenizer.json", "conds.pt"], 4500),
     "music": ("ace-step", ["ace_step_transformer/diffusion_pytorch_model.safetensors", "music_dcae_f8c8/diffusion_pytorch_model.safetensors",
                            "music_vocoder/diffusion_pytorch_model.safetensors", "umt5-base/model.safetensors"], 10000),
+    # On the CPU, loaded apart from the others (not one of the GPU's turns).
+    "segment": ("clipseg", ["model.safetensors", "config.json", "preprocessor_config.json", "vocab.json", "merges.txt", "tokenizer_config.json"], 0),
 }
 
 MAX_PICTURE = 30 * 1024 * 1024
@@ -280,6 +284,54 @@ async def speakers(request: Request):
             after = next((labels[j] for j in range(i + 1, len(segments)) if j in known), None)
             labels[i] = before if before is not None else (after or 0)
     return {"speakers": labels, "count": (max(labels) + 1) if labels else 0}
+
+
+# Where the things named are in a picture (CLIPSeg, on the CPU): one map per name of the model's score at each point, from
+# LOW (black) to HIGH (white) on the same scale for every name, so names can be compared point by point; and its best score.
+MAX_LABELS = 12
+LOW, HIGH = -10.0, 6.0
+_segmenter = None
+_segmenter_lock = threading.Lock()
+
+
+def _segment_model():
+    global _segmenter
+    with _segmenter_lock:
+        if _segmenter is None:
+            if not _present("segment"):
+                raise Refused(503, "The segmenting model is not in the library yet (Admin → Models → default models downloads it).")
+            from transformers import CLIPSegForImageSegmentation, CLIPSegProcessor
+            _segmenter = (CLIPSegProcessor.from_pretrained(_dir("segment")), CLIPSegForImageSegmentation.from_pretrained(_dir("segment")).eval())
+        return _segmenter
+
+
+@app.post("/v1/segment")
+async def segment(request: Request):
+    try:
+        body = await request.json()
+        raw = base64.b64decode(body.get("picture") or "", validate=False)
+        labels = [str(x)[:200] for x in body.get("labels") or [] if str(x).strip()]
+    except Exception:
+        return _error(400, "Send JSON: picture (base64) and labels (what to find).")
+    if not raw or len(raw) > MAX_PICTURE or not 1 <= len(labels) <= MAX_LABELS:
+        return _error(400, f"Send a picture of at most 30 MB and 1 to {MAX_LABELS} labels.")
+    try:
+        picture = Image.open(io.BytesIO(raw)).convert("RGB")
+    except Exception:
+        return _error(400, "This is not a picture this reads (PNG, JPEG, WebP).")
+    processor, model = _segment_model()
+    with _segmenter_lock, torch.inference_mode():
+        x = processor(text=labels, images=[picture] * len(labels), padding=True, return_tensors="pt")
+        logits = model(**x).logits.float().numpy()
+    if logits.ndim == 2:
+        logits = logits[None]
+    masks, strength = [], []
+    for z in logits:
+        png = io.BytesIO()
+        Image.fromarray((np.clip((z - LOW) / (HIGH - LOW), 0, 1) * 255).round().astype(np.uint8)).save(png, "PNG")
+        masks.append(base64.b64encode(png.getvalue()).decode())
+        strength.append(round(float(z.max()), 3))
+    return {"masks": masks, "strength": strength}
 
 
 _SENTENCE = re.compile(r"(?<=[.!?…])\s+")

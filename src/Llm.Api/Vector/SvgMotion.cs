@@ -67,9 +67,11 @@ public static partial class SvgMotion
         ("slide-out", "leaves to a side"), ("rise", "comes up from below as it appears"), ("pop", "appears, growing past its size and back"),
         ("grow", "grows from nothing"), ("shrink", "shrinks to nothing"), ("zoom-in", "comes closer as it appears"),
         ("spin", "turns round and round (amount: turns a cycle)"), ("orbit", "goes round a point (origin: \"x y\")"),
-        ("float", "rises and sinks gently (amount: how high)"), ("bounce", "bounces up and down"), ("sway", "rocks from side to side (amount: degrees)"),
+        ("float", "rises and sinks gently (amount: how high)"), ("drift", "drifts slowly from side to side, as a cloud or waves (amount: how far)"), ("bounce", "bounces up and down"), ("sway", "rocks from side to side (amount: degrees)"),
         ("swing", "swings from its top like a sign"), ("wave", "waves, as a hand (origin: where it turns, e.g. bottom)"),
         ("pulse", "grows a little and back"), ("heartbeat", "beats twice and rests"), ("wiggle", "wiggles"), ("shake", "shakes side to side"),
+        ("breathe", "breathes: swells a little upward and back, slowly (amount: how much, 0.03)"), ("twinkle", "twinkles as a star: dims and shrinks a little and back"),
+        ("glow", "glows: a soft light around it brightens and fades (color, amount: how wide)"),
         ("blink", "closes and opens quickly now and then, as an eye"), ("draw", "its lines are drawn on, then it fills in"),
         ("color", "its colour changes to another and back (color)"), ("keyframes", "moves as its keys say (at 0 to 1: x, y, scale, rotate, opacity, fill)"),
     ];
@@ -230,10 +232,14 @@ public static partial class SvgMotion
             "spin" => (3.0, "linear", true, false),
             "orbit" => (6.0, "linear", true, false),
             "float" => (3.0, "ease-in-out", true, false),
+            "drift" => (6.0, "ease-in-out", true, false),
             "bounce" => (1.4, "ease-in-out", true, false),
             "sway" or "swing" => (1.2, "ease-in-out", true, true),
             "wave" => (1.2, "ease-in-out", true, false),
             "pulse" => (1.6, "ease-in-out", true, false),
+            "breathe" => (3.6, "ease-in-out", true, false),
+            "twinkle" => (1.6, "ease-in-out", true, false),
+            "glow" => (2.6, "ease-in-out", true, false),
             "heartbeat" => (1.3, "ease-in-out", true, false),
             "wiggle" or "shake" => (0.8, "ease-in-out", false, false),
             "blink" => (4.0, "linear", true, false),
@@ -265,7 +271,7 @@ public static partial class SvgMotion
 
     private static (string Box, string Origin) OriginOf(string kind, string? origin)
     {
-        var o = (origin ?? (kind switch { "swing" => "top", "wave" => "bottom", _ => "center" })).Trim().ToLowerInvariant();
+        var o = (origin ?? (kind switch { "swing" => "top", "wave" or "breathe" => "bottom", _ => "center" })).Trim().ToLowerInvariant();
         var parts = o.Split([' ', ','], StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 2 && parts.All(p => double.TryParse(p, NumberStyles.Float, CultureInfo.InvariantCulture, out _)))
         {
@@ -299,10 +305,14 @@ public static partial class SvgMotion
             "zoom-in" => $"from{{transform:scale({N(1 - (a ?? 0.4))});opacity:0}}to{{transform:scale(1);opacity:1}}",
             "spin" or "orbit" => $"from{{transform:rotate(0deg)}}to{{transform:rotate({N(360 * (a ?? 1))}deg)}}",
             "float" => $"0%,100%{{{T(0, 0)}}}50%{{{T(0, -(a ?? box.H * 0.03))}}}",
+            "drift" => $"0%,100%{{{T(-(a ?? box.W * 0.03), 0)}}}50%{{{T(a ?? box.W * 0.03, 0)}}}",
             "bounce" => $"0%,40%,70%,100%{{{T(0, 0)};animation-timing-function:ease-out}}20%{{{T(0, -(a ?? box.H * 0.08))};animation-timing-function:ease-in}}55%{{{T(0, -(a ?? box.H * 0.08) * 0.35)};animation-timing-function:ease-in}}",
             "sway" or "swing" => $"from{{transform:rotate({N(-(a ?? 8))}deg)}}to{{transform:rotate({N(a ?? 8)}deg)}}",
             "wave" => $"0%,100%{{transform:rotate(0deg)}}20%{{transform:rotate({N(a ?? 20)}deg)}}40%{{transform:rotate({N(-(a ?? 20) * 0.3)}deg)}}60%{{transform:rotate({N(a ?? 20)}deg)}}80%{{transform:rotate(0deg)}}",
             "pulse" => $"0%,100%{{transform:scale(1)}}50%{{transform:scale({N(1 + (a ?? 0.06))})}}",
+            "breathe" => $"0%,100%{{transform:scale(1,1)}}50%{{transform:scale({N(1 + (a ?? 0.03) * 0.4)},{N(1 + (a ?? 0.03))})}}",
+            "twinkle" => $"0%,100%{{opacity:1;transform:scale(1)}}50%{{opacity:{N(Math.Clamp(1 - (a ?? 0.6), 0, 1))};transform:scale(.78)}}",
+            "glow" => $"0%,100%{{filter:drop-shadow(0 0 0px {Color(m.Color) ?? "#fff1a8"})}}50%{{filter:drop-shadow(0 0 {N(a ?? box.W * 0.025)}px {Color(m.Color) ?? "#fff1a8"}) brightness(1.12)}}",
             "heartbeat" => $"0%,28%,70%,100%{{transform:scale(1)}}14%{{transform:scale({N(1 + (a ?? 0.15))})}}42%{{transform:scale({N(1 + (a ?? 0.15) * 0.8)})}}",
             "wiggle" => $"0%,100%{{transform:rotate(0deg)}}20%,60%{{transform:rotate({N(-(a ?? 6))}deg)}}40%,80%{{transform:rotate({N(a ?? 6)}deg)}}",
             "shake" => $"0%,100%{{{T(0, 0)}}}20%,60%{{{T(-(a ?? box.W * 0.02), 0)}}}40%,80%{{{T(a ?? box.W * 0.02, 0)}}}",

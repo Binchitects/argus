@@ -39,6 +39,30 @@ public sealed class VectorTests(AppFixture app)
         }
     }
 
+    /// <summary>The studio server's segmenter: a map for each thing asked (or, failing, a 503), what was asked kept.</summary>
+    private sealed class FakeSegmenter : HttpMessageHandler
+    {
+        public readonly ConcurrentQueue<string[]> Asked = new();
+        public bool Fail { get; set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            JsonNode answer = new JsonObject { ["models"] = new JsonObject { ["segment"] = true } };
+            if (request.RequestUri!.AbsolutePath == "/v1/segment")
+            {
+                var labels = JsonNode.Parse(await request.Content!.ReadAsStringAsync(cancellationToken))!["labels"]!.AsArray().Select(l => l!.GetValue<string>()).ToArray();
+                Asked.Enqueue(labels);
+                if (Fail)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { Content = new StringContent("""{"error": "The segmenting model is not in the library yet."}""") };
+                }
+                var map = Convert.ToBase64String(Png.Encode(new Png.Image(1, 1, [255, 255, 255, 255])));
+                answer = new JsonObject { ["masks"] = new JsonArray([.. labels.Select(_ => (JsonNode)map)]), ["strength"] = new JsonArray([.. labels.Select(_ => (JsonNode)1.5)]) };
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(answer.ToJsonString(), System.Text.Encoding.UTF8, "application/json") };
+        }
+    }
+
     private static async Task<JsonElement> DoneAsync(WebApplicationFactory<Program> f, TestBrowser b, object request, string status = "done")
     {
         var res = await b.PostAsync("/api/media/jobs", request);
@@ -57,10 +81,12 @@ public sealed class VectorTests(AppFixture app)
     {
         await using var sandbox = new FakeSandbox();
         var pictures = new FakePictures();
+        var segmenter = new FakeSegmenter();
         await using var f = app.Create(app.ConnectionStringFor("vector_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
             new Dictionary<string, string?> { ["Sandbox:Dir"] = sandbox.Dir, ["Modules:imagegen"] = "true" },
             s => s.AddHttpClient(SdServer.Client).ConfigurePrimaryHttpMessageHandler(() => pictures)
-                .Services.AddHttpClient(MediaControl.Client).ConfigurePrimaryHttpMessageHandler(() => pictures));
+                .Services.AddHttpClient(MediaControl.Client).ConfigurePrimaryHttpMessageHandler(() => pictures)
+                .Services.AddHttpClient(StudioServer.Client).ConfigurePrimaryHttpMessageHandler(() => segmenter));
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var name = "vd" + Guid.NewGuid().ToString("N")[..10];
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
@@ -132,14 +158,21 @@ public sealed class VectorTests(AppFixture app)
         var mine = await b.GetAsync($"/api/media/items/{upload.GetProperty("id").GetGuid()}/svg");
         Assert.DoesNotContain("alert", await mine.Content.ReadAsStringAsync(), StringComparison.Ordinal);
 
-        // Traced: a picture of one's own, then one the picture model draws flat from words (kept beside it).
+        // Traced: one the picture model draws flat from words (kept beside it), made of the things the words name (the model
+        // names them, the segmenter finds them: not the background), then the person's picture, its parts its islands when
+        // the segmenter fails.
         var traced = First(await DoneAsync(f, b, new { action = "trace", prompt = "a red badge", trace = "logo" }));
         Assert.Contains("flat vector illustration", pictures.Asked.Single()["prompt"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Equal(["a red round badge", "a dark star"], segmenter.Asked.Single());
         var tracedDrawing = await b.JsonAsync(await b.GetAsync($"/api/media/vectors/{traced}"));
-        Assert.Contains("id=\"shape-3\"", tracedDrawing.GetProperty("still").GetString(), StringComparison.Ordinal);
+        var still = tracedDrawing.GetProperty("still").GetString()!;
+        Assert.Contains("<g id=\"badge\">", still, StringComparison.Ordinal);
+        Assert.Contains("<g id=\"star\">", still, StringComparison.Ordinal);
         Assert.Equal(("traced", "logo"), (tracedDrawing.GetProperty("source").GetString(), tracedDrawing.GetProperty("style").GetString()));
         var parent = (await b.JsonAsync(await b.GetAsync("/api/media/items"))).GetProperty("items").EnumerateArray().First(i => i.GetProperty("id").GetGuid() == traced).GetProperty("parentId").GetGuid();
-        await DoneAsync(f, b, new { action = "trace", sourceId = parent });
+        segmenter.Fail = true;
+        var islands = First(await DoneAsync(f, b, new { action = "trace", sourceId = parent }));
+        Assert.Contains("<g id=\"part\">", (await b.JsonAsync(await b.GetAsync($"/api/media/vectors/{islands}"))).GetProperty("still").GetString(), StringComparison.Ordinal);
 
         // Another person sees none of it.
         var other = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
