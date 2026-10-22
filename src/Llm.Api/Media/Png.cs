@@ -267,6 +267,101 @@ public static class Png
         return new Image(original.Width, original.Height, o);
     }
 
+    /// <summary>A rectangle of a picture, in pixels.</summary>
+    public sealed record Area(int X, int Y, int Width, int Height);
+
+    /// <summary>
+    /// Where a mask is painted (its red above a trace), with a quarter of its size around it (32 pixels at least), and at least
+    /// <paramref name="least"/> pixels a side where the picture allows; null when nothing is painted.
+    /// </summary>
+    public static Area? AreaAround(Image mask, int least)
+    {
+        int x0 = mask.Width, y0 = mask.Height, x1 = -1, y1 = -1;
+        for (var y = 0; y < mask.Height; y++)
+        {
+            for (var x = 0; x < mask.Width; x++)
+            {
+                if (mask.Rgba[(y * mask.Width + x) * 4] > 8)
+                {
+                    (x0, y0, x1, y1) = (Math.Min(x0, x), Math.Min(y0, y), Math.Max(x1, x), Math.Max(y1, y));
+                }
+            }
+        }
+        if (x1 < 0)
+        {
+            return null;
+        }
+        var margin = Math.Max(32, Math.Max(x1 - x0, y1 - y0) / 4);
+        (int Start, int Length) Side(int from, int to, int whole)
+        {
+            var start = Math.Max(0, from - margin);
+            var end = Math.Min(whole, to + 1 + margin);
+            var grow = Math.Min(least, whole) - (end - start);
+            if (grow > 0)
+            {
+                start = Math.Max(0, start - (grow + 1) / 2);
+                end = Math.Min(whole, start + Math.Min(least, whole));
+                start = Math.Max(0, end - Math.Min(least, whole));
+            }
+            return (start, end - start);
+        }
+        var (left, w) = Side(x0, x1, mask.Width);
+        var (top, h) = Side(y0, y1, mask.Height);
+        return new Area(left, top, w, h);
+    }
+
+    public static Image Crop(Image image, Area area)
+    {
+        var o = new byte[area.Width * area.Height * 4];
+        for (var y = 0; y < area.Height; y++)
+        {
+            Array.Copy(image.Rgba, ((area.Y + y) * image.Width + area.X) * 4, o, y * area.Width * 4, area.Width * 4);
+        }
+        return new Image(area.Width, area.Height, o);
+    }
+
+    /// <summary>A copy of <paramref name="image"/> with <paramref name="part"/> over it at (x, y).</summary>
+    public static Image Paste(Image image, Image part, int x, int y)
+    {
+        var o = (byte[])image.Rgba.Clone();
+        for (var row = 0; row < part.Height && y + row < image.Height; row++)
+        {
+            var width = Math.Min(part.Width, image.Width - x);
+            Array.Copy(part.Rgba, row * part.Width * 4, o, ((y + row) * image.Width + x) * 4, width * 4);
+        }
+        return new Image(image.Width, image.Height, o);
+    }
+
+    /// <summary>A picture at another size, each pixel from the four nearest of the original (bilinear).</summary>
+    public static Image Resize(Image image, int width, int height)
+    {
+        if (width == image.Width && height == image.Height)
+        {
+            return image;
+        }
+        var o = new byte[width * height * 4];
+        for (var y = 0; y < height; y++)
+        {
+            var sy = Math.Clamp((y + 0.5) * image.Height / height - 0.5, 0, image.Height - 1);
+            int ya = (int)sy, yb = Math.Min(ya + 1, image.Height - 1);
+            var fy = sy - ya;
+            for (var x = 0; x < width; x++)
+            {
+                var sx = Math.Clamp((x + 0.5) * image.Width / width - 0.5, 0, image.Width - 1);
+                int xa = (int)sx, xb = Math.Min(xa + 1, image.Width - 1);
+                var fx = sx - xa;
+                for (var c = 0; c < 4; c++)
+                {
+                    double P(int px, int py) => image.Rgba[(py * image.Width + px) * 4 + c];
+                    var top = P(xa, ya) * (1 - fx) + P(xb, ya) * fx;
+                    var bottom = P(xa, yb) * (1 - fx) + P(xb, yb) * fx;
+                    o[(y * width + x) * 4 + c] = (byte)Math.Round(top * (1 - fy) + bottom * fy);
+                }
+            }
+        }
+        return new Image(width, height, o);
+    }
+
     /// <summary>A picture file's size from its header (PNG, JPEG, WebP, GIF), or null when it is none of these.</summary>
     public static (int Width, int Height)? SizeOf(byte[] file)
     {

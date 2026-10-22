@@ -60,7 +60,7 @@ function MakeCard({ config }: { config: MediaConfig }) {
   const size = shapes.find((s) => s.value === shape)!
   return (
     <Card>
-      <CardContent className="pt-6">
+      <CardContent>
         <form
           className="grid gap-3"
           onSubmit={(e) => {

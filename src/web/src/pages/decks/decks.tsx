@@ -61,7 +61,7 @@ export function DecksPage() {
         }
       />
       <Card>
-        <CardContent className="pt-6">
+        <CardContent>
           <form
             className="grid gap-3"
             onSubmit={(e) => {

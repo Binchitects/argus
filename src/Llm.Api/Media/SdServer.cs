@@ -13,6 +13,9 @@ public sealed class SdServer(IHttpClientFactory http, MediaControl media)
 {
     public const string Client = "sd";
 
+    /// <summary>A picture model's GPU budget under which a picture it reads in is encoded in tiles.</summary>
+    public const decimal SmallBudgetGb = 6;
+
     public sealed class SdException(string message) : Exception(message);
 
     private static string UrlOf(MediaControl.Model model) => model.Mode == Llm.Core.Models.MediaModes.Video ? MediaModels.VideoUrl : MediaModels.ImageUrl;
@@ -46,6 +49,11 @@ public sealed class SdServer(IHttpClientFactory http, MediaControl media)
         if (references is { Count: > 0 })
         {
             body["ref_images"] = new JsonArray([.. references.Select(r => (JsonNode)r)]);
+        }
+        // A picture read in on a small GPU budget (the model shares the GPU): its encoding in quarters, as one would not fit.
+        if ((start is not null || references is { Count: > 0 }) && m.MaxVramGb is < SmallBudgetGb)
+        {
+            body["vae_tiling_params"] = new JsonObject { ["enabled"] = true, ["rel_size_x"] = 0.25, ["rel_size_y"] = 0.25 };
         }
         var result = await JobAsync(model, "img_gen", body, ct);
         var images = (result["images"] as JsonArray ?? []).Select(i => i?["b64_json"]?.GetValue<string>()).OfType<string>().Select(Convert.FromBase64String).ToList();
@@ -100,12 +108,12 @@ public sealed class SdServer(IHttpClientFactory http, MediaControl media)
         }
     }
 
-    /// <summary>A picture four times as large, by the picture server's upscaler (no generation: quick, answered at once).</summary>
-    public async Task<(byte[] Png, int Width, int Height)> EnlargeAsync(MediaControl.Model model, byte[] image, CancellationToken ct)
+    /// <summary>A picture four times as large, by the picture server's upscaler (no generation: quick, answered at once), as a JPEG (a PNG that large is tens of megabytes).</summary>
+    public async Task<(byte[] Jpeg, int Width, int Height)> EnlargeAsync(MediaControl.Model model, byte[] image, CancellationToken ct)
     {
         media.Touch(model.Name);
         using var res = await http.CreateClient(Client).PostAsJsonAsync(MediaModels.ImageUrl + "/sdcpp/v1/upscale",
-            new JsonObject { ["image"] = DataUrl(image), ["repeats"] = 1, ["output_format"] = "png" }, ct);
+            new JsonObject { ["image"] = DataUrl(image), ["repeats"] = 1, ["output_format"] = "jpeg", ["output_compression"] = 92 }, ct);
         var body = await res.Content.ReadFromJsonAsync<JsonObject>(ct);
         if (!res.IsSuccessStatusCode || body?["images"]?[0]?["b64_json"]?.GetValue<string>() is not { } b64)
         {

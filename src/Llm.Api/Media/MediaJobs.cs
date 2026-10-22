@@ -188,48 +188,71 @@ public sealed partial class MediaJobs(IServiceScopeFactory scopes, TimeProvider 
         var began = DateTimeOffset.UtcNow;
         var (w, h) = Fit(Number(options, "width") ?? size?.Width ?? 1024, Number(options, "height") ?? size?.Height ?? 1024);
         var results = new List<(byte[] Data, string Type, int? Width, int? Height, double? Seconds)>();
-        switch (job.Action)
+        // A server that restarted meanwhile (its settings changed, a new upscaler) is waited for once more, and asked again.
+        for (var attempt = 1; ; attempt++)
         {
-            case MediaJob.Make:
-                await PhaseAsync(db, job, count == 1 ? "Drawing" : $"Drawing {count} pictures");
-                results.AddRange((await server.PicturesAsync(model, prompt, w, h, count, ct)).Select(p => (p, "image/png", (int?)w, (int?)h, (double?)null)));
-                break;
-            case MediaJob.Vary:
-                await PhaseAsync(db, job, count == 1 ? "Drawing a variation" : $"Drawing {count} variations");
-                results.AddRange((await server.PicturesAsync(model, prompt, w, h, count, ct, start: SdServer.DataUrl(file!.Data!, file.ContentType),
-                    strength: Math.Clamp(Number(options, "strength") ?? 0.55, 0.2, 0.9))).Select(p => (p, "image/png", (int?)w, (int?)h, (double?)null)));
-                break;
-            case MediaJob.Edit:
-                await PhaseAsync(db, job, "Changing it");
-                if (painted is not null)
+            try
+            {
+                results.Clear();
+                switch (job.Action)
                 {
-                    // Changed whole, by reference (what this model does well), then only the painted part kept, its edge soft.
-                    var original = Png.Decode(painted.Picture);
-                    var mask = Png.Decode(painted.Mask);
-                    var changed = (await server.PicturesAsync(model, prompt, original.Width, original.Height, 1, ct, references: [SdServer.DataUrl(painted.Picture)]))[0];
-                    var blended = Png.Blend(original, Png.Decode(changed), mask);
-                    results.Add((Png.Encode(blended), "image/png", blended.Width, blended.Height, null));
+                    case MediaJob.Make:
+                        await PhaseAsync(db, job, count == 1 ? "Drawing" : $"Drawing {count} pictures");
+                        results.AddRange((await server.PicturesAsync(model, prompt, w, h, count, ct)).Select(p => (p, "image/png", (int?)w, (int?)h, (double?)null)));
+                        break;
+                    case MediaJob.Vary:
+                        await PhaseAsync(db, job, count == 1 ? "Drawing a variation" : $"Drawing {count} variations");
+                        results.AddRange((await server.PicturesAsync(model, prompt, w, h, count, ct, start: SdServer.DataUrl(file!.Data!, file.ContentType),
+                            strength: Math.Clamp(Number(options, "strength") ?? 0.55, 0.2, 0.9))).Select(p => (p, "image/png", (int?)w, (int?)h, (double?)null)));
+                        break;
+                    case MediaJob.Edit:
+                        await PhaseAsync(db, job, "Changing it");
+                        if (painted is not null)
+                        {
+                            // Only the painted part and some of what is around it, drawn again by reference (what this model does well)
+                            // at a size it works well at; put back in its place, and only the painted part kept, its edge soft.
+                            var original = Png.Decode(painted.Picture);
+                            var mask = Png.Decode(painted.Mask);
+                            var area = Png.AreaAround(mask, MinArea) ?? throw new Refused("Paint over the part to change first.");
+                            var part = Png.Crop(original, area);
+                            var (tw, th) = DrawSize(area.Width, area.Height);
+                            var drawn = (await server.PicturesAsync(model, prompt, tw, th, 1, ct, references: [SdServer.DataUrl(Png.Encode(part))]))[0];
+                            var changed = Png.Paste(original, Png.Resize(Png.Decode(drawn), area.Width, area.Height), area.X, area.Y);
+                            var blended = Png.Blend(original, changed, mask);
+                            results.Add((Png.Encode(blended), "image/png", blended.Width, blended.Height, null));
+                        }
+                        else
+                        {
+                            results.AddRange((await server.PicturesAsync(model, prompt, w, h, 1, ct, references: [SdServer.DataUrl(file!.Data!, file.ContentType)]))
+                                .Select(p => (p, "image/png", (int?)w, (int?)h, (double?)null)));
+                        }
+                        break;
+                    case MediaJob.Enlarge:
+                        await PhaseAsync(db, job, "Enlarging");
+                        var (big, bw, bh) = await server.EnlargeAsync(await ModelAsync(sp, me, Llm.Core.Models.MediaModes.Image, ct), file!.Data!, ct);
+                        results.Add((big, "image/jpeg", bw, bh, null));
+                        break;
+                    case MediaJob.Move:
+                        var seconds = (int)Math.Clamp(Number(options, "seconds") ?? 3, 1, Math.Max(1, model.Row.MaxSeconds ?? 5));
+                        await PhaseAsync(db, job, $"Making a {seconds}-second clip (a few minutes)");
+                        var (clip, type) = await server.VideoAsync(model, prompt.Length > 0 ? prompt : "gentle natural motion, the camera still", seconds, ct,
+                            start: SdServer.DataUrl(file!.Data!, file.ContentType), size: SdServer.VideoSize(model, size?.Width ?? w, size?.Height ?? h));
+                        results.Add((clip, type, null, null, seconds));
+                        break;
+                    default:
+                        throw new Refused("Unknown work.");
                 }
-                else
+                break;
+            }
+            catch (HttpRequestException) when (attempt == 1)
+            {
+                await PhaseAsync(db, job, $"Waiting for {model.Name} to start again");
+                await Task.Delay(TimeSpan.FromSeconds(3), ct);
+                if (await media.ReadyAsync(model.Name, ct) is { } stillNot)
                 {
-                    results.AddRange((await server.PicturesAsync(model, prompt, w, h, 1, ct, references: [SdServer.DataUrl(file!.Data!, file.ContentType)]))
-                        .Select(p => (p, "image/png", (int?)w, (int?)h, (double?)null)));
+                    throw new Refused(stillNot);
                 }
-                break;
-            case MediaJob.Enlarge:
-                await PhaseAsync(db, job, "Enlarging");
-                var (big, bw, bh) = await server.EnlargeAsync(await ModelAsync(sp, me, Llm.Core.Models.MediaModes.Image, ct), file!.Data!, ct);
-                results.Add((big, "image/png", bw, bh, null));
-                break;
-            case MediaJob.Move:
-                var seconds = (int)Math.Clamp(Number(options, "seconds") ?? 3, 1, Math.Max(1, model.Row.MaxSeconds ?? 5));
-                await PhaseAsync(db, job, $"Making a {seconds}-second clip (a few minutes)");
-                var (clip, type) = await server.VideoAsync(model, prompt.Length > 0 ? prompt : "gentle natural motion, the camera still", seconds, ct,
-                    start: SdServer.DataUrl(file!.Data!, file.ContentType), size: SdServer.VideoSize(model, size?.Width ?? w, size?.Height ?? h));
-                results.Add((clip, type, null, null, seconds));
-                break;
-            default:
-                throw new Refused("Unknown work.");
+            }
         }
         media.Touch(model.Name);
         await PhaseAsync(db, job, "Keeping it");
@@ -245,7 +268,7 @@ public sealed partial class MediaJobs(IServiceScopeFactory scopes, TimeProvider 
         {
             var attachment = new ChatAttachment
             {
-                UserId = me.Id, FileName = stem + (type == "image/png" ? ".png" : type == "video/webm" ? ".webm" : ".avi"), ContentType = type, Size = data.Length,
+                UserId = me.Id, FileName = stem + type switch { "image/png" => ".png", "image/jpeg" => ".jpg", "video/webm" => ".webm", _ => ".avi" }, ContentType = type, Size = data.Length,
                 Kind = video ? "video" : "image", Data = data, Text = "", Seconds = secs, Origin = video ? "video" : "picture",
             };
             db.ChatAttachments.Add(attachment);
@@ -253,7 +276,8 @@ public sealed partial class MediaJobs(IServiceScopeFactory scopes, TimeProvider 
             {
                 OwnerId = me.Id, AttachmentId = attachment.Id, Kind = video ? MediaItem.Video : MediaItem.Picture, Action = job.Action,
                 Prompt = prompt.Length > 0 ? prompt : null, ParentId = source?.Id, Width = rw, Height = rh, Seconds = secs, Model = model.Name,
-                Thumb = video ? null : Thumb(data),
+                // An enlargement looks as its picture did, small.
+                Thumb = video ? null : type == "image/png" ? Thumb(data) : source?.Thumb,
             };
             db.MediaItems.Add(item);
             items.Add(item);
@@ -274,6 +298,17 @@ public sealed partial class MediaJobs(IServiceScopeFactory scopes, TimeProvider 
             await spendLog.BookPicturesAsync(me.Email ?? "", key, model.Name, results.Count, (model.Row.UnitPrice ?? prices.Defaults.PerImage) * results.Count, began, DateTimeOffset.UtcNow, ct);
         }
         return items;
+    }
+
+    /// <summary>The least a painted change's area is, a side (with what is around the painting): the model needs to see where it is.</summary>
+    public const int MinArea = 256;
+
+    /// <summary>The size a painted change's area is drawn at: its longer side 768 to 1024 pixels (a small area made larger), each a multiple of 16.</summary>
+    public static (int Width, int Height) DrawSize(int width, int height)
+    {
+        var longer = Math.Max(width, height);
+        var scale = Math.Clamp(longer, 768, 1024) / (double)longer;
+        return Fit(width * scale, height * scale);
     }
 
     /// <summary>A size the picture model takes: within 64 to 1024 pixels a side (its shape kept), each a multiple of 16.</summary>

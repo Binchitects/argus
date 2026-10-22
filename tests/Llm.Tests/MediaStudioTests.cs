@@ -59,6 +59,28 @@ public sealed class MediaStudioTests(AppFixture app)
         Assert.Equal((10, 7), Png.SizeOf([.. "GIF89a"u8, 10, 0, 7, 0]));
         Assert.Null(Png.SizeOf([1, 2, 3, 4]));
 
+        // A painted change: the painting with some around it, 256 pixels a side at least where the picture allows.
+        var painted = Solid(1000, 600, 0, 0, 0);
+        for (var y = 100; y < 140; y++)
+        {
+            for (var x = 700; x < 800; x++)
+            {
+                painted.Rgba[(y * 1000 + x) * 4] = 255;
+            }
+        }
+        Assert.Equal(new Png.Area(622, 0, 256, 256), Png.AreaAround(painted, 256));
+        Assert.Null(Png.AreaAround(Solid(10, 10, 0, 0, 0), 256));
+        Assert.Equal(new Png.Area(0, 0, 10, 10), Png.AreaAround(Solid(10, 10, 255, 0, 0), 256));
+        var part = Png.Crop(gradient, new Png.Area(5, 4, 10, 6));
+        var at = (4 * 40 + 5) * 4;
+        Assert.Equal(gradient.Rgba[at], part.Rgba[0]);
+        var back = Png.Paste(Solid(40, 30, 0, 0, 0), part, 5, 4);
+        Assert.Equal(part.Rgba[..4], back.Rgba[at..(at + 4)]);
+        Assert.Equal((20, 15), (Png.Resize(gradient, 20, 15).Width, Png.Resize(gradient, 20, 15).Height));
+        Assert.Equal(Solid(7, 5, 9, 8, 7).Rgba, Png.Resize(Solid(3, 2, 9, 8, 7), 7, 5).Rgba);
+        Assert.Equal((768, 384), MediaJobs.DrawSize(64, 32));
+        Assert.Equal((1024, 576), MediaJobs.DrawSize(1024, 576));
+
         Assert.Equal((1024, 672), MediaJobs.Fit(1536, 1024));
         Assert.Equal((496, 288), MediaJobs.Fit(500, 300));
         Assert.Equal((64, 64), MediaJobs.Fit(10, 10));
@@ -92,7 +114,8 @@ public sealed class MediaStudioTests(AppFixture app)
                     break;
                 case "/sdcpp/v1/upscale":
                     var image = Png.Decode(Convert.FromBase64String(body["image"]!.GetValue<string>().Split(',')[1]));
-                    var big = Png.Encode(Solid(image.Width * 4, image.Height * 4, 0, 255, 0));
+                    Assert.Equal("jpeg", body["output_format"]!.GetValue<string>());
+                    var big = Jpeg.Encode(Solid(image.Width * 4, image.Height * 4, 0, 255, 0));
                     answer = new JsonObject
                     {
                         ["images"] = new JsonArray(new JsonObject { ["b64_json"] = Convert.ToBase64String(big) }), ["width"] = image.Width * 4, ["height"] = image.Height * 4,
@@ -207,7 +230,9 @@ public sealed class MediaStudioTests(AppFixture app)
             Assert.Equal([0, 0, 255], pixels.Rgba[..3]);
             Assert.Equal([255, 0, 0], pixels.Rgba[(63 * 4)..(63 * 4 + 3)]);
             var changed = server.Asked.Last(a => a.Path == "/sdcpp/v1/img_gen").Body;
+            // The painted part with what is around it (here all of it, smaller than 256 pixels), drawn larger.
             Assert.Equal(DataUrl(red), changed["ref_images"]![0]!.GetValue<string>());
+            Assert.Equal((768, 384), (changed["width"]!.GetValue<int>(), changed["height"]!.GetValue<int>()));
 
             // A little different, from the painted one; four times as large; and a clip that starts from it.
             await DoneAsync(f, b, new { action = "vary", sourceId = editId, strength = 0.4 });
@@ -216,6 +241,7 @@ public sealed class MediaStudioTests(AppFixture app)
             Assert.StartsWith("data:image/png;base64,", varied["init_image"]!.GetValue<string>(), StringComparison.Ordinal);
             var enlarged = await ItemAsync(b, (await DoneAsync(f, b, new { action = "enlarge", sourceId = editId })).GetProperty("items")[0].GetGuid());
             Assert.Equal((256, 128), (enlarged.GetProperty("width").GetInt32(), enlarged.GetProperty("height").GetInt32()));
+            Assert.Equal(("image/jpeg", true), (enlarged.GetProperty("contentType").GetString(), enlarged.GetProperty("thumb").GetBoolean()));
             var clip = await ItemAsync(b, (await DoneAsync(f, b, new { action = "move", sourceId = editId, prompt = "The fox looks up", seconds = 2 })).GetProperty("items")[0].GetGuid());
             Assert.Equal(("video", 2.0), (clip.GetProperty("kind").GetString(), clip.GetProperty("seconds").GetDouble()));
             var film = server.Asked.Single(a => a.Path == "/sdcpp/v1/vid_gen").Body;
