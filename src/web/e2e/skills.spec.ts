@@ -38,7 +38,7 @@ test('a skill is made with parameters, chosen with /, filled in above the box an
     await expect(chosen).toBeVisible()
     await expect(box).toHaveValue('')
     // Not sent while its parameter is empty.
-    await page.getByRole('button', { name: 'Send' }).click()
+    await page.getByRole('button', { name: 'Send', exact: true }).click()
     await expect(chosen.getByText('Fill this in to send.')).toBeVisible()
     await chosen.getByRole('textbox', { name: /Word/ }).fill('banana')
     await expectAccessible(page, info, 'skill-chosen')
