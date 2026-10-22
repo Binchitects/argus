@@ -126,6 +126,23 @@ public sealed class MediaStoryTests(AppFixture app)
         Assert.NotEqual(video, again.GetProperty("videoItemId").GetGuid());
         Assert.Single((await b.JsonAsync(await b.GetAsync("/api/media/items?kind=video"))).GetProperty("items").EnumerateArray());
 
+        // One video of a person's in the making at a time.
+        var second = (await b.JsonAsync(await b.PostAsync("/api/media/stories", new { brief = "Another one", shots = 2 }))).GetProperty("id").GetGuid();
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            var s = db.MediaStories.Single(x => x.Id == id);
+            (s.Status, s.UpdatedAt) = (Llm.Core.Media.MediaStory.Making, DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+        await StatusAssert.Is(HttpStatusCode.TooManyRequests, await b.PostAsync($"/api/media/stories/{second}/make"));
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            db.MediaStories.Single(x => x.Id == id).Status = Llm.Core.Media.MediaStory.Done;
+            await db.SaveChangesAsync();
+        }
+
         // Another person sees none of it; deleted, its files go and the video stays.
         var other = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         await StatusAssert.Is(HttpStatusCode.NotFound, await other.GetAsync($"/api/media/stories/{id}"));

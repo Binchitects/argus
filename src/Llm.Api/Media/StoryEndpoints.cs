@@ -167,6 +167,12 @@ public static class StoryEndpoints
         {
             return AuthEndpoints.Problem(409, "story", "It is being made already.");
         }
+        // One video of a person's in the making at a time: each takes the GPU for minutes a shot.
+        var since = clock.GetUtcNow() - StoryRuns.Lost;
+        if (await db.MediaStories.AnyAsync(s => s.OwnerId == story.OwnerId && s.Id != story.Id && s.Status == MediaStory.Making && s.UpdatedAt > since, ct))
+        {
+            return AuthEndpoints.Problem(429, "story", "Another video of yours is being made: make this one when it is done.");
+        }
         if (!await modules.HasAsync("videogen", ct) || !await modules.HasAsync("imagegen", ct))
         {
             return AuthEndpoints.Problem(503, "story", "A video needs the picture and video servers (the imagegen and videogen modules).");
