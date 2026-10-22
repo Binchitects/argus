@@ -19,6 +19,7 @@ _NAMED = {"red": "#c0392b", "green": "#3a8f3a", "blue": "#2e6fbf", "yellow": "#e
 _MATERIALS = {}
 PATTERNS = ("brick", "tiles", "shingles", "checker", "wood", "stone", "concrete", "plaster", "grass", "marble", "metal", "fabric", "noise")
 SHADERS = ("matte", "plastic", "metal", "mirror", "glass", "light", "ceramic", "rubber")
+_NOTHING = {"", "none", "no", "null", "plain", "solid", "default", "false", "nothing", "n/a"}
 SHAPES = ("box", "cylinder", "cone", "sphere", "torus", "plane", "roof", "wedge", "pyramid", "capsule", "lathe", "extrude", "tube", "text", "tree",
           "light", "figure")
 LIGHTS = ("point", "spot", "area", "sun")
@@ -220,6 +221,11 @@ def _images(m, files, size=2.0, units=None):
 
 def material(color="grey", metallic=0.0, roughness=None, glass=False, texture=None, texture_size=None, color2=None, shader=None, glow=0.0, units=1.0):
     # One material: a colour, or a texture (a pattern's name, or a texture's images), with a shader. The same ones are shared.
+    # "none", "plain" and their like (as small models write "no texture") are no texture, and no shader.
+    if str(texture).strip().lower() in _NOTHING:
+        texture = None
+    if str(shader).strip().lower() in _NOTHING:
+        shader = None
     if texture and str(texture).lower() in PATTERNS and not _known(color):
         color = str(texture).lower()
     key = (str(color), float(metallic or 0), roughness, bool(glass), str(texture), texture_size, str(color2), str(shader), float(glow or 0), units)

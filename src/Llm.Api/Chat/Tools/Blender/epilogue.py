@@ -250,7 +250,8 @@ if globals().get("PRINT") and _meshes:
             _z.writestr("3D/3dmodel.model", "\n".join(_xml))
         _size = " × ".join(f"{(_hi[i] - _lo[i]) * _k:.1f}" for i in range(3))
         _openparts = [n for n, _v, _t, x, _c in _parts if x]
-        print(f"Print files: model.stl and model.3mf, {_size} mm" + (f" (1:{1000 / _k:.0f} of its real size)" if abs(_k - 1000) > 1 else " (its real size)")
+        _scale = " (its real size)" if abs(_k - 1000) <= 1 else f" (1:{1000 / _k:.3g} of its real size)" if _k < 1000 else f" ({_k / 1000:.3g} times its real size)"
+        print(f"Print files: model.stl and model.3mf, {_size} mm{_scale}"
               + f", {sum(len(t) for _n, _v, t, _x, _c in _parts):,} triangles. "
               + ("Every part is closed (watertight)." if not _openparts else f"Not closed (a slicer may repair it, or close it): {', '.join(_openparts[:8])}."))
 
