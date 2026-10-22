@@ -207,9 +207,9 @@ public sealed partial class SvgDraw(OneQuestion one, ChatModels models, SvgRende
     private const string Naming = """
         You name the separate things in a picture, from the words it was drawn from, so that each can be animated on its own.
         Answer with JSON only: {"things": [{"id": "fox", "looks": "an orange fox"}, …]}.
-        - At most six things, the main subject first. Things drawn that could move apart (a fox, the moon, a boat, waves, clouds, stars, a tree, a person), not their pieces (no eyes, no tails, no sails), not the plain background or the sky.
+        - At most six things, the main subject first. Every separate thing drawn, also those that stay still (a fox, the moon, a boat, waves, clouds, stars, a kite, a dog, a hill, a cup, a saucer), each on its own; not their pieces (no eyes, no tails, no sails), not the plain background or the sky.
         - id: one or two lowercase English words joined by a hyphen. Many of a kind together are one thing with a plural id (stars, clouds, birds).
-        - looks: the thing alone in a few English words, with its colour and shape when the words give them (a blue crescent moon, small yellow stars, a small sailboat); never what it is on, under or with.
+        - looks: the thing alone in two to four English words, with its colour and shape when the words give them (a blue crescent moon, small yellow stars, a red kite, a girl); never what it does, holds, or is on, under or with (a girl, not a girl flying a kite).
         """;
 
     /// <summary>The things a picture drawn from these words has that could each move on their own (at most six), named by the model; none when it cannot say.</summary>
@@ -296,7 +296,7 @@ public sealed partial class SvgDraw(OneQuestion one, ChatModels models, SvgRende
                 after = [Turn("assistant", text), Turn("user", "Answer with JSON only: {\"motions\": [ … ]}.")];
                 continue;
             }
-            motions = [.. motions.Take(60)];
+            motions = [.. SvgMotion.Unrepeated(root, motions).Take(60)];
             var result = SvgMotion.Apply(still, motions);
             if (result.Problems.Count == 0 || round == 2)
             {

@@ -262,3 +262,11 @@ export const changeVector = (id: string, body: { still?: string; motions?: Motio
 export const restoreVersion = (id: string, version: number) => api<void>(`/api/media/vectors/${id}/versions/${version}/restore`, { method: 'POST' })
 export const uploadVector = (svg: string, name: string) => api<{ id: string; changed: string[] }>('/api/media/vectors', { body: { svg, name } })
 export const svgUrl = (id: string) => `/api/media/items/${id}/svg`
+
+/** Why code typed by hand is not an SVG yet (what the browser's XML reader says), or null when it is one. */
+export function notSvg(code: string): string | null {
+  const doc = new DOMParser().parseFromString(code, 'image/svg+xml')
+  const error = doc.querySelector('parsererror')
+  if (error) return (error.textContent ?? 'Not XML').split('\n').map((l) => l.trim()).find((l) => l.length > 0 && !/^This page contains/.test(l)) ?? 'Not XML'
+  return doc.documentElement.localName === 'svg' ? null : 'It does not start with <svg>.'
+}

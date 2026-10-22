@@ -131,6 +131,19 @@ public sealed class VectorPartsTests
     }
 
     [Fact]
+    public void A_piece_repeating_its_part_s_motion_goes_and_other_motions_stay()
+    {
+        var root = XElement.Parse(Scene);
+        var kept = SvgMotion.Unrepeated(root, [
+            new() { Target = "car", Kind = "float" },
+            new() { Target = "body", Kind = "float" },
+            new() { Target = "body", Kind = "pulse" },
+            new() { Target = "sun", Kind = "float" },
+        ]);
+        Assert.Equal(["car float", "body pulse", "sun float"], kept.Select(m => $"{m.Target} {m.Kind}"));
+    }
+
+    [Fact]
     public void A_thing_s_name_becomes_an_id_the_drawing_can_have()
     {
         Assert.Equal("fox", SvgDraw.ThingId("Fox"));

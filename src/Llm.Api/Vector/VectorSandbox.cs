@@ -114,13 +114,26 @@ public sealed class VectorSandbox(SandboxClient sandbox)
                     s = np.sort(score[i])[::-1]
                     if s[0] >= -2.5 and (len(s) < 2 or s[0] - s[1] >= 0.75):
                         label[i] = score[i].argmax()
+            # A shape still undecided, not a speck, judged by each thing's own map (where it is most likely, against the picture's
+            # middle): a pale-green moon the segmenter scores low everywhere is still where its map is highest. A thing not found
+            # yet is favoured (it was named, so it is drawn somewhere).
+            low = np.median(maps.reshape(len(labels), -1), axis=1)
+            high = maps.reshape(len(labels), -1).max(1)
+            for i in np.where((label < 0) & (isl > 0) & (area >= 0.002 * sw * sh))[0]:
+                rel = (score[i] - low) / np.maximum(high - low, 1e-6) + 0.1 * np.array([not (label == k).any() for k in range(len(labels))])
+                order = np.sort(rel)[::-1]
+                if order[0] >= (0.6 if area[i] >= 0.01 * sw * sh else 0.45) and (len(order) < 2 or order[0] - order[1] >= 0.15):
+                    label[i] = rel.argmax()
             # The undecided take the label of the neighbour they share most border with (in their island).
             for _ in range(20):
                 changed = False
                 for i in np.where((label < 0) & (isl > 0))[0]:
-                    # (Not a large shape the segmenter saw as nothing like it: that is something else, left a part of its own.)
-                    best = sorted(((c, k) for k, c in near[i].items() if label[k] >= 0 and isl[k] == isl[i]
-                                   and (score[i, label[k]] >= -5.5 or area[i] < 0.002 * sw * sh)), reverse=True)
+                    # (Not a shape the segmenter saw as nothing like it, the larger the surer it must be: a hill under a girl is
+                    # something else, left a part of its own; a girl's eye is hers.)
+                    def like(k):
+                        a = area[i] / (sw * sh)
+                        return a < 0.002 or score[i, label[k]] >= (-5.5 if a < 0.01 else -3.5)
+                    best = sorted(((c, k) for k, c in near[i].items() if label[k] >= 0 and isl[k] == isl[i] and like(k)), reverse=True)
                     if best:
                         label[i] = label[best[0][1]]
                         changed = True
@@ -256,7 +269,7 @@ public sealed class VectorSandbox(SandboxClient sandbox)
 
     /// <summary>How the frames are made a video: its filters and codec, by format (the frames are PNGs, see-through where nothing is drawn).</summary>
     private const string EncodeScript = """
-        import json, subprocess
+        import glob, json, math, subprocess
         job = json.load(open('job.json'))
         fps, fmt, bg = job['fps'], job['format'], job['background']
         src = ['-framerate', str(fps), '-i', 'frame-%05d.png']
@@ -270,6 +283,12 @@ public sealed class VectorSandbox(SandboxClient sandbox)
         elif fmt == 'webm':
             cmd = base + src + ['-vf', f'{even},format=yuva420p', '-c:v', 'libvpx-vp9', '-threads', '2', '-row-mt', '0', '-pix_fmt', 'yuva420p',
                                 '-b:v', '0', '-crf', '30', '-auto-alt-ref', '0', 'drawing.webm']
+        elif fmt == 'sprite':
+            # Every frame in one picture, left to right and down, as near a square as the count allows.
+            n = len(glob.glob('frame-*.png'))
+            cols = math.ceil(math.sqrt(n))
+            rows = math.ceil(n / cols)
+            cmd = base + src + ['-vf', f'format=rgba,tile={cols}x{rows}:color=0x00000000', '-frames:v', '1', '-pix_fmt', 'rgba', 'drawing.png']
         else:
             pal = '[0:v]split[a][b];[a]palettegen=reserve_transparent=1:stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a:alpha_threshold=128'
             cmd = base + src + ['-filter_complex', pal, '-loop', '0', 'drawing.gif']
@@ -277,7 +296,10 @@ public sealed class VectorSandbox(SandboxClient sandbox)
         print(json.dumps({'error': r.stderr.strip()[-600:] if r.returncode else None}))
         """;
 
-    /// <summary>Frames (PNGs) made a video: "mp4" (on <paramref name="background"/>), "webm" (see-through kept) or "gif" (looping).</summary>
+    /// <summary>
+    /// Frames (PNGs) made a video: "mp4" (on <paramref name="background"/>), "webm" (see-through kept) or "gif" (looping); or
+    /// "sprite": a sprite sheet, every frame in one PNG, in rows.
+    /// </summary>
     public async Task<(byte[] Bytes, string Type, string Extension)> EncodeAsync(IReadOnlyList<byte[]> frames, int fps, string format, string background, CancellationToken ct)
     {
         if (sandbox.Unavailable() is { } why)
@@ -287,7 +309,10 @@ public sealed class VectorSandbox(SandboxClient sandbox)
         var files = frames.Select((f, i) => new SandboxFile(string.Create(CultureInfo.InvariantCulture, $"frame-{i:00000}.png"), f)).ToList();
         files.Add(new SandboxFile("job.json", Encoding.UTF8.GetBytes(new JsonObject { ["fps"] = fps, ["format"] = format, ["background"] = background }.ToJsonString())));
         var run = await sandbox.RunAsync(EncodeScript, files, 280, ct);
-        var (name, type) = format switch { "mp4" => ("drawing.mp4", "video/mp4"), "webm" => ("drawing.webm", "video/webm"), _ => ("drawing.gif", "image/gif") };
+        var (name, type) = format switch
+        {
+            "mp4" => ("drawing.mp4", "video/mp4"), "webm" => ("drawing.webm", "video/webm"), "sprite" => ("drawing.png", "image/png"), _ => ("drawing.gif", "image/gif"),
+        };
         var said = run.Stdout.Split('\n').Select(l => l.Trim()).LastOrDefault(l => l.StartsWith('{'));
         var error = said is null ? null : JsonNode.Parse(said)?["error"]?.GetValue<string>();
         var bytes = run.Files.FirstOrDefault(f => f.Name == name)?.Bytes;

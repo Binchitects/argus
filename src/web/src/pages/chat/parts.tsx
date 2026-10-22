@@ -1,4 +1,4 @@
-import { AlertTriangle, AudioLines, Brain, Calculator, Check, ChevronRight, CircleX, Clapperboard, Clock, Download, FilePen, FileText, FolderTree, Globe, Image as ImageIcon, ListChecks, ListTree, Loader2, Network, Scale, Search, ShieldQuestion, ShieldX, SquareTerminal, Telescope, TextSearch, Wrench, Zap, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, AudioLines, Brain, Calculator, Check, ChevronRight, CircleX, Clapperboard, Clock, Download, FilePen, FileText, FolderTree, Globe, Image as ImageIcon, ListChecks, ListTree, Loader2, Network, PenTool, Scale, Search, ShieldQuestion, ShieldX, SquareTerminal, Telescope, TextSearch, Wrench, Zap, type LucideIcon } from 'lucide-react'
 import { Link } from 'react-router'
 import { Collapsible } from 'radix-ui'
 import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from 'react'
@@ -84,6 +84,7 @@ const toolIcons: [RegExp, LucideIcon][] = [
   [/^canvas_/, FilePen],
   [/python|run_code/, SquareTerminal],
   [/web|url|fetch/, Globe],
+  [/_svg$/, PenTool],
   [/image|picture|draw/, ImageIcon],
   [/video/, Clapperboard],
   [/speak/, AudioLines],
@@ -167,6 +168,7 @@ export const ToolCard = memo(function ToolCard({
   const args: [string, string][] = useMemo(() => (delegate ? partsSummary(call.function.arguments) : argsSummary(call.function.arguments)), [delegate, call.function.arguments])
   const running = !result && live && !waiting
   const drawing = running && /image|picture|draw/.test(call.function.name)
+  const animating = running && /animate/.test(call.function.name)
   const filming = running && /video/.test(call.function.name)
   const now = useNow(running && !!progress)
   const ran = running && progress ? now - progress.since : 0
@@ -203,7 +205,7 @@ export const ToolCard = memo(function ToolCard({
             ) : running ? (
               <>
                 <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />{' '}
-                {drawing ? 'Drawing' : filming ? 'Filming' : parts ? partsDone(work?.filter((w) => w.status === 'done').length ?? 0, parts) : 'Running'}
+                {drawing ? 'Drawing' : animating ? 'Animating' : filming ? 'Filming' : parts ? partsDone(work?.filter((w) => w.status === 'done').length ?? 0, parts) : 'Running'}
                 {ran >= 1000 && <span className="tabular-nums"> · {seconds(Math.floor(ran / 1000) * 1000)}</span>}
               </>
             ) : declined ? (

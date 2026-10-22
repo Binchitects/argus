@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fakeApi, member, renderApp } from '@/test/utils'
-import type { MediaConfig, MediaItem, MediaJob, VectorConfig, VectorDrawing } from './media-api'
+import { notSvg, type MediaConfig, type MediaItem, type MediaJob, type VectorConfig, type VectorDrawing } from './media-api'
 
 const config: MediaConfig = { picture: 'FLUX.2-klein-4B', video: null, enlarge: false, cutout: false, voice: false, music: false, going: 0, mostGoing: 3 }
 
@@ -119,5 +119,11 @@ describe('vector drawings', () => {
     expect(within(versions).getAllByRole('listitem')).toHaveLength(2)
     await userEvent.click(await within(versions).findByRole('button', { name: 'Put back' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/media/vectors/v1/versions/2/restore')).toBe(true))
+  })
+
+  it('code typed by hand is an SVG only when it reads as XML and starts with <svg>', () => {
+    expect(notSvg(still)).toBeNull()
+    expect(notSvg('<svg xmlns="http://www.w3.org/2000/svg"><rect></svg>')).toBeTruthy()
+    expect(notSvg('<g xmlns="http://www.w3.org/2000/svg"/>')).toBe('It does not start with <svg>.')
   })
 })

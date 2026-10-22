@@ -175,7 +175,7 @@ public static class VectorEndpoints
         {
             return Results.NotFound();
         }
-        http.Response.Headers.ContentSecurityPolicy = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; sandbox";
+        http.Response.Headers.ContentSecurityPolicy = SvgSafe.Policy;
         http.Response.Headers.XContentTypeOptions = "nosniff";
         http.Response.Headers.CacheControl = "private, no-cache";
         return http.Request.Query.ContainsKey("download")

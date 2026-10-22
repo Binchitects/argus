@@ -1036,6 +1036,12 @@ public static partial class ChatEndpoints
             http.Response.Headers.XContentTypeOptions = "nosniff";
             return Results.File(a.Data, a.ContentType, enableRangeProcessing: true);
         }
+        if (a.Kind == "image" && a.ContentType == "image/svg+xml")
+        {
+            // A drawing (made safe when it was made): opened on its own too, it runs nothing and reaches nothing.
+            http.Response.Headers.ContentSecurityPolicy = Vector.SvgSafe.Policy;
+            http.Response.Headers.XContentTypeOptions = "nosniff";
+        }
         return a.Kind == "image" && a.Data is not null
             ? Results.File(a.Data, a.ContentType)
             : Results.Text(a.Text, "text/plain; charset=utf-8");

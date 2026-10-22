@@ -20,6 +20,9 @@ public sealed record SafeSvg(string Markup, double Width, double Height, IReadOn
 /// </summary>
 public static partial class SvgSafe
 {
+    /// <summary>How a drawing is served: opened on its own it runs nothing and reaches nothing (a sandboxing content policy).</summary>
+    public const string Policy = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; sandbox";
+
     public const int MostBytes = 4 * 1024 * 1024;
     public const int MostElements = 60_000;
     public const int MostDepth = 64;

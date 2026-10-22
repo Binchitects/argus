@@ -148,7 +148,7 @@ public sealed record ToolChoice(IChatTool Tool, ToolSetting Setting, string? Una
 /// what admins chose for each: on or off, for whom, on in new chats, ask first.
 /// </summary>
 public sealed class ToolRegistry(
-    AppDbContext db, ArgusTool argus, ImageTool image, VideoTool video, SpeechTool speech, CalculatorTool calculator, TimeTool time, FilesTool files, CanvasTool canvas, PythonTool python, WebTool web, AskTool ask, AgentsTool agents, MemoryTool memory,
+    AppDbContext db, ArgusTool argus, ImageTool image, VectorTool vector, VideoTool video, SpeechTool speech, CalculatorTool calculator, TimeTool time, FilesTool files, CanvasTool canvas, PythonTool python, WebTool web, AskTool ask, AgentsTool agents, MemoryTool memory,
     IHttpClientFactory http, IOptions<AuthOptions> auth, IOptionsMonitor<ChatOptions> chat, Plugins.PersonCredentials people, Knowledge.KnowledgeTool knowledge, LayaTool laya,
     ResearchTool research, BlenderTool blender, Browser.BrowserTool browser, DataTool data, DeckTool decks, Plans.PlansTool plans, Code.ReviewTool reviews, GatewayChat gateway, ToolUsage usage,
     SandboxClient sandbox, IServiceScopeFactory scopes, IOptionsMonitor<SandboxOptions> sandboxOptions)
@@ -160,7 +160,7 @@ public sealed class ToolRegistry(
         var settings = await db.ToolSettings.AsNoTracking().ToDictionaryAsync(s => s.ToolId, ct);
         var servers = await db.McpServers.AsNoTracking().OrderBy(s => s.Name).ToListAsync(ct);
         var customs = await db.CustomTools.AsNoTracking().OrderBy(t => t.Name).ToListAsync(ct);
-        IEnumerable<IChatTool> tools = [argus, knowledge, data, decks, python, web, research, browser, image, video, speech, calculator, time, files, canvas, blender, plans, reviews, ask, agents, memory, laya,
+        IEnumerable<IChatTool> tools = [argus, knowledge, data, decks, python, web, research, browser, image, vector, video, speech, calculator, time, files, canvas, blender, plans, reviews, ask, agents, memory, laya,
             .. servers.Select(Server), .. customs.Select(t => CustomTools.For(t, http, gateway, auth.Value.DataKey))];
         var all = new List<ToolChoice>();
         foreach (var tool in tools)
@@ -194,6 +194,7 @@ public sealed class ToolRegistry(
         [Plans.PlansTool.ToolId] = Core.Access.Permissions.Plans,
         ["knowledge"] = Core.Access.Permissions.Knowledge,
         ["image"] = Core.Access.Permissions.Pictures,
+        [VectorTool.ToolId] = Core.Access.Permissions.Pictures,
         ["video"] = Core.Access.Permissions.Video,
         ["speech"] = Core.Access.Permissions.Speech,
         ["memory"] = Core.Access.Permissions.Memory,

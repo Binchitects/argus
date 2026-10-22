@@ -39,6 +39,16 @@ purify.addHook('afterSanitizeAttributes', (node) => {
   }
 })
 
+// A picture by a bare file name ("![a fox](fox.svg)") is a model naming a file it was shown, not an address: it would be
+// fetched beside the page and show broken. Its words stay, in its place.
+purify.addHook('uponSanitizeElement', (node, data) => {
+  if (data.tagName !== 'img') return
+  const src = (node as Element).getAttribute('src') ?? ''
+  if (/^(https?:|data:|blob:|\/)/i.test(src)) return
+  const alt = (node as Element).getAttribute('alt') ?? ''
+  node.parentNode?.replaceChild(node.ownerDocument!.createTextNode(alt), node)
+})
+
 export function sanitize(html: string): string {
   return purify.sanitize(html, { FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'iframe', 'object', 'embed'], ADD_ATTR: ['target', 'dir'] })
 }

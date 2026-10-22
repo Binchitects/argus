@@ -14,7 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from '@/components/ui/toaster'
 import { errorMessage } from '@/lib/api'
 import {
-  changeVector, contentUrl, mediaJobsQuery, removeItem, restoreVersion, startJob, svgUrl, uploadVector, vectorConfigQuery, vectorQuery, vectorVersionsQuery, working,
+  changeVector, contentUrl, mediaJobsQuery, notSvg, removeItem, restoreVersion, startJob, svgUrl, uploadVector, vectorConfigQuery, vectorQuery, vectorVersionsQuery, working,
   type MediaJobRequest, type MediaItem, type Motion, type VectorConfig,
 } from './media-api'
 import { VectorStage, type StageHandle } from './vector-stage'
@@ -125,7 +125,13 @@ export function VectorForm({ config }: { config: VectorConfig }) {
 }
 
 /** The sizes each format is made at (a GIF's colours and size keep it small), the middle one first chosen. */
-const sides: Record<string, string[]> = { png: ['1024', '2048', '4096'], gif: ['320', '480', '640'], mp4: ['720', '1080', '1920'], webm: ['720', '1080', '1920'] }
+const sides: Record<string, string[]> = {
+  png: ['1024', '2048', '4096'], gif: ['320', '480', '640'], mp4: ['720', '1080', '1920'], webm: ['720', '1080', '1920'], sprite: ['128', '256', '512'],
+}
+
+/** How each format is named here (a sprite sheet: every frame in one PNG, in rows). */
+const formatNames: Record<string, string> = { png: 'PNG', gif: 'GIF', mp4: 'MP4', webm: 'WebM', sprite: 'Sprite sheet' }
+const formatName = (f: string) => formatNames[f] ?? f.toUpperCase()
 
 const repeats = [
   { value: 'once', label: 'Once' },
@@ -202,6 +208,10 @@ export function VectorEditor({ item, items, onClose }: { item: MediaItem; items:
   const [background, setBackground] = useState('#ffffff')
   const [problems, setProblems] = useState<string[]>([])
   const d = drawing.data
+  // Code typed by hand shows on the stage as it is typed (still: its motions come back when it is used), once it is SVG.
+  const typed = d && code !== null && code !== d.still ? code : null
+  const typedWrong = typed !== null ? notSvg(typed) : null
+  const preview = typed !== null && typedWrong === null
   const started = useStart(() => toast.success('Started: it shows here when done.'))
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['media', 'vector', item.id] })
@@ -240,9 +250,9 @@ export function VectorEditor({ item, items, onClose }: { item: MediaItem; items:
       <div className="grid content-start gap-2">
         <VectorStage
           ref={stage}
-          markup={d.markup}
-          seconds={d.seconds}
-          loops={d.loops}
+          markup={preview ? typed : d.markup}
+          seconds={preview ? 0 : d.seconds}
+          loops={preview ? false : d.loops}
           picking={picking}
           picked={picked}
           onPick={(id) => {
@@ -356,10 +366,17 @@ export function VectorEditor({ item, items, onClose }: { item: MediaItem; items:
             <Field label="Its code" hint="The drawing as it stands still; its motions are kept apart.">
               <Textarea rows={8} spellCheck={false} className="font-mono text-xs" value={code ?? d.still} onChange={(e) => setCode(e.target.value)} />
             </Field>
-            {code !== null && code !== d.still && (
-              <Button variant="outline" loading={save.isPending} onClick={() => save.mutate({ still: code })}>
-                <Code2 /> Use this code
-              </Button>
+            {typedWrong && <p className="text-xs text-destructive-ink">Not SVG yet: {typedWrong}</p>}
+            {typed !== null && (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="outline" loading={save.isPending} disabled={!!typedWrong} onClick={() => save.mutate({ still: typed })}>
+                  <Code2 /> Use this code
+                </Button>
+                <Button variant="ghost" onClick={() => setCode(null)}>
+                  Undo
+                </Button>
+                {preview && <span className="text-xs text-muted-foreground">The stage shows it as typed.</span>}
+              </div>
             )}
           </TabsContent>
           <TabsContent value="export" className="grid gap-3 pt-2">
@@ -370,7 +387,7 @@ export function VectorEditor({ item, items, onClose }: { item: MediaItem; items:
                 setFormat(f)
                 setSide((sides[f] ?? sides.png)[1])
               }}
-              options={config.data.formats.map((f) => ({ value: f, label: f.toUpperCase() }))}
+              options={config.data.formats.map((f) => ({ value: f, label: formatName(f) }))}
             />
             {format !== 'png' && !config.data.moves && <Alert>Animations are recorded by the browser module, which does not run here.</Alert>}
             {format !== 'png' && d.seconds <= 0 && <Alert>It does not move yet: give it motions first.</Alert>}
@@ -391,7 +408,7 @@ export function VectorEditor({ item, items, onClose }: { item: MediaItem; items:
               disabled={format !== 'png' && (!config.data.moves || d.seconds <= 0)}
               onClick={() => job({ action: 'export', format, side: Number(side), ...(format === 'mp4' ? { background } : {}) })}
             >
-              <Film /> Make the {format.toUpperCase()}
+              <Film /> Make the {format === 'sprite' ? 'sprite sheet' : formatName(format)}
             </Button>
             <p className="text-xs text-muted-foreground">It goes into the gallery beside the drawing. The SVG itself plays its motions anywhere: download it below.</p>
             {exports.length > 0 && (

@@ -211,8 +211,14 @@ public static partial class VectorJobs
         return (item, png);
     }
 
-    /// <summary>The formats a drawing is made: a picture (PNG), a looping GIF, an MP4 (on a background), a WebM (see-through kept).</summary>
-    public static readonly IReadOnlyList<string> Formats = ["png", "gif", "mp4", "webm"];
+    /// <summary>
+    /// The formats a drawing is made: a picture (PNG), a looping GIF, an MP4 (on a background), a WebM (see-through kept), a
+    /// sprite sheet (its frames in one PNG, for games and pages).
+    /// </summary>
+    public static readonly IReadOnlyList<string> Formats = ["png", "gif", "mp4", "webm", "sprite"];
+
+    /// <summary>A sprite sheet's frames at most, and its side at most (pixels).</summary>
+    public const int MostSprites = 144, MostSheet = 8192;
 
     private static async Task<IReadOnlyList<MediaItem>> ExportAsync(IServiceProvider sp, AppDbContext db, MediaJob job, AppUser me, JsonNode? options, Func<string, Task> phase,
         CancellationToken ct)
@@ -242,16 +248,23 @@ public static partial class VectorJobs
             {
                 throw new VectorRefusedException("This drawing does not move: give it motions first, or make it a PNG.");
             }
-            var gif = format == "gif";
-            var side = Math.Clamp(Side(options, "side", gif ? 480 : 1080), 64, gif ? 640 : 1920);
-            var fps = Math.Clamp(Side(options, "fps", gif ? 20 : 30), 5, gif ? 25 : 60);
-            seconds = Math.Clamp(options?["seconds"] is JsonValue sv && sv.TryGetValue<double>(out var sec) ? sec : vector.Seconds, 0.2, gif ? 12 : 60);
+            var (gif, sprite) = (format == "gif", format == "sprite");
+            var side = sprite ? Math.Clamp(Side(options, "side", 256), 32, 1024) : Math.Clamp(Side(options, "side", gif ? 480 : 1080), 64, gif ? 640 : 1920);
+            var fps = sprite ? Math.Clamp(Side(options, "fps", 12), 2, 30) : Math.Clamp(Side(options, "fps", gif ? 20 : 30), 5, gif ? 25 : 60);
+            seconds = Math.Clamp(options?["seconds"] is JsonValue sv && sv.TryGetValue<double>(out var sec) ? sec : vector.Seconds, 0.2, gif ? 12 : sprite ? 12 : 60);
+            if (sprite)
+            {
+                // As many frames as fit: at most MostSprites, the sheet at most MostSheet a side.
+                fps = Math.Max(1, Math.Min(fps, (int)Math.Floor(MostSprites / seconds.Value)));
+                var columns = (int)Math.Ceiling(Math.Sqrt(Math.Max(1, Math.Round(seconds.Value * fps))));
+                side = Math.Min(side, MostSheet / columns);
+            }
             await phase($"Recording {seconds:0.#} seconds, {fps} frames a second");
             var frames = await render.FramesAsync(markup, side, seconds.Value, fps, ct);
             await phase($"Making the {format.ToUpperInvariant()}");
             (bytes, contentType, extension) = await sp.GetRequiredService<VectorSandbox>().EncodeAsync(frames, fps, format, Text(options, "background") is { } bg && Color(bg) ? bg : "white", ct);
-            kind = gif ? MediaItem.Picture : MediaItem.Video;
-            (width, height) = Png.SizeOf(frames[0]) is { } s ? (s.Width, s.Height) : ((int?)null, (int?)null);
+            kind = gif || sprite ? MediaItem.Picture : MediaItem.Video;
+            (width, height) = Png.SizeOf(sprite ? bytes : frames[0]) is { } s ? (s.Width, s.Height) : ((int?)null, (int?)null);
             thumb = MediaJobs.Thumb(frames[Math.Min(frames.Count - 1, (int)(frames.Count * 0.6))]);
         }
         if (await sp.GetRequiredService<Storage.StorageQuotas>().RefusalAsync(me.Id, bytes.Length, ct) is { } full)

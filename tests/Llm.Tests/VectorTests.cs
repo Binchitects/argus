@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using Llm.Api.Media;
 using Llm.Api.Models;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
@@ -173,6 +174,31 @@ public sealed class VectorTests(AppFixture app)
         segmenter.Fail = true;
         var islands = First(await DoneAsync(f, b, new { action = "trace", sourceId = parent }));
         Assert.Contains("<g id=\"part\">", (await b.JsonAsync(await b.GetAsync($"/api/media/vectors/{islands}"))).GetProperty("still").GetString(), StringComparison.Ordinal);
+
+        // In the chat: drawn and animated by the tool as the studio does it (kept there), shown as an SVG that runs nothing.
+        await using (var scope = f.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            var person = await db.Users.SingleAsync(u => u.UserName == name);
+            var run = await scope.ServiceProvider.GetRequiredService<Llm.Api.Chat.Tools.VectorTool>()
+                .StartAsync(new Llm.Api.Chat.Tools.ToolContext(person, person.Email!, new Llm.Core.Chat.Conversation { UserId = person.Id }), CancellationToken.None);
+            Assert.Contains(run.Functions, fn => fn!["function"]!["name"]!.GetValue<string>() == "animate_svg");
+            var drawn = await run.CallAsync("draw_svg", new JsonObject { ["description"] = "a sun over hills", ["kind"] = "drawing", ["style"] = "cute" }, CancellationToken.None);
+            Assert.False(drawn.IsError, drawn.Text);
+            var answer = JsonNode.Parse(drawn.Text)!;
+            Assert.Equal(["sky", "sun", "hills"], answer["parts"]!.AsArray().Select(p => p!.GetValue<string>()));
+            var shownFile = drawn.Files!.Single();
+            Assert.Equal(("image", "image/svg+xml"), (shownFile.Kind, shownFile.ContentType));
+            var shown = await b.GetAsync($"/api/chat/attachments/{shownFile.Id}/content");
+            Assert.Contains("sandbox", shown.Headers.GetValues("Content-Security-Policy").Single(), StringComparison.Ordinal);
+            var chatDrawing = answer["drawing"]!.GetValue<string>();
+            Assert.Contains((await b.JsonAsync(await b.GetAsync("/api/media/items"))).GetProperty("items").EnumerateArray(), i => i.GetProperty("id").GetString() == chatDrawing);
+            var animated = await run.CallAsync("animate_svg", new JsonObject { ["drawing"] = chatDrawing, ["motion"] = "the sun spins" }, CancellationToken.None);
+            Assert.False(animated.IsError, animated.Text);
+            Assert.Contains("sun: spin", JsonNode.Parse(animated.Text)!["motions"]!.ToJsonString(), StringComparison.Ordinal);
+            Assert.True((await run.CallAsync("animate_svg", new JsonObject { ["drawing"] = id.ToString(), ["motion"] = "x" }, CancellationToken.None)).IsError is false);
+            Assert.True((await run.CallAsync("animate_svg", new JsonObject { ["drawing"] = Guid.NewGuid().ToString(), ["motion"] = "spin" }, CancellationToken.None)).IsError);
+        }
 
         // Another person sees none of it.
         var other = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);

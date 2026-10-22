@@ -299,6 +299,7 @@ public static class IdentityWiring
         services.AddScoped<Vector.SvgDraw>();
         services.AddScoped<Vector.VectorSandbox>();
         services.AddScoped<Vector.VectorStore>();
+        services.AddScoped<Chat.Tools.VectorTool>();
         services.AddSingleton<Chat.Tools.CalculatorTool>();
         services.AddSingleton<Chat.Tools.TimeTool>();
         services.AddSingleton<Chat.Tools.AskTool>();

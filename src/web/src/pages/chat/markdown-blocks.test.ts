@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LiveBlocks, toBlocks } from './markdown-blocks'
+import { LiveBlocks, sanitize, toBlocks } from './markdown-blocks'
 
 const html = (text: string) => toBlocks(text).map((b) => (b.kind === 'html' ? b.html : '')).join('')
 
@@ -50,5 +50,13 @@ describe('an answer read as it is written', () => {
     const text = 'See [the docs][d].\n\n[d]: https://example.test/docs\n\nMore.\n\nAnd [again][d].\n'
     for (let end = 1; end <= text.length; end += 2) live.update(text.slice(0, end))
     expect(live.update(text)).toEqual(toBlocks(text))
+  })
+})
+
+describe('pictures in an answer', () => {
+  it('shows a picture by its address, and only the words of one named by a bare file name', () => {
+    expect(sanitize('<p><img src="https://example.test/a.png" alt="a"></p>')).toContain('<img')
+    expect(sanitize('<p><img src="data:image/png;base64,AA" alt="b"></p>')).toContain('<img')
+    expect(sanitize('<p>See <img src="a-hot-air-balloon.svg" alt="A balloon"> here</p>')).toBe('<p dir="auto">See A balloon here</p>')
   })
 })

@@ -78,6 +78,18 @@ public static partial class SvgMotion
 
     private static readonly HashSet<string> KindNames = [.. Kinds.Select(k => k.Kind)];
 
+    /// <summary>
+    /// The motions without those a part's pieces repeat of it (the clouds drift, and each cloud drifts too: twice as far):
+    /// a motion of a part inside another part that moves the same way goes.
+    /// </summary>
+    public static List<Motion> Unrepeated(XElement root, IReadOnlyList<Motion> motions)
+    {
+        var ids = root.Descendants().Where(e => e.Attribute("id") is not null).GroupBy(e => (string)e.Attribute("id")!).ToDictionary(g => g.Key, g => g.First());
+        bool Inside(string inner, string outer) =>
+            ids.TryGetValue(inner, out var i) && (outer == "scene" ? inner != "scene" : ids.TryGetValue(outer, out var o) && i.Ancestors().Contains(o));
+        return [.. motions.Where(m => !motions.Any(other => other != m && other.Kind == m.Kind && Inside(m.Target, other.Target)))];
+    }
+
     /// <summary>What can move: what is drawn, and groups of it (not gradients' stops, a path inside a clip...).</summary>
     private static readonly HashSet<string> Movable = new(StringComparer.Ordinal) { "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "text", "use", "image", "svg" };
 

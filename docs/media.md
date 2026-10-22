@@ -2,8 +2,8 @@
 
 Pictures from a few words; a picture changed by saying how, all of it or only the
 part painted over; variations of it; the picture four times as large, or cut out of
-its background; a short clip that starts from it; speech in a voice from a sample,
-and music. **Workspace → Media studio** (`/media`).
+its background; a short clip that starts from it; vector drawings (SVG) that move;
+speech in a voice from a sample, and music. **Workspace → Media studio** (`/media`).
 
 ## Media studio
 
@@ -34,6 +34,50 @@ Open a picture to work on it:
 
 **Made from** opens the picture it came from. **Download** saves the file; **Delete**
 takes it out of the studio with its file (an upload stays in your files).
+
+## Vector drawings
+
+**Vector** makes an SVG: sharp at any size, small, and made of parts that can move.
+
+- **Illustration** (with the picture model): the picture model draws it flat, and it
+  is traced into clean vector shapes (vtracer). Its things are found and named as
+  parts: the chat model names the things in your words (a fox, the moon, stars), a
+  small model on the studio server finds where each is in the picture (CLIPSeg),
+  and the shapes are grouped into them. Many of a kind (stars, birds) become a part
+  whose pieces can move one after another. **Traced as** sets how closely it
+  follows the picture: an illustration, more detail, an icon, a logo.
+- **Drawn as SVG**: the model writes the SVG itself in a style (flat, line,
+  isometric, gradient, icon, cute, geometric) and a shape. Best for icons, diagrams
+  and simple shapes; what it got wrong (not XML, parts off the canvas, no names)
+  goes back to it to fix, and a model that sees looks at its own drawing.
+- **An SVG** of your own: it is made safe on the way in (no script, no outside
+  references, nothing that is not drawn), and you are told what was taken out.
+- A picture of yours: open it and choose **Vector** to trace it.
+
+Open a drawing to work on it. Its stage plays its motions: pause, scrub the time,
+or play it again and again.
+
+- **Animate**: say what moves and how ("the stars twinkle one after another, the
+  moon glows, the fox breathes"); the model plans the motions from its parts. Or
+  **Pick a part** on the stage, **Give it a motion**, and set each motion by hand:
+  what moves, how (fade, slide, pop, grow, spin, orbit, float, drift, bounce, sway,
+  swing, wave, pulse, breathe, twinkle, glow, heartbeat, wiggle, shake, blink, draw
+  the lines on, a colour change, or keyframes of your own), how long, when, once or
+  in a loop. **Play these** keeps them. Motions are written into the SVG as CSS, so
+  the file plays them anywhere: in a page, a slide, an `<img>`.
+- **Change**: say what changes, or change **Its code** by hand: the stage shows it
+  as you type, and **Use this code** keeps it.
+- **Export**: a **PNG** (up to 4,096 pixels), a looping **GIF**, an **MP4** on a
+  colour, a **WebM** that keeps its see-through background, or a **Sprite sheet**
+  (every frame in one PNG, for games and pages). Moving ones are recorded by the
+  stack's own Chromium (the **browser** module), frame by frame. Each goes into the
+  gallery beside the drawing; **SVG** downloads the drawing itself.
+- **Versions**: every change is kept (the last 50); **Put back** brings one back as
+  a new version.
+
+In a chat, the **Vector drawings** tool draws and animates SVG the same way
+(`draw_svg`, `animate_svg`); each is shown in the chat as it plays and kept in the
+studio, to change and export there.
 
 ## Videos
 
@@ -80,6 +124,10 @@ Each comes as an MP3 in the gallery, under **Sound**.
   (Comfy-Org/Real-ESRGAN_repackaged, 67 MB), and the picture server reads it from
   then on.
 - For **Move**, the **videogen** module, a video model and the **Video** permission.
+- For vector drawings, the sandbox (tracing, PNGs and videos) and the **browser**
+  module (recording moving ones). Their parts are found with the **studio** module's
+  CLIPSeg (CIDAS/clipseg-rd64-refined, 603 MB, on its CPU), fetched with its other
+  models; without it a traced drawing's parts are its islands of shapes.
 - For **Cut out**, **Speech** and **Music**, the **studio** module
   (`COMPOSE_PROFILES=studio`): one service on the GPU with BiRefNet lite (178 MB),
   Chatterbox's English model (3.2 GB) and ACE-Step v1 3.5B (8.3 GB), fetched into
