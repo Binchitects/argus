@@ -605,9 +605,11 @@ a room holds (Settings → Chat → **Most people in a room**, 50).
   others' messages and the model's answers are shown translated, each with
   **Show the original** under it; your own stay as you wrote them. Write in
   yours: each reader reads it in theirs. A message is translated once into
-  a language, by the model for small steps, and kept for everyone who reads
-  in it; one already in that language is left as it is. The choice is your
-  browser's, for every room.
+  a language, by the model for small steps (or the one an admin names under
+  Settings → **Model that translates rooms**: a larger model translates days,
+  names and idioms better), and kept for everyone who reads in it; one
+  already in that language is left as it is. The choice is your browser's,
+  for every room.
 
 ## Plans
 

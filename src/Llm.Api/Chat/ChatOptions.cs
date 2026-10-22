@@ -58,6 +58,9 @@ public sealed class ChatOptions
     /// <summary>The model for sub-agents and small steps (titles, compaction, the safeguards' check, Auto); empty: each step uses the answer's own model.</summary>
     public string? SmallModel { get; set; }
 
+    /// <summary>The model that translates rooms for their readers; empty: the model for small steps.</summary>
+    public string? TranslationModel { get; set; }
+
     /// <summary>The thinking levels a chat offers: level:Label pairs, comma-separated.</summary>
     public string ThinkingPresets { get; set; } = "xhigh:Deep think,medium:Balanced,low:Quick,off:No thinking";
 

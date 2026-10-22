@@ -177,7 +177,7 @@ public sealed class FakeModel : HttpMessageHandler
         // Rooms read in another language: each message given back as "[Language] text", or "=" for one starting "[same]".
         if (system0.StartsWith("You translate messages of a group chat", StringComparison.Ordinal))
         {
-            var language = System.Text.RegularExpressions.Regex.Match(system0, @"into (\w+),").Groups[1].Value;
+            var language = System.Text.RegularExpressions.Regex.Match(system0, @"into (\w+)\.").Groups[1].Value;
             var given = JsonNode.Parse(lastUser)!["messages"]!.AsArray().OfType<JsonObject>().Select(m => new JsonObject
             {
                 ["id"] = m["id"]!.GetValue<string>(),

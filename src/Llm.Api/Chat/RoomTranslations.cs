@@ -15,8 +15,8 @@ public sealed record TranslateRequest(string? Language, IReadOnlyList<Guid>? Ids
 
 /// <summary>
 /// Rooms in every language: each reader reads the room in theirs. A message is translated into a language once, by the
-/// model for small steps (as the reader who first asks: their credit), and kept for everyone who reads in it; one already
-/// in that language is kept as such and never asked again.
+/// translation model (Chat:TranslationModel, else the model for small steps; as the reader who first asks: their credit),
+/// and kept for everyone who reads in it; one already in that language is kept as such and never asked again.
 /// </summary>
 public static class RoomTranslations
 {
@@ -44,13 +44,15 @@ public static class RoomTranslations
     }
 
     private static readonly System.Text.CompositeFormat Instructions = System.Text.CompositeFormat.Parse("""
-        You translate messages of a group chat. Translate each message into {0}, as a person who speaks it would write it: the
-        same tone, the same Markdown, and names, @mentions, links, code and numbers as they are. A message already in {0} is "=".
+        You translate messages of a group chat into {0}. Translate each one faithfully, as a person who speaks {0} would write it:
+        the same meaning and tone, nothing added or left out. Days, dates, times and numbers mean exactly what they meant (Thursday
+        stays Thursday). Names of people, products, files and code, @mentions, links and Markdown stay as they are, untranslated.
+        A message already in {0} is "=".
         Answer with JSON only: {{"messages": [{{"id": "…", "text": "…"}}]}}, one for each message, in their order.
         """);
 
     private static async Task<IResult> TranslateAsync(Guid id, TranslateRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, OneQuestion one,
-        CancellationToken ct)
+        Microsoft.Extensions.Options.IOptionsMonitor<ChatOptions> chat, CancellationToken ct)
     {
         var me = (await users.GetUserAsync(p))!;
         if (await RoomAccess.FindAsync(db, id, me, Need.Read, ct) is not { IsRoom: true })
@@ -70,7 +72,13 @@ public static class RoomTranslations
         string? problem = null;
         foreach (var batch in Batches(missing.Select(m => (m.Id, Text: m.Content.Length > MostChars ? m.Content[..MostChars] : m.Content))))
         {
-            var (made, why) = await AskAsync(one, me, language.Name, batch, ct);
+            var model = chat.CurrentValue.TranslationModel is { Length: > 0 } named ? named : "small";
+            var (made, why) = await AskAsync(one, me, model, language.Name, batch, ct);
+            if (why is not null)
+            {
+                // Once more: a small model sometimes answers in words, not JSON.
+                (made, why) = await AskAsync(one, me, model, language.Name, batch, ct);
+            }
             if (why is not null)
             {
                 problem = why;
@@ -120,12 +128,12 @@ public static class RoomTranslations
     }
 
     /// <summary>One question for a batch: the translations by message (null: in that language already); or why not.</summary>
-    private static async Task<(Dictionary<Guid, string?> Made, string? Problem)> AskAsync(OneQuestion one, AppUser me, string language, List<(Guid Id, string Text)> batch,
-        CancellationToken ct)
+    private static async Task<(Dictionary<Guid, string?> Made, string? Problem)> AskAsync(OneQuestion one, AppUser me, string model, string language,
+        List<(Guid Id, string Text)> batch, CancellationToken ct)
     {
         var messages = new JsonArray([.. batch.Select((m, i) => (JsonNode)new JsonObject { ["id"] = (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), ["text"] = m.Text })]);
         var asked = await one.AskAsync(me, new JsonObject { ["messages"] = messages }.ToJsonString(Mcp.Plain), string.Format(System.Globalization.CultureInfo.InvariantCulture, Instructions, language),
-            "small", Math.Min(8000, batch.Sum(m => m.Text.Length) * 2 + 400), "translate", ct);
+            model, Math.Min(8000, batch.Sum(m => m.Text.Length) * 2 + 400), "translate", ct);
         if (asked.Problem is not null)
         {
             return ([], "The messages could not be translated now.");

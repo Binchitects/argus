@@ -189,6 +189,8 @@ public static class SettingsCatalog
             { Max = 100 },
         new("Chat:SmallModel", Model, "Model for sub-agents and small steps", "A small, fast chat model for the many short steps: sub-agents, chat titles, compaction summaries, the safeguards' check, and Auto, which it brings to the chat's model menu (it answers easy questions itself and hands the rest on). It never thinks for them. With a place left beside it for the other models (3 or more loaded at once, with the big one), it keeps a place of its own and never makes room; at 2 at once it shares the last place with the models loaded on request, and while another sits there each step uses the answer's own model. Keep it loaded (Admin → Models) to keep it loaded whatever the others. Empty: each step uses the answer's own model.", SettingType.Text, SettingScope.Live)
             { Max = 100 },
+        new("Chat:TranslationModel", Model, "Model that translates rooms", "A chat model's name, for reading rooms in another language: each message is translated once into a language and kept for all who read in it. A larger model translates better (dates, names, idioms). Empty: the model for small steps.", SettingType.Text, SettingScope.Live)
+            { Max = 100 },
         new("Media:PictureModel", Model, "Picture model the chat uses", "A picture model's name (Admin → Models), for the chat's pictures when the person does not name one. Empty: the first one they may use.", SettingType.Text, SettingScope.Live)
             { Max = 100 },
         new("Media:VideoModel", Model, "Video model the chat uses", "A video model's name, for the chat's clips. Empty: the first one they may use.", SettingType.Text, SettingScope.Live)
