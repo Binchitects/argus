@@ -79,7 +79,8 @@ public sealed partial class MediaJobs(IServiceScopeFactory scopes, TimeProvider 
         {
             job.Status = MediaJob.Failed;
             job.Phase = null;
-            var why = ex is Refused ? ex.Message : $"The {(job.Action == MediaJob.Move ? "clip" : "picture")} could not be made: {ex.Message}";
+            var what = job.Action switch { MediaJob.Move => "clip", MediaJob.Speak => "speech", MediaJob.Music => "music", _ => "picture" };
+            var why = ex is Refused ? ex.Message : $"The {what} could not be made: {ex.Message}";
             job.Error = why.Length > 2000 ? why[..2000] : why;
         }
         job.FinishedAt = clock.GetUtcNow();
@@ -87,9 +88,9 @@ public sealed partial class MediaJobs(IServiceScopeFactory scopes, TimeProvider 
         // Work that took a while is said in the bell: the person may have left the page.
         if (job.FinishedAt - started > TimeSpan.FromSeconds(45))
         {
-            var what = job.Action == MediaJob.Move ? "clip" : "pictures";
+            var what = job.Action switch { MediaJob.Move => "clip", MediaJob.Speak => "speech", MediaJob.Music => "music", MediaJob.Cutout => "picture", _ => "pictures" };
             await sp.GetRequiredService<Notifications.Notifier>().SendAsync(job.OwnerId, job.Status == MediaJob.Done
-                ? new Notifications.News("media", $"Your {what} {(what == "clip" ? "is" : "are")} ready", job.Prompt, "/media")
+                ? new Notifications.News("media", $"Your {what} {(what == "pictures" ? "are" : "is")} ready", job.Prompt, "/media")
                 : new Notifications.News("media", $"Your {what} could not be made", job.Error, "/media"), CancellationToken.None);
         }
     }
@@ -129,6 +130,10 @@ public sealed partial class MediaJobs(IServiceScopeFactory scopes, TimeProvider 
 
     private static async Task<IReadOnlyList<MediaItem>> MakeAsync(IServiceProvider sp, AppDbContext db, MediaJob job, AppUser me, Painted? painted, CancellationToken ct)
     {
+        if (MediaJob.OnStudio(job.Action))
+        {
+            return await StudioAsync(sp, db, job, me, ct);
+        }
         var video = job.Action == MediaJob.Move;
         var options = JsonNode.Parse(job.Options);
         var model = await ModelAsync(sp, me, video ? Llm.Core.Models.MediaModes.Video : Llm.Core.Models.MediaModes.Image, ct);
@@ -311,6 +316,141 @@ public sealed partial class MediaJobs(IServiceScopeFactory scopes, TimeProvider 
         return Fit(width * scale, height * scale);
     }
 
+    /// <summary>
+    /// Work for the studio server: a picture's background taken away, words spoken (in a voice from a sample of the person's,
+    /// which they said they may use), music. Credit, room, safeguards first; the server's turn; kept and booked as the rest.
+    /// </summary>
+    private static async Task<IReadOnlyList<MediaItem>> StudioAsync(IServiceProvider sp, AppDbContext db, MediaJob job, AppUser me, CancellationToken ct)
+    {
+        var options = JsonNode.Parse(job.Options);
+        var server = sp.GetRequiredService<StudioServer>();
+        var source = job.SourceId is { } sid ? await db.MediaItems.AsNoTracking().SingleOrDefaultAsync(i => i.Id == sid && i.OwnerId == me.Id, ct) : null;
+        var file = source is null ? null : await db.ChatAttachments.AsNoTracking().SingleOrDefaultAsync(a => a.Id == source.AttachmentId, ct);
+        if (job.Action == MediaJob.Cutout && file?.Data is null)
+        {
+            throw new Refused("The picture it works on is gone.");
+        }
+        byte[]? voice = null;
+        if (job.Action == MediaJob.Speak && options?["voice"]?.GetValue<string>() is { } v && Guid.TryParse(v, out var voiceId))
+        {
+            voice = await db.ChatAttachments.AsNoTracking().Where(a => a.Id == voiceId && a.UserId == me.Id && (a.Kind == "audio" || a.Kind == "video"))
+                .Select(a => a.Kind == "video" ? a.Sound : a.Data).SingleOrDefaultAsync(ct) ?? throw new Refused("The voice sample is gone.");
+        }
+        var credit = job.Action == MediaJob.Cutout ? Llm.Core.Access.CreditKind.Pictures : Llm.Core.Access.CreditKind.Speech;
+        if (await sp.GetRequiredService<Gateway.Credit>().RefusalAsync(me, credit, ct) is { } spent)
+        {
+            throw new Refused(spent);
+        }
+        if (await sp.GetRequiredService<Storage.StorageQuotas>().RefusalAsync(me.Id, 0, ct) is { } full)
+        {
+            throw new Refused(full);
+        }
+        var safeguards = sp.GetRequiredService<Safeguards.Safeguards>();
+        if (job.Action == MediaJob.Cutout && await safeguards.TakeImageAsync(me.Id, ct) is { } limit)
+        {
+            throw new Refused(limit);
+        }
+        var prompt = job.Prompt ?? "";
+        var lyrics = options?["lyrics"]?.GetValue<string>();
+        foreach (var words in new[] { job.Prompt, lyrics }.OfType<string>().Where(w => w.Length > 0))
+        {
+            var verdict = await safeguards.CheckMessageAsync(me, words, 0, false, null, ct);
+            if (!verdict.Allowed)
+            {
+                throw new Refused(verdict.Reason ?? "A rule here stopped these words.");
+            }
+            if (words == job.Prompt)
+            {
+                prompt = verdict.Text ?? words;
+            }
+            else
+            {
+                lyrics = verdict.Text ?? words;
+            }
+        }
+
+        // Its turn on the GPU (with pictures and videos), and room made when the server has less free than its model needs.
+        await PhaseAsync(db, job, "Waiting for its turn on the GPU");
+        var kind = StudioServer.KindOf(job.Action);
+        var health = await server.HealthAsync(ct);
+        var need = health?.Loaded.Contains(kind) == true ? 0 : StudioServer.NeedMb(kind);
+        await using var hold = await sp.GetRequiredService<GpuShare>().HoldStudioAsync(job.Action switch
+        {
+            MediaJob.Cutout => StudioServer.CutoutModel, MediaJob.Speak => StudioServer.VoiceModel, _ => StudioServer.MusicModel,
+        }, need, async c => (await server.HealthAsync(c))?.FreeMb, server.UnloadAsync, ct);
+        byte[] data;
+        string type, model, call;
+        double? seconds = null;
+        int? width = null, height = null;
+        var began = DateTimeOffset.UtcNow;
+        try
+        {
+            switch (job.Action)
+            {
+                case MediaJob.Cutout:
+                    await PhaseAsync(db, job, "Taking the background away");
+                    data = await server.CutoutAsync(file!.Data!, file.ContentType, ct);
+                    (type, model, call) = ("image/png", StudioServer.CutoutModel, Gateway.SpendLog.PictureCall);
+                    (width, height) = Png.SizeOf(data) is { } wh ? (wh.Width, wh.Height) : (source!.Width, source.Height);
+                    break;
+                case MediaJob.Speak:
+                    await PhaseAsync(db, job, voice is null ? "Speaking" : "Speaking in the voice of the sample");
+                    (data, var said) = await server.SpeakAsync(prompt, voice, Math.Clamp(Number(options, "exaggeration") ?? 0.5, 0.25, 1.5), ct);
+                    (type, model, call, seconds) = ("audio/mpeg", StudioServer.VoiceModel, Gateway.SpendLog.SpeechCall, said);
+                    break;
+                default:
+                    var length = Math.Clamp(Number(options, "seconds") ?? 30, 5, 240);
+                    await PhaseAsync(db, job, $"Making {length:0} seconds of music (about a minute)");
+                    (data, var made) = await server.MusicAsync(prompt, lyrics, length, ct);
+                    (type, model, call, seconds) = ("audio/mpeg", StudioServer.MusicModel, Gateway.SpendLog.MusicCall, made);
+                    break;
+            }
+        }
+        catch (SdServer.SdException ex) when (ex.Message.Contains("GPU", StringComparison.Ordinal) && hold.Unloaded.Count == 0)
+        {
+            throw new Refused($"{ex.Message} No chat model could make room now (each is kept loaded or in use).");
+        }
+        await PhaseAsync(db, job, "Keeping it");
+        if (await sp.GetRequiredService<Storage.StorageQuotas>().RefusalAsync(me.Id, data.Length, ct) is { } noRoom)
+        {
+            throw new Refused(noRoom);
+        }
+        var picture = type == "image/png";
+        var stem = Path.GetFileNameWithoutExtension(Chat.Tools.ImageTool.FileName(prompt.Length > 0 ? prompt : source?.Prompt ?? job.Action));
+        var attachment = new ChatAttachment
+        {
+            UserId = me.Id, FileName = stem + (picture ? "-cutout.png" : ".mp3"), ContentType = type, Size = data.Length, Kind = picture ? "image" : "audio",
+            Data = data, Text = job.Action == MediaJob.Speak ? prompt : "", Seconds = seconds, Origin = picture ? "picture" : job.Action == MediaJob.Music ? "music" : "speech",
+        };
+        db.ChatAttachments.Add(attachment);
+        var item = new MediaItem
+        {
+            OwnerId = me.Id, AttachmentId = attachment.Id, Kind = picture ? MediaItem.Picture : MediaItem.Sound, Action = job.Action,
+            Prompt = prompt.Length > 0 ? prompt : source?.Prompt, ParentId = source?.Id, Width = width, Height = height, Seconds = seconds, Model = model,
+            Thumb = picture ? Thumb(data) : null,
+        };
+        db.MediaItems.Add(item);
+        await db.SaveChangesAsync(ct);
+
+        var prices = sp.GetRequiredService<Gateway.PriceBook>();
+        var key = Gateway.AnswerCache.HashOf(await sp.GetRequiredService<ChatKey>().GetAsync(ct));
+        var spendLog = sp.GetRequiredService<Gateway.SpendLog>();
+        var now = DateTimeOffset.UtcNow;
+        switch (job.Action)
+        {
+            case MediaJob.Cutout:
+                await spendLog.BookPicturesAsync(me.Email ?? "", key, model, 1, prices.Images(1), began, now, ct);
+                break;
+            case MediaJob.Speak:
+                await spendLog.BookSoundAsync(call, me.Email ?? "", key, model, prompt.Length, prices.Speech(prompt.Length), began, now, ct);
+                break;
+            default:
+                await spendLog.BookSoundAsync(call, me.Email ?? "", key, model, seconds ?? 0, prices.Defaults.PerMusicMinute * (decimal)(seconds ?? 0) / 60m, began, now, ct);
+                break;
+        }
+        return [item];
+    }
+
     /// <summary>A size the picture model takes: within 64 to 1024 pixels a side (its shape kept), each a multiple of 16.</summary>
     public static (int Width, int Height) Fit(double width, double height)
     {
@@ -324,7 +464,7 @@ public sealed partial class MediaJobs(IServiceScopeFactory scopes, TimeProvider 
     {
         try
         {
-            return Jpeg.Encode(Jpeg.Smaller(Png.Decode(picture), ThumbSide), 82);
+            return Jpeg.Encode(Jpeg.Smaller(Png.OverChecks(Png.Decode(picture)), ThumbSide), 82);
         }
         catch (InvalidDataException)
         {

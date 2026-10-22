@@ -7,11 +7,15 @@ export interface MediaConfig {
   video: string | null
   /** Whether pictures can be enlarged (the picture server has its upscaler). */
   enlarge: boolean
+  /** The studio server's: a picture's background taken away, speech in a voice from a sample, music. */
+  cutout: boolean
+  voice: boolean
+  music: boolean
   going: number
   mostGoing: number
 }
 
-export type MediaAction = 'make' | 'edit' | 'vary' | 'enlarge' | 'move' | 'upload'
+export type MediaAction = 'make' | 'edit' | 'vary' | 'enlarge' | 'move' | 'cutout' | 'speak' | 'music' | 'upload'
 
 export interface MediaItem {
   id: string
@@ -58,11 +62,18 @@ export interface MediaJobRequest {
   /** A painted change: the picture as drawn here, and where it was painted (white), both PNG data URLs of the same size. */
   picture?: string
   mask?: string
+  lyrics?: string
+  /** Speak in the voice of this sound file of the person's, with their word that they may (consent). */
+  voiceId?: string
+  consent?: boolean
+  exaggeration?: number
 }
 
 export const mediaConfigQuery = queryOptions({ queryKey: ['media', 'config'], queryFn: ({ signal }) => api<MediaConfig>('/api/media', { signal }) })
 
-export const mediaItemsQuery = (kind: 'all' | 'picture' | 'video') =>
+export type Shown = 'all' | 'picture' | 'video' | 'sound'
+
+export const mediaItemsQuery = (kind: Shown) =>
   infiniteQueryOptions({
     queryKey: ['media', 'items', kind],
     queryFn: ({ signal, pageParam }) => {
@@ -103,6 +114,9 @@ export const actionNames: Record<MediaAction, string> = {
   vary: 'A variation',
   enlarge: 'Enlarged',
   move: 'Set moving',
+  cutout: 'Background taken away',
+  speak: 'Spoken',
+  music: 'Music',
   upload: 'Uploaded',
 }
 
@@ -112,4 +126,7 @@ export const working: Record<MediaJob['action'], string> = {
   vary: 'Varying',
   enlarge: 'Enlarging',
   move: 'Making a clip',
+  cutout: 'Taking the background away',
+  speak: 'Speaking',
+  music: 'Making music',
 }

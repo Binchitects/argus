@@ -267,6 +267,30 @@ public static class Png
         return new Image(original.Width, original.Height, o);
     }
 
+    /// <summary>A picture with see-through parts over light grey checks (24 pixels), as pictures without a background are shown; opaque, it is itself.</summary>
+    public static Image OverChecks(Image image)
+    {
+        var o = (byte[])image.Rgba.Clone();
+        var any = false;
+        for (var i = 0; i < o.Length; i += 4)
+        {
+            var a = o[i + 3];
+            if (a == 255)
+            {
+                continue;
+            }
+            any = true;
+            var p = i / 4;
+            var check = ((p % image.Width / 24) + (p / image.Width / 24)) % 2 == 0 ? 255 : 229;
+            for (var c = 0; c < 3; c++)
+            {
+                o[i + c] = (byte)((o[i + c] * a + check * (255 - a) + 127) / 255);
+            }
+            o[i + 3] = 255;
+        }
+        return any ? new Image(image.Width, image.Height, o) : image;
+    }
+
     /// <summary>A rectangle of a picture, in pixels.</summary>
     public sealed record Area(int X, int Y, int Width, int Height);
 

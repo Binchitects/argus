@@ -293,6 +293,8 @@ public static class IdentityWiring
         services.AddScoped<Chat.Media>();
         services.AddHttpClient(Media.SdServer.Client, c => c.Timeout = TimeSpan.FromMinutes(2));
         services.AddScoped<Media.SdServer>();
+        services.AddHttpClient(Media.StudioServer.Client, c => c.Timeout = TimeSpan.FromMinutes(10));
+        services.AddScoped<Media.StudioServer>();
         services.AddSingleton<Chat.Tools.CalculatorTool>();
         services.AddSingleton<Chat.Tools.TimeTool>();
         services.AddSingleton<Chat.Tools.AskTool>();

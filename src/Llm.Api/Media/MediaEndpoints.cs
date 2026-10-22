@@ -12,8 +12,10 @@ using Microsoft.EntityFrameworkCore;
 namespace Llm.Api.Media;
 
 /// <param name="Picture">A painted edit: the picture as the page drew it, a PNG data URL (with <paramref name="Mask"/>, the same size: white where painted).</param>
+/// <param name="VoiceId">Speak: a sound file of the person's (an upload or a recording) whose voice to speak in; with <paramref name="Consent"/>.</param>
+/// <param name="Consent">Speak in a sample's voice: the person says the voice is theirs, or that they may use it.</param>
 public sealed record MediaJobRequest(string? Action, string? Prompt, Guid? SourceId, int? Count, int? Width, int? Height, double? Strength, int? Seconds,
-    string? Picture, string? Mask);
+    string? Picture, string? Mask, string? Lyrics = null, Guid? VoiceId = null, bool Consent = false, double? Exaggeration = null);
 
 public sealed record MediaUpload(Guid AttachmentId);
 
@@ -25,6 +27,8 @@ public static class MediaEndpoints
 {
     public const int Page = 48;
     public const int MostPromptChars = 2000;
+    public const int MostSpeechChars = 3000;
+    public const int MostLyricsChars = 6000;
     /// <summary>A painted edit's picture or mask, at most.</summary>
     public const int MostPaintedBytes = 16 * 1024 * 1024;
 
@@ -44,7 +48,7 @@ public static class MediaEndpoints
 
     /// <summary>What the studio can do here, for this person: the picture and video models they may use, and whether pictures can be enlarged.</summary>
     private static async Task<IResult> ConfigAsync(ClaimsPrincipal p, UserManager<AppUser> users, MediaControl media, ModelPolicy policy, Operations.Modules modules,
-        AppDbContext db, Access.AccessService access, TimeProvider clock, CancellationToken ct)
+        AppDbContext db, Access.AccessService access, StudioServer studio, TimeProvider clock, CancellationToken ct)
     {
         var me = await Me(p, users);
         async Task<string?> PickAsync(string mode, string module)
@@ -58,9 +62,14 @@ public static class MediaEndpoints
         }
         var picture = await PickAsync(Core.Models.MediaModes.Image, "imagegen");
         var since = clock.GetUtcNow() - MediaJobs.Lost;
+        var has = await modules.HasAsync("studio", ct) ? await studio.HealthAsync(ct) : null;
+        var sound = await access.MayAsync(me, Core.Access.Permissions.Speech, ct);
         return Results.Ok(new
         {
             picture,
+            cutout = has?.Cutout == true,
+            voice = sound && has?.Voice == true,
+            music = sound && has?.Music == true,
             video = await access.MayAsync(me, Core.Access.Permissions.Video, ct) ? await PickAsync(Core.Models.MediaModes.Video, "videogen") : null,
             enlarge = picture is not null && media.CanEnlarge,
             going = await db.MediaJobs.CountAsync(j => j.OwnerId == me.Id && j.Status == MediaJob.Working && j.CreatedAt > since, ct),
@@ -219,16 +228,48 @@ public static class MediaEndpoints
         {
             return AuthEndpoints.Problem(400, "prompt", $"Say it in at most {MostPromptChars:N0} characters.");
         }
-        if (action is MediaJob.Make or MediaJob.Edit && string.IsNullOrEmpty(prompt))
+        if (action is MediaJob.Make or MediaJob.Edit or MediaJob.Speak or MediaJob.Music && string.IsNullOrEmpty(prompt))
         {
-            return AuthEndpoints.Problem(400, "prompt", action == MediaJob.Make ? "Describe the picture." : "Say what to change.");
+            return AuthEndpoints.Problem(400, "prompt", action switch
+            {
+                MediaJob.Make => "Describe the picture.", MediaJob.Edit => "Say what to change.", MediaJob.Speak => "Write what to say.", _ => "Describe the music.",
+            });
         }
-        if (!await modules.HasAsync(action == MediaJob.Move ? "videogen" : "imagegen", ct))
+        if (action == MediaJob.Speak && prompt!.Length > MostSpeechChars)
         {
-            return AuthEndpoints.Problem(503, "action", action == MediaJob.Move ? "The video server does not run here (the videogen module)." : "The picture server does not run here (the imagegen module).");
+            return AuthEndpoints.Problem(400, "prompt", $"Say at most {MostSpeechChars:N0} characters at once.");
+        }
+        if (body.Lyrics is { Length: > MostLyricsChars })
+        {
+            return AuthEndpoints.Problem(400, "lyrics", $"Lyrics of at most {MostLyricsChars:N0} characters.");
+        }
+        if (action is MediaJob.Speak or MediaJob.Music && !await access.MayAsync(me, Core.Access.Permissions.Speech, ct))
+        {
+            return AuthEndpoints.Problem(403, "action", "You may not make speech or music here (an admin gives it under Access).");
+        }
+        if (action == MediaJob.Speak && body.VoiceId is { } voice)
+        {
+            if (!body.Consent)
+            {
+                return AuthEndpoints.Problem(400, "consent", "Say that the voice is yours, or that its owner lets you use it.");
+            }
+            if (!await db.ChatAttachments.AnyAsync(a => a.Id == voice && a.UserId == me.Id && (a.Kind == "audio" || a.Kind == "video"), ct))
+            {
+                return AuthEndpoints.Problem(400, "voiceId", "Choose a recording or sound file of yours for the voice.");
+            }
+        }
+        var module = MediaJob.OnStudio(action) ? "studio" : action == MediaJob.Move ? "videogen" : "imagegen";
+        if (!await modules.HasAsync(module, ct))
+        {
+            return AuthEndpoints.Problem(503, "action", module switch
+            {
+                "studio" => "The studio server does not run here (the studio module).",
+                "videogen" => "The video server does not run here (the videogen module).",
+                _ => "The picture server does not run here (the imagegen module).",
+            });
         }
         MediaItem? source = null;
-        if (action != MediaJob.Make)
+        if (action is not (MediaJob.Make or MediaJob.Speak or MediaJob.Music))
         {
             source = body.SourceId is { } sid ? await db.MediaItems.AsNoTracking().SingleOrDefaultAsync(i => i.Id == sid && i.OwnerId == me.Id, ct) : null;
             if (source is null)
@@ -278,7 +319,19 @@ public static class MediaEndpoints
         }
         if (body.Seconds is { } secs)
         {
-            options["seconds"] = Math.Clamp(secs, 1, 10);
+            options["seconds"] = action == MediaJob.Music ? Math.Clamp(secs, 5, 240) : Math.Clamp(secs, 1, 10);
+        }
+        if (action == MediaJob.Music && body.Lyrics?.Trim() is { Length: > 0 } lyrics)
+        {
+            options["lyrics"] = lyrics;
+        }
+        if (action == MediaJob.Speak)
+        {
+            options["exaggeration"] = Math.Clamp(body.Exaggeration ?? 0.5, 0.25, 1.5);
+            if (body.VoiceId is { } v)
+            {
+                options["voice"] = v.ToString();
+            }
         }
         var job = new MediaJob
         {

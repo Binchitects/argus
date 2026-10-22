@@ -30,6 +30,10 @@ public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfig
     /// <summary>The call type of a picture the app booked (LiteLLM's own name for image generation).</summary>
     public const string PictureCall = "aimage_generation";
 
+    /// <summary>Speech in a voice from a sample (LiteLLM's name for speech), and music (the app's own name), made by the studio server.</summary>
+    public const string SpeechCall = "aspeech";
+    public const string MusicCall = "amusic_generation";
+
     /// <summary>
     /// A clip made for a person (in a chat or the media studio): in the log as the chat's request (its key, its person),
     /// with its length kept so its cost can be worked out again. A log that cannot be written is logged and left: the clip
@@ -41,6 +45,11 @@ public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfig
     /// <summary>Pictures made for a person by the picture server itself (the media studio: changed, enlarged), as the gateway books one.</summary>
     public Task BookPicturesAsync(string email, string chatKeyHash, string model, int count, decimal cost, DateTimeOffset start, DateTimeOffset end, CancellationToken ct) =>
         BookAsync(PictureCall, Models.MediaModels.ImageUrl, email, chatKeyHash, model, cost, start, end, new JsonObject { ["pictures"] = count }, ct);
+
+    /// <summary>A sound the studio server made for a person: speech (its characters kept) or music (its seconds kept).</summary>
+    public Task BookSoundAsync(string call, string email, string chatKeyHash, string model, double amount, decimal cost, DateTimeOffset start, DateTimeOffset end, CancellationToken ct) =>
+        BookAsync(call, Models.MediaModels.StudioUrl, email, chatKeyHash, model, cost, start, end,
+            new JsonObject { [call == SpeechCall ? "characters" : "music_seconds"] = amount }, ct);
 
     private async Task BookAsync(string call, string apiBase, string email, string chatKeyHash, string model, decimal cost, DateTimeOffset start, DateTimeOffset end,
         JsonObject metadata, CancellationToken ct)
@@ -54,7 +63,7 @@ public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfig
                   "startTime", "endTime", model, model_group, custom_llm_provider, api_base, "user", metadata, end_user, status)
                 values (@id, @call, @key, @spend, 0, 0, 0, @start, @end, @model, @model, 'arena', @base, '', @metadata::jsonb, @email, 'success')
                 """, conn);
-            insert.Parameters.AddWithValue("id", $"arena-{(call == VideoCall ? "video" : "picture")}-{Guid.NewGuid():N}");
+            insert.Parameters.AddWithValue("id", $"arena-{call switch { VideoCall => "video", PictureCall => "picture", SpeechCall => "speech", _ => "music" }}-{Guid.NewGuid():N}");
             insert.Parameters.AddWithValue("call", call);
             insert.Parameters.AddWithValue("key", chatKeyHash);
             insert.Parameters.AddWithValue("spend", (double)cost);

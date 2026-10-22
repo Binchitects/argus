@@ -233,6 +233,36 @@ public sealed class GpuShareTests(AppFixture app) : IDisposable
     }
 
     [Fact]
+    public async Task Studio_work_short_of_memory_gets_room_and_the_studio_unloads_its_model_before_the_room_goes_back()
+    {
+        await using var s = await NewAsync();
+        using var deadline = new CancellationTokenSource(Deadline);
+        // The studio server says its free memory itself: 3,500 MB while the chat model is loaded.
+        Task<long?> Free(CancellationToken _) => Task.FromResult<long?>(app.Engine.StatusOf(Chat) == "unloaded" ? 20000 : 3500);
+        var released = 0;
+        var hold = await s.Gpu.HoldStudioAsync("Chatterbox", 4500, Free, () =>
+        {
+            released++;
+            return Task.CompletedTask;
+        }, deadline.Token);
+        Assert.Equal([Chat], hold.Unloaded);
+        Assert.Equal(("Chatterbox", "studio piece"), (s.State.Lent?.Media, s.State.Lent?.Kind));
+        Assert.Contains(s.Gpu.Recent, h => h.Text == $"Made room for Chatterbox (a studio piece): unloaded {Chat}.");
+
+        await hold.DisposeAsync();
+        Assert.Equal(1, released);
+        Assert.Null(s.State.Lent);
+        Assert.Equal("loaded", app.Engine.StatusOf(Chat));
+
+        // With the room it needs already free: its turn only.
+        await using (var quick = await s.Gpu.HoldStudioAsync("BiRefNet-lite", 1800, _ => Task.FromResult<long?>(20000), () => Task.CompletedTask, deadline.Token))
+        {
+            Assert.Empty(quick.Unloaded);
+            Assert.Null(s.State.Lent);
+        }
+    }
+
+    [Fact]
     public async Task A_video_server_decoding_on_the_cpu_is_started_again_on_the_gpu_once_room_is_made()
     {
         await using var s = await NewAsync();

@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Brush, Download, Eraser, Expand, Film, ImagePlus, Images, Palette, Sparkles, Trash2, Undo2, Upload, Wand2, X } from 'lucide-react'
+import { AudioLines, Brush, Download, Eraser, Expand, Film, ImagePlus, Images, Music, Palette, Scissors, Sparkles, Trash2, Undo2, Upload, Wand2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { PageHeader } from '@/components/app/page-header'
 import { QueryError } from '@/components/app/query-state'
@@ -17,12 +17,17 @@ import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from '@/components/ui/toaster'
 import { errorMessage } from '@/lib/api'
+import { cn } from '@/lib/utils'
 import { uploadFile } from '../chat/api'
 import {
   actionNames, addUpload, contentUrl, fit, mediaConfigQuery, mediaItemsQuery, mediaJobsQuery, removeItem, startJob, thumbUrl, working,
-  type MediaConfig, type MediaItem, type MediaJob, type MediaJobRequest,
+  type MediaConfig, type MediaItem, type MediaJob, type MediaJobRequest, type Shown,
 } from './media-api'
 import { PaintLayer, type PaintHandle } from './paint'
+import { MusicForm, SpeakForm } from './sound'
+
+/** What a job makes, as the gallery shows it. */
+const kindOf = (action: MediaJob['action']): Shown => (action === 'move' ? 'video' : action === 'speak' || action === 'music' ? 'sound' : 'picture')
 
 const shapes = [
   { value: 'square', label: 'Square', width: 1024, height: 1024 },
@@ -48,8 +53,22 @@ function useStart(onStarted?: () => void) {
   })
 }
 
+/** What to make: a picture, speech or music (those the studio server has). */
+function CreateCard({ config }: { config: MediaConfig }) {
+  const [mode, setMode] = useState('picture')
+  const modes = [{ value: 'picture', label: 'Picture' }, ...(config.voice ? [{ value: 'speech', label: 'Speech' }] : []), ...(config.music ? [{ value: 'music', label: 'Music' }] : [])]
+  return (
+    <Card>
+      <CardContent className="grid gap-3">
+        {modes.length > 1 && <Segmented label="Make" value={mode} onChange={setMode} options={modes} />}
+        {mode === 'speech' ? <SpeakForm /> : mode === 'music' ? <MusicForm /> : <MakeForm config={config} />}
+      </CardContent>
+    </Card>
+  )
+}
+
 /** Words to a picture: its shape and how many. */
-function MakeCard({ config }: { config: MediaConfig }) {
+function MakeForm({ config }: { config: MediaConfig }) {
   const [prompt, setPrompt] = useState('')
   const [shape, setShape] = useState<Shape>('square')
   const [count, setCount] = useState('1')
@@ -59,69 +78,65 @@ function MakeCard({ config }: { config: MediaConfig }) {
   const [uploading, setUploading] = useState(false)
   const size = shapes.find((s) => s.value === shape)!
   return (
-    <Card>
-      <CardContent>
-        <form
-          className="grid gap-3"
-          onSubmit={(e) => {
-            e.preventDefault()
-            start.mutate({ action: 'make', prompt: prompt.trim(), count: Number(count), width: size.width, height: size.height })
+    <form
+      className="grid gap-3"
+      onSubmit={(e) => {
+        e.preventDefault()
+        start.mutate({ action: 'make', prompt: prompt.trim(), count: Number(count), width: size.width, height: size.height })
+      }}
+    >
+      <Field label="Describe a picture">
+        <Textarea
+          rows={2}
+          maxLength={2000}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey && prompt.trim()) {
+              e.preventDefault()
+              e.currentTarget.form?.requestSubmit()
+            }
           }}
-        >
-          <Field label="Describe a picture">
-            <Textarea
-              rows={2}
-              maxLength={2000}
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey && prompt.trim()) {
-                  e.preventDefault()
-                  e.currentTarget.form?.requestSubmit()
-                }
-              }}
-              placeholder="A lighthouse on a cliff at dusk, warm light in the windows, waves below, a painting in oils"
-            />
-          </Field>
-          <div className="flex flex-wrap items-center gap-2">
-            <Segmented label="Shape" value={shape} onChange={setShape} options={shapes.map((s) => ({ value: s.value, label: s.label }))} />
-            <Segmented label="How many" value={count} onChange={setCount} options={[{ value: '1', label: 'One' }, { value: '2', label: 'Two' }, { value: '4', label: 'Four' }]} />
-            <div className="ml-auto flex gap-2">
-              <input
-                ref={file}
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                className="hidden"
-                aria-label="Upload a picture"
-                onChange={async (e) => {
-                  const f = e.target.files?.[0]
-                  e.target.value = ''
-                  if (!f) return
-                  setUploading(true)
-                  try {
-                    const a = await uploadFile(f, () => undefined)
-                    await addUpload(a.id)
-                    await queryClient.invalidateQueries({ queryKey: ['media', 'items'] })
-                    toast.success(`${f.name} is in the studio: open it to change it.`)
-                  } catch (err) {
-                    toast.error(errorMessage(err))
-                  } finally {
-                    setUploading(false)
-                  }
-                }}
-              />
-              <Button type="button" variant="outline" loading={uploading} onClick={() => file.current?.click()}>
-                <Upload /> Upload a picture
-              </Button>
-              <Button type="submit" loading={start.isPending} disabled={!prompt.trim() || !config.picture}>
-                <Sparkles /> Make it
-              </Button>
-            </div>
-          </div>
-          {!config.picture && <Alert>There is no picture model here you may use: an admin adds one under Admin → Models (the imagegen module runs it).</Alert>}
-        </form>
-      </CardContent>
-    </Card>
+          placeholder="A lighthouse on a cliff at dusk, warm light in the windows, waves below, a painting in oils"
+        />
+      </Field>
+      <div className="flex flex-wrap items-center gap-2">
+        <Segmented label="Shape" value={shape} onChange={setShape} options={shapes.map((s) => ({ value: s.value, label: s.label }))} />
+        <Segmented label="How many" value={count} onChange={setCount} options={[{ value: '1', label: 'One' }, { value: '2', label: 'Two' }, { value: '4', label: 'Four' }]} />
+        <div className="ml-auto flex gap-2">
+          <input
+            ref={file}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="hidden"
+            aria-label="Upload a picture"
+            onChange={async (e) => {
+              const f = e.target.files?.[0]
+              e.target.value = ''
+              if (!f) return
+              setUploading(true)
+              try {
+                const a = await uploadFile(f, () => undefined)
+                await addUpload(a.id)
+                await queryClient.invalidateQueries({ queryKey: ['media', 'items'] })
+                toast.success(`${f.name} is in the studio: open it to change it.`)
+              } catch (err) {
+                toast.error(errorMessage(err))
+              } finally {
+                setUploading(false)
+              }
+            }}
+          />
+          <Button type="button" variant="outline" loading={uploading} onClick={() => file.current?.click()}>
+            <Upload /> Upload a picture
+          </Button>
+          <Button type="submit" loading={start.isPending} disabled={!prompt.trim() || !config.picture}>
+            <Sparkles /> Make it
+          </Button>
+        </div>
+      </div>
+      {!config.picture && <Alert>There is no picture model here you may use: an admin adds one under Admin → Models (the imagegen module runs it).</Alert>}
+    </form>
   )
 }
 
@@ -151,6 +166,11 @@ function Tile({ item, onOpen }: { item: MediaItem; onOpen: () => void }) {
       >
         {item.kind === 'video' ? (
           <video src={contentUrl(item)} muted playsInline preload="metadata" className="size-full object-cover" aria-hidden="true" />
+        ) : item.kind === 'sound' ? (
+          <span className={cn('flex size-full flex-col items-center justify-center gap-2 p-4 text-center', item.action === 'music' ? 'bg-gradient-to-br from-violet-500/25 to-sky-500/20' : 'bg-gradient-to-br from-emerald-500/20 to-teal-500/15')}>
+            {item.action === 'music' ? <Music className="size-8 text-violet-700 dark:text-violet-300" aria-hidden="true" /> : <AudioLines className="size-8 text-emerald-700 dark:text-emerald-300" aria-hidden="true" />}
+            <span className="line-clamp-3 text-xs text-foreground/80">{label}</span>
+          </span>
         ) : (
           <img src={thumbUrl(item)} alt="" loading="lazy" decoding="async" className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
         )}
@@ -158,8 +178,8 @@ function Tile({ item, onOpen }: { item: MediaItem; onOpen: () => void }) {
           {item.kind === 'video' && <Film className="size-3.5 shrink-0" aria-hidden="true" />}
           <span className="line-clamp-2">{label}</span>
         </span>
-        {item.kind === 'video' && (
-          <span className="absolute top-2 right-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white">{item.seconds} s</span>
+        {item.kind !== 'picture' && item.seconds != null && (
+          <span className="absolute top-2 right-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white">{Math.round(item.seconds)} s</span>
         )}
       </button>
     </li>
@@ -206,6 +226,12 @@ function Editor({ item, items, config, onOpen, onClose }: { item: MediaItem; ite
       <figure className="flex min-h-64 items-center justify-center overflow-hidden rounded-xl bg-[repeating-conic-gradient(var(--color-muted)_0%_25%,transparent_0%_50%)] bg-[length:20px_20px]">
         {item.kind === 'video' ? (
           <video src={contentUrl(item)} controls autoPlay loop muted playsInline className="max-h-[70vh] w-full object-contain" aria-label={title} />
+        ) : item.kind === 'sound' ? (
+          <div className="grid w-full gap-4 p-6 text-center">
+            {item.action === 'music' ? <Music className="mx-auto size-12 text-violet-600" aria-hidden="true" /> : <AudioLines className="mx-auto size-12 text-emerald-600" aria-hidden="true" />}
+            {/* oxlint-disable-next-line jsx-a11y/media-has-caption -- made from the words shown beside it */}
+            <audio src={contentUrl(item)} controls autoPlay className="w-full" aria-label={title} />
+          </div>
         ) : (
           <div className="relative inline-block max-h-[70vh]">
             <img
@@ -250,6 +276,7 @@ function Editor({ item, items, config, onOpen, onClose }: { item: MediaItem; ite
               <TabsTrigger value="edit">Change</TabsTrigger>
               <TabsTrigger value="vary">Variations</TabsTrigger>
               {config.enlarge && <TabsTrigger value="enlarge">Enlarge</TabsTrigger>}
+              {config.cutout && <TabsTrigger value="cutout">Cut out</TabsTrigger>}
               {config.video && <TabsTrigger value="move">Move</TabsTrigger>}
             </TabsList>
             <TabsContent value="edit" className="grid gap-3 pt-2">
@@ -299,6 +326,14 @@ function Editor({ item, items, config, onOpen, onClose }: { item: MediaItem; ite
                 <Images /> Make variations
               </Button>
             </TabsContent>
+            {config.cutout && (
+              <TabsContent value="cutout" className="grid gap-3 pt-2">
+                <p className="text-sm text-muted-foreground">The background taken away: what is in front stays, the rest becomes see-through (a PNG to put on slides, pages or other pictures).</p>
+                <Button loading={start.isPending} onClick={() => send({ action: 'cutout' })}>
+                  <Scissors /> Take the background away
+                </Button>
+              </TabsContent>
+            )}
             {config.enlarge && (
               <TabsContent value="enlarge" className="grid gap-3 pt-2">
                 <p className="text-sm text-muted-foreground">
@@ -351,7 +386,7 @@ function Editor({ item, items, config, onOpen, onClose }: { item: MediaItem; ite
 export function MediaPage() {
   const queryClient = useQueryClient()
   const config = useQuery(mediaConfigQuery)
-  const [kind, setKind] = useState<'all' | 'picture' | 'video'>('all')
+  const [kind, setKind] = useState<Shown>('all')
   const items = useInfiniteQuery(mediaItemsQuery(kind))
   const jobs = useQuery(mediaJobsQuery)
   const [open, setOpen] = useState<string | null>(null)
@@ -374,7 +409,7 @@ export function MediaPage() {
 
   if (config.error) return <QueryError error={config.error} retry={() => config.refetch()} />
   const all = items.data?.pages.flatMap((p) => p.items) ?? []
-  const going = (jobs.data ?? []).filter((j) => j.status === 'working' && (kind === 'all' || (kind === 'video') === (j.action === 'move')))
+  const going = (jobs.data ?? []).filter((j) => j.status === 'working' && (kind === 'all' || kind === kindOf(j.action)))
   const failed = (jobs.data ?? []).filter((j) => j.status === 'failed' && !hidden.includes(j.id))
   const chosen = all.find((i) => i.id === open)
   return (
@@ -384,7 +419,7 @@ export function MediaPage() {
         description="Pictures from a few words; change one by saying how (all of it, or only the part you paint over), make variations, enlarge it, or make it move."
       />
       <div className="grid gap-4">
-        {config.data ? <MakeCard config={config.data} /> : <Skeleton className="h-40 rounded-xl" />}
+        {config.data ? <CreateCard config={config.data} /> : <Skeleton className="h-40 rounded-xl" />}
         {failed.map((j) => (
           <Alert key={j.id} variant="destructive" className="flex items-start gap-2">
             <span className="min-w-0 flex-1">{j.error}</span>
@@ -395,7 +430,12 @@ export function MediaPage() {
         ))}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-base font-semibold">Your pictures and clips</h2>
-          <Segmented label="Show" value={kind} onChange={setKind} options={[{ value: 'all', label: 'All' }, { value: 'picture', label: 'Pictures' }, { value: 'video', label: 'Clips' }]} />
+          <Segmented
+            label="Show"
+            value={kind}
+            onChange={setKind}
+            options={[{ value: 'all', label: 'All' }, { value: 'picture', label: 'Pictures' }, { value: 'video', label: 'Clips' }, { value: 'sound', label: 'Sound' }]}
+          />
         </div>
         {items.error ? (
           <QueryError error={items.error} retry={() => items.refetch()} />

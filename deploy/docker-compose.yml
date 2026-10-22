@@ -124,7 +124,7 @@ services:
         read_only: true
         bind: { create_host_path: true }
     # The stack's network, Laya's and the browser's, which lead nowhere else.
-    networks: [default, laya, browsing]
+    networks: [default, laya, browsing, studio]
     # Not required: with an external Postgres this stack's is left out.
     depends_on: { postgres: { condition: service_healthy, required: false } }
 
@@ -377,6 +377,26 @@ services:
     tmpfs: ["/work:size=4g,mode=0711", "/tmp:size=1g,mode=0700"]
     volumes: [blender:/jobs]
 
+  # The media studio's own models on the GPU: a picture's background taken away, a text spoken
+  # in a voice from a short sample, music from words. Their weights come from the library
+  # (MODELS_DIR/studio, fetched by the app); one works at a time and is unloaded when unused.
+  # Off unless COMPOSE_PROFILES names studio.
+  studio:
+    <<: [*service, *gpu]
+    build: ./services/studio
+    image: arena-studio
+    container_name: studio
+    profiles: [studio]
+    read_only: true
+    tmpfs: ["/tmp:size=2g,mode=1777,exec"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment: { CUDA_DEVICE_ORDER: PCI_BUS_ID, STUDIO_IDLE: "180" }
+    volumes: ["${MODELS_DIR:-./models}:/models:ro"]
+    networks: [studio]
+    mem_limit: 24g
+    cpus: 8
+
   # Laya: typed decisions (a text and questions in, probabilities out) for the chat's
   # Decide tool and Code Arena, on the CPU. Off unless COMPOSE_PROFILES names laya. The
   # app fetches its two checkpoints into MODELS_DIR/laya; it reads them, and reaches
@@ -502,6 +522,8 @@ networks:
   laya: { internal: true }
   # Between the app and the browser only: internal, so the browser's only way out is the app's proxy.
   browsing: { internal: true }
+  # Between the app and the studio only: internal, so no way out of the stack.
+  studio: { internal: true }
 
 # The stack's data lives in folders of DATA_DIR on the host, one per volume (the installer asks where,
 # and makes them with their services' owners); compose names them as volumes, so backups and

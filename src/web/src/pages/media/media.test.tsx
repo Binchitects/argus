@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fakeApi, member, renderApp } from '@/test/utils'
 import { fit, type MediaConfig, type MediaItem, type MediaJob } from './media-api'
 
-const config: MediaConfig = { picture: 'FLUX.2-klein-4B', video: 'Wan2.2-TI2V-5B', enlarge: true, going: 0, mostGoing: 3 }
+const config: MediaConfig = { picture: 'FLUX.2-klein-4B', video: 'Wan2.2-TI2V-5B', enlarge: true, cutout: true, voice: true, music: true, going: 0, mostGoing: 3 }
 
 const fox: MediaItem = {
   id: 'i1', kind: 'picture', action: 'make', prompt: 'A red fox in the snow', parentId: null, width: 1024, height: 768, seconds: null, model: 'FLUX.2-klein-4B',
@@ -16,6 +16,12 @@ const clip: MediaItem = { ...fox, id: 'i3', kind: 'video', action: 'move', promp
 const job = (o: Partial<MediaJob>): MediaJob => ({
   id: 'j1', action: 'make', prompt: 'A lighthouse at dusk', sourceId: null, count: 2, createdAt: '', finishedAt: null, status: 'working', phase: 'Waiting for its turn on the GPU', error: null, items: [], ...o,
 })
+
+vi.mock('../chat/api', async (original) => ({
+  ...(await original<typeof import('../chat/api')>()),
+  // XMLHttpRequest (for upload progress) has no server in tests.
+  uploadFile: vi.fn(async (file: File) => ({ id: `att-${file.name}`, fileName: file.name, size: file.size, truncated: false, kind: 'audio', contentType: file.type })),
+}))
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -100,5 +106,39 @@ describe('media studio', () => {
     expect(within(dialog).queryByRole('tab', { name: 'Enlarge' })).toBeNull()
     expect(fit(1536, 1024)).toEqual({ width: 1024, height: 672 })
     expect(fit(500, 300)).toEqual({ width: 496, height: 288 })
+  })
+
+  it('speaks words in a voice from a sample only with the word that it may, makes music, and cuts a picture out', async () => {
+    const calls = fakeApi(member, {
+      'GET /api/media': () => ({ json: config }),
+      'GET /api/media/items': () => ({ json: { items: [fox], more: false } }),
+      'GET /api/media/jobs': () => ({ json: [] }),
+      'POST /api/media/jobs': (body) => ({ status: 202, json: job({ action: (body as MediaJob).action }) }),
+    })
+    renderApp('/media')
+    await userEvent.click(await screen.findByRole('radio', { name: 'Speech' }))
+    await userEvent.type(screen.getByLabelText('What to say'), 'Welcome to the lunch club.')
+    await userEvent.click(screen.getByRole('radio', { name: 'A voice from a sample' }))
+    const speak = screen.getByRole('button', { name: /Speak it/ })
+    expect(speak).toBeDisabled()
+    await userEvent.upload(screen.getByLabelText('A sound file of the voice'), new File(['ID3'], 'me.mp3', { type: 'audio/mpeg' }))
+    expect(await screen.findByText('me.mp3')).toBeInTheDocument()
+    expect(speak).toBeDisabled()
+    await userEvent.click(screen.getByLabelText(/This voice is mine, or its owner lets me use it/))
+    await userEvent.click(speak)
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ action: 'speak', prompt: 'Welcome to the lunch club.', exaggeration: 0.5, voiceId: 'att-me.mp3', consent: true }),
+    )
+
+    await userEvent.click(screen.getByRole('radio', { name: 'Music' }))
+    await userEvent.type(screen.getByLabelText('Describe the music'), 'lo-fi piano, rain')
+    await userEvent.click(screen.getByRole('radio', { name: '1 min' }))
+    await userEvent.click(screen.getByRole('button', { name: /Make the music/ }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST').at(-1)?.body).toEqual({ action: 'music', prompt: 'lo-fi piano, rain', seconds: 60 }))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Made from words: A red fox in the snow' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('tab', { name: 'Cut out' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Take the background away/ }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST').at(-1)?.body).toEqual({ action: 'cutout', sourceId: 'i1', width: 1024, height: 768 }))
   })
 })

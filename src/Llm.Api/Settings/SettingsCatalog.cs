@@ -227,6 +227,8 @@ public static class SettingsCatalog
             { Default = "0.006", Unit = "$ per minute", Min = 0, Max = 100, Optional = false },
         new("Prices:PerThousandCharacters", PricesGroup, "1,000 characters read aloud", "Text to speech: Read aloud, the Speech tool, Talk's answers, an API key's speech.", SettingType.Number, SettingScope.Live)
             { Default = "0.015", Unit = "$ per 1,000 characters", Min = 0, Max = 100, Optional = false },
+        new("Prices:PerMusicMinute", PricesGroup, "A minute of music", "Each minute of music the media studio's music model makes.", SettingType.Number, SettingScope.Live)
+            { Default = "0.06", Unit = "$ per minute", Min = 0, Max = 100, Optional = false },
 
         new("Chat:RequestTimeout", Chat, "Longest single answer", "An answer still running after this long is stopped.", SettingType.Duration, SettingScope.AppRestart)
             { Default = "00:15:00", Unit = "minutes", Min = 1, Max = 240, Optional = false },

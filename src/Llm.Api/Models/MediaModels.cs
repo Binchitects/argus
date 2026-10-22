@@ -15,6 +15,11 @@ public static class MediaModels
     /// <summary>The picture server's upscalers (each file in it one), and the one it has: Real-ESRGAN x4plus, as safetensors.</summary>
     public const string UpscalerDir = "image/upscale";
     public const string Upscaler = "RealESRGAN_x4plus.safetensors";
+    /// <summary>The studio server's models (the studio module): background removal, voice cloning, music.</summary>
+    public const string CutoutDir = "studio/birefnet-lite";
+    public const string VoiceDir = "studio/chatterbox";
+    public const string MusicDir = "studio/ace-step";
+    public const string StudioUrl = "http://studio:8000";
 
     /// <summary>What the gateway and the chat call them.</summary>
     public const string ImageModel = "FLUX.2-klein-4B";
@@ -35,6 +40,14 @@ public static class MediaModels
 
     /// <summary>What a Laya checkpoint is: its weights, its settings, its encoder's and tokenizer's.</summary>
     public static readonly string[] LayaFiles = ["rl_agent_config.json", "model.safetensors", "encoder/config.json", "tokenizer/tokenizer.json", "tokenizer/tokenizer_config.json"];
+
+    /// <summary>ACE-Step's checkpoint, as its pipeline reads it: each part in its own folder.</summary>
+    public static readonly string[] MusicFiles =
+    [
+        "config.json", "ace_step_transformer/config.json", "ace_step_transformer/diffusion_pytorch_model.safetensors", "music_dcae_f8c8/config.json",
+        "music_dcae_f8c8/diffusion_pytorch_model.safetensors", "music_vocoder/config.json", "music_vocoder/diffusion_pytorch_model.safetensors", "umt5-base/config.json",
+        "umt5-base/model.safetensors", "umt5-base/special_tokens_map.json", "umt5-base/tokenizer.json", "umt5-base/tokenizer_config.json",
+    ];
 
     /// <summary>A checkpoint of convaiinnovations/laya (its root is the English one), into its own folder under laya/.</summary>
     private static IReadOnlyList<ServerFile> Laya(string subfolder, string checkpoint) =>
@@ -63,6 +76,14 @@ public static class MediaModels
         ]),
         // Laya, the decision model (the laya module, off by default): English (calibrated) and multilingual, on the CPU.
         ("laya", [.. Laya("", "english"), .. Laya("multilingual/", "multilingual")]),
+        // The media studio's own (the studio module, off by default): BiRefNet lite takes a picture's background away (178 MB),
+        // Chatterbox speaks in a voice from a short sample (its English model, 3.2 GB), ACE-Step makes music (8.3 GB).
+        ("studio",
+        [
+            .. new[] { "model.safetensors", "birefnet.py", "BiRefNet_config.py", "config.json" }.Select(f => new ServerFile("ZhengPeng7/BiRefNet_lite", f, CutoutDir)),
+            .. new[] { "t3_cfg.safetensors", "s3gen.safetensors", "ve.safetensors", "tokenizer.json", "conds.pt" }.Select(f => new ServerFile("ResembleAI/chatterbox", f, VoiceDir)),
+            .. MusicFiles.Select(f => new ServerFile("ACE-Step/ACE-Step-v1-3.5B", f, MusicDir, f)),
+        ]),
     ];
 
     /// <summary>The speech server's models (its own ids), by the name the gateway gives them.</summary>

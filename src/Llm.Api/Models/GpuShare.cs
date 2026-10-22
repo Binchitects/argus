@@ -86,8 +86,11 @@ public sealed partial class GpuShare : IDisposable
         LogHappened(logger, text);
     }
 
-    /// <summary>What a picture or video model makes: "video" or "picture".</summary>
-    private static string KindOf(MediaControl.Model model) => model.Mode == MediaModes.Video ? "video" : "picture";
+    /// <summary>The mode of the media studio's own models' work (the studio server), which borrows the GPU as pictures do.</summary>
+    public const string StudioMode = "studio";
+
+    /// <summary>What a picture or video model makes: "video" or "picture"; the studio server's work, "studio piece".</summary>
+    private static string KindOf(MediaControl.Model model) => model.Mode switch { MediaModes.Video => "video", StudioMode => "studio piece", _ => "picture" };
 
     /// <summary>
     /// The GPU memory a picture or video model needs, in MB: to decode on the GPU when it may ("auto": its budget there and
@@ -143,6 +146,31 @@ public sealed partial class GpuShare : IDisposable
         }
     }
 
+    /// <summary>
+    /// The GPU for the studio server's work (<paramref name="name"/>: its model): its turn (pictures and videos take theirs
+    /// from the same), then room when the studio server says it has less free than <paramref name="needMb"/>. Ended, the
+    /// room goes back once <paramref name="release"/> (the studio server unloading its model) is done.
+    /// </summary>
+    public async Task<Hold> HoldStudioAsync(string name, int needMb, Func<CancellationToken, Task<long?>> freeMb, Func<Task> release, CancellationToken ct)
+    {
+        var model = new MediaControl.Model(name, StudioMode, StudioMode, null, new MediaModel { Name = name, Mode = StudioMode });
+        await _one.WaitAsync(ct);
+        var hold = new Hold(this, model) { Free = freeMb, Release = release };
+        try
+        {
+            if (options.Value.Enabled && needMb > 0 && await freeMb(ct) is { } free && free < needMb)
+            {
+                await MakeRoomAsync(hold, needMb, ct);
+            }
+            return hold;
+        }
+        catch
+        {
+            await hold.DisposeAsync();
+            throw;
+        }
+    }
+
     private async Task MakeRoomAsync(Hold hold, int need, CancellationToken ct)
     {
         var model = hold.Model;
@@ -170,11 +198,15 @@ public sealed partial class GpuShare : IDisposable
         var unloaded = string.Join(", ", hold.Unloaded.Concat(hold.Asleep.Select(n => n + " (asleep)")));
         Say($"Made room for {model.Name} (a {kind}){(gpus is { Count: > 0 } ? $" on GPU {string.Join(", ", gpus)}" : "")}: "
             + (hold.Unloaded.Count > 0 ? "unloaded " : "put to sleep ") + $"{unloaded}.");
-        // Their memory, as the server's script reads it every 2 s (the engine stops a model within 10 s).
+        // Their memory, as the server's script reads it every 2 s (or the studio server says it; the engine stops a model within 10 s).
         var waited = System.Diagnostics.Stopwatch.StartNew();
-        while (media.StatusOf(model.Server) is { FreeMb: { } free } && free < need && waited.Elapsed < RoomWait)
+        while ((hold.Free is { } said ? await said(ct) : media.StatusOf(model.Server)?.FreeMb) is { } free && free < need && waited.Elapsed < RoomWait)
         {
             await Task.Delay(TimeSpan.FromSeconds(1), ct);
+        }
+        if (hold.Free is not null)
+        {
+            return;
         }
         var why = $"for a {kind}, with room made by unloading {unloaded}";
         if (media.StatusOf(model.Server) is { Phase: "running" } status && status.Model == model.Name && status.Vae == "cpu" && model.Row.Vae == "auto")
@@ -205,6 +237,10 @@ public sealed partial class GpuShare : IDisposable
             {
                 // Borrowed: the model goes (unless kept loaded), and its server's memory is free before the chat models load
                 // again (llama.cpp fits a model to the memory free as it loads).
+                if (hold.Release is { } release)
+                {
+                    await release();
+                }
                 media.Unhold(model.Name);
                 media.Done(model.Name, "unloaded: the room went back to the chat models");
                 var waited = System.Diagnostics.Stopwatch.StartNew();
@@ -321,6 +357,12 @@ public sealed partial class GpuShare : IDisposable
 
         /// <summary>The chat models put to sleep for it.</summary>
         public IReadOnlyList<string> Slept => Asleep;
+
+        /// <summary>A server that says its own free memory (the studio server), instead of a status file.</summary>
+        internal Func<CancellationToken, Task<long?>>? Free { get; init; }
+
+        /// <summary>What frees its server's memory when the room goes back (the studio server unloading its model).</summary>
+        internal Func<Task>? Release { get; init; }
 
         public async ValueTask DisposeAsync()
         {

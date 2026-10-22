@@ -288,6 +288,144 @@ public sealed class MediaStudioTests(AppFixture app)
         }
     }
 
+    /// <summary>The studio server: a cut-out half see-through, speech and music as a few bytes of "MP3" with their length.</summary>
+    private sealed class FakeStudio : HttpMessageHandler
+    {
+        public readonly ConcurrentQueue<(string Path, JsonObject? Body)> Asked = new();
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path == "/health")
+            {
+                return Json(new JsonObject { ["models"] = new JsonObject { ["cutout"] = true, ["voice"] = true, ["music"] = true } });
+            }
+            if (path == "/v1/cutout")
+            {
+                var picture = Png.Decode(await request.Content!.ReadAsByteArrayAsync(cancellationToken));
+                Asked.Enqueue((path, null));
+                for (var i = 3; i < picture.Rgba.Length / 2; i += 4)
+                {
+                    picture.Rgba[i] = 0;
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(RgbaPng(picture)) };
+            }
+            Asked.Enqueue((path, JsonNode.Parse(await request.Content!.ReadAsStringAsync(cancellationToken)) as JsonObject));
+            var res = new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([0xFF, 0xF3, 0x44, 0xC4]) };
+            res.Headers.Add("X-Seconds", path == "/v1/music" ? "20.00" : "2.50");
+            return res;
+        }
+
+        private static HttpResponseMessage Json(JsonNode body) =>
+            new(HttpStatusCode.OK) { Content = new StringContent(body.ToJsonString(), System.Text.Encoding.UTF8, "application/json") };
+    }
+
+    /// <summary>An RGBA PNG (Png.Encode writes RGB only), unfiltered.</summary>
+    private static byte[] RgbaPng(Png.Image image)
+    {
+        using var raw = new MemoryStream();
+        using (var z = new System.IO.Compression.ZLibStream(raw, System.IO.Compression.CompressionLevel.Fastest, leaveOpen: true))
+        {
+            for (var y = 0; y < image.Height; y++)
+            {
+                z.WriteByte(0);
+                z.Write(image.Rgba, y * image.Width * 4, image.Width * 4);
+            }
+        }
+        // The RGB writer's file, its header and data swapped for these.
+        var rgb = Png.Encode(new Png.Image(1, 1, [0, 0, 0, 255]));
+        using var o = new MemoryStream();
+        o.Write(rgb, 0, 8);
+        void Chunk(string type, byte[] body)
+        {
+            var len = new byte[4];
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(len, body.Length);
+            o.Write(len);
+            var named = System.Text.Encoding.ASCII.GetBytes(type);
+            o.Write(named);
+            o.Write(body);
+            o.Write(new byte[4]);
+        }
+        var header = new byte[13];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(header, image.Width);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(header.AsSpan(4), image.Height);
+        (header[8], header[9]) = (8, 6);
+        Chunk("IHDR", header);
+        Chunk("IDAT", raw.ToArray());
+        Chunk("IEND", []);
+        return o.ToArray();
+    }
+
+    [Fact]
+    public async Task The_studio_server_takes_a_background_away_speaks_in_a_voice_the_person_may_use_and_makes_music()
+    {
+        var library = Directory.CreateTempSubdirectory("media-studio-");
+        var server = new FakeSd();
+        var studio = new FakeStudio();
+        await using var f = app.Create(app.ConnectionStringFor("studio_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
+            new Dictionary<string, string?> { ["Modules:imagegen"] = "true", ["Modules:studio"] = "true", ["Engine:LibraryDir"] = library.FullName },
+            services => services.AddHttpClient(SdServer.Client).ConfigurePrimaryHttpMessageHandler(() => server)
+                .Services.AddHttpClient(MediaControl.Client).ConfigurePrimaryHttpMessageHandler(() => server)
+                .Services.AddHttpClient(StudioServer.Client).ConfigurePrimaryHttpMessageHandler(() => studio));
+        try
+        {
+            var (b, _, email) = await PersonAsync(f);
+            var config = await b.JsonAsync(await b.GetAsync("/api/media"));
+            Assert.True(config.GetProperty("cutout").GetBoolean() && config.GetProperty("voice").GetBoolean() && config.GetProperty("music").GetBoolean());
+
+            var made = (await DoneAsync(f, b, new { action = "make", prompt = "A cup of tea", width = 64, height = 64 })).GetProperty("items")[0].GetGuid();
+            var cut = await ItemAsync(b, (await DoneAsync(f, b, new { action = "cutout", sourceId = made })).GetProperty("items")[0].GetGuid());
+            Assert.Equal(("picture", "cutout", made), (cut.GetProperty("kind").GetString(), cut.GetProperty("action").GetString(), cut.GetProperty("parentId").GetGuid()));
+            Assert.Equal((64, 64), (cut.GetProperty("width").GetInt32(), cut.GetProperty("height").GetInt32()));
+            var kept = Png.Decode(await (await b.GetAsync($"/api/chat/attachments/{cut.GetProperty("attachmentId").GetGuid()}/content")).Content.ReadAsByteArrayAsync());
+            Assert.Equal(0, kept.Rgba[3]);
+            Assert.Equal(255, kept.Rgba[^1]);
+            Assert.Equal("image/jpeg", (await b.GetAsync($"/api/media/items/{cut.GetProperty("id").GetGuid()}/thumb")).Content.Headers.ContentType?.MediaType);
+
+            // Its own voice; a person's sample only when they say they may use it.
+            var spoken = await ItemAsync(b, (await DoneAsync(f, b, new { action = "speak", prompt = "Welcome to the lunch club." })).GetProperty("items")[0].GetGuid());
+            Assert.Equal(("sound", "speak", 2.5, "audio/mpeg"), (spoken.GetProperty("kind").GetString(), spoken.GetProperty("action").GetString(),
+                spoken.GetProperty("seconds").GetDouble(), spoken.GetProperty("contentType").GetString()));
+            Assert.Null(studio.Asked.Single(a => a.Path == "/v1/speak").Body!["voice"]);
+            Guid sample;
+            using (var scope = f.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var me = db.Users.Single(u => u.Email == email).Id;
+                var a = new Llm.Core.Chat.ChatAttachment { UserId = me, FileName = "me.mp3", ContentType = "audio/mpeg", Kind = "audio", Data = [1, 2, 3], Text = "" };
+                db.ChatAttachments.Add(a);
+                await db.SaveChangesAsync();
+                sample = a.Id;
+            }
+            await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync("/api/media/jobs", new { action = "speak", prompt = "Hello", voiceId = sample }));
+            await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync("/api/media/jobs", new { action = "speak", prompt = "Hello", voiceId = Guid.NewGuid(), consent = true }));
+            await DoneAsync(f, b, new { action = "speak", prompt = "Hello from me.", voiceId = sample, consent = true, exaggeration = 0.7 });
+            var asked = studio.Asked.Last(a => a.Path == "/v1/speak").Body!;
+            Assert.Equal((Convert.ToBase64String([1, 2, 3]), 0.7), (asked["voice"]!.GetValue<string>(), asked["exaggeration"]!.GetValue<double>()));
+
+            var song = await ItemAsync(b, (await DoneAsync(f, b, new { action = "music", prompt = "lo-fi piano, rain, calm", lyrics = "[verse]\nTea in the morning", seconds = 20 })).GetProperty("items")[0].GetGuid());
+            Assert.Equal(("sound", "music", 20.0), (song.GetProperty("kind").GetString(), song.GetProperty("action").GetString(), song.GetProperty("seconds").GetDouble()));
+            var music = studio.Asked.Single(a => a.Path == "/v1/music").Body!;
+            Assert.Equal(("lo-fi piano, rain, calm", "[verse]\nTea in the morning", 20.0), (music["prompt"]!.GetValue<string>(), music["lyrics"]!.GetValue<string>(), music["seconds"]!.GetValue<double>()));
+
+            await using var conn = new NpgsqlConnection(app.LitellmConnectionString);
+            await conn.OpenAsync();
+            await using var cmd = new NpgsqlCommand("""select call_type, count(*) from "LiteLLM_SpendLogs" where end_user = @email group by call_type order by call_type""", conn);
+            cmd.Parameters.AddWithValue("email", email);
+            await using var reader = await cmd.ExecuteReaderAsync();
+            var rows = new List<(string, long)>();
+            while (await reader.ReadAsync())
+            {
+                rows.Add((reader.GetString(0), reader.GetInt64(1)));
+            }
+            Assert.Equal([(SpendLog.PictureCall, 2L), (SpendLog.MusicCall, 1L), (SpendLog.SpeechCall, 2L)], rows);
+        }
+        finally
+        {
+            library.Delete(true);
+        }
+    }
+
     [Fact]
     public async Task An_upload_goes_into_the_studio_and_stays_the_persons_when_taken_out()
     {

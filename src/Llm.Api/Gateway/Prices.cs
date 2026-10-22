@@ -30,6 +30,9 @@ public sealed class PriceOptions
 
     /// <summary>Per 1,000 characters read aloud.</summary>
     public decimal PerThousandCharacters { get; set; } = 0.015m;
+
+    /// <summary>Per minute of music the media studio's music model makes.</summary>
+    public decimal PerMusicMinute { get; set; } = 0.06m;
 }
 
 /// <summary>A chat model's prices, in dollars per million tokens: prompt tokens read, prompt tokens from the cache, tokens written.</summary>

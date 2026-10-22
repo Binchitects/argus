@@ -51,18 +51,27 @@ public sealed class MediaJob
     public const string Enlarge = "enlarge";
     /// <summary>A short clip that starts from a picture.</summary>
     public const string Move = "move";
+    /// <summary>A picture with its background taken away (the studio server).</summary>
+    public const string Cutout = "cutout";
+    /// <summary>Words spoken in a voice from a short sample, or the model's own (the studio server).</summary>
+    public const string Speak = "speak";
+    /// <summary>Music from a description and lyrics (the studio server).</summary>
+    public const string Music = "music";
 
-    public static readonly IReadOnlyList<string> Actions = [Make, Edit, Vary, Enlarge, Move];
+    public static readonly IReadOnlyList<string> Actions = [Make, Edit, Vary, Enlarge, Move, Cutout, Speak, Music];
+
+    /// <summary>Work the studio server does (not the picture or video server).</summary>
+    public static bool OnStudio(string action) => action is Cutout or Speak or Music;
 
     public Guid Id { get; set; } = Guid.CreateVersion7();
     public Guid OwnerId { get; set; }
     public required string Action { get; set; }
     public string? Prompt { get; set; }
-    /// <summary>The item it works on, for all but Make.</summary>
+    /// <summary>The item it works on: a picture (all but Make, Speak and Music).</summary>
     public Guid? SourceId { get; set; }
     /// <summary>How many it makes (Make and Vary: 1 to 4).</summary>
     public int Count { get; set; } = 1;
-    /// <summary>Its settings, JSON: <c>{ width, height, strength, seconds }</c>.</summary>
+    /// <summary>Its settings, JSON: <c>{ width, height, strength, seconds, lyrics, voice, exaggeration }</c>.</summary>
     public string Options { get; set; } = "{}";
     public string Status { get; set; } = Working;
     /// <summary>Where it is: waiting for the GPU, loading the model, drawing...</summary>
@@ -72,4 +81,43 @@ public sealed class MediaJob
     public string Items { get; set; } = "[]";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? FinishedAt { get; set; }
+}
+
+/// <summary>
+/// A short video made from a storyboard: shots the model wrote from the person's words (or they did), each a picture set
+/// moving with what the narrator says over it; the narration spoken, captions from it, music under it, all cut into one
+/// MP4 (a <see cref="MediaItem"/>). Any shot made again on its own, and the video cut again.
+/// </summary>
+public sealed class MediaStory
+{
+    public const string Draft = "draft";
+    public const string Making = "making";
+    public const string Done = "done";
+    public const string Failed = "failed";
+
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid OwnerId { get; set; }
+    public required string Title { get; set; }
+    /// <summary>What the person asked for.</summary>
+    public required string Brief { get; set; }
+    /// <summary>
+    /// Its shots, JSON: <c>[{ visual, narration, seconds, picture, clip, speech, speechSeconds }]</c>; picture and clip are
+    /// files (attachments) made for the shot, speech its narration's sound: each made again when what it comes from changes.
+    /// </summary>
+    public string Shots { get; set; } = "[]";
+    /// <summary>The narrator: null for the person's own speech settings, or a sound file of theirs whose voice it is (with their word).</summary>
+    public Guid? VoiceId { get; set; }
+    /// <summary>The music under it, in words (style, instruments, mood); null: none.</summary>
+    public string? Music { get; set; }
+    /// <summary>The music made for it (an attachment), while the words and length it was made for hold.</summary>
+    public Guid? MusicFileId { get; set; }
+    /// <summary>What the music file was made for: its words and seconds.</summary>
+    public string? MusicMadeFor { get; set; }
+    public string Status { get; set; } = Draft;
+    public string? Phase { get; set; }
+    public string? Error { get; set; }
+    /// <summary>The video, once cut (a media item).</summary>
+    public Guid? VideoItemId { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

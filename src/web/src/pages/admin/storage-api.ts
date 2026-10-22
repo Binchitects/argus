@@ -116,7 +116,7 @@ export interface StorageReport {
   trends: Record<string, number[][]>
 }
 
-export type Origin = 'upload' | 'picture' | 'video' | 'speech' | 'tool'
+export type Origin = 'upload' | 'picture' | 'video' | 'speech' | 'music' | 'tool'
 export type FileState = 'chat' | 'assistant' | 'deck' | 'studio' | 'deleted' | 'none'
 
 export interface FileRow {
@@ -180,6 +180,7 @@ export const origins: Record<Origin, string> = {
   picture: 'Picture made',
   video: 'Video made',
   speech: 'Speech made',
+  music: 'Music made',
   tool: 'Made by a tool',
 }
 

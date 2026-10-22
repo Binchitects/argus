@@ -47,7 +47,7 @@ public sealed partial class StorageCleanups(AppDbContext db, StorageFiles files,
     {
         "deleted-chats" => await DeletedChatsAsync(ct),
         "unused-files" => await FilesAsync(kind, Days(days, DefaultUnusedDays), new FileFilter(States: ["none"]), null, ct),
-        "old-media" => await FilesAsync(kind, Days(days, options.CurrentValue.MediaDays), new FileFilter(Origins: ["picture", "video", "speech"], States: ["chat", "deleted", "none"]),
+        "old-media" => await FilesAsync(kind, Days(days, options.CurrentValue.MediaDays), new FileFilter(Origins: ["picture", "video", "speech", "music"], States: ["chat", "deleted", "none"]),
             "The chats keep their words; the pictures, videos and sound files are gone from them.", ct),
         "disk-orphans" => await OrphansAsync(ct),
         "old-backups" => await BackupsAsync(Keep(keep), ct),
@@ -155,7 +155,7 @@ public sealed partial class StorageCleanups(AppDbContext db, StorageFiles files,
     /// <summary>Every file a files clean-up takes (its plan shows the first ones only).</summary>
     private async Task<IEnumerable<Guid>> AllAsync(string kind, int? days, CancellationToken ct)
     {
-        var filter = kind == "old-media" ? new FileFilter(Origins: ["picture", "video", "speech"], States: ["chat", "deleted", "none"]) : new FileFilter(States: ["none"]);
+        var filter = kind == "old-media" ? new FileFilter(Origins: ["picture", "video", "speech", "music"], States: ["chat", "deleted", "none"]) : new FileFilter(States: ["none"]);
         var (rows, _) = await files.ListAsync(filter with { Before = clock.GetUtcNow().AddDays(-(days ?? DefaultUnusedDays)), Take = 100_000 }, ct);
         return rows.Where(r => !r.Held).Select(r => r.Id);
     }

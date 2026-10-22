@@ -73,6 +73,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Panels.Panel> Panels => Set<Panels.Panel>();
     public DbSet<Media.MediaItem> MediaItems => Set<Media.MediaItem>();
     public DbSet<Media.MediaJob> MediaJobs => Set<Media.MediaJob>();
+    public DbSet<Media.MediaStory> MediaStories => Set<Media.MediaStory>();
     public DbSet<ScheduledRun> ScheduledRuns => Set<ScheduledRun>();
     public DbSet<TaskEvent> TaskEvents => Set<TaskEvent>();
     public DbSet<Notification> Notifications => Set<Notification>();
@@ -698,6 +699,20 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Error).HasMaxLength(2000);
             e.HasIndex(x => new { x.OwnerId, x.Status });
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Media.MediaStory>(e =>
+        {
+            e.ToTable("media_stories");
+            e.Property(x => x.Title).HasMaxLength(200);
+            e.Property(x => x.Brief).HasMaxLength(8000);
+            e.Property(x => x.Music).HasMaxLength(1000);
+            e.Property(x => x.MusicMadeFor).HasMaxLength(1100);
+            e.Property(x => x.Status).HasMaxLength(16);
+            e.Property(x => x.Phase).HasMaxLength(200);
+            e.Property(x => x.Error).HasMaxLength(2000);
+            e.HasIndex(x => new { x.OwnerId, x.UpdatedAt });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Media.MediaItem>().WithMany().HasForeignKey(x => x.VideoItemId).OnDelete(DeleteBehavior.SetNull);
         });
         builder.Entity<TaskTemplate>(e =>
         {
