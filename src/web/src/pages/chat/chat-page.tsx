@@ -409,6 +409,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     }
   }
 
+  // While a screen is shared with a model that cannot see: the model to offer instead (loaded first, then one that loads on request).
+  const seer = model?.vision ? null : (config.models.find((m) => m.vision && m.loaded) ?? config.models.find((m) => m.vision && m.onRequest))?.name ?? null
   const toolsPicker = model?.tools === false ? null : <ToolsPicker tools={config.tools} value={toolsOnHere} onChange={(tools) => void change({ tools })} />
 
   /**
@@ -1057,7 +1059,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                 {asking && <SafeguardAsk question={asking.question} onAnswer={asking.answer} />}
                 <PublishDialog what={publishing} onClose={() => setPublishing(null)} />
                 <BrowserBar chatId={id ?? null} active={toolsOnHere.includes('browser')} />
-                <ScreenBar share={share} sees={model?.vision ?? false} />
+                <ScreenBar share={share} sees={model?.vision ?? false} seer={seer} onSeer={(m) => void change({ model: m })} />
                 <TalkBar state={talk.state} onEnd={talk.end} />
                 <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} compare={comparePicker} talk={talkButton} history={history} autoFocus big />
                 <div className={cn('stagger mt-4 grid gap-2', starters ? 'sm:grid-cols-2' : 'sm:grid-cols-3')} aria-label={starters ? 'Conversation starters' : undefined}>
@@ -1229,7 +1231,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   </Button>
                 )}
                 <BrowserBar chatId={id ?? null} active={toolsOnHere.includes('browser')} />
-                <ScreenBar share={share} sees={model?.vision ?? false} />
+                <ScreenBar share={share} sees={model?.vision ?? false} seer={seer} onSeer={(m) => void change({ model: m })} />
                 <TalkBar state={talk.state} onEnd={talk.end} />
                 {data?.codeArena && !streaming && (
                   <output className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground">

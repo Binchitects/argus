@@ -11,9 +11,11 @@ vi.mock('./api', async (original) => ({
   uploadFile: vi.fn(async (file: File) => ({ id: `att-${file.name}`, fileName: file.name, size: file.size, truncated: false, kind: 'image', contentType: file.type })),
 }))
 
-const config = (vision: boolean): ChatConfig => ({
+const model = (name: string, vision: boolean) => ({ name, context: 32768, maxOutput: 4096, vision, tools: true, thinking: false, loaded: true, prices: { input: 1, cachedInput: 0.1, output: 2 } })
+
+const config = (vision: boolean, others: string[] = []): ChatConfig => ({
   model: 'Eyes-Model',
-  models: [{ name: 'Eyes-Model', context: 32768, maxOutput: 4096, vision, tools: true, thinking: false, loaded: true, prices: { input: 1, cachedInput: 0.1, output: 2 } }],
+  models: [model('Eyes-Model', vision), ...others.map((n) => model(n, true))],
   presets: [{ level: 'off', label: 'No thinking' }],
   defaultThinking: 'off',
   argus: false,
@@ -60,9 +62,9 @@ afterEach(() => {
   Reflect.deleteProperty(navigator, 'mediaDevices')
 })
 
-function backend(vision = true) {
+function backend(vision = true, others: string[] = []) {
   return fakeApi(member, {
-    'GET /api/chat/config': () => ({ json: config(vision) }),
+    'GET /api/chat/config': () => ({ json: config(vision, others) }),
     'GET /api/chat/conversations': () => ({ json: [] }),
     'POST /api/chat/conversations': () => ({ status: 201, json: conversation }),
     'GET /api/chat/conversations/c1': () => ({ json: conversation }),
@@ -107,6 +109,17 @@ describe('show your screen', () => {
     expect(await screen.findByRole('region', { name: 'Sharing your screen' })).toHaveTextContent('cannot see pictures')
     await userEvent.click(screen.getByRole('button', { name: 'Stop sharing your screen' }))
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Sharing your screen' })).toBeNull())
+  })
+
+  it('offers a model that can see, and switches to it in one click', async () => {
+    backend(false, ['Seer-VL'])
+    renderApp('/chat')
+    await userEvent.click(await screen.findByRole('button', { name: /Share your screen/ }))
+    const bar = await screen.findByRole('region', { name: 'Sharing your screen' })
+    expect(bar).toHaveTextContent('switch to one that can')
+    await userEvent.click(screen.getByRole('button', { name: 'Use Seer-VL' }))
+    await waitFor(() => expect(bar).toHaveTextContent('Each question takes a picture of it now.'))
+    expect(screen.queryByRole('button', { name: 'Use Seer-VL' })).toBeNull()
   })
 
   it('names a frame by when it was taken', () => {
