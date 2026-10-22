@@ -96,6 +96,9 @@ services:
       # LMCache's remote store for the vLLM models' token cache (redis://valkey:6379 with the valkey profile); empty: none.
       Engine__LmcacheRemote: ${LMCACHE_REMOTE:-}
       Argus__AdminToken: ${ARGUS_KEY:?set ARGUS_KEY in .env}
+      # Code Studio's workspaces (the workspaces profile): the service and its key.
+      Workspaces__Url: http://workspaces:4000
+      Workspaces__Key: ${WORKSPACES_KEY:-}
       Argus__GitlabUrl: ${GITLAB_URL:-}
       # The browser agent's browser (COMPOSE_PROFILES=browser); without it the Browser tool says it is not running.
       Browser__Url: ${BROWSER_URL:-http://browser:9222}
@@ -124,7 +127,7 @@ services:
         read_only: true
         bind: { create_host_path: true }
     # The stack's network, Laya's and the browser's, which lead nowhere else.
-    networks: [default, laya, browsing, studio]
+    networks: [default, laya, browsing, studio, workspaces]
     # Not required: with an external Postgres this stack's is left out.
     depends_on: { postgres: { condition: service_healthy, required: false } }
 
@@ -144,6 +147,8 @@ services:
     <<: *service
     image: ghcr.io/berriai/litellm:main-stable
     container_name: litellm
+    # The workspaces' agents call the gateway too, with their own keys.
+    networks: [default, workspaces]
     command: [--config, /app/arena.yaml, --port, "4000"]
     environment:
       LITELLM_MASTER_KEY: ${GATEWAY_KEY}
@@ -397,6 +402,30 @@ services:
     mem_limit: 24g
     cpus: 8
 
+  # Code Studio's workspaces: Code Arena's own engine per workspace (a clone of a project the person works on in the
+  # browser's IDE), each as its own user with limits (services/workspaces/supervisor.py). Off unless COMPOSE_PROFILES
+  # names workspaces. No Docker socket; only the capabilities to switch users and clean up after them. Its network
+  # reaches the app (the IDE's requests come through it), the gateway and the internet (the code host, package
+  # registries), not the stack's databases, engines or browser.
+  workspaces:
+    <<: *service
+    build: { context: .., dockerfile: deploy/services/workspaces/Dockerfile }
+    image: arena-workspaces
+    container_name: workspaces
+    profiles: [workspaces]
+    init: true
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, KILL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 4096
+    mem_limit: ${WORKSPACES_MEMORY:-16g}
+    cpus: ${WORKSPACES_CPUS:-4}
+    environment:
+      WORKSPACES_KEY: ${WORKSPACES_KEY:-}
+      WORKSPACES_SLOTS: ${WORKSPACES_SLOTS:-32}
+    volumes: [workspaces:/workspaces]
+    networks: [workspaces]
+
   # Laya: typed decisions (a text and questions in, probabilities out) for the chat's
   # Decide tool and Code Arena, on the CPU. Off unless COMPOSE_PROFILES names laya. The
   # app fetches its two checkpoints into MODELS_DIR/laya; it reads them, and reaches
@@ -524,6 +553,9 @@ networks:
   browsing: { internal: true }
   # Between the app and the studio only: internal, so no way out of the stack.
   studio: { internal: true }
+  # Between the app, the gateway and Code Studio's workspaces: not internal (a workspace clones, pushes and installs
+  # packages), and nothing else of the stack is on it.
+  workspaces: {}
 
 # The stack's data lives in folders of DATA_DIR on the host, one per volume (the installer asks where,
 # and makes them with their services' owners); compose names them as volumes, so backups and
@@ -539,6 +571,9 @@ volumes:
     driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/directory" }
   sandbox:
     driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/sandbox" }
+  # Code Studio's workspaces: each a clone, its engine's home and what the person has not pushed yet.
+  workspaces:
+    driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/workspaces" }
   blender:
     driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/blender" }
   argus:

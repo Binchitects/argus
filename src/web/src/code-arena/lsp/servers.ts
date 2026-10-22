@@ -1,7 +1,7 @@
 import type * as Monaco from 'monaco-editor'
 import { useSyncExternalStore } from 'react'
 import { toast } from '@/components/ui/toaster'
-import { api } from '@/lib/api'
+import { api } from '../http'
 import type { MonacoModule, Reveal } from '../editor-state'
 import { formatError, formatModel, formatterOf, formattersOf } from '../format'
 import { languageServerList, lspSocketUrl, type LanguageServerLog } from '../ide-api'

@@ -104,16 +104,24 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     // The commands with no time limit: their output to the page as it comes, a few times a second, for as long as they run.
     private readonly Dictionary<int, (StringBuilder Pending, bool Flushing)> _jobOutput = [];
 
-    private WebApp(Runtime rt, WebAssets assets, HttpServer server)
+    private WebApp(Runtime rt, WebAssets assets, HttpServer server, string? served)
     {
         _rt = rt;
         _assets = assets;
         _server = server;
+        _served = served is not null;
+        Token = served ?? Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
         StartIde();
     }
 
-    /// <summary>This run's key to the page: 256 random bits.</summary>
-    public string Token { get; } = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    /// <summary>This run's key to the page: 256 random bits; served for Code Studio, the key Arena gave it.</summary>
+    public string Token { get; }
+
+    /// <summary>
+    /// Served for Arena's Code Studio: reached through Arena (which signs the person in, checks where each request comes
+    /// from, and sends the key as a bearer token), so the key alone lets a request in: no cookie, no names checked.
+    /// </summary>
+    private readonly bool _served;
     public IPEndPoint Endpoint => _server.Endpoint;
     public int Port => _server.Endpoint.Port;
     /// <summary>The address to open: the token in it once; the page then lives on a cookie.</summary>
@@ -123,10 +131,13 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     /// <summary>Per port: two runs side by side keep their own.</summary>
     private string CookieName => $"code_arena_{Port}";
 
-    /// <summary>Listens on 127.0.0.1 at the port (0: a free one) and takes over the runtime's events and questions.</summary>
-    public static WebApp Start(Runtime rt, WebAssets assets, int port)
+    /// <summary>
+    /// Listens on 127.0.0.1 at the port (0: a free one) and takes over the runtime's events and questions; served for Code
+    /// Studio (<paramref name="served"/>: its key), on every address of the machine instead.
+    /// </summary>
+    public static WebApp Start(Runtime rt, WebAssets assets, int port, string? served = null)
     {
-        var app = new WebApp(rt, assets, new HttpServer(port));
+        var app = new WebApp(rt, assets, new HttpServer(port, served is null ? null : IPAddress.Any), served);
         rt.Agent.Events = app;
         rt.Permissions.Asker = app.AskAsync;
         rt.Jobs.Started += app.JobStarted;
@@ -152,6 +163,20 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         res.Headers["X-Content-Type-Options"] = "nosniff";
         res.Headers["Referrer-Policy"] = "no-referrer";
         res.Headers["Cache-Control"] = "no-store";
+        var bearer = req.Header("Authorization") is { } auth && auth.StartsWith("Bearer ", StringComparison.Ordinal) ? auth[7..].Trim() : null;
+        var api = req.Path.StartsWith("/api/", StringComparison.Ordinal);
+        if (_served)
+        {
+            // Through Arena: the key as a bearer token, on every request; the rest as below.
+            if (!TokenIs(bearer))
+            {
+                res.KeepAlive = false;
+                await res.ErrorAsync(401, "unauthorized", "This workspace answers only to Arena's Code Studio.", ct);
+                return;
+            }
+            await DispatchAsync(req, res, api, false, ct);
+            return;
+        }
         // A name that points at 127.0.0.1 (DNS rebinding) still says its own name here.
         if (!LocalName(req.Header("Host"), "", Port))
         {
@@ -184,8 +209,6 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             await HandOffAsync(res, ct);
             return;
         }
-        var bearer = req.Header("Authorization") is { } auth && auth.StartsWith("Bearer ", StringComparison.Ordinal) ? auth[7..].Trim() : null;
-        var api = req.Path.StartsWith("/api/", StringComparison.Ordinal);
         var cookie = TokenIs(req.Cookie(CookieName));
         if (!cookie && !TokenIs(bearer))
         {
@@ -199,9 +222,15 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             }
             return;
         }
+        await DispatchAsync(req, res, api, cookie, ct);
+    }
+
+    /// <summary>A request let in: to the API (JSON only, Arena's routes relayed) or to the page's files.</summary>
+    private async Task DispatchAsync(HttpRequest req, HttpResponse res, bool api, bool cookie, CancellationToken ct)
+    {
         if (api)
         {
-            if (req.Header("Sec-Fetch-Site") is { } site && site is not ("same-origin" or "none"))
+            if (!_served && req.Header("Sec-Fetch-Site") is { } site && site is not ("same-origin" or "none"))
             {
                 await res.ErrorAsync(403, "forbidden", "Requests from other sites are refused.", ct);
                 return;

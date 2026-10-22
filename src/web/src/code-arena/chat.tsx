@@ -13,6 +13,7 @@ import { ApiError, errorMessage } from '@/lib/api'
 import { useTheme, type ThemePreference } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { configQuery, streamChat } from '@/pages/chat/api'
+import { ideUrl } from './http'
 import { contextOf } from '@/pages/chat/context'
 import { useFileRefs } from '@/pages/chat/file-refs'
 import { ContextGauge } from '@/pages/chat/context-gauge'
@@ -554,7 +555,7 @@ export function Thread({
       const events = batched<CodeEvent>((all) => setLive((s) => all.reduce((now, e) => reduceCode(now, e, localId), s ?? start)))
       try {
         await streamChat(
-          path,
+          ideUrl(path),
           body,
           (e) => {
             received = true

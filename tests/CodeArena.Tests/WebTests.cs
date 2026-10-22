@@ -74,6 +74,53 @@ public sealed partial class WebTests : IDisposable
     }
 
     [Fact]
+    public async Task Served_for_code_studio_it_listens_beyond_this_machine_and_takes_only_its_key_as_a_bearer_token()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        var key = new string('k', 40);
+        await using var web = await WebRun.StartServedAsync(h, key);
+        Assert.Contains("Only with its key, as a bearer token", web.Out);
+
+        // Its key as a bearer token, whatever the Host and the Origin (Arena's, as it relays the person's IDE).
+        using var withKey = WebRun.Client(web.Port, key);
+        withKey.DefaultRequestHeaders.Host = "workspaces:4100";
+        withKey.DefaultRequestHeaders.Add("Origin", "https://llm.example.test");
+        var state = await Json(await withKey.GetAsync("/api/state"));
+        Assert.Equal(h.Work, state["folder"]!.GetValue<string>());
+        // Without it, or with the key in the address or a cookie: refused.
+        using var anonymous = WebRun.Client(web.Port, token: null);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/state")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/?token=" + key)).StatusCode);
+        anonymous.DefaultRequestHeaders.Add("Cookie", $"code_arena_{web.Port}={key}");
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/state")).StatusCode);
+        // Still JSON only.
+        var form = await withKey.PostAsync("/api/file", new StringContent("path=a", Encoding.UTF8, "application/x-www-form-urlencoded"));
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, form.StatusCode);
+        // On the machine's other addresses too (Arena reaches it over its network).
+        foreach (var address in OtherAddresses())
+        {
+            using var other = new TcpClient();
+            await other.ConnectAsync(address, web.Port);
+        }
+    }
+
+    [Fact]
+    public async Task Without_a_key_of_its_own_served_mode_does_not_start()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        h.Env["CODE_ARENA_TOKEN"] = "short";
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var code = await Cli.RunAsync(["web", "--serve"], new CliEnv
+        {
+            In = new StringReader(""), Out = output, Err = error, Env = k => h.Env.GetValueOrDefault(k), Cwd = h.Work, Paths = h.Paths,
+            Window = _ => null, WindowHandOff = TimeSpan.FromMilliseconds(500), BrowserWait = TimeSpan.FromSeconds(20),
+        });
+        Assert.Equal(1, code);
+        Assert.Contains("--serve needs CODE_ARENA_TOKEN", output + error.ToString());
+    }
+
+    [Fact]
     public async Task Other_hosts_other_sites_and_non_JSON_posts_are_refused()
     {
         using var h = new Harness(_gateway, _mcp);

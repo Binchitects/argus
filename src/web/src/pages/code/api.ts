@@ -134,3 +134,25 @@ export const removeRule = (id: string) => api(`/api/code/rules/${id}`, { method:
 export const newRuleSecret = (id: string) => api<{ secret: string }>(`/api/code/rules/${id}/secret`, { body: {} })
 
 export const checkRule = (id: string) => api<{ said: string[] }>(`/api/code/rules/${id}/check`, { body: {} })
+
+export interface Workspace {
+  id: string
+  kind: 'server' | 'machine'
+  name: string
+  project: string | null
+  branch: string | null
+  state: 'running' | 'asleep' | 'failed'
+  error: string | null
+  createdAt: string
+  usedAt: string
+}
+
+export const workspacesQuery = {
+  queryKey: ['studio', 'workspaces'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ server: boolean; workspaces: Workspace[] }>('/api/studio/workspaces', { signal }),
+}
+
+export const createWorkspace = (body: { project: string; branch?: string }) => api<Workspace>('/api/studio/workspaces', { body })
+export const startWorkspace = (id: string) => api<Workspace>(`/api/studio/workspaces/${id}/start`, { body: {} })
+export const stopWorkspace = (id: string) => api<Workspace>(`/api/studio/workspaces/${id}/stop`, { body: {} })
+export const deleteWorkspace = (id: string) => api(`/api/studio/workspaces/${id}`, { method: 'DELETE' })

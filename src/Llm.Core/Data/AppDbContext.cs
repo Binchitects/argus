@@ -70,6 +70,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Studio.WorkflowRun> WorkflowRuns => Set<Studio.WorkflowRun>();
     public DbSet<Studio.WorkflowRunStep> WorkflowRunSteps => Set<Studio.WorkflowRunStep>();
     public DbSet<Code.CodeFix> CodeFixes => Set<Code.CodeFix>();
+    public DbSet<Code.StudioWorkspace> StudioWorkspaces => Set<Code.StudioWorkspace>();
     public DbSet<Panels.Panel> Panels => Set<Panels.Panel>();
     public DbSet<Media.MediaItem> MediaItems => Set<Media.MediaItem>();
     public DbSet<Media.MediaJob> MediaJobs => Set<Media.MediaJob>();
@@ -668,6 +669,18 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.MergeRequestUrl).HasMaxLength(1000);
             e.Property(x => x.Error).HasMaxLength(2000);
             e.HasIndex(x => new { x.UserId, x.CreatedAt });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Code.StudioWorkspace>(e =>
+        {
+            e.ToTable("studio_workspaces");
+            e.Property(x => x.Kind).HasMaxLength(16);
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.Project).HasMaxLength(500);
+            e.Property(x => x.Branch).HasMaxLength(255);
+            e.Property(x => x.KeyAlias).HasMaxLength(200);
+            e.Property(x => x.Error).HasMaxLength(2000);
+            e.HasIndex(x => new { x.UserId, x.UsedAt });
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<Panels.Panel>(e =>

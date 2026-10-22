@@ -37,8 +37,20 @@ public sealed class TestBrowser
     public async Task<JsonElement> JsonAsync(HttpResponseMessage res) =>
         JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement;
 
-    public async Task<HttpResponseMessage> LoginAsync(string user, string password, bool remember = false) =>
-        await PostAsync("/api/auth/login", new { userName = user, password, remember });
+    public async Task<HttpResponseMessage> LoginAsync(string user, string password, bool remember = false)
+    {
+        var res = await PostAsync("/api/auth/login", new { userName = user, password, remember });
+        if (res.Headers.TryGetValues("Set-Cookie", out var set))
+        {
+            _cookies.AddRange(set.Select(c => c.Split(';')[0]));
+        }
+        return res;
+    }
+
+    private readonly List<string> _cookies = [];
+
+    /// <summary>The cookies sign-in set ("name=value"), for a client of the server that is not this one (a WebSocket's).</summary>
+    public IReadOnlyList<string> Cookies() => _cookies;
 
     public async Task<TestBrowser> SignedInAsync(string user, string password)
     {

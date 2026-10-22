@@ -1,4 +1,4 @@
-import { api } from '@/lib/api'
+import { api } from './http'
 import { blank, reduce, type LiveState } from '@/pages/chat/live'
 import type { Attachment, ChatEvent, ChatTool, Message } from '@/pages/chat/types'
 import type { Piece } from './bridge'

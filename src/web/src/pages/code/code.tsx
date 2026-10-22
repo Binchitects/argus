@@ -16,6 +16,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { errorMessage } from '@/lib/api'
 import { AutoReviews } from './auto-reviews'
 import { askCode, mergeRequestsQuery, reviewsQuery, startReview, verdictLabel, type ReviewBrief } from './api'
+import { Workspaces } from './studio'
 
 /** A review's state in a word or two, with its verdict once done. */
 export function ReviewState({ r }: { r: ReviewBrief }) {
@@ -71,8 +72,8 @@ export function CodePage() {
   return (
     <>
       <PageHeader
-        title="Code"
-        description="Review merge requests with the model, and ask about your code. It reads with your own access (GitLab, and GitHub or Gitea once linked in your account), and writes nothing there; Fix it opens merge requests as you, with your own token."
+        title="Code Studio"
+        description="Code in an IDE like VS Code, on the server or your own machine; review merge requests with the model, and ask Argus about your code. Reviews read with your own access and write nothing; workspaces and Fix it push and open merge requests as you, with your own token."
         actions={
           <Button variant="outline" asChild>
             <Link to="/code/fixes">
@@ -86,6 +87,10 @@ export function CodePage() {
           {error}
         </Alert>
       )}
+      <div className="mb-8">
+        <Workspaces />
+      </div>
+      <h2 className="mb-3 text-lg font-semibold">Review and ask</h2>
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>

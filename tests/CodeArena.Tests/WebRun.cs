@@ -105,6 +105,47 @@ internal sealed partial class WebRun : IAsyncDisposable
     [GeneratedRegex(@"http://127\.0\.0\.1:(?<port>\d+)/\?token=(?<token>[A-Za-z0-9_-]+)")]
     private static partial Regex Link();
 
+    /// <summary>code-arena web --serve (Code Studio's workspace): its key from CODE_ARENA_TOKEN, its port from what it printed.</summary>
+    public static async Task<WebRun> StartServedAsync(Harness h, string token)
+    {
+        var output = new StringWriter();
+        var error = new StringWriter();
+        h.Env["CODE_ARENA_TOKEN"] = token;
+        var env = new CliEnv
+        {
+            In = new StringReader(""),
+            Out = TextWriter.Synchronized(output),
+            Err = TextWriter.Synchronized(error),
+            Env = k => h.Env.GetValueOrDefault(k),
+            Cwd = h.Cwd ?? h.Work,
+            Paths = h.Paths,
+            Window = _ => null,
+            WindowHandOff = TimeSpan.FromMilliseconds(500),
+            BrowserWait = TimeSpan.FromSeconds(20),
+        };
+        var exit = Task.Run(() => Cli.RunAsync(["web", "--serve"], env));
+        var run = new WebRun(env, output, error, exit);
+        for (var waited = 0; ; waited += 50)
+        {
+            if (Served().Match(run.Out) is { Success: true } m)
+            {
+                run.Port = int.Parse(m.Groups["port"].Value);
+                run.Token = token;
+                break;
+            }
+            if (exit.IsCompleted || waited > 20_000)
+            {
+                throw new Xunit.Sdk.XunitException($"code-arena web --serve did not start: {run.Out} {run.Err}");
+            }
+            await Task.Delay(50);
+        }
+        run.Http = Client(run.Port, token);
+        return run;
+    }
+
+    [GeneratedRegex(@"served on port (?<port>\d+) for Code Studio")]
+    private static partial Regex Served();
+
     /// <summary>A client of the server: no cookies of its own, no redirects followed, the key as a bearer token when given.</summary>
     public static HttpClient Client(int port, string? token)
     {

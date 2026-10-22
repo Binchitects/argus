@@ -1,4 +1,4 @@
-import { api } from '@/lib/api'
+import { api, ideSocketUrl } from '../http'
 import type { TerminalInfo } from '../ide-api'
 
 /** A run configuration: launch.json's, or one the project's files give. */
@@ -125,7 +125,7 @@ export const stopDebug = (id: string) => api('/api/debug/stop', { body: { id } }
 export const debugSource = (id: string, path: string) => api<{ path: string; text: string | null; readOnly: boolean; version?: string }>(`/api/debug/source?id=${encodeURIComponent(id)}&path=${encodeURIComponent(path)}`)
 
 /** A debug session's WebSocket, on this page's server (the page's own cookie lets it in, as the terminals'). */
-export const debugSocketUrl = (id: string, where: Location = window.location) => `${where.protocol === 'https:' ? 'wss' : 'ws'}://${where.host}/api/debug/socket?id=${encodeURIComponent(id)}`
+export const debugSocketUrl = (id: string, where: Location = window.location) => ideSocketUrl(`/api/debug/socket?id=${encodeURIComponent(id)}`, where)
 
 /** The person's own processes, for an attach configuration's ${command:pickProcess}. */
 export const listProcesses = () => api<{ pid: number; name: string; command: string | null }[]>('/api/processes')

@@ -283,3 +283,77 @@ spec:
   selector: {{- include "arena.selector" (dict "root" $ "name" "searxng") | nindent 4 }}
   ports: [{ name: http, port: 8080, targetPort: http }]
 {{- end }}
+{{- /* Code Studio's workspaces (services/workspaces): Code Arena's engine per workspace, each as its own user. */}}
+{{- if .Values.workspaces.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workspaces
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "workspaces") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" "workspaces") | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" . | nindent 6 }}
+      automountServiceAccountToken: false
+      # Reaps what a workspace leaves behind, as compose's init: true.
+      shareProcessNamespace: true
+      containers:
+        - name: workspaces
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.workspaces) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          ports: [{ name: http, containerPort: 4000 }]
+          env:
+            {{- include "arena.secretEnv" (list $ "WORKSPACES_KEY" "WORKSPACES_KEY") | nindent 12 }}
+            - { name: WORKSPACES_SLOTS, value: {{ .Values.workspaces.slots | quote }} }
+          resources: {{- toYaml .Values.workspaces.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL], add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, KILL] }
+          readinessProbe: { httpGet: { path: /health, port: http }, periodSeconds: 30 }
+          volumeMounts:
+            - { name: workspaces, mountPath: /workspaces }
+      volumes:
+        {{- include "arena.claim" (list "workspaces" "arena-workspaces") | nindent 8 }}
+---
+# Headless: the name is the pod's own address, so the app reaches each workspace's engine at its port.
+apiVersion: v1
+kind: Service
+metadata:
+  name: workspaces
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector: {{- include "arena.selector" (dict "root" $ "name" "workspaces") | nindent 4 }}
+  ports: [{ name: http, port: 4000, targetPort: http }]
+---
+# The app's pods in; out to the app, the gateway, DNS and the internet (not the cluster's private addresses).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: workspaces
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "workspaces") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "arena.selector" (dict "root" $ "name" "app") | nindent 14 }}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {{- include "arena.selector" (dict "root" $ "name" "app") | nindent 14 }}
+        - podSelector:
+            matchLabels: {{- include "arena.selector" (dict "root" $ "name" "litellm") | nindent 14 }}
+    - ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+    - to:
+        - ipBlock: { cidr: 0.0.0.0/0, except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16] }
+{{- end }}

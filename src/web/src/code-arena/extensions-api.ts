@@ -1,4 +1,4 @@
-import { api, ApiError } from '@/lib/api'
+import { api, ApiError, ideUrl } from './http'
 
 // VS Code extensions as code-arena keeps them (in its data folder): only what they declare, never their code. The page
 // lists them, installs a .vsix the person picks, imports VS Code's own from this computer, and reads the files their
@@ -187,7 +187,7 @@ export const enableExtension = (id: string, enabled: boolean) => api<ExtensionIt
 
 /** The address of one of an extension's files (an icon, a font): the version makes an update's a new one. */
 export const extensionFileUrl = (id: string, path: string, version?: string) =>
-  `/api/extensions/file?id=${encodeURIComponent(id)}&path=${encodeURIComponent(path)}${version ? `&v=${encodeURIComponent(version)}` : ''}`
+  ideUrl(`/api/extensions/file?id=${encodeURIComponent(id)}&path=${encodeURIComponent(path)}${version ? `&v=${encodeURIComponent(version)}` : ''}`)
 
 /** One of an extension's files as text (a theme, snippets: JSON with comments). */
 export async function extensionFileText(id: string, path: string, version?: string): Promise<string> {

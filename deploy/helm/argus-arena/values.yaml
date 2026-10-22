@@ -40,6 +40,7 @@ secrets:
   appKey: ""
   engineKey: ""
   argusKey: ""
+  workspacesKey: ""
   gatewayKey: ""
   hfToken: ""
   gitlabToken: ""
@@ -56,6 +57,7 @@ images:
   blender: { repository: arena-blender, tag: "" }
   laya: { repository: arena-laya, tag: "" }
   studio: { repository: arena-studio, tag: "" }
+  workspaces: { repository: arena-workspaces, tag: "" }
   postgres: { repository: pgvector/pgvector, tag: 0.8.0-pg16 }
   litellm: { repository: ghcr.io/berriai/litellm, tag: main-stable }
   llamacpp: { repository: ghcr.io/ggml-org/llama.cpp, tag: server-cuda }
@@ -202,6 +204,14 @@ sandbox:
   enabled: true
   resources: { limits: { cpu: "2", memory: 4Gi } }
 
+# Code Studio's workspaces: Code Arena's own engine per workspace, each as its own user (services/workspaces). Off
+# unless turned on. Its pod reaches the app, the gateway and the internet (the code host, package registries), not
+# the cluster's other services.
+workspaces:
+  enabled: false
+  slots: 32
+  resources: { requests: { cpu: "1", memory: 2Gi }, limits: { cpu: "4", memory: 16Gi } }
+
 # The chat's 3D models: Blender headless, as the sandbox is (no network, a read-only root), with more room.
 blender:
   enabled: false
@@ -247,6 +257,8 @@ persistence:
   vllmStatus: { size: 64Mi }
   directory: { size: 1Gi }
   sandbox: { size: 10Gi }
+  # Code Studio's workspaces: their clones, their engines' homes, what was not pushed yet.
+  workspaces: { size: 100Gi }
   blender: { size: 10Gi }
 
 ingress:

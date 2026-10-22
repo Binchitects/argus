@@ -47,6 +47,9 @@ spec:
             - { name: Engine__EmbedGpu, value: {{ .Values.engines.embedGpu | quote }} }
             - { name: Engine__LmcacheRemote, value: {{ .Values.engines.lmcacheRemote | quote }} }
             {{- include "arena.secretEnv" (list $ "Argus__AdminToken" "ARGUS_KEY") | nindent 12 }}
+            # Code Studio's workspaces (workspaces.enabled): the service and its key.
+            - { name: Workspaces__Url, value: "http://workspaces:4000" }
+            {{- include "arena.secretEnv" (list $ "Workspaces__Key" "WORKSPACES_KEY") | nindent 12 }}
             - { name: Argus__GitlabUrl, value: {{ .Values.gitlab.url | quote }} }
             # The browser agent's browser: none in the chart yet (compose's browser profile); the Browser tool says so.
             - { name: Browser__Url, value: {{ .Values.browser.url | quote }} }

@@ -196,10 +196,10 @@ internal sealed class HttpServer : IAsyncDisposable
     private readonly ConcurrentDictionary<Task, bool> _connections = new();
     private Task _accepting = Task.CompletedTask;
 
-    /// <summary>Listens on 127.0.0.1 at the port (0: a free one). Throws SocketException when it is taken.</summary>
-    public HttpServer(int port)
+    /// <summary>Listens on 127.0.0.1 (or <paramref name="on"/>) at the port (0: a free one). Throws SocketException when it is taken.</summary>
+    public HttpServer(int port, IPAddress? on = null)
     {
-        _listener = new TcpListener(IPAddress.Loopback, port);
+        _listener = new TcpListener(on ?? IPAddress.Loopback, port);
         _listener.Start();
     }
 

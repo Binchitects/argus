@@ -1,4 +1,4 @@
-import { api, ApiError } from '@/lib/api'
+import { api, ApiError, ideSocketUrl, ideUrl } from './http'
 import type { ServerInfo } from './lsp/client'
 
 /** A file or folder in a folder's listing; paths are relative to the working directory, with "/". */
@@ -127,7 +127,7 @@ export const searchQuery = (o: SearchOptions) => {
 
 export const readFile = (path: string) => api<OpenedFile>(`/api/file?path=${at(path)}`)
 /** A file of the folder as it is (a picture, a sound, a video), for the page to show or play: its cookie lets it through. */
-export const rawFileUrl = (path: string) => `/api/media?path=${at(path)}`
+export const rawFileUrl = (path: string) => ideUrl(`/api/media?path=${at(path)}`)
 /** Saves; with the version it was read at, refused (409 "changed") when the file changed on disk since. */
 export const writeFile = (path: string, text: string, version: string | null) => api<Saved>('/api/file', { body: { path, text, version } })
 export const createEntry = (path: string, kind: 'file' | 'dir') => api<{ path: string; kind: 'file' | 'dir' }>('/api/files/new', { body: { path, kind } })
@@ -370,8 +370,7 @@ export const closeTerminal = (id: string) => api('/api/terminals/close', { body:
  * A terminal's socket, on this page's own server: the browser sends this run's
  * key with it (the cookie the printed address set), as it does with every call.
  */
-export const terminalSocketUrl = (id: string, where: Location = window.location) =>
-  `${where.protocol === 'https:' ? 'wss' : 'ws'}://${where.host}/api/terminals/socket?id=${at(id)}`
+export const terminalSocketUrl = (id: string, where: Location = window.location) => ideSocketUrl(`/api/terminals/socket?id=${at(id)}`, where)
 
 /** The language servers code-arena knows, as found on this computer or named in config.json. */
 export const languageServerList = () => api<ServerInfo[]>('/api/lsp')
@@ -391,8 +390,7 @@ export const languageServerLogQuery = (id: string) => ({
 })
 
 /** A language server's socket (it starts as the socket opens, and stops as it closes): the Language Server Protocol's messages, one per text frame. */
-export const lspSocketUrl = (id: string, where: Location = window.location) =>
-  `${where.protocol === 'https:' ? 'wss' : 'ws'}://${where.host}/api/lsp/socket?server=${encodeURIComponent(id)}`
+export const lspSocketUrl = (id: string, where: Location = window.location) => ideSocketUrl(`/api/lsp/socket?server=${encodeURIComponent(id)}`, where)
 
 /** The folder a path is in ("" for the working directory). */
 export const parentOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '')

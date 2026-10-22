@@ -53,8 +53,8 @@ const tokenQuery = { queryKey: ['fixes', 'token'] as const, queryFn: ({ signal }
 const fixesQuery = { queryKey: ['fixes'] as const, queryFn: ({ signal }: { signal: AbortSignal }) => api<FixBrief[]>('/api/fixes', { signal }) }
 const fixQuery = (id: string) => ({ queryKey: ['fixes', id] as const, queryFn: ({ signal }: { signal: AbortSignal }) => api<Fix>(`/api/fixes/${id}`, { signal }) })
 
-/** The person's own GitLab token for Fix it: it reads the branch and opens the merge request as them. */
-function TokenCard() {
+/** The person's own GitLab token for Fix it and Code Studio: read, cloned, pushed and opened as them. */
+export function TokenCard() {
   const queryClient = useQueryClient()
   const token = useQuery(tokenQuery)
   const [value, setValue] = useState('')
@@ -75,7 +75,7 @@ function TokenCard() {
           <KeyRound className="size-4 text-muted-foreground" aria-hidden="true" /> Your GitLab token
         </CardTitle>
         <CardDescription>
-          Fix it reads the branch and opens the merge request as you, with your own token (scope api), never Argus's. It is kept encrypted and never shown again.
+          Fix it and Code Studio read, clone, push and open merge requests as you, with your own token (scope api), never Argus's. It is kept encrypted and never shown again.
         </CardDescription>
       </CardHeader>
       <CardContent>

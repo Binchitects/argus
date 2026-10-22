@@ -301,6 +301,11 @@ public static class IdentityWiring
         services.AddScoped<Vector.VectorSandbox>();
         services.AddScoped<Vector.VectorStore>();
         services.AddScoped<Chat.Tools.VectorTool>();
+        services.Configure<Code.Studio.WorkspacesOptions>(config.GetSection("Workspaces"));
+        services.AddScoped<Code.Studio.StudioWorkspaces>();
+        // A workspace's clone may take minutes, and an agent's turn streams for as long as it runs.
+        services.AddHttpClient(Code.Studio.StudioWorkspaces.Client, c => c.Timeout = Timeout.InfiniteTimeSpan);
+        services.AddHostedService<Code.Studio.StudioIdle>();
         services.AddSingleton<Chat.Tools.CalculatorTool>();
         services.AddSingleton<Chat.Tools.TimeTool>();
         services.AddSingleton<Chat.Tools.AskTool>();
@@ -520,6 +525,7 @@ public static class IdentityWiring
         Code.CodeEndpoints.MapCode(app);
         Code.ReviewRuleEndpoints.MapReviewRules(app);
         Code.CodeHostLinks.MapCodeHostLinks(app);
+        Code.Studio.StudioEndpoints.MapStudio(app);
         Chat.Tools.Browser.BrowserEndpoints.MapBrowser(app);
         Insights.DataSourceEndpoints.MapDataSources(app);
         Insights.DataEndpoints.MapData(app);

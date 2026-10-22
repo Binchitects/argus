@@ -37,6 +37,11 @@ internal sealed class Options
     public bool Browser { get; set; }
     /// <summary>The agent answers in the IDE's page (Markdown, links to files), not in this terminal.</summary>
     public bool Ide { get; set; }
+    /// <summary>
+    /// The IDE served for Arena's Code Studio (a workspace on the server): on every address of this machine, its key from
+    /// CODE_ARENA_TOKEN, each request with it as a bearer token (Arena signs the person in and sends it); no window.
+    /// </summary>
+    public bool Serve { get; set; }
 }
 
 /// <summary>What the program runs with: its streams, environment, folder and paths. Tests make their own.</summary>
@@ -125,6 +130,7 @@ internal static partial class Cli
               --port N               the IDE: listen on this port (default: a free one)
               --no-open              the IDE: print the address, do not open a window
               --browser              the IDE: in a tab of your browser, not a window of its own
+              --serve                the IDE for Arena's Code Studio: on every address, its key from CODE_ARENA_TOKEN
           -v, --version              the version, the licence and where the source is
           -h, --help
 
@@ -256,6 +262,10 @@ internal static partial class Cli
                     break;
                 case "--browser":
                     o.Browser = true;
+                    break;
+                case "--serve":
+                    o.Serve = true;
+                    o.NoOpen = true;
                     break;
                 case "--":
                     words.AddRange(args[(i + 1)..]);
@@ -542,7 +552,14 @@ internal static partial class Cli
                 WebApp app;
                 try
                 {
-                    app = WebApp.Start(rt, assets, o.Port ?? 0);
+                    // Served for Code Studio: the key Arena's workspace service gave it, at least 32 characters.
+                    var served = o.Serve ? env.Env("CODE_ARENA_TOKEN") is { Length: >= 32 } given ? given : throw new ArgumentException("--serve needs CODE_ARENA_TOKEN, at least 32 characters.") : null;
+                    app = WebApp.Start(rt, assets, o.Port ?? 0, served);
+                }
+                catch (ArgumentException e)
+                {
+                    ui.Error(e.Message);
+                    return 1;
                 }
                 catch (System.Net.Sockets.SocketException e)
                 {
@@ -556,9 +573,9 @@ internal static partial class Cli
                     var git = SystemPrompt.GitRoot(rt.Workspace.Root) is { } root && SystemPrompt.GitBranch(root) is { } branch ? $" ({branch})" : "";
                     env.Out.WriteLine($"Code Arena {Version}, the IDE for {rt.Workspace.Root}{git}: {rt.Model.Name}, mode {rt.Permissions.Mode.Name()}");
                     env.Out.WriteLine();
-                    env.Out.WriteLine($"  {app.Address}");
+                    env.Out.WriteLine(o.Serve ? $"  served on port {app.Port} for Code Studio" : $"  {app.Address}");
                     env.Out.WriteLine();
-                    env.Out.WriteLine("Only this machine can open it, and only with the key in the address. Ctrl+C stops it.");
+                    env.Out.WriteLine(o.Serve ? "Only with its key, as a bearer token. Ctrl+C stops it." : "Only this machine can open it, and only with the key in the address. Ctrl+C stops it.");
                     env.Out.WriteLine("The agent in this terminal instead: code-arena chat");
                     using var launcher = o.NoOpen ? null : Launcher.Write(env.Paths.DataDir, app.Port, app.Address);
                     // Its own window first (config.json "window": false, or --browser, a tab instead), else a tab.

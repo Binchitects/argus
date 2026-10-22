@@ -98,7 +98,7 @@ HELPER=python:3.13-slim
 EMBED_FILE=embed/nomic-embed-text-v1.5.f16.gguf
 GPU_SERVICES="llamacpp imagegen videogen gpu-exporter power-limits"
 # The services' users, for the volumes they write: repair puts a wrong owner right.
-VOLUME_OWNERS="engine:1000:1000 directory:1000:1000 sandbox:1000:1000 blender:1000:1000 audio:1000:1000 argus:10001:10001 loki:10001:10001 prometheus:65534:65534 alertmanager:65534:65534"
+VOLUME_OWNERS="engine:1000:1000 directory:1000:1000 sandbox:1000:1000 workspaces:0:0 blender:1000:1000 audio:1000:1000 argus:10001:10001 loki:10001:10001 prometheus:65534:65534 alertmanager:65534:65534"
 # .env and this script decide these, not the caller's shell.
 unset COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME COMPOSE_ENV_FILES
 export PODMAN_COMPOSE_WARNING_LOGS=false
@@ -1208,7 +1208,7 @@ make_env() {
   V[DOMAIN]="$NEW_DOMAIN"; V[ADMIN_EMAIL]="$NEW_EMAIL"; V[MODELS_DIR]="$NEW_MODELS_DIR"; V[MODEL]="$NEW_MODEL"; V[DATA_DIR]="$DATA_DIR"
   V[DEFAULT_MODELS]="$([[ "${NEW_DEFAULTS:-}" == download ]] && echo download)"
   # Every key compose cannot start without gets a secret of its own (the gateway's starts with sk-).
-  for key in DB_PASSWORD APP_KEY ENGINE_KEY ARGUS_KEY $(required_keys "$DEPLOY"); do [[ -n "${V[$key]:-}" ]] || V[$key]="$(gen_secret)"; done
+  for key in DB_PASSWORD APP_KEY ENGINE_KEY ARGUS_KEY WORKSPACES_KEY $(required_keys "$DEPLOY"); do [[ -n "${V[$key]:-}" ]] || V[$key]="$(gen_secret)"; done
   V[GATEWAY_KEY]="sk-$(gen_secret)"
   ADMIN_PASSWORD_NEW="$(gen_secret | cut -c1-24)"; V[ADMIN_PASSWORD]="$ADMIN_PASSWORD_NEW"
   tmp="$env.installer-new"
