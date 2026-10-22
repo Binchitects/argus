@@ -323,6 +323,10 @@ public static class IdentityWiring
         services.AddScoped<Insights.DataQuestions>();
         services.AddScoped<Decks.DeckMaker>();
         services.AddScoped<Chat.Tools.DeckTool>();
+        // Agent Studio: its runs (a singleton that runs them in the background, and its schedules), and the step runner.
+        services.AddSingleton<Studio.StudioRuns>();
+        services.AddHostedService(sp => sp.GetRequiredService<Studio.StudioRuns>());
+        services.AddScoped<Studio.FlowRunner>();
         services.AddScoped<Chat.Tools.DataTool>();
         services.AddSingleton<Insights.BoardRefresher>();
         services.AddHostedService(sp => sp.GetRequiredService<Insights.BoardRefresher>());
@@ -503,6 +507,7 @@ public static class IdentityWiring
         Insights.DataSourceEndpoints.MapDataSources(app);
         Insights.DataEndpoints.MapData(app);
         Decks.DeckEndpoints.MapDecks(app);
+        Studio.StudioEndpoints.MapStudio(app);
         Apps.AppEndpoints.MapApps(app);
         Plans.PlanEndpoints.MapPlans(app);
         app.MapForwardAuth();

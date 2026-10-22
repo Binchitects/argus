@@ -26,7 +26,7 @@ public sealed record QueueRequest(string? Content, Guid[]? Attachments = null, b
 /// before it ends, however it ended (AnswerJobs asks for the next one). A message that
 /// waits after a restart goes once the app is back.
 /// </summary>
-public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJobs jobs, RoomHub rooms, ILogger<QueuedMessages> logger)
+public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJobs jobs, RoomHub rooms, Studio.StudioRuns studio, ILogger<QueuedMessages> logger)
 {
     /// <summary>How many may wait in one chat.</summary>
     public const int Max = 10;
@@ -97,8 +97,12 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
                 await db.SaveChangesAsync();
                 if (job is null)
                 {
-                    // For the people only: saved, and the next in line goes.
+                    // For the people only: saved, and the next in line goes; a room's workflows hear it.
                     rooms.Said(c.Id, question.Id);
+                    if (c.IsRoom && question.AuthorId is { } author)
+                    {
+                        studio.RoomMessage(c.Id, author, question.Content);
+                    }
                     attempt = -1;
                     continue;
                 }

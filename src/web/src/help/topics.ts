@@ -254,6 +254,34 @@ export const topics = {
     manual: { doc: 'decks', section: 'changing-it' },
   },
 
+  studio: {
+    title: 'Agent Studio',
+    about: 'Workflows that do the work as you: a trigger, steps that think, decide and wait for your yes, and what they give out. Every run kept, to replay.',
+    parts: [
+      { name: 'Your workflows', text: 'Each with its trigger, whether it is on, and when it last ran.' },
+      { name: 'Shared with you', text: 'Workflows others shared: fill their form or run them; they run as their owner.' },
+      { name: 'Templates', text: 'A morning digest, a review of each merge request, a room\'s triage, a request form, one by one: a workflow to start from.' },
+      { name: 'From a scheduled task', text: 'One of your scheduled tasks as a workflow: its trigger, its question and tools, its email and GitLab answer.' },
+    ],
+    tasks: [
+      { title: 'Review each merge request', steps: ['Choose the template **Review each merge request**.', 'In its trigger, copy its address; press **Save** and copy the secret shown.', 'In GitLab, add a webhook with that address and secret token, for merge request events.', 'Switch it **On**.'] },
+    ],
+    manual: { doc: 'studio', section: 'making-a-workflow' },
+  },
+
+  workflow: {
+    title: 'A workflow',
+    about: 'Its trigger and steps on the canvas, changed in the panel beside it; its runs, each to replay step by step.',
+    parts: [
+      { name: 'The canvas', text: 'The trigger on top, the steps in order: an **If** with its Yes and No steps side by side, a **For each** with its steps framed. **+** adds a step there.' },
+      { name: 'The panel', text: 'What is chosen: its settings. **{}** puts a value in a text: the input, a field, what a step before gave.' },
+      { name: 'On, Save, Run now', text: '**On** lets its trigger run it; **Save** keeps the changes; **Run now** runs it, with words or its fields.' },
+      { name: 'Runs', text: 'Every run; open one to **Replay** it on the canvas or read its **Timeline**. A run that asks you waits for **Yes, go on** or **No, stop it**.' },
+    ],
+    tasks: [{ title: 'Ask before it posts', steps: ['Press **+** before the step that posts.', 'Choose **Ask me first** and write the question, with the draft in it ({{draft.text}}).', 'Save. Each run now waits for your yes, and a notification tells you.'] }],
+    manual: { doc: 'studio', section: 'steps' },
+  },
+
   tasks: {
     title: 'Scheduled tasks',
     about: 'Questions asked for you on a schedule or on an event, with your model and tools: a morning digest, a weekly report, a review of each merge request.',

@@ -167,6 +167,13 @@ public sealed class FakeModel : HttpMessageHandler
             chunks = [Delta(new JsonObject { ["content"] = $"```json\n{{\"findings\": {findings}}}\n```" }), Finish("stop"), Usage(300, 0, 40)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
+        // Asked for JSON only (Agent Studio's ask step): the JSON a "[json:…]" marker in the question holds.
+        if (system0.EndsWith("Answer with JSON only, no other words.", StringComparison.Ordinal)
+            && System.Text.RegularExpressions.Regex.Match(lastUser, @"\[json:(.*)\]", System.Text.RegularExpressions.RegexOptions.Singleline) is { Success: true } jsonMarker)
+        {
+            chunks = [Delta(new JsonObject { ["content"] = jsonMarker.Groups[1].Value }), Finish("stop"), Usage(100, 0, 20)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
         // Decks: a deck of a title slide, points (a picture), a chart and an odd layout; "[nojson]" answers in words the
         // first time. A change appends a slide on costs to the deck it was given (each picture's fileId dropped, as small
         // models do), or with "[retitle]" renames it.

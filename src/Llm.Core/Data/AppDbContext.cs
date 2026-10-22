@@ -66,6 +66,9 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Decks.Deck> Decks => Set<Decks.Deck>();
     public DbSet<Decks.DeckVersion> DeckVersions => Set<Decks.DeckVersion>();
     public DbSet<Decks.DeckTemplate> DeckTemplates => Set<Decks.DeckTemplate>();
+    public DbSet<Studio.Workflow> Workflows => Set<Studio.Workflow>();
+    public DbSet<Studio.WorkflowRun> WorkflowRuns => Set<Studio.WorkflowRun>();
+    public DbSet<Studio.WorkflowRunStep> WorkflowRunSteps => Set<Studio.WorkflowRunStep>();
     public DbSet<ScheduledRun> ScheduledRuns => Set<ScheduledRun>();
     public DbSet<TaskEvent> TaskEvents => Set<TaskEvent>();
     public DbSet<Notification> Notifications => Set<Notification>();
@@ -606,6 +609,41 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.ToTable("deck_templates");
             e.Property(x => x.Name).HasMaxLength(100);
             e.HasIndex(x => x.Name).IsUnique();
+        });
+        builder.Entity<Studio.Workflow>(e =>
+        {
+            e.ToTable("workflows");
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.Property(x => x.Reach).HasMaxLength(16);
+            e.Property(x => x.SecretHash).HasMaxLength(64);
+            e.Property(x => x.GroupIds).HasDefaultValueSql("'{}'::uuid[]");
+            e.HasIndex(x => x.OwnerId);
+            e.HasIndex(x => x.NextRunAt);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Studio.WorkflowRun>(e =>
+        {
+            e.ToTable("workflow_runs");
+            e.Property(x => x.Trigger).HasMaxLength(16);
+            e.Property(x => x.Status).HasMaxLength(16);
+            e.Property(x => x.Error).HasMaxLength(2000);
+            e.HasIndex(x => new { x.WorkflowId, x.StartedAt });
+            e.HasIndex(x => x.Status);
+            e.HasOne<Studio.Workflow>().WithMany().HasForeignKey(x => x.WorkflowId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Studio.WorkflowRunStep>(e =>
+        {
+            e.ToTable("workflow_run_steps");
+            e.Property(x => x.Path).HasMaxLength(500);
+            e.Property(x => x.StepId).HasMaxLength(50);
+            e.Property(x => x.Kind).HasMaxLength(16);
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.Status).HasMaxLength(16);
+            e.Property(x => x.Link).HasMaxLength(500);
+            e.Property(x => x.Error).HasMaxLength(2000);
+            e.HasIndex(x => new { x.RunId, x.Path }).IsUnique();
+            e.HasOne<Studio.WorkflowRun>().WithMany().HasForeignKey(x => x.RunId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<TaskTemplate>(e =>
         {
