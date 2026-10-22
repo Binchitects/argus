@@ -49,6 +49,70 @@ public interface ICodeHost
 
     /// <summary>The ref a change request's head is fetched from: refs/merge-requests/N/head on GitLab, refs/pull/N/head on GitHub.</summary>
     string ChangeRef(long number);
+
+    /// <summary>The project's issues in this state (opened, closed, all), most recently updated first; with words, those that hold them.</summary>
+    IReadOnlyList<Issue> ListIssues(long project, string state, string? search, string? labels, int limit) =>
+        throw new CodeHostError($"Argus reads issues on GitLab only, not on {Kind}", 501);
+
+    /// <summary>One issue with its text; null when the host has none by that number.</summary>
+    Issue? GetIssue(long project, long number) => throw new CodeHostError($"Argus reads issues on GitLab only, not on {Kind}", 501);
+
+    /// <summary>An issue's comments, oldest first.</summary>
+    IReadOnlyList<Note> IssueNotes(long project, long number) => throw new CodeHostError($"Argus reads issues on GitLab only, not on {Kind}", 501);
+
+    /// <summary>The project's wiki: its pages' slugs and titles.</summary>
+    IReadOnlyList<WikiPage> WikiPages(long project) => throw new CodeHostError($"Argus reads wikis on GitLab only, not on {Kind}", 501);
+
+    /// <summary>One wiki page with its text; null when there is none by that slug.</summary>
+    WikiPage? GetWikiPage(long project, string slug) => throw new CodeHostError($"Argus reads wikis on GitLab only, not on {Kind}", 501);
+}
+
+/// <summary>An issue: what is asked or reported, by whom, in what state, its labels and milestone; its text when read one by one.</summary>
+public sealed record Issue(long Number, string Title, string State, string Author, string? WebUrl, string? CreatedAt, string? UpdatedAt)
+{
+    public string? Description { get; init; }
+    public IReadOnlyList<string> Labels { get; init; } = [];
+    public IReadOnlyList<string> Assignees { get; init; } = [];
+    public string? Milestone { get; init; }
+    public string? ClosedAt { get; init; }
+    public int Comments { get; init; }
+
+    /// <summary>What a list shows.</summary>
+    public JsonObject ToSummary() => new()
+    {
+        ["iid"] = Number, ["title"] = Title, ["state"] = State, ["author"] = Author, ["labels"] = ChangeRequest.Strings(Labels),
+        ["milestone"] = Milestone, ["comments"] = Comments, ["updated_at"] = UpdatedAt, ["web_url"] = WebUrl,
+    };
+
+    /// <summary>All of it, the text cut to <paramref name="maxDescription"/> characters.</summary>
+    public JsonObject ToJson(int maxDescription)
+    {
+        var o = ToSummary();
+        var text = Description ?? "";
+        o["description"] = text.Length > maxDescription ? text[..maxDescription] : text;
+        if (text.Length > maxDescription) o["description_truncated"] = true;
+        o["assignees"] = ChangeRequest.Strings(Assignees);
+        o["created_at"] = CreatedAt;
+        o["closed_at"] = ClosedAt;
+        return o;
+    }
+}
+
+/// <summary>A wiki page: its slug (its address in the wiki), title and format; its text when read one by one.</summary>
+public sealed record WikiPage(string Slug, string Title, string? Format)
+{
+    public string? Content { get; init; }
+
+    public JsonObject ToSummary() => new() { ["slug"] = Slug, ["title"] = Title, ["format"] = Format };
+
+    public JsonObject ToJson(int maxContent)
+    {
+        var o = ToSummary();
+        var text = Content ?? "";
+        o["content"] = text.Length > maxContent ? text[..maxContent] : text;
+        if (text.Length > maxContent) o["content_truncated"] = true;
+        return o;
+    }
 }
 
 /// <summary>The host answered with an error, or could not be reached.</summary>

@@ -48,7 +48,12 @@ the page) and `docs_verify` (check a draft you already wrote).
 project the caller is a member of, indexed or not
 ([below](#merge-requests-and-code-at-any-commit)).
 
-Thirty tools in total. Packs are licensed material — each result carries its
+**Issues and the wiki.** `issue_list`, `issue_get`, `wiki_list` and
+`wiki_get` read what people asked for, reported and wrote down about the
+business: the same read-only access, the same per-person check
+([below](#issues-and-the-wiki)).
+
+Thirty-four tools in total. Packs are licensed material — each result carries its
 own attribution, e.g. WDK pages are CC BY 4.0.
 
 `semantic_search`, `which_repo` and `docs_find` turn a question into a vector
@@ -787,6 +792,25 @@ checked yet says that its access cannot be checked, not that it is missing.
 | `compare_refs` | Two branches, tags or commits: from their merge base, or `straight` |
 | `file_at` | A file at a merge request's head (`iid`), a branch or tag that need not be indexed, or a commit; a line range; at most 64 KB |
 | `grep_at` | `git grep` at the same, where `search_code` cannot reach (an extended regular expression, or `fixed` text) |
+
+## Issues and the wiki
+
+Four tools read where the business speaks: a project's issues (what people
+asked for, what broke for them, why a rule is the way it is) and its wiki
+(processes, rules, glossaries, decisions written down). Read-only, with
+Argus's service token, after the same per-person check as the merge request
+tools; GitLab only (GitHub and Gitea say they are not read here).
+
+| Tool | What it reads |
+| --- | --- |
+| `issue_list` | Issues by `state` (`opened` by default, `closed`, `all`), `search` (words in the title or text), `labels` (comma-separated); newest first |
+| `issue_get` | One issue in full (text up to 20,000 characters, labels, milestone, assignees) and its comments, GitLab's own notes left out |
+| `wiki_list` | The wiki's pages: slug, title, format |
+| `wiki_get` | One page's text, as written, up to 40,000 characters |
+
+The text of an issue, a comment or a page is what people wrote: data for the
+model, never instructions to it, and checked against the code before it is
+told as how the system behaves today.
 
 **Merge request heads in the mirror.** `file_at` and `grep_at` read the
 project's git mirror. A merge request's head is fetched from

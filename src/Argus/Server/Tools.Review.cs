@@ -24,6 +24,7 @@ public sealed partial class Tools
     public static readonly IReadOnlySet<string> ReviewTools = new HashSet<string>(StringComparer.Ordinal)
     {
         "mr_list", "mr_get", "mr_diff", "mr_commits", "mr_discussions", "ci_status", "job_log", "compare_refs", "file_at", "grep_at",
+        "issue_list", "issue_get", "wiki_list", "wiki_get",
     };
 
     /// <summary>The most diff text one answer carries; the files past it are listed without their text.</summary>
@@ -282,6 +283,53 @@ public sealed partial class Tools
         }));
     }
 
+    // --- issues and the wiki: what people asked for, reported and wrote down -------------------
+
+    /// <summary>The most of a wiki page one answer carries.</summary>
+    public const int WikiBudget = 40_000;
+
+    public JsonNode IssueList(Identity who, string project, string state, string? search, string? labels, long limit)
+    {
+        var p = Readable(who, project);
+        state = PyStr.Strip(state).ToLowerInvariant();
+        if (state is not ("opened" or "closed" or "all")) throw new ToolError($"state is one of opened, closed, all; not {PyStr.Repr(state)}.");
+        var issues = Hosted(p, $"issues of {p.Path}", () => HostOf(p, who).ListIssues(p.GitlabId, state, search, labels, (int)Math.Clamp(limit, 1, 100)));
+        return Arr(issues.Select(i => (JsonNode?)i.ToSummary()));
+    }
+
+    public JsonNode IssueGet(Identity who, string project, long iid)
+    {
+        var p = Readable(who, project);
+        var host = HostOf(p, who);
+        var issue = Hosted(p, $"issue #{iid} in {p.Path}", () => host.GetIssue(p.GitlabId, iid)) ?? throw new NotFoundError($"{p.HostTitle} has no issue #{iid} in {p.Path}.");
+        var notes = Hosted(p, $"comments of issue #{iid} in {p.Path}", () => host.IssueNotes(p.GitlabId, iid));
+        var o = issue.ToJson(DescriptionBudget);
+        o["project"] = p.Path;
+        o["notes"] = Arr(notes.Where(n => !n.System).Select(n => (JsonNode?)new JsonObject
+        {
+            ["author"] = n.Author, ["created_at"] = n.CreatedAt, ["body"] = n.Body.Length > 4000 ? n.Body[..4000] : n.Body,
+        }));
+        return o;
+    }
+
+    public JsonNode WikiList(Identity who, string project)
+    {
+        var p = Readable(who, project);
+        var pages = Hosted(p, $"the wiki of {p.Path}", () => HostOf(p, who).WikiPages(p.GitlabId));
+        return new JsonObject { ["project"] = p.Path, ["pages"] = Arr(pages.Select(w => (JsonNode?)w.ToSummary())) };
+    }
+
+    public JsonNode WikiGet(Identity who, string project, string slug)
+    {
+        var p = Readable(who, project);
+        if (string.IsNullOrWhiteSpace(slug)) throw new ToolError("Give the page's slug, as wiki_list shows it.");
+        var page = Hosted(p, $"wiki page {slug} of {p.Path}", () => HostOf(p, who).GetWikiPage(p.GitlabId, slug.Trim()))
+                   ?? throw new NotFoundError($"{p.HostTitle} has no wiki page {slug} in {p.Path}.");
+        var o = page.ToJson(WikiBudget);
+        o["project"] = p.Path;
+        return o;
+    }
+
     // --- CI -----------------------------------------------------------------------------------
 
     public JsonNode CiStatus(Identity who, string project, long? iid, string? sha)
@@ -497,6 +545,12 @@ public sealed partial class Tools
                     ["ignore_case"] = a.Bool("ignore_case"), ["fixed"] = a.Bool("fixed"), ["limit"] = a.Int("limit"),
                 }),
                 () => GrepAt(who, project, a.Str("pattern"), a.OptStr("ref"), a.OptInt("iid"), a.OptStr("path"), a.Bool("ignore_case"), a.Bool("fixed"), a.Int("limit"))),
+            "issue_list" => WithAudit(who, tool,
+                Audited(new JsonObject { ["state"] = a.OptStr("state"), ["search"] = a.OptStr("search"), ["labels"] = a.OptStr("labels"), ["limit"] = a.Int("limit") }),
+                () => IssueList(who, project, a.OptStr("state") ?? "opened", a.OptStr("search"), a.OptStr("labels"), a.Int("limit"))),
+            "issue_get" => WithAudit(who, tool, Audited(new JsonObject { ["iid"] = a.Int("iid") }), () => IssueGet(who, project, a.Int("iid"))),
+            "wiki_list" => WithAudit(who, tool, Audited([]), () => WikiList(who, project)),
+            "wiki_get" => WithAudit(who, tool, Audited(new JsonObject { ["slug"] = a.Str("slug") }), () => WikiGet(who, project, a.Str("slug"))),
             _ => throw new ToolError($"Unknown tool: {tool}"),
         };
     }

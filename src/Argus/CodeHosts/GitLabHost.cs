@@ -156,6 +156,42 @@ public sealed class GitLabHost(GitLabConfig cfg, HttpClient? client = null) : IC
         }).ToList()))
         .ToList();
 
+    public IReadOnlyList<Issue> ListIssues(long project, string state, string? search, string? labels, int limit)
+    {
+        var query = new List<(string, string)> { ("state", state), ("order_by", "updated_at"), ("sort", "desc") };
+        if (!string.IsNullOrWhiteSpace(search)) query.Add(("search", search.Trim()));
+        if (!string.IsNullOrWhiteSpace(labels)) query.Add(("labels", labels.Trim()));
+        return (Pages($"{Project(project)}/issues", query, limit) ?? throw Missing($"project {project}")).Select(IssueOf).ToList();
+    }
+
+    public Issue? GetIssue(long project, long number) =>
+        Json($"{Project(project)}/issues/{number}") is JsonObject i ? IssueOf(i) : null;
+
+    public IReadOnlyList<Note> IssueNotes(long project, long number) =>
+        (Pages($"{Project(project)}/issues/{number}/notes", [("sort", "asc"), ("order_by", "created_at")], 200) ?? throw Missing($"issue #{number}"))
+        .Select(n => new Note(Long(n["id"]), User(n["author"]), Str(n["body"]) ?? "", Str(n["created_at"]), Bool(n["system"]), false, false, null))
+        .ToList();
+
+    public IReadOnlyList<WikiPage> WikiPages(long project) =>
+        (Json($"{Project(project)}/wikis") as JsonArray ?? throw Missing($"wiki of project {project}"))
+        .OfType<JsonObject>().Select(w => new WikiPage(Str(w["slug"]) ?? "", Str(w["title"]) ?? "", Str(w["format"]))).ToList();
+
+    public WikiPage? GetWikiPage(long project, string slug) =>
+        Json($"{Project(project)}/wikis/{Uri.EscapeDataString(slug)}") is JsonObject w
+            ? new WikiPage(Str(w["slug"]) ?? slug, Str(w["title"]) ?? slug, Str(w["format"])) { Content = Str(w["content"]) }
+            : null;
+
+    static Issue IssueOf(JsonObject i) =>
+        new(Long(i["iid"]), Str(i["title"]) ?? "", Str(i["state"]) ?? "", User(i["author"]), Str(i["web_url"]), Str(i["created_at"]), Str(i["updated_at"]))
+        {
+            Description = Str(i["description"]),
+            Labels = (i["labels"] as JsonArray ?? []).Select(l => l is JsonObject o ? Str(o["name"]) ?? "" : Str(l) ?? "").Where(l => l.Length > 0).ToList(),
+            Assignees = (i["assignees"] as JsonArray ?? []).Select(User).Where(u => u.Length > 0).ToList(),
+            Milestone = Str((i["milestone"] as JsonObject)?["title"]),
+            ClosedAt = Str(i["closed_at"]),
+            Comments = (int)Long(i["user_notes_count"]),
+        };
+
     public IReadOnlyList<Pipeline> Pipelines(long project, long? number, string? sha)
     {
         var rows = number is { } n

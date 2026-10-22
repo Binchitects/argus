@@ -56,7 +56,15 @@ Argus's read-only credential and checked per person, indexed or not — 10 tools
 | `compare_refs` | Two branches, tags or commits compared, without a merge request |
 | `file_at` · `grep_at` | A file, or a search, at a merge request's head, a branch nobody indexed, or a commit |
 
-**30 tools in total**. The first twenty are contract-tested against a live
+**Issues and the wiki**, where the business speaks, read the same way — 4
+tools ([README](README.md#issues-and-the-wiki)):
+
+| Tool | Answers |
+|---|---|
+| `issue_list` · `issue_get` | A project's issues by state, words or labels; one in full with its comments |
+| `wiki_list` · `wiki_get` | The wiki's pages; one page's text |
+
+**34 tools in total**. The first twenty are contract-tested against a live
 server — see [Checking it](#checking-it); the merge request tools against a
 fake GitLab in the tests, and against the test GitLab's seeded merge requests.
 

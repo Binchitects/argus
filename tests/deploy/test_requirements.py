@@ -38,6 +38,8 @@ class RequirementsTests(unittest.TestCase):
         self.fake("nvidia-smi", 'exit 9')
         self.fake("systemctl", 'echo "systemctl $*" >> "$CALLS"')
         self.fake("timedatectl", 'echo yes')
+        # The host's own listeners are not this test's: nothing listens, unless a test says a port is taken (TAKEN_PORT, by nginx).
+        self.fake("ss", 'case "$*" in *"sport = :${TAKEN_PORT:-none}"*) echo "LISTEN 0 511 0.0.0.0:$TAKEN_PORT 0.0.0.0:* users:((\\"nginx\\",pid=1,fd=6))" ;; esac')
         # Offline: the vendors' repositories are out of reach, so the system's own packages are used.
         self.fake("curl", 'exit 7')
         # apt-get installs nvidia-container-toolkit by making nvidia-ctk, which logs what it is asked.
@@ -69,6 +71,12 @@ class RequirementsTests(unittest.TestCase):
         self.assertIn("packages: apt", r.stdout)
         self.assertIn("GPU: none asked for (--cpu-only)", r.stdout)
         self.assertIn("Every requirement is met.", r.stdout)
+
+    def test_A_port_something_listens_on_is_named_with_what_listens(self):
+        r = self.run_req("--cpu-only", extra={"TAKEN_PORT": "18443"})
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertIn("ok     port 18080 is free", r.stdout)
+        self.assertIn("port 18443 is taken by nginx: --http-port / --https-port another", r.stdout)
 
     def test_A_card_without_its_driver_is_named_with_the_fix_and_the_way_round_it(self):
         r = self.run_req()

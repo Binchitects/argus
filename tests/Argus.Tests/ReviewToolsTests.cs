@@ -102,6 +102,48 @@ public sealed class ReviewToolsTests : IAsyncLifetime
         return structured is JsonObject o && o.Count == 1 && o["result"] is JsonArray list ? list : structured;
     }
 
+    [Fact]
+    public async Task Issues_and_the_wiki_are_read_with_their_comments_and_pages_and_only_ever_read()
+    {
+        var eal = _gitlab[ReviewFixture.EalCore];
+        JsonObject Issue(long iid, string title, string state, string updated, string description, params string[] labels) => new()
+        {
+            ["iid"] = iid, ["title"] = title, ["state"] = state, ["description"] = description, ["author"] = new JsonObject { ["username"] = "bob" },
+            ["labels"] = new JsonArray([.. labels.Select(l => (JsonNode)l)]), ["milestone"] = new JsonObject { ["title"] = "Q4" }, ["user_notes_count"] = 2,
+            ["created_at"] = "2026-09-01T10:00:00Z", ["updated_at"] = updated, ["web_url"] = $"https://gitlab.test/root/eal-core/-/issues/{iid}",
+        };
+        eal.Issues[1] = Issue(1, "Refunds round half up", "closed", "2026-10-01T10:00:00Z", "Finance asks refunds to round half up, as invoices do.", "finance");
+        eal.Issues[2] = Issue(2, "Free shipping over 50", "opened", "2026-10-05T10:00:00Z", "Orders of 50 or more ship free.", "pricing");
+        eal.IssueNotes[1] =
+        [
+            new JsonObject { ["id"] = 10, ["body"] = "Agreed with finance on 3 Sept.", ["author"] = new JsonObject { ["username"] = "alice" }, ["created_at"] = "2026-09-03T10:00:00Z", ["system"] = false },
+            new JsonObject { ["id"] = 11, ["body"] = "changed the label", ["author"] = new JsonObject { ["username"] = "alice" }, ["created_at"] = "2026-09-04T10:00:00Z", ["system"] = true },
+        ];
+        eal.Wiki["glossary"] = ("Glossary", "**Basket**: what a customer is about to buy.");
+        eal.Wiki["pricing"] = ("Pricing", new string('x', Tools.WikiBudget + 10));
+
+        var open = (await Answer("issue_list", new { project = "root/eal-core" })).AsArray();
+        Assert.Equal([2L], open.Select(i => i!["iid"]!.GetValue<long>()));
+        Assert.Equal(("Free shipping over 50", "Q4", 2), (open[0]!["title"]!.GetValue<string>(), open[0]!["milestone"]!.GetValue<string>(), open[0]!["comments"]!.GetValue<int>()));
+        Assert.Equal([2L, 1L], (await Answer("issue_list", new { project = "root/eal-core", state = "all" })).AsArray().Select(i => i!["iid"]!.GetValue<long>()));
+        Assert.Equal([1L], (await Answer("issue_list", new { project = "root/eal-core", state = "all", search = "refunds" })).AsArray().Select(i => i!["iid"]!.GetValue<long>()));
+        Assert.Equal([2L], (await Answer("issue_list", new { project = "root/eal-core", state = "all", labels = "pricing" })).AsArray().Select(i => i!["iid"]!.GetValue<long>()));
+        Assert.True((await Call("issue_list", new { project = "root/eal-core", state = "merged" }))["isError"]!.GetValue<bool>());
+
+        var refunds = await Answer("issue_get", new { project = "root/eal-core", iid = 1 });
+        Assert.Equal(("Finance asks refunds to round half up, as invoices do.", "root/eal-core"), (refunds["description"]!.GetValue<string>(), refunds["project"]!.GetValue<string>()));
+        // The people's comments, not GitLab's own notes.
+        Assert.Equal(["Agreed with finance on 3 Sept."], refunds["notes"]!.AsArray().Select(n => n!["body"]!.GetValue<string>()));
+        Assert.True((await Call("issue_get", new { project = "root/eal-core", iid = 9 }))["isError"]!.GetValue<bool>());
+
+        Assert.Equal(["glossary", "pricing"], (await Answer("wiki_list", new { project = "root/eal-core" }))["pages"]!.AsArray().Select(p => p!["slug"]!.GetValue<string>()));
+        Assert.Equal("**Basket**: what a customer is about to buy.", (await Answer("wiki_get", new { project = "root/eal-core", slug = "glossary" }))["content"]!.GetValue<string>());
+        var long_ = await Answer("wiki_get", new { project = "root/eal-core", slug = "pricing" });
+        Assert.Equal((Tools.WikiBudget, true), (long_["content"]!.GetValue<string>().Length, long_["content_truncated"]!.GetValue<bool>()));
+        // Read only: Argus never wrote to GitLab.
+        Assert.All(_gitlab.Requests, r => Assert.Equal("GET", r.Method));
+    }
+
     async Task<HttpResponseMessage> Review(string pathAndQuery, string? email = Alpha, string token = Chat)
     {
         var req = new HttpRequestMessage(HttpMethod.Get, pathAndQuery);
@@ -328,6 +370,10 @@ public sealed class ReviewToolsTests : IAsyncLifetime
         ["compare_refs"] = new { project = "root/driver-shim", from = "main", to = "shim-secret" },
         ["file_at"] = new { project = "root/driver-shim", @ref = "shim-secret", path = "src/shim.c" },
         ["grep_at"] = new { project = "root/driver-shim", @ref = "shim-secret", pattern = "SHIM_ONLY" },
+        ["issue_list"] = new { project = "root/driver-shim" },
+        ["issue_get"] = new { project = "root/driver-shim", iid = 1 },
+        ["wiki_list"] = new { project = "root/driver-shim" },
+        ["wiki_get"] = new { project = "root/driver-shim", slug = "pricing" },
     };
 
     [Fact]

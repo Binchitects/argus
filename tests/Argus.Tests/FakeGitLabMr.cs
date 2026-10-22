@@ -131,6 +131,30 @@ public sealed class FakeGitLabMr : IAsyncDisposable
                 .Select(m => (JsonNode)m.Json());
             return Paged(req, list);
         });
+        _app.MapGet("/api/v4/projects/{id:long}/issues", (long id, HttpRequest req, string? state, string? search, string? labels) =>
+        {
+            if (!_projects.TryGetValue(id, out var p)) return NotFound("Project");
+            var wanted = (labels ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var list = p.Issues.Values
+                .Where(i => state is null or "all" || i["state"]!.GetValue<string>() == state)
+                .Where(i => search is null || (i["title"]!.GetValue<string>() + " " + i["description"]?.GetValue<string>()).Contains(search, StringComparison.OrdinalIgnoreCase))
+                .Where(i => wanted.All(l => (i["labels"] as JsonArray ?? []).Any(x => x!.GetValue<string>() == l)))
+                .OrderByDescending(i => i["updated_at"]!.GetValue<string>(), StringComparer.Ordinal)
+                .Select(i => (JsonNode)i);
+            return Paged(req, list);
+        });
+        _app.MapGet("/api/v4/projects/{id:long}/issues/{iid:long}", (long id, long iid) =>
+            _projects.TryGetValue(id, out var p) && p.Issues.TryGetValue(iid, out var i) ? JsonOf(i) : NotFound("Issue"));
+        _app.MapGet("/api/v4/projects/{id:long}/issues/{iid:long}/notes", (long id, long iid, HttpRequest req) =>
+            _projects.TryGetValue(id, out var p) && p.Issues.ContainsKey(iid) ? Paged(req, p.IssueNotes.GetValueOrDefault(iid, [])) : NotFound("Issue"));
+        _app.MapGet("/api/v4/projects/{id:long}/wikis", (long id) =>
+            _projects.TryGetValue(id, out var p)
+                ? JsonOf(new JsonArray([.. p.Wiki.OrderBy(w => w.Key, StringComparer.Ordinal).Select(w => (JsonNode)new JsonObject { ["slug"] = w.Key, ["title"] = w.Value.Title, ["format"] = "markdown" })]))
+                : NotFound("Project"));
+        _app.MapGet("/api/v4/projects/{id:long}/wikis/{slug}", (long id, string slug) =>
+            _projects.TryGetValue(id, out var p) && p.Wiki.TryGetValue(slug, out var w)
+                ? JsonOf(new JsonObject { ["slug"] = slug, ["title"] = w.Title, ["format"] = "markdown", ["content"] = w.Content })
+                : NotFound("Wiki Page"));
         _app.MapGet("/api/v4/projects/{id:long}/merge_requests/{iid:long}", (long id, long iid) =>
             Mr(id, iid) is { } m ? JsonOf(m.Json()) : NotFound("Merge Request"));
         _app.MapGet("/api/v4/projects/{id:long}/merge_requests/{iid:long}/diffs", (long id, long iid, HttpRequest req) =>
@@ -232,6 +256,11 @@ public sealed class FakeProject
     public string Bare { get; }
     public ConcurrentDictionary<long, FakeMr> Mrs { get; } = new();
     public List<FakePipeline> Pipelines { get; } = [];
+    /// <summary>Its issues as GitLab answers them (iid, title, description, state, labels, author ...), and each one's notes.</summary>
+    public ConcurrentDictionary<long, JsonObject> Issues { get; } = new();
+    public ConcurrentDictionary<long, List<JsonObject>> IssueNotes { get; } = new();
+    /// <summary>Its wiki's pages by slug: title, format and content.</summary>
+    public ConcurrentDictionary<string, (string Title, string Content)> Wiki { get; } = new();
 
     internal FakeProject(FakeGitLabMr gitlab, long id, string path, string visibility, string dir)
     {
