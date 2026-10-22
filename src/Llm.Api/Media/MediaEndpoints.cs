@@ -16,10 +16,12 @@ namespace Llm.Api.Media;
 /// <param name="Consent">Speak in a sample's voice: the person says the voice is theirs, or that they may use it.</param>
 /// <param name="Style">Draw: the drawing's style (flat, line, isometric...).</param>
 /// <param name="Trace">Trace: how the picture is traced (illustration, detailed, icon, logo).</param>
-/// <param name="Format">Export: png, gif, mp4 or webm; with <paramref name="Side"/> (the longer side, pixels), <paramref name="Fps"/> and <paramref name="Background"/> (an MP4's).</param>
+/// <param name="Format">Export: png, gif, mp4, webm or sprite; with <paramref name="Side"/> (the longer side, pixels), <paramref name="Fps"/> and <paramref name="Background"/> (an MP4's).</param>
+/// <param name="Animate">Draw and trace: a new drawing moves as its words say, gently alive when they say not ("always", the default), only when they say ("auto"), or not ("never").</param>
 public sealed record MediaJobRequest(string? Action, string? Prompt, Guid? SourceId, int? Count, int? Width, int? Height, double? Strength, int? Seconds,
     string? Picture, string? Mask, string? Lyrics = null, Guid? VoiceId = null, bool Consent = false, double? Exaggeration = null,
-    string? Style = null, string? Trace = null, string? Format = null, int? Side = null, int? Fps = null, string? Background = null, double? Length = null);
+    string? Style = null, string? Trace = null, string? Format = null, int? Side = null, int? Fps = null, string? Background = null, double? Length = null,
+    string? Animate = null);
 
 public sealed record MediaUpload(Guid AttachmentId);
 
@@ -357,6 +359,7 @@ public static class MediaEndpoints
             options["side"] = body.Side;
             options["fps"] = body.Fps;
             options["background"] = body.Background;
+            options["animate"] = body.Animate is "always" or "auto" or "never" ? body.Animate : null;
             if (body.Length is { } length)
             {
                 options["seconds"] = Math.Clamp(length, 0.2, 60);

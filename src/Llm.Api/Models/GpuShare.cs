@@ -101,8 +101,10 @@ public sealed partial class GpuShare : IDisposable
 
     /// <summary>
     /// How much the job lacks, by its server's status file (the GPU's free memory, every 2 s): null when it has what it
-    /// needs or nothing says. A server running the model already holds its share: it lacks only when it decodes on the
-    /// CPU though it may on the GPU (it started while the chat models held the memory).
+    /// needs or nothing says. A server running the model already holds its share: it lacks when it decodes on the CPU
+    /// though it may on the GPU (it started while the chat models held the memory), or when a chat model loaded since has
+    /// left it less than it computes with (its weights may wait in system memory, brought in a block at a time: a block
+    /// with nowhere to go fails the picture).
     /// </summary>
     private int? Short(MediaControl.Model model)
     {
@@ -112,10 +114,13 @@ public sealed partial class GpuShare : IDisposable
         }
         if (status is { Phase: "running" } && status.Model == model.Name)
         {
-            return model.Row.Vae == "auto" && status.Vae == "cpu" ? need : null;
+            return (model.Row.Vae == "auto" && status.Vae == "cpu") || free < RunningMb ? need : null;
         }
         return free < need ? need : null;
     }
+
+    /// <summary>The GPU memory a server running its model needs free to compute as it goes, in MB.</summary>
+    public const int RunningMb = 2 * ReserveMb;
 
     /// <summary>
     /// The GPU for a job of <paramref name="model"/> (a picture or video model): its turn, then room when it is short. Dispose

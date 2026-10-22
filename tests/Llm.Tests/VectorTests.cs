@@ -102,9 +102,9 @@ public sealed class VectorTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync("/api/media/jobs", new { action = "draw", prompt = "x", style = "baroque" }));
 
         // Drawn: its first answer not XML, then one without names: each sent back to fix.
-        var broken = First(await DoneAsync(f, b, new { action = "draw", prompt = "[broken] a sun over hills", style = "flat" }));
+        var broken = First(await DoneAsync(f, b, new { action = "draw", prompt = "[broken] a sun over hills", style = "flat", animate = "never" }));
         Assert.Equal(2, asked("svg-draw"));
-        var id = First(await DoneAsync(f, b, new { action = "draw", prompt = "[noids] a sun over hills", style = "cute", width = 512, height = 512 }));
+        var id = First(await DoneAsync(f, b, new { action = "draw", prompt = "[noids] a sun over hills", style = "cute", width = 512, height = 512, animate = "never" }));
         Assert.Equal(4, asked("svg-draw"));
         var fixedUp = app.Model.Requests.Last(r => r.Body["metadata"]?["tags"]?[0]?.GetValue<string>() == "svg-draw").Body["messages"]!.AsArray();
         Assert.True(fixedUp.Last()!["content"]!.ToString().Contains("no part has an id", StringComparison.Ordinal), fixedUp.ToJsonString());
@@ -117,9 +117,16 @@ public sealed class VectorTests(AppFixture app)
         Assert.Equal("image/svg+xml", file.Content.Headers.ContentType?.MediaType);
         Assert.Contains("sandbox", file.Headers.GetValues("Content-Security-Policy").Single(), StringComparison.Ordinal);
 
+        // Drawn and animated in one go: the words' picture drawn, then moving as they say (its first version still).
+        var moving = First(await DoneAsync(f, b, new { action = "draw", prompt = "a sun over hills, the sun spins" }));
+        var moved = await b.JsonAsync(await b.GetAsync($"/api/media/vectors/{moving}"));
+        Assert.Equal((2, "sun", "spin"), (moved.GetProperty("version").GetInt32(), moved.GetProperty("motions")[0].GetProperty("target").GetString(),
+            moved.GetProperty("motions")[0].GetProperty("kind").GetString()));
+        Assert.Contains("the sun spins", app.Model.Requests.Last(r => r.Body["metadata"]?["tags"]?[0]?.GetValue<string>() == "svg-animate").Body.ToJsonString(), StringComparison.Ordinal);
+
         // Animated as asked: a part it named is not there, so it plans again.
         await DoneAsync(f, b, new { action = "animate", sourceId = id, prompt = "[badpart] the sun turns, the hills appear" });
-        Assert.Equal(2, asked("svg-animate"));
+        Assert.Equal(3, asked("svg-animate"));
         drawing = await b.JsonAsync(await b.GetAsync($"/api/media/vectors/{id}"));
         Assert.Equal(["sun", "hills"], drawing.GetProperty("motions").EnumerateArray().Select(m => m.GetProperty("target").GetString()));
         Assert.Contains("@keyframes", drawing.GetProperty("markup").GetString(), StringComparison.Ordinal);

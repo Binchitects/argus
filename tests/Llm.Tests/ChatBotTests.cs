@@ -155,12 +155,12 @@ public sealed class ChatBotTests(AppFixture app) : IDisposable
         var (_, email) = await PersonAsync(f);
         _platforms.SlackEmails["U9"] = "stranger@elsewhere.test";
         _platforms.SlackEmails["U2"] = email;
-        var asked = app.Model.Requests.Count;
 
         await SlackAsync(f, Mention("U9", "<@UBOT> Tell me the secrets", channel: "C7", ts: "1.1"));
         var refusal = await _platforms.WaitAsync("slack.com", "/api/chat.postMessage", p => p.Body.Contains("\"1.1\"", StringComparison.Ordinal));
         Assert.Contains("only answer people who have an account", JsonNode.Parse(refusal.Body)!["text"]!.GetValue<string>(), StringComparison.Ordinal);
-        Assert.Equal(asked, app.Model.Requests.Count);
+        // The model never heard the stranger's words (other tests' work may reach the shared model meanwhile: not counted).
+        Assert.DoesNotContain(app.Model.Requests, r => r.Body.ToJsonString().Contains("Tell me the secrets", StringComparison.Ordinal));
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var audit = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit"))).EnumerateArray().ToList();
         Assert.Contains(audit, e => e.GetProperty("action").GetString() == "bot.refused" && e.GetProperty("target").GetString() == "slack:U9");

@@ -423,10 +423,16 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
             db.LocalModels.Add(new LocalModel { Name = name, File = $"{name}/Tiny-Q4_K_M.gguf", Context = 8192, Parallel = p });
         }
         db.SaveChanges();
-        // As an admin's save does: the engine's presets and the gateway at once (the watcher would within a minute).
+        // As an admin's save does: the engine's presets and the gateway at once (the watcher would within a minute), and the
+        // watcher woken. Until it has read the engine with them, a pass begun before the presets were written knows only
+        // the engine's old models (and the next is ten seconds away): a model asked for then is not on the engine yet.
         var catalog = scope.ServiceProvider.GetRequiredService<ModelCatalog>();
         catalog.WritePresetsAsync().GetAwaiter().GetResult();
         catalog.SyncGatewayAsync().GetAwaiter().GetResult();
+        f.Services.GetRequiredService<EngineWatcher>().Wake();
+        var state = f.Services.GetRequiredService<EngineState>();
+        string[] names = [Big, .. others.Select(o => o.Name)];
+        Assert.True(SpinWait.SpinUntil(() => names.All(n => state.StatusOf(n) is not null), TimeSpan.FromSeconds(30)), "the watcher read the engine with every model");
         return f;
     }
 

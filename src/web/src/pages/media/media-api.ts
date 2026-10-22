@@ -74,6 +74,8 @@ export interface MediaJobRequest {
   fps?: number
   background?: string
   length?: number
+  /** Draw and trace: moving as its words say, gently alive when they say not (always); only when they say (auto); still (never). */
+  animate?: 'always' | 'auto' | 'never'
 }
 
 export const mediaConfigQuery = queryOptions({ queryKey: ['media', 'config'], queryFn: ({ signal }) => api<MediaConfig>('/api/media', { signal }) })

@@ -353,6 +353,25 @@ public sealed class GpuShareTests(AppFixture app) : IDisposable
     }
 
     [Fact]
+    public async Task A_picture_server_running_its_model_gets_room_when_a_chat_model_loaded_since_left_it_too_little()
+    {
+        await using var s = await NewAsync();
+        var media = s.Media;
+        using var deadline = new CancellationTokenSource(Deadline);
+        media.Load(Picture);
+        await UntilAsync(() => media.StatusOf("imagegen") is { Phase: "running" } st && st.Model == Picture, "the picture server runs its model");
+        // A bigger chat model loaded since (asked for by a drawing's planning): 1,500 MB free, too little to compute in.
+        s.Serve.FreeOf = () => app.Engine.StatusOf(Chat) == "loaded" ? 1_500 : 20_000;
+        await UntilAsync(() => media.StatusOf("imagegen") is { FreeMb: 1_500 }, "the picture server's script says 1,500 MB are free");
+
+        await using (var hold = await s.Gpu.HoldAsync(media.Find(Picture)!, deadline.Token))
+        {
+            Assert.Equal([Chat], hold.Unloaded);
+        }
+        Assert.Equal("loaded", app.Engine.StatusOf(Chat));
+    }
+
+    [Fact]
     public async Task Picture_and_video_jobs_take_turns_and_a_server_does_not_switch_models_under_a_job()
     {
         await using var s = await NewAsync();

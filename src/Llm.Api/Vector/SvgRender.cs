@@ -174,6 +174,10 @@ public sealed class SvgRender(BrowserSessions browser, SandboxClient sandbox)
     private static double Round(JsonNode? n) => n is JsonValue v && v.TryGetValue<double>(out var d) ? Math.Round(d, 1) : 0;
 
     /// <summary>The parts, a line each, for a model: "#wheel-left circle at 140,230 size 28×28 fill #222".</summary>
+    /// <summary>Where each part's middle is, in the drawing's units (the first of an id), for motions that go between parts.</summary>
+    public static Dictionary<string, (double X, double Y)> Centers(IReadOnlyList<PartBox> parts) =>
+        parts.GroupBy(p => p.Id, StringComparer.Ordinal).ToDictionary(g => g.Key, g => (g.First().X + g.First().Width / 2, g.First().Y + g.First().Height / 2), StringComparer.Ordinal);
+
     public static string Describe(IReadOnlyList<PartBox> parts) =>
         string.Join('\n', parts.Select(p => string.Create(CultureInfo.InvariantCulture,
             $"#{p.Id} {p.Tag} at {p.X:0.#},{p.Y:0.#} size {p.Width:0.#}×{p.Height:0.#}{(p.Fill is { } f ? $" fill {f}" : "")}{(p.Text is { Length: > 0 } t ? $" text \"{t}\"" : "")}")));

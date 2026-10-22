@@ -24,14 +24,16 @@ public sealed class VectorStore(AppDbContext db, SvgRender render, TimeProvider 
     public static List<Motion> MotionsOf(string json) => JsonSerializer.Deserialize<List<Motion>>(json, Json) ?? [];
 
     /// <summary>The drawing as people take it: its motions compiled in (or still), and how long it plays.</summary>
-    public static (string Markup, Timeline Timeline, IReadOnlyList<string> Problems) Compile(string still, IReadOnlyList<Motion> motions)
+    /// <param name="centers">Where its parts are (for travels between them); measured here when a motion needs them and none are given.</param>
+    public static (string Markup, Timeline Timeline, IReadOnlyList<string> Problems) Compile(string still, IReadOnlyList<Motion> motions,
+        IReadOnlyDictionary<string, (double X, double Y)>? centers = null)
     {
         if (motions.Count == 0)
         {
             var safe = SvgSafe.Clean(still);
             return (safe.Markup, safe.Animated ? SmilTimeline(safe.Markup) : new Timeline(0, false), []);
         }
-        var a = SvgMotion.Apply(still, motions);
+        var a = SvgMotion.Apply(still, motions, centers);
         return (a.Markup, a.Timeline, a.Problems);
     }
 
@@ -103,7 +105,8 @@ public sealed class VectorStore(AppDbContext db, SvgRender render, TimeProvider 
     public async Task<IReadOnlyList<string>> ChangeAsync(MediaItem item, MediaVector vector, string still, IReadOnlyList<Motion> motions, string change, CancellationToken ct)
     {
         var safe = SvgSafe.Clean(still);
-        var (markup, timeline, problems) = Compile(safe.Markup, motions);
+        var centers = motions.Any(m => m.Kind == "travel") ? SvgRender.Centers(await render.PartsAsync(safe.Markup, ct)) : null;
+        var (markup, timeline, problems) = Compile(safe.Markup, motions, centers);
         var file = await db.ChatAttachments.SingleAsync(a => a.Id == item.AttachmentId, ct);
         file.Data = Encoding.UTF8.GetBytes(markup);
         file.Size = file.Data.Length;

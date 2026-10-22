@@ -238,6 +238,7 @@ function Editor({ item, items, config, onOpen, onClose }: { item: MediaItem; ite
   const [motion, setMotion] = useState('')
   const [seconds, setSeconds] = useState('3')
   const [traceAs, setTraceAs] = useState('illustration')
+  const [traceMotion, setTraceMotion] = useState('')
   const parent = item.parentId ? items.find((i) => i.id === item.parentId) : undefined
   const natural = { width: loaded?.naturalWidth ?? item.width ?? 1024, height: loaded?.naturalHeight ?? item.height ?? 1024 }
   const work = fit(natural.width, natural.height)
@@ -382,7 +383,13 @@ function Editor({ item, items, config, onOpen, onClose }: { item: MediaItem; ite
               <TabsContent value="trace" className="grid gap-3 pt-2">
                 <p className="text-sm text-muted-foreground">Traced into clean vector shapes: an SVG as sharp at any size, small, and its parts ready to animate. Flat pictures with few colours trace best.</p>
                 <Segmented label="Traced as" value={traceAs} onChange={setTraceAs} options={vector.data.traces.map((t) => ({ value: t.name, label: t.name[0].toUpperCase() + t.name.slice(1) }))} />
-                <Button loading={start.isPending} onClick={() => send({ action: 'trace', trace: traceAs })}>
+                <Field label="How it moves" hint="Optional: say it, and the drawing is animated as it is traced.">
+                  <Textarea rows={2} maxLength={2000} value={traceMotion} onChange={(e) => setTraceMotion(e.target.value)} placeholder="The fox's tail sways, the stars twinkle" />
+                </Field>
+                <Button
+                  loading={start.isPending}
+                  onClick={() => send({ action: 'trace', trace: traceAs, ...(traceMotion.trim() ? { prompt: traceMotion.trim(), animate: 'auto' as const } : { animate: 'never' as const }) })}
+                >
                   <PenTool /> Trace it
                 </Button>
               </TabsContent>

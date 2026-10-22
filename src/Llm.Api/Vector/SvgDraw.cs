@@ -204,6 +204,37 @@ public sealed partial class SvgDraw(OneQuestion one, ChatModels models, SvgRende
 
     private static readonly JsonSerializerOptions Lenient = new(JsonSerializerDefaults.Web) { AllowTrailingCommas = true, ReadCommentHandling = JsonCommentHandling.Skip, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString };
 
+    private const string Splitting = """
+        You plan an animated illustration from a request. Split it into what one still picture shows, and how it moves.
+        Answer with JSON only: {"scene": "…", "motion": "…"}.
+        - scene: in English, one still picture, as a short list of things: each thing, its colour, and where it is (left, right, middle, top, bottom); the things large, filling the picture, apart from each other, nothing else on the ground or around them. What goes from one thing to another is drawn once, between them, as a bold simple icon big enough to see (about a sixth of the picture). No words about time or motion (no "moving", "sending", "dragging", "trail", "sparkles as it moves").
+        - motion: in English, how each thing moves (the file goes from the laptop to the server, again and again; the server's light blinks); "" when the request says nothing about motion.
+        """;
+
+    /// <summary>A request split into the still picture to draw (in English, things placed so the motion can happen) and how it moves ("" when it says not).</summary>
+    public async Task<(string Scene, string Motion)> SplitAsync(AppUser me, string request, CancellationToken ct)
+    {
+        var asked = await one.AskAsync(me, $"The request: {request}", Splitting, Model, 600, "svg-plan", ct);
+        var text = asked.Text ?? "";
+        var (start, end) = (text.IndexOf('{'), text.LastIndexOf('}'));
+        try
+        {
+            var plan = start >= 0 && end > start
+                ? JsonNode.Parse(text[start..(end + 1)], null, new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip })
+                : null;
+            if (plan?["scene"] is JsonValue sv && sv.TryGetValue<string>(out var scene) && scene.Trim().Length > 0)
+            {
+                var motion = plan["motion"] is JsonValue mv && mv.TryGetValue<string>(out var m) ? m.Trim() : "";
+                return (scene.Trim()[..Math.Min(1500, scene.Trim().Length)], motion[..Math.Min(1500, motion.Length)]);
+            }
+        }
+        catch (JsonException)
+        {
+        }
+        // Not understood: drawn as asked, and animated as asked.
+        return (request, request);
+    }
+
     private const string Naming = """
         You name the separate things in a picture, from the words it was drawn from, so that each can be animated on its own.
         Answer with JSON only: {"things": [{"id": "fox", "looks": "an orange fox"}, …]}.
@@ -251,6 +282,7 @@ public sealed partial class SvgDraw(OneQuestion one, ChatModels models, SvgRende
     {
         await phase("Looking at its parts");
         var parts = await render.PartsAsync(still, ct);
+        var centers = SvgRender.Centers(parts);
         var root = XElement.Parse(still);
         var box = SvgMotion.ViewBox(root);
         var list = parts.Count > 0
@@ -260,13 +292,13 @@ public sealed partial class SvgDraw(OneQuestion one, ChatModels models, SvgRende
             You animate SVG drawings with motions. Answer with JSON only: {"motions": [ … ]}, each motion:
             {"target": "a part's id, or scene for the whole drawing", "kind": "…", "duration": seconds, "delay": seconds, "repeat": "once" | "loop" | a number,
              "easing": "linear" | "ease-in-out" | "ease-out" | "spring" | "smooth" | "snappy", "alternate": true | false, "stagger": seconds (its own parts one after another),
-             "from": "left" | "right" | "top" | "bottom", "amount": number, "origin": "center" | "top" | "bottom" | "left" | "right" | "x y", "color": "#hex",
+             "from": "left" | "right" | "top" | "bottom" (a slide), or a part's id (where a travel starts), "to": a part's id (where a travel goes), "amount": number, "origin": "center" | "top" | "bottom" | "left" | "right" | "x y", "color": "#hex",
              "keys": [{"at": 0 to 1, "x": n, "y": n, "scale": n, "rotate": degrees, "opacity": 0 to 1, "fill": "#hex"}] for kind keyframes}.
             The kinds:
             {{Motions()}}
             Distances are in the drawing's units (its viewBox is {{box.W}}×{{box.H}}). Only the parts listed exist.
             Do what is asked, and only that: the parts named move as said, everything else stays still. No entrances unless asked (fade-in, slide-in, pop...).
-            Choose kinds that look natural: stars twinkle (twinkle), lights, the sun and the moon glow (glow), creatures breathe (breathe), clouds and waves drift (drift), boats rock (sway with origin bottom and amount 5), leaves and flowers sway, wheels spin, eyes blink.
+            Choose kinds that look natural: what is sent, carried or thrown goes from one part to another (travel, from and to their ids), stars twinkle (twinkle), lights, the sun and the moon glow (glow), creatures breathe (breathe), clouds and waves drift (drift), boats rock (sway with origin bottom and amount 5), leaves and flowers sway, wheels spin, eyes blink.
             A part whose own parts are numbered (stars-1, stars-2...) moves them one after another with "stagger" on the part itself (target "stars").
             When asked only to make it alive: entrances one after another first, then gentle loops; wheels spin, things float or sway, eyes blink, lines draw on.
             """;
@@ -297,12 +329,12 @@ public sealed partial class SvgDraw(OneQuestion one, ChatModels models, SvgRende
                 continue;
             }
             motions = [.. SvgMotion.Unrepeated(root, motions).Take(60)];
-            var result = SvgMotion.Apply(still, motions);
+            var result = SvgMotion.Apply(still, motions, centers);
             if (result.Problems.Count == 0 || round == 2)
             {
                 // What it could not do is left out: the rest plays.
                 var good = motions.Where((_, i) => !result.Problems.Any(p => p.StartsWith($"motion {i + 1}:", StringComparison.Ordinal))).ToList();
-                return (good, good.Count == motions.Count ? result : SvgMotion.Apply(still, good), null);
+                return (good, good.Count == motions.Count ? result : SvgMotion.Apply(still, good, centers), null);
             }
             after = [Turn("assistant", text), Turn("user", "Fix these and answer with all the motions again, JSON only:\n- " + string.Join("\n- ", result.Problems))];
         }

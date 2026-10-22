@@ -69,7 +69,8 @@ public sealed partial class VectorTool(AppDbContext db, MediaJobs jobs, Operatio
         }
         var trace = traces && Schema.Str(args, "kind") != "drawing";
         var style = Schema.Str(args, "style") is { } s && SvgDraw.Styles.Any(x => x.Name == s) ? s : "flat";
-        var options = trace ? new JsonObject { ["trace"] = "illustration" } : new JsonObject { ["style"] = style, ["width"] = 512, ["height"] = 512 };
+        // Moving when its words say how (animate_svg makes it move later otherwise).
+        var options = trace ? new JsonObject { ["trace"] = "illustration", ["animate"] = "auto" } : new JsonObject { ["style"] = style, ["width"] = 512, ["height"] = 512, ["animate"] = "auto" };
         return await RunAsync(context, trace ? MediaJob.Trace : MediaJob.Draw, description, null, options, ct);
     }
 

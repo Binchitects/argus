@@ -48,6 +48,7 @@ export function VectorForm({ config }: { config: VectorConfig }) {
   const [style, setStyle] = useState('flat')
   const [trace, setTrace] = useState('illustration')
   const [shape, setShape] = useState<(typeof shapes)[number]['value']>('square')
+  const [moving, setMoving] = useState<'always' | 'never'>('always')
   const file = useRef<HTMLInputElement | null>(null)
   const start = useStart(() => setPrompt(''))
   const size = shapes.find((s) => s.value === shape)!
@@ -60,7 +61,11 @@ export function VectorForm({ config }: { config: VectorConfig }) {
       className="grid gap-3"
       onSubmit={(e) => {
         e.preventDefault()
-        start.mutate(how === 'trace' ? { action: 'trace', prompt: prompt.trim(), trace } : { action: 'draw', prompt: prompt.trim(), style, width: size.width, height: size.height })
+        start.mutate(
+          how === 'trace'
+            ? { action: 'trace', prompt: prompt.trim(), trace, animate: moving }
+            : { action: 'draw', prompt: prompt.trim(), style, width: size.width, height: size.height, animate: moving },
+        )
       }}
     >
       <Segmented label="How it is made" value={how} onChange={setHow} options={hows} />
@@ -69,8 +74,14 @@ export function VectorForm({ config }: { config: VectorConfig }) {
           ? 'The picture model draws it flat, and it is traced into clean vector shapes: rich illustrations, logos and stickers.'
           : 'The model writes the SVG itself, every part named: icons, diagrams and simple scenes, the best to animate part by part.'}
       </p>
-      <Field label="Describe the drawing">
-        <Textarea rows={2} maxLength={2000} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="A friendly robot waving, with a little antenna" />
+      <Field label="Describe it, and how it moves" hint="What is in it, and what moves how: it is drawn, then animated, in one go. Said nothing about motion, it comes gently alive.">
+        <Textarea
+          rows={3}
+          maxLength={2000}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="A laptop on the right and a server rack on the left; a file flies from the laptop to the server again and again, and the server's green light blinks"
+        />
       </Field>
       <div className="flex flex-wrap items-center gap-2">
         {how === 'trace' ? (
@@ -92,6 +103,7 @@ export function VectorForm({ config }: { config: VectorConfig }) {
             <Segmented label="Shape" value={shape} onChange={setShape} options={shapes.map((s) => ({ value: s.value, label: s.label }))} />
           </>
         )}
+        <Segmented label="Moving or still" value={moving} onChange={setMoving} options={[{ value: 'always', label: 'Moving' }, { value: 'never', label: 'Still' }]} />
         <div className="ml-auto flex gap-2">
           <input
             ref={file}

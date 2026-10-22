@@ -72,7 +72,7 @@ test('an illustration from words comes in named parts that move as asked, and is
   try {
     await page.goto('/media')
     await page.getByRole('radiogroup', { name: 'Make' }).getByRole('radio', { name: 'Vector' }).click()
-    await page.getByLabel('Describe the drawing').fill(words)
+    await page.getByLabel('Describe it, and how it moves').fill(words)
     await page.getByRole('button', { name: /Make it/ }).click()
     const gallery = page.getByRole('list', { name: 'Your pictures, drawings and clips' })
     const drawing = gallery.getByRole('button', { name: `Traced into SVG: ${words}` })

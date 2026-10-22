@@ -38,13 +38,18 @@ public static partial class VectorJobs
             {
                 var (w, h) = (Math.Clamp(Side(options, "width", 512), 16, 4096), Math.Clamp(Side(options, "height", 512), 16, 4096));
                 var style = Text(options, "style") ?? "flat";
-                var (drawn, problem) = await sp.GetRequiredService<SvgDraw>().DrawAsync(me, job.Prompt ?? "", style, w, h, phase, ct);
+                var draw = sp.GetRequiredService<SvgDraw>();
+                await phase("Planning the picture");
+                var (scene, motion) = await draw.SplitAsync(me, job.Prompt ?? "", ct);
+                var (drawn, problem) = await draw.DrawAsync(me, scene, style, w, h, phase, ct);
                 if (drawn is null)
                 {
                     throw new VectorRefusedException(problem ?? "Nothing was drawn.");
                 }
                 await phase("Keeping it");
-                return [await store.AddAsync(me, drawn.Svg, MediaJob.Draw, job.Prompt, "drawn", style, null, drawn.Model, ct)];
+                var made = await store.AddAsync(me, drawn.Svg, MediaJob.Draw, job.Prompt, "drawn", style, null, drawn.Model, ct);
+                await AnimateAsync(sp, db, me, made, motion, Text(options, "animate"), phase, ct);
+                return [made];
             }
             case MediaJob.Trace:
                 return await TraceAsync(sp, db, job, me, options, phase, ct);
@@ -100,6 +105,9 @@ public static partial class VectorJobs
         CancellationToken ct)
     {
         var style = VectorSandbox.StyleOf(Text(options, "trace"));
+        // A picture of one's own moves as its words say; a picture drawn from words, as they say (gently alive when they say not, as asked).
+        string? scene = null;
+        var motion = job.SourceId is not null ? job.Prompt : null;
         byte[] picture;
         string type;
         MediaItem? source;
@@ -112,14 +120,48 @@ public static partial class VectorJobs
         }
         else
         {
-            (source, picture) = await FlatPictureAsync(sp, db, job, me, phase, ct);
+            // What is seen is drawn (the motion is not the picture model's to draw: it would draw a clock for "a file being sent").
+            await phase("Planning the picture");
+            (scene, motion) = await sp.GetRequiredService<SvgDraw>().SplitAsync(me, job.Prompt ?? "", ct);
+            var log = sp.GetRequiredService<ILogger<SvgDraw>>();
+            Planned(log, scene, motion);
+            (source, picture) = await FlatPictureAsync(sp, db, job, me, scene, phase, ct);
             type = "image/png";
         }
-        var (things, maps) = await ThingsAsync(sp, me, job.Prompt ?? source?.Prompt, picture, phase, ct);
+        var (things, maps) = await ThingsAsync(sp, me, scene ?? source?.Prompt, picture, phase, ct);
         await phase("Tracing it into shapes");
         var svg = SvgSafe.Clean(await sp.GetRequiredService<VectorSandbox>().TraceAsync(picture, type, style, things, maps, ct));
         await phase("Keeping it");
-        return [await sp.GetRequiredService<VectorStore>().AddAsync(me, svg, MediaJob.Trace, job.Prompt ?? source?.Prompt, "traced", style.Name, source?.Id, null, ct)];
+        // Named by what it shows: a picture's own words (the words given with it say how it moves), else the words it was drawn from.
+        var named = job.SourceId is not null ? source?.Prompt ?? job.Prompt : job.Prompt;
+        var made = await sp.GetRequiredService<VectorStore>().AddAsync(me, svg, MediaJob.Trace, named, "traced", style.Name, source?.Id, null, ct);
+        await AnimateAsync(sp, db, me, made, motion, Text(options, "animate"), phase, ct);
+        return [made];
+    }
+
+    /// <summary>The words that ask for no motion, and only a drawing's own words then: gently alive, not a show.</summary>
+    public const string Alive = "Make it gently alive: a few subtle loops that suit each thing (float, sway, drift, twinkle, glow, breathe, blink); no entrances.";
+
+    /// <summary>
+    /// A new drawing animated in the same work: by the motion its words asked for; with none, gently alive when
+    /// <paramref name="mode"/> is "always" (the studio's own), still when "auto" (a chat's: it animates when asked) or
+    /// "never". A plan that cannot be made leaves it still: the drawing is not lost for its motions.
+    /// </summary>
+    private static async Task AnimateAsync(IServiceProvider sp, AppDbContext db, AppUser me, MediaItem item, string? motion, string? mode, Func<string, Task> phase,
+        CancellationToken ct)
+    {
+        var request = motion is { Length: > 0 } ? motion : (mode ?? "always") == "always" ? Alive : null;
+        if (mode == "never" || request is null)
+        {
+            return;
+        }
+        var vector = await db.MediaVectors.SingleAsync(v => v.ItemId == item.Id, ct);
+        var (motions, _, _) = await sp.GetRequiredService<SvgDraw>().AnimateAsync(me, vector.Still, [], request, phase, ct);
+        if (motions is { Count: > 0 })
+        {
+            await phase("Keeping it");
+            await sp.GetRequiredService<VectorStore>().ChangeAsync(item, vector, vector.Still, motions, $"animated: {request}", ct);
+        }
     }
 
     /// <summary>
@@ -155,6 +197,9 @@ public static partial class VectorJobs
         }
     }
 
+    [LoggerMessage(Level = LogLevel.Information, Message = "A drawing planned: the picture {Scene}; the motion {Motion}")]
+    private static partial void Planned(ILogger logger, string scene, string motion);
+
     [LoggerMessage(Level = LogLevel.Information, Message = "A traced picture's things: {Things}")]
     private static partial void Found(ILogger logger, IReadOnlyList<Thing> things);
 
@@ -162,7 +207,9 @@ public static partial class VectorJobs
     private static partial void NotSegmented(ILogger logger, Exception ex);
 
     /// <summary>A flat picture from the person's words by the picture model (their credit, today's pictures, its turn on the GPU), kept as their picture.</summary>
-    private static async Task<(MediaItem Item, byte[] Png)> FlatPictureAsync(IServiceProvider sp, AppDbContext db, MediaJob job, AppUser me, Func<string, Task> phase, CancellationToken ct)
+    /// <param name="scene">What the picture shows (the words' still picture, in English).</param>
+    private static async Task<(MediaItem Item, byte[] Png)> FlatPictureAsync(IServiceProvider sp, AppDbContext db, MediaJob job, AppUser me, string scene, Func<string, Task> phase,
+        CancellationToken ct)
     {
         var media = sp.GetRequiredService<MediaControl>();
         var ours = media.All.Where(m => m.Mode == Llm.Core.Models.MediaModes.Image).Select(m => m.Name).ToList();
@@ -176,10 +223,13 @@ public static partial class VectorJobs
         {
             throw new VectorRefusedException(limit);
         }
-        var verdict = await sp.GetRequiredService<Safeguards.Safeguards>().CheckMessageAsync(me, job.Prompt ?? "", 0, false, model.Name, ct);
-        if (!verdict.Allowed)
+        // The person's words, and the picture's words made of them (what the picture model is sent), each through the rules.
+        var safeguards = sp.GetRequiredService<Safeguards.Safeguards>();
+        var verdict = await safeguards.CheckMessageAsync(me, job.Prompt ?? "", 0, false, model.Name, ct);
+        var seen = verdict.Allowed ? await safeguards.CheckMessageAsync(me, scene, 0, false, model.Name, ct) : verdict;
+        if (!verdict.Allowed || !seen.Allowed)
         {
-            throw new VectorRefusedException(verdict.Reason ?? "A rule here stopped these words.");
+            throw new VectorRefusedException((verdict.Allowed ? seen : verdict).Reason ?? "A rule here stopped these words.");
         }
         await phase("Waiting for its turn on the GPU");
         await using var hold = await sp.GetRequiredService<GpuShare>().HoldAsync(model, ct);
@@ -190,7 +240,7 @@ public static partial class VectorJobs
         }
         await phase("Drawing it flat, to trace");
         var began = DateTimeOffset.UtcNow;
-        var png = (await sp.GetRequiredService<SdServer>().PicturesAsync(model, $"{verdict.Text ?? job.Prompt}, {FlatStyle}", 1024, 1024, 1, ct))[0];
+        var png = (await sp.GetRequiredService<SdServer>().PicturesAsync(model, $"{seen.Text ?? scene}, {FlatStyle}", 1024, 1024, 1, ct))[0];
         media.Touch(model.Name);
         var prices = sp.GetRequiredService<Gateway.PriceBook>();
         var key = Gateway.AnswerCache.HashOf(await sp.GetRequiredService<Chat.ChatKey>().GetAsync(ct));

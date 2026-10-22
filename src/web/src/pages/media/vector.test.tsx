@@ -48,16 +48,16 @@ describe('vector drawings', () => {
     // What to make (the gallery has a Vector of its own, to show only drawings).
     await userEvent.click(await within(await screen.findByRole('radiogroup', { name: 'Make' })).findByRole('radio', { name: 'Vector' }))
     // An illustration first: the picture model draws it, and it is traced.
-    await userEvent.type(screen.getByLabelText('Describe the drawing'), 'A fox logo')
+    await userEvent.type(screen.getByLabelText('Describe it, and how it moves'), 'A fox logo')
     await userEvent.click(screen.getByRole('radio', { name: 'Logo' }))
     await userEvent.click(screen.getByRole('button', { name: /Make it/ }))
-    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/media/jobs')?.body).toEqual({ action: 'trace', prompt: 'A fox logo', trace: 'logo' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/media/jobs')?.body).toEqual({ action: 'trace', prompt: 'A fox logo', trace: 'logo', animate: 'always' }))
 
     await userEvent.click(screen.getByRole('radio', { name: 'Drawn as SVG' }))
-    await userEvent.type(screen.getByLabelText('Describe the drawing'), 'A rocket icon')
+    await userEvent.type(screen.getByLabelText('Describe it, and how it moves'), 'A rocket icon')
     await userEvent.click(screen.getByRole('radio', { name: 'Wide' }))
     await userEvent.click(screen.getByRole('button', { name: /Make it/ }))
-    await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.path === '/api/media/jobs')[1]?.body).toEqual({ action: 'draw', prompt: 'A rocket icon', style: 'flat', width: 640, height: 400 }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.path === '/api/media/jobs')[1]?.body).toEqual({ action: 'draw', prompt: 'A rocket icon', style: 'flat', width: 640, height: 400, animate: 'always' }))
 
     const file = new File(['<svg xmlns="http://www.w3.org/2000/svg"><script>x</script></svg>'], 'mine.svg', { type: 'image/svg+xml' })
     await userEvent.upload(screen.getByLabelText('An SVG file'), file)

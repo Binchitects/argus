@@ -93,6 +93,7 @@ public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, Ch
 /// Runs <see cref="KeyAccess.SyncAsync"/>, <see cref="Gateway.GroupTeams.SyncAsync"/> and <see cref="Gateway.RateLimits.SyncAsync"/> when access, groups or
 /// the company's rate limits change, and every 10 minutes (the directory's groups change on their own). With several replicas, the one that leads runs it.
 /// </summary>
+/// <remarks>Keys:Watch=false turns the looking off (a test that calls the checks itself, without the watcher's pass between).</remarks>
 public sealed partial class KeyAccessWatcher : BackgroundService
 {
     private const string WakeTopic = "keys:wake";
@@ -100,13 +101,15 @@ public sealed partial class KeyAccessWatcher : BackgroundService
     private readonly IServiceScopeFactory scopes;
     private readonly Replicas replicas;
     private readonly ILogger<KeyAccessWatcher> logger;
+    private readonly bool _watch;
     private readonly IDisposable? _onChange;
     private readonly IDisposable? _onRates;
 
     public KeyAccessWatcher(IServiceScopeFactory scopes, Replicas replicas, ILogger<KeyAccessWatcher> logger, IOptionsMonitor<ChatOptions> chat,
-        IOptionsMonitor<Gateway.RateLimitOptions> rates)
+        IOptionsMonitor<Gateway.RateLimitOptions> rates, IConfiguration config)
     {
         this.scopes = scopes;
+        _watch = config.GetValue("Keys:Watch", true);
         this.replicas = replicas;
         this.logger = logger;
         replicas.On(WakeTopic, _ =>
@@ -160,6 +163,10 @@ public sealed partial class KeyAccessWatcher : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (!_watch)
+        {
+            return;
+        }
         // Soon after start (an upgrade may bring a new limit), then every ten minutes or when woken.
         var wait = TimeSpan.FromSeconds(15);
         while (!stoppingToken.IsCancellationRequested)

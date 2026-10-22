@@ -131,9 +131,24 @@ public sealed class VectorPartsTests
     }
 
     [Fact]
+    public void A_travel_goes_from_one_part_to_another_by_where_they_are_and_without_them_says_so()
+    {
+        var centers = new Dictionary<string, (double X, double Y)> { ["sun"] = (320, 70), ["car"] = (180, 220), ["road"] = (200, 260) };
+        var a = SvgMotion.Apply(SvgMotionTests.Scene, [new() { Target = "sun", Kind = "travel", From = "road", To = "car" }], centers);
+        Assert.Empty(a.Problems);
+        // From the road's middle to the car's, as moves from where the sun is.
+        Assert.Contains("0%{transform:translate(-120px,190px);opacity:0}", a.Markup, StringComparison.Ordinal);
+        Assert.Contains("82%{transform:translate(-140px,150px);opacity:1}", a.Markup, StringComparison.Ordinal);
+        Assert.True(a.Timeline.Loops);
+        Assert.Contains("a travel goes to a part", Assert.Single(SvgMotion.Apply(SvgMotionTests.Scene, [new() { Target = "sun", Kind = "travel", To = "moon" }], centers).Problems),
+            StringComparison.Ordinal);
+        Assert.Single(SvgMotion.Apply(SvgMotionTests.Scene, [new() { Target = "sun", Kind = "travel", To = "car" }]).Problems);
+    }
+
+    [Fact]
     public void A_piece_repeating_its_part_s_motion_goes_and_other_motions_stay()
     {
-        var root = XElement.Parse(Scene);
+        var root = XElement.Parse(SvgMotionTests.Scene);
         var kept = SvgMotion.Unrepeated(root, [
             new() { Target = "car", Kind = "float" },
             new() { Target = "body", Kind = "float" },

@@ -15,7 +15,8 @@ public sealed class CreditMoveTests(AppFixture app)
     public async Task The_gateways_budget_becomes_every_kinds_credit_once_and_the_gateway_holds_none()
     {
         var gateway = new FakeGateway();
-        await using var f = app.Create(app.ConnectionStringFor("move_" + Guid.NewGuid().ToString("N")[..8]), gateway);
+        // The watcher's own pass (15 s after start) would move the credits between the calls here on a busy machine.
+        await using var f = app.Create(app.ConnectionStringFor("move_" + Guid.NewGuid().ToString("N")[..8]), gateway, new Dictionary<string, string?> { ["Keys:Watch"] = "false" });
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         static string Person(string name) => $"{name}@example.test";
         var (had, own, none) = (Person("had"), Person("own"), Person("none"));
@@ -56,7 +57,8 @@ public sealed class CreditMoveTests(AppFixture app)
     public async Task Keys_are_blocked_while_their_person_has_no_API_access_whatever_failed_before()
     {
         var gateway = new FakeGateway();
-        await using var f = app.Create(app.ConnectionStringFor("blocks_" + Guid.NewGuid().ToString("N")[..8]), gateway);
+        // The watcher's own pass (15 s after start) would do the blocks between the calls here on a busy machine.
+        await using var f = app.Create(app.ConnectionStringFor("blocks_" + Guid.NewGuid().ToString("N")[..8]), gateway, new Dictionary<string, string?> { ["Keys:Watch"] = "false" });
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var name = "b" + Guid.NewGuid().ToString("N")[..8];
         await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" });

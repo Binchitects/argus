@@ -36,8 +36,10 @@ public sealed record Motion
     /// <summary>There and back (each other time backwards).</summary>
     public bool? Alternate { get; init; }
     public string? Easing { get; init; }
-    /// <summary>Where a slide comes from or goes to: left, right, top, bottom.</summary>
+    /// <summary>Where a slide comes from or goes to: left, right, top, bottom; where a travel starts: a part's id ("laptop"), else where it is.</summary>
     public string? From { get; init; }
+    /// <summary>Where a travel goes: a part's id ("server"), or "x y" in the drawing's units.</summary>
+    public string? To { get; init; }
     /// <summary>How far (drawing units), how much (degrees for turns, a fraction for scale), by kind.</summary>
     public double? Amount { get; init; }
     /// <summary>What it turns and scales about: center, top, bottom, left, right, top left..., or "x y" in the drawing's units.</summary>
@@ -67,7 +69,8 @@ public static partial class SvgMotion
         ("slide-out", "leaves to a side"), ("rise", "comes up from below as it appears"), ("pop", "appears, growing past its size and back"),
         ("grow", "grows from nothing"), ("shrink", "shrinks to nothing"), ("zoom-in", "comes closer as it appears"),
         ("spin", "turns round and round (amount: turns a cycle)"), ("orbit", "goes round a point (origin: \"x y\")"),
-        ("float", "rises and sinks gently (amount: how high)"), ("drift", "drifts slowly from side to side, as a cloud or waves (amount: how far)"), ("bounce", "bounces up and down"), ("sway", "rocks from side to side (amount: degrees)"),
+        ("float", "rises and sinks gently (amount: how high)"), ("drift", "drifts slowly from side to side, as a cloud or waves (amount: how far)"),
+        ("travel", "goes from one place to another, as a file sent from a laptop to a server or a car along a road (to: the part it goes to, or \"x y\"; from: the part it starts at, else where it is), appearing at the start and fading at the end each time"), ("bounce", "bounces up and down"), ("sway", "rocks from side to side (amount: degrees)"),
         ("swing", "swings from its top like a sign"), ("wave", "waves, as a hand (origin: where it turns, e.g. bottom)"),
         ("pulse", "grows a little and back"), ("heartbeat", "beats twice and rests"), ("wiggle", "wiggles"), ("shake", "shakes side to side"),
         ("breathe", "breathes: swells a little upward and back, slowly (amount: how much, 0.03)"), ("twinkle", "twinkles as a star: dims and shrinks a little and back"),
@@ -137,7 +140,8 @@ public static partial class SvgMotion
     }
 
     /// <summary>The motions compiled into the drawing (made safe first), and how long it plays.</summary>
-    public static Animated Apply(string markup, IReadOnlyList<Motion> motions)
+    /// <param name="centers">Where each part's middle is, in the drawing's units (SvgRender.PartsAsync): travels go between parts by them.</param>
+    public static Animated Apply(string markup, IReadOnlyList<Motion> motions, IReadOnlyDictionary<string, (double X, double Y)>? centers = null)
     {
         var root = Still(XElement.Parse(SvgSafe.Clean(markup).Markup));
         var box = ViewBox(root);
@@ -171,9 +175,11 @@ public static partial class SvgMotion
                 problems.Add($"motion {n + 1}: \"{target}\" is a <{element.Name.LocalName}> that is not drawn where it is: give the motion to what draws it");
                 continue;
             }
-            var targets = m.Stagger is > 0
-                ? element.Elements().Where(c => Movable.Contains(c.Name.LocalName)).ToList()
-                : [element];
+            // One after another: its pieces (groups, or parts with names); a part of a few unnamed shapes (three birds), each of
+            // them; a part of many unnamed shapes is one thing (a traced fox): it moves whole.
+            var children = element.Elements().Where(c => Movable.Contains(c.Name.LocalName)).ToList();
+            var pieces = children.Where(c => c.Name.LocalName == "g" || c.Attribute("id") is not null).ToList();
+            var targets = m.Stagger is > 0 ? (pieces.Count > 0 ? pieces : children.Count <= 6 ? children : [element]) : [element];
             if (targets.Count == 0)
             {
                 problems.Add($"motion {n + 1}: \"{target}\" has no parts of its own to go one after another");
@@ -181,7 +187,17 @@ public static partial class SvgMotion
             }
             var t = Timing(kind, m);
             var name = $"k{n + 1}";
-            if (Frames(kind, m, box, element) is not { } frames)
+            (double X0, double Y0, double X1, double Y1)? way = null;
+            if (kind == "travel")
+            {
+                if (Way(target, m, centers) is not { } found)
+                {
+                    problems.Add($"motion {n + 1}: a travel goes to a part (to: its id, one of {string.Join(", ", centers?.Keys.Take(40) ?? [])}) or a point (\"x y\"), from a part or where \"{target}\" is");
+                    continue;
+                }
+                way = found;
+            }
+            if (Frames(kind, m, box, element, way) is not { } frames)
             {
                 problems.Add($"motion {n + 1}: keyframes need at least one key (at 0 to 1)");
                 continue;
@@ -245,6 +261,7 @@ public static partial class SvgMotion
             "orbit" => (6.0, "linear", true, false),
             "float" => (3.0, "ease-in-out", true, false),
             "drift" => (6.0, "ease-in-out", true, false),
+            "travel" => (2.6, "cubic-bezier(.45,0,.55,1)", true, false),
             "bounce" => (1.4, "ease-in-out", true, false),
             "sway" or "swing" => (1.2, "ease-in-out", true, true),
             "wave" => (1.2, "ease-in-out", true, false),
@@ -297,7 +314,40 @@ public static partial class SvgMotion
         return ("fill-box", $"{X(x)} {Y(y)}");
     }
 
-    private static string? Frames(string kind, Motion m, (double X, double Y, double W, double H) box, XElement element)
+    /// <summary>
+    /// A travel's start and end, as moves from where the part is: from its own middle (or the middle of the part it starts
+    /// at) to the middle of the part it goes to, or to a point. Null when where they are is not known.
+    /// </summary>
+    private static (double X0, double Y0, double X1, double Y1)? Way(string target, Motion m, IReadOnlyDictionary<string, (double X, double Y)>? centers)
+    {
+        if (centers is null || !centers.TryGetValue(target, out var self))
+        {
+            return null;
+        }
+        (double X, double Y)? Point(string? where)
+        {
+            var w = (where ?? "").Trim().TrimStart('#');
+            if (w.Length == 0)
+            {
+                return null;
+            }
+            if (centers.TryGetValue(w, out var c))
+            {
+                return c;
+            }
+            var xy = w.Split([' ', ','], StringSplitOptions.RemoveEmptyEntries);
+            return xy.Length == 2 && double.TryParse(xy[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x)
+                && double.TryParse(xy[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y) ? (x, y) : null;
+        }
+        if (Point(m.To) is not { } to)
+        {
+            return null;
+        }
+        var from = Point(m.From) ?? self;
+        return (from.X - self.X, from.Y - self.Y, to.X - self.X, to.Y - self.Y);
+    }
+
+    private static string? Frames(string kind, Motion m, (double X, double Y, double W, double H) box, XElement element, (double X0, double Y0, double X1, double Y1)? way = null)
     {
         var a = m.Amount;
         var side = (m.From ?? "left").Trim().ToLowerInvariant();
@@ -318,6 +368,8 @@ public static partial class SvgMotion
             "spin" or "orbit" => $"from{{transform:rotate(0deg)}}to{{transform:rotate({N(360 * (a ?? 1))}deg)}}",
             "float" => $"0%,100%{{{T(0, 0)}}}50%{{{T(0, -(a ?? box.H * 0.03))}}}",
             "drift" => $"0%,100%{{{T(-(a ?? box.W * 0.03), 0)}}}50%{{{T(a ?? box.W * 0.03, 0)}}}",
+            // Appears where it starts, goes, and fades where it arrives: each time round a new one on its way.
+            "travel" when way is { } w => $"0%{{{T(w.X0, w.Y0)};opacity:0}}12%{{{T(w.X0, w.Y0)};opacity:1}}82%{{{T(w.X1, w.Y1)};opacity:1}}100%{{{T(w.X1, w.Y1)};opacity:0}}",
             "bounce" => $"0%,40%,70%,100%{{{T(0, 0)};animation-timing-function:ease-out}}20%{{{T(0, -(a ?? box.H * 0.08))};animation-timing-function:ease-in}}55%{{{T(0, -(a ?? box.H * 0.08) * 0.35)};animation-timing-function:ease-in}}",
             "sway" or "swing" => $"from{{transform:rotate({N(-(a ?? 8))}deg)}}to{{transform:rotate({N(a ?? 8)}deg)}}",
             "wave" => $"0%,100%{{transform:rotate(0deg)}}20%{{transform:rotate({N(a ?? 20)}deg)}}40%{{transform:rotate({N(-(a ?? 20) * 0.3)}deg)}}60%{{transform:rotate({N(a ?? 20)}deg)}}80%{{transform:rotate(0deg)}}",

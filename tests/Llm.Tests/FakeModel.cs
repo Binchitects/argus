@@ -186,6 +186,14 @@ public sealed class FakeModel : HttpMessageHandler
             chunks = [Delta(new JsonObject { ["content"] = "Here you are:\n" + svg }), Finish("stop"), Usage(200, 0, 300)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
+        // A request split into its still picture (as asked) and its motion: "the sun spins" when it says so, else none.
+        if (system0.StartsWith("You plan an animated illustration from a request", StringComparison.Ordinal))
+        {
+            var asking = lastUser.Replace("The request: ", "", StringComparison.Ordinal);
+            var plan = new JsonObject { ["scene"] = asking, ["motion"] = asking.Contains("spins", StringComparison.Ordinal) ? "the sun spins" : "" };
+            chunks = [Delta(new JsonObject { ["content"] = plan.ToJsonString() }), Finish("stop"), Usage(60, 0, 30)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
         // A picture's things, named from its words: "a red badge" has a badge and a star.
         if (system0.StartsWith("You name the separate things in a picture", StringComparison.Ordinal))
         {
