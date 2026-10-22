@@ -12,6 +12,65 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v6.6.0 (2026-10-22)
+
+The media studio: pictures you change by painting, narrated videos from a few
+words, voices and music, and 3D you can print.
+
+### :rocket: Epics and highlights
+
+- **Media studio** (Workspace → Media studio): pictures from a few words (a
+  shape, one to four), then any of them, or one you upload, **changed** by
+  saying how: all of it, or only the part you paint over (the rest stays
+  exactly as it was, its edge blended softly); **variations** a little to a
+  lot different; **enlarged** four times (Real-ESRGAN); **cut out** of its
+  background; or **set moving** (a short clip from the video model that
+  starts from it). Each is a job in the background, in its turn on the GPU,
+  shown where it will land in the gallery and said in the bell when long;
+  every result keeps where it came from
+- **Videos from a few words**: say what a video is about and the model
+  writes a storyboard (shots, each what is seen and what the narrator
+  says). Change any of it, then **Make the video**: each shot drawn and set
+  moving, the narration spoken (your voice settings, or a voice from a
+  sample you may use), music made for its length, and all cut into one MP4
+  with captions and the music ducked under the voice. A changed shot is
+  made again alone
+- **Speech and music**: words spoken in the voice model's own voice or in a
+  voice from a 10 to 30 second sample (only with your word that you may use
+  it; watermarked as made by a model), and music from a description and
+  lyrics, 15 seconds to 2 minutes
+- **3D you can print**: ask the 3D tool to print a model and it comes back as
+  STL and 3MF too (millimetres, on the plate, its real size when it fits,
+  each part with its colour), with its printed size and whether every part
+  is closed; ask for a turntable and a video of it turning once round plays
+  in the chat
+
+### :sparkles: New features & Enhancements
+
+- The **studio** module (`COMPOSE_PROFILES=studio`, `studio.enabled` in the
+  chart): BiRefNet lite, Chatterbox and ACE-Step on one GPU service on an
+  internal network, one model at a time, unloaded when unused; its work
+  borrows GPU room as pictures do (idle chat models unloaded, given back
+  after)
+- Show your screen with a model that cannot see: the bar offers a model
+  that can and switches to it in one click
+- The bell, readable: news in sections, repeats folded, plain words; a
+  workflow run that went well says nothing
+- A llama.cpp model that does not fit beside the loaded ones gets room from
+  idle ones first, and a model that fails to load says why in words
+- A price for a minute of music (Settings → Prices); pictures, clips, speech
+  and music the studio makes are booked in the gateway's log as the chat's
+- Storage shows the studio's files as **In the media studio**, and music as
+  its own kind
+
+### :arrow_up: Deps updates
+
+- Fetched into the model library with the default models: Real-ESRGAN x4plus
+  (67 MB), BiRefNet lite (178 MB), Chatterbox's English model (3.2 GB),
+  ACE-Step v1 3.5B (8.3 GB), all from Hugging Face
+- The studio image: PyTorch 2.11 (CUDA 13), chatterbox-tts 0.1.7, ACE-Step
+  (GitHub, commit 1bee4c9)
+
 ## v6.5.0 (2026-10-22)
 
 Agents that do the work: workflows that run as you, an agent that fixes the

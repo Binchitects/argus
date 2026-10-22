@@ -1475,6 +1475,12 @@ a download).
    roles (the expert, the critic, the one who says no), the moderator writes
    the verdict with who said what.
 
+Released: **v6.6.0** (2026-10-22), all three items below, except: figures
+that move (a walk, a wave) are not made yet; a voice from a sample speaks
+English only (Chatterbox's English model; its multilingual one is a further
+2.1 GB); a painted change redraws the painted part with what is around it
+and blends it back (FLUX.2-klein's masked inpainting ignored the mask).
+
 ### v6.6 — Studio: pictures, video and 3D, finished
 
 1. **Video studio.** From a script or a question: a storyboard, each shot
