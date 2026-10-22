@@ -111,7 +111,11 @@ def _load(kind: str):
         # Its own voice, for speaking without a sample: a person's sample is never kept for the next one.
         model.default_conds = model.conds
     else:
+        import torchaudio
         from acestep.pipeline_ace_step import ACEStepPipeline
+
+        # ACE-Step saves its music with torchaudio, which now writes through TorchCodec (it needs FFmpeg's libraries): soundfile instead.
+        torchaudio.save = lambda path, src, sample_rate, **_: sf.write(path, src.float().cpu().numpy().T, sample_rate)
         model = ACEStepPipeline(checkpoint_dir=path, dtype="bfloat16" if DEVICE == "cuda" else "float32", torch_compile=False, cpu_offload=False)
     _loaded[kind] = model
     return model

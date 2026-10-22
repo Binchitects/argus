@@ -260,18 +260,20 @@ if globals().get("TURNTABLE") and _meshes:
     _lo = _mu.Vector((min(min((o.matrix_world @ _mu.Vector(c))[i] for c in o.bound_box) for o in _meshes) for i in range(3)))
     _hi = _mu.Vector((max(max((o.matrix_world @ _mu.Vector(c))[i] for c in o.bound_box) for o in _meshes) for i in range(3)))
     _mid, _size = (_lo + _hi) / 2, max((_hi - _lo).length, 0.01)
-    if _sc.render.engine not in {"CYCLES", "BLENDER_WORKBENCH"}:
-        _sc.render.engine = "BLENDER_WORKBENCH"
-    _cycles = _sc.render.engine == "CYCLES"
-    if _cycles:
-        _sc.cycles.samples = min(_sc.cycles.samples, 8)
-    else:
-        # A light backdrop, as the pictures have (a video keeps no see-through background).
-        _sc.world = _sc.world or _bpy.data.worlds.new("_tool_world")
-        _sc.world.color = (0.92, 0.93, 0.95)
-        _sc.render.film_transparent = False
-    _sc.render.resolution_x, _sc.render.resolution_y = (480, 360) if _cycles else (640, 480)
-    _frames = 72 if _cycles else 96
+    # Always the quick renderer: a turntable is many frames, and Cycles' would spend the run's CPU time in a few.
+    for _m in _materials:
+        _p = _principled(_m)
+        if _p is not None and not _p.inputs["Base Color"].is_linked:
+            _m.diffuse_color = tuple(_p.inputs["Base Color"].default_value)
+    _sc.render.engine = "BLENDER_WORKBENCH"
+    _sc.display.shading.light = "STUDIO"
+    _sc.display.shading.color_type = "MATERIAL"
+    # A light backdrop, as the pictures have (a video keeps no see-through background).
+    _sc.world = _sc.world or _bpy.data.worlds.new("_tool_world")
+    _sc.world.color = (0.92, 0.93, 0.95)
+    _sc.render.film_transparent = False
+    _sc.render.resolution_x, _sc.render.resolution_y = 640, 480
+    _frames = 96
     _pivot = _bpy.data.objects.new("_tool_pivot", None)
     _sc.collection.objects.link(_pivot)
     _pivot.location = _mid
