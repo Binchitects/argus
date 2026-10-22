@@ -13,21 +13,26 @@ export const noObserve = !!process.env.E2E_NO_OBSERVE
  * which an installed Chrome logs when it reloads its certificate store mid-run,
  * the service worker's script refused over the stack's own certificate (a
  * browser registers one only over a certificate it trusts; ignoreHTTPSErrors
- * does not reach it), and without a gateway, its 502s.
+ * does not reach it), and without a gateway, its 502s. Nor what the test runner
+ * itself is refused in a frame that runs no script (a drawing's stage: Playwright
+ * puts its own script in every frame; a plain browser logs nothing there).
  */
 export function watchConsole(page: Page): string[] {
   const errors: string[] = []
   page.on('console', (m) => {
     const t = m.text()
-    if (m.type() !== 'error' || t.includes('401') || t.includes('ERR_CERT_VERIFIER_CHANGED') || t.includes('SSL certificate error occurred when fetching the script') || (noGateway && t.includes('502'))) return
+    if (m.type() !== 'error' || t.includes('401') || t.includes('ERR_CERT_VERIFIER_CHANGED') || t.includes('SSL certificate error occurred when fetching the script') || t.startsWith("Blocked script execution in 'about:srcdoc'") || (noGateway && t.includes('502'))) return
     errors.push(`${t} (${m.location().url || 'no url'})`)
   })
   page.on('pageerror', (e) => errors.push(e.message))
   return errors
 }
 
-/** No serious or critical accessibility violations (axe, WCAG 2.2 AA). */
-export async function expectAccessible(page: Page, info: TestInfo, label: string) {
+/**
+ * No serious or critical accessibility violations (axe, WCAG 2.2 AA). Frames that run no script (a drawing's sandboxed
+ * stage) are left out: axe cannot run in them, and waits for them.
+ */
+export async function expectAccessible(page: Page, info: TestInfo, label: string, scriptless: string[] = []) {
   // A dialog fading in has text at part opacity: axe reads its contrast once it has arrived.
   await page.evaluate(() =>
     Promise.race([
@@ -35,7 +40,9 @@ export async function expectAccessible(page: Page, info: TestInfo, label: string
       new Promise((resolve) => setTimeout(resolve, 2000)),
     ]),
   )
-  const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze()
+  const axe = new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+  for (const frame of scriptless) axe.exclude(frame)
+  const result = await axe.analyze()
   const bad = result.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')
   if (bad.length) await info.attach(`axe-${label}.json`, { body: JSON.stringify(bad, null, 2), contentType: 'application/json' })
   expect(bad.map((v) => `${v.id}: ${v.help} (${v.nodes.map((n) => n.target.join(' ')).slice(0, 3).join(' | ')})`), `accessibility of ${label}`).toEqual([])

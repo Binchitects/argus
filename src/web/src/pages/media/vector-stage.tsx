@@ -12,14 +12,15 @@ export interface StageHandle {
 
 /**
  * The drawing on a stage of its own: a frame with no script (sandboxed; the drawing was made safe on the server too) whose
- * page this one drives — its animations played, paused and sought (SMIL's and CSS's), and a part picked by a click.
+ * page this one drives — its animations played, paused and sought (SMIL's and CSS's), and a part picked by a click. Nothing
+ * listens inside the frame (a sandbox without scripts runs no listener there): the pointer is read over it, on this page,
+ * and the part under it found in the frame's document.
  */
 function page(markup: string) {
   return `<!doctype html><html><head><meta charset="utf-8"><style>
 html,body{margin:0;height:100%;overflow:hidden;background:transparent}
 body{display:grid;place-items:center}
 body>svg{display:block;width:100%;height:100%;max-width:100%;max-height:100%}
-.arena-picking{cursor:crosshair}
 .arena-hover{filter:drop-shadow(0 0 2px rgba(124,58,237,.9))}
 .arena-picked{filter:drop-shadow(0 0 2px #7c3aed) drop-shadow(0 0 5px rgba(124,58,237,.8))}
 </style></head><body>${markup}</body></html>`
@@ -109,31 +110,23 @@ export function VectorStage({
     return () => cancelAnimationFrame(raf)
   }, [playing, doc, seconds, loop, loops, seekTo, pause, svgOf])
 
-  // Picking: a part under the pointer is lit, a click picks it (its nearest element with an id, not the stage's own).
+  // Picking: the part under the pointer (its nearest element with an id, not the stage's own) is lit; a click picks it.
+  const lit = useRef<Element | null>(null)
+  const partAt = (e: React.PointerEvent | React.MouseEvent) => {
+    const box = frame.current?.getBoundingClientRect()
+    const hit = box && doc ? doc.elementFromPoint(e.clientX - box.left, e.clientY - box.top) : null
+    const part = hit?.closest('[id]')
+    return part && part.localName !== 'svg' && !part.closest('defs') ? part : null
+  }
+  const light = (part: Element | null) => {
+    if (part === lit.current) return
+    lit.current?.classList.remove('arena-hover')
+    lit.current = part
+    part?.classList.add('arena-hover')
+  }
   useEffect(() => {
-    if (!doc || !picking) return
-    let lit: Element | null = null
-    const partOf = (e: Event) => {
-      const t = e.target as Element | null
-      const part = t?.closest?.('[id]')
-      return part && part.localName !== 'svg' && !part.closest('defs') ? part : null
-    }
-    const over = (e: Event) => {
-      lit?.classList.remove('arena-hover')
-      lit = partOf(e)
-      lit?.classList.add('arena-hover')
-    }
-    const click = (e: Event) => onPick?.(partOf(e)?.id ?? null)
-    doc.addEventListener('pointerover', over)
-    doc.addEventListener('click', click)
-    doc.body.classList.add('arena-picking')
-    return () => {
-      lit?.classList.remove('arena-hover')
-      doc.removeEventListener('pointerover', over)
-      doc.removeEventListener('click', click)
-      doc.body.classList.remove('arena-picking')
-    }
-  }, [doc, picking, onPick])
+    if (!picking) light(null)
+  }, [picking])
 
   useEffect(() => {
     if (!doc) return
@@ -149,7 +142,7 @@ export function VectorStage({
           title="The drawing"
           sandbox="allow-same-origin"
           srcDoc={page(markup)}
-          className="block aspect-[4/3] max-h-[62vh] w-full"
+          className="pointer-events-none block aspect-[4/3] max-h-[62vh] w-full"
           onLoad={(e) => {
             const d = e.currentTarget.contentDocument as Doc | null
             started.current = performance.now()
@@ -158,6 +151,15 @@ export function VectorStage({
             setDoc(d)
           }}
         />
+        {picking && (
+          <div
+            className="absolute inset-0 cursor-crosshair"
+            role="presentation"
+            onPointerMove={(e) => light(partAt(e))}
+            onPointerLeave={() => light(null)}
+            onClick={(e) => onPick?.(partAt(e)?.id ?? null)}
+          />
+        )}
       </div>
       {seconds > 0 && (
         <div className="flex items-center gap-2">

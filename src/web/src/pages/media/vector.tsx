@@ -169,7 +169,7 @@ function MotionRow({ m, kinds, parts, onChange, onRemove }: { m: Motion; kinds: 
       <div className="flex flex-wrap items-center gap-1.5 text-xs">
         <span className="flex items-center gap-1">
           Lasts
-          <Input type="number" min={0.1} max={60} step={0.1} value={m.duration ?? ''} placeholder="auto" aria-label="How long it lasts, in seconds" className="h-7 w-16" onChange={(e) => onChange({ ...m, duration: e.target.value ? Number(e.target.value) : undefined })} />s
+          <Input type="number" min={0.1} max={60} step={0.1} value={m.duration ?? ''} placeholder="auto" aria-label="How long it lasts, in seconds" className="h-7 w-20" onChange={(e) => onChange({ ...m, duration: e.target.value ? Number(e.target.value) : undefined })} />s
         </span>
         <span className="flex items-center gap-1">
           after
@@ -187,7 +187,8 @@ export function VectorEditor({ item, items, onClose }: { item: MediaItem; items:
   const confirm = useConfirm()
   const config = useQuery(vectorConfigQuery)
   const drawing = useQuery(vectorQuery(item.id))
-  const versions = useQuery({ ...vectorVersionsQuery(item.id), enabled: false })
+  const [tab, setTab] = useState('animate')
+  const versions = useQuery({ ...vectorVersionsQuery(item.id), enabled: tab === 'versions' })
   const jobs = useQuery(mediaJobsQuery)
   const stage = useRef<StageHandle | null>(null)
   const [picking, setPicking] = useState(false)
@@ -283,12 +284,12 @@ export function VectorEditor({ item, items, onClose }: { item: MediaItem; items:
             Not done: {problems.join('; ')}.
           </Alert>
         )}
-        <Tabs defaultValue="animate">
+        <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="w-full">
             <TabsTrigger value="animate">Animate</TabsTrigger>
             <TabsTrigger value="change">Change</TabsTrigger>
             <TabsTrigger value="export">Export</TabsTrigger>
-            <TabsTrigger value="versions" onClick={() => void versions.refetch()}>
+            <TabsTrigger value="versions">
               <History className="size-4" />
               <span className="sr-only">Versions</span>
             </TabsTrigger>
@@ -422,7 +423,6 @@ export function VectorEditor({ item, items, onClose }: { item: MediaItem; items:
                       onClick={async () => {
                         await restoreVersion(item.id, v.version).catch((e: unknown) => toast.error(errorMessage(e)))
                         refresh()
-                        void versions.refetch()
                       }}
                     >
                       Put back

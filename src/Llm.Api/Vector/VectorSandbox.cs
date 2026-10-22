@@ -188,8 +188,9 @@ public sealed class VectorSandbox(SandboxClient sandbox)
             members = rest[isl[rest] == j]
             groups.append({'id': None, 'label': None, 'pieces': [members], 'area': int(area[members].sum())})
         # Specks (each less than a thousandth) in one group of their own.
-        specks = [g for g in groups if g['label'] is None and g['area'] < 0.001 * sw * sh]
-        groups = [g for g in groups if g not in specks]
+        speck = [g['label'] is None and g['area'] < 0.001 * sw * sh for g in groups]
+        specks = [g for g, k in zip(groups, speck) if k]
+        groups = [g for g, k in zip(groups, speck) if not k]
         if specks:
             groups.append({'id': None, 'label': None, 'pieces': [np.concatenate([g['pieces'][0] for g in specks])], 'area': sum(g['area'] for g in specks), 'specks': True})
         for g in groups:

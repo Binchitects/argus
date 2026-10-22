@@ -20,7 +20,7 @@ test('a picture is made from words, then changed only where painted', async ({ p
     await page.getByLabel('Describe a picture').fill(words)
     await page.getByRole('radio', { name: 'Wide' }).click()
     await page.getByRole('button', { name: /Make it/ }).click()
-    const gallery = page.getByRole('list', { name: 'Your pictures and clips' })
+    const gallery = page.getByRole('list', { name: 'Your pictures, drawings and clips' })
     // Its place in the gallery says what it does, then it is there.
     await expect(gallery.getByRole('listitem', { name: new RegExp(`^Drawing: ${words.slice(0, 20)}`) })).toBeVisible()
     const made = gallery.getByRole('button', { name: `Made from words: ${words}` })
