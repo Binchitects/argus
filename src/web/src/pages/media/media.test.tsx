@@ -38,7 +38,7 @@ describe('media studio', () => {
       },
     })
     renderApp('/media')
-    const gallery = await screen.findByRole('list', { name: 'Your pictures and clips' })
+    const gallery = await screen.findByRole('list', { name: 'Your pictures, drawings and clips' })
     expect(within(gallery).getAllByRole('button')).toHaveLength(3)
     expect(within(gallery).getByRole('button', { name: 'Set moving: The fox looks up' })).toHaveTextContent('3 s')
     expect(screen.getByText('You have had 50 pictures drawn today.')).toBeInTheDocument()

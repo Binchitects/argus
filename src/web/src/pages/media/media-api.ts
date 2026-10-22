@@ -15,11 +15,11 @@ export interface MediaConfig {
   mostGoing: number
 }
 
-export type MediaAction = 'make' | 'edit' | 'vary' | 'enlarge' | 'move' | 'cutout' | 'speak' | 'music' | 'story' | 'upload'
+export type MediaAction = 'make' | 'edit' | 'vary' | 'enlarge' | 'move' | 'cutout' | 'speak' | 'music' | 'story' | 'draw' | 'trace' | 'reshape' | 'animate' | 'export' | 'upload'
 
 export interface MediaItem {
   id: string
-  kind: 'picture' | 'video' | 'sound'
+  kind: 'picture' | 'video' | 'sound' | 'vector'
   action: MediaAction
   prompt: string | null
   parentId: string | null
@@ -67,11 +67,18 @@ export interface MediaJobRequest {
   voiceId?: string
   consent?: boolean
   exaggeration?: number
+  style?: string
+  trace?: string
+  format?: string
+  side?: number
+  fps?: number
+  background?: string
+  length?: number
 }
 
 export const mediaConfigQuery = queryOptions({ queryKey: ['media', 'config'], queryFn: ({ signal }) => api<MediaConfig>('/api/media', { signal }) })
 
-export type Shown = 'all' | 'picture' | 'video' | 'sound'
+export type Shown = 'all' | 'picture' | 'video' | 'sound' | 'vector'
 
 export const mediaItemsQuery = (kind: Shown) =>
   infiniteQueryOptions({
@@ -118,6 +125,11 @@ export const actionNames: Record<MediaAction, string> = {
   speak: 'Spoken',
   music: 'Music',
   story: 'A video',
+  draw: 'Drawn as SVG',
+  trace: 'Traced into SVG',
+  reshape: 'Changed',
+  animate: 'Animated',
+  export: 'Exported',
   upload: 'Uploaded',
 }
 
@@ -177,4 +189,76 @@ export const working: Record<MediaJob['action'], string> = {
   cutout: 'Taking the background away',
   speak: 'Speaking',
   music: 'Making music',
+  draw: 'Drawing',
+  trace: 'Tracing',
+  reshape: 'Changing the drawing',
+  animate: 'Animating',
+  export: 'Exporting',
 }
+
+/** A motion of a drawing's part (its id, or "scene"): a kind, its timing, and what the kind takes. */
+export interface Motion {
+  target: string
+  kind: string
+  duration?: number
+  delay?: number
+  stagger?: number
+  repeat?: string
+  alternate?: boolean
+  easing?: string
+  from?: string
+  amount?: number
+  origin?: string
+  color?: string
+  keys?: { at: number; x?: number; y?: number; scale?: number; rotate?: number; opacity?: number; fill?: string }[]
+}
+
+export interface VectorDrawing {
+  id: string
+  prompt: string | null
+  width: number | null
+  height: number | null
+  /** The drawing as it stands still, made safe. */
+  still: string
+  motions: Motion[]
+  /** The drawing as people take it: its motions compiled in. */
+  markup: string
+  seconds: number
+  loops: boolean
+  source: 'drawn' | 'traced' | 'uploaded' | string
+  style: string | null
+  version: number
+  updatedAt: string
+}
+
+export interface VectorConfig {
+  styles: { name: string; about: string }[]
+  traces: { name: string; about: string }[]
+  kinds: { kind: string; about: string }[]
+  formats: string[]
+  /** Animations can be recorded (the browser module runs). */
+  moves: boolean
+  tracesPictures: boolean
+  drawsPictures: boolean
+}
+
+export interface PartBox {
+  id: string
+  tag: string
+  x: number
+  y: number
+  width: number
+  height: number
+  fill: string | null
+  text: string | null
+}
+
+export const vectorConfigQuery = queryOptions({ queryKey: ['media', 'vector-config'], queryFn: ({ signal }) => api<VectorConfig>('/api/media/vectors/config', { signal }), staleTime: 60_000 })
+export const vectorQuery = (id: string) => queryOptions({ queryKey: ['media', 'vector', id], queryFn: ({ signal }) => api<VectorDrawing>(`/api/media/vectors/${id}`, { signal }) })
+export const vectorVersionsQuery = (id: string) =>
+  queryOptions({ queryKey: ['media', 'vector', id, 'versions'], queryFn: ({ signal }) => api<{ version: number; change: string; createdAt: string }[]>(`/api/media/vectors/${id}/versions`, { signal }) })
+export const changeVector = (id: string, body: { still?: string; motions?: Motion[] }) =>
+  api<{ drawing: VectorDrawing; problems: string[] }>(`/api/media/vectors/${id}`, { method: 'PUT', body })
+export const restoreVersion = (id: string, version: number) => api<void>(`/api/media/vectors/${id}/versions/${version}/restore`, { method: 'POST' })
+export const uploadVector = (svg: string, name: string) => api<{ id: string; changed: string[] }>('/api/media/vectors', { body: { svg, name } })
+export const svgUrl = (id: string) => `/api/media/items/${id}/svg`

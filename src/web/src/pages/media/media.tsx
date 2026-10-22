@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AudioLines, Brush, Download, Eraser, Expand, Film, ImagePlus, Images, Music, Palette, Play, Scissors, Sparkles, Trash2, Undo2, Upload, Wand2, X } from 'lucide-react'
+import { AudioLines, Brush, Download, Eraser, Expand, Film, ImagePlus, Images, Music, Palette, PenTool, Play, Scissors, Sparkles, Trash2, Undo2, Upload, Wand2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { PageHeader } from '@/components/app/page-header'
 import { QueryError } from '@/components/app/query-state'
@@ -20,15 +20,17 @@ import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { uploadFile } from '../chat/api'
 import {
-  actionNames, addUpload, contentUrl, fit, mediaConfigQuery, mediaItemsQuery, mediaJobsQuery, removeItem, startJob, thumbUrl, working,
+  actionNames, addUpload, contentUrl, fit, mediaConfigQuery, mediaItemsQuery, mediaJobsQuery, removeItem, startJob, svgUrl, thumbUrl, vectorConfigQuery, working,
   type MediaConfig, type MediaItem, type MediaJob, type MediaJobRequest, type Shown,
 } from './media-api'
 import { PaintLayer, type PaintHandle } from './paint'
 import { MusicForm, SpeakForm } from './sound'
 import { StoryEditor, StoryForm, StoryList } from './story'
+import { VectorEditor, VectorForm } from './vector'
 
 /** What a job makes, as the gallery shows it. */
-const kindOf = (action: MediaJob['action']): Shown => (action === 'move' ? 'video' : action === 'speak' || action === 'music' ? 'sound' : 'picture')
+const kindOf = (action: MediaJob['action']): Shown =>
+  action === 'move' ? 'video' : action === 'speak' || action === 'music' ? 'sound' : ['draw', 'trace', 'reshape', 'animate', 'export'].includes(action) ? 'vector' : 'picture'
 
 const shapes = [
   { value: 'square', label: 'Square', width: 1024, height: 1024 },
@@ -54,11 +56,13 @@ function useStart(onStarted?: () => void) {
   })
 }
 
-/** What to make: a picture, speech or music (those the studio server has). */
+/** What to make: a picture, a vector drawing, speech or music (those the studio server has). */
 function CreateCard({ config, onStory }: { config: MediaConfig; onStory: (id: string) => void }) {
   const [mode, setMode] = useState('picture')
+  const vector = useQuery(vectorConfigQuery)
   const modes = [
     { value: 'picture', label: 'Picture' },
+    ...(vector.data ? [{ value: 'vector', label: 'Vector' }] : []),
     ...(config.video && config.picture ? [{ value: 'video', label: 'Video' }] : []),
     ...(config.voice ? [{ value: 'speech', label: 'Speech' }] : []),
     ...(config.music ? [{ value: 'music', label: 'Music' }] : []),
@@ -67,7 +71,17 @@ function CreateCard({ config, onStory }: { config: MediaConfig; onStory: (id: st
     <Card>
       <CardContent className="grid gap-3">
         {modes.length > 1 && <Segmented label="Make" value={mode} onChange={setMode} options={modes} />}
-        {mode === 'video' ? <StoryForm onWritten={onStory} /> : mode === 'speech' ? <SpeakForm /> : mode === 'music' ? <MusicForm /> : <MakeForm config={config} />}
+        {mode === 'video' ? (
+          <StoryForm onWritten={onStory} />
+        ) : mode === 'vector' && vector.data ? (
+          <VectorForm config={vector.data} />
+        ) : mode === 'speech' ? (
+          <SpeakForm />
+        ) : mode === 'music' ? (
+          <MusicForm />
+        ) : (
+          <MakeForm config={config} />
+        )}
       </CardContent>
     </Card>
   )
@@ -172,6 +186,9 @@ function Tile({ item, onOpen }: { item: MediaItem; onOpen: () => void }) {
       >
         {item.kind === 'video' && !item.thumb ? (
           <video src={contentUrl(item)} muted playsInline preload="metadata" className="size-full object-cover" aria-hidden="true" />
+        ) : item.kind === 'vector' ? (
+          // The drawing itself, playing its motions (an image runs nothing; the file is served sandboxed besides).
+          <img src={`${svgUrl(item.id)}?v=${item.size}`} alt="" loading="lazy" decoding="async" className="size-full bg-[repeating-conic-gradient(var(--color-background)_0%_25%,transparent_0%_50%)] bg-[length:16px_16px] object-contain" />
         ) : item.kind === 'sound' ? (
           <span className={cn('flex size-full flex-col items-center justify-center gap-2 p-4 text-center', item.action === 'music' ? 'bg-gradient-to-br from-violet-500/25 to-sky-500/20' : 'bg-gradient-to-br from-emerald-500/20 to-teal-500/15')}>
             {item.action === 'music' ? <Music className="size-8 text-violet-700 dark:text-violet-300" aria-hidden="true" /> : <AudioLines className="size-8 text-emerald-700 dark:text-emerald-300" aria-hidden="true" />}
@@ -182,6 +199,7 @@ function Tile({ item, onOpen }: { item: MediaItem; onOpen: () => void }) {
         )}
         <span className="absolute inset-x-0 bottom-0 flex items-end gap-1.5 bg-gradient-to-t from-black/70 to-transparent p-2 pt-8 text-left text-xs text-white opacity-90 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-visible:opacity-100">
           {item.kind === 'video' && <Film className="size-3.5 shrink-0" aria-hidden="true" />}
+          {item.kind === 'vector' && <PenTool className="size-3.5 shrink-0" aria-hidden="true" />}
           <span className="line-clamp-2">{label}</span>
         </span>
         {item.kind === 'video' && item.thumb && (
@@ -205,6 +223,7 @@ function Editor({ item, items, config, onOpen, onClose }: { item: MediaItem; ite
     toast.success('Started: it shows in the gallery when done.')
     onClose()
   })
+  const vector = useQuery(vectorConfigQuery)
   const picture = useRef<HTMLImageElement | null>(null)
   const [loaded, setLoaded] = useState<HTMLImageElement | null>(null)
   const paint = useRef<PaintHandle | null>(null)
@@ -218,6 +237,7 @@ function Editor({ item, items, config, onOpen, onClose }: { item: MediaItem; ite
   const [strength, setStrength] = useState('0.55')
   const [motion, setMotion] = useState('')
   const [seconds, setSeconds] = useState('3')
+  const [traceAs, setTraceAs] = useState('illustration')
   const parent = item.parentId ? items.find((i) => i.id === item.parentId) : undefined
   const natural = { width: loaded?.naturalWidth ?? item.width ?? 1024, height: loaded?.naturalHeight ?? item.height ?? 1024 }
   const work = fit(natural.width, natural.height)
@@ -289,6 +309,7 @@ function Editor({ item, items, config, onOpen, onClose }: { item: MediaItem; ite
               {config.enlarge && <TabsTrigger value="enlarge">Enlarge</TabsTrigger>}
               {config.cutout && <TabsTrigger value="cutout">Cut out</TabsTrigger>}
               {config.video && <TabsTrigger value="move">Move</TabsTrigger>}
+              {vector.data?.tracesPictures && <TabsTrigger value="trace">Vector</TabsTrigger>}
             </TabsList>
             <TabsContent value="edit" className="grid gap-3 pt-2">
               <Field label="What to change" hint={painting ? 'Paint over the part to change: the rest stays as it is.' : 'All of it changes as you say; or paint over the part to change.'}>
@@ -357,6 +378,15 @@ function Editor({ item, items, config, onOpen, onClose }: { item: MediaItem; ite
                 </Button>
               </TabsContent>
             )}
+            {vector.data?.tracesPictures && (
+              <TabsContent value="trace" className="grid gap-3 pt-2">
+                <p className="text-sm text-muted-foreground">Traced into clean vector shapes: an SVG as sharp at any size, small, and its parts ready to animate. Flat pictures with few colours trace best.</p>
+                <Segmented label="Traced as" value={traceAs} onChange={setTraceAs} options={vector.data.traces.map((t) => ({ value: t.name, label: t.name[0].toUpperCase() + t.name.slice(1) }))} />
+                <Button loading={start.isPending} onClick={() => send({ action: 'trace', trace: traceAs })}>
+                  <PenTool /> Trace it
+                </Button>
+              </TabsContent>
+            )}
             {config.video && (
               <TabsContent value="move" className="grid gap-3 pt-2">
                 <Field label="What happens" hint={`A short clip from ${config.video} that starts from this picture; it takes a few minutes.`}>
@@ -415,6 +445,7 @@ export function MediaPage() {
     }
     if (done) {
       void queryClient.invalidateQueries({ queryKey: ['media', 'items'] })
+      void queryClient.invalidateQueries({ queryKey: ['media', 'vector'] })
       void queryClient.invalidateQueries({ queryKey: mediaConfigQuery.queryKey })
     }
   }, [jobs.data, queryClient])
@@ -428,7 +459,7 @@ export function MediaPage() {
     <>
       <PageHeader
         title="Media studio"
-        description="Pictures from a few words; change one by saying how (all of it, or only the part you paint over), make variations, enlarge it, or make it move."
+        description="Pictures and vector drawings from a few words; change one by saying how (all of it, or only the part you paint over), trace it into an SVG, animate it, or make it move."
       />
       <div className="grid gap-4">
         {config.data ? <CreateCard config={config.data} onStory={setStory} /> : <Skeleton className="h-40 rounded-xl" />}
@@ -442,12 +473,12 @@ export function MediaPage() {
         ))}
         {config.data?.video && <StoryList onOpen={setStory} />}
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-base font-semibold">Your pictures and clips</h2>
+          <h2 className="text-base font-semibold">Your pictures, drawings and clips</h2>
           <Segmented
             label="Show"
             value={kind}
             onChange={setKind}
-            options={[{ value: 'all', label: 'All' }, { value: 'picture', label: 'Pictures' }, { value: 'video', label: 'Clips' }, { value: 'sound', label: 'Sound' }]}
+            options={[{ value: 'all', label: 'All' }, { value: 'picture', label: 'Pictures' }, { value: 'vector', label: 'Vector' }, { value: 'video', label: 'Clips' }, { value: 'sound', label: 'Sound' }]}
           />
         </div>
         {items.error ? (
@@ -462,10 +493,10 @@ export function MediaPage() {
           </ul>
         ) : all.length === 0 && going.length === 0 ? (
           <EmptyState icon={Palette} title="Nothing here yet">
-            Describe a picture above, or upload one of yours to change it.
+            Describe a picture or a drawing above, or upload one of yours to change it.
           </EmptyState>
         ) : (
-          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" aria-label="Your pictures and clips">
+          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" aria-label="Your pictures, drawings and clips">
             {going.flatMap((j) => Array.from({ length: j.action === 'make' || j.action === 'vary' ? j.count : 1 }, (_, i) => <WorkingTile key={`${j.id}-${i}`} job={j} />))}
             {all.map((item) => (
               <Tile key={item.id} item={item} onOpen={() => setOpen(item.id)} />
@@ -482,7 +513,13 @@ export function MediaPage() {
         <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-6xl">{story && config.data && <StoryEditor key={story} id={story} config={config.data} onClose={() => setStory(null)} />}</DialogContent>
       </Dialog>
       <Dialog open={!!chosen} onOpenChange={(o) => !o && setOpen(null)}>
-        <DialogContent className="sm:max-w-6xl">{chosen && config.data && <Editor key={chosen.id} item={chosen} items={all} config={config.data} onOpen={setOpen} onClose={() => setOpen(null)} />}</DialogContent>
+        <DialogContent className="max-h-[94vh] overflow-y-auto sm:max-w-6xl">
+          {chosen?.kind === 'vector' ? (
+            <VectorEditor key={chosen.id} item={chosen} items={all} onClose={() => setOpen(null)} />
+          ) : (
+            chosen && config.data && <Editor key={chosen.id} item={chosen} items={all} config={config.data} onOpen={setOpen} onClose={() => setOpen(null)} />
+          )}
+        </DialogContent>
       </Dialog>
     </>
   )

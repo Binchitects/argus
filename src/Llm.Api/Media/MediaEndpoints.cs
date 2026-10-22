@@ -85,7 +85,7 @@ public static class MediaEndpoints
     {
         var me = await Me(p, users);
         var q = db.MediaItems.AsNoTracking().Where(i => i.OwnerId == me.Id);
-        if (kind is MediaItem.Picture or MediaItem.Video or MediaItem.Sound)
+        if (kind is MediaItem.Picture or MediaItem.Video or MediaItem.Sound or MediaItem.Vector)
         {
             q = q.Where(i => i.Kind == kind);
         }
