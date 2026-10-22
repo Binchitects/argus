@@ -12,6 +12,71 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v6.7.0 (2026-10-22)
+
+Vector and motion: SVG you would ship, made of named parts, that moves as
+you say.
+
+### :rocket: Epics and highlights
+
+- **Vector drawings** (Media studio → Vector): an **illustration** from a few
+  words (the picture model draws it flat; it is traced into clean shapes,
+  cut out side by side with no seams), SVG **drawn by the model** in a
+  style (icons, diagrams, simple shapes; what it got wrong goes back to it
+  to fix), an **SVG of your own** (made safe, and told what went), or any
+  picture of yours traced
+- **Named parts**: a traced drawing comes as its things (a fox, the moon,
+  stars), not a heap of shapes: the chat model names the things in the
+  words, CLIPSeg finds each in the picture, and the shapes are grouped into
+  them; many of a kind become pieces that move one after another
+- **Made and animated in one go**: describe it and how it moves ("a laptop
+  sends a file to a server, which lights up"); the words are split into the
+  picture to draw and the motion, and the drawing comes out moving (gently
+  alive when the words say nothing; Moving or Still)
+- **Directed animation**: the planner tells the request as a little film in
+  beats on one cycle (anticipation, the move, follow-through, secondary
+  motion under it), from 36 motions compiled into the SVG as CSS — fade,
+  slide, pop, spin, float, drift, sway, breathe, twinkle, glow, draw the
+  lines on, travel and arc between parts, jump and land with squash and
+  stretch, flip, a camera that goes close, a trail of ghost copies, dashes
+  that flow along an arrow, keyframes of your own; or pick a part on the
+  stage and give it a motion by hand, with a timeline (play, pause, scrub,
+  loop). The file plays anywhere
+- **Diagrams**: how something works, crisp and clean — the model lays out
+  its things (Lucide's icons on tiles, labels, arrows), the app draws them
+  alike, each a part that moves on its own
+- **Out of the studio**: PNG up to 4,096 pixels, a looping GIF, an MP4, a
+  WebM that keeps its see-through background, or a sprite sheet, recorded
+  by the stack's own Chromium; and in a chat, the **Vector drawings** tool
+  draws and animates SVG (`draw_svg`, `animate_svg`), shown as it plays
+
+### :sparkles: New features & Enhancements
+
+- A picture server already running its model gets GPU room when a chat
+  model loaded since left it too little (the picture failed before)
+- The model that draws SVG (Settings → Chat) plans the drawings and their
+  motions; a larger one plans far better (Qwen3.8-27B here)
+- A drawing's code changed by hand shows on the stage as it is typed; every
+  change is a version (the last 50), and any can be put back
+- Drawings are served so that, even opened on their own, they run nothing
+  and reach nothing (a sandboxing content policy), in the studio and in
+  chats
+- Rooms read in one's own language (twenty languages; the original a click
+  away), translated faithfully by the model an admin names
+- The studio server tells who spoke each part of a recording
+  (`/v1/speakers`), the groundwork of meetings
+
+### :bug: Bugs fixed
+
+- Toasts' close buttons are 24 pixels (WCAG 2.2 target size)
+
+### :arrow_up: Deps updates
+
+- Sandbox: vtracer 0.6.15 and resvg-py 0.5.0
+- Studio: CLIPSeg (CIDAS/clipseg-rd64-refined, 603 MB, Apache-2.0), fetched
+  with the studio's default models
+- Lucide's icons (lucide-static 1.61.0, ISC) for diagrams, in the app
+
 ## v6.6.0 (2026-10-22)
 
 The media studio: pictures you change by painting, narrated videos from a few

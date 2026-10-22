@@ -274,6 +274,12 @@ public sealed class VllmBackendTests : IDisposable
         }
 
         await UntilAsync("unloaded");
+        // "unloaded" is also what a model reads before the supervisor has said anything: its heartbeat back first.
+        for (var i = 0; i < 100 && backend.Down() is not null; i++)
+        {
+            await SyncAsync();
+            await Task.Delay(200);
+        }
         Assert.Null(backend.Down());
         await backend.LoadAsync("flash", default);
         await UntilAsync("loaded");

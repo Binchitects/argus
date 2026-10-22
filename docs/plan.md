@@ -1493,6 +1493,12 @@ and blends it back (FLUX.2-klein's masked inpainting ignored the mask).
    model, and figures that move (a walk, a wave) exported with their
    animation.
 
+Released: **v6.7.0** (2026-10-22), all three items below, except: SVG is not
+yet optimized beyond what making it safe does (decimals to three places,
+nothing that does not draw); frames come as a sprite sheet (one PNG), not a
+folder of files; a drawing the model writes itself is only as good as the
+chat model (an illustration, traced, is the high-quality route).
+
 ### v6.7 — Vector and motion
 
 The person asked for this release to be about high-quality SVG and animated
@@ -1514,7 +1520,40 @@ SVG, and nothing else.
    frames, rendered by the stack's own Chromium; SVG and PNG at any size;
    and the chat's tools draw and animate SVG too.
 
-### v6.8 — Everyone, in every language
+### v6.8 — Code Studio, and Argus the business's technical mind
+
+The person asked (2026-10-22) for the Code section to become Code Studio, an
+IDE like VS Code in the browser, with the code arena's whole feature set,
+review inside it, and Argus as the business's technical mind and senior
+expert that explains the business, not only the code. Chosen: workspaces on
+the server and on one's own machine; Argus learns from the code and the
+repositories' documents, GitLab's issues, merge requests and wikis, and the
+company's knowledge.
+
+1. **Code Studio.** Workspace → Code Studio (`/code`): open a GitLab project
+   and branch in a workspace on the server, or connect one's own machine
+   (Code Arena's CLI), and work in the IDE Code Arena already is — editor,
+   explorer, search, source control, terminals, tasks, run and debug,
+   language servers, extensions, settings and keys, the agent's chat. A
+   server workspace runs Code Arena's own engine per workspace in an
+   isolated service (each its own user, limits, no Docker socket; network
+   only to the code host and package registries), cloned and pushed with the
+   person's own token; idle ones sleep and wake. Its home lists one's
+   workspaces, recent reviews and Argus.
+2. **Review in the studio.** Review one's changes, a branch or a merge
+   request from the IDE: findings as comments in the editor and in
+   Problems, each with its fix to apply; the automatic reviews and fixes
+   there too.
+3. **Argus, the business's technical mind.** Argus learns what the code is
+   for: each system's domain, capabilities, entities, rules, processes and
+   integrations, a glossary, from the code and its documents, GitLab's
+   issues, merge requests and wikis (read only), and the company's
+   knowledge; kept fresh as it indexes. It answers as a senior expert who
+   knows the business — "what happens when a customer cancels an order",
+   "why does billing round this way", "who uses this service" — traced
+   through the code with its sources, in the studio and in the chat.
+
+### v6.9 — Everyone, in every language
 
 1. **Rooms in every language** (reading a room in one's language came
    ahead, on main after v6.6.0). Each member reads the room in their own
@@ -1528,7 +1567,7 @@ SVG, and nothing else.
    any app to a chat, push notifications, Talk on the lock screen's
    shortcut, works with a poor connection (what is sent waits).
 
-### v6.9 — A model of your own
+### v7.0 — A model of your own
 
 1. **Model lab.** Teach a small model the company's words on the local GPU
    (a LoRA from chosen knowledge sources, prompts and good answers), then

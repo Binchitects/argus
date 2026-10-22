@@ -54,7 +54,9 @@ public sealed class FakeChatPlatforms : HttpMessageHandler
     /// <summary>Waits for a post to a place, up to ten seconds.</summary>
     public async Task<Post> WaitAsync(string host, string path, Func<Post, bool>? match = null)
     {
-        for (var i = 0; i < 200; i++)
+        // Up to 30 s: a bound for a post that never comes, not a wait for one that does (it returns as soon as it is there);
+        // a machine busy with other tests' builds takes longer than 10.
+        for (var i = 0; i < 600; i++)
         {
             if (To(host, path).FirstOrDefault(p => match?.Invoke(p) ?? true) is { } found)
             {
