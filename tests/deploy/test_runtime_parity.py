@@ -44,6 +44,7 @@ ALLOWED: dict[tuple[str, str, str], str] = {
     ("env", "app", "Modules__videogen"): "as Modules__imagegen",
     ("env", "app", "Modules__audio"): "as Modules__imagegen",
     ("env", "app", "Modules__laya"): "as Modules__imagegen",
+    ("env", "app", "Modules__studio"): "as Modules__imagegen",
     ("env", "app", "Database__RootCertificate"): "externalDatabase.caSecret; compose sets it in the override",
     ("env", "litellm", "DB_PASSWORD"): "Kubernetes builds DATABASE_URL from it ($(DB_PASSWORD)); compose interpolates",
     ("env", "postgres", "PGDATA"): "a volume's root is not empty on some storage (lost+found)",
@@ -97,7 +98,7 @@ def compose_config(*files: str) -> dict:
         env_file = Path(tmp) / "parity.env"
         env_file.write_text(example)
         env = {k: v for k, v in os.environ.items() if not k.startswith(("COMPOSE_", "DOCKER_HOST"))}
-        env.update({"COMPOSE_PROFILES": "laya,vllm,ha,3d", "PODMAN_COMPOSE_WARNING_LOGS": "false"})
+        env.update({"COMPOSE_PROFILES": "laya,vllm,ha,3d,studio", "PODMAN_COMPOSE_WARNING_LOGS": "false"})
         args = [*cmd, "--env-file", str(env_file)]
         for f in files:
             args += ["-f", str(DEPLOY / f)]
@@ -130,7 +131,7 @@ def helm_rendered() -> dict[str, dict[str, set[str]]] | None:
         return None
     if helm is None:
         return None
-    on = ["laya.enabled=true", "blender.enabled=true", "videogen.enabled=true", "vllm.enabled=true", "valkey.enabled=true", "argus.packLibraryClaim=packs"]
+    on = ["laya.enabled=true", "studio.enabled=true", "blender.enabled=true", "videogen.enabled=true", "vllm.enabled=true", "valkey.enabled=true", "argus.packLibraryClaim=packs"]
     out: dict[str, dict[str, set[str]]] = {}
     # This chart's Postgres, and an external one with a CA of its own: together, every variable a pod can be given.
     # The output holds the Secret it made up: it is read here and never printed.

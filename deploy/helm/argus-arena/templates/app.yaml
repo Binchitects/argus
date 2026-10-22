@@ -56,6 +56,7 @@ spec:
             - { name: Modules__videogen, value: {{ .Values.videogen.enabled | quote }} }
             - { name: Modules__audio, value: {{ .Values.audio.enabled | quote }} }
             - { name: Modules__laya, value: {{ .Values.laya.enabled | quote }} }
+            - { name: Modules__studio, value: {{ .Values.studio.enabled | quote }} }
             {{- range $k, $v := .Values.app.env }}
             - { name: {{ $k }}, value: {{ $v | quote }} }
             {{- end }}

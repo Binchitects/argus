@@ -55,6 +55,7 @@ images:
   sandbox: { repository: arena-sandbox, tag: "" }
   blender: { repository: arena-blender, tag: "" }
   laya: { repository: arena-laya, tag: "" }
+  studio: { repository: arena-studio, tag: "" }
   postgres: { repository: pgvector/pgvector, tag: 0.8.0-pg16 }
   litellm: { repository: ghcr.io/berriai/litellm, tag: main-stable }
   llamacpp: { repository: ghcr.io/ggml-org/llama.cpp, tag: server-cuda }
@@ -179,6 +180,17 @@ videogen:
   gpus: 1
   nodeSelector: {}
   tolerations: []
+# The media studio's own models on a GPU: a picture's background taken away, speech in a voice from a
+# sample, music. Off unless turned on; the app fetches their weights (11.6 GB) into the library's studio folder.
+studio:
+  enabled: false
+  gpus: 1
+  idleSeconds: 180
+  nodeSelector: {}
+  tolerations: []
+  resources:
+    requests: { cpu: "2", memory: 8Gi }
+    limits: { cpu: "8", memory: 24Gi }
 
 # Speech to text and text to speech, on the CPU.
 audio:
