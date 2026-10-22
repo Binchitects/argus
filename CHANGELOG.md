@@ -12,6 +12,54 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v6.4.0 (2026-10-22)
+
+Apps: what the chat builds, people use; the company's data asked in words;
+decks from a few words.
+
+### :rocket: Epics and highlights
+
+- **Decks** (Workspace → Decks, and the **Decks** chat tool): "make a deck
+  about…" and the model writes the slides (title, sections, points, two
+  columns, charts, pictures, quotes) with speaker notes. Charts get their
+  numbers from your words or from the company's data (never made up: a
+  chart whose numbers no one gave loses them and says why), pictures come
+  from the picture model one by one. Change it by asking ("a slide on costs
+  after the third", "make this slide shorter") or by hand; every version is
+  kept. **Present** it full screen, print it to **PDF**, or download it as
+  **PowerPoint**, built in the company's template (its layouts, theme and
+  logo; PowerPoint's own charts; speaker notes). Admins upload templates
+- **Ask your data** (Workspace → Data): admins connect PostgreSQL databases
+  (the tables people may ask, for everyone or some groups); a question in
+  words becomes SQL, shown and explained, run read only, and answered with
+  a chart and the rows. Change the SQL and run it, ask a follow-up, and pin
+  charts to **boards** that refresh hourly or daily as their owner, are
+  shared like apps, and post a chart to a room. Every query is kept for
+  admins. In a chat, the **Company data** tool does the same
+- **Arena Apps** (Workspace → Apps): a page or a component the chat built,
+  published from its preview at its own link, for you, some groups or
+  everyone; a gallery, versions, and **Remix** to make one your own. An app
+  asks the model and keeps its data (`window.arena`), as the person using
+  it: their model, credit and safeguards
+
+### :sparkles: New features & Enhancements
+
+- Read only, for real: each data query is one statement (the server refuses
+  more), in a read-only transaction with a time limit, after its plan shows
+  it reads only the tables opened; a superuser connection is refused, and a
+  role that may write is warned of
+- Administration → Data sources: connect and try a database, choose its
+  tables, tell the model what to know about the data, limits on rows and
+  seconds, and **What was asked** (who, the question, the SQL)
+- Decks: a slide's own picture can be uploaded; a chart can be asked of a
+  database by hand; **Ask the numbers again** refreshes a deck's charts
+- Storage: a picture on a deck is **On a deck**, kept by the clean-ups
+- The `feature.apps`, `feature.data` and `feature.decks` permissions, and
+  `data.manage` for data sources
+- Browser tests for apps, data (with `E2E_DATA_CONNECTION`) and decks; the
+  service worker refused over the stack's own certificate is no console
+  error
+
 ## v6.3.0 (2026-10-21)
 
 "Show me": the model sees what you see, builds what you draw, and works a

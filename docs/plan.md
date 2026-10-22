@@ -1430,6 +1430,11 @@ Released: **v6.3.0** (2026-10-21), all three items below.
    Needs a yes: the Playwright image (mcr.microsoft.com/playwright, about
    2 GB).
 
+Released: **v6.4.0** (2026-10-22), all three items below, except: an app's
+`arena.ask` has no tools, and an app or a board is shared with groups, not
+named people; Ask your data connects PostgreSQL only (MySQL and SQL Server
+need their drivers, a download); a deck's PDF is printed by the browser.
+
 ### v6.4 — Apps: what the chat builds, people use
 
 1. **Arena Apps.** A preview published as an app at its own link in the
