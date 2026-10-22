@@ -17,8 +17,9 @@ namespace Llm.Api.Chat;
 /// <param name="Quote">The part of an earlier answer it replies to (ChatQuotes).</param>
 /// <param name="Mentions">The room's members it names.</param>
 /// <param name="ReplyTo">A room's message it replies to: a reply to one of the model's answers is a question to it.</param>
+/// <param name="Skill">A skill it uses (/name and its parameters): a question to the model, in a room too.</param>
 public sealed record QueueRequest(string? Content, Guid[]? Attachments = null, bool Research = false, string? Quote = null, Guid[]? Mentions = null, Guid? ReplyTo = null,
-    Guid[]? Acknowledged = null, string? Justification = null);
+    Guid[]? Acknowledged = null, string? Justification = null, SkillUse? Skill = null);
 
 /// <summary>
 /// Messages sent while a chat answers wait here, on the server: a reload or another
@@ -79,7 +80,7 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
                 var last = await db.ChatMessages.Where(m => m.ConversationId == c.Id).MaxAsync(m => (int?)m.Sequence) ?? 0;
                 var question = new ChatMessage
                 {
-                    ConversationId = c.Id, ParentId = c.CurrentLeafId, Role = "user", Sequence = last + 1, Content = next.Content, Quote = next.Quote,
+                    ConversationId = c.Id, ParentId = c.CurrentLeafId, Role = "user", Sequence = last + 1, Content = next.Content, Quote = next.Quote, Skill = next.Skill,
                     AttachmentsJson = files.Count > 0 ? JsonSerializer.Serialize(files) : null,
                     AuthorId = next.UserId, ForPeople = next.ForPeople, Mentions = next.Mentions, ReplyToId = next.ReplyToId,
                 };
@@ -92,7 +93,7 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
                 var titled = last == 0 && !c.IsRoom;
                 if (titled)
                 {
-                    c.Title = ChatService.TitleFrom(next.Content.Length > 0 ? next.Content : "Attached files");
+                    c.Title = ChatService.TitleFrom(next.Content.Length > 0 ? next.Content : SkillLibrary.Kept(next.Skill)?.Title ?? "Attached files");
                 }
                 await db.SaveChangesAsync();
                 if (job is null)
@@ -163,7 +164,7 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
             .Select(a => new { a.Id, a.FileName, a.Size, a.Truncated, a.Kind, a.ContentType, original = a.Kind != "image" && a.Data != null }).ToDictionaryAsync(a => a.Id, ct);
         return [.. queued.Select(q => (object)new
         {
-            q.Id, q.Content, q.Quote, q.Research, q.CreatedAt, q.UserId, q.ForPeople,
+            q.Id, q.Content, q.Quote, skill = SkillLibrary.Kept(q.Skill), q.Research, q.CreatedAt, q.UserId, q.ForPeople,
             attachments = ChatService.ParseIds(q.AttachmentsJson).Where(files.ContainsKey).Select(a => files[a]),
         })];
     }
@@ -197,7 +198,21 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
         }
         var text = (body.Content ?? "").Trim();
         var attachments = (body.Attachments ?? []).Distinct().ToArray();
-        if (text.Length == 0 && attachments.Length == 0)
+        // A skill used: filled in now, as the person sees it, and sent so when its turn comes.
+        SkillCall? skill = null;
+        if (body.Skill is { Name: { Length: > 0 } skillName } use)
+        {
+            if (await SkillEndpoints.FindAsync(me, skillName, access, db, ct) is not { } found)
+            {
+                return AuthEndpoints.Problem(400, "skill", $"There is no skill /{skillName.TrimStart('/')} you may use.");
+            }
+            (skill, var missing) = SkillLibrary.Use(found, use.Args, text);
+            if (missing is not null)
+            {
+                return AuthEndpoints.Problem(400, "skill", missing);
+            }
+        }
+        if (text.Length == 0 && attachments.Length == 0 && skill is null)
         {
             return AuthEndpoints.Problem(400, "empty", "Write a message first.");
         }
@@ -229,7 +244,7 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
                 return AuthEndpoints.Problem(400, "reply", "That message is not in this room.");
             }
         }
-        var toModel = !c.IsRoom || RoomEndpoints.NamesArena(text) || repliedTo is { Role: "assistant" };
+        var toModel = !c.IsRoom || skill is not null || RoomEndpoints.NamesArena(text) || repliedTo is { Role: "assistant" };
         var forPeople = !toModel;
         if (repliedTo is { Role: "assistant" } answer && quote is null)
         {
@@ -241,7 +256,8 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
             return AuthEndpoints.Problem(403, "research", Tools.ResearchTool.NotYours);
         }
         var model = c.Model ?? (await policy.ForAsync(me, await models.ListAsync(ct), ct)).Default?.Name;
-        var verdict = await safeguards.CheckMessageAsync(me, text, attachments.Length, body.Research, model, ct, quote,
+        // A skill's instructions are read with the words: the rules see what the model would.
+        var verdict = await safeguards.CheckMessageAsync(me, skill is null ? text : SkillLibrary.ForModel(skill, text), attachments.Length, body.Research, model, ct, quote,
             new SendContext(body.Acknowledged, body.Justification, c.Id));
         if (!verdict.Allowed)
         {
@@ -254,8 +270,8 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
         var last = await db.QueuedMessages.Where(q => q.ConversationId == id).MaxAsync(q => (int?)q.Position, ct) ?? 0;
         db.QueuedMessages.Add(new QueuedMessage
         {
-            // Its secrets masked, when the person's policy masks them.
-            ConversationId = id, Content = verdict.Text ?? text, Quote = verdict.Quote ?? quote, Research = body.Research && !forPeople, Position = last + 1,
+            // Its secrets masked, when the person's policy masks them (with a skill, as the model reads it: ChatService masks it).
+            ConversationId = id, Content = skill is null ? verdict.Text ?? text : text, Skill = skill is null ? null : SkillLibrary.Keep(skill), Quote = verdict.Quote ?? quote, Research = body.Research && !forPeople, Position = last + 1,
             AttachmentsJson = attachments.Length > 0 ? JsonSerializer.Serialize(attachments) : null,
             UserId = me.Id, ForPeople = forPeople, Mentions = mentions, ReplyToId = repliedTo?.Id, Model = verdict.Model,
         });

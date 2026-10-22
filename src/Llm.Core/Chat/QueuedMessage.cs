@@ -12,6 +12,8 @@ public sealed class QueuedMessage
     public required string Content { get; set; }
     /// <summary>The part of an earlier answer it quotes, if any (as ChatMessage keeps it).</summary>
     public string? Quote { get; set; }
+    /// <summary>The skill it uses, as ChatMessage keeps it (its parameters filled in when it was queued).</summary>
+    public string? Skill { get; set; }
     /// <summary>The attachments' ids, as a JSON array (as ChatMessage keeps them).</summary>
     public string? AttachmentsJson { get; set; }
     /// <summary>Deep research for this one.</summary>

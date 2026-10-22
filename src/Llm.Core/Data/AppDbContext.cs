@@ -88,7 +88,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<AccessChange> AccessChanges => Set<AccessChange>();
     public DbSet<AccessMeta> AccessMeta => Set<AccessMeta>();
     public DbSet<Memory> Memories => Set<Memory>();
-    public DbSet<SavedPrompt> Prompts => Set<SavedPrompt>();
+    public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<KnowledgeSource> KnowledgeSources => Set<KnowledgeSource>();
     public DbSet<KnowledgeDocument> KnowledgeDocuments => Set<KnowledgeDocument>();
     public DbSet<KnowledgeChunk> KnowledgeChunks => Set<KnowledgeChunk>();
@@ -867,12 +867,15 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(m => new { m.UserId, m.UpdatedAt });
             e.HasOne<AppUser>().WithMany().HasForeignKey(m => m.UserId).OnDelete(DeleteBehavior.Cascade);
         });
-        builder.Entity<SavedPrompt>(e =>
+        builder.Entity<Skill>(e =>
         {
-            e.ToTable("prompts");
+            e.ToTable("skills");
             e.Property(p => p.Name).HasMaxLength(40);
             e.Property(p => p.Title).HasMaxLength(100);
-            e.Property(p => p.Text).HasMaxLength(20_000);
+            e.Property(p => p.Description).HasMaxLength(1000).HasDefaultValue("");
+            e.Property(p => p.Instructions).HasMaxLength(20_000);
+            e.Property(p => p.Parameters).HasMaxLength(10_000).HasDefaultValue("[]");
+            e.Property(p => p.AutoUse).HasDefaultValue(true);
             e.Property(p => p.Groups).HasDefaultValueSql("'{}'::uuid[]");
             e.HasIndex(p => p.UserId);
             e.HasIndex(p => p.ServerId);

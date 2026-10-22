@@ -21,10 +21,10 @@ public sealed class PluginOptions
 public sealed record PluginAssistant(string Name, string? Description, string? Instructions, string[] Starters, string[] Tools, string? Model, string? Icon, string? Color);
 
 /// <summary>
-/// A plugin's files: its manifest (and its text), its OpenAPI document when its tools are one, the prompts, assistants and
+/// A plugin's files: its manifest (and its text), its OpenAPI document when its tools are one, the skills, assistants and
 /// safeguard rules it adds; and every file it names, by name, so an earlier version can be put back as it was.
 /// </summary>
-public sealed record PluginPackage(PluginManifest Manifest, string ManifestText, string? Spec, IReadOnlyList<Chat.PluginPrompt>? Prompts = null)
+public sealed record PluginPackage(PluginManifest Manifest, string ManifestText, string? Spec)
 {
     public IReadOnlyList<PluginAssistant> Assistants { get; init; } = [];
     public IReadOnlyList<Safeguards.RuleRequest> Rules { get; init; } = [];
@@ -37,8 +37,14 @@ public sealed record PluginPackage(PluginManifest Manifest, string ManifestText,
     public IReadOnlyList<PluginSkill> Skills { get; init; } = [];
 }
 
-/// <summary>A Code Arena skill a plugin brings: its name and description (from its SKILL.md) and its files, by their path in its folder.</summary>
-public sealed record PluginSkill(string Name, string Description, IReadOnlyDictionary<string, string> Files);
+/// <summary>
+/// A skill a plugin brings: its name and description (from its SKILL.md) and its files, by their path in its folder; Code
+/// Arena's, and the chat's slash command too (<see cref="Chat"/>) when its name is one.
+/// </summary>
+public sealed record PluginSkill(string Name, string Description, IReadOnlyDictionary<string, string> Files)
+{
+    public Chat.PluginSkillFile? Chat { get; init; }
+}
 
 /// <summary>A plugin a catalog offers: what it is, and where its zip is (with its SHA-256), or the folder it is in.</summary>
 public sealed record CatalogEntry(string Name, string Version, string Title, string Description, string Source, string? Url, string? Sha256, string? PersonAuth);
@@ -172,11 +178,6 @@ public sealed class PluginCatalog(IOptionsMonitor<PluginOptions> options, IHttpC
         {
             spec = file(name) ?? throw new PluginException($"The plugin has no {name}, which its manifest names.");
         }
-        var prompts = manifest.Prompts.Select(f => Chat.PromptLibrary.FromFile(f, file(f) ?? throw new PluginException($"The plugin has no {f}, which its manifest names."))).ToList();
-        if (prompts.GroupBy(p => p.Name).FirstOrDefault(g => g.Count() > 1) is { } twice)
-        {
-            throw new PluginException($"The prompt /{twice.Key} is in the plugin twice.");
-        }
         var assistants = manifest.Assistants.Select(f => Assistant(f, file(f) ?? throw new PluginException($"The plugin has no {f}, which its manifest names."))).ToList();
         var rules = manifest.Safeguards.SelectMany(f => Rules(f, file(f) ?? throw new PluginException($"The plugin has no {f}, which its manifest names."))).ToList();
         var skills = new List<PluginSkill>();
@@ -201,7 +202,7 @@ public sealed class PluginCatalog(IOptionsMonitor<PluginOptions> options, IHttpC
             {
                 throw new PluginException($"The skill {skillName} is in the plugin twice.");
             }
-            skills.Add(new PluginSkill(skillName, description, files));
+            skills.Add(new PluginSkill(skillName, description, files) { Chat = Chat.SkillLibrary.FromSkill(folder, files["SKILL.md"], skillName, description) });
         }
         var server = new Dictionary<string, string>(StringComparer.Ordinal);
         if (manifest.Sandbox is { } own)
@@ -224,7 +225,7 @@ public sealed class PluginCatalog(IOptionsMonitor<PluginOptions> options, IHttpC
                 throw new PluginException($"The sandbox's server is more than {MostSkillFiles} files or {MostSkillChars / 1_000_000} MB.");
             }
         }
-        return new PluginPackage(manifest, text, spec, prompts) { Assistants = assistants, Rules = rules, Files = kept, Skills = skills, SandboxFiles = server };
+        return new PluginPackage(manifest, text, spec) { Assistants = assistants, Rules = rules, Files = kept, Skills = skills, SandboxFiles = server };
     }
 
     /// <summary>A SKILL.md's name and description, from its front matter (name: and description:), else its folder and first line.</summary>

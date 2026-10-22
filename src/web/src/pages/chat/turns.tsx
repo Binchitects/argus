@@ -28,6 +28,7 @@ import { compactedText, contextError } from './context'
 import type { Quote } from './quote'
 import { QuoteChip, QuotedLine, QuotePartDialog } from './quote-parts'
 import { TranslatedNote } from './read-in'
+import { SkillUsed } from './skill-used'
 import type { Translation } from './room-language'
 import type { AgentWork, ChatConfig, Compaction, InLine, Message } from './types'
 
@@ -241,6 +242,7 @@ export function QuestionTurn({
       )}
       {images.length > 0 && <ImageViewer images={asViewerImages(images)} index={viewing} onIndex={setViewing} />}
       {m.quote && editing === null && <QuotedLine quote={m.quote} onJump={onJumpToQuote ? () => onJumpToQuote(m) : undefined} />}
+      {m.skill && <SkillUsed skill={m.skill} />}
       {editing === null ? (
         <>
           {typed && (
@@ -256,7 +258,7 @@ export function QuestionTurn({
           className="grid w-full max-w-[85%] gap-2"
           onSubmit={(e) => {
             e.preventDefault()
-            if (editing.trim()) onEdit?.(m, editing.trim(), editQuote?.text ?? null)
+            if (editing.trim() || m.skill) onEdit?.(m, editing.trim(), editQuote?.text ?? null)
             setEditing(null)
           }}
         >
@@ -270,7 +272,7 @@ export function QuestionTurn({
             <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(null)}>
               Cancel
             </Button>
-            <Button type="submit" size="sm" disabled={busy || !editing.trim()}>
+            <Button type="submit" size="sm" disabled={busy || (!editing.trim() && !m.skill)}>
               Send
             </Button>
           </div>

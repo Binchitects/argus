@@ -10,6 +10,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, ApiError, errorMessage, infoQuery, type Me } from '@/lib/api'
 import { refusalEvent, safeguardQuestion, type SafeguardAnswer, type SafeguardQuestion } from './safeguard'
 import { AskReview, SafeguardAsk } from './safeguard-dialogs'
+import type { SkillUse } from '@/lib/skills'
 import { useMedia } from '@/lib/use-media'
 import { cn } from '@/lib/utils'
 import { archiveChat, assistantQuery, cancelQueued, chatModel, configQuery, conversationQuery, forkChat, hurryChat, queueMessage, sendQueuedNow, stampQuery, stopChat, streamChat, uploadFile } from './api'
@@ -612,13 +613,13 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     }
   }
   /** `onEvent`: hears the answer's events as they come (a sketch's question reads the code it gets). */
-  const send = async (text: string, files?: Attachment[], talkTurn?: TalkTurn, quoted?: Quote, onEvent?: (e: ChatEvent) => void): Promise<boolean> => {
+  const send = async (text: string, files?: Attachment[], talkTurn?: TalkTurn, quoted?: Quote, onEvent?: (e: ChatEvent) => void, skill?: SkillUse): Promise<boolean> => {
     const fromBox = files === undefined
     // Compare too: two models answer this message, side by side.
     const versus = fromBox ? compare : null
     if (versus) setCompare(null)
     // "/compact": a command, not a question.
-    if (text === '/compact' && (files ?? uploads.attachments).length === 0) {
+    if (text === '/compact' && !skill && (files ?? uploads.attachments).length === 0) {
       if (!canCompact) {
         toast.error(id ? 'Compact when the answer is done.' : 'This chat has nothing to compact yet.')
         return false
@@ -650,6 +651,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       ...(versus?.models ? { models: versus.models } : {}),
       ...(talkTurn ? { spoken: true } : {}),
       ...(withQuote ? { quote: withQuote.text } : {}),
+      ...(skill ? { skill: { name: skill.name, args: skill.args } } : {}),
     }
     const watch = (e: ChatEvent) => {
       if (e.type === 'question' && fromBox) uploads.clear()
@@ -662,7 +664,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
         if (said) speak(said).catch((err) => toast.error(errorMessage(err)))
       }
     }
-    let sent = await run(conversationId, versus ? 'compare' : 'messages', body, withQuestion(view, localId, parent, text, attachments, withQuote?.text), localId, watch)
+    let sent = await run(conversationId, versus ? 'compare' : 'messages', body, withQuestion(view, localId, parent, text, attachments, withQuote?.text, skill), localId, watch)
     // A safeguard asks first (send it anyway? why?): asked here, and sent again with the person's answer.
     const question = !sent ? safeguardHit.current : null
     if (question) {
@@ -671,7 +673,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       setAsking(null)
       if (answer.go) {
         const again = newLocalId()
-        sent = await run(conversationId, versus ? 'compare' : 'messages', { ...body, acknowledged: question.rules, justification: answer.justification }, withQuestion(view, again, parent, text, attachments, withQuote?.text), again, watch)
+        sent = await run(conversationId, versus ? 'compare' : 'messages', { ...body, acknowledged: question.rules, justification: answer.justification }, withQuestion(view, again, parent, text, attachments, withQuote?.text, skill), again, watch)
       }
     }
     // Not sent: it goes back into the box with its quote, and Compare stays on for it.
@@ -729,7 +731,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   // Written while an answer runs: each waits on the server (a reload, or another tab, still shows it)
   // and becomes the next question once the answer before is over, or at once with Send now (which
   // stops the answer). This page then watches that answer as it watched the one before.
-  const queue: Queued[] = (data?.queued ?? []).map((q) => ({ key: q.id, text: q.content, attachments: q.attachments, quote: q.quote }))
+  const queue: Queued[] = (data?.queued ?? []).map((q) => ({ key: q.id, text: q.content, attachments: q.attachments, quote: q.quote, skill: q.skill }))
   const setQueued = (chat: string, queued: QueuedMessage[]) =>
     queryClient.setQueryData<Conversation>(conversationQuery(chat).queryKey, (c) => (c ? { ...c, queued } : c))
   /** Watches the answer the chat is writing now (a queued message's): from its start, then live. */
@@ -745,11 +747,11 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     })
   }
   /** Queues what the box holds (its files and quote); `quoted`: a question about a selection instead, with no files. */
-  const enqueue = async (text: string, quoted?: Quote, inRoom?: { replyTo?: string; mentions?: string[] }): Promise<boolean> => {
+  const enqueue = async (text: string, quoted?: Quote, inRoom?: { replyTo?: string; mentions?: string[] }, skill?: SkillUse): Promise<boolean> => {
     const chat = streamingIn.current ?? id
     if (!chat) return false
     const fromBox = !quoted
-    if (fromBox && text === '/compact' && uploads.attachments.length === 0) {
+    if (fromBox && text === '/compact' && !skill && uploads.attachments.length === 0) {
       toast.error('Compact when the answer is done.')
       return false
     }
@@ -762,6 +764,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
         ...(withQuote ? { quote: withQuote.text } : {}),
         ...(inRoom?.replyTo ? { replyTo: inRoom.replyTo } : {}),
         ...(inRoom?.mentions?.length ? { mentions: inRoom.mentions } : {}),
+        ...(skill ? { skill: { name: skill.name, args: skill.args } } : {}),
       })
       if (fromBox) uploads.clear()
       setQueued(chat, r.queued)
@@ -856,8 +859,16 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     void run(
       id,
       'messages',
-      { content: text, attachments: m.attachments.map((a) => a.id), parentId: m.parentId ?? undefined, root: m.parentId === null, ...(quoted ? { quote: quoted } : {}) },
-      withQuestion(view, localId, m.parentId, text, m.attachments, quoted),
+      // A new version of a question keeps the skill it used, with the same parameters.
+      {
+        content: text,
+        attachments: m.attachments.map((a) => a.id),
+        parentId: m.parentId ?? undefined,
+        root: m.parentId === null,
+        ...(quoted ? { quote: quoted } : {}),
+        ...(m.skill ? { skill: { name: m.skill.name, args: m.skill.args } } : {}),
+      },
+      withQuestion(view, localId, m.parentId, text, m.attachments, quoted, m.skill ?? undefined),
       localId,
     )
   }
@@ -1065,7 +1076,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                 <BrowserBar chatId={id ?? null} active={toolsOnHere.includes('browser')} />
                 <ScreenBar share={share} sees={model?.vision ?? false} seer={seer} onSeer={(m) => void change({ model: m })} />
                 <TalkBar state={talk.state} onEnd={talk.end} />
-                <Composer streaming={streaming} onSend={send} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} compare={comparePicker} talk={talkButton} history={history} autoFocus big />
+                <Composer streaming={streaming} onSend={(text, skill) => send(text, undefined, undefined, undefined, undefined, skill)} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} compare={comparePicker} talk={talkButton} history={history} autoFocus big />
                 <div className={cn('stagger mt-4 grid gap-2', starters ? 'sm:grid-cols-2' : 'sm:grid-cols-3')} aria-label={starters ? 'Conversation starters' : undefined}>
                   {(starters ?? (config.argus ? [{ icon: Search, text: 'Which of our repositories call the payment service, and where?' }, ...suggestions.slice(0, 2)] : suggestions)).map((s) => (
                     <button
@@ -1270,16 +1281,16 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   elsewhere={data?.codeArena && !streaming ? 'Code Arena is answering' : undefined}
                   onSend={
                     room
-                      ? async (text) => {
-                          const sent = await enqueue(text, undefined, { replyTo: replyTo?.id, mentions: mentionsIn(text, room.members, me?.id ?? '') })
+                      ? async (text, skill) => {
+                          const sent = await enqueue(text, undefined, { replyTo: replyTo?.id, mentions: mentionsIn(text, room.members, me?.id ?? '') }, skill)
                           if (sent) setReplyTo(null)
                           return sent
                         }
-                      : send
+                      : (text, skill) => send(text, undefined, undefined, undefined, undefined, skill)
                   }
                   talk={talkButton}
                   queued={queue}
-                  onQueue={enqueue}
+                  onQueue={(text, skill) => enqueue(text, undefined, undefined, skill)}
                   onSendNow={(key) => void sendNow(key)}
                   onUnqueue={(key) => void unqueue(key)}
                  

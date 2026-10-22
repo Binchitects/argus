@@ -3,7 +3,7 @@
 Ready-made tools for the chat. A plugin is a folder with a `plugin.yaml` and
 the files it names: an API (its OpenAPI document) or an MCP server, how its
 calls sign in, which calls change something, the settings an admin fills in;
-and what else it brings: prompts for the library, assistants, safeguard rules
+and what else it brings: skills, assistants, safeguard rules
 and toolsets. **No plugin code runs in the app**: its tools are a remote MCP
 server, or an API the app calls with each operation's arguments.
 
@@ -20,9 +20,9 @@ own writes always ask first.
 - a catalog's, when **Settings → Plugins → Plugin catalog** names one (below).
 
 **Install** first says what the plugin does (its operations or its MCP
-server, how people sign in, what asks first, the prompts it adds) and what
+server, how people sign in, what asks first, the skills it adds) and what
 installing **grants** it: the hosts its calls go to, people's own accounts,
-the calls that change things, and the prompts, assistants, safeguard rules
+the calls that change things, and the skills, assistants, safeguard rules
 and toolsets it adds. A plugin that asks for more than adding tools installs
 only with the admin's yes (**Install and grant**); the grant is kept and
 audited. Then it asks for its settings. A
@@ -39,7 +39,7 @@ and to its OAuth token address when that is on the same server (same host and
 port), never to a host either redirects to (not followed); an update keeps it.
 
 **Update to …** appears when a catalog has a newer version (compared part by
-part, 1.10.0 after 1.9.2); the settings stay, and its prompts, assistants,
+part, 1.10.0 after 1.9.2); the settings stay, and its skills, assistants,
 rules and toolsets become the new version's. A version that asks for more
 than was granted waits for the admin's yes. **Pin this version** keeps it
 where it is: no update is offered until it is unpinned. Every version
@@ -49,7 +49,7 @@ and time over the last week, the last error and failures in a row; **Check
 now** reaches its server as you. A plugin's tool that fails 25 calls in a row
 is turned off, and the admins hear of it (Settings → Chat → **Turn off a
 failing tool**; 0: never). **Remove** takes its tool out of every chat, its
-prompts out of the library, its assistants, rules and toolsets away, and
+skills out of the library, its assistants, rules and toolsets away, and
 forgets everyone's connected accounts for it.
 
 Every install, update, settings change, connection and call is in the audit
@@ -106,7 +106,7 @@ auth:
     scopes: [api]
   help: Sign in to GitLab and allow the chat to work with issues as you.
 writes: [create_issue, add_note]   # functions (their own names) that ask first
-prompts: [prompts/triage.md]       # files in the plugin, each a prompt for the library
+skills: [skills/triage]            # folders, each a SKILL.md: a slash command and a Code Arena skill
 settings:
   - { key: gitlab_url, title: GitLab address, type: url, required: true }
   - { key: client_id, title: Application ID, type: text, required: true }
@@ -133,7 +133,6 @@ tasks:
     prompt: What is the weather today at the office, and should we expect delays?
     cron: "0 7 * * 1-5"
     tools: [self]                      # none: the plugin's own
-skills: [skills/storm-report]          # folders, each a SKILL.md and the files beside it
 ```
 
 - **An assistant** (`assistants/*.yaml`): `name`, `description`,
@@ -149,17 +148,10 @@ skills: [skills/storm-report]          # folders, each a SKILL.md and the files 
   who may use the plugin's tool. **Add** opens a new task with its name,
   question, schedule and tools filled in; once added it is theirs (runs as
   them, changed or removed as any of theirs) and stays if the plugin goes.
-- **A Code Arena skill**: a folder with its `SKILL.md` (front matter `name`
-  and `description`, as agentskills.io's) and the files beside it, up to 100
-  files and 1 MB. Code Arena keeps the skills of the plugins its person may
-  use under its config folder's `plugin-skills/`, written anew at each start
-  when Arena answers (kept as they were when it does not); the project's and
-  the person's own skills of the same name win.
-
 ## Making a plugin
 
 **Admin → Plugins → Make a plugin** downloads a starter plugin with every
-part (an API document, settings, a prompt, an assistant, a rule, a toolset).
+part (an API document, settings, a skill, an assistant, a rule, a toolset).
 Change it, zip the folder, and **Check a plugin** reads the zip as installing
 would, without installing it: what would stop it (a file it names that is
 missing, an API document with no operations, a `{placeholder}` that is not a
@@ -209,24 +201,39 @@ sandbox has (pandas, numpy, the document and picture tools...) and nothing
 from the network. Its writes ask first, and who may use it is set as for any
 tool.
 
-## Prompts
+## Skills
 
-`prompts:` lists Markdown files in the plugin. Each is a prompt of the library
-(**Workspace → Prompts**, and `/` in the chat): a front matter with its slash
-name and title, then its text, with `{{variables}}` the chat asks for before
-sending.
+`skills:` lists folders in the plugin, each a `SKILL.md` (front matter, then
+its instructions) and the files beside it, up to 100 files and 1 MB. A skill
+is two things at once:
+
+- **A slash command in the chat** (**Workspace → Skills**, and `/` in the
+  composer), like Claude Code's: its `name` is the command, its `description`
+  says when it is for (the model uses it on its own when the question fits),
+  its `parameters` are the fields the composer asks for, and its instructions
+  take them as `{{name}}`; `$ARGUMENTS` is what the person typed after the
+  fields. A `{{variable}}` not declared is a required parameter.
+- **A Code Arena skill**: Code Arena keeps the skills of the plugins its
+  person may use under its config folder's `plugin-skills/`, written anew at
+  each start when Arena answers (kept as they were when it does not); the
+  project's and the person's own skills of the same name win.
 
 ```markdown
 ---
 name: triage
 title: Triage a GitLab issue
+description: Sort a GitLab issue — what it asks, bug or feature, how urgent, which labels — without changing it.
+parameters:
+  - { name: issue, description: "The issue's number, like 42" }
+  - { name: project, description: "The project's path, like team/app" }
 ---
 Triage issue #{{issue}} in the GitLab project {{project}}. Read it and its comments, then say …
 ```
 
-A plugin's prompts are for whoever may use its tool (Admin → Tools), and
-nobody changes them: they come with an install or an update, and go with the
-plugin. `gitlab-issues` brings `/triage`.
+A parameter may say `required: false` and a `default`. A plugin's skills are
+for whoever may use its tool (Admin → Tools), and nobody changes them: they
+come with an install or an update, and go with the plugin. `gitlab-issues`
+brings `/triage`.
 
 ## An API by its OpenAPI document
 

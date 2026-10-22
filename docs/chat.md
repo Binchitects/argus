@@ -137,10 +137,10 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   answer, in any chat, knows it; what the model offers to remember on its own
   waits for your yes. Your account → Memory (or the brain in a chat's header)
   lists, edits and deletes them ([below](#memory)).
-- **Prompts.** `/` at the start of a message finds a prompt of the library
-  (Workspace → Prompts): yours, your groups', the company's or a plugin's.
-  Chosen, it asks for its blanks and sends it filled in
-  ([below](#prompts-and-slash-commands)).
+- **Skills.** `/` at the start of a message finds a skill (Workspace →
+  Skills): yours, your groups', the company's or a plugin's. Chosen, it asks
+  for its parameters and goes with your message; the model also uses one on
+  its own when a question fits ([below](#skills-and-slash-commands)).
 - **What you sent before (↑).** As in Claude's apps: with the box empty, or
   the caret on its first line, **↑** brings back your last message in this
   chat, then older ones; when this chat has none left, your messages in your
@@ -756,6 +756,27 @@ needs the `feature.fixit` permission. Everyone holds it unless an admin
 denies it. Tests in other languages cannot run here yet: the agent says so,
 and you run them in your pipeline.
 
+### Code Studio workspaces
+
+**Code → Code Studio** (`/code`) lists your workspaces: Code Arena's IDE in
+the browser (the editor, terminals, search, Git, language servers, the
+debugger and its agent), on a project of yours that the server keeps.
+
+- **A new workspace** is a GitLab project and branch (its default branch
+  when none), read with your own GitLab token, the one Fix it links. It is
+  cloned once on the workspaces service; it pushes as you.
+- **Open** starts it and shows the IDE at `/code/w/…`, the whole window. Its
+  engine runs as a user of its own, with limits; it has no Docker socket, and
+  its network reaches the app, the gateway and the internet, not the stack's
+  databases, engines or browser. Its agent uses a gateway key of its own,
+  against your credit. Only you reach it.
+- **Asleep.** A workspace unused for 30 minutes stops; its files stay, and
+  **Open** wakes it. **Delete** takes its files and its key away.
+- **Where.** The workspaces service runs with the `workspaces` profile
+  ([deployment.md](deployment.md)); without it, Code Studio lists no
+  server workspaces. It needs the `code.studio` permission, which everyone
+  holds unless an admin denies it. At most 8 workspaces each.
+
 ## 3D models
 
 The **3D models** tool (Admin → Tools; the 3D sandbox runs with
@@ -1188,26 +1209,44 @@ probability for every option, all questions in one forward pass.
   Arena MCP, and Code Arena uses it to look at commands
   ([code-arena.md](code-arena.md#laya-looks-at-commands)).
 
-## Prompts and slash commands
+## Skills and slash commands
 
-**Prompts** (Workspace → Prompts, `/prompts`) keep what you ask often, with
-blanks filled in each time: "Review {{file}} for {{focus}}".
+**Skills** (Workspace → Skills, `/skills`) work as Claude Code's: instructions
+for a kind of work you ask often, with parameters filled in each time. A
+skill has a slash name, a title, **when to use it** (a description, as the
+model reads it to choose it), its **instructions** and its **parameters**.
 
 - **In the chat**, `/` at the start of the message opens the list: type to
-  find by slash name or title, arrows to move, **Enter** or **Tab** to use
-  one, **Esc** to close it. `/compact` is there too. A chosen prompt's text
-  comes into the box with a field for each `{{blank}}` (Enter moves to the
-  next; on the last it sends). Sending fills them in; it waits until every
-  blank has something. A prompt without blanks just comes into the box.
+  find by slash name, title or description, arrows to move, **Enter** or
+  **Tab** to use one, **Esc** to close it. `/compact` is there too. The
+  chosen skill sits above the box as a chip, with a field for each parameter
+  (required ones marked; a default shown in its field). What you write in the
+  box goes with it. Enter moves from field to field, then to the box;
+  Backspace in the empty box, or the chip's X, lets the skill go. Sending
+  waits until every required parameter has something.
+- **What the model reads**: the skill's instructions, its parameters filled
+  in, then your words, unless the instructions say where they go
+  (`$ARGUMENTS`). The chat shows your words and the skill you used (its chip
+  and parameters; its instructions on demand), not the instructions in your
+  message. A message sent while an answer runs waits with its skill, filled
+  in as it was.
+- **Used on its own**: a skill that says when to use it is listed to the
+  model (the **Skills** tool, on in new chats), and the model loads it with
+  `use_skill` when a question fits, its parameters taken from the question.
+  Turn **The model uses it on its own** off to keep one for `/` only.
+- **Parameters**: each `{{name}}` in the instructions is one (a new one is
+  added as you write it); say what it is, whether it is required, and its
+  default.
 - **Yours**, **shared with your groups** (their members use it; only you
   change it), or **for everyone** (made and changed by admins; audited as
-  `prompt.*`). Each has a slash name (lowercase letters, digits, `-` and `_`),
-  a title and its text. Your own slash names are unique, and so are the
-  company's; the same name from two places shows both, yours first.
-- **Plugins bring their own** ([plugins.md](plugins.md#prompts)), for
-  whoever may use the plugin's tool, and take them away when removed:
-  `gitlab-issues` brings `/triage`.
-- Up to 200 prompts per person, 20,000 characters each.
+  `skill.*`). Your own slash names are unique, and so are the company's; the
+  same name from two places shows both, yours first.
+- **Plugins bring their own** ([plugins.md](plugins.md#skills)): each skill
+  folder of a plugin (its `SKILL.md`) is a slash command too, for whoever may
+  use the plugin's tool, and goes when the plugin is removed: `gitlab-issues`
+  brings `/triage`.
+- Up to 200 skills per person, 20,000 characters of instructions and 20
+  parameters each.
 
 ## Scheduled tasks
 
@@ -1468,7 +1507,7 @@ their turn:
   it. A server's key is stored encrypted under `APP_KEY` and never shown.
 - **Memories are the person's own**: only their answers read them, and only
   they see, change or delete them, admins included.
-- **Prompts** are their owner's, unless shared with groups (members use
+- **Skills** are their owner's, unless shared with groups (members use
   them) or made for everyone by an admin; a plugin's are for whoever may use
   its tool.
 
@@ -1715,10 +1754,15 @@ use and edit one); a new chat takes `assistantId`.
   prompt (after the fixed notes) and gone once deleted; an offer kept only
   when accepted (in the person's words), taken back, declined, and nobody
   else able to answer it; a task's chat only offering; the person's switch
-  and the company's; the block's budget. And the prompt library: a person's own, shared with their groups
+  and the company's; the block's budget. And skills (`SkillTests`): a person's own, shared with their groups
   (only the owner changes it), the company's (admins only, audited), the
-  checks on names and groups, and a plugin's `/triage` installed with it, for
-  whoever may use its tool, and removed with it. And ↑'s history: one's own
+  checks on names, parameters and groups; one used with its parameters (the
+  model reads its instructions filled in, the chat keeps the words and the
+  skill apart, one missing a required parameter refused), queued with an
+  answer running, used by the model on its own (`use_skill`) when it says
+  when it is for; and a plugin's `/triage` (its SKILL.md) installed with it,
+  for whoever may use its tool, and removed with it; prompts kept as skills
+  on an upgrade (`SkillsMigrationTests`). And ↑'s history: one's own
   messages across chats, newest first, a page at a time, archived chats' too,
   a deleted chat's and pasted documents left out, and nobody else's: not a
   triggered task's run, nor a shared chat's questions copied into a fork (what
@@ -1778,10 +1822,12 @@ use and edit one); a new chat takes `assistantId`.
   - Auto in the model menu, its note under an answer (the small model's, or
     handed on with a thinking level), **Ask the big model**, no Auto without
     a small model, and the sub-agents' model under an answer
-  - `/review` chosen from the `/` menu, its blanks asked for, not sent while
-    one is empty, then sent filled in; the menu found by title, closed with
-    Esc; a prompt without blanks; the Prompts page (sections, a new prompt
-    shared with a group, an admin's for everyone, edit and delete)
+  - `/review` chosen from the `/` menu: its chip and parameter fields, not
+    sent while a required one is empty, then sent as a skill with the box's
+    words; Backspace letting it go; the menu found by title, closed with Esc;
+    a skill without parameters; the Skills page (sections, a new skill with
+    parameters shared with a group, an admin's for everyone, edit and
+    delete)
   - memory: an offer kept in the person's words and undone; the chat's Memory
     button listing and deleting; Your account → Memory (add, edit, delete,
     off)

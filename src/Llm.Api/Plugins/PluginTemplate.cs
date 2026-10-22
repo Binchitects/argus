@@ -38,7 +38,7 @@ public static class PluginTemplate
                 required: true
             # Calls that change something ask the person first.
             writes: []
-            prompts: [prompts/forecast.md]
+            skills: [skills/forecast]
             assistants: [assistants/forecaster.yaml]
             safeguards: [safeguards/rules.yaml]
             toolsets:
@@ -66,12 +66,16 @@ public static class PluginTemplate
                     "200":
                       description: The weather.
             """),
-        ("prompts/forecast.md", """
+        ("skills/forecast/SKILL.md", """
             ---
             name: forecast
             title: Forecast for a trip
+            description: The weather for a trip's next days, and what to pack for it.
+            parameters:
+              - { name: city, description: Where you are going }
+              - { name: days, description: How many days, required: false, default: "3" }
             ---
-            What will the weather be like in {{city}} for the next few days, and what should I pack?
+            What will the weather be like in {{city}} for the next {{days}} days, and what should I pack? $ARGUMENTS
             """),
         ("assistants/forecaster.yaml", """
             name: Forecaster
@@ -97,7 +101,7 @@ public static class PluginTemplate
         ("README.md", """
             # Weather desk
 
-            A starter plugin: change the manifest, the API document, the prompt, the assistant and the rules, zip the folder,
+            A starter plugin: change the manifest, the API document, the skill, the assistant and the rules, zip the folder,
             check it under Admin → Plugins → Check a plugin, then install it. docs/plugins.md describes every field.
             """),
     ];
@@ -177,7 +181,7 @@ public static class PluginTemplate
         {
             ok = problems.Count == 0, problems, warnings,
             m.Name, m.Version, m.Title, operations, mcp = m.Mcp,
-            prompts = (package.Prompts ?? []).Select(p => p.Name), assistants = package.Assistants.Select(a => a.Name), rules = package.Rules.Select(r => r.Name),
+            skills = Chat.SkillLibrary.ChatSkillsOf(package).Select(p => p.Name), assistants = package.Assistants.Select(a => a.Name), rules = package.Rules.Select(r => r.Name),
             toolsets = m.Toolsets.Select(t => t.Name), permissions = PluginContent.Permissions(package),
         };
     }

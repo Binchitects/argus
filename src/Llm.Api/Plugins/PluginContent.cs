@@ -37,9 +37,9 @@ public static class PluginContent
         {
             list.Add(new("writes", $"Can change things: {string.Join(", ", m.Writes)} (each call asks the person first)."));
         }
-        if (package.Prompts is { Count: > 0 } prompts)
+        if (Chat.SkillLibrary.ChatSkillsOf(package) is { Count: > 0 } skills)
         {
-            list.Add(new("prompts", $"Adds {prompts.Count} prompt{(prompts.Count > 1 ? "s" : "")} to the library: {string.Join(", ", prompts.Select(p => "/" + p.Name))}."));
+            list.Add(new("skills", $"Adds {skills.Count} skill{(skills.Count > 1 ? "s" : "")} for the chat: {string.Join(", ", skills.Select(p => "/" + p.Name))}."));
         }
         if (package.Assistants.Count > 0)
         {

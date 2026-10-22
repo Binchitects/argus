@@ -88,10 +88,10 @@ Other clients (streamable HTTP):
   `resources/read` reads a link with the key; the person opens it in the
   browser, signed in. A client of 2025-03-26 or older gets the links in the
   text. The files are kept with the person's files, outside any chat.
-- **Prompts**: the prompt library as the person sees it in the chat's `/`
-  menu: their own, their groups', the company's and their plugins'. Each
-  `{{variable}}` is an argument; `prompts/get` returns the text filled in, as
-  one user message. A name in two places is theirs first, as in the menu.
+- **Prompts**: the person's skills as they see them in the chat's `/` menu:
+  their own, their groups', the company's and their plugins'. Each parameter
+  is an argument; `prompts/get` returns the instructions filled in, as one
+  user message. A name in two places is theirs first, as in the menu.
 
 ## Who it runs as
 

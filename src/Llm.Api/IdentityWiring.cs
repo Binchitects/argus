@@ -380,6 +380,7 @@ public static class IdentityWiring
         services.Configure<Chat.MemoryOptions>(config.GetSection("Memory"));
         services.AddScoped<Chat.Memories>();
         services.AddScoped<Chat.Tools.MemoryTool>();
+        services.AddScoped<Chat.Tools.SkillTool>();
         ArenaMcp.McpEndpoints.AddArenaMcp(services, config);
         // Answers outlive the page that asked: they run here, and a page re-attaches.
         services.AddSingleton<Chat.RoomHub>();
@@ -556,7 +557,7 @@ public static class IdentityWiring
         Access.SharingEndpoints.MapSharing(app);
         Chat.TraceEndpoints.MapTraces(app);
         Chat.MemoryEndpoints.MapMemories(app);
-        Chat.PromptEndpoints.MapPrompts(app);
+        Chat.SkillEndpoints.MapSkills(app);
         Quality.QualityEndpoints.MapQuality(app);
         Chat.CanvasEndpoints.MapCanvases(app);
         Chat.QueuedMessages.MapQueue(app);

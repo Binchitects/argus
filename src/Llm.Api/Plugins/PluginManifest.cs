@@ -21,14 +21,14 @@ public sealed record PluginOAuth(string Authorize, string Token, string[] Scopes
 /// A plugin's manifest (plugin.yaml): what it is, where its tools are (an OpenAPI document in
 /// the plugin, or an MCP server), how calls authenticate (one key for everyone, or each person's
 /// own API key or OAuth account), which functions change something (they ask first), and the
-/// settings an admin fills in; and what else it brings: prompts for the library (Markdown files),
-/// assistants and safeguard rules (YAML files), and toolsets. No plugin code runs in the app.
+/// settings an admin fills in; and what else it brings: skills (folders with a SKILL.md, for the chat's
+/// slash commands and Code Arena), assistants and safeguard rules (YAML files), and toolsets. No plugin code runs in the app.
 /// </summary>
 public sealed partial record PluginManifest(
     string Name, string Version, string Title, string Description,
     string? OpenApi, string? Mcp, string Url,
     string? PersonAuth, string Header, string Value, PluginOAuth? OAuth, string? Help,
-    string[] Writes, PluginSetting[] Settings, string[] Prompts)
+    string[] Writes, PluginSetting[] Settings)
 {
     public string[] Assistants { get; init; } = [];
     public string[] Safeguards { get; init; } = [];
@@ -108,11 +108,6 @@ public sealed partial record PluginManifest(
         {
             throw new ManifestException($"The setting {twice.Key} is there twice.");
         }
-        string[] prompts = [.. (doc["prompts"] as JsonArray ?? []).Select(Str).OfType<string>()];
-        if (prompts.FirstOrDefault(f => f.Contains("..", StringComparison.Ordinal) || Path.IsPathRooted(f)) is { } outside)
-        {
-            throw new ManifestException($"The prompt {outside} must be a file inside the plugin.");
-        }
         string[] Files(string key)
         {
             string[] files = [.. (doc[key] as JsonArray ?? []).Select(Str).OfType<string>()];
@@ -141,7 +136,7 @@ public sealed partial record PluginManifest(
         return new PluginManifest(name, Str(doc["version"]) ?? "0", Str(doc["title"]) ?? name, Str(doc["description"]) ?? "",
             openapi, mcp, sandbox is not null ? SandboxScheme + name : Str(tools["url"]) ?? mcp ?? "",
             person, Str(auth["header"]) ?? "Authorization", Str(auth["value"]) ?? "Bearer {token}", oauth, Str(auth["help"]),
-            [.. (doc["writes"] as JsonArray ?? []).Select(Str).OfType<string>()], settings, prompts)
+            [.. (doc["writes"] as JsonArray ?? []).Select(Str).OfType<string>()], settings)
         {
             Assistants = Files("assistants"), Safeguards = Files("safeguards"), Toolsets = toolsets, Author = Str(doc["author"]), Homepage = Str(doc["homepage"]),
             Tasks = tasks, Skills = [.. Files("skills").Select(f => f.Trim('/'))], Sandbox = sandbox,

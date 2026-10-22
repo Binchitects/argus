@@ -32,9 +32,9 @@ describe('the help panel', () => {
 
   it('opens over the page on a narrower screen, and Esc gives focus back to the ?', async () => {
     fakeApi(member)
-    renderApp('/prompts')
+    renderApp('/skills')
     const panel = await openHelp()
-    expect(await within(panel).findByRole('heading', { name: 'Prompts' })).toBeInTheDocument()
+    expect(await within(panel).findByRole('heading', { name: 'Skills' })).toBeInTheDocument()
     await waitFor(() => expect(panel).toContainElement(document.activeElement as HTMLElement))
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
@@ -44,11 +44,11 @@ describe('the help panel', () => {
   it('sits beside the page on a wide screen: the page makes room, and it follows you while you work', async () => {
     wideScreen()
     fakeApi(member)
-    renderApp('/prompts')
+    renderApp('/skills')
     const button = await screen.findByRole('button', { name: 'Help for this page' })
     await userEvent.click(button)
     const panel = await screen.findByRole('complementary', { name: 'Help' })
-    expect(await within(panel).findByRole('heading', { name: 'Prompts' })).toBeInTheDocument()
+    expect(await within(panel).findByRole('heading', { name: 'Skills' })).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(button).toHaveAttribute('aria-expanded', 'true')
     expect(panel).toHaveFocus()
@@ -105,13 +105,13 @@ describe('the help panel', () => {
 
   it('opens the manual at its section, and gets out of the way', async () => {
     fakeApi(member)
-    const { router } = renderApp('/prompts')
+    const { router } = renderApp('/skills')
     const panel = await openHelp()
     await userEvent.click(await within(panel).findByRole('link', { name: 'Read more in the manual' }))
     await waitFor(() => expect(router.state.location.pathname).toBe('/help/chat'))
-    expect(router.state.location.hash).toBe('#prompts-and-slash-commands')
+    expect(router.state.location.hash).toBe('#skills-and-slash-commands')
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(await screen.findByRole('heading', { name: 'Prompts and slash commands' })).toHaveAttribute('id', 'prompts-and-slash-commands')
+    expect(await screen.findByRole('heading', { name: 'Skills and slash commands' })).toHaveAttribute('id', 'skills-and-slash-commands')
   })
 
   it('helps on the sign-in page too, with whom to ask instead of the manual', async () => {

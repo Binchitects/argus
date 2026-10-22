@@ -153,7 +153,7 @@ public static class PluginEndpoints
         {
             m.Name, m.Version, m.Title, m.Description, m.PersonAuth, m.Help, m.Writes, operations, mcp = m.Mcp, m.Author, m.Homepage,
             settings = m.Settings.Select(x => new { x.Key, x.Title, x.Type, x.Required, x.Help }),
-            prompts = (package.Prompts ?? []).Select(x => new { x.Name, x.Title }),
+            skills = Chat.SkillLibrary.ChatSkillsOf(package).Select(x => new { x.Name, x.Title }),
             assistants = package.Assistants.Select(a => new { a.Name, a.Description }),
             rules = package.Rules.Select(r => new { r.Name, r.Detector, r.Action }),
             toolsets = m.Toolsets.Select(t => new { t.Name, t.Description }),
@@ -201,7 +201,7 @@ public static class PluginEndpoints
         await db.SaveChangesAsync(ct);
         var adminId = (await users.GetUserAsync(principal))?.Id;
         db.PluginReleases.Add(PluginContent.Release(server, package, adminId));
-        await Chat.PromptLibrary.SyncAsync(db, server, package, ct);
+        await Chat.SkillLibrary.SyncAsync(db, server, package, ct);
         await PluginContent.SyncAsync(db, server, package, adminId, ct);
         await audit.WriteAsync("plugin.install", package.Manifest.Name, detail: $"{package.Manifest.Version}, {server.Url}; granted {string.Join(", ", server.PluginPermissions)}");
         await ServerTls.AuditAsync(audit, server, TlsCheck.System, null);
@@ -337,7 +337,7 @@ public static class PluginEndpoints
         var adminId = (await users.GetUserAsync(principal))?.Id;
         db.PluginReleases.Add(PluginContent.Release(server, package, adminId));
         await db.SaveChangesAsync(ct);
-        await Chat.PromptLibrary.SyncAsync(db, server, package, ct);
+        await Chat.SkillLibrary.SyncAsync(db, server, package, ct);
         await PluginContent.SyncAsync(db, server, package, adminId, ct);
         await audit.WriteAsync(action, server.Plugin, detail: $"{was} → {server.PluginVersion}{(more.Count > 0 ? $"; granted {string.Join(", ", more.Select(p => p.Key))}" : "")}");
         return Results.Ok(new { version = server.PluginVersion, granted = more });

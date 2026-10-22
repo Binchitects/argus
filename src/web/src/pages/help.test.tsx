@@ -52,7 +52,7 @@ describe('the manual', () => {
     await userEvent.click(screen.getByRole('combobox', { name: 'Page of the manual' }))
     await userEvent.click(await screen.findByRole('option', { name: 'Every page, explained' }))
     await userEvent.click(await screen.findByRole('combobox', { name: 'Section of Every page, explained' }))
-    expect(await screen.findByRole('option', { name: 'Prompts' })).toBeInTheDocument()
+    expect(await screen.findByRole('option', { name: 'Skills' })).toBeInTheDocument()
   })
 
   it('says when nothing matches', async () => {

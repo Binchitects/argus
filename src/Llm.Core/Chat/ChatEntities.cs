@@ -89,6 +89,12 @@ public sealed class ChatMessage
     /// reads it before the question (ChatQuotes.ForModel); the page shows it above the question.
     /// </summary>
     public string? Quote { get; set; }
+    /// <summary>
+    /// A question that used a skill: which (its name and title), what it was given, and its instructions as filled in then,
+    /// JSON <c>{ name, title, args, instructions }</c>. The model reads the instructions before the question; the page shows
+    /// the skill and its arguments.
+    /// </summary>
+    public string? Skill { get; set; }
     public string? Reasoning { get; set; }
     public string? ToolCallsJson { get; set; }
     public string? ToolCallId { get; set; }

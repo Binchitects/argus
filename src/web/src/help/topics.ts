@@ -88,7 +88,7 @@ export const topics = {
       { name: 'The answers', text: 'Under each answer: the model, time, tokens and cost; thumbs up or down; **Answer again** (also with another model, shorter or longer); **Fork from here**; read aloud. Arrows like 2 / 3 switch between versions of a question or an answer.' },
       { name: 'The message box', text: 'The paperclip attaches files (or paste or drop them). **Tools** chooses what the model may use in this chat, **Deep research** among them when an admin gave it to you: the model starts it when you ask, after your **Allow**. **Compare** applies to the next message. The microphone records a voice message; **Talk** is a voice conversation; the screen button shares your screen, and each question then takes a picture of it; **Sketch** (the pen) is a whiteboard whose drawing the model builds into a page, a component, a diagram, a 3D scene or a table. With **Browser** on in Tools, the model uses a real browser while you watch it above the box, and **Take over** lets you do a part yourself.' },
       { name: 'Context', text: 'The gauge beside Send: how full the model\'s window is, what fills it, and where the chat compacts itself (Your account → Answers → **Compact long chats**; it always compacts before a message would not fit). **Compact now** summarizes older messages so the chat can go on lighter.' },
-      { name: '/ in the box', text: 'At the start of a message, / finds a saved prompt (Workspace → Prompts) and fills in its blanks.' },
+      { name: '/ in the box', text: 'At the start of a message, / finds a skill (Workspace → Skills): it sits above the box with a field for each parameter, and goes with your message.' },
       { name: '↑ in the box', text: 'With the box empty (or the caret on its first line), ↑ brings back what you sent before: this chat\'s messages, then your other chats\'. ↓ goes back to what you were typing, and Esc goes straight there.' },
     ],
     tasks: [
@@ -97,7 +97,7 @@ export const topics = {
       { title: 'Try another model on the same question', steps: ['Open **Answer again** under the answer.', 'Choose the model (or a thinking level).', 'Both answers stay: the arrows switch between them.'] },
       { title: 'Compare two models blind', steps: ['Press **Compare** in the message box.', 'Choose two models, or leave it to chance.', 'Send your question, read both answers, and vote. The names show after your vote, and the vote counts on the Leaderboard.'] },
       { title: 'Share a chat', steps: ['Open **⋯** at the top right of the chat.', 'Choose **Share**.', 'Choose who may open it (everyone in the company, or chosen groups) and what it shows. The link is copied. **Revoke link** stops it.'] },
-      { title: 'Use a saved prompt', steps: ['Type / at the start of the message.', 'Choose the prompt with the arrows and Enter.', 'Fill in each blank (Enter moves to the next) and send.'] },
+      { title: 'Use a skill', steps: ['Type / at the start of the message.', 'Choose the skill with the arrows and Enter.', 'Fill in its parameters (Enter moves to the next, then to the box), add anything in the box, and send.'] },
       { title: 'Send a message again', steps: ['Press ↑ in the empty box until the message shows (your other chats\' come after this chat\'s).', 'Change it if you like: the one you sent stays as it was.', 'Press Enter: it goes as a new message.'] },
     ],
     manual: { doc: 'chat', section: 'what-it-does' },
@@ -149,20 +149,30 @@ export const topics = {
     manual: { doc: 'chat', section: 'assistants' },
   },
 
-  prompts: {
-    title: 'Prompts',
-    about: 'Prompts you use often, with blanks you fill in each time. Type / in the chat to use one.',
+  skills: {
+    title: 'Skills',
+    about: 'Instructions for work you ask often, with parameters filled in each time, as in Claude Code. Type / in the chat to use one; with a description, the model uses it on its own when a question fits.',
     parts: [
-      { name: 'Yours', text: 'Prompts you made. Only you change them; you may share them with your groups.' },
+      { name: 'Yours', text: 'Skills you made. Only you change them; you may share them with your groups.' },
       { name: 'Shared with you', text: 'From people in your groups.' },
       { name: 'For everyone', text: 'The company\'s, kept by admins.' },
       { name: 'From plugins', text: 'They come and go with their plugin.' },
-      { name: 'New prompt', text: 'A slash name (lowercase letters, digits, - and _), a title, and the text. Write a blank as {{name}}.' },
+      { name: 'New skill', text: 'A slash name, a title, when to use it, the instructions (a parameter as {{name}}, what you type after the fields as $ARGUMENTS) and its parameters.' },
+      { name: 'Used on its own', text: 'A skill that says when to use it is listed to the model (the Skills tool): it loads the skill when a question fits. Off: only with /.' },
     ],
     tasks: [
-      { title: 'Make a prompt with blanks', steps: ['Press **New prompt**.', 'Give it a slash name, like review, and a title.', 'Write the text with blanks: Review {{file}} for {{focus}}.', 'Choose who uses it, and save.', 'In the chat, type /review: a field opens for each blank.'] },
+      {
+        title: 'Make a skill with parameters',
+        steps: [
+          'Press **New skill**.',
+          'Give it a slash name, like review, a title, and when to use it.',
+          'Write the instructions with parameters: Review {{file}} for {{focus}}. Each one gets a row: say what it is, whether it is required, its default.',
+          'Choose who uses it, and save.',
+          'In the chat, type /review: the skill sits above the box with a field for each parameter; what you write in the box goes with it.',
+        ],
+      },
     ],
-    manual: { doc: 'chat', section: 'prompts-and-slash-commands' },
+    manual: { doc: 'chat', section: 'skills-and-slash-commands' },
   },
 
   apps: {
@@ -564,9 +574,10 @@ export const topics = {
   },
 
   code: {
-    title: 'Code',
-    about: 'Reviews of merge requests by the model, and the code assistant. Both read the code with your own GitLab access, through Argus, and write nothing to GitLab.',
+    title: 'Code Studio',
+    about: 'Your workspaces (an IDE in the browser on your projects), reviews of merge requests by the model, and the code assistant. Reviews read the code with your own GitLab access, through Argus, and write nothing to GitLab.',
     parts: [
+      { name: 'Workspaces', text: 'A GitLab project and branch the server keeps for you, with Code Arena\'s IDE: **Open** starts it, unused for 30 minutes it sleeps (its files stay), **Delete** takes it away. It clones and pushes with your GitLab token.' },
       { name: 'Merge requests', text: 'A project by its path (group/project): its open, merged or all merge requests. **Review** starts a review; a branch without a merge request can be reviewed against the one it goes into. GitHub and Gitea projects are github:owner/repo and gitea:owner/repo, once your token is linked in **Account → Code hosts**.' },
       { name: 'Ask about code', text: 'A question about a project, a branch or a merge request: answered in a chat with Argus, which reads the code as you may.' },
       { name: 'Automatic reviews', text: 'A project whose merge requests are reviewed as they open and get new commits (GitLab\'s webhook, and a look every few minutes), and a branch reviewed on a schedule. Read with your access, at your cost; each review can go to a room.' },
@@ -577,6 +588,17 @@ export const topics = {
       { title: 'Review a project automatically', steps: ['Under **Automatic reviews**, press **A project** and type its path.', 'Choose the branches, how often to look, and a room if the team should see each review.', 'Press **Review automatically**, then put the URL and the secret token in the project\'s GitLab webhook (Merge request events).'] },
     ],
     manual: { doc: 'chat', section: 'code-review' },
+  },
+
+  workspace: {
+    title: 'A workspace',
+    about: 'Code Arena\'s IDE on one of your workspaces, the whole window: its editor, terminals, search, Git, language servers, debugger and agent, all on the server.',
+    parts: [
+      { name: 'Its engine', text: 'Runs as a user of its own with limits, no Docker socket, and reaches the app, the gateway and the internet only. Its agent has a key of its own at the gateway, against your credit.' },
+      { name: 'Asleep', text: 'Unused for 30 minutes, it stops; its files stay. Opening it again wakes it.' },
+    ],
+    tasks: [{ title: 'Work on a project in the browser', steps: ['Under **Code Studio → New workspace**, name the project (and a branch) and press **Open it**.', 'The IDE fills the window once the workspace is up; **Open** on its card brings it back later.', 'Edit, run and commit as in Code Arena; its agent works on the same files.'] }],
+    manual: { doc: 'chat', section: 'code-studio-workspaces' },
   },
 
   review: {

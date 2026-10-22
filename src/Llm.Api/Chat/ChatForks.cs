@@ -31,7 +31,7 @@ public static class ChatForks
             var copy = new ChatMessage
             {
                 ConversationId = fork.Id, ParentId = m.ParentId is { } parent ? copies[parent] : null, Sequence = ++sequence, Role = m.Role,
-                Content = m.Content, Quote = m.Quote, Reasoning = m.Reasoning, ToolCallsJson = m.ToolCallsJson, ToolCallId = m.ToolCallId, ToolName = m.ToolName,
+                Content = m.Content, Quote = m.Quote, Skill = m.Skill, Reasoning = m.Reasoning, ToolCallsJson = m.ToolCallsJson, ToolCallId = m.ToolCallId, ToolName = m.ToolName,
                 AttachmentsJson = Mapped(m.AttachmentsJson, files), DetailsJson = Mapped(m.DetailsJson, files), ContextJson = m.ContextJson, CutShort = m.CutShort, Model = m.Model,
                 PromptTokens = m.PromptTokens, CachedTokens = m.CachedTokens, CompletionTokens = m.CompletionTokens, ThinkingMs = m.ThinkingMs, DurationMs = m.DurationMs,
                 // What it cost, shown as it was; not its answer: it ran once, and is one prompt in usage.

@@ -3,7 +3,7 @@ import { ArrowUp, Clock3, ListEnd, Paperclip, Square, TextQuote } from 'lucide-r
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
-import { fillPrompt, promptsQuery, slashItems, slashQuery, variablesOf, type PromptItem, type SlashItem } from '@/lib/prompts'
+import { missingOf, skillsQuery, slashItems, slashQuery, type SkillCall, type SkillItem, type SkillUse, type SlashItem } from '@/lib/skills'
 import { cn } from '@/lib/utils'
 import type { CompactSetting, ContextView } from './context'
 import { ContextGauge } from './context-gauge'
@@ -11,7 +11,7 @@ import { VoiceButton } from './media'
 import { useRecall, type RecallSource } from './recall'
 import type { Quote } from './quote'
 import { QuoteChip } from './quote-parts'
-import { PromptFields, SlashMenu } from './slash'
+import { SkillFields, SlashMenu } from './slash'
 import type { Attachment, ChatModel } from './types'
 import { UploadChips } from './upload-chips'
 
@@ -22,6 +22,8 @@ export interface Queued {
   attachments: Attachment[]
   /** The part of an answer it quotes. */
   quote?: string | null
+  /** The skill it uses. */
+  skill?: SkillCall | null
 }
 import type { Uploads } from './uploads'
 
@@ -29,8 +31,9 @@ import type { Uploads } from './uploads'
  * Where the question is written. Enter sends, Shift+Enter adds a line; files come
  * by the button, by pasting, or by dropping them on the page. A question that did
  * not reach the server comes back here rather than being lost. "/" at the start
- * finds a prompt of the library: chosen, its text comes into the box with a field
- * for each of its blanks, and sending fills them in. ↑ brings back what was sent
+ * finds a skill: chosen, it sits above the box with a field for each of its
+ * parameters, and goes with the message (what is written is its $ARGUMENTS);
+ * Backspace in the empty box, or its X, lets it go. ↑ brings back what was sent
  * before (useRecall). Part of an answer quoted (Reply) shows above it, and goes with
  * the message: Backspace at the start of an empty box, or its X, takes it away.
  */
@@ -59,7 +62,7 @@ export function Composer({
   focusSignal,
 }: {
   streaming: boolean
-  onSend: (text: string) => Promise<boolean>
+  onSend: (text: string, skill?: SkillUse) => Promise<boolean>
   onStop: () => void
   uploads: Uploads
   model?: ChatModel
@@ -75,7 +78,7 @@ export function Composer({
   onCompact?: () => void
   /** While an answer runs: messages waiting to be sent, and how to add (false: it was not taken), hurry or drop one. */
   queued?: Queued[]
-  onQueue?: (text: string) => Promise<boolean>
+  onQueue?: (text: string, skill?: SkillUse) => Promise<boolean>
   onSendNow?: (key: string) => void
   onUnqueue?: (key: string) => void
   /** Compare (arena mode): the next question to two models. */
@@ -99,21 +102,20 @@ export function Composer({
     if (focusSignal) area.current?.focus()
   }, [focusSignal])
 
-  // The / menu: the library is fetched once a message starts with "/".
+  // The / menu: the skills are fetched once a message starts with "/".
   const menuId = useId()
   const query = slashQuery(text)
-  const library = useQuery({ ...promptsQuery, enabled: query !== null, staleTime: 60_000 })
+  const library = useQuery({ ...skillsQuery, enabled: query !== null, staleTime: 60_000 })
   const [active, setActive] = useState(0)
   const [closedAt, setClosedAt] = useState<string | null>(null)
-  const items = query === null ? [] : slashItems(query, library.data?.prompts ?? [], !!onCompact)
+  const items = query === null ? [] : slashItems(query, library.data?.skills ?? [], !!onCompact)
   const menuOpen = items.length > 0 && closedAt !== text
-  // The prompt chosen from the library, while its blanks are being filled in.
-  const [chosen, setChosen] = useState<PromptItem | null>(null)
+  // The skill chosen for the message, and its parameters' values.
+  const [chosen, setChosen] = useState<SkillItem | null>(null)
   const [values, setValues] = useState<Record<string, string>>({})
   const [missing, setMissing] = useState<string[]>([])
   const fields = useRef<Record<string, HTMLTextAreaElement | null>>({})
-  const blanks = chosen ? variablesOf(text) : []
-  // ↑ and ↓: what was sent before. Not while a prompt's blanks are filled in; a message brought back keeps the / menu shut.
+  // ↑ and ↓: what was sent before. Not while a skill is chosen; a message brought back keeps the / menu shut.
   const recall = useRecall({ area, setText, source: history, enabled: !chosen, onRecall: setClosedAt })
 
   useEffect(() => {
@@ -135,40 +137,36 @@ export function Composer({
       onCompact?.()
       return
     }
-    const p = item.prompt!
-    setText(p.text)
-    const vars = variablesOf(p.text)
-    if (vars.length === 0) {
-      unchoose()
-      requestAnimationFrame(() => area.current?.focus())
-      return
-    }
-    setChosen(p)
+    const skill = item.skill!
+    setText('')
+    setChosen(skill)
     setValues({})
     setMissing([])
-    requestAnimationFrame(() => fields.current[vars[0]!]?.focus())
+    const first = skill.parameters[0]?.name
+    requestAnimationFrame(() => (first ? fields.current[first] : area.current)?.focus())
   }
 
-  const hasContent = text.trim().length > 0 || uploads.attachments.length > 0
+  const hasContent = text.trim().length > 0 || uploads.attachments.length > 0 || !!chosen
   // An answer runs, here or elsewhere: what is sent waits its turn.
   const queueing = streaming || !!elsewhere
   const canSend = (!queueing || !!onQueue) && !uploads.busy && hasContent
   const submit = async () => {
     if (!canSend) return
-    // A prompt from the library goes with its blanks filled in: all of them.
-    const empty = blanks.filter((b) => !values[b]?.trim())
+    // A skill goes with the parameters it needs filled in.
+    const empty = chosen ? missingOf(chosen, values) : []
     if (empty.length > 0) {
       setMissing(empty)
       fields.current[empty[0]!]?.focus()
       return
     }
-    const t = (chosen ? fillPrompt(text, values) : text).trim()
+    const t = text.trim()
+    const skill = chosen ? { name: chosen.name, args: Object.fromEntries(Object.entries(values).filter(([, v]) => v.trim())) } : undefined
     const before = { text, chosen, values }
     setText('')
     unchoose()
     recall.reset()
     // An answer is running: this one waits its turn (or goes at once with Send now).
-    if (!(await (queueing && onQueue ? onQueue(t) : onSend(t)))) {
+    if (!(await (queueing && onQueue ? onQueue(t, skill) : onSend(t, skill)))) {
       setText((now) => now || before.text)
       if (before.chosen) {
         setChosen(before.chosen)
@@ -195,10 +193,11 @@ export function Composer({
         return
       }
     }
-    // Backspace at the start of an empty box takes the quote away.
-    if (e.key === 'Backspace' && quote && onClearQuote && !text && e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0) {
+    // Backspace at the start of an empty box lets the skill go, then takes the quote away.
+    if (e.key === 'Backspace' && (chosen || (quote && onClearQuote)) && !text && e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0) {
       e.preventDefault()
-      onClearQuote()
+      if (chosen) unchoose()
+      else onClearQuote?.()
       return
     }
     if (recall.onKeyDown(e)) return
@@ -216,10 +215,9 @@ export function Composer({
       }}
     >
       {menuOpen && <SlashMenu id={menuId} items={items} active={Math.min(active, items.length - 1)} onPick={pick} onActive={setActive} />}
-      {chosen && blanks.length > 0 && (
-        <PromptFields
-          prompt={chosen}
-          variables={blanks}
+      {chosen && (
+        <SkillFields
+          skill={chosen}
           values={values}
           missing={missing}
           refs={fields}
@@ -229,10 +227,9 @@ export function Composer({
           }}
           onClear={() => {
             unchoose()
-            setText('')
             area.current?.focus()
           }}
-          onLast={() => void submit()}
+          onLast={() => area.current?.focus()}
         />
       )}
       {queued && queued.length > 0 && (
@@ -249,7 +246,8 @@ export function Composer({
                   </>
                 )}
                 <span dir="auto" className="min-w-0 flex-1 truncate">
-                  {q.text || `${q.attachments.length} file${q.attachments.length === 1 ? '' : 's'}`}
+                  {q.skill && <span className="font-mono text-[0.8125rem] font-medium">/{q.skill.name} </span>}
+                  {q.text || (q.skill ? '' : `${q.attachments.length} file${q.attachments.length === 1 ? '' : 's'}`)}
                   {q.text && q.attachments.length > 0 && <span className="text-muted-foreground"> · {q.attachments.length} file{q.attachments.length === 1 ? '' : 's'}</span>}
                 </span>
                 <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => onSendNow?.(q.key)}>
@@ -283,7 +281,6 @@ export function Composer({
         onChange={(e) => {
           setText(e.target.value)
           setActive(0)
-          if (!e.target.value) unchoose()
         }}
         onKeyDown={onKey}
         aria-autocomplete="list"
@@ -295,7 +292,7 @@ export function Composer({
             uploads.add(e.clipboardData.files)
           }
         }}
-        placeholder={queueing && onQueue ? 'Queue a message…' : 'Message, or / for a prompt'}
+        placeholder={queueing && onQueue ? 'Queue a message…' : chosen ? `Anything to add for /${chosen.name} (optional)` : 'Message, or / for a skill'}
         aria-label="Message"
         // oxlint-disable-next-line jsx-a11y/no-autofocus -- the chat's whole purpose is this box
         autoFocus={autoFocus}

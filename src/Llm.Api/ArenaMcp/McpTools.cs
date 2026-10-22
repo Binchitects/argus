@@ -418,9 +418,9 @@ public sealed partial class McpTools(
 }
 
 /// <summary>
-/// The prompts Arena MCP serves (prompts/list, prompts/get): the prompt library as the person
-/// sees it in the chat's / menu (theirs, their groups', the company's, their plugins'), each
-/// with its {{variables}} as arguments. One name from two places is theirs first, as in the menu.
+/// The prompts Arena MCP serves (prompts/list, prompts/get, MCP's own name for them): the person's skills as the chat's /
+/// menu shows them (theirs, their groups', the company's, their plugins'), each with its parameters as arguments; got,
+/// its instructions filled in. One name from two places is theirs first, as in the menu.
 /// </summary>
 public sealed class McpPrompts(AppDbContext db, AccessService access)
 {
@@ -430,30 +430,34 @@ public sealed class McpPrompts(AppDbContext db, AccessService access)
         {
             ["name"] = p.Name,
             ["title"] = p.Title,
-            ["description"] = p.Title,
-            ["arguments"] = new JsonArray([.. PromptLibrary.Variables(p.Text).Select(v => (JsonNode)new JsonObject { ["name"] = v, ["required"] = true })]),
+            ["description"] = p.Description.Length > 0 ? p.Description : p.Title,
+            ["arguments"] = new JsonArray([.. SkillLibrary.ParametersOf(p).Select(v => (JsonNode)new JsonObject
+            {
+                ["name"] = v.Name, ["description"] = v.Description, ["required"] = v.Required && v.Default is null,
+            })]),
         })];
 
-    /// <returns>The prompt's description and messages, filled in with the arguments; null when there is no such prompt.</returns>
+    /// <returns>The skill's description and its instructions filled in with the arguments; null when there is no such skill.</returns>
     public async Task<JsonObject?> GetAsync(AppUser user, string name, JsonObject arguments, CancellationToken ct)
     {
-        if ((await UsableAsync(user, ct)).FirstOrDefault(p => p.Name == name) is not { } prompt)
+        if ((await UsableAsync(user, ct)).FirstOrDefault(p => p.Name == name) is not { } skill)
         {
             return null;
         }
         var values = arguments.Where(a => a.Value is JsonValue).ToDictionary(a => a.Key, a => a.Value!.ToString(), StringComparer.Ordinal);
+        var (call, _) = SkillLibrary.Use(skill, values, values.GetValueOrDefault("arguments"));
         return new JsonObject
         {
-            ["description"] = prompt.Title,
+            ["description"] = skill.Description.Length > 0 ? skill.Description : skill.Title,
             ["messages"] = new JsonArray(new JsonObject
             {
                 ["role"] = "user",
-                ["content"] = new JsonObject { ["type"] = "text", ["text"] = PromptLibrary.Fill(prompt.Text, values) },
+                ["content"] = new JsonObject { ["type"] = "text", ["text"] = call?.Instructions ?? SkillLibrary.Fill(skill.Instructions, values) },
             }),
         };
     }
 
     /// <summary>Each slash name once: the first, as the library ranks them.</summary>
-    private async Task<List<SavedPrompt>> UsableAsync(AppUser user, CancellationToken ct) =>
-        [.. (await PromptEndpoints.UsableAsync(user, access, db, ct)).DistinctBy(p => p.Name, StringComparer.Ordinal)];
+    private async Task<List<Skill>> UsableAsync(AppUser user, CancellationToken ct) =>
+        [.. (await SkillEndpoints.UsableAsync(user, access, db, ct)).DistinctBy(p => p.Name, StringComparer.Ordinal)];
 }

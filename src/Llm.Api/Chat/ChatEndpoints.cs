@@ -46,8 +46,9 @@ public sealed record SpeechRequest(string? Text, string? Context = null);
 /// <param name="Quote">The part of an earlier answer the person replies to (ChatQuotes): the model reads it before the question.</param>
 /// <param name="Acknowledged">Safeguard rules the person goes on past: they confirmed a warning, or gave their reason.</param>
 /// <param name="Justification">The person's reason, for a rule that asks for one.</param>
+/// <param name="Skill">A skill used with the message (/name and its parameters): its instructions go to the model before the words.</param>
 public sealed record NewMessage(string Content, Guid[]? Attachments = null, Guid? ParentId = null, bool Root = false, bool Research = false, bool Spoken = false,
-    string? Quote = null, Guid[]? Acknowledged = null, string? Justification = null);
+    string? Quote = null, Guid[]? Acknowledged = null, string? Justification = null, SkillUse? Skill = null);
 
 /// <summary>Compact the branch down to this message (default: the end of the branch on screen).</summary>
 public sealed record CompactRequest(Guid? MessageId = null);
@@ -351,7 +352,7 @@ public static partial class ChatEndpoints
         var names = await db.Users.AsNoTracking().Where(u => authors.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => string.IsNullOrWhiteSpace(u.DisplayName) ? u.UserName! : u.DisplayName, ct);
         return messages.Select(m => (object)new
         {
-            m.Id, m.ParentId, m.Role, m.Content, m.Quote, m.Reasoning, m.ToolName, m.ToolCallId,
+            m.Id, m.ParentId, m.Role, m.Content, m.Quote, skill = SkillLibrary.Kept(m.Skill), m.Reasoning, m.ToolName, m.ToolCallId,
             author = m.AuthorId is { } a ? new { id = a, name = names.GetValueOrDefault(a) ?? "Former member" } : null,
             m.ForPeople, m.Mentions, m.ReplyToId,
             toolCalls = m.ToolCallsJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(m.ToolCallsJson),
@@ -528,7 +529,23 @@ public static partial class ChatEndpoints
         c.ArchivedAt = null;
         var text = (body.Content ?? "").Trim();
         var attachments = (body.Attachments ?? []).Distinct().ToArray();
-        if (text.Length == 0 && attachments.Length == 0)
+        // A skill used: the person's own, their groups', the company's or a plugin's; its required parameters given.
+        SkillCall? skill = null;
+        if (body.Skill is { Name: { Length: > 0 } skillName } use)
+        {
+            if (await SkillEndpoints.FindAsync(me, skillName, access, db, http.RequestAborted) is not { } found)
+            {
+                await Problem(http, 400, "skill", $"There is no skill /{skillName.TrimStart('/')} you may use.");
+                return;
+            }
+            (skill, var missing) = SkillLibrary.Use(found, use.Args, text);
+            if (missing is not null)
+            {
+                await Problem(http, 400, "skill", missing);
+                return;
+            }
+        }
+        if (text.Length == 0 && attachments.Length == 0 && skill is null)
         {
             await Problem(http, 400, "empty", "Write a message first.");
             return;
@@ -566,7 +583,8 @@ public static partial class ChatEndpoints
         var answering = (c.Model is { } chosen && chosen != SmallModel.Auto ? chosen : null)
             ?? (await policy.ForAsync(me, await models.ListAsync(http.RequestAborted), http.RequestAborted)).Default?.Name;
         var judge = (await small.ForAsync(me, http.RequestAborted))?.Name ?? answering;
-        var verdict = await safeguards.CheckMessageAsync(me, text, attachments.Length, body.Research, answering, http.RequestAborted, quote,
+        // A skill's instructions are read with the words: the rules see what the model would.
+        var verdict = await safeguards.CheckMessageAsync(me, skill is null ? text : SkillLibrary.ForModel(skill, text), attachments.Length, body.Research, answering, http.RequestAborted, quote,
             new Safeguards.SendContext(body.Acknowledged, body.Justification, c.Id, judge));
         if (!verdict.Allowed)
         {
@@ -577,8 +595,8 @@ public static partial class ChatEndpoints
         {
             await safeguards.MarkResearchAsync(me.Id, http.RequestAborted);
         }
-        // Its secrets masked, when the person's policy masks them.
-        text = verdict.Text ?? text;
+        // Its secrets masked, when the person's policy masks them (with a skill, as the model reads it: ChatService masks it).
+        text = skill is null ? verdict.Text ?? text : text;
         quote = verdict.Quote ?? quote;
         // A rule may send the question to another model (the company's own, for one that holds personal data).
         await RunAsync(http, c, me, db, jobs, new AnswerOverrides(Model: verdict.Model, Research: body.Research, Again: body.Spoken ? Talk.Note : null), async () =>
@@ -588,13 +606,13 @@ public static partial class ChatEndpoints
             var question = new ChatMessage
             {
                 ConversationId = c.Id, ParentId = parent, Role = "user", Sequence = next + 1, Content = text, Quote = quote, AuthorId = me.Id,
-                AttachmentsJson = attachments.Length > 0 ? JsonSerializer.Serialize(attachments) : null,
+                AttachmentsJson = attachments.Length > 0 ? JsonSerializer.Serialize(attachments) : null, Skill = skill is null ? null : SkillLibrary.Keep(skill),
             };
             db.ChatMessages.Add(question);
             c.CurrentLeafId = question.Id;
             if (first)
             {
-                c.Title = ChatService.TitleFrom(text.Length > 0 ? text : "Attached files");
+                c.Title = ChatService.TitleFrom(text.Length > 0 ? text : skill is not null ? skill.Title : "Attached files");
             }
             c.UpdatedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync();

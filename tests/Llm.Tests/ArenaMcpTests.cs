@@ -216,16 +216,16 @@ public sealed class ArenaMcpTests(AppFixture app)
     }
 
     [Fact]
-    public async Task The_persons_prompts_and_the_companys_are_served_filled_in_and_nobody_elses()
+    public async Task The_persons_skills_and_the_companys_are_served_as_prompts_filled_in_and_nobody_elses()
     {
         await using var f = NewApp();
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var (b, _, _, key) = await PersonAsync(f);
         var (_, _, _, otherKey) = await PersonAsync(f);
-        await StatusAssert.Is(HttpStatusCode.Created, await b.PostAsync("/api/prompts", new { name = "review", title = "Review code", text = "Review {{file}} for {{ focus }}." }));
-        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/prompts", new { name = "standup", title = "Stand-up notes", text = "Write my stand-up.", sharing = "Company" }));
+        await StatusAssert.Is(HttpStatusCode.Created, await b.PostAsync("/api/skills", new { name = "review", title = "Review code", instructions = "Review {{file}} for {{ focus }}." }));
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/skills", new { name = "standup", title = "Stand-up notes", instructions = "Write my stand-up.", sharing = "Company" }));
         // The company's /review too: the person's own comes first, once.
-        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/prompts", new { name = "review", title = "The company's review", text = "Review it.", sharing = "Company" }));
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/skills", new { name = "review", title = "The company's review", instructions = "Review it.", sharing = "Company" }));
 
         var agent = Agent(f, key);
         var listed = (await RpcAsync(agent, "prompts/list")).Answer.GetProperty("result").GetProperty("prompts").EnumerateArray().ToList();

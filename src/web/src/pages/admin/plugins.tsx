@@ -71,8 +71,8 @@ interface Preview {
   operations: number | null
   mcp: string | null
   settings: SettingView[]
-  /** The prompts it adds to the library (Workspace → Prompts). */
-  prompts?: { name: string; title: string }[]
+  /** The skills it adds for the chat (Workspace → Skills). */
+  skills?: { name: string; title: string }[]
   /** What installing it grants it, each in a sentence; needsYes: more than adding tools. */
   permissions?: Permission[]
   needsYes?: boolean
@@ -515,7 +515,7 @@ function InstallDialog({ source, onClose, onDone }: { source: Source | null; onC
               <li>{p.mcp ? `Tools from the MCP server at ${p.mcp}.` : `${p.operations ?? 0} operations of its API.`}</li>
               <li>{p.personAuth ? `${signIn[p.personAuth]}: each person connects their own account in Your account → Connections. ${p.help ?? ''}` : 'One sign-in for everyone, from the settings.'}</li>
               {p.writes.length > 0 && <li>Asks the person first before: {p.writes.join(', ')}.</li>}
-              {!!p.prompts?.length && <li>Adds prompts for whoever may use it: {p.prompts.map((x) => `/${x.name} (${x.title})`).join(', ')}.</li>}
+              {!!p.skills?.length && <li>Adds skills for whoever may use it: {p.skills.map((x) => `/${x.name} (${x.title})`).join(', ')}.</li>}
             </ul>
             {!!p.permissions?.length && (
               <div className="grid gap-1 rounded-lg border p-3 text-sm">

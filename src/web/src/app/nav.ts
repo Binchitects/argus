@@ -23,7 +23,7 @@ export const navigation: NavSection[] = [
       { title: 'Home', path: '/', icon: Home },
       { title: 'Chat', path: '/chat', icon: MessageSquare, keywords: ['conversation', 'ask', 'model', 'argus'] },
       { title: 'Assistants', path: '/assistants', icon: Bot, keywords: ['gpts', 'gems', 'projects', 'instructions', 'knowledge', 'shared', 'team'] },
-      { title: 'Prompts', path: '/prompts', icon: SquareSlash, keywords: ['prompt library', 'slash commands', 'templates', 'snippets', 'saved prompts'] },
+      { title: 'Skills', path: '/skills', icon: SquareSlash, keywords: ['slash commands', 'prompts', 'prompt library', 'templates', 'snippets', 'instructions', 'parameters'] },
       { title: 'Plans', path: '/plans', icon: ListChecks, keywords: ['plan', 'board', 'timeline', 'gantt', 'steps', 'project', 'kanban'] },
       { title: 'Apps', path: '/apps', icon: AppWindow, keywords: ['app', 'apps', 'tool', 'publish', 'page', 'component', 'gallery', 'remix'] },
       { title: 'Data', path: '/data', icon: BarChart, keywords: ['ask your data', 'sql', 'database', 'query', 'chart', 'dashboard', 'board', 'report', 'analytics', 'bi'] },

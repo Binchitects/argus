@@ -1,3 +1,4 @@
+import type { SkillCall } from '@/lib/skills'
 export interface ChatModel {
   name: string
   context: number | null
@@ -82,6 +83,8 @@ export interface Message {
   replyToId?: string | null
   /** A question: the part of an earlier answer it quotes (its Markdown), shown above it; the model reads it before the question. */
   quote?: string | null
+  /** A question: the skill it used, with its parameters (the model read its instructions before the words). */
+  skill?: SkillCall | null
   reasoning: string | null
   toolName: string | null
   toolCallId: string | null
@@ -357,6 +360,7 @@ export interface QueuedMessage {
   userId?: string
   forPeople?: boolean
   quote?: string | null
+  skill?: SkillCall | null
   attachments: Attachment[]
   createdAt: string
 }

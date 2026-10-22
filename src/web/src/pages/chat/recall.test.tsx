@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type { PromptLibrary } from '@/lib/prompts'
+import type { SkillLibrary } from '@/lib/skills'
 import { fakeApi, member, renderApp } from '@/test/utils'
 import { blank } from './live'
 import { recallList } from './recall'
@@ -28,10 +28,10 @@ const conversation: Conversation = {
   messages: [msg('q1', null, 'user', 'first question'), msg('a1', 'q1', 'assistant', 'One.'), msg('q2', 'a1', 'user', 'second question'), msg('a2', 'q2', 'assistant', 'Two.')],
 }
 
-const library: PromptLibrary = {
+const library: SkillLibrary = {
   isAdmin: false,
   groups: [],
-  prompts: [{ id: 'p', name: 'review', title: 'Review code', text: 'Review it.', variables: [], sharing: 'Personal', groups: [], source: 'mine', from: null, canEdit: true, updatedAt: '' }],
+  skills: [{ id: 'p', name: 'review', title: 'Review code', description: '', instructions: 'Review it.', parameters: [], autoUse: true, sharing: 'Personal', groups: [], source: 'mine', from: null, canEdit: true, updatedAt: '' }],
 }
 
 /** The chat, and the person's messages in their other chats (the "first question" again among them: shown once). */
@@ -51,7 +51,7 @@ function backend() {
         { type: 'done', id: 'a3' },
       ],
     }),
-    'GET /api/prompts': () => ({ json: library }),
+    'GET /api/skills': () => ({ json: library }),
   })
 }
 
@@ -79,8 +79,8 @@ describe('↑ in the message box', () => {
     expect(calls.find((c) => c.path.startsWith('/api/chat/history'))?.path).toBe('/api/chat/history?limit=50')
     await userEvent.keyboard('{ArrowUp}')
     expect(el).toHaveValue('/standup in a list')
-    // A message brought back that starts with / does not open the prompts menu.
-    expect(screen.queryByRole('listbox', { name: 'Prompts' })).toBeNull()
+    // A message brought back that starts with / does not open the skills menu.
+    expect(screen.queryByRole('listbox', { name: 'Skills' })).toBeNull()
     // The oldest: Up stays there.
     await userEvent.keyboard('{ArrowUp}')
     expect(el).toHaveValue('/standup in a list')
@@ -136,21 +136,21 @@ describe('↑ in the message box', () => {
     await waitFor(() => expect(asked()).toBe(2))
   })
 
-  it('leaves the arrows to the prompts menu while it is open', async () => {
+  it('leaves the arrows to the skills menu while it is open', async () => {
     backend()
     const el = await box()
     await userEvent.type(el, '/rev')
-    expect(await screen.findByRole('listbox', { name: 'Prompts' })).toBeInTheDocument()
+    expect(await screen.findByRole('listbox', { name: 'Skills' })).toBeInTheDocument()
     await userEvent.keyboard('{ArrowUp}{ArrowDown}')
     expect(el).toHaveValue('/rev')
     // Closed with Esc, the arrows are the history's again.
     await userEvent.keyboard('{Escape}')
-    expect(screen.queryByRole('listbox', { name: 'Prompts' })).toBeNull()
+    expect(screen.queryByRole('listbox', { name: 'Skills' })).toBeNull()
     await userEvent.keyboard('{ArrowUp}')
     expect(el).toHaveValue('second question')
     await userEvent.keyboard('{ArrowDown}')
     expect(el).toHaveValue('/rev')
-    expect(screen.queryByRole('listbox', { name: 'Prompts' })).toBeNull()
+    expect(screen.queryByRole('listbox', { name: 'Skills' })).toBeNull()
   })
 
   it('in several lines, Up and Down move between them until the first or last line', async () => {

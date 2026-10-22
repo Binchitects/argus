@@ -73,6 +73,27 @@ public sealed class QueuedMessagesTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_queued_skill_waits_filled_in_and_goes_as_the_skill_it_was()
+    {
+        var (b, email) = await PersonAsync();
+        await StatusAssert.Is(HttpStatusCode.Created, await b.PostAsync("/api/skills", new { name = "recap", title = "Recap", instructions = "Recap {{topic}} in three bullets." }));
+        var id = await NewChatAsync(b);
+        var (res, _) = await StartAsync(b, id, "Take your time [steady]", "s3 ");
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await QueueAsync(b, id, new { content = "", skill = new { name = "recap" } }));
+        await StatusAssert.Is(HttpStatusCode.OK, await QueueAsync(b, id, new { content = "", skill = new { name = "recap", args = new { topic = "the outage" } } }));
+        var waiting = (await ConversationAsync(b, id)).GetProperty("queued").EnumerateArray().Single();
+        Assert.Equal("the outage", waiting.GetProperty("skill").GetProperty("args").GetProperty("topic").GetString());
+        await res.Content.ReadAsStringAsync();
+        res.Dispose();
+
+        var chat = await SettledAsync(b, id, 2);
+        var question = chat.GetProperty("messages").EnumerateArray().Last(m => m.GetProperty("role").GetString() == "user");
+        Assert.Equal("recap", question.GetProperty("skill").GetProperty("name").GetString());
+        Assert.Contains(app.Model.Requests, r => r.Body["user"]!.GetValue<string>() == email
+            && r.Body["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.ToJsonString().Contains("Recap the outage in three bullets.", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task A_message_sent_while_the_chat_answers_waits_on_the_server_and_is_answered_after_it_on_its_branch()
     {
         var (b, _) = await PersonAsync();

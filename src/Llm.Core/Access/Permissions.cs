@@ -139,7 +139,7 @@ public static class Permissions
     public const string Compare = "feature.compare";
     public const string Uploads = "feature.uploads";
     public const string AssistantsCreate = "feature.assistants.create";
-    public const string PromptsCreate = "feature.prompts";
+    public const string SkillsCreate = "feature.skills";
     public const string Export = "feature.export";
     public const string Knowledge = "feature.knowledge";
     public const string ModelChoice = "feature.model_choice";
@@ -272,7 +272,7 @@ public static class Permissions
         new(Compare, "Features", "Compare two models' answers.", false),
         new(Uploads, "Features", "Attach files to messages.", false),
         new(AssistantsCreate, "Features", "Make assistants.", false),
-        new(PromptsCreate, "Features", "Save prompts and slash commands.", false),
+        new(SkillsCreate, "Features", "Make skills (slash commands with instructions and parameters).", false),
         new(Export, "Features", "Export their own data and chats.", false),
         new(Knowledge, "Features", "Search company knowledge from the chat.", false),
         new(ModelChoice, "Features", "Choose the chat's model (else the company's default answers).", false),

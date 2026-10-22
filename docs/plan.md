@@ -1552,6 +1552,13 @@ company's knowledge.
    knows the business — "what happens when a customer cancels an order",
    "why does billing round this way", "who uses this service" — traced
    through the code with its sources, in the studio and in the chat.
+4. **Skills** (asked 2026-10-22: "usage like skills in Claude Code"). The
+   prompt library becomes skills: a slash name, when to use it, instructions
+   with declared parameters (`{{name}}`, `$ARGUMENTS`). `/name` puts the
+   skill above the box with a field for each parameter and sends it as a
+   skill, not as pasted text; the model also loads one on its own when a
+   question fits (`use_skill`). A plugin's skill folders (`SKILL.md`) are the
+   chat's slash commands and Code Arena's skills alike.
 
 ### v6.9 — Everyone, in every language
 

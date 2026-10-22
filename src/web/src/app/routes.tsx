@@ -38,7 +38,7 @@ export const routes: RouteObject[] = [
           { path: 'chat/assistants/:assistantId', handle: { fullBleed: true }, ...lazy(() => import('@/pages/chat/chat-page').then((m) => ({ Component: m.ChatPage }))) },
           { path: 'shared/:shareId', handle: { fullBleed: true }, ...lazy(() => import('@/pages/chat/shared-view').then((m) => ({ Component: m.SharedChatPage }))) },
           { path: 'assistants', ...lazy(() => import('@/pages/assistants').then((m) => ({ Component: m.AssistantsPage }))) },
-          { path: 'prompts', ...lazy(() => import('@/pages/prompts').then((m) => ({ Component: m.PromptsPage }))) },
+          { path: 'skills', ...lazy(() => import('@/pages/skills').then((m) => ({ Component: m.SkillsPage }))) },
           { path: 'plans', ...lazy(() => import('@/pages/plans').then((m) => ({ Component: m.PlansPage }))) },
           { path: 'apps', ...lazy(() => import('@/pages/apps/apps').then((m) => ({ Component: m.AppsPage }))) },
           { path: 'apps/:id', ...lazy(() => import('@/pages/apps/apps').then((m) => ({ Component: m.AppPage }))) },
