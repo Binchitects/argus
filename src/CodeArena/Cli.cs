@@ -518,14 +518,14 @@ internal static partial class Cli
     /// agent behind a page on 127.0.0.1, until Ctrl+C. What the agent does is
     /// logged here as in a one-shot run (on stderr). A build without the page
     /// says so; without a command, it runs the conversation here instead.
-    /// Served for Code Studio (--serve), it needs no page: Arena shows its own.
+    /// Served for Code Studio (--serve), or connected to it (--connect), it needs no page: Arena shows its own.
     /// </summary>
     private static async Task<int> WebAsync(Options o, CliEnv env, CancellationToken ct)
     {
         var plain = o.NoColor || env.Env("NO_COLOR") is { Length: > 0 } || env.Env("TERM") == "dumb";
         var ui = new Ui(TextReader.Null, env.Out, env.Err, !plain && env.ErrTerminal, canAsk: false) { Quiet = true };
         var assets = env.Web ?? WebAssets.Embedded();
-        if (!assets.Built && !o.Serve)
+        if (!assets.Built && !o.Serve && !o.Connect)
         {
             if (o.Command is null)
             {
