@@ -243,7 +243,7 @@ public sealed class MediaStudioTests(AppFixture app)
             Assert.Equal((256, 128), (enlarged.GetProperty("width").GetInt32(), enlarged.GetProperty("height").GetInt32()));
             Assert.Equal(("image/jpeg", true), (enlarged.GetProperty("contentType").GetString(), enlarged.GetProperty("thumb").GetBoolean()));
             var clip = await ItemAsync(b, (await DoneAsync(f, b, new { action = "move", sourceId = editId, prompt = "The fox looks up", seconds = 2 })).GetProperty("items")[0].GetGuid());
-            Assert.Equal(("video", 2.0), (clip.GetProperty("kind").GetString(), clip.GetProperty("seconds").GetDouble()));
+            Assert.Equal(("video", 2.0, true), (clip.GetProperty("kind").GetString(), clip.GetProperty("seconds").GetDouble(), clip.GetProperty("thumb").GetBoolean()));
             var film = server.Asked.Single(a => a.Path == "/sdcpp/v1/vid_gen").Body;
             Assert.StartsWith("data:image/png;base64,", film["init_image"]!.GetValue<string>(), StringComparison.Ordinal);
             Assert.True(film["width"]!.GetValue<int>() > film["height"]!.GetValue<int>());

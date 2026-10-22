@@ -344,6 +344,8 @@ public sealed partial class StoryRuns(IServiceScopeFactory scopes, TimeProvider 
         {
             OwnerId = me.Id, AttachmentId = file, Kind = MediaItem.Video, Action = "story", Prompt = story.Title, Width = 1280, Height = 720, Seconds = length,
             Model = (await ModelAsync(sp, me, Llm.Core.Models.MediaModes.Video, ct)).Name,
+            // As its first shot's picture, small.
+            Thumb = shots[0].Picture is { } first ? MediaJobs.Thumb(await FileAsync(db, first, ct)) : null,
         };
         db.MediaItems.Add(item);
         var before = story.VideoItemId;

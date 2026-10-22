@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AudioLines, Brush, Download, Eraser, Expand, Film, ImagePlus, Images, Music, Palette, Scissors, Sparkles, Trash2, Undo2, Upload, Wand2, X } from 'lucide-react'
+import { AudioLines, Brush, Download, Eraser, Expand, Film, ImagePlus, Images, Music, Palette, Play, Scissors, Sparkles, Trash2, Undo2, Upload, Wand2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { PageHeader } from '@/components/app/page-header'
 import { QueryError } from '@/components/app/query-state'
@@ -170,7 +170,7 @@ function Tile({ item, onOpen }: { item: MediaItem; onOpen: () => void }) {
         className="group relative block aspect-square w-full overflow-hidden rounded-xl border bg-muted outline-none transition-shadow hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-ring"
         aria-label={`${actionNames[item.action]}: ${label}`}
       >
-        {item.kind === 'video' ? (
+        {item.kind === 'video' && !item.thumb ? (
           <video src={contentUrl(item)} muted playsInline preload="metadata" className="size-full object-cover" aria-hidden="true" />
         ) : item.kind === 'sound' ? (
           <span className={cn('flex size-full flex-col items-center justify-center gap-2 p-4 text-center', item.action === 'music' ? 'bg-gradient-to-br from-violet-500/25 to-sky-500/20' : 'bg-gradient-to-br from-emerald-500/20 to-teal-500/15')}>
@@ -184,6 +184,11 @@ function Tile({ item, onOpen }: { item: MediaItem; onOpen: () => void }) {
           {item.kind === 'video' && <Film className="size-3.5 shrink-0" aria-hidden="true" />}
           <span className="line-clamp-2">{label}</span>
         </span>
+        {item.kind === 'video' && item.thumb && (
+          <span className="absolute inset-0 m-auto flex size-10 items-center justify-center rounded-full bg-black/55 text-white" aria-hidden="true">
+            <Play className="ml-0.5 size-5 fill-current" />
+          </span>
+        )}
         {item.kind !== 'picture' && item.seconds != null && (
           <span className="absolute top-2 right-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white">{Math.round(item.seconds)} s</span>
         )}

@@ -281,8 +281,8 @@ public sealed partial class MediaJobs(IServiceScopeFactory scopes, TimeProvider 
             {
                 OwnerId = me.Id, AttachmentId = attachment.Id, Kind = video ? MediaItem.Video : MediaItem.Picture, Action = job.Action,
                 Prompt = prompt.Length > 0 ? prompt : null, ParentId = source?.Id, Width = rw, Height = rh, Seconds = secs, Model = model.Name,
-                // An enlargement looks as its picture did, small.
-                Thumb = video ? null : type == "image/png" ? Thumb(data) : source?.Thumb,
+                // An enlargement looks as its picture did, small; a clip, as the picture it starts from.
+                Thumb = type == "image/png" ? Thumb(data) : source?.Thumb,
             };
             db.MediaItems.Add(item);
             items.Add(item);
