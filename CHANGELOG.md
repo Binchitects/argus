@@ -12,6 +12,78 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v6.8.0 (2026-10-23)
+
+Code Studio, and Argus the business's technical mind: an IDE like VS Code in
+the browser, on the server or on your own machine, with review inside it, and
+an Argus that explains the business, not only the code.
+
+### :rocket: Epics and highlights
+
+- **Code Studio** (Workspace → Code Studio, `/code`): Code Arena's IDE in
+  the browser, the whole window — editor, explorer, search, source control,
+  terminals, tasks, run and debug, language servers, extensions, the agent's
+  chat — on a **workspace on the server** (a GitLab project and branch,
+  cloned and pushed with your own token, its engine run as its own user with
+  limits and no Docker socket, asleep when unused) or on **your own machine**
+  (`code-arena web --connect` in a folder: it shows in Code Studio while it
+  runs, reached through a tunnel it dials with your API key; only you reach
+  it)
+- **Review in the IDE**: a Review view reviews the changes not yet committed,
+  or the branch over a base, with a reviewer that reads the code and changes
+  nothing; findings worst first, marked in the editor and in Problems, each
+  with why and the fix — **Apply fix** makes a fix that fits the file in the
+  editor, **Ask the agent** hands one to the chat
+- **The business map** (Code Studio → Business map): a project mapped into
+  what its software does for the business — its domain, what it lets the
+  business do, its processes step by step, the rules it enforces and why,
+  what it deals in, whom it talks to, a glossary — read by a model with
+  Argus's read-only tools from the code, the documents, GitLab's issues and
+  wiki; every item says where it was read and opens there
+- **Argus explains the business**: in any chat with Argus on, it answers as
+  the company's senior technical expert, from the map first
+  (`business_map`, `business_explain`), confirmed in the code, the issues and
+  the wiki, in business words first, with its sources
+- **Skills**, as Claude Code's: the prompt library becomes skills — a slash
+  name, when to use it, instructions with parameters. `/name` puts the skill
+  above the box with a field for each parameter and sends it as a skill (the
+  chat shows the chip, not pasted text); the model also uses one on its own
+  when a question fits (`use_skill`). A plugin's skill folders (`SKILL.md`)
+  are slash commands and Code Arena skills alike
+
+### :sparkles: New features & Enhancements
+
+- Argus reads GitLab's issues and wikis: `issue_list`, `issue_get`,
+  `wiki_list`, `wiki_get` (34 tools), read-only, checked per person
+- Workspaces reach Argus with the person's own key; Code Arena served for a
+  workspace needs no page of its own
+- Queued messages and edited questions keep the skill they used; Arena MCP
+  serves skills as prompts
+- A machine's tunnel held by one app replica is reached by the others at its
+  own address, with the tunnel's key
+- The help panel and the manual cover the workspace, the business map and
+  skills
+
+### :bug: Bugs fixed
+
+- The workspaces service took Arena's internal address (`http://app:8080`)
+  and a company's GitLab on http; it keeps what an engine says and tells it
+  when the engine does not start
+- The workspaces image got its supervisor past `.dockerignore`
+- A model was registered twice at the gateway when two syncs ran at once
+  (the watcher's pass and an admin's save), doubling what it was sent at
+  once: one sync at a time now, and a copy registered twice is taken away
+
+### :boom: Breaking changes & Deprecations
+
+- Prompts are skills: `/api/prompts` is `/api/skills`, Workspace → Prompts
+  is Workspace → Skills, the `feature.prompts` permission is
+  `feature.skills` (roles and rules move with the upgrade; every saved
+  prompt is kept as a skill)
+- A plugin's manifest has no `prompts:` key: its skill folders (`skills:`,
+  each a `SKILL.md` with `title` and `parameters` in its front matter) are
+  its slash commands (`gitlab-issues` 1.2.0)
+
 ## v6.7.0 (2026-10-22)
 
 Vector and motion: SVG you would ship, made of named parts, that moves as

@@ -1520,6 +1520,13 @@ SVG, and nothing else.
    frames, rendered by the stack's own Chromium; SVG and PNG at any size;
    and the chat's tools draw and animate SVG too.
 
+Released: **v6.8.0** (2026-10-23), all four items below, except: the IDE's
+Review view reviews local changes and branches (a merge request's review,
+the automatic reviews and Fix it stay on the Code page); a business map is
+made on request, not again as Argus indexes; a server workspace's network
+reaches the internet at large, not only the code host and the package
+registries.
+
 ### v6.8 — Code Studio, and Argus the business's technical mind
 
 The person asked (2026-10-22) for the Code section to become Code Studio, an
