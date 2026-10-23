@@ -24,7 +24,7 @@ public sealed class BusinessException(string message) : Exception(message);
 /// sources it read. One map a project, mapped again on request; a person sees the maps of the projects they may read.
 /// The model's requests are the mapper's, tagged "business".
 /// </summary>
-public sealed partial class BusinessMap(IServiceScopeFactory scopes, IMemoryCache cache, ILogger<BusinessMap> logger) : IHostedService, IDisposable
+public sealed partial class BusinessMap(IServiceScopeFactory scopes, IMemoryCache cache, IHostApplicationLifetime lifetime, ILogger<BusinessMap> logger) : IHostedService
 {
     public const string Tag = "business";
     public const int MostTurns = 40;
@@ -36,9 +36,7 @@ public sealed partial class BusinessMap(IServiceScopeFactory scopes, IMemoryCach
         "file_at", "grep_at", "mr_list", "mr_get", "issue_list", "issue_get", "wiki_list", "wiki_get",
     };
 
-    private readonly CancellationTokenSource _closing = new();
-
-    public void Start(Guid systemId) => _ = Task.Run(() => RunAsync(systemId, _closing.Token));
+    public void Start(Guid systemId) => _ = Task.Run(() => RunAsync(systemId, lifetime.ApplicationStopping));
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -57,13 +55,8 @@ public sealed partial class BusinessMap(IServiceScopeFactory scopes, IMemoryCach
         }
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
-    {
-        _closing.Cancel();
-        return Task.CompletedTask;
-    }
-
-    public void Dispose() => _closing.Dispose();
+    /// <summary>What runs stops with the host's own stopping token: nothing of its own to stop (or to be disposed before it is).</summary>
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>Whether the person may read the project, as Argus says (GitLab's membership), kept ten minutes.</summary>
     public async Task<bool> MayReadAsync(ArgusMcp argus, AppUser me, string project, CancellationToken ct)

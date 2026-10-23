@@ -22,7 +22,7 @@ namespace Llm.Api.Chat;
 /// replicas an answer runs on the one that was asked (Traefik keeps a person on one);
 /// a stop or "answer now" posted to another is passed to it.
 /// </summary>
-public sealed partial class AnswerJobs : IHostedService, IDisposable
+public sealed partial class AnswerJobs : IHostedService
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private const string StopTopic = "answer:stop";
@@ -32,17 +32,18 @@ public sealed partial class AnswerJobs : IHostedService, IDisposable
     private static readonly TimeSpan QueuedAfterStart = TimeSpan.FromSeconds(30);
 
     private readonly ConcurrentDictionary<Guid, Job> _jobs = new();
-    private readonly CancellationTokenSource _closing = new();
     private readonly IServiceScopeFactory scopes;
     private readonly AnswerGate gate;
     private readonly Replicas replicas;
     private readonly ILogger<AnswerJobs> logger;
 
     private readonly RoomHub rooms;
+    // Shutting down: the host's own token (one of this class's own could be disposed before its StopAsync ran).
+    private readonly IHostApplicationLifetime _lifetime;
 
-    public AnswerJobs(IServiceScopeFactory scopes, AnswerGate gate, Replicas replicas, RoomHub rooms, ILogger<AnswerJobs> logger)
+    public AnswerJobs(IServiceScopeFactory scopes, AnswerGate gate, Replicas replicas, RoomHub rooms, IHostApplicationLifetime lifetime, ILogger<AnswerJobs> logger)
     {
-        (this.scopes, this.gate, this.replicas, this.rooms, this.logger) = (scopes, gate, replicas, rooms, logger);
+        (this.scopes, this.gate, this.replicas, this.rooms, _lifetime, this.logger) = (scopes, gate, replicas, rooms, lifetime, logger);
         replicas.On(StopTopic, id => Guid.TryParse(id, out var c) && Stop(c));
         replicas.On(HurryTopic, id => Guid.TryParse(id, out var c) && HurryHere(c));
     }
@@ -353,7 +354,7 @@ public sealed partial class AnswerJobs : IHostedService, IDisposable
             {
                 // The next message queued in this chat starts before this answer's watchers are let go,
                 // so a page that watched this one finds the chat answering again.
-                if (!_closing.IsCancellationRequested)
+                if (!_lifetime.ApplicationStopping.IsCancellationRequested)
                 {
                     await StartQueuedAsync(job.Conversation);
                 }
@@ -404,8 +405,6 @@ public sealed partial class AnswerJobs : IHostedService, IDisposable
         }
     }
 
-    public void Dispose() => _closing.Dispose();
-
     private async Task StartQueuedAsync(Guid conversation)
     {
         await using var scope = scopes.CreateAsyncScope();
@@ -422,13 +421,13 @@ public sealed partial class AnswerJobs : IHostedService, IDisposable
         {
             try
             {
-                await Task.Delay(QueuedAfterStart, _closing.Token);
+                await Task.Delay(QueuedAfterStart, _lifetime.ApplicationStopping);
                 if (!replicas.IsLeader)
                 {
                     return;
                 }
                 await using var scope = scopes.CreateAsyncScope();
-                await scope.ServiceProvider.GetRequiredService<QueuedMessages>().StartWaitingAsync(_closing.Token);
+                await scope.ServiceProvider.GetRequiredService<QueuedMessages>().StartWaitingAsync(_lifetime.ApplicationStopping);
             }
             catch (OperationCanceledException)
             {
@@ -445,7 +444,6 @@ public sealed partial class AnswerJobs : IHostedService, IDisposable
     /// <summary>Shutting down: every answer stops and keeps what it has.</summary>
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        await _closing.CancelAsync();
         var running = _jobs.Values.ToList();
         foreach (var job in running)
         {

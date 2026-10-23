@@ -142,7 +142,11 @@ internal sealed class LocalRun(JsonArray functions, string? instructions, Func<s
 /// question, with their sources, for the model to confirm in the code, the issues and the wiki before it answers as the
 /// company's senior technical expert.
 /// </summary>
-public sealed class ArgusTool(ArgusMcp argus, AppDbContext db, Code.Business.BusinessMap map) : IChatTool
+/// <remarks>
+/// It reads the database with a context of its own: it starts beside other tools (a plugin's sign-in reads the request's
+/// context meanwhile), and one context takes one operation at a time.
+/// </remarks>
+public sealed class ArgusTool(ArgusMcp argus, IServiceScopeFactory scopes, Code.Business.BusinessMap map) : IChatTool
 {
     public const string MapFunction = "business_map", ExplainFunction = "business_explain";
 
@@ -169,7 +173,11 @@ public sealed class ArgusTool(ArgusMcp argus, AppDbContext db, Code.Business.Bus
     {
         var session = await argus.ConnectAsync(context.User.Id, context.Email, ct);
         var functions = Mcp.ToOpenAiTools(await session.ToolsAsync(ct));
-        var mapped = await db.BusinessSystems.AnyAsync(b => b.Status == Core.Code.BusinessSystem.Ready, ct);
+        bool mapped;
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            mapped = await scope.ServiceProvider.GetRequiredService<AppDbContext>().BusinessSystems.AnyAsync(b => b.Status == Core.Code.BusinessSystem.Ready, ct);
+        }
         if (mapped)
         {
             functions.Add(Schema.Function(MapFunction,
@@ -196,8 +204,11 @@ public sealed class ArgusTool(ArgusMcp argus, AppDbContext db, Code.Business.Bus
         });
     }
 
-    private async Task<List<Core.Code.BusinessSystem>> ReadyAsync(AppUser me, CancellationToken ct) =>
-        [.. (await map.VisibleAsync(db, argus, me, ct)).Where(b => b.Status == Core.Code.BusinessSystem.Ready)];
+    private async Task<List<Core.Code.BusinessSystem>> ReadyAsync(AppUser me, CancellationToken ct)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        return [.. (await map.VisibleAsync(scope.ServiceProvider.GetRequiredService<AppDbContext>(), argus, me, ct)).Where(b => b.Status == Core.Code.BusinessSystem.Ready)];
+    }
 
     private async Task<ToolResult> BusinessMapAsync(AppUser me, CancellationToken ct)
     {

@@ -19,7 +19,7 @@ namespace Llm.Api.Code;
 /// refute it; and a summary gives a walkthrough, a risk and a verdict. The model's requests are the person's, tagged
 /// "review". Nothing is posted back to the code host.
 /// </summary>
-public sealed partial class ReviewEngine(IServiceScopeFactory scopes, ILogger<ReviewEngine> logger) : IHostedService, IDisposable
+public sealed partial class ReviewEngine(IServiceScopeFactory scopes, IHostApplicationLifetime lifetime, ILogger<ReviewEngine> logger) : IHostedService
 {
     /// <summary>The most text of a diff one review pass reads.</summary>
     public const int UnitChars = 24_000;
@@ -29,10 +29,8 @@ public sealed partial class ReviewEngine(IServiceScopeFactory scopes, ILogger<Re
     public const int MostFiles = 80;
     public const string Tag = "review";
 
-    private readonly CancellationTokenSource _closing = new();
-
     /// <summary>Starts a queued review in the background.</summary>
-    public void Start(Guid reviewId) => _ = Task.Run(() => RunAsync(reviewId, _closing.Token));
+    public void Start(Guid reviewId) => _ = Task.Run(() => RunAsync(reviewId, lifetime.ApplicationStopping));
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -51,13 +49,8 @@ public sealed partial class ReviewEngine(IServiceScopeFactory scopes, ILogger<Re
         }
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
-    {
-        _closing.Cancel();
-        return Task.CompletedTask;
-    }
-
-    public void Dispose() => _closing.Dispose();
+    /// <summary>What runs stops with the host's own stopping token: nothing of its own to stop (or to be disposed before it is).</summary>
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>One file's part to review: its path and its diff with new line numbers.</summary>
     public sealed record Unit(string Path, string Text);
