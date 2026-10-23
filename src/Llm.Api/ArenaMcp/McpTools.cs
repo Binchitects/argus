@@ -165,13 +165,14 @@ public sealed partial class McpTools(
         {
             return (await start(limit), null);
         }
+        catch (Exception ex) when (limit.IsCancellationRequested && !ct.IsCancellationRequested && ex is not OutOfMemoryException)
+        {
+            // The wait ran out and stopped it: however that surfaced (a cancellation, the database's or the connection's error), it was slow.
+            return (null, Slow(wait));
+        }
         catch (McpException ex)
         {
             return (null, ex.Message);
-        }
-        catch (OperationCanceledException) when (limit.IsCancellationRequested && !ct.IsCancellationRequested)
-        {
-            return (null, Slow(wait));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

@@ -34,8 +34,19 @@ public sealed class TestBrowser
 
     public Task<HttpResponseMessage> GetAsync(string path) => Http.GetAsync(new Uri(path, UriKind.Relative));
 
-    public async Task<JsonElement> JsonAsync(HttpResponseMessage res) =>
-        JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement;
+    /// <summary>The answer as JSON; one that is not says what it was (its request, status and words), not only that it was not JSON.</summary>
+    public async Task<JsonElement> JsonAsync(HttpResponseMessage res)
+    {
+        var text = await res.Content.ReadAsStringAsync();
+        try
+        {
+            return JsonDocument.Parse(text).RootElement;
+        }
+        catch (JsonException ex)
+        {
+            throw new Xunit.Sdk.XunitException($"{res.RequestMessage?.Method} {res.RequestMessage?.RequestUri?.PathAndQuery} answered HTTP {(int)res.StatusCode}, not JSON: {(text.Length > 500 ? text[..500] : text)} ({ex.Message})");
+        }
+    }
 
     public async Task<HttpResponseMessage> LoginAsync(string user, string password, bool remember = false)
     {

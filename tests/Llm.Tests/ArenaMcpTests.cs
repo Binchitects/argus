@@ -394,7 +394,9 @@ public sealed class ArenaMcpTests(AppFixture app)
             var clock = System.Diagnostics.Stopwatch.StartNew();
             var (_, init, _) = await RpcAsync(Agent(f, key), "initialize", new { protocolVersion = "2025-06-18", capabilities = new { }, clientInfo = new { name = "test", version = "1" } });
             Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10), $"initialize took {clock.Elapsed.TotalSeconds:0.0} s");
-            Assert.Contains("Desk (it did not answer within 2 seconds)", init.GetProperty("result").GetProperty("instructions").GetString(), StringComparison.Ordinal);
+            // (Its notes in full when not: what the agent was told of Desk.)
+            var said = init.GetProperty("result").GetProperty("instructions").GetString()!;
+            Assert.True(said.Contains("Desk (it did not answer within 2 seconds)", StringComparison.Ordinal), said[^Math.Min(1500, said.Length)..]);
             var names = (await RpcAsync(Agent(f, key), "tools/list")).Answer.GetProperty("result").GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("name").GetString()).ToList();
             Assert.Contains("calculate", names);
             Assert.Contains("find_symbol", names);

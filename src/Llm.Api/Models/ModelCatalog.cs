@@ -927,8 +927,24 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// it is registered with, so a changed one is replaced and two of one name (a model here
     /// and its copy on a server) are both kept: the gateway spreads requests between them.
     /// Every model carries its prices (its own, else Settings → Prices), so every request has a cost.
+    /// One sync at a time per gateway (the watcher's pass and an admin's save would both add what is missing); a copy
+    /// registered twice (two replicas syncing at once) is taken away.
     /// </summary>
     public async Task SyncGatewayAsync(CancellationToken ct = default)
+    {
+        var syncing = Syncing.GetValue(gateway, _ => new SemaphoreSlim(1, 1));
+        await syncing.WaitAsync(ct);
+        try
+        {
+            await SyncGatewayOnceAsync(ct);
+        }
+        finally
+        {
+            syncing.Release();
+        }
+    }
+
+    private async Task SyncGatewayOnceAsync(CancellationToken ct)
     {
         var defaults = prices.CurrentValue;
         var wanted = new Dictionary<string, (string Name, JsonObject Params, JsonObject Info)>(StringComparer.Ordinal);
@@ -1013,7 +1029,9 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         }
         await MediaAsync(wanted, defaults, ct);
         var managed = await gateway.ManagedModelsAsync(ct);
-        foreach (var old in managed.Where(g => g.Fingerprint is null || !wanted.ContainsKey(g.Fingerprint)))
+        // What is no longer wanted, and every copy but the first of one registered twice.
+        var twice = managed.Where(g => g.Fingerprint is not null).GroupBy(g => g.Fingerprint!, StringComparer.Ordinal).SelectMany(g => g.Skip(1));
+        foreach (var old in managed.Where(g => g.Fingerprint is null || !wanted.ContainsKey(g.Fingerprint)).Concat(twice))
         {
             await gateway.DeleteModelAsync(old.Id, ct);
         }
@@ -1133,6 +1151,9 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
 
     /// <summary>The fallbacks each gateway was last given (by any catalog of this replica): set again only when they change, and at start.</summary>
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ILiteLlm, string> GivenFallbacks = [];
+
+    /// <summary>The sync running against each gateway: the next waits for it.</summary>
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ILiteLlm, SemaphoreSlim> Syncing = [];
 
     private static string Fingerprint(params object?[] parts) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('|', parts.Select(p => Convert.ToString(p, CultureInfo.InvariantCulture))))))[..16];
