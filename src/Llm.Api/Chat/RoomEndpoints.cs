@@ -355,7 +355,7 @@ public static partial class RoomEndpoints
     }
 
     /// <summary>The room's events as server-sent events, for as long as the page has it open (or the person is taken out).</summary>
-    private static async Task EventsAsync(Guid id, HttpContext http, UserManager<AppUser> users, AppDbContext db, RoomHub hub)
+    private static async Task EventsAsync(Guid id, HttpContext http, UserManager<AppUser> users, AppDbContext db, RoomHub hub, Guid? page = null)
     {
         var me = await Me(http.User, users);
         if (await RoomAccess.FindAsync(db, id, me, Need.Read, http.RequestAborted) is not { IsRoom: true })
@@ -369,7 +369,7 @@ public static partial class RoomEndpoints
         await http.Response.Body.FlushAsync(http.RequestAborted);
         try
         {
-            await foreach (var line in hub.WatchAsync(id, me.Id, Heartbeat, http.RequestAborted))
+            await foreach (var line in hub.WatchAsync(id, me.Id, Heartbeat, http.RequestAborted, page))
             {
                 await http.Response.WriteAsync(line.Length == 0 ? ": still here\n\n" : $"data: {line}\n\n", http.RequestAborted);
                 await http.Response.Body.FlushAsync(http.RequestAborted);

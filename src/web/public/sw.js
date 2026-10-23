@@ -1,7 +1,11 @@
-// The installable app's service worker: the app's shell when offline, and the bell's
-// news pushed while no page is open. Never the API: /api, /connect and /.well-known
-// always go to the network, and their answers are never kept.
+// The installable app's service worker: the app's shell when offline, the bell's news
+// pushed while no page is open, and what another app shares to Arena (kept until the
+// chat takes it). Never the API: /api, /connect and /.well-known always go to the
+// network, and their answers are never kept.
 const SHELL = 'shell-v1'
+const SHARED = 'shared-v1'
+// The most a share keeps (its files together): more is left out.
+const MAX_SHARED_BYTES = 50 * 1024 * 1024
 // Fingerprinted files kept at most; the oldest go first (old releases' files).
 const MAX_ASSETS = 300
 
@@ -18,7 +22,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== SHELL).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== SHELL && k !== SHARED).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   )
 })
@@ -30,10 +34,42 @@ async function keep(request, response) {
   for (const old of keys.slice(0, Math.max(0, keys.length - MAX_ASSETS))) await cache.delete(old)
 }
 
+// A share from another app (the manifest's share_target): its words and files kept, and a new chat opened to take them.
+async function share(request) {
+  const form = await request.formData()
+  const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  const cache = await caches.open(SHARED)
+  // Shares nobody took (the page never opened) go after a day.
+  for (const old of await cache.keys()) {
+    const at = parseInt(new URL(old.url).pathname.split('/')[2] || '', 36)
+    if (!at || Date.now() - at > 86_400_000) await cache.delete(old)
+  }
+  const files = []
+  let bytes = 0
+  for (const f of form.getAll('files')) {
+    if (typeof f === 'string' || f.size === 0 || bytes + f.size > MAX_SHARED_BYTES) continue
+    bytes += f.size
+    files.push(f)
+  }
+  await Promise.all(files.map((f, i) => cache.put(`/shared/${id}/${i}`, new Response(f, { headers: { 'Content-Type': f.type || 'application/octet-stream' } }))))
+  const meta = {
+    title: String(form.get('title') || ''),
+    text: String(form.get('text') || ''),
+    url: String(form.get('url') || ''),
+    files: files.map((f, i) => ({ name: f.name || `shared-${i + 1}`, type: f.type || 'application/octet-stream' })),
+  }
+  await cache.put(`/shared/${id}`, new Response(JSON.stringify(meta), { headers: { 'Content-Type': 'application/json' } }))
+  return Response.redirect(`/chat?shared=${id}`, 303)
+}
+
 self.addEventListener('fetch', (event) => {
   const request = event.request
-  if (request.method !== 'GET') return
   const url = new URL(request.url)
+  if (request.method === 'POST' && url.origin === self.location.origin && url.pathname === '/share') {
+    event.respondWith(share(request).catch(() => Response.redirect('/chat', 303)))
+    return
+  }
+  if (request.method !== 'GET') return
   if (url.origin !== self.location.origin || /^\/(api|connect|\.well-known)(\/|$)/.test(url.pathname)) return
   if (request.mode === 'navigate') {
     // A page: the network first (always the latest release), the kept shell when offline.

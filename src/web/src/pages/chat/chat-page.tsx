@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Archive, ArrowDown, Code2, FileUp, GitFork, Lightbulb, Lock, MessageSquare, Reply, Search, Sparkles, SquareTerminal, X } from 'lucide-react'
+import { Archive, ArrowDown, CloudOff, Code2, FileUp, GitFork, Lightbulb, Lock, MessageSquare, Reply, Search, Sparkles, SquareTerminal, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router'
+import { Link, useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -10,6 +10,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, ApiError, errorMessage, infoQuery, type Me } from '@/lib/api'
 import { refusalEvent, safeguardQuestion, type SafeguardAnswer, type SafeguardQuestion } from './safeguard'
 import { AskReview, SafeguardAsk } from './safeguard-dialogs'
+import { takeShared } from '@/lib/shared'
 import type { SkillUse } from '@/lib/skills'
 import { useMedia } from '@/lib/use-media'
 import { cn } from '@/lib/utils'
@@ -62,6 +63,9 @@ import { SelectionToolbar } from './selection-toolbar'
 import { NewRoomDialog, RoomPanel } from './room'
 import { useReadIn, useRoomTranslations } from './room-language'
 import { mentionsIn, typingLine, useRoomEvents } from './room-live'
+import { isOffline, useOnline, useOutbox } from './outbox'
+import { useRoomCall } from './room-call'
+import { CallBar, CallButton } from './call-bar'
 
 /** The id a question is shown under until the server gives it its own. */
 let localCount = 0
@@ -183,6 +187,10 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   /** The chat an answer is streaming in: known before the route says so, when a new chat's first answer starts. */
   const streamingIn = useRef<string | null>(null)
   const uploads = useUploads(config.maxUploadBytes)
+  // Sent with no connection: it waits, and goes when the connection is back.
+  const outbox = useOutbox(id ?? null)
+  const online = useOnline()
+  const wentOffline = useRef(false)
   // Show your screen: each question takes a picture of what is on it.
   const share = useScreenShare()
   const [filesOpen, setFilesOpen] = useState(false)
@@ -234,7 +242,10 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   const data = loaded.data
   // A room: a chat several people share (its people, who is here, who writes).
   const room = data?.room ?? null
-  const roomLive = useRoomEvents(id, room, me?.id ?? '')
+  // A room's call: its people talk, with live captions in each reader's language.
+  const [readIn, setReadIn] = useReadIn()
+  const call = useRoomCall(room ? id : undefined, me?.id ?? '', readIn)
+  const roomLive = useRoomEvents(id, room, me?.id ?? '', call.on)
   /** Who wrote the message a room's message replies to, and its start. */
   const replyOf = (messageId: string) => {
     const m = data?.messages.find((x) => x.id === messageId)
@@ -268,7 +279,6 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   const tree = useMemo(() => new ChatTree(view.messages), [view.messages])
   const path = useMemo(() => tree.path(view.leaf), [tree, view.leaf])
   // A room read in this reader's language: others' messages translated (once on the server, for all who read in it).
-  const [readIn, setReadIn] = useReadIn()
   const translations = useRoomTranslations(room ? id : undefined, readIn, path, me?.id)
   const turns = toTurns(path)
   // ↑ in the box: this chat's questions, newest first, then the person's in their other chats.
@@ -469,6 +479,9 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
         wasStopped = err instanceof DOMException && err.name === 'AbortError'
         // A rule that asks the person first: the sender asks, and sends again.
         safeguardHit.current = safeguardQuestion(err)
+        // The connection went: what was sent waits for it (the sender keeps it).
+        wentOffline.current = !wasStopped && !received && isOffline()
+        if (wentOffline.current) return false
         if (!wasStopped && !safeguardHit.current) setRefused(refusalEvent(err))
         if (!wasStopped && !safeguardHit.current)
           setError(err instanceof ApiError ? err.message : received ? 'The answer was interrupted.' : 'The message did not reach the server. It is back in the box below: send it again.')
@@ -561,6 +574,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     try {
       const created = await api<Conversation>('/api/chat/conversations', { body: draft })
       queryClient.setQueryData(conversationQuery(created.id).queryKey, { ...created, messages: [] })
+      outbox.adopt(created.id)
       onAdopt(created.id)
       navigate(`/chat/${created.id}`, { replace: true })
       return created.id
@@ -629,6 +643,14 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     }
     const withQuote = quoted ?? (fromBox ? quote : null)
     if (fromBox && withQuote) setQuote(null)
+    // No connection: it waits in the outbox (not a voice turn, a comparison or a sketch's question, which need their answer now).
+    const wait = () => {
+      outbox.add({ chatId: id ?? null, text, attachments: files ?? uploads.attachments, quote: withQuote ?? undefined, skill })
+      if (fromBox) uploads.clear()
+      return true
+    }
+    const canWait = !talkTurn && !versus && !onEvent
+    if (canWait && isOffline()) return wait()
     const conversationId = await ensureChat()
     if (!conversationId) {
       if (versus) setCompare(versus)
@@ -665,6 +687,10 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       }
     }
     let sent = await run(conversationId, versus ? 'compare' : 'messages', body, withQuestion(view, localId, parent, text, attachments, withQuote?.text, skill), localId, watch)
+    if (!sent && wentOffline.current && canWait) {
+      wentOffline.current = false
+      return wait()
+    }
     // A safeguard asks first (send it anyway? why?): asked here, and sent again with the person's answer.
     const question = !sent ? safeguardHit.current : null
     if (question) {
@@ -892,8 +918,55 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     }
   }
 
-  // Opened with a question to ask (the code assistant's ?ask=): sent once, when the chat is there and empty.
+  // The connection back (or the chat opened again with it): what waited is sent, one at a time, oldest first.
+  const flushing = useRef(false)
+  useEffect(() => {
+    const next = outbox.here.find((o) => !o.failed)
+    if (!online || !next || flushing.current || streaming || (id && !data)) return
+    flushing.current = true
+    void (async () => {
+      const sent = await send(next.text, next.attachments, undefined, next.quote, undefined, next.skill)
+      // Gone again: send kept a copy to wait. Refused: it stays, for the person to send again or remove.
+      if (sent || isOffline()) outbox.remove(next.key)
+      else outbox.failed(next)
+    })().finally(() => {
+      flushing.current = false
+    })
+  })
+  const waiting =
+    outbox.here.length > 0 ? (
+      <section aria-label="Waiting to be sent" className="mb-2 grid gap-1.5 rounded-xl border bg-card px-3 py-2 text-sm shadow-sm">
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          <CloudOff className="size-3.5 shrink-0" aria-hidden="true" />
+          {online ? 'Sending what waited for the connection…' : 'No connection: what you send waits here, and goes when it is back.'}
+        </p>
+        <ul className="grid gap-1">
+          {outbox.here.map((o) => (
+            <li key={o.key} className="flex items-center gap-2">
+              <span className="min-w-0 flex-1 truncate" dir="auto">
+                {o.text || `${o.attachments.length} file${o.attachments.length === 1 ? '' : 's'}`}
+              </span>
+              {o.failed && (
+                <>
+                  <span className="text-xs text-destructive-ink">Not sent</span>
+                  <Button type="button" size="sm" variant="outline" className="h-7 px-2" onClick={() => outbox.retry(o.key)}>
+                    Send again
+                  </Button>
+                </>
+              )}
+              <Button type="button" size="icon-sm" variant="ghost" aria-label={`Remove: ${o.text || 'the files'}`} onClick={() => outbox.remove(o.key)}>
+                <X />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ) : null
+
+  // Opened with a question to ask (the code assistant's ?ask=, a meeting's): sent once, when the chat is there and empty,
+  // with the files it came with (a meeting's minutes and transcript).
   const [params, setParams] = useSearchParams()
+  const location = useLocation()
   const askOnce = useRef(false)
   const toAsk = params.get('ask')
   useEffect(() => {
@@ -906,8 +979,45 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       },
       { replace: true },
     )
-    void send(toAsk, [])
+    void send(toAsk, (location.state as { files?: Attachment[] } | null)?.files ?? [])
   })
+
+  // Opened by another app's share (the installed app's share target): its files attached and its words in the box of a new chat.
+  const [seed, setSeed] = useState<{ text: string; n: number } | null>(null)
+  const sharedId = params.get('shared')
+  const took = useRef<string | null>(null)
+  useEffect(() => {
+    if (!sharedId || took.current === sharedId) return
+    took.current = sharedId
+    setParams(
+      (p) => {
+        p.delete('shared')
+        return p
+      },
+      { replace: true },
+    )
+    void takeShared(sharedId).then((shared) => {
+      if (!shared) return toast.error('What was shared is gone: share it again.')
+      if (shared.files.length) uploads.add(shared.files)
+      setSeed((s) => ({ text: shared.text, n: (s?.n ?? 0) + 1 }))
+    })
+  }, [sharedId, setParams, uploads])
+
+  // Opened from the installed app's Talk shortcut: Talk starts.
+  const talkNow = params.get('talk') === '1'
+  const talked = useRef(false)
+  useEffect(() => {
+    if (!talkNow || talked.current) return
+    talked.current = true
+    setParams(
+      (p) => {
+        p.delete('talk')
+        return p
+      },
+      { replace: true },
+    )
+    void talk.start()
+  }, [talkNow, setParams, talk])
 
   // Opened at a message (a search result): onto its branch, then to it, marked for a moment.
   const switchingTo = useRef<string | null>(null)
@@ -1039,7 +1149,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
             onMove={id ? (assistantId) => void move(assistantId) : undefined}
             onShare={id && path.length ? () => setSharing(true) : undefined}
             onCompact={canCompact ? () => void compact() : undefined}
-            room={room ? { people: room.members.length, here: roomLive.here.length, onOpen: () => setPeopleOpen(true), readIn: { value: readIn, onChange: setReadIn } } : undefined}
+            room={room ? { people: room.members.length, here: roomLive.here.length, onOpen: () => setPeopleOpen(true), readIn: { value: readIn, onChange: setReadIn }, call: <CallButton call={call} canSpeak={room.role !== 'viewer'} /> } : undefined}
             onMakeRoom={id && data && !room && !data.origin ? () => setMakingRoom(true) : undefined}
           />
           {empty ? (
@@ -1076,7 +1186,23 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                 <BrowserBar chatId={id ?? null} active={toolsOnHere.includes('browser')} />
                 <ScreenBar share={share} sees={model?.vision ?? false} seer={seer} onSeer={(m) => void change({ model: m })} />
                 <TalkBar state={talk.state} onEnd={talk.end} />
-                <Composer streaming={streaming} onSend={(text, skill) => send(text, undefined, undefined, undefined, undefined, skill)} onStop={() => void stop()} uploads={uploads} model={model} tools={toolsPicker} compare={comparePicker} talk={talkButton} history={history} autoFocus big />
+                {waiting}
+                {room && <CallBar call={call} me={me?.id ?? ''} readIn={readIn} canSpeak={room.role !== 'viewer'} names={(person) => room.members.find((m) => m.id === person)?.name ?? 'Someone'} />}
+                <Composer
+                  key={seed?.n ?? 0}
+                  initialText={seed?.text}
+                  streaming={streaming}
+                  onSend={(text, skill) => send(text, undefined, undefined, undefined, undefined, skill)}
+                  onStop={() => void stop()}
+                  uploads={uploads}
+                  model={model}
+                  tools={toolsPicker}
+                  compare={comparePicker}
+                  talk={talkButton}
+                  history={history}
+                  autoFocus
+                  big
+                />
                 <div className={cn('stagger mt-4 grid gap-2', starters ? 'sm:grid-cols-2' : 'sm:grid-cols-3')} aria-label={starters ? 'Conversation starters' : undefined}>
                   {(starters ?? (config.argus ? [{ icon: Search, text: 'Which of our repositories call the payment service, and where?' }, ...suggestions.slice(0, 2)] : suggestions)).map((s) => (
                     <button
@@ -1249,6 +1375,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                 <BrowserBar chatId={id ?? null} active={toolsOnHere.includes('browser')} />
                 <ScreenBar share={share} sees={model?.vision ?? false} seer={seer} onSeer={(m) => void change({ model: m })} />
                 <TalkBar state={talk.state} onEnd={talk.end} />
+                {waiting}
+                {room && <CallBar call={call} me={me?.id ?? ''} readIn={readIn} canSpeak={room.role !== 'viewer'} names={(person) => room.members.find((m) => m.id === person)?.name ?? 'Someone'} />}
                 {data?.codeArena && !streaming && (
                   <output className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground">
                     <SquareTerminal className="size-3.5 shrink-0 animate-pulse" aria-hidden="true" />

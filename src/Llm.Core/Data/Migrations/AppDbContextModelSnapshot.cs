@@ -3856,6 +3856,129 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("media_vector_versions", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Meetings.Meeting", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("CompletionTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Decisions")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("Language")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Model")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid?>("PlanId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("PromptTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("RecordingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<double?>("Seconds")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("Speakers")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Step")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Summary")
+                        .HasMaxLength(20000)
+                        .HasColumnType("character varying(20000)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Transcript")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "CreatedAt");
+
+                    b.ToTable("meetings", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Meetings.MeetingAction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Done")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateOnly?>("Due")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("MeetingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Number")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Owner")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid?>("PersonId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("RemindedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("Speaker")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MeetingId");
+
+                    b.HasIndex("Due", "Done", "RemindedAt");
+
+                    b.ToTable("meeting_actions", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Models.CachedAnswer", b =>
                 {
                     b.Property<long>("Id")
@@ -5903,6 +6026,24 @@ namespace Llm.Core.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Llm.Core.Meetings.Meeting", b =>
+                {
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Meetings.MeetingAction", b =>
+                {
+                    b.HasOne("Llm.Core.Meetings.Meeting", null)
+                        .WithMany("Actions")
+                        .HasForeignKey("MeetingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Llm.Core.Models.MediaModel", b =>
                 {
                     b.OwnsMany("Llm.Core.Models.MediaModelFile", "Files", b1 =>
@@ -6188,6 +6329,11 @@ namespace Llm.Core.Data.Migrations
             modelBuilder.Entity("Llm.Core.Code.CodeReview", b =>
                 {
                     b.Navigation("Findings");
+                });
+
+            modelBuilder.Entity("Llm.Core.Meetings.Meeting", b =>
+                {
+                    b.Navigation("Actions");
                 });
 
             modelBuilder.Entity("Llm.Core.Plans.Plan", b =>

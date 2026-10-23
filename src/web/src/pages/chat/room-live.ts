@@ -1,14 +1,20 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { conversationQuery, watchRoom, type RoomEvent } from './api'
+import { pageId, type CallEvent } from './room-call'
 import type { RoomBrief } from './types'
 
 /**
  * A room's live events while its page is open: the chat is read again when someone writes, an answer starts or ends, or
  * its people or settings change; who is here and who is typing. Returns who is here and the names typing now.
  */
-export function useRoomEvents(chatId: string | undefined, room: RoomBrief | null | undefined, me: string) {
+export function useRoomEvents(chatId: string | undefined, room: RoomBrief | null | undefined, me: string, onCall?: (e: CallEvent) => void) {
   const queryClient = useQueryClient()
+  // The call's events go to the call (read as they come, so a new handler needs no new stream).
+  const callNow = useRef(onCall)
+  useEffect(() => {
+    callNow.current = onCall
+  })
   const [here, setHere] = useState<string[]>([])
   const [typing, setTyping] = useState<Record<string, number>>({})
   const isRoom = !!room
@@ -17,6 +23,7 @@ export function useRoomEvents(chatId: string | undefined, room: RoomBrief | null
     const abort = new AbortController()
     const on = (e: RoomEvent) => {
       if (e.type === 'presence') setHere(e.here)
+      else if (e.type === 'call' || e.type === 'signal' || e.type === 'caption') callNow.current?.(e)
       else if (e.type === 'typing') {
         if (e.by !== me) setTyping((t) => ({ ...t, [e.by]: Date.now() + 6000 }))
       } else {
@@ -28,7 +35,7 @@ export function useRoomEvents(chatId: string | undefined, room: RoomBrief | null
     const loop = async () => {
       while (!abort.signal.aborted) {
         try {
-          await watchRoom(chatId, on, abort.signal)
+          await watchRoom(chatId, on, abort.signal, pageId)
         } catch {
           // closed, or taken out of the room: the next read of the chat says so
         }

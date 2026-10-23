@@ -128,7 +128,7 @@ public static class RoomTranslations
     }
 
     /// <summary>One question for a batch: the translations by message (null: in that language already); or why not.</summary>
-    private static async Task<(Dictionary<Guid, string?> Made, string? Problem)> AskAsync(OneQuestion one, AppUser me, string model, string language,
+    internal static async Task<(Dictionary<Guid, string?> Made, string? Problem)> AskAsync(OneQuestion one, AppUser me, string model, string language,
         List<(Guid Id, string Text)> batch, CancellationToken ct)
     {
         var messages = new JsonArray([.. batch.Select((m, i) => (JsonNode)new JsonObject { ["id"] = (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), ["text"] = m.Text })]);

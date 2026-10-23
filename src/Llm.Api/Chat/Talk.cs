@@ -28,10 +28,6 @@ public static class Talk
     {
         var ct = request.HttpContext.RequestAborted;
         var me = (await users.GetUserAsync(p))!;
-        if (await request.HttpContext.RequestServices.GetRequiredService<Gateway.Credit>().RefusalAsync(me, Llm.Core.Access.CreditKind.Speech, ct) is { } spent)
-        {
-            return AuthEndpoints.Problem(403, "credit", spent);
-        }
         if (request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
         {
             limit.MaxRequestBodySize = MaxBytes + 64 * 1024;
@@ -40,19 +36,33 @@ public static class Talk
         {
             return AuthEndpoints.Problem(400, "file", "Send exactly one recording.");
         }
-        var file = files[0];
+        var (text, refused) = await WriteDownAsync(request.HttpContext, files[0], me, gateway, models, voices, media, ct);
+        return refused ?? Results.Ok(new { text });
+    }
+
+    /// <summary>
+    /// A recording of speech written down (the person's credit for speech, the gateway's speech to text, the language they
+    /// speak when they chose one); or why not, as the answer to give.
+    /// </summary>
+    public static async Task<(string Text, IResult? Refused)> WriteDownAsync(HttpContext http, IFormFile file, AppUser me, GatewayChat gateway, ChatModels models,
+        VoiceCatalog voices, MediaControl media, CancellationToken ct)
+    {
+        if (await http.RequestServices.GetRequiredService<Gateway.Credit>().RefusalAsync(me, Llm.Core.Access.CreditKind.Speech, ct) is { } spent)
+        {
+            return ("", AuthEndpoints.Problem(403, "credit", spent));
+        }
         var type = (file.ContentType ?? "").Split(';')[0].Trim().ToLowerInvariant();
         if (file.Length == 0 || !(type.StartsWith("audio/", StringComparison.Ordinal) || type == "video/webm"))
         {
-            return AuthEndpoints.Problem(400, "sound", "Send a recording of speech (WebM, MP4, OGG, WAV or MP3).");
+            return ("", AuthEndpoints.Problem(400, "sound", "Send a recording of speech (WebM, MP4, OGG, WAV or MP3)."));
         }
         if (file.Length > MaxBytes)
         {
-            return AuthEndpoints.Problem(413, "too_large", "That recording is too long: say it in shorter parts.");
+            return ("", AuthEndpoints.Problem(413, "too_large", "That recording is too long: say it in shorter parts."));
         }
         if (await models.OfModeAsync("audio_transcription", media.Pick(Llm.Core.Models.MediaModes.Transcription)?.Name, ct) is not { } model)
         {
-            return AuthEndpoints.Problem(503, "no_transcription", "The gateway has no speech to text model (the audio module).");
+            return ("", AuthEndpoints.Problem(503, "no_transcription", "The gateway has no speech to text model (the audio module)."));
         }
         using var ms = new MemoryStream();
         await file.CopyToAsync(ms, ct);
@@ -61,11 +71,11 @@ public static class Talk
         try
         {
             var text = await gateway.TranscribeAsync(model.Name, ms.ToArray(), "speech" + Extension(sound), me.Email!, ct, sound, await voices.LanguageOfAsync(me, ct));
-            return Results.Ok(new { text = text.Trim() });
+            return (text.Trim(), null);
         }
         catch (ChatGatewayException ex)
         {
-            return AuthEndpoints.Problem(502, "gateway", ex.Message);
+            return ("", AuthEndpoints.Problem(502, "gateway", ex.Message));
         }
     }
 

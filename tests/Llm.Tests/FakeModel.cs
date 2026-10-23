@@ -55,6 +55,15 @@ public sealed class FakeModel : HttpMessageHandler
     public ConcurrentQueue<string> Transcriptions { get; } = new();
     public ConcurrentQueue<JsonObject> SpeechRequests { get; } = new();
 
+    /// <summary>What speech to text hears in a meeting: four parts, two voices taking turns.</summary>
+    public const string MeetingHeard = """
+        {"text": "...", "language": "en", "duration": 40.0, "segments": [
+         {"start": 0.0, "end": 9.5, "text": " Hi Ben, it's Ana. Shall we ship the new checkout on Monday?"},
+         {"start": 9.5, "end": 18.0, "text": " Yes, if the payment tests pass. I'll fix the flaky one."},
+         {"start": 18.0, "end": 30.0, "text": " Good. Then I write the release notes by Friday."},
+         {"start": 30.0, "end": 40.0, "text": " Agreed, Monday it is."}]}
+        """;
+
     /// <summary>A real 1x1 PNG.</summary>
     public static readonly byte[] Png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
 
@@ -67,7 +76,13 @@ public sealed class FakeModel : HttpMessageHandler
         // Speech to text takes a form, and answers with what was said.
         if (request.RequestUri!.AbsolutePath.EndsWith("/audio/transcriptions", StringComparison.Ordinal))
         {
-            Transcriptions.Enqueue(await request.Content!.ReadAsStringAsync(cancellationToken));
+            var form = await request.Content!.ReadAsStringAsync(cancellationToken);
+            Transcriptions.Enqueue(form);
+            // A meeting's (asked part by part, with their times): two people agreeing who does what.
+            if (form.Contains("timestamp_granularities", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(MeetingHeard, Encoding.UTF8, "application/json") };
+            }
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"text":"What is the capital of France?"}""", Encoding.UTF8, "application/json") };
         }
         var body = JsonNode.Parse(await request.Content!.ReadAsStringAsync(cancellationToken))!.AsObject();
@@ -198,6 +213,22 @@ public sealed class FakeModel : HttpMessageHandler
         if (system0.StartsWith("You name the separate things in a picture", StringComparison.Ordinal))
         {
             chunks = [Delta(new JsonObject { ["content"] = """{"things": [{"id": "Badge", "looks": "a red round badge"}, {"id": "star", "looks": "a dark star"}, {"id": "background", "looks": "white"}]}""" }), Finish("stop"), Usage(80, 0, 40)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
+        // A meeting's minutes (and notes on a part of a long one): who does what, as the meeting said.
+        if (system0.StartsWith("You write a meeting's minutes", StringComparison.Ordinal) || system0.StartsWith("You take notes on one part of a meeting", StringComparison.Ordinal))
+        {
+            var minutes = new JsonObject
+            {
+                ["title"] = "Checkout launch", ["summary"] = "- Ship the new checkout on Monday\n- Payment tests first",
+                ["decisions"] = new JsonArray("Ship the new checkout on Monday."),
+                ["actions"] = new JsonArray(
+                    new JsonObject { ["text"] = "Fix the flaky payment test", ["owner"] = "Speaker 2", ["due"] = null },
+                    new JsonObject { ["text"] = "Write the release notes", ["owner"] = "Ana", ["due"] = "2026-10-30" },
+                    new JsonObject { ["text"] = "Tell support", ["owner"] = "Dana from support", ["due"] = "not a date" }),
+                ["names"] = new JsonObject { ["Speaker 1"] = "Ana", ["Speaker 2"] = "Ben", ["Speaker 9"] = "Nobody" },
+            };
+            chunks = [Delta(new JsonObject { ["content"] = "Here are the minutes:\n" + minutes.ToJsonString() }), Finish("stop"), Usage(400, 0, 120)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
         // The business mapper: reads the code once (find_symbol), then reports its map; "group/silent" never reports.

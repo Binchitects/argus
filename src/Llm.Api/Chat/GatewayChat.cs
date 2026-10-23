@@ -177,6 +177,44 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
         return JsonNode.Parse(await res.Content.ReadAsStringAsync(ct))?["text"]?.GetValue<string>() ?? "";
     }
 
+    /// <summary>A part of a sound, as speech to text heard it: from when to when (seconds), and what was said.</summary>
+    public sealed record HeardPart(double Start, double End, string Text);
+
+    /// <summary>
+    /// What was said in a long sound, part by part with their times (a meeting), and the language heard, from the speech to
+    /// text model at the gateway. The spend is the person's.
+    /// </summary>
+    public async Task<(IReadOnlyList<HeardPart> Parts, string? Language, double Seconds)> TranscribePartsAsync(string model, byte[] sound, string personEmail,
+        CancellationToken ct, string? language = null)
+    {
+        media.Touch(model);
+        using var res = await WithKeyAsync(() => PostAsync("/v1/audio/transcriptions", () =>
+        {
+            var form = new MultipartFormDataContent
+            {
+                { new ByteArrayContent(sound) { Headers = { ContentType = new MediaTypeHeaderValue("audio/mpeg") } }, "file", "meeting.mp3" },
+                { new StringContent(model), "model" },
+                { new StringContent("verbose_json"), "response_format" },
+                { new StringContent("segment"), "timestamp_granularities[]" },
+                { new StringContent(personEmail), "user" },
+            };
+            if (language is not null)
+            {
+                form.Add(new StringContent(language), "language");
+            }
+            return form;
+        }, personEmail, "application/json", ct), ct);
+        var answer = JsonNode.Parse(await res.Content.ReadAsStringAsync(ct));
+        var parts = (answer?["segments"] as JsonArray ?? []).OfType<JsonObject>()
+            .Select(s => new HeardPart(s["start"]?.GetValue<double>() ?? 0, s["end"]?.GetValue<double>() ?? 0, (s["text"]?.GetValue<string>() ?? "").Trim()))
+            .Where(p => p.Text.Length > 0).ToList();
+        if (parts.Count == 0 && (answer?["text"]?.GetValue<string>() ?? "").Trim() is { Length: > 0 } all)
+        {
+            parts.Add(new HeardPart(0, answer?["duration"]?.GetValue<double>() ?? 0, all));
+        }
+        return (parts, answer?["language"]?.GetValue<string>(), answer?["duration"]?.GetValue<double>() ?? parts.LastOrDefault()?.End ?? 0);
+    }
+
     /// <summary>A text spoken by a text to speech model at the gateway, as MP3 bytes. The spend is the person's.</summary>
     public async Task<byte[]> SpeakAsync(string model, string text, string voice, string personEmail, CancellationToken ct, double speed = 1)
     {

@@ -1,7 +1,7 @@
 import { Archive, ArchiveRestore, Bot, Brain, Check, ChevronDown, Eye, FileDown, FilePen, FoldVertical, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, Share2, SlidersHorizontal, Sparkles, Trash2, Users, Wrench } from 'lucide-react'
 import { ReadInMenu } from './read-in'
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -246,7 +246,7 @@ export function ChatHeader({
   /** Share the chat: a read-only link. */
   onShare?: () => void
   /** A room: how many people it has, and its panel. */
-  room?: { people: number; here: number; onOpen: () => void; readIn?: { value: string; onChange: (code: string) => void } }
+  room?: { people: number; here: number; onOpen: () => void; readIn?: { value: string; onChange: (code: string) => void }; call?: ReactNode }
   /** Make the chat a room (its owner's, not a room yet). */
   onMakeRoom?: () => void
 }) {
@@ -270,6 +270,7 @@ export function ChatHeader({
         </Link>
       )}
       <span className="ml-auto flex shrink-0 items-center gap-1">
+        {room?.call}
         {room?.readIn && <ReadInMenu value={room.readIn.value} onChange={room.readIn.onChange} />}
         {room && (
           <Tooltip content="People in this room">

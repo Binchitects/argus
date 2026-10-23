@@ -1,4 +1,4 @@
-import { Activity, AppWindow, GitPullRequest, ListChecks, BarChart, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Palette, Plug, Presentation, ScrollText, Settings, ShieldAlert, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Workflow, Wrench, type LucideIcon } from 'lucide-react'
+import { Activity, AppWindow, AudioLines, GitPullRequest, ListChecks, BarChart, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Palette, Plug, Presentation, ScrollText, Settings, ShieldAlert, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Workflow, Wrench, type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
   title: string
@@ -24,6 +24,7 @@ export const navigation: NavSection[] = [
       { title: 'Chat', path: '/chat', icon: MessageSquare, keywords: ['conversation', 'ask', 'model', 'argus'] },
       { title: 'Assistants', path: '/assistants', icon: Bot, keywords: ['gpts', 'gems', 'projects', 'instructions', 'knowledge', 'shared', 'team'] },
       { title: 'Skills', path: '/skills', icon: SquareSlash, keywords: ['slash commands', 'prompts', 'prompt library', 'templates', 'snippets', 'instructions', 'parameters'] },
+      { title: 'Meetings', path: '/meetings', icon: AudioLines, keywords: ['meeting', 'record', 'recording', 'transcript', 'minutes', 'notes', 'action items', 'decisions', 'who said', 'speakers', 'otter', 'fireflies', 'call'] },
       { title: 'Plans', path: '/plans', icon: ListChecks, keywords: ['plan', 'board', 'timeline', 'gantt', 'steps', 'project', 'kanban'] },
       { title: 'Apps', path: '/apps', icon: AppWindow, keywords: ['app', 'apps', 'tool', 'publish', 'page', 'component', 'gallery', 'remix'] },
       { title: 'Data', path: '/data', icon: BarChart, keywords: ['ask your data', 'sql', 'database', 'query', 'chart', 'dashboard', 'board', 'report', 'analytics', 'bi'] },

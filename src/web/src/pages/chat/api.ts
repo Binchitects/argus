@@ -1,4 +1,5 @@
 import { api, ApiError } from '@/lib/api'
+import type { CallEvent } from './room-call'
 import type { Assistant, AssistantSummary, Attachment, ChatConfig, ChatEvent, ChatShare, Conversation, ConversationSummary, Named, QueuedMessage, SharedChat } from './types'
 
 export const configQuery = {
@@ -197,9 +198,11 @@ export type RoomEvent =
   | { type: 'presence'; here: string[] }
   | { type: 'members' }
   | { type: 'settings' }
+  | CallEvent
 
-export const watchRoom = (id: string, on: (e: RoomEvent) => void, signal: AbortSignal) =>
-  streamChat(`/api/rooms/${id}/events`, null, on as unknown as (e: ChatEvent) => void, signal)
+/** A room's events for this page (`page`: its own id, by which the room's call reaches it). */
+export const watchRoom = (id: string, on: (e: RoomEvent) => void, signal: AbortSignal, page?: string) =>
+  streamChat(`/api/rooms/${id}/events${page ? `?page=${page}` : ''}`, null, on as unknown as (e: ChatEvent) => void, signal)
 
 /** People to add: by name or username (never their email). */
 export const sharingPeopleQuery = (q: string) => ({

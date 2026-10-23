@@ -98,6 +98,26 @@ public sealed class StudioServer(IHttpClientFactory http)
         return [.. masks.Select(m => Convert.FromBase64String(m?.GetValue<string>() ?? ""))];
     }
 
+    /// <summary>
+    /// Who spoke each part of a sound (an MP3): a number for each part, from 0 in the order they first speak, by how alike
+    /// their voices are (Chatterbox's voice encoder, on the CPU); <paramref name="speakers"/>, how many there were, when known.
+    /// </summary>
+    public async Task<IReadOnlyList<int>> SpeakersAsync(byte[] mp3, IReadOnlyList<(double Start, double End)> parts, int? speakers, CancellationToken ct)
+    {
+        var body = new JsonObject
+        {
+            ["audio"] = Convert.ToBase64String(mp3),
+            ["segments"] = new JsonArray([.. parts.Select(p => (JsonNode)new JsonArray(p.Start, p.End))]),
+        };
+        if (speakers is > 0)
+        {
+            body["speakers"] = speakers;
+        }
+        using var res = await http.CreateClient(Client).PostAsJsonAsync(MediaModels.StudioUrl + "/v1/speakers", body, ct);
+        var labels = JsonNode.Parse(await BytesAsync(res, ct))?["speakers"] as JsonArray ?? [];
+        return [.. labels.Select(l => l?.GetValue<int>() ?? 0)];
+    }
+
     private static double SecondsOf(HttpResponseMessage res) =>
         res.Headers.TryGetValues("X-Seconds", out var v) && double.TryParse(v.FirstOrDefault(), System.Globalization.CultureInfo.InvariantCulture, out var s) ? s : 0;
 

@@ -90,6 +90,9 @@ export const topics = {
       { name: 'Context', text: 'The gauge beside Send: how full the model\'s window is, what fills it, and where the chat compacts itself (Your account → Answers → **Compact long chats**; it always compacts before a message would not fit). **Compact now** summarizes older messages so the chat can go on lighter.' },
       { name: '/ in the box', text: 'At the start of a message, / finds a skill (Workspace → Skills): it sits above the box with a field for each parameter, and goes with your message.' },
       { name: '↑ in the box', text: 'With the box empty (or the caret on its first line), ↑ brings back what you sent before: this chat\'s messages, then your other chats\'. ↓ goes back to what you were typing, and Esc goes straight there.' },
+      { name: 'No connection', text: 'What you send with no connection waits above the box, and goes by itself when the connection is back (a new chat is made then). One the server refuses stays with **Send again**.' },
+      { name: 'From your phone', text: 'Installed on a phone, Arena is in the Share sheet: what you share opens a new chat with it attached and its words in the box. A long press on the app\'s icon offers **New chat**, **Talk** and **Record a meeting**.' },
+      { name: 'A room\'s call', text: 'In a room, **Call** at the top starts its call; the others see who is in it and **Join**. What each says shows as live captions above the box, in your language when you read the room in one (**Show the original** beside each). **Mute** stops your sound and your captions; **Leave** ends it for you.' },
     ],
     tasks: [
       { title: 'Ask about a file', steps: ['Press the paperclip, or drop the file on the page.', 'Wait until it shows as attached.', 'Type your question and press Enter.'] },
@@ -543,6 +546,37 @@ export const topics = {
       { title: 'Try a rule before it bites', steps: ['Make it with **Monitor only**.', 'Watch **What they did** for a week, then switch it to **Enforce**.'] },
     ],
     manual: { doc: 'admin', section: 'safeguards' },
+  },
+
+  meetings: {
+    title: 'Meetings',
+    about: 'Meetings recorded in the browser or uploaded, made into who said what, the minutes (a summary, the decisions, the action items) and a reminder for each action item on its day. Each meeting is its owner\'s.',
+    parts: [
+      { name: 'Record a meeting', text: 'The microphone records the room (or a call played aloud) until **Stop and make the minutes**; the loudness bar shows it hears.' },
+      { name: 'Upload a recording', text: 'A sound or a video, up to 60 MB (three hours as the browser records).' },
+      { name: 'Your meetings', text: 'Each one with its length and how many of its action items are open; while one is made, its step.' },
+    ],
+    tasks: [
+      { title: 'Make the minutes of a meeting', steps: ['Type its title, or leave it to the minutes.', 'Choose **Record a meeting** and allow the microphone, or **Upload a recording**.', 'Wait for its steps: listening, telling the voices apart, writing the minutes.', 'Name the speakers, check the action items, then **Make a plan** or **Ask about it**.'] },
+    ],
+    manual: { doc: 'chat', section: 'meetings' },
+  },
+
+  meeting: {
+    title: 'A meeting',
+    about: 'One meeting: its recording, the transcript (who spoke when; a line plays from there), the summary, the decisions, the action items and the speakers.',
+    parts: [
+      { name: 'Transcript', text: 'Each part of what was said with its speaker and time. A line plays the recording from there; the line playing is marked. **Find in what was said** keeps the lines that hold your words.' },
+      { name: 'Action items', text: 'Whose each is (a speaker, someone else by name, or nobody yet) and its due date. Done ones are struck through. A person\'s items are reminded to them once, on the day due (an item dated in the past, at once).' },
+      { name: 'Speakers', text: 'Told apart by their voices and named as the meeting named them. Rename one, or tell which person in Arena they are (**It is me**, or a name): their action items go to that person.' },
+      { name: 'Make a plan', text: 'A plan with a step per action item, its owner and due date, opened on the board.' },
+      { name: 'Ask about it', text: 'A chat with the minutes and the whole transcript as a file: ask what was said, by whom, or what to tell someone who missed it.' },
+      { name: 'Make again', text: 'Listens and writes the minutes again (after a better model is set, or when it failed). Names you gave go.' },
+    ],
+    tasks: [
+      { title: 'Give an action item to someone', steps: ['Under **Speakers**, tell which person a speaker is.', 'Their action items show **→** that person.', 'Set a due date: they are reminded on that day.'] },
+    ],
+    manual: { doc: 'chat', section: 'meetings' },
   },
 
   plans: {

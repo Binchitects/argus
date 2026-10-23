@@ -385,9 +385,16 @@ public static class IdentityWiring
         ArenaMcp.McpEndpoints.AddArenaMcp(services, config);
         // Answers outlive the page that asked: they run here, and a page re-attaches.
         services.AddSingleton<Chat.RoomHub>();
+        services.Configure<Chat.RoomCallOptions>(config.GetSection("Rooms:Calls"));
+        services.AddSingleton<Chat.RoomCaptions>();
         services.AddSingleton<Code.ReviewEngine>();
         services.AddHostedService(sp => sp.GetRequiredService<Code.ReviewEngine>());
         services.AddSingleton<Code.Business.BusinessMap>();
+        services.Configure<Meetings.MeetingOptions>(config.GetSection("Meetings"));
+        services.AddSingleton<Meetings.MeetingEngine>();
+        services.AddHostedService(sp => sp.GetRequiredService<Meetings.MeetingEngine>());
+        services.AddSingleton<Meetings.MeetingReminders>();
+        services.AddHostedService(sp => sp.GetRequiredService<Meetings.MeetingReminders>());
         services.AddHostedService(sp => sp.GetRequiredService<Code.Business.BusinessMap>());
         services.AddSingleton<Code.AutoReviews>();
         services.AddHostedService(sp => sp.GetRequiredService<Code.AutoReviews>());
@@ -526,11 +533,13 @@ public static class IdentityWiring
         Safeguards.SafeguardEndpoints.MapSafeguards(app);
         Chat.RoomEndpoints.MapRooms(app);
         Chat.RoomTranslations.MapRoomTranslations(app);
+        Chat.RoomCalls.MapRoomCalls(app);
         Code.CodeEndpoints.MapCode(app);
         Code.ReviewRuleEndpoints.MapReviewRules(app);
         Code.CodeHostLinks.MapCodeHostLinks(app);
         Code.Studio.StudioEndpoints.MapStudio(app);
         Code.Business.BusinessEndpoints.MapBusiness(app);
+        Meetings.MeetingEndpoints.MapMeetings(app);
         Chat.Tools.Browser.BrowserEndpoints.MapBrowser(app);
         Insights.DataSourceEndpoints.MapDataSources(app);
         Insights.DataEndpoints.MapData(app);

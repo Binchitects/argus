@@ -610,6 +610,20 @@ a room holds (Settings → Chat → **Most people in a room**, 50).
   names and idioms better), and kept for everyone who reads in it; one
   already in that language is left as it is. The choice is your browser's,
   for every room.
+- **Calls.** **Call** in a room's header starts the room's call, and its
+  people see who is in it and **Join** (viewers listen to the room, not its
+  call). Each page in the call talks to every other directly (WebRTC; the
+  server passes only their signals, never their sound), up to 8 at once.
+  What each person says is cut at their pause (or every 12 seconds while
+  they go on), written down by the speech-to-text model as theirs, and
+  shown to everyone as **live captions**, in the reader's language when
+  they read the room in one (translated once for all who read in it,
+  **Show the original** a click away). **Mute** stops both the sound and
+  the captions. A page that joins late sees the last captions; when the
+  last one leaves, they go. Calls, like the room's live events, are held by
+  the replica the room's pages reach. Browsers on different networks need a
+  STUN or TURN server: `Rooms:Calls:IceServers` (none by default, for one
+  network); `Rooms:Calls:MostInCall` (8) sets the size.
 
 ## Plans
 
@@ -626,6 +640,36 @@ made it) as a **board**, a column per status, where a click moves a step on
 and a new step can be added; and a **timeline**, each step from its start to
 its due date. A plan made in a room is its people's to see and move along;
 the chat reads it as people left it.
+
+## Meetings
+
+**Meetings** (in the sidebar) makes a meeting's minutes from its recording.
+Record it in the browser (the microphone hears the room, or a call played
+aloud; recorded as Opus at 32 kbit/s, so three hours fit) or upload a sound
+or a video, up to 60 MB. It is made in steps, each shown as it goes:
+
+1. **Reading the recording**: the sound is made a 16 kHz mp3 in the sandbox.
+2. **Listening to what was said**: the speech-to-text model writes it down
+   with each part's start and end.
+3. **Telling the voices apart**: the media studio's voice model groups the
+   parts by voice (Speaker 1, Speaker 2, ...). Without the studio, the
+   transcript is kept and the meeting says who spoke is not told.
+4. **Writing the minutes**: the chat model writes the title, the summary,
+   the decisions and the action items (whose each is and by when, as said),
+   and names the speakers from what they called each other. A long meeting
+   is read a part at a time and its notes put together.
+
+The meeting's page plays the recording from any line of the transcript and
+marks the line playing. Rename a speaker, or tell which person in Arena they
+are: their action items are that person's, and on the day an item is due the
+person is told once, in their notifications (an item dated in the past is
+told at once, as overdue). One replica looks for due items every five
+minutes. **Make a plan** makes a plan with a step per action item, its owner
+and its due date. **Ask about it** opens a chat with the minutes and the whole
+transcript as a file. A meeting is its owner's only; the speech-to-text model
+must be one they may use, and the recording passes the safeguards like any
+upload. `Meetings:MaxUploadBytes` (60 MB) and `Meetings:MostPerPerson` (500)
+set the limits.
 
 ## Code review
 
@@ -1372,7 +1416,22 @@ to the home screen first, then turn them on there.
 **The app installs** like any other: **Install** in the account menu (or Your
 account) when the browser offers it, or the browser's own menu. It opens in its
 own window; how pushes are signed and sent, and the browser extension, are in
-[integrations.md](integrations.md).
+[integrations.md](integrations.md). Installed on a phone:
+
+- **Share to Arena.** Arena is in the phone's Share sheet: a file, a page or
+  words from any app open a new chat with the files attached and the words
+  (a page's title, text and link, each once) in the box, to ask about. The
+  app's service worker keeps what was shared (up to 50 MB together) until
+  the chat takes it; what nobody took goes after a day.
+- **Shortcuts.** A long press on the app's icon offers **New chat**,
+  **Talk** (a voice conversation that starts at once) and **Record a
+  meeting** (recording starts at once; see [Meetings](#meetings)).
+- **A poor connection.** A message sent with no connection waits above the
+  box (**No connection: what you send waits here**), kept in the browser
+  for every tab, and is sent by itself, oldest first, when the connection
+  is back; a new chat is made then. A message the server refuses then stays
+  there with **Send again** and a way to remove it. Talk, Compare and a
+  sketch's question need their answer at once and do not wait.
 
 **Chats from elsewhere**: a question to the bot in Slack, Mattermost or Teams,
 or an email to the app, is answered as you in a chat of yours, titled with

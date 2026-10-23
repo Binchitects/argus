@@ -190,6 +190,12 @@ public sealed class WebPushTests(AppFixture app) : IDisposable
         var icons = manifest.GetProperty("icons").EnumerateArray().ToList();
         Assert.Contains(icons, i => i.GetProperty("sizes").GetString() == "512x512" && i.GetProperty("purpose").GetString() == "maskable");
         Assert.Contains(icons, i => i.GetProperty("sizes").GetString() == "192x192");
+        // A phone's Share sheet sends to a new chat (the service worker takes the post), and a long press offers the shortcuts.
+        var share = manifest.GetProperty("share_target");
+        Assert.Equal("/share", share.GetProperty("action").GetString());
+        Assert.Equal("multipart/form-data", share.GetProperty("enctype").GetString());
+        Assert.Equal("files", share.GetProperty("params").GetProperty("files")[0].GetProperty("name").GetString());
+        Assert.Equal(["/chat", "/chat?talk=1", "/meetings?record=1"], manifest.GetProperty("shortcuts").EnumerateArray().Select(s => s.GetProperty("url").GetString()));
     }
 
     [Theory]

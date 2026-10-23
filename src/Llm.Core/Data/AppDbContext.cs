@@ -72,6 +72,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Code.CodeFix> CodeFixes => Set<Code.CodeFix>();
     public DbSet<Code.StudioWorkspace> StudioWorkspaces => Set<Code.StudioWorkspace>();
     public DbSet<Code.BusinessSystem> BusinessSystems => Set<Code.BusinessSystem>();
+    public DbSet<Meetings.Meeting> Meetings => Set<Meetings.Meeting>();
+    public DbSet<Meetings.MeetingAction> MeetingActions => Set<Meetings.MeetingAction>();
     public DbSet<Panels.Panel> Panels => Set<Panels.Panel>();
     public DbSet<Media.MediaItem> MediaItems => Set<Media.MediaItem>();
     public DbSet<Media.MediaJob> MediaJobs => Set<Media.MediaJob>();
@@ -671,6 +673,33 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Error).HasMaxLength(2000);
             e.HasIndex(x => new { x.UserId, x.CreatedAt });
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Meetings.Meeting>(e =>
+        {
+            e.ToTable("meetings");
+            e.HasIndex(m => new { m.UserId, m.CreatedAt });
+            e.Property(m => m.Title).HasMaxLength(300);
+            e.Property(m => m.Status).HasMaxLength(20);
+            e.Property(m => m.Step).HasMaxLength(300);
+            e.Property(m => m.Error).HasMaxLength(2000);
+            e.Property(m => m.Language).HasMaxLength(20);
+            e.Property(m => m.Transcript).HasColumnType("jsonb");
+            e.Property(m => m.Speakers).HasColumnType("jsonb");
+            e.Property(m => m.Decisions).HasColumnType("jsonb");
+            e.Property(m => m.Summary).HasMaxLength(20_000);
+            e.Property(m => m.Model).HasMaxLength(200);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(m => m.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(m => m.Actions).WithOne().HasForeignKey(a => a.MeetingId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Meetings.MeetingAction>(e =>
+        {
+            e.ToTable("meeting_actions");
+            // Made with their ids: one found through its meeting is new, not one to update.
+            e.Property(a => a.Id).ValueGeneratedNever();
+            e.Property(a => a.Text).HasMaxLength(1000);
+            e.Property(a => a.Owner).HasMaxLength(200);
+            // The reminders' look: what is due, not done and not reminded yet.
+            e.HasIndex(a => new { a.Due, a.Done, a.RemindedAt });
         });
         builder.Entity<Code.BusinessSystem>(e =>
         {

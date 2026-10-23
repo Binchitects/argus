@@ -60,6 +60,7 @@ export function Composer({
   quote,
   onClearQuote,
   focusSignal,
+  initialText,
 }: {
   streaming: boolean
   onSend: (text: string, skill?: SkillUse) => Promise<boolean>
@@ -94,8 +95,10 @@ export function Composer({
   onClearQuote?: () => void
   /** Each change puts the focus in the box (a quote was just added). */
   focusSignal?: number
+  /** What the box starts with (what another app shared). */
+  initialText?: string
 }) {
-  const [text, setText] = useState('')
+  const [text, setText] = useState(initialText ?? '')
   const area = useRef<HTMLTextAreaElement>(null)
   const picker = useRef<HTMLInputElement>(null)
   useEffect(() => {

@@ -41,7 +41,14 @@ public static class PushEndpoints
         g.MapPost("/test", TestAsync);
     }
 
-    /// <summary>What makes the app installable: its name, colours and icons (the icons are the web's own files).</summary>
+    /// <summary>What another app may share to Arena: what the chat reads.</summary>
+    private static readonly string[] Shareable = ["image/*", "audio/*", "video/*", "text/*", "application/pdf", ".docx", ".xlsx", ".pptx", ".csv", ".md", ".json"];
+
+    /// <summary>
+    /// What makes the app installable: its name, colours and icons (the icons are the web's own files); a share target, so a
+    /// phone's Share sheet sends a file, a page or words to a new chat (the service worker keeps them for it); and its shortcuts
+    /// (a long press on its icon): a new chat, Talk, and recording a meeting.
+    /// </summary>
     private static IResult Manifest(HttpResponse response, IOptionsMonitor<BrandingOptions> branding)
     {
         var name = branding.CurrentValue.ProductName is { Length: > 0 } n ? n : AppInfo.Current.Name;
@@ -57,7 +64,25 @@ public static class PushEndpoints
                 new { src = "/icons/maskable-512.png", sizes = "512x512", type = "image/png", purpose = "maskable" },
                 new { src = "/favicon.svg", sizes = "any", type = "image/svg+xml", purpose = "any" },
             },
+            share_target = new
+            {
+                action = "/share", method = "POST", enctype = "multipart/form-data",
+                @params = new
+                {
+                    title = "title", text = "text", url = "url",
+                    files = new[] { new { name = "files", accept = Shareable } },
+                },
+            },
+            shortcuts = new[]
+            {
+                Shortcut("New chat", "Chat", "Ask a question", "/chat"),
+                Shortcut("Talk", "Talk", "A voice conversation: speak, and the answer is read aloud", "/chat?talk=1"),
+                Shortcut("Record a meeting", "Meeting", "Record a meeting: who said what, the minutes and the action items", "/meetings?record=1"),
+            },
         }, contentType: "application/manifest+json");
+
+        static object Shortcut(string name, string shortName, string description, string url) =>
+            new { name, short_name = shortName, description, url, icons = new[] { new { src = "/icons/icon-192.png", sizes = "192x192", type = "image/png" } } };
     }
 
     private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;
