@@ -52,7 +52,7 @@ test('the skip link takes the keyboard past the navigation to the page', async (
 })
 
 const pages = ['/', '/account', '/setup', '/chat', '/tasks', '/memory', '/skills', '/usage', '/help', '/help/chat', '/help/admin', '/admin', '/admin/people', '/admin/groups', '/admin/tools', '/admin/sign-in', '/admin/models',
-  '/admin/settings', '/admin/audit', '/admin/indexing', '/admin/packs', '/admin/explore', '/admin/monitoring', '/admin/dashboards', '/admin/dashboards/stack-health',
+  '/admin/settings', '/admin/audit', '/admin/compliance', '/admin/indexing', '/admin/packs', '/admin/explore', '/admin/monitoring', '/admin/dashboards', '/admin/dashboards/stack-health',
   ...(noObserve ? [] : ['/admin/logs', '/admin/alerts'])]
 
 test('every page fits 320 px without scrolling sideways', async ({ page, isMobile }) => {

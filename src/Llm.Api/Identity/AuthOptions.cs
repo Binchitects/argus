@@ -28,6 +28,9 @@ public sealed class AuthOptions
     public TimeSpan SessionMax { get; set; } = TimeSpan.FromHours(12);
     public TimeSpan RememberMe { get; set; } = TimeSpan.FromDays(30);
 
+    /// <summary>Who must sign in with a second factor: off, admins (anyone holding an administrative permission) or everyone; a group can require it of its members.</summary>
+    public string TwoFactorRequired { get; set; } = TwoFactorPolicy.Off;
+
     /// <summary>
     /// Sign-ins (and their second factors) one address may send a minute: a flood guard only, guessing is stopped per account
     /// (LoginThrottle, lockout). An office signing in at 9:00 behind one NAT address needs room: 300 people within a minute

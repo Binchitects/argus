@@ -20,6 +20,7 @@ export interface GroupSummary {
   costCentre?: string | null
   requestsPerMinute?: number | null
   tokensPerMinute?: number | null
+  requireTwoFactor?: boolean
 }
 
 export interface GroupMember {
@@ -43,6 +44,8 @@ export interface GroupPolicies {
   /** Each member's API key, a minute: null is the company's setting, 0 no limit. */
   requestsPerMinute: number | null
   tokensPerMinute: number | null
+  /** Members sign in with a second factor: who has none sets one up at their next sign-in. */
+  requireTwoFactor: boolean
 }
 
 export const noPolicies: GroupPolicies = {
@@ -52,6 +55,7 @@ export const noPolicies: GroupPolicies = {
   costCentre: null,
   requestsPerMinute: null,
   tokensPerMinute: null,
+  requireTwoFactor: false,
 }
 
 export interface GroupDetail extends Omit<GroupSummary, 'members'> {

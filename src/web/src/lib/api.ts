@@ -26,6 +26,8 @@ export interface Me {
   permissions?: string[]
   source: 'local' | 'ldap' | 'oidc'
   twoFactorEnabled: boolean
+  /** Signed in only to set up two-factor sign-in, which the company requires, before anything else. */
+  mustSetUpTwoFactor?: boolean
   signedInAt: number | null
 }
 

@@ -194,4 +194,58 @@ public sealed partial class ComplianceControlsTests(AppFixture app)
             Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    [Trait("Control", "GOV-01")]
+    public async Task The_companys_part_is_attested_and_audited_and_the_evidence_holds_everything_an_auditor_asks_for()
+    {
+        await using var f = app.Create(app.ConnectionStringFor("cmp_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway());
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+
+        Assert.Equal(HttpStatusCode.NotFound, (await admin.PostAsync("/api/admin/compliance/controls/XYZ-99/attest", new { note = "Policy v1" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsync("/api/admin/compliance/controls/IAM-01/attest", new { note = " " })).StatusCode);
+        var attested = await admin.JsonAsync(await admin.PostAsync("/api/admin/compliance/controls/IAM-01/attest", new { note = "Password policy v2, in the ISMS folder" }));
+        Assert.Equal("admin", attested.GetProperty("actor").GetString());
+        var at = attested.GetProperty("at").GetDateTimeOffset();
+        Assert.Equal(at.AddDays(365), attested.GetProperty("due").GetDateTimeOffset());
+
+        var view = await admin.JsonAsync(await admin.GetAsync("/api/admin/compliance"));
+        var iam01 = view.GetProperty("controls").EnumerateArray().Single(c => c.GetProperty("id").GetString() == "IAM-01");
+        Assert.Equal("Password policy v2, in the ISMS folder", iam01.GetProperty("attested").GetProperty("note").GetString());
+        Assert.Equal(JsonValueKind.Null, view.GetProperty("controls").EnumerateArray().Single(c => c.GetProperty("id").GetString() == "IAM-02").GetProperty("attested").ValueKind);
+
+        // A person who may read it but not attest: the Auditor role.
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = "cmpauditor", email = "cmpauditor@example.test" }));
+        var role = (await admin.JsonAsync(await admin.GetAsync("/api/admin/access"))).GetProperty("roles").EnumerateArray().Single(r => r.GetProperty("key").GetString() == "auditor").GetProperty("id").GetGuid();
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/access/assignments", new { roleId = role, subjectKind = "Person", subjectId = made.GetProperty("id").GetGuid() }));
+        var auditor = await new TestBrowser(f).SignedInAsync("cmpauditor", made.GetProperty("password").GetString()!);
+        Assert.Equal(HttpStatusCode.OK, (await auditor.GetAsync("/api/admin/compliance")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await auditor.PostAsync("/api/admin/compliance/controls/IAM-01/attest", new { note = "Not mine to say" })).StatusCode);
+
+        var evidence = await admin.GetAsync("/api/admin/compliance/evidence");
+        Assert.Equal("application/zip", evidence.Content.Headers.ContentType?.MediaType);
+        using var zip = new System.IO.Compression.ZipArchive(await evidence.Content.ReadAsStreamAsync());
+        string Read(string name)
+        {
+            using var r = new StreamReader(zip.GetEntry(name)!.Open());
+            return r.ReadToEnd();
+        }
+        Assert.Equal(["README.txt", "attestations.csv", "audit-actions.csv", "compliance.json", "controls.yaml", "privileged-access.csv", "settings.json"],
+            zip.Entries.Select(e => e.FullName).Order(StringComparer.Ordinal));
+        Assert.Equal(File.ReadAllText(Path.Combine(Root, "docs", "compliance", "controls.yaml")), Read("controls.yaml"));
+        Assert.Contains("IAM-01,", Read("attestations.csv"), StringComparison.Ordinal);
+        Assert.Contains("Password policy v2, in the ISMS folder", Read("attestations.csv"), StringComparison.Ordinal);
+        var privileged = Read("privileged-access.csv").Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.StartsWith("person,email,signs in with,second factor", privileged[0], StringComparison.Ordinal);
+        Assert.Contains(privileged, l => l.StartsWith("admin,", StringComparison.Ordinal) && l.Contains(",a password here,no,no,", StringComparison.Ordinal));
+        Assert.Contains(privileged, l => l.StartsWith("cmpauditor,", StringComparison.Ordinal) && l.Contains("compliance.read", StringComparison.Ordinal));
+        Assert.Contains("compliance.attest", Read("audit-actions.csv"), StringComparison.Ordinal);
+        Assert.Contains("\"checks\"", Read("compliance.json"), StringComparison.Ordinal);
+        // The settings without a secret's value: the APP_KEY-encrypted ones are only "set" or not.
+        Assert.DoesNotContain(AppFixture.AdminPassword, Read("settings.json"), StringComparison.Ordinal);
+
+        var audit = await admin.JsonAsync(await admin.GetAsync("/api/admin/audit?take=50"));
+        Assert.Contains(audit.EnumerateArray(), e => e.GetProperty("action").GetString() == "compliance.attest" && e.GetProperty("target").GetString() == "IAM-01");
+        Assert.Contains(audit.EnumerateArray(), e => e.GetProperty("action").GetString() == "compliance.evidence");
+    }
 }

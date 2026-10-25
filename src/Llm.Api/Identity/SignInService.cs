@@ -33,6 +33,7 @@ public sealed partial class SignInService(
     LoginThrottle throttle,
     IHttpContextAccessor http,
     Access.AccessService access,
+    TwoFactorPolicy twoFactor,
     ILogger<SignInService> logger)
 {
     private string? Ip => http.HttpContext?.Connection.RemoteIpAddress?.ToString();
@@ -399,6 +400,13 @@ public sealed partial class SignInService(
             await http.HttpContext!.SignInAsync(IdentityConstants.TwoFactorUserIdScheme, new ClaimsPrincipal(half));
             await audit.WriteAsync("sign_in.password_ok", user.UserName, detail: method + ", awaiting 2fa");
             return SignInOutcome.TwoFactorRequired;
+        }
+        // Required of them and not set up: signed in to set it up, and to nothing else until they have (UseTwoFactorEnrolment).
+        if (await twoFactor.RequiredAsync(user) is { } why)
+        {
+            await signIn.SignInWithClaimsAsync(user, remember, [new Claim("amr", method), new Claim(TwoFactorPolicy.EnrolClaim, "1")]);
+            await SignedInAsync(user, $"{method}, to set up two-factor sign-in: {why}");
+            return SignInOutcome.Success;
         }
         await signIn.SignInWithClaimsAsync(user, remember, [new Claim("amr", method)]);
         await SignedInAsync(user, method);

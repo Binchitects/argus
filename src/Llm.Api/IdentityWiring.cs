@@ -119,7 +119,7 @@ public static class IdentityWiring
             o.ValidationInterval = auth.SessionRecheck;
             o.OnRefreshingPrincipal = ctx =>
             {
-                foreach (var type in new[] { AppClaimsFactory.AuthTime, "amr" })
+                foreach (var type in new[] { AppClaimsFactory.AuthTime, "amr", TwoFactorPolicy.EnrolClaim })
                 {
                     var old = ctx.CurrentPrincipal?.FindFirst(type);
                     var id = ctx.NewPrincipal?.Identity as ClaimsIdentity;
@@ -233,6 +233,7 @@ public static class IdentityWiring
         services.AddSingleton<Llm.Core.Access.AccessSnapshotCache>();
         services.AddScoped<Access.AccessService>();
         services.AddScoped<SignInService>();
+        services.AddScoped<TwoFactorPolicy>();
         services.AddScoped<DirectoryMoves>();
         services.AddScoped<PersonClaims>();
         services.AddScoped<IdentityBootstrap>();
@@ -510,6 +511,25 @@ public static class IdentityWiring
             throw new InvalidOperationException("The OIDC signing key cannot be decrypted: APP_DATA_KEY differs from the first start.", ex);
         }
     }
+
+    /// <summary>
+    /// A session that must set up two-factor sign-in first (TwoFactorPolicy.EnrolClaim) reaches only who is signed in, the setup
+    /// itself, signing out and the app's info: the rest of the API, and other apps' sign-in through this one (OIDC, forwardAuth),
+    /// answer 403 enrol_2fa until it is set up. Keys are not sessions: they pass.
+    /// </summary>
+    public static IApplicationBuilder UseTwoFactorEnrolment(this IApplicationBuilder app) =>
+        app.Use(async (ctx, next) =>
+        {
+            var path = ctx.Request.Path;
+            if (ctx.User.HasClaim(c => c.Type == TwoFactorPolicy.EnrolClaim) && (path.StartsWithSegments("/api") || path.StartsWithSegments("/connect"))
+                && !path.StartsWithSegments("/api/auth") && !path.StartsWithSegments("/api/account/2fa") && !path.StartsWithSegments("/api/info"))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                await ctx.Response.WriteAsJsonAsync(new { status = "enrol_2fa", error = "Set up two-factor sign-in first: the company requires it." });
+                return;
+            }
+            await next(ctx);
+        });
 
     /// <summary>
     /// State-changing API calls must carry X-Requested-With. A browser only sends

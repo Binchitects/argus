@@ -47,6 +47,29 @@ Nothing in it may go stale:
   Compliance and by `GET /api/admin/compliance`) and from outside
   (`live:` checks, by [`deploy/scripts/compliance-check.py`](#checking-a-live-stack)).
 
+## The Compliance center
+
+**Admin → Compliance** (the Owner and the **Compliance officer** role; the
+**Auditor** role reads it) shows, for each framework, the controls that serve
+it with how many are met now, and for each control:
+
+- what meets it in Arena, and the clauses it serves;
+- its checks, green, amber or red, each saying what it found and what to
+  change: passwords and lockout, sessions, admins' second factor, the audit
+  log, how long chats and logs are kept, the newest backup, the certificate,
+  secrets encrypted at rest;
+- where it is documented (links into this manual) and the tests that prove it;
+- **the company's part**, and **Attest**: who says it is done, what was done and
+  where its proof is. An attestation is kept for good with the person's name and
+  the date, is in the audit log (`compliance.attest`), and counts for a year;
+  then the control's part is due again.
+
+**Download evidence** gives one zip for the auditor: the controls, every
+check's result, every attestation, the settings (a secret only as set or not),
+who holds an administrative permission (how they sign in, whether they have a
+second factor, when they last signed in), and the audit log's last 90 days
+counted by action. Each download is audited (`compliance.evidence`).
+
 ## Checking a live stack
 
 ```bash

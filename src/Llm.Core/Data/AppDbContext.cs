@@ -93,6 +93,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Memory> Memories => Set<Memory>();
     public DbSet<MemoryChange> MemoryChanges => Set<MemoryChange>();
     public DbSet<SkillChange> SkillChanges => Set<SkillChange>();
+    public DbSet<Compliance.ComplianceAttestation> ComplianceAttestations => Set<Compliance.ComplianceAttestation>();
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<KnowledgeSource> KnowledgeSources => Set<KnowledgeSource>();
     public DbSet<KnowledgeDocument> KnowledgeDocuments => Set<KnowledgeDocument>();
@@ -933,6 +934,14 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(c => c.After).HasMaxLength(500);
             e.HasIndex(c => new { c.UserId, c.At });
             e.HasOne<AppUser>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Compliance.ComplianceAttestation>(e =>
+        {
+            e.ToTable("compliance_attestations");
+            e.Property(a => a.ControlId).HasMaxLength(16);
+            e.Property(a => a.Actor).HasMaxLength(256);
+            e.Property(a => a.Note).HasMaxLength(2000);
+            e.HasIndex(a => new { a.ControlId, a.At });
         });
         builder.Entity<SkillChange>(e =>
         {

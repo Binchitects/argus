@@ -76,8 +76,11 @@ controls:
     title: Two-factor sign-in
     meets: >-
       People enrol an authenticator app and get recovery codes; an admin can
-      reset a lost one. Company sign-in brings the identity provider's own
-      second factor.
+      reset a lost one. The company requires it of admins or of everyone, and a
+      group of its members: who has none sets it up at their next sign-in and
+      reaches nothing else until then, and cannot turn it off while it is
+      required. Company sign-in brings the identity provider's own second
+      factor.
     frameworks:
       iso27001: [A.8.5]
       soc2: [CC6.1]
@@ -86,10 +89,13 @@ controls:
     docs: [authentication.md#what-protects-the-sign-in]
     tests:
       - Llm.Tests/IdentityTests.Two_factor_sign_in_with_an_authenticator_and_with_a_recovery_code
+      - Llm.Tests/TwoFactorPolicyTests.Required_of_everyone_a_person_without_one_sets_it_up_first_reaches_nothing_else_and_cannot_turn_it_off
+      - Llm.Tests/TwoFactorPolicyTests.Required_of_admins_or_of_a_groups_members_it_reaches_only_them_and_the_compliance_check_says_who_has_none
     checks: [app:two-factor]
     operator: >-
-      Require a second factor at the identity provider for company sign-in;
-      admins enrol theirs.
+      Choose who must use it (Settings → Sign-in: admins at least; everyone
+      for health data); require a second factor at the identity provider for
+      company sign-in.
 
   - id: IAM-04
     title: Joiners and leavers follow the company's directory
@@ -365,10 +371,12 @@ controls:
       gdpr: [Art.5(2), Art.25]
     docs:
       - compliance/README.md#controls-and-how-they-are-kept
+      - compliance/README.md#the-compliance-center
       - development.md#releasing
     tests:
       - Llm.Tests/ComplianceControlsTests.Every_control_names_tests_documents_and_checks_that_exist
       - Llm.Tests/ComplianceControlsTests.Every_test_that_proves_a_control_is_named_by_it
       - Llm.Tests/ComplianceControlsTests.The_app_runs_its_checks_and_admins_see_them_with_the_controls
+      - Llm.Tests/ComplianceControlsTests.The_companys_part_is_attested_and_audited_and_the_evidence_holds_everything_an_auditor_asks_for
       - deploy/test_compliance_check.py::test_A_failed_check_fails_the_run_and_warnings_only_with_strict
     operator: The release manager runs the checklist; an auditor samples it.

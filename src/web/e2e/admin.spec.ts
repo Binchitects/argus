@@ -11,6 +11,7 @@ const pages: [string, string][] = [
   ['/admin/models', 'Models'],
   ['/admin/settings', 'Settings'],
   ['/admin/audit', 'Audit log'],
+  ['/admin/compliance', 'Compliance'],
   ['/admin/indexing', 'Indexing'],
   ['/admin/packs', 'Knowledge packs'],
   ['/admin/explore', 'Explore the index'],

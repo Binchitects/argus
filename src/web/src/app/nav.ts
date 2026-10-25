@@ -1,4 +1,4 @@
-import { Activity, AppWindow, AudioLines, Brain, GitPullRequest, ListChecks, BarChart, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Palette, Plug, Presentation, ScrollText, Settings, ShieldAlert, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Workflow, Wrench, type LucideIcon } from 'lucide-react'
+import { Activity, AppWindow, BadgeCheck, AudioLines, Brain, GitPullRequest, ListChecks, BarChart, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Palette, Plug, Presentation, ScrollText, Settings, ShieldAlert, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Workflow, Wrench, type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
   title: string
@@ -57,6 +57,7 @@ export const navigation: NavSection[] = [
       { title: 'Storage', path: '/admin/storage', icon: HardDrive, keywords: ['disk', 'space', 'files', 'uploads', 'database', 'backups', 'quota', 'clean up', 'models', 'logs'], permission: 'storage.read' },
       { title: 'Settings', path: '/admin/settings', icon: Settings, keywords: ['configuration', 'config', 'env'], permission: 'settings.read' },
       { title: 'Audit log', path: '/admin/audit', icon: ScrollText, keywords: ['events', 'history', 'security'], permission: 'audit.read' },
+      { title: 'Compliance', path: '/admin/compliance', icon: BadgeCheck, keywords: ['iso 27001', 'soc 2', 'hipaa', 'gdpr', 'audit', 'controls', 'evidence', 'attest', 'policy', 'auditor'], permission: 'compliance.read' },
       { title: 'Quality', path: '/admin/quality', icon: ThumbsUp, keywords: ['feedback', 'thumbs', 'ratings', 'arena', 'leaderboard', 'answers'], permission: 'monitoring.read' },
     ],
   },

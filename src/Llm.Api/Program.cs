@@ -54,6 +54,7 @@ app.UseCsrfGuard();
 // Code Studio's terminals, language servers and debugger reach their workspace over WebSockets.
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
 app.UseAuthentication();
+app.UseTwoFactorEnrolment();
 app.UseAuthorization();
 app.UseRateLimiter();
 

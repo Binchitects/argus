@@ -25,6 +25,9 @@ public sealed class Group
     /// <summary>Members' chats and their files are kept this many days, then deleted; null: the company's setting. The shortest of a person's groups applies.</summary>
     public int? RetentionDays { get; set; }
 
+    /// <summary>Members sign in with a second factor: who has none sets one up at their next sign-in.</summary>
+    public bool RequireTwoFactor { get; set; }
+
     /// <summary>What the group may spend in a calendar month on the chat's answers; null: no group limit of that kind (Credits).</summary>
     public decimal? ChatCredit { get; set; }
     /// <summary>... on its members' API keys' text requests.</summary>

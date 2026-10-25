@@ -313,6 +313,9 @@ namespace Llm.Core.Data.Migrations
                     b.Property<int?>("RequestsPerMinute")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("RequireTwoFactor")
+                        .HasColumnType("boolean");
+
                     b.Property<int?>("RetentionDays")
                         .HasColumnType("integer");
 
@@ -3185,6 +3188,40 @@ namespace Llm.Core.Data.Migrations
                     b.HasIndex("UserId", "UsedAt");
 
                     b.ToTable("studio_workspaces", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Compliance.ComplianceAttestation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Actor")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<Guid?>("ActorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ControlId")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Note")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ControlId", "At");
+
+                    b.ToTable("compliance_attestations", (string)null);
                 });
 
             modelBuilder.Entity("Llm.Core.Data.Setting", b =>

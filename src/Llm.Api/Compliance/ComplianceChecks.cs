@@ -20,7 +20,7 @@ public sealed record CheckResult(string Id, string Title, string State, string D
 /// The checks the app runs on itself for Admin → Compliance (their ids are app:ID in controls.yaml): what it is set to, and what
 /// it sees of the stack. deploy/scripts/compliance-check.py prints them beside its own, from outside.
 /// </summary>
-public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users, Access.AccessService access, IOptions<AuthOptions> auth,
+public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users, Access.AccessService access, IOptionsMonitor<AuthOptions> auth,
     IOptions<IdentityOptions> identity, IOptionsMonitor<Retention.RetentionOptions> retention, StoragePlaces places, LokiDatasource loki,
     PromDatasource prom, IOptions<StackOptions> stack, TimeProvider clock)
 {
@@ -81,7 +81,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
 
     private (string, string) Sessions()
     {
-        var a = auth.Value;
+        var a = auth.CurrentValue;
         var kept = $"Idle {Span(a.SessionIdle)}, at most {Span(a.SessionMax)}; \"keep me signed in\" {Span(a.RememberMe)}.";
         return a.SessionIdle <= TimeSpan.FromHours(1) && a.SessionMax <= TimeSpan.FromHours(12)
             ? (Ok, kept)
@@ -100,12 +100,15 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         var everyone = people.Count(p => p.Source != UserSource.Oidc);
         var enrolled = people.Count(p => p.Source != UserSource.Oidc && p.TwoFactorEnabled);
         var share = $"{enrolled} of {everyone} {(everyone == 1 ? "person" : "people")} who sign in here {(enrolled == 1 ? "has" : "have")} a second factor.";
+        var policy = auth.CurrentValue.TwoFactorRequired;
+        var required = policy == TwoFactorPolicy.Off ? "It is not required: set Settings → Sign-in → Require two-factor sign-in to admins or everyone."
+            : $"Required of {policy}: who has none sets it up at their next sign-in.";
         if (without.Count == 0)
         {
-            return (Ok, $"Every admin who signs in here has a second factor. {share}");
+            return (policy == TwoFactorPolicy.Off ? Warn : Ok, $"Every admin who signs in here has a second factor. {share} {required}");
         }
         var named = string.Join(", ", without.Take(5)) + (without.Count > 5 ? $" and {without.Count - 5} more" : "");
-        return (Warn, $"{without.Count} of {here.Count} admins who sign in here {(without.Count == 1 ? "has" : "have")} no second factor: {named}. {share}");
+        return (Warn, $"{without.Count} of {here.Count} admins who sign in here {(without.Count == 1 ? "has" : "have")} no second factor: {named}. {share} {required}");
     }
 
     private async Task<(string, string)> AuditLogAsync(CancellationToken ct)
@@ -189,10 +192,11 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         };
     }
 
-    private (string, string) DataKey() => string.IsNullOrEmpty(auth.Value.DataKey)
+    private (string, string) DataKey() => string.IsNullOrEmpty(auth.CurrentValue.DataKey)
         ? (Fail, "APP_KEY is not set: the signing keys and settings' secrets are not encrypted at rest.")
         : (Ok, "The signing keys and settings' secrets are encrypted with APP_KEY.");
 
     private static string Span(TimeSpan t) =>
-        t.TotalDays >= 2 ? $"{t.TotalDays:0} days" : t.TotalHours >= 2 ? $"{t.TotalHours:0} hours" : t.TotalMinutes >= 2 ? $"{t.TotalMinutes:0} minutes" : $"{t.TotalSeconds:0} seconds";
+        t.TotalDays >= 2 ? $"{t.TotalDays:0} days" : t.TotalHours >= 2 ? $"{t.TotalHours:0} hours" : t == TimeSpan.FromHours(1) ? "1 hour"
+        : t.TotalMinutes >= 2 ? $"{t.TotalMinutes:0} minutes" : $"{t.TotalSeconds:0} seconds";
 }

@@ -34,13 +34,18 @@ public static partial class ComplianceControls
 {
     public const string ControlTrait = "Control";
 
-    private static readonly Lazy<ControlsFile> Built = new(() =>
+    private static readonly Lazy<string> BuiltText = new(() =>
     {
         using var stream = typeof(ComplianceControls).Assembly.GetManifestResourceStream("compliance-controls.yaml")
             ?? throw new InvalidOperationException("controls.yaml is not built into the app.");
         using var reader = new StreamReader(stream);
-        return Parse(reader.ReadToEnd());
+        return reader.ReadToEnd();
     });
+
+    private static readonly Lazy<ControlsFile> Built = new(() => Parse(BuiltText.Value));
+
+    /// <summary>controls.yaml as built into the app, word for word (the evidence carries it).</summary>
+    public static string Text => BuiltText.Value;
 
     public static ControlsFile All => Built.Value;
 

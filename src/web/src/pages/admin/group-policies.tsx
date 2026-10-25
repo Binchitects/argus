@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { money } from '@/lib/format'
@@ -26,6 +28,7 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
   const [costCentre, setCostCentre] = useState(p.costCentre ?? '')
   const [requests, setRequests] = useState(p.requestsPerMinute === null || p.requestsPerMinute === undefined ? '' : String(p.requestsPerMinute))
   const [tokens, setTokens] = useState(p.tokensPerMinute === null || p.tokensPerMinute === undefined ? '' : String(p.tokensPerMinute))
+  const [twoFactor, setTwoFactor] = useState(p.requireTwoFactor ?? false)
   const [error, setError] = useState<string | null>(null)
   const save = useMutation({
     mutationFn: (body: GroupPolicies) => api(`/api/admin/groups/${group.id}/policies`, { method: 'PUT', body }),
@@ -54,6 +57,7 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
       costCentre: costCentre.trim() || null,
       requestsPerMinute: r,
       tokensPerMinute: t,
+      requireTwoFactor: twoFactor,
     })
   }
   const spent = group.spentThisMonth
@@ -120,6 +124,13 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
           </Field>
         </div>
         <p className="text-xs text-muted-foreground">A person in several groups gets the highest limit of the groups that set one (0, no limit, is the highest); their own (Admin → People) replaces it. The chat is not limited by these.</p>
+        <div className="flex items-start gap-3">
+          <Switch id="group-2fa" checked={twoFactor} onCheckedChange={setTwoFactor} />
+          <div className="grid gap-0.5">
+            <Label htmlFor="group-2fa">Require two-factor sign-in</Label>
+            <p className="text-xs text-muted-foreground">Members who sign in here with a password need a code from their phone too; who has none sets it up at their next sign-in. Company sign-in uses the provider&apos;s own. Settings → Sign-in can require it of admins or everyone.</p>
+          </div>
+        </div>
       </CardContent>
       <CardFooter>
         <Button onClick={submit} loading={save.isPending}>

@@ -60,6 +60,7 @@ export const routeHelp: Record<string, TopicId> = {
   '/admin/models': 'models',
   '/admin/settings': 'settings',
   '/admin/audit': 'audit',
+  '/admin/compliance': 'compliance',
   '/admin/quality': 'quality',
   '/admin/indexing': 'indexing',
   '/admin/packs': 'packs',

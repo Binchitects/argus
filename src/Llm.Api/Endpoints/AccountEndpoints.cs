@@ -32,10 +32,11 @@ public static class AccountEndpoints
             await users.UpdateAsync(me);
             return Results.Ok(new { seen = me.SeenRelease });
         });
-        me.MapGet("/2fa", async (ClaimsPrincipal p, UserManager<AppUser> users) =>
+        me.MapGet("/2fa", async (ClaimsPrincipal p, UserManager<AppUser> users, TwoFactorPolicy policy) =>
         {
-            var u = await users.GetUserAsync(p);
-            return Results.Ok(new { enabled = u!.TwoFactorEnabled, recoveryCodesLeft = await users.CountRecoveryCodesAsync(u) });
+            var u = (await users.GetUserAsync(p))!;
+            // required: why it may not be turned off (the company's policy or a group's), or null.
+            return Results.Ok(new { enabled = u.TwoFactorEnabled, recoveryCodesLeft = await users.CountRecoveryCodesAsync(u), required = await policy.RequiredAsync(u) });
         });
         me.MapPost("/2fa/setup", SetupTwoFactorAsync);
         me.MapPost("/2fa/enable", EnableTwoFactorAsync);
@@ -152,9 +153,14 @@ public static class AccountEndpoints
         return Results.Ok(new { recoveryCodes = codes });
     }
 
-    private static async Task<IResult> DisableTwoFactorAsync(CodeRequest body, ClaimsPrincipal p, UserManager<AppUser> users, SignInManager<AppUser> signIn, Audit audit)
+    private static async Task<IResult> DisableTwoFactorAsync(CodeRequest body, ClaimsPrincipal p, UserManager<AppUser> users, SignInManager<AppUser> signIn, Audit audit,
+        TwoFactorPolicy policy)
     {
         var user = (await users.GetUserAsync(p))!;
+        if (await policy.RequiredAsync(user) is { } why)
+        {
+            return AuthEndpoints.Problem(409, "required", $"Two-factor sign-in stays on: {why}. To move it to a new phone, ask an admin to reset it; you set it up again at your next sign-in.");
+        }
         var code = (body.Code ?? "").Replace(" ", "", StringComparison.Ordinal);
         // Proof of the device (or a recovery code), so a borrowed session cannot switch 2FA off.
         var ok = await users.VerifyTwoFactorTokenAsync(user, users.Options.Tokens.AuthenticatorTokenProvider, code) ||

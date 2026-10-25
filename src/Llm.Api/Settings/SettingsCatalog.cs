@@ -51,6 +51,8 @@ public static class SettingsCatalog
             { Default = "12:00:00", Unit = "hours", Min = 1, Max = 168, Optional = false },
         new("Auth:RememberMe", SignIn, "\"Keep me signed in\" lasts", "How long a device stays signed in when that box is ticked.", SettingType.Duration, SettingScope.AppRestart)
             { Default = "30.00:00:00", Unit = "days", Min = 1, Max = 365, Optional = false },
+        new("Auth:TwoFactorRequired", SignIn, "Require two-factor sign-in", "Who must sign in with a code from their phone as well as their password. admins: anyone holding an administrative permission; everyone: every person who signs in here. A group can require it of its members too (Admin → Groups → Policies). Who has none sets it up at their next sign-in, before anything else; who signs in with the company's identity provider uses its own second factor. API keys are not affected.", SettingType.Choice, SettingScope.Live)
+            { Default = "off", Options = ["off", "admins", "everyone"], Optional = false, Impact = "Applies from each person's next sign-in." },
         new("Throttle:MaxFailuresPerAccount", SignIn, "Wrong passwords before a lock", "Failed sign-ins for one account from one address, within the window, before that pair is locked.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "5", Min = 3, Max = 100, Optional = false },
         new("Throttle:AccountBan", SignIn, "Lock for", "How long that account is locked for that address.", SettingType.Duration, SettingScope.Live)

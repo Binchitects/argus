@@ -11,6 +11,7 @@ import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
 import { HelpButton, HelpPanel } from '@/help/help-button'
 import { infoQuery, meQuery, type AppInfo, type Me } from '@/lib/api'
+import { SetUpTwoFactor } from './set-up-two-factor'
 import { cn } from '@/lib/utils'
 import { CommandMenu } from './command-menu'
 import { findNavItem, visibleNavigation, type NavItem, type NavSection } from './nav'
@@ -36,6 +37,7 @@ export function Shell() {
   }, [me.data, location.pathname, location.search, navigate])
 
   if (me.isPending || !me.data) return <ShellSkeleton />
+  if (me.data.mustSetUpTwoFactor) return <SetUpTwoFactor me={me.data} />
   return <SignedIn me={me.data} />
 }
 

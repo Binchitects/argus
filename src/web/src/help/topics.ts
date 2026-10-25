@@ -801,6 +801,7 @@ export const topics = {
     ],
     tasks: [
       { title: 'Turn on the company directory', steps: ['Press **Configure** on the directory card (Settings → Company directory).', 'Follow the guide at the top: the server, the service account and where people are, then the groups. Each field\'s help has an OpenLDAP and an Active Directory example.', 'Press **Test the settings**: each step says what works and, when something does not, exactly what to fix.', 'Under **Try a person\'s sign-in**, type someone\'s username and password and press **Try it**: it shows who they would be here. Then save.'] },
+      { title: 'Require two-factor sign-in', steps: ['Open Settings → Sign-in and set Require two-factor sign-in to admins or everyone (or, for one group, Admin → Groups → the group → Policies → Require two-factor sign-in).', 'Each person it covers who has none sets it up at their next sign-in, before anything else; a session already open goes on until it ends.', 'Admin → Compliance shows the admins who still have none.'] },
       { title: 'Find out why someone cannot sign in', steps: ['Open **Audit log** and look for their sign-in: it has the directory\'s reason.', 'In Settings → Company directory, under **Try a person\'s sign-in**, type their username and password and press **Try it**: it shows each step, and who they would be here or why not. A wrong password counts as a wrong sign-in does.'] },
     ],
     manual: { doc: 'authentication', section: 'the-company-directory-ldap--active-directory' },
@@ -877,6 +878,23 @@ export const topics = {
     ],
     tasks: [{ title: 'Find who changed a setting', steps: ['Choose **Settings** under **Show**.', 'Each change names the setting, who changed it and when; a secret shows only as "a new secret value".'] }],
     manual: { doc: 'authentication', section: 'auditing-it' },
+  },
+
+  compliance: {
+    title: 'Compliance',
+    about: 'ISO 27001, SOC 2, HIPAA and the GDPR: what Arena does for each control, whether it holds now, the company\'s part attested, and the evidence an auditor asks for.',
+    admin: true,
+    parts: [
+      { name: 'Frameworks', text: 'For each one, the controls that serve it and its clauses, how many are met, in part or not met now, and how many the company has attested. Choose one to see only its controls.' },
+      { name: 'Checks now', text: 'What the app checks on itself: passwords and lockout, sessions, admins\' second factor, the audit log, how long chats and logs are kept, the newest backup, the certificate and secrets encrypted at rest. Amber says what to change.' },
+      { name: 'Controls', text: 'Each control: what meets it in Arena, the clauses it serves, its checks, where it is documented, the tests that prove it in every release, and the company\'s part.' },
+      { name: 'Attest', text: 'Says the company\'s part is done, with what and where its proof is. Kept with your name and the date, and in the audit log; it counts for a year. Needs the Compliance officer role (or Owner).' },
+      { name: 'Download evidence', text: 'One zip: the controls, every check\'s result, the attestations, the settings (no secret), who holds an administrative permission, and the audit log\'s last 90 days by action. Each download is audited.' },
+    ],
+    tasks: [
+      { title: 'Prepare for an audit', steps: ['Fix what is red or amber under **Checks now**: each says what to change.', 'For each control, do the company\'s part and **Attest** it with where its proof is.', 'Run `python3 deploy/scripts/compliance-check.py` on the host for the checks from outside.', '**Download evidence** and give it to the auditor with your policies.'] },
+    ],
+    manual: { doc: 'compliance', section: 'controls-and-how-they-are-kept' },
   },
 
   quality: {

@@ -56,6 +56,8 @@ public static class AuthEndpoints
             permissions = Core.Access.Permissions.AdminKeys.Where(member.Has),
             source = UserSources.Name(user.Source),
             twoFactorEnabled = user.TwoFactorEnabled,
+            // Signed in to set up two-factor sign-in, which the company requires, before anything else.
+            mustSetUpTwoFactor = principal.HasClaim(c => c.Type == TwoFactorPolicy.EnrolClaim),
             signedInAt = AppClaimsFactory.SignedInAt(principal)?.ToUnixTimeSeconds(),
         });
     }

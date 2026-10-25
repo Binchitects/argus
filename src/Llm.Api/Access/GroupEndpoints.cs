@@ -23,8 +23,9 @@ public sealed record MembersRequest(Guid[] UserIds);
 /// <param name="CostCentre">The label its spend is charged to (the chargeback report).</param>
 /// <param name="RequestsPerMinute">Requests a minute each member's API key may send; 0: no limit.</param>
 /// <param name="TokensPerMinute">Tokens a minute each member's API key may use; 0: no limit.</param>
+/// <param name="RequireTwoFactor">Members sign in with a second factor (set up at their next sign-in).</param>
 public sealed record PoliciesRequest(int? RetentionDays = null, CreditsRequest? Credits = null, bool CreditPerMember = false, string? CostCentre = null,
-    int? RequestsPerMinute = null, int? TokensPerMinute = null);
+    int? RequestsPerMinute = null, int? TokensPerMinute = null, bool RequireTwoFactor = false);
 
 /// <summary>Groups for access rules, retention, credit and API keys' rate limits: app groups whose members are chosen here, and directory groups.</summary>
 public static class GroupEndpoints
@@ -72,7 +73,7 @@ public static class GroupEndpoints
         {
             x.Id, x.Name, x.Description, x.Directory, x.Scim, x.Priority, x.CreatedAt,
             members = x.Directory is { } d ? directoryPeople.Count(m => AccessService.InDirectoryGroup(m, d)) : counts.GetValueOrDefault(x.Id),
-            x.RetentionDays, credits = CreditsRequest.Of(x), x.CreditPerMember, x.CostCentre, x.RequestsPerMinute, x.TokensPerMinute,
+            x.RetentionDays, credits = CreditsRequest.Of(x), x.CreditPerMember, x.CostCentre, x.RequestsPerMinute, x.TokensPerMinute, x.RequireTwoFactor,
         }));
     }
 
@@ -114,7 +115,7 @@ public static class GroupEndpoints
             policies = new
             {
                 group.RetentionDays, credits = CreditsRequest.Of(group), group.CreditPerMember, group.CostCentre,
-                group.RequestsPerMinute, group.TokensPerMinute,
+                group.RequestsPerMinute, group.TokensPerMinute, group.RequireTwoFactor,
             },
             spentThisMonth = month is null ? (decimal?)null : people.Sum(u => month.Total(u.Email ?? "")),
             spentByKind = Kinds(k => people.Sum(u => month!.Of(u.Email ?? "", k))),
@@ -276,6 +277,7 @@ public static class GroupEndpoints
         group.CostCentre = Clean(body.CostCentre);
         group.RequestsPerMinute = body.RequestsPerMinute;
         group.TokensPerMinute = body.TokensPerMinute;
+        group.RequireTwoFactor = body.RequireTwoFactor;
         await db.SaveChangesAsync();
         await audit.WriteAsync("group.policies", group.Name, detail: Describe(group));
         keys.Wake();
@@ -290,6 +292,7 @@ public static class GroupEndpoints
         g.CostCentre is { } cc ? $"cost centre {cc}" : null,
         g.RequestsPerMinute is { } r ? $"requests a minute {(r == 0 ? "no limit" : r.ToString("N0", CultureInfo.InvariantCulture))}" : null,
         g.TokensPerMinute is { } t ? $"tokens a minute {(t == 0 ? "no limit" : t.ToString("N0", CultureInfo.InvariantCulture))}" : null,
+        g.RequireTwoFactor ? "two-factor required" : null,
     }.OfType<string>());
 
     /// <summary>
