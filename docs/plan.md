@@ -1864,6 +1864,120 @@ sandbox that reaches tools needs a broker that keeps every right and every
    change (a new model, a new prompt), scored by rules or a judge model,
    with what got worse shown first.
 
+### v7.4 — Security: vulnerabilities known, found and fixed
+
+The person asked (2026-10-26) for a knowledge pack about vulnerabilities, and
+for recognising them and fixing them. Three parts: what the models know (two
+packs), what finds the vulnerabilities (scanners and the model's review, each
+grounded in the packs), and what fixes them (a change that is proved, then
+checked again). What is there to build on: Argus's packs (`docs_lookup` by
+exact name, `docs_search` by meaning), the code index with references, change
+impact and the graph, the `security-review` skill, code review and automatic
+reviews, Fix it, Code Studio, the sandbox with no network, and v7.1's scan of
+Arena's own dependencies.
+
+1. **The `security` pack**, one composite, each source's licence recorded
+   (`argus pack info` prints the attribution):
+   - **CWE** (MITRE's XML, free to use with its notice): each weakness with
+     its description, consequences, how it is detected, mitigations, the
+     demonstrative examples (the weak code and the fixed) and the CVEs seen;
+     `CWE-89` a symbol; the Top 25 and the views by language as facets.
+   - **CAPEC**: the attack patterns, linked to the weaknesses they use.
+   - **OWASP** (CC BY-SA 4.0): the Cheat Sheet Series (how to fix, by topic
+     and framework), ASVS 5.0 (each requirement a symbol, `V5.3.4`), the
+     Top 10s (web, API, LLM applications) and the Web Security Testing Guide.
+   - **CodeQL's query help** (MIT): per language, what each query
+     recognises, the recommendation, and the bad and good examples, with
+     their CWE tags. The help only: the CodeQL engine's licence does not
+     cover scanning private code.
+   - **The languages' own rules**: .NET's security analyzers (CA2100,
+     CA3001…), Bandit's checks, gosec's, ESLint's security plugin; each rule
+     a symbol, linked to its CWE.
+   Not taken: Semgrep's registry rules and the SEI CERT wiki (their terms do
+   not allow redistributing them), and the CIS benchmarks.
+2. **The `advisories` pack, renewed every day**: known vulnerabilities in
+   packages, from the GitHub Advisory Database (CC BY 4.0: npm, NuGet, PyPI,
+   Maven, Go, crates, RubyGems, Composer), OSV, NVD's CVE records and CISA's
+   Known Exploited Vulnerabilities. Each advisory a document (`GHSA-…` and
+   `CVE-…` as symbols), and a table of the packages and version ranges it
+   affects, the versions that fix it, its CVSS score, its CWE and whether it
+   is exploited, so matching needs no model. Built on a connected machine
+   each day, published in a pack index with its SHA-256, taken by `argus pack
+   update` (and carried to an offline host by `airgap.sh`); Arena shows its
+   age and warns past a week.
+3. **Recognising vulnerable dependencies.** Argus reads each indexed branch's
+   manifests and lock files (npm, pnpm and yarn locks, NuGet's
+   `packages.lock.json` and `PackageReference`, pip requirements, Poetry and
+   uv locks, `go.sum`, `Cargo.lock`, Maven, Gradle, `Gemfile.lock`,
+   `composer.lock`) and matches them against the advisories: a tool,
+   `deps_check`, answers as the person, within their GitLab rights. Each
+   finding says how the package comes in (directly, or through which), the
+   version that fixes it and the smallest upgrade. A CycloneDX SBOM per
+   repository and branch, to download. Checked again whenever the advisories
+   are renewed, so a new CVE in old code is found without a push.
+4. **Recognising weaknesses in code**, two passes that check each other:
+   - **Scanners**, in the sandbox with no network, on a checkout of the
+     indexed commit: opengrep (LGPL-2.1) with Arena's own rules (written
+     here, under the app's licence, each tagged with its CWE and tested on
+     its bad and good examples), Bandit, gosec, the .NET analyzers, ESLint's
+     security plugin, gitleaks for secrets (the history too), and Trivy for
+     images and infrastructure as code (Dockerfiles, compose, Helm,
+     Terraform; its database carried as the advisories are). Their SARIF
+     merged, duplicates folded.
+   - **The model's review**: `security-review` grown into a skill that walks
+     the code with Argus, from the entry points (routes, handlers, commands,
+     queue consumers, found through the graph) to the sinks (SQL, commands,
+     paths, deserialisers, templates, outbound requests) through
+     `find_references`. Each suspicion is checked against the pack's CWE page
+     and the scanners' rules, and dropped when the line where untrusted data
+     reaches the sink cannot be cited. A finding gives the CWE, severity,
+     `file:line`, the data's path, how it could be exploited, the fix and the
+     pack's pages it rests on.
+   - **Triage**: whether both passes found it, one, or neither; a finding
+     people mark as wrong is remembered for that repository, and the
+     reflection learns from it (v7.0's skills that learn).
+5. **Fixing.** **Fix it** on a finding, in Code Studio or in Code Arena on
+   the person's machine: the agent writes a test that shows the weakness
+   where it can (a request that injects, a path that escapes), makes the
+   change the cheat sheet and the CWE's mitigations describe (a parameterised
+   query, not an escaped string), runs the tests, runs the scanners and the
+   review again on the change, and offers the patch, a branch and a merge
+   request opened as the person with their own GitLab sign-in (Argus's token
+   stays read only). For a dependency: the smallest upgrade that fixes it,
+   the lock file updated, the build and the tests run. Many findings at once:
+   one branch each, for people to take or leave.
+6. **Where people see it**:
+   - **Admin → Security**, and each repository's page for those who may read
+     it: findings by severity with the known-exploited first, what is new
+     this week, what was fixed, risks accepted (by whom, why, and until
+     when), and the SBOMs.
+   - **The chat and Code Arena**: "is this repository affected by
+     CVE-2026-…?", `/security-review`, and findings in Code Arena's Problems
+     panel with Fix it beside each.
+   - **Automatic reviews**: a merge request that adds a finding or a
+     vulnerable package says so in its review.
+   - **Alerts**: a new critical or known-exploited finding reaches the
+     repository's owners and the security team.
+7. **Measured, as Argus was.** Recognising: on the Juliet test suite (NIST
+   SARD, public domain: C, C++, Java, C#) and the OWASP Benchmark (Java),
+   precision and recall per CWE for the scanners alone, the model alone, the
+   model with the pack, and both passes together. Fixing: on real CVE fixes
+   (CVEfixes, its licence checked first), the share fixed with the tests
+   passing and the scanners clean. Published in `docs/measurements/`; a
+   release that makes either worse says so.
+8. **Compliance**: the controls it adds to `controls.yaml`: vulnerability
+   management (ISO 27001 A.8.8, SOC 2 CC7.1, HIPAA 164.308(a)(1)(ii)(A) and
+   (B), GDPR 32(1)(d)), secure coding (A.8.28) and security testing (A.8.29),
+   each with its tests and live checks (the advisories' age, findings past
+   the deadline their severity gives).
+
+In this order: the `security` pack and the grounded review first (a headline
+on its own), then the advisories and dependencies, the scanners, Fix it, and
+the measurements. Needs a yes before downloading: the CWE and CAPEC files, the
+OWASP and CodeQL repositories, the advisory databases, opengrep, Bandit,
+gosec, gitleaks and Trivy for the sandbox image, the Juliet suite and the
+OWASP Benchmark; each one's size said when asked.
+
 ### Groundwork, in between
 
 1. The vLLM image on a real GPU server: bring-up, a smoke test per model,
