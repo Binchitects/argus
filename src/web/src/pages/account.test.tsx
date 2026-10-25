@@ -202,11 +202,15 @@ describe('account', () => {
   })
 
   it('memory lists what the chat remembers, adds, edits, deletes and turns it off', async () => {
-    let view = { enabled: true, on: true, max: 100, maxChars: 300, memories: [{ id: 'm1', text: 'Deploys with Podman.', createdAt: '2026-10-01T10:00:00Z', updatedAt: '2026-10-01T10:00:00Z' }] }
+    const item = (id: string, text: string) => ({
+      id, text, scope: 'person', kind: 'fact', project: null, source: 'typed', sourceId: null, pinned: false, usedAt: null, uses: 0, replacedBy: null,
+      createdAt: '2026-10-01T10:00:00Z', updatedAt: '2026-10-01T10:00:00Z', mine: true, canEdit: true,
+    })
+    let view = { enabled: true, on: true, max: 1000, maxChars: 500, keepsCompany: false, memories: [item('m1', 'Deploys with Podman.')] }
     const calls = fakeApi(member, {
       'GET /api/account/memories': () => ({ json: view }),
       'POST /api/account/memories': (body) => {
-        const m = { id: 'm2', text: (body as { text: string }).text, createdAt: '2026-10-02T10:00:00Z', updatedAt: '2026-10-02T10:00:00Z' }
+        const m = { ...item('m2', (body as { text: string }).text), createdAt: '2026-10-02T10:00:00Z', updatedAt: '2026-10-02T10:00:00Z' }
         view = { ...view, memories: [m, ...view.memories] }
         return { status: 201, json: m }
       },

@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import type { MemoryView } from '@/lib/memory'
+import type { MemoryItem, MemoryView } from '@/lib/memory'
 import { fakeApi, member, renderApp } from '@/test/utils'
 import { blank } from './live'
 import type { ChatConfig, Conversation, Message } from './types'
@@ -32,7 +32,11 @@ const chat = (state: 'offered' | 'kept'): Conversation => ({
   ],
 })
 
-const memories = (over: Partial<MemoryView> = {}): MemoryView => ({ enabled: true, on: true, max: 100, maxChars: 300, memories: [], ...over })
+const memories = (over: Partial<MemoryView> = {}): MemoryView => ({ enabled: true, on: true, max: 1000, maxChars: 500, keepsCompany: false, memories: [], ...over })
+const item = (over: Partial<MemoryItem>): MemoryItem => ({
+  id: 'm1', text: '', scope: 'person', kind: 'fact', project: null, source: 'typed', sourceId: null, pinned: false, usedAt: null, uses: 0, replacedBy: null,
+  createdAt: '2026-10-01T10:00:00Z', updatedAt: '2026-10-01T10:00:00Z', mine: true, canEdit: true, ...over,
+})
 
 describe('memory in the chat', () => {
   it('what the model offers is kept only when the person says Remember, in their own words if they change them', async () => {
@@ -65,7 +69,7 @@ describe('memory in the chat', () => {
   })
 
   it('a memory the person asked for shows as remembered, and the Memory button lists and deletes theirs', async () => {
-    let list = [{ id: 'm1', text: 'Deploys with Podman.', createdAt: '2026-10-01T10:00:00Z', updatedAt: '2026-10-01T10:00:00Z' }]
+    let list = [item({ id: 'm1', text: 'Deploys with Podman.' })]
     const calls = fakeApi(member, {
       'GET /api/chat/config': () => ({ json: config }),
       'GET /api/chat/conversations': () => ({ json: [] }),

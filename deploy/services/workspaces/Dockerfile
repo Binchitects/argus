@@ -9,6 +9,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS code-arena
 WORKDIR /src
 COPY global.json Directory.Build.props VERSION ./
 COPY src/CodeArena/ src/CodeArena/
+COPY skills/ skills/
 # The one file Code Arena shares with the app (linked in its project): how a context refusal reads.
 COPY src/Llm.Core/Chat/ContextOverflow.cs src/Llm.Core/Chat/
 RUN rm -rf src/CodeArena/web src/CodeArena/bin src/CodeArena/obj && mkdir -p src/CodeArena/web \

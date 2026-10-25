@@ -114,6 +114,11 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
       if (i >= 0) messages[i] = { ...messages[i]!, details: { ...messages[i]!.details, route: e.route } }
       return { ...state, messages }
     }
+    case 'memories': {
+      const i = messages.findIndex((m) => m.id === e.id)
+      if (i >= 0) messages[i] = { ...messages[i]!, details: { ...messages[i]!.details, memories: e.memories } }
+      return { ...state, messages }
+    }
     case 'arena': {
       const same = state.arena?.id === e.id ? state.arena : null
       return { ...state, arena: { a: same?.a, b: same?.b, id: e.id, questionId: e.questionId, side: e.side, step: e.step, of: e.of }, thinkingSince: null }

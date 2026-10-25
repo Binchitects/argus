@@ -908,7 +908,14 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             e.ToTable("memories");
             e.Property(m => m.Text).HasMaxLength(500);
+            // Those kept before scopes and kinds were: a person's facts, typed.
+            e.Property(m => m.Scope).HasMaxLength(20).HasDefaultValue(Memory.Person);
+            e.Property(m => m.Kind).HasMaxLength(20).HasDefaultValue(Memory.Fact);
+            e.Property(m => m.Source).HasMaxLength(20).HasDefaultValue(Memory.Typed);
+            e.Property(m => m.ProjectKey).HasMaxLength(300);
             e.HasIndex(m => new { m.UserId, m.UpdatedAt });
+            e.HasIndex(m => new { m.UserId, m.Scope, m.ProjectKey });
+            e.HasIndex(m => m.Scope).HasFilter("\"Scope\" = 'company'");
             e.HasOne<AppUser>().WithMany().HasForeignKey(m => m.UserId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<Skill>(e =>
@@ -922,6 +929,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(p => p.AutoUse).HasDefaultValue(true);
             e.Property(p => p.Groups).HasDefaultValueSql("'{}'::uuid[]");
             e.HasIndex(p => p.UserId);
+            // Each built-in one once, whichever replica writes them.
+            e.HasIndex(p => p.Name).IsUnique().HasFilter("\"BuiltIn\"").HasDatabaseName("IX_skills_Name_BuiltIn");
             e.HasIndex(p => p.ServerId);
             e.HasOne<AppUser>().WithMany().HasForeignKey(p => p.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<McpServer>().WithMany().HasForeignKey(p => p.ServerId).OnDelete(DeleteBehavior.Cascade);

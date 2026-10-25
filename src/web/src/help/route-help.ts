@@ -17,6 +17,7 @@ export const routeHelp: Record<string, TopicId> = {
   '/shared/:shareId': 'shared',
   '/assistants': 'assistants',
   '/skills': 'skills',
+  '/memory': 'memory',
   '/meetings': 'meetings',
   '/meetings/:id': 'meeting',
   '/plans': 'plans',

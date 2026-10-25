@@ -39,6 +39,10 @@ public sealed class Skill
     public List<Guid> Groups { get; set; } = [];
     /// <summary>The plugin's tool row it came with (McpServer): it is removed with it.</summary>
     public Guid? ServerId { get; set; }
+    /// <summary>One that comes with Arena (the repository's skills/ folder): the company's, kept as Arena writes it.</summary>
+    public bool BuiltIn { get; set; }
+    /// <summary>A built-in one an admin turned off: nobody uses it until it is turned on again.</summary>
+    public bool Off { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

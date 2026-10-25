@@ -254,7 +254,7 @@ public sealed partial class ChatService(
         var compactAt = user.CompactAt ?? chat.CurrentValue.CompactAt;
         var offersTools = tools.Count > 0 && chat.CurrentValue.MaxToolRounds > 0;
         var lengthNote = AnswerLengths.Note(user.AnswerLength);
-        var memory = conversation.IsRoom ? null : await memories.NoteAsync(user, ct);
+        var (memory, inNote) = conversation.IsRoom ? (null, []) : await memories.NoteAsync(user, ct);
         var (messages, imagesDropped, systemParts, budget) = await BuildHistoryAsync(conversation, question, model, modelName, helper, email, demand.Notes(), runs.ContainsKey("read_file"),
             lengthNote, memory, new HistoryFit(compactAt, offersTools ? demand.Request().ToJsonString().Length : 0), emit, ct);
         // Said on the person's turn (models follow it more closely there), at the prompt's end (the
@@ -270,6 +270,14 @@ public sealed partial class ChatService(
         if (overrides.Again is { Length: > 0 } again)
         {
             ToQuestion(messages, "\n\n" + again);
+        }
+        // The memories that matter to this question, beyond the prompt's block, go with it (the cache keeps the rest); the
+        // answer says which it read.
+        List<Recalled> recalled = conversation.IsRoom ? [] : await memories.RecallAsync(user, question.Content, ct, besides: inNote);
+        if (recalled.Count > 0)
+        {
+            ToQuestion(messages, "\n\n" + Memories.QuestionNote(recalled));
+            await memories.UsedAsync([.. recalled.Select(r => r.Memory.Id)], ct);
         }
         if (imagesDropped)
         {
@@ -362,11 +370,21 @@ public sealed partial class ChatService(
             db.ChatMessages.Add(msg);
             conversation.CurrentLeafId = msg.Id;
             await emit(new { type = "assistant", id = msg.Id, parentId = parent, model = modelName });
-            if (round == 0 && route is not null)
+            if (round == 0 && (route is not null || recalled.Count > 0))
             {
-                // Who answers on Auto, and why: kept with the answer, said under it.
-                msg.DetailsJson = new JsonObject { ["route"] = route.ToJson() }.ToJsonString();
-                await emit(new { type = "route", id = msg.Id, route = route.ToJson() });
+                // Who answers on Auto, and why, and the memories it read: kept with the answer, said under it.
+                var details = new JsonObject();
+                if (route is not null)
+                {
+                    details["route"] = route.ToJson();
+                    await emit(new { type = "route", id = msg.Id, route = route.ToJson() });
+                }
+                if (recalled.Count > 0)
+                {
+                    details["memories"] = MemoriesRead(recalled);
+                    await emit(new { type = "memories", id = msg.Id, memories = MemoriesRead(recalled) });
+                }
+                msg.DetailsJson = details.ToJsonString();
             }
 
             var request = new JsonObject
@@ -979,6 +997,10 @@ public sealed partial class ChatService(
     private const int AgentToolChars = 12_000;
 
     /// <summary>Text added to the newest question, in the request only.</summary>
+    /// <summary>The memories an answer read, as it keeps and shows them.</summary>
+    private static JsonArray MemoriesRead(IEnumerable<Recalled> recalled) =>
+        new([.. recalled.Select(r => (JsonNode)new JsonObject { ["id"] = r.Memory.Id.ToString(), ["text"] = r.Memory.Text, ["kind"] = r.Memory.Kind, ["scope"] = r.Memory.Scope })]);
+
     private static void ToQuestion(JsonArray messages, string text)
     {
         if (messages.OfType<JsonObject>().LastOrDefault(m => m["role"]?.GetValue<string>() == "user") is not { } asked)

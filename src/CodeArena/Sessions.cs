@@ -372,6 +372,9 @@ internal sealed class SessionStore
     /// <summary>Told of each message the session adds (the chat in Arena is sent it).</summary>
     public event Action<JsonObject>? Added;
 
+    /// <summary>Told when a compaction's summary waits to be sent (Arena keeps it where the web chat keeps its own).</summary>
+    public event Action? SummaryWaiting;
+
     /// <summary>A message the person added in Arena's web chat (with its id there), taken into this session.</summary>
     public void Remote(SyncEntry e) => Write(Line(e));
 
@@ -456,6 +459,7 @@ internal sealed class SessionStore
         if (upTo >= 0)
         {
             Write(new JsonObject { ["type"] = "summary", ["upTo"] = upTo, ["text"] = text });
+            SummaryWaiting?.Invoke();
         }
     }
 

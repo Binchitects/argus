@@ -1217,29 +1217,48 @@ company's** puts them all back.
 
 ## Memory
 
-What you tell the chat about yourself, kept for every later answer, in every
-chat, as ChatGPT and Claude do.
+What the models remember for you, in every chat and in Code Arena: about
+you, about your projects, and the company's. **Workspace → Memory** lists it
+all.
 
 - **Asked for.** "Remember that I deploy with Podman": the model calls
-  `remember`, and the memory is kept at once. Its card in the answer says
-  **Remembered**, with **Undo**. In a scheduled task's chat it is only
-  offered: a task's question may carry an issue's or a webhook's words.
+  `remember`, and the memory is kept at once, with its kind. Its card in the
+  answer says **Remembered**, with **Undo**. In a scheduled task's chat it is
+  only offered: a task's question may carry an issue's or a webhook's words.
 - **Offered.** When you mention something lasting (your team, your tools, how
   you like answers) without asking, the model may offer to remember it: the
   card asks **Remember this?** with **Remember**, **No thanks** and **Edit**
   (to change the words first). Nothing is kept until you say so, and nothing
   waits: the answer goes on, and you can decide later.
-- **Used.** Each answer gets your memories in a short block of its system
-  prompt, the newest first, as many as fit in about 400 tokens (1,500
-  characters). The block comes after the app's fixed notes and the tools', so
-  a new memory leaves the cached start of the prompt as it was.
-- **Yours to change.** Your account → **Memory**, or the brain in a chat's
-  header: add one, edit or delete one, **Forget everything**, or turn **Use
-  memory** off (answers then neither read nor offer memories; yours stay). Up
-  to 100 memories of 300 characters each. A memory said again comes first
-  again rather than twice.
-- **Nobody else sees them**, admins included: no admin page, audit entry or
-  log shows one. Sub-agents do not get the `remember` tool. Deleting a person
+- **Kinds.** Each memory is a **preference** (how you like things), a
+  **fact**, a **decision** (and why), a **how to** (how something is done
+  here) or a **lesson** (what went wrong once, or what you corrected). The
+  model says it when it remembers; you change it on the Memory page.
+- **Whose.** Yours (every chat and project), a project's (kept by Code Arena
+  in a repository's sessions, read there), or **the company's**: kept by
+  those who manage the company's knowledge, read by everyone's answers, and
+  changed only by them.
+- **Read by relevance.** Each answer reads, in a block of its system prompt,
+  the pinned memories, the company's and the newest, as many as fit in about
+  400 tokens (1,500 characters); the block changes only when they do, so the
+  start of the prompt stays cached. Then the memories that matter to the
+  question, nearest by meaning (the knowledge embedder; by their words when
+  it is away), go with the question, within about 500 tokens. Under the
+  answer, **Read N memories** shows them; each memory counts how often
+  answers read it. The model can also look with `recall`, which searches
+  all of memory.
+- **Said again.** A memory saying what one kept already says (the same
+  words, or the same meaning) is that one, in the newer words, not a second.
+  Memories kept while the embedder was away are given their meaning within
+  ten minutes of its return.
+- **Yours to change.** **Workspace → Memory**: find one by its words, by
+  whose it is or its kind; pin one (every answer reads it), change its kind,
+  edit or forget it, **Forget all of mine** (the company's stay), or turn
+  **Use memory** off (answers then neither read nor offer memories; yours
+  stay). Up to 1,000 of yours, 500 characters each; the company keeps up to
+  300.
+- **Nobody else sees yours**, admins included: no admin page, audit entry or
+  log shows one. Sub-agents do not get the memory tool. Deleting a person
   deletes their memories.
 - **For the company:** **Settings → Chat → Memory** turns it off for everyone
   (people's memories stay, to see and delete). The **Memory** tool is also
@@ -1324,6 +1343,17 @@ model reads it to choose it), its **instructions** and its **parameters**.
   change it), or **for everyone** (made and changed by admins; audited as
   `skill.*`). Your own slash names are unique, and so are the company's; the
   same name from two places shows both, yours first.
+- **Arena's own**: the skills people use most come with Arena, for the chat
+  and Code Arena alike: `/code-review`, `/security-review`, `/write-tests`,
+  `/debug`, `/refactor`, `/explain-code`, `/commit-message`,
+  `/mr-description`, `/release-notes`, `/document-project`, `/plan-change`,
+  `/brainstorm`, `/summarize`, `/meeting-notes`, `/write-email`,
+  `/analyze-data`, `/make-deck`, `/translate`, `/sql-explain`, `/api-review`
+  and `/postmortem` (the repository's `skills/` folder). Nobody edits them;
+  yours, a group's or the company's of the same name wins over one, and an
+  admin turns one off for everyone (**Turn off for everyone** on the Skills
+  page, audited as `skill.off`; Code Arena leaves it out too).
+  **Settings → Chat → Arena's own skills** off removes them all.
 - **Plugins bring their own** ([plugins.md](plugins.md#skills)): each skill
   folder of a plugin (its `SKILL.md`) is a slash command too, for whoever may
   use the plugin's tool, and goes when the plugin is removed: `gitlab-issues`

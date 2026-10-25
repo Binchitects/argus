@@ -122,6 +122,10 @@ internal static class Schema
 
     public static JsonObject Text(string description) => new() { ["type"] = "string", ["description"] = description };
 
+    /// <summary>A string that is one of these.</summary>
+    public static JsonObject Choice(string description, IEnumerable<string> values) =>
+        new() { ["type"] = "string", ["enum"] = new JsonArray([.. values.Select(v => (JsonNode)v)]), ["description"] = description };
+
     public static string? Str(JsonObject args, string name) => args[name] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
 }
 

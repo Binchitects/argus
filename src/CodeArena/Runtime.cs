@@ -193,8 +193,9 @@ internal sealed partial class Runtime : IAsyncDisposable
     private static readonly TimeSpan AccountWait = TimeSpan.FromSeconds(5);
     /// <summary>The session's MCP servers: Arena's, Argus's and the person's own, each connected in the background.</summary>
     public IReadOnlyList<ServerLink> Links => _links;
-    /// <summary>Whether Arena's MCP endpoint answered.</summary>
-    public bool ArenaConnected => _links.Any(l => l.Name == ArenaName && l.State == LinkState.Connected);
+    /// <summary>Whether Arena's MCP endpoint answered and its tools are among the session's (set once they are, not before).</summary>
+    public bool ArenaConnected => Volatile.Read(ref _arenaServing);
+    private bool _arenaServing;
     /// <summary>Told when a server connects or is lost (on a background thread): the terminal says so at its next prompt, the IDE's page reads it.</summary>
     public Action<ServerLink>? ServersChanged { get; set; }
 
@@ -298,10 +299,20 @@ internal sealed partial class Runtime : IAsyncDisposable
         var project = SystemPrompt.GitRoot(Workspace.Root) ?? Workspace.Root;
         Permissions.Rules = PermissionRules.Of(Config, project);
         Permissions.Workspace = Workspace;
-        Memory = new MemoryStore(Env.Paths, project);
-        _memory = Memory.ForPrompt();
-        // The skills Arena's plugins bring, kept with the person's (the ones kept before when Arena does not answer).
-        if (await ChatSync.PluginSkillsAsync(Config, Http, AccountWait, ct) is { } brought)
+        Memory = new MemoryStore(Env.Paths, project) { Arena = Config.Url is { Length: > 0 } && Config.ApiKey is { Length: > 0 } ? new ArenaMemory(Config, Http) : null };
+        _memory = await Memory.ForPromptAsync(Ui.Info, ct);
+        // The skills Arena's plugins bring, kept with the person's (the ones kept before when Arena does not answer); and
+        // Arena's own, less those its admins turned off.
+        var brought = await ChatSync.PluginSkillsAsync(Config, Http, AccountWait, ct);
+        try
+        {
+            BuiltInSkills.Keep(Env.Paths, [.. (brought?["off"] as JsonArray ?? []).Select(n => n?.GetValue<string>() ?? "")], Config.BuiltInSkills);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Ui.Warn($"Arena's own skills could not be kept in {BuiltInSkills.Folder(Env.Paths)}: {e.Message}");
+        }
+        if (brought is not null)
         {
             try
             {
@@ -339,6 +350,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             tools.Add(agents);
         }
         tools.Add(MemoryStore.RememberTool());
+        tools.Add(MemoryStore.RecallTool());
         tools.Add(SessionSearch.Tool());
         if (Extensions.Skills.Count > 0)
         {
@@ -467,6 +479,8 @@ internal sealed partial class Runtime : IAsyncDisposable
             Total = Total,
             Stream = !Ui.Quiet,
             Compaction = Compaction,
+            // What is remembered that matters to each message (a few hundred tokens at most).
+            Recall = (message, given, token) => Memory.RecallAsync(message, given, 1_500, token),
         };
         Context.SubAgent = (description, prompt, agent, token) => RunSubAgentAsync(inputs, description, prompt, agent, token);
         _inputs = inputs;
@@ -941,6 +955,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             Volatile.Write(ref _instructions, notes);
             if (link.Name == ArenaName)
             {
+                Volatile.Write(ref _arenaServing, client is not null);
                 Permissions.Guard = LayaGuard.For(client, Workspace, Ui);
                 if (Permissions.Guard is { } guard)
                 {
@@ -1079,7 +1094,7 @@ internal sealed partial class Runtime : IAsyncDisposable
     /// <summary>A new, empty session (/clear): the same tools and model.</summary>
     public void NewSession()
     {
-        _memory = Memory.ForPrompt();
+        _memory = Memory.Again();
         Session = SessionStore.Create(Env.Paths.SessionsDir, Workspace.Root, Model.Name);
         Agent.Session = Session;
         Agent.Clear();
@@ -1093,7 +1108,7 @@ internal sealed partial class Runtime : IAsyncDisposable
     public void Resume(string file)
     {
         var data = SessionStore.Load(file, whole: true);
-        _memory = Memory.ForPrompt();
+        _memory = Memory.Again();
         Session = SessionStore.Open(file);
         Agent.Session = Session;
         Agent.Load(data.Messages, data.Known);

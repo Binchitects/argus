@@ -1622,6 +1622,43 @@ namespace Llm.Core.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.PrimitiveCollection<float[]>("Embedding")
+                        .HasColumnType("real[]");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("fact");
+
+                    b.Property<bool>("Pinned")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("ProjectKey")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<Guid?>("ReplacedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("person");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("typed");
+
+                    b.Property<Guid?>("SourceId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Text")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -1630,12 +1667,23 @@ namespace Llm.Core.Data.Migrations
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("UsedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
+                    b.Property<int>("Uses")
+                        .HasColumnType("integer");
+
                     b.HasKey("Id");
 
+                    b.HasIndex("Scope")
+                        .HasFilter("\"Scope\" = 'company'");
+
                     b.HasIndex("UserId", "UpdatedAt");
+
+                    b.HasIndex("UserId", "Scope", "ProjectKey");
 
                     b.ToTable("memories", (string)null);
                 });
@@ -2201,6 +2249,9 @@ namespace Llm.Core.Data.Migrations
                         .HasColumnType("boolean")
                         .HasDefaultValue(true);
 
+                    b.Property<bool>("BuiltIn")
+                        .HasColumnType("boolean");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -2227,6 +2278,9 @@ namespace Llm.Core.Data.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
 
+                    b.Property<bool>("Off")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("Parameters")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -2252,6 +2306,11 @@ namespace Llm.Core.Data.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique()
+                        .HasDatabaseName("IX_skills_Name_BuiltIn")
+                        .HasFilter("\"BuiltIn\"");
 
                     b.HasIndex("ServerId");
 

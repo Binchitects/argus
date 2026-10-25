@@ -16,6 +16,9 @@ public sealed partial class MemoryTool(Memories memories, AppDbContext db) : ICh
 {
     public const string Function = "remember";
 
+    /// <summary>Searches all the memories, beyond those given with the question.</summary>
+    public const string RecallFunction = "recall";
+
     /// <summary>A memory the model offered, waiting for the person.</summary>
     public const string Offered = "offered";
     /// <summary>Kept: in every answer from now on.</summary>
@@ -38,7 +41,10 @@ public sealed partial class MemoryTool(Memories memories, AppDbContext db) : ICh
         "or when they tell you a lasting fact or preference that would help in later chats (their role, team, projects, tools, how they " +
         "like answers); what they did not ask for is offered to them, and kept only if they accept. One short sentence each, about them " +
         "(\"Works on the payments team.\"). Never remember secrets, passwords or keys, health, or other people's personal details, nor what " +
-        "matters only to this chat. What you remember already is in your instructions: do not remember it again.";
+        "matters only to this chat. What you remember already is in your instructions or with the question: do not remember it again. " +
+        "Give each its kind: preference (how they like things), fact, decision (what was decided, and why), howto (how to do something " +
+        "here), lesson (what went wrong once, or what they corrected). When the question needs something you may have been told before " +
+        "and it is not given, look with recall.";
 
     public Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct) => Task.FromResult<IToolRun>(!memories.On(context.User)
         // Turned off by the person: no function, no word of it.
@@ -47,12 +53,38 @@ public sealed partial class MemoryTool(Memories memories, AppDbContext db) : ICh
             [
                 Schema.Function(Function,
                     "Remembers one short fact about the person for their later chats. Kept at once when they asked you to remember it; otherwise offered to them.",
-                    new JsonObject { ["memory"] = Schema.Text("One short sentence about the person, e.g. \"Works on the payments team.\"") }, "memory"),
+                    new JsonObject
+                    {
+                        ["memory"] = Schema.Text("One short sentence about the person, e.g. \"Works on the payments team.\""),
+                        ["kind"] = Schema.Choice("What it is: preference, fact (the default), decision, howto or lesson.", Memory.Kinds),
+                    }, "memory"),
+                Schema.Function(RecallFunction,
+                    "Searches everything remembered about the person (and the company's memories) for what bears on a question: the nearest by meaning, with their kind.",
+                    new JsonObject { ["query"] = Schema.Text("What to look for, in a few words or a question.") }, "query"),
             ],
             Instructions,
-            (function, args, token) => function == Function
-                ? RememberAsync(context, args, token)
-                : Task.FromResult(new ToolResult($"There is no function {function}.", IsError: true))));
+            (function, args, token) => function switch
+            {
+                Function => RememberAsync(context, args, token),
+                RecallFunction => RecallAsync(context, args, token),
+                _ => Task.FromResult(new ToolResult($"There is no function {function}.", IsError: true)),
+            }));
+
+    private async Task<ToolResult> RecallAsync(ToolContext context, JsonObject args, CancellationToken ct)
+    {
+        var query = Schema.Str(args, "query") ?? "";
+        if (query.Trim().Length == 0)
+        {
+            return new ToolResult("Say what to look for: {\"query\":\"…\"}.", IsError: true);
+        }
+        var found = await memories.RecallAsync(context.User, query, ct, budget: 6_000, most: 25);
+        if (found.Count == 0)
+        {
+            return new ToolResult("Nothing remembered bears on that.");
+        }
+        await memories.UsedAsync([.. found.Select(r => r.Memory.Id)], ct);
+        return new ToolResult(string.Join('\n', found.Select(r => "- " + Memories.Line(r.Memory))));
+    }
 
     private async Task<ToolResult> RememberAsync(ToolContext context, JsonObject args, CancellationToken ct)
     {
@@ -62,9 +94,11 @@ public sealed partial class MemoryTool(Memories memories, AppDbContext db) : ICh
             return new ToolResult(problem + " Call remember again with {\"memory\":\"…\"}.", IsError: true);
         }
         var userId = context.User.Id;
+        var kind = Schema.Str(args, "kind") is { } k && Memory.Kinds.Contains(k) ? k : Memory.Fact;
+        var facts = new MemoryFacts(Kind: kind, Source: Memory.FromChat, SourceId: context.Conversation.Id);
         if (await memories.FindAsync(userId, text, ct) is { } same)
         {
-            await memories.KeepAsync(userId, same.Text, ct);
+            await memories.KeepAsync(userId, same.Text, facts, ct);
             return new ToolResult($"Already remembered: {same.Text}") { Details = Card(same.Id, same.Text, Kept) };
         }
         // A task's chat only offers: its question may carry an event's words (an issue, a webhook's JSON), never the person's own.
@@ -72,19 +106,19 @@ public sealed partial class MemoryTool(Memories memories, AppDbContext db) : ICh
         {
             return new ToolResult("Offered to the person: it is kept only if they accept it, on its card in the chat. Go on with your answer; do not wait for it.")
             {
-                Details = Card(null, text, Offered),
+                Details = Card(null, text, Offered, kind),
             };
         }
-        if (await memories.KeepAsync(userId, text, ct) is not { } kept)
+        if (await memories.KeepAsync(userId, text, facts, ct) is not { } kept)
         {
             return new ToolResult($"Not remembered: the person keeps {Memories.PerPerson} memories already. Tell them to delete some in Your account → Memory.", IsError: true);
         }
-        return new ToolResult($"Remembered: {kept.Text}") { Details = Card(kept.Id, kept.Text, Kept) };
+        return new ToolResult($"Remembered: {kept.Text}") { Details = Card(kept.Id, kept.Text, Kept, kept.Kind) };
     }
 
     /// <summary>What the memory card in the chat shows: the memory, its id once kept, and where it stands.</summary>
-    public static JsonObject Card(Guid? id, string text, string state) =>
-        new() { ["memory"] = new JsonObject { ["id"] = id?.ToString(), ["text"] = text, ["state"] = state } };
+    public static JsonObject Card(Guid? id, string text, string state, string kind = Memory.Fact) =>
+        new() { ["memory"] = new JsonObject { ["id"] = id?.ToString(), ["text"] = text, ["state"] = state, ["kind"] = kind } };
 
     /// <summary>The question being answered: up the branch from the step the answer is at.</summary>
     private async Task<string> QuestionAsync(Conversation chat, CancellationToken ct)

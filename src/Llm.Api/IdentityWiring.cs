@@ -380,6 +380,10 @@ public static class IdentityWiring
         // What a person asked the chat to remember, and the prompt library.
         services.Configure<Chat.MemoryOptions>(config.GetSection("Memory"));
         services.AddScoped<Chat.Memories>();
+        services.AddSingleton<Chat.BuiltInSkills>();
+        services.AddHostedService(sp => sp.GetRequiredService<Chat.BuiltInSkills>());
+        services.AddSingleton<Chat.MemoryUpkeep>();
+        services.AddHostedService(sp => sp.GetRequiredService<Chat.MemoryUpkeep>());
         services.AddScoped<Chat.Tools.MemoryTool>();
         services.AddScoped<Chat.Tools.SkillTool>();
         ArenaMcp.McpEndpoints.AddArenaMcp(services, config);
@@ -565,6 +569,7 @@ public static class IdentityWiring
         Settings.SettingsEndpoints.MapSettings(app);
         Chat.ChatEndpoints.MapChat(app);
         Chat.CodeArenaSync.MapCodeArenaSync(app);
+        Chat.CodeArenaMemory.MapCodeArenaMemory(app);
         Chat.AssistantEndpoints.MapAssistants(app);
         Chat.ShareEndpoints.MapShares(app);
         Access.SharingEndpoints.MapSharing(app);

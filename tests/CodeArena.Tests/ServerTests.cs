@@ -144,8 +144,8 @@ public sealed class ServerTests : IDisposable
         // Arena lost: Argus's copy comes back.
         _mcp.Status = 503;
         rt.Links[0].Retry();
-        await Until(() => rt.Links[0].State == LinkState.Failed, "Arena lost");
-        Assert.Equal(Runtime.ArgusName, rt.Tools.Find("web_search")!.Server);
+        // The link says it is down a moment before its tools have gone (what hears of it changes them): both are waited for.
+        await Until(() => rt.Links[0].State == LinkState.Failed && rt.Tools.Find("web_search")?.Server == Runtime.ArgusName, "Arena lost, Argus's web_search back");
         Assert.Contains(argus.Calls, c => c.Method == "tools/list");
     }
 

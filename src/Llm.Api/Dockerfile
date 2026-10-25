@@ -18,6 +18,8 @@ COPY src/Llm.Api/Llm.Api.csproj src/Llm.Api/
 RUN dotnet restore src/Llm.Api/Llm.Api.csproj
 COPY src/Llm.Core/ src/Llm.Core/
 COPY src/Llm.Api/ src/Llm.Api/
+# The skills that come with Arena, built into the app (and Code Arena, below).
+COPY skills/ skills/
 RUN dotnet publish src/Llm.Api/Llm.Api.csproj -c Release --no-restore -o /out ${APP_VERSION:+-p:AppVersion=$APP_VERSION} \
  && rm -f /out/*.pdb \
  && mkdir -p /shared/engine-config /shared/directory /shared/sandbox
@@ -55,6 +57,7 @@ COPY global.json Directory.Build.props VERSION ./
 COPY tools/publish-code-arena.sh tools/
 COPY tools/offline-nuget/ tools/offline-nuget/
 COPY src/CodeArena/ src/CodeArena/
+COPY skills/ skills/
 # The one file Code Arena shares with the app (linked in its project): how a context refusal reads.
 COPY src/Llm.Core/Chat/ContextOverflow.cs src/Llm.Core/Chat/
 COPY --from=code-arena-web /CodeArena/web/ src/CodeArena/web/

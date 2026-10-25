@@ -101,8 +101,8 @@ internal sealed class Extensions
     /// <summary>The folders read, the project's first (they win).</summary>
     private static IEnumerable<string> Folders(AppPaths paths, string projectRoot, string kind) =>
         ProjectFolders.Select(f => Path.Combine(projectRoot, f, kind)).Append(Path.Combine(paths.ConfigDir, kind))
-            // The skills Arena's plugins bring come last: the project's and the person's own of the same name win.
-            .Concat(kind == "skills" ? [PluginSkills.Folder(paths)] : []);
+            // The skills Arena's plugins bring come after the project's and the person's own, and Arena's own last: those of the same name win.
+            .Concat(kind == "skills" ? [PluginSkills.Folder(paths), BuiltInSkills.Folder(paths)] : []);
 
     public static Extensions Load(AppPaths paths, string projectRoot)
     {
@@ -226,7 +226,8 @@ internal sealed class Extensions
                 var text = File.ReadAllText(full);
                 return Task.FromResult(new ToolResult(text.Length <= 60_000 ? text : text[..60_000] + "\n… (cut)") { Display = c.Ui.Dim($"{skill.Name}/{name}") });
             }
-            var sb = new StringBuilder(skill.Instructions);
+            var skillMd = Path.Combine(folder, "SKILL.md");
+            var sb = new StringBuilder(File.Exists(skillMd) ? BuiltInSkills.Filled(File.ReadAllText(skillMd), skill.Instructions) : skill.Instructions);
             if (files.Count > 0)
             {
                 sb.Append("\n\nFiles of this skill (skill with file reads one): ").Append(string.Join(", ", files));

@@ -199,14 +199,24 @@ public sealed class MemoryTests(AppFixture app)
     }
 
     [Fact]
-    public void The_block_lists_the_newest_first_within_its_budget()
+    public async Task The_block_holds_the_pinned_ones_whatever_the_budget_then_the_newest_within_it()
     {
-        Assert.Null(Memories.Note([]));
-        Assert.Equal(Memories.Heading + "\n- B.\n- A.", Memories.Note(["B.", "A."]));
-        var many = Enumerable.Range(0, 50).Select(i => $"Memory number {i} is a sentence of about fifty characters.").ToList();
-        var block = Memories.Note(many)!;
-        Assert.True(block.Length <= Memories.Heading.Length + Memories.PromptChars);
-        Assert.Contains("Memory number 0 ", block, StringComparison.Ordinal);
-        Assert.DoesNotContain("Memory number 49 ", block, StringComparison.Ordinal);
+        var (b, email) = await PersonAsync(app.Factory);
+        var ids = new List<string>();
+        for (var i = 0; i < 50; i++)
+        {
+            var res = await b.PostAsync("/api/account/memories", new { text = $"Memory number {i} is a sentence of about fifty characters." });
+            await StatusAssert.Is(HttpStatusCode.Created, res);
+            ids.Add((await b.JsonAsync(res)).GetProperty("id").GetString()!);
+        }
+        await StatusAssert.Is(HttpStatusCode.OK, await b.Http.PutAsJsonAsync(new Uri($"/api/account/memories/{ids[0]}", UriKind.Relative), new { pinned = true }));
+        await SendAsync(b, await NewChatAsync(b), "Hello");
+        var system = SystemSentFor(email);
+        var block = system[system.IndexOf(Memories.Heading, StringComparison.Ordinal)..];
+        // The pinned one first, then the newest while they fit.
+        Assert.StartsWith(Memories.Heading + "\n- Memory number 0 ", block, StringComparison.Ordinal);
+        Assert.Contains("Memory number 49 ", block, StringComparison.Ordinal);
+        Assert.DoesNotContain("Memory number 5 ", block, StringComparison.Ordinal);
+        Assert.True(block.Length <= Memories.Heading.Length + Memories.PromptChars + 80, $"{block.Length} characters");
     }
 }

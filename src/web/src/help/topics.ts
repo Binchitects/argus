@@ -159,6 +159,7 @@ export const topics = {
       { name: 'Yours', text: 'Skills you made. Only you change them; you may share them with your groups.' },
       { name: 'Shared with you', text: 'From people in your groups.' },
       { name: 'For everyone', text: 'The company\'s, kept by admins.' },
+      { name: 'Arena\'s own', text: 'The skills people use most, built in for the chat and Code Arena: /code-review, /write-tests, /debug, /plan-change, /summarize and more. Yours, a group\'s or the company\'s of the same name wins; an admin turns one off for everyone.' },
       { name: 'From plugins', text: 'They come and go with their plugin.' },
       { name: 'New skill', text: 'A slash name, a title, when to use it, the instructions (a parameter as {{name}}, what you type after the fields as $ARGUMENTS) and its parameters.' },
       { name: 'Used on its own', text: 'A skill that says when to use it is listed to the model (the Skills tool): it loads the skill when a question fits. Off: only with /.' },
@@ -546,6 +547,22 @@ export const topics = {
       { title: 'Try a rule before it bites', steps: ['Make it with **Monitor only**.', 'Watch **What they did** for a week, then switch it to **Enforce**.'] },
     ],
     manual: { doc: 'admin', section: 'safeguards' },
+  },
+
+  memory: {
+    title: 'Memory',
+    about: 'Everything the chat and Code Arena remember for you: about you (every chat and project), about your projects (from Code Arena), and the company\'s (kept by those who keep its knowledge). Each answer reads the pinned ones, and those that matter to its question, found by meaning.',
+    parts: [
+      { name: 'Remember something', text: 'One or two short sentences, with its kind: a preference, a fact, a decision, how to do something, or a lesson (what went wrong once). **Pinned**: every answer reads it.' },
+      { name: 'Find a memory', text: 'By its words; **Whose** narrows to yours, a project\'s or the company\'s, and the kind to one kind.' },
+      { name: 'A memory', text: 'Its kind (change it), whose, where it came from (a chat links to it), and how often answers read it. Pin, edit or forget it. The company\'s are changed only by those who keep its knowledge.' },
+      { name: 'Under an answer', text: '**Read N memories**: the ones found for its question; a click shows them.' },
+    ],
+    tasks: [
+      { title: 'Make the chat always know something', steps: ['Type it under **Remember something**, with its kind.', 'Tick **Pinned**.', 'Press **Remember**: every answer reads it from now on.'] },
+      { title: 'See what an answer remembered', steps: ['Under the answer, press **Read N memories**.', 'Each memory it read is listed; **All memories** opens this page.'] },
+    ],
+    manual: { doc: 'chat', section: 'memory' },
   },
 
   meetings: {

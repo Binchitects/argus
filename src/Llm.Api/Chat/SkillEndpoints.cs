@@ -32,6 +32,7 @@ public static class SkillEndpoints
         g.MapPost("", CreateAsync).RequirePermission(Llm.Core.Access.Permissions.SkillsCreate);
         g.MapPut("/{id:guid}", UpdateAsync);
         g.MapDelete("/{id:guid}", DeleteAsync);
+        g.MapPut("/{id:guid}/off", OffAsync);
     }
 
     private sealed record Viewer(AppUser Me, Membership Member, IReadOnlyDictionary<string, ToolSetting> Tools)
@@ -39,6 +40,8 @@ public static class SkillEndpoints
         /// <summary>Whether they may use it: their own, their groups', the company's, or a plugin's whose tool they may use.</summary>
         public bool Sees(Skill p) => p switch
         {
+            // A built-in one turned off: only admins see it (to turn it on again).
+            { BuiltIn: true, Off: true } => Member.IsAdmin,
             { ServerId: { } server } => Tools.GetValueOrDefault(McpServerTool.Prefix + server) is not { } t || (t.Enabled && Member.MayUse(Core.Access.ResourceKinds.Tool, t.ToolId)),
             { UserId: { } owner } when owner == Me.Id => true,
             { Sharing: SkillSharing.Groups } => p.Groups.Any(Member.Groups.Contains),
@@ -46,7 +49,7 @@ public static class SkillEndpoints
             _ => false,
         };
 
-        public bool Edits(Skill p) => p.ServerId is null && (p.UserId == Me.Id || (p.UserId is null && Member.IsAdmin));
+        public bool Edits(Skill p) => p.ServerId is null && !p.BuiltIn && (p.UserId == Me.Id || (p.UserId is null && Member.IsAdmin));
     }
 
     private static async Task<Viewer> ViewerAsync(ClaimsPrincipal p, UserManager<AppUser> users, AccessService access, AppDbContext db, CancellationToken ct)
@@ -61,7 +64,7 @@ public static class SkillEndpoints
     {
         var tools = await db.ToolSettings.AsNoTracking().Where(s => s.ToolId.StartsWith(McpServerTool.Prefix)).ToDictionaryAsync(s => s.ToolId, ct);
         var who = new Viewer(me, await access.MembershipAsync(me, ct), tools);
-        return [.. (await db.Skills.AsNoTracking().Where(x => x.UserId == me.Id || x.UserId == null || x.Sharing == SkillSharing.Groups).ToListAsync(ct))
+        return [.. (await db.Skills.AsNoTracking().Where(x => !x.Off && (x.UserId == me.Id || x.UserId == null || x.Sharing == SkillSharing.Groups)).ToListAsync(ct))
             .Where(who.Sees).OrderBy(x => Rank(x, me.Id)).ThenBy(x => x.Name, StringComparer.Ordinal)];
     }
 
@@ -88,7 +91,7 @@ public static class SkillEndpoints
             groups = groups.Where(g => who.Member.IsAdmin || who.Member.Groups.Contains(g.Id)),
             skills = seen.OrderBy(x => x.Name, StringComparer.Ordinal).ThenBy(x => Rank(x, me)).Select(x => new
             {
-                x.Id, x.Name, x.Title, x.Description, x.Instructions, parameters = SkillLibrary.ParametersOf(x), x.AutoUse, x.Sharing,
+                x.Id, x.Name, x.Title, x.Description, x.Instructions, parameters = SkillLibrary.ParametersOf(x), x.AutoUse, x.Sharing, x.Off,
                 groups = groups.Where(g => x.Groups.Contains(g.Id)),
                 source = Source(x, me),
                 from = x.ServerId is { } s ? plugins.GetValueOrDefault(s) : x.UserId is { } o && o != me ? owners.GetValueOrDefault(o) : null,
@@ -97,10 +100,11 @@ public static class SkillEndpoints
         });
     }
 
-    private static string Source(Skill p, Guid me) => p.ServerId is not null ? "plugin" : p.UserId == me ? "mine" : p.UserId is null ? "company" : "group";
+    private static string Source(Skill p, Guid me) =>
+        p.ServerId is not null ? "plugin" : p.BuiltIn ? "builtin" : p.UserId == me ? "mine" : p.UserId is null ? "company" : "group";
 
-    /// <summary>With the same name, a person's own first, then their groups', the company's, a plugin's.</summary>
-    private static int Rank(Skill p, Guid me) => Source(p, me) switch { "mine" => 0, "group" => 1, "company" => 2, _ => 3 };
+    /// <summary>With the same name, a person's own first, then their groups', the company's, Arena's own, a plugin's.</summary>
+    private static int Rank(Skill p, Guid me) => Source(p, me) switch { "mine" => 0, "group" => 1, "company" => 2, "builtin" => 3, _ => 4 };
 
     private static async Task<IResult> CreateAsync(SkillRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AccessService access, AppDbContext db, Audit audit,
         CancellationToken ct)
@@ -176,7 +180,29 @@ public static class SkillEndpoints
 
     private static IResult Refused(Skill skill) => AuthEndpoints.Problem(403, "not_yours", skill.ServerId is not null
         ? "A plugin's skill comes and goes with the plugin."
+        : skill.BuiltIn ? "Arena's own skills are written by Arena: turn one off, or make the company's skill of the same name, which wins."
         : "Only the person who made this skill changes it.");
+
+    /// <summary>Whether a skill is off: one of Arena's own, which an admin turns off for everyone (and on again).</summary>
+    public sealed record SkillOff(bool Off);
+
+    private static async Task<IResult> OffAsync(Guid id, SkillOff body, ClaimsPrincipal p, UserManager<AppUser> users, AccessService access, AppDbContext db, Audit audit,
+        CancellationToken ct)
+    {
+        var who = await ViewerAsync(p, users, access, db, ct);
+        if (await db.Skills.SingleOrDefaultAsync(x => x.Id == id && x.BuiltIn, ct) is not { } skill || !who.Sees(skill))
+        {
+            return Results.NotFound();
+        }
+        if (!who.Member.IsAdmin)
+        {
+            return AuthEndpoints.Problem(403, "admin", "Only an admin turns Arena's own skills off or on.");
+        }
+        (skill.Off, skill.UpdatedAt) = (body.Off, DateTimeOffset.UtcNow);
+        await db.SaveChangesAsync(ct);
+        await audit.WriteAsync(body.Off ? "skill.off" : "skill.on", "/" + skill.Name);
+        return Results.NoContent();
+    }
 
     /// <summary>Puts what was sent into the skill, checked. The problem, or null.</summary>
     private static async Task<IResult?> ApplyAsync(Skill skill, SkillRequest body, Viewer who, AppDbContext db, CancellationToken ct)
@@ -233,7 +259,7 @@ public static class SkillEndpoints
         var owner = sharing == SkillSharing.Company ? (Guid?)null : skill.UserId ?? who.Me.Id;
         var clash = owner is { } o
             ? await db.Skills.AnyAsync(x => x.Id != skill.Id && x.UserId == o && x.Name == name, ct)
-            : await db.Skills.AnyAsync(x => x.Id != skill.Id && x.UserId == null && x.ServerId == null && x.Name == name, ct);
+            : await db.Skills.AnyAsync(x => x.Id != skill.Id && x.UserId == null && x.ServerId == null && !x.BuiltIn && x.Name == name, ct);
         if (clash)
         {
             return AuthEndpoints.Problem(409, "name", owner is null ? $"The company has a skill /{name} already." : $"You have a skill /{name} already.");

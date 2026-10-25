@@ -24,8 +24,10 @@ export interface SkillItem {
   autoUse: boolean
   sharing: SkillSharing
   groups: { id: string; name: string }[]
-  /** mine: the person's own; group: shared with a group they are in; company: an admin's for everyone; plugin: a plugin's. */
-  source: 'mine' | 'group' | 'company' | 'plugin'
+  /** mine: the person's own; group: shared with a group they are in; company: an admin's for everyone; builtin: Arena's own; plugin: a plugin's. */
+  source: 'mine' | 'group' | 'company' | 'builtin' | 'plugin'
+  /** One of Arena's own an admin turned off (only admins see it, to turn it on again). */
+  off?: boolean
   /** Who shared it (a person's name), or the plugin it came with. */
   from: string | null
   canEdit: boolean
@@ -90,6 +92,7 @@ export function matchSkills(skills: SkillItem[], query: string): SkillItem[] {
   const score = (s: SkillItem) =>
     s.name.startsWith(q) ? 0 : s.name.includes(q) ? 1 : s.title.toLowerCase().includes(q) ? 2 : s.description.toLowerCase().includes(q) ? 3 : -1
   return skills
+    .filter((s) => !s.off)
     .map((s, i) => ({ s, i, score: score(s) }))
     .filter((x) => x.score >= 0)
     .sort((a, b) => a.score - b.score || a.i - b.i)
@@ -101,6 +104,7 @@ export function sourceLabel(s: SkillItem): string {
   if (s.source === 'mine') return s.sharing === 'Groups' ? `Yours · ${s.groups.map((g) => g.name).join(', ')}` : 'Yours'
   if (s.source === 'group') return s.groups.map((g) => g.name).join(', ') || 'A group'
   if (s.source === 'company') return 'Company'
+  if (s.source === 'builtin') return 'Arena'
   return s.from ?? 'Plugin'
 }
 

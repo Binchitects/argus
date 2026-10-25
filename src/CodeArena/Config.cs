@@ -196,6 +196,8 @@ internal sealed class Config
     public bool Window { get; set; } = true;
     /// <summary>Each turn's changes are committed under Code Arena's name (in a git repository): on unless false.</summary>
     public bool AutoCommit { get; set; } = true;
+    /// <summary>Arena's own skills (code-review, write-tests, debug…), offered after the person's and the project's: on unless false.</summary>
+    public bool BuiltInSkills { get; set; } = true;
     /// <summary>
     /// Code completion in the IDE's editor (the rest of a line or a few, as grey text to take with Tab): its model (null:
     /// the session's), and how its prompt marks the code around the cursor (the model's fill-in-the-middle tokens); false: none.
@@ -295,6 +297,7 @@ internal sealed class Config
         };
         config.TerminalShell = raw.Str("terminalShell");
         config.AutoCommit = raw.Bool("autoCommit") ?? true;
+        config.BuiltInSkills = raw.Bool("builtInSkills") ?? true;
         config.Completion = raw.Bool("completion") ?? true;
         config.CompletionModel = raw.Str("completionModel");
         config.CheckCommand = raw.Str("checkCommand");
@@ -430,6 +433,7 @@ internal sealed class Config
         Set("agents", Agents.Count == 0 ? null : new JsonObject(Agents.Select(a => KeyValuePair.Create(a.Key, (JsonNode?)new JsonArray([.. a.Value.Select(x => (JsonNode)x)])))));
         Set("terminalShell", TerminalShell);
         Set("autoCommit", AutoCommit ? null : false);
+        Set("builtInSkills", BuiltInSkills ? null : false);
         Set("completion", Completion ? null : false);
         Set("completionModel", CompletionModel);
         Set("checkCommand", CheckCommand);

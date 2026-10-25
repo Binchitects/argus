@@ -22,6 +22,7 @@ const sections: { source: SkillItem['source']; title: string; description: strin
   { source: 'mine', title: 'Yours', description: 'Yours to change; shared with your groups if you chose so.' },
   { source: 'group', title: 'Shared with you', description: 'From people in your groups.' },
   { source: 'company', title: 'For everyone', description: 'The company’s, kept by admins.' },
+  { source: 'builtin', title: 'Arena’s own', description: 'They come with Arena. An admin turns one off for everyone; yours, a group’s or the company’s of the same name wins over it.' },
   { source: 'plugin', title: 'From plugins', description: 'They come and go with their plugin.' },
 ]
 
@@ -37,6 +38,11 @@ export function SkillsPage() {
   const [search, setSearch] = useState('')
   const remove = useMutation({
     mutationFn: (p: SkillItem) => api(`/api/skills/${p.id}`, { method: 'DELETE' }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: skillsQuery.queryKey }),
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  const turn = useMutation({
+    mutationFn: (p: SkillItem) => api(`/api/skills/${p.id}/off`, { method: 'PUT', body: { off: !p.off } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: skillsQuery.queryKey }),
     onError: (e) => toast.error(errorMessage(e)),
   })
@@ -86,6 +92,7 @@ export function SkillsPage() {
                     <SkillCard
                       key={p.id}
                       skill={p}
+                      onTurn={library.data.isAdmin && p.source === 'builtin' ? () => turn.mutate(p) : undefined}
                       onEdit={() => setEditing(p)}
                       onDelete={async () => {
                         if (await confirm({ title: `Delete /${p.name}?`, description: p.sharing === 'Personal' ? undefined : 'Nobody it is shared with can use it any more.', confirm: 'Delete', destructive: true }))
@@ -109,7 +116,7 @@ export function SkillsPage() {
   )
 }
 
-function SkillCard({ skill: p, onEdit, onDelete }: { skill: SkillItem; onEdit: () => void; onDelete: () => void }) {
+function SkillCard({ skill: p, onEdit, onDelete, onTurn }: { skill: SkillItem; onEdit: () => void; onDelete: () => void; onTurn?: () => void }) {
   return (
     <Card aria-label={`/${p.name}`}>
       <CardHeader>
@@ -122,6 +129,7 @@ function SkillCard({ skill: p, onEdit, onDelete }: { skill: SkillItem; onEdit: (
         <CardDescription className="flex flex-wrap gap-1.5">
           <Badge variant={p.source === 'mine' ? 'default' : 'secondary'}>{sourceLabel(p)}</Badge>
           {p.source === 'group' && p.from && <Badge variant="outline">from {p.from}</Badge>}
+          {p.off && <Badge variant="destructive">Off for everyone</Badge>}
           {p.autoUse && p.description ? (
             <Badge variant="outline">
               <Sparkles aria-hidden="true" /> Used on its own
@@ -150,6 +158,13 @@ function SkillCard({ skill: p, onEdit, onDelete }: { skill: SkillItem; onEdit: (
               </Badge>
             ))}
           </p>
+        )}
+        {onTurn && (
+          <div>
+            <Button variant="outline" size="sm" onClick={onTurn}>
+              {p.off ? 'Turn on for everyone' : 'Turn off for everyone'}
+            </Button>
+          </div>
         )}
         {p.canEdit && (
           <div className="flex flex-wrap gap-2">

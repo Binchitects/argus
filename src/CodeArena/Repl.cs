@@ -694,7 +694,7 @@ internal sealed class Repl(Runtime rt)
                 }
                 break;
             case "/memory":
-                MemoryCommand(arg);
+                await MemoryCommandAsync(arg, ct);
                 break;
             case "/rewind":
                 await RewindCommandAsync(arg, ct);
@@ -831,30 +831,66 @@ internal sealed class Repl(Runtime rt)
         }
     }
 
-    private void MemoryCommand(string arg)
+    private async Task MemoryCommandAsync(string arg, CancellationToken ct)
     {
         var words = arg.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        var memory = rt.Memory;
         if (words is ["add", var rest])
         {
             var person = rest.StartsWith("--all ", StringComparison.Ordinal);
             var text = person ? rest[6..].Trim() : rest.Trim();
-            Ui.Line(rt.Memory.Add(person, text) ? $"Remembered {(person ? "for every project" : "for this project")}: it is in the next sessions' prompt." : "Already remembered.");
+            try
+            {
+                var (added, where) = await memory.RememberAsync(person, text, "fact", ct);
+                Ui.Line(added ? $"Remembered {where}." : $"Already remembered {where}.");
+            }
+            catch (ToolError e)
+            {
+                Ui.Warn(e.Message);
+            }
             return;
         }
         if (words is ["forget", var which])
         {
+            if (memory.Online)
+            {
+                Ui.Line(int.TryParse(which, out var number) && await memory.ForgetListedAsync(number, ct) is { } forgotten
+                    ? $"Forgotten: {forgotten}"
+                    : $"There is no memory {which} of yours: /memory lists them.");
+                return;
+            }
             var person = which.StartsWith("--all ", StringComparison.Ordinal);
             var n = int.TryParse(person ? which[6..] : which, out var k) ? k : 0;
-            Ui.Line(rt.Memory.Forget(person, n) is { } gone ? $"Forgotten: {gone}" : $"There is no memory {which}: /memory lists them.");
+            Ui.Line(memory.Forget(person, n) is { } gone ? $"Forgotten: {gone}" : $"There is no memory {which}: /memory lists them.");
+            return;
+        }
+        if (memory.Online)
+        {
+            // Arena's: the person's, this project's and the company's, as the session started (yours numbered, to forget).
+            var mine = memory.Listed.Where(m => m.Mine).ToList();
+            foreach (var (title, list) in new[]
+            {
+                ("This project", mine.Where(m => m.Scope == "project").ToList()),
+                ("Every project", mine.Where(m => m.Scope == "person").ToList()),
+                ("The company's", memory.Listed.Where(m => !m.Mine).ToList()),
+            })
+            {
+                Ui.Line(Ui.Bold(title) + (title == "This project" ? Ui.Dim($"  {memory.ProjectKey}") : ""));
+                Ui.Line(list.Count == 0 ? Ui.Dim("  (nothing yet)") : string.Join('\n', list.Select(m =>
+                    $"  {(m.Mine ? $"{mine.IndexOf(m) + 1,2}." : "  -")} {m.Text}{(m.Kind == "fact" ? "" : Ui.Dim($" ({(m.Kind == "howto" ? "how to" : m.Kind)})"))}{(m.Pinned ? Ui.Dim(" (pinned)") : "")}")));
+            }
+            Ui.Info("Arena keeps Code Arena's memory, the web chat's too (Memory in Arena edits it). The model keeps memories with remember and searches them with recall; " +
+                "/memory add [--all] TEXT adds one, /memory forget N forgets one.");
             return;
         }
         foreach (var (person, title) in new[] { (false, "This project"), (true, "Every project (/memory add --all, forget --all N)") })
         {
-            var all = rt.Memory.Read(person);
-            Ui.Line(Ui.Bold(title) + Ui.Dim($"  {rt.Memory.FileOf(person)}"));
+            var all = memory.Read(person);
+            Ui.Line(Ui.Bold(title) + Ui.Dim($"  {memory.FileOf(person)}"));
             Ui.Line(all.Count == 0 ? Ui.Dim("  (nothing yet)") : string.Join('\n', all.Select((m, i) => $"  {i + 1,2}. {m}")));
         }
-        Ui.Info("The model keeps memories with remember; /memory add TEXT adds one, /memory forget N forgets one. The files are plain Markdown to edit.");
+        Ui.Info("Kept on this machine (Arena did not answer as the session started: they go to it next time). The model keeps memories with remember; " +
+            "/memory add TEXT adds one, /memory forget N forgets one. The files are plain Markdown to edit.");
     }
 
     private async Task RewindCommandAsync(string arg, CancellationToken ct)

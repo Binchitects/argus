@@ -165,6 +165,8 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Modules:audio", "false");
             // No embedder unless a test brings it (company knowledge and retrieval do).
             b.UseSetting("Modules:embed", "false");
+            // None of Arena's own skills unless a test brings them: the skills' tests count what is there.
+            b.UseSetting("Skills:BuiltIn", "false");
             // No Laya unless a test brings it (LayaTests).
             b.UseSetting("Modules:laya", "false");
             // Nothing listens here: probes are refused at once instead of waiting on DNS.

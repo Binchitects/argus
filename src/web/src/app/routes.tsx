@@ -39,6 +39,7 @@ export const routes: RouteObject[] = [
           { path: 'shared/:shareId', handle: { fullBleed: true }, ...lazy(() => import('@/pages/chat/shared-view').then((m) => ({ Component: m.SharedChatPage }))) },
           { path: 'assistants', ...lazy(() => import('@/pages/assistants').then((m) => ({ Component: m.AssistantsPage }))) },
           { path: 'skills', ...lazy(() => import('@/pages/skills').then((m) => ({ Component: m.SkillsPage }))) },
+          { path: 'memory', ...lazy(() => import('@/pages/memory').then((m) => ({ Component: m.MemoryPage }))) },
           { path: 'meetings', ...lazy(() => import('@/pages/meetings/meetings').then((m) => ({ Component: m.MeetingsPage }))) },
           { path: 'meetings/:id', ...lazy(() => import('@/pages/meetings/meeting').then((m) => ({ Component: m.MeetingPage }))) },
           { path: 'plans', ...lazy(() => import('@/pages/plans').then((m) => ({ Component: m.PlansPage }))) },

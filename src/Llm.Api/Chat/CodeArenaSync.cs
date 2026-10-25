@@ -131,6 +131,8 @@ public static class CodeArenaSync
         return Results.Ok(new
         {
             skills = skills.Select(s => new { s.Skill.Name, s.Skill.Description, s.Plugin, s.Version, files = s.Skill.Files }),
+            // Arena's own skills an admin turned off: Code Arena leaves them out too.
+            off = await db.Skills.AsNoTracking().Where(s => s.BuiltIn && s.Off).Select(s => s.Name).ToListAsync(http.RequestAborted),
         });
     }
 
@@ -179,7 +181,7 @@ public static class CodeArenaSync
         return true;
     }
 
-    private static async Task<(AppUser? Me, IResult? Refusal)> CallerAsync(HttpContext http, McpPeople people)
+    internal static async Task<(AppUser? Me, IResult? Refusal)> CallerAsync(HttpContext http, McpPeople people)
     {
         try
         {

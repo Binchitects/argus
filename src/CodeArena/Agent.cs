@@ -226,6 +226,7 @@ internal sealed class Agent
     {
         Messages = [.. messages];
         _notes.Clear();
+        _given.Clear();
         _knownTokens = 0;
         _knownCount = 0;
         _compactedAt = 0;
@@ -256,6 +257,7 @@ internal sealed class Agent
             // The web's conversation changed, or its messages go before some of the session's: the history as the session has it now.
             Messages = history;
             _notes.Clear();
+            _given.Clear();
             _knownTokens = 0;
             _knownCount = 0;
             _compactedAt = 0;
@@ -341,6 +343,17 @@ internal sealed class Agent
 
     /// <summary>A word for the model for this turn only (answer again shorter or longer), in Code Arena's note; null: none.</summary>
     public string? TurnNote { get; set; }
+
+    /// <summary>
+    /// The memories that matter to the person's message (Arena's recall, else the files'), not among those given already
+    /// this session; said in a note before the message (Code Arena's own: never synced to the web chat). Null: no memory.
+    /// </summary>
+    public Func<string, IReadOnlyCollection<string>, CancellationToken, Task<(string Note, List<string> Ids)?>>? Recall { get; set; }
+
+    /// <summary>The memories said in this session's notes (not said again until a compaction drops the notes).</summary>
+    private readonly HashSet<string> _given = [];
+
+    private static bool IsMemory((int At, string Text) note) => note.Text.StartsWith(MemoryStore.RecallHeading, StringComparison.Ordinal);
 
     private async Task<string> RunTurnAsync(string? input, Spend turn, CancellationToken ct, bool takeIn, IReadOnlyList<Mentions.Piece>? pieces, string? quote,
         (string Section, JsonArray Pictures)? uploaded, bool composed = false, string? subject = null)
@@ -522,6 +535,7 @@ internal sealed class Agent
                 ["content"] = pictures is { Count: > 0 } ? new JsonArray([new JsonObject { ["type"] = "text", ["text"] = input }, .. pictures.Select(p => p!.DeepClone())]) : input,
             };
             Add(question);
+            await RecallAsync(input, ct);
         }
         var last = "";
         var interrupted = 0;
@@ -754,6 +768,27 @@ internal sealed class Agent
         return true;
     }
 
+    /// <summary>The memories that matter to the message just added, in a note before it; nothing when memory does not answer.</summary>
+    private async Task RecallAsync(string input, CancellationToken ct)
+    {
+        if (Recall is not { } recall || input.Trim().Length == 0)
+        {
+            return;
+        }
+        try
+        {
+            if (await recall(input, _given, ct) is { } found)
+            {
+                _notes.Add((Messages.Count - 1, found.Note));
+                _given.UnionWith(found.Ids);
+            }
+        }
+        catch (Exception e) when (e is HttpRequestException or IOException or ToolError || e is OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            // Memory is a help, never a reason for the turn not to go.
+        }
+    }
+
     private void Warn(string text)
     {
         Ui.Warn(text);
@@ -813,13 +848,13 @@ internal sealed class Agent
             note += "\n- For this answer: " + once;
         }
         _notes.RemoveAll(n => n.At > Messages.Count);
-        if (_notes.Count > 0 && _notes[^1].Text == note)
+        if (_notes.LastOrDefault(n => !IsMemory(n)) is { Text: var last } && last == note)
         {
             return;
         }
         var at = Messages.Count > 0 && Messages[^1].Str("role") == "user" ? Messages.Count - 1 : Messages.Count;
-        // One that nothing follows yet is replaced rather than kept beside the new one.
-        _notes.RemoveAll(n => n.At >= at);
+        // One that nothing follows yet is replaced rather than kept beside the new one (the memories for a message stay).
+        _notes.RemoveAll(n => n.At >= at && !IsMemory(n));
         _notes.Add((at, note));
     }
 
@@ -1364,6 +1399,7 @@ internal sealed class Agent
         _knownTokens = 0;
         _knownCount = 0;
         _notes.Clear();
+        _given.Clear();
         Ui.Info(said);
         Events?.Compacted(said);
     }

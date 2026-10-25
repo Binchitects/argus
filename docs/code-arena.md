@@ -175,7 +175,7 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/resume [id]` | switch to a saved session |
 | `/web [N\|all\|WORDS]` | your chats in Arena, newest first (the 30 newest; `all`: the 5,000 newest; `WORDS`: those of them with the words in their title or folder); `/web N` (a number in the list last shown, or a chat's id) continues one here |
 | `/sync [all]` | where this session stands with its chat in Arena; `all` sends what Arena lacks of this folder's sessions |
-| `/memory [add\|forget]` | what it remembers (below); `add TEXT` for this project, `add --all TEXT` for every project, `forget N` |
+| `/memory [add\|forget]` | what it remembers (below; Arena's when signed in); `add TEXT` for this project, `add --all TEXT` for every project, `forget N` |
 | `/rewind [N] [code\|chat]` | the turns kept; `/rewind N` goes back to before turn N (below) |
 | `/search WORDS` | earlier sessions in this folder that said these words |
 | `/permissions [allow\|deny\|remove RULE]` | kept rules (below) |
@@ -1571,14 +1571,29 @@ the threshold and says whose it is.
 
 ## What it remembers, and what came before
 
-**Memory.** The model keeps what a later session should know with its
-`remember` tool: how to build and test the project, its conventions, a
-decision, or (for every project) the person's preferences. Each memory is a
-line of a plain Markdown file: the project's in the data folder (by the
-project's path: on this machine only, never in the repository), the person's
-`memory.md` in the config folder. A session's prompt carries both as it starts.
-`/memory` lists them with their files; `/memory add` and `/memory forget N`
-change them, and the files can be edited by hand.
+**Memory.** Signed in to Arena, Code Arena's memory is Arena's, the web
+chat's too (**Workspace → Memory** in Arena lists and edits it). The model
+keeps what a later session should know with its `remember` tool, with its
+kind (how to build and test the project, a convention, a decision and why, a
+lesson from something that went wrong, or for every project the person's
+preferences): a project's memory is kept by the project's key, its
+repository as its `origin` remote names it (`gitlab.corp/payments/api`, the
+same on every machine and clone; a folder with no remote has a key of its
+own on this machine), the person's for every project. A session starts with
+Arena's block (the pinned memories, the company's and the newest, about 400
+tokens); each message then brings the memories that matter to it, in Code
+Arena's note before the message (never synced into the web chat), each said
+once in a session. `recall` searches all of memory when the model needs
+more. `/memory` lists the person's, the project's and the company's,
+numbered; `/memory add [--all] TEXT` and `/memory forget N` change them.
+
+Without Arena (not signed in, or it did not answer as the session started),
+memory is the files on this machine: the project's in the data folder (by
+the project's path, never in the repository), the person's `memory.md` in
+the config folder, each memory a line the person may edit; the session's
+prompt carries both, and the block Arena gave last time. What is kept
+meanwhile goes to Arena when Code Arena next reaches it (once: the files are
+kept beside as `.imported`).
 
 **Earlier sessions.** The model's `search_sessions` tool finds what was said
 in this folder's earlier sessions (every folder's when asked): messages that
@@ -1630,6 +1645,14 @@ too. `/commands` lists what was found.
   (Admin → Plugins), kept in the config folder's `plugin-skills/` and written
   anew at each start when Arena answers (kept as they were when it does not).
   The project's and your own skills of the same name win over them.
+- **Arena's own skills**: the skills people use most come built into Code
+  Arena, the chat's own too (`code-review`, `write-tests`, `debug`,
+  `refactor`, `plan-change`, `commit-message`, `mr-description` and the
+  rest; see [chat.md](chat.md#skills-and-slash-commands)): written to the
+  config folder's `builtin-skills/` at each start and read last, so the
+  project's, your own and the plugins' of the same name win. One an Arena
+  admin turned off is left out. A loaded skill names its parameters
+  (`‹what›`) and says what each is, for the model to take from the request.
 
 ## Kept rules and the sandbox
 

@@ -117,4 +117,30 @@ describe('skills page', () => {
     expect(await screen.findByText('No skills yet')).toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: 'Skills' }).length).toBeGreaterThan(0)
   })
+
+  it('Arena’s own skills are listed apart; an admin turns one off for everyone, and an off one stays out of the / menu', async () => {
+    let off = false
+    const calls = fakeApi(admin, {
+      'GET /api/skills': () => ({
+        json: library({
+          isAdmin: true,
+          skills: [skill({ id: 'b1', name: 'code-review', title: 'Review code', description: 'Review code for bugs.', source: 'builtin', sharing: 'Company', canEdit: false, off })],
+        }),
+      }),
+      'PUT /api/skills/b1/off': (body) => {
+        off = (body as { off: boolean }).off
+        return { status: 204 }
+      },
+    })
+    renderApp('/skills')
+    const own = await screen.findByRole('region', { name: 'Arena’s own' })
+    const card = within(own).getByRole('region', { name: '/code-review' })
+    expect(within(card).getByText('Arena')).toBeInTheDocument()
+    expect(within(card).queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
+    await userEvent.click(within(card).getByRole('button', { name: 'Turn off for everyone' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ off: true }))
+    expect(await within(own).findByText('Off for everyone')).toBeInTheDocument()
+    expect(within(own).getByRole('button', { name: 'Turn on for everyone' })).toBeInTheDocument()
+  })
 })
+

@@ -20,6 +20,7 @@ import { answerUsage, seconds, waitingText } from './format'
 import { NoticeLine, Thinking, ToolCard } from './parts'
 import { useNow } from './use-now'
 import { QuestionCard } from './questions'
+import { MemoriesRead } from './memories-read'
 import { RouteNote } from './route-note'
 import { researchStep } from './research'
 import { MemoryCard } from './memory'
@@ -599,6 +600,7 @@ export function AnswerTurn({
       })}
       {/* Waiting between two steps of the answer (after a tool), for the GPU lent to a picture or video. */}
       {live && !waiting && queued?.why && <output className="block text-sm text-muted-foreground">{queued.why}</output>}
+      {!live && first?.details?.memories && first.details.memories.length > 0 && <MemoriesRead memories={first.details.memories} />}
       {route && (
         <RouteNote
           route={route}

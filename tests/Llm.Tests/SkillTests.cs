@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Llm.Api.Chat;
 using Llm.Api.Plugins;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
 
@@ -249,5 +250,48 @@ public sealed class SkillTests(AppFixture app)
         var kept = SkillLibrary.Kept(SkillLibrary.Keep(call))!;
         Assert.Equal((call.Name, call.Title, call.Instructions, call.TookWords), (kept.Name, kept.Title, kept.Instructions, kept.TookWords));
         Assert.Equal(call.Args, kept.Args);
+    }
+
+    [Fact]
+    public async Task Arenas_own_skills_are_everyones_an_admin_turns_one_off_and_the_companys_of_the_same_name_wins()
+    {
+        await using var f = app.Create(app.ConnectionStringFor("skills_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
+            new Dictionary<string, string?> { ["Auth:DataKey"] = "a-data-key-for-skill-tests", ["Skills:BuiltIn"] = "true" });
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (b, _, email) = await PersonAsync(f);
+        var all = await SkillsAsync(b);
+        Assert.Equal(Llm.Api.Chat.BuiltInSkills.All.Count, all.Count);
+        Assert.True(all.Count >= 20, $"{all.Count} built in");
+        var review = all.Single(s => s.GetProperty("name").GetString() == "code-review");
+        Assert.Equal(("builtin", false, true), (review.GetProperty("source").GetString(), review.GetProperty("canEdit").GetBoolean(), review.GetProperty("autoUse").GetBoolean()));
+        var what = review.GetProperty("parameters")[0];
+        Assert.Equal(("what", false, "the code or change in this conversation"), (what.GetProperty("name").GetString(), what.GetProperty("required").GetBoolean(), what.GetProperty("default").GetString()));
+        // Used as any skill: its instructions, filled in.
+        var chat = await NewChatAsync(b);
+        var res = await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "", skill = new { name = "code-review", args = new { what = "src/parser.cs" } } });
+        Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
+        Assert.Contains("Review src/parser.cs, with correctness first", LastUser(LastRequestFor(email)), StringComparison.Ordinal);
+
+        // Nobody edits Arena's own: the company makes its own of the same name, which wins.
+        var id = review.GetProperty("id").GetString()!;
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await PutAsync(admin, id, new { name = "code-review", title = "Mine", instructions = "x", sharing = "Company" }));
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await admin.Http.DeleteAsync(new Uri($"/api/skills/{id}", UriKind.Relative)));
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/skills", new { name = "code-review", title = "Our review", instructions = "Review {{what}} our way.", sharing = "Company" }));
+        res = await b.PostAsync($"/api/chat/conversations/{await NewChatAsync(b)}/messages", new { content = "", skill = new { name = "code-review", args = new { what = "app.ts" } } });
+        Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
+        Assert.Contains("Review app.ts our way.", LastUser(LastRequestFor(email)), StringComparison.Ordinal);
+
+        // Turned off by an admin: gone for everyone (Code Arena hears so too), still listed for admins to turn on.
+        var debug = all.Single(s => s.GetProperty("name").GetString() == "debug").GetProperty("id").GetString()!;
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await b.Http.PutAsJsonAsync(new Uri($"/api/skills/{debug}/off", UriKind.Relative), new { off = true }));
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri($"/api/skills/{debug}/off", UriKind.Relative), new { off = true }));
+        Assert.DoesNotContain(await SkillsAsync(b), s => s.GetProperty("name").GetString() == "debug");
+        Assert.True((await SkillsAsync(admin)).Single(s => s.GetProperty("name").GetString() == "debug").GetProperty("off").GetBoolean());
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync($"/api/chat/conversations/{await NewChatAsync(b)}/messages", new { content = "x", skill = new { name = "debug" } }));
+
+        // Written again at the next start: still once each, still off.
+        await f.Services.GetRequiredService<Llm.Api.Chat.BuiltInSkills>().SyncAsync(CancellationToken.None);
+        Assert.True((await SkillsAsync(admin)).Single(s => s.GetProperty("name").GetString() == "debug").GetProperty("off").GetBoolean());
+        Assert.Single(await SkillsAsync(admin), s => s.GetProperty("name").GetString() == "summarize");
     }
 }

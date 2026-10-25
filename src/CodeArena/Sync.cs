@@ -101,6 +101,8 @@ internal sealed class ChatSync : IAsyncDisposable
         _notice = notice;
         _vision = vision ?? (() => false);
         store.Added += Added;
+        // A summary goes when it is written, not with the next message: nothing else may come before the session ends.
+        store.SummaryWaiting += Wake;
         _loop = Task.Run(LoopAsync);
         _watch = Task.Run(WatchAsync);
         if (store.Read(d => d.Waiting > 0 || d.Summary is not null))
@@ -1033,6 +1035,8 @@ internal sealed class ChatSync : IAsyncDisposable
     public async Task FlushAsync(TimeSpan most, bool patient = false, CancellationToken ct = default)
     {
         var until = DateTime.UtcNow + most;
+        // What waits goes now, whatever woke the loop last.
+        Wake();
         var tries = 0;
         while (DateTime.UtcNow < until && !ct.IsCancellationRequested)
         {
@@ -1101,6 +1105,7 @@ internal sealed class ChatSync : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _store.Added -= Added;
+        _store.SummaryWaiting -= Wake;
         EndTurn();
         await FlushAsync(TimeSpan.FromSeconds(5));
         await LetGoAsync();
@@ -1337,7 +1342,7 @@ internal sealed class ChatSync : IAsyncDisposable
         return (res.StatusCode, text.Length > 0 && text.TrimStart().StartsWith('{') ? Json.ParseObject(text) : null);
     }
 
-    private static HttpRequestMessage Request(HttpMethod method, string url, string key, JsonObject? body)
+    internal static HttpRequestMessage Request(HttpMethod method, string url, string key, JsonObject? body)
     {
         var req = new HttpRequestMessage(method, url);
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);

@@ -32,4 +32,9 @@
     <None Include="Dashboards\json\**" />
   </ItemGroup>
 
+  <!-- The skills that come with Arena (the repository's skills/ folder): the chat's and Code Arena's alike. -->
+  <ItemGroup>
+    <EmbeddedResource Include="../../skills/**/*" LogicalName="skills/%(RecursiveDir)%(Filename)%(Extension)" WithCulture="false" />
+  </ItemGroup>
+
 </Project>

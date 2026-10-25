@@ -514,6 +514,8 @@ public sealed class Harness : IDisposable
             ["url"] = mcp?.BaseUrl ?? gateway.Url,
             ["gateway"] = gateway.Url,
             ["apiKey"] = FakeGateway.Key,
+            // Arena's own skills only where a test brings them: the others measure the prompt as it was.
+            ["builtInSkills"] = false,
         };
         config?.Invoke(json);
         File.WriteAllText(Paths.ConfigFile, json.ToJsonString());
@@ -670,6 +672,110 @@ public sealed class FakeChats
     /// <summary>When the person's chats compact, as /api/code-arena/preferences says: their own choice (null: none), and Arena's default.</summary>
     public int? CompactAt { get; set; }
     public int CompactAtDefault { get; set; } = 80;
+    /// <summary>Arena's own skills its admins turned off, as /api/code-arena/skills says (null: it does not answer that).</summary>
+    public List<string>? SkillsOff { get; set; }
+
+    /// <summary>Whether Arena keeps Code Arena's memory (/api/code-arena/memories; an older one does not).</summary>
+    public bool Memory { get; set; } = true;
+
+    /// <summary>Arena's memories, as /api/code-arena/memories keeps them: id, text, scope, kind, project.</summary>
+    public List<JsonObject> Memories { get; } = [];
+
+    /// <summary>The recalls Code Arena asked: the query and the memories it had been given already.</summary>
+    public List<(string Query, List<string> Besides)> Recalls { get; } = [];
+
+    private static string MemoryLine(JsonObject m)
+    {
+        var tags = new List<string>();
+        if (m["kind"]?.GetValue<string>() is { } k && k != "fact")
+        {
+            tags.Add(k == "howto" ? "how to" : k);
+        }
+        if (m["scope"]?.GetValue<string>() == "project")
+        {
+            tags.Add("this project's");
+        }
+        return m["text"]!.GetValue<string>() + (tags.Count > 0 ? $" ({string.Join(", ", tags)})" : "");
+    }
+
+    private static HashSet<string> MemoryWords(string text) =>
+        [.. System.Text.RegularExpressions.Regex.Matches(text.ToLowerInvariant(), "[a-z0-9]{4,}").Select(m => m.Value)];
+
+    /// <summary>Arena's memory routes: as Arena answers them, with words standing in for meaning.</summary>
+    private async Task MemoryAsync(HttpListenerContext ctx, string[] rest, string method, string body)
+    {
+        var json = body.Length > 0 ? JsonNode.Parse(body) as JsonObject : null;
+        JsonNode reply;
+        var status = 200;
+        lock (_gate)
+        {
+            var project = ctx.Request.QueryString["project"] ?? json?["project"]?.GetValue<string>();
+            var readable = Memories.Where(m => m["scope"]!.GetValue<string>() == "person" || m["project"]?.GetValue<string>() == project).ToList();
+            switch (rest, method)
+            {
+                case ([], "GET"):
+                    reply = new JsonObject
+                    {
+                        ["on"] = true,
+                        ["note"] = readable.Count == 0 ? null : "What you remember about the person, from their earlier chats:" + string.Concat(readable.Select(m => "\n- " + MemoryLine(m))),
+                        ["inNote"] = new JsonArray([.. readable.Select(m => (JsonNode)m["id"]!.GetValue<string>())]),
+                        ["memories"] = new JsonArray([.. readable.Select(m => m.DeepClone())]),
+                    };
+                    break;
+                case ([], "POST") or (["import"], "POST"):
+                    var items = rest is ["import"] ? (json!["memories"] as JsonArray)!.OfType<JsonObject>().ToList() : [json!];
+                    var kept = 0;
+                    JsonObject? last = null;
+                    foreach (var item in items)
+                    {
+                        var text = item["text"]?.GetValue<string>() ?? "";
+                        var scope = item["scope"]?.GetValue<string>() ?? "person";
+                        var key = scope == "project" ? item["project"]?.GetValue<string>() : null;
+                        last = Memories.FirstOrDefault(m => m["text"]!.GetValue<string>() == text && m["scope"]!.GetValue<string>() == scope && m["project"]?.GetValue<string>() == key);
+                        if (last is null && text.Length > 0)
+                        {
+                            last = new JsonObject
+                            {
+                                ["id"] = Guid.NewGuid().ToString(), ["text"] = text, ["scope"] = scope, ["kind"] = item["kind"]?.GetValue<string>() ?? "fact",
+                                ["project"] = key, ["pinned"] = false, ["mine"] = true,
+                            };
+                            Memories.Add(last);
+                            kept++;
+                        }
+                    }
+                    reply = rest is ["import"] ? new JsonObject { ["kept"] = kept, ["skipped"] = items.Count - kept } : last!.DeepClone();
+                    break;
+                case (["recall"], "POST"):
+                    var besides = (json!["besides"] as JsonArray ?? []).Select(b => b!.GetValue<string>()).ToList();
+                    Recalls.Add((json["query"]!.GetValue<string>(), besides));
+                    var words = MemoryWords(json["query"]!.GetValue<string>());
+                    var found = readable.Where(m => !besides.Contains(m["id"]!.GetValue<string>()) && MemoryWords(m["text"]!.GetValue<string>()).Overlaps(words)).ToList();
+                    reply = new JsonObject
+                    {
+                        ["note"] = found.Count == 0 ? null : "(Memories that may matter to this question; use them where they help:" + string.Concat(found.Select(m => "\n- " + MemoryLine(m))) + ")",
+                        ["memories"] = new JsonArray([.. found.Select(m => m.DeepClone())]),
+                    };
+                    break;
+                case ([var id], "DELETE"):
+                    status = Memories.RemoveAll(m => m["id"]!.GetValue<string>() == id) > 0 ? 204 : 404;
+                    reply = new JsonObject();
+                    break;
+                default:
+                    status = 404;
+                    reply = new JsonObject();
+                    break;
+            }
+        }
+        if (status == 204)
+        {
+            ctx.Response.StatusCode = 204;
+            return;
+        }
+        ctx.Response.StatusCode = status;
+        ctx.Response.ContentType = "application/json";
+        await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(reply.ToJsonString()));
+    }
+
     /// <summary>Whether Arena answers /api/code-arena/preferences (an older one does not).</summary>
     public bool Preferences { get; set; } = true;
     /// <summary>The web chat's config for the person, as /api/code-arena/config gives it; null: Arena does not answer it.</summary>
@@ -910,6 +1016,21 @@ public sealed class FakeChats
                 ctx.Response.ContentType = "application/json";
                 await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(config.ToJsonString()));
             }
+            return;
+        }
+        if (parts is ["skills"] && method == "GET" && SkillsOff is { } off)
+        {
+            ctx.Response.StatusCode = 200;
+            ctx.Response.ContentType = "application/json";
+            await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(new JsonObject
+            {
+                ["skills"] = new JsonArray(), ["off"] = new JsonArray([.. off.Select(n => (JsonNode)n)]),
+            }.ToJsonString()));
+            return;
+        }
+        if (parts is ["memories", ..] && Memory)
+        {
+            await MemoryAsync(ctx, parts[1..], method, body);
             return;
         }
         if (parts is ["preferences"] && method == "GET")
