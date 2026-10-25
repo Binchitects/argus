@@ -114,7 +114,7 @@ public static class DownloadEndpoints
             chmod 755 "$tmp"
             mv -f "$tmp" "$dir/code-arena"
             echo "Code Arena $version is in $dir/code-arena."
-            case ":$PATH:" in *":$dir:"*) ;; *) echo "Add $dir to your PATH (e.g. in ~/.profile): export PATH="$dir:\$PATH"" ;; esac
+            case ":$PATH:" in *":$dir:"*) ;; *) echo "Add $dir to your PATH (e.g. in ~/.profile): export PATH=\"$dir:\$PATH\"" ;; esac
             echo "Next, sign in: code-arena login --url $arena${CODE_ARENA_CA:+ --ca $CODE_ARENA_CA}"
             echo "Then, in a project: code-arena (it checks this Arena for newer versions; code-arena update installs one)."
 

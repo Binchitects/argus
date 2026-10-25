@@ -94,6 +94,7 @@ public sealed class DownloadTests(AppFixture app)
             var (code, output) = await RunAsync(sh);
             Assert.True(code == 0, output);
             Assert.Contains("Next, sign in: code-arena login --url", output, StringComparison.Ordinal);
+            Assert.Contains($"export PATH=\"{Path.Combine(dir, "bin")}:$PATH\"", output, StringComparison.Ordinal);
             Assert.Equal("#!/bin/sh\necho code-arena 9.9.9\n", await File.ReadAllTextAsync(Path.Combine(dir, "bin", "code-arena")));
             Assert.True(File.GetUnixFileMode(Path.Combine(dir, "bin", "code-arena")).HasFlag(UnixFileMode.UserExecute));
 
