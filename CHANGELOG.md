@@ -12,6 +12,57 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v6.9.0 (2026-10-25)
+
+Everyone, in every language: meetings made into minutes, calls in rooms with
+live captions in each reader's language, and Arena on the phone.
+
+### :rocket: Epics and highlights
+
+- **Meetings** (Workspace → Meetings): record one in the browser or upload a
+  sound or a video (up to 60 MB, three hours as the browser records). It is
+  made in steps shown as they go: speech to text writes down every word with
+  its time, the studio's voice model tells the speakers apart, and the chat
+  model writes the title, the summary, the decisions and the action items
+  (whose each is and by when) and names the speakers from what they called
+  each other. The meeting's page plays the recording from any line of the
+  transcript, marks the line playing, and finds words in it; a speaker told
+  to be a person in Arena has their action items, reminded once on the day
+  due. **Make a plan** makes a plan with a step per action item; **Ask about
+  it** opens a chat with the minutes and the whole transcript
+- **Calls in rooms**: **Call** in a room's header, and its people **Join**.
+  Each page talks to every other directly (WebRTC, up to 8; the server passes
+  only their signals); what each says is written down as they speak and shown
+  to all as live captions, in each reader's language when they read the room
+  in one, the original a click away. **Mute** stops the sound and the
+  captions
+- **Arena on the phone**: installed, it is in the phone's Share sheet (a file,
+  a page or words from any app open a new chat with them), a long press on
+  its icon offers **New chat**, **Talk** and **Record a meeting**, and a
+  message sent with no connection waits above the box and goes by itself
+  when the connection is back
+
+### :sparkles: New features & Enhancements
+
+- `Rooms:Calls:IceServers` for browsers on different networks;
+  `Rooms:Calls:MostInCall` (8); `Meetings:MaxUploadBytes`,
+  `Meetings:MostPerPerson`
+- Money is not math in answers and the manual: "$0.05 … $0.006" stays text,
+  "$x$" stays a formula
+- The tools dialog's kind is a choice (MCP server, API) rather than tabs
+  without panels
+
+### :bug: Bugs fixed
+
+- On a busy machine an agent connecting to Arena MCP could be told a
+  plugin "failed to start", or miss Argus's tools: Argus read the database on
+  the request's context beside a plugin's sign-in. It reads with its own now
+- The background engines (answers, reviews, the business map, meetings) stop
+  with the host's own stopping token: the test host could dispose them first
+- On a phone, a room's header lay over the Thinking picker and the
+  composer's Send button left the box; at 320 px, tables in a card, tabs and
+  the webhook card's buttons widened the page
+
 ## v6.8.0 (2026-10-23)
 
 Code Studio, and Argus the business's technical mind: an IDE like VS Code in

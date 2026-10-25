@@ -1567,6 +1567,10 @@ company's knowledge.
    question fits (`use_skill`). A plugin's skill folders (`SKILL.md`) are the
    chat's slash commands and Code Arena's skills alike.
 
+Released: **v6.9.0** (2026-10-25), all three items below, except: a call's
+sound goes page to page (WebRTC) and is not recorded, so a call is not made
+a meeting yet; push notifications came ahead, in v5.x.
+
 ### v6.9 — Everyone, in every language
 
 1. **Rooms in every language** (reading a room in one's language came
