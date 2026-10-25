@@ -92,6 +92,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<AccessMeta> AccessMeta => Set<AccessMeta>();
     public DbSet<Memory> Memories => Set<Memory>();
     public DbSet<MemoryChange> MemoryChanges => Set<MemoryChange>();
+    public DbSet<SkillChange> SkillChanges => Set<SkillChange>();
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<KnowledgeSource> KnowledgeSources => Set<KnowledgeSource>();
     public DbSet<KnowledgeDocument> KnowledgeDocuments => Set<KnowledgeDocument>();
@@ -932,6 +933,18 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(c => new { c.UserId, c.At });
             e.HasOne<AppUser>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);
         });
+        builder.Entity<SkillChange>(e =>
+        {
+            e.ToTable("skill_changes");
+            e.Property(c => c.Action).HasMaxLength(16);
+            e.Property(c => c.Reason).HasMaxLength(500);
+            e.Property(c => c.Before).HasMaxLength(40_000);
+            e.Property(c => c.After).HasMaxLength(40_000);
+            e.HasIndex(c => new { c.SkillId, c.At });
+            e.HasIndex(c => new { c.UserId, c.Proposed });
+            e.HasOne<Skill>().WithMany().HasForeignKey(c => c.SkillId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
         builder.Entity<Skill>(e =>
         {
             e.ToTable("skills");
@@ -942,6 +955,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(p => p.Parameters).HasMaxLength(10_000).HasDefaultValue("[]");
             e.Property(p => p.AutoUse).HasDefaultValue(true);
             e.Property(p => p.Groups).HasDefaultValueSql("'{}'::uuid[]");
+            e.Property(p => p.Source).HasMaxLength(16).HasDefaultValue(Skill.Typed);
+            e.Property(p => p.Version).HasDefaultValue(1);
             e.HasIndex(p => p.UserId);
             // Each built-in one once, whichever replica writes them.
             e.HasIndex(p => p.Name).IsUnique().HasFilter("\"BuiltIn\"").HasDatabaseName("IX_skills_Name_BuiltIn");

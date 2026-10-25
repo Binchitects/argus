@@ -276,7 +276,14 @@ public sealed class FakeModel : HttpMessageHandler
             var first = System.Text.RegularExpressions.Regex.Match(lastUser, @"- \[([0-9a-f-]{36})\]").Groups[1].Value;
             var proposed = System.Text.RegularExpressions.Regex.Matches(lastUser, @"\[propose (\{[^\]]*\})\]")
                 .Select(m => JsonNode.Parse(m.Groups[1].Value.Replace("FIRST", first, StringComparison.Ordinal))!).ToList();
-            chunks = [Delta(new JsonObject { ["content"] = "Here they are:\n" + new JsonObject { ["memories"] = new JsonArray([.. proposed]) }.ToJsonString() }), Finish("stop"), Usage(300, 0, 60)];
+            // A skill worked out ([skill {...}]) and better versions of those used ([improve {...}]).
+            var skill = System.Text.RegularExpressions.Regex.Match(lastUser, @"\[skill (\{[^\]]*\})\]");
+            var improve = System.Text.RegularExpressions.Regex.Matches(lastUser, @"\[improve (\{[^\]]*\})\]").Select(m => JsonNode.Parse(m.Groups[1].Value)!).ToList();
+            var reflected = new JsonObject
+            {
+                ["memories"] = new JsonArray([.. proposed]), ["skill"] = skill.Success ? JsonNode.Parse(skill.Groups[1].Value) : null, ["improve"] = new JsonArray([.. improve]),
+            };
+            chunks = [Delta(new JsonObject { ["content"] = "Here they are:\n" + reflected.ToJsonString() }), Finish("stop"), Usage(300, 0, 60)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
         // The memory garden: those that say the same merged (the newest, marked), a long one tightened (its start).

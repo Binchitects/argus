@@ -32,10 +32,38 @@ export interface SkillItem {
   from: string | null
   canEdit: boolean
   updatedAt: string
+  /** Learned from the person's work and not kept yet: not used until they keep it. */
+  proposed?: boolean
+  /** Its version: one more with each better one applied (or undone). */
+  version?: number
+  /** Learned from a chat or a Code Arena session, rather than written. */
+  learned?: boolean
 }
+
+/** How one of the person's skills was learned or got better: waiting for them, applied (with Undo), or undone. */
+export interface SkillChangeItem {
+  id: string
+  skillId: string
+  action: 'learned' | 'improved'
+  reason: string
+  proposed: boolean
+  at: string
+  appliedAt: string | null
+  undoneAt: string | null
+  sourceId: string | null
+  /** The instructions before (a better version) and after. */
+  before: string | null
+  after: string | null
+}
+
+export const applySkillChange = (id: string) => api(`/api/skills/changes/${id}/apply`, { body: {} })
+export const dismissSkillChange = (id: string) => api(`/api/skills/changes/${id}/dismiss`, { body: {} })
+export const undoSkillChange = (id: string) => api(`/api/skills/changes/${id}/undo`, { body: {} })
 
 export interface SkillLibrary {
   isAdmin: boolean
+  /** How the person's skills learned and got better, waiting ones first. */
+  changes?: SkillChangeItem[]
   /** The groups the person may share a skill with. */
   groups: { id: string; name: string }[]
   skills: SkillItem[]
@@ -92,7 +120,7 @@ export function matchSkills(skills: SkillItem[], query: string): SkillItem[] {
   const score = (s: SkillItem) =>
     s.name.startsWith(q) ? 0 : s.name.includes(q) ? 1 : s.title.toLowerCase().includes(q) ? 2 : s.description.toLowerCase().includes(q) ? 3 : -1
   return skills
-    .filter((s) => !s.off)
+    .filter((s) => !s.off && !s.proposed)
     .map((s, i) => ({ s, i, score: score(s) }))
     .filter((x) => x.score >= 0)
     .sort((a, b) => a.score - b.score || a.i - b.i)

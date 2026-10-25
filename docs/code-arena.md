@@ -1680,6 +1680,20 @@ subfolder shares it; commit it to share it with the team (or add it to
 **Memory** view opens it. `"projectMemory": false` in `config.json` turns
 it off.
 
+**It learns skills as it works.** `skill_save` keeps a way of doing a task
+the session worked out (how to release here, how to add an endpoint, how to
+debug this kind of failure) as a skill, to do it the same way next time: for
+the project, `.arena/skills/NAME/SKILL.md` in the repository (a better
+version replaces it; commit it to share it), asking first as any edit does
+in the ask mode; or for the person (`"scope": "person"`), one of their
+skills in Arena, used in every project and the web chat, waiting on Arena's
+Skills page unless they keep what is learned on their own (one of theirs of
+that name gets a better version instead). Sessions read skills as they
+start: one saved is used from the next. After a turn of 8 steps or more,
+Code Arena's note reminds the model to keep what it worked out (a skill, or
+the project's memory). Arena also learns skills from the sessions it keeps
+in step with its chats, as it does from the web chat.
+
 **The IDE's Memory view** (the brain in the activity bar) lists what Arena
 remembers for this project, the person and the company, finds by words,
 keeps one (for this project, or for every one) and forgets one of the

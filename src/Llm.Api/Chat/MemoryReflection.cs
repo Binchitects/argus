@@ -44,8 +44,15 @@ public sealed partial class MemoryReflection(IServiceScopeFactory scopes, Operat
         "say the same in other words. When the conversation says otherwise " +
         "than a kept memory, propose the new one with \"replaces\": that memory's id. One or two short sentences each, about the person or " +
         "their work, in the person's language. A project's memory (scope project) is about the code base they worked in here, only when " +
-        "the conversation is a coding session. Answer with JSON only: {\"memories\":[{\"text\":\"…\",\"kind\":\"preference|fact|decision|howto|lesson\"," +
-        "\"scope\":\"person|project\",\"replaces\":null}]} — an empty list when there is nothing worth keeping; at most 5.";
+        "the conversation is a coding session. An answer the person marked bad (said with the reason) is a lesson: what to do " +
+        "differently. Skills too: when the conversation worked out a way of doing a task the person is likely to do again (several steps, " +
+        "not one answer), propose one skill, written as instructions to an assistant, general enough to reuse (no one-off details), never " +
+        "one the person has already (listed); and when a skill used here (given with its instructions) went wrong or the person corrected " +
+        "what it did, propose its better version, whole. Answer with JSON only: {\"memories\":[{\"text\":\"…\",\"kind\":" +
+        "\"preference|fact|decision|howto|lesson\",\"scope\":\"person|project\",\"replaces\":null}],\"skill\":{\"name\":\"kebab-case\"," +
+        "\"title\":\"…\",\"description\":\"when to use it\",\"instructions\":\"…\"},\"improve\":[{\"skill\":\"its name\",\"instructions\":" +
+        "\"the whole new instructions\",\"why\":\"what was wrong\"}]} — memories at most 5, an empty list when nothing is worth keeping; " +
+        "skill null and improve empty unless there is one.";
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -115,8 +122,22 @@ public sealed partial class MemoryReflection(IServiceScopeFactory scopes, Operat
     private static async Task ReflectAsync(IServiceProvider services, AppDbContext db, Memories memories, Conversation chat, AppUser person, CancellationToken ct)
     {
         var said = await db.ChatMessages.AsNoTracking()
-            .Where(m => m.ConversationId == chat.Id && m.Sequence > chat.ReflectedSequence && (m.Role == "user" || m.Role == "assistant") && m.Content != "")
-            .OrderBy(m => m.Sequence).Select(m => new { m.Role, m.Content, m.Sequence }).ToListAsync(ct);
+            .Where(m => m.ConversationId == chat.Id && m.Sequence > chat.ReflectedSequence && (m.Role == "user" || m.Role == "assistant") && (m.Content != "" || m.ToolCallsJson != null))
+            .OrderBy(m => m.Sequence).Select(m => new { m.Id, m.Role, m.Content, m.Sequence, m.Skill, m.ToolCallsJson }).ToListAsync(ct);
+        // The answers the person marked bad, with why: lessons.
+        var answerIds = said.Where(m => m.Role == "assistant").Select(m => m.Id).ToList();
+        var bad = await db.AnswerFeedback.AsNoTracking().Where(f => f.ConversationId == chat.Id && !f.Up && answerIds.Contains(f.MessageId))
+            .ToDictionaryAsync(f => f.MessageId, f => string.Join(": ", new[] { f.Reason, f.Comment }.Where(x => !string.IsNullOrWhiteSpace(x))), ct);
+        // The skills used here: chosen with / (their call kept on the question), or by the model (use_skill).
+        var usedNames = said.Select(m => SkillLibrary.Kept(m.Skill)?.Name).OfType<string>()
+            .Concat(said.Where(m => m.ToolCallsJson?.Contains(Tools.SkillTool.Function, StringComparison.Ordinal) == true)
+                .SelectMany(m => (JsonNode.Parse(m.ToolCallsJson!) as JsonArray ?? []).OfType<JsonObject>())
+                .Where(c => c["function"]?["name"]?.GetValue<string>() == Tools.SkillTool.Function)
+                .Select(c => JsonNode.Parse(c["function"]?["arguments"]?.GetValue<string>() ?? "{}")?["name"]?.GetValue<string>()).OfType<string>())
+            .Select(n => n.Trim().TrimStart('/')).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var access = services.GetRequiredService<Access.AccessService>();
+        var usable = await SkillEndpoints.UsableAsync(person, access, db, ct);
+        var used = usable.Where(x => usedNames.Contains(x.Name, StringComparer.OrdinalIgnoreCase)).GroupBy(x => x.Name).Select(g => g.First()).ToList();
         var last = await LastAsync(db, chat.Id, ct);
         if (said.Count == 0 || said.Where(m => m.Role == "user").Sum(m => m.Content.Length) < 20)
         {
@@ -124,21 +145,31 @@ public sealed partial class MemoryReflection(IServiceScopeFactory scopes, Operat
             return;
         }
         var text = new StringBuilder();
-        foreach (var m in said)
+        foreach (var m in said.Where(m => m.Content.Length > 0))
         {
             var content = m.Role == "assistant" && m.Content.Length > 800 ? m.Content[..800] + " …" : m.Content;
-            text.Append(m.Role == "user" ? "The person: " : "The assistant: ").Append(content).Append("\n\n");
+            var skill = m.Role == "user" && SkillLibrary.Kept(m.Skill) is { } call ? $" (with the skill /{call.Name})" : "";
+            text.Append(m.Role == "user" ? $"The person{skill}: " : "The assistant: ").Append(content).Append("\n\n");
+            if (bad.TryGetValue(m.Id, out var why))
+            {
+                text.Append("(The person marked this answer bad").Append(why.Length > 0 ? $": {why}" : "").Append(".)\n\n");
+            }
         }
         var conversation = text.Length > MostChars ? "…" + text.ToString()[^MostChars..] : text.ToString();
         var known = await memories.RecallAsync(person, conversation[Math.Max(0, conversation.Length - 3_000)..], ct, chat.ProjectKey, budget: 4_000, most: 30);
         var kept = known.Select(r => r.Memory).ToList();
         var question = new StringBuilder();
+        question.Append("The person's skills already: ").AppendJoin(", ", usable.Select(x => "/" + x.Name).Distinct().Take(80)).Append("\n\n");
+        foreach (var x in used)
+        {
+            question.Append("The skill /").Append(x.Name).Append(" used here, its instructions:\n").Append(x.Instructions.Length > 4_000 ? x.Instructions[..4_000] + " …" : x.Instructions).Append("\n\n");
+        }
         if (kept.Count > 0)
         {
             question.Append("Remembered already:\n").AppendJoin('\n', kept.Select(m => $"- [{m.Id}] {Memories.Line(m)}")).Append("\n\n");
         }
         question.Append(chat.Origin == CodeArenaSync.Origin ? $"A coding session in {chat.ProjectKey ?? "a project"}:\n\n" : "The conversation:\n\n").Append(conversation);
-        var asked = await services.GetRequiredService<OneQuestion>().AskAsync(person, question.ToString(), Instructions, "small", 1_500, Tag, ct);
+        var asked = await services.GetRequiredService<OneQuestion>().AskAsync(person, question.ToString(), Instructions, "small", 3_000, Tag, ct);
         if (asked.Problem is not null || asked.Text is not { } answer)
         {
             // Refused (no model, the safeguards): not asked again for what is there now.
@@ -146,7 +177,8 @@ public sealed partial class MemoryReflection(IServiceScopeFactory scopes, Operat
             return;
         }
         var (start, end) = (answer.IndexOf('{'), answer.LastIndexOf('}'));
-        var proposals = start < 0 || end <= start ? [] : (JsonNode.Parse(answer[start..(end + 1)])?["memories"] as JsonArray ?? []).OfType<JsonObject>().Take(MostProposed).ToList();
+        var parsed = start < 0 || end <= start ? null : JsonNode.Parse(answer[start..(end + 1)]);
+        var proposals = (parsed?["memories"] as JsonArray ?? []).OfType<JsonObject>().Take(MostProposed).ToList();
         var waiting = new List<string>();
         var keptNow = new List<string>();
         var fromCodeArena = chat.Origin == CodeArenaSync.Origin;
@@ -170,16 +202,55 @@ public sealed partial class MemoryReflection(IServiceScopeFactory scopes, Operat
             (proposed ? waiting : keptNow).Add(words);
         }
         chat.ReflectedSequence = last;
+        var title = string.IsNullOrWhiteSpace(chat.Title) ? "a chat" : $"“{chat.Title}”";
+        await LearnSkillsAsync(services, db, chat, person, parsed, used, title, last, ct);
         if (waiting.Count + keptNow.Count == 0)
         {
             return;
         }
-        var title = string.IsNullOrWhiteSpace(chat.Title) ? "a chat" : $"“{chat.Title}”";
         var news = waiting.Count > 0
             ? new Notifications.News(Tag, waiting.Count == 1 ? $"Remember this from {title}?" : $"Remember {waiting.Count} things from {title}?",
                 string.Join(" · ", waiting), "/memory", $"memory-reflect:{chat.Id}:{last}")
             : new Notifications.News(Tag, keptNow.Count == 1 ? $"Remembered from {title}" : $"Remembered {keptNow.Count} things from {title}",
                 string.Join(" · ", keptNow), "/memory", $"memory-reflect:{chat.Id}:{last}");
+        await services.GetRequiredService<Notifications.Notifier>().SendAsync(person.Id, news, ct);
+    }
+
+    /// <summary>
+    /// The skill a chat worked out, and the better versions of those it used: each waiting for the person (Skills), or kept at
+    /// once when they keep what is learned on their own; the bell says which.
+    /// </summary>
+    private static async Task LearnSkillsAsync(IServiceProvider services, AppDbContext db, Conversation chat, AppUser person, JsonNode? parsed, List<Skill> used,
+        string title, int last, CancellationToken ct)
+    {
+        var keep = person.MemoryAuto;
+        var said = new List<string>();
+        if (parsed?["skill"] is JsonObject s && s["name"]?.GetValue<string>() is { } name)
+        {
+            var learned = new LearnedSkill(name.Trim().TrimStart('/'), s["title"]?.GetValue<string>() ?? name, s["description"]?.GetValue<string>() ?? "",
+                s["instructions"]?.GetValue<string>() ?? "");
+            if (await SkillLearning.LearnAsync(db, person.Id, learned, chat.Id, $"Worked out in {title}", keep, ct) is { } made)
+            {
+                said.Add($"/{made.Name}: {made.Title}");
+            }
+        }
+        foreach (var i in (parsed?["improve"] as JsonArray ?? []).OfType<JsonObject>().Take(3))
+        {
+            var which = i["skill"]?.GetValue<string>()?.Trim().TrimStart('/');
+            if (used.FirstOrDefault(x => string.Equals(x.Name, which, StringComparison.OrdinalIgnoreCase)) is { } skill
+                && await SkillLearning.ImproveAsync(db, person.Id, skill, i["instructions"]?.GetValue<string>() ?? "", i["why"]?.GetValue<string>() ?? "", chat.Id, keep, ct) is not null)
+            {
+                said.Add($"/{skill.Name}, better");
+            }
+        }
+        if (said.Count == 0)
+        {
+            return;
+        }
+        await db.SaveChangesAsync(ct);
+        var news = new Notifications.News("skill",
+            keep ? $"Learned from {title}" : said.Count == 1 ? $"A skill from {title}: keep it?" : $"{said.Count} skills from {title}: keep them?",
+            string.Join(" · ", said), "/skills", $"skill-learn:{chat.Id}:{last}");
         await services.GetRequiredService<Notifications.Notifier>().SendAsync(person.Id, news, ct);
     }
 

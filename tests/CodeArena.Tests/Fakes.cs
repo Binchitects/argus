@@ -20,7 +20,7 @@ public sealed record Reply(string Text, (string Name, string Args)[] Calls, stri
 /// <summary>An HTTP server on 127.0.0.1 and a free port, handling each request on its own task.</summary>
 public abstract class FakeServer : IDisposable
 {
-    private readonly HttpListener _listener = new();
+    private readonly HttpListener _listener;
     private readonly CancellationTokenSource _stop = new();
 
     protected FakeServer()
@@ -32,16 +32,19 @@ public abstract class FakeServer : IDisposable
             var port = ((IPEndPoint)probe.LocalEndpoint).Port;
             probe.Stop();
             BaseUrl = $"http://127.0.0.1:{port}";
-            _listener.Prefixes.Clear();
-            _listener.Prefixes.Add(BaseUrl + "/");
+            // A listener for each try: one whose start failed is closed, and cannot be started again.
+            var listener = new HttpListener();
+            listener.Prefixes.Add(BaseUrl + "/");
             try
             {
-                _listener.Start();
+                listener.Start();
+                _listener = listener;
                 break;
             }
             catch (HttpListenerException) when (attempt < 5)
             {
                 // Taken between the probe and the start: another port.
+                listener.Close();
             }
         }
         _ = Task.Run(LoopAsync);
@@ -717,6 +720,9 @@ public sealed class FakeChats
     /// <summary>The recalls Code Arena asked: the query and the memories it had been given already.</summary>
     public List<(string Query, List<string> Besides)> Recalls { get; } = [];
 
+    /// <summary>The skills Code Arena kept as the person's (POST /api/code-arena/skills/learn).</summary>
+    public List<JsonObject> SkillsLearned { get; } = [];
+
     /// <summary>What Code Arena asked of Arena's past chats: search or open, and its body.</summary>
     public List<(string What, JsonObject Body)> HistoryAsked { get; } = [];
 
@@ -1067,6 +1073,18 @@ public sealed class FakeChats
         if (parts is ["memories", ..] && Memory)
         {
             await MemoryAsync(ctx, parts[1..], method, body);
+            return;
+        }
+        if (parts is ["skills", "learn"] && method == "POST")
+        {
+            // A skill the agent worked out, kept as the person's: what Code Arena sent, and Arena's word.
+            lock (_gate)
+            {
+                SkillsLearned.Add((JsonNode.Parse(body) as JsonObject)!);
+            }
+            ctx.Response.StatusCode = 200;
+            ctx.Response.ContentType = "application/json";
+            await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(new JsonObject { ["text"] = "It waits for the person on the Skills page.", ["error"] = false }.ToJsonString()));
             return;
         }
         if (parts is ["history", var asked] && method == "POST")

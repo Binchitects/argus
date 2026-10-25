@@ -33,6 +33,13 @@ public static class SkillEndpoints
         g.MapPut("/{id:guid}", UpdateAsync);
         g.MapDelete("/{id:guid}", DeleteAsync);
         g.MapPut("/{id:guid}/off", OffAsync);
+        // What was learned from the person's work: kept, set aside, or undone.
+        g.MapPost("/changes/{id:guid}/apply", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct) =>
+            await SkillLearning.ApplyAsync(db, (await users.GetUserAsync(p))!.Id, id, ct) ? Results.NoContent() : Results.NotFound());
+        g.MapPost("/changes/{id:guid}/dismiss", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct) =>
+            await SkillLearning.DismissAsync(db, (await users.GetUserAsync(p))!.Id, id, ct) ? Results.NoContent() : Results.NotFound());
+        g.MapPost("/changes/{id:guid}/undo", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct) =>
+            await SkillLearning.UndoAsync(db, (await users.GetUserAsync(p))!.Id, id, ct) ? Results.NoContent() : Results.NotFound());
     }
 
     private sealed record Viewer(AppUser Me, Membership Member, IReadOnlyDictionary<string, ToolSetting> Tools)
@@ -64,7 +71,8 @@ public static class SkillEndpoints
     {
         var tools = await db.ToolSettings.AsNoTracking().Where(s => s.ToolId.StartsWith(McpServerTool.Prefix)).ToDictionaryAsync(s => s.ToolId, ct);
         var who = new Viewer(me, await access.MembershipAsync(me, ct), tools);
-        return [.. (await db.Skills.AsNoTracking().Where(x => !x.Off && (x.UserId == me.Id || x.UserId == null || x.Sharing == SkillSharing.Groups)).ToListAsync(ct))
+        // One learned and not kept yet is not used (the person keeps it on the Skills page).
+        return [.. (await db.Skills.AsNoTracking().Where(x => !x.Off && !x.Proposed && (x.UserId == me.Id || x.UserId == null || x.Sharing == SkillSharing.Groups)).ToListAsync(ct))
             .Where(who.Sees).OrderBy(x => Rank(x, me.Id)).ThenBy(x => x.Name, StringComparer.Ordinal)];
     }
 
@@ -84,9 +92,12 @@ public static class SkillEndpoints
         var plugins = await db.McpServers.AsNoTracking().Where(s => serverIds.Contains(s.Id)).ToDictionaryAsync(s => s.Id, s => s.Name, ct);
         var ownerIds = seen.Where(x => x.UserId is { } o && o != me).Select(x => x.UserId!.Value).ToHashSet();
         var owners = await db.Users.AsNoTracking().Where(u => ownerIds.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.DisplayName.Length > 0 ? u.DisplayName : u.UserName!, ct);
+        // How the person's skills learned and got better: waiting first, then the newest.
+        var changes = await db.SkillChanges.AsNoTracking().Where(c => c.UserId == me).OrderByDescending(c => c.Proposed).ThenByDescending(c => c.At).Take(200).ToListAsync(ct);
         return Results.Ok(new
         {
             isAdmin = who.Member.IsAdmin,
+            changes = changes.Select(SkillLearning.View),
             // The groups they may share with: their own; an admin, any.
             groups = groups.Where(g => who.Member.IsAdmin || who.Member.Groups.Contains(g.Id)),
             skills = seen.OrderBy(x => x.Name, StringComparer.Ordinal).ThenBy(x => Rank(x, me)).Select(x => new
@@ -95,7 +106,7 @@ public static class SkillEndpoints
                 groups = groups.Where(g => x.Groups.Contains(g.Id)),
                 source = Source(x, me),
                 from = x.ServerId is { } s ? plugins.GetValueOrDefault(s) : x.UserId is { } o && o != me ? owners.GetValueOrDefault(o) : null,
-                canEdit = who.Edits(x), x.UpdatedAt,
+                canEdit = who.Edits(x), x.UpdatedAt, x.Proposed, x.Version, learned = x.Source == Skill.Learned,
             }),
         });
     }

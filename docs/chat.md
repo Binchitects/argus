@@ -1407,6 +1407,27 @@ for a kind of work you ask often, with parameters filled in each time. A
 skill has a slash name, a title, **when to use it** (a description, as the
 model reads it to choose it), its **instructions** and its **parameters**.
 
+**Skills that learn.** Arena gets better at your work as it does it:
+
+- **Learned from your work.** When a chat or a Code Arena session that worked
+  out a way of doing a task you will likely do again (several steps, not one
+  answer) goes quiet, the model for small steps writes it as a skill: a slash
+  name, when to use it, and the steps as instructions, general enough to
+  reuse. It waits at the top of the Skills page (**Learned from your work**:
+  **Keep**, or **Not now**) and the bell says so; answers use it once kept.
+  With **Remember on its own** (Memory) it is kept at once.
+- **Better in use.** When a skill used in a chat (chosen with `/`, or by the
+  model) went wrong, or you corrected what it did, a better version is
+  proposed, whole, with what was wrong (**Apply** or **Not now**). Each skill
+  shows its version; **How it got better** lists every change with **Undo**.
+  A skill you may not edit (the company's, Arena's own) gets better as yours:
+  a skill of yours with its name, which wins over it.
+- **Lessons from your marks.** An answer you marked bad, with its reason, is
+  read as a lesson: what to do differently, kept as a memory.
+- **Code Arena** keeps what a session worked out with `skill_save` (the
+  project's, in `.arena/skills/`, or yours, here), and after a long turn it
+  is reminded to.
+
 - **In the chat**, `/` at the start of the message opens the list: type to
   find by slash name, title or description, arrows to move, **Enter** or
   **Tab** to use one, **Esc** to close it. `/compact` is there too. The

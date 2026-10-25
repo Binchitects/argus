@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Pencil, Plus, Search, Sparkles, SquareSlash, Trash2, X } from 'lucide-react'
+import { Check, GraduationCap, History, Pencil, Plus, Search, Sparkles, SquareSlash, Trash2, Undo2, X } from 'lucide-react'
 import { useState } from 'react'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
@@ -16,7 +16,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
-import { Arguments, matchSkills, mustFill, skillsQuery, sourceLabel, variablesOf, type SkillItem, type SkillLibrary, type SkillParameter, type SkillSharing } from '@/lib/skills'
+import { applySkillChange, Arguments, dismissSkillChange, matchSkills, mustFill, skillsQuery, sourceLabel, undoSkillChange, variablesOf, type SkillChangeItem, type SkillItem, type SkillLibrary, type SkillParameter, type SkillSharing } from '@/lib/skills'
 
 const sections: { source: SkillItem['source']; title: string; description: string }[] = [
   { source: 'mine', title: 'Yours', description: 'Yours to change; shared with your groups if you chose so.' },
@@ -30,6 +30,62 @@ const sections: { source: SkillItem['source']; title: string; description: strin
  * Skills, as Claude Code's: instructions for a kind of work, with parameters, used with / in the chat (its fields filled in)
  * or by the model on its own when a question fits one; a person's own, their groups', the company's and plugins'.
  */
+/**
+ * What was learned from the person's work, waiting for them: a skill a chat worked out (Keep, or Not now), or a better
+ * version of one they used there (Apply, or Not now), each with why.
+ */
+function Learned({ library }: { library: SkillLibrary }) {
+  const queryClient = useQueryClient()
+  const changed = () => queryClient.invalidateQueries({ queryKey: skillsQuery.queryKey })
+  const apply = useMutation({ mutationFn: applySkillChange, onSuccess: changed, onError: (e) => toast.error(errorMessage(e)) })
+  const dismiss = useMutation({ mutationFn: dismissSkillChange, onSuccess: changed, onError: (e) => toast.error(errorMessage(e)) })
+  const waiting = (library.changes ?? []).filter((c) => c.proposed)
+  if (waiting.length === 0) return null
+  const skillOf = (c: SkillChangeItem) => library.skills.find((x) => x.id === c.skillId)
+  return (
+    <Card className="border-primary/40" aria-label="Learned from your work">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <GraduationCap className="size-4" aria-hidden="true" /> Learned from your work
+        </CardTitle>
+        <CardDescription>From your chats and Code Arena sessions that went quiet: a way of working worth doing again, or a better version of a skill that went wrong there.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ul className="grid gap-3" aria-label="Waiting for you">
+          {waiting.map((c) => {
+            const skill = skillOf(c)
+            const name = skill ? `/${skill.name}` : 'a skill'
+            return (
+              <li key={c.id} className="grid gap-2 rounded-md border p-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary">{c.action === 'learned' ? 'New skill' : 'Better version'}</Badge>
+                  <span className="font-mono">{name}</span>
+                  {skill && <span className="text-muted-foreground">{skill.title}</span>}
+                </div>
+                {c.reason && <p className="text-muted-foreground">{c.reason}</p>}
+                {skill?.description && c.action === 'learned' && <p>{skill.description}</p>}
+                <details>
+                  <summary className="cursor-pointer text-xs text-muted-foreground">{c.action === 'learned' ? 'Its instructions' : 'The new instructions, and the old'}</summary>
+                  <p className="mt-2 font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere]">{c.after}</p>
+                  {c.before && <p className="mt-2 font-mono text-xs whitespace-pre-wrap text-muted-foreground line-through [overflow-wrap:anywhere]">{c.before}</p>}
+                </details>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" disabled={apply.isPending} onClick={() => apply.mutate(c.id)} aria-label={`${c.action === 'learned' ? 'Keep' : 'Apply'} ${name}`}>
+                    <Check /> {c.action === 'learned' ? 'Keep' : 'Apply'}
+                  </Button>
+                  <Button size="sm" variant="ghost" disabled={dismiss.isPending} onClick={() => dismiss.mutate(c.id)} aria-label={`Not now: ${name}`}>
+                    Not now
+                  </Button>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      </CardContent>
+    </Card>
+  )
+}
+
 export function SkillsPage() {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
@@ -48,7 +104,8 @@ export function SkillsPage() {
   })
   if (library.isPending) return <PageSkeleton />
   if (library.error) return <QueryError error={library.error} retry={() => library.refetch()} />
-  const shown = search.trim() ? matchSkills(library.data.skills, search.trim().replace(/^\//, '')) : library.data.skills
+  const kept = library.data.skills.filter((p) => !p.proposed)
+  const shown = search.trim() ? matchSkills(kept, search.trim().replace(/^\//, '')) : kept
   return (
     <>
       <PageHeader
@@ -60,7 +117,10 @@ export function SkillsPage() {
           </Button>
         }
       />
-      {library.data.skills.length === 0 ? (
+      <div className="mb-8 empty:hidden">
+        <Learned library={library.data} />
+      </div>
+      {kept.length === 0 ? (
         <EmptyState
           icon={SquareSlash}
           title="No skills yet"
@@ -92,6 +152,7 @@ export function SkillsPage() {
                     <SkillCard
                       key={p.id}
                       skill={p}
+                      history={(library.data.changes ?? []).filter((c) => c.skillId === p.id && c.action === 'improved' && c.appliedAt)}
                       onTurn={library.data.isAdmin && p.source === 'builtin' ? () => turn.mutate(p) : undefined}
                       onEdit={() => setEditing(p)}
                       onDelete={async () => {
@@ -116,7 +177,13 @@ export function SkillsPage() {
   )
 }
 
-function SkillCard({ skill: p, onEdit, onDelete, onTurn }: { skill: SkillItem; onEdit: () => void; onDelete: () => void; onTurn?: () => void }) {
+function SkillCard({ skill: p, history, onEdit, onDelete, onTurn }: { skill: SkillItem; history: SkillChangeItem[]; onEdit: () => void; onDelete: () => void; onTurn?: () => void }) {
+  const queryClient = useQueryClient()
+  const undo = useMutation({
+    mutationFn: undoSkillChange,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: skillsQuery.queryKey }),
+    onError: (e) => toast.error(errorMessage(e)),
+  })
   return (
     <Card aria-label={`/${p.name}`}>
       <CardHeader>
@@ -130,6 +197,12 @@ function SkillCard({ skill: p, onEdit, onDelete, onTurn }: { skill: SkillItem; o
           <Badge variant={p.source === 'mine' ? 'default' : 'secondary'}>{sourceLabel(p)}</Badge>
           {p.source === 'group' && p.from && <Badge variant="outline">from {p.from}</Badge>}
           {p.off && <Badge variant="destructive">Off for everyone</Badge>}
+          {p.learned && (
+            <Badge variant="outline">
+              <GraduationCap aria-hidden="true" /> Learned
+            </Badge>
+          )}
+          {(p.version ?? 1) > 1 && <Badge variant="outline">v{p.version}</Badge>}
           {p.autoUse && p.description ? (
             <Badge variant="outline">
               <Sparkles aria-hidden="true" /> Used on its own
@@ -158,6 +231,27 @@ function SkillCard({ skill: p, onEdit, onDelete, onTurn }: { skill: SkillItem; o
               </Badge>
             ))}
           </p>
+        )}
+        {history.length > 0 && (
+          <details className="text-xs">
+            <summary className="flex cursor-pointer items-center gap-1 text-muted-foreground">
+              <History className="size-3.5" aria-hidden="true" /> How it got better ({history.length})
+            </summary>
+            <ul className="mt-2 grid gap-2" aria-label={`How /${p.name} got better`}>
+              {history.map((c) => (
+                <li key={c.id} className="flex flex-wrap items-start gap-2">
+                  <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{c.reason || 'A better version'}</span>
+                  {c.undoneAt ? (
+                    <span className="text-muted-foreground">Undone</span>
+                  ) : (
+                    <Button size="sm" variant="ghost" className="h-6" disabled={undo.isPending} onClick={() => undo.mutate(c.id)} aria-label={`Undo: ${c.reason || 'a better version'}`}>
+                      <Undo2 /> Undo
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </details>
         )}
         {onTurn && (
           <div>

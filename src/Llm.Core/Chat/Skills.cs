@@ -43,6 +43,48 @@ public sealed class Skill
     public bool BuiltIn { get; set; }
     /// <summary>A built-in one an admin turned off: nobody uses it until it is turned on again.</summary>
     public bool Off { get; set; }
+    /// <summary>Learned from the person's work, waiting for them: not offered to the model until they keep it.</summary>
+    public bool Proposed { get; set; }
+    /// <summary>typed (written by a person), or learned (from a chat or Code Arena session that worked out a procedure).</summary>
+    public string Source { get; set; } = Typed;
+    /// <summary>The chat it was learned from.</summary>
+    public Guid? SourceId { get; set; }
+    /// <summary>Its version: one more each time a better one is applied (or undone).</summary>
+    public int Version { get; set; } = 1;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public const string Typed = "typed";
+    public const string Learned = "learned";
 }
+
+/// <summary>
+/// How a skill learned or got better from the person's work (Skills → its history): a skill learned from a chat, or a better
+/// version of one used there (it went wrong, or the person corrected it). A proposal waits for the person (Apply, or Not
+/// now); one applied keeps what the skill was, so Undo puts it back.
+/// </summary>
+public sealed class SkillChange
+{
+    public const string LearnedAction = "learned";
+    public const string Improved = "improved";
+
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid SkillId { get; set; }
+    public Guid UserId { get; set; }
+    /// <summary>learned or improved.</summary>
+    public required string Action { get; set; }
+    /// <summary>Why, in a sentence (what went wrong, what the person corrected, what the chat worked out).</summary>
+    public string Reason { get; set; } = "";
+    /// <summary>The skill as it was (JSON: title, description, instructions, parameters); null for one learned.</summary>
+    public string? Before { get; set; }
+    /// <summary>The skill as it is (or would be) after (the same JSON).</summary>
+    public required string After { get; set; }
+    /// <summary>The chat it came from.</summary>
+    public Guid? SourceId { get; set; }
+    /// <summary>Waiting for the person.</summary>
+    public bool Proposed { get; set; }
+    public DateTimeOffset At { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? AppliedAt { get; set; }
+    public DateTimeOffset? UndoneAt { get; set; }
+}
+

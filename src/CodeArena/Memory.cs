@@ -472,6 +472,14 @@ internal sealed class ArenaMemory(Config config, HttpClient http)
 
     private string Url(string path) => config.Url!.TrimEnd('/') + (path.StartsWith("/api/", StringComparison.Ordinal) ? path : "/api/code-arena/memories" + path);
 
+    /// <summary>A skill the agent worked out, kept as the person's in Arena (or a better version of theirs): what Arena did, and whether it refused.</summary>
+    public async Task<(string Text, bool Error)> LearnSkillAsync(string name, string description, string instructions, string why, CancellationToken ct)
+    {
+        var answer = await SendAsync(HttpMethod.Post, "/api/code-arena/skills/learn",
+            new JsonObject { ["name"] = name, ["description"] = description, ["instructions"] = instructions, ["why"] = why }, ct, throwRefusal: true);
+        return answer?.Str("text") is { } text ? (text, answer.Bool("error") == true) : ("Arena did not answer: try again in a moment.", true);
+    }
+
     /// <summary>search_history or open_chat (<paramref name="path"/>: /search, /open), asked of Arena: its answer, and whether it is a refusal.</summary>
     public async Task<(string Text, bool Error)> HistoryAsync(string path, JsonObject body, CancellationToken ct)
     {

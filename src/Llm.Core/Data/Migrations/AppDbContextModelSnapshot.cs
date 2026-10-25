@@ -2364,11 +2364,24 @@ namespace Llm.Core.Data.Migrations
                         .HasColumnType("character varying(10000)")
                         .HasDefaultValue("[]");
 
+                    b.Property<bool>("Proposed")
+                        .HasColumnType("boolean");
+
                     b.Property<Guid?>("ServerId")
                         .HasColumnType("uuid");
 
                     b.Property<int>("Sharing")
                         .HasColumnType("integer");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("typed");
+
+                    b.Property<Guid?>("SourceId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -2380,6 +2393,11 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<Guid?>("UserId")
                         .HasColumnType("uuid");
+
+                    b.Property<int>("Version")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
 
                     b.HasKey("Id");
 
@@ -2393,6 +2411,61 @@ namespace Llm.Core.Data.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("skills", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.SkillChange", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("After")
+                        .IsRequired()
+                        .HasMaxLength(40000)
+                        .HasColumnType("character varying(40000)");
+
+                    b.Property<DateTimeOffset?>("AppliedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Before")
+                        .HasMaxLength(40000)
+                        .HasColumnType("character varying(40000)");
+
+                    b.Property<bool>("Proposed")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("SkillId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("SourceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("UndoneAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SkillId", "At");
+
+                    b.HasIndex("UserId", "Proposed");
+
+                    b.ToTable("skill_changes", (string)null);
                 });
 
             modelBuilder.Entity("Llm.Core.Chat.TaskEvent", b =>
@@ -5947,6 +6020,21 @@ namespace Llm.Core.Data.Migrations
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade);
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.SkillChange", b =>
+                {
+                    b.HasOne("Llm.Core.Chat.Skill", null)
+                        .WithMany()
+                        .HasForeignKey("SkillId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Llm.Core.Chat.TaskEvent", b =>

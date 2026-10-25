@@ -13,6 +13,9 @@ public sealed record ArenaMemoryRequest(string? Text, string? Scope = null, stri
 /// <summary>What Code Arena asks memory about: its question, its project, and the memories it gave already (not again).</summary>
 public sealed record ArenaRecallRequest(string? Query, string? Project = null, List<Guid>? Besides = null, int? Budget = null);
 
+/// <summary>A skill Code Arena worked out: its slash name, when to use it, its instructions, and why.</summary>
+public sealed record ArenaSkillRequest(string? Name, string? Description, string? Instructions, string? Why);
+
 /// <summary>Code Arena's search of the person's past chats (search_history), or its reading of one (open_chat).</summary>
 public sealed record ArenaHistoryRequest(string? Query = null, string? Chat = null, int? From = null, int? To = null);
 
@@ -37,10 +40,47 @@ public static class CodeArenaMemory
         g.MapDelete("/{id:guid}", ForgetAsync);
         g.MapPost("/recall", RecallAsync);
         g.MapPost("/import", ImportAsync);
+        // A skill Code Arena worked out, kept as the person's (or a better version of theirs).
+        app.MapGroup("/api/code-arena/skills").AllowAnonymous("Code Arena: the person's API key is checked on each call.").MapPost("/learn", LearnSkillAsync);
         // The person's past chats and sessions (search_history, open_chat), as the chat's memory tool finds and reads them.
         var history = app.MapGroup("/api/code-arena/history").AllowAnonymous("Code Arena: the person's API key is checked on each call.");
         history.MapPost("/search", HistorySearchAsync);
         history.MapPost("/open", HistoryOpenAsync);
+    }
+
+    /// <summary>
+    /// A skill the agent worked out in Code Arena: one of the person's of that name gets a better version, else it is learned;
+    /// each waits for the person on the Skills page unless they keep what is learned on their own.
+    /// </summary>
+    private static async Task<IResult> LearnSkillAsync(ArenaSkillRequest body, HttpContext http, McpPeople people, AppDbContext db, Access.AccessService access)
+    {
+        var (me, refusal) = await CodeArenaSync.CallerAsync(http, people);
+        if (me is null)
+        {
+            return refusal!;
+        }
+        var ct = http.RequestAborted;
+        var name = body.Name?.Trim().TrimStart('/') ?? "";
+        var why = string.IsNullOrWhiteSpace(body.Why) ? "Worked out in a Code Arena session" : body.Why.Trim()[..Math.Min(400, body.Why.Trim().Length)];
+        var keep = me.MemoryAuto;
+        if (await SkillEndpoints.FindAsync(me, name, access, db, ct) is { } used)
+        {
+            var better = await SkillLearning.ImproveAsync(db, me.Id, used, body.Instructions ?? "", why, null, keep, ct);
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(better is null
+                ? new { text = $"/{name} says that already: nothing changed.", error = false }
+                : new { text = keep ? $"/{name} is better now (Skills shows how, with Undo)." : $"A better /{name} waits for the person on the Skills page.", error = false });
+        }
+        var learned = new LearnedSkill(name, name.Replace('-', ' '), body.Description ?? "", body.Instructions ?? "");
+        if (SkillLearning.Problem(learned) is { } problem)
+        {
+            return Results.Ok(new { text = $"Not a skill: it needs {problem}.", error = true });
+        }
+        var made = await SkillLearning.LearnAsync(db, me.Id, learned, null, why, keep, ct);
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(made is null
+            ? new { text = $"The person has a skill /{name} already.", error = true }
+            : new { text = keep ? $"Kept /{name} as the person's skill, for every project and the web chat." : $"/{name} waits for the person on the Skills page (Learned from your work).", error = false });
     }
 
     private static async Task<IResult> HistorySearchAsync(ArenaHistoryRequest body, HttpContext http, McpPeople people, PastChats past)

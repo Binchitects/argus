@@ -142,5 +142,40 @@ describe('skills page', () => {
     expect(await within(own).findByText('Off for everyone')).toBeInTheDocument()
     expect(within(own).getByRole('button', { name: 'Turn on for everyone' })).toBeInTheDocument()
   })
-})
 
+  it('shows what was learned from the person’s work to keep or set aside, and undoes a better version from a skill’s history', async () => {
+    let shown = library({
+      skills: [
+        skill({ id: 'l1', name: 'weekly-notes', title: 'Weekly release notes', description: 'When asked for this week’s notes', instructions: '1. Read the merged changes.', proposed: true, learned: true }),
+        skill({ id: 's1', name: 'review', title: 'Review code', instructions: 'Review it, by concern.', version: 2 }),
+      ],
+      changes: [
+        { id: 'c1', skillId: 'l1', action: 'learned', reason: 'Worked out in “Release”', proposed: true, at: '', appliedAt: null, undoneAt: null, sourceId: 'chat1', before: null, after: '1. Read the merged changes.' },
+        { id: 'c2', skillId: 's1', action: 'improved', reason: 'It missed the tests', proposed: false, at: '', appliedAt: '2026-10-25T10:00:00Z', undoneAt: null, sourceId: null, before: 'Review it.', after: 'Review it, by concern.' },
+      ],
+    })
+    const calls = fakeApi(member, {
+      'GET /api/skills': () => ({ json: shown }),
+      'POST /api/skills/changes/c1/apply': () => {
+        shown = { ...shown, skills: shown.skills.map((x) => (x.id === 'l1' ? { ...x, proposed: false } : x)), changes: shown.changes!.map((c) => (c.id === 'c1' ? { ...c, proposed: false, appliedAt: 'now' } : c)) }
+        return { status: 204 }
+      },
+      'POST /api/skills/changes/c2/undo': () => ({ status: 204 }),
+    })
+    renderApp('/skills')
+    const learned = await screen.findByRole('region', { name: 'Learned from your work' })
+    expect(within(learned).getByText('Worked out in “Release”')).toBeInTheDocument()
+    // Not among the skills in use until kept.
+    expect(within(screen.getByRole('region', { name: 'Yours' })).queryByRole('region', { name: '/weekly-notes' })).not.toBeInTheDocument()
+    await userEvent.click(within(learned).getByRole('button', { name: 'Keep /weekly-notes' }))
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Learned from your work' })).not.toBeInTheDocument())
+    const kept = await within(screen.getByRole('region', { name: 'Yours' })).findByRole('region', { name: '/weekly-notes' })
+    expect(within(kept).getByText('Learned')).toBeInTheDocument()
+
+    const review = within(screen.getByRole('region', { name: 'Yours' })).getByRole('region', { name: '/review' })
+    expect(within(review).getByText('v2')).toBeInTheDocument()
+    await userEvent.click(within(review).getByText(/How it got better/))
+    await userEvent.click(within(review).getByRole('button', { name: 'Undo: It missed the tests' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/skills/changes/c2/undo')).toBe(true))
+  })
+})

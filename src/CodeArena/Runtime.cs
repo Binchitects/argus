@@ -375,6 +375,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             tools.Add(ProjectMemory.Tool());
         }
+        tools.Add(SkillSave.Tool());
         tools.Add(SessionSearch.Tool());
         tools.AddRange(SessionHistory.Tools());
         if (Extensions.Skills.Count > 0)
@@ -507,6 +508,9 @@ internal sealed partial class Runtime : IAsyncDisposable
             Compaction = Compaction,
             // What is remembered that matters to each message (a few hundred tokens at most).
             Recall = (message, given, token) => Memory.RecallAsync(message, given, 1_500, token),
+            // After a long turn: keep what it worked out, as a skill or in the project's memory.
+            Nudge = "If it worked out a way of doing something worth doing again, keep it as a skill with skill_save" +
+                (Config.ProjectMemory ? "; a lasting fact about this project, with remember_project." : "."),
         };
         Context.SubAgent = (description, prompt, agent, token) => RunSubAgentAsync(inputs, description, prompt, agent, token);
         _inputs = inputs;

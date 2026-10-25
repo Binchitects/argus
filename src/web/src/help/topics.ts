@@ -158,6 +158,7 @@ export const topics = {
     title: 'Skills',
     about: 'Instructions for work you ask often, with parameters filled in each time, as in Claude Code. Type / in the chat to use one; with a description, the model uses it on its own when a question fits.',
     parts: [
+      { name: 'Learned from your work', text: 'Skills worked out in your chats and Code Arena sessions, and better versions of skills that went wrong there: **Keep** (or **Apply**) or **Not now**. Each skill shows its version; **How it got better** has **Undo**.' },
       { name: 'Yours', text: 'Skills you made. Only you change them; you may share them with your groups.' },
       { name: 'Shared with you', text: 'From people in your groups.' },
       { name: 'For everyone', text: 'The company\'s, kept by admins.' },

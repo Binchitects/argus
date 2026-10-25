@@ -346,6 +346,15 @@ internal sealed class Agent
     /// <summary>A word for the model for this turn only (answer again shorter or longer), in Code Arena's note; null: none.</summary>
     public string? TurnNote { get; set; }
 
+    /// <summary>What Code Arena's note says after a long turn (keep what it worked out: a skill, the project's memory); null: nothing.</summary>
+    public string? Nudge { get; init; }
+
+    /// <summary>A turn this long (in steps) is followed by the nudge.</summary>
+    public const int NudgeSteps = 8;
+
+    // The steps of the turn going on, and of the one before it.
+    private int _stepsInTurn, _lastTurnSteps;
+
     /// <summary>
     /// The memories that matter to the person's message (Arena's recall, else the files'), not among those given already
     /// this session; said in a note before the message (Code Arena's own: never synced to the web chat). Null: no memory.
@@ -536,6 +545,7 @@ internal sealed class Agent
                 ["role"] = "user",
                 ["content"] = pictures is { Count: > 0 } ? new JsonArray([new JsonObject { ["type"] = "text", ["text"] = input }, .. pictures.Select(p => p!.DeepClone())]) : input,
             };
+            (_lastTurnSteps, _stepsInTurn) = (_stepsInTurn, 0);
             Add(question);
             await RecallAsync(input, ct);
         }
@@ -546,6 +556,7 @@ internal sealed class Agent
         var waitedForCache = false;
         for (var step = 0; step < MaxSteps; step++)
         {
+            _stepsInTurn++;
             await MaybeCompactAsync(ct);
             ReportJobs();
             var printer = new Printer(Ui, Stream && Depth == 0, Events);
@@ -848,6 +859,10 @@ internal sealed class Agent
         if (TurnNote is { Length: > 0 } once)
         {
             note += "\n- For this answer: " + once;
+        }
+        if (Nudge is { Length: > 0 } nudge && _lastTurnSteps >= NudgeSteps)
+        {
+            note += $"\n- The last turn took {_lastTurnSteps} steps. " + nudge;
         }
         _notes.RemoveAll(n => n.At > Messages.Count);
         if (_notes.LastOrDefault(n => !IsMemory(n)) is { Text: var last } && last == note)
