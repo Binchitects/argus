@@ -1329,11 +1329,11 @@ internal sealed class Agent
             return true;
         }
         Events?.Notice("Compacting the conversation to fit the model's window…");
-        var (summary, failure) = await TrySummaryAsync(keepFrom, SummaryInstruction, force, ct);
+        var (summary, failure) = await TrySummaryAsync(keepFrom, SummaryInstruction + SessionNumbers(keepFrom), force, ct);
         var text = (summary ?? Digest(older, failure!)) + TodoNote();
         Messages =
         [
-            new JsonObject { ["role"] = "user", ["content"] = (summary is not null ? SummaryHead : OmittedHead) + "\n\n" + text },
+            new JsonObject { ["role"] = "user", ["content"] = (summary is not null ? SummaryHead : OmittedHead) + "\n\n" + text + HistoryNote() },
             new JsonObject { ["role"] = "assistant", ["content"] = Understood },
             .. kept,
         ];
@@ -1348,6 +1348,24 @@ internal sealed class Agent
             : $"Compacted without a summary ({failure}): {older.Count} older messages left out, in brief, and {kept.Count} kept.");
         return true;
     }
+
+    /// <summary>
+    /// The numbers in the session of the messages a summary covers (session_read reads them again), when the history is the
+    /// session's as it was saved; empty otherwise (a sub-agent's, or one not saved yet).
+    /// </summary>
+    private string SessionNumbers(int keepFrom)
+    {
+        if (Session is not { } session)
+        {
+            return "";
+        }
+        var (from, prefix, count) = session.Read(s => (s.From, s.Prefix, s.Messages.Count));
+        return count == Messages.Count ? SessionHistory.Numbers(Messages, keepFrom, prefix, from) : "";
+    }
+
+    /// <summary>After a summary: the messages it covers are kept, and how to find them.</summary>
+    private string HistoryNote() => Session is null ? "" :
+        "\n\nThe messages this summary covers are kept: session_search finds them by their words, session_read reads them again by their numbers (#N). Look rather than guess.";
 
     /// <summary>The to-do list as it stands, said after a summary (its todo_write calls are gone with what was summarized).</summary>
     private string TodoNote() =>

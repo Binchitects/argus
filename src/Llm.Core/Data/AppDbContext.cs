@@ -137,6 +137,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(c => c.LoadedTools).HasDefaultValueSql("'{}'::text[]");
             e.Property(c => c.Model).HasMaxLength(200);
             e.Property(c => c.ProjectKey).HasMaxLength(300);
+            e.Property(c => c.Digest).HasMaxLength(4000);
             e.Property(c => c.SystemPrompt).HasMaxLength(20000);
             e.Property(c => c.Origin).HasMaxLength(32);
             e.Property(c => c.OriginRef).HasMaxLength(128);

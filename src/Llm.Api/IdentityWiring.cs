@@ -386,6 +386,10 @@ public static class IdentityWiring
         services.AddHostedService(sp => sp.GetRequiredService<Chat.MemoryUpkeep>());
         services.AddSingleton<Chat.MemoryReflection>();
         services.AddHostedService(sp => sp.GetRequiredService<Chat.MemoryReflection>());
+        // Past chats found again by what they were about: each one's digest as it goes quiet, and the search (search_history).
+        services.AddSingleton<Chat.ChatDigests>();
+        services.AddHostedService(sp => sp.GetRequiredService<Chat.ChatDigests>());
+        services.AddScoped<Chat.PastChats>();
         services.AddScoped<Chat.Tools.MemoryTool>();
         services.AddScoped<Chat.Tools.SkillTool>();
         ArenaMcp.McpEndpoints.AddArenaMcp(services, config);

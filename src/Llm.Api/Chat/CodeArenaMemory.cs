@@ -13,6 +13,9 @@ public sealed record ArenaMemoryRequest(string? Text, string? Scope = null, stri
 /// <summary>What Code Arena asks memory about: its question, its project, and the memories it gave already (not again).</summary>
 public sealed record ArenaRecallRequest(string? Query, string? Project = null, List<Guid>? Besides = null, int? Budget = null);
 
+/// <summary>Code Arena's search of the person's past chats (search_history), or its reading of one (open_chat).</summary>
+public sealed record ArenaHistoryRequest(string? Query = null, string? Chat = null, int? From = null, int? To = null);
+
 /// <summary>Memories Code Arena kept on the machine, brought into Arena once.</summary>
 public sealed record ArenaMemoryImport(List<ArenaMemoryRequest>? Memories);
 
@@ -34,6 +37,33 @@ public static class CodeArenaMemory
         g.MapDelete("/{id:guid}", ForgetAsync);
         g.MapPost("/recall", RecallAsync);
         g.MapPost("/import", ImportAsync);
+        // The person's past chats and sessions (search_history, open_chat), as the chat's memory tool finds and reads them.
+        var history = app.MapGroup("/api/code-arena/history").AllowAnonymous("Code Arena: the person's API key is checked on each call.");
+        history.MapPost("/search", HistorySearchAsync);
+        history.MapPost("/open", HistoryOpenAsync);
+    }
+
+    private static async Task<IResult> HistorySearchAsync(ArenaHistoryRequest body, HttpContext http, McpPeople people, PastChats past)
+    {
+        var (me, refusal) = await CodeArenaSync.CallerAsync(http, people);
+        if (me is null)
+        {
+            return refusal!;
+        }
+        var found = await past.FindAsync(me, body.Query?.Trim() ?? "", http.RequestAborted);
+        return Results.Ok(new { text = found.Text, error = found.IsError });
+    }
+
+    private static async Task<IResult> HistoryOpenAsync(ArenaHistoryRequest body, HttpContext http, McpPeople people, PastChats past)
+    {
+        var (me, refusal) = await CodeArenaSync.CallerAsync(http, people);
+        if (me is null)
+        {
+            return refusal!;
+        }
+        var args = new System.Text.Json.Nodes.JsonObject { ["query"] = body.Query, ["from"] = body.From, ["to"] = body.To };
+        var read = await past.OpenAsync(me, body.Chat, args, http.RequestAborted);
+        return Results.Ok(new { text = read.Text, error = read.IsError });
     }
 
     private static object View(Memory m) => new { m.Id, m.Text, m.Scope, m.Kind, project = m.ProjectKey, m.Pinned, m.Uses, m.UpdatedAt, mine = m.Scope != Memory.Company };

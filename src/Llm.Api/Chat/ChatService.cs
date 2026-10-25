@@ -228,6 +228,11 @@ public sealed partial class ChatService(
             {
                 await StartToolAsync(choice);
             }
+            // A chat that compacted: what its summary stands for is kept, and the model finds and reads it again.
+            if (await db.ChatMessages.AnyAsync(m => m.ConversationId == conversation.Id && m.Summary != null, ct))
+            {
+                await StartToolAsync(new ToolChoice(new ChatHistoryTool(db), new ToolSetting { ToolId = ChatHistoryTool.ToolId }, null));
+            }
         }
 
         // Deep research with sub-agents: the parts research and the web is theirs, and the answer delegates at most
@@ -1545,6 +1550,45 @@ public sealed partial class ChatService(
         return $"\n\nThis chat's plan as it stands, \"{plan.Title}\" (plan_show gives all of it):{string.Concat(steps)}";
     }
 
+    /// <summary>Past this many messages before a chat's newest summary, its branch is read in two steps (<see cref="BranchAsync"/>).</summary>
+    internal const int ReadWholeUpTo = 200;
+
+    /// <summary>
+    /// A chat's messages as their tree (each one's place, role, author and marks, its words left out): what a long chat's
+    /// branch is found in, before what of it is read whole.
+    /// </summary>
+    internal static Task<Dictionary<Guid, ChatMessage>> SkeletonAsync(AppDbContext db, Guid conversation, CancellationToken ct) =>
+        db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == conversation)
+            .Select(m => new ChatMessage
+            {
+                Id = m.Id, ConversationId = m.ConversationId, ParentId = m.ParentId, Sequence = m.Sequence, Role = m.Role, AuthorId = m.AuthorId,
+                Pinned = m.Pinned, LeftOut = m.LeftOut, CreatedAt = m.CreatedAt,
+                // Only whether it holds a summary: the newest is read whole.
+                Summary = m.Summary == null ? null : SummaryMark,
+            })
+            .ToDictionaryAsync(m => m.Id, ct);
+
+    /// <summary>What a skeleton's message says when it holds a summary.</summary>
+    private const string SummaryMark = "(summary)";
+
+    /// <summary>
+    /// The branch to <paramref name="question"/> as an answer reads it. A long chat's messages before its newest summary, which
+    /// the summary stands for, keep their place but not their words (the pinned ones aside, said after the summary), so an
+    /// answer in a chat of thousands of messages reads only what it sends.
+    /// </summary>
+    internal static async Task<List<ChatMessage>> BranchAsync(AppDbContext db, Guid conversation, ChatMessage question, CancellationToken ct)
+    {
+        var skeleton = await SkeletonAsync(db, conversation, ct);
+        skeleton[question.Id] = question;
+        var path = PathTo(skeleton, question.Id);
+        var (_, from) = LastSummary(path, path.Count - 1);
+        var whole = from > ReadWholeUpTo
+            ? path.Skip(from - 1).Concat(path.Take(from - 1).Where(m => m.Pinned)).Select(m => m.Id).Where(id => id != question.Id).ToList()
+            : [.. path.Select(m => m.Id).Where(id => id != question.Id)];
+        var read = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == conversation && whole.Contains(m.Id)).ToDictionaryAsync(m => m.Id, ct);
+        return [.. path.Select(m => read.GetValueOrDefault(m.Id) ?? m)];
+    }
+
     /// <summary>The names of the people who wrote on this branch of a room.</summary>
     private async Task<Dictionary<Guid, string>> RoomAuthorsAsync(IEnumerable<ChatMessage> stored, CancellationToken ct)
     {
@@ -1594,9 +1638,7 @@ public sealed partial class ChatService(
         GatewayModel? model, string modelName, GatewayModel? summarizer, string email, string? toolInstructions, bool canReadFiles, string? lengthNote, string? memory, HistoryFit fit,
         Func<object, Task> emit, CancellationToken ct)
     {
-        var all = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == conversation.Id).ToDictionaryAsync(m => m.Id, ct);
-        all[question.Id] = question;
-        var stored = PathTo(all, question.Id);
+        var stored = await BranchAsync(db, conversation.Id, question, ct);
         // What a summary covers goes as the summary.
         var (summary, from) = LastSummary(stored, stored.Count - 1);
         // Only questions' files go to the model; pictures a tool made are for the person.

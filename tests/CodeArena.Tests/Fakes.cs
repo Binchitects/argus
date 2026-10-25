@@ -684,6 +684,9 @@ public sealed class FakeChats
     /// <summary>The recalls Code Arena asked: the query and the memories it had been given already.</summary>
     public List<(string Query, List<string> Besides)> Recalls { get; } = [];
 
+    /// <summary>What Code Arena asked of Arena's past chats: search or open, and its body.</summary>
+    public List<(string What, JsonObject Body)> HistoryAsked { get; } = [];
+
     private static string MemoryLine(JsonObject m)
     {
         var tags = new List<string>();
@@ -1031,6 +1034,23 @@ public sealed class FakeChats
         if (parts is ["memories", ..] && Memory)
         {
             await MemoryAsync(ctx, parts[1..], method, body);
+            return;
+        }
+        if (parts is ["history", var asked] && method == "POST")
+        {
+            // Arena's search of past chats: what Code Arena asked, and Arena's answer as the chat's tool words it.
+            var json = JsonNode.Parse(body) as JsonObject;
+            lock (_gate)
+            {
+                HistoryAsked.Add((asked, json!));
+            }
+            ctx.Response.StatusCode = 200;
+            ctx.Response.ContentType = "application/json";
+            await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(new JsonObject
+            {
+                ["text"] = asked == "search" ? "[c1] \"Parts vendor\" (chat, last 12 Oct 2026, /chat/c1)\nChose Northwind Traders." : "#1 the person: We chose Northwind Traders.",
+                ["error"] = false,
+            }.ToJsonString()));
             return;
         }
         if (parts is ["preferences"] && method == "GET")

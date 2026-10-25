@@ -279,6 +279,15 @@ public sealed class FakeModel : HttpMessageHandler
             chunks = [Delta(new JsonObject { ["content"] = "Here they are:\n" + new JsonObject { ["memories"] = new JsonArray([.. proposed]) }.ToJsonString() }), Finish("stop"), Usage(300, 0, 60)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
+        // A past chat's digest: the one before (when given), then what the person asked since, a line each.
+        if (system0.StartsWith("You keep the digest of a conversation", StringComparison.Ordinal))
+        {
+            var before = System.Text.RegularExpressions.Regex.Match(lastUser, @"^The digest so far:\n(.*?)\n\nWhat came after it:", System.Text.RegularExpressions.RegexOptions.Singleline);
+            var lines = System.Text.RegularExpressions.Regex.Matches(lastUser, @"^The person: (.+)$", System.Text.RegularExpressions.RegexOptions.Multiline).Select(m => "- asked: " + m.Groups[1].Value);
+            var digest = (before.Success ? before.Groups[1].Value : "A chat") + "\n" + string.Join('\n', lines);
+            chunks = [Delta(new JsonObject { ["content"] = digest }), Finish("stop"), Usage(200, 0, 40)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
         // Rooms read in another language: each message given back as "[Language] text", or "=" for one starting "[same]".
         if (system0.StartsWith("You translate messages of a group chat", StringComparison.Ordinal))
         {

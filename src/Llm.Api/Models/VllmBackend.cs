@@ -109,8 +109,18 @@ public sealed class VllmBackend(VllmEngineOptions instance, EngineOptions engine
         {
             return;
         }
-        File.WriteAllText(path + ".tmp", text);
-        File.Move(path + ".tmp", path, overwrite: true);
+        Replace(path, text);
+    }
+
+    /// <summary>
+    /// A file's whole text renamed into place, from a file of this write's own: two writes at once (the catalog and a
+    /// replica's watcher) each rename theirs, the last one wins, and neither finds the other's gone.
+    /// </summary>
+    private static void Replace(string path, string text)
+    {
+        var temporary = $"{path}.{Guid.NewGuid():N}.tmp";
+        File.WriteAllText(temporary, text);
+        File.Move(temporary, path, overwrite: true);
     }
 
     /// <summary>Writes another file of its presets (LMCache's configuration), only when it changes.</summary>
@@ -122,8 +132,7 @@ public sealed class VllmBackend(VllmEngineOptions instance, EngineOptions engine
         {
             return;
         }
-        File.WriteAllText(path + ".tmp", text);
-        File.Move(path + ".tmp", path, overwrite: true);
+        Replace(path, text);
     }
 
     /// <summary>Changes the desired state under one lock (this replica's): what is read, changed and written is one step.</summary>

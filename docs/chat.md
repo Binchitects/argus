@@ -232,10 +232,27 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     summarized; the answer says "Cleared N earlier results" above it.
   - **The summary in sections.** The model writes it under `## Goal`,
     `## Constraints and preferences`, `## Decisions`, `## Facts and findings`,
-    `## State`, `## Next steps` and `## Open questions`, leaving out any with
-    nothing to say. After it, the next answers read what you pinned (below), word for
+    `## State`, `## Next steps`, `## Open questions` and `## Earlier parts`
+    (a line for each stretch of the chat with its message numbers, "#1–#140:
+    planning the launch"), leaving out any with nothing to say. It reads each
+    message with its number (#212, its place on the chat's branch from 1)
+    and cites them ("chose Postgres (#212)"). After it, the next answers read what you pinned (below), word for
     word, and the chat's plan as it stands (its steps and their state), since
     the summary may have shortened them.
+- **A long chat finds what it said.** A chat that has compacted keeps every
+  message, and each answer then has two functions of its own (not a tool to
+  choose): `chat_search` finds the earlier messages that hold some words (a
+  name, a number, a few words), each with its number and the words around
+  them, and `chat_read` reads messages again by their numbers, up to 20 at
+  once. So a chat can go on for thousands of messages, the summary carrying
+  the thread and the model reading back the exact words when it needs them.
+  Messages left out by the person are not found.
+- **A long chat opens at its end.** The page reads the newest 300 messages of
+  the branch (and the other versions below them); **Show earlier messages**
+  at the top reads 600 more each time. `GET /api/chat/conversations/{id}?last=N`
+  gives that window, and `earlier` says how many of the branch it left out.
+  An answer reads the chat's tree and, whole, only what it sends: the
+  messages from the newest summary on, and those pinned before it.
 - **Pin and leave out.** Each question has **Pin this question** and **Leave
   this question out**. A pinned question is said word for word after every
   summary (up to 8,000 characters of pins), so a budget code or an exact
@@ -1268,6 +1285,19 @@ all.
   session's memories about its project are kept and said. Rooms and
   scheduled tasks' chats are not read, nor what chats said before this
   arrived.
+- **Past work, findable.** As a chat or a Code Arena session goes quiet
+  (ten minutes), the model for small steps writes its **digest**: what it is
+  about, what was asked, done and decided, the names that matter and how it
+  ended, at most 150 words; as it goes on, the digest is written anew from
+  the one before and what came after. With memory on, answers have
+  `search_history` (your past chats and sessions, nearest by meaning to what
+  the earlier work was about, else by their words; each with its id and
+  digest) and `open_chat` (one of them: its digest, and with a query the
+  messages that hold those words, or with from and to its messages by
+  number). "As we decided last month" finds that chat. Only your own chats
+  are searched (not rooms). Code Arena asks the same
+  (`POST /api/code-arena/history/search` and `/open`, with your key).
+  Settings → Chat → **Digests of past chats** turns new digests off.
 - **Kinds.** Each memory is a **preference** (how you like things), a
   **fact**, a **decision** (and why), a **how to** (how something is done
   here) or a **lesson** (what went wrong once, or what you corrected). The

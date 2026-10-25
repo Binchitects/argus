@@ -90,6 +90,8 @@ internal sealed class ToolContext
     /// <summary>The saved sessions' folder (search_sessions), and this session's id (left out of the search).</summary>
     public string? SessionsDir { get; init; }
     public Func<string>? SessionId { get; set; }
+    /// <summary>This session's lines: session_search and session_read read its earlier messages (null: none, a sub-agent's).</summary>
+    public Func<SessionStore?>? Store { get; set; }
     /// <summary>Told before a tool writes a file (its full path): the turn's checkpoint keeps what it held.</summary>
     public Action<string>? BeforeWrite { get; set; }
     /// <summary>Told how a long call goes (an MCP tool's progress reports), for the person.</summary>

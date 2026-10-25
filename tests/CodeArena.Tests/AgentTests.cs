@@ -324,10 +324,13 @@ public sealed class AgentTests : IDisposable
         _gateway.Context = 40_000;
         using var h = new Harness(_gateway, _mcp, c => c["compactAt"] = 30);
         _gateway.Answer = req => FakeGateway.Summarizing(req) ? Reply.Say("SUMMARY: the person asked about turns 1 to 3.") : Reply.Say(new string('x', 8000));
-        Assert.Equal(0, await h.Run("", "-p", "turn 1 " + new string('a', 8000)));
-        Assert.Equal(0, await h.Run("", "-p", "turn 2 " + new string('b', 8000), "-c"));
-        Assert.Equal(0, await h.Run("", "-p", "turn 3 " + new string('c', 8000), "-c"));
-        Assert.Equal(0, await h.Run("", "-p", "turn 4", "-c"));
+        // What each run said: the turn it compacts at depends on how big the prompt and the tools are.
+        var said = "";
+        foreach (var (text, more) in new[] { ("turn 1 " + new string('a', 8000), false), ("turn 2 " + new string('b', 8000), true), ("turn 3 " + new string('c', 8000), true), ("turn 4", true) })
+        {
+            Assert.Equal(0, await (more ? h.Run("", "-p", text, "-c") : h.Run("", "-p", text)));
+            said += h.Err;
+        }
 
         // The summary is asked as the conversation goes on (its start cached): the same system prompt and tools, the older
         // messages, then the request for a summary; the recent turn is not in it.
@@ -344,7 +347,7 @@ public sealed class AgentTests : IDisposable
         Assert.StartsWith("[The conversation so far, summarized", messages[1]!["content"]!.GetValue<string>());
         Assert.Contains("SUMMARY: the person asked", messages[1]!["content"]!.GetValue<string>());
         Assert.Equal("turn 4", FakeGateway.Last(last));
-        Assert.Contains("Compacted:", h.Err);
+        Assert.Contains("Compacted:", said);
         // The compaction is in the session file: a resumed session starts from the summary.
         var data = SessionStore.Load(Directory.GetFiles(h.Paths.SessionsDir).Single());
         Assert.StartsWith("[The conversation so far", data.Messages[0]["content"]!.GetValue<string>());

@@ -72,9 +72,25 @@ export const stampQuery = (id: string) => ({
   refetchInterval: 4000,
 })
 
+/**
+ * A long chat is read from its end: its branch's newest messages (this many at first, more with each "Show earlier"),
+ * and what branches off below them. The window is kept beside the query, not in its key: what updates the chat in
+ * place (its queue, its leaf, a thumb) keeps working on the same entry.
+ */
+export const chatWindow = { first: 300, step: 600 }
+const windows = new Map<string, number>()
+
+/** The window of the chat's messages read now. */
+export const windowOf = (id: string) => windows.get(id) ?? chatWindow.first
+
+/** Reads more of a long chat's earlier messages, the next time it is read. */
+export function widenWindow(id: string) {
+  windows.set(id, windowOf(id) + chatWindow.step)
+}
+
 export const conversationQuery = (id: string) => ({
   queryKey: ['chat', 'conversation', id] as const,
-  queryFn: ({ signal }: { signal: AbortSignal }) => api<Conversation>(`/api/chat/conversations/${id}`, { signal }),
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<Conversation>(`/api/chat/conversations/${id}?last=${windowOf(id)}`, { signal }),
 })
 
 /**

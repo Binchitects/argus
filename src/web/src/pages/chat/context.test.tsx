@@ -91,4 +91,25 @@ describe('what the model reads of a chat', () => {
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ leftOut: true }))
     expect(await within(biggest).findByText('Left out: the model does not read it')).toBeInTheDocument()
   })
+
+  it('a long chat shows its end, and its earlier messages on demand', async () => {
+    const asked: string[] = []
+    fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config }),
+      'GET /api/chat/conversations': () => ({ json: [] }),
+      'GET /api/chat/conversations/c1': (_, __, url) => {
+        asked.push(url.searchParams.get('last') ?? '')
+        const wide = url.searchParams.get('last') === '900'
+        return { json: { ...chat(), earlier: wide ? 0 : 1000, messages: wide ? [msg('q0', null, 'user', { content: 'The very first question.' }), ...chat().messages.map((m) => (m.id === 'q1' ? { ...m, parentId: 'q0' } : m))] : chat().messages } }
+      },
+    })
+    renderApp('/chat/c1')
+    const earlier = await screen.findByRole('button', { name: 'Show earlier messages (600 of 1,000)' })
+    expect(asked[0]).toBe('300')
+    expect(screen.queryByText('The very first question.')).not.toBeInTheDocument()
+    await userEvent.click(earlier)
+    expect(await screen.findByText('The very first question.')).toBeInTheDocument()
+    expect(asked.at(-1)).toBe('900')
+    expect(screen.queryByRole('button', { name: /Show earlier messages/ })).not.toBeInTheDocument()
+  })
 })

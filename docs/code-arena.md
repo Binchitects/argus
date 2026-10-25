@@ -1523,6 +1523,17 @@ What fills the window is managed before anything is summarized:
   characters) is kept as r3. read_result {"id":"r3"} reads it again."). When
   that is enough, nothing is summarized: "Cleared N earlier tool results
   (~T tokens) to make room".
+- **A long session finds what it said.** Every message stays in the
+  session's file, compactions aside: `session_search` finds the ones that
+  hold some words (with their numbers, #N, their place in the session from
+  1), and `session_read` reads them again word for word, up to 20 at once. The
+  summary is asked with the numbers of the messages it covers (and the
+  person's first words in each), cites them, and ends with `## Earlier parts`
+  (a line for each stretch of the session); after it, the model is told the
+  messages are kept and how to read them. `search_sessions` searches the
+  other sessions on this machine; `search_history` asks Arena for the
+  person's past chats and sessions everywhere (the web chat's too), by what
+  they were about (each one's digest), and `open_chat` reads one.
 - **`/context` shows what fills it**: the instructions, the memory (the
   prompt's and what was recalled for the questions), the tools, Code Arena's
   notes, the summary, your messages, the answers and the tools' results, each

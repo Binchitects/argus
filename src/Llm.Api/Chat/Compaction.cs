@@ -45,8 +45,11 @@ public sealed partial class ChatService
         "## State — what is done, what is half done.\n" +
         "## Next steps — what was about to happen next.\n" +
         "## Open questions — what is still undecided or unknown.\n" +
-        "The latest messages matter most: keep their details. Leave out greetings, repetition and dead ends. Write in the language " +
-        "the person writes in, at most about 800 words. Write only the summary.";
+        "## Earlier parts — a line for each stretch of the conversation, with its message numbers and what it was about " +
+        "(\"#1–#140: planning the launch\"); keep the lines of the summary so far, and join the oldest when there are more than 30.\n" +
+        "Each message has its number (#212): give the numbers where the summary speaks of what was said there (\"chose Postgres " +
+        "(#212)\"), so the assistant can read them again. The latest messages matter most: keep their details. Leave out greetings, " +
+        "repetition and dead ends. Write in the language the person writes in, at most about 900 words. Write only the summary.";
 
     /// <summary>The newest summary on a branch before <paramref name="end"/>, and where the messages after it start.</summary>
     internal static (string? Summary, int From) LastSummary(IReadOnlyList<ChatMessage> path, int end)
@@ -88,7 +91,7 @@ public sealed partial class ChatService
         string summary;
         try
         {
-            summary = await SummarizeAsync(earlier, path[from..], model, modelName, email, ct);
+            summary = await SummarizeAsync(earlier, path[from..], model, modelName, email, ct, number: from + 1);
         }
         catch (ChatGatewayException ex)
         {
@@ -136,7 +139,7 @@ public sealed partial class ChatService
         string summary;
         try
         {
-            summary = await SummarizeAsync(earlier, stored[from..at], model, modelName, email, ct);
+            summary = await SummarizeAsync(earlier, stored[from..at], model, modelName, email, ct, number: from + 1);
         }
         catch (ChatGatewayException ex)
         {
@@ -154,10 +157,11 @@ public sealed partial class ChatService
     /// <summary>
     /// A summary of <paramref name="messages"/> after <paramref name="earlier"/>'s. What
     /// does not fit the model's context at once is summarized in parts, each folded
-    /// into the summary so far.
+    /// into the summary so far. With <paramref name="number"/>, the first message's on
+    /// the branch, each message is read with its number (#N), as chat_read reads it.
     /// </summary>
     private async Task<string> SummarizeAsync(string? earlier, IReadOnlyList<ChatMessage> messages, GatewayModel? model, string modelName, string email, CancellationToken ct,
-        string prompt = CompactPrompt)
+        string prompt = CompactPrompt, int? number = null)
     {
         var output = Math.Min(SummaryTokens, model?.MaxOutput ?? SummaryTokens);
         // At 3 characters a token: what is summarized is often denser than prose (code, tool output), and too much is halved anyway.
@@ -167,7 +171,7 @@ public sealed partial class ChatService
 
         var summary = earlier;
         var part = new StringBuilder();
-        foreach (var line in Transcript(messages, names))
+        foreach (var line in Transcript(messages, names, number))
         {
             var free = Math.Max(2_000, room - (summary?.Length ?? 0));
             if (part.Length > 0 && part.Length + line.Length > free)
@@ -208,30 +212,40 @@ public sealed partial class ChatService
     /// <summary>A part is not halved below this many characters: a refusal then is the summary's own or the earlier summary's.</summary>
     private const int MinPart = 1_000;
 
-    /// <summary>The messages as the summarizer reads them: who said what, the tools' answers cut short.</summary>
-    private static IEnumerable<string> Transcript(IEnumerable<ChatMessage> messages, IReadOnlyDictionary<Guid, string> files)
+    /// <summary>The messages as the summarizer reads them: who said what (from <paramref name="number"/> on, each with its number), the tools' answers cut short.</summary>
+    internal static IEnumerable<string> Transcript(IEnumerable<ChatMessage> messages, IReadOnlyDictionary<Guid, string> files, int? number = null, int toolChars = ToolAnswerChars)
     {
+        var n = number ?? 0;
+        // Left out by the person: not summarized either (a question with its answer).
+        var exchangeLeftOut = false;
         foreach (var m in messages)
         {
+            var mark = number is null ? "" : $"#{n} ";
+            n++;
+            exchangeLeftOut = m.Role == "user" ? m.LeftOut : exchangeLeftOut;
+            if (exchangeLeftOut || m.LeftOut)
+            {
+                continue;
+            }
             switch (m.Role)
             {
                 case "user":
                     var attached = ParseIds(m.AttachmentsJson).Select(id => files.GetValueOrDefault(id)).OfType<string>().ToList();
                     var quoting = m.Quote is { Length: > 0 } q ? $" (quoting an earlier answer: \"{(q.Length > 300 ? ChatQuotes.Cut(q, 300) + "…" : q)}\")" : "";
-                    yield return "Person" + quoting + ": " + m.Content + (attached.Count > 0 ? $"\n[attached: {string.Join(", ", attached)}]" : "");
+                    yield return mark + "Person" + quoting + ": " + m.Content + (attached.Count > 0 ? $"\n[attached: {string.Join(", ", attached)}]" : "");
                     break;
                 case "assistant":
                     var text = new StringBuilder();
                     if (m.Content.Length > 0)
                     {
-                        text.Append("Assistant: ").Append(m.Content);
+                        text.Append(mark).Append("Assistant: ").Append(m.Content);
                     }
                     if (m.ToolCallsJson is not null && JsonNode.Parse(m.ToolCallsJson) is JsonArray calls)
                     {
                         foreach (var call in calls.OfType<JsonObject>())
                         {
                             var args = call["function"]?["arguments"]?.GetValue<string>() ?? "";
-                            text.Append(text.Length > 0 ? "\n" : "").Append("Assistant called ").Append(call["function"]?["name"]?.GetValue<string>())
+                            text.Append(text.Length > 0 ? "\n" : mark).Append("Assistant called ").Append(call["function"]?["name"]?.GetValue<string>())
                                 .Append('(').Append(args.Length > 500 ? args[..500] + "…" : args).Append(')');
                         }
                     }
@@ -241,7 +255,7 @@ public sealed partial class ChatService
                     }
                     break;
                 case "tool":
-                    yield return $"{m.ToolName} answered: " + (m.Content.Length > ToolAnswerChars ? m.Content[..ToolAnswerChars] + " […]" : m.Content);
+                    yield return $"{mark}{m.ToolName} answered: " + (m.Content.Length > toolChars ? m.Content[..toolChars] + " […]" : m.Content);
                     break;
             }
         }

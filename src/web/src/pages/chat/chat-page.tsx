@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Archive, ArrowDown, CloudOff, Code2, FileUp, GitFork, Lightbulb, Lock, MessageSquare, Reply, Search, Sparkles, SquareTerminal, X } from 'lucide-react'
+import { Archive, ArrowDown, ChevronsUp, CloudOff, Code2, FileUp, GitFork, Lightbulb, Lock, MessageSquare, Reply, Search, Sparkles, SquareTerminal, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
@@ -14,7 +14,7 @@ import { takeShared } from '@/lib/shared'
 import type { SkillUse } from '@/lib/skills'
 import { useMedia } from '@/lib/use-media'
 import { cn } from '@/lib/utils'
-import { archiveChat, assistantQuery, cancelQueued, chatModel, configQuery, conversationQuery, forkChat, hurryChat, queueMessage, sendQueuedNow, stampQuery, stopChat, streamChat, uploadFile } from './api'
+import { archiveChat, assistantQuery, cancelQueued, chatModel, chatWindow, configQuery, conversationQuery, forkChat, hurryChat, queueMessage, sendQueuedNow, stampQuery, stopChat, streamChat, uploadFile, widenWindow } from './api'
 import { useScreenShare } from './screen'
 import { PublishDialog, type ToPublish } from '../apps/publish-dialog'
 import { BrowserBar } from './browser-bar'
@@ -964,6 +964,9 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       </section>
     ) : null
 
+  // A long chat shows its end first; its earlier messages are read on demand.
+  const [readingEarlier, setReadingEarlier] = useState(false)
+
   // A message pinned (kept word for word through compactions) or left out of what the model reads.
   const changeContext = (m: Message, change: ContextChange) => {
     if (!id) return
@@ -1271,6 +1274,22 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                         </Link>
                       </p>
                     )}
+                    {data?.earlier ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="justify-self-center"
+                        disabled={readingEarlier}
+                        onClick={() => {
+                          if (!id) return
+                          widenWindow(id)
+                          setReadingEarlier(true)
+                          void queryClient.invalidateQueries({ queryKey: conversationQuery(id).queryKey }).finally(() => setReadingEarlier(false))
+                        }}
+                      >
+                        <ChevronsUp /> Show earlier messages ({Math.min(data.earlier, chatWindow.step).toLocaleString()} of {data.earlier.toLocaleString()})
+                      </Button>
+                    ) : null}
                     {turns.map((t, i) => {
                       const compacted = [t.question, ...t.answer].find((m) => m?.summary)
                       const summary = compacted?.summary

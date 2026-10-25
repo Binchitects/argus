@@ -12,12 +12,15 @@ namespace Llm.Api.Chat.Tools;
 /// offers on its own waits for the person, who keeps it or not on the card in the chat (nothing
 /// waits on the server meanwhile). The card's state is the call's details (see MemoryEndpoints).
 /// </summary>
-public sealed partial class MemoryTool(Memories memories, AppDbContext db) : IChatTool
+public sealed partial class MemoryTool(Memories memories, AppDbContext db, PastChats pastChats) : IChatTool
 {
     public const string Function = "remember";
 
     /// <summary>Searches all the memories, beyond those given with the question.</summary>
     public const string RecallFunction = "recall";
+
+    /// <summary>Finds the person's past chats and Code Arena sessions by what they were about; and reads one of them.</summary>
+    public const string HistoryFunction = "search_history", OpenFunction = "open_chat";
 
     /// <summary>A memory the model offered, waiting for the person.</summary>
     public const string Offered = "offered";
@@ -44,7 +47,8 @@ public sealed partial class MemoryTool(Memories memories, AppDbContext db) : ICh
         "matters only to this chat. What you remember already is in your instructions or with the question: do not remember it again. " +
         "Give each its kind: preference (how they like things), fact, decision (what was decided, and why), howto (how to do something " +
         "here), lesson (what went wrong once, or what they corrected). When the question needs something you may have been told before " +
-        "and it is not given, look with recall.";
+        "and it is not given, look with recall. When it refers to earlier work (\"as we decided last month\", \"the script from that chat\"), " +
+        "find the chat or Code Arena session with search_history, then read what you need in it with open_chat.";
 
     public Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct) => Task.FromResult<IToolRun>(!memories.On(context.User)
         // Turned off by the person: no function, no word of it.
@@ -61,14 +65,34 @@ public sealed partial class MemoryTool(Memories memories, AppDbContext db) : ICh
                 Schema.Function(RecallFunction,
                     "Searches everything remembered about the person (and the company's memories) for what bears on a question: the nearest by meaning, with their kind.",
                     new JsonObject { ["query"] = Schema.Text("What to look for, in a few words or a question.") }, "query"),
+                Schema.Function(HistoryFunction,
+                    "Finds the person's past chats and Code Arena sessions by what they were about (their digests: what was asked, done and decided), the nearest first, each with its id.",
+                    new JsonObject { ["query"] = Schema.Text("What the earlier work was about, in a few words or a question.") }, "query"),
+                Schema.Function(OpenFunction,
+                    "Reads one of the person's past chats: its digest, and with query the messages that hold those words (with their numbers), or with from (and to) its messages by number.",
+                    new JsonObject
+                    {
+                        ["chat"] = Schema.Text("The chat's id, as search_history gives it."),
+                        ["query"] = Schema.Text("Words to find in it (optional)."),
+                        ["from"] = new JsonObject { ["type"] = "integer", ["description"] = "The first message to read, by number (optional)." },
+                        ["to"] = new JsonObject { ["type"] = "integer", ["description"] = "The last (optional)." },
+                    }, "chat"),
             ],
             Instructions,
             (function, args, token) => function switch
             {
                 Function => RememberAsync(context, args, token),
                 RecallFunction => RecallAsync(context, args, token),
+                HistoryFunction => HistoryAsync(context, args, token),
+                OpenFunction => OpenAsync(context, args, token),
                 _ => Task.FromResult(new ToolResult($"There is no function {function}.", IsError: true)),
             }));
+
+    private async Task<ToolResult> HistoryAsync(ToolContext context, JsonObject args, CancellationToken ct) =>
+        await pastChats.FindAsync(context.User, Schema.Str(args, "query")?.Trim() ?? "", ct, besides: context.Conversation.Id);
+
+    private async Task<ToolResult> OpenAsync(ToolContext context, JsonObject args, CancellationToken ct) =>
+        await pastChats.OpenAsync(context.User, Schema.Str(args, "chat"), args, ct);
 
     private async Task<ToolResult> RecallAsync(ToolContext context, JsonObject args, CancellationToken ct)
     {

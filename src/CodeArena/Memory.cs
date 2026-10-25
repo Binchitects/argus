@@ -291,6 +291,52 @@ internal sealed class MemoryStore(AppPaths paths, string projectRoot)
             return new ToolResult(lines.EndsWith(')') ? lines[..^1] : lines) { Display = c.Ui.Dim($"{f.Ids.Count} found") };
         },
     };
+
+    /// <summary>
+    /// The person's past chats and Code Arena sessions, everywhere they worked, as Arena keeps them (each with its digest):
+    /// search_history finds them by what they were about, open_chat reads one. Asked of Arena; nothing without it.
+    /// </summary>
+    public static IEnumerable<ToolDef> HistoryTools() =>
+    [
+        new()
+        {
+            Name = "search_history",
+            Kind = ToolKind.Read,
+            Description = "Find the person's past chats and Code Arena sessions (on every machine, and in the web chat) by what they were about: what was asked, done and decided, the nearest first, each with its id. For \"as we decided last month\" or \"the script from that session\".",
+            Parameters = (JsonObject)JsonNode.Parse("""
+                {"type":"object","properties":{"query":{"type":"string","description":"What the earlier work was about, in a few words or a question."}},"required":["query"]}
+                """)!,
+            Summary = a => a.Str("query") ?? "",
+            Run = async (a, c, ct) => await HistoryAsync(c, "/search", new JsonObject { ["query"] = a.Str("query") }, ct),
+        },
+        new()
+        {
+            Name = "open_chat",
+            Kind = ToolKind.Read,
+            Description = "Read one of the person's past chats or sessions, by the id search_history gave: its digest, and with query the messages that hold those words (with their numbers), or with from (and to) its messages by number.",
+            Parameters = (JsonObject)JsonNode.Parse("""
+                {"type":"object","properties":{
+                  "chat":{"type":"string","description":"The chat's id, as search_history gives it."},
+                  "query":{"type":"string","description":"Words to find in it (optional)."},
+                  "from":{"type":"integer","description":"The first message to read, by number (optional)."},
+                  "to":{"type":"integer","description":"The last (optional)."}},
+                 "required":["chat"]}
+                """)!,
+            Summary = a => (a.Str("chat") ?? "") + (a.Str("query") is { } q ? $" {q}" : ""),
+            Run = async (a, c, ct) => await HistoryAsync(c, "/open",
+                new JsonObject { ["chat"] = a.Str("chat"), ["query"] = a.Str("query"), ["from"] = a.Int("from"), ["to"] = a.Int("to") }, ct),
+        },
+    ];
+
+    private static async Task<ToolResult> HistoryAsync(ToolContext c, string path, JsonObject body, CancellationToken ct)
+    {
+        if (c.Memory?.Arena is not { } arena)
+        {
+            throw new ToolError("Past chats are Arena's: this session is not signed in to Arena.");
+        }
+        var (text, error) = await arena.HistoryAsync(path, body, ct);
+        return error ? throw new ToolError(text) : new ToolResult(text) { Display = c.Ui.Dim(Fmt.OneLine(text, 80)) };
+    }
 }
 
 /// <summary>Searching the saved sessions: what was said before, in this folder or all of them.</summary>
@@ -353,7 +399,7 @@ internal static class SessionSearch
         }
     }
 
-    private static string Text(JsonObject m) => m["content"] switch
+    internal static string Text(JsonObject m) => m["content"] switch
     {
         JsonValue v when v.TryGetValue<string>(out var s) => s,
         JsonArray parts => string.Join(' ', parts.OfType<JsonObject>().Select(p => p.Str("text") ?? "")),
@@ -402,7 +448,14 @@ internal sealed class ArenaMemory(Config config, HttpClient http)
     /// <summary>How long one call waits for Arena: memory must not hold a session's start or a message.</summary>
     public static readonly TimeSpan Limit = TimeSpan.FromSeconds(8);
 
-    private string Url(string path) => config.Url!.TrimEnd('/') + "/api/code-arena/memories" + path;
+    private string Url(string path) => config.Url!.TrimEnd('/') + (path.StartsWith("/api/", StringComparison.Ordinal) ? path : "/api/code-arena/memories" + path);
+
+    /// <summary>search_history or open_chat (<paramref name="path"/>: /search, /open), asked of Arena: its answer, and whether it is a refusal.</summary>
+    public async Task<(string Text, bool Error)> HistoryAsync(string path, JsonObject body, CancellationToken ct)
+    {
+        var answer = await SendAsync(HttpMethod.Post, "/api/code-arena/history" + path, body, ct, throwRefusal: true);
+        return answer?.Str("text") is { } text ? (text, answer.Bool("error") == true) : ("Arena did not answer: try again in a moment.", true);
+    }
 
     private async Task<JsonObject?> SendAsync(HttpMethod method, string path, JsonObject? body, CancellationToken ct, bool throwRefusal = false)
     {

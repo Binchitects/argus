@@ -21,6 +21,7 @@
        chat's own reading of it, shared as a file (no project reference). -->
   <ItemGroup>
     <Compile Include="../Llm.Core/Chat/ContextOverflow.cs" Link="Shared/ContextOverflow.cs" />
+    <Compile Include="../Llm.Core/Chat/HistoryWords.cs" Link="Shared/HistoryWords.cs" />
   </ItemGroup>
 
   <!-- The IDE (code-arena, code-arena web): the page src/web builds into web/

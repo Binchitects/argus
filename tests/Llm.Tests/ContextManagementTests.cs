@@ -146,6 +146,9 @@ public sealed class ContextManagementTests(AppFixture app)
         await SendAsync(b, id, "", path: "compact");
         var asked = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email && r.Body["messages"]![0]!["content"]!.GetValue<string>().StartsWith("You compact", StringComparison.Ordinal));
         Assert.Contains("## Decisions", asked.Body["messages"]![0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Contains("## Earlier parts", asked.Body["messages"]![0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+        // Each message with its number, as chat_read reads it again.
+        Assert.Contains("#1 Person: Let us plan the launch.", asked.Body["messages"]![1]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
         await SendAsync(b, id, "Where are we?");
         var system = LastAnswerRequest(email)[0]!["content"]!.GetValue<string>();
         Assert.Contains("This chat's plan as it stands, \"Launch\" (plan_show gives all of it):\n1. [done] Write the notes\n2. [doing] Tell support (Ana)", system, StringComparison.Ordinal);
@@ -189,5 +192,104 @@ public sealed class ContextManagementTests(AppFixture app)
         Assert.StartsWith("vendors vvv", first.GetProperty("preview").GetString(), StringComparison.Ordinal);
         // Small messages are not listed.
         Assert.Single(biggest);
+    }
+
+    [Fact]
+    public async Task A_chat_that_compacted_finds_and_reads_its_older_messages_again_by_their_numbers()
+    {
+        var (b, email) = await PersonAsync();
+        var id = await NewChatAsync(b);
+        // 300 exchanges, the first 290 summarized; the vendor was named in the 12th question only (#23).
+        using (var scope = app.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Guid? parent = null;
+            var seq = 0;
+            for (var i = 0; i < 300; i++)
+            {
+                var q = new ChatMessage { ConversationId = id, ParentId = parent, Role = "user", Sequence = ++seq, Content = i == 11 ? "We chose Northwind Traders as the vendor, at 4.20 a unit." : $"question {i}", Pinned = i == 5 };
+                var a = new ChatMessage { ConversationId = id, ParentId = q.Id, Role = "assistant", Sequence = ++seq, Content = $"answer {i}", Summary = i == 289 ? "## Goal\n- buy parts (#1–#580)" : null };
+                db.ChatMessages.AddRange(q, a);
+                parent = a.Id;
+            }
+            (await db.Conversations.SingleAsync(c => c.Id == id)).CurrentLeafId = parent;
+            await db.SaveChangesAsync();
+        }
+
+        await SendAsync(b, id, "[call chat_search {\"query\":\"Northwind vendor\"}]");
+        var asked = LastAnswerRequest(email);
+        var found = asked.Last(m => m!["role"]!.GetValue<string>() == "tool")!["content"]!.GetValue<string>();
+        Assert.Contains("#23 the person", found, StringComparison.Ordinal);
+        Assert.Contains("Northwind Traders as the vendor", found, StringComparison.Ordinal);
+        var system = asked[0]!["content"]!.GetValue<string>();
+        Assert.Contains("find it with chat_search", system, StringComparison.Ordinal);
+        // The 580 messages the summary stands for are not read whole, but the summary and what was pinned before it are.
+        Assert.Contains("<summary>\n## Goal\n- buy parts (#1–#580)\n</summary>", system, StringComparison.Ordinal);
+        Assert.Contains("<pinned from=\"person\">\nquestion 5\n</pinned>", system, StringComparison.Ordinal);
+        Assert.DoesNotContain("question 200", asked.ToJsonString(), StringComparison.Ordinal);
+        Assert.Contains(asked, m => m!["content"]?.ToString() == "question 295");
+
+        await SendAsync(b, id, "[call chat_read {\"from\":23,\"to\":24}]");
+        var read = LastAnswerRequest(email).Last(m => m!["role"]!.GetValue<string>() == "tool")!["content"]!.GetValue<string>();
+        Assert.Equal("#23 the person: We chose Northwind Traders as the vendor, at 4.20 a unit.\n\n#24 you: answer 11", read);
+
+        // A chat that never compacted has no such tool.
+        var fresh = await NewChatAsync(b);
+        await SendAsync(b, fresh, "Hello.");
+        Assert.DoesNotContain("chat_search", app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body.ToJsonString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_words_of_a_search_leave_out_the_common_ones_and_the_match_is_shown_with_what_is_around_it()
+    {
+        Assert.Equal(["northwind", "vendor", "4.20"], HistoryWords.Terms("What did we say about the Northwind vendor at 4.20?"));
+        var around = HistoryWords.Around(new string('x', 500) + " Northwind " + new string('y', 500), ["northwind"]);
+        Assert.StartsWith("…", around, StringComparison.Ordinal);
+        Assert.Contains("Northwind", around, StringComparison.Ordinal);
+        Assert.EndsWith("…", around, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_long_chat_is_read_from_its_end_with_the_other_versions_below_and_more_on_demand()
+    {
+        var (b, _) = await PersonAsync();
+        var id = await NewChatAsync(b);
+        Guid secondVersion;
+        using (var scope = app.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Guid? parent = null;
+            var seq = 0;
+            var chain = new List<ChatMessage>();
+            for (var i = 0; i < 100; i++)
+            {
+                var q = new ChatMessage { ConversationId = id, ParentId = parent, Role = "user", Sequence = ++seq, Content = $"question {i}" };
+                var a = new ChatMessage { ConversationId = id, ParentId = q.Id, Role = "assistant", Sequence = ++seq, Content = $"answer {i}" };
+                chain.AddRange([q, a]);
+                parent = a.Id;
+            }
+            // Another version of the 90th answer (inside the window), and of the 10th (before it).
+            var late = new ChatMessage { ConversationId = id, ParentId = chain[178].Id, Role = "assistant", Sequence = ++seq, Content = "answer 89, again" };
+            var early = new ChatMessage { ConversationId = id, ParentId = chain[18].Id, Role = "assistant", Sequence = ++seq, Content = "answer 9, again" };
+            db.ChatMessages.AddRange([.. chain, late, early]);
+            (await db.Conversations.SingleAsync(c => c.Id == id)).CurrentLeafId = parent;
+            await db.SaveChangesAsync();
+            secondVersion = late.Id;
+        }
+
+        var shown = await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}?last=50"));
+        Assert.Equal(150, shown.GetProperty("earlier").GetInt32());
+        var ids = shown.GetProperty("messages").EnumerateArray().Select(m => m.GetProperty("content").GetString()).ToList();
+        Assert.Equal(51, ids.Count);
+        Assert.Equal("question 75", ids[0]);
+        Assert.Contains("answer 89, again", ids);
+        Assert.DoesNotContain("answer 9, again", ids);
+        Assert.Contains(shown.GetProperty("messages").EnumerateArray(), m => m.GetProperty("id").GetGuid() == secondVersion);
+
+        // All of it: no window asked, or one bigger than the branch.
+        var all = await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}"));
+        Assert.Equal(202, all.GetProperty("messages").GetArrayLength());
+        Assert.Equal(0, all.GetProperty("earlier").GetInt32());
+        Assert.Equal(202, (await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}?last=500"))).GetProperty("messages").GetArrayLength());
     }
 }

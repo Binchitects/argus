@@ -121,4 +121,59 @@ public sealed class WindowTests : IDisposable
         Assert.Equal("tool", biggest["role"]!.GetValue<string>());
         Assert.StartsWith("read_file's result", biggest["what"]!.GetValue<string>(), StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task A_long_session_finds_and_reads_again_what_its_summary_covers_by_the_numbers_it_cites()
+    {
+        _gateway.Context = 20_000;
+        using var h = new Harness(_gateway, _mcp, c => c["compactAt"] = 50);
+        var asks = new List<string>();
+        _gateway.Answer = req =>
+        {
+            var last = FakeGateway.Last(req);
+            if (FakeGateway.Summarizing(req))
+            {
+                asks.Add(last);
+                return Reply.Say("## Goal\n- pick a vendor (#1)");
+            }
+            return last switch
+            {
+                "find it" => Reply.Call(("session_search", """{"query":"Northwind vendor"}""")),
+                "read it" => Reply.Call(("session_read", """{"from":1,"to":2}""")),
+                _ => FakeGateway.HasToolResults(req) && req["messages"]!.AsArray()[^1]!["role"]!.GetValue<string>() == "tool" ? Reply.Say("done") : Reply.Say("noted " + new string('n', 3000)),
+            };
+        };
+        var input = "We chose Northwind Traders as the vendor.\n" + string.Concat(Enumerable.Range(1, 6).Select(i => $"step {i} " + new string('s', 3000) + "\n")) + "find it\nread it\n/exit\n";
+        Assert.Equal(0, await h.Run(input, "chat", "--mode", "auto-edit"));
+
+        // The summary is asked with the messages' numbers, and the person's first words.
+        var ask = asks[0];
+        Assert.Contains("are #1 to #", ask, StringComparison.Ordinal);
+        Assert.Contains("#1 \"We chose Northwind Traders as the vendor.\"", ask, StringComparison.Ordinal);
+        Assert.Contains("## Earlier parts", ask, StringComparison.Ordinal);
+        var after = _gateway.Requests.Last(r => !FakeGateway.Summarizing(r))["messages"]!.AsArray();
+        Assert.Contains("session_read reads them again", after[1]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+        // Found, then read word for word, though the summary stands for it.
+        var results = Results(_gateway.Requests[^1]);
+        Assert.Contains("#1 the person: We chose Northwind Traders as the vendor.", results[^2], StringComparison.Ordinal);
+        Assert.StartsWith("#1 the person: We chose Northwind Traders as the vendor.\n\n#2 you: noted nnn", results[^1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Past_chats_and_sessions_everywhere_are_found_and_read_through_Arena()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        var step = 0;
+        _gateway.Answer = _ => ++step switch
+        {
+            1 => Reply.Call(("search_history", """{"query":"parts vendor"}""")),
+            2 => Reply.Call(("open_chat", """{"chat":"c1","query":"Northwind"}""")),
+            _ => Reply.Say("Northwind."),
+        };
+        Assert.Equal(0, await h.Run("", "-p", "which vendor did we pick?", "--mode", "auto-edit"));
+        Assert.Equal([("search", "parts vendor"), ("open", "c1")], _mcp.Chats.HistoryAsked.Select(x => (x.What, x.Body["query"]?.GetValue<string>() is { } q && x.What == "search" ? q : x.Body["chat"]!.GetValue<string>())));
+        var results = Results(_gateway.Requests[^1]);
+        Assert.StartsWith("[c1] \"Parts vendor\"", results[0], StringComparison.Ordinal);
+        Assert.Equal("#1 the person: We chose Northwind Traders.", results[1]);
+    }
 }

@@ -366,6 +366,8 @@ export interface Conversation extends ConversationSummary {
   assistant?: ChatAssistant | null
   createdAt: string
   messages: Message[]
+  /** A long chat: its branch's messages before those sent, not read yet ("Show earlier" reads more). */
+  earlier?: number
   /** The chat's comparisons of two models. */
   arenas?: ArenaMatch[]
   /** A room's people and settings (null: the person's own chat). */

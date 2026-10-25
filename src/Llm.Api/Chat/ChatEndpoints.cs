@@ -322,15 +322,30 @@ public static partial class ChatEndpoints
     internal static bool ValidThinking(string level, ChatOptions chat) =>
         level == "off" || ThinkingPresets.Parse(chat.ThinkingPresets).Any(p => p.Level == level);
 
-    private static async Task<IResult> GetAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ToolRegistry registry, AccessService access, AnswerJobs jobs,
-        CancellationToken ct)
+    /// <summary>The fewest messages a window of a long chat holds (?last=).</summary>
+    internal const int FewestShown = 50;
+
+    /// <param name="last">A long chat's window: its branch's newest messages, this many, and what branches off below them; the
+    /// rest is asked for with a bigger one (the answer's earlier says how many it left out). Null: all of it.</param>
+    private static async Task<IResult> GetAsync(Guid id, int? last, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ToolRegistry registry, AccessService access,
+        AnswerJobs jobs, CancellationToken ct)
     {
         var me = await Me(p, users);
         if (await Owned(db, id, me, Need.Read) is not { } c)
         {
             return Results.NotFound();
         }
-        var messages = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == id).OrderBy(m => m.Sequence).ToListAsync(ct);
+        List<ChatMessage>? messages = null;
+        var earlier = 0;
+        if (last is { } wanted && await db.ChatMessages.CountAsync(m => m.ConversationId == id, ct) > Math.Max(FewestShown, wanted)
+            && Window([.. (await ChatService.SkeletonAsync(db, id, ct)).Values.OrderBy(m => m.Sequence)], c.CurrentLeafId, Math.Max(FewestShown, wanted)) is { } window)
+        {
+            // A long chat: its window found in the tree, then only that read whole.
+            var ids = window.Messages.Select(m => m.Id).ToList();
+            messages = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == id && ids.Contains(m.Id)).OrderBy(m => m.Sequence).ToListAsync(ct);
+            earlier = window.Earlier;
+        }
+        messages ??= await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == id).OrderBy(m => m.Sequence).ToListAsync(ct);
         var forkedFrom = c.ForkedFromId is { } from
             ? await db.Conversations.AsNoTracking().Where(x => x.Id == from && x.UserId == me.Id).Select(x => new { x.Id, x.Title }).SingleOrDefaultAsync(ct)
             : null;
@@ -339,7 +354,44 @@ public static partial class ChatEndpoints
         // The person's thumbs, and the arena's answers without their models until voted on.
         var quality = await Quality.ChatQuality.ForAsync(db, me.Id, id, messages, ct);
         return Results.Ok(Shape(c, tools, forkedFrom, await MessagesAsync(db, messages, ct, quality), jobs.IsAnswering(id), assistant, quality.Arenas,
-            await QueuedMessages.ListAsync(db, id, ct), c.IsRoom ? await RoomEndpoints.BriefAsync(db, c, me, jobs, ct) : null));
+            await QueuedMessages.ListAsync(db, id, ct), c.IsRoom ? await RoomEndpoints.BriefAsync(db, c, me, jobs, ct) : null, earlier));
+    }
+
+    /// <summary>
+    /// The newest <paramref name="most"/> messages of the branch to <paramref name="leaf"/>, with every message that branches off
+    /// below the first of them (its other versions too), in order; and how many of the branch are left out before them. Null
+    /// when the branch is not longer than that.
+    /// </summary>
+    internal static (List<ChatMessage> Messages, int Earlier)? Window(List<ChatMessage> messages, Guid? leaf, int most)
+    {
+        if (messages.Count <= most || leaf is not { } at)
+        {
+            return null;
+        }
+        var byId = messages.ToDictionary(m => m.Id);
+        if (!byId.ContainsKey(at))
+        {
+            return null;
+        }
+        var path = ChatService.PathTo(byId, at);
+        if (path.Count <= most)
+        {
+            return null;
+        }
+        var children = messages.Where(m => m.ParentId is not null).ToLookup(m => m.ParentId!.Value);
+        var shown = new HashSet<Guid>();
+        var next = new Queue<ChatMessage>(path[^most].ParentId is { } parent ? children[parent] : [path[^most]]);
+        while (next.TryDequeue(out var m))
+        {
+            if (shown.Add(m.Id))
+            {
+                foreach (var child in children[m.Id])
+                {
+                    next.Enqueue(child);
+                }
+            }
+        }
+        return ([.. messages.Where(m => shown.Contains(m.Id))], path.Count - most);
     }
 
     /// <summary>
@@ -376,14 +428,15 @@ public static partial class ChatEndpoints
     /// <param name="answering">An answer is being written: the page watches it (GET …/stream).</param>
     /// <param name="arenas">The chat's comparisons of two models (arena mode).</param>
     /// <param name="queued">Messages waiting for the answer to end (QueuedMessages).</param>
+    /// <param name="earlier">A long chat's messages before its window, not sent (GetAsync's last).</param>
     private static object Shape(Conversation c, IReadOnlyList<string> tools, object? forkedFrom, IEnumerable<object> messages, bool answering, object? assistant = null,
-        object? arenas = null, IEnumerable<object>? queued = null, object? room = null) =>
+        object? arenas = null, IEnumerable<object>? queued = null, object? room = null, int earlier = 0) =>
         new
         {
             // A room's: the person's role, its people and its settings (RoomEndpoints).
             room,
             c.Id, c.Title, c.Thinking, tools, useArgus = tools.Contains("argus"), c.Model, c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens,
-            c.CurrentLeafId, c.ArchivedAt, forkedFrom, assistant, c.CreatedAt, c.UpdatedAt, answering, messages, arenas = arenas ?? Array.Empty<object>(), queued = queued ?? [],
+            c.CurrentLeafId, c.ArchivedAt, forkedFrom, assistant, c.CreatedAt, c.UpdatedAt, answering, messages, earlier, arenas = arenas ?? Array.Empty<object>(), queued = queued ?? [],
             c.Origin, c.OriginPlace,
             // Code Arena is answering in it: what the person sends waits in the queue until its turn ends.
             codeArena = CodeArenaSync.Answering(c),

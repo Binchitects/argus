@@ -50,6 +50,15 @@ public sealed class Conversation
     /// <summary>What memory has read of it: its messages up to this one (by their sequence), reflected on as it went quiet.</summary>
     public int ReflectedSequence { get; set; }
     /// <summary>
+    /// What it is about, for finding it again (search_history): what was asked, done and decided, the names that matter, how
+    /// it ended. Written as it goes quiet, from the digest before and what came after it; null until then.
+    /// </summary>
+    public string? Digest { get; set; }
+    /// <summary>The digest's vector (the knowledge embedder's, at unit length); null when the embedder was not there.</summary>
+    public float[]? DigestEmbedding { get; set; }
+    /// <summary>What the digest covers: the messages up to this one (by their sequence).</summary>
+    public int DigestedSequence { get; set; }
+    /// <summary>
     /// Code Arena is answering in this chat until then (its turn, held while it works and renewed as it goes): the web
     /// keeps the person's messages in the chat's queue meanwhile, and they go when Code Arena's turn ends. Null: it is not.
     /// </summary>

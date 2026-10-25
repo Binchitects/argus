@@ -351,7 +351,7 @@ public sealed partial class Memories(AppDbContext db, IOptionsMonitor<MemoryOpti
         }
     }
 
-    private async Task<float[]?> DocumentVectorAsync(string text, CancellationToken ct)
+    internal async Task<float[]?> DocumentVectorAsync(string text, CancellationToken ct)
     {
         try
         {
@@ -364,7 +364,7 @@ public sealed partial class Memories(AppDbContext db, IOptionsMonitor<MemoryOpti
         }
     }
 
-    private async Task<float[]?> QueryVectorAsync(string text, CancellationToken ct)
+    internal async Task<float[]?> QueryVectorAsync(string text, CancellationToken ct)
     {
         try
         {
@@ -383,7 +383,7 @@ public sealed partial class Memories(AppDbContext db, IOptionsMonitor<MemoryOpti
         return length is 0 or double.NaN ? v : [.. v.Select(x => (float)(x / length))];
     }
 
-    private static double Dot(float[] a, float[] b)
+    internal static double Dot(float[] a, float[] b)
     {
         double sum = 0;
         for (var i = 0; i < a.Length; i++)

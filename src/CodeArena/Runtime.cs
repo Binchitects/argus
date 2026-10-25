@@ -351,8 +351,10 @@ internal sealed partial class Runtime : IAsyncDisposable
         }
         tools.Add(MemoryStore.RememberTool());
         tools.Add(MemoryStore.RecallTool());
+        tools.AddRange(MemoryStore.HistoryTools());
         tools.Add(KeptResults.Tool());
         tools.Add(SessionSearch.Tool());
+        tools.AddRange(SessionHistory.Tools());
         if (Extensions.Skills.Count > 0)
         {
             tools.Add(Extensions.SkillTool());
@@ -492,6 +494,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             Agent?.Events?.Notice(said);
         };
         Context.SessionId = () => Session.Id;
+        Context.Store = () => Session;
 
         if (resumed is not null && resumedFile is not null)
         {

@@ -1149,6 +1149,16 @@ namespace Llm.Core.Data.Migrations
                     b.Property<DateTimeOffset?>("DeletedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Digest")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.PrimitiveCollection<float[]>("DigestEmbedding")
+                        .HasColumnType("real[]");
+
+                    b.Property<int>("DigestedSequence")
+                        .HasColumnType("integer");
+
                     b.Property<Guid?>("ForkedFromId")
                         .HasColumnType("uuid");
 
