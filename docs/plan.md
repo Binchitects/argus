@@ -1679,7 +1679,90 @@ cut).
    an admin turns any off, and a person's or a project's skill of the same
    name wins.
 
-### v7.1 — Planning and code mode: plans the agents make and prove, and tools called from code
+### v7.1 — Compliance: ISO 27001, SOC 2, HIPAA and GDPR, built in and kept
+
+The person asked (2026-10-26) to cover ISO/IEC 27001:2022, SOC 2 (the Trust
+Services Criteria), HIPAA (the Security and Privacy Rules) and the GDPR in
+this release, documented, and kept from breaking in every release after it.
+Planning and code mode move to v7.2.
+
+A framework is met by an organisation, not a program: Arena gives the
+technical controls, the evidence and the documents an auditor asks for, and
+says plainly what is the operator's part (policies, training, physical
+security, contracts such as a HIPAA BAA, the data protection officer). What is
+there to build on: sign-in hardened (password strength, lockouts, 1-hour idle
+and 12-hour absolute sessions), two-factor, OIDC, SAML and SCIM, groups and
+permissions, the audit log, retention and legal hold, a person's data
+exported (by them or an admin), safeguards on answers, Python and commands in
+sandboxes, backups with restore drills, alerts, and `audit-auth.sh`. The gaps:
+
+1. **The Compliance center** (Admin → Compliance): each framework's controls
+   (Annex A, the TSC, 45 CFR 164.308–316, the GDPR's articles) with what
+   meets each in Arena, its live state from automated checks (red, amber,
+   green), the operator's part to attest (with who and when), and the
+   evidence an auditor asks for as one download (settings, the checks'
+   results, the audit log's proof, access reviews, policies' versions).
+2. **Two-factor required**: for everyone, for admins, or for chosen groups;
+   who has none enrols at their next sign-in; recovery codes; the
+   directory's and SSO's own MFA counted when the provider says so.
+3. **An audit log nobody can change unseen**: each entry chained to the one
+   before (SHA-256), a daily anchor kept apart, a check that walks the chain
+   (and alerts when it breaks); sent on as it happens to a SIEM (syslog,
+   or a webhook); kept at least six years (HIPAA's documentation rule);
+   reads of another person's data (an admin's export, a shared chat opened)
+   audited as changes are.
+4. **Access reviews**: every quarter (or on demand), each privileged person
+   and group membership listed for a reviewer to confirm or revoke, with the
+   record kept: who reviewed, what changed, when. Accounts unused for 90
+   days flagged, and disabled when the company says so.
+5. **Data subject requests** (GDPR 15–22): a request taken in (by the person,
+   or an admin for them) with its 30-day clock; access and portability (the
+   existing export, machine readable), rectification, restriction (no memory,
+   digests or learning from their work), objection, and erasure that reaches
+   everything of theirs (chats, files, memories, digests, skills, the
+   gateway's logs, traces) with a certificate of what was erased and what
+   ages out of backups by when. Each step in the audit log.
+6. **Retention for everything**: logs (Loki, now kept forever), traces,
+   the gateway's request logs, the audit log, backups, metrics: each with
+   its period in Settings, defaults that meet the frameworks, and the jobs
+   that enforce them shown in the Compliance center.
+7. **Encryption, said and checked**: TLS 1.2 or later outside (and the
+   ciphers checked), backups encrypted (pgBackRest's cipher, the key kept
+   apart), files at rest encrypted with `APP_KEY`, and the host's disk
+   encryption attested; HSTS and the security headers checked live.
+8. **Personal and health data kept in bounds**: detectors for identifiers
+   (national IDs, medical record numbers, cards, IBANs, emails, phones, dates
+   of birth) in the safeguards, to warn, mask or block before a question goes
+   to a model, stricter for models outside the company; no personal data in
+   the app's logs and traces (scrubbed, and tested).
+9. **Notice and acknowledgement**: a sign-in notice (acceptable use, the
+   privacy notice) whose version each person acknowledges, kept.
+10. **Security monitoring and incidents**: alerts for repeated failed
+    sign-ins, an admin granted, a mass export, the audit chain broken, a
+    backup failed, a certificate near its end; an incident register with the
+    GDPR's 72-hour clock and HIPAA's breach steps, from alert to closure.
+11. **Supply chain**: every release with its SBOM (CycloneDX), its
+    dependencies scanned for known vulnerabilities (.NET, npm, Python, the
+    images), and checksums; a release with a critical finding does not ship.
+12. **The documents**: `docs/compliance/` with the shared-responsibility
+    model, a mapping for each framework (each control: what meets it, where
+    it is documented, the tests and the live check that prove it), the data
+    flows, a record of processing (GDPR 30) and a DPIA (35) to fill in, an
+    incident-response runbook, and policy templates (access control,
+    backup, retention, encryption, change management).
+13. **Kept in every release**: `docs/compliance/controls.yaml` names, for
+    each control, the feature, the documentation and the tests and live
+    checks that prove it. A test fails when a control names a test that does
+    not exist or a document section that is gone; the tests that prove the
+    controls carry the control's id and run in every release;
+    `deploy/scripts/compliance-check.py` checks the live stack (TLS, headers,
+    cookies, two-factor policy, the audit chain, backups' age and
+    encryption, retention in force, logs' retention); the release checklist
+    and the release tests require it, and a release whose checks fail does
+    not ship. A change that weakens a control says so under its own heading
+    in the changelog.
+
+### v7.2 — Planning and code mode: plans the agents make and prove, and tools called from code
 
 1. **The plan as the agent's working state.** `plan` (make and change)
    instead of Code Arena's to-do list: a goal, and steps each with what
@@ -1771,7 +1854,7 @@ sandbox that reaches tools needs a broker that keeps every right and every
     graph eval in both modes on our own models: tokens in and out, success,
     time. The release says the numbers, and the defaults follow them.
 
-### v7.2 — A model of your own
+### v7.3 — A model of your own
 
 1. **Model lab.** Teach a small model the company's words on the local GPU
    (a LoRA from chosen knowledge sources, prompts and good answers), then
