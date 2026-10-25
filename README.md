@@ -1,82 +1,161 @@
-# Argus Arena
+<p align="center">
+  <img src="docs/assets/hero.svg" alt="Argus Arena: your team's private AI, on your hardware, that knows your code" width="100%">
+</p>
 
-**A private LLM platform for a team, on your own hardware: a chat with tools,
-an API with a key and a budget per person, and Argus, a code index that gives
-the model your codebase and real documentation, within each person's GitLab
-permissions. Nothing leaves your network.**
+<p align="center">
+  <b>The AI platform for teams that can't send their work to someone else's cloud.</b><br>
+  A chat that does real work, a coding agent with its own IDE, a studio, meetings and agents,
+  running on your GPUs, inside your network, grounded in your own codebase.
+</p>
 
-## What you get
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#code-arena">Code Arena</a> ·
+  <a href="#argus">Argus</a> ·
+  <a href="docs/README.md">Documentation</a> ·
+  <a href="CHANGELOG.md">What's new</a>
+</p>
 
-- **A chat** for everyone: the models you run, thinking levels, branches and
-  edits, files and Office documents, and tools that run on the server: Argus
-  (your code and documentation), Python in a sandbox with no network (data,
-  image, map and chart libraries), the web (sites you allow), pictures, video,
-  speech, a calculator and dates. **Sound and video in and out**: voice messages
-  and attached sound or video go to a model that hears and sees (Qwen3-Omni) or
-  as a transcript and frames to one that does not; answers are read aloud. Tools ask before they run when you want them to.
-  Pages, pictures, diagrams and React components the model writes run live in
-  a sandboxed preview.
-- **An API** for editors, agents and scripts: OpenAI-compatible (and Anthropic's
-  and OpenAI's Responses API), a key per person, spend and budgets per person,
-  and fair use when the GPU is shared. **Connect your tools** walks each person
-  through Claude Code, Codex, Qwen Code, OpenCode, Aider, Hermes, OpenClaw,
-  DeepSeek Harness, Continue, Cline and more, and offers
-  [Code Arena](docs/code-arena.md), our own coding agent and an IDE in the
-  browser around it (files, editor, search, terminals, the agent's chat): one
-  file, nothing to install, every Arena tool as you. `tools/package-code-arena.sh`
-  packs it for Linux, macOS and Windows.
-- **Sign-in** for the whole stack: accounts, LDAP or Active Directory, two-factor,
-  single sign-on for the services that have their own login, groups that decide
-  who may use which model and tool.
-- **Administration**: people and groups; models read for what they are, several
-  loaded at once (kept loaded, or loaded on request), each on the GPUs chosen
-  for it, and models on other GPU servers behind the same gateway; picture,
-  video and speech models with the same controls; every
-  setting in one place, the audit log, the code index and knowledge packs.
-- **Observability** in the app: ten dashboards, every service's logs, and the
-  alerts, what fires now and what fired before.
-- **Argus**, the code index: it mirrors your GitLab, extracts symbols and
-  dependencies, serves twelve knowledge packs of API documentation, and answers
-  over MCP. Each developer sees exactly the repositories their GitLab account can
-  read, enforced in SQL.
+<p align="center">
+  <img alt="version" src="https://img.shields.io/badge/version-6.9.0-5b8cff">
+  <img alt="self-hosted" src="https://img.shields.io/badge/self--hosted-on%20your%20GPUs-7c4dff">
+  <img alt="offline" src="https://img.shields.io/badge/installs-air--gapped-2ea043">
+  <img alt="licence" src="https://img.shields.io/badge/licence-AGPL--3.0%20%7C%20commercial-555">
+</p>
 
-## Why Argus
+---
 
-Ten task families, one question each, graded on facts checked against the corpus
-before any model ran:
+Most teams end up with a chat subscription, a coding assistant, an image tool, a
+meeting bot and a few scripts in between. Every one of them is another account,
+another bill, and another place your code and conversations go.
+
+**Argus Arena is all of it in one stack you run yourself.** One sign-in, one set of
+permissions, one budget per person, and models you choose, on hardware you own.
+Nothing leaves your network, and it installs on a machine that never touches the
+internet.
+
+## What's inside
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### 💬 A chat that does the work
+Your models, with thinking levels, branches and files. Tools run on the
+server: Python in a sandbox, the web you allow, your code through Argus. Pages,
+diagrams and React components it writes run live beside the answer. Rooms bring
+people in, with calls captioned live in each reader's language.
+
+</td>
+<td width="50%" valign="top">
+
+### 🧑‍💻 Code Arena
+Our own coding agent, with a full IDE in your browser: editor, search, git,
+terminals, a debugger and language servers. It's one file, installed in one line
+from your Arena and kept current by it. Every Arena tool works as you, and every
+session is synced with the web chat.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 🔎 Argus, your code's index
+It mirrors your GitLab: symbols, references, issues, wikis and documentation
+packs. It answers over MCP, and each developer sees **exactly** what their own
+GitLab account can read, enforced in SQL.
+
+</td>
+<td valign="top">
+
+### 🧠 Memory that lasts
+One memory for the chat and Code Arena. It recalls by meaning, forms memories
+from quiet chats, and tidies itself with undo. Chats thousands of messages long
+still find what was said at the start, past work is found by what it was about,
+and a project keeps its long memory in `.remember/`.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 🎨 Studio
+Pictures, edits with a brush, video, voices, music, background removal, vector
+art with named parts that animate, and 3D models ready to print. They run on the
+same GPUs, with the same rights and budgets as the chat.
+
+</td>
+<td valign="top">
+
+### 🤖 Agents and apps
+Build agents in Agent Studio, turn a chat into an app, ask questions of your
+data, make a deck, let a browser agent do a task while you watch, and sketch a
+screen that becomes working code.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 🎙️ Meetings
+Record one in the browser or upload it. You get who said what, the minutes, and
+action items given to people and reminded on their day.
+
+</td>
+<td valign="top">
+
+### 🛡️ Yours to run
+SSO, LDAP and two-factor sign-in; a key and a budget for each person; groups
+decide models and tools. An audit log, ten dashboards, and an installer for
+offline hosts in one file.
+
+</td>
+</tr>
+</table>
+
+## Argus
+
+A local model can't know a driver's IRQL or which header really declares
+`CreateFileW`. Those facts are too specialised to live in any model's weights.
+Argus hands the model the source and the real documentation, and the answers
+change:
 
 | model | alone | with Argus |
-|---|---|---|
+|---|:---:|:---:|
 | `qwen3.6:27b` (dense, 27.8B) | 5 / 10 | **10 / 10** |
 | `qwen3.6:35b` (MoE, 36.0B) | 5 / 10 | **9 / 10** |
 | `qwen3.8:27b` (dense, 27.3B) | 5 / 9 | **9 / 10** |
 
-All three models failed the *same five* tasks alone: facts too specialised to
-sit in any local model's weights (a driver's IRQL, the header `CreateFileW` is
-really declared in). Scale did not fix it; retrieval did, and answers got faster
-(5.5 s to 2.4 s median). The details are in
-[docs/measurements/model-comparison.md](docs/measurements/model-comparison.md).
+Ten task families were graded against facts checked before any model ran. All
+three models failed the same five tasks alone. Scale didn't fix that; retrieval
+did, and the median answer got faster too (5.5 s to 2.4 s).
+[The full comparison →](docs/measurements/model-comparison.md)
 
-## Architecture
+## Code Arena
 
-```mermaid
-flowchart LR
-  person([People and tools]) --> traefik[Traefik<br/>TLS, routing]
-  traefik --> web[Web<br/>src/web]
-  traefik --> api[API<br/>src/Llm.Api]
-  traefik --> gateway[LiteLLM<br/>keys, budgets]
-  api --> gateway --> engine[llama.cpp<br/>the models, on the GPUs]
-  gateway --> remote[(Other GPU servers)]
-  api --> argus[Argus<br/>src/Argus]
-  api --> sandbox[Python sandbox<br/>no network]
-  gateway --> media[Pictures, video,<br/>speech servers]
-  api --> obs[Prometheus, Loki,<br/>Alertmanager]
-  argus --> gitlab[(Your GitLab)]
-  api --> pg[(Postgres)]
+```bash
+curl -fsSL https://your-arena/api/downloads/code-arena/install.sh | sh
+code-arena login --url https://your-arena
+cd your-project && code-arena
 ```
 
-Every service, network and failure mode is in
-[docs/architecture.md](docs/architecture.md).
+That opens an IDE around the agent in your browser, served from your own
+machine. Prefer the terminal? Use `code-arena chat`. Long sessions don't lose
+the thread: big results are set aside, older ones are cleared before anything
+is summarized, and the agent can read every earlier message back by number.
+Windows users run `irm https://your-arena/api/downloads/code-arena/install.ps1 | iex`.
+[Everything Code Arena does →](docs/code-arena.md)
+
+## How it compares
+
+| | Argus Arena | Cloud AI assistants | A do-it-yourself stack |
+|---|:---:|:---:|:---:|
+| Code and conversations stay on your network | ✅ | ❌ | ✅ |
+| Knows your codebase, within each person's GitLab rights | ✅ | some, through their cloud | you build it |
+| Chat, coding agent, studio, meetings and agents in one sign-in | ✅ | several subscriptions | several projects to glue together |
+| A key, a budget and model rights for each person | ✅ | per seat | ❌ |
+| Any open model, on your own GPUs | ✅ | ❌ | ✅ |
+| Installs on a host with no internet | ✅ | ❌ | rarely |
 
 ## Quick start
 
@@ -84,54 +163,43 @@ On a Linux host with Docker (or rootless Podman) and an NVIDIA GPU:
 
 ```bash
 git clone https://github.com/Binchitects/argus && cd argus/deploy
-cp .env.example .env      # the domain, the models folder, the first model, six secrets
+cp .env.example .env      # your domain, the models folder, the first model, six secrets
 docker compose up -d
 ```
 
 Open `https://llm.localhost` and sign in as `admin` with the password from
-`.env`. The app fetches the first model and the picture, video and speech
-models by itself. Every module runs; one is left out in a line. The full
-walkthrough, Podman and upgrading from v3 are in [docs/deployment.md](docs/deployment.md).
+`.env`. The app fetches its first model and the media models on its own. For an
+offline host, one `.run` file carries everything. The
+[deployment guide](docs/deployment.md) covers Podman, GPUs across servers and
+upgrades. **Argus alone**, without the platform, is in
+[deploy/argus-standalone/](deploy/argus-standalone/README.md).
 
-**Argus alone**, without the platform (its own small app, no sign-in service or
-observability): [deploy/argus-standalone/](deploy/argus-standalone/README.md).
+## Under the hood
 
-## Repository
+```mermaid
+flowchart LR
+  people([People and their tools]) --> traefik[Traefik]
+  traefik --> web[Web app] & api[.NET API] & gateway[LiteLLM gateway]
+  api --> gateway --> engine[Engines on your GPUs]
+  api --> argus[Argus] --> gitlab[(Your GitLab)]
+  api --> sandbox[Sandboxes] & studio[Studio servers] & pg[(Postgres)]
+```
 
-| path | what it is |
-|---|---|
-| [`src/`](src/) | `Llm.Api` and `Llm.Core` (the platform's .NET API), `Argus` (the code index service), `CodeArena` (the coding agent and its IDE), `web` (the platform's React app, and Code Arena's page), `argus-web` (Argus's own app) |
-| [`tests/`](tests/) | `Llm.Tests`, `Argus.Tests` and `CodeArena.Tests` (xUnit), `deploy` (the deployment tooling) |
-| [`deploy/`](deploy/) | the platform's deployment: compose (and Podman's override), config, scripts; `argus-standalone/` |
-| [`tools/`](tools/) | development and operations tools: `dn`, the test GitLab, pack builds, Code Arena's builds and packages (`publish-code-arena.sh`, `package-code-arena.sh`) |
-| [`clients/`](clients/) | MCP configurations for Claude Code, Qwen Code, Continue, DeepSeek Harness and others (the app's **Connect your tools** page has each tool's full setup); the `arena` CLI and a GitLab CI template that reviews merge requests ([docs/ci.md](docs/ci.md)) |
-| [`docs/`](docs/README.md) | the documentation |
-| [`evals/`](evals/) | the evaluation question sets and results |
+A .NET 10 API and a React app. llama.cpp and vLLM serve the models behind a
+LiteLLM gateway, and Prometheus, Loki and Alertmanager watch it all.
+[The architecture →](docs/architecture.md)
 
-## Documentation
+## Learn more
 
-Start at [docs/README.md](docs/README.md). The most used:
+[Documentation](docs/README.md) · [The chat](docs/chat.md) ·
+[Administration](docs/admin.md) · [Deployment](docs/deployment.md) ·
+[Argus](docs/argus/README.md) · [Development](docs/development.md) ·
+[The plan](docs/plan.md)
 
-- [Deployment](docs/deployment.md) and [configuration](docs/configuration.md)
-- [Administration](docs/admin.md), [settings](docs/settings.md) and the [chat](docs/chat.md)
-- [Authentication](docs/authentication.md)
-- [Argus](docs/argus/README.md) and [what it does](docs/argus/overview.md)
-- [Development](docs/development.md) and [testing](docs/testing.md)
-- [The plan](docs/plan.md): the phases, what each delivered, and what is next
+**Contributing:** see [CONTRIBUTING.md](CONTRIBUTING.md). **Security reports:** see
+[SECURITY.md](SECURITY.md).
 
-## Contributing and security
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test and propose a
-change, and [SECURITY.md](SECURITY.md) for reporting a vulnerability.
-
-## Licence
-
-Dual-licensed: the **GNU AGPL v3** ([LICENSE.md](LICENSE.md)), with additional
-terms on attribution and the product names, or a **commercial license** from
-Binchitects for any use that does not meet the AGPL's conditions (a hosted or
-closed-source offering without releasing your source, embedding it in
-proprietary software). [LICENSING.md](LICENSING.md) says which you need.
-Knowledge packs carry their own upstream
-licences, which are not GPL and vary per pack (CC-BY-4.0 for the Microsoft
-documentation, CC-BY-SA-3.0 for cppreference, PSF-2.0 for Python, public domain
-for SQLite, GFDL-1.3 for Qt); `argus pack info <name>` prints each in full.
+**Licence:** dual-licensed, under the **GNU AGPL v3** ([LICENSE.md](LICENSE.md))
+or a **commercial license** from Binchitects for uses the AGPL doesn't fit.
+[LICENSING.md](LICENSING.md) says which you need. Knowledge packs keep their own
+upstream licences.
