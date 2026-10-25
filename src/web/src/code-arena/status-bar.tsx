@@ -1,5 +1,5 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bot, CircleAlert, ExternalLink, Gauge, GitBranch, GitCompareArrows, Info, LoaderCircle, Plug, RotateCw, ShieldCheck, Sparkles, SquareTerminal, TriangleAlert, Unplug } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowUpCircle, Bot, CircleAlert, ExternalLink, Gauge, GitBranch, GitCompareArrows, Info, LoaderCircle, Plug, RotateCw, ShieldCheck, Sparkles, SquareTerminal, TriangleAlert, Unplug } from 'lucide-react'
 import { RadioGroup } from 'radix-ui'
 import { useState, type ComponentProps, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,7 @@ import { formatValue } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { changeSettings, compaction, compactWho, modeLabels, retryServers, stateQuery, windowQuery, type CodeState, type ServerStatus } from './api'
 import { useEditor } from './editor-state'
+import { api } from './http'
 import { changesQuery, problemsQuery } from './ide-api'
 import { useKeyFor, useKeymap } from './keyboard'
 import { LanguageStatus } from './language-status'
@@ -75,6 +76,17 @@ export function StatusBar({
   const connected = state.servers.filter((s) => s.state === 'connected').length
   const down = state.servers.some((s) => s.state === 'failed')
   const used = share(state)
+  const queryClient = useQueryClient()
+  // A newer Code Arena on the Arena: installed from here, run from the next start.
+  const update = useMutation({
+    mutationFn: () => api<{ done: boolean; said: string }>('/api/update', { body: {} }),
+    onSuccess: async (r) => {
+      toast.success(r.said)
+      await queryClient.invalidateQueries({ queryKey: stateQuery.queryKey })
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  const updated = !!state.update && !state.update.includes('code-arena update')
   return (
     <footer aria-label="Status bar" className="flex h-6 shrink-0 items-stretch overflow-hidden bg-primary text-[0.75rem] text-primary-foreground">
       {state.branch && (
@@ -104,6 +116,12 @@ export function StatusBar({
         <output className="flex min-w-0 items-center truncate px-2">{keyStatus}</output>
       )}
       <span className="flex-1" />
+      {state.update && (
+        <Item onClick={() => !updated && update.mutate()} disabled={update.isPending || updated} aria-label={updated ? state.update : `${state.update.split(':')[0]}: install it`} title={state.update}>
+          {update.isPending ? <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <ArrowUpCircle aria-hidden="true" />}
+          {updated ? 'Updated: restart' : 'Update'}
+        </Item>
+      )}
       {active?.kind === 'file' && active.status === 'ready' && cursor && (
         <Item className="tabular-nums" aria-label={`Line ${cursor.line}, column ${cursor.column}: go to a line`} title="Go to a line" onClick={() => setQuickOpen(true, ':')}>
           Ln {cursor.line}, Col {cursor.column}

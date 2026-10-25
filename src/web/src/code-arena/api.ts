@@ -27,6 +27,8 @@ export interface CodeState {
   compactAtSource?: 'flag' | 'config' | 'account' | 'arena' | 'default'
   /** The threshold the Arena account gives (the person's own, else Arena's default); null when Arena did not say. */
   compactAtAccount?: number | null
+  /** A newer Code Arena on the Arena ("Code Arena 7.0.0 is available…"), or what updating did; null: none. */
+  update?: string | null
   /** Arena's, Argus's and the person's MCP servers, each connected in the background. */
   servers: ServerStatus[]
   /** The commands run with no time limit in this session, running or ended. */

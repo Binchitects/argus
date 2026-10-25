@@ -333,6 +333,9 @@ public sealed class FakeMcp : FakeServer
 {
     private readonly List<(string Method, string? Session)> _calls = [];
 
+    /// <summary>The Code Arena build Arena serves (/api/downloads/code-arena): its version, its bytes, and the SHA-256 it lists (null: theirs).</summary>
+    public (string Version, byte[] Bytes, string? Sha256)? Build { get; set; }
+
     public bool Sse { get; set; }
     /// <summary>Arena's default chat model, told in initialize's _meta as Arena MCP does; null: not told.</summary>
     public string? DefaultModel { get; set; }
@@ -379,6 +382,24 @@ public sealed class FakeMcp : FakeServer
         if (!Missing && ctx.Request.Url!.AbsolutePath.StartsWith("/api/chat/attachments", StringComparison.Ordinal))
         {
             await Chats.HandleFilesAsync(ctx, body);
+            return;
+        }
+        if (Build is { } build && ctx.Request.Url!.AbsolutePath.StartsWith("/api/downloads/code-arena", StringComparison.Ordinal))
+        {
+            // Arena's Code Arena builds (anyone may read them): its version, this system's build, and the build itself.
+            ctx.Response.StatusCode = 200;
+            var path = ctx.Request.Url.AbsolutePath;
+            var bytes = path == "/api/downloads/code-arena"
+                ? Encoding.UTF8.GetBytes(new JsonObject
+                {
+                    ["version"] = build.Version,
+                    ["builds"] = new JsonArray(new JsonObject
+                    {
+                        ["rid"] = Updates.Rid, ["size"] = build.Bytes.Length, ["sha256"] = build.Sha256 ?? Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(build.Bytes)),
+                    }),
+                }.ToJsonString())
+                : path == "/api/downloads/code-arena/" + Updates.Rid ? build.Bytes : [];
+            await ctx.Response.OutputStream.WriteAsync(bytes, ct);
             return;
         }
         if (Missing || ctx.Request.Url!.AbsolutePath != "/mcp")
@@ -537,6 +558,16 @@ public sealed class Harness : IDisposable
 
     /// <summary>Runs code-arena with these arguments and typed input; a terminal on stdin unless said otherwise.</summary>
     public async Task<int> Run(string input, params string[] args) => await Run(input, terminal: true, args);
+
+    /// <summary>code-arena update, as if this were the program it replaces.</summary>
+    public async Task<int> RunUpdate(string exe)
+    {
+        var (output, error) = (new StringWriter(), new StringWriter());
+        var env = new CliEnv { In = new StringReader(""), Out = output, Err = error, Env = k => Env.GetValueOrDefault(k), Cwd = Cwd ?? Work, Paths = Paths, Exe = exe };
+        var code = await Cli.RunAsync(["update"], env);
+        (Out, Err) = (output.ToString(), error.ToString());
+        return code;
+    }
 
     public async Task<int> Run(string input, bool terminal, params string[] args)
     {

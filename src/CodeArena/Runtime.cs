@@ -41,6 +41,9 @@ internal sealed partial class Runtime : IAsyncDisposable
     public MemoryStore Memory { get; private set; } = null!;
     private string _memory = "";
 
+    /// <summary>A newer Code Arena the Arena serves, as said at the start (the IDE's status bar shows it); null: none.</summary>
+    public string? UpdateNotice { get; private set; }
+
     /// <summary>The project's long memory (.remember/) as the session starts: read anew for each new or resumed session.</summary>
     private string LongMemory() => Config.ProjectMemory ? ProjectMemory.ForPrompt(ProjectMemory.Root(Workspace.Root)) : "";
     /// <summary>A checkpoint before each turn, for /rewind.</summary>
@@ -304,6 +307,18 @@ internal sealed partial class Runtime : IAsyncDisposable
         Permissions.Workspace = Workspace;
         Memory = new MemoryStore(Env.Paths, project) { Arena = Config.Url is { Length: > 0 } && Config.ApiKey is { Length: > 0 } ? new ArenaMemory(Config, Http) : null };
         _memory = await Memory.ForPromptAsync(Ui.Info, ct) + LongMemory();
+        // A newer Code Arena on the Arena signed in to: looked for in the background, once a day, and said (not for -p).
+        if (!o.Print && Config.UpdateCheck)
+        {
+            _ = Task.Run(async () =>
+            {
+                if (await Updates.NoticeAsync(Config, Http, Env.Paths, DateTimeOffset.UtcNow, ct) is { } said)
+                {
+                    UpdateNotice = said;
+                    Ui.Info(said);
+                }
+            }, ct);
+        }
         // The skills Arena's plugins bring, kept with the person's (the ones kept before when Arena does not answer); and
         // Arena's own, less those its admins turned off.
         var brought = await ChatSync.PluginSkillsAsync(Config, Http, AccountWait, ct);

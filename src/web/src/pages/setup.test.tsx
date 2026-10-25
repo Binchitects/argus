@@ -158,6 +158,9 @@ describe('connect your tools', () => {
     await userEvent.click(await screen.findByRole('option', { name: 'Code Arena (our own agent)' }))
     const steps = screen.getByRole('region', { name: 'Setting up Code Arena (our own agent)' })
     expect(within(steps).getByText(/version 4.2.0/)).toBeInTheDocument()
+    // One line installs it (checked against its checksum); updates come from this Arena.
+    expect(within(steps).getByText(`curl -fsSL ${window.location.origin}/api/downloads/code-arena/install.sh | sh`)).toBeInTheDocument()
+    expect(within(steps).getByText('code-arena update')).toBeInTheDocument()
     expect(within(steps).getByRole('link', { name: /Linux \(x64\)/ })).toHaveAttribute('href', '/api/downloads/code-arena/linux-x64')
     expect(within(steps).getByRole('link', { name: /Windows \(x64\)/ })).toHaveAttribute('href', '/api/downloads/code-arena/win-x64')
     expect(within(steps).getByRole('link', { name: 'Download for macOS (Apple silicon), 38 MB' })).toHaveAttribute('download')
@@ -184,7 +187,7 @@ describe('connect your tools', () => {
     await userEvent.click(await screen.findByRole('combobox', { name: 'Your tool' }))
     await userEvent.click(await screen.findByRole('option', { name: 'Code Arena (our own agent)' }))
     const steps = screen.getByRole('region', { name: 'Setting up Code Arena (our own agent)' })
-    expect(within(steps).getByText(/no builds of it yet/)).toHaveTextContent('tools/publish-code-arena.sh --offline')
+    expect(within(steps).getByText(/no builds of it yet/)).toHaveTextContent('tools/fetch-code-arena-packs.sh, then rebuild the app')
     expect(within(steps).queryByRole('link')).not.toBeInTheDocument()
   })
 

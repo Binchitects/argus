@@ -552,14 +552,16 @@ services:
 ## Code Arena
 
 The app's image carries Code Arena, our own coding agent, for people to
-download from **Connect your tools**: one file per system, built with the
-image. Building it needs .NET's runtime packs, which a host with no internet
-cannot fetch: fill `tools/offline-nuget/` once from a machine that can (its
-README has the commands, about 220 MB), then `docker compose build app`. On a
-host with internet, `docker compose build app --build-arg CODE_ARENA=online`
-fetches them instead. Without either, the image is built without it and the
-page says so; so it is when the packs are older than the SDK image's runtime
-(a newer `sdk:10.0` was pulled), and the build log lists the ones to fetch. People on a private CA sign in with
+download from **Connect your tools** (a one-line installer for each
+system, the file checked against its SHA-256) and to update itself from
+(`code-arena update`): one file per system, built with the image. Building
+it needs .NET's runtime packs: run `tools/fetch-code-arena-packs.sh` before
+`docker compose build app` (it fetches them from nuget.org at the version the
+SDK publishes with, about 220 MB each .NET patch), or carry
+`tools/offline-nuget/` to a host with no internet. When the packs there are
+of another version, the image publishes with nuget.org's; only with neither
+is it built without Code Arena, the page saying so and the build log listing
+the packs to fetch. People on a private CA sign in with
 `code-arena login --url https://DOMAIN --ca ca.crt` (give them `certs/ca.crt`).
 To hand it out another way, `tools/package-code-arena.sh` packs each system
 with its README and licence into `dist/` (with `SHA256SUMS`), from the same

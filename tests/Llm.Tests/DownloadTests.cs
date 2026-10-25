@@ -49,6 +49,68 @@ public sealed class DownloadTests(AppFixture app)
     }
 
     [Fact]
+    public async Task One_line_installs_the_build_for_the_machine_checked_against_its_checksum_and_refuses_one_that_does_not_match()
+    {
+        var dir = Directory.CreateTempSubdirectory("install-").FullName;
+        try
+        {
+            // The downloads as the app serves them, and as file:// gives them to curl here (the script's address put there).
+            var served = Path.Combine(dir, "served", "api", "downloads", "code-arena");
+            Directory.CreateDirectory(Path.Combine(dir, "code-arena", "linux-x64"));
+            Directory.CreateDirectory(Path.Combine(dir, "code-arena", "win-x64"));
+            Directory.CreateDirectory(served);
+            await File.WriteAllTextAsync(Path.Combine(dir, "code-arena", "linux-x64", "code-arena"), "#!/bin/sh\necho code-arena 9.9.9\n");
+            await File.WriteAllTextAsync(Path.Combine(dir, "code-arena", "win-x64", "code-arena.exe"), "MZ pretend!");
+            File.Copy(Path.Combine(dir, "code-arena", "linux-x64", "code-arena"), Path.Combine(served, "linux-x64"));
+            var sum = Convert.ToHexStringLower(SHA256.HashData(await File.ReadAllBytesAsync(Path.Combine(dir, "code-arena", "linux-x64", "code-arena"))));
+            await File.WriteAllTextAsync(Path.Combine(dir, "code-arena", "SHA256SUMS"), $"{sum}  linux-x64/code-arena\ndef456  win-x64/code-arena.exe\n");
+            await using var f = app.Create(app.ConnectionStringFor("install_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
+                new Dictionary<string, string?> { ["Downloads:Directory"] = dir });
+            using var http = f.CreateClient();
+
+            var sh = await http.GetStringAsync("/api/downloads/code-arena/install.sh");
+            Assert.Contains($"arena=\"https://{AppFixture.Domain}\"", sh, StringComparison.Ordinal);
+            Assert.Contains($"  linux-x64) sum={sum} ;;", sh, StringComparison.Ordinal);
+            Assert.DoesNotContain("def456", sh, StringComparison.Ordinal);
+            var ps1 = await http.GetStringAsync("/api/downloads/code-arena/install.ps1");
+            Assert.Contains("-ne 'def456'", ps1, StringComparison.Ordinal);
+            Assert.Contains($"$arena = 'https://{AppFixture.Domain}'", ps1, StringComparison.Ordinal);
+
+            if (!OperatingSystem.IsLinux() || System.Runtime.InteropServices.RuntimeInformation.OSArchitecture != System.Runtime.InteropServices.Architecture.X64)
+            {
+                return;
+            }
+            async Task<(int Code, string Out)> RunAsync(string script)
+            {
+                var file = Path.Combine(dir, "install.sh");
+                await File.WriteAllTextAsync(file, script.Replace($"https://{AppFixture.Domain}", "file://" + Path.Combine(dir, "served"), StringComparison.Ordinal));
+                var start = new System.Diagnostics.ProcessStartInfo("sh", file) { RedirectStandardOutput = true, RedirectStandardError = true };
+                start.Environment["CODE_ARENA_DIR"] = Path.Combine(dir, "bin");
+                using var run = System.Diagnostics.Process.Start(start)!;
+                var said = await run.StandardOutput.ReadToEndAsync() + await run.StandardError.ReadToEndAsync();
+                await run.WaitForExitAsync();
+                return (run.ExitCode, said);
+            }
+            var (code, output) = await RunAsync(sh);
+            Assert.True(code == 0, output);
+            Assert.Contains("Next, sign in: code-arena login --url", output, StringComparison.Ordinal);
+            Assert.Equal("#!/bin/sh\necho code-arena 9.9.9\n", await File.ReadAllTextAsync(Path.Combine(dir, "bin", "code-arena")));
+            Assert.True(File.GetUnixFileMode(Path.Combine(dir, "bin", "code-arena")).HasFlag(UnixFileMode.UserExecute));
+
+            // A build that is not what the list says is not installed.
+            File.Delete(Path.Combine(dir, "bin", "code-arena"));
+            (code, output) = await RunAsync(sh.Replace(sum, new string('0', 64), StringComparison.Ordinal));
+            Assert.Equal(1, code);
+            Assert.Contains("does not match its SHA-256: nothing installed", output, StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Combine(dir, "bin", "code-arena")));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
     public async Task An_image_without_builds_lists_none()
     {
         using var http = app.Factory.CreateClient();

@@ -200,6 +200,8 @@ internal sealed class Config
     public bool BuiltInSkills { get; set; } = true;
     /// <summary>The project's long memory in .remember/ (read at a session's start, kept with remember_project): on unless false.</summary>
     public bool ProjectMemory { get; set; } = true;
+    /// <summary>Whether a session's start looks for a newer Code Arena on the Arena (once a day): on unless false.</summary>
+    public bool UpdateCheck { get; set; } = true;
     /// <summary>
     /// Code completion in the IDE's editor (the rest of a line or a few, as grey text to take with Tab): its model (null:
     /// the session's), and how its prompt marks the code around the cursor (the model's fill-in-the-middle tokens); false: none.
@@ -301,6 +303,7 @@ internal sealed class Config
         config.AutoCommit = raw.Bool("autoCommit") ?? true;
         config.BuiltInSkills = raw.Bool("builtInSkills") ?? true;
         config.ProjectMemory = raw.Bool("projectMemory") ?? true;
+        config.UpdateCheck = raw.Bool("updateCheck") ?? true;
         config.Completion = raw.Bool("completion") ?? true;
         config.CompletionModel = raw.Str("completionModel");
         config.CheckCommand = raw.Str("checkCommand");
@@ -438,6 +441,7 @@ internal sealed class Config
         Set("autoCommit", AutoCommit ? null : false);
         Set("builtInSkills", BuiltInSkills ? null : false);
         Set("projectMemory", ProjectMemory ? null : false);
+        Set("updateCheck", UpdateCheck ? null : false);
         Set("completion", Completion ? null : false);
         Set("completionModel", CompletionModel);
         Set("checkCommand", CheckCommand);

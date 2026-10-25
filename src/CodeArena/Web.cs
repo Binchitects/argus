@@ -102,6 +102,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     // How full the window was when no turn ran: the history is not read while a turn changes it.
     private long _lastUsed;
     private JsonObject? _lastWindow;
+    // What code-arena update did from the IDE: said in place of the notice, until Code Arena starts again.
+    private string? _updated;
     // The commands with no time limit: their output to the page as it comes, a few times a second, for as long as they run.
     private readonly Dictionary<int, (StringBuilder Pending, bool Flushing)> _jobOutput = [];
 
@@ -374,6 +376,14 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             case ("GET", "/api/window"):
                 await res.JsonAsync(200, WindowJson(), ct);
                 return;
+            case ("POST", "/api/update"):
+                var (done, said) = await Updates.UpdateAsync(_rt.Config, _rt.Http, _ => { }, ct);
+                if (done)
+                {
+                    _updated = said;
+                }
+                await res.JsonAsync(done ? 200 : 502, new JsonObject { ["done"] = done, ["said"] = said }, ct);
+                return;
             case ("GET", "/api/memory"):
                 await res.JsonAsync(200, await MemoryJsonAsync(ct), ct);
                 return;
@@ -584,6 +594,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["context"] = _rt.Model.Context,
             // How full the window is (about), and when the session compacts itself: the status bar and the settings show them.
             ["contextUsed"] = Current() is null ? _lastUsed = _rt.Agent.Estimate() : _lastUsed,
+            // A newer Code Arena on the Arena (the status bar offers it), and whether this one was replaced already.
+            ["update"] = _updated ?? _rt.UpdateNotice,
             ["compactAt"] = _rt.Compaction.At,
             ["compactTarget"] = _rt.Compaction.Target,
             // Where the threshold comes from (flag, config, account, arena, default), and the Arena account's (null: not said).

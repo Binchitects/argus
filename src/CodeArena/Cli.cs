@@ -60,6 +60,8 @@ internal sealed class CliEnv
     public bool OutTerminal { get; init; }
     public bool ErrTerminal { get; init; }
     public Func<string, string?>? ReadSecret { get; init; }
+    /// <summary>The program code-arena update replaces (null: this process's own).</summary>
+    public string? Exe { get; init; }
     /// <summary>The terminal key by key, for the prompt's line editor (arrows, history); null: lines as they come.</summary>
     public IKeyboard? Keys { get; init; }
     public CancelKey Cancel { get; } = new();
@@ -111,6 +113,7 @@ internal static partial class Cli
           code-arena login                  sign in: the Arena's address and your API key
           code-arena logout                 forget the API key
           code-arena models                 the models you may use
+          code-arena update                 install the newer Code Arena your Arena serves, if any
           code-arena sandbox [command]      what the agent's commands may do here; with a command, run it as they run
 
         Options:
@@ -171,6 +174,8 @@ internal static partial class Cli
                 return Logout(env, MakeUi(env, o, quiet: false));
             case "models":
                 return await ModelsAsync(o, env, MakeUi(env, o, quiet: false), ct);
+            case "update":
+                return await UpdateAsync(o, env, MakeUi(env, o, quiet: false), ct);
             case "web":
                 return await WebAsync(o, env, ct);
             case "chat":
@@ -190,7 +195,7 @@ internal static partial class Cli
             var a = args[i];
             string Value() => i + 1 < args.Length ? args[++i] : throw new ArgumentException($"{a} needs a value.");
             bool NextIsValue() => i + 1 < args.Length && !args[i + 1].StartsWith('-');
-            if (i == 0 && a is "login" or "logout" or "models" or "web" or "chat" or "help" or "version")
+            if (i == 0 && a is "login" or "logout" or "models" or "update" or "web" or "chat" or "help" or "version")
             {
                 o.Command = a;
                 continue;
@@ -470,6 +475,25 @@ internal static partial class Cli
         config.Save(env.Paths.ConfigFile);
         ui.Line($"Signed out: the key is gone from {env.Paths.ConfigFile}.");
         return 0;
+    }
+
+    /// <summary>code-arena update: Arena's newer build of Code Arena for this system, in this program's place.</summary>
+    private static async Task<int> UpdateAsync(Options o, CliEnv env, Ui ui, CancellationToken ct)
+    {
+        if (LoadConfig(env, ui) is not { } config)
+        {
+            return 1;
+        }
+        config.ApplyEnvironment(env.Env);
+        using var http = Net.Client(Net.CaFile(o.Ca, config.Ca, env.Env));
+        var (done, said) = await Updates.UpdateAsync(config, http, ui.Info, ct, env.Exe);
+        if (done)
+        {
+            ui.Line(said);
+            return 0;
+        }
+        ui.Error(said);
+        return 1;
     }
 
     private static async Task<int> ModelsAsync(Options o, CliEnv env, Ui ui, CancellationToken ct)

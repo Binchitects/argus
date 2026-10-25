@@ -182,8 +182,10 @@ A release is a tag, `vX.Y.Z`, on a commit of `main` whose suites all pass.
    --stop-live`. Each migration applies on that release's schema.
 4. The images: `docker compose build` and `docker compose --profile laya build
    laya` in `deploy/`.
-5. Code Arena's packages: `tools/publish-code-arena.sh --offline`, then
-   `tools/package-code-arena.sh` (into `dist/`).
+5. Code Arena: `tools/fetch-code-arena-packs.sh` before the images (the app
+   image carries its builds); its packages for the release
+   (`tools/package-code-arena.sh`, into `dist/`) are made by the installer's
+   step below when `dist/` has none.
 6. The offline installer: `deploy/scripts/make-installer.sh` (with `--models`
    and `--packs` for a bundle that carries them) writes
    `dist/argus-arena-VERSION-offline.run` and its `.sha256`. It needs the tags

@@ -36,6 +36,9 @@ if args[:1] == ["publish"]:
     if os.environ.get("FAKE_PUBLISH_FAILS"):
         print("error CS1002: ; expected", file=sys.stderr)
         sys.exit(1)
+    if os.environ.get("FAKE_NUGET_UNREACHABLE") and "--source" not in args:
+        print("error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json.", file=sys.stderr)
+        sys.exit(1)
     out = pathlib.Path(args[args.index("-o") + 1])
     rid = args[args.index("-r") + 1]
     out.mkdir(parents=True, exist_ok=True)
@@ -161,16 +164,23 @@ class CodeArenaPacksTests(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertNotIn("not built", r.stdout)
 
-    def test_the_image_skips_code_arena_when_the_packs_do_not_match_its_sdk_and_builds_it_when_they_do(self):
+    def test_the_image_publishes_with_nugets_packs_when_its_own_do_not_match_and_skips_only_when_neither_is_there(self):
         self.packs("10.0.12")
         r = self.image_step("10.0.13")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("Code Arena: not built, tools/offline-nuget lacks the packs above", r.stdout)
+        self.assertIn("Code Arena: publishing with nuget.org's packs instead", r.stdout)
         self.assertIn("runtime 10.0.13", r.stderr)
+        self.assertEqual(len(self.built()), 5)
+        self.assertTrue(all("--source" not in c for c in self.publishes()))
+
+        shutil.rmtree(self.repo / "dist")
+        r = self.image_step("10.0.13", FAKE_NUGET_UNREACHABLE="1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Code Arena: not built, neither tools/offline-nuget nor nuget.org had the packs", r.stdout)
         self.assertEqual(self.built(), [])
         self.assertTrue((self.repo / "dist" / "code-arena").is_dir())
 
-        r = self.image_step("10.0.12")
+        r = self.image_step("10.0.12", FAKE_NUGET_UNREACHABLE="1")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(len(self.built()), 5)
 

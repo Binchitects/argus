@@ -146,7 +146,11 @@ AIRGAP=(bash "$ROOT/scripts/airgap.sh" pack)
 [[ $ENGINE == podman ]] && AIRGAP+=(--podman)
 [[ $WITH_MODELS -eq 1 ]] && AIRGAP+=(--models)
 [[ -n "$MODELS_ARG" ]] && AIRGAP+=(--models-dir "$MODELS_ARG")
-CA_FILES=(); for f in "$CA_DIR"/code-arena-*.tar.gz "$CA_DIR"/code-arena-*.zip; do [[ -f "$f" ]] && CA_FILES+=("$f"); done
+# Code Arena's packages of this release (older ones in dist/ stay out); made here when there are none and they
+# come from dist/: the .NET packs fetched at the SDK's version, then every system published and packed.
+ca_files() { CA_FILES=(); for f in "$CA_DIR"/code-arena-"$VERSION"-*.tar.gz "$CA_DIR"/code-arena-"$VERSION"-*.zip; do [[ -f "$f" ]] && CA_FILES+=("$f"); done; }
+ca_files
+CA_MAKE=0; [[ ${#CA_FILES[@]} -eq 0 && -z "$CA_ARG" && -x "$REPO/tools/package-code-arena.sh" ]] && CA_MAKE=1
 PACK_FILES=(); [[ $PACKS -eq 1 ]] && for f in "$REPO"/packs/*.arguspack; do [[ -f "$f" ]] && PACK_FILES+=("$f"); done
 # The model library, as airgap.sh finds it.
 MODELS_DIR="${MODELS_ARG:-$(sed -n 's/^MODELS_DIR=//p' "$ROOT/.env" 2>/dev/null | tail -n1 | sed -e 's/^"//' -e 's/"$//')}"
@@ -184,13 +188,19 @@ if [[ $DRY -eq 1 ]]; then
   say "  the embedding model ($EMBED_FILE): $(case "$EMBEDDING" in packed) echo "from $MODELS_DIR" ;; missing) echo "NOT IN $MODELS_DIR: the embedding server would wait for it on the other host" ;; *) echo "$EMBEDDING" ;; esac)"
   say "  then gzipped, with installer.sh, docs/, LICENSE.md, LICENSING.md, VERSION, known/ ($(printf '%s\n' ${KNOWN[@]+"${KNOWN[@]}"} | cut -f2 | paste -sd' ' -))"
   [[ -n "$KNOWN_MISSING" ]] && say "  known/: NOT MADE: $KNOWN_MISSING"
-  say "  Code Arena's packages: ${#CA_FILES[@]} in $CA_DIR$([[ ${#CA_FILES[@]} -eq 0 ]] && echo " (none: tools/package-code-arena.sh makes them)")"
+  say "  Code Arena's packages: ${#CA_FILES[@]} of $VERSION in $CA_DIR$([[ $CA_MAKE -eq 1 ]] && echo " (none: made first, tools/fetch-code-arena-packs.sh then tools/package-code-arena.sh)")"
   say "  knowledge packs: $([[ $PACKS -eq 1 ]] && echo "${#PACK_FILES[@]} from packs/" || echo "none (--packs)")"
   exit 0
 fi
 
 mkdir -p "$OUT_DIR" || die "cannot make $OUT_DIR"
 say "make-installer: Argus Arena $VERSION ($COMMIT), from $ENGINE's store"
+if [[ $CA_MAKE -eq 1 ]]; then
+  say "==> Code Arena's packages of $VERSION: none in $CA_DIR, made now"
+  "$REPO/tools/fetch-code-arena-packs.sh" || say "  the .NET packs could not be fetched: published from those in tools/offline-nuget"
+  "$REPO/tools/package-code-arena.sh" || die "Code Arena could not be packed (tools/package-code-arena.sh): fill tools/offline-nuget (its README), or pass --code-arena DIR"
+  ca_files
+fi
 say "==> the release's own images, as arena-SERVICE:$VERSION"
 for s in "${BUILT[@]}"; do
   left "$s" && continue

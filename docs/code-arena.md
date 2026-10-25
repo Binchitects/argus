@@ -18,14 +18,37 @@ tests `tests/CodeArena.Tests`.
 
 ## Getting it
 
-**Your account → Connect your tools → Code Arena (our own agent)** offers a
-download for each system the Arena has a build of. Or from a terminal, with no
-browser (the downloads need no sign-in; the program does nothing without a key):
+**Your account → Connect your tools → Code Arena (our own agent)** installs
+it in one line, the build for the machine checked against the SHA-256 this
+Arena lists (the downloads need no sign-in; the program does nothing without
+a key):
+
+```bash
+curl -fsSL https://DOMAIN/api/downloads/code-arena/install.sh | sh     # Linux and macOS: into ~/.local/bin
+```
+
+```powershell
+irm https://DOMAIN/api/downloads/code-arena/install.ps1 | iex           # Windows: %LOCALAPPDATA%\Programs\code-arena, on PATH
+```
+
+`CODE_ARENA_DIR` puts it elsewhere; on a self-signed deployment,
+`curl --cacert ca.crt -fsSL …/install.sh | CODE_ARENA_CA=ca.crt sh`. Or
+download the file for a system yourself:
 
 ```bash
 curl -fLo code-arena https://DOMAIN/api/downloads/code-arena/linux-x64
 chmod +x code-arena && mkdir -p ~/.local/bin && mv code-arena ~/.local/bin/
 ```
+
+**It keeps itself current.** Arena serves the builds of its own version, so
+a newer one there is the one to run: at a session's start (not for `-p`),
+once a day and in the background, Code Arena asks the Arena it is signed in
+to and says "Code Arena 7.0.0 is available from Arena (this is 6.9.0)"; the
+IDE shows **Update** in its status bar. `code-arena update` (or that button)
+downloads the build for this system, checks its size and SHA-256, and puts it
+in this program's place (on Windows the running one moves aside as
+`code-arena.exe.old`); the next start runs it. `"updateCheck": false` in
+`config.json` stops the daily look.
 
 The systems: `linux-x64`, `linux-arm64`, `osx-arm64` (Apple silicon),
 `osx-x64` and `win-x64` (`code-arena.exe`). `/api/downloads/code-arena` lists
@@ -1915,6 +1938,14 @@ The app's image carries the builds and serves them on Connect your tools. They
 are built when the image is (`src/Llm.Api/Dockerfile`, the `code-arena`
 stage), from .NET's runtime packs, which are not part of the SDK:
 
+- **The deploy**: `tools/fetch-code-arena-packs.sh` first (it asks the SDK
+  which runtime it publishes with and fetches the missing packs from
+  nuget.org into `tools/offline-nuget/`, about 220 MB each .NET patch;
+  `--prune` drops older ones), then `docker compose build app`. When the
+  packs there are not at the SDK's version, the image publishes with
+  nuget.org's instead, and skips Code Arena only when neither is to be had.
+  `deploy/scripts/make-installer.sh` packs Code Arena's packages of the
+  release, making them first when `dist/` has none.
 - **A host with internet**: `docker compose build app --build-arg CODE_ARENA=online`
   (or `tools/publish-code-arena.sh`) fetches them from nuget.org.
 - **A host without**: fill `tools/offline-nuget/` once from a machine with
@@ -1925,8 +1956,9 @@ stage), from .NET's runtime packs, which are not part of the SDK:
   the SDK image's own runtime (`dotnet msbuild src/CodeArena/CodeArena.csproj
   -getProperty:BundledNETCoreAppPackageVersion` prints it; a newer `sdk:10.0`
   pulled since moves it).
-  Without them, the image skips Code Arena, the build log lists the files to
-  fetch at that version, and the page says how to add it.
+  Without them, the image tries nuget.org's; with neither, it skips Code
+  Arena, the build log lists the files to fetch at that version, and the page
+  says how to add it.
 - **By hand**: `tools/publish-code-arena.sh --offline [rid ...]` writes
   `dist/code-arena/<rid>/code-arena` and `SHA256SUMS`, with `dotnet` or
   `tools/dn`. It checks the packs first: when one is missing for a system

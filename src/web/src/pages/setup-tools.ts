@@ -146,24 +146,37 @@ export const tools: Tool[] = [
       "Our own coding agent, with an IDE around it in your browser (or in your terminal): one file with nothing to install, that talks only to this Arena (the model through the gateway, all of Arena's tools as you), with file, shell and git tools on your machine.",
     steps: (c) => {
       const builds = c.codeArena?.builds ?? []
+      if (builds.length === 0)
+        return [
+          {
+            text: "This Arena has no builds of it yet. An admin adds them: tools/fetch-code-arena-packs.sh, then rebuild the app (the deploy does both); or run tools/publish-code-arena.sh and hand out the files in dist/code-arena.",
+          },
+        ]
       return [
-        builds.length > 0
-          ? {
-              text: `Download it for your system (version ${c.codeArena!.version}):`,
-              links: builds.map((b) => ({ label: b.system, href: `/api/downloads/code-arena/${b.rid}`, detail: megabytes(b.size) })),
-            }
-          : {
-              text: "This Arena has no builds of it yet. An admin adds them once: put .NET's runtime packs in tools/offline-nuget (its README says how), then rebuild the app, or run tools/publish-code-arena.sh --offline and hand out the files in dist/code-arena.",
-            },
         unix(c)
           ? {
-              text: 'Make it runnable and put it on your PATH:',
+              text: `Install it in one line (version ${c.codeArena!.version}): the build for your machine, checked against its SHA-256, in ~/.local/bin.`,
+              file: 'shell',
+              code: `curl -fsSL ${c.origin}/api/downloads/code-arena/install.sh | sh`,
+            }
+          : {
+              text: `Install it in one line (version ${c.codeArena!.version}), in PowerShell: the build checked against its SHA-256, on your PATH.`,
+              file: 'powershell',
+              code: `irm ${c.origin}/api/downloads/code-arena/install.ps1 | iex`,
+            },
+        {
+          text: 'Or download it for your system yourself:',
+          links: builds.map((b) => ({ label: b.system, href: `/api/downloads/code-arena/${b.rid}`, detail: megabytes(b.size) })),
+        },
+        unix(c)
+          ? {
+              text: 'Downloaded by hand: make it runnable and put it on your PATH.',
               file: 'shell',
               code: `chmod +x code-arena
 xattr -d com.apple.quarantine code-arena   # macOS only: the browser's download mark
 mkdir -p ~/.local/bin && mv code-arena ~/.local/bin/`,
             }
-          : { text: 'Put code-arena.exe in a folder on your PATH (or run it from where it is, as .\\code-arena.exe).' },
+          : { text: 'Downloaded by hand: put code-arena.exe in a folder on your PATH (or run it from where it is, as .\\code-arena.exe).' },
         {
           text: "Sign in with this Arena's address and your API key. It asks for the key, checks it with the gateway, and keeps it in your config folder, readable by you only.",
           file: 'shell',
@@ -179,9 +192,19 @@ mkdir -p ~/.local/bin && mv code-arena ~/.local/bin/`,
           file: 'shell',
           code: 'cd your-project\ncode-arena chat',
         },
+        {
+          text: 'It keeps itself current: once a day it asks this Arena for a newer version and says so (the IDE shows Update in its status bar); this installs it:',
+          file: 'shell',
+          code: 'code-arena update',
+        },
       ]
     },
     trust: (c) => [
+      {
+        text: 'Install it trusting the CA (curl checks the download with it):',
+        file: 'shell',
+        code: `curl --cacert ${caShell(c)} -fsSL ${c.origin}/api/downloads/code-arena/install.sh | CODE_ARENA_CA=${caShell(c)} sh`,
+      },
       {
         text: "Sign in with the CA's file instead (or set ARENA_CA_CERT to it): Code Arena keeps it, for the gateway and for Arena MCP.",
         file: 'shell',
