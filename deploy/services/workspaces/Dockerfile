@@ -10,8 +10,8 @@ WORKDIR /src
 COPY global.json Directory.Build.props VERSION ./
 COPY src/CodeArena/ src/CodeArena/
 COPY skills/ skills/
-# The one file Code Arena shares with the app (linked in its project): how a context refusal reads.
-COPY src/Llm.Core/Chat/ContextOverflow.cs src/Llm.Core/Chat/
+# The files Code Arena shares with the app (linked in its project): how a context refusal reads, and how earlier messages are found by their words.
+COPY src/Llm.Core/Chat/ContextOverflow.cs src/Llm.Core/Chat/HistoryWords.cs src/Llm.Core/Chat/
 RUN rm -rf src/CodeArena/web src/CodeArena/bin src/CodeArena/obj && mkdir -p src/CodeArena/web \
  && dotnet publish src/CodeArena/CodeArena.csproj -c Release -o /opt/code-arena \
  && rm -f /opt/code-arena/*.pdb

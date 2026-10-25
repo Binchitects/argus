@@ -58,8 +58,8 @@ COPY tools/publish-code-arena.sh tools/
 COPY tools/offline-nuget/ tools/offline-nuget/
 COPY src/CodeArena/ src/CodeArena/
 COPY skills/ skills/
-# The one file Code Arena shares with the app (linked in its project): how a context refusal reads.
-COPY src/Llm.Core/Chat/ContextOverflow.cs src/Llm.Core/Chat/
+# The files Code Arena shares with the app (linked in its project): how a context refusal reads, and how earlier messages are found by their words.
+COPY src/Llm.Core/Chat/ContextOverflow.cs src/Llm.Core/Chat/HistoryWords.cs src/Llm.Core/Chat/
 COPY --from=code-arena-web /CodeArena/web/ src/CodeArena/web/
 RUN mkdir -p dist/code-arena \
  && case "$CODE_ARENA" in \
