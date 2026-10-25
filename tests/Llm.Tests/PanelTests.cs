@@ -53,6 +53,12 @@ public sealed class PanelTests(AppFixture app)
         Assert.Contains("**A panel of The expert, The critic, Release manager** discussed it.", answer, StringComparison.Ordinal);
         Assert.Contains("### Round 2", answer, StringComparison.Ordinal);
         Assert.Contains("## The verdict", answer, StringComparison.Ordinal);
+        // The chat's panels: this one, done, with how many turns it had; nobody else's.
+        var listed = (await pat.JsonAsync(await pat.GetAsync($"/api/chat/conversations/{chat}/panels"))).EnumerateArray().Single();
+        Assert.Equal((id, "done", 6), (listed.GetProperty("id").GetGuid(), listed.GetProperty("status").GetString(), listed.GetProperty("turns").GetInt32()));
+        Assert.Empty((await other.JsonAsync(await other.GetAsync($"/api/chat/conversations/{chat}/panels"))).EnumerateArray());
+        // A chat made for it is named after its question.
+        Assert.Equal("Ship on Thursday?", (await pat.JsonAsync(await pat.GetAsync($"/api/chat/conversations/{chat}"))).GetProperty("title").GetString());
         await StatusAssert.Is(HttpStatusCode.NotFound, await other.GetAsync($"/api/panels/{id}"));
     }
 }

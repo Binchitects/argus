@@ -19,6 +19,10 @@ working again.
 
 ### :sparkles: New features & Enhancements
 
+- **A panel at work, in view**: its dialog shows how far it is (the round,
+  the turns spoken of all it will have, who speaks), stays open as the chat
+  fills, and when closed a bar above the box says how far it is, with
+  **Open**; after a reload too (`GET /api/chat/conversations/{id}/panels`)
 - **What's new**: after a release, each person is shown its highlights once, a
   page each with where to try it (Memory, the chat, Skills, Code Arena), and
   again from the account menu or the command palette; kept with the person,
@@ -34,8 +38,9 @@ working again.
   among themselves when the box is narrow (the keyboard hint shows only when
   the box is wide enough for it)
 - **Ask a panel**: in a new chat there was no button for it (the chat is made
-  for it now); and once the verdict came, it pushed the dialog's Done button
-  off the screen (what was said and the verdict scroll together)
+  for it now, named after the question); and once the verdict came, it pushed
+  the dialog's Done button off the screen (what was said and the verdict
+  scroll together)
 - An answer's row of actions lost the pin and leave-out buttons added in 7.0
   (leaving out a question leaves out its answer, and the context gauge pins
   or leaves out any message)

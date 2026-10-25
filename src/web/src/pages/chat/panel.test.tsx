@@ -2,6 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fakeApi, member, renderApp } from '@/test/utils'
+import { panelView } from './panel-view'
 import type { ChatConfig, Conversation } from './types'
 
 const config: ChatConfig = {
@@ -14,7 +15,11 @@ const conversation: Conversation = {
   currentLeafId: null, archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '', messages: [],
 }
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  // The panel a chat shows outlives the page (as it outlives the box made anew): each test starts with none.
+  for (const chat of ['c1', 'c9']) panelView.hide(chat)
+})
 
 describe('a panel', () => {
   it('seats roles and an assistant, and shows them speaking in turn, then the verdict', async () => {
@@ -79,5 +84,41 @@ describe('a panel', () => {
     expect(calls.findIndex((c) => c.method === 'POST' && c.path === '/api/chat/conversations')).toBeLessThan(calls.findIndex((c) => c.path === '/api/chat/conversations/c9/panel'))
     // It goes on in the chat made for it, still in view.
     expect(await screen.findByRole('list', { name: 'What the panel said' })).toHaveTextContent('Spaces.')
+  })
+
+  it('shows how far it is, and closed, a bar above the box says so and opens it again', async () => {
+    const working = {
+      id: 'p2', question: 'Ship on Thursday?', status: 'working', rounds: 2, error: null, verdict: null,
+      panelists: [{ name: 'The expert' }, { name: 'The critic' }],
+      turns: [{ round: 1, speaker: 'The expert', text: 'Yes.' }, { round: 1, speaker: 'The critic', text: 'No.' }, { round: 2, speaker: 'The expert', text: 'Still yes.' }],
+    }
+    fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config }),
+      'GET /api/chat/conversations': () => ({ json: [conversation] }),
+      'GET /api/chat/conversations/c1': () => ({ json: conversation }),
+      'GET /api/panels/roles': () => ({ json: [{ name: 'The expert', role: 'knows' }, { name: 'The critic', role: 'doubts' }] }),
+      'GET /api/assistants': () => ({ json: [] }),
+      'POST /api/chat/conversations/c1/panel': () => ({ status: 202, json: { id: 'p2' } }),
+      'GET /api/panels/p2': () => ({ json: working }),
+      'GET /api/chat/conversations/c1/panels': () => ({ json: [{ ...working, turns: working.turns.length }] }),
+    })
+    renderApp('/chat/c1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Ask a panel' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Ask a panel' })
+    await userEvent.type(within(dialog).getByLabelText('The question'), 'Ship on Thursday?')
+    await userEvent.click(within(dialog).getByRole('button', { name: /Ask the panel/ }))
+    // 3 of 5 (two panelists, two rounds, and the verdict): round 2.
+    const live = await screen.findByRole('dialog', { name: 'The panel' })
+    expect(within(live).getByRole('progressbar', { name: 'How far the panel is' })).toHaveAttribute('value', '3')
+    expect(within(live).getByText('Round 2 of 2')).toBeInTheDocument()
+    expect(within(live).getByText('3 of 5')).toBeInTheDocument()
+
+    await userEvent.click(within(live).getByRole('button', { name: 'Close (it goes on)' }))
+    const bar = await screen.findByRole('region', { name: 'A panel at work' })
+    expect(bar).toHaveTextContent('The panel on Ship on Thursday?')
+    expect(bar).toHaveTextContent('Round 2 of 2')
+    await userEvent.click(within(bar).getByRole('button', { name: 'Open' }))
+    expect(await screen.findByRole('dialog', { name: 'The panel' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'A panel at work' })).not.toBeInTheDocument()
   })
 })

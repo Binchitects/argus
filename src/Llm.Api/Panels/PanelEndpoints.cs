@@ -38,6 +38,22 @@ public static class PanelEndpoints
         g.MapGet("/panels/roles", () => Results.Ok(Roles.Select(r => new { name = r.Key, role = r.Value })));
         g.MapPost("/chat/conversations/{id:guid}/panel", StartAsync);
         g.MapGet("/panels/{id:guid}", GetAsync);
+        g.MapGet("/chat/conversations/{id:guid}/panels", ListAsync);
+    }
+
+    /// <summary>
+    /// A chat's panels of the person's, the newest first (at most 10): those still working, for the chat to say how far they
+    /// are after a reload, and the latest ones done.
+    /// </summary>
+    private static async Task<IResult> ListAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
+    {
+        var me = (await users.GetUserAsync(p))!;
+        var panels = await db.Panels.AsNoTracking().Where(x => x.ConversationId == id && x.UserId == me.Id).OrderByDescending(x => x.CreatedAt).Take(10).ToListAsync(ct);
+        return Results.Ok(panels.Select(x => new
+        {
+            x.Id, x.Question, x.Rounds, x.Status, x.CreatedAt,
+            panelists = JsonNode.Parse(x.Panelists), turns = (JsonNode.Parse(x.Turns) as JsonArray)?.Count ?? 0,
+        }));
     }
 
     private static async Task<IResult> StartAsync(Guid id, NewPanel body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access, PanelRuns runs,
@@ -91,6 +107,12 @@ public static class PanelEndpoints
             UserId = me.Id, ConversationId = id, Question = question, Panelists = JsonSerializer.Serialize(panelists, JsonSerializerOptions.Web), Rounds = Math.Clamp(body.Rounds ?? 2, 1, 3),
         };
         db.Panels.Add(panel);
+        // A chat made for the panel is named after its question.
+        if (c.Title == "New chat" && !await db.ChatMessages.AnyAsync(m => m.ConversationId == id, ct))
+        {
+            var title = question.ReplaceLineEndings(" ");
+            await db.Conversations.Where(x => x.Id == id).ExecuteUpdateAsync(s => s.SetProperty(x => x.Title, title.Length > 80 ? title[..80].TrimEnd() + "…" : title), ct);
+        }
         await db.SaveChangesAsync(ct);
         runs.Go(panel.Id);
         return Results.Accepted($"/api/panels/{panel.Id}", new { panel.Id });

@@ -11,8 +11,10 @@ import { Textarea } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip } from '@/components/ui/tooltip'
 import { api, errorMessage } from '@/lib/api'
+import { cn } from '@/lib/utils'
 import { assistantsQuery } from './api'
 import { Markdown } from './markdown'
+import { panelView, useShownPanel } from './panel-view'
 
 interface PanelState {
   id: string
@@ -100,6 +102,40 @@ function Setup({ chatId, ensureChat, onStarted }: { chatId: string | undefined; 
   )
 }
 
+/** How far a panel is: turns spoken (the moderator's verdict the last), of all it will have, and its round. */
+function progressOf(p: { status: string; rounds: number; panelists: unknown[]; turns: unknown[] | number; verdict?: string | null }) {
+  const spoken = typeof p.turns === 'number' ? p.turns : p.turns.length
+  const total = p.panelists.length * p.rounds + 1
+  const done = p.status === 'done' ? total : Math.min(total - 1, spoken)
+  const round = Math.min(p.rounds, Math.floor(spoken / Math.max(1, p.panelists.length)) + 1)
+  return { done, total, round }
+}
+
+/** The panel's progress, as a bar and in words. */
+function PanelProgress({ status, done, total, round, rounds }: { status: string; done: number; total: number; round: number; rounds: number }) {
+  const said =
+    status === 'done' ? 'Done: the verdict is in the chat' : status === 'failed' ? 'Stopped' : done >= total - 1 ? 'The moderator is writing the verdict' : `Round ${round} of ${rounds}`
+  return (
+    <div className="grid gap-1">
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span>{said}</span>
+        <span className="tabular-nums">
+          {done} of {total}
+        </span>
+      </div>
+      <progress
+        value={done}
+        max={total}
+        aria-label="How far the panel is"
+        className={cn(
+          'h-1.5 w-full appearance-none overflow-hidden rounded-full bg-muted [&::-webkit-progress-bar]:bg-muted',
+          status === 'failed' ? '[&::-moz-progress-bar]:bg-destructive [&::-webkit-progress-value]:bg-destructive' : '[&::-moz-progress-bar]:bg-primary [&::-webkit-progress-value]:bg-primary',
+        )}
+      />
+    </div>
+  )
+}
+
 /** The panel speaking, turn by turn, as it goes; then its verdict. */
 function Live({ panelId, chatId, onClose }: { panelId: string; chatId: string; onClose: () => void }) {
   const queryClient = useQueryClient()
@@ -115,12 +151,14 @@ function Live({ panelId, chatId, onClose }: { panelId: string; chatId: string; o
   const p = panel.data
   if (!p) return <Spinner label="Seating the panel" />
   const next = p.status === 'working' ? (p.panelists[p.turns.length % p.panelists.length]?.name ?? 'The moderator') : null
+  const { done, total, round } = progressOf(p)
   return (
     <div className="grid gap-3">
       <DialogHeader>
         <DialogTitle>The panel</DialogTitle>
         <DialogDescription>{p.question}</DialogDescription>
       </DialogHeader>
+      <PanelProgress status={p.status} done={done} total={total} round={round} rounds={p.rounds} />
       {/* What was said and the verdict scroll together: the footer stays in view however long they are. */}
       <div className="grid max-h-[60vh] gap-2 overflow-y-auto pe-1">
         <ol className="grid gap-2" aria-label="What the panel said">
@@ -152,26 +190,88 @@ function Live({ panelId, chatId, onClose }: { panelId: string; chatId: string; o
 
 /** The chat's Panel button: a question for several assistants and roles to discuss (in a new chat, the chat is made for it). */
 export function PanelButton({ chatId, ensureChat }: { chatId: string | undefined; ensureChat?: () => Promise<string | null> }) {
-  const [open, setOpen] = useState(false)
-  const [panel, setPanel] = useState<{ id: string; chat: string } | null>(null)
+  const [asking, setAsking] = useState(false)
+  // The chat made for a panel asked in a new chat: the panel shows on in it.
+  const [madeFor, setMadeFor] = useState<string | null>(null)
+  const chat = chatId ?? madeFor ?? undefined
+  const shown = useShownPanel(chat)
+  const open = asking || !!shown
+  const close = () => {
+    setAsking(false)
+    if (chat) panelView.hide(chat)
+  }
   return (
     <>
       <Tooltip content="Ask a panel: assistants and roles discuss it, and a moderator gives the verdict">
-        <Button type="button" variant="ghost" size="icon-sm" aria-label="Ask a panel" onClick={() => setOpen(true)}>
+        <Button type="button" variant="ghost" size="icon-sm" aria-label="Ask a panel" onClick={() => setAsking(true)}>
           <Users />
         </Button>
       </Tooltip>
-      <Dialog
-        open={open}
-        onOpenChange={(o) => {
-          setOpen(o)
-          if (!o) setPanel(null)
-        }}
-      >
+      <Dialog open={open} onOpenChange={(o) => (o ? setAsking(true) : close())}>
         <DialogContent className="sm:max-w-2xl">
-          {open && (panel ? <Live panelId={panel.id} chatId={panel.chat} onClose={() => (setOpen(false), setPanel(null))} /> : <Setup chatId={chatId} ensureChat={ensureChat} onStarted={setPanel} />)}
+          {open &&
+            (shown && chat ? (
+              <Live panelId={shown} chatId={chat} onClose={close} />
+            ) : (
+              <Setup
+                chatId={chatId}
+                ensureChat={ensureChat}
+                onStarted={(p) => {
+                  setMadeFor(p.chat)
+                  panelView.show(p.chat, p.id)
+                  setAsking(false)
+                }}
+              />
+            ))}
         </DialogContent>
       </Dialog>
     </>
   )
 }
+
+interface PanelSummary {
+  id: string
+  question: string
+  rounds: number
+  status: 'working' | 'done' | 'failed'
+  panelists: { name: string }[]
+  turns: number
+}
+
+/**
+ * Above the box while a panel of this chat is working and its dialog is closed: how far it is, and Open. Read from the
+ * server, so it is there again after a reload.
+ */
+export function PanelBar({ chatId }: { chatId: string | undefined }) {
+  const queryClient = useQueryClient()
+  const shown = useShownPanel(chatId)
+  const panels = useQuery({
+    queryKey: ['chat', chatId, 'panels'],
+    queryFn: async ({ signal }) => {
+      const list = await api<PanelSummary[]>(`/api/chat/conversations/${chatId}/panels`, { signal })
+      // One finished since the last look: the chat has its discussion now.
+      if (list.some((p) => p.status !== 'working')) void queryClient.invalidateQueries({ queryKey: ['chat', 'conversation', chatId] })
+      return list
+    },
+    enabled: !!chatId,
+    refetchInterval: (q) => (q.state.data?.some((p) => p.status === 'working') ? 2000 : false),
+  })
+  const working = panels.data?.find((p) => p.status === 'working')
+  if (!chatId || !working || shown) return null
+  const { done, total, round } = progressOf(working)
+  return (
+    <section aria-label="A panel at work" className="grid gap-1.5 rounded-xl border bg-card px-3 py-2 text-sm shadow-xs">
+      <div className="flex items-center gap-2">
+        <Users className="size-4 shrink-0 text-primary-ink" aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate">
+          The panel on <q className="font-medium">{working.question}</q>
+        </span>
+        <Button size="sm" variant="outline" className="h-7" onClick={() => panelView.show(chatId, working.id)}>
+          Open
+        </Button>
+      </div>
+      <PanelProgress status={working.status} done={done} total={total} round={round} rounds={working.rounds} />
+    </section>
+  )
+}
+

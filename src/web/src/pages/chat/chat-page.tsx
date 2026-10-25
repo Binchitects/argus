@@ -19,7 +19,7 @@ import { useScreenShare } from './screen'
 import { PublishDialog, type ToPublish } from '../apps/publish-dialog'
 import { BrowserBar } from './browser-bar'
 import { ScreenBar, ScreenButton } from './screen-share'
-import { PanelButton } from './panel'
+import { PanelBar, PanelButton } from './panel'
 import { SketchButton } from './sketch'
 import type { SketchAsk } from './sketch-prompts'
 import { toBlocks } from './markdown-blocks'
@@ -1196,6 +1196,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                 {asking && <SafeguardAsk question={asking.question} onAnswer={asking.answer} />}
                 <PublishDialog what={publishing} onClose={() => setPublishing(null)} />
                 <BrowserBar chatId={id ?? null} active={toolsOnHere.includes('browser')} />
+                <PanelBar chatId={id} />
                 <ScreenBar share={share} sees={model?.vision ?? false} seer={seer} onSeer={(m) => void change({ model: m })} />
                 <TalkBar state={talk.state} onEnd={talk.end} />
                 {waiting}
@@ -1402,6 +1403,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   </Button>
                 )}
                 <BrowserBar chatId={id ?? null} active={toolsOnHere.includes('browser')} />
+                <PanelBar chatId={id} />
                 <ScreenBar share={share} sees={model?.vision ?? false} seer={seer} onSeer={(m) => void change({ model: m })} />
                 <TalkBar state={talk.state} onEnd={talk.end} />
                 {waiting}
