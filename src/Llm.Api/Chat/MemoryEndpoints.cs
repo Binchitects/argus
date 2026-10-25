@@ -13,8 +13,8 @@ namespace Llm.Api.Chat;
 /// <summary>A memory to keep or change: its words, and what of the rest is said (what is not stays).</summary>
 public sealed record MemoryRequest(string? Text, string? Scope = null, string? Kind = null, string? ProjectKey = null, bool? Pinned = null);
 
-/// <summary>Memory on or off, for the person.</summary>
-public sealed record MemorySwitch(bool On);
+/// <summary>Memory on or off for the person, and whether what it proposes from their quiet chats is kept on its own (left out: as it was).</summary>
+public sealed record MemorySwitch(bool On, bool? Auto = null);
 
 /// <summary>The person's answer on a memory card in the chat: keep it (in their words, if they changed them), or not.</summary>
 public sealed record MemoryDecision(bool Keep, string? Text = null);
@@ -35,6 +35,7 @@ public static class MemoryEndpoints
         me.MapDelete("/{id:guid}", DeleteAsync);
         me.MapDelete("", DeleteAllAsync);
         me.MapPost("/offers/{messageId:guid}", DecideAsync).RequirePermission(Llm.Core.Access.Permissions.Memory);
+        me.MapPost("/{id:guid}/keep", AcceptAsync).RequirePermission(Llm.Core.Access.Permissions.Memory);
     }
 
     private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;
@@ -42,7 +43,7 @@ public static class MemoryEndpoints
     /// <summary>A memory as the page shows it; mine: the person's own (else the company's), and whether they may change it.</summary>
     public static object View(Core.Chat.Memory m, Guid me, bool keepsCompany) => new
     {
-        m.Id, m.Text, m.Scope, m.Kind, project = m.ProjectKey, m.Source, m.SourceId, m.Pinned, m.UsedAt, m.Uses, m.ReplacedBy, m.CreatedAt, m.UpdatedAt,
+        m.Id, m.Text, m.Scope, m.Kind, project = m.ProjectKey, m.Source, m.SourceId, m.Pinned, m.UsedAt, m.Uses, m.ReplacedBy, m.Proposed, m.Replaces, m.CreatedAt, m.UpdatedAt,
         mine = m.UserId == me, canEdit = m.Scope == Core.Chat.Memory.Company ? keepsCompany : m.UserId == me,
     };
 
@@ -54,7 +55,7 @@ public static class MemoryEndpoints
         var company = await KeepsCompanyAsync(access, me, ct);
         return Results.Ok(new
         {
-            enabled = memories.Enabled, on = !me.MemoryOff, max = Memories.PerPerson, maxChars = Memories.MaxChars, keepsCompany = company,
+            enabled = memories.Enabled, on = !me.MemoryOff, auto = me.MemoryAuto, max = Memories.PerPerson, maxChars = Memories.MaxChars, keepsCompany = company,
             kinds = Core.Chat.Memory.Kinds, scopes = Core.Chat.Memory.Scopes,
             memories = (await memories.ListAsync(me.Id, ct, replaced)).Select(m => View(m, me.Id, company)),
         });
@@ -138,8 +139,16 @@ public static class MemoryEndpoints
     {
         var me = await Me(p, users);
         me.MemoryOff = !body.On;
+        me.MemoryAuto = body.Auto ?? me.MemoryAuto;
         await users.UpdateAsync(me);
-        return Results.Ok(new { on = body.On });
+        return Results.Ok(new { on = body.On, auto = me.MemoryAuto });
+    }
+
+    /// <summary>A memory proposed from a quiet chat, kept by the person: read from now on (and what it says otherwise replaced).</summary>
+    private static async Task<IResult> AcceptAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, Memories memories, AccessService access, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        return await memories.AcceptAsync(me.Id, id, ct) is { } kept ? Results.Ok(View(kept, me.Id, await KeepsCompanyAsync(access, me, ct))) : Results.NotFound();
     }
 
     /// <summary>

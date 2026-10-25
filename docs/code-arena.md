@@ -167,7 +167,7 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/agent [NAME TASK]` | your own coding agents (below); with a name and a task, run one on it: its output shows as it comes, and what it said goes into the conversation |
 | `/compact` | summarize the conversation now |
 | `/compact-at [% [%]]` | show or set when the session compacts itself and what it keeps (below); `off` for only when a request would not fit, `account` for your Arena account's, `default` for that and 25 |
-| `/context` | how full the model's window is |
+| `/context` | how full the model's window is, what fills it and its biggest parts |
 | `/cost` | tokens spent, and how full the model's window is |
 | `/mcp [retry [name]]` | Arena's, Argus's and your MCP servers: connected or not and why; `retry` tries those not connected now |
 | `/jobs [stop N]` | the commands run with no time limit, running or ended; `stop N` stops job N |
@@ -1501,8 +1501,31 @@ when Arena does not say), or would not fit at all, the older
 part of the conversation is summarized by the model (the person's goals,
 decisions, files, commands and the state of the work) and the recent part
 kept whole, within the **target**, 25% of the window by default. `/compact`
-does it at once. A tool's output longer than 40,000 characters (less for a
-small window) is cut in the middle.
+does it at once. The summary is written in sections (`## Goal`,
+`## Constraints and preferences`, `## Decisions`, `## Files`, `## Commands`,
+`## Errors met`, `## State`, `## Next steps`), and the to-do list as it stands
+is said after it.
+
+What fills the window is managed before anything is summarized:
+
+- **A big result is kept aside.** A tool's result past 16,000 characters (less
+  for a small window) is kept in a file beside the session's
+  (`sessions/ID.results/r1.txt`, 0600) and the model reads its start and its
+  end, with a line saying how much is not shown and how to read it:
+  `read_result {"id":"r1","from":81,"lines":200}` reads on, and
+  `{"id":"r1","find":"text"}` gives the lines that hold some text. A
+  sub-agent's results, with no session file of their own, are cut in the
+  middle as before (past 40,000 characters).
+- **Earlier results are cleared before compacting.** When the next request
+  would pass the threshold, the results older than the person's last two
+  messages (past 1,000 characters) are kept aside the same way and replaced
+  by a line ("Cleared to make room in the window: read_file's result (10,950
+  characters) is kept as r3. read_result {"id":"r3"} reads it again."). When
+  that is enough, nothing is summarized: "Cleared N earlier tool results
+  (~T tokens) to make room".
+- **`/context` shows what fills it**: the instructions and memory, the tools,
+  Code Arena's notes, the summary, your messages, the answers and the tools'
+  results, each as a bar with its tokens, then the five biggest messages.
 
 A long session never gets stuck on the window:
 
@@ -1584,7 +1607,11 @@ Arena's block (the pinned memories, the company's and the newest, about 400
 tokens); each message then brings the memories that matter to it, in Code
 Arena's note before the message (never synced into the web chat), each said
 once in a session. `recall` searches all of memory when the model needs
-more. `/memory` lists the person's, the project's and the company's,
+more. When a session has been quiet for ten minutes, Arena reads what it said
+(the session is kept in step with a chat there) and keeps what is worth
+remembering about the project (a build command that worked, a convention, a
+lesson); what it learned about the person is proposed in Arena's **Memory**
+first, as in the web chat. `/memory` lists the person's, the project's and the company's,
 numbered; `/memory add [--all] TEXT` and `/memory forget N` change them.
 
 Without Arena (not signed in, or it did not answer as the session started),

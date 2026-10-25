@@ -17,7 +17,7 @@ public sealed class MemoryOptions
 
 /// <summary>What a memory is beside its words: whose (its scope, and project), its kind, where it came from, pinned or not.</summary>
 public sealed record MemoryFacts(string Scope = Memory.Person, string Kind = Memory.Fact, string? ProjectKey = null, string Source = Memory.Typed,
-    Guid? SourceId = null, bool Pinned = false);
+    Guid? SourceId = null, bool Pinned = false, bool Proposed = false, Guid? Replaces = null);
 
 /// <summary>A memory found for a question, and how near it is to it (0 to 1).</summary>
 public sealed record Recalled(Memory Memory, double Score);
@@ -49,10 +49,17 @@ public sealed partial class Memories(AppDbContext db, IOptionsMonitor<MemoryOpti
     /// <summary>Two memories this near (cosine) say the same: the newer words replace the older.</summary>
     public const double Same = 0.92;
 
-    /// <summary>A memory at least this near the question is given with it (by meaning; by words, <see cref="WordsNear"/>).</summary>
+    /// <summary>A memory at least this near the question may be given with it (by meaning; by words, <see cref="WordsNear"/>).</summary>
     public const double Near = 0.35;
 
     public const double WordsNear = 0.2;
+
+    /// <summary>
+    /// What matters stands out: a memory is given with a question when it is this much nearer than the question's typical
+    /// memory (their median: an embedder finds any two sentences somewhat alike, unrelated ones about 0.45 to 0.6), and
+    /// within <see cref="Spread"/> of the nearest. Fewer than five to compare: <see cref="Near"/> alone.
+    /// </summary>
+    public const double Stand = 0.12, Spread = 0.1;
 
     /// <summary>The first line of the system prompt's block.</summary>
     public const string Heading =
@@ -69,7 +76,7 @@ public sealed partial class Memories(AppDbContext db, IOptionsMonitor<MemoryOpti
 
     /// <summary>What this person's answers may read: their own (and their project's, when one is given) and the company's; none replaced.</summary>
     public IQueryable<Memory> Readable(Guid userId, string? project) =>
-        db.Memories.Where(m => m.ReplacedBy == null &&
+        db.Memories.Where(m => m.ReplacedBy == null && !m.Proposed &&
             ((m.UserId == userId && (m.Scope == Memory.Person || (project != null && m.Scope == Memory.Project && m.ProjectKey == project))) || m.Scope == Memory.Company));
 
     /// <summary>The person's memories (every scope and project of theirs, and the company's), the newest first; those replaced too when asked.</summary>
@@ -140,17 +147,17 @@ public sealed partial class Memories(AppDbContext db, IOptionsMonitor<MemoryOpti
         }
         var vector = await QueryVectorAsync(question, ct);
         var words = Words(question);
-        var scored = candidates.Select(m =>
-            {
-                if (vector is not null && m.Embedding is { } e && e.Length == vector.Length)
-                {
-                    var score = Dot(vector, e);
-                    return new Recalled(m, score >= Near ? score : 0);
-                }
-                var byWords = WordScore(words, Words(m.Text));
-                return new Recalled(m, byWords >= WordsNear ? byWords : 0);
-            })
-            .Where(r => r.Score > 0).OrderByDescending(r => r.Score).ThenByDescending(r => r.Memory.UpdatedAt).ToList();
+        // Each memory's nearness: by meaning when both have a vector of the same embedder, else by the words they share.
+        var raw = candidates.Select(m => vector is not null && m.Embedding is { } e && e.Length == vector.Length
+                ? (Memory: m, Score: Dot(vector, e), Floor: Near)
+                : (Memory: m, Score: WordScore(words, Words(m.Text)), Floor: WordsNear)).ToList();
+        // What stands out from this question's typical memory (their median), and comes near the nearest.
+        var ordered = raw.Select(r => r.Score).Order().ToList();
+        var typical = ordered.Count >= 5 ? (ordered[(ordered.Count - 1) / 2] + ordered[ordered.Count / 2]) / 2 : 0;
+        var top = ordered[^1];
+        var bar = Math.Max(typical + Stand, top - Spread);
+        var scored = raw.Where(r => r.Score >= r.Floor && r.Score >= bar).Select(r => new Recalled(r.Memory, r.Score))
+            .OrderByDescending(r => r.Score).ThenByDescending(r => r.Memory.UpdatedAt).ToList();
         var found = new List<Recalled>();
         var used = 0;
         foreach (var r in scored)
@@ -211,7 +218,7 @@ public sealed partial class Memories(AppDbContext db, IOptionsMonitor<MemoryOpti
 
     /// <summary>Memories of this scope and project: the person's own, or the company's.</summary>
     private IQueryable<Memory> Of(Guid userId, MemoryFacts f) =>
-        db.Memories.Where(m => m.ReplacedBy == null && m.Scope == f.Scope && (f.Scope == Memory.Company || (m.UserId == userId && m.ProjectKey == f.ProjectKey)));
+        db.Memories.Where(m => m.ReplacedBy == null && !m.Proposed && m.Scope == f.Scope && (f.Scope == Memory.Company || (m.UserId == userId && m.ProjectKey == f.ProjectKey)));
 
     public Task<Memory?> KeepAsync(Guid userId, string text, CancellationToken ct) => KeepAsync(userId, text, new MemoryFacts(), ct);
 
@@ -224,8 +231,11 @@ public sealed partial class Memories(AppDbContext db, IOptionsMonitor<MemoryOpti
         var now = DateTimeOffset.UtcNow;
         if (await FindAsync(userId, text, ct, facts) is { } same)
         {
-            Touch(same, facts, now);
-            await db.SaveChangesAsync(ct);
+            if (!facts.Proposed)
+            {
+                Touch(same, facts, now);
+                await db.SaveChangesAsync(ct);
+            }
             return same;
         }
         var vector = await DocumentVectorAsync(text, ct);
@@ -236,12 +246,20 @@ public sealed partial class Memories(AppDbContext db, IOptionsMonitor<MemoryOpti
                 .OrderByDescending(x => x.Score).FirstOrDefault();
             if (near.Memory is { } alike)
             {
-                // Said again in other words: the newer words stand.
-                (alike.Text, alike.Embedding) = (text, vector);
-                Touch(alike, facts, now);
-                await db.SaveChangesAsync(ct);
+                // Said again in other words: the newer words stand (a proposal changes nothing the person kept).
+                if (!facts.Proposed)
+                {
+                    (alike.Text, alike.Embedding) = (text, vector);
+                    Touch(alike, facts, now);
+                    await db.SaveChangesAsync(ct);
+                }
                 return alike;
             }
+        }
+        if (facts.Proposed && (await db.Memories.Where(m => m.UserId == userId && m.Proposed).ToListAsync(ct)).FirstOrDefault(m => Key(m.Text) == Key(text)) is { } waiting)
+        {
+            // Proposed already, and still waiting.
+            return waiting;
         }
         var full = facts.Scope == Memory.Company
             ? await db.Memories.CountAsync(m => m.Scope == Memory.Company && m.ReplacedBy == null, ct) >= CompanyMost
@@ -254,10 +272,40 @@ public sealed partial class Memories(AppDbContext db, IOptionsMonitor<MemoryOpti
         {
             UserId = userId, Text = text, Scope = facts.Scope, Kind = facts.Kind, ProjectKey = facts.Scope == Memory.Project ? facts.ProjectKey : null,
             Source = facts.Source, SourceId = facts.SourceId, Pinned = facts.Pinned, Embedding = vector, CreatedAt = now, UpdatedAt = now,
+            Proposed = facts.Proposed, Replaces = facts.Proposed ? facts.Replaces : null,
         };
         db.Memories.Add(made);
+        if (!facts.Proposed && facts.Replaces is { } old)
+        {
+            await ReplaceAsync(made, old, ct);
+        }
         await db.SaveChangesAsync(ct);
         return made;
+    }
+
+    /// <summary><paramref name="newer"/> says otherwise than the person's memory <paramref name="old"/>: that one is kept, replaced (no longer read).</summary>
+    public async Task ReplaceAsync(Memory newer, Guid old, CancellationToken ct)
+    {
+        if (old != newer.Id && await db.Memories.SingleOrDefaultAsync(m => m.Id == old && m.UserId == newer.UserId && m.ReplacedBy == null, ct) is { } replaced)
+        {
+            replaced.ReplacedBy = newer.Id;
+        }
+    }
+
+    /// <summary>A proposal kept: read from now on, and what it replaces replaced. False when it was not one of the person's proposals.</summary>
+    public async Task<Memory?> AcceptAsync(Guid userId, Guid id, CancellationToken ct)
+    {
+        if (await db.Memories.SingleOrDefaultAsync(m => m.Id == id && m.UserId == userId && m.Proposed, ct) is not { } proposal)
+        {
+            return null;
+        }
+        (proposal.Proposed, proposal.UpdatedAt) = (false, DateTimeOffset.UtcNow);
+        if (proposal.Replaces is { } old)
+        {
+            await ReplaceAsync(proposal, old, ct);
+        }
+        await db.SaveChangesAsync(ct);
+        return proposal;
     }
 
     private static void Touch(Memory m, MemoryFacts facts, DateTimeOffset now)

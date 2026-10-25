@@ -384,6 +384,8 @@ public static class IdentityWiring
         services.AddHostedService(sp => sp.GetRequiredService<Chat.BuiltInSkills>());
         services.AddSingleton<Chat.MemoryUpkeep>();
         services.AddHostedService(sp => sp.GetRequiredService<Chat.MemoryUpkeep>());
+        services.AddSingleton<Chat.MemoryReflection>();
+        services.AddHostedService(sp => sp.GetRequiredService<Chat.MemoryReflection>());
         services.AddScoped<Chat.Tools.MemoryTool>();
         services.AddScoped<Chat.Tools.SkillTool>();
         ArenaMcp.McpEndpoints.AddArenaMcp(services, config);

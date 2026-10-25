@@ -179,6 +179,11 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
     }
     case 'notice':
       return { ...state, notices: [...state.notices, { kind: e.kind, text: e.text }] }
+    case 'cleared':
+      return {
+        ...state,
+        notices: [...state.notices, { kind: 'cleared', text: `Made room in the model's context: ${e.results} earlier ${e.results === 1 ? 'result' : 'results'} of tools cleared (the chat keeps them).` }],
+      }
     case 'research':
       return { ...state, research: true }
     case 'error': {

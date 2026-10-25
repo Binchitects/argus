@@ -19,6 +19,10 @@ export interface MemoryItem {
   uses: number
   /** Replaced by a newer memory that said otherwise. */
   replacedBy: string | null
+  /** Proposed from a chat that went quiet: waiting for the person, not read by answers until kept. */
+  proposed: boolean
+  /** The memory a proposal says otherwise than: kept, it replaces that one. */
+  replaces: string | null
   createdAt: string
   updatedAt: string
   /** The person's own (else the company's). */
@@ -31,6 +35,8 @@ export interface MemoryView {
   enabled: boolean
   /** The person has it on. */
   on: boolean
+  /** What memory proposes from the person's quiet chats is kept at once. */
+  auto: boolean
   max: number
   maxChars: number
   /** The person keeps the company's memories (they manage its knowledge). */
@@ -55,6 +61,7 @@ export interface MemoryInput {
 export const keepMemory = (m: MemoryInput) => api<MemoryItem>('/api/account/memories', { body: { ...m, projectKey: m.project } })
 export const changeMemory = (id: string, m: MemoryInput) => api<MemoryItem>(`/api/account/memories/${id}`, { method: 'PUT', body: m })
 export const forgetMemory = (id: string) => api(`/api/account/memories/${id}`, { method: 'DELETE' })
+export const keepProposal = (id: string) => api<MemoryItem>(`/api/account/memories/${id}/keep`, { body: {} })
 
 export const kindLabel: Record<MemoryKind, string> = { preference: 'Preference', fact: 'Fact', decision: 'Decision', howto: 'How to', lesson: 'Lesson' }
 export const scopeLabel: Record<MemoryScope, string> = { person: 'About you', project: 'A project', company: "The company's" }

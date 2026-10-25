@@ -45,6 +45,10 @@ public sealed class Conversation
     public string? OriginRef { get; set; }
     /// <summary>Where it runs there: the Code Arena session's folder.</summary>
     public string? OriginPlace { get; set; }
+    /// <summary>A Code Arena session's project, by its repository's key (its memories are that project's).</summary>
+    public string? ProjectKey { get; set; }
+    /// <summary>What memory has read of it: its messages up to this one (by their sequence), reflected on as it went quiet.</summary>
+    public int ReflectedSequence { get; set; }
     /// <summary>
     /// Code Arena is answering in this chat until then (its turn, held while it works and renewed as it goes): the web
     /// keeps the person's messages in the chat's queue meanwhile, and they go when Code Arena's turn ends. Null: it is not.
@@ -110,6 +114,10 @@ public sealed class ChatMessage
     public string? ContextJson { get; set; }
     /// <summary>Assistant: its thinking was cut short ("Answer now"), and it answered without more.</summary>
     public bool CutShort { get; set; }
+    /// <summary>Pinned by the person: kept word for word through compactions (said after the summary that covers it).</summary>
+    public bool Pinned { get; set; }
+    /// <summary>Left out by the person: not read by the model (its calls' results neither), and not deleted.</summary>
+    public bool LeftOut { get; set; }
     public string? Model { get; set; }
     /// <summary>Assistant: its round's tokens. A delegate call: its sub-agents' together.</summary>
     public int? PromptTokens { get; set; }

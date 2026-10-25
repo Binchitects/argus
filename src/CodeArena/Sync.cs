@@ -258,6 +258,8 @@ internal sealed class ChatSync : IAsyncDisposable
                     var made = await SendAsync(HttpMethod.Post, "/api/code-arena/chats", new JsonObject
                     {
                         ["ref"] = _store.Id, ["place"] = _place, ["model"] = _model(), ["title"] = null,
+                        // The project its memories are of (what memory proposes from the session is that project's).
+                        ["project"] = ProjectKeys.Of(_place),
                     }, ct);
                     if (made.Status != HttpStatusCode.OK || made.Body?.Str("id") is not { } id)
                     {

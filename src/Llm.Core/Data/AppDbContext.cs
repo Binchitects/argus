@@ -136,6 +136,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(c => c.Thinking).HasMaxLength(20);
             e.Property(c => c.LoadedTools).HasDefaultValueSql("'{}'::text[]");
             e.Property(c => c.Model).HasMaxLength(200);
+            e.Property(c => c.ProjectKey).HasMaxLength(300);
             e.Property(c => c.SystemPrompt).HasMaxLength(20000);
             e.Property(c => c.Origin).HasMaxLength(32);
             e.Property(c => c.OriginRef).HasMaxLength(128);
@@ -914,6 +915,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(m => m.Source).HasMaxLength(20).HasDefaultValue(Memory.Typed);
             e.Property(m => m.ProjectKey).HasMaxLength(300);
             e.HasIndex(m => new { m.UserId, m.UpdatedAt });
+            e.HasIndex(m => new { m.UserId, m.Proposed }).HasFilter("\"Proposed\"");
             e.HasIndex(m => new { m.UserId, m.Scope, m.ProjectKey });
             e.HasIndex(m => m.Scope).HasFilter("\"Scope\" = 'company'");
             e.HasOne<AppUser>().WithMany().HasForeignKey(m => m.UserId).OnDelete(DeleteBehavior.Cascade);

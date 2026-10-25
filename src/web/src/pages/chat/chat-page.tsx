@@ -63,6 +63,7 @@ import { SelectionToolbar } from './selection-toolbar'
 import { NewRoomDialog, RoomPanel } from './room'
 import { useReadIn, useRoomTranslations } from './room-language'
 import { mentionsIn, typingLine, useRoomEvents } from './room-live'
+import type { ContextChange } from './message-context'
 import { isOffline, useOnline, useOutbox } from './outbox'
 import { useRoomCall } from './room-call'
 import { CallBar, CallButton } from './call-bar'
@@ -963,6 +964,14 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       </section>
     ) : null
 
+  // A message pinned (kept word for word through compactions) or left out of what the model reads.
+  const changeContext = (m: Message, change: ContextChange) => {
+    if (!id) return
+    void api(`/api/chat/conversations/${id}/messages/${m.id}/context`, { method: 'PUT', body: change })
+      .then(() => queryClient.invalidateQueries({ queryKey: conversationQuery(id).queryKey }))
+      .catch((e) => toast.error(errorMessage(e)))
+  }
+
   // Opened with a question to ask (the code assistant's ?ask=, a meeting's): sent once, when the chat is there and empty,
   // with the files it came with (a meeting's minutes and transcript).
   const [params, setParams] = useSearchParams()
@@ -1277,6 +1286,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                               onSwitch={switchTo}
                               onEdit={room && t.question.author?.id !== me?.id ? undefined : edit}
                               onJumpToQuote={jumpToQuoted}
+                              onContext={room ? undefined : changeContext}
                               room={room ? { me: me?.id ?? '', replyOf, onReply: room.role === 'viewer' ? undefined : setReplyTo, translation: (m) => translations.of(m.id) } : undefined}
                             />
                           )}
@@ -1300,6 +1310,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                             />
                           ) : (t.answer.length > 0 || (answering && i === lastTurn)) && (
                             <AnswerTurn
+                              onContext={room ? undefined : changeContext}
                               answer={t.answer}
                               siblings={t.answer[0] ? tree.siblings(t.answer[0]) : []}
                               live={answering && i === lastTurn}

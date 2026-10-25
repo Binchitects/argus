@@ -7,12 +7,12 @@ import type { ChatConfig, Conversation } from './chat/types'
 import { blank } from './chat/live'
 
 const item = (over: Partial<MemoryItem>): MemoryItem => ({
-  id: 'm1', text: '', scope: 'person', kind: 'fact', project: null, source: 'typed', sourceId: null, pinned: false, usedAt: null, uses: 0, replacedBy: null,
+  id: 'm1', text: '', scope: 'person', kind: 'fact', project: null, source: 'typed', sourceId: null, pinned: false, usedAt: null, uses: 0, replacedBy: null, proposed: false, replaces: null,
   createdAt: '2026-10-01T10:00:00Z', updatedAt: '2026-10-01T10:00:00Z', mine: true, canEdit: true, ...over,
 })
 
 const view = (over: Partial<MemoryView> = {}): MemoryView => ({
-  enabled: true, on: true, max: 1000, maxChars: 500, keepsCompany: false,
+  enabled: true, on: true, auto: false, max: 1000, maxChars: 500, keepsCompany: false,
   memories: [
     item({ id: 'm1', text: 'Deploys with Podman.', kind: 'howto', source: 'chat', sourceId: 'c7', uses: 3, usedAt: '2026-10-20T10:00:00Z' }),
     item({ id: 'm2', text: 'Builds with tools/dn.', scope: 'project', project: 'gitlab.corp/payments/api', source: 'code-arena' }),
@@ -74,6 +74,36 @@ describe('the memory page', () => {
     await userEvent.click(screen.getByRole('checkbox', { name: /The company's/ }))
     await userEvent.click(screen.getByRole('button', { name: 'Remember' }))
     await waitFor(() => expect(calls.find((c) => c.method === 'POST')?.body).toMatchObject({ text: 'The VPN is vpn.corp.', scope: 'company' }))
+  })
+})
+
+describe('memories proposed from quiet chats', () => {
+  it('are shown apart to keep or not, and memory can keep them on its own', async () => {
+    let shown = view({
+      memories: [item({ id: 'p1', text: 'Publishes the docs with Netlify.', kind: 'decision', proposed: true, replaces: 'm9', source: 'reflected', sourceId: 'c3' })],
+    })
+    const calls = fakeApi(member, {
+      'GET /api/account/memories': () => ({ json: shown }),
+      'POST /api/account/memories/p1/keep': () => {
+        shown = { ...shown, memories: shown.memories.map((m) => ({ ...m, proposed: false })) }
+        return { json: shown.memories[0] }
+      },
+      'PUT /api/account/memories/settings': (body) => ({ json: body }),
+    })
+    renderApp('/memory')
+    const proposed = await screen.findByRole('list', { name: 'Proposed memories' })
+    const one = within(proposed).getByRole('listitem', { name: 'Publishes the docs with Netlify.' })
+    expect(one).toHaveTextContent('replaces one you kept')
+    expect(within(one).getByRole('link', { name: 'from a chat' })).toHaveAttribute('href', '/chat/c3')
+    // Not among the memories answers read until kept.
+    expect(screen.queryByRole('list', { name: 'Memories' })).not.toBeInTheDocument()
+    await userEvent.click(within(one).getByRole('button', { name: 'Keep' }))
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/account/memories/p1/keep')).toBe(true))
+    expect(await screen.findByRole('list', { name: 'Memories' })).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Proposed memories' })).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('switch', { name: 'Remember on its own' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/account/memories/settings')?.body).toEqual({ on: true, auto: true }))
   })
 })
 

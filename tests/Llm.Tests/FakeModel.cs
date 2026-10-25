@@ -269,6 +269,16 @@ public sealed class FakeModel : HttpMessageHandler
             chunks = [Delta(new JsonObject { ["content"] = $$$"""{"motions": [{"target": "{{{target}}}", "kind": "spin", "duration": 4}, {"target": "hills", "kind": "fade-in"},]}""" }), Finish("stop"), Usage(200, 0, 60)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
+        // Memory reading a quiet chat: what the person wrote as [propose {...}] is proposed ("replaces": "FIRST" stands for the
+        // first memory listed as remembered already); nothing else.
+        if (system0.StartsWith("You keep what an AI assistant remembers", StringComparison.Ordinal))
+        {
+            var first = System.Text.RegularExpressions.Regex.Match(lastUser, @"- \[([0-9a-f-]{36})\]").Groups[1].Value;
+            var proposed = System.Text.RegularExpressions.Regex.Matches(lastUser, @"\[propose (\{[^\]]*\})\]")
+                .Select(m => JsonNode.Parse(m.Groups[1].Value.Replace("FIRST", first, StringComparison.Ordinal))!).ToList();
+            chunks = [Delta(new JsonObject { ["content"] = "Here they are:\n" + new JsonObject { ["memories"] = new JsonArray([.. proposed]) }.ToJsonString() }), Finish("stop"), Usage(300, 0, 60)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
         // Rooms read in another language: each message given back as "[Language] text", or "=" for one starting "[same]".
         if (system0.StartsWith("You translate messages of a group chat", StringComparison.Ordinal))
         {

@@ -35,12 +35,18 @@ public sealed partial class ChatService
 
     internal const string CompactPrompt =
         "You compact a conversation between a person and an AI assistant, so that it can go on without the whole history: " +
-        "the assistant reads your summary instead of the messages it covers.\n" +
-        "Keep what the person wants, their preferences and constraints; facts, decisions and conclusions; names of files, functions, " +
-        "repositories, commands, settings and numbers; code that still matters (short, in fenced blocks); what the tools found; " +
-        "open questions, and what was about to happen next. The latest messages matter most: keep their details.\n" +
-        "Leave out greetings, repetition and dead ends. Write in the language the person writes in, in short headed sections " +
-        "with bullet points, at most about 800 words. Write only the summary.";
+        "the assistant reads your summary instead of the messages it covers, and must carry on as if it had read them.\n" +
+        "Write these sections, each a few bullet points, leaving out any with nothing to say:\n" +
+        "## Goal — what the person is trying to achieve, in their words.\n" +
+        "## Constraints and preferences — what they asked for or ruled out, and how they like things done.\n" +
+        "## Decisions — what was decided, and why.\n" +
+        "## Facts and findings — names of files, functions, repositories, commands, settings and numbers; what the tools found; " +
+        "code that still matters (short, in fenced blocks).\n" +
+        "## State — what is done, what is half done.\n" +
+        "## Next steps — what was about to happen next.\n" +
+        "## Open questions — what is still undecided or unknown.\n" +
+        "The latest messages matter most: keep their details. Leave out greetings, repetition and dead ends. Write in the language " +
+        "the person writes in, at most about 800 words. Write only the summary.";
 
     /// <summary>The newest summary on a branch before <paramref name="end"/>, and where the messages after it start.</summary>
     internal static (string? Summary, int From) LastSummary(IReadOnlyList<ChatMessage> path, int end)

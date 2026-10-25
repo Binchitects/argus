@@ -479,6 +479,29 @@ internal sealed class Repl(Runtime rt)
         return $"context {Fmt.Tokens(used)} / {Fmt.Tokens(rt.Model.Context)} ({100.0 * used / rt.Model.Context:0}%), compacts {rt.Compaction.When()}";
     }
 
+    /// <summary>What fills the window, by kind (a bar each, of the whole window), and its biggest messages.</summary>
+    private void WindowCommand()
+    {
+        var (kinds, biggest) = rt.Agent.Window();
+        var perToken = rt.Agent.CharsPerToken;
+        var window = (double)rt.Model.Context;
+        foreach (var (kind, chars) in kinds.Where(k => k.Chars > 0))
+        {
+            var tokens = (long)(chars / perToken);
+            var bar = new string('█', (int)Math.Clamp(Math.Round(tokens / window * 40), 1, 40));
+            Ui.Line($"  {kind,-24} {Fmt.Tokens(tokens),8}  {Ui.Blue(bar)}");
+        }
+        if (biggest.Count > 0)
+        {
+            Ui.Line(Ui.Bold("Biggest"));
+            foreach (var item in biggest)
+            {
+                Ui.Line($"  {Fmt.Tokens((long)(item.Chars / perToken)),8}  {item.What}");
+            }
+        }
+        Ui.Info("Big results are kept aside (read_result reads them); before compacting, earlier results are cleared to their note. /compact summarizes now.");
+    }
+
     /// <summary>Runs a slash command; false to leave.</summary>
     private async Task<bool> CommandAsync(string input, CancellationToken ct)
     {
@@ -635,6 +658,7 @@ internal sealed class Repl(Runtime rt)
             case "/context":
                 Ui.Line(ContextUse() + (rt.CompactAtFrom is { } from ? $" ({from})" : "") + (rt.Compaction.At == Compaction.Off ? "" : ", and always before a request would not fit") +
                     $", keeping the recent part within {rt.Compaction.Target}%.");
+                WindowCommand();
                 break;
             case "/compact-at":
                 CompactAt(arg);

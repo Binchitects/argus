@@ -121,6 +121,10 @@ export interface Message {
   context?: ContextFill | null
   /** An answer whose thinking was cut short ("Answer now"). */
   cutShort?: boolean
+  /** Pinned by the person: kept word for word when the chat compacts. */
+  pinned?: boolean
+  /** Left out by the person: the model does not read it (it stays here). */
+  leftOut?: boolean
   /** The person's thumbs on this answer (its last message), if they rated it. */
   feedback?: Feedback | null
 }
@@ -397,6 +401,8 @@ export type ChatEvent =
   | { type: 'assistant'; id: string; parentId: string; model: string; side?: 'a' | 'b' }
   /** Auto: who answers (message `id`), and why. */
   | { type: 'route'; id: string; route: AutoRoute }
+  /** Before compacting, earlier tools' results were cleared to make room: how many, and the characters freed. */
+  | { type: 'cleared'; results: number; chars: number }
   /** The memories found for the question, given with it (message `id`). */
   | { type: 'memories'; id: string; memories: MemoryRead[] }
   /** A comparison's answer starts: `step` of `of`, one after the other. */

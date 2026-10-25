@@ -59,6 +59,9 @@ public sealed record Regenerate(Guid? MessageId = null, string? Model = null, st
 
 public sealed record LeafChange(Guid MessageId);
 
+/// <summary>How a message counts in what the model reads: pinned, left out (left out of the request: as it was).</summary>
+public sealed record MessageContext(bool? Pinned = null, bool? LeftOut = null);
+
 public static partial class ChatEndpoints
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -84,6 +87,7 @@ public static partial class ChatEndpoints
         g.MapGet("/conversations/{id:guid}/stamp", StampAsync);
         g.MapPost("/conversations/{id:guid}/compact", CompactAsync);
         g.MapPut("/conversations/{id:guid}/leaf", LeafAsync);
+        g.MapPut("/conversations/{id:guid}/messages/{messageId:guid}/context", MessageContextAsync);
         g.MapPost("/conversations/{id:guid}/fork", ForkAsync).RequirePermission(Llm.Core.Access.Permissions.Chat);
         g.MapPost("/conversations/{id:guid}/tool-calls/{callId}", DecideAsync);
         g.MapPost("/speech", SpeechAsync).RequirePermission(Llm.Core.Access.Permissions.Speech);
@@ -359,7 +363,7 @@ public static partial class ChatEndpoints
             attachments = ChatService.ParseIds(m.AttachmentsJson).Where(files.ContainsKey).Select(a => files[a]),
             details = (quality is null ? m.DetailsJson : quality.Details(m)) is { } details ? JsonSerializer.Deserialize<JsonElement>(details) : (JsonElement?)null,
             context = m.ContextJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(m.ContextJson),
-            m.CutShort,
+            m.CutShort, m.Pinned, m.LeftOut,
             status = m.Status.ToString().ToLowerInvariant(), error = quality is null ? m.Error : quality.Error(m), model = quality is null ? m.Model : quality.Model(m),
             m.PromptTokens, m.CachedTokens, m.CompletionTokens, m.ThinkingMs, m.DurationMs, m.CreatedAt, m.Summary,
             // An arena answer's cost waits for the vote, as its model does: prices would tell the two apart.
@@ -502,6 +506,30 @@ public static partial class ChatEndpoints
         c.CurrentLeafId = leaf;
         await db.SaveChangesAsync();
         return Results.Ok(new { currentLeafId = leaf });
+    }
+
+    /// <summary>
+    /// How a message counts in what the model reads: pinned (kept word for word through compactions) or left out (not read,
+    /// not deleted). An answer's step left out takes its calls' results with it.
+    /// </summary>
+    private static async Task<IResult> MessageContextAsync(Guid id, Guid messageId, MessageContext body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db)
+    {
+        var me = await Me(p, users);
+        if (await Owned(db, id, me, Need.Manage) is null || await db.ChatMessages.SingleOrDefaultAsync(m => m.Id == messageId && m.ConversationId == id) is not { } message)
+        {
+            return Results.NotFound();
+        }
+        if (message.Role is not ("user" or "assistant" or "tool"))
+        {
+            return AuthEndpoints.Problem(400, "message", "Only the person's messages, the answers and the tools' results count in what the model reads.");
+        }
+        (message.Pinned, message.LeftOut) = (body.Pinned ?? message.Pinned, body.LeftOut ?? message.LeftOut);
+        if (message.Pinned && message.LeftOut)
+        {
+            return AuthEndpoints.Problem(400, "both", "A message is pinned or left out, not both.");
+        }
+        await db.SaveChangesAsync();
+        return Results.Ok(new { message.Id, message.Pinned, message.LeftOut });
     }
 
     private static async Task<IResult> DeleteAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, Retention.Retention retention)

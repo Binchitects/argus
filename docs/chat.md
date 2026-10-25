@@ -219,6 +219,28 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     at once, is full, the request is asked again after two seconds. A summary
     the model refuses as too long is written in halves. An answer cut at the
     end of the context says so, and the next message compacts.
+  - **Cleared first.** Before compacting, the results of tools' calls older
+    than the last two questions (past 600 characters) are cleared in what the
+    model reads, each to a line ("Cleared to make room in the context:
+    calculate's result of an earlier step (3,010 characters). Call the tool
+    again if it is needed."). The calls stay, and the chat keeps the results
+    whole. When that brings the request under the threshold, nothing is
+    summarized; the answer says "Cleared N earlier results" above it.
+  - **The summary in sections.** The model writes it under `## Goal`,
+    `## Constraints and preferences`, `## Decisions`, `## Facts and findings`,
+    `## State`, `## Next steps` and `## Open questions`, leaving out any with
+    nothing to say. After it, the next answers read what you pinned (below), word for
+    word, and the chat's plan as it stands (its steps and their state), since
+    the summary may have shortened them.
+- **Pin and leave out.** Each question has **Pin this question** and **Leave
+  this question out**. A pinned question is said word for word after every
+  summary (up to 8,000 characters of pins), so a budget code or an exact
+  instruction is never paraphrased away. A question left out is not read by
+  the model, nor are the answer and tool calls under it; it stays in the chat,
+  marked "Left out: the model does not read it", and comes back with one
+  click. A pinned question cannot be left out until it is unpinned.
+  `PUT /api/chat/conversations/{id}/messages/{messageId}/context` with
+  `{"pinned": true}` or `{"leftOut": true}` sets them.
 - **Tools on demand.** Every tool's definition in every request is thousands of
   tokens before the question (Argus alone is about 5,000). Past **Tool
   definitions sent whole up to**, a chat sends in full only the tools it has
@@ -1230,6 +1252,18 @@ all.
   card asks **Remember this?** with **Remember**, **No thanks** and **Edit**
   (to change the words first). Nothing is kept until you say so, and nothing
   waits: the answer goes on, and you can decide later.
+- **Formed on their own.** When a chat has been quiet for ten minutes, the
+  model for small steps reads what it said since memory last read it, beside
+  what is remembered already, and proposes what is worth keeping (at most
+  five a chat; never secrets or what matters only to that chat). They wait at
+  the top of **Memory** (**Remember these?**, with **Keep** and **Not now**)
+  and the bell says so; answers read them once kept. With **Remember on its
+  own** on, they are kept at once, and the bell says what was kept. One that
+  says otherwise than a memory you kept (you moved the docs to Netlify)
+  replaces it once kept; the old one stays, as replaced. A Code Arena
+  session's memories about its project are kept and said. Rooms and
+  scheduled tasks' chats are not read, nor what chats said before this
+  arrived.
 - **Kinds.** Each memory is a **preference** (how you like things), a
   **fact**, a **decision** (and why), a **how to** (how something is done
   here) or a **lesson** (what went wrong once, or what you corrected). The

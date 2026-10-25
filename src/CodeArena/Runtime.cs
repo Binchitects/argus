@@ -351,6 +351,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         }
         tools.Add(MemoryStore.RememberTool());
         tools.Add(MemoryStore.RecallTool());
+        tools.Add(KeptResults.Tool());
         tools.Add(SessionSearch.Tool());
         if (Extensions.Skills.Count > 0)
         {

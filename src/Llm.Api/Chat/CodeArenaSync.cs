@@ -48,7 +48,7 @@ public sealed record SyncMessage(
 /// <summary>A file that went with a question on the web: "image" (fetched with the key from /api/code-arena/attachments/{id}), "text", "file", "audio", "video".</summary>
 public sealed record SyncAttachment(Guid Id, string Name, string Kind, string ContentType);
 
-public sealed record SyncNewChat(string? Ref, string? Place, string? Model, string? Title);
+public sealed record SyncNewChat(string? Ref, string? Place, string? Model, string? Title, string? Project = null);
 
 /// <summary>A summary of the branch from its start down to the message <paramref name="UpTo"/>, read instead of those messages.</summary>
 public sealed record SyncSummary(Guid UpTo, string? Text);
@@ -272,6 +272,7 @@ public static class CodeArenaSync
             Origin = Origin,
             OriginRef = reference,
             OriginPlace = Clip(body.Place, 1000),
+            ProjectKey = Clip(body.Project, 300),
             Model = Clip(body.Model, 200),
             Title = Clip(body.Title, 200) ?? "New chat",
         };

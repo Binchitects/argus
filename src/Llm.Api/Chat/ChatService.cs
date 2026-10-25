@@ -1469,6 +1469,78 @@ public sealed partial class ChatService(
     /// <summary>The words around a compaction's summary in the system message.</summary>
     private const string SummaryIntro = "\n\nThe earlier part of this conversation was compacted: its messages are not shown, this summary stands for them.\n<summary>\n";
 
+    /// <summary>What a result left out by the person says, in place of what it said.</summary>
+    internal const string LeftOutResult = "[Left out by the person: not shown.]";
+
+    /// <summary>An earlier exchange's tool result past this many characters is cleared before the chat compacts.</summary>
+    internal const int ClearAbove = 600;
+
+    /// <summary>The pinned messages a summary covers, at most this many characters together.</summary>
+    internal const int PinnedChars = 8_000;
+
+    /// <summary>
+    /// The tools' results of the exchanges before the last two, past <see cref="ClearAbove"/>: cleared to a line saying
+    /// what they were (in the request only). How many, and the characters they freed.
+    /// </summary>
+    internal static (int Count, long Chars) ClearEarlierResults(List<(JsonObject Turn, long Weight, ChatMessage Source)> turns)
+    {
+        var questions = turns.Select((t, i) => (t, i)).Where(x => x.t.Turn["role"]?.GetValue<string>() == "user").Select(x => x.i).ToList();
+        if (questions.Count < 3)
+        {
+            return (0, 0);
+        }
+        var before = questions[^2];
+        var (count, freed) = (0, 0L);
+        for (var i = 0; i < before; i++)
+        {
+            var (turn, weight, source) = turns[i];
+            if (turn["role"]?.GetValue<string>() != "tool" || weight <= ClearAbove)
+            {
+                continue;
+            }
+            var line = $"[Cleared to make room in the context: {source.ToolName ?? "the tool"}'s result of an earlier step ({source.Content.Length:N0} characters). Call the tool again if it is needed.]";
+            turn["content"] = line;
+            turns[i] = (turn, line.Length, source);
+            (count, freed) = (count + 1, freed + weight - line.Length);
+        }
+        return (count, freed);
+    }
+
+    /// <summary>The pinned messages, word for word (the newest first while they fit), as said after a summary; null when none.</summary>
+    internal static string? Pinned(IEnumerable<ChatMessage> pinned)
+    {
+        var list = pinned.Where(m => m.Role is "user" or "assistant" && m.Content.Length > 0).ToList();
+        if (list.Count == 0)
+        {
+            return null;
+        }
+        var sb = new StringBuilder("\n\nPinned by the person, word for word (the summary covers when they were said):");
+        var used = 0;
+        foreach (var m in Enumerable.Reverse(list))
+        {
+            var text = m.Content.Length > PinnedChars / 2 ? m.Content[..(PinnedChars / 2)] + " …" : m.Content;
+            if (used + text.Length > PinnedChars)
+            {
+                break;
+            }
+            sb.Append(m.Role == "user" ? "\n<pinned from=\"person\">\n" : "\n<pinned from=\"assistant\">\n").Append(text).Append("\n</pinned>");
+            used += text.Length;
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>The chat's plan as it stands (its newest), in a few lines, for after a summary; null when it has none.</summary>
+    private async Task<string?> PlanNoteAsync(Guid conversation, CancellationToken ct)
+    {
+        var plan = await db.Plans.AsNoTracking().Include(p => p.Steps).Where(p => p.ConversationId == conversation).OrderByDescending(p => p.UpdatedAt).FirstOrDefaultAsync(ct);
+        if (plan is null || plan.Steps.Count == 0)
+        {
+            return null;
+        }
+        var steps = plan.Steps.OrderBy(x => x.Number).Take(40).Select(x => $"\n{x.Number}. [{x.Status}] {x.Title}{(x.Owner is { Length: > 0 } o ? $" ({o})" : "")}");
+        return $"\n\nThis chat's plan as it stands, \"{plan.Title}\" (plan_show gives all of it):{string.Concat(steps)}";
+    }
+
     /// <summary>The names of the people who wrote on this branch of a room.</summary>
     private async Task<Dictionary<Guid, string>> RoomAuthorsAsync(IEnumerable<ChatMessage> stored, CancellationToken ct)
     {
@@ -1536,8 +1608,37 @@ public sealed partial class ChatService(
         // A room: each person's turn says who wrote it.
         var authors = conversation.IsRoom ? await RoomAuthorsAsync(stored, ct) : null;
         var turns = new List<(JsonObject Turn, long Weight, ChatMessage Source)>();
+        // Left out by the person: not read. A question goes with its answer, tool calls and results; an answer's calls with
+        // their results; a result alone says it was.
+        var leftOutCalls = new HashSet<string>(StringComparer.Ordinal);
+        var exchangeLeftOut = false;
         foreach (var m in stored.Skip(from))
         {
+            if (m.Role == "user")
+            {
+                exchangeLeftOut = m.LeftOut && m.Id != question.Id;
+            }
+            if (exchangeLeftOut)
+            {
+                continue;
+            }
+            if (m.LeftOut && m.Id != question.Id)
+            {
+                if (m.Role == "assistant" && m.ToolCallsJson is not null)
+                {
+                    leftOutCalls.UnionWith((JsonNode.Parse(m.ToolCallsJson) as JsonArray ?? []).Select(c => c?["id"]?.GetValue<string>()).OfType<string>());
+                }
+                if (m.Role != "tool" || m.ToolCallId is null || leftOutCalls.Contains(m.ToolCallId))
+                {
+                    continue;
+                }
+                turns.Add((new JsonObject { ["role"] = "tool", ["tool_call_id"] = m.ToolCallId, ["content"] = LeftOutResult }, LeftOutResult.Length, m));
+                continue;
+            }
+            if (m.Role == "tool" && m.ToolCallId is { } call && leftOutCalls.Contains(call))
+            {
+                continue;
+            }
             switch (m.Role)
             {
                 case "user":
@@ -1672,6 +1773,14 @@ public sealed partial class ChatService(
         // The summary is the small model's work when there is one. The newest exchanges kept whole fit in a quarter of the
         // context, less what this answer added already; after a refusal, in half of what was sent at most, so something is
         // compacted even when the estimate thought it all fitted.
+        // Before compacting: the tools' results of earlier exchanges are cleared to a line each (their calls kept, the chat
+        // keeps them whole): cheap and lossless, often enough on its own.
+        if (reason is AtThreshold or ToFit && fit.Force is null && ClearEarlierResults(turns) is { Count: > 0 } cleared)
+        {
+            tokens = budget.Tokens(Chars(), Count());
+            reason = fit.CompactAt > 0 && tokens >= (long)context * fit.CompactAt / 100 ? AtThreshold : !budget.Fits(tokens) ? ToFit : null;
+            await emit(new { type = "cleared", results = cleared.Count, chars = cleared.Chars });
+        }
         var keep = (long)(context * KeepShare / 100.0 * budget.CharsPerToken) - fit.ExtraChars;
         if (reason == AfterOverflow)
         {
@@ -1687,6 +1796,16 @@ public sealed partial class ChatService(
         if (summary is not null)
         {
             system += SummaryIntro + summary + "\n</summary>";
+            // What the summary covers that the person pinned, word for word; and the chat's plan as it stands.
+            var shown = turns.Select(t => t.Source.Id).ToHashSet();
+            if (Pinned(stored.Where(m => m.Pinned && !m.LeftOut && !shown.Contains(m.Id))) is { } pinned)
+            {
+                system += pinned;
+            }
+            if (await PlanNoteAsync(conversation.Id, ct) is { } plan)
+            {
+                system += plan;
+            }
         }
         // A last resort (the summary failed, or what is kept is still too big): the oldest turns are left out.
         var dropped = TrimOldest(turns, (long)(budget.Limit * budget.CharsPerToken) - system.Length - fit.ToolChars - fit.ExtraChars);

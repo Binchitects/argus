@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, AudioLines, Bell, BellOff, CalendarClock, Coins, Download, GitPullRequest, Image as ImageIcon, MessageSquareText, type LucideIcon, Workflow, Wrench, X } from 'lucide-react'
+import { AlertTriangle, AudioLines, Bell, Brain, BellOff, CalendarClock, Coins, Download, GitPullRequest, Image as ImageIcon, MessageSquareText, type LucideIcon, Workflow, Wrench, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
@@ -39,6 +39,7 @@ const kinds: Record<string, { icon: LucideIcon; tint: string }> = {
   review: { icon: GitPullRequest, tint: 'bg-sky-500/10 text-sky-700 dark:text-sky-400' },
   media: { icon: ImageIcon, tint: 'bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-400' },
   meetings: { icon: AudioLines, tint: 'bg-orange-500/10 text-orange-700 dark:text-orange-400' },
+  memory: { icon: Brain, tint: 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-400' },
 }
 
 /**

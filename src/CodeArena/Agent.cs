@@ -966,7 +966,12 @@ internal sealed class Agent
         for (var i = 0; i < planned.Count; i++)
         {
             var text = results[i].Text;
-            if (text.Length > limit)
+            // Too big to go whole: kept beside the session, its start and end shown, read_result reads the rest.
+            if (text.Length > KeepWhole && KeptResults.Keep(Context, text) is { } kept)
+            {
+                text = KeptResults.Preview(text, kept);
+            }
+            else if (text.Length > limit)
             {
                 text = text[..(limit * 2 / 3)] + $"\n\n… ({text.Length - limit:N0} characters cut: ask for less, e.g. a line range or a narrower search) …\n\n" + text[^(limit / 3)..];
             }
@@ -986,6 +991,46 @@ internal sealed class Agent
 
     /// <summary>About a third of the window, in characters, and never more than 40,000.</summary>
     private int MaxToolChars => Math.Clamp(Model.Context * 3 / 2, 4_000, 40_000);
+
+    /// <summary>A result past this many characters is kept aside (its start and end shown) rather than going whole.</summary>
+    private int KeepWhole => Math.Min(MaxToolChars, 16_000);
+
+    /// <summary>An earlier result past this many characters is cleared (kept aside) before the session compacts.</summary>
+    private const int ClearAbove = 1_000;
+
+    /// <summary>
+    /// The tools' results before the person's last two messages, past <see cref="ClearAbove"/>, kept aside and cleared to a
+    /// line saying where (read_result reads them again): how many, and the characters freed.
+    /// </summary>
+    private (int Count, long Chars) ClearEarlier()
+    {
+        var questions = Messages.Select((m, i) => (m, i)).Where(x => x.m.Str("role") == "user").Select(x => x.i).ToList();
+        if (questions.Count < 3)
+        {
+            return (0, 0);
+        }
+        var (count, freed) = (0, 0L);
+        for (var i = 0; i < questions[^2]; i++)
+        {
+            if (Messages[i].Str("role") != "tool" || Messages[i].Str("content") is not { Length: > ClearAbove } text || KeptResults.IsKept(text)
+                || KeptResults.Keep(Context, text) is not { } kept)
+            {
+                continue;
+            }
+            var call = Messages[i].Str("tool_call_id");
+            var tool = Messages.Take(i).Reverse().Select(m => (m["tool_calls"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(c => c.Str("id") == call))
+                .FirstOrDefault(c => c is not null)?["function"].Str("name") ?? "the tool";
+            var line = KeptResults.Cleared(tool, text.Length, kept);
+            Messages[i]["content"] = line;
+            (count, freed) = (count + 1, freed + text.Length - line.Length);
+        }
+        if (count > 0)
+        {
+            // Measured anew: what the gateway counted last included them.
+            (_knownTokens, _knownCount) = (0, 0);
+        }
+        return (count, freed);
+    }
 
     private void FinishCalls(IEnumerable<string> ids, string text)
     {
@@ -1041,6 +1086,21 @@ internal sealed class Agent
         if (Messages.Count < 3 || estimate < Math.Min(Math.Max(at, _compactedAt + Model.Context / 10.0), Math.Min(Model.Context * 0.95, Limit)))
         {
             return false;
+        }
+        // First the earlier tools' results, kept aside: often enough, and nothing is lost.
+        if (ClearEarlier() is { Count: > 0 } cleared)
+        {
+            var said = $"Cleared {cleared.Count} earlier tool {(cleared.Count == 1 ? "result" : "results")} (~{Fmt.Tokens((long)(cleared.Chars / CharsPerToken))} tokens) to make room: they are kept, read_result reads them again.";
+            if (Estimate() < at)
+            {
+                // Cleared, not compacted: every message keeps its place, and so do the notes beside them.
+                Session?.Compacted(Messages);
+                Ui.Info(said);
+                Events?.Compacted(said);
+                _compactedAt = 0;
+                return true;
+            }
+            Ui.Info(said);
         }
         if (Compaction.At == Compaction.Off || estimate < Model.Context * Compaction.At / 100.0)
         {
@@ -1098,8 +1158,10 @@ internal sealed class Agent
     internal const string SummaryAsk = "[Code Arena asks for a summary, to fit the model's window]";
 
     private const string SummaryInstruction = SummaryAsk + "\n\nSummarize the conversation above so you can carry on from the summary alone: it replaces everything above. " +
-        "Keep the person's goals and instructions, decisions made, files read or changed (with paths), commands run and what they showed, errors met, " +
-        "the state of the work and the next steps. Be concrete and brief (at most 400 words). Invent nothing. Do not call a tool: answer with the summary alone.";
+        "Write these sections, each a few bullet points, leaving out any with nothing to say: ## Goal (the person's goals and instructions, in their words); " +
+        "## Constraints and preferences; ## Decisions (and why); ## Files (read or changed, with paths, and what changed); ## Commands (run, and what they showed); " +
+        "## Errors met; ## State (what is done, what is half done); ## Next steps. Be concrete and brief (at most 500 words). Invent nothing. " +
+        "Do not call a tool: answer with the summary alone.";
 
     private const string TurnInstruction = SummaryAsk + "\n\nSummarize what you did in this turn so far, since the person's last message (earlier summaries of it included), " +
         "so you can carry on from the summary alone: it replaces those steps. Keep the files read or changed (with paths), commands run and what they showed, " +
@@ -1151,6 +1213,51 @@ internal sealed class Agent
     }
 
     private long ToolChars() => Model.Info.Tools ? Tools.Offered().Sum(t => (long)Json.Line(t.Spec()).Length) : 0;
+
+    /// <summary>One message among the biggest in the window: its place, who said it, what it is, its size in characters.</summary>
+    public sealed record WindowItem(int Index, string Role, string What, long Chars);
+
+    /// <summary>
+    /// What fills the window, by kind (in characters, the next request's): the instructions (the memory's block and the
+    /// skills listed among them), the tools, Code Arena's notes, a summary, the person's messages, the answers and the
+    /// tools' results; and its biggest messages.
+    /// </summary>
+    public (IReadOnlyList<(string Kind, long Chars)> Kinds, IReadOnlyList<WindowItem> Biggest) Window()
+    {
+        var notes = _notes.Where(n => n.At <= Messages.Count).Sum(n => (long)n.Text.Length + 10);
+        long summary = 0, person = 0, answers = 0, results = 0;
+        var items = new List<WindowItem>();
+        for (var i = 0; i < Messages.Count; i++)
+        {
+            var m = Messages[i];
+            var size = Size(m);
+            var content = m.Str("content") ?? "";
+            switch (m.Str("role"))
+            {
+                case "user" when content.StartsWith(SummaryMark, StringComparison.Ordinal):
+                    summary += size;
+                    items.Add(new(i, "summary", "the summary of what came before", size));
+                    break;
+                case "user":
+                    person += size;
+                    items.Add(new(i, "user", Fmt.OneLine(content, 60), size));
+                    break;
+                case "tool":
+                    results += size;
+                    var call = m.Str("tool_call_id");
+                    var tool = Messages.Take(i).Reverse().Select(x => (x["tool_calls"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(c => c.Str("id") == call))
+                        .FirstOrDefault(c => c is not null);
+                    items.Add(new(i, "tool", $"{tool?["function"].Str("name") ?? "a tool"}'s result{(tool?["function"].Str("arguments") is { Length: > 2 } args ? " " + Fmt.OneLine(args, 50) : "")}", size));
+                    break;
+                default:
+                    answers += size;
+                    items.Add(new(i, "assistant", Fmt.OneLine(content.Length > 0 ? content : "(calls)", 60), size));
+                    break;
+            }
+        }
+        return ([("instructions and memory", SystemPrompt().Length), ("tools", ToolChars()), ("Code Arena's notes", notes), ("summary", summary),
+            ("your messages", person), ("answers", answers), ("tools' results", results)], [.. items.OrderByDescending(x => x.Chars).Take(5)]);
+    }
 
     /// <summary>A request's size in characters: the system prompt, the tools and the first <paramref name="count"/> messages with their notes.</summary>
     private long Chars(int count) =>
@@ -1216,10 +1323,10 @@ internal sealed class Agent
         }
         Events?.Notice("Compacting the conversation to fit the model's window…");
         var (summary, failure) = await TrySummaryAsync(keepFrom, SummaryInstruction, force, ct);
-        var text = summary ?? Digest(older, failure!);
+        var text = (summary ?? Digest(older, failure!)) + TodoNote();
         Messages =
         [
-            new JsonObject { ["role"] = "user", ["content"] = summary is not null ? SummaryHead + "\n\n" + summary : OmittedHead + "\n\n" + text },
+            new JsonObject { ["role"] = "user", ["content"] = (summary is not null ? SummaryHead : OmittedHead) + "\n\n" + text },
             new JsonObject { ["role"] = "assistant", ["content"] = Understood },
             .. kept,
         ];
@@ -1234,6 +1341,10 @@ internal sealed class Agent
             : $"Compacted without a summary ({failure}): {older.Count} older messages left out, in brief, and {kept.Count} kept.");
         return true;
     }
+
+    /// <summary>The to-do list as it stands, said after a summary (its todo_write calls are gone with what was summarized).</summary>
+    private string TodoNote() =>
+        Context.Todos.Count == 0 ? "" : "\n\nYour to-do list as it stands (todo_write changes it):" + string.Concat(Context.Todos.Select(t => $"\n- [{t.Status}] {t.Content}"));
 
     /// <summary>
     /// One long turn (no message of the person's since): its earlier steps are summarized, the person's message and the

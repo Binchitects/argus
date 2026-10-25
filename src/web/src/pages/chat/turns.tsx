@@ -21,6 +21,7 @@ import { NoticeLine, Thinking, ToolCard } from './parts'
 import { useNow } from './use-now'
 import { QuestionCard } from './questions'
 import { MemoriesRead } from './memories-read'
+import { MessageContextButtons, MessageContextNote, type ContextChange } from './message-context'
 import { RouteNote } from './route-note'
 import { researchStep } from './research'
 import { MemoryCard } from './memory'
@@ -164,6 +165,7 @@ export function QuestionTurn({
   onSwitch,
   onEdit,
   onJumpToQuote,
+  onContext,
   room,
 }: {
   m: Message
@@ -172,6 +174,8 @@ export function QuestionTurn({
   onSwitch: (id: string) => void
   onEdit?: (m: Message, text: string, quote: string | null) => void
   onJumpToQuote?: (m: Message) => boolean
+  /** Pin it, or leave it out of what the model reads (absent: read-only). */
+  onContext?: (m: Message, change: ContextChange) => void
   /** In a room: whose it is (the person's own on the right, others' on the left, with their names), what it replies to, and replying to it. */
   room?: { me: string; replyOf?: (id: string) => { name: string; text: string } | null; onReply?: (m: Message) => void; translation?: (m: Message) => Translation | undefined }
 }) {
@@ -246,8 +250,9 @@ export function QuestionTurn({
       {m.skill && <SkillUsed skill={m.skill} />}
       {editing === null ? (
         <>
+          <MessageContextNote m={m} />
           {typed && (
-            <div dir="auto" className="max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[0.9375rem] leading-relaxed whitespace-pre-wrap text-secondary-foreground">
+            <div dir="auto" className={cn('max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[0.9375rem] leading-relaxed whitespace-pre-wrap text-secondary-foreground', m.leftOut && 'opacity-60')}>
               {translated?.text && !original ? translated.text : typed}
             </div>
           )}
@@ -283,6 +288,7 @@ export function QuestionTurn({
         <div className="flex items-center opacity-100 transition-opacity focus-within:opacity-100 sm:opacity-0 sm:group-hover/q:opacity-100 [@media(hover:none)]:opacity-100">
           <Branches siblings={siblings} current={m} onSwitch={onSwitch} label="Question" />
           <CopyButton text={m.content} label="Copy question" />
+          {onContext && !m.id.startsWith('local-') && <MessageContextButtons m={m} what="question" onChange={onContext} />}
           {room?.onReply && (
             <Tooltip content="Reply">
               <Button variant="ghost" size="icon-sm" className="size-7" onClick={() => room.onReply!(m)} aria-label={`Reply to ${m.author?.name ?? 'this message'}`}>
@@ -405,6 +411,7 @@ export function AnswerTurn({
   onQuote,
   onReply,
   translation,
+  onContext,
 }: {
   answer: Message[]
   siblings: Message[]
@@ -450,6 +457,8 @@ export function AnswerTurn({
   onReply?: (m: Message) => void
   /** In a room read in another language: an answer's translation, when it has one. */
   translation?: (id: string) => Translation | undefined
+  /** Pin the answer's words, or leave them out of what the model reads (absent: read-only). */
+  onContext?: (m: Message, change: ContextChange) => void
 }) {
   const [quoting, setQuoting] = useState(false)
   // Answers shown as written though the room is read in another language.
@@ -475,6 +484,8 @@ export function AnswerTurn({
       <div className="mt-1 flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
         <Branches siblings={siblings} current={first} onSwitch={onSwitch} label="Answer" />
         <CopyButton text={text} label="Copy answer" />
+        {onContext && last && !last.id.startsWith('local-') && last.content && <MessageContextButtons m={last} what="answer" onChange={onContext} />}
+        {last && <MessageContextNote m={last} />}
         {onReply && (
           <Tooltip content="Reply: ask the model about this answer">
             <Button variant="ghost" size="icon-sm" className="size-7" onClick={() => onReply(answer.findLast((x) => x.role === 'assistant') ?? first)} aria-label="Reply to this answer">

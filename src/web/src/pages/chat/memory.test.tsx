@@ -32,9 +32,9 @@ const chat = (state: 'offered' | 'kept'): Conversation => ({
   ],
 })
 
-const memories = (over: Partial<MemoryView> = {}): MemoryView => ({ enabled: true, on: true, max: 1000, maxChars: 500, keepsCompany: false, memories: [], ...over })
+const memories = (over: Partial<MemoryView> = {}): MemoryView => ({ enabled: true, on: true, auto: false, max: 1000, maxChars: 500, keepsCompany: false, memories: [], ...over })
 const item = (over: Partial<MemoryItem>): MemoryItem => ({
-  id: 'm1', text: '', scope: 'person', kind: 'fact', project: null, source: 'typed', sourceId: null, pinned: false, usedAt: null, uses: 0, replacedBy: null,
+  id: 'm1', text: '', scope: 'person', kind: 'fact', project: null, source: 'typed', sourceId: null, pinned: false, usedAt: null, uses: 0, replacedBy: null, proposed: false, replaces: null,
   createdAt: '2026-10-01T10:00:00Z', updatedAt: '2026-10-01T10:00:00Z', mine: true, canEdit: true, ...over,
 })
 

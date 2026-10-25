@@ -16,7 +16,7 @@ import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { ago } from '@/lib/format'
-import { changeMemory, forgetMemory, keepMemory, kindLabel, memoriesQuery, scopeLabel, type MemoryInput, type MemoryItem, type MemoryKind, type MemoryScope } from '@/lib/memory'
+import { changeMemory, forgetMemory, keepMemory, keepProposal, kindLabel, memoriesQuery, scopeLabel, type MemoryInput, type MemoryItem, type MemoryKind, type MemoryScope } from '@/lib/memory'
 
 const kinds = Object.keys(kindLabel) as MemoryKind[]
 
@@ -118,6 +118,7 @@ export function MemoryPage() {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const switchId = useId()
+  const autoId = useId()
   const view = useQuery(memoriesQuery)
   const [find, setFind] = useState('')
   const [scope, setScope] = useState<'all' | MemoryScope>('all')
@@ -126,10 +127,11 @@ export function MemoryPage() {
   const changed = () => queryClient.invalidateQueries({ queryKey: memoriesQuery.queryKey })
   const failed = (e: unknown) => toast.error(errorMessage(e))
   const turn = useMutation({
-    mutationFn: (on: boolean) => api<{ on: boolean }>('/api/account/memories/settings', { method: 'PUT', body: { on } }),
+    mutationFn: (s: { on: boolean; auto?: boolean }) => api<{ on: boolean }>('/api/account/memories/settings', { method: 'PUT', body: s }),
     onSuccess: changed,
     onError: failed,
   })
+  const accept = useMutation({ mutationFn: keepProposal, onSuccess: changed, onError: failed })
   const add = useMutation({
     mutationFn: () => keepMemory({ text: adding.text.trim(), kind: adding.kind, scope: adding.company ? 'company' : 'person', pinned: adding.pinned }),
     onSuccess: async () => {
@@ -146,10 +148,11 @@ export function MemoryPage() {
   if (view.error) return <QueryError error={view.error} retry={() => view.refetch()} />
   const v = view.data
   const words = find.trim().toLowerCase()
+  const proposals = v.memories.filter((m) => m.proposed)
   const shown = v.memories.filter(
-    (m) => (scope === 'all' || m.scope === scope) && (kind === 'all' || m.kind === kind) && (!words || `${m.text} ${m.project ?? ''}`.toLowerCase().includes(words)),
+    (m) => !m.proposed && (scope === 'all' || m.scope === scope) && (kind === 'all' || m.kind === kind) && (!words || `${m.text} ${m.project ?? ''}`.toLowerCase().includes(words)),
   )
-  const mine = v.memories.filter((m) => m.mine && m.scope !== 'company').length
+  const mine = v.memories.filter((m) => m.mine && m.scope !== 'company' && !m.proposed).length
   return (
     <>
       <PageHeader
@@ -158,12 +161,49 @@ export function MemoryPage() {
       />
       {!v.enabled && <Alert className="mb-4">Memory is off for everyone here: answers do not read these. An admin turns it on under Settings → Chat.</Alert>}
       <div className="mb-6 flex items-start gap-2">
-        <Switch id={switchId} checked={v.on} disabled={turn.isPending} onCheckedChange={(on) => turn.mutate(on)} />
+        <Switch id={switchId} checked={v.on} disabled={turn.isPending} onCheckedChange={(on) => turn.mutate({ on })} />
         <div className="grid gap-0.5">
           <Label htmlFor={switchId}>Use memory</Label>
           <p className="text-xs text-muted-foreground">Answers read these, and the chat offers to remember what would help later. Off: it does neither.</p>
         </div>
+        <Switch id={autoId} className="ms-6" checked={v.auto} disabled={turn.isPending || !v.on} onCheckedChange={(auto) => turn.mutate({ on: v.on, auto })} />
+        <div className="grid gap-0.5">
+          <Label htmlFor={autoId}>Remember on its own</Label>
+          <p className="text-xs text-muted-foreground">When a chat goes quiet, what is worth keeping from it is kept at once. Off: it is proposed here first.</p>
+        </div>
       </div>
+      {proposals.length > 0 && (
+        <Card className="mb-6 border-primary/40" aria-label="Proposed">
+          <CardHeader>
+            <CardTitle className="text-base">Remember these?</CardTitle>
+            <CardDescription>From your chats that went quiet. Answers read them once you keep them.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ul className="grid gap-2" aria-label="Proposed memories">
+              {proposals.map((m) => (
+                <li key={m.id} className="flex flex-wrap items-center gap-2 rounded-lg border p-2.5 text-sm" aria-label={m.text}>
+                  <span dir="auto" className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                    {m.text}
+                  </span>
+                  <Badge variant="secondary">{kindLabel[m.kind]}</Badge>
+                  {m.replaces && <Badge variant="outline">replaces one you kept</Badge>}
+                  {m.sourceId && (
+                    <Link to={`/chat/${m.sourceId}`} className="text-xs text-muted-foreground underline-offset-2 hover:underline">
+                      from a chat
+                    </Link>
+                  )}
+                  <Button size="sm" variant="outline" className="h-7" loading={accept.isPending && accept.variables === m.id} onClick={() => accept.mutate(m.id)}>
+                    <Check /> Keep
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7" aria-label={`Not now: ${m.text}`} onClick={() => forget.mutate(m.id)}>
+                    Not now
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
       <Card className="mb-6">
         <CardHeader>
           <CardTitle className="text-base">Remember something</CardTitle>

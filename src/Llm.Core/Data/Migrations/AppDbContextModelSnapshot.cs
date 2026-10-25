@@ -974,6 +974,9 @@ namespace Llm.Core.Data.Migrations
                     b.Property<bool>("ForPeople")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("LeftOut")
+                        .HasColumnType("boolean");
+
                     b.PrimitiveCollection<List<Guid>>("Mentions")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -986,6 +989,9 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<Guid?>("ParentId")
                         .HasColumnType("uuid");
+
+                    b.Property<bool>("Pinned")
+                        .HasColumnType("boolean");
 
                     b.Property<int?>("PromptTokens")
                         .HasColumnType("integer");
@@ -1177,6 +1183,13 @@ namespace Llm.Core.Data.Migrations
                     b.Property<string>("OriginRef")
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
+
+                    b.Property<string>("ProjectKey")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<int>("ReflectedSequence")
+                        .HasColumnType("integer");
 
                     b.Property<Guid?>("ScheduledTaskId")
                         .HasColumnType("uuid");
@@ -1639,7 +1652,13 @@ namespace Llm.Core.Data.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("character varying(300)");
 
+                    b.Property<bool>("Proposed")
+                        .HasColumnType("boolean");
+
                     b.Property<Guid?>("ReplacedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("Replaces")
                         .HasColumnType("uuid");
 
                     b.Property<string>("Scope")
@@ -1680,6 +1699,9 @@ namespace Llm.Core.Data.Migrations
 
                     b.HasIndex("Scope")
                         .HasFilter("\"Scope\" = 'company'");
+
+                    b.HasIndex("UserId", "Proposed")
+                        .HasFilter("\"Proposed\"");
 
                     b.HasIndex("UserId", "UpdatedAt");
 
@@ -3300,6 +3322,9 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<DateTimeOffset?>("LockoutEnd")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("MemoryAuto")
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("MemoryOff")
                         .HasColumnType("boolean");

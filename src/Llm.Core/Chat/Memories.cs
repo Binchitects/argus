@@ -35,6 +35,8 @@ public sealed class Memory
     public const string FromCodeArena = "code-arena";
     /// <summary>Brought in (Markdown, Code Arena's memory files).</summary>
     public const string Imported = "import";
+    /// <summary>Proposed from what a chat said, as it went quiet (the source is its chat).</summary>
+    public const string Reflected = "reflected";
 
     public Guid Id { get; set; } = Guid.CreateVersion7();
     /// <summary>Whose it is (a person's, a project's); who wrote it (the company's).</summary>
@@ -57,6 +59,10 @@ public sealed class Memory
     public float[]? Embedding { get; set; }
     /// <summary>A newer memory said otherwise: this one is kept (to undo), and no longer given to the model.</summary>
     public Guid? ReplacedBy { get; set; }
+    /// <summary>Proposed from a chat that went quiet, waiting for the person: not given to the model until they keep it.</summary>
+    public bool Proposed { get; set; }
+    /// <summary>A proposal that says otherwise than this memory of theirs: kept, it replaces that one.</summary>
+    public Guid? Replaces { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     /// <summary>Written, edited or said again.</summary>
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
