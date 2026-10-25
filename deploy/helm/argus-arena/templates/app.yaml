@@ -74,6 +74,7 @@ spec:
             - { name: media-status, mountPath: /media-status, readOnly: true }
             - { name: vllm-status, mountPath: /vllm-status, readOnly: true }
             - { name: directory, mountPath: /directory }
+            - { name: audit, mountPath: /audit }
             - { name: sandbox, mountPath: /sandbox }
             - { name: blender, mountPath: /blender }
             {{- if and (not .Values.postgresql.enabled) .Values.externalDatabase.caSecret }}
@@ -86,6 +87,7 @@ spec:
         {{- include "arena.claim" (list "media-status" "arena-media-status") | nindent 8 }}
         {{- include "arena.claim" (list "vllm-status" "arena-vllm-status") | nindent 8 }}
         {{- include "arena.claim" (list "directory" "arena-directory") | nindent 8 }}
+        {{- include "arena.claim" (list "audit" "arena-audit") | nindent 8 }}
         {{- include "arena.claim" (list "sandbox" "arena-sandbox") | nindent 8 }}
         {{- include "arena.claim" (list "blender" "arena-blender") | nindent 8 }}
         {{- if and (not .Values.postgresql.enabled) .Values.externalDatabase.caSecret }}

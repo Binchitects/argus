@@ -170,6 +170,8 @@ public sealed class AppFixture : IAsyncLifetime
             // Past chats' digests only where a test asks for them (ChatDigests.RunAsync): the others count the model's requests.
             b.UseSetting("Memory:Digests", "false");
             b.UseSetting("Memory:Garden", "false");
+            // The audit chain's anchors are only logged, unless a test gives them a folder.
+            b.UseSetting("Audit:AnchorDir", "");
             // No Laya unless a test brings it (LayaTests).
             b.UseSetting("Modules:laya", "false");
             // Nothing listens here: probes are refused at once instead of waiting on DNS.

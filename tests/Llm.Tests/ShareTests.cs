@@ -51,6 +51,7 @@ public sealed class ShareTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "LOG-01")]
     public async Task A_shared_chat_opens_for_a_colleague_and_not_for_someone_outside_the_group_and_revoking_stops_it()
     {
         var admin = await AdminAsync();
@@ -113,6 +114,11 @@ public sealed class ShareTests(AppFixture app)
             .Where(e => e.GetProperty("target").GetString() == $"chat {chat}").Select(e => e.GetProperty("action").GetString()).ToList();
         Assert.Contains("chat.share", audit);
         Assert.Contains("chat.unshare", audit);
+        // Each opening by someone else is a read of another person's data, audited as a change is; the owner's own are not.
+        var opened = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit?take=500"))).EnumerateArray()
+            .Where(e => e.GetProperty("action").GetString() == "chat.shared_open" && e.GetProperty("detail").GetString()!.Contains(chat.ToString(), StringComparison.Ordinal)).ToList();
+        Assert.Equal(3, opened.Count);
+        Assert.All(opened, e => Assert.StartsWith("sh", e.GetProperty("target").GetString(), StringComparison.Ordinal));
     }
 
     [Fact]

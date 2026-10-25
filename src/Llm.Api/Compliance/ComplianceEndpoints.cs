@@ -12,6 +12,7 @@ using Llm.Core.Data;
 using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Compliance;
 
@@ -44,7 +45,21 @@ public static class ComplianceEndpoints
         g.MapPost("/controls/{id}/attest", AttestAsync);
         // Reading the evidence changes nothing, yet it lists who holds what: it is audited.
         g.MapGet("/evidence", EvidenceAsync);
+        // The audit log's hash chain walked now, with its anchors; and an anchor made now (before an audit, say).
+        g.MapGet("/audit-chain", async (AuditWatch watch, IOptionsMonitor<AuditOptions> o, CancellationToken ct) =>
+            Results.Ok(new { report = await watch.WalkAsync(anchor: false, ct), anchors = AnchorsOf(o.CurrentValue).TakeLast(30) }));
+        g.MapPost("/audit-chain/anchor", async (AuditWatch watch, AuditChainState state, Audit audit, CancellationToken ct) =>
+        {
+            var report = await watch.WalkAsync(anchor: true, ct);
+            if (report.Holds)
+            {
+                await audit.WriteAsync("audit.anchor", detail: $"entry {state.LastAnchor?.Id}");
+            }
+            return Results.Ok(new { report, anchor = report.Holds ? state.LastAnchor : null });
+        });
     }
+
+    private static IReadOnlyList<AuditAnchor> AnchorsOf(AuditOptions o) => AuditChain.ReadAnchors(string.IsNullOrWhiteSpace(o.AnchorDir) ? null : o.AnchorDir);
 
     private static readonly string[] Worst = [ComplianceChecks.Fail, ComplianceChecks.Warn, ComplianceChecks.Unknown, ComplianceChecks.Ok];
 
@@ -90,7 +105,7 @@ public static class ComplianceEndpoints
     /// who holds an admin permission, and the audit log's last 90 days counted by action.
     /// </summary>
     private static async Task EvidenceAsync(HttpContext http, ClaimsPrincipal p, ComplianceChecks checks, AppDbContext db, AccessService access,
-        Settings.SettingsService settings, Audit audit, TimeProvider clock)
+        Settings.SettingsService settings, Audit audit, AuditWatch watch, IOptionsMonitor<AuditOptions> auditOptions, TimeProvider clock)
     {
         var ct = http.RequestAborted;
         var now = clock.GetUtcNow();
@@ -128,6 +143,8 @@ public static class ComplianceEndpoints
                 settings.json         every setting with its value and where it comes from (secrets only as set or not)
                 privileged-access.csv who holds an administrative permission, how they sign in, whether they have a second factor
                 audit-actions.csv     the audit log's last 90 days, counted by action
+                audit-chain.json      the audit log's hash chain walked as this was made: whether it holds, and where not
+                audit-anchors.jsonl   the chain's daily anchors, kept apart from the database (each: when, the entry, its hash)
 
                 """);
             Text("controls.yaml", ComplianceControls.Text);
@@ -142,6 +159,8 @@ public static class ComplianceEndpoints
                     u.LastSignInAt?.ToString("u", CultureInfo.InvariantCulture), string.Join(" ", adminKeys.Where(memberships[u.Id].Has)),
                 })]));
             Text("audit-actions.csv", Csv([["action", "count", "failed"], .. actions.Select(a => new object?[] { a.Action, a.Count, a.Failed })]));
+            Text("audit-chain.json", JsonSerializer.Serialize(await watch.WalkAsync(anchor: false, ct), json));
+            Text("audit-anchors.jsonl", string.Concat(AnchorsOf(auditOptions.CurrentValue).Select(a => JsonSerializer.Serialize(a, JsonSerializerOptions.Web) + "\n")));
         }
         buffer.Position = 0;
         await buffer.CopyToAsync(http.Response.Body, ct);

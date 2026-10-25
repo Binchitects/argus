@@ -985,6 +985,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(a => a.Actor).HasMaxLength(256);
             e.Property(a => a.Target).HasMaxLength(256);
             e.Property(a => a.Ip).HasMaxLength(64);
+            e.Property(a => a.Hash).HasMaxLength(64);
             e.HasIndex(a => a.At);
         });
     }

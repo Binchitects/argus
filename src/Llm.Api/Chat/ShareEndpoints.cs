@@ -143,7 +143,9 @@ public static class ShareEndpoints
     /// The shared chat, read-only: its messages and files (the whole chat with its branches,
     /// or the one branch shared), who shared it, and whether it is the person's own.
     /// </summary>
-    private static async Task<IResult> OpenAsync(Guid shareId, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access, CancellationToken ct)
+    /// <summary>The shared chat; opened by someone other than its owner, the opening is counted and audited (a read of another person's data).</summary>
+    private static async Task<IResult> OpenAsync(Guid shareId, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access, Audit audit,
+        CancellationToken ct)
     {
         var me = await Me(p, users);
         if (await FindAsync(db, access, me, shareId, ct) is not { } share)
@@ -158,7 +160,12 @@ public static class ShareEndpoints
         {
             await SeenAsync(db, share.Id, me.Id, ct);
         }
-        var owner = await db.Users.AsNoTracking().Where(u => u.Id == share.UserId).Select(u => u.DisplayName == "" ? u.UserName : u.DisplayName).SingleAsync(ct);
+        var who = await db.Users.AsNoTracking().Where(u => u.Id == share.UserId).Select(u => new { u.UserName, u.DisplayName }).SingleAsync(ct);
+        var owner = who.DisplayName == "" ? who.UserName : who.DisplayName;
+        if (!mine)
+        {
+            await audit.WriteAsync("chat.shared_open", who.UserName, detail: $"their chat {c.Id} through link {share.Id}");
+        }
         return Results.Ok(new
         {
             share.Id, c.Title, owner, mine, branch = share.LeafId is not null, sharedAt = share.CreatedAt, c.UpdatedAt,

@@ -256,6 +256,8 @@ persistence:
   # What the vLLM supervisors say of their models and GPUs, read by the app.
   vllmStatus: { size: 64Mi }
   directory: { size: 1Gi }
+  # The audit log's daily anchors, apart from the database.
+  audit: { size: 1Gi }
   sandbox: { size: 10Gi }
   # Code Studio's workspaces: their clones, their engines' homes, what was not pushed yet.
   workspaces: { size: 100Gi }

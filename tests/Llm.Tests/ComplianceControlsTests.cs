@@ -230,7 +230,7 @@ public sealed partial class ComplianceControlsTests(AppFixture app)
             using var r = new StreamReader(zip.GetEntry(name)!.Open());
             return r.ReadToEnd();
         }
-        Assert.Equal(["README.txt", "attestations.csv", "audit-actions.csv", "compliance.json", "controls.yaml", "privileged-access.csv", "settings.json"],
+        Assert.Equal(["README.txt", "attestations.csv", "audit-actions.csv", "audit-anchors.jsonl", "audit-chain.json", "compliance.json", "controls.yaml", "privileged-access.csv", "settings.json"],
             zip.Entries.Select(e => e.FullName).Order(StringComparer.Ordinal));
         Assert.Equal(File.ReadAllText(Path.Combine(Root, "docs", "compliance", "controls.yaml")), Read("controls.yaml"));
         Assert.Contains("IAM-01,", Read("attestations.csv"), StringComparison.Ordinal);
@@ -241,6 +241,7 @@ public sealed partial class ComplianceControlsTests(AppFixture app)
         Assert.Contains(privileged, l => l.StartsWith("cmpauditor,", StringComparison.Ordinal) && l.Contains("compliance.read", StringComparison.Ordinal));
         Assert.Contains("compliance.attest", Read("audit-actions.csv"), StringComparison.Ordinal);
         Assert.Contains("\"checks\"", Read("compliance.json"), StringComparison.Ordinal);
+        Assert.True(JsonDocument.Parse(Read("audit-chain.json")).RootElement.GetProperty("holds").GetBoolean());
         // The settings without a secret's value: the APP_KEY-encrypted ones are only "set" or not.
         Assert.DoesNotContain(AppFixture.AdminPassword, Read("settings.json"), StringComparison.Ordinal);
 

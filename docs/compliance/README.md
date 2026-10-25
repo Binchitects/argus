@@ -70,6 +70,30 @@ who holds an administrative permission (how they sign in, whether they have a
 second factor, when they last signed in), and the audit log's last 90 days
 counted by action. Each download is audited (`compliance.evidence`).
 
+## The audit log as a chain
+
+Each entry of the audit log carries a SHA-256 hash of its fields and of the
+hash of the entry before it. Every writer, on every replica, seals its entry
+under one database lock, so the entries make one chain in the order of their
+ids. Changing an entry, removing one or slipping one in breaks the chain from
+there, and walking it finds the first entry that no longer follows.
+
+Every day the app walks the whole chain. When it holds, the newest entry's id
+and hash are kept as an anchor, apart from the database: a line of
+`anchors.jsonl` in the `audit` volume (`DATA_DIR/audit`) and a line in the
+app's log, which Loki keeps. An anchor that no longer matches shows a chain
+rewritten from that point on, which the walk alone cannot. When the chain is
+broken, every admin is told (the bell, and email and the alerts webhook when
+set up), the break is in the audit log (`audit.chain_broken`), and the check
+**Nobody changed the audit log unseen** is red. **GET
+/api/admin/compliance/audit-chain** walks it on demand, and **POST
+/api/admin/compliance/audit-chain/anchor** anchors it now, before an audit
+for example. The evidence download carries both.
+
+Entries written before the chain existed are sealed, oldest first, the first
+time the app starts after the upgrade. The oldest entry kept is the chain's
+start: when old entries age out, the walk starts from the oldest one left.
+
 ## Checking a live stack
 
 ```bash

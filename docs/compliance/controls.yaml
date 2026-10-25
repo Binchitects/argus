@@ -168,6 +168,8 @@ controls:
       The audit log keeps every sign-in, every change to people, groups,
       roles, settings and the index, every export and every tool an agent
       calls as a person, with who, whom, when and from where; never content.
+      Reads of another person's data are audited as changes are: an admin's
+      export of them, and their shared chat opened by someone else.
     frameworks:
       iso27001: [A.8.15]
       soc2: [CC7.2]
@@ -177,8 +179,34 @@ controls:
     tests:
       - Llm.Tests/IdentityTests.Everything_is_in_the_audit_log
       - Llm.Tests/ArenaMcpTests.An_agent_signs_in_with_the_persons_key_gets_their_chat_tools_and_each_call_is_audited
+      - Llm.Tests/ShareTests.A_shared_chat_opens_for_a_colleague_and_not_for_someone_outside_the_group_and_revoking_stops_it
     checks: [app:audit-log]
     operator: Someone reviews the audit log on a schedule.
+
+  - id: LOG-03
+    title: Nobody changes the audit log unseen
+    meets: >-
+      Each entry is sealed onto the one before it with SHA-256, under one lock
+      for every writer, so an entry changed, removed or slipped in breaks the
+      chain from there; every day the whole chain is walked and its newest
+      entry anchored in a volume of its own and the log, which shows an end
+      rewritten. A break tells every admin, is in the audit log, and turns the
+      check red; the evidence carries the chain's walk and its anchors.
+    frameworks:
+      iso27001: [A.5.28, A.5.33, A.8.15]
+      soc2: [CC7.2, CC7.3]
+      hipaa: [164.312(b), 164.312(c)(1), 164.312(c)(2)]
+      gdpr: [Art.5(1)(f), Art.5(2), Art.32(1)(b)]
+    docs: [compliance/README.md#the-audit-log-as-a-chain]
+    tests:
+      - Llm.Tests/AuditChainTests.An_entry_changed_removed_or_slipped_in_breaks_the_chain_there_and_every_admin_is_told
+      - Llm.Tests/AuditChainTests.An_anchor_kept_apart_shows_the_end_of_the_chain_rewritten_and_entries_from_before_the_chain_are_sealed
+      - Llm.Tests/AuditChainTests.Many_writers_at_once_still_make_one_chain
+    checks: [app:audit-chain]
+    operator: >-
+      Keep the audit volume's folder (DATA_DIR/audit) where the database's
+      administrators cannot write, and back it up apart; restrict direct
+      database access and keep its own logs.
 
   - id: LOG-02
     title: Logs are kept, and kept for a set time

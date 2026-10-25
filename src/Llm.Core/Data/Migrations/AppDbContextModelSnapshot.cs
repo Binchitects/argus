@@ -3597,6 +3597,10 @@ namespace Llm.Core.Data.Migrations
                     b.Property<string>("Detail")
                         .HasColumnType("text");
 
+                    b.Property<string>("Hash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<string>("Ip")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");

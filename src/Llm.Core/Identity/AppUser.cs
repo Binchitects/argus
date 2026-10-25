@@ -98,4 +98,9 @@ public sealed class AuditEvent
     public bool Success { get; set; } = true;
     public string? Ip { get; set; }
     public string? Detail { get; set; }
+    /// <summary>
+    /// SHA-256 of this entry and the hash of the one before it (Llm.Api's AuditChain): changing, removing or slipping in an
+    /// entry breaks every hash after it. Null only for an entry being written.
+    /// </summary>
+    public string? Hash { get; set; }
 }

@@ -22,7 +22,7 @@ public sealed record CheckResult(string Id, string Title, string State, string D
 /// </summary>
 public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users, Access.AccessService access, IOptionsMonitor<AuthOptions> auth,
     IOptions<IdentityOptions> identity, IOptionsMonitor<Retention.RetentionOptions> retention, StoragePlaces places, LokiDatasource loki,
-    PromDatasource prom, IOptions<StackOptions> stack, TimeProvider clock)
+    PromDatasource prom, IOptions<StackOptions> stack, AuditWatch auditWatch, AuditChainState auditState, IOptionsMonitor<AuditOptions> auditOptions, TimeProvider clock)
 {
     public const string Ok = "ok", Warn = "warn", Fail = "fail", Unknown = "unknown";
 
@@ -33,6 +33,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         ("sessions", "Sessions end on their own"),
         ("two-factor", "Admins sign in with two factors"),
         ("audit-log", "The audit log is written"),
+        ("audit-chain", "Nobody changed the audit log unseen"),
         ("chat-retention", "Chats are kept for a set time"),
         ("log-retention", "Logs are kept for a set time"),
         ("backups", "A recent backup that ended well"),
@@ -54,6 +55,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
                 "sessions" => Sessions(),
                 "two-factor" => await TwoFactorAsync(ct),
                 "audit-log" => await AuditLogAsync(ct),
+                "audit-chain" => await AuditChainAsync(ct),
                 "chat-retention" => await ChatRetentionAsync(ct),
                 "log-retention" => await LogRetentionAsync(ct),
                 "backups" => Backups(),
@@ -123,6 +125,26 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         var oldest = await db.AuditEvents.AsNoTracking().MinAsync(e => e.At, ct);
         var lastDay = await db.AuditEvents.AsNoTracking().CountAsync(e => e.At >= day, ct);
         return (Ok, $"{lastDay} entries in the last 24 hours; the oldest is from {oldest:yyyy-MM-dd}.");
+    }
+
+    /// <summary>The whole chain walked now, and whether its anchors are kept apart from the database.</summary>
+    private async Task<(string, string)> AuditChainAsync(CancellationToken ct)
+    {
+        var r = await auditWatch.WalkAsync(anchor: false, ct);
+        if (!r.Holds)
+        {
+            return (Fail, r.BrokenAt is { } at
+                ? $"The hash chain is broken at entry {at}: {r.Why}."
+                : $"The anchors of entries {string.Join(", ", r.AnchorsWrong)} no longer match: the chain was rewritten after them.");
+        }
+        var walked = $"{r.Entries} entries, each sealed onto the one before, walked now and whole.";
+        if (string.IsNullOrWhiteSpace(auditOptions.CurrentValue.AnchorDir))
+        {
+            return (Warn, $"{walked} Its daily anchors are only logged: give them a folder of their own (Audit:AnchorDir).");
+        }
+        return auditState.LastAnchor is { } a
+            ? (Ok, $"{walked} {r.Anchors} anchors kept apart, the newest from {a.At:yyyy-MM-dd} (entry {a.Id}).")
+            : (Warn, $"{walked} No anchor is kept yet: the first is made within a day of the app starting.");
     }
 
     private async Task<(string, string)> ChatRetentionAsync(CancellationToken ct)

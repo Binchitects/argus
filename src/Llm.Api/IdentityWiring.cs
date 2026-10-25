@@ -228,6 +228,10 @@ public static class IdentityWiring
         services.AddScoped<Company.SamlReplay>();
         services.AddScoped<Scim.ScimTokens>();
         services.AddScoped<Audit>();
+        services.Configure<AuditOptions>(config.GetSection("Audit"));
+        services.AddSingleton<AuditChainState>();
+        services.AddSingleton<AuditWatch>();
+        services.AddHostedService(sp => sp.GetRequiredService<AuditWatch>());
         services.AddScoped<DirectoryFile>();
         services.AddScoped<PeopleService>();
         services.AddSingleton<Llm.Core.Access.AccessSnapshotCache>();
