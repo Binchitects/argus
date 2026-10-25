@@ -56,4 +56,28 @@ describe('a panel', () => {
     expect(await screen.findByRole('region', { name: 'The verdict' }, { timeout: 4000 })).toHaveTextContent('Ship on Friday.')
     expect(screen.getByRole('button', { name: 'Done: it is in the chat' })).toBeInTheDocument()
   })
+
+  it('in a new chat, makes the chat first and the panel goes into it', async () => {
+    const calls = fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config }),
+      'GET /api/chat/conversations': () => ({ json: [] }),
+      'POST /api/chat/conversations': () => ({ status: 201, json: { ...conversation, id: 'c9' } }),
+      'GET /api/chat/conversations/c9': () => ({ json: { ...conversation, id: 'c9' } }),
+      'GET /api/panels/roles': () => ({ json: [{ name: 'The expert', role: 'knows' }, { name: 'The critic', role: 'doubts' }] }),
+      'GET /api/assistants': () => ({ json: [] }),
+      'POST /api/chat/conversations/c9/panel': () => ({ status: 202, json: { id: 'p9' } }),
+      'GET /api/panels/p9': () => ({
+        json: { id: 'p9', question: 'Tabs or spaces?', status: 'working', rounds: 1, error: null, panelists: [{ name: 'The expert' }, { name: 'The critic' }], turns: [{ round: 1, speaker: 'The expert', text: 'Spaces.' }], verdict: null },
+      }),
+    })
+    renderApp('/chat')
+    await userEvent.click(await screen.findByRole('button', { name: 'Ask a panel' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Ask a panel' })
+    await userEvent.type(within(dialog).getByLabelText('The question'), 'Tabs or spaces?')
+    await userEvent.click(within(dialog).getByRole('button', { name: /Ask the panel/ }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c9/panel')).toBe(true))
+    expect(calls.findIndex((c) => c.method === 'POST' && c.path === '/api/chat/conversations')).toBeLessThan(calls.findIndex((c) => c.path === '/api/chat/conversations/c9/panel'))
+    // It goes on in the chat made for it, still in view.
+    expect(await screen.findByRole('list', { name: 'What the panel said' })).toHaveTextContent('Spaces.')
+  })
 })

@@ -14,7 +14,8 @@ Sections used:
 
 ## v7.0.1 (2026-10-26)
 
-What's new, told once, and a tidier place to type.
+What's new, told once, a tidier place to type, and the sketch and the panel
+working again.
 
 ### :sparkles: New features & Enhancements
 
@@ -32,6 +33,9 @@ What's new, told once, and a tidier place to type.
   it stays at the bottom right beside the context gauge, and the tools wrap
   among themselves when the box is narrow (the keyboard hint shows only when
   the box is wide enough for it)
+- **Ask a panel**: in a new chat there was no button for it (the chat is made
+  for it now); and once the verdict came, it pushed the dialog's Done button
+  off the screen (what was said and the verdict scroll together)
 - An answer's row of actions lost the pin and leave-out buttons added in 7.0
   (leaving out a question leaves out its answer, and the context gauge pins
   or leaves out any message)

@@ -875,7 +875,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
         screenFrame={share.sharing ? share.frame : undefined}
       />
       <ScreenButton share={share} />
-      <PanelButton chatId={id} />
+      <PanelButton chatId={id} ensureChat={ensureChat} />
       <TalkButton state={talk.state} onStart={() => void talk.start()} onEnd={talk.end} />
     </>
   )

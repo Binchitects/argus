@@ -30,7 +30,7 @@ type Seat = { role: string } | { assistantId: string; name: string }
 
 const seatKey = (s: Seat) => ('role' in s ? `role:${s.role}` : `assistant:${s.assistantId}`)
 
-function Setup({ chatId, onStarted }: { chatId: string; onStarted: (id: string) => void }) {
+function Setup({ chatId, ensureChat, onStarted }: { chatId: string | undefined; ensureChat?: () => Promise<string | null>; onStarted: (panel: { id: string; chat: string }) => void }) {
   const id = useId()
   const roles = useQuery({ queryKey: ['panels', 'roles'], queryFn: ({ signal }) => api<{ name: string; role: string }[]>('/api/panels/roles', { signal }) })
   const assistants = useQuery(assistantsQuery)
@@ -38,8 +38,16 @@ function Setup({ chatId, onStarted }: { chatId: string; onStarted: (id: string) 
   const [seats, setSeats] = useState<Seat[]>([{ role: 'The expert' }, { role: 'The critic' }, { role: 'The one who says no' }])
   const [rounds, setRounds] = useState('2')
   const start = useMutation({
-    mutationFn: () => api<{ id: string }>(`/api/chat/conversations/${chatId}/panel`, { body: { question: question.trim(), rounds: Number(rounds), panelists: seats.map((s) => ('role' in s ? { role: s.role } : { assistantId: s.assistantId })) } }),
-    onSuccess: (r) => onStarted(r.id),
+    mutationFn: async () => {
+      // In a new chat, the chat is made first: the panel goes into it.
+      const chat = chatId ?? (await ensureChat?.())
+      if (!chat) throw new Error('The chat could not be made: try again.')
+      const made = await api<{ id: string }>(`/api/chat/conversations/${chat}/panel`, {
+        body: { question: question.trim(), rounds: Number(rounds), panelists: seats.map((s) => ('role' in s ? { role: s.role } : { assistantId: s.assistantId })) },
+      })
+      return { id: made.id, chat }
+    },
+    onSuccess: onStarted,
   })
   const toggle = (seat: Seat, on: boolean) => setSeats(on ? [...seats, seat] : seats.filter((s) => seatKey(s) !== seatKey(seat)))
   const seated = (seat: Seat) => seats.some((s) => seatKey(s) === seatKey(seat))
@@ -113,25 +121,28 @@ function Live({ panelId, chatId, onClose }: { panelId: string; chatId: string; o
         <DialogTitle>The panel</DialogTitle>
         <DialogDescription>{p.question}</DialogDescription>
       </DialogHeader>
-      <ol className="grid max-h-[50vh] gap-2 overflow-y-auto" aria-label="What the panel said">
-        {p.turns.map((t, i) => (
-          <li key={i} className="rounded-lg border p-2 text-sm">
-            <span className="font-medium">{t.speaker}</span> <span className="text-xs text-muted-foreground">round {t.round}</span>
-            <p className="mt-0.5 whitespace-pre-wrap">{t.text}</p>
-          </li>
-        ))}
-      </ol>
-      {next && (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Spinner label="Speaking" /> {p.turns.length >= p.panelists.length * p.rounds ? 'The moderator' : next} is speaking…
-        </p>
-      )}
-      {p.error && <Alert variant="destructive">{p.error}</Alert>}
-      {p.verdict && (
-        <section aria-label="The verdict" className="rounded-xl border bg-muted/40 p-3 text-sm">
-          <Markdown text={p.verdict} />
-        </section>
-      )}
+      {/* What was said and the verdict scroll together: the footer stays in view however long they are. */}
+      <div className="grid max-h-[60vh] gap-2 overflow-y-auto pe-1">
+        <ol className="grid gap-2" aria-label="What the panel said">
+          {p.turns.map((t, i) => (
+            <li key={i} className="rounded-lg border p-2 text-sm">
+              <span className="font-medium">{t.speaker}</span> <span className="text-xs text-muted-foreground">round {t.round}</span>
+              <p className="mt-0.5 whitespace-pre-wrap">{t.text}</p>
+            </li>
+          ))}
+        </ol>
+        {next && (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Spinner label="Speaking" /> {p.turns.length >= p.panelists.length * p.rounds ? 'The moderator' : next} is speaking…
+          </p>
+        )}
+        {p.error && <Alert variant="destructive">{p.error}</Alert>}
+        {p.verdict && (
+          <section aria-label="The verdict" className="rounded-xl border bg-muted/40 p-3 text-sm">
+            <Markdown text={p.verdict} />
+          </section>
+        )}
+      </div>
       <DialogFooter>
         <Button onClick={onClose}>{p.status === 'done' ? 'Done: it is in the chat' : 'Close (it goes on)'}</Button>
       </DialogFooter>
@@ -139,11 +150,10 @@ function Live({ panelId, chatId, onClose }: { panelId: string; chatId: string; o
   )
 }
 
-/** The chat's Panel button: a question for several assistants and roles to discuss. */
-export function PanelButton({ chatId }: { chatId: string | undefined }) {
+/** The chat's Panel button: a question for several assistants and roles to discuss (in a new chat, the chat is made for it). */
+export function PanelButton({ chatId, ensureChat }: { chatId: string | undefined; ensureChat?: () => Promise<string | null> }) {
   const [open, setOpen] = useState(false)
-  const [panel, setPanel] = useState<string | null>(null)
-  if (!chatId) return null
+  const [panel, setPanel] = useState<{ id: string; chat: string } | null>(null)
   return (
     <>
       <Tooltip content="Ask a panel: assistants and roles discuss it, and a moderator gives the verdict">
@@ -159,7 +169,7 @@ export function PanelButton({ chatId }: { chatId: string | undefined }) {
         }}
       >
         <DialogContent className="sm:max-w-2xl">
-          {open && (panel ? <Live panelId={panel} chatId={chatId} onClose={() => (setOpen(false), setPanel(null))} /> : <Setup chatId={chatId} onStarted={setPanel} />)}
+          {open && (panel ? <Live panelId={panel.id} chatId={panel.chat} onClose={() => (setOpen(false), setPanel(null))} /> : <Setup chatId={chatId} ensureChat={ensureChat} onStarted={setPanel} />)}
         </DialogContent>
       </Dialog>
     </>
