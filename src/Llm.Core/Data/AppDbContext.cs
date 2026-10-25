@@ -120,6 +120,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
 
         builder.Entity<AppUser>(e =>
         {
+            e.Property(u => u.SeenRelease).HasMaxLength(32);
             e.Property(u => u.DisplayName).HasMaxLength(200);
             e.Property(u => u.LdapDn).HasMaxLength(1000);
             e.Property(u => u.OidcSubject).HasMaxLength(255);

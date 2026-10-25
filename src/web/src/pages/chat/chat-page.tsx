@@ -1329,7 +1329,6 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                             />
                           ) : (t.answer.length > 0 || (answering && i === lastTurn)) && (
                             <AnswerTurn
-                              onContext={room ? undefined : changeContext}
                               answer={t.answer}
                               siblings={t.answer[0] ? tree.siblings(t.answer[0]) : []}
                               live={answering && i === lastTurn}

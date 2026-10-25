@@ -1543,8 +1543,8 @@ function Welcome() {
     [useKeyFor('workbench.action.openSettings'), 'Settings'],
   ]
   return (
-    <div className="absolute inset-0 grid place-items-center overflow-auto p-6">
-      <div className="grid max-w-sm animate-enter justify-items-center gap-4 text-center">
+    <div className="@container absolute inset-0 grid place-items-center overflow-auto p-6">
+      <div className="grid w-full max-w-sm min-w-0 animate-enter justify-items-center gap-4 text-center">
         <div className="grid size-14 place-items-center rounded-2xl border bg-card shadow-sm">
           <FileDiff className="size-6 text-primary" aria-hidden="true" />
         </div>
@@ -1552,7 +1552,8 @@ function Welcome() {
           <h2 className="text-base font-semibold">No file is open</h2>
           <p className="mt-1 text-sm text-muted-foreground">Open one from the Explorer, or ask the agent in the chat: what it changes shows under Agent changes.</p>
         </div>
-        <dl className="grid w-full grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 text-left text-sm">
+        {/* The keys only where there is room for them beside what they do. */}
+        <dl className="hidden w-full grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 text-left text-sm @xs:grid">
           {keys.filter((k): k is [string, string] => !!k[0]).map(([k, what]) => (
             <div key={k} className="contents">
               <dt className="justify-self-end">
@@ -1562,7 +1563,7 @@ function Welcome() {
             </div>
           ))}
         </dl>
-        <p className="text-xs text-muted-foreground">The activity bar on the left switches between the Explorer, Search, Agent changes and Chat.</p>
+        <p className="hidden text-xs text-muted-foreground @xs:block">The activity bar on the left switches between the Explorer, Search, Agent changes and Chat.</p>
       </div>
     </div>
   )

@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils'
 import { CommandMenu } from './command-menu'
 import { findNavItem, visibleNavigation, type NavItem, type NavSection } from './nav'
 import { UserMenu } from './user-menu'
+import { WhatsNew } from './whats-new'
 
 function readCollapsed(): boolean {
   try {
@@ -45,6 +46,8 @@ function SignedIn({ me }: { me: Me }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
+  // The newest release's tour: once by itself after a deploy, again from the account menu or the palette.
+  const [whatsNew, setWhatsNew] = useState(false)
   const sections = visibleNavigation(me)
   const name = info.data?.name ?? 'Argus Arena'
 
@@ -129,7 +132,7 @@ function SignedIn({ me }: { me: Me }) {
             </Button>
             <HelpButton open={helpOpen} onOpenChange={setHelpOpen} />
             <NotificationBell />
-            <UserMenu me={me} />
+            <UserMenu me={me} onWhatsNew={() => setWhatsNew(true)} />
           </div>
         </header>
         <main id="main" tabIndex={-1} className={cn('w-full flex-1 outline-none', fullBleed ? 'min-h-0' : 'mx-auto max-w-(--page-max) px-4 py-6 sm:px-6 lg:px-8')}>
@@ -143,7 +146,8 @@ function SignedIn({ me }: { me: Me }) {
         </main>
       </div>
       <HelpPanel open={helpOpen} onOpenChange={setHelpOpen} />
-      <CommandMenu open={paletteOpen} onOpenChange={setPaletteOpen} me={me} />
+      <CommandMenu open={paletteOpen} onOpenChange={setPaletteOpen} me={me} onWhatsNew={() => setWhatsNew(true)} />
+      <WhatsNew open={whatsNew} onOpenChange={setWhatsNew} />
     </div>
   )
 }

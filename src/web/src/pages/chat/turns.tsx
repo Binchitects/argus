@@ -411,7 +411,6 @@ export function AnswerTurn({
   onQuote,
   onReply,
   translation,
-  onContext,
 }: {
   answer: Message[]
   siblings: Message[]
@@ -457,8 +456,6 @@ export function AnswerTurn({
   onReply?: (m: Message) => void
   /** In a room read in another language: an answer's translation, when it has one. */
   translation?: (id: string) => Translation | undefined
-  /** Pin the answer's words, or leave them out of what the model reads (absent: read-only). */
-  onContext?: (m: Message, change: ContextChange) => void
 }) {
   const [quoting, setQuoting] = useState(false)
   // Answers shown as written though the room is read in another language.
@@ -484,7 +481,7 @@ export function AnswerTurn({
       <div className="mt-1 flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
         <Branches siblings={siblings} current={first} onSwitch={onSwitch} label="Answer" />
         <CopyButton text={text} label="Copy answer" />
-        {onContext && last && !last.id.startsWith('local-') && last.content && <MessageContextButtons m={last} what="answer" onChange={onContext} />}
+        {/* An answer is pinned or left out from the context gauge (its question's buttons leave it out with it): here, only what it is. */}
         {last && <MessageContextNote m={last} />}
         {onReply && (
           <Tooltip content="Reply: ask the model about this answer">

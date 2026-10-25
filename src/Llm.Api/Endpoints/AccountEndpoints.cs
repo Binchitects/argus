@@ -19,6 +19,19 @@ public static class AccountEndpoints
     {
         var me = app.MapGroup("/api/account").PersonOnly();
         me.MapPost("/password", ChangePasswordAsync);
+        // "What's new": the release whose tour the person has seen (it opens once for each release after it).
+        me.MapGet("/whats-new", async (ClaimsPrincipal p, UserManager<AppUser> users) => Results.Ok(new { seen = (await users.GetUserAsync(p))!.SeenRelease }));
+        me.MapPut("/whats-new", async (SeenRelease body, ClaimsPrincipal p, UserManager<AppUser> users) =>
+        {
+            if (string.IsNullOrWhiteSpace(body.Release) || body.Release.Length > 32)
+            {
+                return AuthEndpoints.Problem(400, "release", "Say which release was seen (7.0).");
+            }
+            var me = (await users.GetUserAsync(p))!;
+            me.SeenRelease = body.Release.Trim();
+            await users.UpdateAsync(me);
+            return Results.Ok(new { seen = me.SeenRelease });
+        });
         me.MapGet("/2fa", async (ClaimsPrincipal p, UserManager<AppUser> users) =>
         {
             var u = await users.GetUserAsync(p);
@@ -225,6 +238,9 @@ public static class AccountEndpoints
         return sb.ToString().TrimEnd().ToLowerInvariant();
     }
 }
+
+/// <summary>The release whose "What's new" the person has seen.</summary>
+public sealed record SeenRelease(string? Release);
 
 /// <summary>
 /// A person's own choices for their answers. Only what is sent changes. <paramref name="CompactAt"/>: when their chats compact

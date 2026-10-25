@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { BookOpen, Columns2, Download, LifeBuoy, LogOut, Maximize2, Monitor, Moon, Palette, RectangleHorizontal, Sun, UserRound } from 'lucide-react'
+import { BookOpen, Columns2, Download, Gift, LifeBuoy, LogOut, Maximize2, Monitor, Moon, Palette, RectangleHorizontal, Sun, UserRound } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { Avatar } from '@/components/ui/avatar'
 import {
@@ -21,7 +21,7 @@ import { useTheme, type ThemePreference } from '@/lib/theme'
 import { setWidth, useWidth, type WidthPreference } from '@/lib/width'
 import { useSignOut } from './use-sign-out'
 
-export function UserMenu({ me }: { me: Me }) {
+export function UserMenu({ me, onWhatsNew }: { me: Me; onWhatsNew?: () => void }) {
   const navigate = useNavigate()
   const signOut = useSignOut()
   const { preference, setPreference } = useTheme()
@@ -46,6 +46,11 @@ export function UserMenu({ me }: { me: Me }) {
         <DropdownMenuItem onSelect={() => navigate('/help')}>
           <BookOpen /> Manual
         </DropdownMenuItem>
+        {onWhatsNew && (
+          <DropdownMenuItem onSelect={onWhatsNew}>
+            <Gift /> What&apos;s new
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
             <Palette /> Theme

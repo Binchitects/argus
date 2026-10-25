@@ -41,7 +41,8 @@ beforeEach(() => {
     fillRect: () => undefined, drawImage: () => undefined, beginPath: () => undefined, stroke: () => undefined,
     moveTo: (x: number, y: number) => lines.push([x, y]), lineTo: (x: number, y: number) => lines.push([x, y]),
   }) as never)
-  vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((done: BlobCallback) => done(new Blob(['png'], { type: 'image/png' })))
+  // As browsers do: the picture comes later, never during the call.
+  vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((done: BlobCallback) => void setTimeout(() => done(new Blob(['png'], { type: 'image/png' })), 0))
 })
 
 afterEach(() => {

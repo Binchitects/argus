@@ -101,8 +101,15 @@ function Whiteboard({ chatKey, busy, onAsk, onAttach, screenFrame, onClose }: {
     if (done) setStrokes((s) => [...s, done])
   }
 
+  // toBlob gives the picture later (it returns nothing): resolved only by its callback, or at once when there is no board.
   const file = () =>
-    new Promise<File | null>((resolve) => canvas.current?.toBlob((b) => resolve(b ? new File([b], sketchName(new Date()), { type: 'image/png' }) : null), 'image/png') ?? resolve(null))
+    new Promise<File | null>((resolve) => {
+      if (!canvas.current) {
+        resolve(null)
+        return
+      }
+      canvas.current.toBlob((b) => resolve(b ? new File([b], sketchName(new Date()), { type: 'image/png' }) : null), 'image/png')
+    })
   const ask = async (a: SketchAsk) => {
     const f = await file()
     if (f) onAsk(f, a)

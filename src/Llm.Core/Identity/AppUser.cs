@@ -52,6 +52,8 @@ public sealed class AppUser : IdentityUser<Guid>
     public bool MemoryAuto { get; set; }
     /// <summary>When the memory garden last tidied their memories (merged, let go, tightened); null: never.</summary>
     public DateTimeOffset? MemoryTidiedAt { get; set; }
+    /// <summary>The release whose "What's new" the person has seen (7.0): it opens once for each release after it.</summary>
+    public string? SeenRelease { get; set; }
     /// <summary>Set while the person is on legal hold: nothing of theirs is deleted, by retention or by them.</summary>
     public DateTimeOffset? LegalHoldSince { get; set; }
     /// <summary>Why the hold was placed (a matter, a ticket), as the admin wrote it.</summary>

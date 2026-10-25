@@ -1,4 +1,4 @@
-import { BookOpen, LogOut, Monitor, Moon, Sun, UserRound, type LucideIcon } from 'lucide-react'
+import { BookOpen, Gift, LogOut, Monitor, Moon, Sun, UserRound, type LucideIcon } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
@@ -22,7 +22,7 @@ interface Command {
  * matches are one list, best first (ranked here: cmdk reorders items but not
  * the groups around them, so a keyword hit in an earlier group would win).
  */
-export function CommandMenu({ open, onOpenChange, me }: { open: boolean; onOpenChange: (o: boolean) => void; me: Me }) {
+export function CommandMenu({ open, onOpenChange, me, onWhatsNew }: { open: boolean; onOpenChange: (o: boolean) => void; me: Me; onWhatsNew?: () => void }) {
   const navigate = useNavigate()
   const signOut = useSignOut()
   const { setPreference } = useTheme()
@@ -35,12 +35,13 @@ export function CommandMenu({ open, onOpenChange, me }: { open: boolean; onOpenC
       ),
       { id: 'account', title: 'Your account', group: 'Account', icon: UserRound, keywords: ['password', '2fa', 'api key', 'profile'], run: () => navigate('/account') },
       { id: 'help', title: 'Manual', group: 'Account', icon: BookOpen, keywords: ['help', 'docs', 'documentation', 'how to', 'guide'], run: () => navigate('/help') },
+      ...(onWhatsNew ? [{ id: 'whats-new', title: "What's new", group: 'Account', icon: Gift, keywords: ['release', 'changelog', 'new', 'version', 'updates'], run: onWhatsNew }] : []),
       { id: 'light', title: 'Light theme', group: 'Account', icon: Sun, keywords: ['appearance'], run: () => setPreference('light') },
       { id: 'dark', title: 'Dark theme', group: 'Account', icon: Moon, keywords: ['appearance'], run: () => setPreference('dark') },
       { id: 'system', title: 'System theme', group: 'Account', icon: Monitor, keywords: ['appearance'], run: () => setPreference('system') },
       { id: 'sign-out', title: 'Sign out', group: 'Account', icon: LogOut, keywords: ['log out', 'logout'], run: () => void signOut() },
     ],
-    [me, navigate, setPreference, signOut],
+    [me, navigate, setPreference, signOut, onWhatsNew],
   )
 
   const matches = useMemo(

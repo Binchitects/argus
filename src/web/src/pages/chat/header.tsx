@@ -105,10 +105,10 @@ export function ThinkingPicker({ config, value, onChange }: { config: ChatConfig
   const defaultLabel = config.presets.find((p) => p.level === config.defaultThinking)?.label
   return (
     <Select value={value ?? DEFAULT} onValueChange={(v) => onChange(v === DEFAULT ? null : v)}>
-      <SelectTrigger size="sm" className="h-8 w-auto shrink-0 gap-1.5 border-transparent bg-transparent px-2 shadow-none hover:bg-accent [&>svg:last-child]:hidden sm:[&>svg:last-child]:block" aria-label="Thinking">
+      <SelectTrigger size="sm" className="h-8 w-auto shrink-0 gap-1.5 border-transparent bg-transparent px-2 shadow-none hover:bg-accent [&>svg:last-child]:hidden @lg:[&>svg:last-child]:block" aria-label="Thinking">
         <Brain className="size-4 text-muted-foreground" aria-hidden="true" />
-        {/* On a phone the icon alone; the choice shows when the list opens. */}
-        <span className="hidden sm:inline">
+        {/* In a narrow header (a phone, Code Arena's chat beside the editor) the icon alone: the model's name keeps its room, and the choice shows when the list opens. */}
+        <span className="hidden @lg:inline">
           <SelectValue />
         </span>
       </SelectTrigger>
@@ -251,7 +251,7 @@ export function ChatHeader({
   onMakeRoom?: () => void
 }) {
   return (
-    <header className="flex h-12 shrink-0 items-center gap-1 border-b px-2 sm:px-3">
+    <header className="@container flex h-12 shrink-0 items-center gap-1 border-b px-2 sm:px-3">
       <Button variant="ghost" size="icon-sm" className="shrink-0 lg:hidden" onClick={onOpenList} aria-label="Chats">
         <MessagesSquare />
       </Button>

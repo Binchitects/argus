@@ -214,7 +214,7 @@ export function Composer({
   }
   return (
     <form
-      className={cn('relative rounded-2xl border bg-card shadow-sm transition-shadow focus-within:border-primary/50 focus-within:shadow-md', big && 'shadow-md')}
+      className={cn('@container relative rounded-2xl border bg-card shadow-sm transition-shadow focus-within:border-primary/50 focus-within:shadow-md', big && 'shadow-md')}
       onSubmit={(e) => {
         e.preventDefault()
         void submit()
@@ -304,8 +304,9 @@ export function Composer({
         autoFocus={autoFocus}
         className={cn('block max-h-72 w-full resize-none bg-transparent px-4 pt-3 text-[0.9375rem] leading-relaxed outline-none placeholder:text-muted-foreground', big && 'min-h-20')}
       />
-      {/* On a phone the buttons wrap onto a second line: Send stays in the box. */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 pt-1 pb-2">
+      {/* The box's own tools on the left, wrapping among themselves when it is narrow; the gauge and Send stay together at the bottom right. */}
+      <div className="flex items-end gap-2 px-2 pt-1 pb-2">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1 gap-y-1">
         <input ref={picker} type="file" multiple hidden onChange={(e) => { if (e.target.files) uploads.add(e.target.files); e.target.value = '' }} aria-label="Attach files" />
         <Tooltip content="Attach files: Word, Excel, PowerPoint, PDF, text, code, images, sound, video">
           <Button type="button" variant="ghost" size="icon-sm" onClick={() => picker.current?.click()} aria-label="Attach">
@@ -316,8 +317,10 @@ export function Composer({
         {talk}
         {tools}
         {compare}
-        <span className="hidden text-xs text-muted-foreground xl:inline">Enter to send · Shift+Enter for a new line</span>
-        <span className="ml-auto" />
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+        {/* Said only when the box is wide enough for it beside the tools (its own width, not the window's). */}
+        <span className="hidden text-xs whitespace-nowrap text-muted-foreground @5xl:inline">Enter to send · Shift+Enter for a new line</span>
         {context && <ContextGauge context={context} onCompact={onCompact} busy={streaming} compact={compact} items={contextItems} />}
         {streaming && onQueue && hasContent && (
           <Tooltip content="Queue: sent when the answer ends (Enter)">
@@ -342,6 +345,7 @@ export function Composer({
             <ArrowUp />
           </Button>
         )}
+        </div>
       </div>
     </form>
   )
