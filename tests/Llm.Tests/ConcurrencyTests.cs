@@ -1018,12 +1018,16 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         await EventuallyAsync(() => state.Default == Big, "the big model is the one new chats get");
         // The engine loaded tiny-a, and unloaded the big one (a request that did not ask the app first).
         var engine = f.Services.GetRequiredService<EngineClient>();
+        Assert.Equal(0, state.Evicted(Big));
         await engine.LoadAsync("tiny-a");
         await engine.UnloadAsync(Big);
         watcher.Wake();
-        await EventuallyAsync(() => state.StatusOf(Big) == "unloaded" && state.StatusOf("tiny-a") == "loaded", "the watcher sees it");
+        // What the watcher keeps of it: the engine unloaded the big one by its own choice. (It loads the big one again at
+        // once, in the place left free, and its next look, three seconds on, has it loaded: a wait for it unloaded that
+        // looks only after that, as a test running late in the full suite may, never sees it.)
+        await EventuallyAsync(() => state.Evicted(Big) > 0, "the watcher sees the engine unloaded the big one by its own choice");
 
-        // A chat that chose no model is answered by the big one, which loads again for it, not by tiny-a.
+        // A chat that chose no model is answered by the big one, back on the engine, not by tiny-a.
         var b = await PersonAsync(f);
         var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { thinking = "off", tools = Array.Empty<string>() }))).GetProperty("id").GetGuid();
         var events = await AskAsync(b, chat, "which model?");
