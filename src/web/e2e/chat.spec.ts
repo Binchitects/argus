@@ -97,12 +97,22 @@ const argusChat = {
   ],
 }
 
+/**
+ * A saved chat served by the browser itself, with what the page asks of it beside: where it stands (every few seconds,
+ * to read it again when it changed elsewhere) and its canvases (none).
+ */
+async function serveChat(page: Page, chat: { id: string }) {
+  await page.route(`**/api/chat/conversations/${chat.id}`, (route) => route.fulfill({ json: chat }))
+  await page.route(`**/api/chat/conversations/${chat.id}/stamp`, (route) => route.fulfill({ json: { stamp: 'e2e', answering: false } }))
+  await page.route(`**/api/chat/conversations/${chat.id}/canvases`, (route) => route.fulfill({ json: [] }))
+}
+
 async function serveArgusChat(page: Page) {
   await page.route('**/api/chat/config', async (route) => {
     const res = await route.fetch()
     await route.fulfill({ response: res, json: { ...(await res.json()), argus: true, gitlabUrl: 'https://gitlab.example.com' } })
   })
-  await page.route(`**/api/chat/conversations/${argusChat.id}`, (route) => route.fulfill({ json: argusChat }))
+  await serveChat(page, argusChat)
   await page.route('**/api/chat/attachments/*/content*', (route) => route.fulfill({ body: png, contentType: 'image/png' }))
 }
 
@@ -167,16 +177,25 @@ const docChat = {
 test.describe('document pages', () => {
   test('a Word file shows as its pages, zoomed in the panel and full size', async ({ page }, info) => {
     const base = '/api/chat/attachments/44444444-4444-4444-8444-444444444444'
-    await page.route(`**/api/chat/conversations/${docChat.id}`, (route) => route.fulfill({ json: docChat }))
-    await page.route(`**${base}/pages`, (route) => route.fulfill({ json: { total: 23, drawn: 2, pages: [`${base}/pages/1`, `${base}/pages/2`] } }))
+    await serveChat(page, docChat)
+    // As the server: every page up to the one asked for, drawn (twenty at a time). The next twenty wait until the test
+    // has looked at the first.
+    let drawMore!: () => void
+    const more = new Promise<void>((resolve) => (drawMore = resolve))
+    await page.route(`**${base}/pages?upTo=*`, async (route) => {
+      const upTo = Number(new URL(route.request().url()).searchParams.get('upTo'))
+      if (upTo > 20) await more
+      const drawn = Math.min(23, upTo)
+      await route.fulfill({ json: { total: 23, drawn, pages: Array.from({ length: drawn }, (_, i) => `${base}/pages/${i + 1}`) } })
+    })
     await page.route(`**${base}/pages/*`, (route) => route.fulfill({ body: png, contentType: 'image/png' }))
     await page.goto(`/chat/${docChat.id}`)
     await page.getByRole('button', { name: /^Files \(1\)$/ }).click()
     const panel = page.getByRole('complementary', { name: 'Files' })
     await panel.getByRole('button', { name: /plan\.docx/ }).click()
     const pages = panel.getByRole('list', { name: 'Pages of plan.docx' })
-    await expect(pages.getByRole('img')).toHaveCount(2)
-    await expect(panel).toContainText('23 pages · the first 2 shown')
+    await expect(pages.getByRole('img')).toHaveCount(20)
+    await expect(panel).toContainText('23 pages · the first 20 shown')
     await panel.getByRole('button', { name: 'Zoom in' }).click()
     await expect(panel.getByRole('button', { name: 'Zoom 125%: fit the panel' })).toBeVisible()
     await expectAccessible(page, info, 'document-pages')
@@ -188,6 +207,11 @@ test.describe('document pages', () => {
     await expect(viewer.getByRole('button', { name: /^Zoom \d+%: fit to the screen$/ })).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(viewer).toHaveCount(0)
+    // The rest are drawn as the reader reaches the end.
+    drawMore()
+    await pages.getByRole('listitem').last().scrollIntoViewIfNeeded()
+    await expect(pages.getByRole('img')).toHaveCount(23)
+    await expect(panel).not.toContainText('the first')
   })
 })
 
@@ -206,7 +230,7 @@ const contextChat = {
 
 test.describe('context gauge', () => {
   test('shows how full the context is and what fills it, and compacts from there', async ({ page }, info) => {
-    await page.route(`**/api/chat/conversations/${contextChat.id}`, (route) => route.fulfill({ json: contextChat }))
+    await serveChat(page, contextChat)
     let compacted = false
     await page.route(`**/api/chat/conversations/${contextChat.id}/compact`, (route) => {
       compacted = true
@@ -382,7 +406,7 @@ const rtlChat = {
 
 test.describe('right-to-left text', () => {
   test('a Persian question and answer read right to left, code left to right', async ({ page, isMobile }, info) => {
-    await page.route(`**/api/chat/conversations/${rtlChat.id}`, (route) => route.fulfill({ json: rtlChat }))
+    await serveChat(page, rtlChat)
     await page.goto(`/chat/${rtlChat.id}`)
     const direction = (l: Locator) => l.evaluate((e) => getComputedStyle(e).direction)
     const answer = page.getByRole('region', { name: 'Answer' })
@@ -418,7 +442,7 @@ test.describe('diagrams', () => {
     test(`a Mermaid diagram is drawn in the answer, its code a click away (${theme})`, async ({ page, isMobile }, info) => {
       const errors = watchConsole(page)
       await withTheme(page, theme)
-      await page.route(`**/api/chat/conversations/${diagramChat.id}`, (route) => route.fulfill({ json: diagramChat }))
+      await serveChat(page, diagramChat)
       await page.goto(`/chat/${diagramChat.id}`)
       const answer = page.getByRole('region', { name: 'Answer' })
       const figure = answer.getByRole('figure', { name: 'Diagram: mermaid' })
@@ -463,7 +487,7 @@ test.describe('questions from the model', () => {
   test('are answered on a card, and the answers are the next message', async ({ page, isMobile }, info) => {
     const errors = watchConsole(page)
     let sent: { content: string; parentId?: string } | null = null
-    await page.route(`**/api/chat/conversations/${askChat.id}`, (route) => route.fulfill({ json: askChat }))
+    await serveChat(page, askChat)
     await page.route(`**/api/chat/conversations/${askChat.id}/messages`, async (route) => {
       sent = route.request().postDataJSON()
       await route.fulfill({ status: 409, json: { error: 'not in this test' } })
@@ -521,7 +545,7 @@ const agentsChat = {
 
 test.describe('sub-agents', () => {
   test("each part's work is shown on the card as the chat shows its own: thinking, tool calls, pictures, words", async ({ page }, info) => {
-    await page.route(`**/api/chat/conversations/${agentsChat.id}`, (route) => route.fulfill({ json: agentsChat }))
+    await serveChat(page, agentsChat)
     await page.route('**/api/chat/attachments/*/content', (route) => route.fulfill({ body: png, contentType: 'image/png' }))
     await page.goto(`/chat/${agentsChat.id}`)
     const answer = page.getByRole('region', { name: 'Answer' })
@@ -529,7 +553,7 @@ test.describe('sub-agents', () => {
     await expect(answer.getByRole('list', { name: 'Pictures' }).getByRole('img', { name: 'codec-flow.png' })).toBeVisible()
     await answer.getByRole('button', { name: /Sub-agents/ }).click()
     const agents = answer.getByRole('list', { name: 'Sub-agents' })
-    await expect(answer).toContainText('2 of 2 done')
+    await expect(answer).toContainText('2 of 2 parts done')
     const codec = agents.getByRole('listitem', { name: 'codec errors' })
     const shim = agents.getByRole('listitem', { name: 'driver-shim errors' })
     // Done parts are folded, one under the other; all open at once.
@@ -825,8 +849,14 @@ test.describe('tools', () => {
     const button = page.getByRole('button', { name: /^Tools: \d+ of \d+ on$/ })
     const before = Number((await button.getAttribute('aria-label'))!.match(/(\d+) of/)![1])
     await button.click()
-    await page.getByRole('switch', { name: /Calculator/ }).click()
-    await expect(page.getByRole('button', { name: new RegExp(`^Tools: ${before - 1} of`) })).toBeVisible()
+    // On or off to begin with, as Admin → Tools has it here: off, then on, or the other way round.
+    const calculator = page.getByRole('switch', { name: /Calculator/ })
+    const on = (await calculator.getAttribute('aria-checked')) === 'true'
+    await calculator.click()
+    await expect(calculator).toHaveAttribute('aria-checked', String(!on))
+    await expect(page.getByRole('button', { name: new RegExp(`^Tools: ${on ? before - 1 : before + 1} of`) })).toBeVisible()
+    await calculator.click()
+    await expect(page.getByRole('button', { name: new RegExp(`^Tools: ${before} of`) })).toBeVisible()
   })
 
   test('the model uses the calculator, and draws with the image tool', async ({ page, request }) => {

@@ -9,6 +9,12 @@ test('a scheduled task is set up in words, runs now, and its answer is a chat an
   const name = `Digest ${isMobile ? 'phone' : 'desk'} ${Date.now() % 100000}`
   await page.goto('/tasks')
   await expect(page.getByRole('heading', { level: 1, name: 'Scheduled tasks' })).toBeVisible()
+  if (!(await (await page.request.get('/api/tasks')).json()).enabled) {
+    // Turned off here (Settings → Scheduled tasks): the page says so, and no task can be added.
+    await expect(page.getByText('Scheduled tasks are off here.')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'New task' })).toBeDisabled()
+    test.skip(true, 'scheduled tasks are off here (Settings → Scheduled tasks)')
+  }
   await page.getByRole('button', { name: 'New task' }).first().click()
   const dialog = page.getByRole('dialog', { name: 'New scheduled task' })
   await dialog.getByRole('textbox', { name: 'Name' }).fill(name)

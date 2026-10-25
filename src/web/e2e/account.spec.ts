@@ -30,7 +30,14 @@ test('connect your tools: the address, the setups and the certificate are the re
   const url = new URL(baseURL!)
   const gateway = `${url.protocol}//gateway.${url.host}`
   await expect(page.getByText(`${gateway}/v1`, { exact: true })).toBeVisible()
+  // The page starts on the system the browser says it runs on (Playwright's desktop Chrome says Windows): each in turn.
+  const system = page.getByRole('combobox', { name: 'Your system' })
+  await system.click()
+  await page.getByRole('option', { name: 'macOS or Linux' }).click()
   await expect(page.getByText(/export ANTHROPIC_BASE_URL=/)).toContainText(`ANTHROPIC_BASE_URL=${gateway}`)
+  await system.click()
+  await page.getByRole('option', { name: 'Windows (PowerShell)' }).click()
+  await expect(page.getByText(/\$env:ANTHROPIC_BASE_URL = /)).toContainText(`$env:ANTHROPIC_BASE_URL = "${gateway}"`)
   const cert = await page.request.get('/api/account/certificate')
   const offered = page.getByRole('link', { name: /The CA certificate/ })
   if (!(await (await page.request.get('/api/account/connect')).json()).certificate) {

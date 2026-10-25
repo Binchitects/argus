@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { expectAccessible, expectTheme, withTheme, noGateway, noObserve, screenshot, watchConsole } from './helpers.ts'
 
 const pages: [string, string][] = [
@@ -9,7 +9,6 @@ const pages: [string, string][] = [
   ['/admin/tools', 'Tools'],
   ['/admin/sign-in', 'Sign-in'],
   ['/admin/models', 'Models'],
-  ['/admin/model', 'Deployment'],
   ['/admin/settings', 'Settings'],
   ['/admin/audit', 'Audit log'],
   ['/admin/indexing', 'Indexing'],
@@ -50,7 +49,7 @@ for (const theme of ['light', 'dark'] as const) {
 test('the usage dashboard draws every panel without an error', async ({ page }) => {
   const errors = watchConsole(page)
   await page.goto('/usage')
-  await expect(page.getByRole('tab', { name: 'Everyone' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('tab', { name: 'Everyone', exact: true })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('region', { name: 'Cost by person' })).toBeVisible()
   await expect(page.locator('main .animate-pulse')).toHaveCount(0, { timeout: 30_000 })
   const panels = page.locator('main [data-panel]')
@@ -82,13 +81,16 @@ test('logs: narrowed by container, level and text in the address, and live', asy
   const lines = page.getByRole('region', { name: 'Logs, log lines' })
   await expect(lines.getByRole('listitem').first()).toBeVisible({ timeout: 30_000 })
 
+  // The containers offered are those with lines in the range (Traefik, say, may have written none): the first of them.
   await page.getByRole('button', { name: 'Containers' }).click()
-  await page.getByRole('menuitemcheckbox', { name: 'traefik', exact: true }).click()
+  const offered = page.getByRole('menuitemcheckbox').filter({ hasNotText: 'All containers' }).first()
+  const container = (await offered.textContent())!.trim()
+  await offered.click()
   await page.keyboard.press('Escape')
-  await expect(page).toHaveURL(/container=traefik/)
+  await expect(page).toHaveURL(new RegExp(`container=${container}`))
   await expect(page.getByText('The query sent to Loki')).toBeVisible()
   await page.getByText('The query sent to Loki').click()
-  await expect(page.getByText('{container=~"traefik"}')).toBeVisible()
+  await expect(page.getByText(`{container=~"${container}"}`)).toBeVisible()
   // A long query scrolls in its box; the page never gets wider than the screen.
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
 
@@ -103,7 +105,7 @@ test('logs: narrowed by container, level and text in the address, and live', asy
   await page.getByRole('button', { name: 'Live' }).click()
   await expect(page.getByRole('button', { name: 'Live' })).toHaveAttribute('aria-pressed', 'true')
   const tail = await page.waitForRequest((r) => r.url().includes('/api/admin/logs/?') && r.url().includes('limit=500'), { timeout: 10_000 })
-  expect(new URL(tail.url()).searchParams.get('container')).toBe('traefik')
+  expect(new URL(tail.url()).searchParams.get('container')).toBe(container)
 })
 
 test('alerts: what fires, what fired, and every rule with its query', async ({ page }) => {
@@ -147,7 +149,9 @@ test('my own usage', async ({ page }) => {
   await page.goto('/usage')
   await page.getByRole('tab', { name: 'Mine' }).click()
   await expect(page.getByLabel('Input, cache hit', { exact: true })).toBeVisible()
-  await expect(page.getByLabel('Cost', { exact: true })).toHaveText(/^\$/)
+  // The range's cost, then that of the prompts listed under it.
+  await expect(page.getByRole('heading', { name: 'Your prompts' })).toBeVisible()
+  await expect(page.getByLabel('Cost', { exact: true })).toHaveText([/^\$/, /^\$/])
 })
 
 test('a person, from added to deleted', async ({ page }) => {
@@ -158,7 +162,7 @@ test('a person, from added to deleted', async ({ page }) => {
   const dialog = page.getByRole('dialog')
   await dialog.getByLabel('Username').fill(name)
   await dialog.getByLabel('Email').fill(`${name}@example.test`)
-  await dialog.getByLabel('Credit ($)').fill('5')
+  await dialog.getByLabel('Chat credit ($ a month)').fill('5')
   await dialog.getByRole('button', { name: 'Add person' }).click()
   await expect(dialog.getByText('Person added')).toBeVisible()
   await dialog.getByRole('button', { name: 'Done' }).click()
@@ -166,6 +170,7 @@ test('a person, from added to deleted', async ({ page }) => {
   await page.getByRole('searchbox', { name: 'Search people' }).fill(name)
   await page.getByRole('cell', { name: new RegExp(name) }).click()
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(name)
+  await expect(page.getByLabel('Chat credit ($)')).toHaveValue('5')
   await expect(page.getByText('/ $5.00')).toBeVisible()
 
   await page.getByRole('button', { name: 'Disable' }).click()
@@ -180,7 +185,7 @@ test('a person, from added to deleted', async ({ page }) => {
   await expect(page).toHaveURL(/\/admin\/people$/)
 })
 
-test('a live setting applies at once and is audited; a stack setting waits and can be discarded', async ({ page }) => {
+test('a live setting applies at once and is audited; one read at start waits for a restart, and put back waits no more', async ({ page, isMobile }) => {
   const brand = `E2E Brand ${Date.now().toString(36)}`
   await page.goto('/admin/settings')
   await settled(page, 'Settings')
@@ -192,30 +197,47 @@ test('a live setting applies at once and is audited; a stack setting waits and c
   await page.getByRole('button', { name: /Back to the default/ }).first().click()
   await expect(page.getByLabel('Product name')).toHaveValue('Argus Arena')
 
-  if (await page.getByText('Stack settings cannot be saved yet').isVisible()) return
-  await page.goto('/admin/settings#backup')
-  const keep = page.getByLabel('Backups kept')
-  const was = await keep.inputValue()
-  await keep.fill(String(Number(was || '14') + 1))
-  await page.getByRole('region', { name: 'Unsaved changes' }).getByRole('button', { name: 'Save changes' }).click()
-  await expect(page.getByText(/\.env changes? (is|are) waiting to be applied/)).toBeVisible()
-  await expect(page.getByRole('region', { name: 'apply command', exact: true })).toHaveText('./scripts/apply-settings.sh')
-  await page.getByRole('button', { name: /Discard pending change/ }).click()
-  await expect(page.getByText(/\.env changes? (is|are) waiting to be applied/)).toBeHidden()
+  // A setting read when the app starts: one browser only, as whether a restart is due is the whole app's.
+  if (!isMobile) {
+    const key = 'Engine:KvCacheDays'
+    try {
+      await page.goto('/admin/settings#model')
+      const days = page.getByLabel("Keep conversations' caches for")
+      // Its row: the innermost part of the page with its box and what is looked for.
+      const row = (has: Locator) => page.locator('div').filter({ has: days }).filter({ has }).last()
+      await days.fill(String(Number((await days.inputValue()) || '0') + 1))
+      await page.getByRole('region', { name: 'Unsaved changes' }).getByRole('button', { name: 'Save changes' }).click()
+      await expect(page.getByText('1 after a restart')).toBeVisible()
+      await expect(row(page.getByText('Needs restart'))).toBeVisible()
+      await expect(page.getByText('Some changes apply when the app restarts')).toBeVisible()
+      const back = page.getByRole('button', { name: 'Back to the default' })
+      await row(back).getByRole('button', { name: 'Back to the default' }).click()
+      await expect(row(page.getByText('Needs restart'))).toHaveCount(0)
+    } finally {
+      // Whatever happened, the live stack is left as it was: no restart due for this test.
+      await page.request.put('/api/admin/config', { data: { changes: [{ key, reset: true }] }, headers: { 'X-Requested-With': 'e2e' } })
+    }
+  }
 
   await page.goto('/admin/audit')
   await page.getByRole('radio', { name: 'Settings' }).click()
   await expect(page.getByRole('cell', { name: 'Branding:ProductName' }).first()).toBeVisible()
 })
 
-test('the engine has its model loaded, and more come from the library', async ({ page }) => {
+test("the engine's models each say whether they are loaded, and more come from the library", async ({ page }) => {
   await page.goto('/admin/models')
   await settled(page, 'Models')
   // Read-only: loading another model here would switch it for every other test.
   test.skip(await page.getByText(/needs the llama\.cpp engine/).isVisible(), 'no llama.cpp engine')
-  const env = page.locator('main section').filter({ has: page.getByText('.env', { exact: true }) })
-  await expect(env.getByText('Loaded', { exact: true })).toBeVisible({ timeout: 60_000 })
-  await expect(env.getByRole('button', { name: 'Unload' })).toBeVisible()
+  // Every chat model is one added here (none comes from .env); each loads when asked for unless it is kept loaded.
+  const models = page.locator('main section').filter({ has: page.getByText('Added here', { exact: true }) })
+  await expect(models.first()).toBeVisible()
+  const loaded = models.filter({ has: page.getByText('Loaded', { exact: true }) })
+  const unloaded = models.filter({ has: page.getByText('Not loaded', { exact: true }) })
+  await expect.poll(async () => (await loaded.count()) + (await unloaded.count())).toBeGreaterThan(0)
+  // A loaded one can be unloaded, one not loaded can be loaded.
+  await expect(loaded.filter({ hasNot: page.getByRole('button', { name: 'Unload', exact: true }) })).toHaveCount(0)
+  await expect(unloaded.filter({ hasNot: page.getByRole('button', { name: 'Load', exact: true }) })).toHaveCount(0)
   await page.getByRole('button', { name: 'Add a model' }).click()
   const dialog = page.getByRole('dialog', { name: 'Add a model' })
   await dialog.getByRole('combobox', { name: 'File or model' }).click()
