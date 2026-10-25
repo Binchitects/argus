@@ -123,6 +123,7 @@ public sealed class OperationsTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "MON-01")]
     public void The_certificate_alerts_warn_thirty_days_before_and_are_critical_seven_days_before()
     {
         var path = Path.Combine(AppFixture.DashboardsPath, "..", "..", "..", "..", "deploy", "config", "prometheus", "rules", "stack.yml");

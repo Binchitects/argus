@@ -155,6 +155,7 @@ public sealed partial class SettingsTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "DAT-05")]
     public async Task A_secret_is_stored_encrypted_used_in_plain_and_never_sent_back()
     {
         var (f, _, db) = NewApp();

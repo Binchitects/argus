@@ -72,6 +72,7 @@ public sealed class ScimTests(AppFixture app, CompanyIdpFixture company) : IClas
     }
 
     [Fact]
+    [Trait("Control", "IAM-04")]
     public async Task Scim_needs_its_token_which_is_shown_once_stored_as_a_hash_and_replaced_at_once()
     {
         var database = app.ConnectionStringFor("scimtoken_" + Guid.NewGuid().ToString("N")[..8]);
@@ -107,6 +108,7 @@ public sealed class ScimTests(AppFixture app, CompanyIdpFixture company) : IClas
     }
 
     [Fact]
+    [Trait("Control", "IAM-04")]
     public async Task A_person_deactivated_through_scim_is_disabled_here_and_their_keys_stop_at_once()
     {
         var (f, scim) = await ScimAsync();

@@ -208,6 +208,7 @@ public sealed partial class ObserveTests(AppFixture app) : IAsyncLifetime
         """;
 
     [Fact]
+    [Trait("Control", "MON-01")]
     public async Task Alerts_show_what_fires_and_every_rule_and_survive_either_source_down()
     {
         var b = await Admin();

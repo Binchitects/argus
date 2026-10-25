@@ -46,6 +46,7 @@ public sealed class SecretScanningTests(AppFixture app)
         app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.ToJsonString();
 
     [Fact]
+    [Trait("Control", "DAT-04")]
     public async Task A_pasted_private_key_is_refused_in_the_chat_and_through_the_API_and_audited_by_its_kind_only()
     {
         await using var f = NewApp();

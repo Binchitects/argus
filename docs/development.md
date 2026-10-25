@@ -177,16 +177,20 @@ A release is a tag, `vX.Y.Z`, on a commit of `main` whose suites all pass.
    `vitest`), the deployment tooling (`python3 -m unittest discover -s
    tests/deploy`), and the outside-in suites against the stack running this
    commit ([testing.md](testing.md)).
-3. An upgrade from the oldest release the bundle takes (5.2.0) keeps every
+3. The compliance checks pass against the stack running this commit:
+   `python3 deploy/scripts/compliance-check.py` exits 0
+   ([compliance](compliance/README.md#checking-a-live-stack)). A change that
+   makes a control weaker is under **Weakened controls** in the changelog.
+4. An upgrade from the oldest release the bundle takes (5.2.0) keeps every
    person, chat and setting: `scripts/upgrade-test.py --from v5.2.0
    --stop-live`. Each migration applies on that release's schema.
-4. The images: `docker compose build` and `docker compose --profile laya build
+5. The images: `docker compose build` and `docker compose --profile laya build
    laya` in `deploy/`.
-5. Code Arena: `tools/fetch-code-arena-packs.sh` before the images (the app
+6. Code Arena: `tools/fetch-code-arena-packs.sh` before the images (the app
    image carries its builds); its packages for the release
    (`tools/package-code-arena.sh`, into `dist/`) are made by the installer's
    step below when `dist/` has none.
-6. The offline installer: `deploy/scripts/make-installer.sh` (with `--models`
+7. The offline installer: `deploy/scripts/make-installer.sh` (with `--models`
    and `--packs` for a bundle that carries them) writes
    `dist/argus-arena-VERSION-offline.run` and its `.sha256`. It needs the tags
    of the releases since 5.2.0 (`git fetch --tags`) and the embedding model in
@@ -194,9 +198,9 @@ A release is a tag, `vX.Y.Z`, on a commit of `main` whose suites all pass.
    `sh dist/argus-arena-VERSION-offline.run verify`, and
    `sh dist/argus-arena-VERSION-offline.run upgrade --dir DIR --dry-run` against
    an installation of the oldest release it upgrades.
-7. Tag the commit and push the tag (`release.yml` publishes the Argus image),
-   and attach the `.run`, its `.sha256` and Code Arena's packages to the
-   release.
+8. Tag the commit and push the tag (`release.yml` publishes the Argus image),
+   make the GitHub release (`gh release create`), and attach the `.run`, its
+   `.sha256` and Code Arena's packages to it.
 
 When a release can no longer upgrade from 5.2.0 (a migration or a file that
 needs a release in between), raise `UPGRADES_FROM` in

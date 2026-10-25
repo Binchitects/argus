@@ -100,6 +100,7 @@ public sealed class SamlSignInTests(AppFixture app, SamlIdpFixture saml) : IClas
         [.. (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit?take=50"))).EnumerateArray()];
 
     [Fact]
+    [Trait("Control", "IAM-04")]
     public async Task Saml_sign_in_creates_the_person_with_their_groups_their_role_and_a_key()
     {
         var f = await AppAsync();

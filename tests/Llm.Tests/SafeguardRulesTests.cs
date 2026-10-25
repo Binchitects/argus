@@ -153,6 +153,7 @@ public sealed class SafeguardRulesTests(AppFixture app)
         .Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => JsonDocument.Parse(l[6..]).RootElement)];
 
     [Fact]
+    [Trait("Control", "DAT-04")]
     public async Task Answers_are_masked_or_withheld_and_what_tools_send_and_bring_back_is_held_by_their_rules()
     {
         await using var f = NewApp();

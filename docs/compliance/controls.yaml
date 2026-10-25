@@ -1,0 +1,374 @@
+# The controls Arena provides, and what proves each one.
+#
+# The source of truth for docs/compliance/, Admin → Compliance and the guard test
+# (tests/Llm.Tests/ComplianceControlsTests.cs), which fails when anything named here
+# is gone. Each control:
+#   id         area and number (IAM-01); never reused for something else
+#   title      what it is, in a few words
+#   meets      how Arena meets it
+#   frameworks the clauses it serves: iso27001 (Annex A of ISO/IEC 27001:2022),
+#              soc2 (the Trust Services Criteria), hipaa (45 CFR, 164.xxx),
+#              gdpr (the Regulation's articles, Art.N)
+#   docs       where it is documented: a file under docs/ and a section's anchor
+#   tests      what proves it: Project/Class.Method for .NET (the method carries
+#              [Trait("Control", "<id>")]), deploy/test_x.py::test_name for Python
+#   checks     what watches it live: app:<id> (inside the app, Admin → Compliance)
+#              or live:<id> (from outside, deploy/scripts/compliance-check.py)
+#   operator   the part of the company that runs it
+
+frameworks:
+  iso27001: ISO/IEC 27001:2022, Annex A
+  soc2: SOC 2, Trust Services Criteria (2017, revised points of focus 2022)
+  hipaa: HIPAA Security and Privacy Rules, 45 CFR Part 164
+  gdpr: General Data Protection Regulation (EU) 2016/679
+
+controls:
+  - id: IAM-01
+    title: Each person signs in as themselves, with a strong password
+    meets: >-
+      Every person has their own account. Passwords must score 3 or more on
+      zxcvbn, with the person's own names counted against them; a wrong
+      password and an unknown name get the same answer; guessing one account,
+      spraying many and floods are stopped and lock out.
+    frameworks:
+      iso27001: [A.5.16, A.5.17, A.8.5]
+      soc2: [CC6.1, CC6.2]
+      hipaa: [164.308(a)(5)(ii)(C), 164.308(a)(5)(ii)(D), 164.312(a)(2)(i), 164.312(d)]
+      gdpr: [Art.32]
+    docs: [authentication.md#what-protects-the-sign-in]
+    tests:
+      - Llm.Tests/IdentityTests.Wrong_password_and_unknown_name_get_the_same_answer
+      - Llm.Tests/IdentityTests.A_person_changes_their_own_password_only_with_the_current_one_and_a_strong_new_one
+      - Llm.Tests/IdentityTests.Five_failures_ban_that_account_from_that_address_but_not_colleagues_behind_it
+      - Llm.Tests/IdentityTests.Spraying_many_accounts_from_one_address_bans_the_address
+      - Llm.Tests/IdentityTests.Ten_failures_lock_the_account_from_any_address
+      - Llm.Tests/ConcurrentSignInTests.Parallel_wrong_passwords_still_reach_the_lockout
+    checks: [app:passwords]
+    operator: >-
+      A password policy people are told about; no shared accounts; the first
+      admin's password (ADMIN_PASSWORD) kept as a break-glass secret.
+
+  - id: IAM-02
+    title: Sessions end on their own
+    meets: >-
+      A session ends after an hour without activity and after 12 hours in any
+      case (30 days only when the person asks to stay signed in); each one is
+      re-checked against the account every minute, so a disabled person or a
+      reset password ends it at once. The cookie is Secure, HttpOnly and
+      SameSite.
+    frameworks:
+      iso27001: [A.8.5]
+      soc2: [CC6.1]
+      hipaa: [164.312(a)(2)(iii)]
+      gdpr: [Art.32]
+    docs: [authentication.md#what-protects-the-sign-in]
+    tests:
+      - Llm.Tests/SessionCapTests.Refreshing_a_session_does_not_restart_the_twelve_hour_cap
+      - Llm.Tests/IdentityTests.A_password_reset_ends_the_persons_sessions_and_only_the_new_password_works
+      - Llm.Tests/IdentityTests.Disabling_signs_out_and_blocks_keys_and_enabling_undoes_it
+    checks: [app:sessions, live:cookies]
+    operator: >-
+      Decide whether "keep me signed in" fits (for health data, set
+      Auth:RememberMe no longer than Auth:SessionMax); screens locked when
+      people step away.
+
+  - id: IAM-03
+    title: Two-factor sign-in
+    meets: >-
+      People enrol an authenticator app and get recovery codes; an admin can
+      reset a lost one. Company sign-in brings the identity provider's own
+      second factor.
+    frameworks:
+      iso27001: [A.8.5]
+      soc2: [CC6.1]
+      hipaa: [164.312(d)]
+      gdpr: [Art.32]
+    docs: [authentication.md#what-protects-the-sign-in]
+    tests:
+      - Llm.Tests/IdentityTests.Two_factor_sign_in_with_an_authenticator_and_with_a_recovery_code
+    checks: [app:two-factor]
+    operator: >-
+      Require a second factor at the identity provider for company sign-in;
+      admins enrol theirs.
+
+  - id: IAM-04
+    title: Joiners and leavers follow the company's directory
+    meets: >-
+      People come from the company's directory (LDAP or Active Directory),
+      OIDC or SAML with their groups and role; SCIM creates, changes and
+      deactivates them, and a person who leaves is disabled with their keys
+      stopped at once.
+    frameworks:
+      iso27001: [A.5.16, A.5.18]
+      soc2: [CC6.2, CC6.3]
+      hipaa: [164.308(a)(3)(ii)(C), 164.308(a)(4)(ii)(C)]
+      gdpr: [Art.32]
+    docs:
+      - authentication.md#the-company-directory-ldap--active-directory
+      - authentication.md#scim-provisioning
+      - authentication.md#company-sign-in-by-saml-20
+    tests:
+      - Llm.Tests/ScimTests.Scim_needs_its_token_which_is_shown_once_stored_as_a_hash_and_replaced_at_once
+      - Llm.Tests/ScimTests.A_person_deactivated_through_scim_is_disabled_here_and_their_keys_stop_at_once
+      - Llm.Tests/SamlSignInTests.Saml_sign_in_creates_the_person_with_their_groups_their_role_and_a_key
+      - Llm.Tests/CompanySignInTests.Company_sign_in_creates_the_person_with_their_groups_their_role_and_a_key
+      - Llm.Tests/LdapTests.The_sync_disables_people_who_leave_and_restores_them_when_they_return
+    operator: >-
+      The joiner, mover and leaver process in the directory; local accounts
+      kept to the few who need them.
+
+  - id: IAM-05
+    title: Least privilege, by roles and rules
+    meets: >-
+      What a person may do comes from roles (built in, or made by the company)
+      held directly, through a group or by everyone, and from rules that give
+      or take a feature; admin roles can be scoped to some groups. The checker
+      says why a person may or may not do something.
+    frameworks:
+      iso27001: [A.5.15, A.5.18, A.8.2, A.8.3]
+      soc2: [CC6.1, CC6.3]
+      hipaa: [164.308(a)(4)(ii)(B), 164.312(a)(1)]
+      gdpr: [Art.25, Art.32]
+    docs: [admin.md#access-roles-and-rules]
+    tests:
+      - Llm.Tests/EndpointAccessTests.A_role_reaches_the_reads_of_its_permissions_and_no_others
+      - Llm.Tests/EndpointAccessTests.Each_built_in_role_holds_exactly_its_permissions
+      - Llm.Tests/AccessEndpointsTests.A_rule_takes_a_feature_from_a_group_and_the_checker_says_why
+    operator: Decide who holds which role, and review it.
+
+  - id: IAM-06
+    title: API keys are personal, revocable and checked
+    meets: >-
+      Each key belongs to one person and works only as them; an unknown,
+      blocked or expired key is refused; rotating a key revokes the old one
+      first, and disabling a person stops their keys.
+    frameworks:
+      iso27001: [A.5.17, A.8.5]
+      soc2: [CC6.1]
+      hipaa: [164.312(d)]
+      gdpr: [Art.32]
+    docs: [authentication.md#as-a-machine-client-of-the-engine-api]
+    tests:
+      - Llm.Tests/KeyCheckTests.An_unknown_blocked_or_expired_key_is_refused
+      - Llm.Tests/IdentityTests.Rotating_a_key_revokes_the_old_one_first
+    operator: People keep their keys out of shared files and repositories.
+
+  - id: LOG-01
+    title: Who did what is recorded
+    meets: >-
+      The audit log keeps every sign-in, every change to people, groups,
+      roles, settings and the index, every export and every tool an agent
+      calls as a person, with who, whom, when and from where; never content.
+    frameworks:
+      iso27001: [A.8.15]
+      soc2: [CC7.2]
+      hipaa: [164.308(a)(1)(ii)(D), 164.312(b)]
+      gdpr: [Art.5(2), Art.30]
+    docs: [admin.md#admin, settings.md#every-change-is-audited]
+    tests:
+      - Llm.Tests/IdentityTests.Everything_is_in_the_audit_log
+      - Llm.Tests/ArenaMcpTests.An_agent_signs_in_with_the_persons_key_gets_their_chat_tools_and_each_call_is_audited
+    checks: [app:audit-log]
+    operator: Someone reviews the audit log on a schedule.
+
+  - id: LOG-02
+    title: Logs are kept, and kept for a set time
+    meets: >-
+      Every service's logs go to Loki, searchable by container, level and
+      text; how long Loki keeps them is read from its configuration and shown.
+    frameworks:
+      iso27001: [A.8.15]
+      soc2: [CC7.2]
+      hipaa: [164.312(b)]
+      gdpr: [Art.5(1)(e)]
+    docs: [admin.md#storage]
+    tests:
+      - Llm.Tests/StorageTests.Lokis_retention_is_read_from_its_configuration
+    checks: [app:log-retention]
+    operator: Decide how long logs are kept.
+
+  - id: MON-01
+    title: The service is watched and people are alerted
+    meets: >-
+      Prometheus and Alertmanager watch the stack; an alert that starts firing
+      reaches every admin's bell, email and the alerts webhook once; the
+      certificate warns 30 days before it expires and is critical 7 days before.
+    frameworks:
+      iso27001: [A.8.16]
+      soc2: [CC7.2, CC7.3]
+      hipaa: [164.308(a)(1)(ii)(D), 164.308(a)(6)(ii)]
+      gdpr: [Art.32(1)(b)]
+    docs: [admin.md#admin]
+    tests:
+      - Llm.Tests/ObserveTests.Alerts_show_what_fires_and_every_rule_and_survive_either_source_down
+      - Llm.Tests/NotificationsTests.A_system_alert_that_starts_firing_reaches_every_admin_once
+      - Llm.Tests/OperationsTests.The_certificate_alerts_warn_thirty_days_before_and_are_critical_seven_days_before
+    checks: [app:certificate]
+    operator: Someone takes the alerts, around the clock where the company needs it.
+
+  - id: DAT-01
+    title: Chats and files are deleted when their time is up
+    meets: >-
+      The company sets how long chats are kept, a group can set a shorter time,
+      and every hour a job deletes chats past it with their files, and files
+      nobody uses that are as old; each deletion is audited with counts.
+    frameworks:
+      iso27001: [A.5.33, A.8.10]
+      soc2: [C1.2, P4.2, P4.3]
+      gdpr: [Art.5(1)(e), Art.17]
+    docs: [admin.md#retention-legal-hold-and-exports]
+    tests:
+      - Llm.Tests/RetentionTests.A_chat_past_its_groups_retention_is_deleted_with_its_files_and_one_under_legal_hold_is_not
+    checks: [app:chat-retention]
+    operator: Decide the periods, and write them in the retention policy.
+
+  - id: DAT-02
+    title: Legal hold
+    meets: >-
+      A person on legal hold keeps everything: retention passes them by, and a
+      chat they delete is hidden from them, not erased, until the hold ends.
+    frameworks:
+      iso27001: [A.5.28, A.5.33]
+      gdpr: [Art.17(3)(e)]
+    docs: [admin.md#retention-legal-hold-and-exports]
+    tests:
+      - Llm.Tests/RetentionTests.A_person_on_legal_hold_who_deletes_a_chat_only_hides_it_until_the_hold_ends
+    operator: Legal decides holds and when they end.
+
+  - id: DAT-03
+    title: A person's data, exported
+    meets: >-
+      People download everything of theirs from Your account; an admin exports
+      a person's data for eDiscovery, audited: their profile, chats as JSON and
+      Markdown, and files.
+    frameworks:
+      iso27001: [A.5.34]
+      soc2: [P5.1]
+      hipaa: [164.524]
+      gdpr: [Art.15, Art.20]
+    docs: [admin.md#retention-legal-hold-and-exports]
+    tests:
+      - Llm.Tests/RetentionTests.A_persons_export_holds_their_profile_chats_as_json_and_markdown_and_their_files
+    operator: Answer a person's request within the time the law gives (a month under the GDPR).
+
+  - id: DAT-04
+    title: Personal data and secrets kept from the model
+    meets: >-
+      Safeguards mask personal data before a question reaches the model while
+      the chat keeps it as written; answers are masked or withheld by rule;
+      what tools send and bring back is held by their rules; a pasted secret
+      or private key is refused and audited by its kind only.
+    frameworks:
+      iso27001: [A.8.11, A.8.12]
+      soc2: [C1.1, CC6.7]
+      hipaa: [164.502(b)]
+      gdpr: [Art.25, Art.32(1)(a)]
+    docs: [admin.md#safeguards, chat.md#safeguards]
+    tests:
+      - Llm.Tests/SafeguardsTests.Personal_data_reaches_the_model_masked_and_the_chat_keeps_it_as_written
+      - Llm.Tests/SafeguardRulesTests.Answers_are_masked_or_withheld_and_what_tools_send_and_bring_back_is_held_by_their_rules
+      - Llm.Tests/SecretScanningTests.A_pasted_private_key_is_refused_in_the_chat_and_through_the_API_and_audited_by_its_kind_only
+    operator: Decide which data may reach which model, and which models are outside the company.
+
+  - id: DAT-05
+    title: Secrets are encrypted at rest
+    meets: >-
+      The signing keys, settings' secrets (directory, SSO, connectors) and
+      tokens are stored encrypted with APP_KEY; a changed key fails loudly
+      instead of resetting keys; secrets are never sent back to a browser.
+    frameworks:
+      iso27001: [A.8.24]
+      soc2: [CC6.1]
+      hipaa: [164.312(a)(2)(iv)]
+      gdpr: [Art.32(1)(a)]
+    docs: [authentication.md#what-protects-the-sign-in]
+    tests:
+      - Llm.Tests/KeyRingTests.With_a_data_key_the_key_ring_is_encrypted_and_survives_a_restart
+      - Llm.Tests/KeyRingTests.A_changed_data_key_fails_loudly_instead_of_silently_resetting_keys
+      - Llm.Tests/SettingsTests.A_secret_is_stored_encrypted_used_in_plain_and_never_sent_back
+      - Llm.Tests/KnowledgeConnectorTests.Test_connection_says_what_it_reached_and_secrets_are_stored_encrypted_and_never_sent_back
+    checks: [app:data-key]
+    operator: Keep APP_KEY with the company's secrets, apart from the backups; encrypt the hosts' disks.
+
+  - id: NET-01
+    title: Encrypted in transit, one way in
+    meets: >-
+      Only Traefik's ports 80 and 443 are published, 80 only to redirect; the
+      services talk on Docker's network; every page carries a strict content
+      security policy and the security headers; a state change needs a header
+      another site cannot send; hosts without a rule are refused.
+    frameworks:
+      iso27001: [A.8.20, A.8.24, A.8.26]
+      soc2: [CC6.6, CC6.7]
+      hipaa: [164.312(e)(1), 164.312(e)(2)(ii)]
+      gdpr: [Art.32(1)(a)]
+    docs:
+      - authentication.md#what-is-deliberately-not-behind-sign-in
+      - deployment.md#certificates
+    tests:
+      - Llm.Tests/FoundationTests.Security_headers_are_set
+      - Llm.Tests/IdentityTests.State_changes_without_the_csrf_header_are_refused
+      - Llm.Tests/ForwardAuthTests.Hosts_without_a_rule_are_denied_even_to_admins
+    checks: [live:tls, live:headers, live:csrf]
+    operator: A certificate from the company's CA or Let's Encrypt; the network around the hosts.
+
+  - id: OPS-01
+    title: Backups, restored and proven
+    meets: >-
+      scripts/backup.sh backs up the databases, the settings and the files,
+      with a second copy elsewhere; point-in-time recovery archives the WAL;
+      the drill restores into a throwaway stack, never the live one, and
+      checks that every person, chat and setting came back.
+    frameworks:
+      iso27001: [A.5.30, A.8.13]
+      soc2: [A1.2, A1.3, CC9.1]
+      hipaa: [164.308(a)(7)(ii)(A), 164.308(a)(7)(ii)(B), 164.308(a)(7)(ii)(D)]
+      gdpr: [Art.32(1)(c), Art.32(1)(d)]
+    docs:
+      - deployment.md#backups-and-restore
+      - deployment.md#point-in-time-recovery-pitr
+    tests:
+      - deploy/test_backup.py::test_By_default_it_keeps_BACKUP_KEEP_here_and_in_the_second_copy
+      - deploy/test_pitr.py::test_pitr_yml_archives_wal_to_the_backup_disk
+      - deploy/test_pitr.py::test_the_drill_restores_into_a_scratch_container_never_the_stacks
+      - deploy/test_recovery.py::test_The_live_project_is_refused_before_anything_runs
+      - deploy/test_recovery_check.py::test_A_person_lost_in_the_restore_fails_it
+    checks: [app:backups]
+    operator: Schedule the backups, keep the second copy off the host, run the drill on a schedule.
+
+  - id: OPS-02
+    title: Code the model writes runs apart
+    meets: >-
+      Python, documents and a plugin's own server run in the sandbox: no
+      network, a read-only root, its own limits, nothing that outlives a run.
+    frameworks:
+      iso27001: [A.8.22, A.8.7]
+      soc2: [CC6.8]
+      hipaa: [164.308(a)(5)(ii)(B)]
+      gdpr: [Art.32(1)(b)]
+    docs: [plugins.md#a-server-of-its-own-in-the-sandbox]
+    tests:
+      - Llm.Tests/ChatToolsTests.Python_runs_in_the_sandbox_with_the_chats_files_and_what_it_writes_comes_back
+      - Llm.Tests/PluginTests.A_plugins_own_server_runs_in_the_sandbox_with_its_settings_one_job_a_call
+    operator: Keep the sandbox's host patched.
+
+  - id: GOV-01
+    title: The controls are kept from breaking
+    meets: >-
+      This file names, for each control, the tests and live checks that prove
+      it; the guard test fails when one of them is gone, and the release
+      checklist requires the live checks to pass.
+    frameworks:
+      iso27001: [A.5.36, A.8.29, A.8.32]
+      soc2: [CC4.1, CC8.1]
+      hipaa: [164.308(a)(8)]
+      gdpr: [Art.5(2), Art.25]
+    docs:
+      - compliance/README.md#controls-and-how-they-are-kept
+      - development.md#releasing
+    tests:
+      - Llm.Tests/ComplianceControlsTests.Every_control_names_tests_documents_and_checks_that_exist
+      - Llm.Tests/ComplianceControlsTests.Every_test_that_proves_a_control_is_named_by_it
+      - Llm.Tests/ComplianceControlsTests.The_app_runs_its_checks_and_admins_see_them_with_the_controls
+      - deploy/test_compliance_check.py::test_A_failed_check_fails_the_run_and_warnings_only_with_strict
+    operator: The release manager runs the checklist; an auditor samples it.

@@ -411,6 +411,7 @@ public sealed class LdapTests(AppFixture app, LdapServer ldap) : IClassFixture<L
     }
 
     [Fact]
+    [Trait("Control", "IAM-04")]
     public async Task The_sync_disables_people_who_leave_and_restores_them_when_they_return()
     {
         var sync = "/api/admin/ldap/sync";

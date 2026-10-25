@@ -80,6 +80,7 @@ public sealed class FoundationTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "NET-01")]
     public async Task Security_headers_are_set()
     {
         var res = await _client.GetAsync(new Uri("/api/info", UriKind.Relative));

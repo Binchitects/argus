@@ -338,6 +338,7 @@ public sealed class KnowledgeConnectorTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "DAT-05")]
     public async Task Test_connection_says_what_it_reached_and_secrets_are_stored_encrypted_and_never_sent_back()
     {
         await using var f = NewApp();

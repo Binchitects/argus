@@ -13,6 +13,7 @@ import authentication from '@docs/authentication.md?raw'
 import chat from '@docs/chat.md?raw'
 import ci from '@docs/ci.md?raw'
 import codeArena from '@docs/code-arena.md?raw'
+import compliance from '@docs/compliance/README.md?raw'
 import configuration from '@docs/configuration.md?raw'
 import cpuTemperature from '@docs/cpu-temperature.md?raw'
 import data from '@docs/data.md?raw'
@@ -102,6 +103,7 @@ export const manualGroups: ManualGroup[] = [
       doc('admin.md', 'Admin, usage and cost', 'The admin area: people, groups, models, tools, dashboards, logs, alerts, usage and cost.', 'admins', admin),
       doc('settings.md', 'Settings', 'The Settings page: what applies at once or after a restart, secrets, what groups can set.', 'admins', settings),
       doc('authentication.md', 'Sign-in', 'Who signs in where: local accounts, the directory, company sign-in, SCIM, 2FA.', 'admins', authentication),
+      doc('compliance/README.md', 'Compliance', 'ISO 27001, SOC 2, HIPAA and the GDPR: what Arena covers and the company does, the controls, and the checks that keep them.', 'admins', compliance),
       doc('knowledge.md', 'Company knowledge', 'GitLab, Confluence, SharePoint, folders and websites, searched by each person within their rights.', 'admins', knowledge),
       doc('plugins.md', 'Plugins and APIs', 'Installing plugins, each person\'s own account, the manifest, a catalog.', 'admins', plugins),
       doc('deployment.md', 'Deploying', 'The samples and secrets, addresses, a host with no network, switching the model, the traps.', 'admins', deployment),

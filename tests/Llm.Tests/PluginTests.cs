@@ -308,6 +308,7 @@ public sealed class PluginTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "OPS-02")]
     public async Task A_plugins_own_server_runs_in_the_sandbox_with_its_settings_one_job_a_call()
     {
         await using var sandbox = new FakeSandbox();

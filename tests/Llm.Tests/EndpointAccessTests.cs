@@ -132,6 +132,7 @@ public sealed partial class EndpointAccessTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "IAM-05")]
     public async Task A_role_reaches_the_reads_of_its_permissions_and_no_others()
     {
         var routes = Routes().Where(r => r.Method == "GET" && r.Permission is { } p && !Permissions.IsFeature(p) && !r.Pattern.Contains('{', StringComparison.Ordinal)).ToList();
@@ -194,6 +195,7 @@ public sealed partial class EndpointAccessTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "IAM-05")]
     public void Each_built_in_role_holds_exactly_its_permissions()
     {
         var roles = BuiltInRoles.All.ToDictionary(r => r.Key, r => new AccessRole { Key = r.Key, Name = r.Name, BuiltIn = true, Permissions = [.. r.Permissions] });

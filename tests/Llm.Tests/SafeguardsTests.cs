@@ -70,6 +70,7 @@ public sealed class SafeguardsTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "DAT-04")]
     public async Task Personal_data_reaches_the_model_masked_and_the_chat_keeps_it_as_written()
     {
         await using var f = NewApp([]);

@@ -136,7 +136,9 @@ What each person may do is decided in one place, from three things:
   **Review admin**, **Team manager** (a group's people, their credit and
   limits, its spend; given over a group), **Supervisor** (dashboards, alerts,
   logs, usage and the audit log, read-only), **Operator** (takes alerts, loads
-  and unloads models, cleans up storage) and **Member**. A role is held by a person, by a group (an
+  and unloads models, cleans up storage), **Safety officer** (the safeguards),
+  **Compliance officer** (Admin → Compliance: the controls and their checks;
+  reads the audit log; see [compliance](compliance/README.md)) and **Member**. A role is held by a person, by a group (an
   app group, a directory group linked to one, or a SCIM group) or by
   everyone, maybe until a date.
 - **Rules**: allow or deny one action on a resource (a model, a tool, a

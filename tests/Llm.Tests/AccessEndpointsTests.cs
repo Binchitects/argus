@@ -72,6 +72,7 @@ public sealed class AccessEndpointsTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "IAM-05")]
     public async Task A_rule_takes_a_feature_from_a_group_and_the_checker_says_why()
     {
         var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);

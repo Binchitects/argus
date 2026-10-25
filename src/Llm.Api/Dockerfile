@@ -20,6 +20,8 @@ COPY src/Llm.Core/ src/Llm.Core/
 COPY src/Llm.Api/ src/Llm.Api/
 # The skills that come with Arena, built into the app (and Code Arena, below).
 COPY skills/ skills/
+# The compliance controls, which Admin → Compliance shows.
+COPY docs/compliance/controls.yaml docs/compliance/
 RUN dotnet publish src/Llm.Api/Llm.Api.csproj -c Release --no-restore -o /out ${APP_VERSION:+-p:AppVersion=$APP_VERSION} \
  && rm -f /out/*.pdb \
  && mkdir -p /shared/engine-config /shared/directory /shared/sandbox

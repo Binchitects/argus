@@ -1,6 +1,6 @@
 namespace Llm.Api;
 
-/// <summary>Retention and legal hold, groups' credit, API keys' rate limits, prices and costs, the gateway's guardrail, and storage: their services and endpoints.</summary>
+/// <summary>Retention and legal hold, groups' credit, API keys' rate limits, prices and costs, the gateway's guardrail, storage and compliance: their services and endpoints.</summary>
 public static class GovernanceWiring
 {
     public static void AddGovernance(this IServiceCollection services, IConfiguration config)
@@ -23,6 +23,7 @@ public static class GovernanceWiring
         services.AddScoped<Gateway.CostRecalculation>();
         services.AddScoped<Dashboards.PromptUsage>();
         Storage.StorageEndpoints.AddStorage(services, config);
+        Compliance.ComplianceEndpoints.AddCompliance(services);
     }
 
     public static void MapGovernance(this IEndpointRouteBuilder app)
@@ -31,5 +32,6 @@ public static class GovernanceWiring
         Safeguards.GuardrailEndpoints.MapGuardrail(app);
         Dashboards.PromptEndpoints.MapPrompts(app);
         Storage.StorageEndpoints.MapStorage(app);
+        Compliance.ComplianceEndpoints.MapCompliance(app);
     }
 }

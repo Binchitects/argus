@@ -51,6 +51,7 @@ public sealed class NotificationsTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "MON-01")]
     public async Task A_system_alert_that_starts_firing_reaches_every_admin_once()
     {
         var admin = await Admin();

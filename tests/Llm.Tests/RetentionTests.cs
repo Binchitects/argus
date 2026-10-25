@@ -87,6 +87,7 @@ public sealed class RetentionTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "DAT-01")]
     public async Task A_chat_past_its_groups_retention_is_deleted_with_its_files_and_one_under_legal_hold_is_not()
     {
         var (f, clock) = NewApp(new() { ["Retention:Days"] = "365" });
@@ -136,6 +137,7 @@ public sealed class RetentionTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "DAT-02")]
     public async Task A_person_on_legal_hold_who_deletes_a_chat_only_hides_it_until_the_hold_ends()
     {
         var (f, _) = NewApp();
@@ -182,6 +184,7 @@ public sealed class RetentionTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "DAT-03")]
     public async Task A_persons_export_holds_their_profile_chats_as_json_and_markdown_and_their_files()
     {
         var (f, _) = NewApp();

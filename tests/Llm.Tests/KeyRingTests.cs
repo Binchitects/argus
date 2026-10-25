@@ -8,6 +8,7 @@ public sealed class KeyRingTests(AppFixture app)
     private static Dictionary<string, string?> WithKey(string key) => new() { ["Auth:DataKey"] = key };
 
     [Fact]
+    [Trait("Control", "DAT-05")]
     public async Task With_a_data_key_the_key_ring_is_encrypted_and_survives_a_restart()
     {
         var cs = app.ConnectionStringFor("ring_" + Guid.NewGuid().ToString("N")[..8]);
@@ -37,6 +38,7 @@ public sealed class KeyRingTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "DAT-05")]
     public async Task A_changed_data_key_fails_loudly_instead_of_silently_resetting_keys()
     {
         var cs = app.ConnectionStringFor("ring_" + Guid.NewGuid().ToString("N")[..8]);

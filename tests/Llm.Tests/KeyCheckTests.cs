@@ -85,6 +85,7 @@ public sealed class KeyCheckTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "IAM-06")]
     public async Task An_unknown_blocked_or_expired_key_is_refused()
     {
         var http = Inside();

@@ -300,6 +300,7 @@ public sealed class ForwardAuthTests(AppFixture app)
     [InlineData("unknown.llm.test")]
     [InlineData("metrics.other.example")]
     [InlineData("llm.test.evil.example")]
+    [Trait("Control", "NET-01")]
     public async Task Hosts_without_a_rule_are_denied_even_to_admins(string host)
     {
         var admin = await Browser().SignedInAsync("admin", AppFixture.AdminPassword);

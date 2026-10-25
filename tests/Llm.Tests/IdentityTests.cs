@@ -35,6 +35,7 @@ public sealed class IdentityTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "IAM-01")]
     public async Task Wrong_password_and_unknown_name_get_the_same_answer()
     {
         var wrong = await Browser().LoginAsync("admin", "not the password at all");
@@ -54,6 +55,7 @@ public sealed class IdentityTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "NET-01")]
     public async Task State_changes_without_the_csrf_header_are_refused()
     {
         var admin = await Admin();
@@ -102,6 +104,7 @@ public sealed class IdentityTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "IAM-01")]
     public async Task A_person_changes_their_own_password_only_with_the_current_one_and_a_strong_new_one()
     {
         var admin = await Admin();
@@ -120,6 +123,7 @@ public sealed class IdentityTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "IAM-02")]
     public async Task A_password_reset_ends_the_persons_sessions_and_only_the_new_password_works()
     {
         var admin = await Admin();
@@ -134,6 +138,7 @@ public sealed class IdentityTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "IAM-02")]
     public async Task Disabling_signs_out_and_blocks_keys_and_enabling_undoes_it()
     {
         var admin = await Admin();
@@ -182,6 +187,7 @@ public sealed class IdentityTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "IAM-06")]
     public async Task Rotating_a_key_revokes_the_old_one_first()
     {
         var admin = await Admin();
@@ -304,6 +310,7 @@ public sealed class IdentityTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "IAM-03")]
     public async Task Two_factor_sign_in_with_an_authenticator_and_with_a_recovery_code()
     {
         var admin = await Admin();
@@ -348,6 +355,7 @@ public sealed class IdentityTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "IAM-01")]
     public async Task Five_failures_ban_that_account_from_that_address_but_not_colleagues_behind_it()
     {
         var admin = await Admin();
@@ -364,6 +372,7 @@ public sealed class IdentityTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "IAM-01")]
     public async Task Spraying_many_accounts_from_one_address_bans_the_address()
     {
         var ip = "198.51.100.9";
@@ -376,6 +385,7 @@ public sealed class IdentityTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "IAM-01")]
     public async Task Ten_failures_lock_the_account_from_any_address()
     {
         var admin = await Admin();
@@ -408,6 +418,7 @@ public sealed class IdentityTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "LOG-01")]
     public async Task Everything_is_in_the_audit_log()
     {
         var admin = await Admin();
@@ -440,6 +451,7 @@ public sealed class IdentityTests(AppFixture app)
 public sealed class SessionCapTests(AppFixture app)
 {
     [Fact]
+    [Trait("Control", "IAM-02")]
     public async Task Refreshing_a_session_does_not_restart_the_twelve_hour_cap()
     {
         var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
@@ -467,6 +479,7 @@ public sealed class ConcurrentSignInTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "IAM-01")]
     public async Task Parallel_wrong_passwords_still_reach_the_lockout()
     {
         var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);

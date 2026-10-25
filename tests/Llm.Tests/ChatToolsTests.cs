@@ -782,6 +782,7 @@ public sealed class ChatToolsTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "OPS-02")]
     public async Task Python_runs_in_the_sandbox_with_the_chats_files_and_what_it_writes_comes_back()
     {
         await using var sandbox = new FakeSandbox();

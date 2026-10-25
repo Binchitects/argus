@@ -960,6 +960,7 @@ public sealed class StorageTests(AppFixture app)
     [InlineData("limits_config:\n  retention_period: 336h\ncompactor:\n  retention_enabled: false\ntable_manager:\n  retention_period: 336h\n", "forever")]
     [InlineData("limits_config:\n  per_stream:\n    retention_period: 1h\ncompactor:\n  retention_enabled: true\n", "forever")]
     [InlineData("server:\n  http_listen_port: 3100\n", null)]
+    [Trait("Control", "LOG-02")]
     public void Lokis_retention_is_read_from_its_configuration(string yaml, string? keeps) =>
         Assert.Equal(keeps, StorageReport.LokiKeeps(yaml));
 

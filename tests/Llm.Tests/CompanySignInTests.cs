@@ -79,6 +79,7 @@ public sealed class CompanySignInTests(AppFixture app, CompanyIdpFixture company
         [.. (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit?take=50"))).EnumerateArray()];
 
     [Fact]
+    [Trait("Control", "IAM-04")]
     public async Task Company_sign_in_creates_the_person_with_their_groups_their_role_and_a_key()
     {
         var f = await AppAsync();

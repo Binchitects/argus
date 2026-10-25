@@ -79,6 +79,7 @@ public sealed class ArenaMcpTests(AppFixture app)
         admin.Http.PutAsJsonAsync(new Uri($"/api/admin/tools/{tool}", UriKind.Relative), setting);
 
     [Fact]
+    [Trait("Control", "LOG-01")]
     public async Task An_agent_signs_in_with_the_persons_key_gets_their_chat_tools_and_each_call_is_audited()
     {
         await using var f = NewApp();

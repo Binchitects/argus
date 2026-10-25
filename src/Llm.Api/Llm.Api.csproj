@@ -27,6 +27,7 @@
     <EmbeddedResource Include="Chat\Tools\Blender\epilogue.py" LogicalName="blender-epilogue.py" />
     <EmbeddedResource Include="Media\Scripts\cut-story.py" LogicalName="cut-story.py" />
     <EmbeddedResource Include="Vector\Icons\lucide.json" LogicalName="lucide.json" />
+    <EmbeddedResource Include="../../docs/compliance/controls.yaml" LogicalName="compliance-controls.yaml" />
     <!-- The dashboards go into the image at /dashboards (Dockerfile), not beside the app. -->
     <Content Remove="Dashboards\json\**" />
     <None Include="Dashboards\json\**" />
