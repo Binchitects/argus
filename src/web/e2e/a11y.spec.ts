@@ -51,7 +51,7 @@ test('the skip link takes the keyboard past the navigation to the page', async (
   expect(await page.evaluate(() => !!document.activeElement?.closest('main'))).toBe(true)
 })
 
-const pages = ['/', '/account', '/setup', '/chat', '/tasks', '/usage', '/help', '/help/chat', '/help/admin', '/admin', '/admin/people', '/admin/groups', '/admin/tools', '/admin/sign-in', '/admin/models',
+const pages = ['/', '/account', '/setup', '/chat', '/tasks', '/memory', '/skills', '/usage', '/help', '/help/chat', '/help/admin', '/admin', '/admin/people', '/admin/groups', '/admin/tools', '/admin/sign-in', '/admin/models',
   '/admin/settings', '/admin/audit', '/admin/indexing', '/admin/packs', '/admin/explore', '/admin/monitoring', '/admin/dashboards', '/admin/dashboards/stack-health',
   ...(noObserve ? [] : ['/admin/logs', '/admin/alerts'])]
 
