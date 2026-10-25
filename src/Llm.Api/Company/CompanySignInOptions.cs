@@ -26,6 +26,21 @@ public sealed class CompanySignInOptions
     /// <summary>The claim with the person's groups; a dotted path (realm_access.roles) reaches into an object. Empty: no groups.</summary>
     public string GroupsClaim { get; set; } = "groups";
 
+    /// <summary>
+    /// What the provider says (OIDC's amr or acr, SAML's AuthnContextClassRef) when the person used a second factor, comma-separated:
+    /// a person required to use one (TwoFactorPolicy) is let in only when one of these comes.
+    /// </summary>
+    public string SecondFactorMethods { get; set; } = DefaultSecondFactorMethods;
+
+    public const string DefaultSecondFactorMethods = "mfa, otp, hwk, swk, sms, fido, fpt, face, iris, phr, phrh, " +
+        "http://schemas.microsoft.com/claims/multipleauthn, urn:oasis:names:tc:SAML:2.0:ac:classes:MobileTwoFactorContract, " +
+        "urn:oasis:names:tc:SAML:2.0:ac:classes:MobileTwoFactorUnregistered, urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken";
+
+    /// <summary>Whether what the provider said includes a second factor.</summary>
+    public bool SaysSecondFactor(IReadOnlyList<string>? methods) =>
+        methods is { Count: > 0 } && SecondFactorMethods.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Any(m => methods.Contains(m, StringComparer.OrdinalIgnoreCase));
+
     /// <summary>SAML: where the identity provider publishes its metadata (entity ID, sign-in address, signing certificates).</summary>
     public string? SamlMetadataUrl { get; set; }
 

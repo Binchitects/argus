@@ -80,7 +80,8 @@ controls:
       group of its members: who has none sets it up at their next sign-in and
       reaches nothing else until then, and cannot turn it off while it is
       required. Company sign-in brings the identity provider's own second
-      factor.
+      factor: when one is required, the provider must say it was used (OIDC's
+      amr or acr, SAML's authentication context), or the sign-in is refused.
     frameworks:
       iso27001: [A.8.5]
       soc2: [CC6.1]
@@ -91,6 +92,8 @@ controls:
       - Llm.Tests/IdentityTests.Two_factor_sign_in_with_an_authenticator_and_with_a_recovery_code
       - Llm.Tests/TwoFactorPolicyTests.Required_of_everyone_a_person_without_one_sets_it_up_first_reaches_nothing_else_and_cannot_turn_it_off
       - Llm.Tests/TwoFactorPolicyTests.Required_of_admins_or_of_a_groups_members_it_reaches_only_them_and_the_compliance_check_says_who_has_none
+      - Llm.Tests/CompanySignInTests.A_second_factor_required_of_someone_must_come_from_the_provider
+      - Llm.Tests/SamlSignInTests.A_second_factor_required_of_someone_must_be_the_assertions_authentication_context
     checks: [app:two-factor]
     operator: >-
       Choose who must use it (Settings → Sign-in: admins at least; everyone

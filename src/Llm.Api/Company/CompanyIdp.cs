@@ -10,7 +10,9 @@ using Microsoft.IdentityModel.Tokens;
 namespace Llm.Api.Company;
 
 /// <summary>What the identity provider says about a person, once its token (or SAML assertion) has been checked.</summary>
-public sealed record CompanyPerson(string Subject, string? UserName, string? Email, bool? EmailVerified, string? DisplayName, IReadOnlyList<string> Groups, bool Saml = false);
+/// <param name="Methods">How the provider says they signed in: OIDC's amr values and acr, SAML's AuthnContextClassRef.</param>
+public sealed record CompanyPerson(string Subject, string? UserName, string? Email, bool? EmailVerified, string? DisplayName, IReadOnlyList<string> Groups, bool Saml = false,
+    IReadOnlyList<string>? Methods = null);
 
 /// <summary>Why a company sign-in failed: the identity provider could not be reached, or what it sent is not acceptable.</summary>
 public sealed class CompanyIdpException(string message, bool unavailable = false, Exception? inner = null) : Exception(message, inner)
@@ -128,7 +130,8 @@ public sealed class CompanyIdp(IHttpClientFactory http, TimeProvider clock) : ID
             First(claims, "email"),
             First(claims, "email_verified") is { } v && bool.TryParse(v, out var verified) ? verified : null,
             string.IsNullOrWhiteSpace(name) ? null : name.Trim(),
-            string.IsNullOrWhiteSpace(o.GroupsClaim) ? [] : [.. Strings(claims, o.GroupsClaim.Trim()).Where(g => g.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)]);
+            string.IsNullOrWhiteSpace(o.GroupsClaim) ? [] : [.. Strings(claims, o.GroupsClaim.Trim()).Where(g => g.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)],
+            Methods: [.. Strings(claims, "amr"), .. First(claims, "acr") is { Length: > 0 } acr ? [acr] : Array.Empty<string>()]);
     }
 
     /// <summary>Reads the discovery document and the keys of these settings (saved or not): what an admin needs before saving them.</summary>

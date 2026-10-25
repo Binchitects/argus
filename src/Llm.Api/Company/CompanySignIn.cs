@@ -17,12 +17,14 @@ public enum CompanyOutcome
     Disabled,
     /// <summary>The provider's account cannot be a person here: no email, a name someone else has, a local admin...</summary>
     Refused,
+    /// <summary>A second factor is required of them, and the provider did not say they used one.</summary>
+    NoSecondFactor,
 }
 
 /// <summary>
 /// Signs in the person the identity provider vouched for: made on their first
 /// sign-in, matched by email to someone already here, kept current every time.
-/// Two-factor sign-in is the provider's business.
+/// Two-factor sign-in is the provider's: when the company requires it of them (TwoFactorPolicy), the provider must say it was used.
 /// </summary>
 public sealed class CompanySignIn(
     AppDbContext db,
@@ -31,6 +33,7 @@ public sealed class CompanySignIn(
     PeopleService people,
     CompanyPeople company,
     Audit audit,
+    TwoFactorPolicy twoFactor,
     IOptionsMonitor<CompanySignInOptions> options)
 {
     public const string Amr = "oidc";
@@ -138,6 +141,11 @@ public sealed class CompanySignIn(
             return await FailAsync(person, userName, CompanyOutcome.Refused, ex.Message);
         }
 
+        if (!o.SaysSecondFactor(person.Methods) && await twoFactor.RequiredAsync(user) is { } why)
+        {
+            var said = person.Methods is { Count: > 0 } m ? string.Join(", ", m) : "nothing";
+            return await FailAsync(person, userName, CompanyOutcome.NoSecondFactor, $"no second factor at the provider (it said {said}), and {why}");
+        }
         await signIn.SignInWithClaimsAsync(user, remember, [new Claim("amr", person.Saml ? SamlAmr : Amr)]);
         var now = DateTimeOffset.UtcNow;
         await db.Users.Where(u => u.Id == user.Id).ExecuteUpdateAsync(set => set.SetProperty(u => u.LastSignInAt, now));

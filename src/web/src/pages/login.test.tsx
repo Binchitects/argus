@@ -90,6 +90,12 @@ describe('company sign-in', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Your company account is not allowed to sign in here. Ask an admin.')
     expect(await screen.findByRole('link', { name: 'Sign in with Okta' })).toHaveAttribute('href', '/api/auth/company/start?rd=%2Fchat')
   })
+
+  it('says when the provider did not use the second factor this place requires', async () => {
+    fakeApi(null, { 'GET /api/auth/company': () => ({ json: { label: 'Okta' } }) })
+    renderApp('/login?error=company_no_second_factor&rd=%2Fchat')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Two-factor sign-in is required here, and your company sign-in did not use a second factor.')
+  })
 })
 
 describe('behind the form', () => {

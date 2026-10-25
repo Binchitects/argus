@@ -28,7 +28,9 @@ public sealed class FakeSamlIdp : HttpMessageHandler
     private const string Saml = "urn:oasis:names:tc:SAML:2.0:assertion";
 
     /// <summary>A person at the provider: their NameID and the attributes it sends.</summary>
-    public sealed record Person(string NameId, string? Email, string[] Groups, string? Name = null);
+    /// <param name="Context">The AuthnContextClassRef it sends: how they signed in.</param>
+    public sealed record Person(string NameId, string? Email, string[] Groups, string? Name = null,
+        string Context = "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport");
 
     /// <summary>
     /// What a forged or broken answer gets wrong. Wrap: "wrapped" puts a forged assertion (for Forged) where the
@@ -204,7 +206,7 @@ public sealed class FakeSamlIdp : HttpMessageHandler
                 new XElement(saml + "Conditions", new XAttribute("NotBefore", T(notBefore)), new XAttribute("NotOnOrAfter", T(until)),
                     new XElement(saml + "AudienceRestriction", new XElement(saml + "Audience", f.Audience ?? sp))),
                 new XElement(saml + "AuthnStatement", new XAttribute("AuthnInstant", T(now)), new XAttribute("SessionIndex", "_session"),
-                    new XElement(saml + "AuthnContext", new XElement(saml + "AuthnContextClassRef", "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport"))),
+                    new XElement(saml + "AuthnContext", new XElement(saml + "AuthnContextClassRef", p.Context))),
                 new XElement(saml + "AttributeStatement", attributes)));
     }
 

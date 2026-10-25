@@ -162,7 +162,9 @@ public static class SamlResponse
             null,
             Value(o.SamlDisplayNameAttribute),
             [.. Values(o.SamlGroupsAttribute).Distinct(StringComparer.OrdinalIgnoreCase)],
-            Saml: true);
+            Saml: true,
+            Methods: [.. SamlIdp.Children(assertion, AssertionNs, "AuthnStatement").SelectMany(s => SamlIdp.Children(s, AssertionNs, "AuthnContext"))
+                .SelectMany(c => SamlIdp.Children(c, AssertionNs, "AuthnContextClassRef")).Select(Text).OfType<string>().Where(t => t.Trim().Length > 0)]);
         var keepUntil = (notOnOrAfter is { } end && end > confirmedUntil ? end : confirmedUntil) + Skew;
         return new SamlAssertion(id, keepUntil, person);
     }

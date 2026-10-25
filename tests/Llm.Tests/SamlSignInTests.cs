@@ -259,6 +259,28 @@ public sealed class SamlSignInTests(AppFixture app, SamlIdpFixture saml) : IClas
     }
 
     [Fact]
+    [Trait("Control", "IAM-03")]
+    public async Task A_second_factor_required_of_someone_must_be_the_assertions_authentication_context()
+    {
+        var f = await AppAsync();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var group = await admin.JsonAsync(await admin.PostAsync("/api/admin/groups", new { name = "Payroll " + Guid.NewGuid().ToString("N")[..6], directory = "payroll" }));
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/groups/{group.GetProperty("id").GetGuid()}/policies", UriKind.Relative),
+            new { requireTwoFactor = true }));
+
+        var pia = new FakeSamlIdp.Person("pia@example.test", "pia@example.test", ["llm-users", "payroll"]);
+        var (refused, answer) = await saml.SignInAsync(f, pia);
+        Assert.Equal("/login?error=company_no_second_factor&rd=%2Fchat", Location(answer));
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await refused.GetAsync("/api/auth/me"));
+        Assert.Contains(await AuditAsync(admin), e => e.GetProperty("detail").GetString()?.Contains(
+            "no second factor at the provider (it said urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport)", StringComparison.Ordinal) == true);
+
+        var (session, welcome) = await saml.SignInAsync(f, pia with { Context = "http://schemas.microsoft.com/claims/multipleauthn" });
+        Assert.Equal("/chat", Location(welcome));
+        await StatusAssert.Is(HttpStatusCode.OK, await session.GetAsync("/api/auth/me"));
+    }
+
+    [Fact]
     public async Task Someone_outside_the_required_group_is_refused_and_a_local_admin_is_never_taken_over()
     {
         var f = await AppAsync();

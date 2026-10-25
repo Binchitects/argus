@@ -164,6 +164,7 @@ public static partial class CompanyEndpoints
         CompanyOutcome.Success => Results.Redirect(redirect),
         CompanyOutcome.NotAllowed => Results.Redirect(Login("company_not_allowed", redirect)),
         CompanyOutcome.Disabled => Results.Redirect(Login("company_disabled", redirect)),
+        CompanyOutcome.NoSecondFactor => Results.Redirect(Login("company_no_second_factor", redirect)),
         _ => Results.Redirect(Login("company_refused", redirect)),
     };
 

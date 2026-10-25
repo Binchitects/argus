@@ -35,6 +35,7 @@ const companyQuery = {
 const companyErrors: Record<string, string> = {
   company_not_allowed: 'Your company account is not allowed to sign in here. Ask an admin.',
   company_disabled: 'This account is disabled. Ask an admin.',
+  company_no_second_factor: 'Two-factor sign-in is required here, and your company sign-in did not use a second factor. Sign in there with one (your authenticator app or key), or ask your IT team to require it.',
   company_refused: 'Your company account cannot be used here. Ask an admin: the audit log says why.',
   company_failed: 'Company sign-in did not work. Try again; if it keeps failing, ask an admin (the audit log says why).',
   company_unavailable: "Your company's sign-in cannot be reached right now. Try again shortly.",

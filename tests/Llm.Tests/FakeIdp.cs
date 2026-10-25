@@ -22,7 +22,9 @@ public sealed class FakeIdp : HttpMessageHandler
     private const string KeyId = "idp-key-1";
 
     /// <summary>A person at the provider. Groups go in the identity token, or only in userinfo (as GitLab does).</summary>
-    public sealed record Person(string Sub, string? UserName, string? Email, string[] Groups, string? Name = null, bool? EmailVerified = null, bool GroupsInUserInfo = false);
+    /// <param name="Amr">How they signed in, as the identity token's amr says (pwd, mfa…); null: no amr.</param>
+    public sealed record Person(string Sub, string? UserName, string? Email, string[] Groups, string? Name = null, bool? EmailVerified = null, bool GroupsInUserInfo = false,
+        string[]? Amr = null);
 
     /// <summary>What a forged or broken identity token gets wrong.</summary>
     public sealed record Forgery(string? Issuer = null, string? Audience = null, string? Nonce = null, bool OtherKey = false, bool Expired = false);
@@ -119,6 +121,10 @@ public sealed class FakeIdp : HttpMessageHandler
         if (!p.GroupsInUserInfo)
         {
             claims["groups"] = p.Groups;
+        }
+        if (p.Amr is not null)
+        {
+            claims["amr"] = p.Amr;
         }
         var now = DateTime.UtcNow;
         var key = new RsaSecurityKey(f.OtherKey ? _other : _key) { KeyId = KeyId };

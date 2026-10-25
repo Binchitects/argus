@@ -118,6 +118,36 @@ public sealed class CompanySignInTests(AppFixture app, CompanyIdpFixture company
     }
 
     [Fact]
+    [Trait("Control", "IAM-03")]
+    public async Task A_second_factor_required_of_someone_must_come_from_the_provider()
+    {
+        var f = await AppAsync();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        // The provider's group "treasury" is a group here that requires a second factor.
+        var group = await admin.JsonAsync(await admin.PostAsync("/api/admin/groups", new { name = "Treasury " + Guid.NewGuid().ToString("N")[..6], directory = "treasury" }));
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/groups/{group.GetProperty("id").GetGuid()}/policies", UriKind.Relative),
+            new { requireTwoFactor = true }));
+
+        var tess = new FakeIdp.Person("sub-tess", "tess", "tess@example.test", ["llm-users", "treasury"], Amr: ["pwd"]);
+        var (refused, answer) = await company.SignInAsync(f, tess);
+        Assert.Equal("/login?error=company_no_second_factor&rd=%2Fchat", Location(answer));
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await refused.GetAsync("/api/auth/me"));
+        Assert.Contains(await AuditAsync(admin), e => e.GetProperty("action").GetString() == "sign_in" && !e.GetProperty("success").GetBoolean()
+            && e.GetProperty("detail").GetString()!.Contains("no second factor at the provider (it said pwd), and the group Treasury", StringComparison.Ordinal));
+        // No amr at all is no second factor either.
+        Assert.StartsWith("/login?error=company_no_second_factor", Location((await company.SignInAsync(f, tess with { Amr = null })).Answer), StringComparison.Ordinal);
+
+        var (session, welcome) = await company.SignInAsync(f, tess with { Amr = ["pwd", "mfa"] });
+        Assert.Equal("/chat", Location(welcome));
+        var me = await session.JsonAsync(await session.GetAsync("/api/auth/me"));
+        Assert.False(me.GetProperty("mustSetUpTwoFactor").GetBoolean());
+        // Someone it is not required of signs in with a password alone.
+        var (other, ok) = await company.SignInAsync(f, new("sub-otto", "otto", "otto@example.test", ["llm-users"], Amr: ["pwd"]));
+        Assert.Equal("/chat", Location(ok));
+        await StatusAssert.Is(HttpStatusCode.OK, await other.GetAsync("/api/auth/me"));
+    }
+
+    [Fact]
     public async Task Someone_outside_the_required_group_is_refused_and_disabled_until_they_are_back()
     {
         var f = await AppAsync();
