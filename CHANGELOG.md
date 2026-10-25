@@ -12,6 +12,34 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v7.0.1 (2026-10-26)
+
+What's new, told once, and a tidier place to type.
+
+### :sparkles: New features & Enhancements
+
+- **What's new**: after a release, each person is shown its highlights once, a
+  page each with where to try it (Memory, the chat, Skills, Code Arena), and
+  again from the account menu or the command palette; kept with the person,
+  so it opens once on every device
+
+### :bug: Bugs fixed
+
+- The sketch's **Attach it**, and every "make it a page, a diagram…" button,
+  did nothing: the picture was taken as missing before the browser had made
+  it
+- The chat's message box: Send fell onto a line of its own under the tools;
+  it stays at the bottom right beside the context gauge, and the tools wrap
+  among themselves when the box is narrow (the keyboard hint shows only when
+  the box is wide enough for it)
+- An answer's row of actions lost the pin and leave-out buttons added in 7.0
+  (leaving out a question leaves out its answer, and the context gauge pins
+  or leaves out any message)
+- Code Arena's chat: the model's name had shrunk to nothing beside the
+  thinking level in a narrow chat panel (the level shows as its icon there);
+  the editor's empty page no longer ran under the chat when the window is
+  narrow
+
 ## v7.0.0 (2026-10-25)
 
 Memory, and work that never loses the thread: what Arena and Code Arena
