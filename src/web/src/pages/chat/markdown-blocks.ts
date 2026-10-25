@@ -7,6 +7,21 @@ import { highlight } from './highlight'
 
 const marked = new Marked({ gfm: true, breaks: false })
 marked.use(markedKatex({ throwOnError: false, nonStandard: true }))
+// Money is not math: "$0.05 … $0.006" or "$5 and $10" (the would-be closing $ followed by a digit, as pandoc reads it) stays
+// text; "$5$" and "$x$" are still formulas. Tried before the formulas (marked tries the latest extension first).
+marked.use({
+  extensions: [
+    {
+      name: 'money',
+      level: 'inline',
+      start: (src: string) => {
+        const at = src.indexOf('$')
+        return at < 0 ? undefined : at
+      },
+      tokenizer: (src: string) => (/^\$(?!\$)(?:\\.|[^\\\n$])+?\$(?=\d)/.test(src) ? { type: 'text', raw: '$', text: '$' } : undefined),
+    },
+  ],
+})
 marked.use({
   renderer: {
     // Code inside a list or a quote: highlighted in place (top-level code is a component).

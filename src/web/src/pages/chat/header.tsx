@@ -255,7 +255,7 @@ export function ChatHeader({
       <Button variant="ghost" size="icon-sm" className="shrink-0 lg:hidden" onClick={onOpenList} aria-label="Chats">
         <MessagesSquare />
       </Button>
-      <div className="flex min-w-0 items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1">
         <ModelPicker config={config} value={settings.model ?? null} onChange={(model) => onChange({ model: model ?? '' })} />
         <ThinkingPicker config={config} value={settings.thinking ?? null} onChange={(thinking) => onChange({ thinking: thinking ?? '' })} />
       </div>
@@ -269,13 +269,14 @@ export function ChatHeader({
           <bdi className="truncate">{assistant.name}</bdi>
         </Link>
       )}
-      <span className="ml-auto flex shrink-0 items-center gap-1">
+      {/* On a phone: what does not fit scrolls, rather than lying over the pickers. */}
+      <span className="ml-auto flex min-w-0 items-center gap-1 overflow-x-auto">
         {room?.call}
         {room?.readIn && <ReadInMenu value={room.readIn.value} onChange={room.readIn.onChange} />}
         {room && (
           <Tooltip content="People in this room">
             <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={room.onOpen} aria-label={`People in this room (${room.people}, ${room.here} here)`}>
-              <Users /> <span className="tabular-nums">{room.people}</span>
+              <Users /> <span className="hidden tabular-nums sm:inline">{room.people}</span>
             </Button>
           </Tooltip>
         )}
@@ -284,13 +285,13 @@ export function ChatHeader({
         {canvas && (
           <Tooltip content={canvas.open ? 'Hide the canvas' : 'Canvas: documents and code you and the model edit'}>
             <Button variant={canvas.open ? 'secondary' : 'ghost'} size="sm" className="h-8 gap-1.5" onClick={canvas.onToggle} aria-pressed={canvas.open} aria-label={`Canvas (${canvas.count})`}>
-              <FilePen /> <span className="tabular-nums">{canvas.count}</span>
+              <FilePen /> <span className="hidden tabular-nums sm:inline">{canvas.count}</span>
             </Button>
           </Tooltip>
         )}
         <Tooltip content={filesOpen ? 'Hide files' : 'Files in this chat'}>
           <Button variant={filesOpen ? 'secondary' : 'ghost'} size="sm" className="h-8 gap-1.5" onClick={onToggleFiles} aria-pressed={filesOpen} aria-label={`Files (${filesCount})`}>
-            <FolderOpen /> <span className="tabular-nums">{filesCount}</span>
+            <FolderOpen /> <span className="hidden tabular-nums sm:inline">{filesCount}</span>
           </Button>
         </Tooltip>
         {chat && <ChatMenu chat={chat} onCompact={onCompact} onExport={onExport} assistant={assistant} onMove={onMove} onShare={onShare} onMakeRoom={onMakeRoom} />}

@@ -218,8 +218,11 @@ async def cutout(request: Request):
 
 
 # Who spoke: each part's voice as Chatterbox's voice encoder hears it (on the CPU: it is small), the parts grouped by how
-# alike their voices are. Parts shorter than this take their neighbour's speaker; farther apart than DIFFERENT, two voices.
+# alike their voices are. Parts shorter than SHORTEST take their neighbour's speaker; the voices are told apart by the parts
+# of STEADY or longer (a short part's voice print wanders: "Thanks, Ana." alone looked like a third person), and every other
+# part takes the voice it is nearest; farther apart than DIFFERENT, two voices.
 SHORTEST = 0.8
+STEADY = 1.6
 DIFFERENT = 0.17
 MAX_SEGMENTS = 3000
 _encoder = None
@@ -241,6 +244,46 @@ def _voices():
         return _encoder
 
 
+def label_speakers(segments, embed, most=None):
+    """Each part's speaker, numbered from 0 in the order they first speak. embed(indices) gives the voice prints of those parts."""
+    from scipy.cluster.hierarchy import fcluster, linkage
+
+    n = len(segments)
+    heard = [i for i, (a, b) in enumerate(segments) if b - a >= SHORTEST]
+    steady = [i for i in heard if segments[i][1] - segments[i][0] >= STEADY]
+    if len(steady) < 2:
+        # Few long parts: told apart by what there is.
+        steady = heard
+    labels = [None] * n
+    if len(steady) >= 2:
+        prints = np.asarray(embed(heard), dtype=np.float64)
+        prints = prints / np.linalg.norm(prints, axis=1, keepdims=True)
+        at = {i: k for k, i in enumerate(heard)}
+        grouped = prints[[at[i] for i in steady]]
+        tree = linkage(grouped, method="average", metric="cosine")
+        groups = fcluster(tree, t=most, criterion="maxclust") if most else fcluster(tree, t=DIFFERENT, criterion="distance")
+        voices = sorted(set(int(g) for g in groups))
+        centres = np.stack([grouped[groups == g].mean(axis=0) for g in voices])
+        centres = centres / np.linalg.norm(centres, axis=1, keepdims=True)
+        for i in heard:
+            labels[i] = voices[int(np.argmax(centres @ prints[at[i]]))]
+        # Numbered in the order they first speak.
+        order = {}
+        for i in range(n):
+            if labels[i] is not None:
+                labels[i] = order.setdefault(labels[i], len(order))
+    elif heard:
+        for i in heard:
+            labels[i] = 0
+    # A short part: its neighbour's speaker (the one before, else the one after).
+    for i in range(n):
+        if labels[i] is None:
+            before = next((labels[j] for j in range(i - 1, -1, -1) if labels[j] is not None), None)
+            after = next((labels[j] for j in range(i + 1, n) if labels[j] is not None), None)
+            labels[i] = before if before is not None else (after if after is not None else 0)
+    return labels
+
+
 @app.post("/v1/speakers")
 async def speakers(request: Request):
     try:
@@ -259,30 +302,16 @@ async def speakers(request: Request):
     if wave.ndim > 1:
         wave = wave.mean(axis=1)
     import librosa
-    from scipy.cluster.hierarchy import fcluster, linkage
 
     if rate != 16000:
         wave, rate = librosa.resample(wave, orig_sr=rate, target_sr=16000), 16000
-    long = [i for i, (a, b) in enumerate(segments) if b - a >= SHORTEST]
-    labels = [0] * len(segments)
-    if len(long) >= 2:
-        parts = [wave[int(segments[i][0] * rate):int(segments[i][1] * rate)] for i in long]
+
+    def embed(indices):
+        parts = [wave[int(segments[i][0] * rate):int(segments[i][1] * rate)] for i in indices]
         with torch.inference_mode():
-            found = _voices().embeds_from_wavs(parts, sample_rate=rate)
-        found = found / np.linalg.norm(found, axis=1, keepdims=True)
-        tree = linkage(found, method="average", metric="cosine")
-        groups = fcluster(tree, t=int(most), criterion="maxclust") if most else fcluster(tree, t=DIFFERENT, criterion="distance")
-        # Numbered in the order they first speak.
-        order = {}
-        for i, g in zip(long, groups):
-            labels[i] = order.setdefault(int(g), len(order))
-    # A short part: its neighbour's speaker (the one before, else the one after).
-    known = set(long)
-    for i in range(len(segments)):
-        if i not in known:
-            before = next((labels[j] for j in range(i - 1, -1, -1) if j in known), None)
-            after = next((labels[j] for j in range(i + 1, len(segments)) if j in known), None)
-            labels[i] = before if before is not None else (after or 0)
+            return _voices().embeds_from_wavs(parts, sample_rate=rate)
+
+    labels = label_speakers(segments, embed, int(most) if most else None)
     return {"speakers": labels, "count": (max(labels) + 1) if labels else 0}
 
 

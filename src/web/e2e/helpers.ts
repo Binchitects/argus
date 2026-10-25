@@ -21,7 +21,10 @@ export function watchConsole(page: Page): string[] {
   const errors: string[] = []
   page.on('console', (m) => {
     const t = m.text()
-    if (m.type() !== 'error' || t.includes('401') || t.includes('ERR_CERT_VERIFIER_CHANGED') || t.includes('SSL certificate error occurred when fetching the script') || t.startsWith("Blocked script execution in 'about:srcdoc'") || (noGateway && t.includes('502'))) return
+    // The service worker's script, its fetch cut short (the test went on to the next page, or Chrome reloaded its
+    // certificates): Chrome says so itself, and the app goes on without the worker until the next page.
+    if (m.type() !== 'error' || t.includes('401') || t.includes('ERR_CERT_VERIFIER_CHANGED') || t.includes('SSL certificate error occurred when fetching the script') ||
+      t.includes('An unknown error occurred when fetching the script') || t.startsWith("Blocked script execution in 'about:srcdoc'") || (noGateway && t.includes('502'))) return
     errors.push(`${t} (${m.location().url || 'no url'})`)
   })
   page.on('pageerror', (e) => errors.push(e.message))

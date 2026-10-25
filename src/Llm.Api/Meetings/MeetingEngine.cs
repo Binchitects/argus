@@ -59,6 +59,26 @@ public sealed partial class MeetingEngine(IServiceScopeFactory scopes, IHostAppl
     /// <summary>What runs stops with the host's own stopping token: nothing of its own to stop (or to be disposed before it is).</summary>
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
+    /// <summary>A line of the transcript joins at most this long a run of one speaker's parts (seconds), and parts at most this far apart.</summary>
+    public const double LongestLine = 60, JoinGap = 2.5;
+
+    /// <summary>The transcript's lines: each part with its speaker, a speaker's parts one after another joined into one line.</summary>
+    public static List<TranscriptLine> Lines(IReadOnlyList<GatewayChat.HeardPart> parts, IReadOnlyList<int> speakers)
+    {
+        var lines = new List<TranscriptLine>();
+        for (var i = 0; i < parts.Count; i++)
+        {
+            var (p, who) = (parts[i], i < speakers.Count ? speakers[i] : 0);
+            if (lines.Count > 0 && lines[^1] is var last && last.Speaker == who && p.Start - last.End <= JoinGap && p.End - last.Start <= LongestLine)
+            {
+                lines[^1] = last with { End = Math.Round(p.End, 2), Text = last.Text + " " + p.Text };
+                continue;
+            }
+            lines.Add(new TranscriptLine(Math.Round(p.Start, 2), Math.Round(p.End, 2), who, p.Text));
+        }
+        return lines;
+    }
+
     private async Task RunAsync(Guid id, CancellationToken ct)
     {
         await using var scope = scopes.CreateAsyncScope();
@@ -114,7 +134,7 @@ public sealed partial class MeetingEngine(IServiceScopeFactory scopes, IHostAppl
                 // The studio is not running (or has no voice model): one voice, said so.
                 (speakers, unsure) = ([.. parts.Select(_ => 0)], "Who spoke is not told: the studio's voice model is not running here.");
             }
-            var lines = parts.Select((p, i) => new TranscriptLine(Math.Round(p.Start, 2), Math.Round(p.End, 2), i < speakers.Count ? speakers[i] : 0, p.Text)).ToList();
+            var lines = Lines(parts, speakers);
             meeting.Transcript = JsonSerializer.Serialize(lines, Json);
 
             await StepAsync(db, meeting, "Writing the minutes", ct);

@@ -111,7 +111,8 @@ test('the bell lists each kind of news, leads to it, and can say it on the deskt
   await page.goto('/tasks')
   await page.getByRole('button', { name: 'Notifications, 4 new' }).click()
   const bell = page.getByRole('dialog', { name: 'Notifications' })
-  const news = bell.getByRole('list', { name: 'News' })
+  // By day: a list under each day's heading.
+  const news = bell.getByLabel('News', { exact: true })
   await expect(news.getByRole('listitem')).toHaveCount(5)
   // A long word in a body wraps: the list never scrolls sideways.
   expect(await news.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)

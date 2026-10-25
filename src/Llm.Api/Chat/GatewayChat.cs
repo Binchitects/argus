@@ -196,6 +196,7 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
                 { new StringContent(model), "model" },
                 { new StringContent("verbose_json"), "response_format" },
                 { new StringContent("segment"), "timestamp_granularities[]" },
+                { new StringContent("word"), "timestamp_granularities[]" },
                 { new StringContent(personEmail), "user" },
             };
             if (language is not null)
@@ -205,14 +206,69 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
             return form;
         }, personEmail, "application/json", ct), ct);
         var answer = JsonNode.Parse(await res.Content.ReadAsStringAsync(ct));
-        var parts = (answer?["segments"] as JsonArray ?? []).OfType<JsonObject>()
-            .Select(s => new HeardPart(s["start"]?.GetValue<double>() ?? 0, s["end"]?.GetValue<double>() ?? 0, (s["text"]?.GetValue<string>() ?? "").Trim()))
-            .Where(p => p.Text.Length > 0).ToList();
+        // With each word's time: parts cut where a speaker may change (a sentence's end, a pause), as short as a turn can be;
+        // a segment of speech to text's own runs over several turns when nobody pauses long.
+        var words = (answer?["words"] as JsonArray ?? []).OfType<JsonObject>()
+            .Select(w => new HeardPart(w["start"]?.GetValue<double>() ?? 0, w["end"]?.GetValue<double>() ?? 0, w["word"]?.GetValue<string>() ?? ""))
+            .Where(w => w.Text.Trim().Length > 0).ToList();
+        var parts = words.Count > 0 ? Utterances(words)
+            : [.. (answer?["segments"] as JsonArray ?? []).OfType<JsonObject>()
+                .Select(s => new HeardPart(s["start"]?.GetValue<double>() ?? 0, s["end"]?.GetValue<double>() ?? 0, (s["text"]?.GetValue<string>() ?? "").Trim()))
+                .Where(p => p.Text.Length > 0)];
         if (parts.Count == 0 && (answer?["text"]?.GetValue<string>() ?? "").Trim() is { Length: > 0 } all)
         {
             parts.Add(new HeardPart(0, answer?["duration"]?.GetValue<double>() ?? 0, all));
         }
         return (parts, answer?["language"]?.GetValue<string>(), answer?["duration"]?.GetValue<double>() ?? parts.LastOrDefault()?.End ?? 0);
+    }
+
+    /// <summary>A pause this long (seconds) between two words may be a new speaker.</summary>
+    public const double TurnPause = 0.6;
+
+    /// <summary>The longest part (seconds): one who speaks on is cut at a comma, or at any word past it.</summary>
+    public const double LongestPart = 12;
+
+    /// <summary>
+    /// Words made parts that end where a speaker may change: after a sentence's end, at a pause of <see cref="TurnPause"/>,
+    /// and past <see cref="LongestPart"/> at a comma (at any word at half as long again).
+    /// </summary>
+    public static List<HeardPart> Utterances(IReadOnlyList<HeardPart> words)
+    {
+        var parts = new List<HeardPart>();
+        var said = new StringBuilder();
+        double start = 0, end = 0;
+        for (var i = 0; i < words.Count; i++)
+        {
+            var w = words[i];
+            if (said.Length > 0 && w.Start - end >= TurnPause)
+            {
+                Flush();
+            }
+            if (said.Length == 0)
+            {
+                start = w.Start;
+            }
+            said.Append(w.Text);
+            end = w.End;
+            var text = w.Text.TrimEnd();
+            var length = end - start;
+            if (text.EndsWith('.') || text.EndsWith('?') || text.EndsWith('!') || text.EndsWith('…') || text.EndsWith('。') || text.EndsWith('؟')
+                || (length >= LongestPart && (text.EndsWith(',') || text.EndsWith('،'))) || length >= LongestPart * 1.5)
+            {
+                Flush();
+            }
+        }
+        Flush();
+        return parts;
+
+        void Flush()
+        {
+            if (said.ToString().Trim() is { Length: > 0 } t)
+            {
+                parts.Add(new HeardPart(start, end, t));
+            }
+            said.Clear();
+        }
     }
 
     /// <summary>A text spoken by a text to speech model at the gateway, as MP3 bytes. The spend is the person's.</summary>

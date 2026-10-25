@@ -13,7 +13,7 @@ import { Field } from '@/components/ui/field'
 import { Input, Textarea } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Segmented } from '@/components/app/segmented'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { toolIcon } from '../chat/tools'
@@ -330,18 +330,18 @@ function ServerForm({ saved, onClose }: { saved: ToolRow['server']; onClose: () 
         }}
       >
         {error && <Alert variant="destructive">{error}</Alert>}
-        <Tabs
+        <Segmented
+          label="Kind"
           value={kind}
-          onValueChange={(v) => {
-            setKind(v as 'mcp' | 'openapi')
+          onChange={(v) => {
+            setKind(v)
             setTest(null)
           }}
-        >
-          <TabsList aria-label="Kind">
-            <TabsTrigger value="mcp">MCP server</TabsTrigger>
-            <TabsTrigger value="openapi">API (OpenAPI)</TabsTrigger>
-          </TabsList>
-        </Tabs>
+          options={[
+            { value: 'mcp', label: 'MCP server' },
+            { value: 'openapi', label: 'API (OpenAPI)' },
+          ]}
+        />
         <Field label="Name" hint="Shown to people in the chat's Tools menu.">
           <Input required maxLength={100} autoComplete="off" {...field('name')} />
         </Field>

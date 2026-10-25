@@ -60,3 +60,13 @@ describe('pictures in an answer', () => {
     expect(sanitize('<p>See <img src="a-hot-air-balloon.svg" alt="A balloon"> here</p>')).toBe('<p dir="auto">See A balloon here</p>')
   })
 })
+
+describe('money and math', () => {
+  it('keeps prices as text and formulas as formulas', () => {
+    const out = new DOMParser().parseFromString(html('A picture ($0.05), a minute of sound ($0.006), and $5 or $10 a month.\n\nWhere $x^2$ and $5$ are formulas.'), 'text/html')
+    const [prices, formulas] = [...out.body.querySelectorAll('p')]
+    expect(prices!.querySelector('.katex')).toBeNull()
+    expect(prices!.textContent).toBe('A picture ($0.05), a minute of sound ($0.006), and $5 or $10 a month.')
+    expect(formulas!.querySelectorAll('.katex')).toHaveLength(2)
+  })
+})

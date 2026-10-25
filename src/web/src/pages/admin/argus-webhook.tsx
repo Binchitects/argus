@@ -61,7 +61,7 @@ export function WebhookCard() {
         </CardTitle>
         <CardDescription>GitLab tells Argus when a branch changes: a push, or a merge request merged. Argus updates that repository at once instead of waiting for the schedule.</CardDescription>
         {!d.fromEnv && (
-          <CardAction className="flex gap-2">
+          <CardAction className="flex flex-wrap justify-end gap-2">
             {d.enabled && (
               <Button
                 variant="outline"

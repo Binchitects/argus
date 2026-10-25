@@ -7,7 +7,7 @@ import { expectAccessible, noObserve } from './helpers.ts'
 const opens: [string, string | RegExp][] = [
   ['/admin/people', 'Add person'],
   ['/admin/groups', 'New group'],
-  ['/admin/tools', 'Add MCP server'],
+  ['/admin/tools', 'Add a server or API'],
   ['/admin/models', 'Add a model'],
   ['/admin/models', 'Add a server'],
   ['/admin/packs', 'Add a pack'],

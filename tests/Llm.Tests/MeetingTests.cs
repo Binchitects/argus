@@ -234,5 +234,28 @@ public sealed class MeetingTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.OK, await ana.PostAsync($"/api/meetings/{id}/again"));
         Assert.Equal([0, 1, 0, 1], (await MadeAsync(ana, id)).GetProperty("transcript").EnumerateArray().Select(l => l.GetProperty("speaker").GetInt32()));
     }
-}
 
+    [Fact]
+    public void Words_are_cut_where_a_speaker_may_change_and_one_speakers_parts_are_one_line()
+    {
+        static Llm.Api.Chat.GatewayChat.HeardPart W(double start, double end, string text) => new(start, end, text);
+        // Two turns with no long pause between them, as speech to text gives one segment for: cut at the sentence's end.
+        var words = new[]
+        {
+            W(0.0, 0.24, " Hi,"), W(0.34, 0.54, " Ben,"), W(0.74, 1.08, " it's Ana."), W(1.32, 3.0, " Ready to launch?"),
+            W(3.4, 3.9, " Thanks"), W(4.6, 5.0, " Ana."), W(5.1, 5.6, " Friday"), W(5.6, 6.0, " works,"),
+        };
+        var parts = Llm.Api.Chat.GatewayChat.Utterances(words);
+        Assert.Equal(["Hi, Ben, it's Ana.", "Ready to launch?", "Thanks", "Ana.", "Friday works,"], parts.Select(p => p.Text));
+        Assert.Equal((3.4, 3.9), (parts[2].Start, parts[2].End));
+        // One who speaks on is cut, past twelve seconds at a comma, else at eighteen.
+        var long_ = Enumerable.Range(0, 40).Select(i => W(i * 0.5, i * 0.5 + 0.4, i == 30 ? " so," : " word")).ToList();
+        Assert.Equal([31, 9], Llm.Api.Chat.GatewayChat.Utterances(long_).Select(p => p.Text.Split(' ').Length));
+
+        var lines = Llm.Api.Meetings.MeetingEngine.Lines(parts, [0, 0, 1, 1, 1]);
+        Assert.Equal([(0, "Hi, Ben, it's Ana. Ready to launch?"), (1, "Thanks Ana. Friday works,")], lines.Select(l => (l.Speaker, l.Text)));
+        Assert.Equal((0.0, 3.0), (lines[0].Start, lines[0].End));
+        // Far apart, the same speaker's parts stay apart.
+        Assert.Equal(2, Llm.Api.Meetings.MeetingEngine.Lines([W(0, 1, "One."), W(5, 6, "Two.")], [0, 0]).Count);
+    }
+}

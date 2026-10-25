@@ -182,7 +182,7 @@ describe('admin tools', () => {
     renderApp('/admin/tools')
     await userEvent.click(await screen.findByRole('button', { name: 'Add a server or API' }))
     const dialog = await screen.findByRole('dialog', { name: 'Add a server or API' })
-    await userEvent.click(within(dialog).getByRole('tab', { name: 'API (OpenAPI)' }))
+    await userEvent.click(within(dialog).getByRole('radio', { name: 'API (OpenAPI)' }))
     await userEvent.type(within(dialog).getByLabelText('Name'), 'Pets')
     await userEvent.type(within(dialog).getByLabelText("Or the document's address"), 'https://pets.example.test/openapi.json')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Read it' }))
