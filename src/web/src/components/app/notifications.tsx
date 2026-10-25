@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, AudioLines, Bell, Brain, BellOff, CalendarClock, Coins, Download, GitPullRequest, Image as ImageIcon, MessageSquareText, SquareSlash, type LucideIcon, Workflow, Wrench, X } from 'lucide-react'
+import { AlertTriangle, AudioLines, BadgeCheck, Bell, Brain, BellOff, CalendarClock, Coins, Download, GitPullRequest, Image as ImageIcon, MessageSquareText, SquareSlash, type LucideIcon, Workflow, Wrench, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
@@ -33,6 +33,7 @@ const kinds: Record<string, { icon: LucideIcon; tint: string }> = {
   task: { icon: CalendarClock, tint: 'bg-violet-500/10 text-violet-600 dark:text-violet-400' },
   usage: { icon: Coins, tint: 'bg-amber-500/10 text-amber-700 dark:text-amber-400' },
   alert: { icon: AlertTriangle, tint: 'bg-destructive/10 text-destructive-ink' },
+  compliance: { icon: BadgeCheck, tint: 'bg-sky-500/10 text-sky-700 dark:text-sky-400' },
   download: { icon: Download, tint: 'bg-muted text-muted-foreground' },
   workflow: { icon: Workflow, tint: 'bg-teal-500/10 text-teal-700 dark:text-teal-400' },
   fix: { icon: Wrench, tint: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' },

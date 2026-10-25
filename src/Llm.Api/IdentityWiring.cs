@@ -232,6 +232,9 @@ public static class IdentityWiring
         services.AddSingleton<AuditChainState>();
         services.AddSingleton<AuditWatch>();
         services.AddHostedService(sp => sp.GetRequiredService<AuditWatch>());
+        services.Configure<AuditForwardOptions>(config.GetSection("Audit"));
+        services.AddSingleton<AuditForwarder>();
+        services.AddHostedService(sp => sp.GetRequiredService<AuditForwarder>());
         services.AddScoped<DirectoryFile>();
         services.AddScoped<PeopleService>();
         services.AddSingleton<Llm.Core.Access.AccessSnapshotCache>();

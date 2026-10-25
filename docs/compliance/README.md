@@ -70,6 +70,28 @@ who holds an administrative permission (how they sign in, whether they have a
 second factor, when they last signed in), and the audit log's last 90 days
 counted by action. Each download is audited (`compliance.evidence`).
 
+## Access reviews
+
+An access review lists, for a reviewer to **Keep** or **Revoke**:
+
+- every administrative role given to a person, a group or everyone (the first
+  admin, `ADMIN_USERNAME`, is listed and always stays an Owner: the way back in);
+- each member of a group that holds one (a directory's or SCIM's group says to
+  change it at its source);
+- each account nobody signed in to for longer than **Settings → Compliance →
+  An account is unused after** (90 days unless set).
+
+Revoking takes the role away, removes the member, or disables the account, at
+once and audited. A review is closed when every item is decided, and is kept
+for good with each decision: who, when, and what came of it. The evidence
+download carries every review as `access-reviews.csv`.
+
+A review starts by itself every **Review access every** days (90 unless set;
+0: only by hand), due two weeks later, and the admins are told. **Disable
+unused accounts** disables accounts unused that long every day, never the
+first admin. The check **Privileged access was reviewed** is green while the
+last review was closed within the period.
+
 ## The audit log as a chain
 
 Each entry of the audit log carries a SHA-256 hash of its fields and of the
@@ -93,6 +115,27 @@ for example. The evidence download carries both.
 Entries written before the chain existed are sealed, oldest first, the first
 time the app starts after the upgrade. The oldest entry kept is the chain's
 start: when old entries age out, the walk starts from the oldest one left.
+
+## Sending it to the SIEM
+
+**Settings → Audit log** sends every entry on to the company's SIEM as it is
+written, in order and each once:
+
+- **Send it to syslog**: `udp://host:514`, `tcp://host:514` or
+  `tls://host:6514` (the collector's certificate is checked). Each entry is an
+  RFC 5424 message, facility *log audit*, informational or (a failure) warning,
+  whose text is the entry as JSON with its hash. Over TCP and TLS each message
+  is octet-counted (RFC 6587).
+- **Post it to a webhook**: an `https://` address, given the entries as a JSON
+  array in batches of up to 200. With **The webhook's signing key** (make one
+  with `openssl rand -hex 32`), each post carries `X-Arena-Signature: sha256=`
+  and the HMAC-SHA256 of its body, in hex.
+
+How far it got is kept in the database, so a restart or another replica goes
+on from there; one replica sends at a time. A collector that does not answer
+is tried again, later each time (up to every five minutes), and nothing is
+skipped. The check **The audit log is sent on to the SIEM** says how far it got
+and, when the last try failed, why.
 
 ## Checking a live stack
 

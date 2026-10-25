@@ -162,6 +162,30 @@ controls:
       - Llm.Tests/IdentityTests.Rotating_a_key_revokes_the_old_one_first
     operator: People keep their keys out of shared files and repositories.
 
+  - id: IAM-07
+    title: Privileged access is reviewed
+    meets: >-
+      An access review lists every privileged role given to a person, a group
+      or everyone, each member of a group that holds one, and the accounts
+      nobody signed in to for long, for a reviewer to keep or revoke; revoking
+      takes effect at once and is audited, and a closed review is kept for
+      good. One starts by itself every quarter and the admins are told;
+      accounts unused for long are disabled when the company says so.
+    frameworks:
+      iso27001: [A.5.18, A.8.2]
+      soc2: [CC6.2, CC6.3]
+      hipaa: [164.308(a)(3)(ii)(B), 164.308(a)(4)(ii)(C)]
+      gdpr: [Art.32(1)(d)]
+    docs: [compliance/README.md#access-reviews]
+    tests:
+      - Llm.Tests/AccessReviewTests.A_review_lists_privileged_roles_their_groups_members_and_unused_accounts_and_revoking_takes_effect_at_once
+      - Llm.Tests/AccessReviewTests.The_schedule_starts_a_review_when_one_is_due_tells_the_admins_and_disables_unused_accounts_when_asked
+    checks: [app:access-review]
+    operator: >-
+      Name the reviewers (the Compliance officer role), finish each review by
+      its due date, and review the directory's and SCIM's groups at their
+      source as the review says.
+
   - id: LOG-01
     title: Who did what is recorded
     meets: >-
@@ -207,6 +231,28 @@ controls:
       Keep the audit volume's folder (DATA_DIR/audit) where the database's
       administrators cannot write, and back it up apart; restrict direct
       database access and keep its own logs.
+
+  - id: LOG-04
+    title: The audit log is sent on to the company's SIEM
+    meets: >-
+      Every entry, as it is written, in order and each once, by syslog (RFC
+      5424 over UDP, TCP or TLS) and to a webhook signed with HMAC-SHA256,
+      with its hash so the SIEM can walk the chain too. How far it got is kept
+      in the database, so a restart or another replica goes on from there; a
+      collector that does not answer is tried again and nothing is skipped.
+    frameworks:
+      iso27001: [A.8.15, A.8.16]
+      soc2: [CC7.2]
+      hipaa: [164.308(a)(1)(ii)(D), 164.312(b)]
+      gdpr: [Art.32(1)(b)]
+    docs: [compliance/README.md#sending-it-to-the-siem]
+    tests:
+      - Llm.Tests/AuditForwardTests.Each_entry_is_posted_once_in_order_signed_and_a_webhook_that_fails_gets_them_all_later
+      - Llm.Tests/AuditForwardTests.Syslog_gets_each_entry_octet_counted_as_RFC_5424_with_failures_as_warnings
+    checks: [app:audit-forwarding]
+    operator: >-
+      Run the SIEM, keep what it receives for as long as the frameworks ask
+      (six years under HIPAA), and watch its alerts.
 
   - id: LOG-02
     title: Logs are kept, and kept for a set time

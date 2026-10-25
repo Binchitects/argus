@@ -859,6 +859,8 @@ export const topics = {
       safeguards: { name: 'Safeguards', text: 'What keeps the chat from misuse: limits per person, secrets in messages, blocked words, the model\'s check of each message, personal data, and what happens after refusals. A group can set its own under Groups.' },
       'company-knowledge': { name: 'Company knowledge', text: 'How often sources are read again, and how much of long files comes with each question.' },
       'data-retention': { name: 'Data retention', text: 'How long chats are kept before they are deleted with their files. A group can keep its own.' },
+      compliance: { name: 'Compliance', text: 'How often access is reviewed (a review starts by itself and the admins are told), after how many days an account counts as unused, and whether unused accounts are disabled every day.' },
+      'audit-log': { name: 'Audit log', text: 'Sends every entry of the audit log on to the company\'s SIEM as it is written, in order and each once: by syslog (udp, tcp or tls) and to a webhook, signed with its key. A collector that does not answer is tried again; Admin → Compliance shows how far it got.' },
       speech: { name: 'Speech', text: 'Reading aloud and speech to text for everyone, unless a person chooses their own under Your account → Voice: the language people speak (or found by itself), the voice for each language, the reading speed, and whether Talk reads answers aloud. **Try it** reads a sample with the voice chosen.' },
       storage: { name: 'Storage', text: 'When a disk is too full (the alert), how much each person\'s files may take, and what the clean-up under Admin → Storage takes as old media.' },
       prices: { name: 'Prices', text: 'What a chat model costs when it has no price of its own under Admin → Models (input, cached input and output, per million tokens), and what pictures, video and speech cost. Every request gets its cost from these. **Recalculate past costs** prices requests recorded at no cost, for the dates you choose, after showing how many and the total.' },
@@ -895,6 +897,21 @@ export const topics = {
       { title: 'Prepare for an audit', steps: ['Fix what is red or amber under **Checks now**: each says what to change.', 'For each control, do the company\'s part and **Attest** it with where its proof is.', 'Run `python3 deploy/scripts/compliance-check.py` on the host for the checks from outside.', '**Download evidence** and give it to the auditor with your policies.'] },
     ],
     manual: { doc: 'compliance', section: 'controls-and-how-they-are-kept' },
+  },
+
+  'access-review': {
+    title: 'Access review',
+    about: 'Who holds privileged access, and the accounts nobody used for long: each kept or revoked by a reviewer, and the review kept for good once closed.',
+    admin: true,
+    parts: [
+      { name: 'Privileged roles', text: 'Each administrative role given to a person, a group or everyone. **Revoke** takes it away at once (audited). The first admin is always an Owner and stays one.' },
+      { name: 'Members of privileged groups', text: 'Each member of a group that holds such a role. **Revoke** removes them from it; a directory\'s or SCIM\'s group says to change it there.' },
+      { name: 'Unused accounts', text: 'Nobody signed in to them for long (Settings → Compliance). **Revoke** disables the account.' },
+      { name: 'Keep the rest', text: 'Keeps every item not decided yet, under your name.' },
+      { name: 'Close the review', text: 'Once every item is decided. A closed review cannot change; its decisions are in the evidence download.' },
+    ],
+    tasks: [{ title: 'Review access for the quarter', steps: ['Open the review from Admin → Compliance (or the bell, when the schedule started it).', 'For each item: **Keep** it, or **Revoke** it when the person no longer needs it.', 'Press **Close the review** when nothing is left to decide.'] }],
+    manual: { doc: 'compliance', section: 'access-reviews' },
   },
 
   quality: {

@@ -75,3 +75,52 @@ export function tally(controls: Control[], framework: Framework, now: Date) {
     attested: serving.filter((c) => attestedNow(c, now)).length,
   }
 }
+
+export interface ReviewSummary {
+  id: string
+  title: string
+  createdAt: string
+  createdBy: string
+  dueAt: string
+  closedAt: string | null
+  closedBy: string | null
+  items: number
+  kept: number
+  revoked: number
+}
+
+export type ReviewKind = 'role' | 'member' | 'unused'
+
+export interface ReviewItem {
+  id: string
+  kind: ReviewKind
+  subject: string
+  what: string
+  decision: 'keep' | 'revoke' | null
+  decidedBy: string | null
+  decidedAt: string | null
+  note: string | null
+  /** What revoking did, or why it could not be done here. */
+  outcome: string | null
+}
+
+export interface ReviewDetail {
+  review: Omit<ReviewSummary, 'items' | 'kept' | 'revoked'>
+  items: ReviewItem[]
+}
+
+export const reviewsQuery = {
+  queryKey: ['admin', 'compliance', 'reviews'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<ReviewSummary[]>('/api/admin/compliance/reviews', { signal }),
+}
+
+export const reviewQuery = (id: string) => ({
+  queryKey: ['admin', 'compliance', 'reviews', id] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<ReviewDetail>(`/api/admin/compliance/reviews/${id}`, { signal }),
+})
+
+/** Where a review stands: closed, late (past its due date and open), or under way. */
+export function reviewState(r: { closedAt: string | null; dueAt: string }, now: Date): 'closed' | 'late' | 'open' {
+  if (r.closedAt) return 'closed'
+  return new Date(r.dueAt) < now ? 'late' : 'open'
+}

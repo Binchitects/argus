@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, CircleDashed, CircleHelp, Download, FileCheck2, RefreshCw, TriangleAlert, XCircle, type LucideIcon } from 'lucide-react'
 import { useState } from 'react'
-import { Link, useOutletContext } from 'react-router'
+import { Link, useNavigate, useOutletContext } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { QueryError } from '@/components/app/query-state'
 import { Segmented } from '@/components/app/segmented'
@@ -16,7 +16,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage, type Me } from '@/lib/api'
 import { ago, when } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { attestedNow, complianceQuery, FRAMEWORKS, manualLink, tally, type Attestation, type CheckResult, type Control, type Framework, type State } from './compliance-api'
+import { attestedNow, complianceQuery, FRAMEWORKS, manualLink, reviewsQuery, reviewState, tally, type Attestation, type CheckResult, type Control, type Framework, type State } from './compliance-api'
 
 const AREAS: Record<string, string> = {
   IAM: 'People and access',
@@ -93,6 +93,59 @@ function AttestDialog({ control, onClose }: { control: Control; onClose: () => v
         </form>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function AccessReviews({ mayStart }: { mayStart: boolean }) {
+  const reviews = useQuery(reviewsQuery)
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const start = useMutation({
+    mutationFn: () => api<{ id: string }>('/api/admin/compliance/reviews', { method: 'POST', body: {} }),
+    onSuccess: ({ id }) => {
+      void queryClient.invalidateQueries({ queryKey: reviewsQuery.queryKey })
+      navigate(`/admin/compliance/reviews/${id}`)
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  const now = new Date()
+  return (
+    <section aria-labelledby="reviews" className="grid gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 id="reviews" className="text-lg font-semibold">
+            Access reviews
+          </h2>
+          <p className="text-sm text-muted-foreground">Who holds privileged access and which accounts went unused, each kept or revoked; a new one starts by itself every quarter (Settings → Compliance).</p>
+        </div>
+        {mayStart && (
+          <Button variant="outline" onClick={() => start.mutate()} loading={start.isPending}>
+            Start a review
+          </Button>
+        )}
+      </div>
+      {reviews.data?.length === 0 && <p className="text-sm text-muted-foreground">No review yet.</p>}
+      {(reviews.data?.length ?? 0) > 0 && (
+        <ul className="divide-y rounded-lg border bg-card">
+          {reviews.data!.slice(0, 8).map((r) => {
+            const state = reviewState(r, now)
+            return (
+              <li key={r.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 p-3 text-sm">
+                <Link to={`/admin/compliance/reviews/${r.id}`} className="min-w-48 flex-1 font-medium text-primary-ink underline-offset-2 hover:underline">
+                  {r.title}
+                </Link>
+                <span className="text-muted-foreground">
+                  {r.kept + r.revoked} of {r.items} decided, {r.revoked} revoked
+                </span>
+                <Badge variant={state === 'closed' ? 'success' : state === 'late' ? 'warning' : 'secondary'}>
+                  {state === 'closed' ? `Closed ${new Date(r.closedAt!).toLocaleDateString()}` : state === 'late' ? 'Late' : `Due ${new Date(r.dueAt).toLocaleDateString()}`}
+                </Badge>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </section>
   )
 }
 
@@ -281,6 +334,8 @@ export function CompliancePage() {
               })}
             </ul>
           </section>
+
+          <AccessReviews mayStart={mayAttest} />
 
           <section aria-labelledby="controls" className="grid gap-4">
             <div className="flex flex-wrap items-center justify-between gap-2">

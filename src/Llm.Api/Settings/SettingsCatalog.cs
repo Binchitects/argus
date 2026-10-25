@@ -22,6 +22,8 @@ public static class SettingsCatalog
     private const string Schedules = "Scheduled tasks";
     private const string Mail = "Email";
     private const string NotificationsGroup = "Notifications";
+    private const string AuditGroup = "Audit log";
+    private const string ComplianceGroup = "Compliance";
     private const string Safeguards = "Safeguards";
     private const string Knowledge = "Company knowledge";
     private const string Retention = "Data retention";
@@ -318,6 +320,19 @@ public static class SettingsCatalog
         new("Mail:From", Mail, "Sender", "The address email comes from, e.g. Argus Arena <llm@example.com>.", SettingType.Text, SettingScope.Live),
         new("Notifications:Email", NotificationsGroup, "Email the credit and alert news", "Besides the bell: a person at 80% of their credit and with it used up, and the admins of alerts that start firing and of credit used up, by email (once each). Needs email set up (Email).", SettingType.Boolean, SettingScope.Live)
             { Default = "true", Optional = false },
+        new("Audit:Syslog", AuditGroup, "Send it to syslog", "Every entry of the audit log, as it is written and in order, to the company's SIEM or log collector by syslog (RFC 5424, facility log audit, the entry as JSON with its hash): udp://host:514, tcp://host:514 or tls://host:6514 (the collector's certificate is checked). A collector that does not answer is tried again, later each time, and nothing is skipped. Empty: none.", SettingType.Text, SettingScope.Live)
+            { Pattern = @"(udp|tcp|tls)://[^\s/:]+:\d{1,5}", PatternHelp = "udp://, tcp:// or tls://host:port", Max = 300 },
+        new("Audit:Webhook", AuditGroup, "Post it to a webhook", "Every entry, as it is written, posted as JSON in batches (each entry with its hash, so the receiver can walk the chain too) to this https:// address: a SIEM's HTTP collector (Splunk HEC, Elastic, Sentinel's data collector through a relay). Empty: none.", SettingType.Secret, SettingScope.Live)
+            { Pattern = @"https://\S+", PatternHelp = "an https:// URL" },
+        new("Audit:WebhookSecret", AuditGroup, "The webhook's signing key", "Each post carries X-Arena-Signature: sha256= and the HMAC-SHA256 of its body with this key, in hex, for the receiver to check. Make one with: openssl rand -hex 32.", SettingType.Secret, SettingScope.Live),
+
+        new("Compliance:ReviewEveryDays", ComplianceGroup, "Review access every", "An access review (who holds privileged access, and the accounts unused for long) starts by itself this many days after the last one, and the admins are told. 0: only when started by hand (Admin → Compliance).", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "90", Unit = "days", Min = 0, Max = 365, Optional = false },
+        new("Compliance:UnusedDays", ComplianceGroup, "An account is unused after", "Nobody signed in to it for this many days: it is in the next access review, and disabled when the next setting says so.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "90", Unit = "days", Min = 7, Max = 3650, Optional = false },
+        new("Compliance:DisableUnused", ComplianceGroup, "Disable unused accounts", "Every day, accounts unused that long are disabled (audited, reason \"unused\"); the first admin never is. An admin enables one again under Admin → People.", SettingType.Boolean, SettingScope.Live)
+            { Default = "false" },
+
         new("Notifications:AlertsWebhook", NotificationsGroup, "Alerts webhook", "The admins' news (alerts that start firing, people who used up their credit) is posted here too, once each: a Slack, Teams or Mattermost incoming webhook. Its host must be one of the webhook hosts (Scheduled tasks). Empty: none.", SettingType.Secret, SettingScope.Live)
             { Pattern = @"https://\S+", PatternHelp = "an https:// webhook URL" },
 

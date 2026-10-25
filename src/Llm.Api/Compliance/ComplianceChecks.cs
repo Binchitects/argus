@@ -22,7 +22,7 @@ public sealed record CheckResult(string Id, string Title, string State, string D
 /// </summary>
 public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users, Access.AccessService access, IOptionsMonitor<AuthOptions> auth,
     IOptions<IdentityOptions> identity, IOptionsMonitor<Retention.RetentionOptions> retention, StoragePlaces places, LokiDatasource loki,
-    PromDatasource prom, IOptions<StackOptions> stack, AuditWatch auditWatch, AuditChainState auditState, IOptionsMonitor<AuditOptions> auditOptions, TimeProvider clock)
+    PromDatasource prom, IOptions<StackOptions> stack, AuditWatch auditWatch, AuditChainState auditState, IOptionsMonitor<AuditOptions> auditOptions, AuditForwarder forwarder, IOptionsMonitor<ComplianceOptions> compliance, TimeProvider clock)
 {
     public const string Ok = "ok", Warn = "warn", Fail = "fail", Unknown = "unknown";
 
@@ -34,11 +34,13 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         ("two-factor", "Admins sign in with two factors"),
         ("audit-log", "The audit log is written"),
         ("audit-chain", "Nobody changed the audit log unseen"),
+        ("audit-forwarding", "The audit log is sent on to the SIEM"),
         ("chat-retention", "Chats are kept for a set time"),
         ("log-retention", "Logs are kept for a set time"),
         ("backups", "A recent backup that ended well"),
         ("certificate", "The site's certificate"),
         ("data-key", "Secrets encrypted at rest"),
+        ("access-review", "Privileged access was reviewed"),
     ];
 
     /// <summary>A newest backup older than this is amber; one older than <see cref="BackupStale"/> is red.</summary>
@@ -56,11 +58,13 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
                 "two-factor" => await TwoFactorAsync(ct),
                 "audit-log" => await AuditLogAsync(ct),
                 "audit-chain" => await AuditChainAsync(ct),
+                "audit-forwarding" => await AuditForwardingAsync(ct),
                 "chat-retention" => await ChatRetentionAsync(ct),
                 "log-retention" => await LogRetentionAsync(ct),
                 "backups" => Backups(),
                 "certificate" => await CertificateAsync(ct),
                 "data-key" => DataKey(),
+                "access-review" => await AccessReviewAsync(ct),
                 _ => (Unknown, "No such check."),
             };
             results.Add(new CheckResult(id, title, state, detail));
@@ -147,6 +151,24 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
             : (Warn, $"{walked} No anchor is kept yet: the first is made within a day of the app starting.");
     }
 
+    private async Task<(string, string)> AuditForwardingAsync(CancellationToken ct)
+    {
+        if (!forwarder.On)
+        {
+            return (Warn, "The audit log is kept only here: send it on to the company's SIEM as well (Settings → Audit log: syslog or a webhook).");
+        }
+        var s = await forwarder.StateAsync(db, ct);
+        var behind = s.Newest - s.Sent;
+        if (s.Problem is { } problem)
+        {
+            return (Fail, $"{behind} entries wait to be sent, and the last try failed: {problem}");
+        }
+        // What was written in the last seconds is on its way.
+        return behind <= 20
+            ? (Ok, $"Sent on as it is written: entry {s.Sent} of {s.Newest}.")
+            : (Warn, $"{behind} entries wait to be sent (entry {s.Sent} of {s.Newest}).");
+    }
+
     private async Task<(string, string)> ChatRetentionAsync(CancellationToken ct)
     {
         var groups = await db.Groups.AsNoTracking().CountAsync(g => g.RetentionDays != null, ct);
@@ -212,6 +234,26 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
             <= 30 => (Warn, $"{said}, in {cert.Days} days: renew it."),
             _ => (Ok, $"{said}, in {cert.Days} days."),
         };
+    }
+
+    /// <summary>A review closed within the period (and a little), or one under way and not late.</summary>
+    private async Task<(string, string)> AccessReviewAsync(CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var every = Math.Max(1, compliance.CurrentValue.ReviewEveryDays is > 0 and var d ? d : 90);
+        var closed = await db.AccessReviews.AsNoTracking().Where(r => r.ClosedAt != null).MaxAsync(r => r.ClosedAt, ct);
+        var open = await db.AccessReviews.AsNoTracking().Where(r => r.ClosedAt == null).OrderBy(r => r.DueAt).FirstOrDefaultAsync(ct);
+        if (open is not null && open.DueAt < now)
+        {
+            return (Warn, $"\"{open.Title}\" was due {open.DueAt:yyyy-MM-dd} and is still open: keep or revoke what is left, then close it.");
+        }
+        if (closed is { } c && now - c <= TimeSpan.FromDays(every + 14))
+        {
+            return (Ok, $"The last review was closed {c:yyyy-MM-dd}{(open is null ? "" : $"; \"{open.Title}\" is under way, due {open.DueAt:yyyy-MM-dd}")}.");
+        }
+        return open is not null
+            ? (Warn, $"\"{open.Title}\" is under way, due {open.DueAt:yyyy-MM-dd}; none was closed in the last {every} days.")
+            : (Warn, closed is null ? "Access was never reviewed: start a review under Admin → Compliance." : $"The last review was closed {closed:yyyy-MM-dd}, over {every} days ago.");
     }
 
     private (string, string) DataKey() => string.IsNullOrEmpty(auth.CurrentValue.DataKey)

@@ -100,6 +100,9 @@ public sealed class FakeWebhook : HttpMessageHandler
 {
     public List<(Uri Url, string Body)> Posts { get; } = [];
 
+    /// <summary>Each post's X-Arena-Signature, by its body (the audit log's webhook signs them).</summary>
+    public Dictionary<string, string> Signatures { get; } = [];
+
     public HttpStatusCode Answer { get; set; } = HttpStatusCode.OK;
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -108,6 +111,10 @@ public sealed class FakeWebhook : HttpMessageHandler
         lock (Posts)
         {
             Posts.Add((request.RequestUri!, body));
+            if (request.Headers.TryGetValues("X-Arena-Signature", out var signature))
+            {
+                Signatures[body] = signature.Single();
+            }
         }
         return new HttpResponseMessage(Answer);
     }

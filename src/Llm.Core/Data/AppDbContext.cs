@@ -94,6 +94,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<MemoryChange> MemoryChanges => Set<MemoryChange>();
     public DbSet<SkillChange> SkillChanges => Set<SkillChange>();
     public DbSet<Compliance.ComplianceAttestation> ComplianceAttestations => Set<Compliance.ComplianceAttestation>();
+    public DbSet<Compliance.AccessReview> AccessReviews => Set<Compliance.AccessReview>();
+    public DbSet<Compliance.AccessReviewItem> AccessReviewItems => Set<Compliance.AccessReviewItem>();
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<KnowledgeSource> KnowledgeSources => Set<KnowledgeSource>();
     public DbSet<KnowledgeDocument> KnowledgeDocuments => Set<KnowledgeDocument>();
@@ -934,6 +936,27 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(c => c.After).HasMaxLength(500);
             e.HasIndex(c => new { c.UserId, c.At });
             e.HasOne<AppUser>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Compliance.AccessReview>(e =>
+        {
+            e.ToTable("access_reviews");
+            e.Property(r => r.Title).HasMaxLength(200);
+            e.Property(r => r.CreatedBy).HasMaxLength(256);
+            e.Property(r => r.ClosedBy).HasMaxLength(256);
+            e.HasIndex(r => r.CreatedAt);
+        });
+        builder.Entity<Compliance.AccessReviewItem>(e =>
+        {
+            e.ToTable("access_review_items");
+            e.Property(i => i.Kind).HasMaxLength(16);
+            e.Property(i => i.Subject).HasMaxLength(300);
+            e.Property(i => i.What).HasMaxLength(500);
+            e.Property(i => i.Decision).HasMaxLength(16);
+            e.Property(i => i.DecidedBy).HasMaxLength(256);
+            e.Property(i => i.Note).HasMaxLength(1000);
+            e.Property(i => i.Outcome).HasMaxLength(500);
+            e.HasIndex(i => i.ReviewId);
+            e.HasOne<Compliance.AccessReview>().WithMany().HasForeignKey(i => i.ReviewId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<Compliance.ComplianceAttestation>(e =>
         {

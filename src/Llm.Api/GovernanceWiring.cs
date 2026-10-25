@@ -23,7 +23,7 @@ public static class GovernanceWiring
         services.AddScoped<Gateway.CostRecalculation>();
         services.AddScoped<Dashboards.PromptUsage>();
         Storage.StorageEndpoints.AddStorage(services, config);
-        Compliance.ComplianceEndpoints.AddCompliance(services);
+        Compliance.ComplianceEndpoints.AddCompliance(services, config);
     }
 
     public static void MapGovernance(this IEndpointRouteBuilder app)

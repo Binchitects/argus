@@ -30,12 +30,24 @@ public sealed record ComplianceView(IReadOnlyDictionary<string, string> Framewor
 
 public sealed record AttestRequest(string? Note);
 
+/// <param name="Decision">keep or revoke.</param>
+public sealed record DecideRequest(string? Decision, string? Note);
+
+public sealed record ReviewSummary(Guid Id, string Title, DateTimeOffset CreatedAt, string CreatedBy, DateTimeOffset DueAt, DateTimeOffset? ClosedAt, string? ClosedBy,
+    int Items, int Kept, int Revoked);
+
 public static class ComplianceEndpoints
 {
     /// <summary>An attestation counts for this long; after it, the operator's part is due again.</summary>
     public static readonly TimeSpan AttestationLasts = TimeSpan.FromDays(365);
 
-    public static void AddCompliance(IServiceCollection services) => services.AddScoped<ComplianceChecks>();
+    public static void AddCompliance(IServiceCollection services, IConfiguration config)
+    {
+        services.AddScoped<ComplianceChecks>();
+        services.Configure<ComplianceOptions>(config.GetSection("Compliance"));
+        services.AddScoped<AccessReviews>();
+        services.AddHostedService<AccessReviewSchedule>();
+    }
 
     public static void MapCompliance(IEndpointRouteBuilder app)
     {
@@ -48,6 +60,21 @@ public static class ComplianceEndpoints
         // The audit log's hash chain walked now, with its anchors; and an anchor made now (before an audit, say).
         g.MapGet("/audit-chain", async (AuditWatch watch, IOptionsMonitor<AuditOptions> o, CancellationToken ct) =>
             Results.Ok(new { report = await watch.WalkAsync(anchor: false, ct), anchors = AnchorsOf(o.CurrentValue).TakeLast(30) }));
+        // Access reviews: started by the schedule or by hand, each item kept or revoked, closed when all are decided.
+        g.MapGet("/reviews", async (AppDbContext db, CancellationToken ct) => Results.Ok(await ReviewListAsync(db, ct)));
+        g.MapPost("/reviews", async (ClaimsPrincipal p, UserManager<AppUser> users, AccessReviews reviews, CancellationToken ct) =>
+        {
+            var review = await reviews.StartAsync((await users.GetUserAsync(p))!.UserName!, ct);
+            return Results.Created($"/api/admin/compliance/reviews/{review.Id}", new { review.Id });
+        });
+        g.MapGet("/reviews/{id:guid}", async (Guid id, AppDbContext db, CancellationToken ct) =>
+            await db.AccessReviews.AsNoTracking().SingleOrDefaultAsync(r => r.Id == id, ct) is { } review
+                ? Results.Ok(new { review, items = await db.AccessReviewItems.AsNoTracking().Where(i => i.ReviewId == id).OrderBy(i => i.Kind).ThenBy(i => i.Subject).ToListAsync(ct) })
+                : Results.NotFound());
+        g.MapPost("/reviews/{id:guid}/items/{item:guid}", async (Guid id, Guid item, DecideRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AccessReviews reviews,
+            CancellationToken ct) => await ReviewAsync(async () => await reviews.DecideAsync(id, item, body.Decision ?? "", body.Note, (await users.GetUserAsync(p))!, ct)));
+        g.MapPost("/reviews/{id:guid}/close", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AccessReviews reviews, CancellationToken ct) =>
+            await ReviewAsync(async () => await reviews.CloseAsync(id, (await users.GetUserAsync(p))!, ct)));
         g.MapPost("/audit-chain/anchor", async (AuditWatch watch, AuditChainState state, Audit audit, CancellationToken ct) =>
         {
             var report = await watch.WalkAsync(anchor: true, ct);
@@ -57,6 +84,35 @@ public static class ComplianceEndpoints
             }
             return Results.Ok(new { report, anchor = report.Holds ? state.LastAnchor : null });
         });
+    }
+
+    private static async Task<IResult> ReviewAsync<T>(Func<Task<T>> work)
+    {
+        try
+        {
+            return Results.Ok(await work());
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound();
+        }
+        catch (AccessReviewException ex)
+        {
+            return AuthEndpoints.Problem(400, "review", ex.Message);
+        }
+    }
+
+    /// <summary>Every review, newest first, with how many of its items are decided, kept and revoked.</summary>
+    public static async Task<List<ReviewSummary>> ReviewListAsync(AppDbContext db, CancellationToken ct)
+    {
+        var reviews = await db.AccessReviews.AsNoTracking().OrderByDescending(r => r.CreatedAt).ToListAsync(ct);
+        var counts = await db.AccessReviewItems.AsNoTracking().GroupBy(i => new { i.ReviewId, i.Decision }).Select(g => new { g.Key.ReviewId, g.Key.Decision, n = g.Count() }).ToListAsync(ct);
+        return [.. reviews.Select(r =>
+        {
+            int Of(string? d) => counts.Where(c => c.ReviewId == r.Id && c.Decision == d).Sum(c => c.n);
+            return new ReviewSummary(r.Id, r.Title, r.CreatedAt, r.CreatedBy, r.DueAt, r.ClosedAt, r.ClosedBy,
+                Of(null) + Of(AccessReviewItem.Keep) + Of(AccessReviewItem.Revoke), Of(AccessReviewItem.Keep), Of(AccessReviewItem.Revoke));
+        })];
     }
 
     private static IReadOnlyList<AuditAnchor> AnchorsOf(AuditOptions o) => AuditChain.ReadAnchors(string.IsNullOrWhiteSpace(o.AnchorDir) ? null : o.AnchorDir);
@@ -145,6 +201,7 @@ public static class ComplianceEndpoints
                 audit-actions.csv     the audit log's last 90 days, counted by action
                 audit-chain.json      the audit log's hash chain walked as this was made: whether it holds, and where not
                 audit-anchors.jsonl   the chain's daily anchors, kept apart from the database (each: when, the entry, its hash)
+                access-reviews.csv    every access review's every item: who, what they held, the decision, by whom, when, what came of it
 
                 """);
             Text("controls.yaml", ComplianceControls.Text);
@@ -159,6 +216,12 @@ public static class ComplianceEndpoints
                     u.LastSignInAt?.ToString("u", CultureInfo.InvariantCulture), string.Join(" ", adminKeys.Where(memberships[u.Id].Has)),
                 })]));
             Text("audit-actions.csv", Csv([["action", "count", "failed"], .. actions.Select(a => new object?[] { a.Action, a.Count, a.Failed })]));
+            var reviewTitles = await db.AccessReviews.AsNoTracking().ToDictionaryAsync(r => r.Id, r => r.Title, ct);
+            var reviewItems = await db.AccessReviewItems.AsNoTracking().OrderBy(i => i.ReviewId).ThenBy(i => i.Subject).ToListAsync(ct);
+            Text("access-reviews.csv", Csv([["review", "kind", "who", "what", "decision", "by", "at", "note", "outcome"], .. reviewItems.Select(i => new object?[]
+            {
+                reviewTitles.GetValueOrDefault(i.ReviewId), i.Kind, i.Subject, i.What, i.Decision, i.DecidedBy, i.DecidedAt?.ToString("u", CultureInfo.InvariantCulture), i.Note, i.Outcome,
+            })]));
             Text("audit-chain.json", JsonSerializer.Serialize(await watch.WalkAsync(anchor: false, ct), json));
             Text("audit-anchors.jsonl", string.Concat(AnchorsOf(auditOptions.CurrentValue).Select(a => JsonSerializer.Serialize(a, JsonSerializerOptions.Web) + "\n")));
         }
