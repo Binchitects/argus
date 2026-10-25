@@ -43,6 +43,7 @@ internal sealed class Repl(Runtime rt)
         ("/resume [id]", "switch to a saved session"),
         ("/web [N|all|WORDS]", "your chats in Arena (all, or those with WORDS in the title); /web N continues one here, kept in step both ways"),
         ("/memory [add|forget]", "what it remembers; add TEXT (this project), add --all TEXT (every project), forget N"),
+        ("/remember", "the project's long memory (.remember/MEMORY.md, in the repository): what every session reads at its start"),
         ("/rewind [N] [code|chat]", "the turns kept; /rewind N goes back to before turn N (its files and the conversation)"),
         ("/search WORDS", "earlier sessions in this folder that said these words"),
         ("/permissions [allow|deny|remove RULE]", "kept rules, e.g. run_shell(npm test*), edit_file, read_file(.env*)"),
@@ -717,6 +718,9 @@ internal sealed class Repl(Runtime rt)
                     Ui.Line($"Continuing the chat from Arena in session {rt.Session.Id}: {rt.Agent.Messages.Count} messages.");
                 }
                 break;
+            case "/remember":
+                RememberCommand();
+                break;
             case "/memory":
                 await MemoryCommandAsync(arg, ct);
                 break;
@@ -852,6 +856,34 @@ internal sealed class Repl(Runtime rt)
         finally
         {
             rt.Env.Cancel.EndTurn();
+        }
+    }
+
+    /// <summary>The project's long memory: where it is, how big, its sections and topic files; or how it starts.</summary>
+    private void RememberCommand()
+    {
+        if (!rt.Config.ProjectMemory)
+        {
+            Ui.Line("The project's long memory is off (\"projectMemory\": false in config.json).");
+            return;
+        }
+        var root = ProjectMemory.Root(rt.Workspace.Root);
+        var main = Path.Combine(ProjectMemory.Folder(root), ProjectMemory.MainName);
+        if (!File.Exists(main))
+        {
+            Ui.Line($"No long memory yet: the agent starts {ProjectMemory.FolderName}/{ProjectMemory.MainName} (with remember_project) when it learns what a later session should know, or write it yourself.");
+            return;
+        }
+        var lines = File.ReadAllLines(main);
+        Ui.Line($"{Path.GetRelativePath(rt.Workspace.Root, main)} ({Files.Size(new FileInfo(main).Length)}, {lines.Length} lines), read at every session's start. Its sections:");
+        foreach (var heading in lines.Where(l => l.StartsWith("## ", StringComparison.Ordinal)))
+        {
+            Ui.Line("  " + heading[3..]);
+        }
+        var topics = Directory.EnumerateFiles(ProjectMemory.Folder(root), "*.md", SearchOption.AllDirectories).Where(f => f != main).ToList();
+        if (topics.Count > 0)
+        {
+            Ui.Line("Topic files: " + string.Join(", ", topics.Select(f => Path.GetRelativePath(ProjectMemory.Folder(root), f))));
         }
     }
 

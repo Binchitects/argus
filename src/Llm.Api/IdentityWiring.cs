@@ -390,6 +390,9 @@ public static class IdentityWiring
         services.AddSingleton<Chat.ChatDigests>();
         services.AddHostedService(sp => sp.GetRequiredService<Chat.ChatDigests>());
         services.AddScoped<Chat.PastChats>();
+        // The memory garden: near-duplicates merged, what was replaced or unused let go, long ones tightened; each with Undo.
+        services.AddSingleton<Chat.MemoryGarden>();
+        services.AddHostedService(sp => sp.GetRequiredService<Chat.MemoryGarden>());
         services.AddScoped<Chat.Tools.MemoryTool>();
         services.AddScoped<Chat.Tools.SkillTool>();
         ArenaMcp.McpEndpoints.AddArenaMcp(services, config);

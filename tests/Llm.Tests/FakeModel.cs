@@ -279,6 +279,15 @@ public sealed class FakeModel : HttpMessageHandler
             chunks = [Delta(new JsonObject { ["content"] = "Here they are:\n" + new JsonObject { ["memories"] = new JsonArray([.. proposed]) }.ToJsonString() }), Finish("stop"), Usage(300, 0, 60)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
+        // The memory garden: those that say the same merged (the newest, marked), a long one tightened (its start).
+        if (system0.StartsWith("You tidy what an AI assistant remembers", StringComparison.Ordinal))
+        {
+            var tidied = system0.Contains("say the same thing", StringComparison.Ordinal)
+                ? lastUser.Split('\n').Last(l => l.StartsWith("- ", StringComparison.Ordinal))[2..] + " (merged)"
+                : lastUser[..Math.Min(150, lastUser.Length)];
+            chunks = [Delta(new JsonObject { ["content"] = tidied }), Finish("stop"), Usage(100, 0, 20)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
         // A past chat's digest: the one before (when given), then what the person asked since, a line each.
         if (system0.StartsWith("You keep the digest of a conversation", StringComparison.Ordinal))
         {

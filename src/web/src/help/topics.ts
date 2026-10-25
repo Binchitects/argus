@@ -560,6 +560,7 @@ export const topics = {
       { name: 'A memory', text: 'Its kind (change it), whose, where it came from (a chat links to it), and how often answers read it. Pin, edit or forget it. The company\'s are changed only by those who keep its knowledge.' },
       { name: 'Remember these?', text: 'What memory proposes from your chats that went quiet: **Keep** it (answers read it from then on; one that says otherwise than a memory you kept replaces it) or **Not now**. **Remember on its own** keeps them at once.' },
       { name: 'Under an answer', text: '**Read N memories**: the ones found for its question; a click shows them.' },
+      { name: 'History', text: 'Once a day your memories are tidied: those that say the same are merged, one replaced long ago or unused for months is let go (never a pinned one), a long one is tightened. Each change is listed with what it was; **Undo** puts it back. **Tidy now** tidies at once.' },
       { name: 'Past chats', text: 'Each chat and Code Arena session that went quiet gets a short digest of what it was about. When you refer to earlier work ("as we decided last month"), the model finds that chat by its digest and reads what it needs in it.' },
     ],
     tasks: [

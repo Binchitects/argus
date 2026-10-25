@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Brain, Check, FolderGit2, Pencil, Pin, PinOff, Plus, Search, Trash2, X } from 'lucide-react'
-import { useId, useState } from 'react'
+import { Brain, Check, Download, FileUp, FolderGit2, History, Pencil, Pin, PinOff, Plus, Search, Sparkles, Trash2, Undo2, X } from 'lucide-react'
+import { useId, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
@@ -16,7 +16,8 @@ import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { ago } from '@/lib/format'
-import { changeMemory, forgetMemory, keepMemory, keepProposal, kindLabel, memoriesQuery, scopeLabel, type MemoryInput, type MemoryItem, type MemoryKind, type MemoryScope } from '@/lib/memory'
+import { cn } from '@/lib/utils'
+import { changeLabel, changeMemory, forgetMemory, importMemories, keepMemory, keepProposal, kindLabel, memoriesQuery, memoryHistoryQuery, scopeLabel, tidyMemories, undoMemoryChange, type MemoryChange, type MemoryInput, type MemoryItem, type MemoryKind, type MemoryScope } from '@/lib/memory'
 
 const kinds = Object.keys(kindLabel) as MemoryKind[]
 
@@ -114,6 +115,74 @@ function MemoryRow({ m, maxChars, onChange, onForget }: { m: MemoryItem; maxChar
  * Memory (Workspace → Memory): everything the chat and Code Arena remember for the person — about them, about their
  * projects, and the company's — searched, filtered, pinned, kept in its kind, edited and forgotten.
  */
+/** The garden's changes to the person's memories, newest first, each with Undo; and Tidy now. */
+function MemoryHistory({ on }: { on: boolean }) {
+  const queryClient = useQueryClient()
+  const history = useQuery(memoryHistoryQuery)
+  const changed = () => queryClient.invalidateQueries({ queryKey: memoriesQuery.queryKey })
+  const undo = useMutation({ mutationFn: undoMemoryChange, onSuccess: changed, onError: (e) => toast.error(errorMessage(e)) })
+  const tidy = useMutation({
+    mutationFn: tidyMemories,
+    onSuccess: async (r) => {
+      toast.success(r.changes === 0 ? 'Your memories are tidy already.' : `${r.changes} ${r.changes === 1 ? 'change' : 'changes'}: see History.`)
+      await changed()
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  const changes = history.data?.changes ?? []
+  return (
+    <Card className="mt-6" aria-label="History">
+      <CardHeader className="flex-row items-start justify-between gap-2 space-y-0">
+        <div className="grid gap-1.5">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <History className="size-4" aria-hidden="true" /> History
+          </CardTitle>
+          <CardDescription>
+            Once a day your memories are tidied: those that say the same are merged, one replaced long ago or unused for months is let go (never a pinned one), and a long one is tightened.
+            {history.data?.tidiedAt ? ` Last tidied ${ago(history.data.tidiedAt)}.` : ''}
+          </CardDescription>
+        </div>
+        <Button size="sm" variant="outline" className="shrink-0" disabled={!on || tidy.isPending} onClick={() => tidy.mutate()}>
+          <Sparkles /> Tidy now
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {changes.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No changes yet.</p>
+        ) : (
+          <ul className="grid gap-3" aria-label="Changes">
+            {changes.map((c: MemoryChange) => (
+              <li key={c.id} className="grid gap-1 rounded-md border p-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary">{changeLabel[c.action]}</Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {c.reason} · {ago(c.at)}
+                  </span>
+                  {c.undoneAt ? (
+                    <span className="ms-auto text-xs text-muted-foreground">Undone</span>
+                  ) : (
+                    <Button size="sm" variant="ghost" className="ms-auto h-7" disabled={undo.isPending} onClick={() => undo.mutate(c.id)} aria-label={`Undo: ${changeLabel[c.action]}, ${c.before[0]?.text ?? ''}`}>
+                      <Undo2 /> Undo
+                    </Button>
+                  )}
+                </div>
+                <ul className="grid gap-0.5 text-muted-foreground" aria-label="What it was">
+                  {c.before.map((m) => (
+                    <li key={m.id} className={cn(!c.undoneAt && 'line-through')}>
+                      {m.text}
+                    </li>
+                  ))}
+                </ul>
+                {c.after && <p>{c.after}</p>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 export function MemoryPage() {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
@@ -143,6 +212,15 @@ export function MemoryPage() {
   const change = useMutation({ mutationFn: ({ id, c }: { id: string; c: MemoryInput }) => changeMemory(id, c), onSuccess: changed, onError: failed })
   const forget = useMutation({ mutationFn: forgetMemory, onSuccess: changed, onError: failed })
   const clear = useMutation({ mutationFn: () => api('/api/account/memories', { method: 'DELETE' }), onSuccess: changed, onError: failed })
+  const file = useRef<HTMLInputElement>(null)
+  const bring = useMutation({
+    mutationFn: async (f: File) => importMemories(await f.text()),
+    onSuccess: async (r) => {
+      toast.success(`${r.kept} ${r.kept === 1 ? 'memory' : 'memories'} kept` + (r.skipped > 0 ? `; ${r.skipped} left out (said already, or not a memory)` : '') + '.')
+      await changed()
+    },
+    onError: failed,
+  })
 
   if (view.isPending) return <PageSkeleton />
   if (view.error) return <QueryError error={view.error} retry={() => view.refetch()} />
@@ -292,6 +370,26 @@ export function MemoryPage() {
         <span>
           {mine} of yours (of {v.max}). Pinned ones are read by every answer; the others when they matter to the question.
         </span>
+        <Button variant="link" size="sm" className="h-auto p-0 text-xs" asChild>
+          <a href="/api/account/memories/export" download="memory.md">
+            <Download /> Download as Markdown
+          </a>
+        </Button>
+        <Button variant="link" size="sm" className="h-auto p-0 text-xs" disabled={bring.isPending || !v.on} onClick={() => file.current?.click()}>
+          <FileUp /> Import Markdown
+        </Button>
+        <input
+          ref={file}
+          type="file"
+          accept=".md,.markdown,.txt,text/markdown,text/plain"
+          className="hidden"
+          aria-label="Markdown file of memories"
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) bring.mutate(f)
+            e.target.value = ''
+          }}
+        />
         {mine > 0 && (
           <Button
             variant="link"
@@ -306,6 +404,7 @@ export function MemoryPage() {
           </Button>
         )}
       </div>
+      <MemoryHistory on={v.on && v.enabled} />
     </>
   )
 }

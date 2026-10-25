@@ -67,3 +67,29 @@ public sealed class Memory
     /// <summary>Written, edited or said again.</summary>
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+
+/// <summary>
+/// A change the memory garden made to a person's memories (Memory → History): near-duplicates merged into one, one let go
+/// (replaced long ago, or unused for months), or one tightened. What the memories were before is kept, so Undo puts them back.
+/// </summary>
+public sealed class MemoryChange
+{
+    public const string Merged = "merged";
+    public const string LetGo = "let_go";
+    public const string Tightened = "tightened";
+
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid UserId { get; set; }
+    /// <summary>merged, let_go or tightened.</summary>
+    public required string Action { get; set; }
+    /// <summary>Why, in a few words ("said the same", "replaced over a month ago", "not used since March").</summary>
+    public string Reason { get; set; } = "";
+    /// <summary>The memories as they were (JSON: each with its id, words, kind, scope, project and marks).</summary>
+    public required string Before { get; set; }
+    /// <summary>The memory it left (merged or tightened: its id and words); null when it only let one go.</summary>
+    public Guid? MemoryId { get; set; }
+    public string? After { get; set; }
+    public DateTimeOffset At { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UndoneAt { get; set; }
+}
+

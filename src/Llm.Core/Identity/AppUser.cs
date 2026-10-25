@@ -50,6 +50,8 @@ public sealed class AppUser : IdentityUser<Guid>
     public bool MemoryOff { get; set; }
     /// <summary>What memory proposes from the person's quiet chats is kept at once, rather than waiting for them (Memory → Remember on its own).</summary>
     public bool MemoryAuto { get; set; }
+    /// <summary>When the memory garden last tidied their memories (merged, let go, tightened); null: never.</summary>
+    public DateTimeOffset? MemoryTidiedAt { get; set; }
     /// <summary>Set while the person is on legal hold: nothing of theirs is deleted, by retention or by them.</summary>
     public DateTimeOffset? LegalHoldSince { get; set; }
     /// <summary>Why the hold was placed (a matter, a ticket), as the admin wrote it.</summary>

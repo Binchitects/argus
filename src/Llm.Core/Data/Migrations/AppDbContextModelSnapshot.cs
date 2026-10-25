@@ -1720,6 +1720,50 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("memories", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Chat.MemoryChange", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("After")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Before")
+                        .IsRequired()
+                        .HasMaxLength(20000)
+                        .HasColumnType("character varying(20000)");
+
+                    b.Property<Guid?>("MemoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<DateTimeOffset?>("UndoneAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "At");
+
+                    b.ToTable("memory_changes", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Chat.MessageTranslation", b =>
                 {
                     b.Property<Guid>("MessageId")
@@ -3338,6 +3382,9 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<bool>("MemoryOff")
                         .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset?>("MemoryTidiedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("NormalizedEmail")
                         .HasMaxLength(256)
@@ -5721,6 +5768,15 @@ namespace Llm.Core.Data.Migrations
                 });
 
             modelBuilder.Entity("Llm.Core.Chat.Memory", b =>
+                {
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.MemoryChange", b =>
                 {
                     b.HasOne("Llm.Core.Identity.AppUser", null)
                         .WithMany()

@@ -40,6 +40,9 @@ internal sealed partial class Runtime : IAsyncDisposable
     /// <summary>What the agent remembers; the prompt has it as the session started.</summary>
     public MemoryStore Memory { get; private set; } = null!;
     private string _memory = "";
+
+    /// <summary>The project's long memory (.remember/) as the session starts: read anew for each new or resumed session.</summary>
+    private string LongMemory() => Config.ProjectMemory ? ProjectMemory.ForPrompt(ProjectMemory.Root(Workspace.Root)) : "";
     /// <summary>A checkpoint before each turn, for /rewind.</summary>
     public Checkpoints Checkpoints { get; } = new();
     /// <summary>The sandbox the agent's commands run in.</summary>
@@ -300,7 +303,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         Permissions.Rules = PermissionRules.Of(Config, project);
         Permissions.Workspace = Workspace;
         Memory = new MemoryStore(Env.Paths, project) { Arena = Config.Url is { Length: > 0 } && Config.ApiKey is { Length: > 0 } ? new ArenaMemory(Config, Http) : null };
-        _memory = await Memory.ForPromptAsync(Ui.Info, ct);
+        _memory = await Memory.ForPromptAsync(Ui.Info, ct) + LongMemory();
         // The skills Arena's plugins bring, kept with the person's (the ones kept before when Arena does not answer); and
         // Arena's own, less those its admins turned off.
         var brought = await ChatSync.PluginSkillsAsync(Config, Http, AccountWait, ct);
@@ -353,6 +356,10 @@ internal sealed partial class Runtime : IAsyncDisposable
         tools.Add(MemoryStore.RecallTool());
         tools.AddRange(MemoryStore.HistoryTools());
         tools.Add(KeptResults.Tool());
+        if (Config.ProjectMemory)
+        {
+            tools.Add(ProjectMemory.Tool());
+        }
         tools.Add(SessionSearch.Tool());
         tools.AddRange(SessionHistory.Tools());
         if (Extensions.Skills.Count > 0)
@@ -1099,7 +1106,7 @@ internal sealed partial class Runtime : IAsyncDisposable
     /// <summary>A new, empty session (/clear): the same tools and model.</summary>
     public void NewSession()
     {
-        _memory = Memory.Again();
+        _memory = Memory.Again() + LongMemory();
         Session = SessionStore.Create(Env.Paths.SessionsDir, Workspace.Root, Model.Name);
         Agent.Session = Session;
         Agent.Clear();
@@ -1113,7 +1120,7 @@ internal sealed partial class Runtime : IAsyncDisposable
     public void Resume(string file)
     {
         var data = SessionStore.Load(file, whole: true);
-        _memory = Memory.Again();
+        _memory = Memory.Again() + LongMemory();
         Session = SessionStore.Open(file);
         Agent.Session = Session;
         Agent.Load(data.Messages, data.Known);

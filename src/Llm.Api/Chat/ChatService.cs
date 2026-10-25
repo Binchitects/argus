@@ -49,6 +49,7 @@ public sealed class Hurry
 /// </summary>
 public sealed partial class ChatService(
     AppDbContext db,
+    PastChats pastChats,
     GatewayChat gateway,
     Safeguards.Safeguards safeguards,
     ToolRegistry registry,
@@ -287,6 +288,15 @@ public sealed partial class ChatService(
             recalledChars = note.Length;
             systemParts = systemParts with { Recalled = recalledChars };
             await memories.UsedAsync([.. recalled.Select(r => r.Memory.Id)], ct);
+        }
+        // Past chats about what is asked (their digests, by meaning): named with the question, so earlier work is found without
+        // asking for it; open_chat reads one.
+        if (!conversation.IsRoom && memories.On(user) && await pastChats.RelatedAsync(user, question.Content, conversation.Id, ct) is { Count: > 0 } related)
+        {
+            var note = "\n\n" + PastChats.Note(related);
+            ToQuestion(messages, note);
+            recalledChars += note.Length;
+            systemParts = systemParts with { Recalled = recalledChars };
         }
         if (imagesDropped)
         {

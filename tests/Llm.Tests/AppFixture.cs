@@ -169,6 +169,7 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Skills:BuiltIn", "false");
             // Past chats' digests only where a test asks for them (ChatDigests.RunAsync): the others count the model's requests.
             b.UseSetting("Memory:Digests", "false");
+            b.UseSetting("Memory:Garden", "false");
             // No Laya unless a test brings it (LayaTests).
             b.UseSetting("Modules:laya", "false");
             // Nothing listens here: probes are refused at once instead of waiting on DNS.

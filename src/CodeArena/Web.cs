@@ -374,6 +374,22 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             case ("GET", "/api/window"):
                 await res.JsonAsync(200, WindowJson(), ct);
                 return;
+            case ("GET", "/api/memory"):
+                await res.JsonAsync(200, await MemoryJsonAsync(ct), ct);
+                return;
+            case ("POST", "/api/memory"):
+                await RememberAsync(req, res, ct);
+                return;
+            case ("DELETE", var forget) when forget.StartsWith("/api/memory/", StringComparison.Ordinal):
+                if (await _rt.Memory.ForgetAsync(Uri.UnescapeDataString(forget["/api/memory/".Length..]), ct))
+                {
+                    await res.JsonAsync(200, new JsonObject { ["forgotten"] = true }, ct);
+                }
+                else
+                {
+                    await res.ErrorAsync(502, "arena", "Arena did not forget it: it may be out of reach, or the memory is not yours.", ct);
+                }
+                return;
             case ("GET", "/api/chat/config"):
                 await res.JsonAsync(200, ChatConfig(), ct);
                 return;
@@ -494,6 +510,39 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         {
             return _job;
         }
+    }
+
+    /// <summary>The IDE's Memory view: what Arena remembers for this project and the person (null online: Arena did not answer).</summary>
+    private async Task<JsonObject> MemoryJsonAsync(CancellationToken ct)
+    {
+        var listed = await _rt.Memory.RefreshAsync(ct);
+        return new JsonObject
+        {
+            ["online"] = listed is not null,
+            ["project"] = _rt.Memory.ProjectKey,
+            // The project's long memory in the repository, to open in the editor (null: none yet, or off).
+            ["notebook"] = _rt.Config.ProjectMemory && File.Exists(Path.Combine(ProjectMemory.Folder(ProjectMemory.Root(_rt.Workspace.Root)), ProjectMemory.MainName))
+                ? Path.GetRelativePath(_rt.Workspace.Root, Path.Combine(ProjectMemory.Folder(ProjectMemory.Root(_rt.Workspace.Root)), ProjectMemory.MainName)).Replace('\\', '/')
+                : null,
+            ["memories"] = new JsonArray([.. (listed ?? []).Select(m => (JsonNode)new JsonObject
+            {
+                ["id"] = m.Id, ["text"] = m.Text, ["scope"] = m.Scope, ["kind"] = m.Kind, ["project"] = m.Project, ["pinned"] = m.Pinned, ["mine"] = m.Mine,
+            })]),
+        };
+    }
+
+    /// <summary>A memory kept from the IDE: for this project, or for every one (the person's).</summary>
+    private async Task RememberAsync(HttpRequest req, HttpResponse res, CancellationToken ct)
+    {
+        var body = req.Json();
+        var text = body?.Str("text")?.Trim() ?? "";
+        if (text.Length is 0 or > 500)
+        {
+            await res.ErrorAsync(400, "invalid", "Say it in one or two short sentences (at most 500 characters).", ct);
+            return;
+        }
+        var (added, where) = await _rt.Memory.RememberAsync(body?.Bool("project") != true, text, body?.Str("kind") ?? "fact", ct);
+        await res.JsonAsync(200, new JsonObject { ["added"] = added, ["where"] = where }, ct);
     }
 
     /// <summary>

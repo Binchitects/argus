@@ -176,6 +176,7 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/web [N\|all\|WORDS]` | your chats in Arena, newest first (the 30 newest; `all`: the 5,000 newest; `WORDS`: those of them with the words in their title or folder); `/web N` (a number in the list last shown, or a chat's id) continues one here |
 | `/sync [all]` | where this session stands with its chat in Arena; `all` sends what Arena lacks of this folder's sessions |
 | `/memory [add\|forget]` | what it remembers (below; Arena's when signed in); `add TEXT` for this project, `add --all TEXT` for every project, `forget N` |
+| `/remember` | the project's long memory, `.remember/MEMORY.md` in the repository: its sections and topic files (below) |
 | `/rewind [N] [code\|chat]` | the turns kept; `/rewind N` goes back to before turn N (below) |
 | `/search WORDS` | earlier sessions in this folder that said these words |
 | `/permissions [allow\|deny\|remove RULE]` | kept rules (below) |
@@ -1635,6 +1636,31 @@ the config folder, each memory a line the person may edit; the session's
 prompt carries both, and the block Arena gave last time. What is kept
 meanwhile goes to Arena when Code Arena next reaches it (once: the files are
 kept beside as `.imported`).
+
+**The project's long memory: `.remember/`.** Beside Arena's memories (short
+facts, found by relevance), a project keeps a long memory of its own in the
+repository: `.remember/MEMORY.md`, what the project is, how it builds, tests
+and runs, its conventions, the decisions and why, where the work stands and
+what is next, and the lessons; with topic files beside it
+(`.remember/architecture.md`, `.remember/db/migrations.md`) for the details.
+Every session reads `MEMORY.md` at its start (up to 24,000 characters; past
+that, its start and a note to read the rest and move details into topic
+files), and the topic files are listed with their first lines for the
+model to read when they matter. The model keeps it current as it works with
+`remember_project` (a section of `MEMORY.md` or of a topic file, added to,
+or replaced when it is out of date; the file and the section made when they
+are not there yet), without asking (it writes only inside `.remember/`, and
+a checkpoint keeps what it was for `/rewind`). With none yet, the session is
+told how to start it. It lives at the repository's root, so a session in a
+subfolder shares it; commit it to share it with the team (or add it to
+`.gitignore`). `/remember` shows its sections and topic files; the IDE's
+**Memory** view opens it. `"projectMemory": false` in `config.json` turns
+it off.
+
+**The IDE's Memory view** (the brain in the activity bar) lists what Arena
+remembers for this project, the person and the company, finds by words,
+keeps one (for this project, or for every one) and forgets one of the
+person's.
 
 **Earlier sessions.** The model's `search_sessions` tool finds what was said
 in this folder's earlier sessions (every folder's when asked): messages that

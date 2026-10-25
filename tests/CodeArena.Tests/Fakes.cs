@@ -516,6 +516,8 @@ public sealed class Harness : IDisposable
             ["apiKey"] = FakeGateway.Key,
             // Arena's own skills only where a test brings them: the others measure the prompt as it was.
             ["builtInSkills"] = false,
+            // The project's long memory (.remember/) only where a test brings it, for the same reason.
+            ["projectMemory"] = false,
         };
         config?.Invoke(json);
         File.WriteAllText(Paths.ConfigFile, json.ToJsonString());

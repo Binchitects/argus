@@ -1294,10 +1294,31 @@ all.
   the earlier work was about, else by their words; each with its id and
   digest) and `open_chat` (one of them: its digest, and with a query the
   messages that hold those words, or with from and to its messages by
-  number). "As we decided last month" finds that chat. Only your own chats
+  number). "As we decided last month" finds that chat. With the knowledge
+  embedder, a question also comes with the past chats it bears on by
+  meaning (at most two, well above the typical chat's score and near the
+  best: their ids, titles and the start of their digests), so the model
+  finds earlier work without being asked to look. Only your own chats
   are searched (not rooms). Code Arena asks the same
   (`POST /api/code-arena/history/search` and `/open`, with your key).
   Settings → Chat → **Digests of past chats** turns new digests off.
+- **Tidied, with Undo.** Once a day (Settings → Chat → **Tidy memories**),
+  each person's memories are tidied by the model for small steps: those that
+  say the same (alike by meaning, or by their words; of one scope and
+  project) are merged into one that keeps every detail, the one used most
+  keeping its place; one replaced by a newer memory over a month ago, one
+  never used in six months, or one not used for a year is let go (never a
+  pinned one, never the company's); one longer than 300 characters is
+  tightened. **Memory → History** lists every change with what the memories
+  were, and **Undo** puts them back; **Tidy now** tidies at once. Forgetting
+  all of yours forgets the history too.
+- **Markdown, out and in.** **Download as Markdown** gives `memory.md`: a
+  section for each whose (`## About you`, `## Project host/group/name`,
+  `## The company's`), a heading for each kind (`### Preferences`,
+  `### Facts`, `### Decisions`, `### How to`, `### Lessons`) and a line for
+  each memory (` (pinned)` after a pinned one). **Import Markdown** reads the
+  same back, or another assistant's export, or any list of `- ` lines (with
+  no heading, facts about you); one said already is left as it is.
 - **Kinds.** Each memory is a **preference** (how you like things), a
   **fact**, a **decision** (and why), a **how to** (how something is done
   here) or a **lesson** (what went wrong once, or what you corrected). The

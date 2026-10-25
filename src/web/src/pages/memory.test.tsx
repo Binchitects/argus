@@ -136,4 +136,47 @@ describe('an answer that read memories', () => {
     expect(note).toHaveTextContent('(how to)')
     expect(within(note).getByRole('link', { name: 'All memories' })).toHaveAttribute('href', '/memory')
   })
+
+  it('shows what the garden changed, undoes a change, and tidies now', async () => {
+    let undone: string | null = null
+    const change = {
+      id: 'g1', action: 'merged' as const, reason: '2 said the same', at: '2026-10-24T10:00:00Z', memoryId: 'm1', after: 'Deploys with Podman, never Docker.',
+      before: [{ id: 'm1', text: 'Deploys with Podman.', kind: 'howto' as const }, { id: 'm9', text: 'Uses Podman to deploy, not Docker.', kind: 'howto' as const }],
+    }
+    const calls = fakeApi(member, {
+      'GET /api/account/memories': () => ({ json: view() }),
+      'GET /api/account/memories/history': () => ({ json: { tidiedAt: '2026-10-24T10:00:00Z', changes: [{ ...change, undoneAt: undone }] } }),
+      'POST /api/account/memories/history/g1/undo': () => {
+        undone = '2026-10-25T10:00:00Z'
+        return { json: { ...change, undoneAt: undone } }
+      },
+      'POST /api/account/memories/tidy': () => ({ json: { changes: 0 } }),
+    })
+    renderApp('/memory')
+    const history = await screen.findByRole('region', { name: 'History' })
+    const changes = await within(history).findByRole('list', { name: 'Changes' })
+    expect(within(changes).getByText('Merged')).toBeInTheDocument()
+    expect(within(changes).getByText('Deploys with Podman, never Docker.')).toBeInTheDocument()
+    expect(within(changes).getByText('Uses Podman to deploy, not Docker.')).toHaveClass('line-through')
+    await userEvent.click(within(changes).getByRole('button', { name: /^Undo: Merged/ }))
+    expect(await within(history).findByText('Undone')).toBeInTheDocument()
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/api/account/memories/history/g1/undo')).toBe(true)
+    await userEvent.click(within(history).getByRole('button', { name: 'Tidy now' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/account/memories/tidy')).toBe(true))
+    expect(await screen.findByText('Your memories are tidy already.')).toBeInTheDocument()
+  })
+
+  it('downloads the memories as Markdown and brings memories in from a Markdown file', async () => {
+    const calls = fakeApi(member, {
+      'GET /api/account/memories': () => ({ json: view() }),
+      'GET /api/account/memories/history': () => ({ json: { tidiedAt: null, changes: [] } }),
+      'POST /api/account/memories/import': () => ({ json: { kept: 2, skipped: 1 } }),
+    })
+    renderApp('/memory')
+    expect(await screen.findByRole('link', { name: 'Download as Markdown' })).toHaveAttribute('href', '/api/account/memories/export')
+    const md = '## About you\n\n### Preferences\n\n- Prefers short answers. (pinned)\n'
+    await userEvent.upload(screen.getByLabelText('Markdown file of memories'), new File([md], 'memory.md', { type: 'text/markdown' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/account/memories/import')?.body).toEqual({ markdown: md }))
+    expect(await screen.findByText('2 memories kept; 1 left out (said already, or not a memory).')).toBeInTheDocument()
+  })
 })

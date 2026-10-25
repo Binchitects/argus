@@ -779,7 +779,7 @@ describe('Code Arena, the IDE', () => {
     const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
     // The agent's changes are counted on their button.
     expect(await within(bar).findByRole('button', { name: 'Agent changes (1)' })).toBeInTheDocument()
-    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Chat', 'Terminal', 'Theme', 'Help', 'About Code Arena'])
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Memory', 'Chat', 'Terminal', 'Theme', 'Help', 'About Code Arena'])
     expect(within(bar).getByRole('button', { name: 'Explorer' })).toHaveAttribute('aria-pressed', 'true')
     expect(await screen.findByRole('tree', { name: 'Files' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'No file is open' })).toBeInTheDocument()
@@ -3011,6 +3011,38 @@ describe('Code Arena, the help', () => {
 })
 
 describe('quick open ranking', () => {
+  it('the memory view lists what Arena remembers for the project and the person, keeps one and forgets one', async () => {
+    let memories = [
+      { id: 'p1', text: 'Builds with make, tests with make check.', scope: 'project', kind: 'howto', project: 'gitlab.corp/shop', pinned: false, mine: true },
+      { id: 'u1', text: 'Prefers short answers.', scope: 'person', kind: 'preference', project: null, pinned: true, mine: true },
+      { id: 'c1', text: 'Our fiscal year starts in April.', scope: 'company', kind: 'fact', project: null, pinned: true, mine: false },
+    ]
+    const { calls } = backend({
+      'GET /api/memory': () => ({ json: { online: true, project: 'gitlab.corp/shop', notebook: '.remember/MEMORY.md', memories } }),
+      'POST /api/memory': () => ({ json: { added: true, where: 'for this project, in Arena' } }),
+      'DELETE /api/memory/p1': () => {
+        memories = memories.filter((m) => m.id !== 'p1')
+        return { json: { forgotten: true } }
+      },
+    })
+    renderIde()
+    await openApp()
+    await userEvent.click(screen.getByRole('button', { name: 'Memory' }))
+    const panel = await screen.findByRole('complementary', { name: 'Memory' })
+    const project = await within(panel).findByRole('region', { name: 'This project' })
+    expect(within(panel).getByRole('button', { name: "The project's long memory: .remember/MEMORY.md" })).toBeInTheDocument()
+    expect(project).toHaveTextContent('Builds with make, tests with make check. (how to)')
+    expect(within(panel).getByRole('region', { name: "The company's" })).toHaveTextContent('Our fiscal year starts in April.')
+    // The company's are not the person's to forget.
+    expect(within(panel).queryByRole('button', { name: 'Forget: Our fiscal year starts in April.' })).not.toBeInTheDocument()
+
+    await userEvent.type(within(panel).getByRole('textbox', { name: 'Remember something' }), 'The API runs on port 8081.')
+    await userEvent.click(within(panel).getByRole('button', { name: 'Remember' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/memory')?.body).toEqual({ text: 'The API runs on port 8081.', project: true }))
+    await userEvent.click(within(project).getByRole('button', { name: 'Forget: Builds with make, tests with make check.' }))
+    await waitFor(() => expect(within(panel).queryByText(/Builds with make/)).not.toBeInTheDocument())
+  })
+
   it('ranks by letters in order, the file name and runs first', () => {
     const files = ['src/components/cart-item.tsx', 'src/cart.ts', 'docs/architecture.md', 'tests/cart.test.ts', 'src/app.ts']
     // In the name first (the shorter path first when they score alike), then anywhere in the path.

@@ -195,6 +195,22 @@ export const windowQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => api<CodeWindow>('/api/window', { signal }),
 }
 
+/** A memory as Arena gives it to Code Arena: whose (the person's, this project's, the company's), its kind, pinned or not. */
+export interface CodeMemory {
+  id: string
+  text: string
+  scope: 'person' | 'project' | 'company'
+  kind: string
+  project: string | null
+  pinned: boolean
+  mine: boolean
+}
+
+export const memoryQuery = {
+  queryKey: ['code', 'memory'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ online: boolean; project: string; notebook?: string | null; memories: CodeMemory[] }>('/api/memory', { signal }),
+}
+
 export const sessionsQuery = {
   queryKey: ['code', 'sessions'] as const,
   queryFn: ({ signal }: { signal: AbortSignal }) => api<SessionSummary[]>('/api/sessions', { signal }),

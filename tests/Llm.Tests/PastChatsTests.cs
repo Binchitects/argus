@@ -16,11 +16,12 @@ namespace Llm.Tests;
 [Collection(nameof(AppCollection))]
 public sealed class PastChatsTests(AppFixture app)
 {
-    private (WebApplicationFactory<Program> App, MovableClock Clock) NewApp()
+    private (WebApplicationFactory<Program> App, MovableClock Clock) NewApp(bool embed = false)
     {
         var clock = new MovableClock(DateTimeOffset.UtcNow);
         var f = app.Create(app.ConnectionStringFor("past_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
-            new Dictionary<string, string?> { ["Auth:DataKey"] = "a-data-key-for-history-tests" }, s => s.AddSingleton<TimeProvider>(clock));
+            new Dictionary<string, string?> { ["Auth:DataKey"] = "a-data-key-for-history-tests", ["Modules:embed"] = embed ? "true" : "false" },
+            s => s.AddSingleton<TimeProvider>(clock));
         return (f, clock);
     }
 
@@ -111,5 +112,29 @@ public sealed class PastChatsTests(AppFixture app)
         await SendAsync(b, null, "We chose Northwind Traders as the parts vendor.");
         await StatusAssert.Is(System.Net.HttpStatusCode.OK, await b.Http.PutAsJsonAsync(new Uri("/api/account/memories/settings", UriKind.Relative), new { on = false }));
         Assert.Equal(0, await DigestAsync(f, clock));
+    }
+
+    [Fact]
+    public async Task A_question_about_earlier_work_comes_with_the_past_chats_it_bears_on_by_meaning()
+    {
+        var (f, clock) = NewApp(embed: true);
+        await using var _f = f;
+        var (b, email, _) = await PersonAsync(f);
+        var vendor = await SendAsync(b, null, "We chose Northwind Traders as the parts vendor, at 4.20 a unit.");
+        await SendAsync(b, null, "Plan the team offsite in Lisbon for May.");
+        Assert.Equal(2, await DigestAsync(f, clock));
+
+        await SendAsync(b, null, "Which parts vendor did we choose, Northwind Traders?");
+        var asked = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]!.AsArray()
+            .Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.ToString();
+        Assert.Contains("(Past chats of the person's that may bear on this", asked, StringComparison.Ordinal);
+        Assert.Contains($"[{vendor}]", asked, StringComparison.Ordinal);
+        Assert.DoesNotContain("Lisbon", asked, StringComparison.Ordinal);
+
+        // A question about nothing earlier comes alone.
+        await SendAsync(b, null, "Write a haiku about autumn leaves falling.");
+        asked = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]!.AsArray()
+            .Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.ToString();
+        Assert.DoesNotContain("Past chats", asked, StringComparison.Ordinal);
     }
 }

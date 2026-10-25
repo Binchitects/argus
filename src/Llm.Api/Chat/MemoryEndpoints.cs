@@ -14,6 +14,9 @@ namespace Llm.Api.Chat;
 public sealed record MemoryRequest(string? Text, string? Scope = null, string? Kind = null, string? ProjectKey = null, bool? Pinned = null);
 
 /// <summary>Memory on or off for the person, and whether what it proposes from their quiet chats is kept on its own (left out: as it was).</summary>
+/// <summary>Markdown to bring memories in from.</summary>
+public sealed record MemoryImport(string? Markdown);
+
 public sealed record MemorySwitch(bool On, bool? Auto = null);
 
 /// <summary>The person's answer on a memory card in the chat: keep it (in their words, if they changed them), or not.</summary>
@@ -36,6 +39,69 @@ public static class MemoryEndpoints
         me.MapDelete("", DeleteAllAsync);
         me.MapPost("/offers/{messageId:guid}", DecideAsync).RequirePermission(Llm.Core.Access.Permissions.Memory);
         me.MapPost("/{id:guid}/keep", AcceptAsync).RequirePermission(Llm.Core.Access.Permissions.Memory);
+        // The garden's changes (merged, let go, tightened), each with Undo; and a tidy now.
+        me.MapGet("/history", HistoryAsync);
+        me.MapPost("/history/{id:guid}/undo", UndoAsync).RequirePermission(Llm.Core.Access.Permissions.Memory);
+        me.MapPost("/tidy", TidyAsync).RequirePermission(Llm.Core.Access.Permissions.Memory);
+        // As Markdown, out and back in.
+        me.MapGet("/export", ExportAsync);
+        me.MapPost("/import", ImportAsync).RequirePermission(Llm.Core.Access.Permissions.Memory);
+    }
+
+    /// <summary>The person's memories (and the company's they read) as Markdown, to download.</summary>
+    private static async Task<IResult> ExportAsync(ClaimsPrincipal p, UserManager<AppUser> users, Memories memories, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        var all = await memories.ListAsync(me.Id, ct);
+        return Results.File(System.Text.Encoding.UTF8.GetBytes(MemoryMarkdown.Write(all)), "text/markdown; charset=utf-8", "memory.md");
+    }
+
+    /// <summary>Memories from Markdown (Arena's own export, another assistant's, or a list): each kept, one said already left as it is.</summary>
+    private static async Task<IResult> ImportAsync(MemoryImport body, ClaimsPrincipal p, UserManager<AppUser> users, Memories memories, AccessService access, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        var company = await KeepsCompanyAsync(access, me, ct);
+        var (kept, skipped) = (0, 0);
+        var started = DateTimeOffset.UtcNow;
+        foreach (var m in MemoryMarkdown.Read(body.Markdown ?? ""))
+        {
+            var (text, problem) = Memories.Check(m.Text);
+            var facts = new MemoryFacts(m.Scope, m.Kind, m.Project, Core.Chat.Memory.Imported, null, m.Pinned);
+            // Kept new; one said already is that one, left as it is.
+            if (problem is not null || Memories.Problem(facts) is not null || (m.Scope == Core.Chat.Memory.Company && !company)
+                || await memories.KeepAsync(me.Id, text, facts, ct) is not { } made || made.CreatedAt < started)
+            {
+                skipped++;
+                continue;
+            }
+            kept++;
+        }
+        return Results.Ok(new { kept, skipped });
+    }
+
+    private static async Task<IResult> HistoryAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        var changes = await db.MemoryChanges.AsNoTracking().Where(c => c.UserId == me.Id).OrderByDescending(c => c.At).Take(200).ToListAsync(ct);
+        return Results.Ok(new { tidiedAt = me.MemoryTidiedAt, changes = changes.Select(MemoryGarden.View) });
+    }
+
+    private static async Task<IResult> UndoAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        return await MemoryGarden.UndoAsync(db, me.Id, id, ct)
+            ? Results.Ok(MemoryGarden.View(await db.MemoryChanges.AsNoTracking().SingleAsync(c => c.Id == id, ct)))
+            : Results.NotFound();
+    }
+
+    private static async Task<IResult> TidyAsync(ClaimsPrincipal p, UserManager<AppUser> users, IServiceProvider services, MemoryGarden garden, Memories memories, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        if (!memories.On(me))
+        {
+            return AuthEndpoints.Problem(409, "off", "Memory is off: turn it on to tidy your memories.");
+        }
+        return Results.Ok(new { changes = await garden.TidyAsync(services, me.Id, ct) });
     }
 
     private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;
@@ -132,6 +198,8 @@ public static class MemoryEndpoints
     {
         var me = await Me(p, users);
         await db.Memories.Where(m => m.UserId == me.Id && m.Scope != Core.Chat.Memory.Company).ExecuteDeleteAsync(ct);
+        // And what the garden kept of them, to undo: forgotten too.
+        await db.MemoryChanges.Where(c => c.UserId == me.Id).ExecuteDeleteAsync(ct);
         return Results.NoContent();
     }
 

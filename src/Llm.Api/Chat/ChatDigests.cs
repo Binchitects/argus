@@ -182,6 +182,47 @@ public sealed class PastChats(AppDbContext db, Memories memories)
             .OrderByDescending(p => p.Score).ThenByDescending(p => p.Chat.UpdatedAt).Take(Most)];
     }
 
+    /// <summary>How near by meaning a past chat must be to be named with a question (and above the typical, and near the best), and how many.</summary>
+    public const double RelatedNear = 0.55, RelatedStand = 0.12, RelatedSpread = 0.08;
+    public const int MostRelated = 2;
+
+    /// <summary>
+    /// The past chats a question bears on, by their digests' meaning alone (nothing without the embedder): those well above
+    /// the typical chat's score and near the best, at most two. Words are not enough here: a note on every question that shares
+    /// a word with an old chat would be noise.
+    /// </summary>
+    public async Task<List<PastChat>> RelatedAsync(AppUser me, string question, Guid besides, CancellationToken ct)
+    {
+        if (question.Trim().Length < 12 || await memories.QueryVectorAsync(question, ct) is not { } vector)
+        {
+            return [];
+        }
+        var chats = await db.Conversations.AsNoTracking()
+            .Where(c => c.UserId == me.Id && c.DeletedAt == null && c.Kind != RoomMember.Room && c.Id != besides && c.DigestEmbedding != null)
+            .ToListAsync(ct);
+        var scored = chats.Where(c => c.DigestEmbedding!.Length == vector.Length).Select(c => new PastChat(c, Memories.Dot(vector, c.DigestEmbedding!))).ToList();
+        if (scored.Count == 0)
+        {
+            return [];
+        }
+        var sorted = scored.Select(p => p.Score).Order().ToList();
+        var typical = sorted.Count >= 5 ? sorted[sorted.Count / 2] : 0;
+        var bar = Math.Max(RelatedNear, Math.Max(typical + RelatedStand, sorted[^1] - RelatedSpread));
+        return [.. scored.Where(p => p.Score >= bar).OrderByDescending(p => p.Score).Take(MostRelated)];
+    }
+
+    /// <summary>What goes with a question about the past chats it bears on: each one's id, title, when, and its digest's start.</summary>
+    public static string Note(IReadOnlyList<PastChat> related) =>
+        "(Past chats of the person's that may bear on this, by their digests; open_chat reads one when it matters:" +
+        string.Concat(related.Select(p => $"\n- [{p.Chat.Id}] \"{p.Chat.Title}\" (last {p.Chat.UpdatedAt.ToString("d MMM yyyy", CultureInfo.InvariantCulture)}): " +
+            Fmt(p.Chat.Digest))) + ")";
+
+    private static string Fmt(string? digest)
+    {
+        var text = (digest ?? "").ReplaceLineEndings(" ").Trim();
+        return text.Length > 240 ? text[..240] + "…" : text;
+    }
+
     /// <summary>search_history's answer: the chats found, each with its id and digest.</summary>
     public async Task<ToolResult> FindAsync(AppUser me, string query, CancellationToken ct, Guid? besides = null)
     {

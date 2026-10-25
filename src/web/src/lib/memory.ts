@@ -63,5 +63,29 @@ export const changeMemory = (id: string, m: MemoryInput) => api<MemoryItem>(`/ap
 export const forgetMemory = (id: string) => api(`/api/account/memories/${id}`, { method: 'DELETE' })
 export const keepProposal = (id: string) => api<MemoryItem>(`/api/account/memories/${id}/keep`, { body: {} })
 
+/** A change the memory garden made: memories merged into one, let go, or one tightened; with what they were, to undo it. */
+export interface MemoryChange {
+  id: string
+  action: 'merged' | 'let_go' | 'tightened'
+  reason: string
+  before: { id: string; text: string; kind: MemoryKind }[]
+  memoryId: string | null
+  after: string | null
+  at: string
+  undoneAt: string | null
+}
+
+export const memoryHistoryQuery = {
+  queryKey: ['account', 'memories', 'history'],
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ tidiedAt: string | null; changes: MemoryChange[] }>('/api/account/memories/history', { signal }),
+}
+
+export const undoMemoryChange = (id: string) => api<MemoryChange>(`/api/account/memories/history/${id}/undo`, { body: {} })
+export const tidyMemories = () => api<{ changes: number }>('/api/account/memories/tidy', { body: {} })
+/** Memories from Markdown (Arena's own download, another assistant's export, or a list of lines). */
+export const importMemories = (markdown: string) => api<{ kept: number; skipped: number }>('/api/account/memories/import', { body: { markdown } })
+
+export const changeLabel: Record<MemoryChange['action'], string> = { merged: 'Merged', let_go: 'Let go', tightened: 'Tightened' }
+
 export const kindLabel: Record<MemoryKind, string> = { preference: 'Preference', fact: 'Fact', decision: 'Decision', howto: 'How to', lesson: 'Lesson' }
 export const scopeLabel: Record<MemoryScope, string> = { person: 'About you', project: 'A project', company: "The company's" }

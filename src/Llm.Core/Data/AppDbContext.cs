@@ -91,6 +91,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<AccessChange> AccessChanges => Set<AccessChange>();
     public DbSet<AccessMeta> AccessMeta => Set<AccessMeta>();
     public DbSet<Memory> Memories => Set<Memory>();
+    public DbSet<MemoryChange> MemoryChanges => Set<MemoryChange>();
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<KnowledgeSource> KnowledgeSources => Set<KnowledgeSource>();
     public DbSet<KnowledgeDocument> KnowledgeDocuments => Set<KnowledgeDocument>();
@@ -920,6 +921,16 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(m => new { m.UserId, m.Scope, m.ProjectKey });
             e.HasIndex(m => m.Scope).HasFilter("\"Scope\" = 'company'");
             e.HasOne<AppUser>().WithMany().HasForeignKey(m => m.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<MemoryChange>(e =>
+        {
+            e.ToTable("memory_changes");
+            e.Property(c => c.Action).HasMaxLength(16);
+            e.Property(c => c.Reason).HasMaxLength(300);
+            e.Property(c => c.Before).HasMaxLength(20_000);
+            e.Property(c => c.After).HasMaxLength(500);
+            e.HasIndex(c => new { c.UserId, c.At });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<Skill>(e =>
         {

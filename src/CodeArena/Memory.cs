@@ -136,6 +136,28 @@ internal sealed class MemoryStore(AppPaths paths, string projectRoot)
         "when", "where", "who", "why", "does", "did", "can", "not", "but", "you", "your", "they", "their", "there", "our", "all", "use", "please",
     };
 
+    /// <summary>The memories as Arena has them now (the IDE's Memory view), kept as the list /memory numbers; null when Arena does not answer.</summary>
+    public async Task<List<ArenaMemoryItem>?> RefreshAsync(CancellationToken ct)
+    {
+        if (Arena is not { } arena || await arena.ListAsync(ProjectKey, ct) is not { } list)
+        {
+            return null;
+        }
+        (Online, Listed) = (true, list.Memories);
+        return Listed;
+    }
+
+    /// <summary>Forgets one of the person's memories by its id, in Arena; false when Arena did not.</summary>
+    public async Task<bool> ForgetAsync(string id, CancellationToken ct)
+    {
+        if (Arena is not { } arena || !await arena.ForgetAsync(id, ct))
+        {
+            return false;
+        }
+        Listed.RemoveAll(m => m.Id == id);
+        return true;
+    }
+
     /// <summary>Forgets the memory /memory lists at this place (from 1), in Arena when it answered at the start; the one forgotten, or null.</summary>
     public async Task<string?> ForgetListedAsync(int number, CancellationToken ct)
     {
