@@ -1587,6 +1587,16 @@ a meeting yet; push notifications came ahead, in v5.x.
 
 ### v7.0 — Memory: what the models remember, and what is in their window
 
+Released: **v7.0.0** (2026-10-25), every item below, and beyond them, as the
+person asked along the way: very long chats and sessions (their own earlier
+messages read back by number, a long chat opened at its end), a project's
+long memory in Code Arena's `.remember/`, skills that learn from the work
+(learned, made better with Undo, lessons from answers marked bad, Code
+Arena's `skill_save`), and Code Arena delivered by the Arena (one-line
+install, built by every deploy, self-update). Still to do from it: Code
+Arena's pin and leave out per message (the web chat's are done), and the
+garden for the company's memories.
+
 The person asked (2026-10-25) for a pivot: a large effort on memory
 management and planning in both Code Arena and Argus Arena — memory meaning
 the model's context and its memory — and for the most useful and popular
@@ -1669,7 +1679,7 @@ cut).
    an admin turns any off, and a person's or a project's skill of the same
    name wins.
 
-### v7.1 — Planning: plans the agents make, follow and prove
+### v7.1 — Planning and code mode: plans the agents make and prove, and tools called from code
 
 1. **The plan as the agent's working state.** `plan` (make and change)
    instead of Code Arena's to-do list: a goal, and steps each with what
@@ -1699,6 +1709,67 @@ cut).
 8. **Plans in the chat.** For multi-step work that is not code (research, a
    document, an analysis) the chat proposes a plan, the person approves it,
    and it is carried out with the tools, each step shown.
+
+**Code mode.** The person asked (2026-10-25) to weigh code mode for both
+products: rather than calling tools one by one, each call and its whole
+result passing through the model's window, the model writes a short program
+that calls the tools as functions, and only what the program prints comes
+back. The case for it, from those who measured it:
+
+- Anthropic's [code execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp)
+  presents MCP servers as code to explore (a file of functions per tool, read
+  when needed): one workflow went from about 150,000 tokens to 2,000.
+  Cloudflare's Code Mode reaches a similar finding (models write code better
+  than they make long chains of calls; 2,500 API endpoints behind two tools).
+  Anthropic's API has it as programmatic tool calling (tools callable from its
+  code execution, results filtered before they reach the window).
+- Measured by others on mixed tasks: input tokens down 78% (15,417 to 3,310)
+  with the same success, output tokens up (the code), latency a little up
+  ([AIMultiple](https://research.aimultiple.com/code-execution-with-mcp));
+  37% fewer tokens on complex research in Anthropic's managed form. The gain
+  is large with many tools or long chains of calls carrying big payloads, and
+  small for one or two simple calls.
+
+Why it fits here: Argus alone is about 5,000 tokens of definitions, a person
+may add plugins and MCP servers, and the chains Argus answers with (search,
+then read files, then follow references) carry results the model only needs
+to filter. What there is to build on: the chat's Python sandbox (no network),
+tools on demand (definitions sent whole only once loaded), results kept aside
+and read again (v7.0), sub-agents, and Code Arena's sandbox and shell. The
+risks: a weaker model writes wrong code (so direct calls stay), code in a
+sandbox that reaches tools needs a broker that keeps every right and every
+"ask first", and more output tokens. The plan:
+
+9. **Tools as code, one bridge for both.** Every tool an answer may use (the
+   built-in ones, Argus, plugins, MCP servers, Arena's own) as a Python
+   module generated from its definition: a function per tool with typed
+   parameters and its description as the docstring, grouped by source
+   (`arena.argus.semantic_search(...)`), found with `arena.tools.search("…")`
+   and `help(...)` rather than all of them read up front. A call from code
+   goes to a broker, as the person: their rights, a tool that asks first
+   asks (once for the program, with what it will call), a budget of calls per
+   program, each call shown nested under the program and audited as a direct
+   one is.
+10. **`run_code` in the chat.** Python in the existing sandbox (no network
+    but the broker's socket): the program calls tools, loops, filters and
+    joins, and only what it prints (and the files it writes) comes back, cut
+    and kept aside past a size. For research over the code (every caller of
+    a symbol across repositories, then what each does) and data work that
+    reads many results.
+11. **Code mode in Code Arena.** The same module in its sandbox (a socket to
+    a bridge in Code Arena with the session's own key): its local tools
+    (files, search, git), Arena's and Argus's MCP tools and the person's MCP
+    servers, callable from one `run_code` in Python, beside the shell it has.
+12. **Arena MCP in code mode.** For agents that connect to Arena MCP (Claude
+    Code, Qwen Code, Codex...): two tools, `search_tools` and `run_code`, in
+    place of every definition, chosen per key on Connect your tools.
+13. **When to use which.** Per model (Models: tools direct, as code, or both):
+    both for the strong models, direct for the small ones; the system
+    prompt teaches the pattern when code is on. Direct calls stay for one or
+    two simple calls.
+14. **Measured before it is the default.** The Argus task families and the
+    graph eval in both modes on our own models: tokens in and out, success,
+    time. The release says the numbers, and the defaults follow them.
 
 ### v7.2 — A model of your own
 

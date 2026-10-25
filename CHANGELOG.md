@@ -12,6 +12,69 @@ Sections used:
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
 
+## v7.0.0 (2026-10-25)
+
+Memory, and work that never loses the thread: what Arena and Code Arena
+remember, what fills the model's window, chats and sessions that go on for
+thousands of messages, skills that learn from your work, and Code Arena
+delivered and kept current by your Arena.
+
+### :rocket: Epics and highlights
+
+- **One memory, everywhere**: the chat and Code Arena keep the same memories,
+  each with whose it is (yours, a project's, the company's), its kind
+  (preference, fact, decision, how to, lesson) and where it came from. Each
+  answer reads the pinned ones and those that matter to its question, by
+  meaning; memories form themselves from chats that went quiet (Remember
+  these?, or on their own); the garden merges what says the same, lets go of
+  what was replaced or unused for months and tightens long ones, each change
+  with Undo; Memory has History, Markdown in and out, and the IDE a Memory
+  view. Code Arena keeps a project's long memory in `.remember/` in the
+  repository, read at every session's start and kept with `remember_project`
+- **Very long chats and sessions**: before compacting, older tools' results
+  are cleared (often that is enough); a big result is kept aside and read
+  again in parts; the summary comes in sections, cites message numbers and
+  ends with the chat's stretches; pinned messages and the plan come back after
+  it. A chat that compacted, or a long Code Arena session, finds and reads its
+  own earlier messages by their numbers (`chat_search`, `chat_read`,
+  `session_search`, `session_read`); a long chat opens at its end, and an
+  answer reads whole only what it sends. Every chat and session gets a digest
+  as it goes quiet: `search_history` and `open_chat` find past work by what it
+  was about, and a question comes with the past chats it bears on
+- **Skills that learn**: 21 skills come with Arena (code review, tests,
+  debugging, planning, release notes, meeting notes and more). A chat or a
+  session that worked out a way of doing something worth repeating proposes
+  a skill; a skill that went wrong or that you corrected proposes its better
+  version, applied with a version and Undo; an answer marked bad is read as a
+  lesson. Code Arena keeps what it worked out with `skill_save`, reminded after
+  a long turn
+- **Code Arena, delivered by your Arena**: Connect your tools installs it in
+  one line (the build checked against its SHA-256), every deploy builds it
+  for five systems, and it checks the Arena for a newer version and updates
+  itself (`code-arena update`, or Update in the IDE's status bar)
+
+### :sparkles: New features & Enhancements
+
+- The context gauge shows the memory apart and the biggest messages, each
+  pinned or left out from there; any question can be pinned (said word for
+  word after every summary) or left out of what the model reads, with its
+  answer; Code Arena's `/context` and the IDE's Context show the same
+- Settings → Chat: **Digests of past chats**, **Tidy memories**,
+  **Arena's own skills**
+- `tools/fetch-code-arena-packs.sh` keeps .NET's packs at the SDK's version;
+  `make-installer.sh` packs Code Arena's packages of the release, making them
+  when there are none
+- A new README
+
+### :bug: Bugs fixed
+
+- After a summary, Code Arena's to-do list was not said to the model
+- Recall gave a dozen unrelated memories: it now keeps those well above the
+  typical candidate's score
+- vLLM's preset files could lose a write made at the same moment
+- A test server whose port was taken as it started failed instead of trying
+  another
+
 ## v6.9.0 (2026-10-25)
 
 Everyone, in every language: meetings made into minutes, calls in rooms with
