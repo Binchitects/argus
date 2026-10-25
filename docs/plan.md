@@ -1585,7 +1585,122 @@ a meeting yet; push notifications came ahead, in v5.x.
    any app to a chat, push notifications, Talk on the lock screen's
    shortcut, works with a poor connection (what is sent waits).
 
-### v7.0 — A model of your own
+### v7.0 — Memory: what the models remember, and what is in their window
+
+The person asked (2026-10-25) for a pivot: a large effort on memory
+management and planning in both Code Arena and Argus Arena — memory meaning
+the model's context and its memory — and for the most useful and popular
+skills to come with both. v7.0 is memory and the window; v7.1 is planning.
+
+What is there to build on: the chat keeps up to 100 one-line memories a
+person (the newest few hundred tokens go into every prompt; the model offers
+new ones, kept when the person accepts) and compacts a long chat into a
+summary; Code Arena keeps a person's and a project's memory as Markdown
+files on the machine (all of it in the prompt at a session's start),
+`search_sessions` finds words in earlier sessions, and it compacts at a
+share of the window (summaries, then a turn's own steps, then long results
+cut).
+
+1. **One memory, everywhere.** Memories in Arena's database for the chat and
+   Code Arena alike, each with its scope — the person (every chat and
+   project), a project (a repository: Code Arena's sessions in it, and the
+   people who may read it in GitLab when its owner shares it), or the company
+   (kept by admins, read by everyone) — its kind (preference, fact,
+   decision, how-to, lesson), where it came from (a chat, a session, a
+   meeting, and the message), when it was last used and how often, pinned or
+   not. Hundreds a person, not 100: the prompt takes only what matters.
+   Code Arena reads and writes the same memories through Arena (its
+   `memory.md` files imported once, then a cache for when Arena is out of
+   reach, written back when it answers).
+2. **Recall by relevance.** Before each answer the memories that matter to
+   it — nearest the question and the last turns by meaning (the knowledge
+   embedder; words and recency without it), the pinned ones always — go to
+   the model within a budget, after the cached start of the prompt; `recall`
+   searches all of memory when the model needs more. Under each answer:
+   which memories it used, each a click away.
+3. **Memories that form themselves.** When a chat goes quiet, a Code Arena
+   session ends or a compaction happens, the model for small steps reads
+   what is new and proposes memories: preferences, decisions, how the
+   project builds and tests, and lessons (what the person corrected).
+   A proposal like one kept is merged into it; one that contradicts an older
+   one replaces it (the older kept as replaced). In the chat the person
+   accepts them (or turns on "remember on its own"); in Code Arena a
+   project's are kept and said.
+4. **The memory garden.** Now and then, per person and per project:
+   near-duplicates merged, what was replaced or unused for months let go,
+   long ones tightened; every change listed under Memory → History, each
+   with Undo.
+5. **The Memory page.** Workspace → Memory: search, by scope, kind and
+   project; pin, edit, forget; where each came from and when it was last
+   used; History; Markdown in and out. Code Arena's `/memory` lists and
+   edits the same, and the IDE has a Memory panel.
+6. **The window, managed.** The same in the chat and Code Arena:
+   - **What fills it**: the instructions, the tools, the memory, the plan,
+     the conversation and the tools' results, each with its tokens, the
+     biggest items listed, each with Pin, Leave out and Summarize. The
+     chat's gauge opens it; Code Arena's `/context` draws it; the IDE shows
+     it.
+   - **Big results kept aside**: a tool's result past a few thousand tokens
+     stays out of the window; the model reads its start, its size and a
+     handle, and `read_result` reads any part of it again.
+   - **Clearing before compacting**: as the window fills, old results
+     (before the last few turns) go first, each call kept with a line of
+     what it returned (readable again); compaction only when that is not
+     enough.
+   - **Compaction that keeps the thread**: the summary in sections (goal,
+     constraints, decisions, files, state, next steps, open questions); the
+     plan, the pinned messages, the memories in use and the files being
+     changed come back after it on their own; the person sees what it kept.
+   - **Pin and leave out**: a message pinned is kept word for word through
+     compactions; one left out is not read by the model, and not deleted.
+7. **Past work, findable.** Each chat and Code Arena session gets a digest
+   when it goes quiet (what was asked, done and decided, the files, how it
+   ended), searched by meaning: `search_history` finds past chats and
+   sessions, the web's and Code Arena's together ("what did we decide about
+   retries last month?"), and opens them.
+8. **Skills that come with Arena.** The skills people use most, built in for
+   the chat and Code Arena alike (with parameters, used by / or by the model
+   on its own): review code, security review, write tests, debug
+   systematically, refactor safely, explain code, commit message, merge
+   request description, release notes, document a project, plan a change,
+   brainstorm, summarize a document, meeting notes, write an email or a
+   memo, analyse data, make a deck, translate keeping the terms, explain and
+   speed up a SQL query, review an API, incident postmortem. Our own words;
+   an admin turns any off, and a person's or a project's skill of the same
+   name wins.
+
+### v7.1 — Planning: plans the agents make, follow and prove
+
+1. **The plan as the agent's working state.** `plan` (make and change)
+   instead of Code Arena's to-do list: a goal, and steps each with what
+   "done" means (its check), the files it touches, what it waits for, its
+   status and notes. Shown as it changes (the terminal, the IDE's Plan
+   panel, beside the chat), kept through compactions (it is always in the
+   window), stored with its chat or session and on the Plans board.
+2. **Plan mode, finished.** In plan mode the agent investigates, then
+   proposes a plan the person reviews step by step: approve, change a step,
+   ask for another way, or reject. Approved, it carries out that plan.
+3. **Grounded in the code.** Argus's impact of a change — the symbols and
+   files it touches, their callers in every repository, the tests that cover
+   them — goes into the plan, each step citing the code it changes.
+4. **Critique before acting.** A second reading of the plan with fresh eyes
+   (another model, or the same in a new context): what is missing, what is
+   risky, what has no check. Its notes are shown and folded in.
+5. **Carry out and prove.** Step by step: a checkpoint before each, its
+   check run after it (build, tests, a command), a failed check fixed or the
+   plan changed with the reason; nothing is "done" that was not checked.
+6. **Long tasks across sessions.** A plan outlives its session: the next
+   session (or `code-arena --plan`) picks it up with its progress notes;
+   plans in progress are listed in the web; a scheduled task can carry one
+   on.
+7. **Steps at once.** Steps that wait for nothing run together: research by
+   read-only sub-agents in parallel, changes in their own git worktrees,
+   merged back with their checks.
+8. **Plans in the chat.** For multi-step work that is not code (research, a
+   document, an analysis) the chat proposes a plan, the person approves it,
+   and it is carried out with the tools, each step shown.
+
+### v7.2 — A model of your own
 
 1. **Model lab.** Teach a small model the company's words on the local GPU
    (a LoRA from chosen knowledge sources, prompts and good answers), then
