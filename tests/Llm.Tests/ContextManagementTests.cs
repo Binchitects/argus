@@ -150,4 +150,44 @@ public sealed class ContextManagementTests(AppFixture app)
         var system = LastAnswerRequest(email)[0]!["content"]!.GetValue<string>();
         Assert.Contains("This chat's plan as it stands, \"Launch\" (plan_show gives all of it):\n1. [done] Write the notes\n2. [doing] Tell support (Ana)", system, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task What_filled_an_answer_counts_the_memory_apart_and_lists_the_biggest_messages()
+    {
+        var (b, _) = await PersonAsync();
+        await StatusAssert.Is(HttpStatusCode.Created, await b.PostAsync("/api/account/memories", new { text = "Prefers answers in British English.", pinned = true }));
+        var id = await NewChatAsync(b);
+        Guid resultId;
+        using (var scope = app.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var q = new ChatMessage { ConversationId = id, Role = "user", Sequence = 1, Content = "Fetch the vendors." };
+            var call = new ChatMessage
+            {
+                ConversationId = id, ParentId = q.Id, Role = "assistant", Sequence = 2, Content = "",
+                ToolCallsJson = """[{"id":"c1","type":"function","function":{"name":"calculate","arguments":"{}"}}]""",
+            };
+            var result = new ChatMessage { ConversationId = id, ParentId = call.Id, Role = "tool", Sequence = 3, ToolCallId = "c1", ToolName = "calculate", Content = "vendors " + new string('v', 5_000) };
+            var answer = new ChatMessage { ConversationId = id, ParentId = result.Id, Role = "assistant", Sequence = 4, Content = "Three vendors." };
+            db.ChatMessages.AddRange(q, call, result, answer);
+            (await db.Conversations.SingleAsync(c => c.Id == id)).CurrentLeafId = answer.Id;
+            await db.SaveChangesAsync();
+            resultId = result.Id;
+        }
+        await SendAsync(b, id, "Which is cheapest?");
+
+        var context = (await MessagesAsync(b, id)).Last(m => m.GetProperty("role").GetString() == "assistant").GetProperty("context");
+        Assert.True(context.GetProperty("memory").GetInt64() > "Prefers answers in British English.".Length);
+        // Not counted as the person's instructions: they gave none.
+        Assert.Equal(0, context.GetProperty("instructions").GetInt64());
+        var biggest = context.GetProperty("biggest").EnumerateArray().ToList();
+        var first = biggest[0];
+        Assert.Equal(resultId, first.GetProperty("id").GetGuid());
+        Assert.Equal("tool", first.GetProperty("role").GetString());
+        Assert.Equal("calculate", first.GetProperty("tool").GetString());
+        Assert.Equal(5_008, first.GetProperty("chars").GetInt64());
+        Assert.StartsWith("vendors vvv", first.GetProperty("preview").GetString(), StringComparison.Ordinal);
+        // Small messages are not listed.
+        Assert.Single(biggest);
+    }
 }

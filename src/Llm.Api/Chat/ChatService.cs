@@ -274,9 +274,13 @@ public sealed partial class ChatService(
         // The memories that matter to this question, beyond the prompt's block, go with it (the cache keeps the rest); the
         // answer says which it read.
         List<Recalled> recalled = conversation.IsRoom ? [] : await memories.RecallAsync(user, question.Content, ct, besides: inNote);
+        var recalledChars = 0;
         if (recalled.Count > 0)
         {
-            ToQuestion(messages, "\n\n" + Memories.QuestionNote(recalled));
+            var note = "\n\n" + Memories.QuestionNote(recalled);
+            ToQuestion(messages, note);
+            recalledChars = note.Length;
+            systemParts = systemParts with { Recalled = recalledChars };
             await memories.UsedAsync([.. recalled.Select(r => r.Memory.Id)], ct);
         }
         if (imagesDropped)
@@ -358,7 +362,7 @@ public sealed partial class ChatService(
                 lengthNote, memory, new HistoryFit(0, request["tools"]?.ToJsonString().Length ?? 0, budget, answer.Sum(m => m.ToJsonString().Length), answer.Count, force ?? ToFit), emit, ct);
             // The question as this answer asked it (deep research's steps, answer again) and the answer so far stay as they were.
             messages = [.. rebuilt.Take(LastUser(rebuilt)).Select(m => m!.DeepClone()), .. messages.Skip(asked).Select(m => m!.DeepClone())];
-            systemParts = parts;
+            systemParts = parts with { Recalled = recalledChars };
             request["messages"] = messages.DeepClone();
         }
 
@@ -1733,9 +1737,11 @@ public sealed partial class ChatService(
         }
         var toolNotes = system.Length - baseLength;
         // What the person asked to be remembered: after the fixed notes, so a new memory leaves their cache as it was.
+        var memoryChars = 0;
         if (memory is not null)
         {
             system += "\n\n" + memory;
+            memoryChars = memory.Length + 2;
         }
         // An assistant's instructions, then the chat's own; then the assistant's files.
         var assistant = conversation.AssistantId is { } aid ? await db.Assistants.AsNoTracking().SingleOrDefaultAsync(x => x.Id == aid, ct) : null;
@@ -1747,7 +1753,7 @@ public sealed partial class ChatService(
         {
             system += "\n\nThe person's instructions for this conversation:\n" + conversation.SystemPrompt.Trim();
         }
-        var person = system.Length - baseLength - toolNotes;
+        var person = system.Length - baseLength - toolNotes - memoryChars;
         var beforeFiles = system.Length;
         if (assistant is not null)
         {
@@ -1814,8 +1820,24 @@ public sealed partial class ChatService(
             LogTrimmed(logger, conversation.Id, dropped);
         }
 
+        // The messages that take the most of the window, for the gauge to pin or leave out.
+        var biggest = turns.Where(t => t.Weight > ContextParts.BiggestAbove && t.Source.Role is "user" or "assistant" or "tool")
+            .GroupBy(t => t.Source.Id).Select(g => (Source: g.First().Source, Turn: g.First().Turn, Weight: g.Sum(t => t.Weight)))
+            .OrderByDescending(t => t.Weight).Take(ContextParts.BiggestCount)
+            .Select(t => new WindowItem(t.Source.Id, t.Source.Role, t.Source.Role == "tool" ? t.Source.ToolName : null, t.Weight, Preview(t.Source), t.Source.Pinned))
+            .ToList();
         return ([new JsonObject { ["role"] = "system", ["content"] = system }, .. turns.Select(t => t.Turn)], imagesDropped,
-            new SystemParts(baseLength, toolNotes, person, system.Length - beforeSummary, assistantFiles), budget);
+            new SystemParts(baseLength, toolNotes, person, system.Length - beforeSummary, assistantFiles, memoryChars, Biggest: biggest), budget);
+
+        static string Preview(ChatMessage m)
+        {
+            var text = m.Content.ReplaceLineEndings(" ").Trim();
+            if (text.Length == 0 && m.ToolCallsJson is { } calls)
+            {
+                text = string.Join(", ", (JsonNode.Parse(calls) as JsonArray ?? []).Select(c => c?["function"]?["name"]?.GetValue<string>()).OfType<string>());
+            }
+            return text.Length > 90 ? text[..90] + "…" : text;
+        }
     }
 
     /// <summary>

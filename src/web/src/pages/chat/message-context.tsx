@@ -9,11 +9,11 @@ export interface ContextChange {
   leftOut?: boolean
 }
 
-/** Under a question or an answer: pin it, or leave it out of what the model reads (and back). */
-export function MessageContextButtons({ m, what, onChange }: { m: Message; what: 'question' | 'answer'; onChange: (m: Message, change: ContextChange) => void }) {
+/** Under a question or an answer (and in the context gauge, a tool's result too): pin it, or leave it out of what the model reads (and back). */
+export function MessageContextButtons({ m, what, onChange, pin = true }: { m: Message; what: 'question' | 'answer' | 'result'; onChange: (m: Message, change: ContextChange) => void; pin?: boolean }) {
   return (
     <>
-      {!m.leftOut && (
+      {pin && !m.leftOut && (
         <Tooltip content={m.pinned ? 'Pinned: kept word for word when the chat compacts. Unpin' : 'Pin: kept word for word when the chat compacts'}>
           <Button variant="ghost" size="icon-sm" className="size-7" aria-pressed={!!m.pinned} aria-label={m.pinned ? `Unpin this ${what}` : `Pin this ${what}`} onClick={() => onChange(m, { pinned: !m.pinned })}>
             {m.pinned ? <PinOff /> : <Pin />}

@@ -184,6 +184,17 @@ export const stateQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => api<CodeState>('/api/state', { signal }),
 }
 
+/** What fills the model's window, by kind in tokens, and its biggest messages (measured while no turn runs). */
+export interface CodeWindow {
+  kinds: { kind: string; tokens: number }[]
+  biggest: { role: 'user' | 'assistant' | 'tool' | 'summary'; what: string; tokens: number }[]
+}
+
+export const windowQuery = {
+  queryKey: ['code', 'window'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<CodeWindow>('/api/window', { signal }),
+}
+
 export const sessionsQuery = {
   queryKey: ['code', 'sessions'] as const,
   queryFn: ({ signal }: { signal: AbortSignal }) => api<SessionSummary[]>('/api/sessions', { signal }),

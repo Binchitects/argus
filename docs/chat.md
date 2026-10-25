@@ -184,10 +184,14 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
 - **Context.** The gauge beside Send shows how full the model's context is,
   from the last answer's prompt as the model counted it (and what it
   answered). Opened, it shows what fills it: the system prompt and the tools'
-  notes, tool definitions, your instructions, a summary of earlier messages,
-  files, your messages, answers, tool calls and results, what is kept for the
-  answer, and what is free. Each request is measured by kind in characters and
-  scaled to its prompt tokens.
+  notes, tool definitions, your instructions, the memory (what the prompt
+  holds of it and what was recalled for the question), a summary of earlier
+  messages, files, your messages, answers, tool calls and results, what is
+  kept for the answer, and what is free. Each request is measured by kind in
+  characters and scaled to its prompt tokens. Under **Biggest**, the five
+  messages that took most of it (past 1,000 characters), each with its tokens
+  and its start: a question or an answer is pinned or left out from there, a
+  tool's result left out (below).
 - **Compact.** Near the limit the chat compacts itself: the model summarizes
   the older messages, and the next answers read the summary instead (the
   newest exchanges, about a quarter of the context, stay as they are). **Compact

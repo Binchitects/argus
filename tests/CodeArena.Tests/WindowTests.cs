@@ -88,4 +88,37 @@ public sealed class WindowTests : IDisposable
         Assert.Contains("## Goal\n- fix the bug", summary, StringComparison.Ordinal);
         Assert.Contains("Your to-do list as it stands (todo_write changes it):\n- [completed] Read the code\n- [in_progress] Fix the bug", summary, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task The_IDE_reads_what_fills_the_window_with_the_memory_apart_and_its_biggest_messages()
+    {
+        _mcp.Chats.Memories.Add(new JsonObject
+        {
+            ["id"] = Guid.NewGuid().ToString(), ["text"] = "Prefers answers in British English", ["scope"] = "person", ["kind"] = "preference",
+            ["project"] = null, ["pinned"] = false, ["mine"] = true,
+        });
+        using var h = new Harness(_gateway, _mcp);
+        File.WriteAllText(Path.Combine(h.Work, "big.txt"), Lines("the big file", 200));
+        _gateway.Answer = req => FakeGateway.HasToolResults(req) ? Reply.Say("read") : Reply.Call(("read_file", """{"path":"big.txt"}"""));
+        await using var web = await WebRun.StartAsync(h);
+        using (var stream = await web.StreamAsync(HttpMethod.Post, "/api/messages", new JsonObject { ["text"] = "read big.txt" }))
+        {
+            await stream.RestAsync();
+        }
+        var until = DateTime.UtcNow.AddSeconds(30);
+        while ((await web.GetJsonAsync("/api/session"))["busy"]!.GetValue<bool>())
+        {
+            Assert.True(DateTime.UtcNow < until, "The turn never ended.");
+            await Task.Delay(20);
+        }
+
+        var window = await web.GetJsonAsync("/api/window");
+        var kinds = window["kinds"]!.AsArray().ToDictionary(k => k!["kind"]!.GetValue<string>(), k => k!["tokens"]!.GetValue<long>());
+        Assert.True(kinds["instructions"] > 0);
+        Assert.True(kinds["memory"] > 0);
+        Assert.True(kinds["tools' results"] > 1_000);
+        var biggest = window["biggest"]!.AsArray()[0]!;
+        Assert.Equal("tool", biggest["role"]!.GetValue<string>());
+        Assert.StartsWith("read_file's result", biggest["what"]!.GetValue<string>(), StringComparison.Ordinal);
+    }
 }

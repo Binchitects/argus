@@ -1523,9 +1523,12 @@ What fills the window is managed before anything is summarized:
   characters) is kept as r3. read_result {"id":"r3"} reads it again."). When
   that is enough, nothing is summarized: "Cleared N earlier tool results
   (~T tokens) to make room".
-- **`/context` shows what fills it**: the instructions and memory, the tools,
-  Code Arena's notes, the summary, your messages, the answers and the tools'
-  results, each as a bar with its tokens, then the five biggest messages.
+- **`/context` shows what fills it**: the instructions, the memory (the
+  prompt's and what was recalled for the questions), the tools, Code Arena's
+  notes, the summary, your messages, the answers and the tools' results, each
+  as a bar with its tokens, then the five biggest messages. The IDE's
+  **Context** (the window's use in the status bar) lists the same, from
+  `GET /api/window`, measured while no turn runs.
 
 A long session never gets stuck on the window:
 

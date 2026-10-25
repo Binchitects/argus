@@ -39,7 +39,9 @@ public sealed partial class MemoryReflection(IServiceScopeFactory scopes, Operat
         "remembering in later chats: lasting preferences (how they like answers, their tools and languages), facts about them or their work " +
         "(role, team, projects, the stack), decisions with their reasons, how things are done (commands to build, test or deploy that worked), " +
         "and lessons (what went wrong, or what they corrected). Never secrets, passwords or keys, health, other people's personal details, " +
-        "what matters only to this conversation, or what is remembered already (listed with ids). When the conversation says otherwise " +
+        "what matters only to this conversation (what they asked for here, a question, a summary or a draft they wanted), or what is " +
+        "remembered already (listed with ids). One memory for one thing: a decision with its reason in the same memory, never two that " +
+        "say the same in other words. When the conversation says otherwise " +
         "than a kept memory, propose the new one with \"replaces\": that memory's id. One or two short sentences each, about the person or " +
         "their work, in the person's language. A project's memory (scope project) is about the code base they worked in here, only when " +
         "the conversation is a coding session. Answer with JSON only: {\"memories\":[{\"text\":\"…\",\"kind\":\"preference|fact|decision|howto|lesson\"," +

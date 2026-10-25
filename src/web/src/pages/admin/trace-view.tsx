@@ -9,7 +9,7 @@ import { api } from '@/lib/api'
 import { formatValue, when } from '@/lib/format'
 import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
-import { kinds } from '@/pages/chat/context'
+import { kindFill, kinds } from '@/pages/chat/context'
 import { seconds, toolTitle } from '@/pages/chat/format'
 import type { AgentTrace, AnswerTrace, TraceStep, TraceTokens } from './traces-api'
 
@@ -101,7 +101,7 @@ function AgentRow({ a, total }: { a: AgentTrace; total: number }) {
 function PromptParts({ parts }: { parts: AnswerTrace['prompt'] }) {
   const { resolved } = useTheme()
   const colors = categorical[resolved]
-  const shown = kinds.map((k, i) => ({ ...k, color: colors[i]!, part: parts.find((p) => p.kind === k.key) })).filter((k) => k.part)
+  const shown = kinds.map((k) => ({ ...k, color: kindFill(k, colors), part: parts.find((p) => p.kind === k.key) })).filter((k) => k.part)
   const total = shown.reduce((n, k) => n + (k.part!.tokens ?? k.part!.chars), 0)
   if (!shown.length || total <= 0) return null
   return (

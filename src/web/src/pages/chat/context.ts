@@ -1,18 +1,26 @@
 import type { ReactNode } from 'react'
 import { formatValue } from '@/lib/format'
-import type { Compaction, ContextFill, Message } from './types'
+import type { Compaction, ContextFill, ContextItem, Message } from './types'
 
 /** What fills the context, in the order it is drawn (each keeps its colour by kind). */
-export const kinds: { key: keyof ContextFill; label: string }[] = [
-  { key: 'system', label: 'System prompt and tool notes' },
-  { key: 'tools', label: 'Tool definitions' },
-  { key: 'instructions', label: 'Your instructions' },
-  { key: 'summary', label: 'Summary of earlier messages' },
-  { key: 'files', label: 'Files' },
-  { key: 'you', label: 'Your messages' },
-  { key: 'answers', label: 'Answers' },
-  { key: 'toolResults', label: 'Tool calls and results' },
+/** What fills the context, each with its hue of the categorical palette (8): the memory shares the instructions', hatched. */
+export const kinds: { key: keyof ContextFill; label: string; hue: number; hatch?: boolean }[] = [
+  { key: 'system', label: 'System prompt and tool notes', hue: 0 },
+  { key: 'tools', label: 'Tool definitions', hue: 1 },
+  { key: 'instructions', label: 'Your instructions', hue: 2 },
+  { key: 'memory', label: 'Memory', hue: 2, hatch: true },
+  { key: 'summary', label: 'Summary of earlier messages', hue: 3 },
+  { key: 'files', label: 'Files', hue: 4 },
+  { key: 'you', label: 'Your messages', hue: 5 },
+  { key: 'answers', label: 'Answers', hue: 6 },
+  { key: 'toolResults', label: 'Tool calls and results', hue: 7 },
 ]
+
+/** A kind's fill: its hue, hatched where it shares one. */
+export function kindFill(kind: { hue: number; hatch?: boolean }, colors: readonly string[]): string {
+  const color = colors[kind.hue] ?? 'currentColor'
+  return kind.hatch ? `repeating-linear-gradient(135deg, ${color} 0 2px, transparent 2px 4px)` : color
+}
 
 export interface ContextView {
   /** Tokens the next request starts from: the last one's prompt and what was answered to it. */
@@ -24,6 +32,8 @@ export interface ContextView {
   parts: { key: keyof ContextFill; label: string; tokens: number }[] | null
   /** Worked out, not counted: the chat was compacted since the last answer (the next one counts it). */
   estimated?: boolean
+  /** The messages that took most of it, the biggest first, in tokens. */
+  biggest?: { item: ContextItem; tokens: number }[]
 }
 
 /**
@@ -53,14 +63,15 @@ export function contextOf(last: Message | undefined, limit: number | null | unde
   // tokens per character (about 3.5 when nothing better is known).
   if (compacted != null) {
     const perChar = fill && chars > 0 ? prompt / chars : 1 / 3.5
-    const kept: ContextFill = { system: fill?.system ?? 0, tools: fill?.tools ?? 0, instructions: fill?.instructions ?? 0, summary: compacted.length + 150, files: 0, you: 0, answers: 0, toolResults: 0 }
-    const estimated = kinds.map((k) => ({ ...k, tokens: Math.round(kept[k.key] * perChar) }))
+    const kept: ContextFill = { system: fill?.system ?? 0, tools: fill?.tools ?? 0, instructions: fill?.instructions ?? 0, memory: fill?.memory ?? 0, summary: compacted.length + 150, files: 0, you: 0, answers: 0, toolResults: 0 }
+    const estimated = kinds.map((k) => ({ ...k, tokens: Math.round((kept[k.key] ?? 0) * perChar) }))
     return { used: estimated.reduce((n, p) => n + p.tokens, 0), limit, output, parts: estimated, estimated: true }
   }
   const parts = fill && chars > 0
     ? kinds.map((k) => ({ ...k, tokens: Math.round(((fill[k.key] ?? 0) / chars) * prompt) + (k.key === 'answers' ? completion : 0) }))
     : null
-  return { used: prompt + completion, limit, output, parts }
+  const biggest = fill?.biggest?.length && chars > 0 ? fill.biggest.map((item) => ({ item, tokens: Math.round((item.chars / chars) * prompt) })) : undefined
+  return { used: prompt + completion, limit, output, parts, biggest }
 }
 
 /**

@@ -5,11 +5,24 @@ import { categorical } from '@/components/charts/palette'
 import { formatValue } from '@/lib/format'
 import { useTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
-import { compactsText, kinds, type CompactSetting, type ContextView } from './context'
+import { compactsText, kindFill, kinds, type CompactSetting, type ContextView } from './context'
+import { MessageContextButtons, MessageContextNote, type ContextChange } from './message-context'
+import type { ContextItem, Message } from './types'
 
-export function ContextGauge({ context, onCompact, busy, compact }: { context: ContextView; onCompact?: () => void; busy: boolean; compact?: CompactSetting }) {
+/** The chat's messages the gauge's biggest items are, and how one is pinned or left out. */
+export interface ContextItems {
+  find: (id: string) => Message | undefined
+  change: (m: Message, change: ContextChange) => void
+}
+
+const itemName = (i: ContextItem) => (i.role === 'user' ? 'Your message' : i.role === 'assistant' ? 'An answer' : `${i.tool ?? 'A tool'}'s result`)
+
+export function ContextGauge({ context, onCompact, busy, compact, items }: { context: ContextView; onCompact?: () => void; busy: boolean; compact?: CompactSetting; items?: ContextItems }) {
   const { resolved } = useTheme()
   const colors = categorical[resolved]
+  const fillOf = (key: string) => kindFill(kinds.find((k) => k.key === key) ?? { hue: 0 }, colors)
+  // The biggest messages still in this chat (a fork's are another chat's): each pinned or left out from here.
+  const biggest = (context.biggest ?? []).map((b) => ({ ...b, message: items?.find(b.item.id) })).filter((b) => b.message)
   const share = Math.min(1, context.used / context.limit)
   // The ring warns as the chat nears where it compacts (90% when it compacts only when needed).
   const at = compact && compact.at > 0 ? compact.at / 100 : 0.9
@@ -51,7 +64,7 @@ export function ContextGauge({ context, onCompact, busy, compact }: { context: C
           </div>
           <div className="relative flex h-2.5 w-full gap-0.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
             {shown.length > 0 ? (
-              shown.map((p) => <span key={p.key} className="h-full first:rounded-s-full" style={{ width: of(p.tokens), background: colors[kinds.findIndex((k) => k.key === p.key)] }} />)
+              shown.map((p) => <span key={p.key} className="h-full first:rounded-s-full" style={{ width: of(p.tokens), background: fillOf(p.key) }} />)
             ) : (
               <span className="h-full rounded-s-full bg-primary" style={{ width: of(context.used) }} />
             )}
@@ -62,7 +75,7 @@ export function ContextGauge({ context, onCompact, busy, compact }: { context: C
             <ul className="grid gap-1 text-xs" aria-label="What fills it">
               {shown.map((p) => (
                 <li key={p.key} className="flex items-center gap-2">
-                  <span className="size-2.5 shrink-0 rounded-sm" style={{ background: colors[kinds.findIndex((k) => k.key === p.key)] }} aria-hidden="true" />
+                  <span className="size-2.5 shrink-0 rounded-sm" style={{ background: fillOf(p.key) }} aria-hidden="true" />
                   <span className="min-w-0 flex-1 truncate">{p.label}</span>
                   <span className="text-muted-foreground tabular-nums">{formatValue(p.tokens)}</span>
                   <span className="w-10 text-right text-muted-foreground tabular-nums">{Math.round((p.tokens / context.limit) * 100)}%</span>
@@ -86,6 +99,28 @@ export function ContextGauge({ context, onCompact, busy, compact }: { context: C
           ) : (
             <p className="text-xs text-muted-foreground">What fills it is shown from the next answer on.</p>
           )}
+          {biggest.length > 0 && items ? (
+            <div className="grid gap-1">
+              <p className="text-xs font-medium">Biggest</p>
+              <ul className="grid gap-1 text-xs" aria-label="The biggest messages">
+                {biggest.map(({ item, tokens, message }) => (
+                  <li key={item.id} className="flex min-w-0 items-center gap-1.5">
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{itemName(item)}</span>
+                      <span className="block truncate text-muted-foreground" title={item.preview}>{message!.leftOut || message!.pinned ? <MessageContextNote m={message!} /> : item.preview}</span>
+                    </span>
+                    <span className="shrink-0 text-muted-foreground tabular-nums">{formatValue(tokens)}</span>
+                    {item.role === 'tool' ? (
+                      <MessageContextButtons m={message!} what="result" onChange={items.change} pin={false} />
+                    ) : (
+                      <MessageContextButtons m={message!} what={item.role === 'user' ? 'question' : 'answer'} onChange={items.change} />
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-muted-foreground">Pinned: kept word for word when the chat compacts. Left out: not read by the model from the next answer on, and still here.</p>
+            </div>
+          ) : null}
           <p className="text-xs text-muted-foreground">
             {compact ? compactsText(compact) : 'Near the limit, the chat compacts itself.'} Its older messages then become a summary the model reads instead. Compact now to carry on lighter (also: send /compact).
             {compact?.change ? <> {compact.change}</> : null}

@@ -101,6 +101,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     private int? _thinkingMs;
     // How full the window was when no turn ran: the history is not read while a turn changes it.
     private long _lastUsed;
+    private JsonObject? _lastWindow;
     // The commands with no time limit: their output to the page as it comes, a few times a second, for as long as they run.
     private readonly Dictionary<int, (StringBuilder Pending, bool Flushing)> _jobOutput = [];
 
@@ -370,6 +371,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             case ("GET", "/api/state"):
                 await res.JsonAsync(200, State(), ct);
                 return;
+            case ("GET", "/api/window"):
+                await res.JsonAsync(200, WindowJson(), ct);
+                return;
             case ("GET", "/api/chat/config"):
                 await res.JsonAsync(200, ChatConfig(), ct);
                 return;
@@ -490,6 +494,25 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         {
             return _job;
         }
+    }
+
+    /// <summary>
+    /// What fills the window, by kind in tokens, and its biggest messages: the IDE's Context. Measured while no turn runs
+    /// (a turn changes the messages as it goes); during one, the last measure.
+    /// </summary>
+    private JsonObject WindowJson()
+    {
+        if (Current() is not null)
+        {
+            return _lastWindow ?? new JsonObject { ["kinds"] = new JsonArray(), ["biggest"] = new JsonArray() };
+        }
+        var (kinds, biggest) = _rt.Agent.Window();
+        var perToken = _rt.Agent.CharsPerToken;
+        return _lastWindow = new JsonObject
+        {
+            ["kinds"] = new JsonArray([.. kinds.Select(k => (JsonNode)new JsonObject { ["kind"] = k.Kind, ["tokens"] = (long)(k.Chars / perToken) })]),
+            ["biggest"] = new JsonArray([.. biggest.Select(b => (JsonNode)new JsonObject { ["role"] = b.Role, ["what"] = b.What, ["tokens"] = (long)(b.Chars / perToken) })]),
+        };
     }
 
     private JsonObject State()

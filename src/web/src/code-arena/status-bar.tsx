@@ -10,7 +10,7 @@ import { toast } from '@/components/ui/toaster'
 import { errorMessage } from '@/lib/api'
 import { formatValue } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { changeSettings, compaction, compactWho, modeLabels, retryServers, stateQuery, type CodeState, type ServerStatus } from './api'
+import { changeSettings, compaction, compactWho, modeLabels, retryServers, stateQuery, windowQuery, type CodeState, type ServerStatus } from './api'
 import { useEditor } from './editor-state'
 import { changesQuery, problemsQuery } from './ide-api'
 import { useKeyFor, useKeymap } from './keyboard'
@@ -185,6 +185,41 @@ function ContextSettings({ open, onOpenChange, state }: { open: boolean; onOpenC
 /** When the session compacts: at a share of the window, only when a request would not fit, or as the Arena account says. */
 type CompactWhen = 'share' | 'off' | 'account'
 
+/** What fills the window by kind, and its biggest messages; big results are kept aside, earlier ones cleared before compacting. */
+function WindowParts({ window }: { window: number }) {
+  const { data } = useQuery(windowQuery)
+  const kinds = data?.kinds.filter((k) => k.tokens > 0) ?? []
+  if (!data || kinds.length === 0) return null
+  const of = (n: number) => (window > 0 ? Math.round((n / window) * 100) : 0)
+  return (
+    <div className="grid gap-3 text-xs">
+      <ul className="grid gap-1" aria-label="What fills the window">
+        {kinds.map((k) => (
+          <li key={k.kind} className="flex items-center gap-2">
+            <span className="min-w-0 flex-1 truncate first-letter:uppercase">{k.kind}</span>
+            <span className="text-muted-foreground tabular-nums">{formatValue(k.tokens)}</span>
+            <span className="w-10 text-right text-muted-foreground tabular-nums">{of(k.tokens)}%</span>
+          </li>
+        ))}
+      </ul>
+      {data.biggest.length > 0 && (
+        <div className="grid gap-1">
+          <p className="font-medium">Biggest</p>
+          <ul className="grid gap-1" aria-label="The biggest messages">
+            {data.biggest.map((b, i) => (
+              <li key={i} className="flex min-w-0 items-center gap-2">
+                <span className="min-w-0 flex-1 truncate" title={b.what}>{b.what}</span>
+                <span className="text-muted-foreground tabular-nums">{formatValue(b.tokens)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <p className="text-muted-foreground">A big result is kept aside (the model reads its start and end, and read_result the rest); before compacting, earlier results are cleared to a note, and often that is enough.</p>
+    </div>
+  )
+}
+
 function ContextForm({ state, onDone }: { state: CodeState; onDone: () => void }) {
   const queryClient = useQueryClient()
   const account = state.compactAtAccount ?? null
@@ -225,6 +260,7 @@ function ContextForm({ state, onDone }: { state: CodeState; onDone: () => void }
       <div className="h-2 overflow-hidden rounded-full bg-muted" aria-hidden="true">
         <div className="relative h-full rounded-full bg-primary" style={{ width: `${Math.min(100, used)}%` }} />
       </div>
+      <WindowParts window={state.context} />
       <form className="grid gap-4" onSubmit={(e) => void save(e)} noValidate>
         <RadioGroup.Root value={when} onValueChange={(v) => setWhen(v as CompactWhen)} aria-label="When it compacts" className="grid gap-1.5 text-sm">
           {(

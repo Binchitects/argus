@@ -173,6 +173,8 @@ internal sealed class Agent
     /// its cache. Null: none (a sub-agent, whose prompt says it all).
     /// </summary>
     public Func<string>? Note { get; init; }
+    /// <summary>How long the memory in the system prompt is (for what fills the window); null: none.</summary>
+    public Func<int>? MemoryChars { get; init; }
     /// <summary>Whether the model sees pictures (a screenshot goes to it as one, else it is told it cannot see it).</summary>
     public Func<bool>? Sees { get; init; }
     public SessionStore? Session { get; set; }
@@ -1224,7 +1226,12 @@ internal sealed class Agent
     /// </summary>
     public (IReadOnlyList<(string Kind, long Chars)> Kinds, IReadOnlyList<WindowItem> Biggest) Window()
     {
-        var notes = _notes.Where(n => n.At <= Messages.Count).Sum(n => (long)n.Text.Length + 10);
+        var shown = _notes.Where(n => n.At <= Messages.Count).ToList();
+        var notes = shown.Where(n => !IsMemory(n)).Sum(n => (long)n.Text.Length + 10);
+        // The memory: what the prompt holds, and what was recalled for the questions.
+        var memory = (long)(MemoryChars?.Invoke() ?? 0);
+        var prompt = SystemPrompt().Length - memory;
+        memory += shown.Where(IsMemory).Sum(n => (long)n.Text.Length + 10);
         long summary = 0, person = 0, answers = 0, results = 0;
         var items = new List<WindowItem>();
         for (var i = 0; i < Messages.Count; i++)
@@ -1255,7 +1262,7 @@ internal sealed class Agent
                     break;
             }
         }
-        return ([("instructions and memory", SystemPrompt().Length), ("tools", ToolChars()), ("Code Arena's notes", notes), ("summary", summary),
+        return ([("instructions", prompt), ("memory", memory), ("tools", ToolChars()), ("Code Arena's notes", notes), ("summary", summary),
             ("your messages", person), ("answers", answers), ("tools' results", results)], [.. items.OrderByDescending(x => x.Chars).Take(5)]);
     }
 

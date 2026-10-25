@@ -617,6 +617,12 @@ function backend(extra: Record<string, Handler> = {}, preferences: Preferences =
   const now = { changes: [{ path: 'src/app.ts', created: false, deleted: false, added: 1, removed: 1 }] as Change[], terminals: [] as TerminalInfo[], next: 1, preferences, user: { ...user }, userVersions: {} as Record<string, number> }
   const calls = fakeApi(null, {
     'GET /api/state': () => ({ json: state }),
+    'GET /api/window': () => ({
+      json: {
+        kinds: [{ kind: 'instructions', tokens: 1800 }, { kind: 'memory', tokens: 300 }, { kind: 'tools', tokens: 1500 }, { kind: 'summary', tokens: 0 }, { kind: "tools' results", tokens: 600 }],
+        biggest: [{ role: 'tool', what: "read_file's result {\"path\":\"src/app.ts\"}", tokens: 500 }],
+      },
+    }),
     'GET /api/chat/config': () => ({ json: config }),
     'GET /api/sessions': () => ({ json: [] }),
     'GET /api/session': () => ({ json: { id: 's1', messages: [], diffs: {}, busy: false } }),
@@ -1107,6 +1113,11 @@ describe('Code Arena, the IDE', () => {
     await userEvent.click(context)
     dialog = await screen.findByRole('dialog', { name: 'Context' })
     expect(within(dialog).getByText(/About 4\.2 K of 32\.77 K tokens in use \(13%\)/)).toBeInTheDocument()
+    // What fills it, the memory apart, and the biggest messages.
+    const parts = await within(dialog).findByRole('list', { name: 'What fills the window' })
+    expect(within(parts).getByText('memory').parentElement).toHaveTextContent('memory3001%')
+    expect(within(parts).queryByText('summary')).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('list', { name: 'The biggest messages' })).toHaveTextContent(`read_file's result {"path":"src/app.ts"}500`)
     const at = within(dialog).getByLabelText('Compact at (% of the window)')
     const keep = within(dialog).getByLabelText('Keep the recent part within (%)')
     expect(at).toHaveValue(80)

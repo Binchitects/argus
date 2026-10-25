@@ -1439,6 +1439,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   model={model}
                   tools={toolsPicker}
                   context={context}
+                  contextItems={room ? undefined : { find: (m) => data?.messages.find((x) => x.id === m), change: changeContext }}
                   compact={compactSetting}
                   onCompact={canCompact ? () => void compact() : undefined}
                   history={history}

@@ -118,7 +118,7 @@ export interface Message {
    */
   details?: { agents?: AgentWork[]; canvas?: { id: string; title: string; version: number }; route?: AutoRoute; memory?: MemoryOffer; memories?: MemoryRead[]; note?: boolean } | null
   /** An answer: what filled the request it answered, in characters by kind (the context gauge scales it to its prompt tokens). */
-  context?: ContextFill | null
+  context?: MeasuredContext | null
   /** An answer whose thinking was cut short ("Answer now"). */
   cutShort?: boolean
   /** Pinned by the person: kept word for word when the chat compacts. */
@@ -166,12 +166,29 @@ export type ArenaVote = 'a' | 'b' | 'tie' | 'bad'
 export interface ContextFill {
   system: number
   instructions: number
+  /** The memory note and the memories recalled for the question (none before they were counted apart). */
+  memory?: number
   tools: number
   summary: number
   files: number
   you: number
   answers: number
   toolResults: number
+}
+
+/** A message that takes much of the window, as the model read it: the person's, an answer, or a tool's result. */
+export interface ContextItem {
+  id: string
+  role: 'user' | 'assistant' | 'tool'
+  tool?: string | null
+  chars: number
+  preview: string
+  pinned: boolean
+}
+
+/** What filled a request, by kind in characters, and its biggest messages. */
+export interface MeasuredContext extends ContextFill {
+  biggest?: ContextItem[]
 }
 
 /** A sub-agent's work, as it happens and as it is kept: its part, thinking, tool calls with their results, and words. */
@@ -411,7 +428,7 @@ export type ChatEvent =
   | { type: 'thought'; ms: number; cutShort?: boolean }
   | { type: 'content'; text: string }
   | { type: 'replace'; text: string }
-  | { type: 'usage'; prompt: number | null; cached: number | null; completion: number | null; cost?: number | null; thinkingMs: number | null; durationMs: number | null; context?: ContextFill | null }
+  | { type: 'usage'; prompt: number | null; cached: number | null; completion: number | null; cost?: number | null; thinkingMs: number | null; durationMs: number | null; context?: MeasuredContext | null }
   | { type: 'tool_call'; id: string; name: string; arguments: string; tool?: string | null }
   | { type: 'approval'; id: string; name: string; arguments: string; tool: string; title: string }
   /** How far a long tool call is, as its server says (`total` when it knows the end). */
