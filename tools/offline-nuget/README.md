@@ -40,7 +40,16 @@ preview, do not count): when a pack is missing it lists the files at the
 version to fetch, builds nothing and exits with 3, and the app's image then
 skips Code Arena instead of failing (its build log shows the list).
 
-## Filling it, once, on a machine with internet
+## Filling it, on a machine with internet
+
+`tools/fetch-code-arena-packs.sh` asks the SDK which version it publishes with
+and fetches what is missing from nuget.org (about 220 MB the first time),
+each file checked before it is kept; `--prune` removes the packs of other
+versions, `--check` only says what is missing (exit 3). The deploy runs it
+before it builds the images, so a monthly .NET patch never leaves the app
+without Code Arena; and the app's image, when the packs here are not at the
+SDK's version, publishes with nuget.org's instead (skipping Code Arena only
+when neither is to be had). By hand, it does this:
 
 ```bash
 version=10.0.12

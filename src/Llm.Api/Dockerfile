@@ -45,10 +45,11 @@ FROM code-arena-web-${CODE_ARENA} AS code-arena-web
 # Code Arena, the coding agent people download from Connect your tools: one
 # self-contained file per system (tools/publish-code-arena.sh), its web
 # interface's page embedded. CODE_ARENA=auto builds it from the runtime packs
-# in tools/offline-nuget when they are there, at the runtime version this SDK
-# publishes with, and skips it otherwise (the script says which version to
-# fetch, and the page how to add it): a newer sdk:10.0 than the packs is no
-# failed image.
+# in tools/offline-nuget (tools/fetch-code-arena-packs.sh keeps them at the
+# version this SDK publishes with, and the deploy runs it); when they are not
+# there at that version, from nuget.org's, and only when neither is to be had
+# is it skipped (the page then says how to add it): a newer sdk:10.0 than the
+# packs is no failed image, nor one without Code Arena.
 # online fetches the packs from nuget.org; none skips it.
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS code-arena
 ARG CODE_ARENA
@@ -66,7 +67,9 @@ RUN mkdir -p dist/code-arena \
       none) echo "Code Arena: not built (CODE_ARENA=none)" ;; \
       online) bash tools/publish-code-arena.sh ;; \
       *) bash tools/publish-code-arena.sh --offline \
-         || { test $? -eq 3 && echo "Code Arena: not built, tools/offline-nuget lacks the packs above (see its README)"; } ;; \
+         || { test $? -eq 3 && echo "Code Arena: publishing with nuget.org's packs instead" \
+              && { bash tools/publish-code-arena.sh \
+                   || echo "Code Arena: not built, neither tools/offline-nuget nor nuget.org had the packs (tools/fetch-code-arena-packs.sh, see tools/offline-nuget/README.md)"; }; } ;; \
     esac
 
 # Chiseled: no shell, no package manager, runs as a non-root user.
