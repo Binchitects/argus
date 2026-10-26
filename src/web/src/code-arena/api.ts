@@ -236,6 +236,8 @@ export interface CodePlan {
   review?: 'proposed' | 'approved' | null
   /** The session's mode now. */
   mode?: string
+  /** What a second reading with fresh eyes said of it before its review ('': it held). */
+  critique?: string | null
 }
 
 export const planQuery = {

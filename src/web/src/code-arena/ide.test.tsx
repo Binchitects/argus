@@ -3070,7 +3070,7 @@ describe('quick open ranking', () => {
 
   it('reviews a plan the agent proposed in plan mode: approved, or a step changed with what should change', async () => {
     const plan: CodePlan = {
-      title: 'Fix the parser', goal: null, chat: null, review: 'proposed', mode: 'plan',
+      title: 'Fix the parser', goal: null, chat: null, review: 'proposed', mode: 'plan', critique: '- Step 1 has no check.',
       steps: [{ number: 1, title: 'Read parse.c', status: 'todo', check: null, files: [], dependsOn: [], notes: null, checkResult: null, checkOutput: null }],
     }
     const { calls } = backend({
@@ -3082,6 +3082,7 @@ describe('quick open ranking', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Plan' }))
     const panel = await screen.findByRole('complementary', { name: 'Plan' })
     const review = await within(panel).findByRole('region', { name: 'Review the plan' })
+    expect(within(review).getByLabelText('Its second reading')).toHaveTextContent('- Step 1 has no check.')
     await userEvent.click(within(panel).getByRole('button', { name: 'Change step 1' }))
     await userEvent.type(within(review).getByRole('textbox', { name: 'What should change in step 1' }), 'read the header too')
     await userEvent.click(within(review).getByRole('button', { name: 'Send' }))

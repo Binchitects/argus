@@ -38,6 +38,9 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
 
     /// <summary>Where its review stands: <see cref="Proposed"/>, <see cref="Approved"/>, or null (made outside plan mode).</summary>
     public string? Review { get; init; }
+
+    /// <summary>What a second reading with fresh eyes said of it before the person's review ("" : it held); null: not read again.</summary>
+    public string? Critique { get; init; }
     public const int MostFiles = 50;
 
     public static readonly WorkPlan None = new("", null, []);
@@ -123,7 +126,7 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
                 steps.Add(step);
             }
         }
-        var made = new WorkPlan(title.Length == 0 && steps.Count > 0 ? "Plan" : title, goal, steps) { Review = plan.Review };
+        var made = new WorkPlan(title.Length == 0 && steps.Count > 0 ? "Plan" : title, goal, steps) { Review = plan.Review, Critique = plan.Critique };
         made.Validate();
         return made;
     }
@@ -256,6 +259,7 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
         ["title"] = Title,
         ["goal"] = Goal,
         ["review"] = Review,
+        ["critique"] = Critique,
         ["steps"] = new JsonArray([.. Steps.Select(s => (JsonNode)new JsonObject
         {
             ["number"] = s.Number, ["title"] = s.Title, ["status"] = s.Status, ["check"] = s.Check,
@@ -271,6 +275,7 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
             s.Str("notes"), s.Str("checkResult"), s.Str("checkOutput"), DateTimeOffset.TryParse(s.Str("checkedAt"), out var at) ? at : null))])
     {
         Review = o.Str("review") is Proposed or Approved ? o.Str("review") : null,
+        Critique = o.Str("critique"),
     };
 
     private static string Cut(string s, int max) => s.Length <= max ? s : s[..max];

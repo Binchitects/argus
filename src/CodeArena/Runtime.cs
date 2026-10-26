@@ -513,6 +513,7 @@ internal sealed partial class Runtime : IAsyncDisposable
                 (Config.ProjectMemory ? "; a lasting fact about this project, with remember_project." : "."),
         };
         Context.SubAgent = (description, prompt, agent, token) => RunSubAgentAsync(inputs, description, prompt, agent, token);
+        Agent.Critique = Config.PlanCritique ? (plan, token) => CritiqueAsync(inputs, plan, token) : null;
         _inputs = inputs;
         Context.Progress = said =>
         {
@@ -1289,6 +1290,26 @@ internal sealed partial class Runtime : IAsyncDisposable
             Events = events,
         };
         return await reviewer.RunAsync(prompt, new Spend(), ct);
+    }
+
+    /// <summary>The words a second reading answers with when the plan holds as it is.</summary>
+    public const string PlanHolds = "The plan holds.";
+
+    /// <summary>
+    /// A proposed plan read again by a sub-agent in a context of its own (the same model, fresh eyes, the reading tools):
+    /// what is missing, what is risky, which step has no check or one that would not show it is done; null when it holds.
+    /// </summary>
+    private async Task<string?> CritiqueAsync(SystemPrompt.Inputs inputs, WorkPlan plan, CancellationToken ct)
+    {
+        var asked = Agent.Messages.LastOrDefault(m => m.Str("role") == "user" && m.Str("content") is { Length: > 0 } c && !c.StartsWith('('))?.Str("content");
+        var report = await RunSubAgentAsync(inputs, "a second reading of the plan",
+            "Read this plan with fresh eyes before it is carried out. Look at the code where it helps; change nothing.\n\n"
+            + (asked is null ? "" : $"What the person asked:\n{Fmt.OneLine(Quotes.Split(asked).Text, 2000)}\n\n")
+            + plan.Text() + "\n\n"
+            + "Answer with short notes only, a line each: what is missing, what is risky, which step has no check or a check that would not "
+            + $"show it is done, what is in the wrong order. If the plan holds as it is, answer exactly: {PlanHolds}", null, ct);
+        var notes = report.Trim();
+        return notes.Length == 0 || notes.StartsWith(PlanHolds, StringComparison.OrdinalIgnoreCase) ? null : notes.Length <= 4000 ? notes : notes[..4000];
     }
 
     private async Task<string> RunSubAgentAsync(SystemPrompt.Inputs inputs, string description, string prompt, string? agent, CancellationToken ct)

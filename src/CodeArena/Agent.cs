@@ -343,6 +343,12 @@ internal sealed class Agent
         }
     }
 
+    /// <summary>
+    /// Reads a plan the agent proposed again, with fresh eyes (a sub-agent in a context of its own): its notes, or null when
+    /// the plan holds. Null: no second reading.
+    /// </summary>
+    public Func<WorkPlan, CancellationToken, Task<string?>>? Critique { get; set; }
+
     /// <summary>A word for the model for this turn only (answer again shorter or longer), in Code Arena's note; null: none.</summary>
     public string? TurnNote { get; set; }
 
@@ -536,6 +542,7 @@ internal sealed class Agent
 
     private async Task<string> TurnAsync(string? input, Spend turn, CancellationToken ct, JsonArray? pictures = null)
     {
+        var planAtStart = Context.Plan;
         JsonObject? question = null;
         if (input is not null)
         {
@@ -701,12 +708,55 @@ internal sealed class Agent
                 {
                     continue;
                 }
+                if (await CritiqueAsync(planAtStart, ct))
+                {
+                    continue;
+                }
                 return last;
             }
             await RunToolsAsync(answer.ToolCalls, ct);
         }
         Warn($"Stopped after {MaxSteps} steps.");
         return last;
+    }
+
+    /// <summary>
+    /// A plan proposed in this turn is read once more, with fresh eyes, before the person reviews it: what the reading found
+    /// goes to the model to fold in (true: the turn goes on with it). Once per plan: what the model changes then is not
+    /// read again.
+    /// </summary>
+    private async Task<bool> CritiqueAsync(WorkPlan before, CancellationToken ct)
+    {
+        if (Depth > 0 || Critique is null || Context.Plan is not { Review: WorkPlan.Proposed, Critique: null } plan || ReferenceEquals(plan, before) || plan.IsEmpty)
+        {
+            return false;
+        }
+        Info("Reading the plan again, with fresh eyes…");
+        string? notes;
+        try
+        {
+            notes = await Critique(plan, ct);
+        }
+        catch (Exception e) when (e is GatewayException or HttpRequestException or IOException or ToolError)
+        {
+            Warn($"The plan's second reading did not happen: {e.Message}");
+            notes = null;
+        }
+        Context.Plan = plan with { Critique = notes ?? "" };
+        Context.PlanChanged?.Invoke(Context.Plan);
+        if (notes is null)
+        {
+            Info("The second reading found nothing to add.");
+            return false;
+        }
+        Info("The second reading:\n" + notes);
+        Add(new JsonObject
+        {
+            ["role"] = "user",
+            ["content"] = "(A second reading of your plan, with fresh eyes, before the person reviews it:\n\n" + notes + "\n\n"
+                + "Fold in what holds: change the plan with the plan tool. Then say in a sentence or two what you left out, and why.)",
+        }, kind: "note");
+        return true;
     }
 
     /// <summary>How long a request waits before it is asked again when the engine's shared cache was full.</summary>
@@ -805,6 +855,12 @@ internal sealed class Agent
     private void Warn(string text)
     {
         Ui.Warn(text);
+        Events?.Notice(text);
+    }
+
+    private void Info(string text)
+    {
+        Ui.Info(text);
         Events?.Notice(text);
     }
 

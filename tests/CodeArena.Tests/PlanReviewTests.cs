@@ -68,6 +68,58 @@ public sealed class PlanReviewTests : IDisposable
     }
 
     [Fact]
+    public async Task A_proposed_plan_is_read_again_with_fresh_eyes_once_and_the_agent_folds_in_what_it_found()
+    {
+        var readings = 0;
+        _gateway.Answer = req =>
+        {
+            var last = FakeGateway.Last(req);
+            if (last.StartsWith("Read this plan with fresh eyes", StringComparison.Ordinal))
+            {
+                // The second reading: a sub-agent, in a context of its own (no tools of the main agent's history).
+                readings++;
+                Assert.Contains("What the person asked:\nplan the fix", last, StringComparison.Ordinal);
+                Assert.DoesNotContain(req["messages"]!.AsArray(), m => m!["role"]!.GetValue<string>() == "tool");
+                return Reply.Say("- Step 2's check does not cover an empty frame: add a test for it.");
+            }
+            if (last.StartsWith("(A second reading of your plan", StringComparison.Ordinal))
+            {
+                return Reply.Call(("plan", """{"steps":[{"number":2,"check":"make test TEST=empty_frame"}]}"""));
+            }
+            return req["messages"]!.AsArray()[^1]!["role"]!.GetValue<string>() == "user" && last == "plan the fix" ? Reply.Call(("plan", Proposal)) : Reply.Say("Folded in the empty-frame test.");
+        };
+        using var h = new Harness(_gateway, _mcp);
+        Assert.Equal(0, await h.Run("plan the fix\n/exit\n", "chat", "--mode", "plan"));
+        Assert.Equal(1, readings);
+        Assert.Contains("The second reading:\n- Step 2's check does not cover an empty frame", h.Out, StringComparison.Ordinal);
+        var note = Asked(_gateway).Single(a => a.StartsWith("(A second reading of your plan", StringComparison.Ordinal));
+        Assert.Contains("Fold in what holds: change the plan with the plan tool.", note, StringComparison.Ordinal);
+        // The revised plan is the one reviewed, with what the reading said kept on it; it is not read a second time.
+        Assert.Contains("make test TEST=empty_frame", h.Out, StringComparison.Ordinal);
+        Assert.Contains("Review the plan:", h.Out, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_plan_the_second_reading_finds_whole_goes_to_review_as_it_is_and_the_reading_can_be_turned_off()
+    {
+        _gateway.Answer = req => FakeGateway.Last(req).StartsWith("Read this plan with fresh eyes", StringComparison.Ordinal) ? Reply.Say("The plan holds.")
+            : req["messages"]!.AsArray()[^1]!["role"]!.GetValue<string>() == "user" && FakeGateway.Last(req) == "plan the fix" ? Reply.Call(("plan", Proposal)) : Reply.Say("ok");
+        using (var h = new Harness(_gateway, _mcp))
+        {
+            Assert.Equal(0, await h.Run("plan the fix\n/exit\n", "chat", "--mode", "plan"));
+            Assert.Contains("The second reading found nothing to add.", h.Out, StringComparison.Ordinal);
+            Assert.DoesNotContain(Asked(_gateway), a => a.StartsWith("(A second reading", StringComparison.Ordinal));
+        }
+        var before = _gateway.Requests.Count;
+        using (var h = new Harness(_gateway, _mcp, c => c["planCritique"] = false))
+        {
+            Assert.Equal(0, await h.Run("plan the fix\n/exit\n", "chat", "--mode", "plan"));
+            Assert.DoesNotContain(Asked(_gateway).Skip(before), a => a.StartsWith("Read this plan with fresh eyes", StringComparison.Ordinal));
+            Assert.Contains("Review the plan:", h.Out, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public async Task The_IDE_reviews_the_proposed_plan_and_its_answer_runs_as_a_turn()
     {
         using var h = new Harness(_gateway, _mcp);

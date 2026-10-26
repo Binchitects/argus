@@ -1530,9 +1530,16 @@ agent keeps it ([chat.md](chat.md#plans)).
 
 ### Reviewing a proposed plan
 
-In plan mode the agent makes its plan with the `plan` tool as a proposal: when
-the turn ends the terminal shows it, and the IDE's Plan view offers the same
-choices. Each is said to the agent as your next message:
+In plan mode the agent makes its plan with the `plan` tool as a proposal.
+Before you see it, a **second reading** looks at it with fresh eyes: a
+sub-agent in a context of its own (the same model, the reading tools), given
+what you asked and the plan, says what is missing, what is risky, which step
+has no check or one that would not show it is done, and what is out of
+order. The agent folds in what holds and says what it left out; the reading
+happens once a plan, and you see its notes with the plan (`"planCritique":
+false` in the config file turns it off). When the turn ends the terminal
+shows the plan, and the IDE's Plan view offers the same choices. Each is said
+to the agent as your next message:
 
 | terminal | IDE | what happens |
 |---|---|---|
@@ -1980,7 +1987,7 @@ The rest of the file: `"model"`, `"thinking"`, `"mode"`, `"context"`,
 `"shell"` (the agent's `run_shell`), `"terminalShell"` (the IDE's terminals),
 `"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"argusTools": false`
 (no Argus MCP), `"toolChars"` (tools on demand, above), `"argusUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
-`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"window"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"checkCommand"`, `"sandbox"`,
+`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"planCritique"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"window"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"checkCommand"`, `"sandbox"`,
 `"sandboxNetwork"`, `"sandboxWritable"`, `"permissions"`, `"formatters"`, `"debugAdapters"` and
 `"languageServers"` (the IDE's: above). `ARENA_ARGUS_URL` in the environment gives Argus's address
 for one run.

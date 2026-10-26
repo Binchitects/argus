@@ -196,6 +196,8 @@ internal sealed class Config
     public bool Window { get; set; } = true;
     /// <summary>Each turn's changes are committed under Code Arena's name (in a git repository): on unless false.</summary>
     public bool AutoCommit { get; set; } = true;
+    /// <summary>A plan proposed in plan mode is read again with fresh eyes before the person reviews it: on unless false.</summary>
+    public bool PlanCritique { get; set; } = true;
     /// <summary>Arena's own skills (code-review, write-tests, debug…), offered after the person's and the project's: on unless false.</summary>
     public bool BuiltInSkills { get; set; } = true;
     /// <summary>The project's long memory in .remember/ (read at a session's start, kept with remember_project): on unless false.</summary>
@@ -301,6 +303,7 @@ internal sealed class Config
         };
         config.TerminalShell = raw.Str("terminalShell");
         config.AutoCommit = raw.Bool("autoCommit") ?? true;
+        config.PlanCritique = raw.Bool("planCritique") ?? true;
         config.BuiltInSkills = raw.Bool("builtInSkills") ?? true;
         config.ProjectMemory = raw.Bool("projectMemory") ?? true;
         config.UpdateCheck = raw.Bool("updateCheck") ?? true;
@@ -439,6 +442,7 @@ internal sealed class Config
         Set("agents", Agents.Count == 0 ? null : new JsonObject(Agents.Select(a => KeyValuePair.Create(a.Key, (JsonNode?)new JsonArray([.. a.Value.Select(x => (JsonNode)x)])))));
         Set("terminalShell", TerminalShell);
         Set("autoCommit", AutoCommit ? null : false);
+        Set("planCritique", PlanCritique ? null : false);
         Set("builtInSkills", BuiltInSkills ? null : false);
         Set("projectMemory", ProjectMemory ? null : false);
         Set("updateCheck", UpdateCheck ? null : false);

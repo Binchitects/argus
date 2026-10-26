@@ -65,6 +65,14 @@ export function PlanPanel({ arena }: { arena: string | null }) {
           {proposed && (
             <section aria-label="Review the plan" className="mt-2 grid gap-1.5 rounded border border-warning/40 bg-warning/8 p-2 text-xs">
               <p>The agent proposes this plan. Approve it to carry it out, change a step, ask for another way, or reject it.</p>
+              {p.critique ? (
+                <div aria-label="Its second reading" className="rounded bg-background/60 p-1.5">
+                  <p className="font-medium">A second reading, with fresh eyes, said:</p>
+                  <p className="whitespace-pre-wrap text-muted-foreground">{p.critique}</p>
+                </div>
+              ) : (
+                p.critique === '' && <p className="text-muted-foreground">A second reading found nothing to add.</p>
+              )}
               <div className="flex flex-wrap gap-1">
                 <button type="button" disabled={sending} onClick={() => void review('approve')} className="flex h-6 items-center gap-1 rounded bg-primary px-2 text-primary-foreground disabled:opacity-50">
                   <Check className="size-3.5" aria-hidden="true" /> Approve
