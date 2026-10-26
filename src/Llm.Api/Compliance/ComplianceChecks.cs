@@ -37,6 +37,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         ("audit-forwarding", "The audit log is sent on to the SIEM"),
         ("chat-retention", "Chats are kept for a set time"),
         ("log-retention", "Logs are kept for a set time"),
+        ("records-retention", "Records are kept for set times"),
         ("backups", "A recent backup that ended well"),
         ("certificate", "The site's certificate"),
         ("data-key", "Secrets encrypted at rest"),
@@ -62,6 +63,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
                 "audit-forwarding" => await AuditForwardingAsync(ct),
                 "chat-retention" => await ChatRetentionAsync(ct),
                 "log-retention" => await LogRetentionAsync(ct),
+                "records-retention" => RecordsRetention(),
                 "backups" => Backups(),
                 "certificate" => await CertificateAsync(ct),
                 "data-key" => DataKey(),
@@ -178,6 +180,22 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         return retention.CurrentValue.Days is > 0 and var days
             ? (Ok, $"Chats are deleted {days} days after their last message.{ofGroups}")
             : (Warn, $"Chats are kept forever unless a group sets a time.{ofGroups} Set Settings → Data retention → Keep chats for (the GDPR's storage limitation).");
+    }
+
+    /// <summary>The audit log at least six years (or for good), and the other records for a set time.</summary>
+    private (string, string) RecordsRetention()
+    {
+        var r = retention.CurrentValue;
+        var forever = new[] { ("the gateway's request log", r.GatewayLogDays), ("the record of tool calls", r.ToolCallDays), ("news in the bell", r.NotificationDays) }
+            .Where(x => x.Item2 <= 0).Select(x => x.Item1).ToList();
+        var said = $"The audit log {(r.AuditYears > 0 ? $"{r.AuditYears} years" : "forever")}; the gateway's request log {Days(r.GatewayLogDays)}, tool calls {Days(r.ToolCallDays)}, the bell {Days(r.NotificationDays)}.";
+        if (r.AuditYears is > 0 and < 6)
+        {
+            return (Warn, $"{said} HIPAA keeps the audit log six years: set Settings → Data retention → Keep the audit log for to 6.");
+        }
+        return forever.Count > 0 ? (Warn, $"{said} Kept forever: {string.Join(", ", forever)} (Settings → Data retention).") : (Ok, said);
+
+        static string Days(int d) => d > 0 ? $"{d} days" : "forever";
     }
 
     private async Task<(string, string)> LogRetentionAsync(CancellationToken ct)

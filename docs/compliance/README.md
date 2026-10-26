@@ -122,6 +122,28 @@ answered, and every step is in the audit log (`privacy.*`). The check
   the chain forbids changing them), and when the backups taken before let go of
   the rest.
 
+## How long things are kept
+
+Admin → Compliance lists how long each kind of data and record is kept, and
+what removes it:
+
+| What | Kept | Set in |
+|---|---|---|
+| Chats and their files | until deleted, or the days set (a group can keep its own) | Settings → Data retention → Keep chats for |
+| The audit log | 6 years, then only its oldest entries go, so the chain stays whole | Keep the audit log for |
+| The gateway's request log | 400 days | Keep the gateway's request log for |
+| The record of tool calls | 180 days | Keep the record of tool calls for |
+| News in the bell | 180 days | Keep news in the bell for |
+| The services' logs (Loki) | 90 days | `retention_period` in `config/loki.yml` |
+| Metrics (Prometheus) | 30 days, or 20 GB | its `--storage.tsdb.retention` flags in `docker-compose.yml` |
+| Backups | the newest `BACKUP_KEEP` | `.env` |
+
+The hourly sweep removes what is past its time, and audits each removal with
+counts (`retention.delete`, `retention.records`). Nothing of a person on legal
+hold is removed. The checks **Chats are kept for a set time**, **Records are
+kept for set times** and **Logs are kept for a set time** say what is kept
+forever, and the audit log kept less than the six years HIPAA asks.
+
 ## The audit log as a chain
 
 Each entry of the audit log carries a SHA-256 hash of its fields and of the

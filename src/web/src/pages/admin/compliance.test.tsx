@@ -13,6 +13,7 @@ const control = (over: Partial<Control>): Control => ({
 const view: ComplianceView = {
   frameworks: { iso27001: 'ISO/IEC 27001:2022, Annex A', soc2: 'SOC 2, Trust Services Criteria', hipaa: 'HIPAA, 45 CFR Part 164', gdpr: 'GDPR (EU) 2016/679' },
   checkedAt: new Date().toISOString(),
+  retention: [{ what: 'The audit log', rule: 'Kept 6 years, then deleted by the hourly sweep.' }],
   checks: [
     { id: 'passwords', title: 'Strong passwords and lockout', state: 'ok', detail: 'Passwords score 3 or more.' },
     { id: 'two-factor', title: 'Admins sign in with two factors', state: 'warn', detail: '1 of 1 admins has no second factor: admin.' },
@@ -36,6 +37,7 @@ describe('Admin → Compliance', () => {
     // An attestation older than a year no longer counts.
     expect(iso).toHaveTextContent('0 of 2 attested')
     expect(screen.getByText('1 of 1 admins has no second factor: admin.')).toBeInTheDocument()
+    expect(within(screen.getByRole('heading', { name: 'How long things are kept' }).closest('section')!).getByText('Kept 6 years, then deleted by the hourly sweep.')).toBeInTheDocument()
 
     const net = screen.getByText('Encrypted in transit').closest('[id="NET-01"]') as HTMLElement
     expect(within(net).getByText('No live check here')).toBeInTheDocument()

@@ -36,6 +36,8 @@ export interface ComplianceView {
   controls: Control[]
   checks: CheckResult[]
   checkedAt: string
+  /** How long each kind of data and record is kept, and what removes it. */
+  retention?: { what: string; rule: string }[]
 }
 
 export const FRAMEWORKS = [

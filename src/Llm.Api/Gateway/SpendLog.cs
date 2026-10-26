@@ -44,6 +44,16 @@ public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfig
         return await update.ExecuteNonQueryAsync(ct);
     }
 
+    /// <summary>Removes the gateway's requests older than <paramref name="before"/> (retention); returns how many.</summary>
+    public async Task<int> DeleteBeforeAsync(DateTimeOffset before, CancellationToken ct)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync(ct);
+        await using var delete = new NpgsqlCommand("""delete from "LiteLLM_SpendLogs" where "startTime" < @before""", conn);
+        delete.Parameters.AddWithValue("before", DateTime.SpecifyKind(before.UtcDateTime, DateTimeKind.Unspecified));
+        return await delete.ExecuteNonQueryAsync(ct);
+    }
+
     /// <summary>The call type of a picture the app booked (LiteLLM's own name for image generation).</summary>
     public const string PictureCall = "aimage_generation";
 

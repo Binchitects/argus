@@ -25,8 +25,9 @@ public sealed record AttestationView(string Actor, DateTimeOffset At, string Not
 public sealed record ControlView(string Id, string Title, string Meets, IReadOnlyDictionary<string, List<string>> Frameworks, IReadOnlyList<string> Docs,
     IReadOnlyList<string> Tests, IReadOnlyList<string> Checks, string? Operator, string? State, AttestationView? Attested);
 
+/// <param name="Retention">How long each kind of data and record is kept, and what removes it.</param>
 public sealed record ComplianceView(IReadOnlyDictionary<string, string> Frameworks, IReadOnlyList<ControlView> Controls, IReadOnlyList<CheckResult> Checks,
-    DateTimeOffset CheckedAt);
+    DateTimeOffset CheckedAt, IReadOnlyList<Storage.KeepRule>? Retention = null);
 
 public sealed record AttestRequest(string? Note);
 
@@ -63,8 +64,8 @@ public static class ComplianceEndpoints
     public static void MapCompliance(IEndpointRouteBuilder app)
     {
         var g = app.MapGroup("/api/admin/compliance").RequirePermissions(Permissions.ComplianceRead, Permissions.ComplianceManage);
-        g.MapGet("", async (ComplianceChecks checks, AppDbContext db, TimeProvider clock, CancellationToken ct) =>
-            Results.Ok(View(await checks.RunAsync(ct), await LatestAsync(db, ct), clock.GetUtcNow())));
+        g.MapGet("", async (ComplianceChecks checks, AppDbContext db, Storage.StorageReport storage, TimeProvider clock, CancellationToken ct) =>
+            Results.Ok(View(await checks.RunAsync(ct), await LatestAsync(db, ct), clock.GetUtcNow()) with { Retention = await storage.RulesAsync(ct) }));
         g.MapPost("/controls/{id}/attest", AttestAsync);
         // Reading the evidence changes nothing, yet it lists who holds what: it is audited.
         g.MapGet("/evidence", EvidenceAsync);

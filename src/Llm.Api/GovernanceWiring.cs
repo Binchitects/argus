@@ -8,6 +8,7 @@ public static class GovernanceWiring
         services.Configure<Retention.RetentionOptions>(config.GetSection("Retention"));
         services.AddScoped<Retention.Retention>();
         services.AddScoped<Retention.DataExport>();
+        services.AddScoped<Retention.RecordRetention>();
         services.AddHostedService<Retention.RetentionSweep>();
         services.Configure<Gateway.CreditOptions>(config.GetSection("Credit"));
         services.AddSingleton<Gateway.CreditBook>();

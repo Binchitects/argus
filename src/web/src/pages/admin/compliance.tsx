@@ -336,6 +336,25 @@ export function CompliancePage() {
             </ul>
           </section>
 
+          {(data.retention?.length ?? 0) > 0 && (
+            <section aria-labelledby="retention" className="grid gap-3">
+              <div>
+                <h2 id="retention" className="text-lg font-semibold">
+                  How long things are kept
+                </h2>
+                <p className="text-sm text-muted-foreground">Each kind of data and record, how long it stays, and what removes it (Settings → Data retention).</p>
+              </div>
+              <dl className="divide-y rounded-lg border bg-card text-sm">
+                {data.retention!.map((r) => (
+                  <div key={r.what} className="grid gap-1 p-3 sm:grid-cols-[16rem_1fr]">
+                    <dt className="font-medium">{r.what}</dt>
+                    <dd className="text-muted-foreground">{r.rule}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          )}
+
           <AccessReviews mayStart={mayAttest} />
 
           <DataRequestsSection mayAnswer={!!me.isAdmin || !!me.permissions?.includes('privacy.manage')} />

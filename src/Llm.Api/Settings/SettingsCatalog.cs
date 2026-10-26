@@ -286,6 +286,14 @@ public static class SettingsCatalog
             { Default = "true", Optional = false },
 
         // ---------------------------------------------------------------- retention, live --
+        new("Retention:AuditYears", Retention, "Keep the audit log for", "Its oldest entries go after this many years (the chain then starts at the oldest kept). HIPAA keeps such records six years; 0: forever.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "6", Unit = "years", Min = 0, Max = 100, Optional = false },
+        new("Retention:GatewayLogDays", Retention, "Keep the gateway's request log for", "Each request through the gateway (who, which model, tokens, cost): usage, credit and the dashboards read it. 0: forever.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "400", Unit = "days", Min = 0, Max = 36500, Optional = false },
+        new("Retention:ToolCallDays", Retention, "Keep the record of tool calls for", "Which tool was called, how long it took, whether it failed (never what was sent): Admin → Tools reads it. 0: forever.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "180", Unit = "days", Min = 0, Max = 36500, Optional = false },
+        new("Retention:NotificationDays", Retention, "Keep news in the bell for", "People's notifications, read or not. 0: forever.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "180", Unit = "days", Min = 0, Max = 36500, Optional = false },
         new("Retention:Days", Retention, "Keep chats for", "A chat and its files are deleted this many days after its last message, and so are files nobody uses that are as old. A group can set its own (Admin → Groups); the shortest of a person's groups applies. People on legal hold keep everything. Each deletion is audited, with counts. Empty: forever.", SettingType.WholeNumber, SettingScope.Live)
             { Unit = "days", Min = 1, Max = 36500 },
 

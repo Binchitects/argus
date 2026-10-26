@@ -16,6 +16,18 @@ public sealed class RetentionOptions
 
     /// <summary>How often the sweep looks for chats past their time.</summary>
     public TimeSpan Interval { get; set; } = TimeSpan.FromHours(1);
+
+    /// <summary>Years the audit log is kept (HIPAA keeps such records six); 0: forever.</summary>
+    public int AuditYears { get; set; } = 6;
+
+    /// <summary>Days the gateway's request log is kept (usage, cost, the dashboards); 0: forever.</summary>
+    public int GatewayLogDays { get; set; } = 400;
+
+    /// <summary>Days the record of tool calls (which tool, how long, whether it failed) is kept; 0: forever.</summary>
+    public int ToolCallDays { get; set; } = 180;
+
+    /// <summary>Days news stays in people's bells; 0: forever.</summary>
+    public int NotificationDays { get; set; } = 180;
 }
 
 /// <summary>What was removed: chats and files.</summary>
@@ -183,6 +195,7 @@ public sealed partial class RetentionSweep(IServiceScopeFactory scopes, IOptions
                 {
                     LogSwept(logger, erased.Chats, erased.Files);
                 }
+                await scope.ServiceProvider.GetRequiredService<RecordRetention>().SweepAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

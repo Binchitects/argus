@@ -449,6 +449,25 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
             new("Partial downloads", "Kept while their download can go on from where it got to; a part no download owns is a leftover."),
             new("Container logs", "Docker keeps 5 files of 20 MB for each container."),
         };
+        var r = retention.CurrentValue;
+        string Kept(int amount, string unit, string where) => amount > 0 ? $"Kept {amount} {unit}, then deleted by the hourly sweep. {where}" : $"Kept forever. {where}";
+        rules.Add(new("The audit log", Kept(r.AuditYears, "years", "Settings → Data retention (HIPAA keeps such records six years); the chain starts again at its oldest entry kept.")));
+        rules.Add(new("The gateway's request log", Kept(r.GatewayLogDays, "days", "Settings → Data retention: usage, credit and the dashboards read it.")));
+        rules.Add(new("The record of tool calls", Kept(r.ToolCallDays, "days", "Settings → Data retention.")));
+        rules.Add(new("News in the bell", Kept(r.NotificationDays, "days", "Settings → Data retention.")));
+        string? logs;
+        try
+        {
+            logs = LokiKeeps(await loki.TextAsync("/config", ct));
+        }
+        catch (Exception ex) when (ex is DatasourceException or HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            logs = null;
+        }
+        rules.Add(new("The services' logs (Loki)", logs is null ? "Loki did not say: see config/loki.yml." : logs == "forever" ? "Kept forever: set retention_period in config/loki.yml."
+            : $"Kept {logs}, then its compactor deletes them (config/loki.yml)."));
+        var metrics = await MetricsAsync(ct);
+        rules.Add(new("Metrics (Prometheus)", metrics.Keeps is null ? "Prometheus did not say." : $"Kept {metrics.Keeps}{(metrics.MaxSize is null ? "" : $", or until they take {metrics.MaxSize}")} (its --storage.tsdb.retention flags)."));
         return rules;
     }
 

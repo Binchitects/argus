@@ -207,6 +207,23 @@ controls:
     checks: [app:audit-log]
     operator: Someone reviews the audit log on a schedule.
 
+  - id: LOG-02
+    title: Logs are kept, and kept for a set time
+    meets: >-
+      Every service's logs go to Loki, searchable by container, level and
+      text; how long Loki keeps them is read from its configuration and shown.
+    frameworks:
+      iso27001: [A.8.15]
+      soc2: [CC7.2]
+      hipaa: [164.312(b)]
+      gdpr: [Art.5(1)(e)]
+    docs: [admin.md#storage]
+    tests:
+      - Llm.Tests/StorageTests.Lokis_retention_is_read_from_its_configuration
+      - Llm.Tests/RecordRetentionTests.Loki_is_set_to_keep_logs_for_ninety_days_in_compose_and_in_the_chart
+    checks: [app:log-retention]
+    operator: Decide how long logs are kept.
+
   - id: LOG-03
     title: Nobody changes the audit log unseen
     meets: >-
@@ -253,22 +270,6 @@ controls:
     operator: >-
       Run the SIEM, keep what it receives for as long as the frameworks ask
       (six years under HIPAA), and watch its alerts.
-
-  - id: LOG-02
-    title: Logs are kept, and kept for a set time
-    meets: >-
-      Every service's logs go to Loki, searchable by container, level and
-      text; how long Loki keeps them is read from its configuration and shown.
-    frameworks:
-      iso27001: [A.8.15]
-      soc2: [CC7.2]
-      hipaa: [164.312(b)]
-      gdpr: [Art.5(1)(e)]
-    docs: [admin.md#storage]
-    tests:
-      - Llm.Tests/StorageTests.Lokis_retention_is_read_from_its_configuration
-    checks: [app:log-retention]
-    operator: Decide how long logs are kept.
 
   - id: MON-01
     title: The service is watched and people are alerted
@@ -334,32 +335,6 @@ controls:
       - Llm.Tests/RetentionTests.A_persons_export_holds_their_profile_chats_as_json_and_markdown_and_their_files
     operator: Answer a person's request within the time the law gives (a month under the GDPR).
 
-  - id: DAT-06
-    title: People's requests about their data are answered
-    meets: >-
-      A person asks from Your account (or an admin takes the request in for
-      them) for a copy, their data to take elsewhere, a correction,
-      restriction, objection or erasure; each has its month, the admins hear
-      of it, and every step is audited. Restriction and objection stop
-      everything that learns from their data; erasure removes everything of
-      theirs, takes them out of what others keep, refuses while a legal hold
-      lasts, and gives a certificate of what is kept and why and when backups
-      let go of the rest.
-    frameworks:
-      iso27001: [A.5.34]
-      soc2: [P5.1, P5.2, P4.3]
-      hipaa: [164.524, 164.526]
-      gdpr: [Art.12(3), Art.15, Art.16, Art.17, Art.18, Art.20, Art.21]
-    docs: [compliance/README.md#peoples-data-requests]
-    tests:
-      - Llm.Tests/DataRequestTests.A_person_asks_the_admins_hear_it_is_due_in_a_month_and_answering_tells_them
-      - Llm.Tests/DataRequestTests.Restriction_stops_everything_that_learns_from_their_data_until_it_is_lifted
-      - Llm.Tests/DataRequestTests.Erasure_removes_everything_of_theirs_takes_them_out_of_what_others_keep_and_certifies_what_is_kept
-    checks: [app:data-requests]
-    operator: >-
-      Name who answers them (a data protection officer, with the privacy.manage
-      permission), verify who is asking, and tell people where to complain.
-
   - id: DAT-04
     title: Personal data and secrets kept from the model
     meets: >-
@@ -398,6 +373,52 @@ controls:
       - Llm.Tests/KnowledgeConnectorTests.Test_connection_says_what_it_reached_and_secrets_are_stored_encrypted_and_never_sent_back
     checks: [app:data-key]
     operator: Keep APP_KEY with the company's secrets, apart from the backups; encrypt the hosts' disks.
+
+  - id: DAT-06
+    title: People's requests about their data are answered
+    meets: >-
+      A person asks from Your account (or an admin takes the request in for
+      them) for a copy, their data to take elsewhere, a correction,
+      restriction, objection or erasure; each has its month, the admins hear
+      of it, and every step is audited. Restriction and objection stop
+      everything that learns from their data; erasure removes everything of
+      theirs, takes them out of what others keep, refuses while a legal hold
+      lasts, and gives a certificate of what is kept and why and when backups
+      let go of the rest.
+    frameworks:
+      iso27001: [A.5.34]
+      soc2: [P5.1, P5.2, P4.3]
+      hipaa: [164.524, 164.526]
+      gdpr: [Art.12(3), Art.15, Art.16, Art.17, Art.18, Art.20, Art.21]
+    docs: [compliance/README.md#peoples-data-requests]
+    tests:
+      - Llm.Tests/DataRequestTests.A_person_asks_the_admins_hear_it_is_due_in_a_month_and_answering_tells_them
+      - Llm.Tests/DataRequestTests.Restriction_stops_everything_that_learns_from_their_data_until_it_is_lifted
+      - Llm.Tests/DataRequestTests.Erasure_removes_everything_of_theirs_takes_them_out_of_what_others_keep_and_certifies_what_is_kept
+    checks: [app:data-requests]
+    operator: >-
+      Name who answers them (a data protection officer, with the privacy.manage
+      permission), verify who is asking, and tell people where to complain.
+
+  - id: DAT-07
+    title: Records are kept for set times, and no longer
+    meets: >-
+      The audit log six years unless set (only ever from the start of its
+      chain), the gateway's request log, the record of tool calls and the
+      bell each for a period set under Settings → Data retention, removed by
+      the hourly sweep and audited with counts; the services' logs 90 days
+      (Loki's compactor) and metrics 30 days (Prometheus). Admin → Compliance
+      lists how long each kind of data and record is kept, and what removes it.
+    frameworks:
+      iso27001: [A.5.33, A.8.10, A.8.15]
+      soc2: [C1.2, P4.2, P4.3]
+      hipaa: [164.316(b)(2)(i)]
+      gdpr: [Art.5(1)(e)]
+    docs: [compliance/README.md#how-long-things-are-kept]
+    tests:
+      - Llm.Tests/RecordRetentionTests.Records_past_their_time_go_the_audit_log_only_from_the_start_of_its_chain_and_the_check_says_how_long_each_is_kept
+    checks: [app:records-retention, app:log-retention]
+    operator: Decide the periods, write them in the retention policy, and keep backups as long as it says.
 
   - id: NET-01
     title: Encrypted in transit, one way in
