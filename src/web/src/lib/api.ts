@@ -7,6 +7,8 @@ export interface AppInfo {
   /** The licence, and where this version's source is (the AGPL offers it to everyone who uses it). */
   license?: string
   source?: string
+  /** The sign-in notice everyone accepts (acceptable use, the privacy notice); null: none. */
+  notice?: { title: string; text: string; version: string } | null
 }
 
 /** A support contact as a link: an email address becomes mailto:, a web address stays. */
@@ -28,6 +30,8 @@ export interface Me {
   twoFactorEnabled: boolean
   /** Signed in only to set up two-factor sign-in, which the company requires, before anything else. */
   mustSetUpTwoFactor?: boolean
+  /** Signed in, and to accept the sign-in notice's current version before anything else. */
+  mustAcceptNotice?: boolean
   signedInAt: number | null
 }
 

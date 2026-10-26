@@ -164,3 +164,63 @@ export const dataRequestsQuery = {
   queryKey: ['admin', 'compliance', 'data-requests'] as const,
   queryFn: ({ signal }: { signal: AbortSignal }) => api<DataRequest[]>('/api/admin/compliance/data-requests', { signal }),
 }
+
+export interface SecurityAlert {
+  id: string
+  kind: string
+  title: string
+  detail: string | null
+  at: string
+  incidentId: string | null
+}
+
+export interface Incident {
+  id: string
+  title: string
+  summary: string | null
+  severity: 'low' | 'medium' | 'high' | 'critical'
+  status: 'open' | 'contained' | 'resolved' | 'closed'
+  detectedAt: string
+  openedBy: string
+  personalData: boolean
+  healthData: boolean
+  authorityDecidedAt: string | null
+  authorityNotified: boolean | null
+  peopleNotifiedAt: string | null
+  closedAt: string | null
+  lessons: string | null
+  /** The GDPR's 72 hours to tell the supervisory authority (personal data); null: not asked. */
+  authorityDue: string | null
+  /** HIPAA's 60 days to tell the people (health data); null: not asked. */
+  peopleDue: string | null
+}
+
+export interface IncidentStep {
+  id: string
+  at: string
+  by: string
+  kind: string
+  text: string | null
+}
+
+export const incidentsQuery = {
+  queryKey: ['admin', 'compliance', 'incidents'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ alerts: SecurityAlert[]; incidents: Incident[] }>('/api/admin/compliance/incidents', { signal }),
+}
+
+export const incidentQuery = (id: string) => ({
+  queryKey: ['admin', 'compliance', 'incidents', id] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ incident: Incident; events: IncidentStep[]; alerts: SecurityAlert[] }>(`/api/admin/compliance/incidents/${id}`, { signal }),
+})
+
+/** Each step as the timeline says it. */
+export const STEP_WORDS: Record<string, string> = {
+  opened: 'Opened',
+  note: 'Note',
+  contained: 'Contained',
+  resolved: 'Resolved',
+  authority_notified: 'Supervisory authority told',
+  authority_not_required: 'Authority need not be told',
+  people_notified: 'The people affected told',
+  closed: 'Closed',
+}

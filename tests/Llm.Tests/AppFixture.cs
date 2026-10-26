@@ -174,6 +174,8 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Audit:AnchorDir", "");
             // Access reviews only when a test starts one.
             b.UseSetting("Compliance:ReviewEveryDays", "0");
+            // Security alerts only when a test looks.
+            b.UseSetting("Security:Watch", "false");
             // No Laya unless a test brings it (LayaTests).
             b.UseSetting("Modules:laya", "false");
             // Nothing listens here: probes are refused at once instead of waiting on DNS.

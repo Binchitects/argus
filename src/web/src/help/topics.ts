@@ -859,6 +859,7 @@ export const topics = {
       safeguards: { name: 'Safeguards', text: 'What keeps the chat from misuse: limits per person, secrets in messages, blocked words, the model\'s check of each message, personal data, and what happens after refusals. A group can set its own under Groups.' },
       'company-knowledge': { name: 'Company knowledge', text: 'How often sources are read again, and how much of long files comes with each question.' },
       'data-retention': { name: 'Data retention', text: 'How long chats are kept before they are deleted with their files. A group can keep its own.' },
+      'sign-in-notice': { name: 'Sign-in notice', text: 'What everyone accepts before using the service (acceptable use, the privacy notice): shown on the sign-in page, and accepted once a version by each person before anything else; each acceptance is kept, with its version, and is in the audit log and the evidence. A new version is accepted again.' },
       compliance: { name: 'Compliance', text: 'How often access is reviewed (a review starts by itself and the admins are told), after how many days an account counts as unused, and whether unused accounts are disabled every day.' },
       'audit-log': { name: 'Audit log', text: 'Sends every entry of the audit log on to the company\'s SIEM as it is written, in order and each once: by syslog (udp, tcp or tls) and to a webhook, signed with its key. A collector that does not answer is tried again; Admin → Compliance shows how far it got.' },
       speech: { name: 'Speech', text: 'Reading aloud and speech to text for everyone, unless a person chooses their own under Your account → Voice: the language people speak (or found by itself), the voice for each language, the reading speed, and whether Talk reads answers aloud. **Try it** reads a sample with the voice chosen.' },
@@ -893,6 +894,7 @@ export const topics = {
       { name: 'Attest', text: 'Says the company\'s part is done, with what and where its proof is. Kept with your name and the date, and in the audit log; it counts for a year. Needs the Compliance officer role (or Owner).' },
       { name: 'Access reviews', text: 'Who holds privileged access and the accounts unused for long, each kept or revoked; a new one starts by itself every quarter. **Start a review** starts one now.' },
       { name: 'Data requests', text: 'People\'s requests about their data (a copy, a correction, restriction, objection, erasure), each due within a month: answer it, restrict their processing, erase everything (with a certificate), or refuse with the reason.' },
+      { name: 'Security alerts and incidents', text: 'What the app noticed (many failed sign-ins, an admin role given, many exports, a failed or late backup), each raised once to every admin; open an incident from one, or by hand.' },
       { name: 'Download evidence', text: 'One zip: the controls, every check\'s result, the attestations, the settings (no secret), who holds an administrative permission, the access reviews, the audit log\'s chain and its last 90 days by action. Each download is audited.' },
     ],
     tasks: [
@@ -914,6 +916,19 @@ export const topics = {
     ],
     tasks: [{ title: 'Review access for the quarter', steps: ['Open the review from Admin → Compliance (or the bell, when the schedule started it).', 'For each item: **Keep** it, or **Revoke** it when the person no longer needs it.', 'Press **Close the review** when nothing is left to decide.'] }],
     manual: { doc: 'compliance', section: 'access-reviews' },
+  },
+
+  incident: {
+    title: 'Incident',
+    about: 'A security incident from finding to closure: the clocks the law sets, each step on its timeline, and what was learned.',
+    admin: true,
+    parts: [
+      { name: 'What the law asks', text: 'With personal data: 72 hours from finding it to tell the supervisory authority, or to record why it need not be told (GDPR 33). With health data: 60 days to tell the people (HIPAA 164.404), and HHS. Each clock says how long is left, or how late.' },
+      { name: 'Steps', text: 'A note, contained, resolved, authority told (or need not be, with why), people told, and closed with what was learned. Each is kept with your name and the time, and in the audit log.' },
+      { name: 'Timeline', text: 'Every step, oldest first: the record an auditor and the authority ask for.' },
+    ],
+    tasks: [{ title: 'Handle a personal data breach', steps: ['Open an incident (from its alert, or by hand) with personal data ticked.', 'Contain it, then tell the supervisory authority within 72 hours, or record why it need not be.', 'Tell the people when the risk to them is high.', 'Close it with what was learned.'] }],
+    manual: { doc: 'compliance', section: 'security-alerts-and-incidents' },
   },
 
   quality: {

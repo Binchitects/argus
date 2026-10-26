@@ -96,6 +96,10 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Compliance.ComplianceAttestation> ComplianceAttestations => Set<Compliance.ComplianceAttestation>();
     public DbSet<Compliance.AccessReview> AccessReviews => Set<Compliance.AccessReview>();
     public DbSet<Compliance.DataRequest> DataRequests => Set<Compliance.DataRequest>();
+    public DbSet<Compliance.NoticeAcceptance> NoticeAcceptances => Set<Compliance.NoticeAcceptance>();
+    public DbSet<Compliance.SecurityAlert> SecurityAlerts => Set<Compliance.SecurityAlert>();
+    public DbSet<Compliance.Incident> Incidents => Set<Compliance.Incident>();
+    public DbSet<Compliance.IncidentEvent> IncidentEvents => Set<Compliance.IncidentEvent>();
     public DbSet<Compliance.AccessReviewItem> AccessReviewItems => Set<Compliance.AccessReviewItem>();
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<KnowledgeSource> KnowledgeSources => Set<KnowledgeSource>();
@@ -951,6 +955,44 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(c => c.After).HasMaxLength(500);
             e.HasIndex(c => new { c.UserId, c.At });
             e.HasOne<AppUser>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Compliance.SecurityAlert>(e =>
+        {
+            e.ToTable("security_alerts");
+            e.Property(a => a.Kind).HasMaxLength(32);
+            e.Property(a => a.Title).HasMaxLength(300);
+            e.Property(a => a.Detail).HasMaxLength(2000);
+            e.Property(a => a.Key).HasMaxLength(200);
+            e.HasIndex(a => a.Key).IsUnique();
+            e.HasIndex(a => a.At);
+        });
+        builder.Entity<Compliance.Incident>(e =>
+        {
+            e.ToTable("incidents");
+            e.Property(i => i.Title).HasMaxLength(300);
+            e.Property(i => i.Summary).HasMaxLength(4000);
+            e.Property(i => i.Severity).HasMaxLength(16);
+            e.Property(i => i.Status).HasMaxLength(16);
+            e.Property(i => i.OpenedBy).HasMaxLength(256);
+            e.Property(i => i.Lessons).HasMaxLength(4000);
+            e.HasIndex(i => new { i.Status, i.DetectedAt });
+        });
+        builder.Entity<Compliance.IncidentEvent>(e =>
+        {
+            e.ToTable("incident_events");
+            e.Property(v => v.By).HasMaxLength(256);
+            e.Property(v => v.Kind).HasMaxLength(32);
+            e.Property(v => v.Text).HasMaxLength(4000);
+            e.HasIndex(v => new { v.IncidentId, v.At });
+            e.HasOne<Compliance.Incident>().WithMany().HasForeignKey(v => v.IncidentId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Compliance.NoticeAcceptance>(e =>
+        {
+            e.ToTable("notice_acceptances");
+            e.Property(a => a.Version).HasMaxLength(64);
+            e.Property(a => a.Ip).HasMaxLength(64);
+            e.HasIndex(a => new { a.UserId, a.Version });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(a => a.UserId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<Compliance.DataRequest>(e =>
         {

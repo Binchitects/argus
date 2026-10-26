@@ -60,6 +60,7 @@ app.UseCsrfGuard();
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
 app.UseAuthentication();
 app.UseTwoFactorEnrolment();
+Llm.Api.Compliance.NoticeGate.UseNoticeGate(app);
 app.UseAuthorization();
 app.UseRateLimiter();
 
@@ -70,7 +71,8 @@ app.MapAppIdentity();
 
 var api = app.MapGroup("/api");
 // Public: the sign-in page shows the name, headline and where to get help.
-api.MapGet("/info", (Microsoft.Extensions.Options.IOptionsMonitor<Llm.Api.Settings.BrandingOptions> branding) =>
+api.MapGet("/info", (Microsoft.Extensions.Options.IOptionsMonitor<Llm.Api.Settings.BrandingOptions> branding,
+    Microsoft.Extensions.Options.IOptionsMonitor<Llm.Api.Compliance.NoticeOptions> notice) =>
 {
     var b = branding.CurrentValue;
     return new
@@ -82,6 +84,8 @@ api.MapGet("/info", (Microsoft.Extensions.Options.IOptionsMonitor<Llm.Api.Settin
         // The AGPL's offer of the source to everyone who uses it over a network (LICENSING.md).
         license = "AGPL-3.0-only",
         source = b.SourceUrl,
+        // What everyone accepts before using the service, shown on the sign-in page too.
+        notice = notice.CurrentValue.On ? new { notice.CurrentValue.Title, notice.CurrentValue.Text, notice.CurrentValue.Version } : null,
     };
 }).AllowAnonymous("The sign-in page's name, headline and help: public.");
 api.MapFallback(() => Results.NotFound()).AllowAnonymous("A plain 404.");

@@ -24,6 +24,7 @@ public static class SettingsCatalog
     private const string NotificationsGroup = "Notifications";
     private const string AuditGroup = "Audit log";
     private const string ComplianceGroup = "Compliance";
+    private const string NoticeGroup = "Sign-in notice";
     private const string Safeguards = "Safeguards";
     private const string Knowledge = "Company knowledge";
     private const string Retention = "Data retention";
@@ -334,6 +335,12 @@ public static class SettingsCatalog
             { Pattern = @"https://\S+", PatternHelp = "an https:// URL" },
         new("Audit:WebhookSecret", AuditGroup, "The webhook's signing key", "Each post carries X-Arena-Signature: sha256= and the HMAC-SHA256 of its body with this key, in hex, for the receiver to check. Make one with: openssl rand -hex 32.", SettingType.Secret, SettingScope.Live),
 
+        new("Notice:Title", NoticeGroup, "Title", "Above the notice, on the sign-in page and where people accept it.", SettingType.Text, SettingScope.Live)
+            { Default = "Before you use this service", Optional = false, Max = 120 },
+        new("Notice:Text", NoticeGroup, "Notice", "What everyone accepts before using the service: acceptable use, the privacy notice, a link to the full policy (Markdown). Shown on the sign-in page; after signing in, each person accepts it before anything else, and each acceptance is kept with its version and audited. Empty: no notice.", SettingType.Text, SettingScope.Live)
+            { Max = 20000, Lines = 12 },
+        new("Notice:Version", NoticeGroup, "Version", "Change it when the notice changes in substance: everyone accepts the new version at their next step in the app (a typo fix needs no new version).", SettingType.Text, SettingScope.Live)
+            { Default = "1", Optional = false, Max = 64 },
         new("Compliance:ReviewEveryDays", ComplianceGroup, "Review access every", "An access review (who holds privileged access, and the accounts unused for long) starts by itself this many days after the last one, and the admins are told. 0: only when started by hand (Admin → Compliance).", SettingType.WholeNumber, SettingScope.Live)
             { Default = "90", Unit = "days", Min = 0, Max = 365, Optional = false },
         new("Compliance:UnusedDays", ComplianceGroup, "An account is unused after", "Nobody signed in to it for this many days: it is in the next access review, and disabled when the next setting says so.", SettingType.WholeNumber, SettingScope.Live)

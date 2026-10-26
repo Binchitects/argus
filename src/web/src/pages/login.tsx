@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Building2, KeyRound, LifeBuoy, ShieldCheck } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useSearchParams } from 'react-router'
 import { z } from 'zod'
@@ -14,6 +14,9 @@ import { Label } from '@/components/ui/label'
 import { HelpButton, HelpPanel } from '@/help/help-button'
 import { api, errorMessage, infoQuery, meQuery, supportHref } from '@/lib/api'
 import { EyesBackdrop } from './eyes-backdrop'
+
+/** The notice as formatted text: the chat's Markdown, fetched only when there is a notice to show. */
+const NoticeText = lazy(() => import('./chat/markdown').then((m) => ({ default: m.Markdown })))
 
 type Answer = { status: 'ok'; redirect: string } | { status: '2fa' }
 
@@ -89,6 +92,16 @@ export function LoginPage() {
             <CodeStep redirect={redirect} remember={remember} onBack={() => setStep('password')} />
           )}
           {info.data?.supportContact && <Support contact={info.data.supportContact} />}
+          {info.data?.notice && (
+            <details className="mt-4 text-xs text-muted-foreground">
+              <summary className="cursor-pointer">By signing in you accept: {info.data.notice.title}</summary>
+              <div className="mt-2 max-h-64 overflow-y-auto text-sm text-foreground">
+                <Suspense fallback={<p className="whitespace-pre-wrap">{info.data.notice.text}</p>}>
+                  <NoticeText text={info.data.notice.text} />
+                </Suspense>
+              </div>
+            </details>
+          )}
         </div>
       </main>
       <HelpPanel open={helpOpen} onOpenChange={setHelpOpen} />

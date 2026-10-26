@@ -36,6 +36,13 @@ public sealed record TakeRequest(string? Kind, string? Details, Guid UserId = de
 
 public sealed record OutcomeRequest(string? Outcome);
 
+public sealed record AcceptRequest(string? Version);
+
+public sealed record OpenIncidentRequest(string? Title, string? Summary, string? Severity, bool PersonalData = false, bool HealthData = false, Guid? AlertId = null,
+    DateTimeOffset? DetectedAt = null);
+
+public sealed record StepRequest(string? Kind, string? Text);
+
 public sealed record RestrictionRequest(bool Restricted, string? Why);
 
 public sealed record DataRequestView(Guid Id, Guid? UserId, string Person, string? Email, string Kind, string? Details, string Status, DateTimeOffset ReceivedAt,
@@ -58,6 +65,12 @@ public static class ComplianceEndpoints
         services.Configure<ComplianceOptions>(config.GetSection("Compliance"));
         services.AddScoped<AccessReviews>();
         services.AddScoped<DataRequests>();
+        services.Configure<NoticeOptions>(config.GetSection("Notice"));
+        services.AddScoped<Notice>();
+        services.Configure<SecurityOptions>(config.GetSection("Security"));
+        services.AddSingleton<SecurityWatch>();
+        services.AddHostedService(sp => sp.GetRequiredService<SecurityWatch>());
+        services.AddScoped<Incidents>();
         services.AddHostedService<AccessReviewSchedule>();
     }
 
@@ -117,6 +130,68 @@ public static class ComplianceEndpoints
             return Results.Ok(new { restrictedAt = person.ProcessingRestrictedAt });
         });
 
+        // Security alerts and the incident register.
+        g.MapGet("/incidents", async (AppDbContext db, TimeProvider clock, CancellationToken ct) =>
+        {
+            var since = clock.GetUtcNow().AddDays(-60);
+            var incidents = await db.Incidents.AsNoTracking().OrderBy(i => i.Status == Incident.Closed ? 1 : 0).ThenByDescending(i => i.DetectedAt).Take(100).ToListAsync(ct);
+            return Results.Ok(new
+            {
+                alerts = await db.SecurityAlerts.AsNoTracking().Where(a => a.At >= since).OrderByDescending(a => a.At).Take(200).ToListAsync(ct),
+                incidents = incidents.Select(IncidentShape),
+            });
+        });
+        g.MapPost("/incidents", async (OpenIncidentRequest body, ClaimsPrincipal p, UserManager<AppUser> users, Incidents incidents, CancellationToken ct) =>
+        {
+            try
+            {
+                var made = await incidents.OpenAsync(body.Title ?? "", body.Summary, body.Severity ?? "medium", body.PersonalData, body.HealthData, body.AlertId, body.DetectedAt,
+                    (await users.GetUserAsync(p))!.UserName!, ct);
+                return Results.Created($"/api/admin/compliance/incidents/{made.Id}", IncidentShape(made));
+            }
+            catch (IncidentException ex)
+            {
+                return AuthEndpoints.Problem(400, "incident", ex.Message);
+            }
+        });
+        g.MapGet("/incidents/{id:guid}", async (Guid id, AppDbContext db, CancellationToken ct) =>
+            await db.Incidents.AsNoTracking().SingleOrDefaultAsync(i => i.Id == id, ct) is { } incident
+                ? Results.Ok(new { incident = IncidentShape(incident), events = await db.IncidentEvents.AsNoTracking().Where(e => e.IncidentId == id).OrderBy(e => e.At).ToListAsync(ct),
+                    alerts = await db.SecurityAlerts.AsNoTracking().Where(a => a.IncidentId == id).ToListAsync(ct) })
+                : Results.NotFound());
+        g.MapPost("/incidents/{id:guid}/steps", async (Guid id, StepRequest body, ClaimsPrincipal p, UserManager<AppUser> users, Incidents incidents, CancellationToken ct) =>
+        {
+            try
+            {
+                return Results.Ok(IncidentShape(await incidents.StepAsync(id, body.Kind ?? "", body.Text, (await users.GetUserAsync(p))!.UserName!, ct)));
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (IncidentException ex)
+            {
+                return AuthEndpoints.Problem(400, "incident", ex.Message);
+            }
+        });
+
+        // The sign-in notice: what it says, whether they accepted this version, and accepting it.
+        var notice = app.MapGroup("/api/account/notice").PersonOnly();
+        notice.MapGet("", async (ClaimsPrincipal p, UserManager<AppUser> users, Notice n, CancellationToken ct) =>
+        {
+            var me = (await users.GetUserAsync(p))!;
+            var o = n.Current;
+            var accepted = await n.AcceptedAsync(me.Id, ct);
+            return Results.Ok(new { on = o.On, o.Title, o.Text, o.Version, acceptedVersion = accepted?.Version, acceptedAt = accepted?.At });
+        });
+        notice.MapPost("/accept", async (AcceptRequest body, ClaimsPrincipal p, UserManager<AppUser> users, Notice n, HttpContext http, CancellationToken ct) =>
+        {
+            var me = (await users.GetUserAsync(p))!;
+            return await n.AcceptAsync(me.Id, me.UserName!, body.Version ?? "", http.Connection.RemoteIpAddress?.ToString(), ct)
+                ? Results.NoContent()
+                : AuthEndpoints.Problem(409, "changed", "The notice changed while you read it: read the new one.");
+        });
+
         // The person's own: what they asked, and asking.
         var mine = app.MapGroup("/api/account/data-requests").PersonOnly();
         mine.MapGet("", async (ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct) =>
@@ -155,6 +230,17 @@ public static class ComplianceEndpoints
     private static readonly Func<DataRequest, DataRequestView> ShapeOne = Shaped.Compile();
 
     private static DataRequestView Shape(DataRequest r) => ShapeOne(r);
+
+    /// <summary>An incident with the law's clocks: when the authority and the people must be told by (null: not asked).</summary>
+    private static object IncidentShape(Incident i)
+    {
+        var (authority, people) = Incidents.Clocks(i);
+        return new
+        {
+            i.Id, i.Title, i.Summary, i.Severity, i.Status, i.DetectedAt, i.OpenedBy, i.PersonalData, i.HealthData, i.AuthorityDecidedAt, i.AuthorityNotified,
+            i.PeopleNotifiedAt, i.ClosedAt, i.Lessons, authorityDue = authority, peopleDue = people,
+        };
+    }
 
     private static async Task<IResult> PrivacyAsync<T>(Func<Task<T>> work)
     {
@@ -288,6 +374,8 @@ public static class ComplianceEndpoints
                 audit-chain.json      the audit log's hash chain walked as this was made: whether it holds, and where not
                 audit-anchors.jsonl   the chain's daily anchors, kept apart from the database (each: when, the entry, its hash)
                 access-reviews.csv    every access review's every item: who, what they held, the decision, by whom, when, what came of it
+                notice.csv            who accepted which version of the sign-in notice, when and from where
+                incidents.json        the incident register: each incident with its clocks and every step, and the security alerts
 
                 """);
             Text("controls.yaml", ComplianceControls.Text);
@@ -308,6 +396,16 @@ public static class ComplianceEndpoints
             {
                 reviewTitles.GetValueOrDefault(i.ReviewId), i.Kind, i.Subject, i.What, i.Decision, i.DecidedBy, i.DecidedAt?.ToString("u", CultureInfo.InvariantCulture), i.Note, i.Outcome,
             })]));
+            var accepted = await db.NoticeAcceptances.AsNoTracking().Join(db.Users.AsNoTracking(), a => a.UserId, u => u.Id, (a, u) => new { u.UserName, a.Version, a.At, a.Ip })
+                .OrderBy(a => a.At).ToListAsync(ct);
+            Text("notice.csv", Csv([["person", "version", "at", "from"], .. accepted.Select(a => new object?[] { a.UserName, a.Version, a.At.ToString("u", CultureInfo.InvariantCulture), a.Ip })]));
+            var allIncidents = await db.Incidents.AsNoTracking().OrderBy(i => i.DetectedAt).ToListAsync(ct);
+            var allSteps = await db.IncidentEvents.AsNoTracking().OrderBy(e => e.At).ToListAsync(ct);
+            Text("incidents.json", JsonSerializer.Serialize(new
+            {
+                incidents = allIncidents.Select(i => new { incident = IncidentShape(i), steps = allSteps.Where(e => e.IncidentId == i.Id) }),
+                alerts = await db.SecurityAlerts.AsNoTracking().OrderBy(a => a.At).ToListAsync(ct),
+            }, json));
             Text("audit-chain.json", JsonSerializer.Serialize(await watch.WalkAsync(anchor: false, ct), json));
             Text("audit-anchors.jsonl", string.Concat(AnchorsOf(auditOptions.CurrentValue).Select(a => JsonSerializer.Serialize(a, JsonSerializerOptions.Web) + "\n")));
         }

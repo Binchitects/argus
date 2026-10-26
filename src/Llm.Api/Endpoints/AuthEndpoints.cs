@@ -37,7 +37,7 @@ public static class AuthEndpoints
         _ => Problem(500, "error", "Sign-in failed."),
     };
 
-    private static async Task<IResult> MeAsync(ClaimsPrincipal principal, UserManager<AppUser> users, Access.AccessService access)
+    private static async Task<IResult> MeAsync(ClaimsPrincipal principal, UserManager<AppUser> users, Access.AccessService access, Compliance.Notice notice)
     {
         var user = principal.Identity?.IsAuthenticated == true ? await users.GetUserAsync(principal) : null;
         if (user is null || user.IsDisabled)
@@ -58,6 +58,8 @@ public static class AuthEndpoints
             twoFactorEnabled = user.TwoFactorEnabled,
             // Signed in to set up two-factor sign-in, which the company requires, before anything else.
             mustSetUpTwoFactor = principal.HasClaim(c => c.Type == TwoFactorPolicy.EnrolClaim),
+            // Signed in, and to accept the sign-in notice's current version before anything else.
+            mustAcceptNotice = await notice.MustAcceptAsync(user.Id),
             signedInAt = AppClaimsFactory.SignedInAt(principal)?.ToUnixTimeSeconds(),
         });
     }

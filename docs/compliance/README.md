@@ -137,6 +137,45 @@ Chat messages and memories are not sealed one by one (search reads them in the
 database): the host's disk encryption covers them, as it covers the database's
 own files.
 
+## Security alerts and incidents
+
+Every minute the app looks at what its audit log and access history say, and
+raises a security alert (kept, and sent to every admin's bell, e-mail and the
+alerts webhook) for:
+
+- many failed sign-ins in ten minutes (20, all accounts together, or 10 for
+  one account: `Security:FailedSignIns`, `Security:FailedSignInsOneAccount`);
+- an administrative role given to a person, a group or everyone;
+- many exports by one person in an hour (a person's data, the evidence: 3);
+- a backup that failed, or no good backup for over a day.
+
+A broken audit chain and a certificate near its end raise theirs where they
+are found. Each alert is raised once.
+
+**The incident register** (Admin → Compliance → Security alerts and incidents)
+takes an incident from an alert or by hand: what happened, its severity, and
+whether personal or health data may be involved. Its clocks run from when it
+was found: with personal data, 72 hours to tell the supervisory authority or
+to record why it need not be told (GDPR 33); with health data, 60 days to tell
+the people (HIPAA 164.404, and HHS). Each step (a note, contained, resolved,
+the authority told, the people told, closed with what was learned) is kept on
+its timeline with who and when, and in the audit log (`incident.*`). It cannot
+be closed without what was learned, nor, with personal data, without the
+authority question answered. The check **Incidents handled within the law's
+time** is red while one is past its clock; the evidence carries the register.
+
+## The sign-in notice
+
+**Settings → Sign-in notice** sets what everyone accepts before using the
+service: acceptable use, the privacy notice, links to the full policies
+(Markdown), with a title and a version. The sign-in page shows it to anyone.
+After signing in (with a password, the directory or company sign-in), each
+person accepts its current version before anything else: until they have, the
+app answers nothing but the notice (`403 notice`). A new version is accepted
+again by everyone at their next step. Each acceptance is kept with its version,
+when and from where, is in the audit log (`notice.accept`) and in the evidence
+(`notice.csv`). API keys are not sessions and are not held up.
+
 ## Personal and health data
 
 The safeguards (Admin → Safeguards) find, in what people send, attach, what

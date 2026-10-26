@@ -93,3 +93,69 @@ public sealed class DataRequest
     /// <summary>An erasure's certificate (JSON): what was erased, what is kept and why, and when backups let go of the rest.</summary>
     public string? Certificate { get; set; }
 }
+
+/// <summary>A person accepted the sign-in notice (acceptable use, the privacy notice) in this version: kept as proof.</summary>
+public sealed class NoticeAcceptance
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid UserId { get; set; }
+    public required string Version { get; set; }
+    public DateTimeOffset At { get; set; } = DateTimeOffset.UtcNow;
+    public string? Ip { get; set; }
+}
+
+/// <summary>A security alert the app raised from what it saw (failed sign-ins, an admin made, many exports, a backup failed...).</summary>
+public sealed class SecurityAlert
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    /// <summary>sign_in_failures, account_attacked, admin_granted, mass_export, backup_failed, backup_late, audit_chain.</summary>
+    public required string Kind { get; set; }
+    public required string Title { get; set; }
+    public string? Detail { get; set; }
+    /// <summary>What it is the alert of, once: the same key is not raised twice.</summary>
+    public required string Key { get; set; }
+    public DateTimeOffset At { get; set; } = DateTimeOffset.UtcNow;
+    /// <summary>The incident opened from it, if any.</summary>
+    public Guid? IncidentId { get; set; }
+}
+
+/// <summary>
+/// A security incident, from detection to closure: its severity, whether personal or health data was involved (then the GDPR's
+/// 72 hours to tell the supervisory authority, and HIPAA's 60 days to tell the people), and each step on its timeline.
+/// </summary>
+public sealed class Incident
+{
+    public const string Open = "open", Contained = "contained", Resolved = "resolved", Closed = "closed";
+
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public required string Title { get; set; }
+    public string? Summary { get; set; }
+    /// <summary>low, medium, high or critical.</summary>
+    public string Severity { get; set; } = "medium";
+    public string Status { get; set; } = Open;
+    /// <summary>When it was found: the clocks run from here.</summary>
+    public DateTimeOffset DetectedAt { get; set; } = DateTimeOffset.UtcNow;
+    public required string OpenedBy { get; set; }
+    public bool PersonalData { get; set; }
+    public bool HealthData { get; set; }
+    /// <summary>When the supervisory authority was told (GDPR 33), or decided it need not be (with the reason as a step).</summary>
+    public DateTimeOffset? AuthorityDecidedAt { get; set; }
+    public bool? AuthorityNotified { get; set; }
+    /// <summary>When the people affected were told (GDPR 34, HIPAA 164.404).</summary>
+    public DateTimeOffset? PeopleNotifiedAt { get; set; }
+    public DateTimeOffset? ClosedAt { get; set; }
+    /// <summary>What was learned, required to close it.</summary>
+    public string? Lessons { get; set; }
+}
+
+/// <summary>A step on an incident's timeline.</summary>
+public sealed class IncidentEvent
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid IncidentId { get; set; }
+    public DateTimeOffset At { get; set; } = DateTimeOffset.UtcNow;
+    public required string By { get; set; }
+    /// <summary>opened, note, contained, resolved, authority_notified, authority_not_required, people_notified, closed.</summary>
+    public required string Kind { get; set; }
+    public string? Text { get; set; }
+}

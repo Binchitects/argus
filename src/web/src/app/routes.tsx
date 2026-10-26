@@ -86,6 +86,7 @@ export const routes: RouteObject[] = [
               { path: 'settings', ...lazy(() => import('@/pages/admin/settings').then((m) => ({ Component: m.SettingsPage }))) },
               { path: 'audit', ...lazy(() => import('@/pages/admin/audit').then((m) => ({ Component: m.AuditPage }))) },
               { path: 'compliance', ...lazy(() => import('@/pages/admin/compliance').then((m) => ({ Component: m.CompliancePage }))) },
+              { path: 'compliance/incidents/:id', ...lazy(() => import('@/pages/admin/incidents').then((m) => ({ Component: m.IncidentPage }))) },
               { path: 'compliance/reviews/:id', ...lazy(() => import('@/pages/admin/access-review').then((m) => ({ Component: m.AccessReviewPage }))) },
               { path: 'quality', ...lazy(() => import('@/pages/admin/quality').then((m) => ({ Component: m.QualityPage }))) },
               { path: 'indexing', ...lazy(() => import('@/pages/admin/argus').then((m) => ({ Component: m.IndexingPage }))) },

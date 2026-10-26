@@ -290,6 +290,29 @@ controls:
     checks: [app:certificate]
     operator: Someone takes the alerts, around the clock where the company needs it.
 
+  - id: MON-02
+    title: Security events raise alerts, and incidents are handled in time
+    meets: >-
+      Many failed sign-ins, an administrative role given, many exports by one
+      person, a failed or late backup raise a security alert once, to every
+      admin; the incident register takes an incident from an alert or by hand,
+      runs the GDPR's 72 hours and HIPAA's 60 days from when it was found,
+      keeps every step with who and when, and is closed only with what was
+      learned (and, with personal data, the authority question answered).
+    frameworks:
+      iso27001: [A.5.24, A.5.25, A.5.26, A.5.27, A.8.16]
+      soc2: [CC7.3, CC7.4, CC7.5]
+      hipaa: [164.308(a)(6)(ii), 164.404, 164.408]
+      gdpr: [Art.33, Art.34]
+    docs: [compliance/README.md#security-alerts-and-incidents]
+    tests:
+      - Llm.Tests/IncidentTests.Failed_sign_ins_an_admin_made_many_exports_and_a_failed_backup_each_raise_one_alert_to_every_admin
+      - Llm.Tests/IncidentTests.An_incident_runs_from_its_alert_to_closure_with_the_GDPRs_72_hours_and_HIPAAs_60_days
+    checks: [app:incidents]
+    operator: >-
+      Name who answers the alerts and runs incidents, know which supervisory
+      authority to tell and how, and keep the incident-response runbook.
+
   - id: DAT-01
     title: Chats and files are deleted when their time is up
     meets: >-
@@ -553,3 +576,25 @@ controls:
       - Llm.Tests/ComplianceControlsTests.The_companys_part_is_attested_and_audited_and_the_evidence_holds_everything_an_auditor_asks_for
       - deploy/test_compliance_check.py::test_A_failed_check_fails_the_run_and_warnings_only_with_strict
     operator: The release manager runs the checklist; an auditor samples it.
+
+  - id: GOV-02
+    title: Everyone accepts the acceptable use and privacy notice
+    meets: >-
+      The notice the company sets (acceptable use, the privacy notice) is on
+      the sign-in page for anyone to read; each person accepts its current
+      version before anything else, whichever way they signed in, and again
+      when a new version is set; each acceptance is kept with its version,
+      time and address, audited, and in the evidence.
+    frameworks:
+      iso27001: [A.5.10, A.6.3]
+      soc2: [CC2.3, P1.1]
+      hipaa: [164.308(a)(5)(i)]
+      gdpr: [Art.12, Art.13]
+    docs: [compliance/README.md#the-sign-in-notice]
+    tests:
+      - Llm.Tests/NoticeTests.Everyone_accepts_the_current_version_before_anything_else_and_a_new_version_again
+      - Llm.Tests/NoticeTests.Without_a_notice_nothing_waits_and_the_check_asks_for_one
+    checks: [app:notice]
+    operator: >-
+      Write the notice and the policies it points to, keep them current, and
+      set a new version when they change in substance.

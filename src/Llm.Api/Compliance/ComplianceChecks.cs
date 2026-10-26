@@ -22,7 +22,7 @@ public sealed record CheckResult(string Id, string Title, string State, string D
 /// </summary>
 public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users, Access.AccessService access, IOptionsMonitor<AuthOptions> auth,
     IOptions<IdentityOptions> identity, IOptionsMonitor<Retention.RetentionOptions> retention, StoragePlaces places, LokiDatasource loki,
-    PromDatasource prom, IOptions<StackOptions> stack, AuditWatch auditWatch, AuditChainState auditState, IOptionsMonitor<AuditOptions> auditOptions, AuditForwarder forwarder, IOptionsMonitor<ComplianceOptions> compliance, TimeProvider clock)
+    PromDatasource prom, IOptions<StackOptions> stack, AuditWatch auditWatch, AuditChainState auditState, IOptionsMonitor<AuditOptions> auditOptions, AuditForwarder forwarder, IOptionsMonitor<ComplianceOptions> compliance, IOptionsMonitor<NoticeOptions> notice, TimeProvider clock)
 {
     public const string Ok = "ok", Warn = "warn", Fail = "fail", Unknown = "unknown";
 
@@ -43,6 +43,8 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         ("data-key", "Secrets encrypted at rest"),
         ("files-sealed", "People's files encrypted at rest"),
         ("personal-data", "Personal and health data kept from cloud models"),
+        ("notice", "Everyone accepted the sign-in notice"),
+        ("incidents", "Incidents handled within the law's time"),
         ("access-review", "Privileged access was reviewed"),
         ("data-requests", "People's data requests answered in time"),
     ];
@@ -71,6 +73,8 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
                 "data-key" => DataKey(),
                 "files-sealed" => await FilesSealedAsync(ct),
                 "personal-data" => await PersonalDataAsync(ct),
+                "notice" => await NoticeAsync(ct),
+                "incidents" => await IncidentsAsync(ct),
                 "access-review" => await AccessReviewAsync(ct),
                 "data-requests" => await DataRequestsAsync(ct),
                 _ => (Unknown, "No such check."),
@@ -330,6 +334,36 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         return health.Count == 0
             ? (Ok, $"{string.Join(", ", toCloud.Select(r => $"\"{r.Name}\" ({r.Action})"))} keep personal and health data from models on other providers.")
             : (Warn, $"{string.Join(", ", toCloud.Select(r => $"\"{r.Name}\""))} leave out {string.Join(", ", health.Select(Safeguards.Pii.Named))}: add \"Health and identity data to cloud models\".");
+    }
+
+    /// <summary>A notice is set, and who of the people still here accepted its current version.</summary>
+    private async Task<(string, string)> NoticeAsync(CancellationToken ct)
+    {
+        var o = notice.CurrentValue;
+        if (!o.On)
+        {
+            return (Warn, "No sign-in notice: set acceptable use and the privacy notice under Settings → Sign-in notice, for everyone to accept.");
+        }
+        var people = await db.Users.CountAsync(u => !u.IsDisabled, ct);
+        var accepted = await db.NoticeAcceptances.Where(a => a.Version == o.Version).Join(db.Users.Where(u => !u.IsDisabled), a => a.UserId, u => u.Id, (a, _) => a.UserId).Distinct().CountAsync(ct);
+        return (Ok, $"Version {o.Version}: {accepted} of {people} people accepted it; the others do before their next step in the app.");
+    }
+
+    /// <summary>No breach past the GDPR's 72 hours without the authority question answered, or past HIPAA's 60 days without the people told.</summary>
+    private async Task<(string, string)> IncidentsAsync(CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var open = await db.Incidents.AsNoTracking().Where(i => i.Status != Llm.Core.Compliance.Incident.Closed).ToListAsync(ct);
+        var late = open.Where(i => (i.PersonalData && i.AuthorityDecidedAt is null && now > i.DetectedAt + Incidents.AuthorityWithin)
+            || (i.HealthData && i.PeopleNotifiedAt is null && now > i.DetectedAt + Incidents.PeopleWithin)).ToList();
+        var alerts = await db.SecurityAlerts.CountAsync(a => a.At >= now.AddDays(-30), ct);
+        if (late.Count > 0)
+        {
+            return (Fail, $"Past the law's time: {string.Join("; ", late.Select(i => $"\"{i.Title}\" (found {i.DetectedAt:yyyy-MM-dd HH:mm} UTC)"))}. Tell the supervisory authority (GDPR 33) or record why not, and the people (HIPAA 164.404).");
+        }
+        return open.Count > 0
+            ? (Warn, $"{open.Count} incident{(open.Count == 1 ? "" : "s")} open; {alerts} security alerts in 30 days.")
+            : (Ok, $"No incident open; {alerts} security alerts in 30 days.");
     }
 
     private (string, string) DataKey() => string.IsNullOrEmpty(auth.CurrentValue.DataKey)
