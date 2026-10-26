@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ArrowRight, Brain, ExternalLink, GraduationCap, MessagesSquare, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ArrowRight, BadgeCheck, ExternalLink, HeartPulse, KeyRound, ShieldCheck, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { api, infoQuery } from '@/lib/api'
+import { api, infoQuery, meQuery } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 /** One page of a release's tour: what changed for people, in a few words, and where to try it. */
@@ -15,6 +15,8 @@ interface Slide {
   /** Where to try it, and what the button says. */
   to: string
   action: string
+  /** Shown only to those who hold it (an admin page's permission); everyone else skips the page. */
+  permission?: string
 }
 
 /** A release's tour: shown once to each person after it is deployed (the newest one only). */
@@ -26,36 +28,37 @@ interface Tour {
 }
 
 const latestTour: Tour = {
-  release: '7.0',
-  title: "What's new in Argus Arena 7.0",
+  release: '7.1',
+  title: "What's new in Argus Arena 7.1",
   slides: [
     {
-      icon: Brain,
-      title: 'Memory that lasts',
-      text: 'The chat and Code Arena now share one memory. It brings what matters to each question, learns from chats that went quiet, and tidies itself, every change with Undo.',
-      to: '/memory',
-      action: 'Open Memory',
+      icon: ShieldCheck,
+      title: 'Your data, your rights',
+      text: 'Ask for a copy of your data, a correction, its erasure, or that it stops being used, from your account. Each request is answered within a month, and you see where it stands.',
+      to: '/account',
+      action: 'Your data rights',
     },
     {
-      icon: MessagesSquare,
-      title: 'Chats that never lose the thread',
-      text: 'A long chat keeps every word: the model reads earlier messages back when it needs them, finds your past chats by what they were about, and you can pin a message or leave one out.',
+      icon: KeyRound,
+      title: 'Two-factor where it matters',
+      text: 'Your company can ask for a second factor from everyone, or from the groups that see sensitive data. You set it up once, with an authenticator app, in your account.',
+      to: '/account',
+      action: 'Open your account',
+    },
+    {
+      icon: HeartPulse,
+      title: 'Health and personal data kept in bounds',
+      text: 'Dates of birth, medical record, national and Medicare numbers are found in what you write and send, kept from models outside the company and masked where your company says.',
       to: '/chat',
       action: 'Start a chat',
     },
     {
-      icon: GraduationCap,
-      title: 'Skills that learn',
-      text: 'Twenty-one skills come with Arena, and it learns new ones from your work. When one goes wrong or you correct it, a better version waits for you, with Undo.',
-      to: '/skills',
-      action: 'See your skills',
-    },
-    {
-      icon: SquareTerminal,
-      title: 'Code Arena in one line',
-      text: 'Our coding agent and its IDE install with one command from Connect your tools, and keep themselves up to date from this Arena.',
-      to: '/setup',
-      action: 'Install Code Arena',
+      icon: BadgeCheck,
+      title: 'The Compliance center',
+      text: 'ISO 27001, SOC 2, HIPAA and the GDPR: every control with its live check, the company’s part attested, access reviews, data requests and incidents on the law’s clocks, and the evidence in one download.',
+      to: '/admin/compliance',
+      action: 'Open Compliance',
+      permission: 'compliance.read',
     },
   ],
 }
@@ -87,6 +90,8 @@ export function WhatsNew({ open, onOpenChange }: { open: boolean; onOpenChange: 
   const navigate = useNavigate()
   const seen = useQuery(seenQuery)
   const info = useQuery(infoQuery).data
+  const me = useQuery(meQuery).data
+  const slides = latestTour.slides.filter((s) => !s.permission || me?.isAdmin || me?.permissions?.includes(s.permission))
   const [page, setPage] = useState(0)
   const opened = useRef(false)
   const markSeen = useMutation({
@@ -107,9 +112,9 @@ export function WhatsNew({ open, onOpenChange }: { open: boolean; onOpenChange: 
     if (wantsTour(seen.data?.seen)) markSeen.mutate()
     if (to) navigate(to)
   }
-  const slide = latestTour.slides[page]!
+  const slide = slides[Math.min(page, slides.length - 1)]!
   const Icon = slide.icon
-  const last = page === latestTour.slides.length - 1
+  const last = page >= slides.length - 1
   const notes = info?.source && info.version ? `${info.source.replace(/\/$/, '')}/releases/tag/v${info.version}` : null
 
   return (
@@ -129,12 +134,12 @@ export function WhatsNew({ open, onOpenChange }: { open: boolean; onOpenChange: 
             <DialogDescription className="text-sm leading-relaxed">{slide.text}</DialogDescription>
           </DialogHeader>
           <nav className="flex items-center gap-1.5" aria-label="Pages">
-            {latestTour.slides.map((s, i) => (
+            {slides.map((s, i) => (
               <button
                 key={s.title}
                 type="button"
                 onClick={() => setPage(i)}
-                aria-label={`${s.title} (${i + 1} of ${latestTour.slides.length})`}
+                aria-label={`${s.title} (${i + 1} of ${slides.length})`}
                 aria-current={i === page ? 'step' : undefined}
                 className={cn('h-1.5 rounded-full transition-all', i === page ? 'w-6 bg-primary' : 'w-1.5 bg-muted-foreground/30 hover:bg-muted-foreground/60')}
               />

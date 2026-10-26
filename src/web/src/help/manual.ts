@@ -14,6 +14,26 @@ import chat from '@docs/chat.md?raw'
 import ci from '@docs/ci.md?raw'
 import codeArena from '@docs/code-arena.md?raw'
 import compliance from '@docs/compliance/README.md?raw'
+import complianceControls from '@docs/compliance/controls.md?raw'
+import complianceFlows from '@docs/compliance/data-flows.md?raw'
+import complianceGdpr from '@docs/compliance/frameworks/gdpr.md?raw'
+import complianceHipaa from '@docs/compliance/frameworks/hipaa.md?raw'
+import complianceIso from '@docs/compliance/frameworks/iso27001.md?raw'
+import complianceSoc2 from '@docs/compliance/frameworks/soc2.md?raw'
+import complianceIncidents from '@docs/compliance/incident-response.md?raw'
+import policyUse from '@docs/compliance/policies/acceptable-use.md?raw'
+import policyAccess from '@docs/compliance/policies/access-control.md?raw'
+import policyContinuity from '@docs/compliance/policies/business-continuity.md?raw'
+import policyChange from '@docs/compliance/policies/change-management.md?raw'
+import policyCrypto from '@docs/compliance/policies/cryptography.md?raw'
+import policyData from '@docs/compliance/policies/data-protection.md?raw'
+import policySecurity from '@docs/compliance/policies/information-security.md?raw'
+import policyPeople from '@docs/compliance/policies/people-security.md?raw'
+import policyPhysical from '@docs/compliance/policies/physical-security.md?raw'
+import policyRisk from '@docs/compliance/policies/risk-management.md?raw'
+import policySuppliers from '@docs/compliance/policies/suppliers.md?raw'
+import complianceDpia from '@docs/compliance/templates/dpia.md?raw'
+import complianceRopa from '@docs/compliance/templates/record-of-processing.md?raw'
 import configuration from '@docs/configuration.md?raw'
 import cpuTemperature from '@docs/cpu-temperature.md?raw'
 import data from '@docs/data.md?raw'
@@ -111,6 +131,31 @@ export const manualGroups: ManualGroup[] = [
       doc('configuration.md', 'Configuration', 'Every .env variable and every file under deploy/config/.', 'admins', configuration),
       doc('architecture.md', 'Architecture', 'Every service, how a request flows through them, where state lives, what each failure looks like.', 'admins', architecture),
       doc('cpu-temperature.md', 'CPU temperature', 'How CPU temperature reaches the dashboards, on Linux and on Windows.', 'admins', cpuTemperature),
+    ],
+  },
+  {
+    title: 'Compliance documents',
+    docs: [
+      doc('compliance/controls.md', 'The controls', 'Every control: what meets it, the clauses it serves, the tests and checks behind it, the company\'s part.', 'admins', complianceControls),
+      doc('compliance/frameworks/iso27001.md', 'ISO 27001, clause by clause', 'Annex A\'s 93 controls, Arena\'s controls and the company\'s document for each.', 'admins', complianceIso),
+      doc('compliance/frameworks/soc2.md', 'SOC 2, criterion by criterion', 'The Trust Services Criteria, Arena\'s controls and the company\'s document for each.', 'admins', complianceSoc2),
+      doc('compliance/frameworks/hipaa.md', 'HIPAA, section by section', 'The Security Rule, breach notification and the Privacy Rule\'s parts, with Arena\'s controls.', 'admins', complianceHipaa),
+      doc('compliance/frameworks/gdpr.md', 'The GDPR, article by article', 'The articles a controller\'s systems meet, with Arena\'s controls.', 'admins', complianceGdpr),
+      doc('compliance/data-flows.md', 'Data flows', 'Where people\'s data goes in the stack, and the flows out of the company an admin turns on.', 'admins', complianceFlows),
+      doc('compliance/incident-response.md', 'Incident response', 'From noticing to closure, with the register\'s steps and the law\'s clocks.', 'admins', complianceIncidents),
+      doc('compliance/templates/record-of-processing.md', 'Record of processing', 'GDPR Art. 30, filled in with what Arena processes.', 'admins', complianceRopa),
+      doc('compliance/templates/dpia.md', 'Impact assessment (DPIA)', 'GDPR Art. 35, with Arena\'s measures for each risk.', 'admins', complianceDpia),
+      doc('compliance/policies/information-security.md', 'Information security policy', 'A template: roles, the rules, records, exceptions.', 'admins', policySecurity),
+      doc('compliance/policies/risk-management.md', 'Risk management policy', 'A template: the asset inventory and the risk register, started for you.', 'admins', policyRisk),
+      doc('compliance/policies/access-control.md', 'Access control policy', 'A template: accounts, two-factor, least privilege, reviews, leavers.', 'admins', policyAccess),
+      doc('compliance/policies/acceptable-use.md', 'Acceptable use policy', 'A template: the notice everyone accepts at sign-in, in full.', 'admins', policyUse),
+      doc('compliance/policies/people-security.md', 'People security policy', 'A template: screening, training, leaving.', 'admins', policyPeople),
+      doc('compliance/policies/physical-security.md', 'Physical security policy', 'A template: where the hosts are, the equipment, media and disposal.', 'admins', policyPhysical),
+      doc('compliance/policies/business-continuity.md', 'Backup and continuity policy', 'A template: backups, restores proven, capacity, losing the host.', 'admins', policyContinuity),
+      doc('compliance/policies/data-protection.md', 'Data protection policy', 'A template: classes, people\'s rights, how long things are kept.', 'admins', policyData),
+      doc('compliance/policies/suppliers.md', 'Supplier and transfer policy', 'A template: cloud models and other suppliers, contracts, transfers.', 'admins', policySuppliers),
+      doc('compliance/policies/change-management.md', 'Change and vulnerability policy', 'A template: upgrades, rollback, the SBOM, patching.', 'admins', policyChange),
+      doc('compliance/policies/cryptography.md', 'Cryptography policy', 'A template: TLS, encryption at rest, the keys and who holds them.', 'admins', policyCrypto),
     ],
   },
 ]
