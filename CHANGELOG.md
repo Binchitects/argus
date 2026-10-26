@@ -15,6 +15,89 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.1.0 (2026-10-26)
+
+Compliance, built in and kept: what a company running Arena needs for ISO/IEC
+27001, SOC 2, HIPAA and the GDPR — the controls, live checks of each, the
+evidence in one download, the documents and templates, and a guard that keeps
+every later release from weakening them unseen.
+
+### :rocket: Epics and highlights
+
+- **The Compliance center** (Admin → Compliance, with a new Compliance officer
+  role): each of the 27 controls with the clauses it serves in the four
+  frameworks, its checks now (green, amber or red, each saying what to change),
+  the company's part attested (kept a year, audited), and **Download
+  evidence**: the controls, the checks, the attestations, the access reviews,
+  the notice's acceptances, the incidents, privileged access, the settings and
+  the audit log's chain in one zip. `deploy/scripts/compliance-check.py` checks
+  from outside what a browser sees (TLS, headers, cookies, cross-site requests,
+  the data's disk encryption) beside the app's own checks
+- **An audit log nobody changes unseen**: each entry sealed onto the one
+  before with SHA-256, the chain walked and anchored daily (its own volume and
+  the logs), a break told to every admin; kept six years; sent on to the
+  company's SIEM by syslog (UDP, TCP or TLS) or a signed webhook, each entry
+  once and in order
+- **People's rights and the law's clocks**: data requests (GDPR 15–22) asked
+  from Your account or taken in by an admin, each due in a month, erasure
+  that removes everything of theirs and certifies what is kept and why;
+  security alerts (failed sign-ins, an admin role given, many exports, a failed
+  or missing backup) to every admin; an incident register with the GDPR's 72
+  hours and HIPAA's 60 days from finding to closure with lessons
+- **Kept in bounds**: two-factor required for admins, everyone or chosen
+  groups (company sign-in must then prove its own second factor); access
+  reviews every quarter; people's files, sound, pages and words sealed at rest
+  with AES-256-GCM; encrypted backups; TLS 1.2+ with forward secrecy and HSTS;
+  dates of birth, medical record, NHS, national and Medicare numbers found and
+  kept from cloud models; the app's logs written with personal data masked;
+  a sign-in notice everyone accepts in its current version
+- **The documents**: [docs/compliance](docs/compliance/README.md) with the
+  shared responsibility, every control as an auditor reads it, each framework
+  clause by clause (ISO 27001's 93, SOC 2's 61 criteria, HIPAA's 68 sections,
+  37 GDPR articles) with Arena's controls and the company's document for each,
+  the data flows, an incident runbook, a record of processing, a DPIA and
+  eleven policy templates; in the manual too
+
+### :sparkles: New features & Enhancements
+
+- Every release has its SBOM (`tools/release-scan.py`: CycloneDX, every .NET,
+  npm and Python package and base image, checked against OSV); a critical
+  vulnerability fails the release unless accepted in writing until a date
+- Settings → Data retention: how long the audit log (six years), the gateway's
+  request log (400 days), tool calls and the bell (180 days each) are kept,
+  swept hourly and audited; Admin → Compliance lists every kind of data's period
+- Settings → Audit log, Compliance and Sign-in notice; a group's policies can
+  require two-factor of its members
+- `backup.sh --open` and encrypted backups opened by `--verify`, `--restore`
+  and `restore-test.sh`
+- What's new in 7.1, the tour after the release
+
+### :boom: Breaking changes & Deprecations
+
+- Loki now deletes logs older than 90 days (its compactor had no period, so
+  they were kept forever)
+- The gateway's request log, tool calls and the bell are swept to their new
+  periods on the first hour after the upgrade; set them to 0 first to keep
+  everything
+- With two-factor required, or a sign-in notice set, people do that first at
+  their next step: the app answers nothing else until they have
+- Company sign-in, while a second factor is required, refuses a provider that
+  does not say one was used (OIDC `amr`/`acr`, SAML's authentication context)
+
+### What an upgrade does, and what an admin does after
+
+The migrations add the compliance tables and seal the audit log's chain from
+its oldest entry; a job seals the files stored before; the new `audit` volume
+holds the chain's anchors. Then, in Admin → Compliance, work through what is
+amber: require two-factor, set the sign-in notice, choose how long chats are
+kept, add the two health-data safeguard templates, set `BACKUP_KEY_FILE` for
+encrypted backups and `HSTS_SECONDS` once the certificate is one browsers
+trust, encrypt the data's disk, and attest the company's part.
+
+### :warning: Weakened controls
+
+- None: this is the first release with the controls.
+
 ## v7.0.1 (2026-10-26)
 
 What's new, told once, a tidier place to type, and the sketch and the panel
