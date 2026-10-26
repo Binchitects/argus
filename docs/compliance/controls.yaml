@@ -567,6 +567,8 @@ controls:
       gdpr: [Art.5(2), Art.25]
     docs:
       - compliance/README.md#controls-and-how-they-are-kept
+      - compliance/README.md#the-documents
+      - compliance/README.md#when-a-change-weakens-a-control
       - compliance/README.md#the-compliance-center
       - development.md#releasing
     tests:
@@ -575,6 +577,10 @@ controls:
       - Llm.Tests/ComplianceControlsTests.The_app_runs_its_checks_and_admins_see_them_with_the_controls
       - Llm.Tests/ComplianceControlsTests.The_companys_part_is_attested_and_audited_and_the_evidence_holds_everything_an_auditor_asks_for
       - deploy/test_compliance_check.py::test_A_failed_check_fails_the_run_and_warnings_only_with_strict
+      - deploy/test_compliance_docs.py::test_The_written_documents_are_current
+      - deploy/test_compliance_docs.py::test_Every_clause_a_control_cites_is_listed_and_every_document_is_there
+      - deploy/test_compliance_docs.py::test_The_next_releases_entry_names_each_under_Weakened_controls_or_it_fails
+      - deploy/test_compliance_docs.py::test_Nothing_is_weaker_than_in_the_newest_release_unless_the_changelog_says_so
     operator: The release manager runs the checklist; an auditor samples it.
 
   - id: GOV-02
@@ -598,3 +604,29 @@ controls:
     operator: >-
       Write the notice and the policies it points to, keep them current, and
       set a new version when they change in substance.
+
+  - id: GOV-03
+    title: What a release ships is listed and its known vulnerabilities gate it
+    meets: >-
+      Each release has a software bill of materials (CycloneDX) of every .NET,
+      npm and Python package and base image it ships, checked against OSV's
+      advisories; a critical vulnerability fails the release unless it is
+      accepted in writing, with why and until when, and an acceptance past its
+      date counts no more.
+    frameworks:
+      iso27001: [A.5.21, A.8.8, A.8.28]
+      soc2: [CC7.1, CC8.1, CC9.2]
+      hipaa: [164.308(a)(1)(ii)(A), 164.308(a)(1)(ii)(B)]
+      gdpr: [Art.32(1)(d)]
+    docs:
+      - compliance/README.md#supply-chain
+      - development.md#releasing
+    tests:
+      - deploy/test_release_scan.py::test_What_ships_is_listed_and_the_build_tools_are_not
+      - deploy/test_release_scan.py::test_A_critical_finding_fails_the_release_and_is_in_the_SBOM
+      - deploy/test_release_scan.py::test_Accepted_with_a_date_not_past_it_ships_and_high_ones_never_stop_it
+      - deploy/test_release_scan.py::test_OSV_out_of_reach_fails_it_too
+    operator: >-
+      The release manager runs the scan and attaches the SBOM to the release;
+      the security officer reviews each acceptance before its date and the
+      high findings each release.

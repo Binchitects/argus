@@ -1,0 +1,13 @@
+# Known vulnerabilities accepted for a release, read by tools/release-scan.py: a critical one listed here does not
+# stop the release while its date has not passed. Each: the advisory's id (GHSA-..., CVE-..., PYSEC-...), the
+# package, why it does not apply or cannot be fixed yet, and until when (then it must be looked at again).
+#
+# - id: GHSA-xxxx-xxxx-xxxx
+#   package: npm:example
+#   reason: the vulnerable function is never called; the upgrade breaks the editor
+#   until: 2026-12-31
+
+- id: GHSA-cg2g-xh64-v4q7
+  package: npm:dompurify
+  reason: the bypass needs SAFE_FOR_TEMPLATES, which neither the web (markdown-blocks.ts, dashboards' text panels) nor Monaco's copy sets; upgrade to 3.4.17 when the npm registry is reachable again (it timed out 2026-10-26)
+  until: 2026-11-30

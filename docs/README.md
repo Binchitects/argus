@@ -32,7 +32,7 @@ developers', and Argus run alone); a test fails until it is. Only
 | [configuration.md](configuration.md) | every `.env` variable and every file under `deploy/config/` |
 | [architecture.md](architecture.md) | every service, how a request flows through them, where state lives, and what each failure looks like |
 | [authentication.md](authentication.md) | who signs in where, and how identity reaches each service |
-| [compliance/](compliance/README.md) | ISO 27001, SOC 2, HIPAA and the GDPR: shared responsibility, the controls in [`controls.yaml`](compliance/controls.yaml), and the checks that keep them |
+| [compliance/](compliance/README.md) | ISO 27001, SOC 2, HIPAA and the GDPR: shared responsibility, the controls in [`controls.yaml`](compliance/controls.yaml) and the checks that keep them, each framework clause by clause, data flows, the incident runbook, and policy, record of processing and DPIA templates |
 | [admin.md](admin.md) | the admin area: people, groups, models, tools, dashboards, logs, alerts, usage and cost |
 | [settings.md](settings.md) | the Settings page: what applies at once, after a restart, or on the host |
 | [chat.md](chat.md) | the chat: models, thinking, files, tools and their limits |

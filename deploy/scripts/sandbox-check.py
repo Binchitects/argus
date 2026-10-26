@@ -32,7 +32,7 @@ def env(key, default=""):
 
 PROJECT = os.environ.get("COMPOSE_PROJECT_NAME", "arena")
 UID, GID = env("LLM_UID", "1000"), env("LLM_GID", "1000")
-VOLUME = f"{PROJECT}_sandbox-jobs"
+VOLUME = f"{PROJECT}_sandbox"
 RESULTS = []
 LAST = {}  # the last run's result: a run that failed to happen fails its checks
 

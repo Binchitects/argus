@@ -11,6 +11,9 @@ Sections used:
 - `:bug:` **Bugs fixed**
 - `:boom:` **Breaking changes & Deprecations**
 - `:arrow_up:` **Deps updates**
+- `:warning:` **Weakened controls** — each compliance control the release
+  makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
+  and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
 ## v7.0.1 (2026-10-26)
 

@@ -181,6 +181,8 @@ A release is a tag, `vX.Y.Z`, on a commit of `main` whose suites all pass.
    `python3 deploy/scripts/compliance-check.py` exits 0
    ([compliance](compliance/README.md#checking-a-live-stack)). A change that
    makes a control weaker is under **Weakened controls** in the changelog.
+   The release scan passes: `python3 tools/release-scan.py` writes the SBOM
+   and exits 0 ([supply chain](compliance/README.md#supply-chain)).
 4. An upgrade from the oldest release the bundle takes (5.2.0) keeps every
    person, chat and setting: `scripts/upgrade-test.py --from v5.2.0
    --stop-live`. Each migration applies on that release's schema.
@@ -200,7 +202,8 @@ A release is a tag, `vX.Y.Z`, on a commit of `main` whose suites all pass.
    an installation of the oldest release it upgrades.
 8. Tag the commit and push the tag (`release.yml` publishes the Argus image),
    make the GitHub release (`gh release create`), and attach the `.run`, its
-   `.sha256` and Code Arena's packages to it.
+   `.sha256`, the SBOM (`dist/argus-arena-VERSION.cdx.json`) and Code Arena's
+   packages to it.
 
 When a release can no longer upgrade from 5.2.0 (a migration or a file that
 needs a release in between), raise `UPGRADES_FROM` in

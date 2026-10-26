@@ -21,11 +21,11 @@ RUN apt-get update \
  && fc-cache -f
 
 RUN pip install --no-cache-dir --only-binary=:all: --no-binary=odfpy \
-      numpy==2.5.3 pandas==3.0.6 matplotlib==3.11.2 pillow==12.3.0 \
+      numpy==2.5.3 pandas==3.0.6 matplotlib==3.11.2 pillow==13.0.0 \
       openpyxl==3.1.5 scipy==1.18.1 sympy==1.14.0 \
       duckdb==1.5.5 pyarrow==25.0.1 statsmodels==0.15.0 scikit-learn==1.9.1 seaborn==0.13.2 \
       python-docx==1.2.0 python-pptx==1.0.2 xlsxwriter==3.2.9 odfpy==1.4.1 reportlab==5.0.1 \
-      pypdf==6.19.0 pdfplumber==0.11.10 lxml==6.1.3 beautifulsoup4==4.15.0 markdown==3.11 \
+      pypdf==6.21.2 pdfplumber==0.11.10 lxml==6.1.3 beautifulsoup4==4.15.0 markdown==3.11 \
       pyyaml==6.0.3 jinja2==3.1.6 tabulate==0.10.0 chardet==7.6.0 rapidfuzz==3.14.6 networkx==3.7 \
       pint==0.26.1 holidays==0.105 tzdata==2026.4 numpy-financial==1.1.0 \
       qrcode==8.2 graphviz==0.21 pytesseract==0.3.13 \

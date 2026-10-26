@@ -4,10 +4,10 @@ Arena is built so that a company running it can meet four frameworks:
 
 | Framework | What it is | The part Arena covers |
 |---|---|---|
-| **ISO/IEC 27001:2022** | an information security management system, certified by an auditor | the technical controls of Annex A (5.15–5.18, 5.28, 5.33–5.34, 8.2–8.5, 8.10–8.16, 8.20–8.26, 8.29, 8.32) |
-| **SOC 2** | an auditor's report on the Trust Services Criteria (2017, points of focus revised 2022) | the common criteria CC6–CC9, availability A1, confidentiality C1 and privacy P4–P5 |
-| **HIPAA** | the US rules for health information: the Security Rule (45 CFR 164.308–316) and the Privacy Rule | the technical safeguards of 164.312, the parts of the administrative safeguards of 164.308 a system can do, and documentation kept as 164.316 asks |
-| **The GDPR** | the EU's rules for personal data (Regulation 2016/679) | security of processing (Article 32), privacy by design (25), the people's rights (15–22), storage limitation (5(1)(e)) and accountability (5(2)) |
+| **ISO/IEC 27001:2022** | an information security management system, certified by an auditor | the technical controls of Annex A: [34 of its 93, clause by clause](frameworks/iso27001.md) |
+| **SOC 2** | an auditor's report on the Trust Services Criteria (2017, points of focus revised 2022) | the common criteria CC6–CC9, availability A1, confidentiality C1 and privacy P1, P4–P5 ([criterion by criterion](frameworks/soc2.md)) |
+| **HIPAA** | the US rules for health information: the Security Rule (45 CFR 164.308–316) and the Privacy Rule | the technical safeguards of 164.312, the parts of the administrative safeguards of 164.308 a system can do, documentation kept as 164.316 asks, and breach notification's clocks ([section by section](frameworks/hipaa.md)) |
+| **The GDPR** | the EU's rules for personal data (Regulation 2016/679) | security of processing (Article 32), privacy by design (25), the people's rights (15–22), storage limitation (5(1)(e)), breaches (33–34) and accountability (5(2)) ([article by article](frameworks/gdpr.md)) |
 
 A framework is met by an organisation, not by a program. Arena gives the
 controls, the evidence and the documents; the company that runs it does the
@@ -46,6 +46,42 @@ Nothing in it may go stale:
 - **Live checks** run inside the app (`app:` checks, shown in Admin →
   Compliance and by `GET /api/admin/compliance`) and from outside
   (`live:` checks, by [`deploy/scripts/compliance-check.py`](#checking-a-live-stack)).
+
+## The documents
+
+What a company needs beside the software, here to adapt:
+
+- **[The controls](controls.md)**: every control as an auditor reads it, with
+  the clauses it serves, the tests that prove it and the company's part.
+- **Each framework, clause by clause**: [ISO/IEC 27001](frameworks/iso27001.md),
+  [SOC 2](frameworks/soc2.md), [HIPAA](frameworks/hipaa.md) and
+  [the GDPR](frameworks/gdpr.md): every clause, Arena's controls that serve it,
+  and the company's document that governs it.
+- **[Data flows](data-flows.md)**: where people's data goes inside the stack,
+  and the flows out of the company that an admin turns on.
+- **[The incident response runbook](incident-response.md)**: from noticing to
+  closure, with the register's steps and the law's clocks.
+- **Templates**: the [record of processing](templates/record-of-processing.md)
+  (GDPR Art. 30), filled in with what Arena processes, and a [data protection
+  impact assessment](templates/dpia.md) (Art. 35).
+- **Policies**, templates to replace the brackets of and approve:
+  [information security](policies/information-security.md),
+  [risk management](policies/risk-management.md),
+  [access control](policies/access-control.md),
+  [acceptable use](policies/acceptable-use.md),
+  [people security](policies/people-security.md),
+  [physical security](policies/physical-security.md),
+  [backup and business continuity](policies/business-continuity.md),
+  [data protection and retention](policies/data-protection.md),
+  [suppliers and transfers](policies/suppliers.md),
+  [change and vulnerability management](policies/change-management.md),
+  [cryptography](policies/cryptography.md).
+
+The controls and the framework pages are written from `controls.yaml` and
+[`frameworks.yaml`](frameworks.yaml) (each framework's clauses and the
+document for each) by `python3 tools/compliance-docs.py`. Change those two and
+run it; the deployment tests fail while the pages are not current, while a
+control cites a clause the catalog does not list, or when a document is gone.
 
 ## The Compliance center
 
@@ -274,6 +310,29 @@ is tried again, later each time (up to every five minutes), and nothing is
 skipped. The check **The audit log is sent on to the SIEM** says how far it got
 and, when the last try failed, why.
 
+## Supply chain
+
+```bash
+python3 tools/release-scan.py
+```
+
+It lists what the release ships: every .NET package the app, Argus and Code
+Arena resolve (transitive ones too, as `dotnet list package` sees them), the
+web apps' npm packages from their lock files (the build tools left out), the
+Python packages the images pin in their Dockerfiles, and the base images. It
+asks [OSV](https://osv.dev) about each package at its version, writes
+`dist/argus-arena-VERSION.cdx.json` (CycloneDX 1.5, the vulnerabilities in it)
+and its `.sha256`, and prints what it found, worst first.
+
+A critical vulnerability fails it (exit 1) unless
+[accepted-vulnerabilities.yaml](accepted-vulnerabilities.yaml) accepts it: the
+advisory's id, the package, why it does not apply or cannot be fixed yet, and
+a date it is accepted until. Past that date it fails again, so an acceptance is
+looked at once more. When OSV cannot be reached it fails too (exit 2): nothing
+known is not the same as nothing found. High findings are listed and do not
+fail it; they are fixed in the next release. The base images are listed, not
+scanned here; scan them with Trivy where it is installed.
+
 ## Checking a live stack
 
 ```bash
@@ -297,4 +356,8 @@ says what to change.
 A release that makes a control weaker (a shorter list of what is audited, a
 default made looser, a check removed) says so under **Weakened controls** in
 its [changelog](../../CHANGELOG.md) entry, naming the control's id and why. The
-guard test fails first, so nobody weakens one by accident.
+guard fails first, so nobody weakens one by accident: `tools/compliance-docs.py`
+compares `controls.yaml` with the newest release's, and a control gone, a
+clause or a check it no longer has, or fewer tests proving it fails the
+deployment tests until the changelog's entry for the next release names it
+under a `### :warning: Weakened controls` heading.
