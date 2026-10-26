@@ -435,6 +435,22 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             case ("POST", "/api/plan/review"):
                 await ReviewPlanAsync(req, res, ct);
                 return;
+            case ("POST", "/api/plan/undo"):
+                // A step undone: its files (and later steps') as before it began, the steps to do again, the agent told.
+                if (Busy())
+                {
+                    await res.ErrorAsync(409, "busy", "An answer is being written: undo a step once it ends.", ct);
+                    return;
+                }
+                try
+                {
+                    await res.JsonAsync(200, new JsonObject { ["said"] = _rt.UndoStep(req.Json()?.Int("step") ?? 0) }, ct);
+                }
+                catch (PlanError e)
+                {
+                    await res.ErrorAsync(400, "plan", e.Message, ct);
+                }
+                return;
             case ("POST", "/api/queue"):
                 await QueueAsync(req, res, ct);
                 return;

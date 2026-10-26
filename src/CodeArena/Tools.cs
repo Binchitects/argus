@@ -82,6 +82,12 @@ internal sealed class ToolContext
     public WorkPlan Plan { get; set; } = WorkPlan.None;
     /// <summary>Runs a sub-agent (description, prompt, which of the person's own if any) and returns its report.</summary>
     public Func<string, string, string?, CancellationToken, Task<string>>? SubAgent { get; set; }
+    /// <summary>Whether a step's check is a command to run before the step is done (its first word a program here); null: none is.</summary>
+    public Func<string, bool>? IsCommand { get; set; }
+    /// <summary>Told when a step of the plan begins (doing): the checkpoint before it, for /plan undo.</summary>
+    public Action<int, string>? StepBegan { get; set; }
+    /// <summary>Told when run_shell ran a command and how it ended (passed: exit 0), with its output: a plan step whose check it is records it.</summary>
+    public Action<string, bool, string>? CommandRan { get; set; }
     /// <summary>Whether the session is in plan mode: a plan made then is proposed, for the person to review.</summary>
     public Func<bool>? Planning { get; set; }
     /// <summary>Called when the plan changes, so the session keeps it (and Arena, with the session's chat).</summary>

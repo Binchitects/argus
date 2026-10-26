@@ -33,7 +33,7 @@ public sealed class PlanSyncTests : IDisposable
             "plan it" when req["messages"]!.AsArray()[^1]!["role"]!.GetValue<string>() == "user" => Reply.Call(("plan", """
                 {"title":"Rename parse","goal":"parse_frame everywhere","steps":[{"title":"Find the callers","status":"doing","check":"grep -rn parse src"},{"title":"Rename","files":["src/a.c"],"depends_on":[1]}]}
                 """)),
-            "go on" when req["messages"]!.AsArray()[^1]!["role"]!.GetValue<string>() == "user" => Reply.Call(("plan", """{"steps":[{"number":1,"status":"done"},{"number":2,"status":"doing"}]}""")),
+            "go on" when req["messages"]!.AsArray()[^1]!["role"]!.GetValue<string>() == "user" => Reply.Call(("plan", """{"steps":[{"number":1,"status":"blocked","notes":"src is not there yet"},{"number":2,"status":"doing"}]}""")),
             "start again" when req["messages"]!.AsArray()[^1]!["role"]!.GetValue<string>() == "user" => Reply.Call(("plan", """{"clear":true}""")),
             _ => Reply.Say("ok"),
         };
@@ -56,7 +56,7 @@ public sealed class PlanSyncTests : IDisposable
 
         await (await web.SendAsync("go on")).RestAsync();
         await Until(() => _mcp.Chats.PlansSent().Count == 2, "the changed plan is in Arena");
-        Assert.Equal(["done", "doing"], _mcp.Chats.PlansSent()[1].Plan!["steps"]!.AsArray().Select(s => s!["status"]!.ToString()));
+        Assert.Equal(["blocked", "doing"], _mcp.Chats.PlansSent()[1].Plan!["steps"]!.AsArray().Select(s => s!["status"]!.ToString()));
 
         await (await web.SendAsync("start again")).RestAsync();
         await Until(() => _mcp.Chats.PlansSent().Count == 3, "the plan is dropped in Arena");

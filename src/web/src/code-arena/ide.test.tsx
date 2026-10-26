@@ -3069,6 +3069,24 @@ describe('quick open ranking', () => {
     expect(await screen.findByRole('tab', { name: /parse\.c/ })).toBeInTheDocument()
   })
 
+  it('undoes a step of the plan: its files as before it began, and says so', async () => {
+    const plan: CodePlan = {
+      title: 'Fix', goal: null, chat: null, review: 'approved',
+      steps: [{ number: 1, title: 'Write a', status: 'done', check: 'true', files: ['a.txt'], dependsOn: [], notes: null, checkResult: 'passed', checkOutput: null }],
+    }
+    const { calls } = backend({
+      'GET /api/plan': () => ({ json: plan }),
+      'POST /api/plan/undo': () => ({ json: { said: 'I undid step 1 of the plan: a.txt is as before it began.' } }),
+    })
+    renderIde()
+    await openApp()
+    await userEvent.click(screen.getByRole('button', { name: 'Plan' }))
+    const panel = await screen.findByRole('complementary', { name: 'Plan' })
+    await userEvent.click(await within(panel).findByRole('button', { name: 'Undo step 1' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/plan/undo')?.body).toEqual({ step: 1 }))
+    expect(await screen.findByText('I undid step 1 of the plan: a.txt is as before it began.')).toBeInTheDocument()
+  })
+
   it('reviews a plan the agent proposed in plan mode: approved, or a step changed with what should change', async () => {
     const plan: CodePlan = {
       title: 'Fix the parser', goal: null, chat: null, review: 'proposed', mode: 'plan', critique: '- Step 1 has no check.',

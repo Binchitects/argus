@@ -485,6 +485,18 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             Workspace = Workspace, Ui = Ui, Shell = Config.Shell, Jobs = Jobs, Memory = Memory, SessionsDir = Env.Paths.SessionsDir, Sandbox = Sandbox,
             BeforeWrite = Checkpoints.BeforeWrite, Planning = () => Permissions.Mode == Mode.Plan,
+            StepBegan = Checkpoints.BeginStep,
+            // A step's check that is a command (its first word a program here) is run before the step is done; its run is
+            // recorded on the step.
+            IsCommand = check => IsCommand(check, Workspace.Root),
+        };
+        Context.CommandRan = (command, passed, output) =>
+        {
+            var plan = Context.Plan.Ran(command, passed, output, DateTimeOffset.UtcNow);
+            if (!ReferenceEquals(plan, Context.Plan))
+            {
+                SetPlan(plan);
+            }
         };
         // Whatever the agent commits is by Code Arena (its author), the person staying the committer.
         var harness = CommitIdentity.From(Config);
@@ -1179,6 +1191,51 @@ internal sealed partial class Runtime : IAsyncDisposable
             default:
                 throw new PlanError($"A plan's review is one of {string.Join(", ", Reviews)}.");
         }
+    }
+
+    /// <summary>
+    /// /plan undo N: the files as they were before step N began (and before every step begun after it), those steps to do
+    /// again; the agent is told. What commands changed is not undone.
+    /// </summary>
+    public string UndoStep(int number)
+    {
+        List<int> steps;
+        List<string> restored, lost;
+        try
+        {
+            (steps, restored, lost) = Checkpoints.UndoStep(number);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            var begun = Checkpoints.Steps.Select(s => s.Number).ToList();
+            throw new PlanError(begun.Count == 0 ? "No step has begun in this run: there is nothing to undo." : $"Step {number} has not begun in this run: steps {string.Join(", ", begun)} have.");
+        }
+        var plan = Context.Plan;
+        SetPlan(plan with { Steps = [.. plan.Steps.Select(s => steps.Contains(s.Number) ? s with { Status = WorkStep.Todo, CheckResult = null, CheckOutput = null, CheckedAt = null } : s)] });
+        var files = restored.Select(f => Path.GetRelativePath(Workspace.Root, f)).ToList();
+        var said = $"I undid step{(steps.Count == 1 ? "" : "s")} {string.Join(", ", steps)} of the plan: "
+            + (files.Count == 0 ? "no file had been written since it began." : $"{string.Join(", ", files)} {(files.Count == 1 ? "is" : "are")} as before it began.")
+            + (lost.Count == 0 ? "" : $" Not put back: {string.Join(", ", lost)}.")
+            + " What commands changed is not undone. The steps are to do again.";
+        Agent.Remember(said);
+        return said;
+    }
+
+    /// <summary>Whether a check is a command: its first word a program on the PATH, or a script in the project.</summary>
+    internal static bool IsCommand(string check, string root)
+    {
+        var first = check.Trim().Trim('`').Split((char[])[' ', '\t'], 2, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        if (first is null || first.Length == 0 || !char.IsAsciiLetterOrDigit(first[0]) && first[0] is not ('.' or '/'))
+        {
+            return false;
+        }
+        if (first.Contains('/') || first.Contains('\\'))
+        {
+            return File.Exists(Path.IsPathRooted(first) ? first : Path.Combine(root, first));
+        }
+        var exts = OperatingSystem.IsWindows() ? (Environment.GetEnvironmentVariable("PATHEXT") ?? ".EXE;.CMD;.BAT").Split(';') : [""];
+        return (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Any(dir => exts.Any(ext => File.Exists(Path.Combine(dir, first + ext))));
     }
 
     private void SetPlan(WorkPlan plan)

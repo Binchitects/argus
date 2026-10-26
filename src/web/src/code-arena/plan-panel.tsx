@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, CircleCheck, CircleDashed, CircleDot, CircleSlash, ExternalLink, FileCode, PencilLine, Shuffle, X } from 'lucide-react'
+import { Check, CircleCheck, CircleDashed, CircleDot, CircleSlash, ExternalLink, FileCode, PencilLine, Shuffle, Undo2, X } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from '@/components/ui/toaster'
 import { errorMessage } from '@/lib/api'
@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 import { streamChat } from '@/pages/chat/api'
 import { planQuery, type CodePlanStep } from './api'
 import { useEditor } from './editor-state'
-import { ideUrl } from './http'
+import { api, ideUrl } from './http'
 
 const marks: Record<CodePlanStep['status'], { icon: typeof CircleCheck; label: string; className: string }> = {
   done: { icon: CircleCheck, label: 'Done', className: 'text-success' },
@@ -30,6 +30,17 @@ export function PlanPanel({ arena }: { arena: string | null }) {
   const [sending, setSending] = useState(false)
   const p = plan.data
   const proposed = p?.review === 'proposed'
+  /** A step undone: its files as before it began (and later steps'), the steps to do again; the agent is told. */
+  const undo = async (step: number) => {
+    try {
+      const r = await api<{ said: string }>('/api/plan/undo', { body: { step } })
+      toast.success(r.said)
+    } catch (e) {
+      toast.error(errorMessage(e))
+    } finally {
+      await queryClient.invalidateQueries({ queryKey: planQuery.queryKey })
+    }
+  }
   /** The review goes to the agent as the person's next message: the chat shows the turn it starts. */
   const review = async (action: string, step?: number, words?: string) => {
     setSending(true)
@@ -177,6 +188,11 @@ export function PlanPanel({ arena }: { arena: string | null }) {
                   {proposed && (
                     <button type="button" disabled={sending} onClick={() => setWriting({ action: 'change', step: s.number })} className="ms-5 flex w-fit items-center gap-1 text-muted-foreground hover:text-foreground disabled:opacity-50">
                       <PencilLine className="size-3" aria-hidden="true" /> Change step {s.number}
+                    </button>
+                  )}
+                  {!proposed && (s.status === 'doing' || s.status === 'done') && (
+                    <button type="button" onClick={() => void undo(s.number)} className="ms-5 flex w-fit items-center gap-1 text-muted-foreground hover:text-foreground">
+                      <Undo2 className="size-3" aria-hidden="true" /> Undo step {s.number}
                     </button>
                   )}
                 </li>

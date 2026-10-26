@@ -51,6 +51,7 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
 
     public static readonly WorkPlan None = new("", null, []);
 
+
     public bool IsEmpty => Steps.Count == 0 && Title.Length == 0;
 
     public WorkStep? Current => Steps.FirstOrDefault(s => s.Status == WorkStep.Doing);
@@ -59,7 +60,8 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
     /// The plan with the plan tool's changes: its title and goal, and steps (with a number: that step changed, or taken out
     /// with remove; without: one added at the end); clear starts again from nothing.
     /// </summary>
-    public WorkPlan Apply(JsonObject args)
+    /// <remarks><paramref name="isCommand"/>: whether a step's check is a command to run (a program here), not words to look by.</remarks>
+    public WorkPlan Apply(JsonObject args, Func<string, bool>? isCommand = null)
     {
         var plan = args.Bool("clear") == true ? None : this;
         var title = args.Str("title")?.Trim() is { Length: > 0 } t ? Cut(t, 200) : plan.Title;
@@ -99,14 +101,27 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
             {
                 step = step with { Title = Cut(title2, 300) };
             }
-            if (change.Str("status") is { } status)
-            {
-                step = WorkStep.States.Contains(status) ? step with { Status = status }
-                    : throw new PlanError($"A step's status is one of {string.Join(", ", WorkStep.States)}, not \"{status}\".");
-            }
             if (change.Str("check") is { } check)
             {
                 step = step with { Check = check.Trim().Length == 0 ? null : Cut(check.Trim(), 1000), CheckResult = null, CheckOutput = null, CheckedAt = null };
+            }
+            if (change.Str("status") is { } status)
+            {
+                if (!WorkStep.States.Contains(status))
+                {
+                    throw new PlanError($"A step's status is one of {string.Join(", ", WorkStep.States)}, not \"{status}\".");
+                }
+                if (status == WorkStep.Doing && step.Status != WorkStep.Doing)
+                {
+                    // Begun (again): its check counts from now.
+                    step = step with { CheckResult = null, CheckOutput = null, CheckedAt = null };
+                }
+                if (status == WorkStep.Done && step.Status != WorkStep.Done && step.Check is { } command && isCommand?.Invoke(command) == true && step.CheckResult != "passed")
+                {
+                    throw new PlanError($"Step {step.Number} is done only once its check passed: run it with run_shell (`{command}`) since the step began"
+                        + (step.CheckResult == "failed" ? "; it failed last time: fix what it says, or change the step and say why in its notes." : "."));
+                }
+                step = step with { Status = status };
             }
             if (change["files"] is JsonArray files)
             {
@@ -141,6 +156,20 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
         made.Validate();
         return made;
     }
+
+    /// <summary>
+    /// A command ran (run_shell): the step whose check it is (the one doing, else one not done) records how it went. The plan
+    /// as it was when no step's check is that command.
+    /// </summary>
+    public WorkPlan Ran(string command, bool passed, string output, DateTimeOffset at)
+    {
+        var said = Normal(command);
+        var step = Steps.FirstOrDefault(s => s.Status == WorkStep.Doing && s.Check is { } c && Normal(c) == said)
+            ?? Steps.FirstOrDefault(s => s.Status != WorkStep.Done && s.Check is { } c && Normal(c) == said);
+        return step is null ? this : Checked(step.Number, passed, output, at);
+    }
+
+    private static string Normal(string command) => string.Join(' ', command.Trim().Trim('`').Split((char[])[' ', '\t'], StringSplitOptions.RemoveEmptyEntries));
 
     /// <summary>A step's check ran: how it went, the end of what it said.</summary>
     public WorkPlan Checked(int number, bool passed, string output, DateTimeOffset at) =>

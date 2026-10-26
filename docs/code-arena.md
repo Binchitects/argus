@@ -1520,6 +1520,19 @@ out with `remove`, all of it again with `clear`. A step that waits for one
 not there, steps that wait for one another in a circle, or two doing at once
 are refused, and the plan stays as it was.
 
+**Nothing is done that was not checked.** A step's check that is a command
+(its first word a program here, or a script in the project) is run by the
+agent with `run_shell`, exactly as written, with the same permissions as any
+command; Code Arena records how it went on the step (passed or failed, and
+the end of its output). The step is done only once that check passed since
+it began: marking it done otherwise is refused, and a failed check is fixed,
+or the step changed with the reason in its notes. A check in words ("the
+page shows the cart") is the agent's to look at. A **checkpoint** is kept
+before each step as it begins: `/plan undo N` (the IDE's **Undo step N**) puts
+the files written since back as they were before step N began (and before
+every step begun after it) and makes those steps to do again; the agent is
+told. What commands changed is not undone.
+
 The terminal shows the plan each time it changes, and `/plan` shows it as it
 stands. It is kept with the session (`--continue` and `/resume` bring it
 back) and said again after every summary, so it is in the model's window

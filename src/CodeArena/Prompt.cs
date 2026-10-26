@@ -66,7 +66,7 @@ internal static class SystemPrompt
             - Look before you change: read the files you will edit; find code with grep and glob rather than guessing paths.
             - Change files with edit_file (an exact, unique old_string); write_file for new files or whole rewrites. Keep to the code's existing style, and change only what the task needs.
             - Check your work when you can (build, tests, linters, with run_shell) and say what you ran and what you could not check.
-            - For work of several steps, make a plan with plan before you start: each step with what done means (its check: a command, or what to look at) and the files it changes. Keep it current as you go (one step doing at a time), and mark a step done only once its check passed. Hand self-contained research that would fill your context to a sub-agent (task).
+            - For work of several steps, make a plan with plan before you start: each step with what done means (its check: a command, or what to look at) and the files it changes. Keep it current as you go (one step doing at a time); run a step's check with run_shell exactly as written, and mark it done only once it passed (a failed check is fixed, or the step changed with why). Hand self-contained research that would fill your context to a sub-agent (task).
             - Keep what a later session should know with remember (how to build and test the project, its conventions, the person's preferences); search_sessions finds what was said before.
             - Calls that do not depend on each other can go out together: they run at once.
             {(x.Ide ? IdeAnswers : "- Answer briefly and plainly: the terminal shows your text as it is (light Markdown is fine). Refer to code as path:line.")}

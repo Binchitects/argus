@@ -166,8 +166,10 @@ internal static class LocalTools
             Description = "Your working plan, for work of several steps: a goal, and steps each with what done means (check: a command whose " +
                 "success shows it, as \"dotnet test\", or what to look at), the files it changes and the steps it waits for. Make it " +
                 "before you start; then change it as you go, sending only what changes: a step with its number changes (or, with remove, " +
-                "takes out) that step, one without a number is added. One step doing at a time; a step is done once its check passed. " +
-                "The person sees it as it changes, and it stays in your context through every summary.",
+                "takes out) that step, one without a number is added. One step doing at a time. A step whose check is a command is done " +
+                "only once that command, run with run_shell exactly as written, passed after the step began; a check that failed is fixed, " +
+                "or the plan changed with the reason in the step's notes. The person sees it as it changes, and it stays in your context " +
+                "through every summary.",
             Parameters = Schema("""
                 {"type":"object","properties":{
                   "title":{"type":"string","description":"The plan's name"},
@@ -615,6 +617,7 @@ internal static class LocalTools
         var timeout = TimeSpan.FromSeconds(Math.Clamp(a.Int("timeout_seconds") ?? 120, 1, 600));
         var run = await Proc.RunAsync(ShellCommand(command, c), timeout, ct);
         var status = run.TimedOut ? $"timed out after {timeout.TotalSeconds:0} s (stopped)" : $"exit code {run.ExitCode}";
+        c.CommandRan?.Invoke(command, run.ExitCode == 0 && !run.TimedOut, (run.Output.TrimEnd() + $"\n[{status}]").Trim());
         var text = (run.Output.Length > 0 ? run.Output.TrimEnd() + "\n" : "(no output)\n") + $"[{status}]";
         var display = (run.Output.Length > 0 ? Fmt.Tail(run.Output.TrimEnd(), 8) + "\n" : "") + (run.ExitCode == 0 && !run.TimedOut ? c.Ui.Dim(status) : c.Ui.Red(status));
         return new ToolResult(text, run.ExitCode != 0 || run.TimedOut) { Display = display };
@@ -803,7 +806,7 @@ internal static class LocalTools
         WorkPlan plan;
         try
         {
-            plan = c.Plan.Apply(a);
+            plan = c.Plan.Apply(a, c.IsCommand);
         }
         catch (PlanError e)
         {
@@ -813,6 +816,10 @@ internal static class LocalTools
         {
             // Made in plan mode: the person reviews it when the turn ends.
             plan = plan with { Review = WorkPlan.Proposed };
+        }
+        foreach (var begun in plan.Steps.Where(s => s.Status == WorkStep.Doing && c.Plan.Steps.FirstOrDefault(o => o.Number == s.Number)?.Status != WorkStep.Doing))
+        {
+            c.StepBegan?.Invoke(begun.Number, begun.Title);
         }
         c.Plan = plan;
         c.PlanChanged?.Invoke(plan);
