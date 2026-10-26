@@ -91,7 +91,8 @@ public abstract class JobRunner(Func<string> dir, string name, string howToStart
             try
             {
                 var asked = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(dir, $"{n}.json"), ct))!.AsObject();
-                answer = await calls(asked["name"]?.GetValue<string>() ?? "", asked["args"] as JsonObject ?? [], ct);
+                // The arguments on their own, out of the file's object: a tool may put them in a request of its own (an MCP server's).
+                answer = await calls(asked["name"]?.GetValue<string>() ?? "", asked["args"] is JsonObject args ? (JsonObject)args.DeepClone() : [], ct);
             }
             catch (JsonException)
             {

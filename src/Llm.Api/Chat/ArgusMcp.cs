@@ -50,7 +50,8 @@ public sealed class McpSession(McpEndpoint endpoint, string? sessionId, string p
     {
         var id = Interlocked.Increment(ref _id);
         var token = $"call-{id}";
-        var @params = new JsonObject { ["name"] = name, ["arguments"] = arguments };
+        // A copy when they belong to another object already (a node has one parent): the caller's are never taken.
+        var @params = new JsonObject { ["name"] = name, ["arguments"] = arguments.Parent is null ? arguments : arguments.DeepClone() };
         if (progress is not null)
         {
             @params["_meta"] = new JsonObject { ["progressToken"] = token };

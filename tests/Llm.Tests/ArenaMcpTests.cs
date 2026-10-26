@@ -326,7 +326,7 @@ public sealed class ArenaMcpTests(AppFixture app)
         // The program calls them, each as the person: what it may call, the result, a refusal for the one that asks first.
         (text, isError) = await session.CallAsync("run_code", new JsonObject
         {
-            ["code"] = "# call calculate {\"expression\": \"6*7\"}\n# call current_time {}",
+            ["code"] = "# call calculate {\"expression\": \"6*7\"}\n# call current_time {}\n# call find_symbol {\"name\": \"ParseHeader\"}",
         }, null, CancellationToken.None);
         Assert.False(isError, text);
         var output = JsonNode.Parse(text)!;
@@ -337,12 +337,16 @@ public sealed class ArenaMcpTests(AppFixture app)
         Assert.Contains("\"ok\":true", lines[1], StringComparison.Ordinal);
         Assert.Contains("42", lines[1], StringComparison.Ordinal);
         Assert.Contains("There is no function current_time to call from code", lines[2], StringComparison.Ordinal);
-        Assert.Equal("calculate", output["calls"]!.GetValue<string>());
+        // Argus, behind its MCP server, answers a program's call as it answers the agent's.
+        Assert.Contains("\"ok\":true", lines[3], StringComparison.Ordinal);
+        Assert.Contains("src/parse.c", lines[3], StringComparison.Ordinal);
+        Assert.Equal("calculate, find_symbol", output["calls"]!.GetValue<string>());
 
         // Audited as the agent's own calls would be: the program, and the call it made.
         var audit = (await AuditAsync(f)).Where(e => e.GetProperty("action").GetString() == "mcp.call").Select(e => (e.GetProperty("target").GetString(), e.GetProperty("detail").GetString())).ToList();
         Assert.Contains(("code", "run_code"), audit);
         Assert.Contains(("calculator", "calculate"), audit);
+        Assert.Contains(("argus", "find_symbol"), audit);
 
         // The setup page gives both addresses.
         var info = await b.JsonAsync(await b.GetAsync("/api/account/mcp"));
