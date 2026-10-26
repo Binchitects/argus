@@ -7,8 +7,10 @@ export default async function globalSetup(config: FullConfig) {
   const password = process.env.E2E_PASSWORD
   if (!password) throw new Error('Set E2E_PASSWORD to the admin password (ADMIN_PASSWORD in deploy/.env).')
   const ctx = await request.newContext({ baseURL, ignoreHTTPSErrors: true })
+  // Kept signed in: every test starts from the cookie saved here, which a session idle for an hour (the default)
+  // would let lapse once the run is past its first hour.
   const res = await ctx.post('/api/auth/login', {
-    data: { userName: process.env.E2E_USER ?? 'admin', password, remember: false, redirect: '/' },
+    data: { userName: process.env.E2E_USER ?? 'admin', password, remember: true, redirect: '/' },
     headers: { 'X-Requested-With': 'e2e' },
   })
   if (!res.ok()) throw new Error(`sign-in failed: HTTP ${res.status()} ${await res.text()}`)
