@@ -21,13 +21,14 @@ public sealed partial class ToolModeBook(AppDbContext db, SmallModel small)
     public static string Automatic(string model, string? smallModel) =>
         model == smallModel || Billions(model) is <= SmallBillions ? ToolModes.Direct : ToolModes.Both;
 
-    /// <summary>The size a model's name says, in billions of parameters (the largest it says; 8x7B is 56), or null when it says none.</summary>
+    /// <summary>The size a model's name says, in billions of parameters (the largest it says; 8x7B is 56, 135M is 0.135), or null when it says none.</summary>
     public static double? Billions(string model)
     {
         double? most = null;
         foreach (Match m in Size().Matches(model))
         {
-            var size = double.Parse(m.Groups["size"].Value, CultureInfo.InvariantCulture) * (m.Groups["experts"].Success ? int.Parse(m.Groups["experts"].Value, CultureInfo.InvariantCulture) : 1);
+            var size = double.Parse(m.Groups["size"].Value, CultureInfo.InvariantCulture) * (m.Groups["experts"].Success ? int.Parse(m.Groups["experts"].Value, CultureInfo.InvariantCulture) : 1)
+                / (m.Groups["unit"].Value is "m" or "M" ? 1000 : 1);
             most = Math.Max(most ?? 0, size);
         }
         return most;
@@ -72,6 +73,6 @@ public sealed partial class ToolModeBook(AppDbContext db, SmallModel small)
         await db.SaveChangesAsync(ct);
     }
 
-    [GeneratedRegex(@"(?<![a-z0-9.])(?:(?<experts>\d+)x)?(?<size>\d+(?:\.\d+)?)b(?![a-z0-9])", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<![a-z0-9.])(?:(?<experts>\d+)x)?(?<size>\d+(?:\.\d+)?)(?<unit>[bm])(?![a-z0-9])", RegexOptions.IgnoreCase)]
     private static partial Regex Size();
 }

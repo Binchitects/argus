@@ -838,6 +838,8 @@ public sealed class ChatToolsTests(AppFixture app)
     [InlineData("qwen3-30b-a3b", 30.0, "both")]
     [InlineData("Mixtral-8x7B", 56.0, "both")]
     [InlineData("gpt-oss-120b", 120.0, "both")]
+    [InlineData("SmolLM2-135M-Instruct-Q2_K", 0.135, "direct")]
+    [InlineData("Qwen3-Omni-30B-A3B", 30.0, "both")]
     [InlineData("claude-sonnet-5-5", null, "both")]
     public void A_models_automatic_tools_follow_the_size_its_name_says(string model, double? billions, string mode)
     {
