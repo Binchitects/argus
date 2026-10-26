@@ -362,7 +362,7 @@ function PanelTabButton({ tab, layout, change }: { tab: PanelTab; layout: Layout
           }}
           onClick={() => change({ panelTab: tab })}
           className={cn(
-            'border-b pb-1 outline-none focus-visible:ring-1 focus-visible:ring-ring',
+            'shrink-0 border-b pb-1 whitespace-nowrap outline-none focus-visible:ring-1 focus-visible:ring-ring',
             layout.panelTab === tab ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
             dropLine(over, !across),
           )}
@@ -1243,7 +1243,13 @@ function Workbench({
   )
 
   const panel = panelUsed && (
-    <div key="panel" hidden={!layout.panelOpen} style={across ? { width: panelSize } : { height: panelSize }} className={cn('flex shrink-0 flex-col', across && (layout.panelAt === 'right' ? 'border-l' : 'border-r'))}>
+    // Beside the editor it gives way first when the window is narrow (the editor keeps its own minimum); below it, it keeps its height.
+    <div
+      key="panel"
+      hidden={!layout.panelOpen}
+      style={across ? { flexBasis: panelSize, minWidth: bounds.panel[0] + 20 } : { height: panelSize }}
+      className={cn('flex min-w-0 flex-col', across ? cn('shrink', layout.panelAt === 'right' ? 'border-l' : 'border-r') : 'shrink-0')}
+    >
       {/* Dropped after the tabs: the tab goes last, a view from the side bar comes into the panel. */}
       <div
         className={cn('flex h-7 shrink-0 items-end px-3', !across && 'border-t')}
@@ -1259,7 +1265,7 @@ function Workbench({
           }
         }}
       >
-        <div role="tablist" aria-label="Panel" className="flex min-w-0 flex-1 items-end gap-3 overflow-x-auto text-[0.6875rem] font-semibold tracking-wider uppercase">
+        <div role="tablist" aria-label="Panel" className="flex min-w-0 flex-1 items-end gap-3 overflow-x-auto text-[0.6875rem] font-semibold tracking-wider uppercase [scrollbar-width:none]">
           {layout.panelTabs.map((t) => (
             <PanelTabButton key={t} tab={t} layout={layout} change={arrange} />
           ))}
@@ -1308,7 +1314,7 @@ function Workbench({
     />
   )
   const editorBox = (
-    <div key="editor" className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+    <div key="editor" className={cn('relative flex min-h-0 flex-1 flex-col', across ? 'min-w-[16rem]' : 'min-w-0')}>
       {settings.get('debug.toolBarLocation') !== 'hidden' && <DebugToolbar />}
       <EditorArea />
     </div>
