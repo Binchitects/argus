@@ -19,6 +19,7 @@ import { Markdown } from './markdown'
 import { answerUsage, seconds, waitingText } from './format'
 import { NoticeLine, Thinking, ToolCard } from './parts'
 import { useNow } from './use-now'
+import { PlanCard } from './plan-card'
 import { QuestionCard } from './questions'
 import { MemoriesRead } from './memories-read'
 import { MessageContextButtons, MessageContextNote, type ContextChange } from './message-context'
@@ -606,6 +607,16 @@ export function AnswerTurn({
           </div>
         )
       })}
+      {(() => {
+        // The plan this answer made or changed last: under it, as it stands now (reviewed there when proposed).
+        const planId = assistants
+          .flatMap((a) => a.toolCalls ?? [])
+          .filter((t) => t.function.name.startsWith('plan_'))
+          .map((t) => results.get(t.id)?.details?.plan)
+          .filter((x): x is string => !!x)
+          .at(-1)
+        return planId ? <PlanCard id={planId} live={live} onAnswer={live ? undefined : onAnswer} /> : null
+      })()}
       {/* Waiting between two steps of the answer (after a tool), for the GPU lent to a picture or video. */}
       {live && !waiting && queued?.why && <output className="block text-sm text-muted-foreground">{queued.why}</output>}
       {!live && first?.details?.memories && first.details.memories.length > 0 && <MemoriesRead memories={first.details.memories} />}

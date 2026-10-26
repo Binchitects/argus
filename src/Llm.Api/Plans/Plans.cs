@@ -24,6 +24,8 @@ public sealed record StepChange(int? Number = null, string? Title = null, string
 public static class PlanBook
 {
     public const int MostSteps = 200;
+    public const string Proposed = "proposed";
+    public const string Approved = "approved";
     public const int MostFiles = 50;
 
     /// <summary>The plan, when <paramref name="me"/> may see it (<paramref name="need"/> Write: change it): its maker, or whoever may open its chat that way.</summary>
@@ -277,8 +279,12 @@ public sealed class PlansTool(AppDbContext db, TimeProvider clock) : IChatTool
 
     public Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct) => Task.FromResult<IToolRun>(new LocalRun(
         [
-            Schema.Function("plan_make", "Makes a plan in this chat: a title, its goal, and its steps (numbered 1, 2, ... in the order given).",
-                new JsonObject { ["title"] = Schema.Text("The plan's name"), ["goal"] = Schema.Text("What it is for; what done looks like"), ["steps"] = new JsonObject { ["type"] = "array", ["items"] = StepSchema.DeepClone() } },
+            Schema.Function("plan_make", "Makes a plan in this chat: a title, its goal, and its steps (numbered 1, 2, ... in the order given). With propose, the person reviews it first (approve, change a step, reject) and you carry it out once approved.",
+                new JsonObject
+                {
+                    ["title"] = Schema.Text("The plan's name"), ["goal"] = Schema.Text("What it is for; what done looks like"), ["steps"] = new JsonObject { ["type"] = "array", ["items"] = StepSchema.DeepClone() },
+                    ["propose"] = new JsonObject { ["type"] = "boolean", ["description"] = "true: a plan of the work you will do yourself, for the person to approve before you start" },
+                },
                 "title", "steps"),
             Schema.Function("plan_change", "Changes a plan: its title or goal, and steps (with number: change or remove that step; without: add one). Keep plans up to date as things are decided or done.",
                 new JsonObject { ["plan_id"] = Schema.Text("The plan; leave out for this chat's latest"), ["title"] = Schema.Text("New name"), ["goal"] = Schema.Text("New goal"), ["steps"] = new JsonObject { ["type"] = "array", ["items"] = StepSchema.DeepClone() } }),
@@ -287,7 +293,11 @@ public sealed class PlansTool(AppDbContext db, TimeProvider clock) : IChatTool
         ],
         "Use the plan tools when the conversation is about doing something in steps (a project, a launch, a migration, a trip): " +
         "plan_make with concrete steps, owners and dates (ask for what you do not know), then plan_change as things change; plan_show before " +
-        "answering about where a plan stands. Plans show to the person as a board and a timeline, so do not repeat the whole plan in your answer: say what changed.",
+        "answering about where a plan stands. For work of several steps you will do yourself with your tools (research, a document, an analysis), " +
+        "propose a plan first (plan_make with propose: true, each step with what done means) and stop: the person approves it, changes a step " +
+        "or rejects it. Once approved, carry it out step by step with your tools, marking each step doing as you start it and done when it is " +
+        "(plan_change), so the person sees each one. Plans show to the person as a board and a timeline, so do not repeat the whole plan in your " +
+        "answer: say what changed.",
         async (name, args, token) =>
         {
             try
@@ -303,6 +313,11 @@ public sealed class PlansTool(AppDbContext db, TimeProvider clock) : IChatTool
                         Goal = Schema.Str(args, "goal")?.Trim() is { Length: > 0 } g ? g[..Math.Min(4000, g.Length)] : null,
                     };
                     PlanBook.Apply(plan, PlanBook.Changes(args["steps"] as JsonArray).Select(c => c with { Number = null }));
+                    if (args["propose"] is JsonValue propose && propose.TryGetValue<bool>(out var proposed) && proposed)
+                    {
+                        // The person reviews it on its card before it is carried out.
+                        plan.Review = PlanBook.Proposed;
+                    }
                     db.Plans.Add(plan);
                 }
                 else
@@ -355,6 +370,50 @@ public static class PlanEndpoints
         g.MapPatch("/{id:guid}/steps/{number:int}", StepAsync);
         g.MapPost("/{id:guid}/steps", AddAsync);
         g.MapDelete("/{id:guid}", DeleteAsync);
+        g.MapPost("/{id:guid}/review", ReviewAsync);
+    }
+
+    /// <summary>The person's answer to a plan the chat proposed: approve, change (a step, with what), reject.</summary>
+    public sealed record PlanReview(string Action, int? Step = null, string? Text = null);
+
+    /// <summary>
+    /// A plan the chat proposed, reviewed on its card: approved (the chat carries it out), a step to change (the chat proposes
+    /// it again), or rejected (it goes). What comes back is the person's next message in the chat, which the page sends.
+    /// </summary>
+    private static async Task<IResult> ReviewAsync(Guid id, PlanReview body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        if (await PlanBook.FindAsync(db, id, me, Need.Write, ct) is not { } plan)
+        {
+            return Results.NotFound();
+        }
+        if (plan.Source != Plan.FromChat || plan.Review != PlanBook.Proposed)
+        {
+            return AuthEndpoints.Problem(409, "plan_review", "This plan waits for no review: it was approved already, or never proposed.");
+        }
+        var text = body.Text?.Trim() is { Length: > 0 } t ? t[..Math.Min(2000, t.Length)] : null;
+        var why = text is null ? "." : ": " + text + (text[^1] is '.' or '!' or '?' ? "" : ".");
+        string message;
+        switch (body.Action)
+        {
+            case "approve":
+                plan.Review = PlanBook.Approved;
+                message = $"I approve the plan \"{plan.Title}\". Carry it out now, step by step: mark each step doing as you start it and done when it is." + (text is null ? "" : $"\n\n{text}");
+                break;
+            case "change" when body.Step is { } n && plan.Steps.Any(s => s.Number == n) && text is not null:
+                message = $"Change step {n} of the plan ({plan.Steps.First(s => s.Number == n).Title}){why} Then propose the plan again.";
+                break;
+            case "change":
+                return AuthEndpoints.Problem(400, "plan", "Say which step to change, and what should change.");
+            case "reject":
+                db.Plans.Remove(plan);
+                message = $"I reject the plan \"{plan.Title}\"{why} Do not carry it out.";
+                break;
+            default:
+                return AuthEndpoints.Problem(400, "plan", "A plan's review is approve, change or reject.");
+        }
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new { message });
     }
 
     private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;

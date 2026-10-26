@@ -678,6 +678,15 @@ changes the plan. It refuses steps that wait for one another in a circle and
 dates that end before they start, and warns about a step that starts before
 what it waits for is due, or one overdue and not done.
 
+For work of several steps the chat does itself with its tools (research, a
+document, an analysis), it **proposes a plan** first and stops: the plan
+shows on a card under its answer, each step with what done means. **Approve
+and carry it out**, **Change** a step (say what should change: the chat
+proposes the plan again) or **Reject** it; each is sent as your next
+message. Approved, the chat carries the plan out with its tools, marking each
+step doing as it starts it and done when it is, and the card under the answer
+shows each step as it stands.
+
 Every plan opens under **Plans** (in the sidebar, and from the answer that
 made it) as a **board**, a column per status, where a click moves a step on
 and a new step can be added; and a **timeline**, each step from its start to

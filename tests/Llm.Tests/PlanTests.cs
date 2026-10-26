@@ -71,6 +71,36 @@ public sealed class PlanTests(AppFixture app)
     }
 
     [Fact]
+    public async Task The_chat_proposes_a_plan_of_its_own_work_and_the_person_approves_it_changes_a_step_or_rejects_it()
+    {
+        var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (_, owner) = await PersonAsync(admin);
+        var (_, outsider) = await PersonAsync(admin);
+        var chat = (await owner.JsonAsync(await owner.PostAsync("/api/chat/conversations", new { tools = new[] { "plans" } }))).GetProperty("id").GetGuid();
+        var made = await CallAsync(owner, chat, """research it [call plan_make {"title": "Market study", "propose": true, "steps": [{"title": "Find the competitors", "check": "Five named, with prices"}, {"title": "Write the summary"}]}]""");
+        Assert.False(made.GetProperty("isError").GetBoolean(), made.GetProperty("text").GetString());
+        var id = JsonDocument.Parse(made.GetProperty("text").GetString()!).RootElement.GetProperty("id").GetGuid();
+        Assert.Equal("proposed", (await owner.JsonAsync(await owner.GetAsync($"/api/plans/{id}"))).GetProperty("review").GetString());
+
+        // Someone who may not open the chat reviews nothing; a change needs the step and what.
+        await StatusAssert.Is(HttpStatusCode.NotFound, await outsider.PostAsync($"/api/plans/{id}/review", new { action = "approve" }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await owner.PostAsync($"/api/plans/{id}/review", new { action = "change", step = 1 }));
+        var change = await owner.JsonAsync(await owner.PostAsync($"/api/plans/{id}/review", new { action = "change", step = 1, text = "only those selling in Europe" }));
+        Assert.Equal("Change step 1 of the plan (Find the competitors): only those selling in Europe. Then propose the plan again.", change.GetProperty("message").GetString());
+
+        var approved = await owner.JsonAsync(await owner.PostAsync($"/api/plans/{id}/review", new { action = "approve" }));
+        Assert.StartsWith("I approve the plan \"Market study\". Carry it out now, step by step", approved.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.Equal("approved", (await owner.JsonAsync(await owner.GetAsync($"/api/plans/{id}"))).GetProperty("review").GetString());
+        await StatusAssert.Is(HttpStatusCode.Conflict, await owner.PostAsync($"/api/plans/{id}/review", new { action = "approve" }));
+
+        // Rejected, a proposed plan goes.
+        var other = JsonDocument.Parse((await CallAsync(owner, chat, """another [call plan_make {"title": "Draft", "propose": true, "steps": [{"title": "Outline"}]}]""")).GetProperty("text").GetString()!).RootElement.GetProperty("id").GetGuid();
+        var rejected = await owner.JsonAsync(await owner.PostAsync($"/api/plans/{other}/review", new { action = "reject", text = "not now" }));
+        Assert.Equal("I reject the plan \"Draft\": not now. Do not carry it out.", rejected.GetProperty("message").GetString());
+        await StatusAssert.Is(HttpStatusCode.NotFound, await owner.GetAsync($"/api/plans/{other}"));
+    }
+
+    [Fact]
     public void Steps_are_numbered_checked_and_removed_with_what_waited_for_them()
     {
         var plan = new Plan { Title = "T" };
