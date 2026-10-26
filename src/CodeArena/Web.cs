@@ -1836,6 +1836,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         await _lsp.DisposeAsync();
         await _debug.DisposeAsync();
         await _terminals.DisposeAsync();
+        _watch?.Dispose();
         await _server.DisposeAsync();
         _rt.Agent.Events = null;
         _rt.WebNews = null;

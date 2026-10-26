@@ -29,7 +29,8 @@ import { Explorer } from './explorer'
 import { HelpProvider } from './help'
 import { useOpenHelp } from './help-context'
 import { openProgram, terminalsQuery, type TerminalInfo } from './ide-api'
-import { allFilesQuery, changesQuery, folderQuery, gitBranchesQuery, gitFileLog, gitStatusQuery, readFile, saveWorkspaceState, workspaceStateQuery, type WorkspaceState, parentOf, preferencesQuery, problemsQuery, savePreferences, writeFile } from './ide-api'
+import { allFilesQuery, changesQuery, folderQuery, gitBranchesQuery, gitFileLog, gitLogQuery, gitStatusQuery, readFile, saveWorkspaceState, workspaceStateQuery, type DiskChanges, type WorkspaceState, parentOf, preferencesQuery, problemsQuery, savePreferences, writeFile } from './ide-api'
+import { useDiskChanges } from './disk-watch'
 import { setContext, useKeyboard, useKeyFor } from './keyboard'
 import { quickPick } from './quick-pick'
 import { QuickPickHost } from './quick-pick-host'
@@ -296,7 +297,7 @@ function Workbench({
 }) {
   const queryClient = useQueryClient()
   const ed = useEditor()
-  const { refresh, setQuickOpen, openDiff, accept, editorCommands, runAction, showProblems, active } = ed
+  const { refresh, removed, setQuickOpen, openDiff, accept, editorCommands, runAction, showProblems, active } = ed
   const settings = useSettings()
   const [palette, setPalette] = useState(false)
   const [recent, setRecent] = useState<string[]>(() => (Array.isArray(recentSaved) ? recentSaved.filter((x): x is string => typeof x === 'string') : []))
@@ -391,6 +392,39 @@ function Workbench({
   )
   // A turn over: its commands may have changed files too.
   const onTurnEnd = useCallback(() => void refresh(), [refresh])
+
+  // Files changed on disk by hand (another editor, a command, git) show as they are: a file open here and not edited here
+  // reloads, one deleted closes, the Explorer's folders, Source Control and Changes are read again, and the language
+  // servers are told. Null: anything may have changed, so all of it is read again.
+  const onDisk = useCallback(
+    (d: DiskChanges | null) => {
+      const read = (key: readonly unknown[]) => void queryClient.invalidateQueries({ queryKey: key })
+      read(gitStatusQuery.queryKey)
+      read(changesQuery.queryKey)
+      if (!d) {
+        void refresh()
+        read(['code', 'files'])
+        return
+      }
+      for (const c of d.changes) {
+        if (c.path === '') {
+          read(gitLogQuery.queryKey)
+          read(gitBranchesQuery.queryKey)
+          continue
+        }
+        if (c.kind === 'deleted') removed(c.path)
+        else void refresh(c.path)
+        if (c.kind !== 'changed') {
+          read(folderQuery(parentOf(c.path)).queryKey)
+          read(allFilesQuery.queryKey)
+        }
+      }
+      const files = d.changes.filter((c) => c.path !== '')
+      if (files.length > 0) languageServers.filesChanged(files.map((c) => ({ path: c.path, type: c.kind === 'created' ? 1 : c.kind === 'deleted' ? 3 : 2 })))
+    },
+    [queryClient, refresh, removed],
+  )
+  useDiskChanges(onDisk)
 
   const count = changes.data?.length ?? 0
   // The check's problems: marked in the editor's files, counted on the activity bar and the status bar.

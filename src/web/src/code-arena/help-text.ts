@@ -65,7 +65,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   changes: {
     name: 'Agent changes',
-    text: 'The files the agent changed in this run that you have not kept or put back yet. Each opens as it was before the agent and as it is now. **Accept** keeps a change, **Revert** puts the file back, **Accept all** keeps them all.',
+    text: "The files the agent changed in this run that you have not kept or put back yet, and below them **Your changes**: those changed by hand (git's that are not the agent's). Each opens as it was and as it is now. **Accept** keeps a change, **Revert** puts the file back, **Accept all** keeps them all; a file's right-click menu adds it to the chat, or asks the agent to explain or fix the change.",
     manual: 'the-ide',
   },
   problems: {

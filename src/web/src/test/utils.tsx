@@ -29,7 +29,7 @@ export const member: Me = { ...admin, id: 'm1', userName: 'mo', displayName: 'Mo
 export type Handler = (body: unknown, init: RequestInit, url: URL) => {
   status?: number
   json?: unknown
-  /** Server-sent events, one per chunk; `hang` keeps the stream open until aborted, `until` until it settles. */
+  /** Server-sent events, one per chunk; `hang` keeps the stream open until aborted, `until` until it settles (a JSON answer waits for it, as a long poll's does). */
   events?: object[]
   hang?: boolean
   until?: Promise<unknown>
@@ -98,6 +98,13 @@ export function fakeApi(me: Me | null, routes: Record<string, Handler> = {}) {
         },
       })
       return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }
+    if (until) {
+      // A long poll: answered once it settles, or never when aborted first.
+      await new Promise<void>((resolve, reject) => {
+        void until.then(() => resolve(), () => resolve())
+        init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+      })
     }
     return new Response(status === 204 ? null : JSON.stringify(json ?? {}), { status })
   })

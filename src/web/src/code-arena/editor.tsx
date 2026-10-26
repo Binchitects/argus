@@ -954,17 +954,22 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       return { path, startLine, endLine: last, text }
     }
 
-    /** The lines chosen in the file shown (the cursor's when none are); with their text only when asked (it copies them). */
+    /**
+     * The lines chosen in the file shown (the cursor's when none are); with their text only when asked (it copies them). In a
+     * compare whose "now" side is the file on disk (a change of the agent's, or one not committed), those of that side.
+     */
     const selection = (withText = true): Piece | null => {
-      const ed = editor.current
       const tab = tabsRef.current.find((t) => t.id === activeRef.current)
+      const right = tab?.kind === 'diff' && tab.status === 'ready' && tab.right?.kind === 'file' ? tab.right.path : null
+      const ed = right ? diffEditor.current?.getModifiedEditor?.() : editor.current
+      const path = right ?? (tab?.kind === 'file' ? tab.path : null)
       const model = ed?.getModel()
-      if (!ed || !model || tab?.kind !== 'file' || files.current.get(tab.path)?.model !== model) return null
+      if (!ed || !model || !path || files.current.get(path)?.model !== model) return null
       const s = ed.getSelection()
       const start = s?.startLineNumber ?? ed.getPosition()?.lineNumber ?? 1
       // A selection that ends at a line's start leaves that line out, as an editor's does.
       const end = s && s.endLineNumber > s.startLineNumber && s.endColumn === 1 ? s.endLineNumber - 1 : (s?.endLineNumber ?? start)
-      return withText ? pieceOf(tab.path, start, end) : { path: tab.path, startLine: start, endLine: end }
+      return withText ? pieceOf(path, start, end) : { path, startLine: start, endLine: end }
     }
 
     const shownEditor = () => {
@@ -1238,6 +1243,9 @@ export function EditorProvider({ children }: { children: ReactNode }) {
           side?.createContextKey('textCompareEditorVisible', true)
           if (side) bindEditorContext(side)
         }
+        // The compare's "now" side asks the agent as the editor does: Add to chat, Explain, Fix, Complete (its right-click menu).
+        const now = diffEditor.current.getModifiedEditor?.()
+        if (now) askAboutCode(m, now, actions.selection)
         // The compare's toolbar reads the diff editor: it renders again now that there is one.
         setDiffMade(true)
       }
@@ -1445,8 +1453,10 @@ export function EditorArea() {
       {active?.kind === 'diff' && <CompareToolbar tab={active} change={change} />}
       <div id="editor-panel" role={active ? 'tabpanel' : undefined} aria-label={active ? nameOf(active.path) : undefined} className="relative min-h-0 flex-1">
         {/* Not shown: display none (Monaco's parts set their own visibility); shown again, it lays itself out anew. */}
-        <div ref={bindEditor} data-testid="code-editor" hidden={!showsFile} className="absolute inset-0" />
-        <div ref={bindDiff} data-testid="diff-editor" hidden={!showsDiff} className="absolute inset-0" />
+        {/* monaco-component: Monaco's colours (--vscode-*) for what it shows beside the editor, not in it: its right-click
+            menu (fixedOverflowWidgets) sits in this box, and without them it had no background. */}
+        <div ref={bindEditor} data-testid="code-editor" hidden={!showsFile} className="monaco-component absolute inset-0" />
+        <div ref={bindDiff} data-testid="diff-editor" hidden={!showsDiff} className="monaco-component absolute inset-0" />
         {active?.kind === 'settings' && (
           <Suspense fallback={<Spinner label="Opening the settings" />}>
             <SettingsEditor />

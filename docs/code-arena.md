@@ -314,8 +314,23 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   Ctrl+Alt+A: the rest stays to review). The agent's changes also have
   **Revert** (puts the file back; a file the agent made is deleted) and
   **Accept** (keeps it) for the whole file, and Agent changes has **Accept
-  all**. A tab's right-click menu closes it, the others, those to its
-  right, the saved ones or all, copies its path and compares it.
+  all**. Below the agent's, **Your changes** lists the files changed by
+  hand (in the editor or anywhere else: git's changes that are not the
+  agent's), each opening as git's compare. A changed file's right-click menu
+  (either list) opens its compare or the file, adds it to the chat, asks the
+  agent to **Explain these changes** or **Fix these changes**, copies its path,
+  and for the agent's accepts or reverts it. In a compare, the "now" side's
+  right-click menu has **Add to chat**, **Explain this**, **Fix this** and
+  **Complete this**, as the editor's does. A tab's right-click menu closes it,
+  the others, those to its right, the saved ones or all, copies its path and
+  compares it.
+- **changes on disk**: what changes in the folder by anyone (your own editor,
+  a command, git) shows at once: a file open and not edited here reloads, one
+  deleted closes, the Explorer, Source Control and Changes are read again, and
+  the language servers are told. Code Arena watches the folder (but `.git`'s
+  insides, `node_modules` and `.code-arena`); where the system will not watch
+  so many folders, the IDE reads it all again when its window comes back into
+  view.
 - **search**: text across the files git sees (`.gitignore` holds), with match
   case, whole word, regular expression, and files to include or exclude; a
   result opens the file at the match. **Replace** replaces what it finds, in

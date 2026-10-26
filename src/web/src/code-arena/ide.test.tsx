@@ -257,7 +257,25 @@ const fakes = vi.hoisted(() => {
     updateOptions(o: Record<string, unknown>) {
       Object.assign(this.options, o)
     }
-    side = { createContextKey: () => ({ set() {}, get() {}, reset() {} }), focus() {}, hasTextFocus: () => false, getSelection: () => ({ startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 }) }
+    /** Each side, as Monaco's: the "now" side has the actions added to it (its right-click menu), and the lines chosen in it. */
+    side = (of: () => Model | null) => ({
+      createContextKey: () => ({ set() {}, get() {}, reset() {} }),
+      focus() {},
+      hasTextFocus: () => false,
+      selection: { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
+      getSelection() {
+        return this.selection
+      },
+      getPosition: () => null,
+      getModel: of,
+      actions: new Map<string, { label: string; run: () => void }>(),
+      addAction(a: { id: string; label: string; run: () => void }) {
+        this.actions.set(a.id, a)
+        return { dispose() {} }
+      },
+    })
+    before = this.side(() => this.model?.original ?? null)
+    now = this.side(() => this.model?.modified ?? null)
     /** What Monaco would work out: one change, a line each way. */
     lineChanges = [{ originalStartLineNumber: 1, originalEndLineNumber: 1, modifiedStartLineNumber: 1, modifiedEndLineNumber: 1 }]
     getLineChanges() {
@@ -271,10 +289,10 @@ const fakes = vi.hoisted(() => {
       this.went.push(to)
     }
     getOriginalEditor() {
-      return this.side
+      return this.before
     }
     getModifiedEditor() {
-      return this.side
+      return this.now
     }
     setModel(m: DiffEditor['model']) {
       this.model = m
@@ -713,7 +731,7 @@ function backend(extra: Record<string, Handler> = {}, preferences: Preferences =
     'GET /api/extensions/recommended': () => ({ json: { file: false, recommendations: [], unwanted: [] } }),
     ...extra,
   })
-  return { calls, disk, now }
+  return { calls, disk, dirs, now }
 }
 
 function renderIde() {
@@ -932,6 +950,99 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() => expect(calls.find((c) => c.path === '/api/changes/revert')?.body).toEqual({ path: 'src/app.ts' }))
     await waitFor(() => expect(screen.queryByRole('tablist', { name: 'Open files' })).not.toBeInTheDocument())
     expect(await screen.findByText(/No changes to review/)).toBeInTheDocument()
+  })
+
+  it("asks about the lines chosen in a compare's now side: Add to chat, Explain and Fix in its right-click menu", async () => {
+    const { calls } = backend()
+    renderIde()
+    await userEvent.click(await screen.findByRole('button', { name: 'Agent changes (1)' }))
+    await userEvent.click(within(await screen.findByRole('list', { name: 'Changed files' })).getByRole('button', { name: /app\.ts.*changed/ }))
+    await waitFor(() => expect(fakes.diffEditors[0]?.model?.modified.value).toBe('const total = 1\nconsole.log(total)\n'))
+    const now = fakes.diffEditors[0]!.now
+    expect([...now.actions.values()].map((a) => a.label)).toEqual(['Code Arena: Add to chat', 'Code Arena: Explain this', 'Code Arena: Fix this', 'Code Arena: Complete this'])
+    // The before side is the agent's snapshot, not a file: nothing to ask about there.
+    expect(fakes.diffEditors[0]!.before.actions.size).toBe(0)
+
+    // Add to chat: the lines chosen in the file as it is now.
+    now.selection = { startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 5 }
+    act(() => now.actions.get('codeArena.addToChat')!.run())
+    expect(await within(screen.getByRole('list', { name: 'Sent with the message' })).findByText('src/app.ts:2')).toBeInTheDocument()
+    // Explain: asked at once, about those lines.
+    act(() => now.actions.get('codeArena.explain')!.run())
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/messages')).toBe(true))
+    expect((calls.find((c) => c.method === 'POST' && c.path === '/api/messages')!.body as { context: unknown[] }).context).toContainEqual(
+      expect.objectContaining({ path: 'src/app.ts', startLine: 2, endLine: 2 }),
+    )
+  })
+
+  it('shows what changes on disk by hand: an open file reloads, a new file appears, Source Control and Changes are read again', async () => {
+    let tell = () => {}
+    const told = new Promise<void>((r) => (tell = r))
+    let asked = 0
+    const { calls, disk, dirs } = backend({
+      // code-arena's watcher: where to start, then (once the test says) a file changed and one made, then nothing more.
+      'GET /api/fs/changes': () => {
+        asked++
+        if (asked === 1) return { json: { version: 1, watching: true, changes: [] } }
+        if (asked === 2) return { until: told, json: { version: 2, watching: true, changes: [{ path: 'src/app.ts', kind: 'changed' }, { path: 'NOTES.md', kind: 'created' }] } }
+        return { until: new Promise(() => {}), json: {} }
+      },
+    })
+    renderIde()
+    await openApp()
+    const ed = editor()
+    await waitFor(() => expect(asked).toBe(2))
+    const read = (path: string) => calls.filter((c) => c.method === 'GET' && c.path === path).length
+    const before = { status: read('/api/git/status'), changes: read('/api/changes') }
+
+    // Changed by another editor: the file open here, not edited here, reloads; and a file made beside it.
+    disk['src/app.ts'] = { text: 'const total = 2\n', version: 'v2' }
+    dirs['']!.push({ name: 'NOTES.md', path: 'NOTES.md', kind: 'file', size: 3 })
+    tell()
+    await waitFor(() => expect(ed.model!.value).toBe('const total = 2\n'))
+    await waitFor(() => expect(read('/api/git/status')).toBeGreaterThan(before.status))
+    expect(read('/api/changes')).toBeGreaterThan(before.changes)
+    // The file made there is in the Explorer.
+    expect(await within(screen.getByRole('tree', { name: /Files/ })).findByRole('treeitem', { name: 'NOTES.md' })).toBeInTheDocument()
+  })
+
+  it("lists the person's own changes beside the agent's, and each changed file's right-click menu asks about it", async () => {
+    const { calls } = backend({
+      'GET /api/git/status': () => ({
+        json: {
+          repository: true,
+          branch: 'main',
+          files: [
+            { path: 'src/app.ts', staged: null, changed: 'M', from: null },
+            { path: 'README.md', staged: null, changed: 'M', from: null },
+            { path: 'notes.txt', staged: null, changed: '?', from: null },
+          ],
+        },
+      }),
+      'POST /api/messages': () => ({ events: [{ type: 'question', id: 'm0', parentId: null }, { type: 'assistant', id: 'm1', parentId: 'm0', model: 'model-a' }, { type: 'content', text: 'Done.' }] }),
+    })
+    renderIde()
+    await userEvent.click(await screen.findByRole('button', { name: 'Agent changes (1)' }))
+    // The agent's under its own; the person's (git sees them) below, but not the agent's file twice.
+    const yours = await screen.findByRole('list', { name: 'Files you changed' })
+    expect(within(yours).getAllByRole('listitem').map((li) => li.textContent)).toEqual([expect.stringContaining('README.md'), expect.stringContaining('notes.txt')])
+    expect(within(yours).getByRole('button', { name: /notes\.txt.*not in git yet/ })).toBeInTheDocument()
+
+    // A file of the person's: compared with git's, asked about, never accepted or reverted (they are the person's).
+    fireEvent.contextMenu(within(yours).getByRole('button', { name: /README\.md/ }))
+    let menu = await screen.findByRole('menu', { name: 'README.md: what to do' })
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent?.trim())).toEqual(['Open changes', 'Open file', 'Add to chat', 'Explain these changes', 'Fix these changes', 'Copy path'])
+    await userEvent.click(within(menu).getByRole('menuitem', { name: 'Explain these changes' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/messages')?.body).toMatchObject({ text: asks.explainChange('README.md', true) }))
+    expect(asks.explainChange('README.md', true)).toContain('git diff -- README.md')
+
+    // The agent's: the same, and keep or put back.
+    await screen.findByRole('button', { name: 'Send' })
+    fireEvent.contextMenu(within(screen.getByRole('list', { name: 'Changed files' })).getByRole('button', { name: /app\.ts.*changed/ }))
+    menu = await screen.findByRole('menu', { name: 'src/app.ts: what to do' })
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent?.trim())).toEqual(['Open changes', 'Open file', 'Add to chat', 'Explain these changes', 'Fix these changes', 'Accept', 'Revert', 'Copy path'])
+    await userEvent.click(within(menu).getByRole('menuitem', { name: 'Add to chat' }))
+    expect(await screen.findByText('@src/app.ts', { exact: false })).toBeInTheDocument()
   })
 
   it('accepts a change from the diff tab, and all of them from the list', async () => {

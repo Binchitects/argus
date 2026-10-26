@@ -30,6 +30,11 @@ export const asks = {
   fix: (problems: string[]) =>
     problems.length > 0 ? `Fix the problems in this code: ${problems.join('; ')}.` : 'Find the bugs in this code and fix them.',
   complete: "Complete this code: write what is missing (a function's body, a TODO) with edit_file, keeping its signature and the file's style.",
+  /** About a file's changes: the agent's own (it knows them), or the person's (git diff shows them). */
+  explainChange: (path: string, mine: boolean) =>
+    `Explain the changes to ${path}${mine ? ` I made by hand (git diff -- ${path} shows them)` : ''}: what they do, and anything in them that looks wrong.`,
+  fixChange: (path: string, mine: boolean) =>
+    `Check the changes to ${path}${mine ? ` I made by hand (git diff -- ${path} shows them)` : ''} and fix what is wrong in them: bugs, the problems the editor marks, what does not build.`,
 }
 
 /** How a problem the check found reads to the agent: line:column, its code and message. */

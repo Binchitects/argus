@@ -29,6 +29,7 @@ internal sealed partial class WebApp
     private RunConfigs _runs = null!;
     private EditorExtensions _extensions = null!;
     private Reviews _reviews = null!;
+    private DiskWatch _watch = null!;
 
     /// <summary>The one call whose body is not JSON: a VS Code extension's .vsix, sent whole.</summary>
     private const string InstallPath = "/api/extensions/install";
@@ -48,6 +49,7 @@ internal sealed partial class WebApp
         _runs = new RunConfigs(_rt.Workspace, _terminals, _tasks, _state, _rt.Env.Env);
         _extensions = new EditorExtensions(_rt.Env.Paths.DataDir, _rt.Env.Env);
         _reviews = new Reviews(_rt, _problems);
+        _watch = new DiskWatch(_rt.Workspace.Root);
         StartDebug();
         StartLsp();
     }
@@ -61,6 +63,10 @@ internal sealed partial class WebApp
             {
                 case ("GET", "/api/files"):
                     await res.JsonAsync(200, _files.List(Query(req, "path")), ct);
+                    return true;
+                case ("GET", "/api/fs/changes"):
+                    // What changed on disk since the version the page has: answered at once, or within 25 seconds of waiting.
+                    await res.JsonAsync(200, await _watch.SinceAsync(long.TryParse(Query(req, "since"), out var since) ? since : 0, TimeSpan.FromSeconds(25), ct), ct);
                     return true;
                 case ("POST", "/api/complete"):
                     await CompleteAsync(Body(req), res, ct);

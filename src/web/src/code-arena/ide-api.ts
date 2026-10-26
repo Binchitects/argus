@@ -344,6 +344,18 @@ export interface GitCommit {
   at: string
 }
 
+/** What changed on disk since a version (code-arena's DiskWatch); path "" is Source Control's own (a commit, a checkout). */
+export interface DiskChanges {
+  version: number
+  watching: boolean
+  /** The page is behind what is kept: everything it shows is read again. */
+  all?: boolean
+  changes: { path: string; kind: 'created' | 'changed' | 'deleted' }[]
+}
+
+/** Waits on the server (up to 25 seconds) for what changes on disk after version `since`; 0 asks for the version to start from. */
+export const diskChanges = (since: number, signal: AbortSignal) => api<DiskChanges>(`/api/fs/changes?since=${since}`, { signal })
+
 export const gitStatusQuery = {
   queryKey: ['code', 'git', 'status'] as const,
   queryFn: ({ signal }: { signal: AbortSignal }) => api<GitStatus>('/api/git/status', { signal }),
