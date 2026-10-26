@@ -1316,13 +1316,14 @@ function Workbench({
     />
   )
   const editorBox = (
-    <div key="editor" className={cn('relative flex min-h-0 flex-1 flex-col', across ? 'min-w-[16rem]' : 'min-w-0')}>
+    <div key="editor" className={cn('relative flex min-h-0 flex-1 flex-col', across ? 'min-w-[10rem]' : 'min-w-0')}>
       {settings.get('debug.toolBarLocation') !== 'hidden' && <DebugToolbar />}
       <EditorArea />
     </div>
   )
   const mainArea = (
-    <main key="main" data-panel={layout.panelAt} className={cn('relative flex min-w-0 flex-1', across ? 'flex-row' : 'flex-col')}>
+    // Its parts never spill over the side bar or the chat, however narrow the window.
+    <main key="main" data-panel={layout.panelAt} className={cn('relative flex min-w-0 flex-1 overflow-hidden', across ? 'flex-row' : 'flex-col')}>
       {/* By key: the panel moving round the editor moves them, never draws them again. */}
       {layout.panelAt === 'left' ? [panel, panelSplitter, editorBox] : [editorBox, panelSplitter, panel]}
     </main>

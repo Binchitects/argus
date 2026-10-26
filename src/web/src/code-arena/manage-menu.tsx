@@ -56,7 +56,7 @@ export function ManageMenu({ state, edge }: { state: CodeState; edge: 'left' | '
           </button>
         </DropdownMenuTrigger>
       </Tooltip>
-      <DropdownMenuContent side={edge === 'left' ? 'right' : 'left'} align="end" className="w-64">
+      <DropdownMenuContent side={edge === 'left' ? 'right' : 'left'} align="end" className="w-80 [&_[role=menuitem]]:whitespace-nowrap">
         <DropdownMenuItem onSelect={() => runCommand('workbench.action.openSettings')}>
           Settings {keys.settings && <DropdownMenuShortcut>{keys.settings}</DropdownMenuShortcut>}
         </DropdownMenuItem>
