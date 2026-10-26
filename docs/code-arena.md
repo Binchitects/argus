@@ -253,12 +253,22 @@ the relay: connect folders you would open on that Arena's own workspaces.
 
 The page is laid out as VS Code is, in Argus Arena's design system:
 
-- **activity bar** (the left edge): Explorer, Search, Source control (with a
-  count of the files changed since the last commit), Agent changes (with a
-  count of the files), Problems (with a count of the errors) and Chat switch
-  the side bar; the one shown hides it.
+- **activity bar** (the side bar's edge): Explorer, Search, Source control
+  (with a count of the files changed since the last commit), Agent changes
+  (with a count of the files), Problems (with a count of the errors) and Chat
+  switch the side bar; the one shown hides it.
   At its foot: the terminal panel, the theme (light, dark or the system's:
   kept in the person's `settings.json`, below), Help and About.
+- **moving the parts**: drag a view's icon to another place in the activity
+  bar, or onto the panel's tabs to move the view into the panel (a tab
+  there; drag it back onto the activity bar to return it); drag the panel's
+  tabs into another order. An icon's right-click menu moves its view to the
+  panel, up or down, puts the side bar on the right (the chat then on the
+  left) and resets the views' places; a panel tab's moves its view back and
+  puts the panel below the editor or beside it, left or right. The palette
+  has them too (Toggle Primary Side Bar Position, Move Panel Left, Right or to
+  Bottom, Move View to Panel, Move Panel View to Side Bar, Reset View
+  Locations). Where everything is stays for the next run, with the sizes.
 - **help**: Help in the activity bar opens the IDE's help over the page:
   what each part does, the common tasks step by step and the keys, with a
   link to this page of the manual in the Arena signed in to

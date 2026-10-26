@@ -271,7 +271,7 @@ export function Sessions({ state, onNavigate }: { state: CodeState; onNavigate?:
 }
 
 /** Light, dark, or the system's; kept by code-arena, so the next run (on another port) opens in it too. */
-export function ThemeMenu({ side = 'bottom', align = 'end' }: { side?: 'right' | 'bottom' | 'top'; align?: 'start' | 'end' }) {
+export function ThemeMenu({ side = 'bottom', align = 'end' }: { side?: 'right' | 'left' | 'bottom' | 'top'; align?: 'start' | 'end' }) {
   const { resolved } = useTheme()
   const settings = useSettings()
   const auto = settings.get<boolean>('window.autoDetectColorScheme')

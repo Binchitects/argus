@@ -14,6 +14,7 @@ import { languageServers } from './lsp/servers'
 import * as monaco from 'monaco-editor'
 import type * as Monaco from 'monaco-editor'
 import { asks } from './bridge'
+import { allViews } from './workbench-layout'
 import { rankFiles } from './editor-state'
 import { parts, regions, tasks } from './help-text'
 import type { Change, Entry, Preferences, TerminalInfo } from './ide-api'
@@ -1045,6 +1046,58 @@ describe('Code Arena, the IDE', () => {
     expect(await screen.findByText('@src/app.ts', { exact: false })).toBeInTheDocument()
   })
 
+  it('moves its parts: a view into the panel and back, by its menu or by dragging; the side bar to the right, the panel beside the editor', async () => {
+    const { now } = backend()
+    renderIde()
+    await openApp()
+    const editors = fakes.editors.length
+    const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
+    const drag = (from: Element, to: Element) => {
+      const dataTransfer = { setData() {}, effectAllowed: '', dropEffect: '' }
+      fireEvent.dragStart(from, { dataTransfer })
+      fireEvent.dragOver(to, { dataTransfer })
+      fireEvent.drop(to, { dataTransfer })
+      fireEvent.dragEnd(from, { dataTransfer })
+    }
+    const buttonOf = (name: string) => within(bar).getByRole('button', { name })
+    const menuOf = async (target: Element, name: string) => {
+      fireEvent.contextMenu(target)
+      return screen.findByRole('menu', { name })
+    }
+
+    // Problems into the panel, by its right-click menu: a tab there, shown; no longer in the activity bar.
+    await userEvent.click(within(await menuOf(buttonOf('Problems'), 'Problems: where it goes')).getByRole('menuitem', { name: 'Move to Panel' }))
+    const panel = await screen.findByRole('tablist', { name: 'Panel' })
+    expect(within(panel).getByRole('tab', { name: 'Problems' })).toHaveAttribute('aria-selected', 'true')
+    expect(within(panel).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Terminal', 'Debug Console', 'Output', 'Problems'])
+    expect(within(bar).queryByRole('button', { name: 'Problems' })).not.toBeInTheDocument()
+
+    // Dragged back onto Explorer: in the activity bar before it.
+    drag(within(panel).getByRole('tab', { name: 'Problems' }), buttonOf('Explorer').closest('[draggable="true"]')!)
+    await waitFor(() => expect(within(bar).getAllByRole('button').slice(0, 2).map((b) => b.getAttribute('aria-label'))).toEqual(['Problems', 'Explorer']))
+    expect(within(panel).queryByRole('tab', { name: 'Problems' })).not.toBeInTheDocument()
+    // Search dragged before Problems.
+    drag(buttonOf('Search').closest('[draggable="true"]')!, buttonOf('Problems').closest('[draggable="true"]')!)
+    await waitFor(() => expect(within(bar).getAllByRole('button').slice(0, 3).map((b) => b.getAttribute('aria-label'))).toEqual(['Search', 'Problems', 'Explorer']))
+
+    // The side bar to the right: the activity bar after the editor, the chat before it.
+    await userEvent.click(within(await menuOf(buttonOf('Explorer'), 'Explorer: where it goes')).getByRole('menuitem', { name: 'Move Primary Side Bar Right' }))
+    const main = screen.getByRole('main')
+    await waitFor(() => expect(main.compareDocumentPosition(screen.getByRole('navigation', { name: 'Activity bar' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy())
+    expect(main.compareDocumentPosition(screen.getByRole('complementary', { name: 'Agent' })) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+    // The panel beside the editor, on its right.
+    await userEvent.click(within(await menuOf(within(panel).getByRole('tab', { name: 'Terminal' }), 'Terminal: where it goes')).getByRole('menuitem', { name: 'Move Panel Right' }))
+    await waitFor(() => expect(main).toHaveAttribute('data-panel', 'right'))
+    // Moved, not drawn again: the same editor, the file still open in it.
+    expect(fakes.editors).toHaveLength(editors)
+    expect(editor().model?.value).toBe('const total = 1\nconsole.log(total)\n')
+
+    // Kept for the next run, as arranged.
+    await waitFor(() =>
+      expect(now.preferences.layout).toMatchObject({ sideAt: 'right', panelAt: 'right', order: ['search', 'problems', 'explorer', 'git', 'debug', 'extensions', 'changes', 'review', 'plan', 'memory', 'chat'] }),
+    )
+  })
+
   it('accepts a change from the diff tab, and all of them from the list', async () => {
     const { calls } = backend()
     renderIde()
@@ -1995,7 +2048,12 @@ describe('Code Arena, the IDE', () => {
 
     // A change is kept a moment later (the sizes within bounds); the theme in the person's settings.json at once, its comments kept.
     await userEvent.click(screen.getByRole('button', { name: 'Explorer' }))
-    await waitFor(() => expect(now.preferences.layout).toEqual({ view: 'explorer', side: 300, chat: 960, panel: 280, sideOpen: true, chatOpen: false, panelOpen: false, panelTab: 'terminal' }))
+    await waitFor(() =>
+      expect(now.preferences.layout).toEqual({
+        view: 'explorer', side: 300, chat: 960, panel: 280, sideOpen: true, chatOpen: false, panelOpen: false, panelTab: 'terminal',
+        sideAt: 'left', panelAt: 'bottom', order: [...allViews], panelTabs: ['terminal', 'console', 'output'],
+      }),
+    )
     expect(saves()).toHaveLength(1)
     await userEvent.click(screen.getByRole('button', { name: 'Theme' }))
     await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Light' }))

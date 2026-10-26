@@ -1,11 +1,13 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Blocks, Brain, Bug, CircleAlert, CircleHelp, Files, GitBranch, GitCompareArrows, Info, ListChecks, MessagesSquare, ScanSearch, Search, SquareTerminal, type LucideIcon } from 'lucide-react'
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { toast } from '@/components/ui/toaster'
 import { Alert } from '@/components/ui/alert'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip } from '@/components/ui/tooltip'
+import { menuContent, menuItem } from '@/components/ui/dropdown-menu'
+import { ContextMenu } from 'radix-ui'
 import { ApiError, errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { configQuery } from '@/pages/chat/api'
@@ -54,6 +56,7 @@ import { ensureTheme } from './extensions'
 import { ExtensionsView } from './extensions-view'
 import { appendElement } from './jsonc'
 import { Splitter } from './splitter'
+import { bounds, inPanel, layoutOf, panelParts, reorderPanel, reorderSide, resetLocations, sideViews, toPanel, toSide, type Layout, type PanelTab, type View } from './workbench-layout'
 import { useNotices } from './sync'
 import { About, StatusBar } from './status-bar'
 import { languageServers } from './lsp/servers'
@@ -179,43 +182,6 @@ function Unreachable({ error }: { error: unknown }) {
   )
 }
 
-type View = 'explorer' | 'search' | 'git' | 'debug' | 'extensions' | 'changes' | 'problems' | 'review' | 'plan' | 'memory' | 'chat'
-
-/** Where the panels are and how large: the person's own, kept by code-arena for every run. */
-interface Layout {
-  view: View
-  side: number
-  chat: number
-  panel: number
-  sideOpen: boolean
-  chatOpen: boolean
-  panelOpen: boolean
-  /** The panel's tab: the terminals, the Debug Console, or the Output (the language servers'). */
-  panelTab: 'terminal' | 'console' | 'output'
-}
-
-const defaults: Layout = { view: 'explorer', side: 264, chat: 440, panel: 280, sideOpen: true, chatOpen: true, panelOpen: false, panelTab: 'terminal' }
-/** The panels' sizes, smallest and largest (the terminal's largest also follows the window). */
-const bounds = { side: [180, 640], chat: [320, 960], panel: [100, 4000] } as const
-
-/** The layout saved, what of it still makes sense: the known keys, of their kind, the sizes within bounds. */
-function layoutOf(saved: Record<string, unknown> | undefined): Layout {
-  const layout = { ...defaults }
-  if (!saved) return layout
-  const view = saved.view
-  if (view === 'explorer' || view === 'search' || view === 'git' || view === 'debug' || view === 'extensions' || view === 'changes' || view === 'problems' || view === 'review' || view === 'plan' || view === 'memory' || view === 'chat') layout.view = view
-  if (saved.panelTab === 'terminal' || saved.panelTab === 'console' || saved.panelTab === 'output') layout.panelTab = saved.panelTab
-  for (const k of ['side', 'chat', 'panel'] as const) {
-    const size = saved[k]
-    if (typeof size === 'number' && Number.isFinite(size)) layout[k] = Math.round(Math.min(bounds[k][1], Math.max(bounds[k][0], size)))
-  }
-  for (const k of ['sideOpen', 'chatOpen', 'panelOpen'] as const) {
-    const open = saved[k]
-    if (typeof open === 'boolean') layout[k] = open
-  }
-  return layout
-}
-
 function useLayout(saved: Record<string, unknown> | undefined) {
   const [layout, setLayout] = useState<Layout>(() => layoutOf(saved))
   // Kept by code-arena (a page's browser storage is per port, and each run takes a new one): a moment after the
@@ -257,10 +223,10 @@ const views: { id: View; label: string; icon: LucideIcon; command: string }[] = 
   { id: 'chat', label: 'Chat', icon: MessagesSquare, command: 'codeArena.view.sessions' },
 ]
 
-function ActivityButton({ label, command, pressed, badge, onClick, children }: { label: string; command?: string; pressed?: boolean; badge?: number; onClick: () => void; children: ReactNode }) {
+function ActivityButton({ label, command, pressed, badge, edge = 'left', onClick, children }: { label: string; command?: string; pressed?: boolean; badge?: number; edge?: 'left' | 'right'; onClick: () => void; children: ReactNode }) {
   const keys = useKeyFor(command ?? '')
   return (
-    <Tooltip content={keys ? `${label} (${keys})` : label} side="right">
+    <Tooltip content={keys ? `${label} (${keys})` : label} side={edge === 'left' ? 'right' : 'left'}>
       <button
         type="button"
         aria-label={badge ? `${label} (${badge})` : label}
@@ -268,7 +234,8 @@ function ActivityButton({ label, command, pressed, badge, onClick, children }: {
         onClick={onClick}
         className={cn(
           'relative grid size-12 place-items-center text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset [&_svg]:size-5',
-          pressed && 'text-foreground before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-r before:bg-primary',
+          pressed && 'text-foreground before:absolute before:inset-y-2 before:w-0.5 before:bg-primary',
+          pressed && (edge === 'left' ? 'before:left-0 before:rounded-r' : 'before:right-0 before:rounded-l'),
         )}
       >
         {children}
@@ -279,6 +246,153 @@ function ActivityButton({ label, command, pressed, badge, onClick, children }: {
         )}
       </button>
     </Tooltip>
+  )
+}
+
+/** What a view or a panel tab carries while dragged: its id (the drop reads it from here; a drag's data is hidden until then). */
+const dragged: { current: PanelTab | null } = { current: null }
+
+/** A line where a dragged view or tab would land: before the one it is over. */
+const dropLine = (on: boolean, across: boolean) =>
+  on ? (across ? 'shadow-[inset_0_2px_0_0_var(--color-primary)]' : 'shadow-[inset_2px_0_0_0_var(--color-primary)]') : ''
+
+/** Starts dragging a view or tab: the move is the only thing a drop does with it. */
+function dragging(e: DragEvent<HTMLElement>, id: PanelTab) {
+  dragged.current = id
+  e.dataTransfer.effectAllowed = 'move'
+  e.dataTransfer.setData('text/plain', id)
+}
+
+/**
+ * A view's button in the activity bar: shows its view, drags to another place in the bar or into the panel (dropped on
+ * it, the view goes before it), and has a right-click menu with the same moves and where the side bar sits.
+ */
+function ViewButton({ view, layout, change, badge, onClick }: { view: (typeof views)[number]; layout: Layout; change: (c: Partial<Layout>) => void; badge?: number; onClick: () => void }) {
+  const [over, setOver] = useState(false)
+  const side = sideViews(layout)
+  const at = side.indexOf(view.id)
+  const edge = layout.sideAt
+  return (
+    <ContextMenu.Root>
+      <div
+        draggable
+        onDragStart={(e) => dragging(e, view.id)}
+        onDragEnd={() => (dragged.current = null)}
+        onDragOver={(e) => {
+          if (dragged.current === null || !(views as { id: string }[]).some((v) => v.id === dragged.current)) return
+          e.preventDefault()
+          setOver(dragged.current !== view.id)
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => {
+          e.preventDefault()
+          setOver(false)
+          const moved = dragged.current
+          dragged.current = null
+          if (moved && moved !== view.id && (views as { id: string }[]).some((v) => v.id === moved)) change(reorderSide(layout, moved as View, view.id))
+        }}
+        className={dropLine(over, true)}
+      >
+        <ContextMenu.Trigger asChild>
+          <div>
+            <ActivityButton label={view.label} command={view.command} pressed={layout.sideOpen && layout.view === view.id} badge={badge} edge={edge} onClick={onClick}>
+              <view.icon aria-hidden="true" />
+            </ActivityButton>
+          </div>
+        </ContextMenu.Trigger>
+      </div>
+      <ContextMenu.Portal>
+        <ContextMenu.Content className={menuContent} aria-label={`${view.label}: where it goes`}>
+          <ContextMenu.Item className={menuItem} onSelect={() => change(toPanel(layout, view.id))}>
+            Move to Panel
+          </ContextMenu.Item>
+          <ContextMenu.Item className={menuItem} disabled={at <= 0} onSelect={() => change(reorderSide(layout, view.id, side[at - 1]))}>
+            Move Up
+          </ContextMenu.Item>
+          <ContextMenu.Item className={menuItem} disabled={at < 0 || at >= side.length - 1} onSelect={() => change(reorderSide(layout, view.id, side[at + 2]))}>
+            Move Down
+          </ContextMenu.Item>
+          <ContextMenu.Separator className="-mx-1 my-1 h-px bg-border" />
+          <ContextMenu.Item className={menuItem} onSelect={() => change({ sideAt: edge === 'left' ? 'right' : 'left' })}>
+            Move Primary Side Bar {edge === 'left' ? 'Right' : 'Left'}
+          </ContextMenu.Item>
+          <ContextMenu.Item className={menuItem} onSelect={() => change(resetLocations(layout))}>
+            Reset View Locations
+          </ContextMenu.Item>
+        </ContextMenu.Content>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
+  )
+}
+
+/** The panel's tab names: its own parts' and the views moved there. */
+const tabLabel = (t: PanelTab) => (t === 'terminal' ? 'Terminal' : t === 'console' ? 'Debug Console' : t === 'output' ? 'Output' : (views.find((v) => v.id === t)?.label ?? t))
+
+/**
+ * A tab of the panel: drags to another place among the tabs or, a view's, back into the activity bar; its right-click
+ * menu moves a view back to the side bar and the panel below the editor or beside it.
+ */
+function PanelTabButton({ tab, layout, change }: { tab: PanelTab; layout: Layout; change: (c: Partial<Layout>) => void }) {
+  const [over, setOver] = useState(false)
+  const isView = !(panelParts as readonly string[]).includes(tab)
+  const across = layout.panelAt === 'bottom'
+  return (
+    <ContextMenu.Root>
+      <ContextMenu.Trigger asChild>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={layout.panelTab === tab}
+          draggable
+          onDragStart={(e) => dragging(e, tab)}
+          onDragEnd={() => (dragged.current = null)}
+          onDragOver={(e) => {
+            if (dragged.current === null) return
+            e.preventDefault()
+            setOver(dragged.current !== tab)
+          }}
+          onDragLeave={() => setOver(false)}
+          onDrop={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            setOver(false)
+            const moved = dragged.current
+            dragged.current = null
+            if (moved && moved !== tab) change(reorderPanel(layout, moved, tab))
+          }}
+          onClick={() => change({ panelTab: tab })}
+          className={cn(
+            'border-b pb-1 outline-none focus-visible:ring-1 focus-visible:ring-ring',
+            layout.panelTab === tab ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
+            dropLine(over, !across),
+          )}
+        >
+          {tabLabel(tab)}
+        </button>
+      </ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Content className={menuContent} aria-label={`${tabLabel(tab)}: where it goes`}>
+          {isView && (
+            <>
+              <ContextMenu.Item className={menuItem} onSelect={() => change(toSide(layout, tab as View))}>
+                Move to Side Bar
+              </ContextMenu.Item>
+              <ContextMenu.Separator className="-mx-1 my-1 h-px bg-border" />
+            </>
+          )}
+          {(['bottom', 'left', 'right'] as const)
+            .filter((at) => at !== layout.panelAt)
+            .map((at) => (
+              <ContextMenu.Item key={at} className={menuItem} onSelect={() => change({ panelAt: at })}>
+                {at === 'bottom' ? 'Move Panel to Bottom' : `Move Panel ${at === 'left' ? 'Left' : 'Right'}`}
+              </ContextMenu.Item>
+            ))}
+          <ContextMenu.Item className={menuItem} onSelect={() => change(resetLocations(layout))}>
+            Reset View Locations
+          </ContextMenu.Item>
+        </ContextMenu.Content>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
   )
 }
 
@@ -333,34 +447,57 @@ function Workbench({
   )
   const [panelUsed, setPanelUsed] = useState(layout.panelOpen)
   // Run and Debug is drawn the first time it shows (it asks code-arena for the configurations then).
-  const [debugUsed, setDebugUsed] = useState(layout.view === 'debug')
+  const [debugUsed, setDebugUsed] = useState(() => layout.view === 'debug' || (layout.panelOpen && layout.panelTab === 'debug'))
   // The Extensions view too (it asks code-arena for VS Code's extensions on this computer then).
-  const [extensionsUsed, setExtensionsUsed] = useState(layout.view === 'extensions')
+  const [extensionsUsed, setExtensionsUsed] = useState(() => layout.view === 'extensions' || (layout.panelOpen && layout.panelTab === 'extensions'))
   // Memory is read from Arena when it is first shown, and again from there.
-  const [memoryUsed, setMemoryUsed] = useState(layout.view === 'memory')
+  const [memoryUsed, setMemoryUsed] = useState(() => layout.view === 'memory' || (layout.panelOpen && layout.panelTab === 'memory'))
   // The Review view reads the last review once it is first shown.
-  const [reviewUsed, setReviewUsed] = useState(layout.view === 'review')
+  const [reviewUsed, setReviewUsed] = useState(() => layout.view === 'review' || (layout.panelOpen && layout.panelTab === 'review'))
   const changes = useQuery(changesQuery)
   const [height, setHeight] = useState(() => window.innerHeight)
+  const [width, setWidth] = useState(() => window.innerWidth)
 
   useEffect(() => {
-    const on = () => setHeight(window.innerHeight)
+    const on = () => {
+      setHeight(window.innerHeight)
+      setWidth(window.innerWidth)
+    }
     window.addEventListener('resize', on)
     return () => window.removeEventListener('resize', on)
   }, [])
 
   /** An activity: its view in the side bar; the one shown already closes the side bar, as in an editor. */
+  const used = useCallback((view: PanelTab) => {
+    if (view === 'debug') setDebugUsed(true)
+    if (view === 'extensions') setExtensionsUsed(true)
+    if (view === 'memory') setMemoryUsed(true)
+    if (view === 'review') setReviewUsed(true)
+  }, [])
+  /** A view shown where it is: in the side bar, or (moved there) in the panel. */
   const show = useCallback(
     (view: View, toggle = false) => {
-      if (toggle && layout.sideOpen && layout.view === view) change({ sideOpen: false })
-      else change({ view, sideOpen: true, ...(view === 'chat' ? { chatOpen: true } : {}) })
-      if (view === 'debug') setDebugUsed(true)
-      if (view === 'extensions') setExtensionsUsed(true)
-      if (view === 'memory') setMemoryUsed(true)
-      if (view === 'review') setReviewUsed(true)
+      const chat = view === 'chat' ? { chatOpen: true } : {}
+      if (inPanel(layout, view)) {
+        setPanelUsed(true)
+        if (toggle && layout.panelOpen && layout.panelTab === view) change({ panelOpen: false })
+        else change({ panelOpen: true, panelTab: view, ...chat })
+      } else if (toggle && layout.sideOpen && layout.view === view) change({ sideOpen: false })
+      else change({ view, sideOpen: true, ...chat })
+      used(view)
       if (view === 'search') setSearchFocus((n) => n + 1)
     },
-    [change, layout.sideOpen, layout.view],
+    [change, layout, used],
+  )
+  /** A move of the workbench's parts (a view dragged, or put back where it was): what it shows is drawn there. */
+  const arrange = useCallback(
+    (c: Partial<Layout>) => {
+      change(c)
+      if (c.view) used(c.view)
+      if (c.panelTab) used(c.panelTab)
+      if (c.panelOpen) setPanelUsed(true)
+    },
+    [change, used],
   )
 
   const togglePanel = useCallback(() => {
@@ -937,6 +1074,13 @@ function Workbench({
       requestAnimationFrame(() => document.querySelector<HTMLElement>(['[tabindex="0"]', 'button', 'input'].map((x) => `aside[data-side] > div:not([hidden]) ${x}`).join(', '))?.focus())
     } },
     { id: 'workbench.action.toggleSidebarVisibility', category: 'View', title: 'Toggle Primary Side Bar Visibility', run: () => change({ sideOpen: !layout.sideOpen }) },
+    { id: 'workbench.action.toggleSidebarPosition', category: 'View', title: 'Toggle Primary Side Bar Position', run: () => change({ sideAt: layout.sideAt === 'left' ? 'right' : 'left' }) },
+    { id: 'workbench.action.positionPanelBottom', category: 'View', title: 'Move Panel to Bottom', enabled: () => layout.panelAt !== 'bottom', run: () => arrange({ panelAt: 'bottom', panelOpen: true }) },
+    { id: 'workbench.action.positionPanelLeft', category: 'View', title: 'Move Panel Left', enabled: () => layout.panelAt !== 'left', run: () => arrange({ panelAt: 'left', panelOpen: true }) },
+    { id: 'workbench.action.positionPanelRight', category: 'View', title: 'Move Panel Right', enabled: () => layout.panelAt !== 'right', run: () => arrange({ panelAt: 'right', panelOpen: true }) },
+    { id: 'codeArena.view.moveToPanel', category: 'View', title: 'Move View to Panel', enabled: () => layout.sideOpen && sideViews(layout).length > 0, run: () => arrange(toPanel(layout, layout.view)) },
+    { id: 'codeArena.view.moveToSideBar', category: 'View', title: 'Move Panel View to Side Bar', enabled: () => !(panelParts as readonly string[]).includes(layout.panelTab), run: () => arrange(toSide(layout, layout.panelTab as View)) },
+    { id: 'workbench.action.resetViewLocations', category: 'View', title: 'Reset View Locations', run: () => arrange(resetLocations(layout)) },
     { id: 'workbench.action.togglePanel', category: 'View', title: 'Toggle Panel Visibility', run: togglePanel },
     { id: 'workbench.action.toggleAuxiliaryBar', category: 'View', title: 'Toggle Secondary Side Bar Visibility (the chat)', run: () => change({ chatOpen: !layout.chatOpen }) },
     { id: 'workbench.action.chat.open', category: 'Chat', title: 'Open Chat', run: () => {
@@ -1013,127 +1157,195 @@ function Workbench({
     setRecent(next)
     void savePreferences({ paletteRecent: next }).catch(() => undefined)
   }
+  const side = sideViews(layout)
+  const left = layout.sideAt === 'left'
+  // Beside the editor, the panel is as wide as the window leaves; below it, as tall.
+  const across = layout.panelAt !== 'bottom'
+  const maxSidePanel = Math.max(200, width - (layout.sideOpen ? layout.side : 0) - (layout.chatOpen ? layout.chat : 0) - 360)
+  const panelSize = Math.min(layout.panel, across ? maxSidePanel : maxPanel)
+  /** A view's own part, wherever it is (the side bar or the panel); `shown`: it is on screen now. */
+  const viewPart = (v: View, shown: boolean): ReactNode => {
+    switch (v) {
+      case 'explorer':
+        return <Explorer project={state.project} onOpenChanges={(path) => void openDiff(path)} />
+      case 'search':
+        return <SearchPanel focusKey={searchFocus} replaceKey={replaceKey} />
+      case 'git':
+        return <SourceControlPanel />
+      case 'debug':
+        return debugUsed && <RunDebugView onStart={(name, noDebug) => void start(name, noDebug)} />
+      case 'extensions':
+        return extensionsUsed && <ExtensionsView />
+      case 'changes':
+        return <ChangesPanel />
+      case 'problems':
+        return <ProblemsPanel />
+      case 'review':
+        return reviewUsed && <ReviewPanel />
+      case 'plan':
+        return shown && <PlanPanel arena={state.manual ? new URL(state.manual).origin : null} />
+      case 'memory':
+        return memoryUsed && <MemoryPanel />
+      case 'chat':
+        return <Sessions state={state} />
+    }
+  }
+
+  const activityBar = (
+    <nav key="activity" aria-label="Activity bar" className={cn('flex w-12 shrink-0 flex-col bg-sidebar', left ? 'border-r' : 'border-l')}>
+      {/* Dropped below the views: the view goes last (one from the panel comes back to the side bar). */}
+      <div
+        className="flex min-h-0 flex-1 flex-col"
+        onDragOver={(e) => {
+          if (dragged.current !== null && views.some((v) => v.id === dragged.current)) e.preventDefault()
+        }}
+        onDrop={(e) => {
+          const moved = dragged.current
+          dragged.current = null
+          if (moved && views.some((v) => v.id === moved)) {
+            e.preventDefault()
+            arrange(reorderSide(layout, moved as View))
+          }
+        }}
+      >
+        {side.map((id) => {
+          const v = views.find((x) => x.id === id)!
+          return <ViewButton key={id} view={v} layout={layout} change={arrange} badge={id === 'changes' ? count : id === 'problems' ? errors : id === 'git' ? gitCount : undefined} onClick={() => show(id, true)} />
+        })}
+        <span className="flex-1" />
+      </div>
+      <ActivityButton label="Terminal" command="workbench.action.terminal.toggleTerminal" pressed={layout.panelOpen} edge={layout.sideAt} onClick={toggleTerminal}>
+        <SquareTerminal aria-hidden="true" />
+      </ActivityButton>
+      <div className="grid place-items-center pb-1">
+        <ThemeMenu side={left ? 'right' : 'left'} align="end" />
+      </div>
+      <ActivityButton label="Help" edge={layout.sideAt} onClick={() => openHelp?.()}>
+        <CircleHelp aria-hidden="true" />
+      </ActivityButton>
+      <ActivityButton label="About Code Arena" edge={layout.sideAt} onClick={() => setAbout(true)}>
+        <Info aria-hidden="true" />
+      </ActivityButton>
+    </nav>
+  )
+
+  const sideBar = (
+    <aside key="side" data-side={layout.sideAt} hidden={!layout.sideOpen} aria-label={views.find((v) => v.id === layout.view)?.label} style={{ width: layout.side }} className="min-h-0 shrink-0 bg-sidebar text-sidebar-foreground">
+      {side.map((v) => (
+        <div key={v} hidden={layout.view !== v} className="h-full">
+          {viewPart(v, layout.sideOpen && layout.view === v)}
+        </div>
+      ))}
+    </aside>
+  )
+  const sideSplitter = layout.sideOpen && (
+    <Splitter key="side-splitter" label="Resize the side bar" orientation="vertical" value={layout.side} min={bounds.side[0]} max={bounds.side[1]} grow={left ? 1 : -1} onChange={(size) => change({ side: size })} />
+  )
+
+  const panel = panelUsed && (
+    <div key="panel" hidden={!layout.panelOpen} style={across ? { width: panelSize } : { height: panelSize }} className={cn('flex shrink-0 flex-col', across && (layout.panelAt === 'right' ? 'border-l' : 'border-r'))}>
+      {/* Dropped after the tabs: the tab goes last, a view from the side bar comes into the panel. */}
+      <div
+        className={cn('flex h-7 shrink-0 items-end px-3', !across && 'border-t')}
+        onDragOver={(e) => {
+          if (dragged.current !== null) e.preventDefault()
+        }}
+        onDrop={(e) => {
+          const moved = dragged.current
+          dragged.current = null
+          if (moved) {
+            e.preventDefault()
+            arrange(reorderPanel(layout, moved))
+          }
+        }}
+      >
+        <div role="tablist" aria-label="Panel" className="flex min-w-0 flex-1 items-end gap-3 overflow-x-auto text-[0.6875rem] font-semibold tracking-wider uppercase">
+          {layout.panelTabs.map((t) => (
+            <PanelTabButton key={t} tab={t} layout={layout} change={arrange} />
+          ))}
+        </div>
+      </div>
+      <div hidden={layout.panelTab !== 'terminal'} className="min-h-0 flex-1">
+        <Suspense
+          fallback={
+            <div className="grid h-full place-items-center">
+              <Spinner label="Loading the terminal" />
+            </div>
+          }
+        >
+          <TerminalPanel shown={layout.panelOpen && layout.panelTab === 'terminal'} onHide={() => change({ panelOpen: false })} focusKey={terminalFocus} newKey={newTerminal} show={terminalShown} />
+        </Suspense>
+      </div>
+      {layout.panelTab === 'console' && (
+        <div className="min-h-0 flex-1">
+          <DebugConsole />
+        </div>
+      )}
+      {layout.panelTab === 'output' && (
+        <div className="min-h-0 flex-1">
+          <OutputPanel shown={layout.panelOpen} />
+        </div>
+      )}
+      {layout.panelTabs
+        .filter((t): t is View => !(panelParts as readonly string[]).includes(t))
+        .map((v) => (
+          <div key={v} hidden={layout.panelTab !== v} className="min-h-0 flex-1 overflow-hidden">
+            {viewPart(v, layout.panelOpen && layout.panelTab === v)}
+          </div>
+        ))}
+    </div>
+  )
+  const panelSplitter = layout.panelOpen && (
+    <Splitter
+      key="panel-splitter"
+      label="Resize the panel"
+      orientation={across ? 'vertical' : 'horizontal'}
+      value={panelSize}
+      min={bounds.panel[0]}
+      max={across ? maxSidePanel : maxPanel}
+      grow={layout.panelAt === 'left' ? 1 : -1}
+      onChange={(size) => change({ panel: size })}
+    />
+  )
+  const editorBox = (
+    <div key="editor" className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+      {settings.get('debug.toolBarLocation') !== 'hidden' && <DebugToolbar />}
+      <EditorArea />
+    </div>
+  )
+  const mainArea = (
+    <main key="main" data-panel={layout.panelAt} className={cn('relative flex min-w-0 flex-1', across ? 'flex-row' : 'flex-col')}>
+      {/* By key: the panel moving round the editor moves them, never draws them again. */}
+      {layout.panelAt === 'left' ? [panel, panelSplitter, editorBox] : [editorBox, panelSplitter, panel]}
+    </main>
+  )
+
+  const chatSplitter = layout.chatOpen && (
+    <Splitter key="chat-splitter" label="Resize the chat" orientation="vertical" value={layout.chat} min={bounds.chat[0]} max={bounds.chat[1]} grow={left ? -1 : 1} onChange={(size) => change({ chat: size })} />
+  )
+  const chatSide = (
+    <aside key="chat" hidden={!layout.chatOpen} aria-label="Agent" style={{ width: layout.chat }} className="min-h-0 shrink-0">
+      <Thread
+        key={state.session}
+        state={state}
+        config={config}
+        onOpenList={() => show('chat')}
+        onHide={() => change({ chatOpen: false })}
+        onShow={showChat}
+        onEvent={onEvent}
+        onTurnEnd={onTurnEnd}
+      />
+    </aside>
+  )
+
+  // From the left edge with the side bar there; the other way round with it on the right.
+  const workbenchParts = [activityBar, sideBar, sideSplitter, mainArea, chatSplitter, chatSide]
+
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
       {!!lost && <Unreachable error={lost} />}
-      <div className="flex min-h-0 flex-1">
-        <nav aria-label="Activity bar" className="flex w-12 shrink-0 flex-col border-r bg-sidebar">
-          {views.map((v) => (
-            <ActivityButton key={v.id} label={v.label} command={v.command} pressed={layout.sideOpen && layout.view === v.id} badge={v.id === 'changes' ? count : v.id === 'problems' ? errors : v.id === 'git' ? gitCount : undefined} onClick={() => show(v.id, true)}>
-              <v.icon aria-hidden="true" />
-            </ActivityButton>
-          ))}
-          <span className="flex-1" />
-          <ActivityButton label="Terminal" command="workbench.action.terminal.toggleTerminal" pressed={layout.panelOpen} onClick={toggleTerminal}>
-            <SquareTerminal aria-hidden="true" />
-          </ActivityButton>
-          <div className="grid place-items-center pb-1">
-            <ThemeMenu side="right" align="end" />
-          </div>
-          <ActivityButton label="Help" onClick={() => openHelp?.()}>
-            <CircleHelp aria-hidden="true" />
-          </ActivityButton>
-          <ActivityButton label="About Code Arena" onClick={() => setAbout(true)}>
-            <Info aria-hidden="true" />
-          </ActivityButton>
-        </nav>
-
-        <aside data-side hidden={!layout.sideOpen} aria-label={views.find((v) => v.id === layout.view)?.label} style={{ width: layout.side }} className="min-h-0 shrink-0 bg-sidebar text-sidebar-foreground">
-          <div hidden={layout.view !== 'explorer'} className="h-full">
-            <Explorer project={state.project} onOpenChanges={(path) => void openDiff(path)} />
-          </div>
-          <div hidden={layout.view !== 'search'} className="h-full">
-            <SearchPanel focusKey={searchFocus} replaceKey={replaceKey} />
-          </div>
-          <div hidden={layout.view !== 'git'} className="h-full">
-            <SourceControlPanel />
-          </div>
-          <div hidden={layout.view !== 'debug'} className="h-full">
-            {debugUsed && <RunDebugView onStart={(name, noDebug) => void start(name, noDebug)} />}
-          </div>
-          <div hidden={layout.view !== 'extensions'} className="h-full">
-            {extensionsUsed && <ExtensionsView />}
-          </div>
-          <div hidden={layout.view !== 'changes'} className="h-full">
-            <ChangesPanel />
-          </div>
-          <div hidden={layout.view !== 'problems'} className="h-full">
-            <ProblemsPanel />
-          </div>
-          <div hidden={layout.view !== 'review'} className="h-full">
-            {reviewUsed && <ReviewPanel />}
-          </div>
-          <div hidden={layout.view !== 'plan'} className="h-full">
-            {layout.view === 'plan' && <PlanPanel arena={state.manual ? new URL(state.manual).origin : null} />}
-          </div>
-          <div hidden={layout.view !== 'memory'} className="h-full">
-            {memoryUsed && <MemoryPanel />}
-          </div>
-          <div hidden={layout.view !== 'chat'} className="h-full">
-            <Sessions state={state} />
-          </div>
-        </aside>
-        {layout.sideOpen && <Splitter label="Resize the side bar" orientation="vertical" value={layout.side} min={bounds.side[0]} max={bounds.side[1]} grow={1} onChange={(side) => change({ side })} />}
-
-        <main className="relative flex min-w-0 flex-1 flex-col">
-          {settings.get('debug.toolBarLocation') !== 'hidden' && <DebugToolbar />}
-          <EditorArea />
-          {layout.panelOpen && <Splitter label="Resize the terminal" orientation="horizontal" value={Math.min(layout.panel, maxPanel)} min={bounds.panel[0]} max={maxPanel} grow={-1} onChange={(panel) => change({ panel })} />}
-          {panelUsed && (
-            <div hidden={!layout.panelOpen} style={{ height: Math.min(layout.panel, maxPanel) }} className="flex shrink-0 flex-col">
-              <div role="tablist" aria-label="Panel" className="flex h-7 shrink-0 items-end gap-3 border-t px-3 text-[0.6875rem] font-semibold tracking-wider uppercase">
-                {(['terminal', 'console', 'output'] as const).map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    role="tab"
-                    aria-selected={layout.panelTab === t}
-                    onClick={() => change({ panelTab: t })}
-                    className={cn('border-b pb-1 outline-none focus-visible:ring-1 focus-visible:ring-ring', layout.panelTab === t ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}
-                  >
-                    {t === 'terminal' ? 'Terminal' : t === 'console' ? 'Debug Console' : 'Output'}
-                  </button>
-                ))}
-              </div>
-              <div hidden={layout.panelTab !== 'terminal'} className="min-h-0 flex-1">
-                <Suspense
-                  fallback={
-                    <div className="grid h-full place-items-center">
-                      <Spinner label="Loading the terminal" />
-                    </div>
-                  }
-                >
-                  <TerminalPanel shown={layout.panelOpen && layout.panelTab === 'terminal'} onHide={() => change({ panelOpen: false })} focusKey={terminalFocus} newKey={newTerminal} show={terminalShown} />
-                </Suspense>
-              </div>
-              {layout.panelTab === 'console' && (
-                <div className="min-h-0 flex-1">
-                  <DebugConsole />
-                </div>
-              )}
-              {layout.panelTab === 'output' && (
-                <div className="min-h-0 flex-1">
-                  <OutputPanel shown={layout.panelOpen} />
-                </div>
-              )}
-            </div>
-          )}
-        </main>
-
-        {layout.chatOpen && <Splitter label="Resize the chat" orientation="vertical" value={layout.chat} min={bounds.chat[0]} max={bounds.chat[1]} grow={-1} onChange={(chat) => change({ chat })} />}
-        <aside hidden={!layout.chatOpen} aria-label="Agent" style={{ width: layout.chat }} className="min-h-0 shrink-0">
-          <Thread
-            key={state.session}
-            state={state}
-            config={config}
-            onOpenList={() => show('chat')}
-            onHide={() => change({ chatOpen: false })}
-            onShow={showChat}
-            onEvent={onEvent}
-            onTurnEnd={onTurnEnd}
-          />
-        </aside>
-      </div>
+      {/* By key, in the order the side bar's place gives: React moves the parts, never draws the editor or the chat again. */}
+      <div className="flex min-h-0 flex-1">{left ? workbenchParts : [...workbenchParts].reverse()}</div>
       <StatusBar
         state={state}
         onChanges={() => show('changes')}
