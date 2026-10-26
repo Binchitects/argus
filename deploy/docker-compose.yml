@@ -47,6 +47,8 @@ services:
     environment:
       DOMAIN: ${DOMAIN:-llm.localhost}
       ACME_EMAIL: ${ACME_EMAIL:-}
+      # Strict-Transport-Security's max-age; empty: a year with Let's Encrypt, none with your own CA.
+      HSTS_SECONDS: ${HSTS_SECONDS:-}
     ports: ["${HTTP_PORT:-80}:80", "${HTTPS_PORT:-443}:443"]
     volumes:
       - ./config/traefik:/etc/traefik/dynamic:ro
@@ -107,6 +109,8 @@ services:
       Storage__BackupsKept: ${BACKUP_KEEP:-14}
       # Who issued the certificate Traefik serves, for Admin -> Overview.
       Stack__Acme: ${ACME_EMAIL:+letsencrypt}
+      # The same HSTS as Traefik's, on the app's own answers (and a cluster without Traefik).
+      Stack__HstsSeconds: ${HSTS_SECONDS:-}
     volumes:
       - ${MODELS_DIR:-./models}:/library
       - engine:/engine-config

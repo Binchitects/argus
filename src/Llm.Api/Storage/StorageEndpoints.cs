@@ -31,6 +31,8 @@ public static class StorageEndpoints
         services.AddScoped<StoragePlaces>();
         services.AddScoped<StorageReport>();
         services.AddScoped<StorageCleanups>();
+        services.AddSingleton<FileSealingJob>();
+        services.AddHostedService(sp => sp.GetRequiredService<FileSealingJob>());
         services.AddSingleton<StorageWatch>();
         services.AddHostedService(sp => sp.GetRequiredService<StorageWatch>());
     }

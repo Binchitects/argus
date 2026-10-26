@@ -355,11 +355,15 @@ controls:
     operator: Decide which data may reach which model, and which models are outside the company.
 
   - id: DAT-05
-    title: Secrets are encrypted at rest
+    title: Secrets and people's files are encrypted at rest
     meets: >-
       The signing keys, settings' secrets (directory, SSO, connectors) and
       tokens are stored encrypted with APP_KEY; a changed key fails loudly
       instead of resetting keys; secrets are never sent back to a browser.
+      People's files (their bytes, a video's sound, a document's drawn pages)
+      and deck templates are sealed with AES-256-GCM under a key from APP_KEY
+      before they reach the database, and a job seals those stored before.
+      The disk under the stack's data is checked for encryption from the host.
     frameworks:
       iso27001: [A.8.24]
       soc2: [CC6.1]
@@ -371,7 +375,9 @@ controls:
       - Llm.Tests/KeyRingTests.A_changed_data_key_fails_loudly_instead_of_silently_resetting_keys
       - Llm.Tests/SettingsTests.A_secret_is_stored_encrypted_used_in_plain_and_never_sent_back
       - Llm.Tests/KnowledgeConnectorTests.Test_connection_says_what_it_reached_and_secrets_are_stored_encrypted_and_never_sent_back
-    checks: [app:data-key]
+      - Llm.Tests/FileSealingTests.A_file_is_stored_encrypted_read_as_it_was_and_those_stored_before_are_sealed_by_the_job
+      - Llm.Tests/FileSealingTests.Without_APP_KEY_files_are_stored_as_they_are_and_the_check_says_so
+    checks: [app:data-key, app:files-sealed, live:disk]
     operator: Keep APP_KEY with the company's secrets, apart from the backups; encrypt the hosts' disks.
 
   - id: DAT-06
@@ -423,10 +429,13 @@ controls:
   - id: NET-01
     title: Encrypted in transit, one way in
     meets: >-
-      Only Traefik's ports 80 and 443 are published, 80 only to redirect; the
-      services talk on Docker's network; every page carries a strict content
-      security policy and the security headers; a state change needs a header
-      another site cannot send; hosts without a rule are refused.
+      Only Traefik's ports 80 and 443 are published, 80 only to redirect; TLS
+      1.2 and 1.3 only, and for 1.2 only ciphers with forward secrecy and
+      authenticated encryption; HSTS for a year with a trusted certificate
+      (HSTS_SECONDS); the services talk on Docker's network; every page carries
+      a strict content security policy and the security headers; a state
+      change needs a header another site cannot send; hosts without a rule are
+      refused.
     frameworks:
       iso27001: [A.8.20, A.8.24, A.8.26]
       soc2: [CC6.6, CC6.7]
@@ -439,6 +448,7 @@ controls:
       - Llm.Tests/FoundationTests.Security_headers_are_set
       - Llm.Tests/IdentityTests.State_changes_without_the_csrf_header_are_refused
       - Llm.Tests/ForwardAuthTests.Hosts_without_a_rule_are_denied_even_to_admins
+      - Llm.Tests/FileSealingTests.With_HSTS_set_the_app_sends_it_as_Traefik_does_and_without_it_clears_any_kept_before
     checks: [live:tls, live:headers, live:csrf]
     operator: A certificate from the company's CA or Let's Encrypt; the network around the hosts.
 
@@ -446,7 +456,9 @@ controls:
     title: Backups, restored and proven
     meets: >-
       scripts/backup.sh backs up the databases, the settings and the files,
-      with a second copy elsewhere; point-in-time recovery archives the WAL;
+      with a second copy elsewhere, each file encrypted (AES-256, PBKDF2) with
+      a key kept apart from the backups (BACKUP_KEY_FILE), refused inside them;
+      point-in-time recovery archives the WAL;
       the drill restores into a throwaway stack, never the live one, and
       checks that every person, chat and setting came back.
     frameworks:
@@ -459,12 +471,18 @@ controls:
       - deployment.md#point-in-time-recovery-pitr
     tests:
       - deploy/test_backup.py::test_By_default_it_keeps_BACKUP_KEEP_here_and_in_the_second_copy
+      - deploy/test_backup.py::test_Every_file_is_encrypted_the_MANIFEST_names_the_key_without_it_and_it_opens_only_with_that_key
+      - deploy/test_backup.py::test_A_key_inside_deploy_or_the_backups_is_refused_before_anything_is_taken
       - deploy/test_pitr.py::test_pitr_yml_archives_wal_to_the_backup_disk
       - deploy/test_pitr.py::test_the_drill_restores_into_a_scratch_container_never_the_stacks
       - deploy/test_recovery.py::test_The_live_project_is_refused_before_anything_runs
       - deploy/test_recovery_check.py::test_A_person_lost_in_the_restore_fails_it
     checks: [app:backups]
-    operator: Schedule the backups, keep the second copy off the host, run the drill on a schedule.
+    operator: >-
+      Schedule the backups, keep the second copy off the host, keep the
+      backups' key (BACKUP_KEY_FILE) apart from them with a copy in the
+      company's vault, run the drill on a schedule, and encrypt pgBackRest's
+      repository (its repo1-cipher-type and repo1-cipher-pass) when using it.
 
   - id: OPS-02
     title: Code the model writes runs apart

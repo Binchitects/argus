@@ -10,6 +10,7 @@
 #   ./scripts/backup.sh --restore --from DIR     put volumes and the database back (stack stopped)
 #   ./scripts/backup.sh --restore --from DIR --with-config   also .env, overrides and config files
 #   ./scripts/backup.sh --restore --from DIR --yes           without asking (restore-test.sh, rollback-test.sh)
+#   ./scripts/backup.sh --open DIR --to OUT      an encrypted backup's plain copy in OUT (restore-test.sh reads it)
 #   ./scripts/backup.sh --pitr full|diff         a pgBackRest backup (with pitr.yml: WAL archived continuously,
 #                                                a restore to any second; scripts/restore-drill.sh checks one)
 #
@@ -25,6 +26,9 @@
 #   BACKUP_KEEP           how many backups to keep                default 14
 #   BACKUP_INCLUDE_LOGS   1 = also Loki logs, Prometheus metrics  default 1
 #   BACKUP_TIME           when --install-timer runs it (systemd)  default 03:30
+#   BACKUP_KEY_FILE       encrypt each backup with the key in this file (AES-256, its key stretched by PBKDF2):
+#                         make one with  openssl rand -base64 48 > /root/arena-backup.key && chmod 600 /root/arena-backup.key
+#                         and keep a copy where the backups are not: without it, they cannot be opened   default none
 #
 # One backup is one directory, BACKUP_DIR/<date>_<time>/:
 #   postgres.sql.gz        pg_dumpall of the gateway database: people, API keys, budgets,
@@ -36,6 +40,8 @@
 #                          (Traefik's routes, Prometheus's rules, the other files compose mounts).
 #   MANIFEST, SHA256SUMS   what was taken, from which commit, when it started (UTC); a checksum
 #                          for every file. The directory's name is the host's local time.
+#   With BACKUP_KEY_FILE, each of them but MANIFEST and SHA256SUMS is encrypted (NAME.enc), config/
+#   as config.tar.gz.enc; MANIFEST says so, and which key (its SHA-256, never the key).
 #
 # The backup directory holds every secret of the stack: it is created 0700 and
 # its files 0600. Models are not backed up (MODELS_DIR, re-downloadable).
@@ -85,6 +91,7 @@ HELPER=python:3.13-slim
 HELPER_MISSING="the helper image $HELPER is not on this host, and nothing is pulled: load it from the offline bundle (or $ENGINE pull $HELPER where there is a network)"
 case "$BACKUP_DIR" in /*) ;; *) BACKUP_DIR="$ROOT/${BACKUP_DIR#./}" ;; esac
 COPY_DIR="$(env_get BACKUP_COPY_DIR)"
+KEY_FILE="$(env_get BACKUP_KEY_FILE)"
 case "$COPY_DIR" in ""|/*) ;; *) COPY_DIR="$ROOT/${COPY_DIR#./}" ;; esac
 
 # Named volumes that are caches or models, not state; media-status is what the picture and video
@@ -92,13 +99,15 @@ case "$COPY_DIR" in ""|/*) ;; *) COPY_DIR="$ROOT/${COPY_DIR#./}" ;; esac
 SKIP_VOLUMES=" audio acme sandbox blender postgres media-status vllm-status valkey "
 LOG_VOLUMES=" loki prometheus alertmanager "
 
-ACTION=backup; FROM=""; WITH_CONFIG=0; VERIFY_DIR=""; YES=0
+ACTION=backup; FROM=""; WITH_CONFIG=0; VERIFY_DIR=""; YES=0; OPEN_TO=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --list) ACTION=list; shift ;;
     --verify) ACTION=verify; shift; if [[ $# -gt 0 && "${1:0:2}" != "--" ]]; then VERIFY_DIR="$1"; shift; fi ;;
     --install-timer) ACTION=timer; shift ;;
     --restore) ACTION=restore; shift ;;
+    --open) ACTION=open; [[ $# -ge 2 ]] || die "--open takes a backup folder"; FROM="$2"; shift 2 ;;
+    --to) [[ $# -ge 2 ]] || die "--to takes a folder"; OPEN_TO="$2"; shift 2 ;;
     --from) FROM="$2"; shift 2 ;;
     --with-config) WITH_CONFIG=1; shift ;;
     --yes) YES=1; shift ;;
@@ -119,6 +128,19 @@ verify_dir() {   # verify_dir <backup dir>
   [[ -f "$dir/SHA256SUMS" ]] || { say "  $dir: no SHA256SUMS"; return 1; }
   (cd "$dir" && sha256sum -c --quiet SHA256SUMS) || { say "  $dir: CHECKSUM MISMATCH"; return 1; }
   local f
+  if is_encrypted "$dir"; then
+    # Without its key here, the checksums are what can be checked: the backup is whole, if not readable.
+    [[ -n "$KEY_FILE" && -r "$KEY_FILE" ]] || { say "  $dir: encrypted; the checksums match (without BACKUP_KEY_FILE here, nothing is opened)"; return 0; }
+    for f in "$dir"/postgres.sql.gz.enc "$dir"/volumes/*.tar.gz.enc "$dir"/config.tar.gz.enc; do
+      [[ -f "$f" ]] || continue
+      open_stream "$f" 2>/dev/null | gzip -t 2>/dev/null || { say "  $dir: $(basename "$f") does not open with BACKUP_KEY_FILE, or is corrupt"; return 1; }
+    done
+    if [[ -f "$dir/postgres.sql.gz.enc" ]]; then
+      open_stream "$dir/postgres.sql.gz.enc" | zcat | tail -n 5 | grep -q "PostgreSQL database cluster dump complete" \
+        || { say "  $dir: postgres dump is incomplete"; return 1; }
+    fi
+    return 0
+  fi
   for f in "$dir"/postgres.sql.gz "$dir"/volumes/*.tar.gz; do
     [[ -f "$f" ]] || continue
     gzip -t "$f" 2>/dev/null || { say "  $dir: corrupt archive $(basename "$f")"; return 1; }
@@ -128,6 +150,36 @@ verify_dir() {   # verify_dir <backup dir>
       || { say "  $dir: postgres dump is incomplete"; return 1; }
   fi
   return 0
+}
+
+# Encrypted backups (BACKUP_KEY_FILE): each file AES-256-CBC, its key stretched from the key file by PBKDF2.
+CIPHER=(-aes-256-cbc -pbkdf2 -iter 200000 -md sha256)
+is_encrypted() { [[ -f "$1/MANIFEST" ]] && grep -q '^encrypted: ' "$1/MANIFEST"; }
+need_key() {   # need_key <why>: the key file is there, readable, and openssl to use it
+  [[ -n "$KEY_FILE" ]] || die "$1: set BACKUP_KEY_FILE in .env to its key file"
+  [[ -r "$KEY_FILE" ]] || die "BACKUP_KEY_FILE ($KEY_FILE) cannot be read"
+  command -v openssl >/dev/null || die "openssl is needed for encrypted backups"
+}
+key_id() { sha256sum "$KEY_FILE" | cut -c1-16; }
+seal_file() { openssl enc -e "${CIPHER[@]}" -salt -pass "file:$KEY_FILE" -in "$1" -out "$1.enc" && rm -f "$1"; }
+open_stream() { openssl enc -d "${CIPHER[@]}" -pass "file:$KEY_FILE" -in "$1"; }
+
+# A plain copy of an encrypted backup: each file opened, config/ unpacked, its own checksums (so --verify and
+# --restore take it). Private (0700), like the backup.
+open_backup() {   # open_backup <encrypted dir> <out>
+  local from=$1 out=$2 f rel
+  need_key "$(basename "$from") is encrypted"
+  mkdir -p "$out" && chmod 700 "$out" || die "cannot make $out"
+  while IFS= read -r f; do
+    rel="${f#"$from/"}"; rel="${rel%.enc}"
+    mkdir -p "$out/$(dirname "$rel")"
+    open_stream "$f" > "$out/$rel" || die "$rel does not open with BACKUP_KEY_FILE (another key?)"
+  done < <(find "$from" -type f -name '*.enc')
+  if [[ -f "$out/config.tar.gz" ]]; then
+    tar -xzf "$out/config.tar.gz" -C "$out" && rm -f "$out/config.tar.gz" || die "config.tar.gz does not unpack"
+  fi
+  grep -v '^encrypted: ' "$from/MANIFEST" > "$out/MANIFEST"
+  (cd "$out" && find . -type f ! -name SHA256SUMS -printf '%P\n' | sort | xargs -d '\n' sha256sum > SHA256SUMS)
 }
 
 latest_backup() { ls -1d "$BACKUP_DIR"/20[0-9][0-9]-*_* 2>/dev/null | sort | tail -n1; }
@@ -268,11 +320,30 @@ EOF
   exit 0
 fi
 
+# ============================================================================ open
+if [[ $ACTION == open ]]; then
+  [[ -d "$FROM" ]] || die "no backup at $FROM"
+  is_encrypted "$FROM" || die "$FROM is not encrypted: use it as it is"
+  [[ -n "$OPEN_TO" ]] || die "--open needs --to OUT"
+  [[ ! -e "$OPEN_TO" || -z "$(ls -A "$OPEN_TO" 2>/dev/null)" ]] || die "$OPEN_TO is not empty"
+  verify_dir "$FROM" || die "the backup does not verify"
+  open_backup "$FROM" "$OPEN_TO"
+  say "  opened: $OPEN_TO ($(wc -l < "$OPEN_TO/SHA256SUMS") files); remove it when done, it holds every secret of the stack"
+  exit 0
+fi
+
 # ========================================================================= restore
 if [[ $ACTION == restore ]]; then
   [[ -n "$FROM" && -d "$FROM" ]] || die "pass --from <backup directory>"
   FROM="$(cd "$FROM" && pwd)"
   verify_dir "$FROM" || die "the backup does not verify; not restoring from it"
+  if is_encrypted "$FROM"; then
+    # Restored from a plain copy beside it, removed however the restore ends.
+    PLAIN="$(mktemp -d "$(dirname "$FROM")/.restore-XXXXXX")" || die "cannot make a folder to open the backup in"
+    trap 'rm -rf "$PLAIN"' EXIT
+    rmdir "$PLAIN" && open_backup "$FROM" "$PLAIN"
+    FROM="$PLAIN"
+  fi
   "$ENGINE" image inspect "$HELPER" >/dev/null 2>&1 || die "$HELPER_MISSING"
   if "$ENGINE" compose ps -q 2>/dev/null | grep -q .; then
     die "the stack is running. Stop it first: $ENGINE compose down   (volumes are kept)"
@@ -339,6 +410,14 @@ command -v "$ENGINE" >/dev/null || die "$ENGINE not found"
 [[ -f .env ]] || die "no .env in $ROOT"
 check_keep
 own_dir "$BACKUP_DIR"
+if [[ -n "$KEY_FILE" ]]; then
+  need_key "BACKUP_KEY_FILE is set"
+  # Inside deploy/ (config/ is copied) or BACKUP_DIR, the key would travel with the backups it opens.
+  key_at="$(readlink -f "$KEY_FILE")"
+  for apart in "$ROOT" "$BACKUP_DIR" ${COPY_DIR:+"$COPY_DIR"}; do
+    [[ "$key_at" == "$(readlink -f "$apart")"/* ]] && die "BACKUP_KEY_FILE ($KEY_FILE) is inside $apart: it would travel with the backups it opens. Keep it apart (/root, a vault)."
+  done
+fi
 exec 9>"$BACKUP_DIR/.backup.lock"
 flock -n 9 || die "another backup is running"
 
@@ -441,6 +520,18 @@ for vol in $(compose_volumes); do
   fi
 done
 
+# ---- 3b. encrypted, with BACKUP_KEY_FILE ---------------------------------------------
+ENCRYPTED=""
+if [[ -n "$KEY_FILE" ]]; then
+  say "==> encrypting each file (AES-256, key $(key_id))"
+  if tar -czf "$OUT/config.tar.gz" -C "$OUT" config && rm -rf "$OUT/config"; then
+    while IFS= read -r f; do seal_file "$f" || fail "encrypting ${f#"$OUT/"}"; done < <(find "$OUT" -type f -name '*.gz')
+    ENCRYPTED="aes-256-cbc, pbkdf2 sha256 200000 rounds; key BACKUP_KEY_FILE, sha256 $(key_id)"
+  else
+    fail "config/ into config.tar.gz"
+  fi
+fi
+
 # ---- 4. manifest, checksums, verify ----------------------------------------------
 {
   echo "backup: $STAMP"
@@ -452,6 +543,7 @@ done
   echo "include logs: $INCLUDE_LOGS"
   echo "engine: $ENGINE"
   echo "restore: $ROOT/scripts/backup.sh$([[ $ENGINE == podman ]] && echo " --podman") --restore --from $OUT [--with-config]"
+  [[ -n "$ENCRYPTED" ]] && echo "encrypted: $ENCRYPTED"
 } > "$OUT/MANIFEST"
 (cd "$OUT" && find . -type f ! -name SHA256SUMS ! -name backup.log ! -name RESULT ! -name .restore-psql.log -printf '%P\n' | sort | xargs -d '\n' sha256sum > SHA256SUMS)
 if verify_dir "$OUT"; then say "==> verified: $(wc -l < "$OUT/SHA256SUMS") files match their checksums"; else fail "verification"; fi

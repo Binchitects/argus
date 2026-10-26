@@ -108,9 +108,23 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<BotThread> BotThreads => Set<BotThread>();
     public DbSet<PushSubscription> PushSubscriptions => Set<PushSubscription>();
 
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
+        // A model for each files' key: their converters seal with it.
+        optionsBuilder.ReplaceService<Microsoft.EntityFrameworkCore.Infrastructure.IModelCacheKeyFactory, FileKeyModelCacheKeyFactory>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+        // People's files sealed at rest with the key from APP_KEY (FileSealing); none: stored as they are.
+        var sealer = new FileSealer(Microsoft.EntityFrameworkCore.Infrastructure.AccessorExtensions.GetService<Microsoft.EntityFrameworkCore.Infrastructure.IDbContextOptions>(this)
+            .FindExtension<FileKeyExtension>()?.Key);
+        var files = new Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<byte[], byte[]>(v => sealer.Seal(v), v => sealer.Open(v));
+        var maybeFiles = new Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<byte[]?, byte[]?>(v => v == null ? null : sealer.Seal(v), v => v == null ? null : sealer.Open(v));
+        builder.Entity<ChatAttachment>().Property(a => a.Data).HasConversion(maybeFiles);
+        builder.Entity<ChatAttachment>().Property(a => a.Sound).HasConversion(maybeFiles);
+        builder.Entity<ChatAttachment>().Property(a => a.Text).HasConversion(v => sealer.SealText(v), v => sealer.OpenText(v));
+        builder.Entity<AttachmentPage>().Property(p => p.Data).HasConversion(files);
+        builder.Entity<Decks.DeckTemplate>().Property(t => t.Data).HasConversion(files);
         builder.UseOpenIddict<Guid>();
 
         builder.Entity<Setting>(e =>

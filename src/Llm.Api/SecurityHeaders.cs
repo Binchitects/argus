@@ -8,8 +8,10 @@ public static class SecurityHeaders
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; " +
         "font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'";
 
-    public static IApplicationBuilder UseSecurityHeaders(this IApplicationBuilder app) =>
-        app.Use(async (context, next) =>
+    public static IApplicationBuilder UseSecurityHeaders(this IApplicationBuilder app)
+    {
+        var hsts = app.ApplicationServices.GetRequiredService<Microsoft.Extensions.Options.IOptions<Operations.StackOptions>>().Value.Hsts;
+        return app.Use(async (context, next) =>
         {
             context.Response.OnStarting(() =>
             {
@@ -26,12 +28,13 @@ public static class SecurityHeaders
                 h["Cross-Origin-Opener-Policy"] = "same-origin";
                 if (context.Request.IsHttps)
                 {
-                    // No HSTS: with the stack's own CA, a browser that has not trusted it yet must still
-                    // be able to click through the warning. max-age=0 clears a policy kept from before.
-                    h.StrictTransportSecurity = "max-age=0";
+                    // As Traefik sends it (HSTS_SECONDS). Off with the stack's own CA: a browser that has not trusted it yet
+                    // must still be able to click through the warning, and max-age=0 clears a policy kept from before.
+                    h.StrictTransportSecurity = hsts > 0 ? $"max-age={hsts}; includeSubDomains" : "max-age=0";
                 }
                 return Task.CompletedTask;
             });
             await next(context);
         });
+    }
 }

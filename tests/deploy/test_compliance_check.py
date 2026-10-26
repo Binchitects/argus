@@ -99,14 +99,33 @@ class AppChecks(unittest.TestCase):
         self.assertEqual("unknown", missing[0][1])
 
 
+class Disk(unittest.TestCase):
+    def answers(self, source, types):
+        def run(args, **_):
+            out = source if args[0] == "findmnt" else "\n".join(types)
+            return mock.Mock(stdout=out)
+        return mock.patch.object(cc.subprocess, "run", run)
+
+    def test_The_data_on_a_dm_crypt_device_is_encrypted_and_otherwise_says_what_to_do(self):
+        with self.answers("/dev/mapper/data", ["crypt", "part", "disk"]):
+            self.assertEqual(cc.OK, cc.check_disk("/srv/arena")[0])
+        with self.answers("/dev/nvme0n1p2", ["part", "disk"]):
+            state, detail = cc.check_disk("/srv/arena")
+            self.assertEqual(cc.WARN, state)
+            self.assertIn("LUKS", detail)
+        with self.answers("tank/arena", []):
+            self.assertEqual(cc.WARN, cc.check_disk("/srv/arena")[0])
+        self.assertEqual(cc.UNKNOWN, cc.check_disk("")[0])
+
+
 class ExitCode(unittest.TestCase):
     def run_with(self, states, *args):
         def fake(state):
             return lambda *_: (state, "said")
 
-        patches = [mock.patch.object(cc, f"check_{n}", fake(s)) for n, s in zip(("tls", "headers", "csrf", "cookies"), states)]
+        patches = [mock.patch.object(cc, f"check_{n}", fake(s)) for n, s in zip(("tls", "headers", "csrf", "disk", "cookies"), states)]
         patches += [mock.patch.object(cc, "sign_in", lambda _: ("llm_session=x", None)),
-                    mock.patch.object(cc, "app_checks", lambda *_: [("app:backups", states[4], "said")]),
+                    mock.patch.object(cc, "app_checks", lambda *_: [("app:backups", states[5], "said")]),
                     mock.patch.object(cc.Stack, "req", lambda *_a, **_k: (204, "", headers({}))),
                     mock.patch("sys.argv", ["compliance-check.py", *args])]
         for p in patches:
@@ -120,16 +139,16 @@ class ExitCode(unittest.TestCase):
                 p.stop()
 
     def test_A_failed_check_fails_the_run_and_warnings_only_with_strict(self):
-        self.assertEqual(0, self.run_with(["ok", "warn", "ok", "ok", "unknown"])[0])
-        self.assertEqual(1, self.run_with(["ok", "warn", "ok", "ok", "unknown"], "--strict")[0])
-        code, said = self.run_with(["ok", "ok", "ok", "ok", "fail"])
+        self.assertEqual(0, self.run_with(["ok", "warn", "ok", "ok", "ok", "unknown"])[0])
+        self.assertEqual(1, self.run_with(["ok", "warn", "ok", "ok", "ok", "unknown"], "--strict")[0])
+        code, said = self.run_with(["ok", "ok", "ok", "ok", "ok", "fail"])
         self.assertEqual(1, code)
         self.assertIn("failing: app:backups", said)
 
     def test_The_ids_are_those_controls_yaml_names(self):
-        self.assertEqual(("tls", "headers", "cookies", "csrf"), cc.LIVE_CHECKS)
-        _, said = self.run_with(["ok"] * 5, "--json")
-        self.assertEqual(["live:tls", "live:headers", "live:csrf", "live:cookies", "app:backups"], [r["id"] for r in json.loads(said)])
+        self.assertEqual(("tls", "headers", "cookies", "csrf", "disk"), cc.LIVE_CHECKS)
+        _, said = self.run_with(["ok"] * 6, "--json")
+        self.assertEqual(["live:tls", "live:headers", "live:csrf", "live:disk", "live:cookies", "app:backups"], [r["id"] for r in json.loads(said)])
 
 
 if __name__ == "__main__":

@@ -268,6 +268,8 @@ ingress:
   className: ""
   # A TLS Secret (kubernetes.io/tls) for DOMAIN, gateway.DOMAIN and argus.DOMAIN (a wildcard, or one with the three names).
   tlsSecret: arena-tls
+  # Strict-Transport-Security's max-age the app sends: a year, for a certificate browsers trust; 0 while they do not.
+  hstsSeconds: 31536000
   # Keeps each browser on one app replica (its answers stream from there): the NGINX controller's
   # cookie affinity and Traefik's sticky cookie are both set; another controller needs its own.
   sticky: true

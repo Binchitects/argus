@@ -69,8 +69,12 @@ if [[ -z "$FROM" ]]; then
 fi
 [[ -d "$FROM" ]] || die "no backup at $FROM"
 FROM="$(cd "$FROM" && pwd)"
-[[ -f "$FROM/config/.env" ]] || die "$FROM has no config/.env: its secrets are needed to open its data"
-[[ -f "$FROM/postgres.sql.gz" ]] || die "$FROM has no postgres.sql.gz: nothing to check people and chats against"
+# An encrypted backup (BACKUP_KEY_FILE) is checked through its plain copy, opened in the work folder and removed with it.
+ENCRYPTED=0; grep -q '^encrypted: ' "$FROM/MANIFEST" 2>/dev/null && ENCRYPTED=1
+if [[ $ENCRYPTED -eq 0 ]]; then
+  [[ -f "$FROM/config/.env" ]] || die "$FROM has no config/.env: its secrets are needed to open its data"
+  [[ -f "$FROM/postgres.sql.gz" ]] || die "$FROM has no postgres.sql.gz: nothing to check people and chats against"
+fi
 APP_IMAGE="$IMAGES_FROM-app" WEB_IMAGE="$IMAGES_FROM-web"
 IMAGES="$APP_IMAGE $WEB_IMAGE $(sed -n 's/^[[:space:]]*image:[[:space:]]*//p' "$ROOT/docker-compose.yml" | grep -E '^(traefik|pgvector|ghcr.io/berriai/litellm)' | tr '\n' ' ')python:3.13-slim"
 
@@ -86,6 +90,10 @@ cleanup() {
   rm -rf "$WORK"
 }
 trap cleanup EXIT
+if [[ $ENCRYPTED -eq 1 ]]; then
+  "$ROOT/scripts/backup.sh" --open "$FROM" --to "$WORK/opened" >/dev/null || die "$FROM is encrypted and does not open with BACKUP_KEY_FILE"
+  FROM="$WORK/opened"
+fi
 # The backup's .env: the same secrets its data was written with. The rest is the throwaway's own.
 cp "$FROM/config/.env" "$TP_ENV" && chmod 600 "$TP_ENV"
 tp_env_set HTTPS_PORT "$PORT"

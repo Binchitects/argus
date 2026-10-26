@@ -635,6 +635,29 @@ as another user (the folder is `0700`), or list the app's volumes without
 then says the backups are not seen. Backups taken by a user the app is not, it
 cannot read, and says so.
 
+**Encrypted backups.** With `BACKUP_KEY_FILE` in `.env`, each file of a backup
+(the database dump, every volume's archive, and `config/`, `.env` included, as
+`config.tar.gz.enc`) is encrypted with AES-256, its key stretched from the key
+file by PBKDF2; `MANIFEST` says so and names the key by its SHA-256, never the
+key. Make the key once, and keep a copy where the backups are not (the
+company's vault): without it no backup opens.
+
+```bash
+sudo sh -c 'openssl rand -base64 48 > /root/arena-backup.key && chmod 600 /root/arena-backup.key'
+```
+
+A key inside `deploy/` or the backups' folders is refused (it would travel with
+the backups it opens). `--verify` opens each file with the key, or checks the
+checksums alone where the key is not; `--restore` opens the backup into a
+private folder beside it and removes it after; `scripts/backup.sh --open DIR
+--to OUT` makes a plain copy to look into (remove it when done: it holds every
+secret of the stack); `scripts/restore-test.sh` opens an encrypted backup by
+itself. Admin → Compliance shows whether the newest backup is encrypted.
+pgBackRest (below) encrypts its repository with its own `repo1-cipher-type` and
+`repo1-cipher-pass` (`PGBACKREST_REPO1_CIPHER_TYPE` and
+`PGBACKREST_REPO1_CIPHER_PASS` in the postgres service's environment), set
+before its first backup.
+
 Docker makes a folder it mounts root's when the folder is not there yet, as
 when the stack starts (an upgrade, say) before the first backup into a new
 `BACKUP_DIR`. `scripts/backup.sh`, run as you, takes such a folder back while

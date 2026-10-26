@@ -26,7 +26,8 @@ public sealed record FolderSize(string Name, long Bytes);
 /// <summary>A backup (one folder of scripts/backup.sh) and how it ended.</summary>
 /// <param name="Name">When it began, in the host's local time: a zone the app does not know.</param>
 /// <param name="At">When it began, as its MANIFEST says in UTC; null for a backup from before scripts/backup.sh wrote that.</param>
-public sealed record Backup(string Name, long Bytes, DateTimeOffset? At, string? Result, bool Latest);
+/// <param name="Encrypted">Its MANIFEST says it is encrypted (BACKUP_KEY_FILE).</param>
+public sealed record Backup(string Name, long Bytes, DateTimeOffset? At, string? Result, bool Latest, bool Encrypted = false);
 
 /// <summary>The backups folder as the app sees it (read only).</summary>
 /// <param name="State">ok, missing (not mounted) or unreadable (another user's).</param>
@@ -273,7 +274,7 @@ public sealed partial class StoragePlaces(AppDbContext db, ModelLibrary library,
             }
             if (e is DirectoryInfo d && BackupName().IsMatch(d.Name))
             {
-                backups.Add(new Backup(d.Name, cache.Bytes(d.FullName), Started(d.FullName), Result(d.FullName), d.Name == latest));
+                backups.Add(new Backup(d.Name, cache.Bytes(d.FullName), Started(d.FullName), Result(d.FullName), d.Name == latest, Encrypted(d.FullName)));
             }
             else
             {
@@ -309,6 +310,19 @@ public sealed partial class StoragePlaces(AppDbContext db, ModelLibrary library,
         DateTime.TryParseExact(name, "yyyy-MM-dd_HHmmss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var at) ? at : null;
 
     /// <summary>When a backup began, from the "started:" line (UTC) scripts/backup.sh writes in its MANIFEST.</summary>
+    private static bool Encrypted(string dir)
+    {
+        try
+        {
+            var path = Path.Combine(dir, "MANIFEST");
+            return File.Exists(path) && File.ReadLines(path).Any(l => l.StartsWith("encrypted: ", StringComparison.Ordinal));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     private static DateTimeOffset? Started(string dir)
     {
         const string Key = "started: ";

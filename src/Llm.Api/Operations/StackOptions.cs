@@ -8,6 +8,12 @@ public sealed class StackOptions
 
     /// <summary>Set ("letsencrypt") when Traefik gets its certificates from Let's Encrypt (ACME_EMAIL): Overview says who issued the one served.</summary>
     public string? Acme { get; set; }
+
+    /// <summary>HSTS_SECONDS: Strict-Transport-Security's max-age; null: a year with Let's Encrypt, none (0) with your own CA.</summary>
+    public int? HstsSeconds { get; set; }
+
+    /// <summary>The max-age the stack sends, as Traefik works it out (config/traefik/routes.yml).</summary>
+    public int Hsts => HstsSeconds ?? (string.IsNullOrEmpty(Acme) ? 0 : 31_536_000);
 }
 
 /// <summary>Configuration section "Argus": where its admin surface is and the operator token.</summary>

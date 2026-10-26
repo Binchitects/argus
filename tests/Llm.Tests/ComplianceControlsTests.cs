@@ -151,7 +151,7 @@ public sealed partial class ComplianceControlsTests(AppFixture app)
             var name = started.ToString("yyyy-MM-dd_HHmmss", System.Globalization.CultureInfo.InvariantCulture);
             Directory.CreateDirectory(Path.Combine(backups, name));
             File.WriteAllText(Path.Combine(backups, name, "RESULT"), "ok\n");
-            File.WriteAllText(Path.Combine(backups, name, "MANIFEST"), $"backup: {name}\nstarted: {started:yyyy-MM-ddTHH:mm:ssZ}\n");
+            File.WriteAllText(Path.Combine(backups, name, "MANIFEST"), $"backup: {name}\nstarted: {started:yyyy-MM-ddTHH:mm:ssZ}\nencrypted: aes-256-cbc, pbkdf2 sha256 200000 rounds; key BACKUP_KEY_FILE, sha256 0123456789abcdef\n");
             await using var f = app.Create(app.ConnectionStringFor("cmp_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?>
             {
                 ["Auth:DataKey"] = "a-data-key-for-compliance-tests",

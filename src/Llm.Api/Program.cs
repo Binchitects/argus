@@ -19,9 +19,12 @@ if (!builder.Environment.IsDevelopment())
 }
 
 var connectionString = DatabaseSettings.ConnectionString(builder.Configuration);
+// People's files sealed at rest with a key from APP_KEY (Llm.Core's FileSealing); without APP_KEY they are stored as they are.
+var fileKey = builder.Configuration["Auth:DataKey"] is { Length: > 0 } dataKey ? FileSealer.Derive(dataKey) : null;
 builder.Services.AddDbContext<AppDbContext>((sp, o) =>
 {
     o.UseNpgsql(connectionString);
+    ((Microsoft.EntityFrameworkCore.Infrastructure.IDbContextOptionsBuilderInfrastructure)o).AddOrUpdateExtension(new FileKeyExtension(fileKey));
     o.UseOpenIddict<Guid>();
     // The bell's news is pushed to people's devices too, whoever saves it.
     o.AddInterceptors(sp.GetRequiredService<Llm.Api.Notifications.PushOnSave>());

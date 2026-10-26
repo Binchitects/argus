@@ -122,6 +122,21 @@ answered, and every step is in the audit log (`privacy.*`). The check
   the chain forbids changing them), and when the backups taken before let go of
   the rest.
 
+## Encryption
+
+| What | How | Checked by |
+|---|---|---|
+| Traffic from outside | TLS 1.2 and 1.3 only; for 1.2 only ciphers with forward secrecy and authenticated encryption (Traefik's TLS options in `config/traefik/routes.yml`) | `live:tls` |
+| Browsers kept to https | HSTS for a year with Let's Encrypt's certificate; with your own CA, `HSTS_SECONDS` in `.env` once every browser trusts it | `live:headers` |
+| Secrets at rest | the signing keys and settings' secrets, encrypted with `APP_KEY` | **Secrets encrypted at rest** |
+| People's files at rest | each file's bytes, a video's sound, a document's drawn pages and words, and deck templates: AES-256-GCM under a key from `APP_KEY`, before they reach the database; files stored before are sealed by a job within the hour | **People's files encrypted at rest** |
+| Backups | each file AES-256 with `BACKUP_KEY_FILE`, kept apart ([deployment.md](../deployment.md#backups-and-restore)) | **A recent backup that ended well** |
+| The host's disks | the company's part: LUKS (or the storage's own encryption) under `DATA_DIR`, `MODELS_DIR` and the backups | `live:disk` |
+
+Chat messages and memories are not sealed one by one (search reads them in the
+database): the host's disk encryption covers them, as it covers the database's
+own files.
+
 ## How long things are kept
 
 Admin → Compliance lists how long each kind of data and record is kept, and

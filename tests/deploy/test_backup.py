@@ -147,6 +147,81 @@ class PodmanTests(unittest.TestCase):
         self.assertEqual(self.kept(), ["docker-compose.yml"])
 
 
+class EncryptedTests(unittest.TestCase):
+    """BACKUP_KEY_FILE: every file of a backup encrypted, opened only with its key, the key kept apart from the backups."""
+
+    def setUp(self):
+        self.s = Sandbox()
+        # Outside deploy/ and the backups, as it must be.
+        self.key = self.s.dir / "backup.key"
+        self.key.write_text("a key for the tests, as openssl rand -base64 48 makes one\n")
+        self.key.chmod(0o600)
+
+    def tearDown(self):
+        self.s.cleanup()
+
+    def backup(self) -> "os.PathLike[str]":
+        [name] = [d for d in os.listdir(self.s.deploy / "backups") if re.fullmatch(r"20\d\d-\d\d-\d\d_\d{6}", d)]
+        return self.s.deploy / "backups" / name
+
+    def test_Every_file_is_encrypted_the_MANIFEST_names_the_key_without_it_and_it_opens_only_with_that_key(self):
+        self.s.write(".env", f"BACKUP_KEY_FILE={self.key}\nAPP_KEY=the-stack-secret\n")
+        self.s.run("backup.sh")
+        d = self.backup()
+        files = sorted(str(p.relative_to(d)) for p in d.rglob("*") if p.is_file())
+        self.assertIn("config.tar.gz.enc", files)
+        self.assertFalse((d / "config").exists(), files)
+        self.assertFalse([f for f in files if f.endswith(".gz")], files)
+        manifest = (d / "MANIFEST").read_text()
+        self.assertRegex(manifest, r"(?m)^encrypted: aes-256-cbc, pbkdf2 sha256 200000 rounds; key BACKUP_KEY_FILE, sha256 [0-9a-f]{16}$")
+        self.assertNotIn("a key for the tests", manifest)
+        self.assertNotIn(b"the-stack-secret", (d / "config.tar.gz.enc").read_bytes())
+
+        # The fake engine's dump fails (and a backup with a broken dump does not verify): a whole one, encrypted the same way.
+        subprocess.run(["bash", "-c", f"""set -o pipefail
+            printf -- '-- a dump\\n-- PostgreSQL database cluster dump complete\\n--\\n' | gzip | openssl enc -e -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 -salt \\
+              -pass file:{self.key} -out {d}/postgres.sql.gz.enc
+            cd {d} && find . -type f ! -name SHA256SUMS ! -name backup.log ! -name RESULT -printf '%P\\n' | sort | xargs -d '\\n' sha256sum > SHA256SUMS"""], check=True)
+        verified = self.s.run("backup.sh", "--verify", str(d))
+        self.assertEqual(0, verified.returncode, verified.stdout + verified.stderr)
+        out = self.s.dir / "opened"
+        opened = self.s.run("backup.sh", "--open", str(d), "--to", str(out))
+        self.assertEqual(0, opened.returncode, opened.stdout + opened.stderr)
+        self.assertIn("APP_KEY=the-stack-secret", (out / "config" / ".env").read_text())
+        self.assertNotIn("encrypted:", (out / "MANIFEST").read_text())
+        self.assertEqual(0, self.s.run("backup.sh", "--verify", str(out)).returncode)
+
+        # Another key opens nothing.
+        other = self.s.dir / "other.key"
+        other.write_text("not the key\n")
+        self.s.write(".env", f"BACKUP_KEY_FILE={other}\n")
+        wrong = self.s.run("backup.sh", "--open", str(d), "--to", str(self.s.dir / "wrong"))
+        self.assertNotEqual(0, wrong.returncode)
+        self.assertIn("does not open with BACKUP_KEY_FILE", wrong.stdout + wrong.stderr)
+
+        # Without a key here, the checksums still say whether it is whole.
+        self.s.write(".env", "")
+        unkeyed = self.s.run("backup.sh", "--verify", str(d))
+        self.assertEqual(0, unkeyed.returncode)
+        self.assertIn("encrypted; the checksums match", unkeyed.stdout)
+
+    def test_A_key_inside_deploy_or_the_backups_is_refused_before_anything_is_taken(self):
+        for inside in (self.s.deploy / "config" / "backup.key", self.s.deploy / "backups" / "backup.key"):
+            inside.parent.mkdir(parents=True, exist_ok=True)
+            inside.write_text("a key\n")
+            self.s.write(".env", f"BACKUP_KEY_FILE={inside}\n")
+            done = self.s.run("backup.sh")
+            self.assertNotEqual(0, done.returncode)
+            self.assertIn("would travel with the backups it opens", done.stderr)
+            self.assertFalse([d for d in os.listdir(self.s.deploy / "backups") if re.fullmatch(r"20\d\d-.*", d)])
+
+    def test_A_key_that_cannot_be_read_stops_the_backup(self):
+        self.s.write(".env", f"BACKUP_KEY_FILE={self.s.dir / 'missing.key'}\n")
+        done = self.s.run("backup.sh")
+        self.assertNotEqual(0, done.returncode)
+        self.assertIn("cannot be read", done.stderr)
+
+
 def real_compose() -> str | None:
     """The host's docker, when it has Compose: `docker compose config` only reads files."""
     docker = shutil.which("docker")

@@ -41,6 +41,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         ("backups", "A recent backup that ended well"),
         ("certificate", "The site's certificate"),
         ("data-key", "Secrets encrypted at rest"),
+        ("files-sealed", "People's files encrypted at rest"),
         ("access-review", "Privileged access was reviewed"),
         ("data-requests", "People's data requests answered in time"),
     ];
@@ -67,6 +68,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
                 "backups" => Backups(),
                 "certificate" => await CertificateAsync(ct),
                 "data-key" => DataKey(),
+                "files-sealed" => await FilesSealedAsync(ct),
                 "access-review" => await AccessReviewAsync(ct),
                 "data-requests" => await DataRequestsAsync(ct),
                 _ => (Unknown, "No such check."),
@@ -232,8 +234,12 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
             return (Fail, report.Backups.Count == 0 ? "No backup yet: run scripts/backup.sh on a schedule." : "No backup ended well: see the newest one's log.");
         }
         var age = clock.GetUtcNow() - good.At!.Value;
-        var said = $"The newest that ended well is {good.Name}, {Span(age)} old; {report.Backups.Count} kept.";
-        return age <= BackupDue ? (Ok, said) : (age <= BackupStale ? Warn : Fail, $"{said} Backups are expected every day.");
+        var said = $"The newest that ended well is {good.Name}, {Span(age)} old{(good.Encrypted ? ", encrypted" : "")}; {report.Backups.Count} kept.";
+        if (age > BackupDue)
+        {
+            return (age <= BackupStale ? Warn : Fail, $"{said} Backups are expected every day.");
+        }
+        return good.Encrypted ? (Ok, said) : (Warn, $"{said} It is not encrypted, and it holds every secret of the stack: set BACKUP_KEY_FILE (scripts/backup.sh --help).");
     }
 
     private async Task<(string, string)> CertificateAsync(CancellationToken ct)
@@ -293,6 +299,19 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
             return (Warn, $"{soon.Count} due within a week, the first {soon[0].Person}'s {soon[0].Kind} by {soon[0].DueAt:yyyy-MM-dd}.");
         }
         return (Ok, open.Count == 0 ? $"None waiting; {answered} answered." : $"{open.Count} waiting, the first due {open[0].DueAt:yyyy-MM-dd}; {answered} answered.");
+    }
+
+    /// <summary>Every file's bytes sealed with the key from APP_KEY (the sealing job does those stored before).</summary>
+    private async Task<(string, string)> FilesSealedAsync(CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(auth.CurrentValue.DataKey))
+        {
+            return (Fail, "APP_KEY is not set: people's files are stored as they are.");
+        }
+        var left = await FileSealingJob.UnsealedAsync(db, ct);
+        return left == 0
+            ? (Ok, "Every file, its sound and its drawn pages are encrypted with AES-256-GCM under a key from APP_KEY.")
+            : (Warn, $"{left} files stored before are not sealed yet: the sealing job seals them within the hour.");
     }
 
     private (string, string) DataKey() => string.IsNullOrEmpty(auth.CurrentValue.DataKey)

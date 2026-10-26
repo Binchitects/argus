@@ -20,6 +20,7 @@ import http.cookiejar
 import json
 import socket
 import ssl
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -29,7 +30,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 # What this script checks from outside; the guard test reads this list.
-LIVE_CHECKS = ("tls", "headers", "cookies", "csrf")
+LIVE_CHECKS = ("tls", "headers", "cookies", "csrf", "disk")
 
 OK, WARN, FAIL, UNKNOWN = "ok", "warn", "fail", "unknown"
 
@@ -85,6 +86,23 @@ def handshake(stack, version):
         return False, e.reason or str(e)
 
 
+def weak_cipher(stack):
+    """Whether TLS 1.2 is agreed with a cipher lacking forward secrecy or authenticated encryption (RSA key exchange, CBC)."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    ctx.minimum_version = ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+    try:
+        ctx.set_ciphers("AES128-SHA:AES256-SHA:AES128-GCM-SHA256:ECDHE-RSA-AES128-SHA:ECDHE-RSA-AES256-SHA:@SECLEVEL=0")
+    except ssl.SSLError:
+        return None
+    try:
+        with socket.create_connection((stack.domain, stack.port), timeout=10) as raw, ctx.wrap_socket(raw, server_hostname=stack.domain) as tls:
+            return tls.cipher()[0]
+    except ssl.SSLError:
+        return None
+
+
 def check_tls(stack):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
@@ -104,11 +122,14 @@ def check_tls(stack):
         newest = f"{tls.version()} {tls.cipher()[0]}"
     if taken:
         return FAIL, f"The server still takes {' and '.join(taken)}; it agrees to {newest}."
+    weak = weak_cipher(stack)
+    if weak:
+        return FAIL, f"TLS 1.2 is agreed with {weak}, which lacks forward secrecy or authenticated encryption: set Traefik's TLS options (config/traefik/routes.yml)."
     if not good:
         return FAIL, f"TLS 1.2 is refused ({said}); it agrees to {newest}."
     if unknown:
         return UNKNOWN, f"This machine cannot offer {' and '.join(unknown)} to try them; the server agrees to {newest} and TLS 1.2 ({said})."
-    return OK, f"TLS 1.0 and 1.1 refused; TLS 1.2 ({said}) and {newest}."
+    return OK, f"TLS 1.0 and 1.1 refused, and ciphers without forward secrecy; TLS 1.2 ({said}) and {newest}."
 
 
 REQUIRED = {
@@ -138,6 +159,22 @@ def check_headers(stack):
     if not hsts or "max-age=0" in hsts.replace(" ", ""):
         return WARN, said + " No HSTS (Strict-Transport-Security): with the stack's own CA it is left off so a browser can still be told to trust it."
     return OK, said + f" HSTS: {hsts}."
+
+
+def check_disk(data_dir):
+    """Whether the stack's data (DATA_DIR) is on an encrypted block device (LUKS, dm-crypt), as the host says."""
+    if not data_dir:
+        return UNKNOWN, "DATA_DIR is not in .env."
+    try:
+        source = subprocess.run(["findmnt", "-no", "SOURCE", "--target", data_dir], capture_output=True, text=True, timeout=10).stdout.strip()
+        if not source.startswith("/dev/"):
+            return WARN, f"{data_dir} is on {source or 'an unknown device'}: say how its storage is encrypted (the company's part), or move it to an encrypted disk."
+        chain = subprocess.run(["lsblk", "-s", "-no", "TYPE", source.split("[")[0]], capture_output=True, text=True, timeout=10).stdout.split()
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return UNKNOWN, f"findmnt and lsblk could not say: {e}"
+    if "crypt" in chain:
+        return OK, f"{data_dir} is on {source}, an encrypted block device."
+    return WARN, f"{data_dir} is on {source}, which is not encrypted (no dm-crypt below it): encrypt the host's disks (LUKS), or attest how its storage is."
 
 
 def sign_in(stack):
@@ -203,6 +240,7 @@ def main():
     run("tls", check_tls, stack)
     run("headers", check_headers, stack)
     run("csrf", check_csrf, stack)
+    run("disk", check_disk, env("DATA_DIR"))
     try:
         cookie, problem = sign_in(stack)
     except OSError as e:
