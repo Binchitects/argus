@@ -7,7 +7,7 @@ import { manualDocs, parseDoc } from '@/help/manual'
 import { blank } from '@/pages/chat/live'
 import type { ChatConfig, Message } from '@/pages/chat/types'
 import { fakeApi, type Handler } from '@/test/utils'
-import type { CodeState } from './api'
+import type { CodePlan, CodeState } from './api'
 import { App } from './app'
 import { debug } from './debug/session'
 import { languageServers } from './lsp/servers'
@@ -3044,7 +3044,7 @@ describe('quick open ranking', () => {
   })
 
   it("shows the agent's plan as it changes: each step with what done means, its check and its files, and where Arena shows it", async () => {
-    let plan = {
+    let plan: CodePlan = {
       title: 'Rename the parser', goal: 'parse_frame everywhere', chat: 'c-42',
       steps: [
         { number: 1, title: 'Find the callers', status: 'done', check: 'grep -rn parse src', files: [], dependsOn: [], notes: null, checkResult: 'passed', checkOutput: '0 matches' },
