@@ -1877,8 +1877,12 @@ The person asked (2026-10-26, after v7.2.0) for four Code Arena IDE fixes in
 this release, and for a science lab "where mathematics and chemistry etc
 models live and work". The IDE fixes first:
 
-- Panes moved and rearranged (drag a view to another side, the panel to the
-  right or the bottom, views side by side), kept with the layout.
+- Panes moved and rearranged (done: views dragged in the activity bar and
+  into the panel and back, the side bar left or right with the chat
+  opposite, the panel below the editor or beside it; kept with the layout).
+- A settings button right in the IDE (done: Manage, the gear: Settings,
+  Keyboard Shortcuts, Color Theme, Extensions, the palette, and the model's
+  tools).
 - Files changed by hand show in the IDE and in Changes (done: DiskWatch, Your
   changes).
 - Changes' right-click menu adds to the chat, explains and fixes (done; the
