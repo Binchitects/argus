@@ -15,6 +15,88 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.2.0 (2026-10-26)
+
+Planning and code mode, for long work: the chat and Code Arena propose a plan,
+the person approves it, each step is grounded in the code, checked and
+recorded, and a plan left half done carries on in the next session; and every
+tool becomes a Python function a short program calls many times at once, as
+the person, so a long task keeps its window for what matters.
+
+### :rocket: Epics and highlights
+
+- **Plans you approve, carried out and proved**: Code Arena's `plan` tool is
+  its working state (each step with what done means, its files, what it waits
+  for), kept through compactions, in the IDE's Plan view and on Arena's Plans
+  board. In plan mode the plan is proposed, read again by a sub-agent with
+  fresh eyes, its steps grounded in the code (Argus's change_impact: who uses
+  each symbol, in every repository), then reviewed: approve, approve asking,
+  change a step, another way, or reject. A step whose check is a command is
+  done only once that command passed; a checkpoint before each step lets
+  `/plan undo N` put its files back. `/plan resume` (and `code-arena --plan`)
+  carries a plan an earlier session left on; `run_steps` runs steps that wait
+  for nothing at once, research by sub-agents and changes in git worktrees
+  merged back with their checks
+- **The chat plans too**: for multi-step work of its own it proposes a plan,
+  shown under its answer with Approve, Change a step and Reject; approved, each
+  step shows as it is carried out. The Plans page lists plans in progress
+  first, from chats and from Code Arena
+- **Tools as code** (`run_code`): the model writes a short Python program in
+  the sandbox that calls the chat's tools as functions
+  (`arena.argus.find_symbol(...)`, found with `arena.tools.search`), loops,
+  filters and joins, and only what it prints comes back. Each call runs as the
+  person: their rights, the safeguards, the audit; tools that ask first are
+  called directly. Code Arena has the same module for its own tools, Arena's,
+  Argus's and the person's MCP servers, through a bridge that checks each call
+  as a direct one; agents on Arena MCP (Claude Code, Qwen Code...) take the
+  tools as code at `https://DOMAIN/mcp/code`: `search_tools` and `run_code` in
+  place of every definition
+- **Each model's tools, your way**: Admin → Models → **Tools** on each chat
+  model: direct, as code, or both. Automatic until chosen: direct for the model
+  for small steps and names that say 8B parameters or fewer, as code for the
+  rest; the chat and Code Arena follow it. Questions to the person, plans,
+  memory, the canvas and the browser are always called directly
+- **Measured, and the default follows it**: ten documentation tasks (eight
+  task families and two six-lookup tables) through Arena's own chat.
+  Qwen3.8-27B passed **10 of 10 as code**, 6 with both and 4 direct: as code it
+  looked up every answer (43 lookups from 36 programs), direct it answered
+  from memory; it wrote half as many tokens (10k against 19k) and finished in
+  two thirds of the time, reading more prompt (235k, 70% from the cache).
+  Qwen3-4B passed 1 either way, so small models stay direct
+  ([measurements](docs/measurements/tool-modes.md))
+
+### :sparkles: New features & Enhancements
+
+- Connect your tools: a **Tools as code** switch puts `/mcp/code` in the
+  setups for Claude Code, Qwen Code and other MCP clients
+- `evals/run_tool_modes.py`: the same tasks through Arena's chat with tools
+  direct and as code, the answer key taken from the packs first
+- What's new in 7.2, the tour after the release
+
+### :bug: Bugs fixed
+
+- A background job's failure no longer stops the app: a model timing out in a
+  chat digest restarted it (HttpClient timeouts escaped eleven loops)
+- A step added to a plan already kept (the board's "A new step", the chat's
+  plan_change) no longer fails, and a plan change the chat's Plans tool
+  refused is no longer saved
+- Sub-agents no longer get `run_code`, which had no functions to call for them
+- A program's call of a tool behind an MCP server (Argus, an admin's server)
+  works ("The node already has a parent"), and what a program's calls make
+  (pictures, files) and cost comes with its result
+- Code Arena's image builds have the `arena` module it embeds
+
+### What an upgrade does, and what an admin does after
+
+The migrations add the plans' checks and review and the models' tool modes
+(`model_tool_modes`, empty: every model automatic). Rebuild the sandbox image
+(its runner relays a program's calls). Then, under Admin → Models, look at each
+chat model's **Tools**: a strong model you trust with programs may go as code.
+
+### :warning: Weakened controls
+
+- None.
+
 ## v7.1.0 (2026-10-26)
 
 Compliance, built in and kept: what a company running Arena needs for ISO/IEC

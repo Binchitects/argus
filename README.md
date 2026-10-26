@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-7.1.0-5b8cff">
+  <img alt="version" src="https://img.shields.io/badge/version-7.2.0-5b8cff">
   <img alt="self-hosted" src="https://img.shields.io/badge/self--hosted-on%20your%20GPUs-7c4dff">
   <img alt="offline" src="https://img.shields.io/badge/installs-air--gapped-2ea043">
   <img alt="licence" src="https://img.shields.io/badge/licence-AGPL--3.0%20%7C%20commercial-555">
@@ -90,7 +90,8 @@ same GPUs, with the same rights and budgets as the chat.
 ### 🤖 Agents and apps
 Build agents in Agent Studio, turn a chat into an app, ask questions of your
 data, make a deck, let a browser agent do a task while you watch, and sketch a
-screen that becomes working code.
+screen that becomes working code. For long work the chat proposes a plan you
+approve, and calls its tools from a short program when one call is not enough.
 
 </td>
 </tr>
@@ -145,6 +146,10 @@ That opens an IDE around the agent in your browser, served from your own
 machine. Prefer the terminal? Use `code-arena chat`. Long sessions don't lose
 the thread: big results are set aside, older ones are cleared before anything
 is summarized, and the agent can read every earlier message back by number.
+For long work it plans first: you approve the plan, each step is grounded in
+the code and done only once its check passes, a step can be undone, and the
+next session carries a half-done plan on. Steps that wait for nothing run at
+once, and a short Python program can call its tools many times in one go.
 Windows users run `irm https://your-arena/api/downloads/code-arena/install.ps1 | iex`.
 [Everything Code Arena does →](docs/code-arena.md)
 

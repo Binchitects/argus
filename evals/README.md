@@ -9,6 +9,7 @@ they live outside `tests/` and are run deliberately.
 | `run_hermes_packs.py [pack ...]` | whether the real Hermes CLI answers each loaded pack's question correctly, over MCP, graded on a token from the pack | `hermes-packs-results.json` |
 | `run_code_review.py <url> <token> <file>` | an agentic review of a real source file, closed book against with Argus's tools, printed side by side for a person to judge | stdout |
 | `run_load_test.py --url ... --token ...` | where the single-SQLite index stops scaling: concurrent readers, with and without a writer | `load-test-results.json` |
+| `run_tool_modes.py --models A,B` | the same tasks through Arena's chat with each model's tools direct and as code (run_code): pass, tokens, seconds, calls; the answer key looked up in the packs first | `tool-modes-results.json` |
 
 ## The one rule these exist to enforce
 

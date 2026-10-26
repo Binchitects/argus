@@ -1764,6 +1764,12 @@ sandboxes, backups with restore drills, alerts, and `audit-auth.sh`. The gaps:
 
 ### v7.2 — Planning and code mode: plans the agents make and prove, and tools called from code
 
+Released as v7.2.0 (2026-10-26), every item below built; CHANGELOG.md has what
+it does. Left for later: the graph questions in the tool-modes measurement
+(they need a measured person with GitLab rights), and tools on demand that a
+model in direct mode passes over (it answered from memory instead of loading
+them).
+
 1. **The plan as the agent's working state.** `plan` (make and change)
    instead of Code Arena's to-do list: a goal, and steps each with what
    "done" means (its check), the files it touches, what it waits for, its
@@ -1854,11 +1860,16 @@ sandbox that reaches tools needs a broker that keeps every right and every
     prompt teaches the pattern when code is on. Direct calls stay for one or
     two simple calls.
     *As built:* Admin → Models → Tools; automatic is direct for the model for
-    small steps and names that say 8B or fewer, both for the rest; the chat
-    and Code Arena (its chat config, `toolMode` in config.json last) follow it.
+    small steps and names that say 8B or fewer, as code for the rest (item 14's
+    numbers); the chat and Code Arena (its chat config, `toolMode` in
+    config.json last) follow it.
 14. **Measured before it is the default.** The Argus task families and the
     graph eval in both modes on our own models: tokens in and out, success,
     time. The release says the numbers, and the defaults follow them.
+    *As built:* `evals/run_tool_modes.py`, 8 task families and two six-lookup
+    tables through the chat ([tool-modes.md](measurements/tool-modes.md)):
+    Qwen3.8-27B 10/10 as code, 6/10 both, 4/10 direct; Qwen3-4B 1/10 either
+    way. The graph questions wait for a measured person with GitLab rights.
 
 ### v7.3 — A model of your own
 

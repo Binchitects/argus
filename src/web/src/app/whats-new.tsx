@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ArrowRight, BadgeCheck, ExternalLink, HeartPulse, KeyRound, ShieldCheck, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ClipboardList, ExternalLink, ListChecks, SlidersHorizontal, SquareCode, Terminal, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
@@ -28,37 +28,44 @@ interface Tour {
 }
 
 const latestTour: Tour = {
-  release: '7.1',
-  title: "What's new in Argus Arena 7.1",
+  release: '7.2',
+  title: "What's new in Argus Arena 7.2",
   slides: [
     {
-      icon: ShieldCheck,
-      title: 'Your data, your rights',
-      text: 'Ask for a copy of your data, a correction, its erasure, or that it stops being used, from your account. Each request is answered within a month, and you see where it stands.',
-      to: '/account',
-      action: 'Your data rights',
-    },
-    {
-      icon: KeyRound,
-      title: 'Two-factor where it matters',
-      text: 'Your company can ask for a second factor from everyone, or from the groups that see sensitive data. You set it up once, with an authenticator app, in your account.',
-      to: '/account',
-      action: 'Open your account',
-    },
-    {
-      icon: HeartPulse,
-      title: 'Health and personal data kept in bounds',
-      text: 'Dates of birth, medical record, national and Medicare numbers are found in what you write and send, kept from models outside the company and masked where your company says.',
+      icon: ListChecks,
+      title: 'Plans you approve',
+      text: 'For work of many steps, the chat proposes its plan first: approve it, change a step, or ask for another way. Then each step shows as it is done, and nothing is done that was not checked.',
       to: '/chat',
       action: 'Start a chat',
     },
     {
-      icon: BadgeCheck,
-      title: 'The Compliance center',
-      text: 'ISO 27001, SOC 2, HIPAA and the GDPR: every control with its live check, the company’s part attested, access reviews, data requests and incidents on the law’s clocks, and the evidence in one download.',
-      to: '/admin/compliance',
-      action: 'Open Compliance',
-      permission: 'compliance.read',
+      icon: ClipboardList,
+      title: 'Long work that carries on',
+      text: 'Plans from your chats and from Code Arena on one page, those in progress first: a plan left half done is picked up by the next session, with the checks each step passed.',
+      to: '/plans',
+      action: 'Open Plans',
+    },
+    {
+      icon: SquareCode,
+      title: 'Tools as code',
+      text: 'The chat can write a short program that calls your tools many times at once (every caller of a function, a dozen lookups) and keeps only what matters, so long answers stay focused.',
+      to: '/chat',
+      action: 'Try it in a chat',
+    },
+    {
+      icon: Terminal,
+      title: 'Code Arena plans, proves and runs steps at once',
+      text: 'Plan mode with your review, steps grounded in the code and checked by commands, undone one by one, independent steps run together, and run_code for its own tools. Agents like Claude Code can take your tools as code too.',
+      to: '/setup',
+      action: 'Connect your tools',
+    },
+    {
+      icon: SlidersHorizontal,
+      title: "Each model's tools, your way",
+      text: 'On each chat model: tools direct, as code, or both. Small models call tools directly by default, larger ones get them as code (measured: 10 of 10 lookups against 4 direct); the chat and Code Arena follow your choice.',
+      to: '/admin/models',
+      action: 'Open Models',
+      permission: 'models.read',
     },
   ],
 }
