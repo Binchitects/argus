@@ -241,6 +241,8 @@ export interface CodePlan {
   mode?: string
   /** What a second reading with fresh eyes said of it before its review ('': it held). */
   critique?: string | null
+  /** An earlier session's plan in progress in this folder, when this session has none: it can be carried on here. */
+  resumable?: { title: string; done: number; steps: number; updated: string } | null
 }
 
 export const planQuery = {

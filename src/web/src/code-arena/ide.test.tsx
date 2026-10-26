@@ -3069,6 +3069,21 @@ describe('quick open ranking', () => {
     expect(await screen.findByRole('tab', { name: /parse\.c/ })).toBeInTheDocument()
   })
 
+  it("offers to carry on the plan an earlier session left in progress here", async () => {
+    const { calls } = backend({
+      'GET /api/plan': () => ({ json: { title: '', goal: null, chat: null, steps: [], resumable: { title: 'Big refactor', done: 1, steps: 3, updated: '' } } }),
+      'POST /api/plan/resume': () => ({ json: { said: 'Carried on: "Big refactor" from the session of 2026-10-26 09:00, 1 of 3 steps done.' } }),
+    })
+    renderIde()
+    await openApp()
+    await userEvent.click(screen.getByRole('button', { name: 'Plan' }))
+    const offer = await screen.findByRole('region', { name: 'A plan in progress' })
+    expect(offer).toHaveTextContent('Big refactor, 1 of 3 steps done.')
+    await userEvent.click(within(offer).getByRole('button', { name: 'Carry it on here' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/plan/resume')).toBe(true))
+    expect(await screen.findByText(/Carried on: "Big refactor"/)).toBeInTheDocument()
+  })
+
   it('undoes a step of the plan: its files as before it began, and says so', async () => {
     const plan: CodePlan = {
       title: 'Fix', goal: null, chat: null, review: 'approved',

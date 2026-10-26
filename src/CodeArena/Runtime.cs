@@ -556,6 +556,18 @@ internal sealed partial class Runtime : IAsyncDisposable
         }
         Agent.Session = Session;
         Context.PlanChanged = plan => Session.Plan(plan);
+        if (o.Plan && !o.Resume && !o.Continue)
+        {
+            // code-arena --plan: the plan an earlier session left in progress, carried on in this one.
+            try
+            {
+                Ui.Info(ResumePlan());
+            }
+            catch (PlanError e)
+            {
+                Ui.Warn(e.Message);
+            }
+        }
         Agent.BeforeTurn = TakeInForTurnAsync;
         Agent.AfterTurn = () => Sync?.EndTurn();
         StartSync();
@@ -1219,6 +1231,28 @@ internal sealed partial class Runtime : IAsyncDisposable
             + " What commands changed is not undone. The steps are to do again.";
         Agent.Remember(said);
         return said;
+    }
+
+    /// <summary>A plan an earlier session of this folder left in progress, when this session has none of its own.</summary>
+    public SessionSummary? PlanToResume() =>
+        Context.Plan.IsEmpty ? SessionStore.PlanInProgress(Env.Paths.SessionsDir, Workspace.Root, Session.Id) : null;
+
+    /// <summary>
+    /// /plan resume, code-arena --plan: the plan an earlier session left in progress carried on here, with its progress and
+    /// notes; the agent is told where it stands and to see what that session changed before going on.
+    /// </summary>
+    public string ResumePlan()
+    {
+        if (PlanToResume() is not { } from)
+        {
+            throw new PlanError(Context.Plan.IsEmpty ? "No earlier session of this folder left a plan in progress." : "This session has a plan of its own: /plan shows it.");
+        }
+        SetPlan(from.Plan);
+        var done = from.Plan.Steps.Count(s => s.Status == WorkStep.Done);
+        Agent.Remember($"The plan an earlier session of this folder left in progress ({from.Updated:yyyy-MM-dd HH:mm}) is carried on here, "
+            + $"{done} of {from.Plan.Steps.Count} steps done:\n\n{from.Plan.Text()}\n\n"
+            + "Before going on, see what that session changed (git status, git log, the files of the step that was doing), then carry on from the step that stands next.");
+        return $"Carried on: \"{from.Plan.Title}\" from the session of {from.Updated:yyyy-MM-dd HH:mm}, {done} of {from.Plan.Steps.Count} steps done.";
     }
 
     /// <summary>Whether a check is a command: its first word a program on the PATH, or a script in the project.</summary>

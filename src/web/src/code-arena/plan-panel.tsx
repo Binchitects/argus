@@ -30,6 +30,16 @@ export function PlanPanel({ arena }: { arena: string | null }) {
   const [sending, setSending] = useState(false)
   const p = plan.data
   const proposed = p?.review === 'proposed'
+  /** An earlier session's plan in progress, carried on in this one: the agent is told where it stands. */
+  const resume = async () => {
+    try {
+      toast.success((await api<{ said: string }>('/api/plan/resume', { method: 'POST' })).said)
+    } catch (e) {
+      toast.error(errorMessage(e))
+    } finally {
+      await queryClient.invalidateQueries({ queryKey: planQuery.queryKey })
+    }
+  }
   /** A step undone: its files as before it began (and later steps'), the steps to do again; the agent is told. */
   const undo = async (step: number) => {
     try {
@@ -68,7 +78,19 @@ export function PlanPanel({ arena }: { arena: string | null }) {
         )}
       </div>
       {!p || (p.steps.length === 0 && !p.title) ? (
-        <p className="px-3 text-xs text-muted-foreground">No plan yet: for work of several steps the agent makes one before it starts, and keeps it here as it goes.</p>
+        <div className="grid gap-2 px-3 text-xs">
+          {p?.resumable && (
+            <section aria-label="A plan in progress" className="grid gap-1.5 rounded border p-2">
+              <p>
+                An earlier session left a plan in progress here: <span className="font-medium">{p.resumable.title}</span>, {p.resumable.done} of {p.resumable.steps} steps done.
+              </p>
+              <button type="button" onClick={() => void resume()} className="h-6 w-fit rounded bg-primary px-2 text-primary-foreground">
+                Carry it on here
+              </button>
+            </section>
+          )}
+          <p className="text-muted-foreground">No plan yet: for work of several steps the agent makes one before it starts, and keeps it here as it goes.</p>
+        </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
           <p className="text-sm font-medium">{p.title}</p>

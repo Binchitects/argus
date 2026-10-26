@@ -61,4 +61,20 @@ describe('plans', () => {
     expect(await screen.findByText('Proposed: waiting for its review in Code Arena')).toBeInTheDocument()
     expect(screen.getByText(/approve it to carry it out/)).toBeInTheDocument()
   })
+
+  it('lists the plans in progress first, then those done', async () => {
+    fakeApi(member, {
+      'GET /api/plans': () => ({
+        json: [
+          { id: 'p1', title: 'Launch', conversationId: 'c1', source: 'chat', place: null, updatedAt: '', steps: 2, done: 2 },
+          { id: 'p2', title: 'Rename the parser', conversationId: 'c2', source: 'code', place: 'codec', updatedAt: '', steps: 3, done: 1 },
+        ],
+      }),
+    })
+    renderApp('/plans')
+    const going = await screen.findByRole('list', { name: 'Plans in progress' })
+    expect(within(going).getByRole('link', { name: /Rename the parser/ })).toHaveTextContent('1 of 3 done')
+    expect(within(going).getByText('codec')).toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: 'Plans done' })).getByRole('link', { name: /Launch/ })).toBeInTheDocument()
+  })
 })

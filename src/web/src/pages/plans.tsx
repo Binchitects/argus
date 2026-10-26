@@ -87,24 +87,38 @@ export function PlansPage() {
           Ask a chat with the Plans tool on to plan something: a launch, a migration, a trip.
         </EmptyState>
       ) : (
-        <ul className="grid gap-2" aria-label="Plans">
-          {plans.data.map((p) => (
-            <li key={p.id}>
-              <Link to={`/plans/${p.id}`} className="flex items-center gap-3 rounded-lg border px-4 py-3 text-sm outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring">
-                {p.source === 'code' ? (
-                  <SquareTerminal className="size-4 shrink-0 text-muted-foreground" aria-label="Code Arena's" />
-                ) : (
-                  <ListChecks className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                )}
-                <span className="min-w-0 flex-1 truncate font-medium">{p.title}</span>
-                {p.place && <Badge variant="outline">{p.place}</Badge>}
-                <span className="text-xs text-muted-foreground tabular-nums">
-                  {p.done} of {p.steps} done
-                </span>
-              </Link>
-            </li>
-          ))}
-        </ul>
+        <div className="grid gap-6">
+          {[
+            { label: 'In progress', list: plans.data.filter((p) => p.steps === 0 || p.done < p.steps) },
+            { label: 'Done', list: plans.data.filter((p) => p.steps > 0 && p.done >= p.steps) },
+          ]
+            .filter((g) => g.list.length > 0)
+            .map((g) => (
+              <section key={g.label} aria-label={g.label} className="grid gap-2">
+                <h2 className="text-sm font-medium text-muted-foreground">
+                  {g.label} ({g.list.length})
+                </h2>
+                <ul className="grid gap-2" aria-label={`Plans ${g.label.toLowerCase()}`}>
+                  {g.list.map((p) => (
+                    <li key={p.id}>
+                      <Link to={`/plans/${p.id}`} className="flex items-center gap-3 rounded-lg border px-4 py-3 text-sm outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring">
+                        {p.source === 'code' ? (
+                          <SquareTerminal className="size-4 shrink-0 text-muted-foreground" aria-label="Code Arena's" />
+                        ) : (
+                          <ListChecks className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                        )}
+                        <span className="min-w-0 flex-1 truncate font-medium">{p.title}</span>
+                        {p.place && <Badge variant="outline">{p.place}</Badge>}
+                        <span className="text-xs text-muted-foreground tabular-nums">
+                          {p.done} of {p.steps} done
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))}
+        </div>
       )}
     </>
   )

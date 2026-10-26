@@ -123,6 +123,7 @@ code-arena -p "list the TODOs in src/"  # answer once, print the answer, exit
 git diff | code-arena -p - --output json
 code-arena chat --continue          # carry on with this folder's last session
 code-arena chat --resume            # choose a saved session (or --resume <id>)
+code-arena --plan                   # a new session that carries on the plan an earlier one left in progress
 code-arena chat --web               # your chats in Arena; --web N (or its id) continues one here
 code-arena --version                # the version, the licence and the source
 ```
@@ -1532,6 +1533,17 @@ before each step as it begins: `/plan undo N` (the IDE's **Undo step N**) puts
 the files written since back as they were before step N began (and before
 every step begun after it) and makes those steps to do again; the agent is
 told. What commands changed is not undone.
+
+**A plan outlives its session.** A new session in a folder where an earlier
+one left its plan in progress (a step not done) says so when it starts:
+`/plan resume` (the IDE's Plan view: **Carry it on here**) brings that plan
+into the new session with its progress and notes, and the agent is told
+where it stands and to see what that session changed before going on.
+`code-arena --plan` starts a session that does so at once; with `-p` it runs
+unattended, so the system's scheduler can carry a long task on, a turn at a
+time, for example nightly: `code-arena --plan -p "Carry on with the plan"`
+(a session that finds no plan in progress says so and goes on). Code
+Arena's plans in progress are first on the web's **Plans** page.
 
 The terminal shows the plan each time it changes, and `/plan` shows it as it
 stands. It is kept with the session (`--continue` and `/resume` bring it

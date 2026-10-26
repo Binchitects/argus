@@ -10,6 +10,9 @@ namespace CodeArena;
 internal sealed record SessionSummary(string Id, string File, string? Cwd, DateTime Updated, string Preview, int Messages, string? Conversation = null,
     bool Unlinked = false, int Waiting = 0)
 {
+    /// <summary>Its plan as it last stood.</summary>
+    public WorkPlan Plan { get; init; } = WorkPlan.None;
+
     /// <summary>Arena lacks some of it: never sent, or sent in part (its chat not deleted there).</summary>
     public bool Unsent => Waiting > 0 && !Unlinked;
 }
@@ -884,7 +887,7 @@ internal sealed class SessionStore
                 continue;
             }
             found.Add(new SessionSummary(Path.GetFileNameWithoutExtension(file.Name), file.FullName, scan.Cwd, file.LastWriteTime, scan.Preview, scan.Messages,
-                scan.State.Conversation, scan.State.Unlinked, scan.State.Waiting));
+                scan.State.Conversation, scan.State.Unlinked, scan.State.Waiting) { Plan = scan.State.Plan });
             if (found.Count >= max)
             {
                 break;
@@ -892,6 +895,13 @@ internal sealed class SessionStore
         }
         return found;
     }
+
+    /// <summary>
+    /// The newest session of this folder (other than <paramref name="except"/>) whose plan is in progress: a step not done
+    /// yet. The next session picks it up (/plan resume, code-arena --plan).
+    /// </summary>
+    public static SessionSummary? PlanInProgress(string dir, string cwd, string? except) =>
+        List(dir, cwd, 50).FirstOrDefault(s => s.Id != except && !s.Plan.IsEmpty && s.Plan.Steps.Any(step => step.Status != WorkStep.Done));
 
     private static bool SameFolder(string a, string b) =>
         string.Equals(a, b, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);

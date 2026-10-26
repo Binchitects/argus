@@ -15,6 +15,8 @@ internal sealed class Options
     public bool Print { get; set; }
     public string Output { get; set; } = "text";
     public bool Continue { get; set; }
+    /// <summary>A new session that carries on the plan an earlier session of this folder left in progress.</summary>
+    public bool Plan { get; set; }
     public bool Resume { get; set; }
     public string? ResumeId { get; set; }
     /// <summary>A chat in Arena to continue here (its id, or its number in the list --web prints).</summary>
@@ -119,6 +121,7 @@ internal static partial class Cli
         Options:
           -p, --print [prompt]       one-shot, for scripts; --output json for a JSON answer
           -c, --continue             carry on with this folder's last session
+              --plan                 a new session that carries on the plan an earlier one left in progress here
           -r, --resume [id]          pick a saved session (or give its id)
               --web [N|id]           your chats in Arena; with N or an id, continue that one here
           -m, --model NAME           the model (see code-arena models)
@@ -220,6 +223,9 @@ internal static partial class Cli
                     break;
                 case "-c" or "--continue":
                     o.Continue = true;
+                    break;
+                case "--plan":
+                    o.Plan = true;
                     break;
                 case "-r" or "--resume":
                     o.Resume = true;

@@ -414,6 +414,15 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 var plan = _rt.Context.Plan.ToJson();
                 plan["chat"] = _rt.Sync?.Conversation;
                 plan["mode"] = _rt.Permissions.Mode.Name();
+                if (_rt.PlanToResume() is { } left)
+                {
+                    // An earlier session's plan in progress here: the view offers to carry it on.
+                    plan["resumable"] = new JsonObject
+                    {
+                        ["title"] = left.Plan.Title, ["done"] = left.Plan.Steps.Count(s => s.Status == WorkStep.Done), ["steps"] = left.Plan.Steps.Count,
+                        ["updated"] = left.Updated.ToString("O"),
+                    };
+                }
                 await res.JsonAsync(200, plan, ct);
                 return;
             case ("GET", "/api/history"):
@@ -434,6 +443,16 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 return;
             case ("POST", "/api/plan/review"):
                 await ReviewPlanAsync(req, res, ct);
+                return;
+            case ("POST", "/api/plan/resume"):
+                try
+                {
+                    await res.JsonAsync(200, new JsonObject { ["said"] = _rt.ResumePlan() }, ct);
+                }
+                catch (PlanError e)
+                {
+                    await res.ErrorAsync(400, "plan", e.Message, ct);
+                }
                 return;
             case ("POST", "/api/plan/undo"):
                 // A step undone: its files (and later steps') as before it began, the steps to do again, the agent told.

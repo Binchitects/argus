@@ -30,7 +30,7 @@ internal sealed class Repl(Runtime rt)
         ("/mode [mode]", "show or switch the mode: ask, auto-edit, plan, yolo"),
         ("/thinking [level]", "show or set thinking: default, off, low, medium, high, xhigh"),
         ("/tools [on|off NAME]", "the tools this session has; turn a group of Arena's or a server's tools on or off in it"),
-        ("/plan", "the plan, as it stands; a proposed one: approve [ask], change N what, another why, reject why; undo N"),
+        ("/plan", "the plan, as it stands; a proposed one: approve [ask], change N what, another why, reject why; undo N; resume"),
         ("/agent [NAME TASK]", "your own coding agents (Claude Code, Codex, Gemini CLI: your subscriptions), or hand one a task"),
         ("/review [BASE]", "review the changes not yet committed, or this branch's over BASE (main...): findings by file and line, and a verdict"),
         ("/compact", "summarize the conversation to free the model's window"),
@@ -209,6 +209,11 @@ internal sealed class Repl(Runtime rt)
         if (rt.Permissions.Mode == Mode.Yolo)
         {
             Ui.Warn("yolo: edits and commands run without asking. Use it in a folder you can throw away.");
+        }
+        if (rt.PlanToResume() is { } left)
+        {
+            // A long task goes on across sessions: an earlier one left its plan in progress here.
+            Ui.Info($"An earlier session's plan is in progress here: \"{left.Plan.Title}\", {left.Plan.Steps.Count(s => s.Status == WorkStep.Done)} of {left.Plan.Steps.Count} steps done ({left.Updated:yyyy-MM-dd HH:mm}). /plan resume carries it on.");
         }
         Ui.Info(_editor is null
             ? "/help for commands · Ctrl+C stops a turn · end a line with \\ to go on to the next"
@@ -446,6 +451,20 @@ internal sealed class Repl(Runtime rt)
     /// <summary>/plan approve | approve ask | change N what | another why | reject why: the person's review of a proposed plan; /plan undo N.</summary>
     private async Task ReviewPlanAsync(string arg, CancellationToken ct)
     {
+        if (arg.Equals("resume", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                Ui.Line(rt.ResumePlan());
+                Ui.Line(rt.Context.Plan.Render(Ui));
+                Ui.Info("Say \"go on\" (or what to do first) and the agent carries it on.");
+            }
+            catch (PlanError e)
+            {
+                Ui.Error(e.Message);
+            }
+            return;
+        }
         if (arg.StartsWith("undo", StringComparison.OrdinalIgnoreCase))
         {
             if (!int.TryParse(arg[4..].Trim().TrimStart('#'), out var undo))
