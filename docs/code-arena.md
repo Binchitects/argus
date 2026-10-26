@@ -1363,6 +1363,7 @@ On the person's machine:
 | `plan` | the working plan the person sees (`/plan`), kept in Arena with the session's chat ([below](#the-plan)) |
 | `task` | a sub-agent (below) |
 | `run_steps` | 2 to 4 steps of the plan that wait for nothing not done, at once ([below](#steps-at-once)) |
+| `run_code` | a Python program that calls the session's tools as functions ([below](#code-mode)) |
 
 **Your own subscriptions.** Claude Code (`claude`, a Claude Pro or Max
 subscription), Codex CLI (`codex`, ChatGPT Plus or Pro) and Gemini CLI
@@ -1599,6 +1600,24 @@ to the agent as your next message:
 Saying anything else keeps the conversation going in plan mode. On the
 Plans board in the web, a proposed plan says it waits for its review in
 Code Arena.
+
+## Code mode
+
+Rather than calling tools one by one, each call and its whole result passing
+through the model's window, the agent can write a short Python program that
+calls them as functions (`run_code`): `import arena`, then
+`arena.tools.search("…")` lists the functions that match,
+`help(arena.local.read_file)` says one's parameters, and
+`arena.local.grep(...)`, `arena.argus.find_symbol(...)`,
+`arena.<server>.<tool>(...)` call the session's own tools, Arena's, Argus's
+and your MCP servers'. The program loops, filters and joins, and only what it
+prints comes back. Each call goes through a socket to Code Arena and is
+checked as a direct call would be (the mode, your rules, asking where it
+asks); at most 100 a program. The program runs in the working directory, in
+the session's sandbox, with `python3` (`"python"` in the config file names
+another); `run_code` asks first as a command does, and plan mode refuses it,
+since a program could write without a tool. The `arena` module is the one the
+web chat's sandbox has ([chat.md](chat.md#what-it-does)).
 
 ## Sessions and the model's window
 
@@ -2034,7 +2053,7 @@ The rest of the file: `"model"`, `"thinking"`, `"mode"`, `"context"`,
 `"shell"` (the agent's `run_shell`), `"terminalShell"` (the IDE's terminals),
 `"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"argusTools": false`
 (no Argus MCP), `"toolChars"` (tools on demand, above), `"argusUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
-`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"planCritique"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"window"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"checkCommand"`, `"sandbox"`,
+`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"planCritique"`, `"python"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"window"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"checkCommand"`, `"sandbox"`,
 `"sandboxNetwork"`, `"sandboxWritable"`, `"permissions"`, `"formatters"`, `"debugAdapters"` and
 `"languageServers"` (the IDE's: above). `ARENA_ARGUS_URL` in the environment gives Argus's address
 for one run.

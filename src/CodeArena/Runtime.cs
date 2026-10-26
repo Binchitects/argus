@@ -363,6 +363,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         var tools = LocalTools.All(Config.Shell);
         tools.Add(LocalTools.SubAgentTool());
         tools.Add(LocalTools.RunStepsTool());
+        tools.Add(RunCodeTool(this));
         tools.Add(Screenshots.Tool(Env.Env));
         if (ProviderAgents.Tool(Config, Env.Env) is { } agents)
         {

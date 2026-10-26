@@ -54,6 +54,8 @@
   <!-- The skills that come with Arena (the repository's skills/ folder): the chat's and Code Arena's alike. -->
   <ItemGroup>
     <EmbeddedResource Include="../../skills/**/*" LogicalName="skills/%(RecursiveDir)%(Filename)%(Extension)" WithCulture="false" />
+    <!-- The arena module (tools as code): the same one the chat's sandbox has. -->
+    <EmbeddedResource Include="../../deploy/services/sandbox/arena/__init__.py" LogicalName="arena/__init__.py" WithCulture="false" />
   </ItemGroup>
 
 </Project>

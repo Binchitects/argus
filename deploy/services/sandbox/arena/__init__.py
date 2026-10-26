@@ -1,4 +1,4 @@
-"""The chat's tools as Python functions, for a program run_code runs.
+"""The chat's tools as Python functions, for a program run_code runs (in Arena's sandbox, or Code Arena's).
 
     import arena
     arena.tools.search("find a symbol")        # which functions there are, by what they do
@@ -104,9 +104,9 @@ def _function(definition):
 
 
 def _load():
-    """The tools of this answer, as the chat gave them beside the program (none outside run_code)."""
+    """The tools of this answer, as the chat gave them beside the program (ARENA_TOOLS names the file; none outside run_code)."""
     try:
-        with open(_DEFINITIONS, encoding="utf-8") as f:
+        with open(os.environ.get("ARENA_TOOLS") or _DEFINITIONS, encoding="utf-8") as f:
             return json.load(f)
     except (OSError, ValueError):
         return []

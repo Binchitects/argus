@@ -198,6 +198,8 @@ internal sealed class Config
     public bool AutoCommit { get; set; } = true;
     /// <summary>A plan proposed in plan mode is read again with fresh eyes before the person reviews it: on unless false.</summary>
     public bool PlanCritique { get; set; } = true;
+    /// <summary>The Python run_code runs (code mode): python3 when not said (python on Windows).</summary>
+    public string? Python { get; set; }
     /// <summary>Arena's own skills (code-review, write-tests, debug…), offered after the person's and the project's: on unless false.</summary>
     public bool BuiltInSkills { get; set; } = true;
     /// <summary>The project's long memory in .remember/ (read at a session's start, kept with remember_project): on unless false.</summary>
@@ -304,6 +306,7 @@ internal sealed class Config
         config.TerminalShell = raw.Str("terminalShell");
         config.AutoCommit = raw.Bool("autoCommit") ?? true;
         config.PlanCritique = raw.Bool("planCritique") ?? true;
+        config.Python = raw.Str("python");
         config.BuiltInSkills = raw.Bool("builtInSkills") ?? true;
         config.ProjectMemory = raw.Bool("projectMemory") ?? true;
         config.UpdateCheck = raw.Bool("updateCheck") ?? true;
@@ -443,6 +446,7 @@ internal sealed class Config
         Set("terminalShell", TerminalShell);
         Set("autoCommit", AutoCommit ? null : false);
         Set("planCritique", PlanCritique ? null : false);
+        Set("python", Python);
         Set("builtInSkills", BuiltInSkills ? null : false);
         Set("projectMemory", ProjectMemory ? null : false);
         Set("updateCheck", UpdateCheck ? null : false);

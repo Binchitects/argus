@@ -96,8 +96,9 @@ public sealed class HangCompactionTests(ITestOutputHelper log) : IDisposable
         _gateway.FailureBody = _ => OverWindow(30_000, 20_000);
         _gateway.Answer = req => FakeGateway.Summarizing(req) ? Reply.Say("SUMMARY of the earlier turns.") : Reply.Say("ok");
         await using var rt = await StartAsync(h);
-        rt.Agent.Load(History(12));
-        Assert.True(rt.Agent.Estimate() < rt.Model.Context * rt.Compaction.At / 100.0);
+        // Under the threshold by the estimate (the tools' definitions count in it too).
+        rt.Agent.Load(History(9));
+        Assert.True(rt.Agent.Estimate() < rt.Model.Context * rt.Compaction.At / 100.0, $"{rt.Agent.Estimate()} of {rt.Model.Context}");
 
         Assert.Equal("ok", await Within(rt.Agent.RunAsync("next", new Spend(), CancellationToken.None)));
 
