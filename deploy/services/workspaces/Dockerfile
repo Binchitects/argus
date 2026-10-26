@@ -12,6 +12,8 @@ COPY src/CodeArena/ src/CodeArena/
 COPY skills/ skills/
 # The files Code Arena shares with the app (linked in its project): how a context refusal reads, and how earlier messages are found by their words.
 COPY src/Llm.Core/Chat/ContextOverflow.cs src/Llm.Core/Chat/HistoryWords.cs src/Llm.Core/Chat/
+# The arena module a run_code program imports (code mode), the sandbox's own, embedded.
+COPY deploy/services/sandbox/arena/__init__.py deploy/services/sandbox/arena/
 RUN rm -rf src/CodeArena/web src/CodeArena/bin src/CodeArena/obj && mkdir -p src/CodeArena/web \
  && dotnet publish src/CodeArena/CodeArena.csproj -c Release -o /opt/code-arena \
  && rm -f /opt/code-arena/*.pdb

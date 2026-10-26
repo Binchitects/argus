@@ -12,6 +12,8 @@
 deploy/
 # Code Studio's workspaces image (deploy/services/workspaces/Dockerfile) takes its supervisor from there.
 !deploy/services/workspaces/supervisor.py
+# Code Arena embeds the sandbox's arena module (code mode).
+!deploy/services/sandbox/arena/__init__.py
 docs/measurements/
 evals/
 clients/
