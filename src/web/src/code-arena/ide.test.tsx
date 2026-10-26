@@ -3048,7 +3048,7 @@ describe('quick open ranking', () => {
       title: 'Rename the parser', goal: 'parse_frame everywhere', chat: 'c-42',
       steps: [
         { number: 1, title: 'Find the callers', status: 'done', check: 'grep -rn parse src', files: [], dependsOn: [], notes: null, checkResult: 'passed', checkOutput: '0 matches' },
-        { number: 2, title: 'Rename it', status: 'doing', check: 'make test', files: ['src/parse.c'], dependsOn: [1], notes: 'four callers', checkResult: null, checkOutput: null },
+        { number: 2, title: 'Rename it', status: 'doing', check: 'make test', files: ['src/parse.c'], dependsOn: [1], notes: 'four callers', checkResult: null, checkOutput: null, symbols: ['parse'], impact: 'parse: 2 lines use it, in shop/player (2).' },
       ],
     }
     backend({ 'GET /api/plan': () => ({ json: plan }), 'GET /api/files/src/parse.c': () => ({ json: { path: 'src/parse.c', text: 'int parse(void);\n' } }) })
@@ -3060,6 +3060,7 @@ describe('quick open ranking', () => {
     expect(within(panel).getByText('1/2 done')).toBeInTheDocument()
     expect(within(steps).getAllByRole('listitem')[0]).toHaveTextContent('1. Find the callersDone when: grep -rn parse src· passed')
     expect(within(steps).getByLabelText('Doing')).toBeInTheDocument()
+    expect(within(steps).getByLabelText('What step 2 reaches')).toHaveTextContent('parse: 2 lines use it, in shop/player (2).')
     expect(within(panel).getByRole('link', { name: /In Arena, with its chat/ })).toHaveAttribute('href', 'https://llm.test/chat/c-42')
     // It is read again as the agent works.
     plan = { ...plan, steps: [plan.steps[0]!, { ...plan.steps[1]!, status: 'done', checkResult: 'passed' }] }

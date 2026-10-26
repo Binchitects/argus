@@ -157,6 +157,22 @@ export function PlanPanel({ arena }: { arena: string | null }) {
                       ))}
                     </ul>
                   )}
+                  {s.symbols && s.symbols.length > 0 && (
+                    <p className="ms-5 text-muted-foreground">
+                      Changes:{' '}
+                      {s.symbols.map((n, i) => (
+                        <span key={n}>
+                          {i > 0 && ', '}
+                          <code className="text-foreground">{n}</code>
+                        </span>
+                      ))}
+                    </p>
+                  )}
+                  {s.impact && (
+                    <p aria-label={`What step ${s.number} reaches`} className="ms-5 whitespace-pre-wrap rounded bg-muted/60 px-1.5 py-1 text-muted-foreground">
+                      {s.impact}
+                    </p>
+                  )}
                   {s.notes && <p className="ms-5 whitespace-pre-wrap text-muted-foreground">{s.notes}</p>}
                   {proposed && (
                     <button type="button" disabled={sending} onClick={() => setWriting({ action: 'change', step: s.number })} className="ms-5 flex w-fit items-center gap-1 text-muted-foreground hover:text-foreground disabled:opacity-50">

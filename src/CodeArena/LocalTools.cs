@@ -179,6 +179,7 @@ internal static class LocalTools
                     "status":{"type":"string","enum":["todo","doing","blocked","done"]},
                     "check":{"type":"string","description":"What done means: a command whose success shows it, or what to look at"},
                     "files":{"type":"array","items":{"type":"string"},"description":"The files it changes"},
+                    "symbols":{"type":"array","items":{"type":"string"},"description":"The functions, classes or types it changes: their callers and tests are looked up"},
                     "depends_on":{"type":"array","items":{"type":"integer"},"description":"The steps it waits for"},
                     "notes":{"type":"string","description":"What was found, decided, or why it is blocked"},
                     "remove":{"type":"boolean"}}}}}}

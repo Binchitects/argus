@@ -120,6 +120,47 @@ public sealed class PlanReviewTests : IDisposable
     }
 
     [Fact]
+    public async Task A_proposed_plan_is_grounded_in_the_code_its_symbols_callers_in_every_repository_and_the_tests_that_name_them()
+    {
+        using var argus = new FakeMcp
+        {
+            ToolList = [new JsonObject { ["name"] = "change_impact", ["description"] = "Argus's change_impact.", ["inputSchema"] = new JsonObject { ["type"] = "object" }, ["annotations"] = new JsonObject { ["readOnlyHint"] = true } }],
+            CallContent = [new JsonObject
+            {
+                ["type"] = "text",
+                ["text"] = """
+                    {"repo":"shop/codec","dependents":1,"references":[
+                      {"repo":"shop/codec","path":"src/parse.c","line":10,"is_definition":true},
+                      {"repo":"shop/codec","path":"tests/parse_test.c","line":4},
+                      {"repo":"shop/player","path":"src/play.c","line":88}]}
+                    """,
+            }],
+        };
+        _gateway.Answer = req => req["messages"]!.AsArray()[^1]!["role"]!.GetValue<string>() == "user" && FakeGateway.Last(req) == "plan the fix"
+            ? Reply.Call(("plan", """{"title":"Fix parse","steps":[{"title":"Change parse","symbols":["parse"],"files":["src/parse.c"],"check":"make test"}]}"""))
+            : Reply.Say("ok");
+        using var h = new Harness(_gateway, _mcp, c =>
+        {
+            c["argusUrl"] = argus.Url;
+            c["planCritique"] = false;
+        });
+        Git(h.Work, "init", "-q");
+        Git(h.Work, "remote", "add", "origin", "https://gitlab.example/shop/codec.git");
+        Assert.Equal(0, await h.Run("plan the fix\n/plan\n/exit\n", "chat", "--mode", "plan"));
+
+        var call = Assert.Single(argus.ToolCalls, c => c["name"]!.GetValue<string>() == "change_impact");
+        Assert.Equal(("shop/codec", "parse"), (call["arguments"]!["repo"]!.GetValue<string>(), call["arguments"]!["symbol"]!.GetValue<string>()));
+        Assert.Contains("impact: parse: 2 lines use it, in shop/codec (1), shop/player (1); 1 repository depends on this one; tests that name it: tests/parse_test.c.", h.Out, StringComparison.Ordinal);
+    }
+
+    private static void Git(string dir, params string[] args)
+    {
+        using var git = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("git", args) { WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true })!;
+        git.WaitForExit();
+        Assert.Equal(0, git.ExitCode);
+    }
+
+    [Fact]
     public async Task The_IDE_reviews_the_proposed_plan_and_its_answer_runs_as_a_turn()
     {
         using var h = new Harness(_gateway, _mcp);

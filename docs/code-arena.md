@@ -1512,9 +1512,9 @@ shell, the working directory, the git branch, the date and the mode.
 
 For work of several steps the agent keeps a plan with the `plan` tool: a
 title, a goal, and steps, each with what done means (its check: a command
-whose success shows it, as `dotnet test`, or what to look at), the files it
-changes, the steps it waits for, notes, and a status (to do, doing, blocked,
-done; one doing at a time). It makes the plan before it starts and sends only
+whose success shows it, as `dotnet test`, or what to look at), the files and
+the symbols (functions, classes, types) it changes, the steps it waits for,
+notes, and a status (to do, doing, blocked, done; one doing at a time). It makes the plan before it starts and sends only
 what changes as it goes: a step by its number, a new one without, one taken
 out with `remove`, all of it again with `clear`. A step that waits for one
 not there, steps that wait for one another in a circle, or two doing at once
@@ -1531,7 +1531,12 @@ agent keeps it ([chat.md](chat.md#plans)).
 ### Reviewing a proposed plan
 
 In plan mode the agent makes its plan with the `plan` tool as a proposal.
-Before you see it, a **second reading** looks at it with fresh eyes: a
+It is **grounded in the code** first: when Argus is connected and the project
+is a repository it indexes, each step's symbols are looked up with
+`change_impact` (at most 12 a plan), and the step shows what they reach: the
+lines that use each name in every repository, how many repositories depend
+on this one, and the tests that name it. Before you see the plan, a **second
+reading** looks at it with fresh eyes: a
 sub-agent in a context of its own (the same model, the reading tools), given
 what you asked and the plan, says what is missing, what is risky, which step
 has no check or one that would not show it is done, and what is out of

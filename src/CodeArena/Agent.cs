@@ -349,6 +349,9 @@ internal sealed class Agent
     /// </summary>
     public Func<WorkPlan, CancellationToken, Task<string?>>? Critique { get; set; }
 
+    /// <summary>A proposed plan grounded in the code before its second reading: what its steps' symbols reach (Argus). Null: not looked up.</summary>
+    public Func<WorkPlan, CancellationToken, Task<WorkPlan>>? Ground { get; set; }
+
     /// <summary>A word for the model for this turn only (answer again shorter or longer), in Code Arena's note; null: none.</summary>
     public string? TurnNote { get; set; }
 
@@ -727,7 +730,18 @@ internal sealed class Agent
     /// </summary>
     private async Task<bool> CritiqueAsync(WorkPlan before, CancellationToken ct)
     {
-        if (Depth > 0 || Critique is null || Context.Plan is not { Review: WorkPlan.Proposed, Critique: null } plan || ReferenceEquals(plan, before) || plan.IsEmpty)
+        if (Depth > 0 || Context.Plan is not { Review: WorkPlan.Proposed, Critique: null } plan || ReferenceEquals(plan, before) || plan.IsEmpty)
+        {
+            return false;
+        }
+        if (Ground is not null && plan.Steps.Any(s => s.Symbols.Count > 0 && s.Impact is null))
+        {
+            Info("Looking up what the plan's changes reach…");
+            plan = await Ground(plan, ct);
+            Context.Plan = plan;
+            Context.PlanChanged?.Invoke(plan);
+        }
+        if (Critique is null)
         {
             return false;
         }

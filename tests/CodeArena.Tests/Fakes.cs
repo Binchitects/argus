@@ -364,6 +364,20 @@ public sealed class FakeMcp : FakeServer
     public int Closed => Volatile.Read(ref _closed);
     private int _closed;
 
+    private readonly List<JsonObject> _toolCalls = [];
+
+    /// <summary>Each tools/call's params (name and arguments), in order.</summary>
+    public List<JsonObject> ToolCalls
+    {
+        get
+        {
+            lock (_calls)
+            {
+                return [.. _toolCalls];
+            }
+        }
+    }
+
     public List<(string Method, string? Session)> Calls
     {
         get
@@ -431,6 +445,10 @@ public sealed class FakeMcp : FakeServer
         lock (_calls)
         {
             _calls.Add((method, ctx.Request.Headers["Mcp-Session-Id"]));
+            if (method == "tools/call" && message["params"] is JsonObject called)
+            {
+                _toolCalls.Add(called.DeepClone().AsObject());
+            }
         }
         if (message["id"] is null)
         {

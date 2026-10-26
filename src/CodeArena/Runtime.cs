@@ -514,6 +514,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         };
         Context.SubAgent = (description, prompt, agent, token) => RunSubAgentAsync(inputs, description, prompt, agent, token);
         Agent.Critique = Config.PlanCritique ? (plan, token) => CritiqueAsync(inputs, plan, token) : null;
+        Agent.Ground = GroundAsync;
         _inputs = inputs;
         Context.Progress = said =>
         {
@@ -1290,6 +1291,70 @@ internal sealed partial class Runtime : IAsyncDisposable
             Events = events,
         };
         return await reviewer.RunAsync(prompt, new Spend(), ct);
+    }
+
+    /// <summary>The most symbols looked up for one plan: each is a call to Argus.</summary>
+    public const int MostGrounded = 12;
+
+    /// <summary>
+    /// What each step's symbols reach, from Argus's change_impact (when Argus is connected and the project is a repository it
+    /// knows): the repositories that depend on this one, the lines that use each name, and the tests among them. Steps
+    /// Argus cannot say anything of keep no impact; the plan is otherwise as it was.
+    /// </summary>
+    private async Task<WorkPlan> GroundAsync(WorkPlan plan, CancellationToken ct)
+    {
+        if (Tools.Find("change_impact") is not { Server: ArgusName } impact || ProjectKeys.Of(Workspace.Root) is var key && key.StartsWith("local/", StringComparison.Ordinal))
+        {
+            return plan;
+        }
+        // Argus names a repository by its path in GitLab: the project's key without its host.
+        var repo = key[(key.IndexOf('/') + 1)..];
+        var looked = 0;
+        var steps = new List<WorkStep>();
+        foreach (var step in plan.Steps)
+        {
+            if (step.Symbols.Count == 0 || step.Impact is not null || looked >= MostGrounded)
+            {
+                steps.Add(step);
+                continue;
+            }
+            var said = new List<string>();
+            foreach (var symbol in step.Symbols.Take(MostGrounded - looked))
+            {
+                looked++;
+                try
+                {
+                    var result = await impact.Run(new JsonObject { ["repo"] = repo, ["symbol"] = symbol, ["depth"] = 2 }, Context, ct);
+                    if (!result.Error && Json.ParseObject(result.Text) is { } found)
+                    {
+                        said.Add(Impact(symbol, found));
+                    }
+                }
+                catch (Exception e) when (e is ToolError or McpException or HttpRequestException or IOException)
+                {
+                    // Argus out of reach: the plan goes on without what it would have said.
+                }
+            }
+            steps.Add(said.Count == 0 ? step : step with { Impact = string.Join("\n", said) });
+        }
+        return plan with { Steps = steps };
+    }
+
+    /// <summary>What change_impact said of a symbol, in a line: who depends on the repository, which lines use the name, which of them are tests.</summary>
+    internal static string Impact(string symbol, JsonObject found)
+    {
+        if (found.Str("error") is { } error)
+        {
+            return $"{symbol}: {error}";
+        }
+        var uses = (found["references"] as JsonArray ?? []).OfType<JsonObject>().Where(r => r.Bool("is_definition") != true).ToList();
+        var byRepo = uses.GroupBy(r => r.Str("repo") ?? "").Select(g => $"{g.Key} ({g.Count()})").Take(4).ToList();
+        var tests = uses.Select(r => r.Str("path") ?? "").Where(path => path.Contains("test", StringComparison.OrdinalIgnoreCase) || path.Contains("spec", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.Ordinal).Take(5).ToList();
+        var dependents = found.Int("dependents") ?? 0;
+        var text = $"{symbol}: {(uses.Count == 0 ? "no line found that uses it" : $"{uses.Count}{(found.Bool("references_truncated") == true ? "+" : "")} lines use it, in {string.Join(", ", byRepo)}")}";
+        text += dependents == 0 ? "; no other repository depends on this one" : $"; {dependents} {(dependents == 1 ? "repository depends" : "repositories depend")} on this one";
+        return tests.Count == 0 ? text + "; no test names it." : text + $"; tests that name it: {string.Join(", ", tests)}.";
     }
 
     /// <summary>The words a second reading answers with when the plan holds as it is.</summary>

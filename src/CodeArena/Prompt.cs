@@ -116,7 +116,7 @@ internal static class SystemPrompt
         sb.Append("- Mode: ").Append(mode.Name()).Append(" — ").Append(mode.Describe()).Append('.');
         if (mode == Mode.Plan)
         {
-            sb.Append(" You cannot edit files or run commands now: investigate, then propose your plan with the plan tool (each step with its check and the files it changes)."
+            sb.Append(" You cannot edit files or run commands now: investigate, then propose your plan with the plan tool (each step with its check, the files it changes and the symbols it changes: what uses them, in every repository, is looked up for the plan)."
                 + " The person reviews it: approves it, changes a step, asks for another way or rejects it. Carry it out only once approved.");
         }
         else if (mode != Mode.Yolo)

@@ -224,6 +224,9 @@ export interface CodePlanStep {
   notes: string | null
   checkResult: 'passed' | 'failed' | null
   checkOutput: string | null
+  /** The functions, classes or types it changes; what they reach, as Argus found it. */
+  symbols?: string[]
+  impact?: string | null
 }
 
 /** The agent's working plan (its plan tool), and the Arena chat it is kept with (null: not kept in step). */

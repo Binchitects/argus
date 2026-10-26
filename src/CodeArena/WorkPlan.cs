@@ -17,6 +17,12 @@ internal sealed record WorkStep(int Number, string Title, string Status = WorkSt
 
     public IReadOnlyList<string> Files { get; init; } = Files ?? [];
     public IReadOnlyList<int> DependsOn { get; init; } = DependsOn ?? [];
+
+    /// <summary>The functions, classes or types it changes, by name: what Argus looks up its callers and tests by.</summary>
+    public IReadOnlyList<string> Symbols { get; init; } = [];
+
+    /// <summary>What a change to its symbols reaches, as Argus found it (repositories, lines that use them, tests that name them).</summary>
+    public string? Impact { get; init; }
 }
 
 /// <summary>A plan refused: the words say what to change.</summary>
@@ -108,6 +114,11 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
                 {
                     Files = [.. files.OfType<JsonValue>().Select(f => f.ToString().Trim().Replace('\\', '/')).Where(f => f.Length > 0).Distinct(StringComparer.Ordinal).Take(MostFiles).Select(f => Cut(f, 300))],
                 };
+            }
+            if (change["symbols"] is JsonArray symbols)
+            {
+                var named = symbols.OfType<JsonValue>().Select(x => x.ToString().Trim()).Where(x => x.Length > 0).Distinct(StringComparer.Ordinal).Take(20).Select(x => Cut(x, 200)).ToList();
+                step = step with { Symbols = named, Impact = named.SequenceEqual(step.Symbols) ? step.Impact : null };
             }
             if (change["depends_on"] is JsonArray deps)
             {
@@ -210,6 +221,14 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
             {
                 line += $"\n   files: {string.Join(", ", s.Files)}";
             }
+            if (s.Symbols.Count > 0)
+            {
+                line += $"\n   symbols: {string.Join(", ", s.Symbols)}";
+            }
+            if (s.Impact is not null)
+            {
+                line += $"\n   impact: {s.Impact.Replace("\n", "\n           ", StringComparison.Ordinal)}";
+            }
             if (s.Notes is not null)
             {
                 line += $"\n   notes: {Fmt.OneLine(s.Notes, 300)}";
@@ -250,6 +269,10 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
                 _ => "",
             };
             lines.Add($"{mark}{s.Number}. {title}{check}");
+            if (s.Impact is not null)
+            {
+                lines.AddRange(s.Impact.Split('\n').Select(line => ui.Dim("     impact: " + line)));
+            }
         }
         return string.Join('\n', lines);
     }
@@ -265,6 +288,7 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
             ["number"] = s.Number, ["title"] = s.Title, ["status"] = s.Status, ["check"] = s.Check,
             ["files"] = new JsonArray([.. s.Files.Select(f => (JsonNode)f)]), ["dependsOn"] = new JsonArray([.. s.DependsOn.Select(d => (JsonNode)d)]),
             ["notes"] = s.Notes, ["checkResult"] = s.CheckResult, ["checkOutput"] = s.CheckOutput, ["checkedAt"] = s.CheckedAt?.ToString("O"),
+            ["symbols"] = new JsonArray([.. s.Symbols.Select(x => (JsonNode)x)]), ["impact"] = s.Impact,
         })]),
     };
 
@@ -272,7 +296,11 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
         [.. (o["steps"] as JsonArray ?? []).OfType<JsonObject>().Select(s => new WorkStep(s.Int("number") ?? 0, s.Str("title") ?? "", s.Str("status") ?? WorkStep.Todo,
             s.Str("check"), [.. (s["files"] as JsonArray ?? []).OfType<JsonValue>().Select(f => f.ToString())],
             [.. (s["dependsOn"] as JsonArray ?? []).OfType<JsonValue>().Select(d => d.TryGetValue<int>(out var x) ? x : 0)],
-            s.Str("notes"), s.Str("checkResult"), s.Str("checkOutput"), DateTimeOffset.TryParse(s.Str("checkedAt"), out var at) ? at : null))])
+            s.Str("notes"), s.Str("checkResult"), s.Str("checkOutput"), DateTimeOffset.TryParse(s.Str("checkedAt"), out var at) ? at : null)
+        {
+            Symbols = [.. (s["symbols"] as JsonArray ?? []).OfType<JsonValue>().Select(x => x.ToString())],
+            Impact = s.Str("impact"),
+        })])
     {
         Review = o.Str("review") is Proposed or Approved ? o.Str("review") : null,
         Critique = o.Str("critique"),
