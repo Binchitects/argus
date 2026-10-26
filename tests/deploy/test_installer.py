@@ -111,8 +111,9 @@ class Release:
 
     def env(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         env = {k: v for k, v in os.environ.items() if not k.startswith(("COMPOSE_", "FAKE_"))}
+        # The app's uid is the tests' own: the folders they make are theirs (uid 1001 on GitHub's runners, not 1000).
         env.update({"PATH": f"{self.s.bin}:{env.get('PATH', '/usr/bin:/bin')}", "FAKE_LOG": str(self.s.log), "TMPDIR": str(self.s.dir),
-                    "XDG_RUNTIME_DIR": str(self.s.runtime)})
+                    "XDG_RUNTIME_DIR": str(self.s.runtime), "ARENA_APP_UID": str(os.getuid())})
         env.update(self.s.env)
         env.update(extra or {})
         return env

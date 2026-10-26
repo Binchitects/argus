@@ -97,6 +97,8 @@ HELPER=python:3.13-slim
 # it, which needs the network. The bundle carries it.
 EMBED_FILE=embed/nomic-embed-text-v1.5.f16.gguf
 GPU_SERVICES="llamacpp imagegen videogen gpu-exporter power-limits"
+# The uid the app's image runs as on Docker: it writes MODELS_DIR (ARENA_APP_UID for the tests, which run as theirs).
+APP_UID="${ARENA_APP_UID:-1000}"
 # The services' users, for the volumes they write: repair puts a wrong owner right.
 VOLUME_OWNERS="engine:1000:1000 directory:1000:1000 audit:1000:1000 sandbox:1000:1000 workspaces:0:0 blender:1000:1000 audio:1000:1000 argus:10001:10001 loki:10001:10001 prometheus:65534:65534 alertmanager:65534:65534"
 # .env and this script decide these, not the caller's shell.
@@ -1337,8 +1339,8 @@ place_models() {   # place_models plan|do
   fi
   [[ $absent -eq 0 && ${#carried[@]} -eq 0 ]] && ok "models: every model the bundle lists is in $MODELS_DIR"
   # Docker runs the app as uid 1000: it writes there. (Rootless Podman runs it as you.)
-  if [[ $1 == do && $ENGINE == docker && $EUID -eq 0 && ${MODELS_HAD:-0} -eq 0 && "$(stat -c %u "$MODELS_DIR")" != 1000 ]]; then
-    chown -R 1000:1000 "$MODELS_DIR" && did "$MODELS_DIR is uid 1000's, the app's"
+  if [[ $1 == do && $ENGINE == docker && $EUID -eq 0 && ${MODELS_HAD:-0} -eq 0 && "$(stat -c %u "$MODELS_DIR")" != "$APP_UID" ]]; then
+    chown -R "$APP_UID:$APP_UID" "$MODELS_DIR" && did "$MODELS_DIR is uid $APP_UID's, the app's"
   fi
   return 0
 }
@@ -1480,13 +1482,13 @@ fix_permissions() {   # fix_permissions plan|do -> FIX_FAILED, FIX_FOUND (owners
     if in_helper -v "${PROJECT}_$vol:/v" "$HELPER" chown -R "$uid:$gid" /v; then did "the $vol volume was $have's: now $uid:$gid's, its service's"; FIXED+=("$vol")
     else bad "the $vol volume is $have's, not $uid:$gid's, and chown failed"; FIX_FAILED=1; fi
   done
-  if [[ $ENGINE == docker && -d "$MODELS_DIR" && "$(stat -c %u "$MODELS_DIR")" != 1000 ]]; then
+  if [[ $ENGINE == docker && -d "$MODELS_DIR" && "$(stat -c %u "$MODELS_DIR")" != "$APP_UID" ]]; then
     FIX_FOUND=$((FIX_FOUND + 1))
-    if [[ $1 == plan ]]; then would "give $MODELS_DIR to uid 1000 (the app writes there)"
-    elif [[ ${MODELS_HAD:-0} -gt 0 ]] && ! confirm "$MODELS_DIR holds $MODELS_HAD model file(s) of its own: give it to uid 1000, so the app can download into it too? (no: the app reads them, and downloads fail)"; then
-      note "$MODELS_DIR stays as it is: the app reads its models; to let it download there: sudo chown -R 1000:1000 $MODELS_DIR"
-    elif [[ $EUID -eq 0 ]] && chown -R 1000:1000 "$MODELS_DIR"; then did "$MODELS_DIR is now uid 1000's (the app writes there)"
-    else bad "$MODELS_DIR is not uid 1000's and the app writes there: sudo chown -R 1000:1000 $MODELS_DIR"; FIX_FAILED=1; fi
+    if [[ $1 == plan ]]; then would "give $MODELS_DIR to uid $APP_UID (the app writes there)"
+    elif [[ ${MODELS_HAD:-0} -gt 0 ]] && ! confirm "$MODELS_DIR holds $MODELS_HAD model file(s) of its own: give it to uid $APP_UID, so the app can download into it too? (no: the app reads them, and downloads fail)"; then
+      note "$MODELS_DIR stays as it is: the app reads its models; to let it download there: sudo chown -R $APP_UID:$APP_UID $MODELS_DIR"
+    elif [[ $EUID -eq 0 ]] && chown -R "$APP_UID:$APP_UID" "$MODELS_DIR"; then did "$MODELS_DIR is now uid $APP_UID's (the app writes there)"
+    else bad "$MODELS_DIR is not uid $APP_UID's and the app writes there: sudo chown -R $APP_UID:$APP_UID $MODELS_DIR"; FIX_FAILED=1; fi
   fi
   [[ $FIX_FAILED -eq 0 && $FIX_FOUND -eq 0 ]] && ok "the volumes' owners are their services' users"
   return 0

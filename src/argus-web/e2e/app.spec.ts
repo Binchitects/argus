@@ -140,7 +140,10 @@ test.describe.serial("Argus", () => {
     const aliceKey = gw.keys.find((k: any) => k.user === "alice@example.test" && k.alias === "chat:alice").key;
     const rounds = gw.requests.filter((r: any) => r.auth === aliceKey);
     expect(rounds.length).toBe(2);
-    expect(rounds[0].tools).toBe(17);
+    // Every tool of the code index, each once (the catalog grows: its names, not their number).
+    const offered: string[] = rounds[0].tools;
+    expect(offered).toEqual(expect.arrayContaining(["find_symbol", "search_code", "docs_find"]));
+    expect(new Set(offered).size).toBe(offered.length);
 
     // History survives a reload, tool card and all.
     await page.reload();

@@ -149,7 +149,7 @@ export async function fakeGateway(masterKey: string, model: string) {
     if (p === "/health/liveliness") return json(res, 200, "I'm alive!");
     // For the test to inspect, never part of LiteLLM.
     if (p === "/_e2e/state")
-      return json(res, 200, { users: [...users.values()], keys: [...keys].map(([k, v]) => ({ key: k, ...v })), requests: requests.map((r) => ({ auth: r.auth, tools: (r.body.tools ?? []).length, model: r.body.model })) });
+      return json(res, 200, { users: [...users.values()], keys: [...keys].map(([k, v]) => ({ key: k, ...v })), requests: requests.map((r) => ({ auth: r.auth, tools: (r.body.tools ?? []).map((t: any) => t.function?.name), model: r.body.model })) });
     const key = auth(req);
     const isMaster = key === masterKey;
     if (p.startsWith("/user/") || p.startsWith("/key/")) {

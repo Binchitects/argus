@@ -215,7 +215,8 @@ describe('canvas', () => {
     await userEvent.click(within(panel).getByRole('button', { name: 'Export' }))
     expect(screen.getByRole('menuitem', { name: 'PDF (.pdf)' })).toBeInTheDocument()
     await userEvent.click(screen.getByRole('menuitem', { name: 'Word (.docx)' }))
-    await waitFor(() => expect(saveBlob).toHaveBeenCalledWith(expect.any(Blob), 'Plan.docx'))
+    // The answer's own Blob (fetch's, not the page's: instanceof differs between Node versions), as a file named for it.
+    await waitFor(() => expect(saveBlob).toHaveBeenCalledWith(expect.objectContaining({ size: expect.any(Number), type: expect.any(String) }), 'Plan.docx'))
     expect(calls.some((c) => c.path === '/api/chat/canvases/k1/export?format=docx')).toBe(true)
   })
 
