@@ -73,11 +73,11 @@ public sealed class WindowTests : IDisposable
     }
 
     [Fact]
-    public async Task A_summary_is_asked_in_sections_and_the_to_do_list_is_said_after_it_as_it_stands()
+    public async Task A_summary_is_asked_in_sections_and_the_plan_is_said_after_it_as_it_stands()
     {
         using var h = new Harness(_gateway, _mcp);
         _gateway.Answer = req => FakeGateway.Summarizing(req) ? Reply.Say("## Goal\n- fix the bug")
-            : FakeGateway.Last(req) == "plan it" ? Reply.Call(("todo_write", """{"todos":[{"content":"Read the code","status":"completed"},{"content":"Fix the bug","status":"in_progress"}]}"""))
+            : FakeGateway.Last(req) == "plan it" ? Reply.Call(("plan", """{"title":"The bug","steps":[{"title":"Read the code","status":"done"},{"title":"Fix the bug","status":"doing","check":"make test"}]}"""))
             : Reply.Say("ok");
         Assert.Equal(0, await h.Run("plan it\n/compact\nwhere are we?\n/exit\n", "chat", "--mode", "auto-edit"));
 
@@ -86,7 +86,7 @@ public sealed class WindowTests : IDisposable
         Assert.Contains("## Next steps", asked, StringComparison.Ordinal);
         var summary = _gateway.Requests[^1]["messages"]!.AsArray()[1]!["content"]!.GetValue<string>();
         Assert.Contains("## Goal\n- fix the bug", summary, StringComparison.Ordinal);
-        Assert.Contains("Your to-do list as it stands (todo_write changes it):\n- [completed] Read the code\n- [in_progress] Fix the bug", summary, StringComparison.Ordinal);
+        Assert.Contains("Your plan as it stands (the plan tool changes it):\nPlan: The bug\n1. [done] Read the code\n2. [doing] Fix the bug\n   check: make test\n1 of 2 done.", summary, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -56,7 +56,7 @@ internal sealed class SyncEntry
     }
 }
 
-/// <summary>A saved session read back: its messages (after the last compaction), model, to-do list and tokens.</summary>
+/// <summary>A saved session read back: its messages (after the last compaction), model, plan and tokens.</summary>
 internal sealed class SessionData
 {
     public string Id { get; init; } = "";
@@ -64,7 +64,10 @@ internal sealed class SessionData
     public string? Model { get; set; }
     /// <summary>What the model reads: a summary of what came before <see cref="From"/>, if any, then <see cref="Stream"/> from there.</summary>
     public List<JsonObject> Messages { get; } = [];
-    public List<TodoItem> Todos { get; set; } = [];
+    /// <summary>The agent's plan; how many times it changed, and the change Arena has (its chat's plan is sent once Arena has the messages).</summary>
+    public WorkPlan Plan { get; set; } = WorkPlan.None;
+    public int PlanVersion { get; set; }
+    public int PlanSent { get; set; }
     /// <summary>The groups of remote tools the person turned off in the session, and those the model loaded (<see cref="ToolDemand"/>).</summary>
     public IReadOnlyList<string> ToolsOff { get; set; } = [];
     public IReadOnlyList<string> ToolsLoaded { get; set; } = [];
@@ -106,7 +109,8 @@ internal sealed class SessionData
         var copy = new SessionData
         {
             Id = Id, Cwd = Cwd, Model = Model, Conversation = Conversation, Unlinked = Unlinked, From = From, Branch = Branch, Summary = Summary,
-            WebSummary = WebSummary, Keys = Keys, _pending = _pending, ToolsOff = ToolsOff, ToolsLoaded = ToolsLoaded,
+            WebSummary = WebSummary, Keys = Keys, _pending = _pending, ToolsOff = ToolsOff, ToolsLoaded = ToolsLoaded, Plan = Plan, PlanVersion = PlanVersion,
+            PlanSent = PlanSent,
         };
         copy.Stream.AddRange(Stream.Select(e => new SyncEntry
         {
@@ -258,8 +262,12 @@ internal sealed class SessionData
             case "model":
                 Model = entry.Str("model") ?? Model;
                 break;
-            case "todos" when entry["todos"] is JsonArray todos:
-                Todos = [.. todos.OfType<JsonObject>().Select(t => new TodoItem(t.Str("content") ?? "", t.Str("status") ?? "pending"))];
+            case "plan":
+                Plan = WorkPlan.FromJson(entry["plan"] as JsonObject);
+                PlanVersion++;
+                break;
+            case "plan_sent":
+                PlanSent = Math.Max(PlanSent, entry.Int("version") ?? 0);
                 break;
             case "tools":
                 ToolsOff = Names(entry["off"]);
@@ -529,8 +537,18 @@ internal sealed class SessionStore
     public void Tools(IEnumerable<string> off, IEnumerable<string> loaded) =>
         Write(new JsonObject { ["type"] = "tools", ["off"] = new JsonArray([.. off.Select(g => (JsonNode)g)]), ["loaded"] = new JsonArray([.. loaded.Select(g => (JsonNode)g)]) });
 
-    public void Todos(IEnumerable<TodoItem> todos) =>
-        Write(new JsonObject { ["type"] = "todos", ["todos"] = new JsonArray([.. todos.Select(t => (JsonNode)new JsonObject { ["content"] = t.Content, ["status"] = t.Status })]) });
+    /// <summary>The plan as it is now: the last line of it counts; Arena is sent it with the session's chat.</summary>
+    public void Plan(WorkPlan plan)
+    {
+        Write(new JsonObject { ["type"] = "plan", ["plan"] = plan.ToJson() });
+        PlanWaiting?.Invoke();
+    }
+
+    /// <summary>Arena has the plan as it was at its <paramref name="version"/>th change.</summary>
+    public void PlanSent(int version) => Write(new JsonObject { ["type"] = "plan_sent", ["version"] = version });
+
+    /// <summary>Told when the plan changed: the chat's sync sends it.</summary>
+    public event Action? PlanWaiting;
 
     public void Usage(TokenUsage usage) =>
         Write(new JsonObject { ["type"] = "usage", ["prompt"] = usage.Prompt, ["cached"] = usage.Cached, ["completion"] = usage.Completion });
@@ -570,7 +588,6 @@ internal sealed class SessionStore
         }
         var scan = Scan(file);
         var data = scan.State.Copy();
-        data.Todos = [.. scan.Todos];
         (data.Prompt, data.Cached, data.Completion) = (scan.Prompt, scan.Cached, scan.Completion);
         data.Model = scan.ModelAtCompact;
         TokenUsage? pending = null;
@@ -632,8 +649,6 @@ internal sealed class SessionStore
 
     private static TokenUsage Usage(JsonObject entry) => new(entry.Long("prompt") ?? 0, entry.Long("cached") ?? 0, entry.Long("completion") ?? 0);
 
-    private static List<TodoItem> Todos(JsonArray todos) => [.. todos.OfType<JsonObject>().Select(t => new TodoItem(t.Str("content") ?? "", t.Str("status") ?? "pending"))];
-
     /// <summary>
     /// What a session file holds as it is listed and read back, scanned once and kept by the file's size and time: an
     /// appended file is scanned from where the scan before stopped, and a message's or a compaction's line is read only up
@@ -649,7 +664,6 @@ internal sealed class SessionStore
         public string? Model { get; init; }
         /// <summary>The model when the last compaction was written (its answers' model, read from there on).</summary>
         public string? ModelAtCompact { get; init; }
-        public IReadOnlyList<TodoItem> Todos { get; init; } = [];
         /// <summary>What Arena has of the session and where the model's history starts: its messages without their words.</summary>
         public SessionData State { get; init; } = new();
         /// <summary>Message lines, all of them.</summary>
@@ -717,7 +731,7 @@ internal sealed class SessionStore
 
     private static SessionScan Continue(string file, SessionScan s, long size, DateTime written)
     {
-        var (cwd, model, atCompact, todos) = (s.Cwd, s.Model, s.ModelAtCompact, s.Todos);
+        var (cwd, model, atCompact) = (s.Cwd, s.Model, s.ModelAtCompact);
         var (messages, preview, prompt, cached, completion, compact, length) = (s.Messages, s.Preview, s.Prompt, s.Cached, s.Completion, s.LastCompact, s.Length);
         var state = s.State.Copy();
         var at0 = new DateTimeOffset(written, TimeSpan.Zero);
@@ -766,9 +780,6 @@ internal sealed class SessionStore
                 case "model":
                     model = entry.Str("model") ?? model;
                     break;
-                case "todos" when entry["todos"] is JsonArray list:
-                    todos = Todos(list);
-                    break;
                 case "usage":
                     prompt += entry.Long("prompt") ?? 0;
                     cached += entry.Long("cached") ?? 0;
@@ -778,7 +789,7 @@ internal sealed class SessionStore
         }
         return new SessionScan
         {
-            Size = size, Written = written, Length = length, Cwd = cwd, Model = model, ModelAtCompact = atCompact, Todos = todos, State = state,
+            Size = size, Written = written, Length = length, Cwd = cwd, Model = model, ModelAtCompact = atCompact, State = state,
             Messages = messages, Preview = preview, Prompt = prompt, Cached = cached, Completion = completion, LastCompact = compact,
         };
 

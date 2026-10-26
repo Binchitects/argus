@@ -5104,6 +5104,17 @@ namespace Llm.Core.Data.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("character varying(4000)");
 
+                    b.Property<string>("Place")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)")
+                        .HasDefaultValue("chat");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -5130,6 +5141,21 @@ namespace Llm.Core.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Check")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("CheckOutput")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<string>("CheckResult")
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<DateTimeOffset?>("CheckedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.PrimitiveCollection<List<int>>("DependsOn")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -5138,6 +5164,12 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<DateOnly?>("Due")
                         .HasColumnType("date");
+
+                    b.PrimitiveCollection<List<string>>("Files")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasDefaultValueSql("'{}'::text[]");
 
                     b.Property<string>("Notes")
                         .HasMaxLength(4000)

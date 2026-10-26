@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ListChecks, MessageSquare, Plus } from 'lucide-react'
+import { ListChecks, MessageSquare, Plus, SquareTerminal } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -25,6 +25,14 @@ export interface PlanStep {
   start: string | null
   due: string | null
   dependsOn: number[]
+  /** What done means: a command whose success shows it, or what to look at. */
+  check: string | null
+  /** The files it changes (Code Arena's). */
+  files: string[]
+  /** How its check went when it last ran. */
+  checkResult: 'passed' | 'failed' | null
+  checkOutput: string | null
+  checkedAt: string | null
 }
 
 export interface Plan {
@@ -32,6 +40,10 @@ export interface Plan {
   title: string
   goal: string | null
   conversationId: string | null
+  /** chat: the chat's Plans tool keeps it; code: Code Arena's agent does, and it alone changes it. */
+  source: 'chat' | 'code'
+  /** Code Arena's: the project it works in. */
+  place: string | null
   updatedAt: string
   steps: PlanStep[]
   warnings: string[]
@@ -55,11 +67,15 @@ const planQuery = (id: string) => ({
 export function PlansPage() {
   const plans = useQuery({
     queryKey: ['plans'] as const,
-    queryFn: ({ signal }) => api<{ id: string; title: string; conversationId: string | null; updatedAt: string; steps: number; done: number }[]>('/api/plans', { signal }),
+    queryFn: ({ signal }) =>
+      api<{ id: string; title: string; conversationId: string | null; source: 'chat' | 'code'; place: string | null; updatedAt: string; steps: number; done: number }[]>('/api/plans', { signal }),
   })
   return (
     <>
-      <PageHeader title="Plans" description="Plans the chat made and keeps up to date (its Plans tool): steps with owners, dates and what each waits for. A room's plans are its people's." />
+      <PageHeader
+        title="Plans"
+        description="Plans the chat made and keeps up to date (its Plans tool), and Code Arena's working plans: steps with what done means, owners, dates and what each waits for. A room's plans are its people's."
+      />
       {plans.error ? (
         <QueryError error={plans.error} retry={() => plans.refetch()} />
       ) : plans.isPending ? (
@@ -73,8 +89,13 @@ export function PlansPage() {
           {plans.data.map((p) => (
             <li key={p.id}>
               <Link to={`/plans/${p.id}`} className="flex items-center gap-3 rounded-lg border px-4 py-3 text-sm outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring">
-                <ListChecks className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                {p.source === 'code' ? (
+                  <SquareTerminal className="size-4 shrink-0 text-muted-foreground" aria-label="Code Arena's" />
+                ) : (
+                  <ListChecks className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                )}
                 <span className="min-w-0 flex-1 truncate font-medium">{p.title}</span>
+                {p.place && <Badge variant="outline">{p.place}</Badge>}
                 <span className="text-xs text-muted-foreground tabular-nums">
                   {p.done} of {p.steps} done
                 </span>
@@ -140,6 +161,8 @@ export function PlanPage() {
   if (plan.error) return <QueryError error={plan.error} retry={() => plan.refetch()} />
   if (!plan.data) return <Skeleton className="h-64" />
   const p = plan.data
+  // Code Arena's agent keeps its plan: shown here, changed by asking the agent.
+  const kept = p.source === 'code'
   const change = async (path: string, method: 'PATCH' | 'POST', body: object) => {
     try {
       const saved = await api<Plan>(`/api/plans/${id}${path}`, { method, body })
@@ -163,6 +186,11 @@ export function PlanPage() {
           ) : undefined
         }
       />
+      {kept && (
+        <Alert className="mb-4" title="Code Arena's working plan">
+          Its agent keeps this plan{p.place ? ` in ${p.place}` : ''} and changes it as it works: it shows here as it goes. To change it, ask the agent.
+        </Alert>
+      )}
       {p.warnings.length > 0 && (
         <Alert className="mb-4">
           <ul className="list-disc pl-4 text-sm">
@@ -211,7 +239,27 @@ export function PlanPage() {
                       )}
                       {s.dependsOn.length > 0 && <span>after {s.dependsOn.join(', ')}</span>}
                     </p>
+                    {s.check && (
+                      <p className="flex items-start gap-1 text-xs">
+                        <span className="text-muted-foreground">Done when:</span> <code className="min-w-0 break-words">{s.check}</code>
+                        {s.checkResult && (
+                          <Badge variant={s.checkResult === 'passed' ? 'secondary' : 'destructive'} title={s.checkOutput ?? undefined} className="ms-auto shrink-0">
+                            {s.checkResult === 'passed' ? 'check passed' : 'check failed'}
+                          </Badge>
+                        )}
+                      </p>
+                    )}
+                    {s.files.length > 0 && (
+                      <ul className="flex flex-wrap gap-1" aria-label={`Step ${s.number}'s files`}>
+                        {s.files.map((f) => (
+                          <li key={f}>
+                            <code className="rounded bg-muted px-1 py-0.5 text-xs">{f}</code>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                     {s.notes && <p className="text-xs whitespace-pre-wrap text-muted-foreground">{s.notes}</p>}
+                    {!kept && (
                     <div className="flex flex-wrap gap-1">
                       {columns
                         .filter((o) => o.status !== s.status)
@@ -221,9 +269,10 @@ export function PlanPage() {
                           </Button>
                         ))}
                     </div>
+                    )}
                   </article>
                 ))}
-              {c.status === 'todo' && (
+              {c.status === 'todo' && !kept && (
                 <form
                   className="flex gap-1"
                   onSubmit={(e) => {

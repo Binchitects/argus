@@ -526,7 +526,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             Session = SessionStore.Open(resumedFile);
             Agent.Load(resumed.Messages, resumed.Known);
-            Context.Todos = resumed.Todos;
+            Context.Plan = resumed.Plan;
             Demand.Restore(resumed.ToolsOff, resumed.ToolsLoaded);
             Total.Prompt = resumed.Prompt;
             Total.Cached = resumed.Cached;
@@ -541,7 +541,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             Session = SessionStore.Create(Env.Paths.SessionsDir, Workspace.Root, Model.Name);
         }
         Agent.Session = Session;
-        Context.TodosChanged = todos => Session.Todos(todos);
+        Context.PlanChanged = plan => Session.Plan(plan);
         Agent.BeforeTurn = TakeInForTurnAsync;
         Agent.AfterTurn = () => Sync?.EndTurn();
         StartSync();
@@ -1129,9 +1129,9 @@ internal sealed partial class Runtime : IAsyncDisposable
         Session = SessionStore.Create(Env.Paths.SessionsDir, Workspace.Root, Model.Name);
         Agent.Session = Session;
         Agent.Clear();
-        Context.Todos = [];
+        Context.Plan = WorkPlan.None;
         Demand.Restore([], []);
-        Context.TodosChanged = todos => Session.Todos(todos);
+        Context.PlanChanged = plan => Session.Plan(plan);
         StartSync();
     }
 
@@ -1143,9 +1143,9 @@ internal sealed partial class Runtime : IAsyncDisposable
         Session = SessionStore.Open(file);
         Agent.Session = Session;
         Agent.Load(data.Messages, data.Known);
-        Context.Todos = data.Todos;
+        Context.Plan = data.Plan;
         Demand.Restore(data.ToolsOff, data.ToolsLoaded);
-        Context.TodosChanged = todos => Session.Todos(todos);
+        Context.PlanChanged = plan => Session.Plan(plan);
         if (data.Model is not null && data.Model != Model.Name && Models.FirstOrDefault(m => m.Id == data.Model) is { } info)
         {
             Model.Info = info;

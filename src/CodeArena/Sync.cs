@@ -103,6 +103,7 @@ internal sealed class ChatSync : IAsyncDisposable
         store.Added += Added;
         // A summary goes when it is written, not with the next message: nothing else may come before the session ends.
         store.SummaryWaiting += Wake;
+        store.PlanWaiting += Wake;
         _loop = Task.Run(LoopAsync);
         _watch = Task.Run(WatchAsync);
         if (store.Read(d => d.Waiting > 0 || d.Summary is not null))
@@ -232,9 +233,14 @@ internal sealed class ChatSync : IAsyncDisposable
                     return (d.Conversation, d.Unlinked, Parent: d.LastSent, Unknown: d.Stream.Take(first).Any(e => e.Id == ""), d.Branch, First: first,
                         Batch: batch, Names: names, Summary: summary);
                 });
-                if (plan.Unlinked || (plan.Batch.Count == 0 && plan.Summary is null))
+                if (plan.Unlinked)
                 {
                     return TimeSpan.Zero;
+                }
+                if (plan.Batch.Count == 0 && plan.Summary is null)
+                {
+                    // Every message is there: the plan, when it changed since Arena last had it.
+                    return plan.Conversation is null ? TimeSpan.Zero : await PushPlanAsync(plan.Conversation, ct);
                 }
                 lock (_gate)
                 {
@@ -319,6 +325,40 @@ internal sealed class ChatSync : IAsyncDisposable
         {
             _store.Busy.Release();
         }
+    }
+
+    /// <summary>The plan, whole, to the chat's (dropped there when the plan was cleared), when Arena does not have its latest change.</summary>
+    private async Task<TimeSpan> PushPlanAsync(string conversation, CancellationToken ct)
+    {
+        var (work, version, sent) = _store.Read(d => (d.Plan, d.PlanVersion, d.PlanSent));
+        if (version <= sent)
+        {
+            return TimeSpan.Zero;
+        }
+        var answer = work.IsEmpty
+            ? await SendAsync(HttpMethod.Delete, $"/api/code-arena/chats/{conversation}/plan", null, ct)
+            : await SendAsync(HttpMethod.Put, $"/api/code-arena/chats/{conversation}/plan", Out(work, _place), ct);
+        if (answer.Status is HttpStatusCode.OK or HttpStatusCode.NoContent)
+        {
+            _store.PlanSent(version);
+            return TimeSpan.Zero;
+        }
+        if (answer.Status == HttpStatusCode.BadRequest)
+        {
+            // Arena holds plans to the same rules as here: refused, it is not sent again until it changes.
+            _store.PlanSent(version);
+            _notice(false, $"Arena did not take the plan: {answer.Body?.Str("error") ?? "refused"}");
+            return TimeSpan.Zero;
+        }
+        return Refused(answer);
+    }
+
+    /// <summary>The plan as Arena takes it: its steps, and where the session works.</summary>
+    internal static JsonObject Out(WorkPlan plan, string place)
+    {
+        var o = plan.ToJson();
+        o["place"] = Path.GetFileName(Path.TrimEndingDirectorySeparator(place)) is { Length: > 0 } name ? name : place;
+        return o;
     }
 
     /// <summary>The first messages still to send are a call's results: they go now, straight after it, whatever the web added since.</summary>

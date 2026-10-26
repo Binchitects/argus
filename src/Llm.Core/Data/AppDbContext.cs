@@ -261,6 +261,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.ToTable("plans");
             e.Property(x => x.Title).HasMaxLength(200);
             e.Property(x => x.Goal).HasMaxLength(4000);
+            e.Property(x => x.Source).HasMaxLength(8).HasDefaultValue(Llm.Core.Plans.Plan.FromChat);
+            e.Property(x => x.Place).HasMaxLength(200);
             e.HasIndex(x => new { x.UserId, x.UpdatedAt });
             e.HasIndex(x => x.ConversationId);
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
@@ -275,6 +277,10 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Owner).HasMaxLength(120);
             e.Property(x => x.Status).HasMaxLength(16);
             e.Property(x => x.DependsOn).HasDefaultValueSql("'{}'::integer[]");
+            e.Property(x => x.Check).HasMaxLength(1000);
+            e.Property(x => x.Files).HasDefaultValueSql("'{}'::text[]");
+            e.Property(x => x.CheckResult).HasMaxLength(8);
+            e.Property(x => x.CheckOutput).HasMaxLength(4000);
             e.HasIndex(x => new { x.PlanId, x.Number }).IsUnique();
         });
         builder.Entity<Code.CodeReview>(e =>

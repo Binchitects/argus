@@ -649,6 +649,17 @@ public sealed class FakeChats
 {
     private readonly object _gate = new();
 
+    /// <summary>Each plan Code Arena sent, in order: the chat, and the plan (null: dropped).</summary>
+    public List<(string Chat, JsonObject? Plan)> Plans { get; } = [];
+
+    public List<(string Chat, JsonObject? Plan)> PlansSent()
+    {
+        lock (_gate)
+        {
+            return [.. Plans];
+        }
+    }
+
     /// <summary>A message in a chat's tree: Arena's shape (id, role, content, toolCalls, ref...), and the one before it.</summary>
     public sealed class Node
     {
@@ -1047,6 +1058,20 @@ public sealed class FakeChats
             {
                 ctx.Response.ContentType = found.ContentType;
                 await ctx.Response.OutputStream.WriteAsync(found.Data);
+            }
+            return;
+        }
+        if (parts is ["chats", var planChat, "plan"] && method is "PUT" or "DELETE")
+        {
+            lock (_gate)
+            {
+                Plans.Add((planChat, method == "PUT" ? Json.ParseObject(body) : null));
+            }
+            ctx.Response.StatusCode = method == "PUT" ? 200 : 204;
+            if (method == "PUT")
+            {
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes("""{"id":"plan-1","link":"/plans/plan-1"}"""));
             }
             return;
         }

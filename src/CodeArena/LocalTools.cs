@@ -161,18 +161,30 @@ internal static class LocalTools
         },
         new()
         {
-            Name = "todo_write",
+            Name = "plan",
             Kind = ToolKind.Read,
-            Description = "Keep a to-do list for work of several steps: send the whole list each time, each item pending, in_progress (one at a time) or completed. The person sees it.",
+            Description = "Your working plan, for work of several steps: a goal, and steps each with what done means (check: a command whose " +
+                "success shows it, as \"dotnet test\", or what to look at), the files it changes and the steps it waits for. Make it " +
+                "before you start; then change it as you go, sending only what changes: a step with its number changes (or, with remove, " +
+                "takes out) that step, one without a number is added. One step doing at a time; a step is done once its check passed. " +
+                "The person sees it as it changes, and it stays in your context through every summary.",
             Parameters = Schema("""
-                {"type":"object","properties":{"todos":{"type":"array","items":{"type":"object","properties":{
-                  "content":{"type":"string"},
-                  "status":{"type":"string","enum":["pending","in_progress","completed"]}},
-                 "required":["content","status"]}}},
-                 "required":["todos"]}
+                {"type":"object","properties":{
+                  "title":{"type":"string","description":"The plan's name"},
+                  "goal":{"type":"string","description":"What it is for; what done looks like"},
+                  "clear":{"type":"boolean","description":"true: start from nothing (the work changed)"},
+                  "steps":{"type":"array","items":{"type":"object","properties":{
+                    "number":{"type":"integer","description":"The step to change; leave out to add one"},
+                    "title":{"type":"string"},
+                    "status":{"type":"string","enum":["todo","doing","blocked","done"]},
+                    "check":{"type":"string","description":"What done means: a command whose success shows it, or what to look at"},
+                    "files":{"type":"array","items":{"type":"string"},"description":"The files it changes"},
+                    "depends_on":{"type":"array","items":{"type":"integer"},"description":"The steps it waits for"},
+                    "notes":{"type":"string","description":"What was found, decided, or why it is blocked"},
+                    "remove":{"type":"boolean"}}}}}}
                 """),
-            Summary = a => $"{(a["todos"] as JsonArray)?.Count ?? 0} items",
-            Run = Todo,
+            Summary = a => a["steps"] is JsonArray { Count: > 0 } s ? $"{s.Count} step{(s.Count == 1 ? "" : "s")}" : a.Str("title") ?? "",
+            Run = PlanTool,
         },
     ];
 
@@ -785,29 +797,21 @@ internal static class LocalTools
         }
     }
 
-    private static Task<ToolResult> Todo(JsonObject a, ToolContext c, CancellationToken ct)
+    private static Task<ToolResult> PlanTool(JsonObject a, ToolContext c, CancellationToken ct)
     {
-        var items = (a["todos"] as JsonArray ?? []).OfType<JsonObject>()
-            .Select(t => new TodoItem(t.Str("content") ?? "", t.Str("status") is "in_progress" or "completed" ? t.Str("status")! : "pending"))
-            .Where(t => t.Content.Length > 0)
-            .ToList();
-        c.Todos = items;
-        c.TodosChanged?.Invoke(items);
-        var done = items.Count(t => t.Status == "completed");
-        return Task.FromResult(new ToolResult($"The to-do list has {items.Count} items: {done} done, {items.Count(t => t.Status == "in_progress")} in progress, {items.Count(t => t.Status == "pending")} pending.")
+        WorkPlan plan;
+        try
         {
-            Display = RenderTodos(items, c.Ui),
-        });
+            plan = c.Plan.Apply(a);
+        }
+        catch (PlanError e)
+        {
+            return Task.FromResult(new ToolResult($"The plan is as it was: {e.Message}", Error: true));
+        }
+        c.Plan = plan;
+        c.PlanChanged?.Invoke(plan);
+        return Task.FromResult(new ToolResult(plan.Text()) { Display = plan.Render(c.Ui) });
     }
-
-    public static string RenderTodos(IReadOnlyList<TodoItem> items, Ui ui) => items.Count == 0
-        ? ui.Dim("(empty)")
-        : string.Join('\n', items.Select(t => t.Status switch
-        {
-            "completed" => ui.Green("☒ ") + ui.Dim(t.Content),
-            "in_progress" => ui.Yellow("◐ ") + ui.Bold(t.Content),
-            _ => "☐ " + t.Content,
-        }));
 }
 
 /// <summary>Running a process with a timeout: its output kept within bounds (the start and the end), its whole tree stopped when time is up.</summary>

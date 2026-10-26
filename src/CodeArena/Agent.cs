@@ -1345,7 +1345,7 @@ internal sealed class Agent
         }
         Events?.Notice("Compacting the conversation to fit the model's window…");
         var (summary, failure) = await TrySummaryAsync(keepFrom, SummaryInstruction + SessionNumbers(keepFrom), force, ct);
-        var text = (summary ?? Digest(older, failure!)) + TodoNote();
+        var text = (summary ?? Digest(older, failure!)) + PlanNote();
         Messages =
         [
             new JsonObject { ["role"] = "user", ["content"] = (summary is not null ? SummaryHead : OmittedHead) + "\n\n" + text + HistoryNote() },
@@ -1382,9 +1382,9 @@ internal sealed class Agent
     private string HistoryNote() => Session is null ? "" :
         "\n\nThe messages this summary covers are kept: session_search finds them by their words, session_read reads them again by their numbers (#N). Look rather than guess.";
 
-    /// <summary>The to-do list as it stands, said after a summary (its todo_write calls are gone with what was summarized).</summary>
-    private string TodoNote() =>
-        Context.Todos.Count == 0 ? "" : "\n\nYour to-do list as it stands (todo_write changes it):" + string.Concat(Context.Todos.Select(t => $"\n- [{t.Status}] {t.Content}"));
+    /// <summary>The plan as it stands, said after a summary (its plan calls are gone with what was summarized).</summary>
+    private string PlanNote() =>
+        Context.Plan.IsEmpty ? "" : "\n\nYour plan as it stands (the plan tool changes it):\n" + Context.Plan.Text();
 
     /// <summary>
     /// One long turn (no message of the person's since): its earlier steps are summarized, the person's message and the

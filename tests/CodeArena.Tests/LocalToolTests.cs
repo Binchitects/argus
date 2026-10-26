@@ -469,15 +469,57 @@ public sealed class LocalToolTests : IDisposable
     }
 
     [Fact]
-    public async Task The_todo_list_is_kept_and_shown()
+    public async Task The_plan_is_made_changed_by_its_steps_kept_and_shown_and_what_does_not_hold_is_refused()
     {
         var context = Context();
-        List<TodoItem>? saved = null;
-        context.TodosChanged = t => saved = t;
-        var result = await Run("todo_write", """{"todos":[{"content":"Read the code","status":"completed"},{"content":"Fix the bug","status":"in_progress"},{"content":"Run the tests","status":"pending"}]}""", context);
-        Assert.Equal("The to-do list has 3 items: 1 done, 1 in progress, 1 pending.", result.Text);
-        Assert.Equal(3, saved!.Count);
-        Assert.Equal("☒ Read the code\n◐ Fix the bug\n☐ Run the tests", result.Display);
+        WorkPlan? saved = null;
+        context.PlanChanged = p => saved = p;
+        var made = await Run("plan", """
+            {"title":"Fix the parser","goal":"parse() handles empty frames, tests pass","steps":[
+              {"title":"Read the code","status":"done"},
+              {"title":"Fix the bug","status":"doing","check":"dotnet build","files":["src/Parse.cs","src\\Parse.cs"],"depends_on":[1]},
+              {"title":"Run the tests","check":"dotnet test","depends_on":[2]}]}
+            """, context);
+        Assert.False(made.Error, made.Text);
+        Assert.Equal(["src/Parse.cs"], saved!.Steps[1].Files);
+        Assert.Equal("""
+            Plan: Fix the parser
+            Goal: parse() handles empty frames, tests pass
+            1. [done] Read the code
+            2. [doing] Fix the bug (after 1)
+               check: dotnet build
+               files: src/Parse.cs
+            3. [todo] Run the tests (after 2)
+               check: dotnet test
+            1 of 3 done.
+            """, made.Text);
+        Assert.Equal("Fix the parser  1/3 done\nparse() handles empty frames, tests pass\n☒ 1. Read the code\n◐ 2. Fix the bug  ✓ dotnet build\n☐ 3. Run the tests  ✓ dotnet test", made.Display);
+
+        // Only what changes is sent: a step by its number, one added, one taken out (and waited for no more).
+        var changed = await Run("plan", """{"steps":[{"number":2,"status":"done","notes":"empty frames return 0"},{"number":3,"status":"doing"},{"title":"Update the changelog"},{"number":1,"remove":true}]}""", context);
+        Assert.False(changed.Error, changed.Text);
+        Assert.Equal([2, 3, 4], context.Plan.Steps.Select(s => s.Number));
+        Assert.Empty(context.Plan.Steps[0].DependsOn);
+        Assert.Equal(("done", "empty frames return 0"), (context.Plan.Steps[0].Status, context.Plan.Steps[0].Notes));
+        Assert.Same(context.Plan, saved);
+
+        // Refused, the plan stays as it was.
+        foreach (var (args, why) in new[]
+        {
+            ("""{"steps":[{"number":9,"status":"done"}]}""", "no step 9"),
+            ("""{"steps":[{"number":4,"status":"doing"}]}""", "One step is doing at a time"),
+            ("""{"steps":[{"number":2,"depends_on":[3]},{"number":3,"depends_on":[2]}]}""", "in a circle"),
+            ("""{"steps":[{"number":2,"status":"finished"}]}""", "one of todo, doing, blocked, done"),
+            ("""{"steps":[{"notes":"no title"}]}""", "needs a title"),
+        })
+        {
+            var refused = await Run("plan", args, context);
+            Assert.True(refused.Error, args);
+            Assert.Contains(why, refused.Text, StringComparison.Ordinal);
+        }
+        Assert.Same(context.Plan, saved);
+        Assert.Equal("Plan: Fix the parser", (await Run("plan", """{"clear":true,"title":"Fix the parser"}""", context)).Text.Split('\n')[0]);
+        Assert.Empty(context.Plan.Steps);
     }
 
     [Fact]

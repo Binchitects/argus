@@ -30,7 +30,7 @@ internal sealed class Repl(Runtime rt)
         ("/mode [mode]", "show or switch the mode: ask, auto-edit, plan, yolo"),
         ("/thinking [level]", "show or set thinking: default, off, low, medium, high, xhigh"),
         ("/tools [on|off NAME]", "the tools this session has; turn a group of Arena's or a server's tools on or off in it"),
-        ("/todo", "the to-do list"),
+        ("/plan", "the plan, as it stands"),
         ("/agent [NAME TASK]", "your own coding agents (Claude Code, Codex, Gemini CLI: your subscriptions), or hand one a task"),
         ("/review [BASE]", "review the changes not yet committed, or this branch's over BASE (main...): findings by file and line, and a verdict"),
         ("/compact", "summarize the conversation to free the model's window"),
@@ -607,8 +607,8 @@ internal sealed class Repl(Runtime rt)
                     Ui.Info("Arena's tools are not connected in this session.");
                 }
                 break;
-            case "/todo":
-                Ui.Line(LocalTools.RenderTodos(rt.Context.Todos, Ui));
+            case "/plan" when arg.Length == 0:
+                Ui.Line(rt.Context.Plan.Render(Ui));
                 break;
             case "/agent":
                 await AgentCommandAsync(arg, ct);

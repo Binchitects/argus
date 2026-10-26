@@ -604,8 +604,8 @@ export const topics = {
 
   plans: {
     title: 'Plans',
-    about: 'Plans the chat made with its Plans tool: steps with owners, dates and what each waits for. Yours, and those of rooms you are in.',
-    parts: [{ name: 'The list', text: 'Each plan, newest change first, with how many of its steps are done. A row opens it.' }],
+    about: "Plans the chat made with its Plans tool, and Code Arena's working plans: steps with what done means, owners, dates and what each waits for. Yours, and those of rooms you are in.",
+    parts: [{ name: 'The list', text: "Each plan, newest change first, with how many of its steps are done; Code Arena's show a terminal and their project. A row opens it." }],
     tasks: [{ title: 'Make a plan', steps: ['In a chat, turn on **Plans** in the Tools menu.', 'Ask it to plan something; tell it who does what and by when.', 'Open the plan from the answer.'] }],
     manual: { doc: 'chat', section: 'plans' },
   },
@@ -617,6 +617,8 @@ export const topics = {
       { name: 'Board', text: 'To do, Doing, Blocked and Done. A step\'s buttons move it to another column; **A new step** adds one.' },
       { name: 'Timeline', text: 'Each dated step as a bar from its start to its due date, coloured by its status.' },
       { name: 'Warnings', text: 'What does not fit: a step that starts before what it waits for is due, or one overdue and not done.' },
+      { name: 'Checks and files', text: "A step's **Done when** says how it is checked, and, once it ran, whether the check passed (its output on hover); Code Arena's steps list the files they change." },
+      { name: "Code Arena's plans", text: 'Its agent keeps them as it works: they show here as it goes, and nothing on the board moves them.' },
     ],
     tasks: [{ title: 'Change the plan by talking', steps: ['Open **Its chat**.', 'Say what changed ("Ben is away next week, move his steps").', 'The chat changes the plan; the board shows it.'] }],
     manual: { doc: 'chat', section: 'plans' },

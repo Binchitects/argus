@@ -67,7 +67,7 @@ internal sealed class ToolDef
     public bool ReadOnly => Kind == ToolKind.Read || (Kind == ToolKind.Remote && ChangesNothing);
 }
 
-/// <summary>What tools work with: the allowed folders, the terminal, the shell, the to-do list, sub-agents.</summary>
+/// <summary>What tools work with: the allowed folders, the terminal, the shell, the plan, sub-agents.</summary>
 internal sealed class ToolContext
 {
     public required Workspace Workspace { get; init; }
@@ -78,11 +78,12 @@ internal sealed class ToolContext
     public int Turn { get; set; }
     /// <summary>The commands run with no time limit; null where none may run (a sub-agent).</summary>
     public CommandJobs? Jobs { get; init; }
-    public List<TodoItem> Todos { get; set; } = [];
+    /// <summary>The agent's working plan (the plan tool).</summary>
+    public WorkPlan Plan { get; set; } = WorkPlan.None;
     /// <summary>Runs a sub-agent (description, prompt, which of the person's own if any) and returns its report.</summary>
     public Func<string, string, string?, CancellationToken, Task<string>>? SubAgent { get; set; }
-    /// <summary>Called when the to-do list changes, so the session keeps it.</summary>
-    public Action<List<TodoItem>>? TodosChanged { get; set; }
+    /// <summary>Called when the plan changes, so the session keeps it (and Arena, with the session's chat).</summary>
+    public Action<WorkPlan>? PlanChanged { get; set; }
     /// <summary>What the agent remembers (the remember tool); null: not kept here.</summary>
     public MemoryStore? Memory { get; init; }
     /// <summary>The sandbox the commands run in (none: as the person).</summary>
@@ -97,9 +98,6 @@ internal sealed class ToolContext
     /// <summary>Told how a long call goes (an MCP tool's progress reports), for the person.</summary>
     public Action<string>? Progress { get; set; }
 }
-
-/// <summary>One line of the to-do list.</summary>
-internal sealed record TodoItem(string Content, string Status);
 
 /// <summary>The permission modes: how much runs without asking.</summary>
 internal enum Mode { Ask, AutoEdit, Plan, Yolo }

@@ -213,6 +213,34 @@ export const memoryQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => api<{ online: boolean; project: string; notebook?: string | null; memories: CodeMemory[] }>('/api/memory', { signal }),
 }
 
+/** A step of the agent's plan: what done means (its check), the files it changes, what it waits for, how its check went. */
+export interface CodePlanStep {
+  number: number
+  title: string
+  status: 'todo' | 'doing' | 'blocked' | 'done'
+  check: string | null
+  files: string[]
+  dependsOn: number[]
+  notes: string | null
+  checkResult: 'passed' | 'failed' | null
+  checkOutput: string | null
+}
+
+/** The agent's working plan (its plan tool), and the Arena chat it is kept with (null: not kept in step). */
+export interface CodePlan {
+  title: string
+  goal: string | null
+  steps: CodePlanStep[]
+  chat: string | null
+}
+
+export const planQuery = {
+  queryKey: ['code', 'plan'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<CodePlan>('/api/plan', { signal }),
+  // The agent changes it as it works: read again every few seconds while the view shows.
+  refetchInterval: 2000,
+}
+
 export const sessionsQuery = {
   queryKey: ['code', 'sessions'] as const,
   queryFn: ({ signal }: { signal: AbortSignal }) => api<SessionSummary[]>('/api/sessions', { signal }),

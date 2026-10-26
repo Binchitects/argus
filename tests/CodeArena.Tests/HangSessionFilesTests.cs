@@ -39,7 +39,7 @@ public sealed class HangSessionFilesTests(ITestOutputHelper log) : IDisposable
                     history.Add(web);
                 }
             }
-            store.Todos([new TodoItem($"step {c}", "in_progress")]);
+            store.Plan(new WorkPlan("Plan", null, [new WorkStep(1, $"step {c}", WorkStep.Doing)]));
             store.Link("chat-1");
             // Arena has some of them: three more each time.
             store.Sent(store.Read(d => d.Stream.Where(e => e.Id is null).Take(3).Select(e => (e.Key, $"id-{e.Key}")).ToList()));
@@ -63,7 +63,7 @@ public sealed class HangSessionFilesTests(ITestOutputHelper log) : IDisposable
         Assert.Equal(whole.Messages.Select(m => m.ToJsonString()), fast.Messages.Select(m => m.ToJsonString()));
         Assert.Equal(whole.Answers.OrderBy(a => a.Key).Select(a => $"{a.Key} {a.Value.Model} {a.Value.Usage}"), fast.Answers.OrderBy(a => a.Key).Select(a => $"{a.Key} {a.Value.Model} {a.Value.Usage}"));
         Assert.Equal(whole.Known, fast.Known);
-        Assert.Equal(whole.Todos, fast.Todos);
+        Assert.Equal((whole.Plan.Text(), whole.PlanVersion, whole.PlanSent), (fast.Plan.Text(), fast.PlanVersion, fast.PlanSent));
         Assert.Equal((whole.Prompt, whole.Cached, whole.Completion), (fast.Prompt, fast.Cached, fast.Completion));
         Assert.Equal((whole.Conversation, whole.Unlinked, whole.From, whole.Waiting, whole.LastSent, whole.Prefix), (fast.Conversation, fast.Unlinked, fast.From, fast.Waiting, fast.LastSent, fast.Prefix));
         // What Arena has of it, and what the IDE shows of each message, alike (the words aside: the list does not keep them).

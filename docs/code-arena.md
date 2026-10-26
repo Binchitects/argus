@@ -185,7 +185,7 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/mode [mode]` | show the mode, or switch |
 | `/thinking [level]` | `default`, `off`, `low`, `medium`, `high`, `xhigh` (sent as the chat sends it, through `chat_template_kwargs`); `default` is the web chat's default level when Arena says one (`DEFAULT_THINKING`), else the model's own |
 | `/tools [on\|off NAME]` | the tools of the session, which ask, which are off and which are loaded when needed; `on` or `off` a group of Arena's or a server's tools in this session (by its name, its title or one of its functions) |
-| `/todo` | the to-do list |
+| `/plan` | the plan, as it stands |
 | `/review [BASE]` | reviews the changes not yet committed, or this branch's over BASE (`/review main`): the model reads them with git, tries to refute each finding before it reports it, and ends with a verdict; it changes nothing. A `/review` command of the project's or your own goes first |
 | `/agent [NAME TASK]` | your own coding agents (below); with a name and a task, run one on it: its output shows as it comes, and what it said goes into the conversation |
 | `/compact` | summarize the conversation now |
@@ -1358,7 +1358,7 @@ On the person's machine:
 | `git` | status, diff, log, show, blame, branch: reading only (commits go through `run_shell`), inside the working directory: `diff --no-index` is refused, and so is a file outside it named anywhere in the arguments (`blame --contents FILE`, `-S FILE`), by name or through a link that leads out. It never asks, so the repository's own settings run nothing in it: no fsmonitor, hook, clean or smudge filter, merge driver (`--remerge-diff`), text conversion (so not `status -v`), external diff or signature checker, no submodule looked into (their changes are not shown), and no network (a partial clone does not fetch). Nor do they send it elsewhere: a work tree other than the folder that holds `.git` (`core.worktree`), or a `.git` that leads to another repository's folder, is refused (a worktree of another checkout and a submodule, which git made so, are read), and a `blame.ignoreRevsFile` outside is not read. The file list `grep` and `glob` (and the IDE's search and quick open) take from git is read the same way |
 | `screenshot` | a picture of a web page (`url`, at `width` × `height`, 1280 × 800 by default: the app you build, on its dev server) through a headless Chrome, Edge, Chromium or Brave (`CODE_ARENA_BROWSER` names one); without `url`, the whole screen (grim, gnome-screenshot, spectacle, ImageMagick or scrot on Linux; screencapture on macOS; PowerShell on Windows). The picture goes to the model after the result (one that sees pictures; another is told it cannot). It asks first, as a command does |
 | `ask_agent` | hands a task to one of the person's own coding agents (below), which runs it in the working directory; what it prints comes back. Offered when one is installed; it asks first, as a command does |
-| `todo_write` | the to-do list the person sees (`/todo`) |
+| `plan` | the working plan the person sees (`/plan`), kept in Arena with the session's chat ([below](#the-plan)) |
 | `task` | a sub-agent (below) |
 
 **Your own subscriptions.** Claude Code (`claude`, a Claude Pro or Max
@@ -1507,10 +1507,30 @@ What to put there: how to build and test, conventions, what not to touch.
 Each file is read up to 20,000 characters. The model also gets the system, the
 shell, the working directory, the git branch, the date and the mode.
 
+## The plan
+
+For work of several steps the agent keeps a plan with the `plan` tool: a
+title, a goal, and steps, each with what done means (its check: a command
+whose success shows it, as `dotnet test`, or what to look at), the files it
+changes, the steps it waits for, notes, and a status (to do, doing, blocked,
+done; one doing at a time). It makes the plan before it starts and sends only
+what changes as it goes: a step by its number, a new one without, one taken
+out with `remove`, all of it again with `clear`. A step that waits for one
+not there, steps that wait for one another in a circle, or two doing at once
+are refused, and the plan stays as it was.
+
+The terminal shows the plan each time it changes, and `/plan` shows it as it
+stands. It is kept with the session (`--continue` and `/resume` bring it
+back) and said again after every summary, so it is in the model's window
+however long the work goes on. While the session is kept in step with a chat
+in Arena, the plan goes there too, once the messages that changed it have:
+it shows under **Plans** in the web, with the session's project, as the
+agent keeps it ([chat.md](chat.md#plans)).
+
 ## Sessions and the model's window
 
 Each session is a JSON Lines file in the sessions folder (0600): every message
-as it happens, the model, the to-do list and the tokens. `--continue`,
+as it happens, the model, the plan and the tokens. `--continue`,
 `--resume` and `/resume` read it back. A compaction appends the new history
 (the summary and the part kept), never rewrites the file. Each file is
 scanned once while Code Arena runs and then only what was appended to it (by
@@ -1527,7 +1547,7 @@ decisions, files, commands and the state of the work) and the recent part
 kept whole, within the **target**, 25% of the window by default. `/compact`
 does it at once. The summary is written in sections (`## Goal`,
 `## Constraints and preferences`, `## Decisions`, `## Files`, `## Commands`,
-`## Errors met`, `## State`, `## Next steps`), and the to-do list as it stands
+`## Errors met`, `## State`, `## Next steps`), and the plan as it stands
 is said after it.
 
 What fills the window is managed before anything is summarized:

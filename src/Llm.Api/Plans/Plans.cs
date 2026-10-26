@@ -18,12 +18,13 @@ public sealed class PlanException(string message) : Exception(message);
 
 /// <summary>A step as the tool and the page give it: unset fields are kept as they are.</summary>
 public sealed record StepChange(int? Number = null, string? Title = null, string? Notes = null, string? Owner = null, string? Status = null,
-    string? Start = null, string? Due = null, int[]? DependsOn = null, bool Remove = false);
+    string? Start = null, string? Due = null, int[]? DependsOn = null, bool Remove = false, string? Check = null, string[]? Files = null);
 
 /// <summary>Plans: made and kept by the chat's Plans tool, read and moved along on the page; a room's are its people's.</summary>
 public static class PlanBook
 {
     public const int MostSteps = 200;
+    public const int MostFiles = 50;
 
     /// <summary>The plan, when <paramref name="me"/> may see it (<paramref name="need"/> Write: change it): its maker, or whoever may open its chat that way.</summary>
     public static async Task<Plan?> FindAsync(AppDbContext db, Guid id, AppUser me, Need need, CancellationToken ct)
@@ -105,6 +106,14 @@ public static class PlanBook
             if (c.DependsOn is { } deps)
             {
                 step.DependsOn = [.. deps.Distinct().Order()];
+            }
+            if (c.Check is { } check)
+            {
+                step.Check = check.Trim().Length == 0 ? null : Cut(check.Trim(), 1000);
+            }
+            if (c.Files is { } files)
+            {
+                step.Files = [.. files.Select(f => f.Trim().Replace('\\', '/')).Where(f => f.Length > 0).Distinct(StringComparer.Ordinal).Take(MostFiles).Select(f => Cut(f, 300))];
             }
         }
         if (plan.Steps.Count > MostSteps)
@@ -189,11 +198,12 @@ public static class PlanBook
 
     public static object Shape(Plan p, DateOnly today) => new
     {
-        p.Id, p.Title, p.Goal, p.ConversationId, p.CreatedAt, p.UpdatedAt,
+        p.Id, p.Title, p.Goal, p.ConversationId, p.Source, p.Place, p.CreatedAt, p.UpdatedAt,
         steps = p.Steps.OrderBy(s => s.Number).Select(s => new
         {
             s.Number, s.Title, s.Notes, s.Owner, s.Status,
             start = s.Start?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), due = s.Due?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), s.DependsOn,
+            s.Check, s.Files, s.CheckResult, s.CheckOutput, s.CheckedAt,
         }),
         warnings = Warnings(p, today),
         done = p.Steps.Count(s => s.Status == PlanStep.Done),
@@ -204,7 +214,8 @@ public static class PlanBook
             Number: s["number"] is JsonValue n && n.TryGetValue<int>(out var number) ? number : null,
             Title: Str(s, "title"), Notes: Str(s, "notes"), Owner: Str(s, "owner"), Status: Str(s, "status"), Start: Str(s, "start"), Due: Str(s, "due"),
             DependsOn: s["depends_on"] is JsonArray deps ? [.. deps.Select(d => d is JsonValue v && v.TryGetValue<int>(out var x) ? x : 0)] : null,
-            Remove: s["remove"] is JsonValue r && r.TryGetValue<bool>(out var remove) && remove))];
+            Remove: s["remove"] is JsonValue r && r.TryGetValue<bool>(out var remove) && remove,
+            Check: Str(s, "check"), Files: s["files"] is JsonArray files ? [.. files.OfType<JsonValue>().Select(f => f.ToString())] : null))];
 
     private static string? Str(JsonObject o, string name) => o[name] is JsonValue v ? v.ToString() : null;
 
@@ -238,7 +249,8 @@ public sealed class PlansTool(AppDbContext db, TimeProvider clock) : IChatTool
             ["start"] = Schema.Text("YYYY-MM-DD"),
             ["due"] = Schema.Text("YYYY-MM-DD"),
             ["depends_on"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "integer" }, ["description"] = "Numbers of the steps it waits for" },
-            ["notes"] = Schema.Text("Details, links, acceptance"),
+            ["notes"] = Schema.Text("Details, links"),
+            ["check"] = Schema.Text("What done means: how anyone can tell this step is done"),
             ["remove"] = new JsonObject { ["type"] = "boolean", ["description"] = "plan_change: true takes the step out" },
         },
     };
@@ -335,7 +347,7 @@ public static class PlanEndpoints
         var rooms = await RoomAccess.RoomsOfAsync(db, me, ct);
         var plans = await db.Plans.AsNoTracking().Where(x => x.UserId == me.Id || (x.ConversationId != null && rooms.Contains(x.ConversationId.Value)))
             .OrderByDescending(x => x.UpdatedAt).Take(200)
-            .Select(x => new { x.Id, x.Title, x.ConversationId, x.UpdatedAt, steps = x.Steps.Count, done = x.Steps.Count(s => s.Status == PlanStep.Done) }).ToListAsync(ct);
+            .Select(x => new { x.Id, x.Title, x.ConversationId, x.Source, x.Place, x.UpdatedAt, steps = x.Steps.Count, done = x.Steps.Count(s => s.Status == PlanStep.Done) }).ToListAsync(ct);
         return Results.Ok(plans);
     }
 
@@ -351,6 +363,10 @@ public static class PlanEndpoints
         if (await PlanBook.FindAsync(db, id, me, Need.Write, ct) is not { } plan)
         {
             return Results.NotFound();
+        }
+        if (plan.Source == Plan.FromCode)
+        {
+            return AuthEndpoints.Problem(409, "plan_code", "Code Arena's agent keeps this plan: change it there, by asking the agent.");
         }
         try
         {

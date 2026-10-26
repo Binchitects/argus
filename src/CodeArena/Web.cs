@@ -409,6 +409,12 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             case ("GET", "/api/session"):
                 await res.JsonAsync(200, SessionJson(), ct);
                 return;
+            case ("GET", "/api/plan"):
+                // The agent's plan as it stands (the IDE's Plan view), and where Arena shows it.
+                var plan = _rt.Context.Plan.ToJson();
+                plan["chat"] = _rt.Sync?.Conversation;
+                await res.JsonAsync(200, plan, ct);
+                return;
             case ("GET", "/api/history"):
                 await res.JsonAsync(200, Sent(), ct);
                 return;

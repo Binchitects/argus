@@ -779,7 +779,7 @@ describe('Code Arena, the IDE', () => {
     const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
     // The agent's changes are counted on their button.
     expect(await within(bar).findByRole('button', { name: 'Agent changes (1)' })).toBeInTheDocument()
-    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Memory', 'Chat', 'Terminal', 'Theme', 'Help', 'About Code Arena'])
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Plan', 'Memory', 'Chat', 'Terminal', 'Theme', 'Help', 'About Code Arena'])
     expect(within(bar).getByRole('button', { name: 'Explorer' })).toHaveAttribute('aria-pressed', 'true')
     expect(await screen.findByRole('tree', { name: 'Files' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'No file is open' })).toBeInTheDocument()
@@ -3041,6 +3041,31 @@ describe('quick open ranking', () => {
     await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/memory')?.body).toEqual({ text: 'The API runs on port 8081.', project: true }))
     await userEvent.click(within(project).getByRole('button', { name: 'Forget: Builds with make, tests with make check.' }))
     await waitFor(() => expect(within(panel).queryByText(/Builds with make/)).not.toBeInTheDocument())
+  })
+
+  it("shows the agent's plan as it changes: each step with what done means, its check and its files, and where Arena shows it", async () => {
+    let plan = {
+      title: 'Rename the parser', goal: 'parse_frame everywhere', chat: 'c-42',
+      steps: [
+        { number: 1, title: 'Find the callers', status: 'done', check: 'grep -rn parse src', files: [], dependsOn: [], notes: null, checkResult: 'passed', checkOutput: '0 matches' },
+        { number: 2, title: 'Rename it', status: 'doing', check: 'make test', files: ['src/parse.c'], dependsOn: [1], notes: 'four callers', checkResult: null, checkOutput: null },
+      ],
+    }
+    backend({ 'GET /api/plan': () => ({ json: plan }), 'GET /api/files/src/parse.c': () => ({ json: { path: 'src/parse.c', text: 'int parse(void);\n' } }) })
+    renderIde()
+    await openApp()
+    await userEvent.click(screen.getByRole('button', { name: 'Plan' }))
+    const panel = await screen.findByRole('complementary', { name: 'Plan' })
+    const steps = await within(panel).findByRole('list', { name: 'Steps' })
+    expect(within(panel).getByText('1/2 done')).toBeInTheDocument()
+    expect(within(steps).getAllByRole('listitem')[0]).toHaveTextContent('1. Find the callersDone when: grep -rn parse src· passed')
+    expect(within(steps).getByLabelText('Doing')).toBeInTheDocument()
+    expect(within(panel).getByRole('link', { name: /In Arena, with its chat/ })).toHaveAttribute('href', 'https://llm.test/chat/c-42')
+    // It is read again as the agent works.
+    plan = { ...plan, steps: [plan.steps[0]!, { ...plan.steps[1]!, status: 'done', checkResult: 'passed' }] }
+    expect(await within(panel).findByText('2/2 done', {}, { timeout: 4000 })).toBeInTheDocument()
+    await userEvent.click(within(panel).getByRole('button', { name: 'src/parse.c' }))
+    expect(await screen.findByRole('tab', { name: /parse\.c/ })).toBeInTheDocument()
   })
 
   it('ranks by letters in order, the file name and runs first', () => {
