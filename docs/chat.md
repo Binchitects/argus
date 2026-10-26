@@ -333,7 +333,11 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     record of tool calls. At most 100 calls a program; the tool card counts
     them as they go and lists them. A tool that asks you first, Python
     itself, vector pictures and plugins that run in the sandbox are not
-    callable from code. It needs **Python**'s permission.
+    callable from code. It needs **Python**'s permission. How each model gets
+    it is the admins' choice (Admin → Models → **Tools**): direct (no
+    `run_code`, for small models), as code (`run_code`, even in a chat without
+    it, and the other tools named for it in place of their definitions), or
+    both.
   - **Canvas**: documents and code beside the chat, which you and the model
     both edit (see **Canvas** below).
   - **Reading files**: a long attachment goes into the question only up to a

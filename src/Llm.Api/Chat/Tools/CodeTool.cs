@@ -41,6 +41,24 @@ public sealed partial class CodeTool(SandboxClient sandbox, PythonTool files, Ap
         return $"arena.{(g is "tools" or "call" or "ToolError" ? g + "_" : g)}.{Identifier(function)}";
     }
 
+    /// <summary>
+    /// What a model given its tools as code reads in place of their definitions: each function a program may call, as Python
+    /// calls it, with its parameters (the required ones first) and the first line of what it does.
+    /// </summary>
+    public static string FunctionsNote(IReadOnlyList<CodeFunction> functions)
+    {
+        var lines = functions.Select(f =>
+        {
+            var properties = (f.Parameters?["properties"] as JsonObject)?.Select(p => p.Key).ToList() ?? [];
+            var required = (f.Parameters?["required"] as JsonArray)?.Select(r => r?.GetValue<string>()).OfType<string>().ToHashSet(StringComparer.Ordinal) ?? [];
+            var args = string.Join(", ", properties.OrderBy(p => !required.Contains(p)).Select(p => required.Contains(p) ? p : p + "=…"));
+            var about = (f.Description ?? "").Split('\n')[0];
+            return $"- {PythonName(f.Group, f.Name)}({args}): {(about.Length > 140 ? about[..140] + "…" : about)}";
+        });
+        return $"Your tools are functions to call from a {Function} program, not one by one: write the program, call them with keyword arguments, " +
+            "and print what you need (help(arena.<group>.<function>) in it tells one's parameters in full). They are:\n" + string.Join('\n', lines);
+    }
+
     private static string Identifier(string name)
     {
         var clean = NotWord().Replace(name, "_").Trim('_');

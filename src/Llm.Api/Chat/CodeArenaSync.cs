@@ -141,10 +141,10 @@ public static class CodeArenaSync
     /// shows which models are loaded and see pictures, the deployment's thinking levels and default, and its links to GitLab.
     /// </summary>
     private static async Task<IResult> ConfigAsync(HttpContext http, McpPeople people, ToolRegistry registry, AccessService access, ModelPolicy policy,
-        IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, SmallModel small, IOptionsMonitor<ChatOptions> chat)
+        IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, SmallModel small, IOptionsMonitor<ChatOptions> chat, Models.ToolModeBook toolModes)
     {
         var (me, refusal) = await CallerAsync(http, people);
-        return me is null ? refusal! : Results.Ok(await ChatEndpoints.ConfigForAsync(me, registry, access, policy, argusOptions, argus, models, small, chat, http.RequestAborted));
+        return me is null ? refusal! : Results.Ok(await ChatEndpoints.ConfigForAsync(me, registry, access, policy, argusOptions, argus, models, small, chat, toolModes, http.RequestAborted));
     }
 
     /// <summary>

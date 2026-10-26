@@ -782,6 +782,72 @@ public sealed class ChatToolsTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_model_gets_its_tools_direct_as_code_or_both_as_the_admins_set_it_and_automatically_by_its_size()
+    {
+        await using var sandbox = new FakeSandbox();
+        await using var f = NewApp(settings: new() { ["Sandbox:Dir"] = sandbox.Dir });
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (b, _, email) = await PersonAsync(f);
+        const string model = "Qwen3.8-Flash-Next";
+        Task<HttpResponseMessage> SetModeAsync(string? mode) => admin.Http.PutAsJsonAsync(new Uri($"/api/admin/models/{model}/tools", UriKind.Relative), new { mode });
+        string SystemSent() => app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]![0]!["content"]!.GetValue<string>();
+        var id = await NewChatAsync(b, new { tools = new[] { "code", "calculator" } });
+
+        // Automatic: its name says no small size, so both.
+        await SendAsync(b, id, "hello");
+        Assert.Contains("run_code", FunctionsSentFor(email));
+        Assert.Contains("calculate", FunctionsSentFor(email));
+
+        // Direct: no run_code.
+        await StatusAssert.Is(HttpStatusCode.OK, await SetModeAsync("direct"));
+        await SendAsync(b, id, "again");
+        Assert.DoesNotContain("run_code", FunctionsSentFor(email));
+        Assert.Contains("calculate", FunctionsSentFor(email));
+
+        // As code: run_code, even in a chat without Tools as code, and the functions named for it rather than sent one by one.
+        await StatusAssert.Is(HttpStatusCode.OK, await SetModeAsync("code"));
+        var plain = await NewChatAsync(b, new { tools = new[] { "calculator" } });
+        var events = await SendAsync(b, plain, "Sum it [call run_code {\"code\":\"# call calculate {\\\"expression\\\": \\\"6*7\\\"}\"}]");
+        Assert.Equal(["run_code"], FunctionsSentFor(email));
+        Assert.Contains("- arena.calculator.calculate(expression): ", SystemSent(), StringComparison.Ordinal);
+        var result = Event(events, "tool_result");
+        Assert.False(result.GetProperty("isError").GetBoolean(), result.GetProperty("text").GetString());
+        Assert.Contains("42", JsonDocument.Parse(result.GetProperty("text").GetString()!).RootElement.GetProperty("stdout").GetString(), StringComparison.Ordinal);
+
+        // Code Arena reads it from the chat's config; the list says whose choice it is.
+        Assert.Equal("code", (await b.JsonAsync(await b.GetAsync("/api/chat/config"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == model)
+            .GetProperty("toolMode").GetString());
+        JsonElement Row(JsonElement list) => list.GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == model).GetProperty("toolMode");
+        var row = Row(await admin.JsonAsync(await admin.GetAsync("/api/admin/models")));
+        Assert.Equal(("code", true, "both"), (row.GetProperty("mode").GetString(), row.GetProperty("set").GetBoolean(), row.GetProperty("automatic").GetString()));
+
+        // Back to the automatic choice; a mode that is none and a model that is not there are refused.
+        var back = await admin.JsonAsync(await SetModeAsync(null));
+        Assert.Equal("both", back.GetProperty("toolMode").GetString());
+        Assert.False(back.GetProperty("toolModeSet").GetBoolean());
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await SetModeAsync("sometimes"));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/models/no-such-model/tools", UriKind.Relative), new { mode = "code" }));
+        Assert.Contains((await admin.JsonAsync(await admin.GetAsync("/api/admin/audit"))).EnumerateArray(),
+            e => e.GetProperty("action").GetString() == "model.tools_mode" && e.GetProperty("detail").GetString() == "automatic");
+    }
+
+    [Theory]
+    [InlineData("Qwen3-4B-Instruct-2507", 4.0, "direct")]
+    [InlineData("llama-3.1-8b-instruct", 8.0, "direct")]
+    [InlineData("qwen2.5-coder-1.5b", 1.5, "direct")]
+    [InlineData("qwen3-30b-a3b", 30.0, "both")]
+    [InlineData("Mixtral-8x7B", 56.0, "both")]
+    [InlineData("gpt-oss-120b", 120.0, "both")]
+    [InlineData("claude-sonnet-5-5", null, "both")]
+    public void A_models_automatic_tools_follow_the_size_its_name_says(string model, double? billions, string mode)
+    {
+        Assert.Equal(billions, Llm.Api.Models.ToolModeBook.Billions(model));
+        Assert.Equal(mode, Llm.Api.Models.ToolModeBook.Automatic(model, smallModel: null));
+        // The model for small steps calls its tools directly, whatever its size.
+        Assert.Equal("direct", Llm.Api.Models.ToolModeBook.Automatic(model, smallModel: model));
+    }
+
+    [Fact]
     [Trait("Control", "OPS-02")]
     public async Task A_program_calls_the_chats_tools_as_the_person_through_the_sandbox_and_only_what_it_prints_comes_back()
     {

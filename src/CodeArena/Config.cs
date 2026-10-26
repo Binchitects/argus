@@ -200,6 +200,11 @@ internal sealed class Config
     public bool PlanCritique { get; set; } = true;
     /// <summary>The Python run_code runs (code mode): python3 when not said (python on Windows).</summary>
     public string? Python { get; set; }
+    /// <summary>
+    /// How the model is given the session's tools: "direct" (no run_code), "code" (the servers' tools only as functions for
+    /// run_code) or "both"; when not said, as Arena gives the model its tools (Admin → Models → Tools), else both.
+    /// </summary>
+    public string? ToolMode { get; set; }
     /// <summary>Arena's own skills (code-review, write-tests, debug…), offered after the person's and the project's: on unless false.</summary>
     public bool BuiltInSkills { get; set; } = true;
     /// <summary>The project's long memory in .remember/ (read at a session's start, kept with remember_project): on unless false.</summary>
@@ -307,6 +312,8 @@ internal sealed class Config
         config.AutoCommit = raw.Bool("autoCommit") ?? true;
         config.PlanCritique = raw.Bool("planCritique") ?? true;
         config.Python = raw.Str("python");
+        config.ToolMode = raw.Str("toolMode") is { } toolMode && ToolBox.Modes.Contains(toolMode) ? toolMode
+            : raw.Str("toolMode") is { } wrong ? throw new InvalidOperationException($"\"toolMode\" in {file} is direct, code or both, not {wrong}.") : null;
         config.BuiltInSkills = raw.Bool("builtInSkills") ?? true;
         config.ProjectMemory = raw.Bool("projectMemory") ?? true;
         config.UpdateCheck = raw.Bool("updateCheck") ?? true;
@@ -447,6 +454,7 @@ internal sealed class Config
         Set("autoCommit", AutoCommit ? null : false);
         Set("planCritique", PlanCritique ? null : false);
         Set("python", Python);
+        Set("toolMode", ToolMode);
         Set("builtInSkills", BuiltInSkills ? null : false);
         Set("projectMemory", ProjectMemory ? null : false);
         Set("updateCheck", UpdateCheck ? null : false);

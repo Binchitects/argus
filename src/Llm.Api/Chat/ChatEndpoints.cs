@@ -104,17 +104,19 @@ public static partial class ChatEndpoints
     }
 
     private static async Task<IResult> Config(ClaimsPrincipal p, UserManager<AppUser> users, ToolRegistry registry, AccessService access, ModelPolicy policy,
-        IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, SmallModel small, IOptionsMonitor<ChatOptions> chat, CancellationToken ct) =>
-        Results.Ok(await ConfigForAsync(await Me(p, users), registry, access, policy, argusOptions, argus, models, small, chat, ct));
+        IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, SmallModel small, IOptionsMonitor<ChatOptions> chat, ToolModeBook toolModes, CancellationToken ct) =>
+        Results.Ok(await ConfigForAsync(await Me(p, users), registry, access, policy, argusOptions, argus, models, small, chat, toolModes, ct));
 
     /// <summary>
     /// What the chat offers this person: the models they may use (each loaded or not), the thinking levels, their tools and
     /// the limits on attachments. The web chat reads it signed in; Code Arena reads the same with the person's key
-    /// (/api/code-arena/config), so its model picker says what the web's does.
+    /// (/api/code-arena/config), so its model picker says what the web's does, and it gives each model its tools the way the
+    /// chat does (toolMode: direct, code or both).
     /// </summary>
     internal static async Task<object> ConfigForAsync(AppUser me, ToolRegistry registry, AccessService access, ModelPolicy policy,
-        IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, SmallModel small, IOptionsMonitor<ChatOptions> chat, CancellationToken ct)
+        IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, SmallModel small, IOptionsMonitor<ChatOptions> chat, ToolModeBook toolModes, CancellationToken ct)
     {
+        var modeOf = await toolModes.ResolverAsync(ct);
         // The models this person may use; a model of the engine that is not loaded is listed, marked so.
         var (list, first, onEngine) = await policy.ForAsync(me, await models.ListAsync(ct), ct);
         var tools = await registry.ForAsync(await access.MembershipAsync(me, ct), ct);
@@ -127,6 +129,7 @@ public static partial class ChatEndpoints
             models = list.Select(m => new
             {
                 m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking, loaded = policy.Loaded(m.Name, onEngine), onRequest = policy.OnRequest(m.Name, onEngine),
+                toolMode = modeOf(m.Name),
                 prices = new { input = m.InputPerMtok, cachedInput = m.CachedInputPerMtok, output = m.OutputPerMtok },
             }),
             presets = ThinkingPresets.Parse(chat.CurrentValue.ThinkingPresets),

@@ -141,6 +141,14 @@ internal sealed partial class Runtime : IAsyncDisposable
     /// <summary>The session's choice of remote tools (the groups turned off), and those loaded on demand.</summary>
     public ToolDemand Demand { get; } = new();
 
+    /// <summary>
+    /// How the model is given its tools now (it follows the model): config.json's toolMode, else Arena's word for the model
+    /// (Admin → Models → Tools, in its chat config), else both.
+    /// </summary>
+    public string ToolMode => Config.ToolMode
+        ?? ((ArenaChat?["models"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(m => m.Str("name") == Model?.Info.Id)?.Str("toolMode") is { } said
+            && ToolBox.Modes.Contains(said) ? said : "both");
+
     /// <summary>Arena's word on one of its tools (title, description, icon), from its chat config; null when it has not said.</summary>
     private JsonObject? ArenaTool(string group) => (ArenaChat?["tools"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(t => t.Str("id") == group);
 
@@ -387,7 +395,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         Demand.Budget = Config.ToolChars ?? ToolDemand.DefaultBudget;
         Demand.Loader = LoadTools;
         Demand.Changed = (off, loaded) => Session?.Tools(off, loaded);
-        Tools = new ToolBox(tools) { Demand = Demand };
+        Tools = new ToolBox(tools) { Demand = Demand, Mode = () => ToolMode };
 
         // The servers connect in the background; the session starts when the gateway has said which models there are.
         var models = Gateway.ModelsAsync(ct);
@@ -479,6 +487,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             ServerInstructions = () => Volatile.Read(ref _instructions),
             HasArenaTools = () => ArenaConnected,
             ToolsToLoad = ToolsToLoad,
+            ToolsInCode = ToolsInCode,
             Memory = () => _memory,
             Skills = () => [.. Extensions.Skills.Select(s => (s.Name, s.Description))],
             Agents = () => [.. Extensions.Agents.Select(a => (a.Name, a.Description))],

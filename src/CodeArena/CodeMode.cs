@@ -106,9 +106,62 @@ internal sealed partial class Runtime
     /// <summary>The most calls of the session's tools one program makes.</summary>
     public const int MostCodeCalls = 100;
 
-    /// <summary>The tools a program may call: every one but those that hand work on, wait on jobs, or run code themselves.</summary>
+    /// <summary>
+    /// The tools a program may call: every one but those that hand work on, wait on jobs, or run code themselves, and but the
+    /// servers' tools the person turned off in this session.
+    /// </summary>
     private IEnumerable<ToolDef> CodeTools() =>
-        Tools.All.Where(t => t.Kind != ToolKind.Agent && t.Name is not ("run_code" or "command_output" or "stop_command" or "ask_agent" or ToolDemand.Function));
+        Tools.All.Where(t => t.Kind != ToolKind.Agent && t.Name is not ("run_code" or "command_output" or "stop_command" or "ask_agent" or ToolDemand.Function)
+            && (t.Group is null || !Demand.IsOff(t.Group)));
+
+    /// <summary>
+    /// The note for a model given the servers' tools as code: each as a program calls it, with its parameters (the required
+    /// ones first) and the first line of what it does; empty in the other modes.
+    /// </summary>
+    private string ToolsInCode()
+    {
+        var tools = Tools.InCode();
+        if (tools.Count == 0)
+        {
+            return "";
+        }
+        var lines = tools.Select(t =>
+        {
+            var properties = (t.Parameters["properties"] as JsonObject)?.Select(p => p.Key).ToList() ?? [];
+            var required = (t.Parameters["required"] as JsonArray)?.Select(r => r?.ToString()).OfType<string>().ToHashSet(StringComparer.Ordinal) ?? [];
+            var args = string.Join(", ", properties.OrderBy(p => !required.Contains(p)).Select(p => required.Contains(p) ? p : p + "=…"));
+            var about = t.Description.Split('\n')[0];
+            return $"- {PythonName(t.Server ?? "local", t.Name)}({args}): {(about.Length > 140 ? about[..140] + "…" : about)}";
+        });
+        return "The servers' tools are functions to call from a run_code program, not one by one: write the program, call them with keyword " +
+            "arguments, and print what you need (help(...) in it tells one's parameters in full). The files, search, git and shell tools stay as they are. " +
+            "They are:\n" + string.Join('\n', lines);
+    }
+
+    /// <summary>Python's keywords: a name that is one gets a _ after it, as the arena module names it.</summary>
+    private static readonly HashSet<string> PythonKeywords =
+    [
+        "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del", "elif", "else", "except",
+        "finally", "for", "from", "global", "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try",
+        "while", "with", "yield",
+    ];
+
+    /// <summary>A function as a program calls it, arena.&lt;group&gt;.&lt;function&gt;: the names the arena module gives them.</summary>
+    internal static string PythonName(string group, string function)
+    {
+        var g = Identifier(group);
+        return $"arena.{(g is "tools" or "call" or "ToolError" ? g + "_" : g)}.{Identifier(function)}";
+    }
+
+    private static string Identifier(string name)
+    {
+        var clean = NotWord().Replace(name, "_").Trim('_');
+        clean = clean.Length == 0 ? "tool" : char.IsDigit(clean[0]) ? "_" + clean : clean;
+        return PythonKeywords.Contains(clean) ? clean + "_" : clean;
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\W")]
+    private static partial System.Text.RegularExpressions.Regex NotWord();
 
     public static ToolDef RunCodeTool(Runtime rt) => new()
     {

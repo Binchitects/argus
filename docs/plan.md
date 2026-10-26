@@ -1853,6 +1853,9 @@ sandbox that reaches tools needs a broker that keeps every right and every
     both for the strong models, direct for the small ones; the system
     prompt teaches the pattern when code is on. Direct calls stay for one or
     two simple calls.
+    *As built:* Admin → Models → Tools; automatic is direct for the model for
+    small steps and names that say 8B or fewer, both for the rest; the chat
+    and Code Arena (its chat config, `toolMode` in config.json last) follow it.
 14. **Measured before it is the default.** The Argus task families and the
     graph eval in both modes on our own models: tokens in and out, success,
     time. The release says the numbers, and the defaults follow them.

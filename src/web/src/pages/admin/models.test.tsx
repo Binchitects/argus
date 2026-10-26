@@ -16,6 +16,7 @@ const view = (over: object = {}) => ({
   models: [
     {
       name: 'Big-Model', source: 'local', mode: 'chat', status: 'loaded', file: 'big/Big-Q4.gguf', context: 131072, vision: false, access: everyone, kept: true,
+      toolMode: { mode: 'both', set: false, automatic: 'both' },
       cache: { slots: 4, sideSlot: 3, pinned: true, keepsIdle: true, checkpoints: 4, checkpointBytes: 117_669_888, ramBytes: 16 * 117_669_888 },
     },
     {
@@ -92,6 +93,24 @@ describe('admin models', () => {
     await userEvent.click(within(big).getByRole('button', { name: 'Choose groups' }))
     await userEvent.click(await screen.findByRole('checkbox', { name: /Research/ }))
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toMatchObject({ audience: 'Groups', groups: ['g1'] }))
+  })
+
+  it("a chat model's tools go direct, as code or both, or as the automatic choice says", async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: view() }),
+      'PUT /api/admin/models/Big-Model/tools': () => ({ json: { toolMode: 'code', toolModeSet: true } }),
+    })
+    renderApp('/admin/models')
+    const big = (await screen.findByRole('heading', { name: /Big-Model/ })).closest('section')!
+    const image = screen.getByRole('heading', { name: /flux-image/ }).closest('section')!
+    const picker = within(big).getByRole('combobox', { name: 'Tools' })
+    expect(picker).toHaveTextContent('Automatic: both')
+    expect(within(big).getByText(/a program for many calls, a direct call for one or two/)).toBeInTheDocument()
+    // Not a chat model: no tools to give it.
+    expect(within(image).queryByRole('combobox', { name: 'Tools' })).not.toBeInTheDocument()
+    await userEvent.click(picker)
+    await userEvent.click(await screen.findByRole('option', { name: 'As code' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT' && c.path === '/api/admin/models/Big-Model/tools')?.body).toEqual({ mode: 'code' }))
   })
 
   it("a model's card says what its token cache keeps and the RAM it takes", async () => {

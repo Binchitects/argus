@@ -292,6 +292,19 @@ would be with them.
   by putting layers in RAM (two on one GPU that holds one, say), it is kept
   with that warning. The list is `config/engine/keep`, which the engine reads
   when it starts; without it, the `.env` model is kept.
+- **Tools** (on each chat model's card) is how the chat and Code Arena give
+  that model its tools. **Direct**: each tool called on its own, no
+  `run_code`. **As code**: `run_code`, and the tools a program may call named
+  in its instructions as Python functions (`arena.calculator.calculate(expression)`)
+  instead of every definition sent with each request: fewer tokens, many calls
+  in one step ([chat.md](chat.md#what-it-does)). In Code Arena, the servers'
+  tools (Arena's, Argus's, the person's) go as code and its own files, search,
+  git and shell stay direct. **Both**: every tool and `run_code`, a program for
+  many calls and a direct call for one or two. **Automatic** (until an admin
+  chooses) is direct for the model for small steps and for a model whose name
+  says 8B parameters or fewer (`Qwen3-4B`, `llama-3.1-8b`), both for the rest.
+  It applies from the next answer (Code Arena's next start) and is audited
+  (`model.tools_mode`). Deep research keeps its tools direct.
 - **Loaded on request.** While a place is left beside the kept models, any other
   model loads when someone asks for it: a chat, an API key, a coding agent. Its
   first answer waits while it loads. At the limit, the app first unloads an

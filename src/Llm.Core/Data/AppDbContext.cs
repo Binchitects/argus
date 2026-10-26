@@ -52,6 +52,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<MediaModel> MediaModels => Set<MediaModel>();
     public DbSet<RemoteServer> RemoteServers => Set<RemoteServer>();
     public DbSet<ModelWindow> ModelWindows => Set<ModelWindow>();
+    public DbSet<ModelToolMode> ModelToolModes => Set<ModelToolMode>();
     public DbSet<ModelDownload> ModelDownloads => Set<ModelDownload>();
     public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
     public DbSet<TaskTemplate> TaskTemplates => Set<TaskTemplate>();
@@ -898,6 +899,13 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Error).HasMaxLength(2000);
             e.Property(x => x.CreatedBy).HasMaxLength(256);
             e.OwnsMany(x => x.Files, f => f.ToJson());
+        });
+        builder.Entity<ModelToolMode>(e =>
+        {
+            e.ToTable("model_tool_modes");
+            e.HasKey(x => x.Model);
+            e.Property(x => x.Model).HasMaxLength(200);
+            e.Property(x => x.Mode).HasMaxLength(10);
         });
         builder.Entity<ModelWindow>(e =>
         {

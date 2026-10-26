@@ -9,6 +9,7 @@ using Llm.Api.Gateway;
 using Llm.Core.Chat;
 using Llm.Core.Data;
 using Llm.Core.Identity;
+using ToolModes = Llm.Core.Models.ToolModes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -56,6 +57,7 @@ public sealed partial class ChatService(
     ToolApprovals approvals,
     AccessService access,
     Models.ModelPolicy policy,
+    Models.ToolModeBook toolModes,
     ChatModels models,
     SmallModel small,
     AutoModel auto,
@@ -230,6 +232,7 @@ public sealed partial class ChatService(
 
         // Deep research: asked for with the composer's switch, or (below) started by the model with the Deep research tool.
         var research = overrides.Research;
+        var toolMode = ToolModes.Both;
         IReadOnlyList<ToolChoice> allowed = model?.Tools != false || research ? await registry.ForAsync(await access.MembershipAsync(user, ct), ct) : [];
         if (conversation.IsRoom)
         {
@@ -259,6 +262,17 @@ public sealed partial class ChatService(
                     await emit(NoWebForResearch);
                 }
             }
+            // How this model is given its tools (Admin → Models → Tools): without run_code, or with it, or (as code) its tools only
+            // as functions in a program, which run_code then needs.
+            toolMode = research ? ToolModes.Both : await toolModes.OfAsync(modelName, ct);
+            if (toolMode == ToolModes.Direct)
+            {
+                chosen.RemoveAll(c => c.Tool.Id == CodeTool.ToolId);
+            }
+            else if (toolMode == ToolModes.Code && chosen.All(c => c.Tool.Id != CodeTool.ToolId) && allowed.FirstOrDefault(t => t.Tool.Id == CodeTool.ToolId) is { } code)
+            {
+                chosen.Add(code);
+            }
             foreach (var choice in chosen)
             {
                 await StartToolAsync(choice);
@@ -283,8 +297,18 @@ public sealed partial class ChatService(
             // The page says which step deep research is on.
             await emit(new { type = "research" });
         }
+        // As code: the functions a program may call are not offered one by one, the notes name them for run_code instead.
+        // Sub-agents keep them direct (kit.Tools): a sub-agent has no program of its own.
+        var offered = tools;
+        if (toolMode == ToolModes.Code && runs.ContainsKey(CodeTool.Function))
+        {
+            var inCode = CodeFunctions();
+            var names = inCode.Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
+            offered = [.. tools.OfType<JsonObject>().Where(f => !names.Contains(f["function"]?["name"]?.GetValue<string>() ?? "")).Select(f => (JsonNode)f.DeepClone())];
+            answerNotes.Add((CodeTool.ToolId, CodeTool.FunctionsNote(inCode)));
+        }
         // Past the budget, the tools go on demand: those the chat loaded whole, a line for each other.
-        var demand = new OnDemandTools(tools, runs, answerNotes, conversation.LoadedTools, chat.CurrentValue.ToolTextChars);
+        var demand = new OnDemandTools(offered, runs, answerNotes, conversation.LoadedTools, chat.CurrentValue.ToolTextChars);
         if (research && demand.Load(["web", "agents"]).Added.Count > 0)
         {
             conversation.LoadedTools = demand.Loaded;
@@ -1104,7 +1128,7 @@ public sealed partial class ChatService(
     /// or memory, nor a tool that asks before each call (nobody is there to allow it).
     /// </summary>
     private static bool ForAgents(string function, (ToolChoice Choice, IToolRun Run) tool) =>
-        function is not AgentsTool.Function and not ResearchTool.Function and not AskTool.Function and not MemoryTool.Function
+        function is not AgentsTool.Function and not ResearchTool.Function and not AskTool.Function and not MemoryTool.Function and not CodeTool.Function
         && !tool.Choice.Setting.AskFirst && !tool.Run.AsksFirst(function);
 
     /// <summary>Whether deep research goes by sub-agents with these functions: they can delegate, and the web (if any) does not ask before each call.</summary>

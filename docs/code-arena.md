@@ -1619,6 +1619,14 @@ another); `run_code` asks first as a command does, and plan mode refuses it,
 since a program could write without a tool. The `arena` module is the one the
 web chat's sandbox has ([chat.md](chat.md#what-it-does)).
 
+How the model is given its tools follows the model in use, as Arena says for
+it (Admin → Models → **Tools**, in Arena's chat config): **direct** leaves
+`run_code` out; **code** sends the servers' tools (Arena's, Argus's, your MCP
+servers') only as functions for a program, named in Code Arena's note under
+"Tools as code", while the files, search, git and shell tools stay as they
+are; **both** (also without a word from Arena) sends all. `"toolMode":
+"direct" | "code" | "both"` in the config file has the last word.
+
 ## Sessions and the model's window
 
 Each session is a JSON Lines file in the sessions folder (0600): every message
@@ -2053,7 +2061,7 @@ The rest of the file: `"model"`, `"thinking"`, `"mode"`, `"context"`,
 `"shell"` (the agent's `run_shell`), `"terminalShell"` (the IDE's terminals),
 `"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"argusTools": false`
 (no Argus MCP), `"toolChars"` (tools on demand, above), `"argusUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
-`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"planCritique"`, `"python"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"window"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"checkCommand"`, `"sandbox"`,
+`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"planCritique"`, `"python"`, `"toolMode"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"window"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"checkCommand"`, `"sandbox"`,
 `"sandboxNetwork"`, `"sandboxWritable"`, `"permissions"`, `"formatters"`, `"debugAdapters"` and
 `"languageServers"` (the IDE's: above). `ARENA_ARGUS_URL` in the environment gives Argus's address
 for one run.

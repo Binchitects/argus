@@ -31,6 +31,9 @@ public sealed record ModelAccessRequest(Audience Audience, Guid[]? Groups);
 
 public sealed record KeepRequest(bool Keep);
 
+/// <summary>How a chat model is given its tools: direct, code or both; null for the automatic choice.</summary>
+public sealed record ToolModeRequest(string? Mode);
+
 /// <summary>A picture, video or speech model on (at the gateway, in the chat's tools) or off.</summary>
 
 /// <summary>
@@ -48,6 +51,7 @@ public static class ModelEndpoints
             ["PATCH /api/admin/models/{name}"] = Llm.Core.Access.Permissions.ModelsEdit,
             ["DELETE /api/admin/models/{name}"] = Llm.Core.Access.Permissions.ModelsDelete,
             ["PUT /api/admin/models/{name}/keep"] = Llm.Core.Access.Permissions.ModelsEdit,
+            ["PUT /api/admin/models/{name}/tools"] = Llm.Core.Access.Permissions.ModelsEdit,
             ["PUT /api/admin/models/{name}/access"] = Llm.Core.Access.Permissions.ModelsAccess,
             ["POST /api/admin/models/advice"] = Llm.Core.Access.Permissions.ModelsRead,
         });
@@ -64,13 +68,20 @@ public static class ModelEndpoints
         g.MapPost("/{name}/unload", UnloadAsync).RequirePermission(Llm.Core.Access.Permissions.ModelsLoad);
         g.MapPut("/{name}/keep", KeepAsync);
         g.MapPut("/{name}/access", AccessAsync);
+        g.MapPut("/{name}/tools", ToolModeAsync);
     }
 
     private static async Task<IResult> ListAsync(AppDbContext db, ChatModels gatewayModels, EngineState state, ModelCatalog catalog, ModelLibrary library,
         HardwareProbe hardware, ModelHoursState hours, IOptions<EngineOptions> engine, MediaControl media, SmallModel small, PriceBook prices, ModelPolicy policy, GpuShare gpu,
-        AccessService access, EngineClient engines, CancellationToken ct)
+        AccessService access, EngineClient engines, ToolModeBook toolModes, CancellationToken ct)
     {
         var e = engine.Value;
+        // How each chat model is given its tools: the admins' choice (set), else the automatic one.
+        var modesSet = await toolModes.SetAsync(ct);
+        object ToolMode(string model) => new
+        {
+            mode = modesSet.GetValueOrDefault(model) ?? ToolModeBook.Automatic(model, small.Name), set = modesSet.ContainsKey(model), automatic = ToolModeBook.Automatic(model, small.Name),
+        };
         // What each costs: its own prices, else the defaults (Settings → Prices); own says which it sets.
         var defaults = prices.Defaults;
         object Price(decimal? input, decimal? cached, decimal? output)
@@ -113,7 +124,7 @@ public static class ModelEndpoints
         {
             rows.Add(new
             {
-                name = m.Name, source = "local", mode = "chat",
+                name = m.Name, source = "local", mode = "chat", toolMode = ToolMode(m.Name),
                 // Not in the engine's list although it answered: not read yet (it restarts), or its preset refused.
                 status = state.StatusOf(m.Name) ?? (now is { Error: null, At: not null } ? "missing" : null), kept = pinned.Contains(m.Name), keptNow = kept.Contains(m.Name), m.Devices,
                 // Failed to load: when it is tried again.
@@ -145,7 +156,7 @@ public static class ModelEndpoints
             {
                 rows.Add(new
                 {
-                    name = m.Name, source = "remote", server = s.Name, remote = m.Remote, mode = "chat", status = (string?)null, context = m.Context,
+                    name = m.Name, source = "remote", server = s.Name, remote = m.Remote, mode = "chat", toolMode = ToolMode(m.Name), status = (string?)null, context = m.Context,
                     maxOutput = m.MaxOutput, vision = m.Vision, atGateway = At(m.Name) is not null, access = Access(m.Name),
                     price = Price(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok),
                 });
@@ -174,7 +185,11 @@ public static class ModelEndpoints
         }
         foreach (var m in atGateway.Where(m => local.All(l => l.Name != m.Name) && !onServers.Contains(m.Name) && media.Find(m.Name) is null))
         {
-            rows.Add(new { name = m.Name, source = "gateway", mode = m.Mode, status = (string?)null, context = m.Context, vision = m.Vision, access = Access(m.Name) });
+            rows.Add(new
+            {
+                name = m.Name, source = "gateway", mode = m.Mode, toolMode = m.Mode == "chat" ? ToolMode(m.Name) : null, status = (string?)null, context = m.Context, vision = m.Vision,
+                access = Access(m.Name),
+            });
         }
         return Results.Ok(new
         {
@@ -621,6 +636,26 @@ public static class ModelEndpoints
         await access.SetAudienceAsync(await users.GetUserAsync(principal), ResourceKinds.Model, name, body.Audience, groups, ct);
         await audit.WriteAsync("model.access", name, detail: body.Audience.ToString().ToLowerInvariant());
         return Results.NoContent();
+    }
+
+    /// <summary>
+    /// How a chat model is given its tools (direct, as code, or both), or the automatic choice again (null); applies from
+    /// the next answer, and from Code Arena's next start.
+    /// </summary>
+    private static async Task<IResult> ToolModeAsync(string name, ToolModeRequest body, AppDbContext db, ChatModels gatewayModels, ToolModeBook modes, Audit audit,
+        CancellationToken ct)
+    {
+        if (body.Mode is { } mode && !ToolModes.All.Contains(mode))
+        {
+            return AuthEndpoints.Problem(400, "mode", "A model's tools are direct, code or both (or null for the automatic choice).");
+        }
+        if (!(await gatewayModels.AllAsync(ct)).Any(m => m.Name == name && m.Mode == "chat") && !await db.LocalModels.AnyAsync(m => m.Name == name, ct))
+        {
+            return Results.NotFound();
+        }
+        await modes.SetAsync(name, body.Mode, ct);
+        await audit.WriteAsync("model.tools_mode", name, detail: body.Mode ?? "automatic");
+        return Results.Ok(new { toolMode = await modes.OfAsync(name, ct), toolModeSet = body.Mode is not null });
     }
 
     /// <summary>

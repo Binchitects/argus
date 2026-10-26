@@ -28,6 +28,7 @@ import { DefaultModelsCard } from './default-models'
 import { DownloadsCard, HuggingFaceBrowser } from './huggingface'
 import { bytes, cacheLine, summary, type ModelProfile, type TokenCache } from './model-profile'
 import { ServersSection } from './servers'
+import { ToolModePicker, type ModelTools } from './tool-mode'
 
 interface ModelRow extends SavedModel {
   /** local: added here; remote: on another GPU server; media: a picture, video or speech model of this stack; gateway: served by the gateway otherwise. */
@@ -57,6 +58,8 @@ interface ModelRow extends SavedModel {
   /** A media model's own settings (Admin -> Models -> Edit). */
   settings?: SavedMediaModel['settings']
   vision: boolean
+  /** A chat model: how the chat and Code Arena give it its tools (direct, as code, or both). */
+  toolMode?: ModelTools | null
   atGateway?: boolean
   access: AccessRule
   /** What its file is, when it is in the library. */
@@ -538,6 +541,7 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
           </Label>
         )}
         <AccessPicker value={m.access} onChange={(audience, groups) => access.mutate({ audience, groups })} />
+        {m.toolMode && <ToolModePicker model={m.name} tools={m.toolMode} onChanged={onChanged} />}
         <div className="flex flex-wrap gap-2">
           {onEngine && m.status !== 'loaded' && (
             <Button

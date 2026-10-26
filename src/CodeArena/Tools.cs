@@ -289,6 +289,33 @@ internal sealed class ToolBox(IEnumerable<ToolDef> tools)
     /// <summary>The session's choice of remote tools and those loaded on demand; null: every tool is offered whole (a sub-agent's).</summary>
     public ToolDemand? Demand { get; init; }
 
+    /// <summary>The ways the model is given its tools (Arena's Admin → Models → Tools, or config.json's toolMode).</summary>
+    public static readonly string[] Modes = ["direct", "code", "both"];
+
+    /// <summary>How the model is given its tools now (it follows the model): direct, code or both; null: both.</summary>
+    public Func<string?>? Mode { get; init; }
+
+    /// <summary>
+    /// The tools offered one by one in this mode: all but run_code when direct; as code, all but the servers' tools a program
+    /// calls (in its place, the note names them as functions: <see cref="InCode"/>).
+    /// </summary>
+    private List<ToolDef> Direct()
+    {
+        var all = All;
+        return Mode?.Invoke() switch
+        {
+            "direct" => [.. all.Where(t => t.Name != "run_code")],
+            "code" when all.Any(t => t.Name == "run_code") => [.. all.Where(t => !Programmed(t))],
+            _ => [.. all],
+        };
+    }
+
+    /// <summary>As code, the tools a program calls in place of the model (the servers' ones, but those that hand work on).</summary>
+    public List<ToolDef> InCode() =>
+        Mode?.Invoke() == "code" && All.Any(t => t.Name == "run_code") ? [.. All.Where(t => Programmed(t) && (t.Group is null || Demand?.IsOff(t.Group) != true))] : [];
+
+    private static bool Programmed(ToolDef t) => t.Kind == ToolKind.Remote && t.Server is not null;
+
     /// <summary>
     /// What the model is offered: the local tools, and the remote ones the person has on (all of them whole while their
     /// definitions fit <see cref="ToolDemand.Budget"/>; past it, those loaded and load_tools), in every mode. Plan mode
@@ -297,7 +324,7 @@ internal sealed class ToolBox(IEnumerable<ToolDef> tools)
     /// </summary>
     public IReadOnlyList<ToolDef> Offered()
     {
-        var all = All;
+        var all = Direct();
         if (Demand is not { } demand)
         {
             return all;
@@ -319,7 +346,7 @@ internal sealed class ToolBox(IEnumerable<ToolDef> tools)
     public List<ToolDef> ToLoad()
     {
         var offered = Offered().Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
-        return [.. All.Where(t => t.Group is not null && !offered.Contains(t.Name) && Demand?.IsOff(t.Group) != true)];
+        return [.. Direct().Where(t => t.Group is not null && !offered.Contains(t.Name) && Demand?.IsOff(t.Group) != true)];
     }
 
     public ToolDef? Find(string name) => name == ToolDemand.Function && Demand is { } demand ? demand.LoadTool : All.FirstOrDefault(t => t.Name == name);

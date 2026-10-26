@@ -23,6 +23,8 @@ internal static class SystemPrompt
         public Func<IReadOnlyList<(string Server, string Text)>> ServerInstructions { get; init; } = () => [];
         /// <summary>The remote tools to load (on demand), as the note lists them; empty when every tool on is in the requests.</summary>
         public Func<string> ToolsToLoad { get; init; } = () => "";
+        /// <summary>As code: the servers' tools a program calls, named for run_code (empty in the other modes).</summary>
+        public Func<string> ToolsInCode { get; init; } = () => "";
         /// <summary>Whether Arena's tools are connected at the moment (they connect in the background).</summary>
         public Func<bool> HasArenaTools { get; init; } = () => false;
         /// <summary>What the agent remembers, as the session started (kept so the prompt stays the same through it).</summary>
@@ -140,6 +142,10 @@ internal static class SystemPrompt
         if (x.ToolsToLoad() is { Length: > 0 } toLoad)
         {
             sb.Append("\n# Tools to load\n\n").Append(toLoad).Append('\n');
+        }
+        if (x.ToolsInCode() is { Length: > 0 } inCode)
+        {
+            sb.Append("\n# Tools as code\n\n").Append(inCode).Append('\n');
         }
         return sb.ToString().TrimEnd();
     }

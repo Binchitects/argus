@@ -479,6 +479,7 @@ public static class IdentityWiring
         services.AddSingleton<Models.RemoteHealth>();
         services.AddScoped<Models.ModelCatalog>();
         services.AddScoped<Models.ModelPolicy>();
+        services.AddScoped<Models.ToolModeBook>();
         services.AddScoped<Models.KeyAccess>();
         services.AddSingleton<Models.KeyAccessWatcher>();
         services.AddHostedService(sp => sp.GetRequiredService<Models.KeyAccessWatcher>());

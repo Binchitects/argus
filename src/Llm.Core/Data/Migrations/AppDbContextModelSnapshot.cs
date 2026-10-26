@@ -4950,6 +4950,25 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("model_downloads", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Models.ModelToolMode", b =>
+                {
+                    b.Property<string>("Model")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Model");
+
+                    b.ToTable("model_tool_modes", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Models.ModelWindow", b =>
                 {
                     b.Property<Guid>("Id")
